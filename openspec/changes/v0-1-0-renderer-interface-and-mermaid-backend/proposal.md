@@ -18,10 +18,12 @@ KatanA から Mermaid 描画責務を kcf へ移管する。kcf はまず Mermai
 ### New Capabilities
 
 - `renderer-runtime-interface`: Mermaid rendering contract、versioned Mermaid.js bundle、reference scoring
+- `exporter-interface`: HTML / PDF / PNG / JPEG export の `ExporterTrait` 実装（呼び出し側の trait は KatanA 側で定義済み）
 
 ## Impact
 
 - `crates/katana-canvas-forge/src/renderer/` — trait + DTO 確定
+- `crates/katana-canvas-forge/src/exporter/` — `ExporterTrait` 実装（HTML / PDF / PNG / JPEG）
 - `crates/katana-canvas-forge/src/mermaid/` — KatanA から移管した Mermaid backend
 - `crates/katana-canvas-forge-cli/src/` — CLI 実装
 - `vendor/mermaid/<version>/` — pinned bundle
