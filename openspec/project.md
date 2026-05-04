@@ -12,10 +12,20 @@
 
 ## Versioning
 
-- `v0.1.x`: Mermaid runtime interface 確定 + Mermaid backend 移管 + kcf CLI
-- `v0.2.x`: Draw.io backend
-- `v0.3.x`: HTML / PDF / PNG / JPEG export
-- `v0.4.x`: 公式比較画像・採点・CI 運用
+- `v0.1.x`: KatanA の現在の描画責務を一括で受け取る最初の MVP release
+  - `Renderer` trait + 中立 DTO 確定
+  - Mermaid backend（外部 mmdc 経由 / Rust 管理 JS）
+  - Draw.io backend
+  - HTML / PDF / PNG / JPEG export（`Exporter` trait）
+  - kcf CLI（`render` / `reference-update` / `compare` / `bench`）
+  - Mermaid.js 版固定（`vendor/mermaid/<version>/`）
+- `v0.2.x`: Native backend 移行 — Node.js / Java 外部プロセス依存ゼロ化
+  - Mermaid native backend（`merman` 等）
+  - PlantUML native backend（`plantuml-little` 等）
+  - Draw.io native export
+- `v0.3.x`: 公式比較画像・採点・CI 運用の本格化
+
+> **方針**: KatanA `release/v0.22.10` 時点で同一実装内に密結合している Mermaid + Draw.io + export を、kcf v0.1.0 で一括引き受けする。中途半端に分割すると KatanA 側で hybrid 状態（一部 kcf、一部 KatanA 内）が発生し、結合検証コストが増える。一括移管が現実的。
 
 ## Consumers
 
