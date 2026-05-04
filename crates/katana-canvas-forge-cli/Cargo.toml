@@ -1,0 +1,19 @@
+[package]
+name = "katana-canvas-forge-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "CLI front-end for katana-canvas-forge: render, reference-update, compare, bench."
+
+[[bin]]
+name = "kcf"
+path = "src/main.rs"
+
+[dependencies]
+katana-canvas-forge = { path = "../katana-canvas-forge" }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
