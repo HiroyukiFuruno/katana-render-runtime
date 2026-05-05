@@ -66,8 +66,18 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         with:
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2.9.1
+      - uses: actions/cache@v5.0.5
         if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - uses: taiki-e/install-action@v2.77.1
         if: needs.changes.outputs.code == 'true'
         with:
@@ -88,8 +98,18 @@ jobs:
         if: needs.changes.outputs.code == 'true'
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.code == 'true'
-      - uses: Swatinem/rust-cache@v2.9.1
+      - uses: actions/cache@v5.0.5
         if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - uses: taiki-e/install-action@v2.77.1
         if: needs.changes.outputs.code == 'true'
         with:
@@ -108,8 +128,18 @@ jobs:
         if: needs.changes.outputs.code == 'true'
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.code == 'true'
-      - uses: Swatinem/rust-cache@v2.9.1
+      - uses: actions/cache@v5.0.5
         if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - uses: taiki-e/install-action@v2.77.1
         if: needs.changes.outputs.code == 'true'
         with:
@@ -128,8 +158,18 @@ jobs:
         if: needs.changes.outputs.code == 'true'
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.code == 'true'
-      - uses: Swatinem/rust-cache@v2.9.1
+      - uses: actions/cache@v5.0.5
         if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - uses: taiki-e/install-action@v2.77.1
         if: needs.changes.outputs.code == 'true'
         with:
@@ -148,8 +188,18 @@ jobs:
         if: needs.changes.outputs.code == 'true'
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.code == 'true'
-      - uses: Swatinem/rust-cache@v2.9.1
+      - uses: actions/cache@v5.0.5
         if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - uses: taiki-e/install-action@v2.77.1
         if: needs.changes.outputs.code == 'true'
         with:
