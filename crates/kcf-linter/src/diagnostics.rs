@@ -68,6 +68,12 @@ pub enum KcfLintError {
         #[source]
         source: toml::de::Error,
     },
+    #[error("failed to walk {path}: {source}")]
+    Walk {
+        path: PathBuf,
+        #[source]
+        source: ignore::Error,
+    },
     #[error("workspace root could not be resolved from {path}")]
     WorkspaceRoot { path: PathBuf },
 }

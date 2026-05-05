@@ -7,7 +7,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/HiroyukiFuruno/katana-canvas-forge"
@@ -26,3 +26,14 @@ ignore = "0.4"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "2", features = ["full", "visit"] }
 toml = "0.9"
+base64 = "0.22"
+dirs = "6.0.0"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+include_dir = "0.7.4"
+mathjax_svg = "3.2.0"
+regex = "1.12.3"
+resvg = "0.47"
+syntect = { version = "5", default-features = false, features = ["default-themes", "default-syntaxes", "regex-fancy"] }
+tiny-skia = "0.12"
+v8 = "=139.0.0"
+xmltree = "0.12"
