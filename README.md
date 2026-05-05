@@ -1,17 +1,18 @@
 <p align="center">
-  <img src="assets/kcf-logo.svg" width="128" alt="katana-canvas-forge logo">
+  <img src="assets/kcf-icon.png" width="128" alt="katana-canvas-forge icon">
 </p>
 
 <h1 align="center">katana-canvas-forge</h1>
 
 <p align="center">
-  <code>kcf</code> — versioned diagram rendering and document export runtime for
-  <a href="https://github.com/HiroyukiFuruno/KatanA">KatanA</a>.
+  A Rust rendering core and <code>kcf</code> CLI for Mermaid, Draw.io, and
+  document export workflows.
 </p>
 
 <p align="center">
-  <strong><a href="#status">Status</a></strong> |
-  <strong><a href="#scope">Scope</a></strong> |
+  <strong><a href="#installation">Installation</a></strong> |
+  <strong><a href="#cli-usage">CLI Usage</a></strong> |
+  <strong><a href="#library-api">Library API</a></strong> |
   <strong><a href="#layout">Layout</a></strong> |
   <strong><a href="docs/release.md">Release</a></strong>
 </p>
@@ -19,44 +20,102 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://github.com/HiroyukiFuruno/katana-canvas-forge/actions/workflows/ci.yml"><img src="https://github.com/HiroyukiFuruno/katana-canvas-forge/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/HiroyukiFuruno/katana-canvas-forge/actions/workflows/release-preflight.yml"><img src="https://github.com/HiroyukiFuruno/katana-canvas-forge/actions/workflows/release-preflight.yml/badge.svg" alt="Release preflight"></a>
   <a href="https://github.com/HiroyukiFuruno/katana-canvas-forge/releases/latest"><img src="https://img.shields.io/github/v/release/HiroyukiFuruno/katana-canvas-forge" alt="Latest Release"></a>
   <a href="https://crates.io/crates/katana-canvas-forge"><img src="https://img.shields.io/crates/v/katana-canvas-forge.svg" alt="crates.io"></a>
+  <a href="https://docs.rs/katana-canvas-forge"><img src="https://docs.rs/katana-canvas-forge/badge.svg" alt="docs.rs"></a>
   <img src="https://img.shields.io/badge/cli-kcf-2563EB" alt="CLI: kcf">
 </p>
 
 ---
 
-## Status
+## What is kcf
 
-v0.1.0 release candidate. Mermaid rendering, Draw.io rendering,
-HTML / PDF / PNG / JPEG export, and reference score tooling have been
-transferred from [KatanA](https://github.com/HiroyukiFuruno/KatanA)
-into this repository.
+`katana-canvas-forge` provides the portable rendering layer extracted from
+[KatanA](https://github.com/HiroyukiFuruno/KatanA). It keeps diagram rendering,
+document export, reference generation, and score comparison in a standalone Rust
+crate so downstream applications can integrate the same behavior without
+depending on KatanA Desktop internals.
 
-KatanA will consume this crate after the follow-up score improvement patch.
-The v0.1.0 release itself does not change KatanA behavior.
+The project is intentionally narrow: it owns rendering and export behavior, not
+the editor, preview UI, workspace state, or chat surface.
 
-## Scope
+## Features
 
-- Mermaid rendering through a Rust-managed JavaScript runtime, with the
-  official `mermaid.min.js` bundle supplied by the local runtime path.
-- Draw.io rendering as a sibling backend behind the same renderer interface
-  where compatible, otherwise as a separately documented backend.
-- HTML / PDF / PNG / JPEG export from rendered output.
-- Reference-image generation and ImageMagick scoring against upstream
-  Mermaid.js and Draw.io renderers.
-- A library API consumed by KatanA and a `kcf` CLI for single-shot render,
-  reference update, comparison, and benchmarking.
+- **Mermaid rendering** through the official Mermaid JavaScript runtime.
+- **Draw.io rendering** through transferred KatanA-compatible runtime logic.
+- **HTML / PDF / PNG / JPEG export** from rendered Markdown-derived output.
+- **Reference snapshots** for committed Mermaid and Draw.io fixtures.
+- **Image scoring** against official renderer output for regression tracking.
+- **`kcf` CLI** for render, export, reference update, comparison, and benchmark
+  workflows.
 
-## Non-Scope
+## Installation
+
+Use the library from Rust:
+
+```bash
+cargo add katana-canvas-forge
+```
+
+Install the CLI:
+
+```bash
+cargo install katana-canvas-forge-cli
+```
+
+The installed binary is `kcf`.
+
+## CLI Usage
+
+Render diagrams:
+
+```bash
+kcf mermaid render input.md output.svg
+kcf drawio render diagram.drawio output.svg
+```
+
+Export Markdown-derived output:
+
+```bash
+kcf export html input.md output.html
+kcf export pdf input.md output.pdf
+kcf export png input.md output.png
+kcf export jpg input.md output.jpg
+```
+
+Run reference comparison:
+
+```bash
+kcf reference mermaid-compare
+kcf reference drawio-compare
+```
+
+## Library API
+
+Embed `katana-canvas-forge` when an application needs diagram rendering or
+document export in-process.
+
+Primary integration points:
+
+- `RenderInput`
+- `RenderOutput`
+- `DiagramKind`
+- Mermaid renderer
+- Draw.io renderer
+- HTML / PDF / PNG / JPEG exporters
+
+The API keeps KatanA integration needs in mind, but the crate remains standalone.
+Consumers should treat KatanA UI state, editor state, and workspace navigation as
+their own responsibilities.
+
+## Non-Goals
 
 - Markdown parsing, preview UI, editor UI, theme state, or any KatanA UI
   concern. This crate must not depend on `egui`, KatanA preview widgets,
   or KatanA UI state.
 - Viewer rendering for CSV / PDF / Office files. These are planned as later
   kcf changes and are separate from v0.1.0 export support.
-- LLM chat UI / agent protocols — see
+- LLM chat UI / agent protocols. See
   [`katana-chat-ui`](https://github.com/HiroyukiFuruno/katana-chat-ui).
 
 ## Layout
