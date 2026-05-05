@@ -103,7 +103,20 @@ impl MermaidMarkdownOps {
     }
 
     fn starts_block(line: &str) -> bool {
-        matches!(line.trim(), "```mermaid" | "~~~mermaid")
+        let trimmed = line.trim();
+        Self::starts_block_with(trimmed, b'`') || Self::starts_block_with(trimmed, b'~')
+    }
+
+    fn starts_block_with(line: &str, marker: u8) -> bool {
+        let bytes = line.as_bytes();
+        let marker_count = bytes.iter().take_while(|it| **it == marker).count();
+        if marker_count < 3 {
+            return false;
+        }
+        line[marker_count..]
+            .split_whitespace()
+            .next()
+            .is_some_and(|language| language == "mermaid")
     }
 
     fn ends_block(line: &str) -> bool {
@@ -112,74 +125,5 @@ impl MermaidMarkdownOps {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{DiagramCommand, DiagramSourceOps, MermaidMarkdownOps, RenderInputFactory};
-    use crate::commands::DiagramAction;
-    use katana_canvas_forge::DiagramKind;
-
-    #[test]
-    fn extracts_mermaid_fence_from_markdown() {
-        let source = "# Title\n\n~~~mermaid\ngraph TD; A-->B\n~~~\n".to_string();
-        assert_eq!(MermaidMarkdownOps::extract(source), "graph TD; A-->B");
-    }
-
-    #[test]
-    fn keeps_source_when_mermaid_fence_is_not_closed() {
-        let source = "```mermaid\ngraph TD; A-->B".to_string();
-        assert_eq!(MermaidMarkdownOps::extract(source.clone()), source);
-    }
-
-    #[test]
-    fn drawio_source_passes_through() {
-        let source = "<mxGraphModel />".to_string();
-        assert_eq!(
-            DiagramSourceOps::prepare(DiagramKind::Drawio, source.clone()),
-            source
-        );
-    }
-
-    #[test]
-    fn render_input_factory_sets_kind_and_source() {
-        let input = RenderInputFactory::create(DiagramKind::Mermaid, "graph TD; A".to_string());
-        assert_eq!(input.kind, DiagramKind::Mermaid);
-        assert_eq!(input.source, "graph TD; A");
-    }
-
-    #[test]
-    fn mermaid_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Error>> {
-        let input = std::env::temp_dir().join(format!("kcf-cli-mmd-{}.md", std::process::id()));
-        let output = std::env::temp_dir().join(format!("kcf-cli-mmd-{}.svg", std::process::id()));
-        let runtime = std::env::temp_dir().join("missing-kcf-mermaid-runtime.js");
-
-        std::fs::write(&input, "```mermaid\ngraph TD; A-->B\n```\n")?;
-        let result = DiagramCommand::new(DiagramKind::Mermaid).run(DiagramAction::Render {
-            input: input.clone(),
-            output,
-            runtime: Some(runtime),
-        });
-
-        assert!(result.is_err());
-        std::fs::remove_file(input)?;
-        Ok(())
-    }
-
-    #[test]
-    fn drawio_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Error>> {
-        let input =
-            std::env::temp_dir().join(format!("kcf-cli-drawio-{}.drawio", std::process::id()));
-        let output =
-            std::env::temp_dir().join(format!("kcf-cli-drawio-{}.svg", std::process::id()));
-        let runtime = std::env::temp_dir().join("missing-kcf-drawio-runtime.js");
-
-        std::fs::write(&input, "<mxGraphModel />")?;
-        let result = DiagramCommand::new(DiagramKind::Drawio).run(DiagramAction::Render {
-            input: input.clone(),
-            output,
-            runtime: Some(runtime),
-        });
-
-        assert!(result.is_err());
-        std::fs::remove_file(input)?;
-        Ok(())
-    }
-}
+#[path = "diagram_cmd_tests.rs"]
+mod tests;
