@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 
+const DEFAULT_MIN_SCORE: f32 = 99.0;
+
 #[derive(Parser)]
 #[command(name = "kcf", version, about = "katana-canvas-forge CLI")]
 struct Cli {
@@ -30,7 +32,7 @@ enum MermaidAction {
     Compare {
         #[arg(long)]
         fixtures: String,
-        #[arg(long, default_value_t = 99.0)]
+        #[arg(long, default_value_t = DEFAULT_MIN_SCORE)]
         min_score: f32,
     },
     Bench {

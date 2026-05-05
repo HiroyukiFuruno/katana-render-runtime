@@ -1,0 +1,19 @@
+# lefthook.yml
+no_tty: true
+output:
+  - failure
+
+pre-commit:
+  parallel: false
+  commands:
+    fmt-check:
+      run: just fmt-check
+    lint:
+      run: just lint
+    ast-lint:
+      run: just ast-lint
+
+pre-push:
+  commands:
+    release-verify:
+      run: just release-verify
