@@ -66,10 +66,12 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         with:
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
         if: needs.changes.outputs.code == 'true'
-      - uses: taiki-e/install-action@just
+      - uses: taiki-e/install-action@v2.77.1
         if: needs.changes.outputs.code == 'true'
+        with:
+          tool: just
       - if: needs.changes.outputs.code == 'true'
         run: just fmt-check
       - if: needs.changes.outputs.code == 'true'
@@ -86,10 +88,12 @@ jobs:
         if: needs.changes.outputs.code == 'true'
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.code == 'true'
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
         if: needs.changes.outputs.code == 'true'
-      - uses: taiki-e/install-action@just
+      - uses: taiki-e/install-action@v2.77.1
         if: needs.changes.outputs.code == 'true'
+        with:
+          tool: just
       - if: needs.changes.outputs.code == 'true'
         run: just ast-lint
 
@@ -104,10 +108,12 @@ jobs:
         if: needs.changes.outputs.code == 'true'
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.code == 'true'
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
         if: needs.changes.outputs.code == 'true'
-      - uses: taiki-e/install-action@just
+      - uses: taiki-e/install-action@v2.77.1
         if: needs.changes.outputs.code == 'true'
+        with:
+          tool: just
       - if: needs.changes.outputs.code == 'true'
         run: just unit-test
 
@@ -122,10 +128,12 @@ jobs:
         if: needs.changes.outputs.code == 'true'
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.code == 'true'
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
         if: needs.changes.outputs.code == 'true'
-      - uses: taiki-e/install-action@just
+      - uses: taiki-e/install-action@v2.77.1
         if: needs.changes.outputs.code == 'true'
+        with:
+          tool: just
       - if: needs.changes.outputs.code == 'true'
         run: just dependency-leak
 
@@ -140,11 +148,15 @@ jobs:
         if: needs.changes.outputs.code == 'true'
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.code == 'true'
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
         if: needs.changes.outputs.code == 'true'
-      - uses: taiki-e/install-action@just
+      - uses: taiki-e/install-action@v2.77.1
         if: needs.changes.outputs.code == 'true'
-      - uses: taiki-e/install-action@cargo-llvm-cov
+        with:
+          tool: just
+      - uses: taiki-e/install-action@v2.77.1
         if: needs.changes.outputs.code == 'true'
+        with:
+          tool: cargo-llvm-cov
       - if: needs.changes.outputs.code == 'true'
         run: just coverage
