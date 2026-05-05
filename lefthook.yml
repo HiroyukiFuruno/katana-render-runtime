@@ -7,13 +7,17 @@ pre-commit:
   parallel: false
   commands:
     fmt-check:
+      glob: "{*.rs,*.toml,*.lock,Justfile}"
       run: just fmt-check
     lint:
+      glob: "{*.rs,*.toml,*.lock,Justfile}"
       run: just lint
     ast-lint:
+      glob: "{*.rs,*.toml,*.lock,Justfile}"
       run: just ast-lint
 
 pre-push:
   commands:
     release-verify:
+      glob: "{*.rs,*.toml,*.lock,Justfile}"
       run: just release-verify
