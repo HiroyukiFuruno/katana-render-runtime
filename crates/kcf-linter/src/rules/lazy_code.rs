@@ -36,18 +36,23 @@ impl LazyCodeVisitor {
         self.violations
     }
 
-    fn macro_name(mac: &syn::Macro) -> Option<String> {
-        let segment = mac.path.segments.last()?;
-        Some(segment.ident.to_string())
+    fn prohibited_macro_name(mac: &syn::Macro) -> Option<&'static str> {
+        if mac.path.is_ident("todo") {
+            return Some("todo");
+        }
+        if mac.path.is_ident("unimplemented") {
+            return Some("unimplemented");
+        }
+        if mac.path.is_ident("dbg") {
+            return Some("dbg");
+        }
+        None
     }
 
     fn check_macro(&mut self, mac: &syn::Macro) {
-        let Some(name) = Self::macro_name(mac) else {
+        let Some(name) = Self::prohibited_macro_name(mac) else {
             return;
         };
-        if !matches!(name.as_str(), "todo" | "unimplemented" | "dbg") {
-            return;
-        }
         let location = SpanOps::start(mac.path.span());
         self.violations.push(Violation::new(
             self.file.clone(),

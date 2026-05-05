@@ -7,12 +7,31 @@ repository.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 description.workspace = true
+include = [
+    "Cargo.toml",
+    "src/**/*.rs",
+    "src/**/*.js",
+    "src/markdown/drawio_renderer/js_runtime/resources/drawio-resource-manifest.json",
+    "src/markdown/drawio_renderer/js_runtime/resources/shapes/**",
+    "src/markdown/drawio_renderer/js_runtime/resources/stencils/**",
+]
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
+base64 = { workspace = true }
+dirs = { workspace = true }
+image = { workspace = true }
+include_dir = { workspace = true }
+mathjax_svg = { workspace = true }
+regex = { workspace = true }
+resvg = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+syntect = { workspace = true }
 thiserror = { workspace = true }
+tiny-skia = { workspace = true }
 tracing = { workspace = true }
+v8 = { workspace = true }
+xmltree = { workspace = true }

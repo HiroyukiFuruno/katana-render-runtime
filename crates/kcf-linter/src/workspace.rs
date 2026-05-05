@@ -67,9 +67,10 @@ impl WorkspaceModel {
             return Ok(files);
         }
         for entry in WalkBuilder::new(root).standard_filters(true).build() {
-            let Ok(entry) = entry else {
-                continue;
-            };
+            let entry = entry.map_err(|source| KcfLintError::Walk {
+                path: root.to_path_buf(),
+                source,
+            })?;
             let path = entry.path();
             if Self::is_rust_file(path) {
                 files.push(Self::parse_file(path)?);

@@ -48,6 +48,15 @@ jobs:
       - uses: taiki-e/install-action@just
       - run: just unit-test
 
+  dependency-leak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@just
+      - run: just dependency-leak
+
   coverage:
     runs-on: ubuntu-latest
     steps:

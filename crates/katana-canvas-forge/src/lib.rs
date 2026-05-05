@@ -4,12 +4,15 @@
 //! responsibilities extracted from KatanA. KatanA consumes this crate as a
 //! library through the renderer runtime interface defined here.
 //!
-//! Status: scaffolding. The runtime interface and Mermaid implementation are
-//! migrated from KatanA in the v0.22.11 change.
+//! Status: v0.1.0 transfers the KatanA Mermaid / Draw.io / export runtime into
+//! this independent crate.
 
+pub mod exporter;
+pub mod markdown;
 pub mod renderer;
 
 pub use renderer::{
-    DiagramKind, RenderConfig, RenderContext, RenderDiagnostics, RenderError, RenderInput,
-    RenderOutput, RenderPolicy, Renderer, RendererProfile, RuntimeVersion,
+    DiagramKind, DrawioRenderer, MermaidRenderer, RenderConfig, RenderContext, RenderDiagnostics,
+    RenderError, RenderInput, RenderOutput, RenderPolicy, Renderer, RendererProfile,
+    RuntimePathResolver, RuntimeVersion,
 };
