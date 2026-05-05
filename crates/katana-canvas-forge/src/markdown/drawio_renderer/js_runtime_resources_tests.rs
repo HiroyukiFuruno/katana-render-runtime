@@ -24,7 +24,7 @@ fn builtin_selects_basic_stencil_shape_scripts_and_referenced_images() {
 }
 
 #[test]
-fn mime_type_and_resource_groups_cover_supported_assets() {
+fn mime_type_for_path_covers_supported_assets() {
     assert_eq!(mime_type_for_path("a.xml"), "text/xml");
     assert_eq!(mime_type_for_path("a.js"), "application/javascript");
     assert_eq!(mime_type_for_path("a.svg"), "image/svg+xml");
@@ -33,12 +33,20 @@ fn mime_type_and_resource_groups_cover_supported_assets() {
     assert_eq!(mime_type_for_path("a.jpeg"), "image/jpeg");
     assert_eq!(mime_type_for_path("a.gif"), "image/gif");
     assert_eq!(mime_type_for_path("a.bin"), "application/octet-stream");
+}
+
+#[test]
+fn encoding_for_path_covers_binary_and_text_assets() {
     assert!(matches!(
         encoding_for_path("a.png"),
         super::DrawioResourceEncoding::Base64
     ));
     assert_eq!(encoding_for_path("a.xml").as_str(), "text");
     assert_eq!(encoding_for_path("a.png").as_str(), "base64");
+}
+
+#[test]
+fn resource_groups_and_prefix_handle_known_values() {
     assert_eq!(resource_groups("rackGeneral"), vec!["rack".to_string()]);
     assert_eq!(resource_groups("custom"), vec!["custom".to_string()]);
     assert_eq!(drawio_prefix(";"), None);

@@ -1,5 +1,6 @@
 pub mod html;
 mod html_template;
+mod html_uri;
 pub mod image;
 mod native_blocks;
 mod native_document;

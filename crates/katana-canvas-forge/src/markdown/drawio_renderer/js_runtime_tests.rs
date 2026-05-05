@@ -7,9 +7,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 #[test]
-fn bundle_cache_reads_once_and_svg_validation_rejects_plain_text() {
-    let path =
-        std::env::temp_dir().join(format!("kcf-drawio-runtime-unit-{}.js", std::process::id()));
+fn bundle_cache_reads_once() {
+    let path = temp_runtime_path("kcf-drawio-runtime-unit");
     assert!(std::fs::write(&path, "function GraphViewer() {}").is_ok());
 
     let cache: RuntimeBundleCache = Mutex::new(HashMap::new());
@@ -18,7 +17,12 @@ fn bundle_cache_reads_once_and_svg_validation_rejects_plain_text() {
     assert!(std::fs::write(&path, "changed").is_ok());
     let second = read_drawio_bundle_with_cache(&path, &cache);
     assert!(matches!(second.as_deref(), Ok("function GraphViewer() {}")));
+}
 
+#[test]
+fn bundle_reading_and_svg_validation_report_errors() {
+    let path = temp_runtime_path("kcf-drawio-runtime-validation-unit");
+    assert!(std::fs::write(&path, "function GraphViewer() {}").is_ok());
     assert!(read_drawio_bundle(&path).is_ok());
     assert!(read_drawio_bundle(&path).is_ok());
     assert!(ensure_svg("plain text").is_err());
@@ -27,8 +31,7 @@ fn bundle_cache_reads_once_and_svg_validation_rejects_plain_text() {
 
 #[test]
 fn fake_bundle_renders_svg() {
-    let path =
-        std::env::temp_dir().join(format!("kcf-drawio-render-unit-{}.js", std::process::id()));
+    let path = temp_runtime_path("kcf-drawio-render-unit");
     assert!(std::fs::write(&path, fake_bundle()).is_ok());
 
     let rendered =
@@ -39,10 +42,7 @@ fn fake_bundle_renders_svg() {
 
 #[test]
 fn fake_bundle_reports_runtime_error() {
-    let path = std::env::temp_dir().join(format!(
-        "kcf-drawio-runtime-error-unit-{}.js",
-        std::process::id()
-    ));
+    let path = temp_runtime_path("kcf-drawio-runtime-error-unit");
     assert!(std::fs::write(&path, "window.GraphViewer = {};").is_ok());
 
     let rendered =
@@ -84,6 +84,10 @@ fn poison_cache(cache: &RuntimeBundleCache) {
         Err(_) => return,
     };
     std::panic::resume_unwind(Box::new("poison drawio cache"));
+}
+
+fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("{prefix}-{}.js", std::process::id()))
 }
 
 fn fake_bundle() -> &'static str {

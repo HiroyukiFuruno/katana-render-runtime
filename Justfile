@@ -27,7 +27,7 @@ fmt-check:
 
 # Run strict Clippy checks
 lint:
-    RUSTFLAGS="-D warnings" {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports
+    RUSTFLAGS="-D warnings" {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity
 
 # Run Rust syntax based structural checks
 ast-lint:
@@ -60,6 +60,7 @@ release-verify: check coverage
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
     {{CARGO}} package -p katana-canvas-forge --locked --allow-dirty
     {{CARGO}} package -p katana-canvas-forge-cli --locked --allow-dirty --list >/dev/null
+    bash scripts/release/verify-crate-size.sh katana-canvas-forge "{{VERSION}}"
     {{CARGO}} publish -p katana-canvas-forge --dry-run --locked --allow-dirty
 
 # Verify release branch readiness before merging

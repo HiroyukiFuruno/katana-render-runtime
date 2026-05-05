@@ -25,34 +25,42 @@ fn renders_fulfilled_and_pending_promise_values() {
 
 #[test]
 fn returns_compile_and_rejected_promise_errors_with_messages() {
-    let compile = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed("bad.js", "}")]);
-    let rejected = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
-        "reject.js",
-        "Promise.reject(new Error('rejected'))",
-    )]);
-    let thrown = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
-        "throw.js",
-        "throw 'plain failure'",
-    )]);
-    let thrown_null = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
-        "throw-null.js",
-        "throw null",
-    )]);
-    let thrown_same_stack = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
+    assert_runtime_error("bad.js", "}", |it| !it.is_empty());
+    assert_runtime_error("reject.js", "Promise.reject(new Error('rejected'))", |it| {
+        it.contains("rejected")
+    });
+}
+
+#[test]
+fn returns_thrown_primitive_errors_with_messages() {
+    assert_runtime_error("throw.js", "throw 'plain failure'", |it| {
+        it.contains("plain failure")
+    });
+    assert_runtime_error("throw-null.js", "throw null", |it| it == "null");
+}
+
+#[test]
+fn returns_thrown_object_errors_with_messages() {
+    assert_runtime_error(
         "throw-same-stack.js",
         "throw { toString() { return 'same'; }, stack: 'same' }",
-    )]);
-    let thrown_without_stack = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
+        |it| it == "same",
+    );
+    assert_runtime_error(
         "throw-without-stack.js",
         "throw { toString() { return 'without stack'; } }",
-    )]);
+        |it| it == "without stack",
+    );
+}
 
-    assert!(matches!(compile, Err(message) if !message.is_empty()));
-    assert!(matches!(rejected, Err(message) if message.contains("rejected")));
-    assert!(matches!(thrown, Err(message) if message.contains("plain failure")));
-    assert!(matches!(thrown_null, Err(message) if message == "null"));
-    assert!(matches!(thrown_same_stack, Err(message) if message == "same"));
-    assert!(matches!(thrown_without_stack, Err(message) if message == "without stack"));
+fn assert_runtime_error(
+    script_name: &'static str,
+    script: &'static str,
+    matches_error: impl FnOnce(&str) -> bool,
+) {
+    let output = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(script_name, script)]);
+
+    assert!(matches!(output, Err(message) if matches_error(&message)));
 }
 
 #[test]

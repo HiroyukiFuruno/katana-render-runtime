@@ -1,3 +1,4 @@
+use super::html_uri::HtmlFileUri;
 use crate::markdown::color_preset::DiagramColorPreset;
 
 pub(crate) struct HtmlExportTemplate;
@@ -87,7 +88,7 @@ impl HtmlExportTemplate {
         {
             return src.to_string();
         }
-        format!("file://{}", base_dir.join(src).display())
+        HtmlFileUri::from_path(&base_dir.join(src))
     }
 
     pub(crate) fn generate_css(preset: &DiagramColorPreset) -> String {

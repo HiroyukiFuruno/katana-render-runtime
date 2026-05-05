@@ -14,6 +14,11 @@ fn reports_all_structural_rule_families() -> TestResult<()> {
     )?;
     write_file(
         &root,
+        "crates/katana-canvas-forge/src/long_type_only.rs",
+        &long_type_only_source(),
+    )?;
+    write_file(
+        &root,
         "crates/katana-canvas-forge-cli/src/bad.rs",
         cli_duplicate_source(),
     )?;
@@ -26,13 +31,16 @@ fn reports_all_structural_rule_families() -> TestResult<()> {
     Ok(())
 }
 
-fn required_rules() -> [&'static str; 8] {
+fn required_rules() -> [&'static str; 11] {
     [
         "file-length",
         "function-length",
         "nesting-depth",
+        "error-first",
+        "type-separation",
         "public-free-function",
         "prohibited-method",
+        "prohibited-type",
         "lazy-code",
         "prohibited-attribute",
         "renderer-boundary",
@@ -40,24 +48,35 @@ fn required_rules() -> [&'static str; 8] {
 }
 
 fn bad_lib_source() -> String {
-    let mut source = String::from(bad_lib_header());
+    let mut source = String::new();
+    source.push_str(bad_lib_exposed_source());
+    source.push_str(bad_lib_allowed_source());
+    source.push_str(bad_lib_long_impl_source());
     append_oversized_function(&mut source);
     append_file_length_filler(&mut source);
     source
 }
 
-fn bad_lib_header() -> &'static str {
+fn bad_lib_exposed_source() -> &'static str {
     r#"
 #[allow(dead_code)]
 pub fn exposed() {
     let value = Some(1);
+    let result: Result<i32, ()> = Ok(1);
     let _ = value.unwrap();
+    if let Ok(success) = result {
+        let _success = success;
+    }
     todo!();
     unimplemented!();
     dbg!(value);
     if true { if true { if true { if true {} } } }
 }
+"#
+}
 
+fn bad_lib_allowed_source() -> &'static str {
+    r#"
 pub(crate) fn crate_visible() {}
 
 #[cfg(test)]
@@ -69,7 +88,11 @@ mod tests {
 }
 
 fn main() {}
+"#
+}
 
+fn bad_lib_long_impl_source() -> &'static str {
+    r#"
 struct Long;
 impl Long {
     fn oversized() {
@@ -81,12 +104,21 @@ fn append_oversized_function(source: &mut String) {
         source.push_str(&format!("        let _line_{line} = {line};\n"));
     }
     source.push_str("    }\n}\n");
+    source.push_str("pub struct Mixed;\n");
+    source.push_str("impl Mixed { fn logic(&self) {} }\n");
+    source.push_str("type BadLock = std::sync::RwLock<i32>;\n");
 }
 
 fn append_file_length_filler(source: &mut String) {
-    for line in 0..180 {
+    for line in 0..260 {
         source.push_str(&format!("// filler {line}\n"));
     }
+}
+
+fn long_type_only_source() -> String {
+    let mut source = String::from("pub struct TypeOnly;\n");
+    append_file_length_filler(&mut source);
+    source
 }
 
 fn cli_duplicate_source() -> &'static str {

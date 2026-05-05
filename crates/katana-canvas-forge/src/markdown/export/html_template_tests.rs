@@ -4,11 +4,11 @@ use crate::markdown::color_preset::DiagramColorPreset;
 #[test]
 fn relative_path_resolution_handles_unclosed_src_and_absolute_urls() {
     let resolved = HtmlExportTemplate::resolve_relative_paths(
-        r#"<img src="a.png"><img src="data:image/png;base64,aaa"><img src="broken"#,
+        r#"<img src="a file.png"><img src="data:image/png;base64,aaa"><img src="broken"#,
         std::path::Path::new("/tmp/doc"),
     );
 
-    assert!(resolved.contains(r#"src="file:///tmp/doc/a.png""#));
+    assert!(resolved.contains(r#"src="file:///tmp/doc/a%20file.png""#));
     assert!(resolved.contains(r#"src="data:image/png;base64,aaa""#));
     assert!(resolved.ends_with(r#"src="broken"#));
 }

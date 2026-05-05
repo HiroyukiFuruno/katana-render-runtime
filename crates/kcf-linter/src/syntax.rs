@@ -46,25 +46,31 @@ mod tests {
     use super::AttributeOps;
 
     #[test]
-    fn detects_test_and_allow_attributes_without_fallback() {
+    fn detects_test_attributes_without_fallback() {
         let test_attr: syn::Attribute = syn::parse_quote!(#[test]);
         let cfg_test_attr: syn::Attribute = syn::parse_quote!(#[cfg(test)]);
         let cfg_list_attr: syn::Attribute = syn::parse_quote!(#[cfg(any(test))]);
-        let allow_attr: syn::Attribute = syn::parse_quote!(#[allow(dead_code)]);
-        let cfg_attr: syn::Attribute = syn::parse_quote!(#[cfg_attr(test, allow(dead_code))]);
-        let cfg_without_allow_attr: syn::Attribute =
-            syn::parse_quote!(#[cfg_attr(test, deprecated)]);
-        let non_allow_list_attr: syn::Attribute = syn::parse_quote!(#[cfg(any(unix, test))]);
         let cfg_feature_attr: syn::Attribute = syn::parse_quote!(#[cfg(feature = "demo")]);
         let derive_attr: syn::Attribute = syn::parse_quote!(#[derive(Debug)]);
 
-        assert!(!AttributeOps::is_allow_attr(&test_attr));
         assert!(!AttributeOps::has_cfg_test_attr(&[]));
         assert!(AttributeOps::has_cfg_test_attr(&[test_attr]));
         assert!(AttributeOps::has_cfg_test_attr(&[cfg_test_attr]));
         assert!(!AttributeOps::has_cfg_test_attr(&[cfg_list_attr]));
         assert!(!AttributeOps::has_cfg_test_attr(&[cfg_feature_attr]));
         assert!(!AttributeOps::has_cfg_test_attr(&[derive_attr]));
+    }
+
+    #[test]
+    fn detects_allow_attributes_without_fallback() {
+        let test_attr: syn::Attribute = syn::parse_quote!(#[test]);
+        let allow_attr: syn::Attribute = syn::parse_quote!(#[allow(dead_code)]);
+        let cfg_attr: syn::Attribute = syn::parse_quote!(#[cfg_attr(test, allow(dead_code))]);
+        let cfg_without_allow_attr: syn::Attribute =
+            syn::parse_quote!(#[cfg_attr(test, deprecated)]);
+        let non_allow_list_attr: syn::Attribute = syn::parse_quote!(#[cfg(any(unix, test))]);
+
+        assert!(!AttributeOps::is_allow_attr(&test_attr));
         assert!(AttributeOps::is_allow_attr(&allow_attr));
         assert!(AttributeOps::is_allow_attr(&cfg_attr));
         assert!(!AttributeOps::is_allow_attr(&cfg_without_allow_attr));
