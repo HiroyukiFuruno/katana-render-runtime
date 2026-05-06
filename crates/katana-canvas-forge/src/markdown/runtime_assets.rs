@@ -138,6 +138,19 @@ mod tests {
     }
 
     #[test]
+    fn materialize_keeps_same_existing_asset_file() {
+        let path = test_path("current-mermaid.min.js");
+        remove_parent(&path);
+        let first = RuntimeAsset::mermaid().materialize_at(path.clone());
+        assert!(matches!(first, Ok(written) if written == path));
+
+        let second = RuntimeAsset::mermaid().materialize_at(path.clone());
+
+        assert!(matches!(second, Ok(written) if written == path));
+        remove_parent(&path);
+    }
+
+    #[test]
     fn runtime_asset_error_keeps_io_error_message() {
         let error = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
 
