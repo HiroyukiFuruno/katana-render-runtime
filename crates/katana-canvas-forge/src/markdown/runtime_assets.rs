@@ -146,6 +146,11 @@ mod tests {
         assert_eq!(message, "denied");
     }
 
+    #[test]
+    fn remove_parent_accepts_path_without_parent() {
+        remove_parent(std::path::Path::new(""));
+    }
+
     fn test_path(name: &str) -> std::path::PathBuf {
         let slug = name.replace(['.', '/'], "-");
         std::env::temp_dir()
