@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   RuntimeAssetCatalog,
+  RuntimeAssetCatalogSource,
   RuntimeAssetChecksum,
   RuntimeAssetPaths,
 } from "./runtime-asset-common";
@@ -22,9 +23,38 @@ test("runtime asset checksum は固定ファイルと一致する", () => {
   const drawio = RuntimeAssetCatalog.byKind("drawio");
 
   expect(RuntimeAssetChecksum.digestFile(RuntimeAssetPaths.assetFile(mermaid))).toBe(
-    "217b66ef4279c33c141b4afe22effad10a91c02558dc70917be2c0981e78ed87",
+    mermaid.checksum,
   );
   expect(RuntimeAssetChecksum.digestFile(RuntimeAssetPaths.assetFile(drawio))).toBe(
-    "a8b7897de995a4e7dd3a541a5e7250d64a295440f728f0ddae72179cdf5a83d5",
+    drawio.checksum,
   );
+});
+
+test("runtime asset catalog source は対象 asset の固定値だけ更新する", () => {
+  const source = [
+    "const DEFINITIONS: RuntimeAssetDefinition[] = [",
+    "  {",
+    '    kind: "mermaid",',
+    '    version: "3.3.1",',
+    '    checksum: "old-mermaid-checksum",',
+    "  },",
+    "  {",
+    '    kind: "drawio",',
+    '    version: "29.7.10",',
+    '    checksum: "old-drawio-checksum",',
+    "  },",
+    "];",
+  ].join("\n");
+
+  const updated = RuntimeAssetCatalogSource.updatePinnedAsset(
+    source,
+    "mermaid",
+    "4.0.0",
+    "new-mermaid-checksum",
+  );
+
+  expect(updated).toContain('kind: "mermaid",\n    version: "4.0.0",');
+  expect(updated).toContain('checksum: "new-mermaid-checksum",');
+  expect(updated).toContain('kind: "drawio",\n    version: "29.7.10",');
+  expect(updated).toContain('checksum: "old-drawio-checksum",');
 });

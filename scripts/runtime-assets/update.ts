@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   RuntimeAssetCatalog,
+  RuntimeAssetCatalogSource,
   RuntimeAssetChecksum,
   RuntimeAssetPaths,
   type RuntimeAssetDefinition,
@@ -51,6 +52,7 @@ class RuntimeSourceUpdater {
   update(definition: RuntimeAssetDefinition, version: string, checksum: string) {
     this.updateRust(definition, version, checksum);
     this.updateJustfile(definition, version);
+    this.updateScriptCatalog(definition, version, checksum);
   }
 
   private updateRust(definition: RuntimeAssetDefinition, version: string, checksum: string) {
@@ -75,6 +77,18 @@ class RuntimeSourceUpdater {
       .readFileSync(justfile, "utf8")
       .replace(pattern, `${constName} := "${version}"`);
     fs.writeFileSync(justfile, source, "utf8");
+  }
+
+  private updateScriptCatalog(definition: RuntimeAssetDefinition, version: string, checksum: string) {
+    const catalogPath = RuntimeAssetPaths.runtimeAssetCommon();
+    const source = fs.readFileSync(catalogPath, "utf8");
+    const updated = RuntimeAssetCatalogSource.updatePinnedAsset(
+      source,
+      definition.kind,
+      version,
+      checksum,
+    );
+    fs.writeFileSync(catalogPath, updated, "utf8");
   }
 
   private replaceConst(source: string, constName: string, value: string): string {

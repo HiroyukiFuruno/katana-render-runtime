@@ -8,6 +8,7 @@ export interface RuntimeAssetDefinition {
   readonly kind: RuntimeAssetKind;
   readonly displayName: string;
   readonly version: string;
+  readonly checksum: string;
   readonly fileName: string;
   readonly rustVersionConst: string;
   readonly rustChecksumConst: string;
@@ -22,6 +23,7 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
     kind: "mermaid",
     displayName: "Mermaid.js",
     version: "3.3.1",
+    checksum: "217b66ef4279c33c141b4afe22effad10a91c02558dc70917be2c0981e78ed87",
     fileName: "mermaid.min.js",
     rustVersionConst: "MERMAID_JS_VERSION",
     rustChecksumConst: "MERMAID_JS_CHECKSUM",
@@ -36,6 +38,7 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
     kind: "drawio",
     displayName: "Draw.io",
     version: "29.7.10",
+    checksum: "a8b7897de995a4e7dd3a541a5e7250d64a295440f728f0ddae72179cdf5a83d5",
     fileName: "drawio.min.js",
     rustVersionConst: "DRAWIO_JS_VERSION",
     rustChecksumConst: "DRAWIO_JS_CHECKSUM",
@@ -59,6 +62,37 @@ export class RuntimeAssetCatalog {
       throw new Error(`Unknown runtime asset: ${kind}`);
     }
     return definition;
+  }
+}
+
+export class RuntimeAssetCatalogSource {
+  static updatePinnedAsset(
+    source: string,
+    kind: RuntimeAssetKind,
+    version: string,
+    checksum: string,
+  ): string {
+    let updated = RuntimeAssetCatalogSource.replaceString(source, kind, "version", version);
+    updated = RuntimeAssetCatalogSource.replaceString(updated, kind, "checksum", checksum);
+    return updated;
+  }
+
+  private static replaceString(
+    source: string,
+    kind: RuntimeAssetKind,
+    propertyName: "version" | "checksum",
+    value: string,
+  ): string {
+    const blockPattern = new RegExp(`(\\{\\n\\s+kind: "${kind}",[\\s\\S]*?\\n\\s+\\},)`);
+    const block = source.match(blockPattern)?.[1];
+    if (block === undefined) {
+      throw new Error(`Runtime asset catalog entry not found: ${kind}`);
+    }
+    const propertyPattern = new RegExp(`(\\s+${propertyName}: )"[^"]+"`);
+    if (!propertyPattern.test(block)) {
+      throw new Error(`Runtime asset catalog property not found: ${kind}.${propertyName}`);
+    }
+    return source.replace(block, block.replace(propertyPattern, `$1"${value}"`));
   }
 }
 
@@ -93,6 +127,10 @@ export class RuntimeAssetPaths {
 
   static justfile(): string {
     return "Justfile";
+  }
+
+  static runtimeAssetCommon(): string {
+    return path.join("scripts", "runtime-assets", "runtime-asset-common.ts");
   }
 }
 
