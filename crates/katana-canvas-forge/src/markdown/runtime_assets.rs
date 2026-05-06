@@ -95,13 +95,12 @@ mod tests {
     #[test]
     fn materialize_writes_missing_asset_file() {
         let path = test_path("missing-mermaid.min.js");
-        let _ = std::fs::remove_file(&path);
+        remove_parent(&path);
 
         let result = RuntimeAsset::mermaid().materialize_at(path.clone());
 
         assert!(matches!(result, Ok(written) if written == path));
         assert!(path.exists());
-        let _ = std::fs::remove_file(&path);
         remove_parent(&path);
     }
 
@@ -119,6 +118,32 @@ mod tests {
         assert!(read_error.is_err());
         let _ = std::fs::remove_dir_all(&path);
         remove_parent(&path);
+    }
+
+    #[test]
+    fn materialize_replaces_different_existing_asset_file() {
+        let path = test_path("stale-mermaid.min.js");
+        remove_parent(&path);
+        let parent = path.parent();
+        assert!(matches!(parent, Some(it) if std::fs::create_dir_all(it).is_ok()));
+        let write_result = std::fs::write(&path, b"stale");
+        assert!(write_result.is_ok());
+
+        let result = RuntimeAsset::mermaid().materialize_at(path.clone());
+
+        assert!(result.is_ok());
+        let stored = std::fs::read(path.clone());
+        assert!(matches!(stored, Ok(bytes) if bytes != b"stale"));
+        remove_parent(&path);
+    }
+
+    #[test]
+    fn runtime_asset_error_keeps_io_error_message() {
+        let error = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+
+        let message = super::runtime_asset_error(error);
+
+        assert_eq!(message, "denied");
     }
 
     fn test_path(name: &str) -> std::path::PathBuf {
