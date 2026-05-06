@@ -162,4 +162,20 @@ mod tests {
         );
         assert!(body_css("<style>tbody { color: red; }</style>").is_none());
     }
+
+    #[test]
+    fn parses_body_selector_suffixes() {
+        let selectors = [
+            "body.dark",
+            "body#preview",
+            "body:hover",
+            "body[data-theme=\"dark\"]",
+            "body main",
+        ];
+
+        for selector in selectors {
+            let html = format!("<style>{selector} {{ color: #eeeeee; }}</style>");
+            assert!(body_css(&html).is_some());
+        }
+    }
 }

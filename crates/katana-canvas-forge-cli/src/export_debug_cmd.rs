@@ -21,7 +21,7 @@ impl ExportDebugCommand<MacOsOutputOpener> {
     pub(crate) fn new(input: PathBuf) -> Self {
         Self {
             input,
-            opener: MacOsOutputOpener,
+            opener: MacOsOutputOpener::new(),
         }
     }
 }
@@ -47,15 +47,44 @@ impl<O: ExportOutputOpener> ExportDebugCommand<O> {
     }
 }
 
-pub(crate) struct MacOsOutputOpener;
+pub(crate) struct MacOsOutputOpener {
+    command_name: &'static str,
+}
+
+impl MacOsOutputOpener {
+    fn new() -> Self {
+        Self {
+            command_name: "open",
+        }
+    }
+
+    #[cfg(test)]
+    fn with_command(command_name: &'static str) -> Self {
+        Self { command_name }
+    }
+}
 
 impl ExportOutputOpener for MacOsOutputOpener {
     fn open(&mut self, path: &Path) -> anyhow::Result<()> {
-        let status = std::process::Command::new("open")
+        let status = std::process::Command::new(self.command_name)
             .arg(path)
             .status()
             .with_context(|| format!("failed to run macOS open for {}", path.display()))?;
-        if status.success() {
+        MacOsOpenStatus::new(status).ensure(path)
+    }
+}
+
+struct MacOsOpenStatus {
+    status: std::process::ExitStatus,
+}
+
+impl MacOsOpenStatus {
+    fn new(status: std::process::ExitStatus) -> Self {
+        Self { status }
+    }
+
+    fn ensure(&self, path: &Path) -> anyhow::Result<()> {
+        if self.status.success() {
             return Ok(());
         }
         anyhow::bail!("macOS open failed for {}", path.display());
@@ -122,63 +151,5 @@ impl ExportDebugExporter {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{ExportDebugCommand, ExportOutputOpener};
-    use std::cell::RefCell;
-    use std::path::{Path, PathBuf};
-    use std::rc::Rc;
-
-    #[test]
-    fn run_writes_four_formats_to_tmp_and_opens_them() -> Result<(), Box<dyn std::error::Error>> {
-        let input = PathBuf::from(format!(
-            "/tmp/kcf-export-debug-input-{}.html",
-            std::process::id()
-        ));
-        std::fs::write(&input, debug_html())?;
-        let opened = Rc::new(RefCell::new(Vec::new()));
-        let opener = RecordingOpener::new(Rc::clone(&opened));
-
-        ExportDebugCommand::with_opener(input.clone(), opener).run()?;
-
-        let paths = opened.borrow().clone();
-        assert_eq!(paths.len(), 4);
-        assert_extensions(&paths);
-        for path in &paths {
-            assert!(path.starts_with("/tmp"));
-            assert!(path.exists());
-            std::fs::remove_file(path)?;
-        }
-        std::fs::remove_file(input)?;
-        Ok(())
-    }
-
-    struct RecordingOpener {
-        opened: Rc<RefCell<Vec<PathBuf>>>,
-    }
-
-    impl RecordingOpener {
-        fn new(opened: Rc<RefCell<Vec<PathBuf>>>) -> Self {
-            Self { opened }
-        }
-    }
-
-    impl ExportOutputOpener for RecordingOpener {
-        fn open(&mut self, path: &Path) -> anyhow::Result<()> {
-            self.opened.borrow_mut().push(path.to_path_buf());
-            Ok(())
-        }
-    }
-
-    fn assert_extensions(paths: &[PathBuf]) {
-        let extensions = paths
-            .iter()
-            .filter_map(|it| it.extension())
-            .map(|it| it.to_string_lossy().to_string())
-            .collect::<Vec<_>>();
-        assert_eq!(extensions, ["html", "pdf", "png", "jpg"]);
-    }
-
-    fn debug_html() -> &'static str {
-        "<!doctype html><html><body><h1>debug</h1></body></html>"
-    }
-}
+#[path = "export_debug_cmd_tests.rs"]
+mod tests;
