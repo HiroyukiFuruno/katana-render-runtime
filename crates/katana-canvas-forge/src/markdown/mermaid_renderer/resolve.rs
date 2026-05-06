@@ -1,10 +1,11 @@
+use crate::markdown::runtime_assets::RuntimeAsset;
 use std::path::PathBuf;
 
 pub struct MermaidBinaryOps;
 
 impl MermaidBinaryOps {
     pub fn default_install_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".local").join("katana").join("mermaid.min.js"))
+        Some(RuntimeAsset::mermaid().materialized_path())
     }
 
     pub fn resolve_mermaid_js() -> Result<PathBuf, String> {
@@ -36,8 +37,10 @@ impl MermaidBinaryOps {
     }
 
     fn resolve_mermaid_js_with_home(home_path: Option<PathBuf>) -> Result<PathBuf, String> {
-        home_path
-            .ok_or_else(|| "home directory is unavailable for Mermaid.js resolution".to_string())
+        let Some(path) = home_path else {
+            return Err("bundled Mermaid.js path is unavailable".to_string());
+        };
+        RuntimeAsset::mermaid().materialize_at(path)
     }
 
     pub fn find_mermaid_js() -> Result<Option<PathBuf>, String> {
@@ -55,10 +58,23 @@ mod tests {
     use super::MermaidBinaryOps;
 
     #[test]
-    fn resolve_mermaid_js_reports_missing_home_without_fallback() {
+    fn resolve_mermaid_js_reports_missing_default_without_fallback() {
         let result = MermaidBinaryOps::resolve_mermaid_js_with_home(None);
 
-        assert!(matches!(result, Err(error) if error.contains("home directory")));
+        assert!(matches!(result, Err(error) if error.contains("bundled Mermaid.js")));
+    }
+
+    #[test]
+    fn resolve_mermaid_js_uses_versioned_repository_asset_without_env() {
+        let result = MermaidBinaryOps::resolve_mermaid_js_with_env(
+            None,
+            MermaidBinaryOps::default_install_path(),
+        );
+
+        assert!(matches!(
+            result,
+            Ok(path) if path.ends_with("vendor/mermaid/3.3.1/mermaid.min.js")
+        ));
     }
 
     #[test]

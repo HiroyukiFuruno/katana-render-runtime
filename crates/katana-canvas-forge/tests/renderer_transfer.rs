@@ -92,7 +92,9 @@ fn render_output_exposes_adapter_relevant_metadata() {
         runtime: RuntimeVersion {
             name: "mermaid".to_string(),
             version: "3.3.1".to_string(),
-            checksum: None,
+            checksum: Some(
+                "217b66ef4279c33c141b4afe22effad10a91c02558dc70917be2c0981e78ed87".to_string(),
+            ),
         },
         profile: RendererProfile {
             id: "mermaid-js".to_string(),
@@ -109,6 +111,7 @@ fn render_output_exposes_adapter_relevant_metadata() {
     assert_eq!(output.width, 20.0);
     assert_eq!(output.height, 10.0);
     assert_eq!(output.runtime.name, "mermaid");
+    assert!(output.runtime.checksum.is_some());
     assert_eq!(output.profile.id, "mermaid-js");
     assert_eq!(output.cache_fingerprint, "fingerprint");
 }

@@ -5,9 +5,10 @@ CARGO := env_var_or_default("CARGO", "cargo")
 VERSION := env_var_or_default("VERSION", `awk -F '"' '/^version = / { print $2; exit }' Cargo.toml`)
 COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
-HOME_DIR := env_var_or_default("HOME", "")
-MERMAID_JS := env_var_or_default("MERMAID_JS", HOME_DIR + "/.local/katana/mermaid.min.js")
-DRAWIO_JS := env_var_or_default("DRAWIO_JS", HOME_DIR + "/.local/katana/drawio.min.js")
+MERMAID_JS_VERSION := "3.3.1"
+DRAWIO_JS_VERSION := "29.7.10"
+MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-canvas-forge/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
+DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-canvas-forge/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
 DRAWIO_RESOURCE_DIR := "crates/katana-canvas-forge/src/markdown/drawio_renderer/js_runtime/resources"
 DRAWIO_RESOURCE_MANIFEST := DRAWIO_RESOURCE_DIR + "/drawio-resource-manifest.json"
 
@@ -50,8 +51,17 @@ unit-test:
 coverage:
     {{CARGO}} llvm-cov --workspace --all-features --locked --summary-only --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}
 
+# Verify pinned runtime asset checksums
+runtime-asset-check:
+    cd crates/katana-canvas-forge/vendor/mermaid/{{MERMAID_JS_VERSION}} && shasum -a 256 -c mermaid.min.js.sha256
+    cd crates/katana-canvas-forge/vendor/drawio/{{DRAWIO_JS_VERSION}} && shasum -a 256 -c drawio.min.js.sha256
+
+# Run TypeScript tests for runtime asset helper scripts
+runtime-asset-script-test:
+    bun test scripts/runtime-assets/runtime-asset-common_test.ts
+
 # Run the local quality gate
-check: fmt-check lint unit-test ast-lint dependency-leak
+check: fmt-check lint unit-test ast-lint dependency-leak runtime-asset-check
     @echo "checks passed"
 
 # Verify package metadata and dry-run the first publishable crate
@@ -71,6 +81,33 @@ release-check: release-verify
 browser-install:
     playwright install chromium
 
+# Show latest Mermaid.js and Draw.io versions without changing files
+runtime-asset-latest runtime='all':
+    bun run scripts/runtime-assets/latest-check.ts "{{runtime}}"
+
+# Show latest Mermaid.js version without changing files
+mermaid-latest:
+    just runtime-asset-latest mermaid
+
+# Show latest Draw.io version without changing files
+drawio-latest:
+    just runtime-asset-latest drawio
+
+# Update Mermaid.js runtime asset and refresh references
+mermaid-update version:
+    bun run scripts/runtime-assets/update.ts mermaid "{{version}}"
+    just mermaid-reference-all
+    just mermaid-compare-full
+    just mermaid-compare-ci
+
+# Update Draw.io runtime asset and refresh references
+drawio-update version:
+    bun run scripts/runtime-assets/update.ts drawio "{{version}}"
+    bun run scripts/drawio/resource-update.ts --resources "{{DRAWIO_RESOURCE_DIR}}" --manifest "{{DRAWIO_RESOURCE_MANIFEST}}"
+    just drawio-reference-all
+    just drawio-compare-full
+    just drawio-compare-ci
+
 # Render kcf Mermaid SVG fixtures
 mermaid-render fixtures output='tmp/kcf-mermaid-rendered':
     @rm -rf "{{output}}"
@@ -83,6 +120,12 @@ mermaid-render fixtures output='tmp/kcf-mermaid-rendered':
 # Update official Mermaid reference SVG / PNG
 mermaid-reference fixtures:
     bun run scripts/mermaid/diagram-update.ts --fixtures "{{fixtures}}" --output tmp/kcf-mermaid-official --markdown-output "{{fixtures}}/official-dark" --theme dark --mermaid-js "{{MERMAID_JS}}" --skip-errors
+
+# Update all committed Mermaid reference SVG / PNG fixtures
+mermaid-reference-all:
+    just mermaid-reference tests/fixtures/mermaid/en
+    just mermaid-reference tests/fixtures/mermaid/ja
+    just mermaid-reference tests/fixtures/mermaid/representative
 
 # Compare committed official Mermaid reference with kcf rendering through ImageMagick score
 mermaid-compare fixtures min_score='99' output='tmp/kcf-mermaid':
@@ -115,6 +158,40 @@ drawio-render fixtures output='tmp/kcf-drawio-rendered':
 # Update official Draw.io reference SVG / PNG
 drawio-reference fixtures:
     bun run scripts/drawio/diagram-update.ts --fixtures "{{fixtures}}" --output "{{fixtures}}/official" --drawio-js "{{DRAWIO_JS}}" --resources "{{DRAWIO_RESOURCE_DIR}}" --resource-manifest "{{DRAWIO_RESOURCE_MANIFEST}}"
+
+# Update all committed Draw.io reference SVG / PNG fixtures
+drawio-reference-all:
+    @set -euo pipefail; \
+    root="tests/fixtures/drawio"; \
+    for fixtures in \
+      "$root/basic" \
+      "$root/official/diagrams" \
+      "$root/official/examples" \
+      "$root/official/blog" \
+      "$root/official/templates/aws" \
+      "$root/official/templates/azure" \
+      "$root/official/templates/basic" \
+      "$root/official/templates/business" \
+      "$root/official/templates/charts" \
+      "$root/official/templates/education" \
+      "$root/official/templates/engineering" \
+      "$root/official/templates/flowcharts" \
+      "$root/official/templates/gcp" \
+      "$root/official/templates/ibm-cloud" \
+      "$root/official/templates/infographic" \
+      "$root/official/templates/layout" \
+      "$root/official/templates/maps" \
+      "$root/official/templates/network" \
+      "$root/official/templates/other" \
+      "$root/official/templates/plans" \
+      "$root/official/templates/software" \
+      "$root/official/templates/tables" \
+      "$root/official/templates/uml" \
+      "$root/official/templates/venn" \
+      "$root/official/templates/world" \
+      "$root/representative"; do \
+        just drawio-reference "$fixtures"; \
+      done
 
 # Compare committed official Draw.io reference with kcf rendering through ImageMagick score
 drawio-compare fixtures min_score='99' output='tmp/kcf-drawio' baseline='':

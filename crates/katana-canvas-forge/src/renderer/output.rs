@@ -39,7 +39,11 @@ impl RenderOutputFactory {
     ) -> Result<RenderOutput, RenderError> {
         let metadata = SvgMetadataOps::parse(&svg)?;
         Ok(RenderOutput {
-            cache_fingerprint: CacheFingerprintOps::render(input, runtime.version),
+            cache_fingerprint: CacheFingerprintOps::render(
+                input,
+                runtime.version,
+                runtime.checksum,
+            ),
             svg,
             width: metadata.width,
             height: metadata.height,
@@ -54,7 +58,7 @@ impl RenderOutputFactory {
         RuntimeVersion {
             name: runtime.name.to_string(),
             version: runtime.version.to_string(),
-            checksum: None,
+            checksum: Some(runtime.checksum.to_string()),
         }
     }
 
@@ -83,7 +87,7 @@ mod tests {
     };
 
     #[test]
-    fn output_factory_maps_svg_to_public_output() {
+    fn output_factory_maps_svg_dimensions_to_public_output() {
         let input = input();
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"></svg>"#;
         let output = RenderOutputFactory::from_diagram_result(
@@ -91,9 +95,26 @@ mod tests {
             DiagramResult::Ok(svg.to_string()),
             RuntimeDescriptor::mermaid(),
         );
-        assert!(matches!(&output, Ok(it) if it.width == 20.0));
-        assert!(matches!(&output, Ok(it) if it.runtime.version == "3.3.1"));
-        assert!(matches!(&output, Ok(it) if it.view_box.is_empty()));
+
+        assert!(matches!(output, Ok(it) if it.width == 20.0 && it.view_box.is_empty()));
+    }
+
+    #[test]
+    fn output_factory_maps_runtime_checksum_to_public_output() {
+        let input = input();
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"></svg>"#;
+        let output = RenderOutputFactory::from_diagram_result(
+            &input,
+            DiagramResult::Ok(svg.to_string()),
+            RuntimeDescriptor::mermaid(),
+        );
+
+        assert!(matches!(
+            output,
+            Ok(it) if it.runtime.version == "3.3.1"
+                && it.runtime.checksum.as_deref()
+                    == Some("217b66ef4279c33c141b4afe22effad10a91c02558dc70917be2c0981e78ed87")
+        ));
     }
 
     #[test]

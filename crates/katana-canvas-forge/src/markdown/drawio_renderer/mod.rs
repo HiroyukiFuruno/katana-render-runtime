@@ -3,22 +3,18 @@ mod js_runtime_resources;
 mod js_runtime_scripts;
 pub mod types;
 
+pub use crate::markdown::runtime_assets::{DRAWIO_JS_CHECKSUM, DRAWIO_JS_VERSION};
 pub use types::DrawioRendererOps;
 
 use crate::markdown::color_preset::DiagramColorPreset;
+use crate::markdown::runtime_assets::{DRAWIO_DOWNLOAD_URL, RuntimeAsset};
 use crate::markdown::{DiagramBlock, DiagramResult};
 use js_runtime::DrawioJsRuntimeOps;
 use std::path::PathBuf;
 
-/// Pinned Draw.io version used in rendering and tests.
-/// Update together with the installed binary and update snapshot assertions when bumping.
-pub const DRAWIO_JS_VERSION: &str = "29.7.10";
-/// Versioned release page URL matching `DRAWIO_JS_VERSION`.
-const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v29.7.10";
-
 impl DrawioRendererOps {
     pub fn default_install_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".local").join("katana").join("drawio.min.js"))
+        Some(RuntimeAsset::drawio().materialized_path())
     }
 
     pub fn resolve_drawio_js() -> Result<PathBuf, String> {
@@ -50,9 +46,10 @@ impl DrawioRendererOps {
     }
 
     fn resolve_drawio_js_with_home(home_path: Option<PathBuf>) -> Result<PathBuf, String> {
-        home_path.ok_or_else(|| {
-            "home directory is unavailable for Draw.io runtime resolution".to_string()
-        })
+        let Some(path) = home_path else {
+            return Err("bundled Draw.io runtime path is unavailable".to_string());
+        };
+        RuntimeAsset::drawio().materialize_at(path)
     }
 
     pub fn find_drawio_js() -> Result<Option<PathBuf>, String> {
@@ -106,10 +103,23 @@ mod tests {
     }
 
     #[test]
-    fn resolve_drawio_js_reports_missing_home_without_fallback() {
+    fn resolve_drawio_js_reports_missing_default_without_fallback() {
         let result = DrawioRendererOps::resolve_drawio_js_with_home(None);
 
-        assert!(matches!(result, Err(error) if error.contains("home directory")));
+        assert!(matches!(result, Err(error) if error.contains("bundled Draw.io")));
+    }
+
+    #[test]
+    fn resolve_drawio_js_uses_versioned_repository_asset_without_env() {
+        let result = DrawioRendererOps::resolve_drawio_js_with_env(
+            None,
+            DrawioRendererOps::default_install_path(),
+        );
+
+        assert!(matches!(
+            result,
+            Ok(path) if path.ends_with("vendor/drawio/29.7.10/drawio.min.js")
+        ));
     }
 
     #[test]

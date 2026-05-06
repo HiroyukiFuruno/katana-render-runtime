@@ -15,13 +15,13 @@ v0.1.0 transfer 後の Mermaid.js / Draw.io.js asset 管理状態を確認する
 
 ### タスク
 
-- [ ] 1.1 Mermaid.js の取り込み元、version、checksum、参照箇所を一覧化する
-- [ ] 1.2 Draw.io.js の取り込み元、version、checksum、resource manifest、参照箇所を一覧化する
-- [ ] 1.3 runtime metadata と cache fingerprint が version / checksum を扱えるか確認する
+- [x] 1.1 Mermaid.js の取り込み元、version、checksum、参照箇所を一覧化する
+- [x] 1.2 Draw.io.js の取り込み元、version、checksum、resource manifest、参照箇所を一覧化する
+- [x] 1.3 runtime metadata と cache fingerprint が version / checksum を扱えるか確認する
 
 ### Definition of Done
 
-- [ ] 固定対象の asset と参照箇所が artifact に残っている
+- [x] 固定対象の asset と参照箇所が artifact に残っている
 
 ---
 
@@ -33,15 +33,15 @@ Mermaid.js / Draw.io.js の取り込み version を kcf 側で固定する。
 
 ### タスク
 
-- [ ] 2.1 Mermaid.js 固定 version 定数または manifest を追加する
-- [ ] 2.2 Draw.io.js 固定 version 定数または manifest を追加する
-- [ ] 2.3 checksum を runtime metadata と検証に接続する
-- [ ] 2.4 version 変更時に reference snapshot 更新が必要なことを検知する
+- [x] 2.1 Mermaid.js 固定 version 定数または manifest を追加する
+- [x] 2.2 Draw.io.js 固定 version 定数または manifest を追加する
+- [x] 2.3 checksum を runtime metadata と検証に接続する
+- [x] 2.4 version 変更時に reference snapshot 更新が必要なことを検知する
 
 ### Definition of Done
 
-- [ ] version と checksum が実行時 metadata に現れる
-- [ ] version が不明な asset を暗黙に読み込まない
+- [x] version と checksum が実行時 metadata に現れる
+- [x] version が不明な asset を暗黙に読み込まない
 
 ---
 
@@ -53,14 +53,14 @@ Mermaid.js / Draw.io.js の取り込み version を kcf 側で固定する。
 
 ### タスク
 
-- [ ] 3.1 Mermaid.js latest check recipe を追加する
-- [ ] 3.2 Draw.io.js latest check recipe を追加する
-- [ ] 3.3 latest check は repository 内 file を変更しないようにする
+- [x] 3.1 Mermaid.js latest check recipe を追加する
+- [x] 3.2 Draw.io.js latest check recipe を追加する
+- [x] 3.3 latest check は repository 内 file を変更しないようにする
 
 ### Definition of Done
 
-- [ ] latest check の出力に current / latest / update hint が含まれる
-- [ ] latest check 実行後に `git status --short` が変化しない
+- [x] latest check の出力に current / latest / update hint が含まれる
+- [x] latest check 実行後に `git status --short` が変化しない
 
 ---
 
@@ -72,22 +72,22 @@ Mermaid.js / Draw.io.js の取り込み version を kcf 側で固定する。
 
 ### タスク
 
-- [ ] 4.1 Mermaid.js update recipe を追加する
-- [ ] 4.2 Draw.io.js update recipe を追加する
-- [ ] 4.3 update recipe が checksum を更新する
-- [ ] 4.4 update recipe が full / representative の reference snapshot を再生成する
-- [ ] 4.5 update recipe が local full compare と CI/CD representative compare を実行し、score 低下を検知する
+- [x] 4.1 Mermaid.js update recipe を追加する
+- [x] 4.2 Draw.io.js update recipe を追加する
+- [x] 4.3 update recipe が checksum を更新する
+- [x] 4.4 update recipe が full / representative の reference snapshot を再生成する
+- [x] 4.5 update recipe が local full compare と CI/CD representative compare を実行し、score 低下を検知する
 
 ### Definition of Done
 
-- [ ] 指定 version 取り込みが再現可能である
-- [ ] render script、resource manifest、checksum、reference snapshot の更新漏れを CI で検知できる
+- [x] 指定 version 取り込みが再現可能である
+- [x] render script、resource manifest、checksum、reference snapshot の更新漏れを CI で検知できる
 
 ---
 
 ## 5. Final Verification
 
-- [ ] 5.1 `/lint-and-ast-lint` を実行する
-- [ ] 5.2 `/self-review` を実行する
-- [ ] 5.3 `npx -y @fission-ai/openspec validate "v0-1-1-runtime-asset-version-pinning" --strict` を実行する
+- [x] 5.1 `/lint-and-ast-lint` を実行する
+- [x] 5.2 `/self-review` を実行する
+- [x] 5.3 `npx -y @fission-ai/openspec validate "v0-1-1-runtime-asset-version-pinning" --strict` を実行する
 - [ ] 5.4 PR 作成が必要な場合は `/create_pull_request` を使う
