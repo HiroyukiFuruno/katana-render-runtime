@@ -11,6 +11,7 @@ include = [
     "Cargo.toml",
     "src/**/*.rs",
     "src/**/*.js",
+    "vendor/**",
     "src/markdown/drawio_renderer/js_runtime/resources/drawio-resource-manifest.json",
     "src/markdown/drawio_renderer/js_runtime/resources/shapes/**",
     "src/markdown/drawio_renderer/js_runtime/resources/stencils/**",
@@ -21,7 +22,6 @@ path = "src/lib.rs"
 
 [dependencies]
 base64 = { workspace = true }
-dirs = { workspace = true }
 image = { workspace = true }
 include_dir = { workspace = true }
 mathjax_svg = { workspace = true }

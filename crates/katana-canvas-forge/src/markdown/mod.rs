@@ -4,6 +4,7 @@ pub(crate) mod diagram_runtime;
 pub mod drawio_renderer;
 pub mod export;
 pub mod mermaid_renderer;
+pub mod runtime_assets;
 pub mod svg_rasterize;
 pub mod types;
 

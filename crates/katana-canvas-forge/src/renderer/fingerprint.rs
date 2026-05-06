@@ -5,13 +5,18 @@ use std::hash::{Hash, Hasher};
 pub(super) struct CacheFingerprintOps;
 
 impl CacheFingerprintOps {
-    pub(super) fn render(input: &RenderInput, runtime_version: &str) -> String {
+    pub(super) fn render(
+        input: &RenderInput,
+        runtime_version: &str,
+        runtime_checksum: &str,
+    ) -> String {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         input.kind.hash(&mut hasher);
         input.source.hash(&mut hasher);
         input.context.theme_fingerprint.hash(&mut hasher);
         Self::hash_current_theme(&mut hasher);
         runtime_version.hash(&mut hasher);
+        runtime_checksum.hash(&mut hasher);
         format!("{:016x}", hasher.finish())
     }
 
@@ -48,8 +53,8 @@ mod tests {
 
     #[test]
     fn render_fingerprint_changes_with_theme_context() {
-        let default = CacheFingerprintOps::render(&input(None), "runtime");
-        let themed = CacheFingerprintOps::render(&input(Some("theme-a")), "runtime");
+        let default = CacheFingerprintOps::render(&input(None), "runtime", "checksum");
+        let themed = CacheFingerprintOps::render(&input(Some("theme-a")), "runtime", "checksum");
 
         assert_ne!(default, themed);
     }
@@ -58,12 +63,20 @@ mod tests {
     fn render_fingerprint_changes_with_current_theme() {
         let original = DiagramColorPreset::is_dark_mode();
         DiagramColorPreset::set_dark_mode(false);
-        let light = CacheFingerprintOps::render(&input(None), "runtime");
+        let light = CacheFingerprintOps::render(&input(None), "runtime", "checksum");
         DiagramColorPreset::set_dark_mode(true);
-        let dark = CacheFingerprintOps::render(&input(None), "runtime");
+        let dark = CacheFingerprintOps::render(&input(None), "runtime", "checksum");
         DiagramColorPreset::set_dark_mode(original);
 
         assert_ne!(light, dark);
+    }
+
+    #[test]
+    fn render_fingerprint_changes_with_runtime_checksum() {
+        let checksum_a = CacheFingerprintOps::render(&input(None), "runtime", "checksum-a");
+        let checksum_b = CacheFingerprintOps::render(&input(None), "runtime", "checksum-b");
+
+        assert_ne!(checksum_a, checksum_b);
     }
 
     fn input(theme_fingerprint: Option<&str>) -> RenderInput {

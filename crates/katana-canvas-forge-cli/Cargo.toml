@@ -13,7 +13,7 @@ name = "kcf"
 path = "src/main.rs"
 
 [dependencies]
-katana-canvas-forge = { path = "../katana-canvas-forge", version = "0.1.0" }
+katana-canvas-forge = { path = "../katana-canvas-forge", version = "0.1.1" }
 clap = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
