@@ -2,15 +2,23 @@ use katana_canvas_forge::exporter::{
     ExportConfig, ExportFormat, ExportInput, ExporterTrait, ImageExporter, PdfExporter,
 };
 
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
 #[test]
-fn native_export_preserves_html_body_background() -> Result<(), Box<dyn std::error::Error>> {
+fn native_export_preserves_html_body_background() -> TestResult {
     let png_path = output_path("dark-background", "png");
+    let jpeg_path = output_path("dark-background", "jpg");
     let pdf_path = output_path("dark-background", "pdf");
 
     ImageExporter.export(&export_input(
         ExportFormat::Png,
         dark_export_html(),
         &png_path,
+    ))?;
+    ImageExporter.export(&export_input(
+        ExportFormat::Jpeg,
+        dark_export_html(),
+        &jpeg_path,
     ))?;
     PdfExporter.export(&export_input(
         ExportFormat::Pdf,
@@ -19,17 +27,51 @@ fn native_export_preserves_html_body_background() -> Result<(), Box<dyn std::err
     ))?;
 
     let png = image::open(&png_path)?.to_rgba8();
-    let jpeg = first_pdf_stream(&std::fs::read(&pdf_path)?)?;
-    let pdf_image = image::load_from_memory(&jpeg)?.to_rgba8();
+    let jpeg_image = image::open(&jpeg_path)?.to_rgba8();
+    let pdf_jpeg = first_pdf_stream(&std::fs::read(&pdf_path)?)?;
+    let pdf_image = image::load_from_memory(&pdf_jpeg)?.to_rgba8();
     assert_dark_pixel(png.get_pixel(8, 8).0);
+    assert_dark_pixel(jpeg_image.get_pixel(8, 8).0);
     assert_dark_pixel(pdf_image.get_pixel(8, 8).0);
-    remove_outputs([png_path, pdf_path])?;
+    remove_outputs([png_path, jpeg_path, pdf_path])?;
     Ok(())
 }
 
 #[test]
-fn image_export_normalizes_percent_width_svg_before_embedding()
--> Result<(), Box<dyn std::error::Error>> {
+fn native_export_preserves_selector_list_body_background() -> TestResult {
+    let png_path = output_path("selector-list-background", "png");
+    let jpeg_path = output_path("selector-list-background", "jpg");
+    let pdf_path = output_path("selector-list-background", "pdf");
+
+    ImageExporter.export(&export_input(
+        ExportFormat::Png,
+        selector_list_export_html(),
+        &png_path,
+    ))?;
+    ImageExporter.export(&export_input(
+        ExportFormat::Jpeg,
+        selector_list_export_html(),
+        &jpeg_path,
+    ))?;
+    PdfExporter.export(&export_input(
+        ExportFormat::Pdf,
+        selector_list_export_html(),
+        &pdf_path,
+    ))?;
+
+    let png = image::open(&png_path)?.to_rgba8();
+    let jpeg = image::open(&jpeg_path)?.to_rgba8();
+    let pdf = first_pdf_stream(&std::fs::read(&pdf_path)?)?;
+    let pdf_image = image::load_from_memory(&pdf)?.to_rgba8();
+    assert_dark_pixel(png.get_pixel(8, 8).0);
+    assert_dark_pixel(jpeg.get_pixel(8, 8).0);
+    assert_dark_pixel(pdf_image.get_pixel(8, 8).0);
+    remove_outputs([png_path, jpeg_path, pdf_path])?;
+    Ok(())
+}
+
+#[test]
+fn image_export_normalizes_percent_width_svg_before_embedding() -> TestResult {
     let png_path = output_path("percent-width-svg", "png");
 
     ImageExporter.export(&export_input(
@@ -66,9 +108,7 @@ fn export_input(
     }
 }
 
-fn remove_outputs<const N: usize>(
-    paths: [std::path::PathBuf; N],
-) -> Result<(), Box<dyn std::error::Error>> {
+fn remove_outputs<const N: usize>(paths: [std::path::PathBuf; N]) -> TestResult {
     for path in paths {
         if path.exists() {
             std::fs::remove_file(path)?;
@@ -77,7 +117,7 @@ fn remove_outputs<const N: usize>(
     Ok(())
 }
 
-fn first_pdf_stream(pdf: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn first_pdf_stream(pdf: &[u8]) -> TestResult<Vec<u8>> {
     let start_marker = b"stream\n";
     let end_marker = b"\nendstream";
     let Some(start_position) = pdf
@@ -140,6 +180,21 @@ body { background-color: #1e1e1e; color: #E0E0E0; }
 <svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 120 80">
 <rect x="0" y="0" width="120" height="80" fill="#ff0000"/>
 </svg>
+</body>
+</html>"##
+}
+
+fn selector_list_export_html() -> &'static str {
+    r##"<!DOCTYPE html>
+<html>
+<head>
+<style>
+html, body { background: #1e1e1e; color: #E0E0E0; }
+</style>
+</head>
+<body>
+<h1>Selector List Export</h1>
+<p>CSS must apply to native PDF and image exports.</p>
 </body>
 </html>"##
 }

@@ -2,7 +2,7 @@
 
 v0.1.0 は純粋な transfer。KatanA 既存実装を kcf に移すことだけを完了条件にする。
 
-v0.1.2 は、その transfer 後に残る runtime asset 管理の課題を解決する patch。Mermaid.js / Draw.io.js の取り込み version、checksum、更新 recipe、reference snapshot 更新を kcf が所有する。
+v0.1.1 は、その transfer 後に残る runtime asset 管理の課題を解決する patch。Mermaid.js / Draw.io.js の取り込み version、checksum、更新 recipe、reference snapshot 更新を kcf が所有する。
 
 ## Goals
 
@@ -17,7 +17,7 @@ v0.1.2 は、その transfer 後に残る runtime asset 管理の課題を解決
 ## Non-Goals
 
 - renderer の忠実移植は v0.1.0 で扱う
-- score の初期改善は v0.1.1、継続改善は v0.4.x で扱う
+- score の初期改善は v0.1.4、継続改善は v0.4.x で扱う
 - 公開 CLI の UX 固定は v0.5.0 で扱う
 
 ## Asset Ownership
@@ -47,4 +47,4 @@ CI/CD の通常経路は reference snapshot を再生成しない。CI/CD は re
 
 v0.1.0 は KatanA 既存実装を移すだけ。runtime asset 管理が未整理でも、既存実装相当で動く状態までを v0.1.0 とする。
 
-v0.1.2 は、v0.1.0 で移した runtime asset を kcf の所有物として固定し、更新可能にする。
+v0.1.1 は、v0.1.0 で移した runtime asset を kcf の所有物として固定し、更新可能にする。

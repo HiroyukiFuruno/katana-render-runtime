@@ -81,14 +81,14 @@ Office rendering の見た目を reference と比較できるようにする。
 
 - [ ] 3.1 Word / Excel / PPTX の最小 case と代表 case を追加する
 - [ ] 3.2 reference snapshot 更新 recipe を追加する
-- [ ] 3.3 viewer e2e で generated artifact と reference artifact を比較表示する
+- [ ] 3.3 表示確認 case で generated artifact と reference artifact を比較表示する
 - [ ] 3.4 score report と screenshot report を保存する
 - [ ] 3.5 KatanA consumer compatibility の smoke case を追加する
 - [ ] 3.6 既知差分や score 改善候補を v0.4.x の候補として report に残す
 
 ### Definition of Done
 
-- [ ] viewer e2e smoke が Office case を読み込める
+- [ ] 表示確認 smoke が Office case を読み込める
 - [ ] reference snapshot の更新方法が just recipe で再現できる
 - [ ] KatanA 側で利用する artifact metadata が report に残る
 
@@ -99,7 +99,7 @@ Office rendering の見た目を reference と比較できるようにする。
 - [ ] 4.1 `cargo fmt --all -- --check` を実行する
 - [ ] 4.2 `cargo clippy --workspace --all-targets -- -D warnings` を実行する
 - [ ] 4.3 `cargo test --workspace` を実行する
-- [ ] 4.4 Office viewer e2e smoke を実行する
+- [ ] 4.4 Office viewer rendering smoke を実行する
 - [ ] 4.5 `/lint-and-ast-lint` を実行し、静的検査（lint）と抽象構文木検査（AST lint）の結果を記録する
 - [ ] 4.6 release gate を実行し、package 対象外の fixture や snapshot が混入していないことを確認する
 - [ ] 4.7 `/self-review` を実行する
@@ -111,5 +111,5 @@ Office rendering の見た目を reference と比較できるようにする。
 
 > ユーザーから受けた指摘は `[/]` で閉じる。通常の開発タスク `[x]` と混ぜない。
 
-- [ ] 5.1 実装結果、viewer e2e 結果、release gate 結果をユーザーに提示する
+- [ ] 5.1 実装結果、表示確認結果、release gate 結果をユーザーに提示する
 - [ ] 5.2 フィードバックを本 `tasks.md` に追記し、対応済みを `[/]` にする

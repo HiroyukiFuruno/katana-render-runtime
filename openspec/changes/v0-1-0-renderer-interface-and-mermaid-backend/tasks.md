@@ -11,8 +11,8 @@
 - [x] Draw.io score smoke は 1 fixture を比較し、minimum score 99.99 を確認済み
 - [x] Mermaid representative compare は 10 fixture を比較し、既存 score floor 付きで通過済み（minimum score 88.85）
 - [x] Draw.io representative compare は 20 fixture を比較し、`score-baseline.json` 付きで通過済み（minimum score 93.20）
-- [/] v0.1.0 は KatanA 側へまだ取り込まないため release し、full score 未達は v0.1.1 score improvement に送る方針を記録済み
-- [/] v0.1.x 後続要件として、v0.1.2 に runtime asset version pinning、v0.1.3 に Mermaid ZenUML / unsupported fixture handling、v0.1.4 に実表示 E2E（viewer e2e）を追加する方針を design.md に記録済み
+- [/] v0.1.0 は KatanA 側へまだ取り込まないため release し、full score 未達は v0.1.4 score improvement に送る方針を記録済み
+- [/] v0.1.x 後続要件として、v0.1.1 に runtime asset version pinning、v0.1.2 に export CSS 回帰修正と macOS debug open、v0.1.3 に Mermaid ZenUML / unsupported fixture handling、v0.1.4 に score improvement を置く方針を design.md に記録済み
 - [/] 公式 reference SVG / PNG は git 管理し、CI/CD では再取得・再生成しない方針を proposal / design / spec に記録済み
 - [/] ローカルは全量評価、CI/CD は代表ケース評価、`basic` は疎通確認専用とする方針を proposal / design / spec に記録済み
 - [/] Justfile の `kcf-*` recipe 名は v0.1.0 公開前品質として整理済み
@@ -146,7 +146,7 @@ KatanA 既存 Mermaid runtime と fixture coverage を kcf へ移す。
 ### Definition of Done
 
 - [x] PR #1 の簡略 SVG 生成ではなく、KatanA 既存 runtime と同等の出力である
-- [x] version 固定と更新 recipe 改善は v0.1.2 に送られている
+- [x] version 固定と更新 recipe 改善は v0.1.1 に送られている
 - [x] Mermaid 既存 fixture と KatanA 由来 runtime 検証観点が kcf 側で検証されている
 
 ---
@@ -284,13 +284,13 @@ kcf CLI を library の薄い利用者として整え、移植後の品質ゲー
 - [x] 7.4 just recipe を render、reference-update、compare、bench、export に接続する
 - [x] 7.5 local full compare と CI/CD representative compare の just recipe を分ける
 - [x] 7.6 CI で fmt / clippy / test / coverage / dependency leak / release-preflight を実行する
-- [/] 7.7 reference score の CI 必須化は、v0.1.1 score improvement と v0.1.2 runtime asset pinning の後に接続する
+- [/] 7.7 reference score の CI 必須化は、v0.1.4 score improvement と v0.1.1 runtime asset pinning の後に接続する
 - [x] 7.8 lefthook または equivalent で軽量な pre-commit gate を設定する
 
 ### Definition of Done
 
 - [x] CLI が KatanA 固有 path を前提にしない
-- [x] runtime asset version 固定と更新 recipe 改善は v0.1.2 に送られている
+- [x] runtime asset version 固定と更新 recipe 改善は v0.1.1 に送られている
 - [x] CI が PR #1 型の簡略実装を通常 test / coverage / dependency leak で検知できる
 
 ---

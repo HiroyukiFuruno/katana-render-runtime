@@ -27,4 +27,4 @@
 - **WHEN** CSV viewer rendering tests を実行する
 - **THEN** normal、quoted、multiline、wide、large、encoding fixture を検証する
 - **THEN** expected metadata と HTML fragment を比較する
-- **THEN** viewer e2e で少なくとも 1 case の実表示を確認する
+- **THEN** 表示確認 case で少なくとも 1 case の実表示を確認する

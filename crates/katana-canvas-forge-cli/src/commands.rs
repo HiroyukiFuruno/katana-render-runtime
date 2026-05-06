@@ -28,6 +28,10 @@ pub(crate) enum Commands {
         #[arg(long)]
         output: PathBuf,
     },
+    ExportDebug {
+        #[arg(long)]
+        input: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -75,6 +79,13 @@ mod tests {
             "kcf", "export", "html", "--input", "in.html", "--output", "out.html",
         ])?;
         assert!(matches!(cli.command, super::Commands::Export { .. }));
+        Ok(())
+    }
+
+    #[test]
+    fn parses_export_debug_command() -> Result<(), Box<dyn std::error::Error>> {
+        let cli = Cli::try_parse_from(["kcf", "export-debug", "--input", "in.html"])?;
+        assert!(matches!(cli.command, super::Commands::ExportDebug { .. }));
         Ok(())
     }
 }

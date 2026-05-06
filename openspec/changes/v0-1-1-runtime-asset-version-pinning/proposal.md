@@ -1,6 +1,6 @@
 ## Why
 
-v0.1.0 は KatanA 既存 rendering/export runtime の純粋な移植に限定する。移植後に残る Mermaid.js / Draw.io.js の runtime asset 管理課題は、v0.1.2 の小規模 patch として解決する。
+v0.1.0 は KatanA 既存 rendering/export runtime の純粋な移植に限定する。移植後に残る Mermaid.js / Draw.io.js の runtime asset 管理課題は、v0.1.1 の小規模 patch として解決する。
 
 Mermaid.js と Draw.io.js の取り込み version が曖昧なままだと、reference score、cache fingerprint、CI 再現性、KatanA consumer integration が揺れる。kcf が runtime asset の version 固定、最新版確認、取り込み、checksum、reference snapshot 更新を所有する。
 
@@ -18,7 +18,7 @@ Mermaid.js と Draw.io.js の取り込み version が曖昧なままだと、ref
 
 - Mermaid / Draw.io renderer 自体を作り直さない
 - HTML / PDF / PNG / JPEG export の移植をここで行わない
-- ImageMagick score の初期改善は v0.1.1、継続改善は v0.4.x に送る
+- ImageMagick score の初期改善は v0.1.4、継続改善は v0.4.x に送る
 - 公開 CLI surface の整理は v0.5.0 に送る
 
 ## Capabilities

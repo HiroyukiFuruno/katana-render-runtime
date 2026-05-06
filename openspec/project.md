@@ -22,25 +22,25 @@
   - Mermaid / Draw.io の公式 reference 生成と ImageMagick 採点評価の移植
   - 開発用 kcf CLI（`render` / `reference-update` / `compare` / `bench`）
   - fixture、既存 test、CI の移植
-  - runtime asset の取得 version 固定や更新 recipe 改善は `v0.1.2` に送る
-  - full score 未達は KatanA 側へ取り込む前に `v0.1.1` で改善する
-- `v0.1.1`: reference score improvement
-  - Draw.io official / representative の既知 score 未達を改善する
-  - score baseline は下げず、修正後の下限として上げる
-  - Mermaid supported fixture の score 回帰を確認する
-  - Mermaid ZenUML fixture 対応は `v0.1.3` に送る
-- `v0.1.2`: Mermaid.js / Draw.io.js runtime asset version pinning
+  - runtime asset の取得 version 固定や更新 recipe 改善は `v0.1.1` に送る
+  - full score 未達は KatanA 側へ取り込む前の最終段階として `v0.1.4` で改善する
+- `v0.1.1`: Mermaid.js / Draw.io.js runtime asset version pinning
   - Mermaid.js と Draw.io.js の取り込み version を kcf で固定する
   - 現在取り込める最新版を確認する just recipe を追加する
   - 指定 version を取り込み、checksum、manifest、reference snapshot を更新する just recipe を追加する
   - v0.1.0 transfer で露出した runtime asset 管理の課題を小規模 patch として解決する
+- `v0.1.2`: export CSS regression fix / macOS debug open
+  - PDF / PNG / JPEG export に HTML の `body` 向けCSSを反映する
+  - export 4形式を `/tmp` に出力し、macOS の既定アプリで開く debug command を追加する
 - `v0.1.3`: Mermaid ZenUML / unsupported fixture handling
   - `28-zen-uml.md` の supported / unsupported 境界を固定する
   - unsupported fixture は暗黙 skip せず、理由を report に残す
   - compare が空出力や未生成 PNG で null 参照しないようにする
-- `v0.1.4`: viewer e2e harness
-  - SVG / PNG / JPEG / PDF / HTML を実ウィンドウで確認する E2E を `test/e2e/viewer/` に隔離する
-  - ImageMagick score は正本のまま維持し、viewer e2e は目視補助に限定する
+- `v0.1.4`: reference score improvement
+  - Jules 側で停滞している旧 v0.1.1 の範囲を v0.1.x の最後に回す
+  - Draw.io official / representative の既知 score 未達を改善する
+  - score baseline は下げず、修正後の下限として上げる
+  - Mermaid supported fixture の score 回帰を確認する
 - `v0.2.0`: CSV viewer rendering
   - CSV を構造化して render し、viewer に渡せる形式へ変換する
   - 表形式、列幅、型推定、文字コード、巨大 CSV の扱いを仕様化する
@@ -52,12 +52,12 @@
   - Office 系の対象 format はこの 3 種に限定し、他の Office format は別 change にしない限り扱わない
 - `v0.4.x`: バグ取りと score 向上
   - Mermaid / Draw.io / export / viewer rendering のバグ修正
-  - v0.1.1 後に残る reference score、baseline policy、fixture coverage、差分 report の継続改善
+  - v0.1.4 後に残る reference score、baseline policy、fixture coverage、差分 report の継続改善
 - `v0.5.0`: CLI 公開
   - 外部利用者向けの CLI surface、help、exit code、配布、release 手順を固定する
   - 開発用 CLI と公開 CLI の差分を整理する
 
-> **方針**: KatanA `release/v0.22.10` 時点で同一実装内に密結合している Mermaid + Draw.io + export + 採点評価を、kcf v0.1.0 で一括引き受けする。新規に簡略版を作るのではなく、KatanA 既存実装を正本として移植し、KatanA 固有 UI state と path 前提だけを剥がす。v0.1.0 は KatanA 側へまだ取り込まないため release 可能とし、取り込み前に v0.1.1 で score 未達を改善する。runtime asset version 固定と更新 recipe は v0.1.2、ZenUML / unsupported fixture handling は v0.1.3、viewer e2e は v0.1.4 に分離する。CSV / PDF / Office viewer rendering と CLI 公開は、その後に進める。
+> **方針**: KatanA `release/v0.22.10` 時点で同一実装内に密結合している Mermaid + Draw.io + export + 採点評価を、kcf v0.1.0 で一括引き受けする。新規に簡略版を作るのではなく、KatanA 既存実装を正本として移植し、KatanA 固有 UI state と path 前提だけを剥がす。v0.1.0 は KatanA 側へまだ取り込まないため release 可能とする。旧 v0.1.1 の score 改善（score improvement）は Jules 側で停滞しているため v0.1.x の最後へ回し、実行時資産のバージョン固定（runtime asset version pinning）と更新 recipe を v0.1.1、export CSS 回帰修正と macOS debug open を v0.1.2、ZenUML / unsupported fixture handling を v0.1.3、score 未達改善を v0.1.4 に分離する。CSV / PDF / Office viewer rendering と CLI 公開は、その後に進める。
 
 ## Consumers
 

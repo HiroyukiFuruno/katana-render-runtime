@@ -15,7 +15,7 @@ v0.2.0 を CSV viewer rendering に限定し、export や spreadsheet engine へ
 
 ### タスク
 
-- [ ] 1.1 v0.1.0 から v0.1.4 までの transfer / score / runtime asset / ZenUML / viewer e2e が前提であることを確認する
+- [ ] 1.1 v0.1.0 から v0.1.4 までの transfer / runtime asset / export CSS debug / ZenUML / score が前提であることを確認する
 - [ ] 1.2 viewer rendering と export の責務差を確認する
 - [ ] 1.3 CSV 編集、保存、型変換を non-goal として固定する
 - [ ] 1.4 v0.5.0 まで public CLI contract を固定しない方針を確認する
@@ -99,11 +99,11 @@ CSV viewer rendering の回帰を fixture で検知する。
 - [ ] 5.1 `tests/fixtures/csv/` を追加する
 - [ ] 5.2 normal、quoted、multiline、wide、large、encoding fixture を追加する
 - [ ] 5.3 expected metadata と HTML fragment を検証する
-- [ ] 5.4 viewer e2e に CSV case を追加する
+- [ ] 5.4 CSV viewer rendering の表示確認 case を追加する
 
 ### Definition of Done
 
-- [ ] unit / integration / viewer e2e の責務が分かれている
+- [ ] unit / integration / 表示確認 case の責務が分かれている
 - [ ] fixture が CI で再現可能である
 
 ---
@@ -112,6 +112,6 @@ CSV viewer rendering の回帰を fixture で検知する。
 
 - [ ] 6.1 `just check` を実行する
 - [ ] 6.2 `cargo tree --workspace -e normal` で KatanA UI 依存がないことを確認する
-- [ ] 6.3 CSV viewer e2e smoke を実行する
+- [ ] 6.3 CSV viewer rendering smoke を実行する
 - [ ] 6.4 `npx -y @fission-ai/openspec validate v0-2-0-csv-viewer-rendering --strict` を実行する
 - [ ] 6.5 変更差分を自己レビューする

@@ -10,7 +10,7 @@ PDF export と PDF viewer rendering は逆方向の処理である。export は 
 - page range、scale、background を指定できる
 - page metadata と diagnostics を返せる
 - KatanA UI に依存しない API にする
-- viewer e2e で実表示を確認できる
+- 表示確認 case で実表示を確認できる
 
 ## Non-Goals
 
@@ -48,9 +48,9 @@ PDF viewer rendering は viewer DTO を使う。
 
 全 page render は明示 option にする。巨大 PDF で CI が不安定にならないよう、fixture と timeout policy を tasks に含める。
 
-## Viewer E2E
+## 表示確認
 
-viewer e2e は PDF を直接表示してもよいが、初期完了条件は page artifact を表示できることとする。
+表示確認 case は PDF を直接表示してもよいが、初期完了条件は page artifact を表示できることとする。
 
 PDF 直接表示は UI 側の責務になりやすいため、kcf の正本は page artifact 生成と metadata / diagnostics に置く。
 
@@ -59,6 +59,6 @@ PDF 直接表示は UI 側の責務になりやすいため、kcf の正本は p
 - valid PDF fixture の page artifact 比較
 - rotated / multi-page / large fixture の metadata 検証
 - invalid / encrypted PDF の error 検証
-- viewer e2e screenshot
+- 表示確認 screenshot
 - `just check`
 - `npx -y @fission-ai/openspec validate v0-3-0-pdf-viewer-rendering --strict`

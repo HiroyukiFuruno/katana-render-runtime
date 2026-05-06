@@ -99,12 +99,12 @@ PDF viewer rendering の回帰と実表示を確認する。
 - [ ] 5.1 `tests/fixtures/pdf/` を追加する
 - [ ] 5.2 normal、multi-page、rotated、large、invalid fixture を追加する
 - [ ] 5.3 expected metadata と page artifact を検証する
-- [ ] 5.4 viewer e2e に PDF case を追加する
+- [ ] 5.4 PDF viewer rendering の表示確認 case を追加する
 
 ### Definition of Done
 
 - [ ] fixture が CI で再現可能である
-- [ ] viewer e2e で PDF page artifact を表示できる
+- [ ] 表示確認 case で PDF page artifact を表示できる
 
 ---
 
@@ -112,6 +112,6 @@ PDF viewer rendering の回帰と実表示を確認する。
 
 - [ ] 6.1 `just check` を実行する
 - [ ] 6.2 PDF backend setup を含む CI smoke を確認する
-- [ ] 6.3 PDF viewer e2e smoke を実行する
+- [ ] 6.3 PDF viewer rendering smoke を実行する
 - [ ] 6.4 `npx -y @fission-ai/openspec validate v0-3-0-pdf-viewer-rendering --strict` を実行する
 - [ ] 6.5 変更差分を自己レビューする

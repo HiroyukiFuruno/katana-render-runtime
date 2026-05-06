@@ -26,4 +26,4 @@
 - **WHEN** PDF viewer rendering tests を実行する
 - **THEN** normal、multi-page、rotated、large、invalid fixture を検証する
 - **THEN** page metadata と artifact 生成結果を検証する
-- **THEN** viewer e2e で少なくとも 1 case の実表示を確認する
+- **THEN** 表示確認 case で少なくとも 1 case の実表示を確認する

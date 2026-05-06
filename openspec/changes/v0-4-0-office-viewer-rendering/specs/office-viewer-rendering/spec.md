@@ -49,18 +49,18 @@
 - **THEN** rendering を実行せず非0終了する
 - **THEN** 失敗理由に expected checksum と actual checksum を含める
 
-### Requirement: Office viewer rendering は reference と viewer e2e で検証できなければならない
+### Requirement: Office viewer rendering は reference と表示確認 case で検証できなければならない
 
-システムは、Word / Excel / PPTX の最小 case と代表 case を reference snapshot と viewer e2e で検証できなければならない（MUST）。
+システムは、Word / Excel / PPTX の最小 case と代表 case を reference snapshot と表示確認 case で検証できなければならない（MUST）。
 
-#### Scenario: viewer e2e で Office case を開く
+#### Scenario: 表示確認 case で Office case を開く
 
-- **WHEN** 開発者が Office viewer e2e case を開く
+- **WHEN** 開発者が Office 表示確認 case を開く
 - **THEN** reference artifact と kcf artifact が比較表示される
 - **THEN** Word は page、Excel は sheet、PPTX は slide の単位で確認できる
 
 #### Scenario: 自動品質 gate を実行する
 
 - **WHEN** CI または release gate が Office rendering check を実行する
-- **THEN** unit test、integration test、viewer e2e smoke、score report、lint、AST lint が実行される
+- **THEN** unit test、integration test、表示確認 smoke、score report、lint、AST lint が実行される
 - **THEN** fixture、snapshot、runtime bundle の package 混入を検出できる

@@ -40,11 +40,11 @@
 
 ### Requirement: v0.1.0 transfer の挙動を壊してはならない
 
-システムは、v0.1.2 の runtime asset version 固定によって v0.1.0 transfer の rendering / export / score 挙動を壊してはならない（MUST NOT）。
+システムは、v0.1.1 の runtime asset version 固定によって v0.1.0 transfer の rendering / export / score 挙動を壊してはならない（MUST NOT）。
 
 #### Scenario: v0.1.0 fixture を再検証する
 
-- **WHEN** v0.1.2 の変更後に v0.1.0 の Mermaid / Draw.io fixtures を compare する
+- **WHEN** v0.1.1 の変更後に v0.1.0 の Mermaid / Draw.io fixtures を compare する
 - **THEN** local full compare で既存 baseline と score policy を満たす
 - **THEN** CI/CD representative compare で代表ケースの score policy を満たす
 - **THEN** score 低下がある場合は version 更新差分として report に残す

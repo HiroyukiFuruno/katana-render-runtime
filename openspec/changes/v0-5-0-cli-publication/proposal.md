@@ -1,6 +1,6 @@
 ## Why
 
-v0.1.0 から v0.4.0 までで renderer、viewer rendering、reference 更新、viewer e2e が段階的に揃う。
+v0.1.0 から v0.4.0 までで renderer、viewer rendering、reference 更新、表示確認 case が段階的に揃う。
 
 v0.5.0 では、それらを library 内部の実装に留めず、利用者が install して実行できる CLI として公開する。CLI は library の薄い利用者に限定し、KatanA 固有 state を持たない generic tool として提供する。
 

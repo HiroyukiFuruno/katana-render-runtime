@@ -10,7 +10,7 @@ PDF は page、rotation、crop box、透明背景、font、画像、巨大 docum
 - page count、page size、rotation、render scale、diagnostics を metadata として返す
 - page range を指定して必要な page だけ render できる
 - rendering backend の初期化と error を構造化して返す
-- viewer e2e で PDF page artifact の実表示を確認する
+- 表示確認 case で PDF page artifact の実表示を確認する
 
 ## Non-Goals
 
@@ -32,6 +32,6 @@ PDF は page、rotation、crop box、透明背景、font、画像、巨大 docum
 
 - `crates/katana-canvas-forge/src/viewer/pdf/` — PDF render backend、page artifact、metadata
 - `tests/fixtures/pdf/` — normal、multi-page、rotated、large、invalid fixture
-- `test/e2e/viewer/` — PDF page artifact の実表示確認
+- `tests/fixtures/pdf/` — PDF page artifact の実表示確認 case
 - `Justfile` — v0.5.0 まで非公開扱いの検証 recipe
 - `openspec/changes/v0-3-0-pdf-viewer-rendering/` — PDF viewer rendering の仕様とタスク
