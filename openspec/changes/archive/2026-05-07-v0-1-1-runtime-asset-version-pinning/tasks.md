@@ -90,4 +90,4 @@ Mermaid.js / Draw.io.js の取り込み version を kcf 側で固定する。
 - [x] 5.1 `/lint-and-ast-lint` を実行する
 - [x] 5.2 `/self-review` を実行する
 - [x] 5.3 `npx -y @fission-ai/openspec validate "v0-1-1-runtime-asset-version-pinning" --strict` を実行する
-- [ ] 5.4 PR 作成が必要な場合は `/create_pull_request` を使う
+- [x] 5.4 PR 作成が必要な場合は `/create_pull_request` を使う
