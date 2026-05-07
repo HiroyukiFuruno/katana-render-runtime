@@ -18,7 +18,7 @@ Mermaid.js と Draw.io.js の取り込み version が曖昧なままだと、ref
 
 - Mermaid / Draw.io renderer 自体を作り直さない
 - HTML / PDF / PNG / JPEG export の移植をここで行わない
-- ImageMagick score の初期改善は v0.1.4、継続改善は v0.4.x に送る
+- ImageMagick score の初期改善は v0.1.2、継続改善は v0.4.x に送る
 - 公開 CLI surface の整理は v0.5.0 に送る
 
 ## Capabilities
