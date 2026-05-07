@@ -1,16 +1,14 @@
 ## Why
 
-v0.3.0 では PDF viewer rendering を追加する。v0.1.0 の PDF export は「Markdown などから PDF を書き出す」責務であり、v0.3.0 の PDF viewer rendering は「既存 PDF を画面表示向け artifact に変換する」責務である。
+責務再整理により、PDF viewer renderingはKDVへ移譲する。KCFではこのchangeを実装開始しない。
 
-PDF は page、rotation、crop box、透明背景、font、画像、巨大 document の扱いで失敗しやすい。kcf が UI 非依存で page artifact を生成し、KatanA 側は artifact を viewer に渡すだけにする。
+PDF はpage、rotation、crop box、透明背景、font、画像、巨大documentの扱いで失敗しやすい。viewer/exportをKDVへ寄せる方針により、この領域は `katana-document-viewer` 側で扱う。
 
 ## What Changes
 
-- PDF 入力を page 単位の viewer artifact に render する
-- page count、page size、rotation、render scale、diagnostics を metadata として返す
-- page range を指定して必要な page だけ render できる
-- rendering backend の初期化と error を構造化して返す
-- 表示確認 case で PDF page artifact の実表示を確認する
+- KCF側のv0.3.0としてはPDF viewer renderingを開始しない
+- KDV側OpenSpecへPDF viewerのpage artifact、metadata、diagnostics、windowingを移す
+- KCF側には外部描画referenceやscoreの保守だけを残す
 
 ## Non-Goals
 
@@ -24,14 +22,11 @@ PDF は page、rotation、crop box、透明背景、font、画像、巨大 docum
 
 ### New Capabilities
 
-- `pdf-viewer-renderer`: PDF を page artifact へ render する
-- `pdf-page-windowing`: page range と scale を指定して render できる
-- `pdf-render-diagnostics`: backend 初期化、password、破損 PDF、unsupported feature を構造化 error として返す
+- `pdf-viewer-renderer`: KDVへ移譲
+- `pdf-page-windowing`: KDVへ移譲
+- `pdf-render-diagnostics`: KDVへ移譲
 
 ## Impact
 
-- `crates/katana-canvas-forge/src/viewer/pdf/` — PDF render backend、page artifact、metadata
-- `tests/fixtures/pdf/` — normal、multi-page、rotated、large、invalid fixture
-- `tests/fixtures/pdf/` — PDF page artifact の実表示確認 case
-- `Justfile` — v0.5.0 まで非公開扱いの検証 recipe
-- `openspec/changes/v0-3-0-pdf-viewer-rendering/` — PDF viewer rendering の仕様とタスク
+- `katana-document-viewer` — PDF viewer renderingの移譲先
+- `openspec/changes/v0-3-0-pdf-viewer-rendering/` — KCF側では移譲記録として維持

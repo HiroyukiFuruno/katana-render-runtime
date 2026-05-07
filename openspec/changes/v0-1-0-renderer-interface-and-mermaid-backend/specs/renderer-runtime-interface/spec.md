@@ -133,15 +133,15 @@
 - **THEN** kcf workspace dependency graph に `egui`、KatanA UI state は含まれない
 - **THEN** 描画結果は SVG 文字列とメタデータ（DTO）として返される
 
-### Requirement: document viewer rendering 拡張を transfer から分離しなければならない
+### Requirement: document viewer rendering 拡張をKDVへ移譲しなければならない
 
-システムは、CSV / PDF / Word / Excel / PPTX を viewer 用に render する拡張要件を、v0.1.0 transfer から分離しなければならない（MUST）。
+システムは、CSV / PDF / Word / Excel / PPTX をviewer用にrenderする拡張要件をKDVへ移譲し、v0.1.0 transferから分離しなければならない（MUST）。
 
 #### Scenario: v0.1.0 の完了条件を判定する
 
 - **WHEN** v0.1.0 の完了可否を確認する
 - **THEN** Mermaid / Draw.io / HTML / PDF / PNG / JPEG export / scoring の KatanA 既存実装移植を必須条件にする
-- **THEN** CSV / PDF / Word / Excel / PPTX viewer rendering は後続 extension change の対象として扱う
+- **THEN** CSV / PDF / Word / Excel / PPTX viewer rendering はKDV側changeの対象として扱う
 
 ### Requirement: coverage gate は未到達行 0 を要求しなければならない
 

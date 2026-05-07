@@ -19,11 +19,13 @@ v0.1.3 を export CSS 回帰修正と macOS デバッグ実行のフェーズと
 - [x] 1.2 v0.1.3 の対象を PDF / PNG / JPEG のCSS反映と export 4形式デバッグに固定する
 - [x] 1.3 macOS だけをサポート対象にし、Windows / Linux 対応を入れない
 - [x] 1.4 PDF と画像の出力先を `/tmp` に固定する
+- [x] 1.5 このexport保守はKDV移譲までの暫定維持であり、新規export責務ではないことを明記する
 
 ### Definition of Done
 
 - [x] v0.1.3 の目的と非目的が artifact に残っている
 - [x] v0.1.2 との依存関係が明確である
+- [x] KDV移譲後のKCF側export削除方針と矛盾していない
 
 ---
 

@@ -5,8 +5,8 @@
 <h1 align="center">katana-canvas-forge</h1>
 
 <p align="center">
-  A Rust rendering core and <code>kcf</code> CLI for Mermaid, Draw.io, and
-  document export workflows.
+  A Rust rendering core and <code>kcf</code> CLI for Mermaid, Draw.io, PlantUML,
+  math, and other external rendering workflows.
 </p>
 
 <p align="center">
@@ -30,20 +30,23 @@
 
 ## What is kcf
 
-`katana-canvas-forge` provides the portable rendering layer extracted from
-[KatanA](https://github.com/HiroyukiFuruno/KatanA). It keeps diagram rendering,
-document export, reference generation, and score comparison in a standalone Rust
-crate so downstream applications can integrate the same behavior without
+`katana-canvas-forge` provides the portable external rendering layer extracted
+from [KatanA](https://github.com/HiroyukiFuruno/KatanA). It keeps diagram
+rendering, reference generation, and score comparison in a standalone Rust crate
+so downstream applications can integrate the same behavior without
 depending on KatanA Desktop internals.
 
-The project is intentionally narrow: it owns rendering and export behavior, not
-the editor, preview UI, workspace state, or chat surface.
+The project is intentionally narrow: its final responsibility is external
+rendering. Existing HTML / PDF / PNG / JPEG export remains only until
+`katana-document-viewer` provides equivalent export behavior, then that export
+surface moves out of kcf.
 
 ## Features
 
 - **Mermaid rendering** through the official Mermaid JavaScript runtime.
 - **Draw.io rendering** through transferred KatanA-compatible runtime logic.
-- **HTML / PDF / PNG / JPEG export** from rendered Markdown-derived output.
+- **Legacy HTML / PDF / PNG / JPEG export** from rendered Markdown-derived
+  output, maintained only during the KDV migration window.
 - **Reference snapshots** for committed Mermaid and Draw.io fixtures.
 - **Image scoring** against official renderer output for regression tracking.
 - **`kcf` CLI** for render, export, reference update, comparison, and benchmark
@@ -92,8 +95,8 @@ kcf reference drawio-compare
 
 ## Library API
 
-Embed `katana-canvas-forge` when an application needs diagram rendering or
-document export in-process.
+Embed `katana-canvas-forge` when an application needs external diagram or math
+rendering in-process.
 
 Primary integration points:
 
@@ -102,7 +105,7 @@ Primary integration points:
 - `DiagramKind`
 - Mermaid renderer
 - Draw.io renderer
-- HTML / PDF / PNG / JPEG exporters
+- Legacy HTML / PDF / PNG / JPEG exporters kept until KDV replacement
 
 The API keeps KatanA integration needs in mind, but the crate remains standalone.
 Consumers should treat KatanA UI state, editor state, and workspace navigation as
@@ -113,8 +116,10 @@ their own responsibilities.
 - Markdown parsing, preview UI, editor UI, theme state, or any KatanA UI
   concern. This crate must not depend on `egui`, KatanA preview widgets,
   or KatanA UI state.
-- Viewer rendering for CSV / PDF / Office files. These are planned as later
-  kcf changes and are separate from v0.1.0 export support.
+- New Markdown viewer/export ownership. KDV owns Markdown viewer and
+  HTML/PDF/PNG/JPG export after migration.
+- Viewer rendering for CSV / PDF / Office files. These are KDV responsibilities,
+  not new KCF scope.
 - LLM chat UI / agent protocols. See
   [`katana-chat-ui`](https://github.com/HiroyukiFuruno/katana-chat-ui).
 

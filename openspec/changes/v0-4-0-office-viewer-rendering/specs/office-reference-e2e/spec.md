@@ -1,19 +1,11 @@
 ## ADDED Requirements
 
-### Requirement: Office rendering は最小 case と代表 case で検証しなければならない
+### Requirement: Office viewer reference E2E is owned by KDV
 
-システムは、Word / Excel / PPTX それぞれに最小 case と代表 case を持ち、reference snapshot と表示確認 case で検証しなければならない（MUST）。
+Office viewer reference and display confirmation cases SHALL be defined by KDV instead of KCF.
 
-#### Scenario: CI/CD で代表 case を検証する
+#### Scenario: Office visual verification is needed
 
-- **WHEN** CI/CD が Office rendering check を実行する
-- **THEN** Word / Excel / PPTX の代表 case を render する
-- **THEN** git 管理済み reference snapshot と比較する
-- **THEN** reference snapshot を CI/CD 内で再生成しない
-
-#### Scenario: ローカルで full case を検証する
-
-- **WHEN** 開発者が Office full validation を実行する
-- **THEN** Word / Excel / PPTX の full fixture を render する
-- **THEN** 表示確認 case で reference artifact と kcf artifact を比較表示できる
-- **THEN** score 改善対象は v0.4.x の候補として report に残す
+- **WHEN** Word, Excel, or PPTX viewer output needs visual verification
+- **THEN** KDV owns the reference cases and display confirmation
+- **THEN** KCF does not add Office viewer E2E fixtures

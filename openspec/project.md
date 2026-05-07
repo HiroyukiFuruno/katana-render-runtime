@@ -2,18 +2,21 @@
 
 ## Project
 
-`katana-canvas-forge`（kcf）は、Mermaid / Draw.io 描画と HTML / PDF / PNG / JPEG export を担う versioned rendering library。KatanA はこれを git dependency として consume するだけ。描画実装・版管理・採点運用はすべてここで行う。
+`katana-canvas-forge`（KCF）は、Mermaid / Draw.io / PlantUML / mathなどの外部描画を担うversioned rendering library。KatanA はこれを git dependency としてconsumeするだけ。描画実装・版管理・採点運用はここで行う。
+
+既存HTML / PDF / PNG / JPEG exportは、`katana-document-viewer`（KDV）に同等機能が入るまで維持する。KDV実装後、export関連計画と実装はKDVへ移譲し、KCF側から削除する。
 
 ## Design Principles
 
 - KatanA の public interface に kcf 固有の型を漏らさない。KatanA が見るのは `Renderer` trait と中立 DTO のみ。
-- v0.1.0 transfer では KatanA 側で定義済みの interface を正本として完全踏襲する。kcf 側で独自に縮小、改名、簡略化しない。
+- v0.1.0 transfer では KatanA 側で定義済みの interface を正本として完全踏襲する。KDV移譲までは既存exportを維持する。
+- 新規export責務はKCFに追加しない。Markdown viewer/exportはKDV側で扱う。
 - `egui` / KatanA UI state に依存しない。将来 KatanA が egui から脱却しても kcf は無影響。
 - CLI（`kcf`）は library の薄い利用者として設計する。
 
 ## Versioning
 
-- `v0.1.0`: KatanA 既存 rendering/export runtime の忠実移植（transfer）
+- `v0.1.0`: KatanA 既存 rendering/export runtime の忠実移植（transfer）。exportはKDV移譲までの維持対象。
   - `Renderer` / `Exporter` trait + 中立 DTO 確定
   - KatanA 側で定義済みの interface を完全踏襲
   - KatanA 既存 Mermaid backend の移植
@@ -41,23 +44,23 @@
   - Draw.io official / representative の既知 score 未達を改善する
   - score baseline は下げず、修正後の下限として上げる
   - Mermaid supported fixture の score 回帰を確認する
-- `v0.2.0`: CSV viewer rendering
-  - CSV を構造化して render し、viewer に渡せる形式へ変換する
-  - 表形式、列幅、型推定、文字コード、巨大 CSV の扱いを仕様化する
-- `v0.3.0`: PDF viewer rendering
-  - PDF ファイルを viewer 用に render する
-  - page navigation、scale、text layer、thumbnail、cache の扱いを仕様化する
-- `v0.4.0`: Office viewer rendering
-  - Word / Excel / PPTX に限定して viewer 用に render する
-  - Office 系の対象 format はこの 3 種に限定し、他の Office format は別 change にしない限り扱わない
+- `v0.2.0`: KDV移譲計画へ変更
+  - CSV / PDF / Office viewer renderingはKDV側へ移す
+  - KCF側で必要な外部描画APIだけを残す
+- `v0.3.0`: KDV移譲計画へ変更
+  - PDF viewer renderingはKDV側へ移す
+  - KCF側では外部描画referenceとscoreを維持する
+- `v0.4.0`: KDV移譲計画へ変更
+  - Office viewer renderingはKDV側へ移す
+  - KCF側ではOffice viewer責務を持たない
 - `v0.4.x`: バグ取りと score 向上
-  - Mermaid / Draw.io / export / viewer rendering のバグ修正
+  - Mermaid / Draw.io / 既存export保守 / 外部描画reference のバグ修正
   - v0.1.4 後に残る reference score、baseline policy、fixture coverage、差分 report の継続改善
 - `v0.5.0`: CLI 公開
   - 外部利用者向けの CLI surface、help、exit code、配布、release 手順を固定する
   - 開発用 CLI と公開 CLI の差分を整理する
 
-> **方針**: KatanA `release/v0.22.10` 時点で同一実装内に密結合している Mermaid + Draw.io + export + 採点評価を、kcf v0.1.0 で一括引き受けする。新規に簡略版を作るのではなく、KatanA 既存実装を正本として移植し、KatanA 固有 UI state と path 前提だけを剥がす。v0.1.0 は KatanA 側へまだ取り込まないため release 可能とする。旧 v0.1.1 の score 改善（score improvement）は Jules 側で停滞しているため v0.1.x の最後へ回し、実行時資産のバージョン固定（runtime asset version pinning）と更新 recipe を v0.1.1、export CSS 回帰修正と macOS debug open を v0.1.2、ZenUML / unsupported fixture handling を v0.1.3、score 未達改善を v0.1.4 に分離する。CSV / PDF / Office viewer rendering と CLI 公開は、その後に進める。
+> **方針**: KatanA `release/v0.22.10` 時点で同一実装内に密結合している Mermaid + Draw.io + export + 採点評価を、KCF v0.1.0 で一括引き受けした。既存exportはKDVに同等機能が入るまで維持するが、新規export計画はKDVへ移す。KCFの最終責務は外部描画、runtime asset管理、reference scoreである。
 
 ## Consumers
 

@@ -2,7 +2,7 @@
 
 ### Requirement: native PDF / PNG / JPEG export は HTML の body 向けCSSを反映しなければならない
 
-システムは、native PDF / PNG / JPEG export で、HTML 内の `body` を対象にした背景色と文字色を反映しなければならない（MUST）。
+システムは、KDV移譲まで維持するnative PDF / PNG / JPEG export で、HTML 内の `body` を対象にした背景色と文字色を反映しなければならない（MUST）。
 
 #### Scenario: body の background-color を反映する
 
@@ -52,3 +52,13 @@
 - **WHEN** `export-debug` が出力ファイルを開く
 - **THEN** macOS の `open` を使う
 - **THEN** Windows の `start` や Linux の `xdg-open` 分岐を追加しない
+
+### Requirement: KCF export maintenance must remain migration-bound
+
+KCF SHALL treat this export maintenance as temporary compatibility work until KDV provides equivalent export behavior.
+
+#### Scenario: KDV export becomes available
+
+- **WHEN** KDV provides equivalent HTML/PDF/PNG/JPG export
+- **THEN** KCF export maintenance is moved or deleted
+- **THEN** KCF continues to own external rendering, runtime assets, references, and score comparison
