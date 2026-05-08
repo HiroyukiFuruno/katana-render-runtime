@@ -2,7 +2,7 @@
 
 ### Requirement: CLI は library の薄い利用者として公開されなければならない
 
-システムは、CLI を `katana-canvas-forge` library の薄い利用者として公開しなければならない（MUST）。CLI は argument parsing、file I/O、exit code、stdout / stderr を担当し、rendering、export、score、viewer rendering の中核判断を再実装してはならない（MUST NOT）。
+システムは、CLI を `katana-canvas-forge` library の薄い利用者として公開しなければならない（MUST）。CLI は argument parsing、file I/O、exit code、stdout / stderr を担当し、Mermaid / Draw.io rendering、score、reference 更新の中核判断を再実装してはならない（MUST NOT）。
 
 #### Scenario: CLI から render を実行する
 
@@ -23,7 +23,7 @@
 #### Scenario: output contract を検証する
 
 - **WHEN** CI が CLI integration test を実行する
-- **THEN** `--help`、`--version`、render、export、score、reference 更新の代表 command が検証される
+- **THEN** `--help`、`--version`、render、score、reference 更新の代表 command が検証される
 - **THEN** stdout、stderr、exit code の破壊的変更を検出できる
 
 #### Scenario: machine readable output を変更する
@@ -71,9 +71,15 @@
 #### Scenario: KatanA consumer compatibility を確認する
 
 - **WHEN** release gate が consumer compatibility check を実行する
-- **THEN** render、export、score、viewer rendering の最小 fixture が成功する
+- **THEN** render、score、reference 更新の最小 fixture が成功する
 - **THEN** KatanA 側で必要な metadata と error code が維持される
 - **THEN** UI state を fixture や CLI argument に含めない
+
+#### Scenario: KDVへ移譲した機能を公開CLIに戻さない
+
+- **WHEN** CLI 公開範囲を確認する
+- **THEN** CSV / PDF / Office viewer rendering はKCF CLIの公開commandに含まれない
+- **THEN** HTML / PDF / PNG / JPG export の新規拡張はKCF CLIの公開範囲に含まれない
 
 #### Scenario: 破壊的変更を検出する
 

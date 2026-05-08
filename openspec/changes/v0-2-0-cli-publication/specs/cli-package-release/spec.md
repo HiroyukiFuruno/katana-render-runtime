@@ -15,7 +15,7 @@
 
 - **WHEN** packaged CLI を install する
 - **THEN** `--version` と `--help` が実行できる
-- **THEN** render、export、score、viewer rendering の代表 command が成功する
+- **THEN** render、score、reference 更新の代表 command が成功する
 
 ### Requirement: docs と CLI help は矛盾してはならない
 

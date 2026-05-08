@@ -18,7 +18,7 @@ v0.1.0 の Mermaid full compare では `28-zen-uml.md` が `UnknownDiagramError`
 - v0.1.4 の Draw.io / Mermaid score 改善に混ぜない
 - Draw.io.js の version 固定は v0.1.1 に送る
 - ZenUML 対応に不要な Mermaid.js 本体の更新はしない
-- export CSS 回帰修正と macOS debug open は v0.1.2 に送る
+- export CSS 回帰修正と macOS debug open はKDV移譲対象として v0.1.6 に送る
 - fallback SVG で ZenUML を描けた扱いにしない
 - `28-zen-uml.md` を未対応 fixture として score 対象から外さない
 
