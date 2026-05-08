@@ -1,10 +1,12 @@
+use katana_ast_lint::KatanaAstLint;
+use katana_ast_lint::config::KalConfig;
 use kcf_linter::{KcfLinter, ViolationReport};
 use std::path::{Path, PathBuf};
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[test]
-fn reports_all_structural_rule_families() -> TestResult<()> {
+fn reports_kal_shared_rule_families() -> TestResult<()> {
     let root = temp_root("rules");
     write_manifests(&root)?;
     write_file(
@@ -23,28 +25,83 @@ fn reports_all_structural_rule_families() -> TestResult<()> {
         cli_duplicate_source(),
     )?;
 
+    let report = kal_report(&root);
+    for message in required_kal_messages() {
+        assert!(report.contains(message), "{report}");
+    }
+    Ok(())
+}
+
+#[test]
+fn reports_kcf_supplemental_rule_families() -> TestResult<()> {
+    let root = temp_root("supplemental-rules");
+    write_manifests(&root)?;
+    write_file(
+        &root,
+        "crates/katana-canvas-forge/src/bad.rs",
+        &bad_lib_source(),
+    )?;
+    write_file(
+        &root,
+        "crates/katana-canvas-forge-cli/src/bad.rs",
+        cli_duplicate_source(),
+    )?;
+
     let violations = KcfLinter::lint_workspace(&root)?;
     let report = ViolationReport::format(&violations);
-    for rule in required_rules() {
+    for rule in required_supplemental_rules() {
         assert!(report.contains(rule), "{report}");
     }
     Ok(())
 }
 
-fn required_rules() -> [&'static str; 11] {
+fn required_kal_messages() -> [&'static str; 7] {
     [
-        "file-length",
+        "File exceeds 200-line limit",
+        "Magic number",
+        "Do not nest success paths with `if let Ok(...)`",
+        "Public free function `exposed` detected",
+        "Mixed logic and data",
+        "ProcessService::create_command",
+        "Standard `//` comments are prohibited",
+    ]
+}
+
+fn required_supplemental_rules() -> [&'static str; 7] {
+    [
         "function-length",
-        "nesting-depth",
-        "error-first",
-        "type-separation",
-        "public-free-function",
         "prohibited-method",
         "prohibited-type",
         "lazy-code",
         "prohibited-attribute",
         "renderer-boundary",
+        "cli-renderer-duplication",
     ]
+}
+
+fn kal_report(root: &Path) -> String {
+    let mut config = kal_config();
+    config.source_roots = vec![
+        root.join("crates/katana-canvas-forge/src"),
+        root.join("crates/katana-canvas-forge-cli/src"),
+    ];
+    let violations = KatanaAstLint::with_config(config).violations();
+    violations
+        .iter()
+        .map(|it| {
+            format!(
+                "{}:{}:{} {}\n",
+                it.file.display(),
+                it.line,
+                it.column,
+                it.message
+            )
+        })
+        .collect()
+}
+
+fn kal_config() -> KalConfig {
+    KalConfig::default()
 }
 
 fn bad_lib_source() -> String {
@@ -70,6 +127,7 @@ pub fn exposed() {
     todo!();
     unimplemented!();
     dbg!(value);
+    let _command = std::process::Command::new("ls");
     if true { if true { if true { if true {} } } }
 }
 "#

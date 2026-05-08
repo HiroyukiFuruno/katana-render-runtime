@@ -1,4 +1,5 @@
 use crate::file_ops::FileOps;
+use crate::system::ProcessService;
 use anyhow::Context;
 use katana_canvas_forge::exporter::{
     ExportConfig, ExportFormat, ExportInput, ExporterTrait, HtmlExporter, ImageExporter,
@@ -7,6 +8,7 @@ use katana_canvas_forge::exporter::{
 use std::path::{Path, PathBuf};
 
 const DEBUG_OUTPUT_DIR: &str = "/tmp";
+const DEBUG_OUTPUT_COUNT: usize = 4;
 
 pub(crate) trait ExportOutputOpener {
     fn open(&mut self, path: &Path) -> anyhow::Result<()>;
@@ -66,7 +68,7 @@ impl MacOsOutputOpener {
 
 impl ExportOutputOpener for MacOsOutputOpener {
     fn open(&mut self, path: &Path) -> anyhow::Result<()> {
-        let status = std::process::Command::new(self.command_name)
+        let status = ProcessService::create_command(self.command_name)
             .arg(path)
             .status()
             .with_context(|| format!("failed to run macOS open for {}", path.display()))?;
@@ -109,7 +111,7 @@ impl ExportDebugOutputPaths {
         }
     }
 
-    fn paths(&self) -> [&Path; 4] {
+    fn paths(&self) -> [&Path; DEBUG_OUTPUT_COUNT] {
         [
             self.html.as_path(),
             self.pdf.as_path(),

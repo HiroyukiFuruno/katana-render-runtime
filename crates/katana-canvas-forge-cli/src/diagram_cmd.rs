@@ -7,6 +7,8 @@ use katana_canvas_forge::{
 };
 use std::path::PathBuf;
 
+const MIN_MARKDOWN_FENCE_MARKERS: usize = 3;
+
 pub(crate) struct DiagramCommand {
     kind: DiagramKind,
 }
@@ -110,7 +112,7 @@ impl MermaidMarkdownOps {
     fn starts_block_with(line: &str, marker: u8) -> bool {
         let bytes = line.as_bytes();
         let marker_count = bytes.iter().take_while(|it| **it == marker).count();
-        if marker_count < 3 {
+        if marker_count < MIN_MARKDOWN_FENCE_MARKERS {
             return false;
         }
         line[marker_count..]

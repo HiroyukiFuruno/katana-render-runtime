@@ -87,6 +87,27 @@ fn workspace_model_allows_missing_source_roots() -> TestResult<()> {
     Ok(())
 }
 
+#[test]
+fn workspace_model_exposes_loaded_source() -> TestResult<()> {
+    let root = temp_root("source-model");
+    write_valid_manifests(&root)?;
+    write_file(
+        &root,
+        "crates/katana-canvas-forge/src/lib.rs",
+        "pub struct Loaded;",
+    )?;
+
+    let workspace = WorkspaceModel::load(&root)?;
+    let source_file = workspace
+        .rust_files()
+        .iter()
+        .find(|it| it.path().ends_with("lib.rs"))
+        .ok_or("expected loaded Rust source")?;
+
+    assert_eq!(source_file.source(), "pub struct Loaded;");
+    Ok(())
+}
+
 fn write_valid_manifests(root: &Path) -> TestResult<()> {
     write_file(
         root,

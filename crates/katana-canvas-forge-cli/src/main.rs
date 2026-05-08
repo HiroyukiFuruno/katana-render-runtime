@@ -4,6 +4,7 @@ mod export_cmd;
 mod export_debug_cmd;
 mod file_ops;
 mod reference_cmd;
+mod system;
 
 use clap::Parser;
 use commands::{Cli, Commands};

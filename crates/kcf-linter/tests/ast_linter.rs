@@ -1,3 +1,4 @@
+use katana_ast_lint::KatanaAstLint;
 use kcf_linter::{KcfLintError, KcfLinter, ViolationReport};
 use std::path::{Path, PathBuf};
 
@@ -18,6 +19,7 @@ fn workspace_root() -> Result<PathBuf, KcfLintError> {
 
 #[test]
 fn ast_linter_workspace_rules() -> Result<(), KcfLintError> {
+    KatanaAstLint::from_workspace().assert_clean();
     let root = workspace_root()?;
     let violations = KcfLinter::lint_workspace(&root)?;
     assert!(

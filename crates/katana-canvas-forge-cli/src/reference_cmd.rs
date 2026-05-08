@@ -1,8 +1,8 @@
+use crate::system::ProcessService;
 use anyhow::anyhow;
 use katana_canvas_forge::DiagramKind;
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::process::Command;
 
 pub(crate) struct ReferenceCommand;
 
@@ -61,7 +61,7 @@ impl JustRecipe {
     }
 
     fn run(self) -> anyhow::Result<()> {
-        let status = Command::new("just")
+        let status = ProcessService::create_command("just")
             .arg(&self.recipe)
             .args(&self.args)
             .status()?;

@@ -1,5 +1,9 @@
 use super::api::RenderError;
 
+const VIEW_BOX_COMPONENT_COUNT: usize = 4;
+const VIEW_BOX_WIDTH_INDEX: usize = 2;
+const VIEW_BOX_HEIGHT_INDEX: usize = 3;
+
 pub(super) struct SvgMetadata {
     pub(super) width: f32,
     pub(super) height: f32,
@@ -67,8 +71,11 @@ impl SvgMetadataOps {
             .split_whitespace()
             .filter_map(|part| part.parse::<f32>().ok())
             .collect::<Vec<_>>();
-        if numbers.len() == 4 {
-            return Ok((numbers[2], numbers[3]));
+        if numbers.len() == VIEW_BOX_COMPONENT_COUNT {
+            return Ok((
+                numbers[VIEW_BOX_WIDTH_INDEX],
+                numbers[VIEW_BOX_HEIGHT_INDEX],
+            ));
         }
         Err(RenderError::InvalidInput(
             "SVG size metadata is missing".to_string(),

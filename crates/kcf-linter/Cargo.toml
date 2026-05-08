@@ -14,6 +14,7 @@ path = "src/lib.rs"
 
 [dependencies]
 ignore = { workspace = true }
+katana-ast-lint = { workspace = true }
 proc-macro2 = { workspace = true }
 syn = { workspace = true }
 thiserror = { workspace = true }
