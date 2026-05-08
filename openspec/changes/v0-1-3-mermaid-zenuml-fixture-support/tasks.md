@@ -1,4 +1,4 @@
-# Tasks: katana-canvas-forge v0.1.3 Mermaid ZenUML fixture support
+# Tasks: katana-canvas-forge v0.1.3 Mermaid ZenUML rendering
 
 ## Branch Rule
 
@@ -7,67 +7,99 @@
 
 ---
 
-## 1. Fixture Policy
+## User Feedback
 
-### 目的
-
-`28-zen-uml.md` を supported にするか unsupported として明示するかを決める。
-
-### タスク
-
-- [ ] 1.1 Mermaid.js runtime の ZenUML support 状態を確認する
-- [ ] 1.2 `en/28-zen-uml.md` と `ja/28-zen-uml.md` の扱いを固定する
-- [ ] 1.3 unsupported とする場合は reason metadata を定義する
-
-### Definition of Done
-
-- [ ] supported / unsupported の判断が artifact に残っている
+- [/] 未対応扱いを完了条件にしない。ZenUML は対応JSを取り込み、描画に使うことを v0.1.3 の完了条件にする。
+- [/] コードブロックの構文木（AST）から種類を判定し、`zenuml` なら取り込んだJSを使う実装方針にする。
 
 ---
 
-## 2. Compare Error Handling
+## 1. ZenUML 判定
 
 ### 目的
 
-full compare が unsupported fixture や空出力で null 参照しないようにする。
+コードブロックの構文木（AST）から Mermaid ブロックを受け取り、source 先頭の diagram type が `zenuml` かを判定する。
 
 ### タスク
 
-- [ ] 2.1 rasterize / compare の null 参照箇所を error first に直す
-- [ ] 2.2 unsupported fixture を report に出す
-- [ ] 2.3 fallback SVG / stub PNG を使っていないことをテストする
+- [ ] 1.1 `RenderInput` / `DiagramBlock` 生成経路で Mermaid ブロックの source を保持している箇所を特定する
+- [ ] 1.2 `zenuml` 判定を専用型または専用関数として実装する
+- [ ] 1.3 frontmatter、空行、前後空白を含む判定テストを追加する
+- [ ] 1.4 `tests/fixtures/mermaid/en/28-zen-uml.md` と `tests/fixtures/mermaid/ja/28-zen-uml.md` が ZenUML 判定になることをテストする
 
 ### Definition of Done
 
-- [ ] full compare が原因付きで完了または失敗する
-- [ ] null 参照で落ちない
+- [ ] `zenuml` が明示的に判定され、他の Mermaid diagram は既存経路のまま描画される
 
 ---
 
-## 3. ZenUML Support Or Explicit Unsupported
+## 2. ZenUML 対応JS asset
 
 ### 目的
 
-ZenUML を描画可能にするか、未対応として明示的に扱う。
+ZenUML 対応JSを repository 管理の固定 runtime asset として取り込む。
 
 ### タスク
 
-- [ ] 3.1 support 可能な場合は runtime 初期化を追加する
-- [ ] 3.2 support できない場合は unsupported report を実装する
-- [ ] 3.3 supported の場合は score reference を更新する
-- [ ] 3.4 unsupported の場合は score 対象から外した理由を report に残す
+- [ ] 2.1 `@mermaid-js/mermaid-zenuml` 由来の browser 実行可能なJSを選定する
+- [ ] 2.2 `crates/katana-canvas-forge/vendor/mermaid-zenuml/<version>/mermaid-zenuml.min.js` に固定配置する
+- [ ] 2.3 `scripts/runtime-assets/runtime-asset-common.ts` に `mermaid-zenuml` kind、version、checksum、download source を追加する
+- [ ] 2.4 `RuntimeAsset::mermaid_zenuml()` と materialize test を追加する
+- [ ] 2.5 `Justfile` に `MERMAID_ZENUML_JS_VERSION` と `MERMAID_ZENUML_JS` を追加する
 
 ### Definition of Done
 
-- [ ] ZenUML の扱いが曖昧でない
-- [ ] supported fixture を暗黙に除外していない
+- [ ] ZenUML 対応JSが version / checksum 付きで再取得・検証できる
+- [ ] runtime asset の暗黙外部依存がない
 
 ---
 
-## 4. Final Verification
+## 3. Mermaid runtime 登録
 
-- [ ] 4.1 `mermaid-compare-full` を実行する
-- [ ] 4.2 `just check` を実行する
-- [ ] 4.3 `git diff --check` を実行する
-- [ ] 4.4 PR 作成後に `@codex review` を依頼する
-- [ ] 4.5 `npx -y @fission-ai/openspec validate "v0-1-3-mermaid-zenuml-fixture-support" --strict` を実行する
+### 目的
+
+ZenUML 判定時に、取り込んだJSを Mermaid runtime に登録してから描画する。
+
+### タスク
+
+- [ ] 3.1 `MermaidRuntimeScripts::source_scripts()` に `mermaid-zenuml.min.js` と bridge script を追加する
+- [ ] 3.2 読み込み順を `mermaid.min.js` → `mermaid-zenuml.min.js` → bridge → `render-mermaid.js` に固定する
+- [ ] 3.3 bridge script で ZenUML module を `globalThis.__katanaMermaidZenuml` に正規化する
+- [ ] 3.4 `render_mermaid.js` で `zenuml` 判定時に `mermaidValue.registerExternalDiagrams([globalThis.__katanaMermaidZenuml])` を render 前に実行する
+- [ ] 3.5 `globalThis.__katanaMermaidZenuml` が存在しない場合は fallback せず error にする
+- [ ] 3.6 fake runtime test で `registerExternalDiagrams` が render 前に呼ばれることを確認する
+
+### Definition of Done
+
+- [ ] `28-zen-uml.md` が `UnknownDiagramError` にならず SVG を返す
+- [ ] fallback SVG / stub PNG を使っていない
+
+---
+
+## 4. 公式参照と比較
+
+### 目的
+
+公式参照生成と Katana runtime の両方で ZenUML を描画し、score 対象として比較する。
+
+### タスク
+
+- [ ] 4.1 `scripts/mermaid/official-renderer.ts` に ZenUML 対応JS読み込みと external diagram 登録を追加する
+- [ ] 4.2 `diagram-update` で `en/28-zen-uml.md` と `ja/28-zen-uml.md` の参照SVG / PNGを更新する
+- [ ] 4.3 `mermaid-compare-full` で `28-zen-uml.md` が score 対象に含まれることを確認する
+- [ ] 4.4 参照更新差分に fallback SVG / stub PNG が含まれていないことを確認する
+
+### Definition of Done
+
+- [ ] `28-zen-uml.md` が通常 fixture として比較される
+- [ ] ZenUML の比較結果が report に出る
+
+---
+
+## 5. Final Verification
+
+- [ ] 5.1 `just mermaid-compare-full` を実行する
+- [ ] 5.2 `just check` を実行する
+- [ ] 5.3 `git diff --check` を実行する
+- [ ] 5.4 PR 作成後に `@codex review` を依頼する
+- [ ] 5.5 `npx -y @fission-ai/openspec validate "v0-1-3-mermaid-zenuml-fixture-support" --strict` を実行する
