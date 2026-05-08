@@ -64,6 +64,15 @@ runtime-asset-script-test:
 check: fmt-check lint unit-test ast-lint dependency-leak runtime-asset-check
     @echo "checks passed"
 
+# Update dependency crates safely (respects Cargo.toml SemVer)
+update-safe:
+    {{CARGO}} update
+
+# Upgrade all dependencies to latest versions (including breaking changes)
+update:
+    {{CARGO}} upgrade -i
+    {{CARGO}} update
+
 # Verify package metadata and dry-run the first publishable crate
 release-verify: check coverage
     bash scripts/release/verify-version.sh "{{VERSION}}"
