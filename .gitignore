@@ -6,4 +6,4 @@ Cargo.lock.bak
 .idea/
 .vscode/
 *.swp
-node_moduels
+node_modules
