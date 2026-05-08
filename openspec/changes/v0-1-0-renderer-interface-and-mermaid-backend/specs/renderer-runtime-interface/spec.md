@@ -125,7 +125,7 @@
 - **THEN** Mermaid は KatanA から移植した full fixture を比較する
 - **THEN** Draw.io は `basic` と `official` 配下の全カテゴリを比較する
 - **THEN** git 管理済み公式 reference SVG / PNG と kcf 出力だけを比較する
-- **THEN** score 改善対象は v0.1.2 の作業として report に残す
+- **THEN** score 改善対象は v0.1.4 の作業として report に残す
 
 #### Scenario: kcf に egui / KatanA UI 依存を持たせない
 

@@ -1,9 +1,9 @@
-# Tasks: katana-canvas-forge v0.1.3 export CSS debug
+# Tasks: katana-canvas-forge v0.1.2 export CSS debug
 
 ## Branch Rule
 
-- **標準ブランチ**: `release/v0.1.3`
-- **作業ブランチ**: `feature/v0.1.3-task-x`
+- **標準ブランチ**: `release/v0.1.2`
+- **作業ブランチ**: `feature/v0.1.2-task-x`
 
 ---
 
@@ -11,20 +11,20 @@
 
 ### 目的
 
-v0.1.3 を export CSS 回帰修正と macOS デバッグ実行のフェーズとして固定する。
+v0.1.2 を export CSS 回帰修正と macOS デバッグ実行のフェーズとして固定する。
 
 ### タスク
 
-- [x] 1.1 v0.1.2 を score improvement へ繰り上げ、この change を v0.1.3 へ移す
-- [x] 1.2 v0.1.3 の対象を PDF / PNG / JPEG のCSS反映と export 4形式デバッグに固定する
+- [x] 1.1 score improvement を v0.1.x 最終フェーズへ送り、この change を v0.1.2 に固定する
+- [x] 1.2 v0.1.2 の対象を PDF / PNG / JPEG のCSS反映と export 4形式デバッグに固定する
 - [x] 1.3 macOS だけをサポート対象にし、Windows / Linux 対応を入れない
 - [x] 1.4 PDF と画像の出力先を `/tmp` に固定する
 - [x] 1.5 このexport保守はKDV移譲までの暫定維持であり、新規export責務ではないことを明記する
 
 ### Definition of Done
 
-- [x] v0.1.3 の目的と非目的が artifact に残っている
-- [x] v0.1.2 との依存関係が明確である
+- [x] v0.1.2 の目的と非目的が artifact に残っている
+- [x] v0.1.4 との依存関係が明確である
 - [x] KDV移譲後のKCF側export削除方針と矛盾していない
 
 ---
@@ -99,5 +99,5 @@ native export の軽量CSS解釈で、`body` 向けCSSを正しく拾う。
 - [x] 5.3 `cargo test -p katana-canvas-forge-cli export_debug -- --nocapture` を実行する
 - [x] 5.4 `cargo test -p katana-canvas-forge-cli cli_export_debug_writes_and_opens_four_formats -- --nocapture` を実行する
 - [x] 5.5 `just lint` と `just ast-lint` を実行する
-- [x] 5.6 `npx -y @fission-ai/openspec validate "v0-1-3-export-css-debug" --strict` を実行する
+- [x] 5.6 `npx -y @fission-ai/openspec validate "export-css-debug" --strict` を実行する
 - [x] 5.7 `/self-review` を実行する

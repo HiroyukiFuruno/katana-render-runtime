@@ -45,7 +45,7 @@
 
 ### Requirement: export-debug は macOS 専用でなければならない
 
-システムは、v0.1.3 の `export-debug` を macOS 専用として扱わなければならない（MUST）。
+システムは、v0.1.2 の `export-debug` を macOS 専用として扱わなければならない（MUST）。
 
 #### Scenario: OS起動方法を固定する
 

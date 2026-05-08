@@ -1,9 +1,9 @@
-# Tasks: katana-canvas-forge v0.1.4 Mermaid ZenUML fixture support
+# Tasks: katana-canvas-forge v0.1.3 Mermaid ZenUML fixture support
 
 ## Branch Rule
 
-- **標準ブランチ**: `release/v0.1.4`
-- **作業ブランチ**: `feature/v0.1.4-task-x`
+- **標準ブランチ**: `release/v0.1.3`
+- **作業ブランチ**: `feature/v0.1.3-task-x`
 
 ---
 
@@ -70,4 +70,4 @@ ZenUML を描画可能にするか、未対応として明示的に扱う。
 - [ ] 4.2 `just check` を実行する
 - [ ] 4.3 `git diff --check` を実行する
 - [ ] 4.4 PR 作成後に `@codex review` を依頼する
-- [ ] 4.5 `npx -y @fission-ai/openspec validate "v0-1-4-mermaid-zenuml-fixture-support" --strict` を実行する
+- [ ] 4.5 `npx -y @fission-ai/openspec validate "v0-1-3-mermaid-zenuml-fixture-support" --strict` を実行する

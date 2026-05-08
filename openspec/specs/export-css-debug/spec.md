@@ -1,7 +1,7 @@
 # export-css-debug Specification
 
 ## Purpose
-TBD - created by archiving change v0-1-3-export-css-debug. Update Purpose after archive.
+TBD - created by archiving change v0-1-2-export-css-debug. Update Purpose after archive.
 ## Requirements
 ### Requirement: native PDF / PNG / JPEG export は HTML の body 向けCSSを反映しなければならない
 
@@ -48,7 +48,7 @@ TBD - created by archiving change v0-1-3-export-css-debug. Update Purpose after 
 
 ### Requirement: export-debug は macOS 専用でなければならない
 
-システムは、v0.1.3 の `export-debug` を macOS 専用として扱わなければならない（MUST）。
+システムは、v0.1.2 の `export-debug` を macOS 専用として扱わなければならない（MUST）。
 
 #### Scenario: OS起動方法を固定する
 
@@ -65,4 +65,3 @@ KCF SHALL treat this export maintenance as temporary compatibility work until KD
 - **WHEN** KDV provides equivalent HTML/PDF/PNG/JPG export
 - **THEN** KCF export maintenance is moved or deleted
 - **THEN** KCF continues to own external rendering, runtime assets, references, and score comparison
-

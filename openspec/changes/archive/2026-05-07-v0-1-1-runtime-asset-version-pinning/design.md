@@ -17,7 +17,7 @@ v0.1.1 は、その transfer 後に残る runtime asset 管理の課題を解決
 ## Non-Goals
 
 - renderer の忠実移植は v0.1.0 で扱う
-- score の初期改善は v0.1.2、継続改善は v0.4.x で扱う
+- score の初期改善は v0.1.4、継続改善は v0.4.x で扱う
 - 公開 CLI の UX 固定は v0.5.0 で扱う
 
 ## Asset Ownership
