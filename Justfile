@@ -1,7 +1,10 @@
 set shell := ["bash", "-uc"]
 
+RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)
+RTK_CMD := if RTK == "" { "" } else { RTK + " " }
 JOBS := env_var_or_default("JOBS", "2")
-CARGO := env_var_or_default("CARGO", "cargo")
+export RUSTFLAGS := env_var_or_default("RUSTFLAGS", "-D warnings")
+CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")
 VERSION := env_var_or_default("VERSION", `awk -F '"' '/^version = / { print $2; exit }' Cargo.toml`)
 COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
@@ -63,6 +66,14 @@ runtime-asset-script-test:
 # Run the local quality gate
 check: fmt-check lint unit-test ast-lint dependency-leak runtime-asset-check
     @echo "checks passed"
+
+# Sweep old build artifacts locally (older than 7 days)
+sweep:
+    @{{CARGO}} sweep --time 7 || true
+
+# Remove build artifacts
+clean: sweep
+    {{CARGO}} clean
 
 # Update dependency crates safely (respects Cargo.toml SemVer)
 update-safe:
