@@ -1,3 +1,5 @@
+> Status: 要件変更により破棄済み。`v0.1.2` は Mermaid ZenUML / unsupported fixture handling に再割当する。
+
 ## Why
 
 v0.1.2 は、KDV移譲まで維持する既存exportのCSS回帰を止める最小フェーズにする。

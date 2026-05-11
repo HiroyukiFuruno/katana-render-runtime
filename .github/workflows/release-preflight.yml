@@ -38,14 +38,11 @@ jobs:
       - uses: taiki-e/install-action@v2.77.1
         with:
           tool: cargo-llvm-cov
+      - run: just browser-install
       - name: Resolve version
         id: version
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            version="${GITHUB_HEAD_REF#release/}"
-          else
-            version="$(awk -F '"' '/^version = / { print "v" $2; exit }' Cargo.toml)"
-          fi
+          version="$(awk -F '"' '/^version = / { print "v" $2; exit }' Cargo.toml)"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
       - run: just VERSION="${{ steps.version.outputs.version }}" release-check

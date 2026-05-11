@@ -32,18 +32,23 @@
   - 現在取り込める最新版を確認する just recipe を追加する
   - 指定 version を取り込み、checksum、manifest、reference snapshot を更新する just recipe を追加する
   - v0.1.0 transfer で露出した runtime asset 管理の課題を小規模 patch として解決する
-- `v0.1.2`: export CSS regression fix / macOS debug open
-  - PDF / PNG / JPEG export に HTML の `body` 向けCSSを反映する
-  - export 4形式を `/tmp` に出力し、macOS の既定アプリで開く debug command を追加する
-- `v0.1.3`: Mermaid ZenUML / unsupported fixture handling
+- `v0.1.2`: Mermaid ZenUML / unsupported fixture handling
   - `28-zen-uml.md` の supported / unsupported 境界を固定する
   - unsupported fixture は暗黙 skip せず、理由を report に残す
   - compare が空出力や未生成 PNG で null 参照しないようにする
+- `v0.1.3`: RenderInput theme application
+  - consumer が渡す theme snapshot を Mermaid / Draw.io の実描画に反映する
+  - cache fingerprint は process global state ではなく、RenderInput 由来の実効 theme を使う
+  - global theme state は後方互換 fallback に限定する
 - `v0.1.4`: reference score improvement
   - Jules 側で停滞している旧 v0.1.1 の範囲を v0.1.x の最後に回す
   - Draw.io official / representative の既知 score 未達を改善する
   - score baseline は下げず、修正後の下限として上げる
   - Mermaid supported fixture の score 回帰を確認する
+- `v0.1.5`: KDV export handoff
+  - 不要になった export CSS debug 計画はKCF release番号から外す
+  - 旧 export/debug 論点はKDV側へ移譲する
+  - KCF側は Mermaid / Draw.io rendering、runtime asset、reference score に責務を絞る
 - `v0.2.0`: KDV移譲計画へ変更
   - CSV / PDF / Office viewer renderingはKDV側へ移す
   - KCF側で必要な外部描画APIだけを残す

@@ -36,6 +36,16 @@ class CliOptions {
           ),
         ),
       ),
+      mermaidZenumlJs: path.resolve(
+        expandHome(
+          CliOptions.get(
+            argv,
+            "--mermaid-zenuml-js",
+            process.env.MERMAID_ZENUML_JS ||
+              "crates/katana-canvas-forge/vendor/mermaid-zenuml/0.2.2/mermaid-zenuml.min.js",
+          ),
+        ),
+      ),
       writeMarkdown: !argv.includes("--no-write-md"),
       skipErrors: argv.includes("--skip-errors"),
       theme: CliOptions.theme(argv),
@@ -54,7 +64,7 @@ class CliOptions {
   private static exitIfHelp(argv: string[]) {
     if (argv.includes("--help")) {
       console.log(
-        "Usage: bun run scripts/mermaid/diagram-update.ts [--fixtures DIR] [--output DIR] [--markdown-output DIR] [--theme dark|light] [--mermaid-js FILE]",
+        "Usage: bun run scripts/mermaid/diagram-update.ts [--fixtures DIR] [--output DIR] [--markdown-output DIR] [--theme dark|light] [--mermaid-js FILE] [--mermaid-zenuml-js FILE]",
       );
       process.exit(0);
     }
@@ -163,6 +173,9 @@ class MermaidDiagramUpdate {
   private validate() {
     if (!fs.existsSync(this.options.mermaidJs)) {
       throw new Error(`mermaid.min.js not found: ${this.options.mermaidJs}`);
+    }
+    if (!fs.existsSync(this.options.mermaidZenumlJs)) {
+      throw new Error(`mermaid-zenuml.min.js not found: ${this.options.mermaidZenumlJs}`);
     }
   }
 }

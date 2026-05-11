@@ -1,8 +1,12 @@
 const document = {
   nodeType: 9,
   currentScript: null,
+  activeElement: null,
   addEventListener() {},
   removeEventListener() {},
+  dispatchEvent() {
+    return true;
+  },
   createElement(tagName) {
     const node = new KatanaNode(tagName);
     node.ownerDocument = document;
@@ -89,8 +93,30 @@ globalThis.Node.DOCUMENT_FRAGMENT_NODE = 11;
 globalThis.DocumentFragment = KatanaNode;
 globalThis.HTMLTemplateElement = KatanaNode;
 globalThis.HTMLFormElement = KatanaNode;
+globalThis.HTMLButtonElement = KatanaNode;
+globalThis.HTMLCanvasElement = KatanaNode;
+globalThis.HTMLFieldSetElement = KatanaNode;
+globalThis.HTMLIFrameElement = KatanaNode;
+globalThis.HTMLImageElement = KatanaNode;
+globalThis.HTMLInputElement = KatanaNode;
+globalThis.HTMLLabelElement = KatanaNode;
+globalThis.HTMLLegendElement = KatanaNode;
+globalThis.HTMLSelectElement = KatanaNode;
+globalThis.HTMLTextAreaElement = KatanaNode;
+globalThis.HTMLVideoElement = KatanaNode;
+globalThis.SVGImageElement = KatanaNode;
 globalThis.NamedNodeMap = Array;
 globalThis.NodeFilter = { SHOW_ELEMENT: 1, SHOW_TEXT: 4, SHOW_COMMENT: 128 };
+globalThis.MutationObserver = class {
+  constructor(callback) {
+    this.callback = callback;
+  }
+  observe() {}
+  disconnect() {}
+  takeRecords() {
+    return [];
+  }
+};
 globalThis.trustedTypes = {
   createPolicy() {
     return {

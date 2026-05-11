@@ -14,11 +14,11 @@ class RuntimeAssetDownloader {
   async download(definition: RuntimeAssetDefinition, version: string): Promise<void> {
     const target = RuntimeAssetPaths.assetFile(definition, version);
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    if (definition.kind === "mermaid") {
-      await this.downloadFile(definition.downloadUrl(version), target);
+    if (definition.kind === "drawio") {
+      await this.downloadDrawio(definition.downloadUrl(version), target);
       return;
     }
-    await this.downloadDrawio(definition.downloadUrl(version), target);
+    await this.downloadFile(definition.downloadUrl(version), target);
   }
 
   private async downloadFile(url: string, target: string) {
@@ -71,7 +71,7 @@ class RuntimeSourceUpdater {
 
   private updateJustfile(definition: RuntimeAssetDefinition, version: string) {
     const justfile = RuntimeAssetPaths.justfile();
-    const constName = `${definition.kind.toUpperCase()}_JS_VERSION`;
+    const constName = RuntimeAssetPaths.justVersionVariable(definition);
     const pattern = new RegExp(`${constName} := "[^"]+"`);
     const source = fs
       .readFileSync(justfile, "utf8")
@@ -131,7 +131,9 @@ class UpdateCommand {
 class CliOptions {
   static command(argv: string[]): UpdateCommand {
     if (argv.length !== 2) {
-      throw new Error("Usage: bun run scripts/runtime-assets/update.ts <mermaid|drawio> <version>");
+      throw new Error(
+        "Usage: bun run scripts/runtime-assets/update.ts <mermaid|mermaid-zenuml|drawio> <version>",
+      );
     }
     return new UpdateCommand(RuntimeAssetCatalog.byKind(argv[0]), argv[1]);
   }

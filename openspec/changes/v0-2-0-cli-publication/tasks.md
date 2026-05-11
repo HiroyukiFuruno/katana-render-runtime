@@ -2,7 +2,7 @@
 
 ### Definition of Ready
 
-- [ ] v0.1.0 から v0.1.6 までの Mermaid / Draw.io renderer、score、reference 更新、KDV移譲記録を確認している
+- [ ] v0.1.0 から v0.1.5 までの Mermaid / Draw.io renderer、score、reference 更新、KDV移譲記録を確認している
 - [ ] CLI が library の薄い利用者である方針が固定されている
 - [ ] KatanA 固有 state を CLI argument にしない方針が固定されている
 

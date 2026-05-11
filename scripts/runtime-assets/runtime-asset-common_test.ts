@@ -8,22 +8,31 @@ import {
 
 test("runtime asset path は version を含む", () => {
   const mermaid = RuntimeAssetCatalog.byKind("mermaid");
+  const zenuml = RuntimeAssetCatalog.byKind("mermaid-zenuml");
   const drawio = RuntimeAssetCatalog.byKind("drawio");
 
   expect(RuntimeAssetPaths.assetFile(mermaid)).toBe(
     "crates/katana-canvas-forge/vendor/mermaid/3.3.1/mermaid.min.js",
   );
+  expect(RuntimeAssetPaths.assetFile(zenuml)).toBe(
+    "crates/katana-canvas-forge/vendor/mermaid-zenuml/0.2.2/mermaid-zenuml.min.js",
+  );
   expect(RuntimeAssetPaths.assetFile(drawio)).toBe(
     "crates/katana-canvas-forge/vendor/drawio/29.7.10/drawio.min.js",
   );
+  expect(RuntimeAssetPaths.justVersionVariable(zenuml)).toBe("MERMAID_ZENUML_JS_VERSION");
 });
 
 test("runtime asset checksum は固定ファイルと一致する", () => {
   const mermaid = RuntimeAssetCatalog.byKind("mermaid");
+  const zenuml = RuntimeAssetCatalog.byKind("mermaid-zenuml");
   const drawio = RuntimeAssetCatalog.byKind("drawio");
 
   expect(RuntimeAssetChecksum.digestFile(RuntimeAssetPaths.assetFile(mermaid))).toBe(
     mermaid.checksum,
+  );
+  expect(RuntimeAssetChecksum.digestFile(RuntimeAssetPaths.assetFile(zenuml))).toBe(
+    zenuml.checksum,
   );
   expect(RuntimeAssetChecksum.digestFile(RuntimeAssetPaths.assetFile(drawio))).toBe(
     drawio.checksum,

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-export type RuntimeAssetKind = "mermaid" | "drawio";
+export type RuntimeAssetKind = "mermaid" | "mermaid-zenuml" | "drawio";
 
 export interface RuntimeAssetDefinition {
   readonly kind: RuntimeAssetKind;
@@ -33,6 +33,21 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
       `https://cdn.jsdelivr.net/npm/mermaid@${version}/dist/mermaid.min.js`,
     downloadUrl: (version: string) =>
       `https://cdn.jsdelivr.net/npm/mermaid@${version}/dist/mermaid.min.js`,
+  },
+  {
+    kind: "mermaid-zenuml",
+    displayName: "Mermaid ZenUML",
+    version: "0.2.2",
+    checksum: "39143c3cb4e7a1dc53938de0c85e5fd2aee1533ec4e07d7d95a6ef639956ff1f",
+    fileName: "mermaid-zenuml.min.js",
+    rustVersionConst: "MERMAID_ZENUML_JS_VERSION",
+    rustChecksumConst: "MERMAID_ZENUML_JS_CHECKSUM",
+    rustDownloadConst: "MERMAID_ZENUML_DOWNLOAD_URL",
+    latestUrl: "https://registry.npmjs.org/@mermaid-js/mermaid-zenuml/latest",
+    releasePageUrl: (version: string) =>
+      `https://cdn.jsdelivr.net/npm/@mermaid-js/mermaid-zenuml@${version}/dist/mermaid-zenuml.min.js`,
+    downloadUrl: (version: string) =>
+      `https://cdn.jsdelivr.net/npm/@mermaid-js/mermaid-zenuml@${version}/dist/mermaid-zenuml.min.js`,
   },
   {
     kind: "drawio",
@@ -113,6 +128,10 @@ export class RuntimeAssetPaths {
 
   static checksumFile(definition: RuntimeAssetDefinition, version = definition.version): string {
     return `${RuntimeAssetPaths.assetFile(definition, version)}.sha256`;
+  }
+
+  static justVersionVariable(definition: RuntimeAssetDefinition): string {
+    return `${definition.kind.toUpperCase().replaceAll("-", "_")}_JS_VERSION`;
   }
 
   static runtimeAssetsRust(): string {

@@ -1,5 +1,7 @@
 # Tasks: katana-canvas-forge v0.1.2 export CSS debug
 
+> Status: 要件変更により破棄済み。`v0.1.2` は Mermaid ZenUML / unsupported fixture handling に再割当する。
+
 ## Branch Rule
 
 - **標準ブランチ**: `release/v0.1.2`

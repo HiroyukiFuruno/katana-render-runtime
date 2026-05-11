@@ -9,8 +9,11 @@ VERSION := env_var_or_default("VERSION", `awk -F '"' '/^version = / { print $2; 
 COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
 MERMAID_JS_VERSION := "3.3.1"
+MERMAID_ZENUML_JS_VERSION := "0.2.2"
 DRAWIO_JS_VERSION := "29.7.10"
+PLAYWRIGHT_VERSION := "1.59.1"
 MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-canvas-forge/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
+MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-canvas-forge/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
 DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-canvas-forge/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
 DRAWIO_RESOURCE_DIR := "crates/katana-canvas-forge/src/markdown/drawio_renderer/js_runtime/resources"
 DRAWIO_RESOURCE_MANIFEST := DRAWIO_RESOURCE_DIR + "/drawio-resource-manifest.json"
@@ -57,6 +60,7 @@ coverage:
 # Verify pinned runtime asset checksums
 runtime-asset-check:
     cd crates/katana-canvas-forge/vendor/mermaid/{{MERMAID_JS_VERSION}} && shasum -a 256 -c mermaid.min.js.sha256
+    cd crates/katana-canvas-forge/vendor/mermaid-zenuml/{{MERMAID_ZENUML_JS_VERSION}} && shasum -a 256 -c mermaid-zenuml.min.js.sha256
     cd crates/katana-canvas-forge/vendor/drawio/{{DRAWIO_JS_VERSION}} && shasum -a 256 -c drawio.min.js.sha256
 
 # Run TypeScript tests for runtime asset helper scripts
@@ -99,7 +103,8 @@ release-check: release-verify
 
 # Install Playwright Chromium for official Mermaid / Draw.io reference rendering
 browser-install:
-    playwright install chromium
+    @if ! command -v playwright >/dev/null 2>&1; then npm install --global "playwright@{{PLAYWRIGHT_VERSION}}"; fi
+    @if [[ "$(uname -s)" == "Linux" ]]; then playwright install --with-deps chromium; else playwright install chromium; fi
 
 # Show latest Mermaid.js and Draw.io versions without changing files
 runtime-asset-latest runtime='all':
@@ -139,7 +144,7 @@ mermaid-render fixtures output='tmp/kcf-mermaid-rendered':
 
 # Update official Mermaid reference SVG / PNG
 mermaid-reference fixtures:
-    bun run scripts/mermaid/diagram-update.ts --fixtures "{{fixtures}}" --output tmp/kcf-mermaid-official --markdown-output "{{fixtures}}/official-dark" --theme dark --mermaid-js "{{MERMAID_JS}}" --skip-errors
+    bun run scripts/mermaid/diagram-update.ts --fixtures "{{fixtures}}" --output tmp/kcf-mermaid-official --markdown-output "{{fixtures}}/official-dark" --theme dark --mermaid-js "{{MERMAID_JS}}" --mermaid-zenuml-js "{{MERMAID_ZENUML_JS}}" --skip-errors
 
 # Update all committed Mermaid reference SVG / PNG fixtures
 mermaid-reference-all:

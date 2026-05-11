@@ -10,6 +10,7 @@
 pub mod exporter;
 pub mod markdown;
 pub mod renderer;
+mod system;
 
 pub use renderer::{
     DiagramKind, DrawioRenderer, MermaidRenderer, RenderConfig, RenderContext, RenderDiagnostics,

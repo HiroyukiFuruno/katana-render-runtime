@@ -140,6 +140,16 @@ class KatanaNode {
   }
   addEventListener() {}
   removeEventListener() {}
+  dispatchEvent() {
+    return true;
+  }
+  focus() {
+    document.activeElement = this;
+  }
+  click() {}
+  get isConnected() {
+    return this === document || document.documentElement.contains(this);
+  }
   toJSON() {
     return {};
   }

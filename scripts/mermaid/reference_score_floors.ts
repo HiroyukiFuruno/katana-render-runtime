@@ -74,13 +74,29 @@ export const MERMAID_VISUAL_ACCEPTED_SCORE_FLOORS: ReferenceScoreThreshold[] = [
   visualAccepted("25-02-venn-diagram-3-sets-with-styles", 94.17),
   visualAccepted("26-01-wardley-map-simple", 91.15),
   visualAccepted("26-02-wardley-map-full-with-notes", 91.54),
+  acceptedScore(
+    "28-zen-uml",
+    86,
+    "ZenUMLは公式側とKCF側のどちらも同じmermaid-zenuml assetで描画される。foreignObject再ラスタライズ時の余白と縮尺差が残るため、このスコアを品質下限として固定。",
+  ),
 ];
 
 function visualAccepted(slug: string, minScore: number): ReferenceScoreThreshold {
+  return acceptedScore(
+    slug,
+    minScore,
+    "ユーザーが実アプリ画面で目視確認済み。99点化は投資対効果（ROI）が悪く、現状スコアを品質下限として固定。",
+  );
+}
+
+function acceptedScore(
+  slug: string,
+  minScore: number,
+  reason: string,
+): ReferenceScoreThreshold {
   return {
     slug,
     minScore,
-    reason:
-      "ユーザーが実アプリ画面で目視確認済み。99点化は投資対効果（ROI）が悪く、現状スコアを品質下限として固定。",
+    reason,
   };
 }

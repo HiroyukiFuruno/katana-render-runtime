@@ -1,4 +1,7 @@
-function katanaNormalizeNativeSvgFallbacks(svg) {
+function katanaNormalizeNativeSvgFallbacks(svg, request) {
+  if (katanaMermaidDiagramType(request.source) === "zenuml") {
+    return svg;
+  }
   return svg.replace(/<foreignObject\b[\s\S]*?<\/foreignObject>/g, "");
 }
 

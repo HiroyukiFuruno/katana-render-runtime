@@ -1,3 +1,5 @@
+> Status: 要件変更により破棄済み。active spec からは削除し、`v0.1.2` は Mermaid ZenUML / unsupported fixture handling に再割当する。
+
 ## ADDED Requirements
 
 ### Requirement: native PDF / PNG / JPEG export は HTML の body 向けCSSを反映しなければならない

@@ -4,10 +4,18 @@ pub(super) struct MermaidRuntimeScripts;
 
 impl MermaidRuntimeScripts {
     pub(super) fn build<'a>(bundle: &'a str, request_json: &str) -> Vec<DiagramRuntimeScript<'a>> {
+        Self::build_with_zenuml(bundle, MERMAID_ZENUML, request_json)
+    }
+
+    fn build_with_zenuml<'a>(
+        bundle: &'a str,
+        zenuml_bundle: &'a str,
+        request_json: &str,
+    ) -> Vec<DiagramRuntimeScript<'a>> {
         let mut scripts = Self::dom_scripts();
         scripts.extend(Self::svg_base_scripts());
         scripts.extend(Self::svg_fix_scripts());
-        scripts.extend(Self::source_scripts(bundle, request_json));
+        scripts.extend(Self::source_scripts(bundle, zenuml_bundle, request_json));
         scripts
     }
 
@@ -68,12 +76,19 @@ impl MermaidRuntimeScripts {
         ]
     }
 
-    fn source_scripts<'a>(bundle: &'a str, request_json: &str) -> Vec<DiagramRuntimeScript<'a>> {
+    fn source_scripts<'a>(
+        bundle: &'a str,
+        zenuml_bundle: &'a str,
+        request_json: &str,
+    ) -> Vec<DiagramRuntimeScript<'a>> {
         vec![
             DiagramRuntimeScript::borrowed("source-i18n-context.js", SOURCE_I18N_CONTEXT),
             DiagramRuntimeScript::borrowed("source-i18n-normalize.js", SOURCE_I18N_NORMALIZE),
+            DiagramRuntimeScript::borrowed("mermaid-diagram-type.js", MERMAID_DIAGRAM_TYPE),
             DiagramRuntimeScript::borrowed("svg-normalize.js", SVG_NORMALIZE),
             DiagramRuntimeScript::borrowed("mermaid.min.js", bundle),
+            DiagramRuntimeScript::borrowed("mermaid-zenuml.min.js", zenuml_bundle),
+            DiagramRuntimeScript::borrowed("mermaid-zenuml-bridge.js", MERMAID_ZENUML_BRIDGE),
             DiagramRuntimeScript::owned("render-mermaid.js", render_script(request_json)),
         ]
     }
@@ -127,17 +142,73 @@ const SVG_DIAGRAM_NORMALIZERS: &str = include_str!("js_runtime/svg_diagram_norma
 const SVG_DIMENSIONS: &str = include_str!("js_runtime/svg_dimensions.js");
 const SOURCE_I18N_CONTEXT: &str = include_str!("js_runtime/source_i18n_context.js");
 const SOURCE_I18N_NORMALIZE: &str = include_str!("js_runtime/source_i18n_normalize.js");
+const MERMAID_DIAGRAM_TYPE: &str = include_str!("js_runtime/mermaid_diagram_type.js");
 const SVG_NORMALIZE: &str = include_str!("js_runtime/svg_normalize.js");
+const MERMAID_ZENUML: &str =
+    include_str!("../../../vendor/mermaid-zenuml/0.2.2/mermaid-zenuml.min.js");
+const MERMAID_ZENUML_BRIDGE: &str = include_str!("js_runtime/mermaid_zenuml_bridge.js");
 const RENDER_MERMAID: &str = include_str!("js_runtime/render_mermaid.js");
 
 #[cfg(test)]
 mod tests {
     use super::MermaidRuntimeScripts;
+    use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
 
     #[test]
     fn build_includes_bundle_and_render_script() {
         let scripts = MermaidRuntimeScripts::build("bundle", "{}");
         assert!(scripts.iter().any(|it| it.name == "mermaid.min.js"));
+        assert!(scripts.iter().any(|it| it.name == "mermaid-zenuml.min.js"));
+        assert!(
+            scripts
+                .iter()
+                .any(|it| it.name == "mermaid-zenuml-bridge.js")
+        );
         assert!(scripts.iter().any(|it| it.name == "render-mermaid.js"));
+    }
+
+    #[test]
+    fn zenuml_registration_runs_before_render() {
+        let scripts = MermaidRuntimeScripts::build_with_zenuml(
+            fake_mermaid(),
+            fake_zenuml(),
+            r##"{"source":"zenuml\nA.method()","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff","diagramType":"zenuml"}"##,
+        );
+
+        let rendered = DiagramV8Runtime::render(&scripts);
+
+        assert!(rendered.as_ref().is_ok_and(|it| it.contains("registered")));
+    }
+
+    #[test]
+    fn zenuml_directive_source_registers_external_diagram_without_request_hint() {
+        let scripts = MermaidRuntimeScripts::build_with_zenuml(
+            fake_mermaid(),
+            fake_zenuml(),
+            r##"{"source":"%%{init: { \"theme\": \"dark\" }}%%\n%% comment\nzenuml\nA.method()","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff"}"##,
+        );
+
+        let rendered = DiagramV8Runtime::render(&scripts);
+
+        assert!(rendered.as_ref().is_ok_and(|it| it.contains("registered")));
+    }
+
+    fn fake_mermaid() -> &'static str {
+        r#"
+globalThis.mermaid = {
+  initialize() {},
+  registerExternalDiagrams: async (diagrams) => {
+    globalThis.__registeredDiagram = diagrams[0].id;
+  },
+  render: async (id) => {
+    const text = globalThis.__registeredDiagram ?? "missing";
+    return { svg: `<svg id="${id}"><text>${text}</text></svg>` };
+  }
+};
+"#
+    }
+
+    fn fake_zenuml() -> &'static str {
+        r#"globalThis["mermaid-zenuml"] = { id: "registered" };"#
     }
 }

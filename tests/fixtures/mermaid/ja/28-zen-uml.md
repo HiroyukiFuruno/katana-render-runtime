@@ -25,3 +25,11 @@ zenuml
       }
     }
 ~~~
+
+<!-- katana-mermaid-official:start -->
+
+## 公式Mermaid.js描画
+
+![公式Mermaid.js描画: 28. ZenUML](official-dark/28-zen-uml.png)
+
+<!-- katana-mermaid-official:end -->
