@@ -180,6 +180,19 @@ mod tests {
         assert!(rendered.as_ref().is_ok_and(|it| it.contains("registered")));
     }
 
+    #[test]
+    fn zenuml_directive_source_registers_external_diagram_without_request_hint() {
+        let scripts = MermaidRuntimeScripts::build_with_zenuml(
+            fake_mermaid(),
+            fake_zenuml(),
+            r##"{"source":"%%{init: { \"theme\": \"dark\" }}%%\n%% comment\nzenuml\nA.method()","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff"}"##,
+        );
+
+        let rendered = DiagramV8Runtime::render(&scripts);
+
+        assert!(rendered.as_ref().is_ok_and(|it| it.contains("registered")));
+    }
+
     fn fake_mermaid() -> &'static str {
         r#"
 globalThis.mermaid = {

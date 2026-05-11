@@ -14,6 +14,7 @@
 - [/] latest が v0.1.1 のため、この release change を v0.1.2 に調整する。
 - [/] export-css-debug は要件変更により不要になったため、active spec から外す。
 - [/] PR review の P1 指摘に対応し、CI の Playwright 依存を明示的に setup する。
+- [/] PR review の directive 前置き ZenUML 判定指摘は release 主目的を壊すため P1相当として扱い、対応する。
 
 ---
 

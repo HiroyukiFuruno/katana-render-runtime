@@ -30,15 +30,27 @@ impl MermaidDiagramType {
     }
 
     fn diagram_type_line<'a>(lines: &'a [&str]) -> Option<&'a str> {
+        Self::diagram_body_lines(lines)?
+            .iter()
+            .copied()
+            .find(|it| !Self::is_mermaid_directive_or_comment(it))
+    }
+
+    fn diagram_body_lines<'a>(lines: &'a [&str]) -> Option<&'a [&'a str]> {
         match lines.first().copied() {
-            Some("---") => Self::frontmatter_body_line(lines),
-            first => first,
+            Some("---") => Self::frontmatter_body_lines(lines),
+            Some(_) => Some(lines),
+            None => None,
         }
     }
 
-    fn frontmatter_body_line<'a>(lines: &'a [&str]) -> Option<&'a str> {
+    fn frontmatter_body_lines<'a>(lines: &'a [&str]) -> Option<&'a [&'a str]> {
         let end_index = lines.iter().skip(1).position(|line| *line == "---")?;
-        lines.get(end_index + 2).copied()
+        Some(&lines[end_index + 2..])
+    }
+
+    fn is_mermaid_directive_or_comment(line: &str) -> bool {
+        line.starts_with("%%")
     }
 }
 
@@ -57,11 +69,24 @@ mod tests {
     }
 
     #[test]
+    fn detects_zenuml_after_mermaid_directives_and_comments() {
+        let source = "%%{init: { \"theme\": \"dark\" }}%%\n%% comment\nzenuml\nA.method()";
+
+        let diagram_type = MermaidDiagramType::from_source(source);
+
+        assert_eq!(diagram_type, MermaidDiagramType::Zenuml);
+    }
+
+    #[test]
     fn keeps_other_mermaid_diagrams_on_existing_path() {
         let diagram_type = MermaidDiagramType::from_source("\n graph TD; A-->B");
 
         assert_eq!(diagram_type, MermaidDiagramType::Other);
         assert_eq!(diagram_type.request_value(), "");
+        assert_eq!(
+            MermaidDiagramType::from_source(""),
+            MermaidDiagramType::Other
+        );
     }
 
     #[test]

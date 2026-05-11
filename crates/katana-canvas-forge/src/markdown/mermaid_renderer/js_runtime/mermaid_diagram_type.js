@@ -7,7 +7,8 @@ function katanaMermaidDiagramType(source) {
 }
 
 function katanaMermaidDiagramTypeLine(lines) {
-  return katanaMermaidDiagramTypeLineReaders()[Number(lines[0] === "---")](lines);
+  const bodyLines = katanaMermaidDiagramTypeLineReaders()[Number(lines[0] === "---")](lines);
+  return bodyLines.find((line) => !katanaMermaidIsDirectiveOrComment(line));
 }
 
 function katanaMermaidDiagramTypeLineReaders() {
@@ -15,14 +16,18 @@ function katanaMermaidDiagramTypeLineReaders() {
 }
 
 function katanaMermaidFirstDiagramTypeLine(lines) {
-  return lines[0];
+  return lines;
 }
 
 function katanaMermaidFrontmatterDiagramTypeLine(lines) {
   const endIndex = lines.slice(1).indexOf("---");
-  return lines[katanaMermaidFrontmatterBodyStartIndex(endIndex)];
+  return lines.slice(katanaMermaidFrontmatterBodyStartIndex(endIndex));
 }
 
 function katanaMermaidFrontmatterBodyStartIndex(endIndex) {
   return [0, endIndex + 2][Number(endIndex >= 0)];
+}
+
+function katanaMermaidIsDirectiveOrComment(line) {
+  return line.startsWith("%%");
 }
