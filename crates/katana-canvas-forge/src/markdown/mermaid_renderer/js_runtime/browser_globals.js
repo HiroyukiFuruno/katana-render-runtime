@@ -1,6 +1,16 @@
 globalThis.window = globalThis;
 globalThis.self = globalThis;
 globalThis.navigator = { userAgent: "KatanA Rust-managed Mermaid runtime" };
+globalThis.location = {
+  href: "https://katana.local/",
+  origin: "https://katana.local",
+  protocol: "https:",
+  host: "katana.local",
+  hostname: "katana.local",
+  pathname: "/",
+  search: "",
+  hash: "",
+};
 const KATANA_DETERMINISTIC_NOW = Date.parse("2026-01-01T00:00:00.000Z");
 globalThis.Date.now = () => KATANA_DETERMINISTIC_NOW;
 globalThis.performance = { now: () => Date.now() };
@@ -13,6 +23,19 @@ globalThis.screen = {
   availWidth: globalThis.innerWidth,
   availHeight: globalThis.innerHeight,
 };
+globalThis.localStorage = katanaStorage();
+globalThis.sessionStorage = katanaStorage();
+class KatanaMessageChannel {
+  constructor() {
+    this.port1 = { onmessage: null };
+    this.port2 = {
+      postMessage: (data) => {
+        queueMicrotask(() => this.port1.onmessage?.({ data }));
+      },
+    };
+  }
+}
+
 class KatanaSegmenter {
   segment(value) {
     const input = String(value);
@@ -41,6 +64,7 @@ globalThis.crypto = {
 };
 Math.random = katanaDeterministicRandom;
 let katanaRandomState = 0x12345678;
+globalThis.queueMicrotask = (callback) => Promise.resolve().then(callback);
 
 function katanaDeterministicRandom() {
   katanaRandomState = (1664525 * katanaRandomState + 1013904223) >>> 0;
@@ -50,8 +74,36 @@ function katanaDeterministicRandom() {
 function katanaDeterministicByte(index) {
   return (index * 73 + 41) & 0xff;
 }
-globalThis.setTimeout = (callback) => callback();
+
+function katanaStorage() {
+  const values = {};
+  return {
+    get length() {
+      return Object.keys(values).length;
+    },
+    clear() {
+      Object.keys(values).forEach((key) => delete values[key]);
+    },
+    getItem(key) {
+      return values[String(key)] ?? null;
+    },
+    key(index) {
+      return Object.keys(values)[index] ?? null;
+    },
+    removeItem(key) {
+      delete values[String(key)];
+    },
+    setItem(key, value) {
+      values[String(key)] = String(value);
+    },
+  };
+}
+
+globalThis.setTimeout = (callback, _delay, ...args) => callback(...args);
 globalThis.clearTimeout = () => {};
+globalThis.setInterval = (callback, _delay, ...args) => callback(...args);
+globalThis.clearInterval = () => {};
+globalThis.MessageChannel = KatanaMessageChannel;
 let katanaAnimationFrameDepth = 0;
 globalThis.requestAnimationFrame = (callback) => katanaRunAnimationFrame(callback);
 function katanaRunAnimationFrame(callback) {

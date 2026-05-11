@@ -24,6 +24,7 @@ function katanaNormalizeColoredMermaidSvg(svg, request) {
   return katanaNormalizeDiagramSpecificSvg(
     katanaNormalizeNativeSvgFallbacks(
       katanaNormalizeNegativeRectWidths(katanaNormalizeC4RelationColors(svg, request)),
+      request,
     ),
     request,
   );

@@ -59,6 +59,7 @@ interface MermaidNormalizationRequest {
 export interface RendererOptions {
   outputDir: string;
   mermaidJs: string;
+  mermaidZenumlJs: string;
   theme: DiagramThemeName;
 }
 
@@ -110,9 +111,12 @@ export class OfficialMermaidRenderer {
 
   private async renderPage(page: PageHandle, fixture: RenderFixture) {
     await page.setContent(this.baseHtml(), { waitUntil: "load" });
+    await this.installStorage(page);
     await OfficialRendererDeterminism.install(page);
     await this.installRuntime(page);
     await page.addScriptTag({ path: this.options.mermaidJs });
+    await page.addScriptTag({ path: this.options.mermaidZenumlJs });
+    await page.addScriptTag({ path: MermaidRuntimeScripts.zenumlBridgePath() });
     await this.capture(page, fixture, await this.renderSvg(page, fixture));
   }
 
@@ -120,6 +124,36 @@ export class OfficialMermaidRenderer {
     for (const scriptPath of MermaidRuntimeScripts.paths()) {
       await page.addScriptTag({ path: scriptPath });
     }
+  }
+
+  private installStorage(page: PageHandle): Promise<void> {
+    return page.evaluate(() => {
+      const storage = () => {
+        const values = new Map<string, string>();
+        return {
+          get length() {
+            return values.size;
+          },
+          clear() {
+            values.clear();
+          },
+          getItem(key: string) {
+            return values.get(String(key)) ?? null;
+          },
+          key(index: number) {
+            return Array.from(values.keys()).at(index) ?? null;
+          },
+          removeItem(key: string) {
+            values.delete(String(key));
+          },
+          setItem(key: string, value: string) {
+            values.set(String(key), String(value));
+          },
+        };
+      };
+      Object.defineProperty(window, "localStorage", { value: storage(), configurable: true });
+      Object.defineProperty(window, "sessionStorage", { value: storage(), configurable: true });
+    });
   }
 
   private async capture(page: PageHandle, fixture: RenderFixture, svg: string) {
@@ -138,11 +172,17 @@ export class OfficialMermaidRenderer {
       source: OfficialSourceNormalizer.normalize(fixture.source),
     };
     return page.evaluate(
-      ({ config, input, request }) => {
+      async ({ config, input, request }) => {
         const i18nWindow = window as MermaidI18nWindow;
         const normalized = i18nWindow.katanaNormalizeMermaidSourceI18n(input.source);
         const mermaidValue = i18nWindow.mermaid;
         mermaidValue.initialize(config);
+        if (i18nWindow.katanaMermaidDiagramType(normalized.source) === "zenuml") {
+          if (i18nWindow.__katanaMermaidZenuml === undefined) {
+            throw new Error("ZenUML runtime asset was not registered");
+          }
+          await mermaidValue.registerExternalDiagrams([i18nWindow.__katanaMermaidZenuml]);
+        }
         return mermaidValue.render(`official-${input.slug}`, normalized.source).then((result) => {
           const restored = i18nWindow.katanaRestoreMermaidI18nText(
             result.svg,

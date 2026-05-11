@@ -77,11 +77,23 @@ fn resolve_value(
     let Ok(promise) = v8::Local::<v8::Promise>::try_from(value) else {
         return Ok(value.to_rust_string_lossy(scope));
     };
-    scope.perform_microtask_checkpoint();
+    drain_microtasks(scope, promise);
     match promise.state() {
         v8::PromiseState::Fulfilled => Ok(promise.result(scope).to_rust_string_lossy(scope)),
         v8::PromiseState::Rejected => Err(promise.result(scope).to_rust_string_lossy(scope)),
         v8::PromiseState::Pending => Err("Diagram render Promise did not settle".to_string()),
+    }
+}
+
+fn drain_microtasks(
+    scope: &mut v8::TryCatch<v8::HandleScope>,
+    promise: v8::Local<'_, v8::Promise>,
+) {
+    for _ in 0..64 {
+        scope.perform_microtask_checkpoint();
+        if promise.state() != v8::PromiseState::Pending {
+            return;
+        }
     }
 }
 

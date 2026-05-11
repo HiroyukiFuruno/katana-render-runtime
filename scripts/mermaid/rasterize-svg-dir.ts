@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DiagramTheme, type DiagramThemeName } from "./diagram_theme";
 import { PlaywrightLoader } from "./official-renderer";
+import { SvgRasterizeInput } from "./rasterize_svg_input";
 import type { BrowserHandle, FontReadyDocument, PageHandle } from "./official-renderer-types";
 
 interface CliParsedOptions {
@@ -84,7 +85,12 @@ class SvgBrowserRasterizer {
 
   private async rasterizeAll(repository: SvgFixtureRepository) {
     for (const fileName of repository.list()) {
-      await this.rasterize(fileName, repository.read(fileName));
+      const svg = repository.read(fileName);
+      if (!new SvgRasterizeInput(svg).shouldRasterize()) {
+        console.log(`skipped ${fileName}`);
+        continue;
+      }
+      await this.rasterize(fileName, svg);
     }
   }
 
@@ -148,6 +154,12 @@ class SvgCaptureSizer {
       svgElement.setAttribute("height", String(height));
       svgElement.style.maxWidth = `${width}px`;
       const capture = document.getElementById("capture") as HTMLElement;
+      if (svgElement.getAttribute("aria-roledescription") === "zenuml") {
+        capture.style.padding = "12px 0";
+        capture.style.width = `${width}px`;
+        capture.style.height = `${height + 24}px`;
+        return;
+      }
       capture.style.width = `${width + 24}px`;
       capture.style.height = `${height + 24}px`;
     });
