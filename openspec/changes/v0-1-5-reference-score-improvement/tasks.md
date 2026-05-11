@@ -1,9 +1,9 @@
-# Tasks: katana-canvas-forge v0.1.4 reference score improvement
+# Tasks: katana-canvas-forge v0.1.5 reference score improvement
 
 ## Branch Rule
 
-- **標準ブランチ**: `release/v0.1.4`
-- **作業ブランチ**: `feature/v0.1.4-task-x`
+- **標準ブランチ**: `release/v0.1.5`
+- **作業ブランチ**: `feature/v0.1.5-task-x`
 
 ---
 
@@ -15,14 +15,14 @@ v0.1.0 release 時点で残る score 未達を全 supported pattern から一覧
 
 ### 書き込み範囲
 
-- `tmp/kcf-v0.1.4-reference-score-improvement/`
+- `tmp/kcf-v0.1.5-reference-score-improvement/`
 - `tests/fixtures/drawio/representative/score-baseline.json`
-- `openspec/changes/v0-1-4-reference-score-improvement/tasks.md`
+- `openspec/changes/v0-1-5-reference-score-improvement/tasks.md`
 
 ### タスク
 
-- [ ] 1.1 `mkdir -p tmp/kcf-v0.1.4-reference-score-improvement` を実行する
-- [ ] 1.2 `just drawio-compare-ci 99` を実行し、失敗した fixture 名、score、出力先を `tmp/kcf-v0.1.4-reference-score-improvement/inventory.md` に記録する
+- [ ] 1.1 `mkdir -p tmp/kcf-v0.1.5-reference-score-improvement` を実行する
+- [ ] 1.2 `just drawio-compare-ci 99` を実行し、失敗した fixture 名、score、出力先を `tmp/kcf-v0.1.5-reference-score-improvement/inventory.md` に記録する
 - [ ] 1.3 `just drawio-compare-full 99` を実行し、全対象 directory ごとに失敗した fixture 名、score、出力先を `inventory.md` に追記する
 - [ ] 1.4 `just mermaid-compare-ci 99` を実行し、supported fixture の状態を `inventory.md` に追記する
 - [ ] 1.5 `just mermaid-compare-full 99` を実行し、`en` と `ja` の supported fixture の状態を `inventory.md` に追記する
@@ -51,17 +51,17 @@ Draw.io の全 supported pattern の score 未達を renderer / resource / postp
 - `crates/katana-canvas-forge/src/markdown/drawio_renderer/`
 - `scripts/drawio/`
 - `tests/fixtures/drawio/`
-- `tmp/kcf-v0.1.4-reference-score-improvement/`
+- `tmp/kcf-v0.1.5-reference-score-improvement/`
 
 ### タスク
 
-- [ ] 2.1 `i18n` を含む最小 directory として `tests/fixtures/drawio/official/diagrams` を選び、`just drawio-compare tests/fixtures/drawio/official/diagrams 99 tmp/kcf-v0.1.4-reference-score-improvement/i18n` を実行する
-- [ ] 2.2 `tmp/kcf-v0.1.4-reference-score-improvement/i18n/comparison` の official PNG、kcf PNG、diff、report の `i18n` 行だけを見て差分を一種類だけ分類する
+- [ ] 2.1 `i18n` を含む最小 directory として `tests/fixtures/drawio/official/diagrams` を選び、`just drawio-compare tests/fixtures/drawio/official/diagrams 99 tmp/kcf-v0.1.5-reference-score-improvement/i18n` を実行する
+- [ ] 2.2 `tmp/kcf-v0.1.5-reference-score-improvement/i18n/comparison` の official PNG、kcf PNG、diff、report の `i18n` 行だけを見て差分を一種類だけ分類する
 - [ ] 2.3 `i18n` の分類が `resource` なら resource resolver、`postprocess` なら SVG postprocess、`runtime` なら runtime adapter だけを最小修正する
 - [ ] 2.4 `i18n` を再実行し、score が 99 以上になるまで 2.2 から繰り返す
-- [ ] 2.5 `link` を含む最小 directory として `tests/fixtures/drawio/official/diagrams` を選び、`just drawio-compare tests/fixtures/drawio/official/diagrams 99 tmp/kcf-v0.1.4-reference-score-improvement/link` を実行する
+- [ ] 2.5 `link` を含む最小 directory として `tests/fixtures/drawio/official/diagrams` を選び、`just drawio-compare tests/fixtures/drawio/official/diagrams 99 tmp/kcf-v0.1.5-reference-score-improvement/link` を実行する
 - [ ] 2.6 `link` も 2.2 から 2.4 と同じ cycle で 99 以上へ上げる
-- [ ] 2.7 representative baseline の 99 点未満 case を `inventory.md` から 1 case ずつ選び、`just drawio-compare tests/fixtures/drawio/representative 99 tmp/kcf-v0.1.4-reference-score-improvement/<case>` で再現する
+- [ ] 2.7 representative baseline の 99 点未満 case を `inventory.md` から 1 case ずつ選び、`just drawio-compare tests/fixtures/drawio/representative 99 tmp/kcf-v0.1.5-reference-score-improvement/<case>` で再現する
 - [ ] 2.8 各 case は「再現、差分分類、最小修正、再比較、score 99 以上確認」の順で 1 case ずつ閉じる
 - [ ] 2.9 full compare だけで出た 99 未満 case も、対象 directory ごとに 1 case ずつ 2.2 から 2.4 と同じ cycle で閉じる
 - [ ] 2.10 改善後、`tests/fixtures/drawio/representative/score-baseline.json` の下限を 99 以上へ上げる
@@ -84,13 +84,13 @@ Draw.io の全 supported pattern の score 未達を renderer / resource / postp
 
 ### 目的
 
-Mermaid の全 supported pattern も v0.1.4 の 99 点基準にそろえる。
+Mermaid の全 supported pattern も v0.1.5 の 99 点基準にそろえる。
 
 ### 書き込み範囲
 
 - `scripts/mermaid/`
 - `tests/fixtures/mermaid/`
-- `tmp/kcf-v0.1.4-reference-score-improvement/`
+- `tmp/kcf-v0.1.5-reference-score-improvement/`
 
 ### タスク
 
@@ -122,7 +122,7 @@ score 改善を通常品質ゲートと release gate に接続する。
 - [ ] 4.3 `just mermaid-compare-ci 99` を実行する
 - [ ] 4.4 `just mermaid-compare-full 99` を実行する
 - [ ] 4.5 `just check` を実行する
-- [ ] 4.6 `just VERSION=v0.1.4 release-check` を実行する
+- [ ] 4.6 `just VERSION=v0.1.5 release-check` を実行する
 - [ ] 4.7 `git diff --check` を実行する
 
 ### Definition of Done
@@ -138,5 +138,5 @@ score 改善を通常品質ゲートと release gate に接続する。
 - [ ] 5.1 `/lint-and-ast-lint` 相当の検査結果を記録する
 - [ ] 5.2 `/self-review` 相当の検査で「full compare 対象の supported fixture に score 99 未満が残っていない」ことを確認する
 - [ ] 5.3 PR 作成後に `@codex review` を依頼する
-- [ ] 5.4 `npx -y @fission-ai/openspec validate "v0-1-4-reference-score-improvement" --strict` を実行する
+- [ ] 5.4 `npx -y @fission-ai/openspec validate "v0-1-5-reference-score-improvement" --strict` を実行する
 - [ ] 5.5 指摘があれば対応し、再度 `@codex review` を依頼する

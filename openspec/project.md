@@ -40,12 +40,16 @@
   - consumer が渡す theme snapshot を Mermaid / Draw.io の実描画に反映する
   - cache fingerprint は process global state ではなく、RenderInput 由来の実効 theme を使う
   - global theme state は後方互換 fallback に限定する
-- `v0.1.4`: reference score improvement
+- `v0.1.4`: ZenUML foreignObject fix（緊急）
+  - ZenUML 出力が `foreignObject` を含み KatanA の resvg/usvg 経路で白表示になる問題を修正する
+  - `render_zenuml_browser.mjs` を PNG screenshot + SVG ラッパー出力に変更し `foreignObject` を除去する
+  - ZenUML テストを「ネイティブ画像化経路で非空・非白」の期待値に更新する
+- `v0.1.5`: reference score improvement
   - Jules 側で停滞している旧 v0.1.1 の範囲を v0.1.x の最後に回す
   - Draw.io official / representative の既知 score 未達を改善する
   - score baseline は下げず、修正後の下限として上げる
   - Mermaid supported fixture の score 回帰を確認する
-- `v0.1.5`: KDV export handoff
+- `v0.1.6`: KDV export handoff
   - 不要になった export CSS debug 計画はKCF release番号から外す
   - 旧 export/debug 論点はKDV側へ移譲する
   - KCF側は Mermaid / Draw.io rendering、runtime asset、reference score に責務を絞る
