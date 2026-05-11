@@ -11,6 +11,7 @@ COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES
 MERMAID_JS_VERSION := "3.3.1"
 MERMAID_ZENUML_JS_VERSION := "0.2.2"
 DRAWIO_JS_VERSION := "29.7.10"
+ZENUML_CORE_JS_VERSION := "3.47.9"
 PLAYWRIGHT_VERSION := "1.59.1"
 MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-canvas-forge/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
 MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-canvas-forge/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
@@ -62,6 +63,7 @@ runtime-asset-check:
     cd crates/katana-canvas-forge/vendor/mermaid/{{MERMAID_JS_VERSION}} && shasum -a 256 -c mermaid.min.js.sha256
     cd crates/katana-canvas-forge/vendor/mermaid-zenuml/{{MERMAID_ZENUML_JS_VERSION}} && shasum -a 256 -c mermaid-zenuml.min.js.sha256
     cd crates/katana-canvas-forge/vendor/drawio/{{DRAWIO_JS_VERSION}} && shasum -a 256 -c drawio.min.js.sha256
+    cd crates/katana-canvas-forge/vendor/zenuml-core/{{ZENUML_CORE_JS_VERSION}} && shasum -a 256 -c zenuml.js.sha256
 
 # Run TypeScript tests for runtime asset helper scripts
 runtime-asset-script-test:

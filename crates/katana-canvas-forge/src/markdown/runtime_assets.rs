@@ -12,6 +12,12 @@ pub const MERMAID_ZENUML_JS_CHECKSUM: &str =
 pub const MERMAID_ZENUML_DOWNLOAD_URL: &str =
     "https://cdn.jsdelivr.net/npm/@mermaid-js/mermaid-zenuml@0.2.2/dist/mermaid-zenuml.min.js";
 
+pub const ZENUML_CORE_JS_VERSION: &str = "3.47.9";
+pub const ZENUML_CORE_JS_CHECKSUM: &str =
+    "ece11a311907401113f965e110c25c04c6a9b3dcbbb234bf2cd593a3f3ebe3df";
+pub const ZENUML_CORE_DOWNLOAD_URL: &str =
+    "https://cdn.jsdelivr.net/npm/@zenuml/core@3.47.9/dist/zenuml.js";
+
 pub const DRAWIO_JS_VERSION: &str = "29.7.10";
 pub const DRAWIO_JS_CHECKSUM: &str =
     "a8b7897de995a4e7dd3a541a5e7250d64a295440f728f0ddae72179cdf5a83d5";
@@ -43,12 +49,12 @@ impl RuntimeAsset {
         }
     }
 
-    pub(crate) fn mermaid_zenuml() -> Self {
+    pub(crate) fn zenuml_core() -> Self {
         Self {
-            kind: "mermaid-zenuml",
-            version: MERMAID_ZENUML_JS_VERSION,
-            filename: "mermaid-zenuml.min.js",
-            bytes: include_bytes!("../../vendor/mermaid-zenuml/0.2.2/mermaid-zenuml.min.js"),
+            kind: "zenuml-core",
+            version: ZENUML_CORE_JS_VERSION,
+            filename: "zenuml.js",
+            bytes: include_bytes!("../../vendor/zenuml-core/3.47.9/zenuml.js"),
         }
     }
 
@@ -90,17 +96,18 @@ fn runtime_asset_error(error: std::io::Error) -> String {
 mod tests {
     use super::{
         DRAWIO_JS_CHECKSUM, MERMAID_JS_CHECKSUM, MERMAID_ZENUML_JS_CHECKSUM, RuntimeAsset,
+        ZENUML_CORE_JS_CHECKSUM,
     };
 
     #[test]
     fn materialized_paths_are_versioned() {
         let mermaid = RuntimeAsset::mermaid().materialized_path();
-        let zenuml = RuntimeAsset::mermaid_zenuml().materialized_path();
         let drawio = RuntimeAsset::drawio().materialized_path();
+        let zenuml_core = RuntimeAsset::zenuml_core().materialized_path();
 
         assert!(mermaid.ends_with("vendor/mermaid/3.3.1/mermaid.min.js"));
-        assert!(zenuml.ends_with("vendor/mermaid-zenuml/0.2.2/mermaid-zenuml.min.js"));
         assert!(drawio.ends_with("vendor/drawio/29.7.10/drawio.min.js"));
+        assert!(zenuml_core.ends_with("vendor/zenuml-core/3.47.9/zenuml.js"));
     }
 
     #[test]
@@ -108,6 +115,7 @@ mod tests {
         assert_eq!(MERMAID_JS_CHECKSUM.len(), 64);
         assert_eq!(MERMAID_ZENUML_JS_CHECKSUM.len(), 64);
         assert_eq!(DRAWIO_JS_CHECKSUM.len(), 64);
+        assert_eq!(ZENUML_CORE_JS_CHECKSUM.len(), 64);
         assert!(MERMAID_JS_CHECKSUM.chars().all(|it| it.is_ascii_hexdigit()));
         assert!(
             MERMAID_ZENUML_JS_CHECKSUM
@@ -115,6 +123,11 @@ mod tests {
                 .all(|it| it.is_ascii_hexdigit())
         );
         assert!(DRAWIO_JS_CHECKSUM.chars().all(|it| it.is_ascii_hexdigit()));
+        assert!(
+            ZENUML_CORE_JS_CHECKSUM
+                .chars()
+                .all(|it| it.is_ascii_hexdigit())
+        );
     }
 
     #[test]

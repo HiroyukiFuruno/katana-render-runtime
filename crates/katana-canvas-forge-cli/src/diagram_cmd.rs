@@ -87,38 +87,42 @@ struct MermaidMarkdownOps;
 
 impl MermaidMarkdownOps {
     fn extract(source: String) -> String {
-        let mut lines = Vec::new();
-        let mut in_block = false;
+        let mut lines: Vec<&str> = Vec::new();
+        let mut block_lang: Option<&'static str> = None;
         for line in source.lines() {
-            if Self::starts_block(line) {
-                in_block = true;
+            if block_lang.is_none() {
+                block_lang = Self::starts_block(line);
                 continue;
             }
-            if in_block && Self::ends_block(line) {
-                return lines.join("\n");
+            if Self::ends_block(line) {
+                let content = lines.join("\n");
+                return if block_lang == Some("zenuml") {
+                    format!("zenuml\n{content}")
+                } else {
+                    content
+                };
             }
-            if in_block {
-                lines.push(line);
-            }
+            lines.push(line);
         }
         source
     }
 
-    fn starts_block(line: &str) -> bool {
+    fn starts_block(line: &str) -> Option<&'static str> {
         let trimmed = line.trim();
-        Self::starts_block_with(trimmed, b'`') || Self::starts_block_with(trimmed, b'~')
+        Self::language_of(trimmed, b'`').or_else(|| Self::language_of(trimmed, b'~'))
     }
 
-    fn starts_block_with(line: &str, marker: u8) -> bool {
+    fn language_of(line: &str, marker: u8) -> Option<&'static str> {
         let bytes = line.as_bytes();
         let marker_count = bytes.iter().take_while(|it| **it == marker).count();
         if marker_count < MIN_MARKDOWN_FENCE_MARKERS {
-            return false;
+            return None;
         }
-        line[marker_count..]
-            .split_whitespace()
-            .next()
-            .is_some_and(|language| language == "mermaid")
+        match line[marker_count..].split_whitespace().next() {
+            Some("mermaid") => Some("mermaid"),
+            Some("zenuml") => Some("zenuml"),
+            _ => None,
+        }
     }
 
     fn ends_block(line: &str) -> bool {

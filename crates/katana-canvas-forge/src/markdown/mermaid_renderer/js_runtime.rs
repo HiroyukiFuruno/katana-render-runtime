@@ -1,6 +1,6 @@
 use super::diagram_type::MermaidDiagramType;
 use super::js_runtime_scripts::MermaidRuntimeScripts;
-use super::zenuml_browser_runtime::ZenumlBrowserRenderOps;
+use super::zenuml_v8_runtime::ZenumlV8RenderOps;
 use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
 use std::collections::HashMap;
@@ -24,7 +24,7 @@ impl MermaidJsRuntimeOps {
     ) -> Result<String, String> {
         let request = MermaidRenderRequest::new(source, preset);
         if request.diagram_type == MermaidDiagramType::Zenuml {
-            return ZenumlBrowserRenderOps::render(source, mermaid_js, preset, request.svg_id);
+            return ZenumlV8RenderOps::render(source, preset, request.svg_id);
         }
         let bundle = read_mermaid_bundle(mermaid_js)?;
         let request_json = request.to_json_value().to_string();

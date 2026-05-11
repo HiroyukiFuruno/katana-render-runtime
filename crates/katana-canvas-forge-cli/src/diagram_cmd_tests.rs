@@ -9,6 +9,26 @@ fn extracts_mermaid_fence_from_markdown() {
 }
 
 #[test]
+fn extracts_zenuml_fence_and_prepends_zenuml_keyword() {
+    let source = "~~~zenuml\ntitle Flow\nA.method()\n~~~\n".to_string();
+    assert_eq!(
+        MermaidMarkdownOps::extract(source),
+        "zenuml\ntitle Flow\nA.method()"
+    );
+}
+
+#[test]
+fn extracts_zenuml_direct_fence_from_committed_fixture() {
+    let fixture =
+        include_str!("../../../tests/fixtures/mermaid/en/29-zenuml-direct.md").to_string();
+    let extracted = MermaidMarkdownOps::extract(fixture);
+    assert!(
+        extracted.starts_with("zenuml\n"),
+        "extracted source should start with 'zenuml\\n', got: {extracted:?}"
+    );
+}
+
+#[test]
 fn extracts_mermaid_fence_with_info_string_attributes() {
     let source = "``` mermaid title=\"flow\"\ngraph TD; A-->B\n```\n".to_string();
     assert_eq!(MermaidMarkdownOps::extract(source), "graph TD; A-->B");
@@ -23,6 +43,12 @@ fn extracts_mermaid_fence_when_language_has_attributes() {
 #[test]
 fn keeps_source_when_mermaid_fence_is_not_closed() {
     let source = "```mermaid\ngraph TD; A-->B".to_string();
+    assert_eq!(MermaidMarkdownOps::extract(source.clone()), source);
+}
+
+#[test]
+fn unknown_fence_language_passes_through_as_source() {
+    let source = "```javascript\nconsole.log('hi')\n```\n".to_string();
     assert_eq!(MermaidMarkdownOps::extract(source.clone()), source);
 }
 

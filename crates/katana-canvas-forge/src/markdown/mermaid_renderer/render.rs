@@ -81,7 +81,7 @@ impl MermaidRenderOps {
         mode: DiagramRuntimeMode,
     ) -> PathBuf {
         let mut hasher = DefaultHasher::new();
-        "mermaid-render-theme-v123-zenuml-png-wrapper".hash(&mut hasher);
+        "mermaid-render-theme-v124-zenuml-v8-renderer".hash(&mut hasher);
         mode.mermaid_cache_profile().hash(&mut hasher);
         source.hash(&mut hasher);
         preset.mermaid_theme.hash(&mut hasher);

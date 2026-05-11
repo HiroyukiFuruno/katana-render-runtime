@@ -25,7 +25,7 @@ fn fake_bundle_renders_svg_and_rejects_non_svg_output() {
 }
 
 #[test]
-fn zenuml_source_uses_browser_renderer_from_mermaid_surface() {
+fn zenuml_source_uses_v8_renderer_from_mermaid_surface() {
     let mermaid = RuntimeAsset::mermaid();
     let rendered = mermaid
         .materialize_at(mermaid.materialized_path())
@@ -37,16 +37,14 @@ fn zenuml_source_uses_browser_renderer_from_mermaid_surface() {
             )
         });
 
-    assert_zenuml_png_wrapper_svg(&rendered);
+    assert_zenuml_v8_svg(&rendered);
 }
 
-fn assert_zenuml_png_wrapper_svg(rendered: &Result<String, String>) {
+fn assert_zenuml_v8_svg(rendered: &Result<String, String>) {
     assert!(
         rendered
             .as_ref()
-            .is_ok_and(|svg| ["viewBox=", "width=\"1520\""]
-                .iter()
-                .all(|expected| svg.contains(expected))),
+            .is_ok_and(|svg| svg.contains("<svg") && svg.contains("viewBox=")),
         "{rendered:?}"
     );
     assert!(
@@ -58,7 +56,7 @@ fn assert_zenuml_png_wrapper_svg(rendered: &Result<String, String>) {
     assert!(
         rendered
             .as_ref()
-            .is_ok_and(|svg| svg.contains("<image") && svg.contains("data:image/png;base64,")),
+            .is_ok_and(|svg| !svg.contains("data:image/png;base64,")),
         "{rendered:?}"
     );
 }
