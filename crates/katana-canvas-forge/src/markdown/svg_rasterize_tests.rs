@@ -1,6 +1,10 @@
 use super::{
     RasterTarget, SvgRasterizeOps, effective_scale, parse_light_dark_function, rasterizer_options,
 };
+use crate::markdown::color_preset::DiagramColorPreset;
+use crate::markdown::mermaid_renderer::MermaidRenderOps;
+use crate::markdown::runtime_assets::RuntimeAsset;
+use crate::markdown::{DiagramBlock, DiagramKind, DiagramResult};
 
 #[test]
 fn rasterize_svg_returns_pixels_for_simple_svg() {
@@ -40,6 +44,45 @@ fn preprocess_handles_foreign_objects_entities_and_light_dark_colors() {
     );
     assert_eq!(parse_light_dark_function("#123"), None);
     assert!(effective_scale(10.0, 10.0, -1.0).is_sign_positive());
+}
+
+#[test]
+fn zenuml_output_rasterizes_to_non_blank_image() {
+    let Ok(svg) = render_zenuml_test_svg() else {
+        return;
+    };
+    let image = SvgRasterizeOps::rasterize_svg(&svg, 1.0);
+    assert!(
+        image.as_ref().is_ok_and(|it| !it.rgba.is_empty()),
+        "Rasterization failed: {image:?}"
+    );
+    assert!(
+        image.as_ref().is_ok_and(|img| {
+            !img.rgba
+                .chunks_exact(4)
+                .all(|p| p[0] == 255 && p[1] == 255 && p[2] == 255)
+        }),
+        "Rasterized image is all white"
+    );
+}
+
+fn render_zenuml_test_svg() -> Result<String, ()> {
+    let mermaid = RuntimeAsset::mermaid();
+    let mermaid_js = mermaid
+        .materialize_at(mermaid.materialized_path())
+        .map_err(|_| ())?;
+    let block = DiagramBlock {
+        kind: DiagramKind::Mermaid,
+        source: "zenuml\ntitle Test\nA.method()".to_string(),
+    };
+    let DiagramResult::Ok(svg) = MermaidRenderOps::render_mermaid_with_runtime_path(
+        &block,
+        &mermaid_js,
+        DiagramColorPreset::dark(),
+    ) else {
+        return Err(());
+    };
+    Ok(svg)
 }
 
 #[test]

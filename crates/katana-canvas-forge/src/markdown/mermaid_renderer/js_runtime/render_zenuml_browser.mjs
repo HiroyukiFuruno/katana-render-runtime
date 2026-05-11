@@ -72,8 +72,8 @@ function installStorage(page) {
   });
 }
 
-function renderZenuml(page, value) {
-  return page.evaluate(async (request) => {
+async function renderZenuml(page, value) {
+  await page.evaluate(async (request) => {
     const mermaidValue = window.mermaid;
     const zenumlDiagram = window["mermaid-zenuml"];
     if (!zenumlDiagram) {
@@ -105,7 +105,8 @@ function renderZenuml(page, value) {
     });
     await mermaidValue.registerExternalDiagrams([zenumlDiagram]);
     const result = await mermaidValue.render(request.svgId, request.source);
-    return normalizeSvgMetadata(result.svg);
+    const svg = normalizeSvgMetadata(result.svg);
+    document.getElementById("diagram").innerHTML = svg;
 
     function normalizeSvgMetadata(svg) {
       const pageStyle = zenumlPageStyle();
@@ -188,4 +189,14 @@ function renderZenuml(page, value) {
       return Number.isFinite(value) && value > 0 ? Math.ceil(value) : null;
     }
   }, value);
+
+  const bbox = await page.locator("#diagram").boundingBox();
+  if (!bbox || bbox.width <= 0 || bbox.height <= 0) {
+    throw new Error("ZenUML bounding box is empty");
+  }
+  const png = await page.screenshot({ clip: bbox, type: "png" });
+  const base64 = Buffer.from(png).toString("base64");
+  const W = Math.ceil(bbox.width);
+  const H = Math.ceil(bbox.height);
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><image xlink:href="data:image/png;base64,${base64}" width="${W}" height="${H}"/></svg>`;
 }

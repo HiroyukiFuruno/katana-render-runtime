@@ -5,7 +5,7 @@ Mermaid の ZenUML diagram を kcf の通常描画・参照生成・比較評価
 ## Requirements
 ### Requirement: ZenUML diagram を描画しなければならない
 
-システムは、Mermaid コードブロック内の diagram type が `zenuml` の場合、ZenUML 対応JSを使って SVG を描画しなければならない（MUST）。`zenuml` を未対応 fixture として score 対象から外してはならない（MUST NOT）。
+システムは、Mermaid コードブロック内の diagram type が `zenuml` の場合、ZenUML 対応JSを使って SVG を描画しなければならない（MUST）。`zenuml` を未対応 fixture として score 対象から外してはならない（MUST NOT）。描画結果の SVG は `<foreignObject` を含んではならない（MUST NOT）。描画結果の SVG は `<image` 要素と `data:image/png;base64,` を含まなければならない（MUST）。
 
 #### Scenario: ZenUML fixture を描画する
 
@@ -14,6 +14,8 @@ Mermaid の ZenUML diagram を kcf の通常描画・参照生成・比較評価
 - **THEN** renderer は diagram type を `zenuml` と判定する
 - **THEN** renderer は ZenUML 対応JSを Mermaid runtime に登録する
 - **THEN** renderer は `UnknownDiagramError` を返さず SVG を生成する
+- **THEN** 生成された SVG に `<foreignObject` が含まれない
+- **THEN** 生成された SVG に `<image` と `data:image/png;base64,` が含まれる
 - **THEN** full compare は `28-zen-uml.md` を score 対象に含める
 
 ### Requirement: ZenUML 対応JSを固定 asset として管理しなければならない

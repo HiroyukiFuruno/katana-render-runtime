@@ -30,15 +30,28 @@ fn renders_zenuml_svg_through_browser_runtime() {
             )
         });
 
+    assert_zenuml_png_wrapper_svg(&rendered);
+}
+
+fn assert_zenuml_png_wrapper_svg(rendered: &Result<String, String>) {
     assert!(
-        rendered.as_ref().is_ok_and(|svg| [
-            "<foreignObject",
-            "Unit Test",
-            "viewBox=",
-            "width=\"1520\"",
-        ]
-        .iter()
-        .all(|expected| svg.contains(expected))),
+        rendered
+            .as_ref()
+            .is_ok_and(|svg| ["viewBox=", "width=\"1520\""]
+                .iter()
+                .all(|expected| svg.contains(expected))),
+        "{rendered:?}"
+    );
+    assert!(
+        rendered
+            .as_ref()
+            .is_ok_and(|svg| !svg.contains("<foreignObject")),
+        "{rendered:?}"
+    );
+    assert!(
+        rendered
+            .as_ref()
+            .is_ok_and(|svg| svg.contains("<image") && svg.contains("data:image/png;base64,")),
         "{rendered:?}"
     );
 }
