@@ -64,6 +64,7 @@ impl DrawioRendererOps {
     pub fn render_drawio_with_runtime_path(
         block: &DiagramBlock,
         drawio_js: &std::path::Path,
+        preset: &DiagramColorPreset,
     ) -> DiagramResult {
         if !drawio_js.exists() {
             return DiagramResult::NotInstalled {
@@ -73,7 +74,6 @@ impl DrawioRendererOps {
             };
         }
 
-        let preset = DiagramColorPreset::current();
         match DrawioJsRuntimeOps::render(&block.source, drawio_js, preset) {
             Ok(svg) => DiagramResult::Ok(svg),
             Err(error) => DiagramResult::Err {
@@ -98,6 +98,7 @@ mod tests {
         let result = DrawioRendererOps::render_drawio_with_runtime_path(
             &block,
             std::path::Path::new("target/kcf-tests/missing-drawio.min.js"),
+            crate::markdown::color_preset::DiagramColorPreset::current(),
         );
         assert!(matches!(result, DiagramResult::NotInstalled { .. }));
     }

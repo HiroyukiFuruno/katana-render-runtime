@@ -106,7 +106,7 @@ impl HtmlExportTemplate {
                 "#ffffff"
             }
         } else {
-            preset.background
+            preset.background.as_ref()
         }
     }
 

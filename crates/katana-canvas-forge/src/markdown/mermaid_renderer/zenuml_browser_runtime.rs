@@ -69,12 +69,12 @@ impl<'a> ZenumlBrowserRequest<'a> {
             mermaid_js: mermaid_js.to_string_lossy().into_owned(),
             zenuml_js: zenuml_js.to_string_lossy().into_owned(),
             svg_id,
-            theme: preset.mermaid_theme,
-            background: preset.background,
-            fill: preset.fill,
-            text: preset.text,
-            stroke: preset.stroke,
-            arrow: preset.arrow,
+            theme: preset.mermaid_theme.as_ref(),
+            background: preset.background.as_ref(),
+            fill: preset.fill.as_ref(),
+            text: preset.text.as_ref(),
+            stroke: preset.stroke.as_ref(),
+            arrow: preset.arrow.as_ref(),
         }
     }
 }

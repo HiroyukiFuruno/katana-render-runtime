@@ -1,3 +1,4 @@
+use katana_canvas_forge::markdown::color_preset::DiagramColorPreset;
 use katana_canvas_forge::markdown::drawio_renderer::DrawioRendererOps;
 use katana_canvas_forge::markdown::{DiagramBlock, DiagramKind, DiagramResult};
 use std::path::{Path, PathBuf};
@@ -25,6 +26,7 @@ fn returns_not_installed_without_drawio_js() -> TestResult<()> {
     let result = DrawioRendererOps::render_drawio_with_runtime_path(
         &drawio_block(SIMPLE_DRAWIO_XML),
         &missing_path,
+        DiagramColorPreset::current(),
     );
 
     match result {
@@ -62,6 +64,7 @@ fn fake_drawio_js_does_not_fallback_to_native_svg() -> TestResult<()> {
     let result = DrawioRendererOps::render_drawio_with_runtime_path(
         &drawio_block(SIMPLE_DRAWIO_XML),
         fake_runtime.path(),
+        DiagramColorPreset::current(),
     );
 
     assert!(matches!(result, DiagramResult::Err { .. }));
@@ -75,6 +78,7 @@ fn fake_drawio_js_can_render_svg_without_official_runtime() -> TestResult<()> {
     let result = DrawioRendererOps::render_drawio_with_runtime_path(
         &drawio_block(SIMPLE_DRAWIO_XML),
         fake_runtime.path(),
+        DiagramColorPreset::current(),
     );
 
     let DiagramResult::Ok(svg) = result else {
@@ -96,6 +100,7 @@ fn concurrent_drawio_renders_without_drawio_js() -> TestResult<()> {
                 let result = DrawioRendererOps::render_drawio_with_runtime_path(
                     &drawio_block(&source),
                     &runtime_path,
+                    DiagramColorPreset::current(),
                 );
                 assert!(matches!(result, DiagramResult::NotInstalled { .. }));
             })

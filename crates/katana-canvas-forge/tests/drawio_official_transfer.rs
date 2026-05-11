@@ -1,3 +1,4 @@
+use katana_canvas_forge::markdown::color_preset::DiagramColorPreset;
 use katana_canvas_forge::markdown::drawio_renderer::DrawioRendererOps;
 use katana_canvas_forge::markdown::{DiagramBlock, DiagramKind, DiagramResult};
 use std::path::PathBuf;
@@ -74,6 +75,7 @@ fn returns_not_installed_without_drawio_js() -> TestResult<()> {
     let result = DrawioRendererOps::render_drawio_with_runtime_path(
         &drawio_block(SIMPLE_DRAWIO_XML),
         &missing_path,
+        DiagramColorPreset::current(),
     );
 
     assert!(matches!(result, DiagramResult::NotInstalled { .. }));
@@ -87,6 +89,7 @@ fn render_with_official_drawio_js(source: &str) -> TestResult<DiagramResult> {
     Ok(DrawioRendererOps::render_drawio_with_runtime_path(
         &drawio_block(source),
         &drawio_js,
+        DiagramColorPreset::current(),
     ))
 }
 

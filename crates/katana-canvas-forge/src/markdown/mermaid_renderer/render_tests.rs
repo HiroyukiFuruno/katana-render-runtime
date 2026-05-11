@@ -10,7 +10,11 @@ fn render_mermaid_uses_explicit_runtime_path() -> TestResult<()> {
     std::fs::write(&runtime, fake_mermaid_bundle())?;
 
     assert!(matches!(
-        MermaidRenderOps::render_mermaid_with_runtime_path(&block("graph TD; R-->S"), &runtime),
+        MermaidRenderOps::render_mermaid_with_runtime_path(
+            &block("graph TD; R-->S"),
+            &runtime,
+            DiagramColorPreset::current()
+        ),
         DiagramResult::Ok(svg) if svg.contains("<svg")
     ));
     Ok(())
@@ -22,18 +26,17 @@ fn render_with_runtime_path_handles_cache_and_runtime_errors() -> TestResult<()>
     std::fs::write(&runtime, fake_mermaid_bundle())?;
     let source = format!("graph TD; A{}-->B", std::process::id());
 
-    let first = MermaidRenderOps::render_mermaid_with_runtime_path(&block(&source), &runtime);
+    let first = render_with_current_preset(&source, &runtime);
     assert!(matches!(first, DiagramResult::Ok(svg) if svg.contains("<svg")));
 
     std::fs::write(&runtime, "globalThis.mermaid = {};")?;
-    let second = MermaidRenderOps::render_mermaid_with_runtime_path(&block(&source), &runtime);
+    let second = render_with_current_preset(&source, &runtime);
     assert!(matches!(second, DiagramResult::Ok(svg) if svg.contains("<svg")));
 
     let invalid_runtime = fake_mermaid_runtime("invalid");
     std::fs::write(&invalid_runtime, "globalThis.mermaid = {};")?;
     let error_source = format!("graph TD; E{}-->F", std::process::id());
-    let failed =
-        MermaidRenderOps::render_mermaid_with_runtime_path(&block(&error_source), &invalid_runtime);
+    let failed = render_with_current_preset(&error_source, &invalid_runtime);
     assert!(matches!(failed, DiagramResult::Err { error, .. } if !error.is_empty()));
     Ok(())
 }
@@ -42,11 +45,19 @@ fn render_with_runtime_path_handles_cache_and_runtime_errors() -> TestResult<()>
 fn render_reports_missing_and_empty_inputs_without_runtime() {
     let missing = std::path::Path::new("target/kcf-tests/missing-mermaid.min.js");
     assert!(matches!(
-        MermaidRenderOps::render_mermaid_with_runtime_path(&block("graph TD; A-->B"), missing),
+        MermaidRenderOps::render_mermaid_with_runtime_path(
+            &block("graph TD; A-->B"),
+            missing,
+            DiagramColorPreset::current()
+        ),
         DiagramResult::NotInstalled { .. }
     ));
     assert!(matches!(
-        MermaidRenderOps::render_mermaid_with_runtime_path(&block(" \n\t"), missing),
+        MermaidRenderOps::render_mermaid_with_runtime_path(
+            &block(" \n\t"),
+            missing,
+            DiagramColorPreset::current()
+        ),
         DiagramResult::Ok(svg) if svg.is_empty()
     ));
 }
@@ -116,6 +127,14 @@ fn block(source: &str) -> DiagramBlock {
         kind: DiagramKind::Mermaid,
         source: source.to_string(),
     }
+}
+
+fn render_with_current_preset(source: &str, runtime: &std::path::Path) -> DiagramResult {
+    MermaidRenderOps::render_mermaid_with_runtime_path(
+        &block(source),
+        runtime,
+        DiagramColorPreset::current(),
+    )
 }
 
 fn fake_mermaid_runtime(name: &str) -> std::path::PathBuf {

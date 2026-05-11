@@ -105,6 +105,6 @@ ZenUML 判定時に、取り込んだJSを Mermaid runtime に登録してから
 - [x] 5.1 `just mermaid-compare-full` を実行する
 - [x] 5.2 `just check` を実行する
 - [x] 5.3 `git diff --check` を実行する
-- [ ] 5.4 PR 作成後に `@codex review` を依頼する
+- [x] 5.4 PR 作成後に `@codex review` を依頼する
 - [x] 5.5 `npx -y @fission-ai/openspec validate "v0-1-2-mermaid-zenuml-fixture-support" --strict` を実行する
 - [x] 5.6 `just VERSION=v0.1.2 release-check` を実行する

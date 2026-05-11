@@ -14,6 +14,6 @@ mod system;
 
 pub use renderer::{
     DiagramKind, DrawioRenderer, MermaidRenderer, RenderConfig, RenderContext, RenderDiagnostics,
-    RenderError, RenderInput, RenderOutput, RenderPolicy, Renderer, RendererProfile,
-    RuntimePathResolver, RuntimeVersion,
+    RenderError, RenderInput, RenderOutput, RenderPolicy, RenderThemeMode, RenderThemeSnapshot,
+    Renderer, RendererProfile, RuntimePathResolver, RuntimeVersion,
 };

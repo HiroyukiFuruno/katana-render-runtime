@@ -21,7 +21,8 @@ npx -y @fission-ai/openspec <command>
 - `/openspec-verify-change` が PASS している。
 - `tasks.md` の実装タスクがすべて `[x]` になっている。
 - 必要な品質ゲートが通っている。
-- PR 統合が必要な変更では、統合済みである。
+- PR 統合が必要な通常変更では、統合済みである。
+- `release/vX.Y.Z` ブランチで release PR に archive 移動を含める場合は、PR 作成前の archive を許可する。
 
 ## 手順
 
@@ -76,5 +77,6 @@ npx -y @fission-ai/openspec <command>
 ## 禁止
 
 - 未完了タスクを archive で隠さない。
-- PR 統合前提の変更を未統合のまま archive しない。
+- 通常変更では PR 統合前提の変更を未統合のまま archive しない。
+- release PR では、実装・検証が完了した change を PR 作成前に archive へ移動する。
 - ユーザーの承認なしに強制 archive しない。

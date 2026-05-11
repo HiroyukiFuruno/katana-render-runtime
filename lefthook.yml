@@ -21,3 +21,10 @@ pre-push:
     release-verify:
       glob: "{*.rs,*.toml,*.lock,Justfile}"
       run: just release-verify
+
+pre-pr:
+  commands:
+    release-openspec-archive:
+      run: bash scripts/release/check-openspec-release-archive.sh
+      only:
+        - ref: release/v*

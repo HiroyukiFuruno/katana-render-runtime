@@ -95,6 +95,19 @@ fn request_id_changes_with_theme_and_source() {
     assert_ne!(dark.svg_id, other.svg_id);
 }
 
+#[test]
+fn request_fields_come_from_preset_not_global_state() {
+    DiagramColorPreset::set_dark_mode(true);
+    let request = MermaidRenderRequest::new("graph TD; A-->B", DiagramColorPreset::light());
+
+    assert_eq!(request.theme, "default");
+    assert_eq!(request.background, "transparent");
+    assert_eq!(request.fill, "#fff2cc");
+    assert_eq!(request.text, "#333333");
+    assert_eq!(request.stroke, "#d6b656");
+    assert_eq!(request.arrow, "#555555");
+}
+
 fn fake_bundle() -> &'static str {
     r#"
 globalThis.mermaid = {

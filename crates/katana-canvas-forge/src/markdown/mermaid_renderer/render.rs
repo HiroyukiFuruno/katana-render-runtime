@@ -17,6 +17,7 @@ impl MermaidRenderOps {
     pub fn render_mermaid_with_runtime_path(
         block: &DiagramBlock,
         mermaid_js: &Path,
+        preset: &DiagramColorPreset,
     ) -> DiagramResult {
         if block.source.trim().is_empty() {
             return DiagramResult::Ok(String::new());
@@ -30,7 +31,6 @@ impl MermaidRenderOps {
             };
         }
 
-        let preset = DiagramColorPreset::current();
         let mode = DiagramRuntimeMode::current();
         let cache_file = Self::cache_file_path(&block.source, preset, mode);
         Self::render_mermaid_with_cache_file(block, mermaid_js, preset, &cache_file)

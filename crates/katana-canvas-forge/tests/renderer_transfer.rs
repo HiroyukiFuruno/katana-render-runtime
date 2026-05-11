@@ -69,6 +69,7 @@ fn render_input_keeps_katana_adapter_relevant_fields() -> Result<(), Box<dyn std
         context: RenderContext {
             theme_fingerprint: Some("theme-v1".to_string()),
             document_id: Some("workspace-file".to_string()),
+            theme: None,
         },
     };
 

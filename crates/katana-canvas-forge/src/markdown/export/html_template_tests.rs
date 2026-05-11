@@ -18,8 +18,8 @@ fn generated_css_resolves_transparent_background_for_light_and_dark_presets() {
     let light_css = HtmlExportTemplate::generate_css(DiagramColorPreset::light());
     let dark_css = HtmlExportTemplate::generate_css(DiagramColorPreset::dark());
     let custom = DiagramColorPreset {
-        background: "#123456",
-        text: "#eeeeee",
+        background: "#123456".into(),
+        text: "#eeeeee".into(),
         ..DiagramColorPreset::default()
     };
     let custom_css = HtmlExportTemplate::generate_css(&custom);

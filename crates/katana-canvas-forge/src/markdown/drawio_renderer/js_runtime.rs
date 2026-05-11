@@ -39,8 +39,8 @@ impl<'a> DrawioRenderRequest<'a> {
     fn new(source: &'a str, preset: &'a DiagramColorPreset) -> Self {
         Self {
             source,
-            dark_mode: DiagramColorPreset::is_dark_mode(),
-            background: preset.background,
+            dark_mode: preset.dark_mode,
+            background: preset.background.as_ref(),
             resources: DrawioResourceCatalog::builtin(source),
         }
     }

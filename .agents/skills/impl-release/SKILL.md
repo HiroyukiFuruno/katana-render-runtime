@@ -57,8 +57,10 @@ git push -u origin release/vX.Y.Z
 ## Phase 4: PR 作成と cloud review
 
 `release/vX.Y.Z` から `master` へ取り込み依頼（Pull Request）を作成します。
+PR 作成前に、対象 version 以前の完了済み OpenSpec change を archive へ移動し、`lefthook run pre-pr` を通します。
 
 ```bash
+lefthook run pre-pr
 pr_url="$(gh pr create --base master --head release/vX.Y.Z --title "Prepare vX.Y.Z release" --body-file <pr-body-file>)"
 gh pr comment "${pr_url}" --body '@codex review'
 ```

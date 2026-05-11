@@ -35,10 +35,36 @@ pub struct RenderPolicy {
     pub cache_profile: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RenderThemeMode {
+    Light,
+    Dark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RenderThemeSnapshot {
+    pub mode: RenderThemeMode,
+    pub background: String,
+    pub text: String,
+    pub fill: String,
+    pub stroke: String,
+    pub arrow: String,
+    pub drawio_label_color: String,
+    pub mermaid_theme: String,
+    pub plantuml_class_bg: String,
+    pub plantuml_note_bg: String,
+    pub plantuml_note_text: String,
+    pub syntax_theme_dark: String,
+    pub syntax_theme_light: String,
+    pub preview_text: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RenderContext {
+    /// `theme` がある場合は描画と cache fingerprint の正とし、既存の文字列 fingerprint は識別補助として残す。
     pub theme_fingerprint: Option<String>,
     pub document_id: Option<String>,
+    pub theme: Option<RenderThemeSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

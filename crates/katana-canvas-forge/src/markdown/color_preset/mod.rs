@@ -2,6 +2,7 @@ pub mod dark;
 pub mod light;
 pub mod types;
 
+use crate::renderer::{RenderInput, RenderThemeMode, RenderThemeSnapshot};
 use std::sync::atomic::Ordering;
 pub use types::{DARK_MODE, DiagramColorPreset};
 
@@ -29,6 +30,37 @@ impl DiagramColorPreset {
             Self::dark()
         } else {
             Self::light()
+        }
+    }
+
+    pub(crate) fn for_render_input(input: &RenderInput) -> Self {
+        input
+            .context
+            .theme
+            .as_ref()
+            .map_or_else(|| Self::current().clone(), Self::from_theme_snapshot)
+    }
+
+    pub fn from_theme_snapshot(snapshot: &RenderThemeSnapshot) -> Self {
+        Self {
+            dark_mode: snapshot.mode == RenderThemeMode::Dark,
+            background: snapshot.background.clone().into(),
+            text: snapshot.text.clone().into(),
+            fill: snapshot.fill.clone().into(),
+            stroke: snapshot.stroke.clone().into(),
+            arrow: snapshot.arrow.clone().into(),
+            drawio_label_color: snapshot.drawio_label_color.clone().into(),
+            mermaid_theme: snapshot.mermaid_theme.clone().into(),
+            plantuml_class_bg: snapshot.plantuml_class_bg.clone().into(),
+            plantuml_note_bg: snapshot.plantuml_note_bg.clone().into(),
+            plantuml_note_text: snapshot.plantuml_note_text.clone().into(),
+            syntax_theme_dark: snapshot.syntax_theme_dark.clone().into(),
+            syntax_theme_light: snapshot.syntax_theme_light.clone().into(),
+            preview_text: snapshot.preview_text.clone().into(),
+            proportional_font_candidates: Self::default_proportional_fonts(),
+            monospace_font_candidates: Self::default_monospace_fonts(),
+            emoji_font_candidates: Self::default_emoji_fonts(),
+            editor_font_size: Self::DEFAULT_EDITOR_FONT_SIZE,
         }
     }
 
@@ -105,6 +137,13 @@ impl DiagramColorPreset {
 #[cfg(test)]
 mod tests {
     use super::DiagramColorPreset;
+    use crate::renderer::{
+        DiagramKind, RenderConfig, RenderContext, RenderInput, RenderPolicy, RenderThemeMode,
+        RenderThemeSnapshot,
+    };
+    use std::sync::{Mutex, MutexGuard};
+
+    static MODE_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn light_and_dark_presets_keep_katana_theme_names() {
@@ -122,6 +161,7 @@ mod tests {
 
     #[test]
     fn current_tracks_dark_mode_and_default_font_lists_are_populated() {
+        let _guard = mode_guard();
         DiagramColorPreset::set_dark_mode(true);
         assert_eq!(DiagramColorPreset::current().mermaid_theme, "dark");
         DiagramColorPreset::set_dark_mode(false);
@@ -129,5 +169,77 @@ mod tests {
         assert!(!DiagramColorPreset::default_proportional_fonts().is_empty());
         assert!(!DiagramColorPreset::default_monospace_fonts().is_empty());
         assert!(!DiagramColorPreset::default_emoji_fonts().is_empty());
+    }
+
+    #[test]
+    fn for_render_input_prefers_render_input_theme_over_global_state() {
+        let _guard = mode_guard();
+        DiagramColorPreset::set_dark_mode(true);
+        let preset = DiagramColorPreset::for_render_input(&input(Some(light_snapshot())));
+
+        assert!(!preset.dark_mode);
+        assert_eq!(preset.mermaid_theme, "default");
+        assert_eq!(preset.text, "#333333");
+    }
+
+    #[test]
+    fn for_render_input_falls_back_to_global_state() {
+        let _guard = mode_guard();
+        DiagramColorPreset::set_dark_mode(true);
+        let preset = DiagramColorPreset::for_render_input(&input(None));
+
+        assert!(preset.dark_mode);
+        assert_eq!(preset.mermaid_theme, "dark");
+    }
+
+    #[test]
+    fn mode_guard_accepts_poisoned_lock() {
+        let poison = std::panic::catch_unwind(|| {
+            let _guard = mode_guard();
+            std::panic::resume_unwind(Box::new("poison mode guard"));
+        });
+
+        assert!(poison.is_err());
+        let _guard = mode_guard();
+    }
+
+    fn input(theme: Option<RenderThemeSnapshot>) -> RenderInput {
+        RenderInput {
+            kind: DiagramKind::Mermaid,
+            source: "graph TD; A-->B".to_string(),
+            config: RenderConfig::default(),
+            policy: RenderPolicy::default(),
+            context: RenderContext {
+                theme_fingerprint: None,
+                document_id: None,
+                theme,
+            },
+        }
+    }
+
+    fn light_snapshot() -> RenderThemeSnapshot {
+        RenderThemeSnapshot {
+            mode: RenderThemeMode::Light,
+            background: "transparent".to_string(),
+            text: "#333333".to_string(),
+            fill: "#fff2cc".to_string(),
+            stroke: "#d6b656".to_string(),
+            arrow: "#555555".to_string(),
+            drawio_label_color: "#333333".to_string(),
+            mermaid_theme: "default".to_string(),
+            plantuml_class_bg: "#FEFECE".to_string(),
+            plantuml_note_bg: "#FBFB77".to_string(),
+            plantuml_note_text: "#333333".to_string(),
+            syntax_theme_dark: "base16-ocean.dark".to_string(),
+            syntax_theme_light: "InspiredGitHub".to_string(),
+            preview_text: "#333333".to_string(),
+        }
+    }
+
+    fn mode_guard() -> MutexGuard<'static, ()> {
+        match MODE_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(error) => error.into_inner(),
+        }
     }
 }

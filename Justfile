@@ -97,8 +97,12 @@ release-verify: check coverage
     bash scripts/release/verify-crate-size.sh katana-canvas-forge "{{VERSION}}"
     {{CARGO}} publish -p katana-canvas-forge --dry-run --locked --allow-dirty
 
+# Verify completed OpenSpec changes are archived before release PRs
+release-openspec-archive:
+    bash scripts/release/check-openspec-release-archive.sh "{{VERSION}}"
+
 # Verify release branch readiness before merging
-release-check: release-verify
+release-check: release-openspec-archive release-verify
     bash scripts/release/assert-crates-not-published.sh "{{VERSION}}"
 
 # Install Playwright Chromium for official Mermaid / Draw.io reference rendering

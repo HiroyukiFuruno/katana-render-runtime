@@ -51,12 +51,12 @@ impl<'a> MermaidRenderRequest<'a> {
         Self {
             source,
             svg_id: Self::svg_id(source, preset),
-            theme: preset.mermaid_theme,
-            background: preset.background,
-            fill: preset.fill,
-            text: preset.text,
-            stroke: preset.stroke,
-            arrow: preset.arrow,
+            theme: preset.mermaid_theme.as_ref(),
+            background: preset.background.as_ref(),
+            fill: preset.fill.as_ref(),
+            text: preset.text.as_ref(),
+            stroke: preset.stroke.as_ref(),
+            arrow: preset.arrow.as_ref(),
             diagram_type: MermaidDiagramType::from_source(source),
         }
     }

@@ -1,6 +1,6 @@
 use super::{
-    DrawioJsRuntimeOps, RuntimeBundleCache, ensure_svg, lock_cache, read_drawio_bundle,
-    read_drawio_bundle_with_cache, rendered_svg,
+    DrawioJsRuntimeOps, DrawioRenderRequest, RuntimeBundleCache, ensure_svg, lock_cache,
+    read_drawio_bundle, read_drawio_bundle_with_cache, rendered_svg,
 };
 use crate::markdown::color_preset::DiagramColorPreset;
 use std::collections::HashMap;
@@ -60,6 +60,15 @@ fn render_reports_missing_bundle_through_surface_path() {
     );
 
     assert!(result.is_err());
+}
+
+#[test]
+fn request_fields_come_from_preset_not_global_state() {
+    DiagramColorPreset::set_dark_mode(true);
+    let request = DrawioRenderRequest::new("<mxGraphModel />", DiagramColorPreset::light());
+
+    assert!(!request.dark_mode);
+    assert_eq!(request.background, "transparent");
 }
 
 #[test]

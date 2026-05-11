@@ -1,3 +1,4 @@
+use katana_canvas_forge::markdown::color_preset::DiagramColorPreset;
 use katana_canvas_forge::markdown::mermaid_renderer;
 use katana_canvas_forge::markdown::svg_rasterize::SvgRasterizeOps;
 use katana_canvas_forge::markdown::{DiagramBlock, DiagramKind, DiagramResult};
@@ -32,6 +33,7 @@ fn returns_not_installed_when_mermaid_js_is_missing() -> TestResult<()> {
     let result = mermaid_renderer::MermaidRenderOps::render_mermaid_with_runtime_path(
         &mermaid_block(),
         &missing_path,
+        DiagramColorPreset::current(),
     );
 
     match result {
@@ -170,8 +172,11 @@ fn render_svg(source: String) -> TestResult<String> {
         kind: DiagramKind::Mermaid,
         source,
     };
-    match mermaid_renderer::MermaidRenderOps::render_mermaid_with_runtime_path(&block, &mermaid_js)
-    {
+    match mermaid_renderer::MermaidRenderOps::render_mermaid_with_runtime_path(
+        &block,
+        &mermaid_js,
+        DiagramColorPreset::current(),
+    ) {
         DiagramResult::Ok(svg) => Ok(svg),
         other => Err(test_error(format!(
             "Expected Mermaid SVG rendering, got {other:?}"

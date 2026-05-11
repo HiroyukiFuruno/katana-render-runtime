@@ -1,6 +1,7 @@
 use super::api::{DiagramKind, RenderError, RenderInput, RenderOutput, Renderer};
 use super::output::RenderOutputFactory;
 use super::runtime::RuntimeDescriptor;
+use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::{
     DiagramBlock, drawio_renderer::DrawioRendererOps, mermaid_renderer::MermaidRenderOps,
 };
@@ -36,7 +37,8 @@ impl MermaidRenderer {
             kind: crate::markdown::DiagramKind::Mermaid,
             source: input.source.clone(),
         };
-        MermaidRenderOps::render_mermaid_with_runtime_path(&block, &self.runtime_path)
+        let preset = DiagramColorPreset::for_render_input(input);
+        MermaidRenderOps::render_mermaid_with_runtime_path(&block, &self.runtime_path, &preset)
     }
 }
 
@@ -70,7 +72,8 @@ impl DrawioRenderer {
             kind: crate::markdown::DiagramKind::DrawIo,
             source: input.source.clone(),
         };
-        DrawioRendererOps::render_drawio_with_runtime_path(&block, &self.runtime_path)
+        let preset = DiagramColorPreset::for_render_input(input);
+        DrawioRendererOps::render_drawio_with_runtime_path(&block, &self.runtime_path, &preset)
     }
 }
 
