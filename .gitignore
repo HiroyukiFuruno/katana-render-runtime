@@ -7,3 +7,7 @@ Cargo.lock.bak
 .vscode/
 *.swp
 node_modules
+
+# openspec skills
+**/openspec-*/*.md
+**/opsx-*/*.md
