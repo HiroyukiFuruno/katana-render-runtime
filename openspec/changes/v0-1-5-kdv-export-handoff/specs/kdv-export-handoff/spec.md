@@ -2,11 +2,11 @@
 
 ### Requirement: KCFは旧export/debug品質ゲートをKDVへ移譲しなければならない
 
-システムは、旧 `release/v0.1.3` のHTML / PDF / PNG / JPG export、README相対パス解決、file path入力、macOS debug openをKDVへ移譲しなければならない（MUST）。
+システムは、旧 export/debug 実装 branch のHTML / PDF / PNG / JPG export、README相対パス解決、file path入力、macOS debug openをKDVへ移譲しなければならない（MUST）。
 
 #### Scenario: 旧release branchを扱う
 
-- **WHEN** 開発者が旧 `release/v0.1.3` の内容を確認する
+- **WHEN** 開発者が旧 export/debug 実装 branch の内容を確認する
 - **THEN** KCF masterへそのままmergeしない
 - **THEN** export/debugに関する論点をKDV側OpenSpecへ移譲する
 - **THEN** KCF側には移譲記録だけを残す

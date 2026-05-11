@@ -1,6 +1,6 @@
 ## Why
 
-v0.1.0 から v0.1.6 までで、KCF は Mermaid / Draw.io の外部描画、runtime asset、reference score、KDV移譲記録へ責務を絞る。
+v0.1.0 から v0.1.5 までで、KCF は Mermaid / Draw.io の外部描画、runtime asset、reference score、KDV移譲記録へ責務を絞る。
 
 v0.2.0 では、KCFが引き続き所有する render / score / reference 更新を、library 内部の実装に留めず、利用者が install して実行できる CLI として公開する。CLI は library の薄い利用者に限定し、KatanA 固有 state を持たない generic tool として提供する。
 

@@ -1,16 +1,19 @@
-# Tasks: katana-canvas-forge v0.1.3 Mermaid ZenUML rendering
+# Tasks: katana-canvas-forge v0.1.2 Mermaid ZenUML rendering
 
 ## Branch Rule
 
-- **標準ブランチ**: `release/v0.1.3`
-- **作業ブランチ**: `feature/v0.1.3-task-x`
+- **標準ブランチ**: `release/v0.1.2`
+- **作業ブランチ**: `feature/v0.1.2-task-x`
 
 ---
 
 ## User Feedback
 
-- [/] 未対応扱いを完了条件にしない。ZenUML は対応JSを取り込み、描画に使うことを v0.1.3 の完了条件にする。
+- [/] 未対応扱いを完了条件にしない。ZenUML は対応JSを取り込み、描画に使うことを v0.1.2 の完了条件にする。
 - [/] コードブロックの構文木（AST）から種類を判定し、`zenuml` なら取り込んだJSを使う実装方針にする。
+- [/] latest が v0.1.1 のため、この release change を v0.1.2 に調整する。
+- [/] export-css-debug は要件変更により不要になったため、active spec から外す。
+- [/] PR review の P1 指摘に対応し、CI の Playwright 依存を明示的に setup する。
 
 ---
 
@@ -102,4 +105,5 @@ ZenUML 判定時に、取り込んだJSを Mermaid runtime に登録してから
 - [x] 5.2 `just check` を実行する
 - [x] 5.3 `git diff --check` を実行する
 - [ ] 5.4 PR 作成後に `@codex review` を依頼する
-- [x] 5.5 `npx -y @fission-ai/openspec validate "v0-1-3-mermaid-zenuml-fixture-support" --strict` を実行する
+- [x] 5.5 `npx -y @fission-ai/openspec validate "v0-1-2-mermaid-zenuml-fixture-support" --strict` を実行する
+- [x] 5.6 `just VERSION=v0.1.2 release-check` を実行する

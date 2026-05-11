@@ -8,7 +8,7 @@ Mermaid full compare は `28-zen-uml.md` で失敗している。
 - `tests/fixtures/mermaid/ja/28-zen-uml.md`
 - `UnknownDiagramError`
 
-ZenUML は Mermaid 本体だけでは描画されず、ZenUML 対応JSを取り込み、Mermaid runtime に外部 diagram として登録する必要がある。v0.1.3 は未対応扱いを完了条件にしない。コードブロックの構文木（AST）から `zenuml` を判定し、取り込んだJSを使って描画する change である。
+ZenUML は Mermaid 本体だけでは描画されず、ZenUML 対応JSを取り込み、Mermaid runtime に外部 diagram として登録する必要がある。v0.1.2 は未対応扱いを完了条件にしない。コードブロックの構文木（AST）から `zenuml` を判定し、取り込んだJSを使って描画する change である。
 
 ## Goals
 
@@ -81,4 +81,4 @@ if (katanaMermaidDiagramType(preparedSource.source) === "zenuml") {
 - fallback SVG / stub PNG が追加されていない
 - `just check`
 - `just mermaid-compare-full`
-- `npx -y @fission-ai/openspec validate "v0-1-3-mermaid-zenuml-fixture-support" --strict`
+- `npx -y @fission-ai/openspec validate "v0-1-2-mermaid-zenuml-fixture-support" --strict`

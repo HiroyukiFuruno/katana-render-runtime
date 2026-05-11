@@ -141,4 +141,4 @@ pub fn render_mermaid_with_runtime_path(
 - `DiagramColorPreset::current()` の直接参照が renderer / fingerprint から無くなり、fallback path にだけ残る
 - `just check`
 - `just mermaid-compare-full` で score が悪化しない
-- `npx -y @fission-ai/openspec validate "v0-1-4-render-input-theme-application" --strict`
+- `npx -y @fission-ai/openspec validate "v0-1-3-render-input-theme-application" --strict`

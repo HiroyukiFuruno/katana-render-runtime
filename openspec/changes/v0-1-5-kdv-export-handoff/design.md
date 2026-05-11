@@ -2,11 +2,11 @@
 
 KCFは図形描画のlibraryであり、document viewerやexport pipelineのownerではない。KME / KDV / KatanAの分離後は、KCFが担うべき範囲は Mermaid / Draw.io の外部描画、runtime asset、reference scoreである。
 
-旧 `release/v0.1.3` は、利用側GUI品質ゲートを作るために export と viewer 的な機能まで含めた。しかし、その後の設計でKDVがviewer/exportを担うことになったため、KCFに同じ責務を残すと境界が崩れる。
+旧 export/debug 実装 branch は、利用側GUI品質ゲートを作るために export と viewer 的な機能まで含めた。しかし、その後の設計でKDVがviewer/exportを担うことになったため、KCFに同じ責務を残すと境界が崩れる。
 
 ## Handoff Policy
 
-旧 `release/v0.1.3` からKDVへ渡す論点:
+旧 export/debug 実装 branch からKDVへ渡す論点:
 
 - HTML / PDF / PNG / JPG export
 - README相対パス解決
@@ -31,7 +31,7 @@ KDV v0.1.0はMarkdown viewerとviewer/export共通pipelineを中心にし、HTML
 
 ## Branch Handling
 
-旧 `release/v0.1.3` branchは、KCF masterへmergeしない。必要な内容はKDV側OpenSpecへ移譲し、KCF側ではこのchangeを移譲記録として残す。
+旧 export/debug 実装 branch は、KCF masterへmergeしない。必要な内容はKDV側OpenSpecへ移譲し、KCF側ではこのchangeを移譲記録として残す。
 
 ## Verification
 

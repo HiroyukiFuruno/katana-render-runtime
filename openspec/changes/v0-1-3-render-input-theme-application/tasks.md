@@ -1,9 +1,9 @@
-# Tasks: katana-canvas-forge v0.1.4 RenderInput theme application
+# Tasks: katana-canvas-forge v0.1.3 RenderInput theme application
 
 ## Branch Rule
 
-- **標準ブランチ**: `release/v0.1.4`
-- **作業ブランチ**: `feature/v0.1.4-task-x`
+- **標準ブランチ**: `release/v0.1.3`
+- **作業ブランチ**: `feature/v0.1.3-task-x`
 
 ---
 
@@ -127,5 +127,5 @@ Issue #4 の症状（global が dark のとき light input が無視される）
 - [ ] 6.2 `just mermaid-compare-full` を実行する
 - [ ] 6.3 `git diff --check` を実行する
 - [ ] 6.4 PR 作成後に `@codex review` を依頼する
-- [ ] 6.5 `npx -y @fission-ai/openspec validate "v0-1-4-render-input-theme-application" --strict` を実行する
+- [ ] 6.5 `npx -y @fission-ai/openspec validate "v0-1-3-render-input-theme-application" --strict` を実行する
 - [ ] 6.6 KatanA v0.22.13 OpenSpec 側の adapter / 回帰テスト計画と整合していることを確認する

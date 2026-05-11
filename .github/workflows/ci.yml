@@ -145,6 +145,8 @@ jobs:
         with:
           tool: just
       - if: needs.changes.outputs.code == 'true'
+        run: just browser-install
+      - if: needs.changes.outputs.code == 'true'
         run: just unit-test
 
   dependency-leak:
@@ -208,5 +210,7 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         with:
           tool: cargo-llvm-cov
+      - if: needs.changes.outputs.code == 'true'
+        run: just browser-install
       - if: needs.changes.outputs.code == 'true'
         run: just coverage

@@ -1,5 +1,7 @@
 ## Context
 
+> Status: 要件変更により破棄済み。`v0.1.2` は Mermaid ZenUML / unsupported fixture handling に再割当する。
+
 v0.1.2 は、v0.1.0 transfer と v0.1.1 runtime asset version pinning の後続である。
 
 このフェーズでは、KDV移譲まで維持する既存exportで生成される PDF / PNG / JPEG に HTML の CSS が当たらない回帰を止める。特に `html, body { background: ...; color: ... }` のような selector list と、`background-color` ではなく `background` を使う指定を対象にする。

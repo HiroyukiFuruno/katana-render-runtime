@@ -2,7 +2,7 @@
 
 v0.1.0 の Mermaid full compare では `28-zen-uml.md` が `UnknownDiagramError` になった。
 
-原因は ZenUML が Mermaid 本体だけでは描画されず、ZenUML 対応JSを取り込み、Mermaid runtime に外部 diagram として登録していないことにある。v0.1.3 では `28-zen-uml.md` を未対応扱いにせず、コードブロックの構文木（AST）から Mermaid / ZenUML を判定し、取り込んだ ZenUML 対応JSで実際に描画する。
+原因は ZenUML が Mermaid 本体だけでは描画されず、ZenUML 対応JSを取り込み、Mermaid runtime に外部 diagram として登録していないことにある。v0.1.2 では `28-zen-uml.md` を未対応扱いにせず、コードブロックの構文木（AST）から Mermaid / ZenUML を判定し、取り込んだ ZenUML 対応JSで実際に描画する。
 
 ## What Changes
 
@@ -18,7 +18,7 @@ v0.1.0 の Mermaid full compare では `28-zen-uml.md` が `UnknownDiagramError`
 - v0.1.4 の Draw.io / Mermaid score 改善に混ぜない
 - Draw.io.js の version 固定は v0.1.1 に送る
 - ZenUML 対応に不要な Mermaid.js 本体の更新はしない
-- export CSS 回帰修正と macOS debug open はKDV移譲対象として v0.1.6 に送る
+- 不要になった export CSS debug 計画はKCF release番号から外し、旧 export/debug 論点は v0.1.5 のKDV移譲記録で扱う
 - fallback SVG で ZenUML を描けた扱いにしない
 - `28-zen-uml.md` を未対応 fixture として score 対象から外さない
 
@@ -36,4 +36,4 @@ v0.1.0 の Mermaid full compare では `28-zen-uml.md` が `UnknownDiagramError`
 - `crates/katana-canvas-forge/src/markdown/mermaid_renderer/` — ZenUML bridge script 読み込みと render 前登録
 - `tests/fixtures/mermaid/` — ZenUML fixture の参照SVG / PNG更新
 - `scripts/mermaid/` — 公式参照生成側でも ZenUML 対応JSを読み込む
-- `openspec/changes/v0-1-3-mermaid-zenuml-fixture-support/` — 本 change の仕様とタスク
+- `openspec/changes/v0-1-2-mermaid-zenuml-fixture-support/` — 本 change の仕様とタスク

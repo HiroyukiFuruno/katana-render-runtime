@@ -12,7 +12,7 @@
 - [x] Mermaid representative compare は 10 fixture を比較し、既存 score floor 付きで通過済み（minimum score 88.85）
 - [x] Draw.io representative compare は 20 fixture を比較し、`score-baseline.json` 付きで通過済み（minimum score 93.20）
 - [/] v0.1.0 は KatanA 側へまだ取り込まないため release し、full score 未達は v0.1.4 reference score improvement に送る方針を記録済み
-- [/] v0.1.x 後続要件として、v0.1.1 に runtime asset version pinning、v0.1.2 に export CSS 回帰修正と macOS debug open、v0.1.3 に Mermaid ZenUML / unsupported fixture handling、v0.1.4 に reference score improvement を置く方針を design.md に記録済み
+- [/] v0.1.x 後続要件として、v0.1.1 に runtime asset version pinning、v0.1.2 に Mermaid ZenUML / unsupported fixture handling、v0.1.3 に RenderInput theme application、v0.1.4 に reference score improvement、v0.1.5 にKDV export handoffを置く方針を design.md に記録済み
 - [/] 公式 reference SVG / PNG は git 管理し、CI/CD では再取得・再生成しない方針を proposal / design / spec に記録済み
 - [/] ローカルは全量評価、CI/CD は代表ケース評価、`basic` は疎通確認専用とする方針を proposal / design / spec に記録済み
 - [/] Justfile の `kcf-*` recipe 名は v0.1.0 公開前品質として整理済み

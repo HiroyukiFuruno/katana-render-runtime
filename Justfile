@@ -11,6 +11,7 @@ COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES
 MERMAID_JS_VERSION := "3.3.1"
 MERMAID_ZENUML_JS_VERSION := "0.2.2"
 DRAWIO_JS_VERSION := "29.7.10"
+PLAYWRIGHT_VERSION := "1.59.1"
 MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-canvas-forge/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
 MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-canvas-forge/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
 DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-canvas-forge/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
@@ -102,7 +103,8 @@ release-check: release-verify
 
 # Install Playwright Chromium for official Mermaid / Draw.io reference rendering
 browser-install:
-    playwright install chromium
+    @if ! command -v playwright >/dev/null 2>&1; then npm install --global "playwright@{{PLAYWRIGHT_VERSION}}"; fi
+    @if [[ "$(uname -s)" == "Linux" ]]; then playwright install --with-deps chromium; else playwright install chromium; fi
 
 # Show latest Mermaid.js and Draw.io versions without changing files
 runtime-asset-latest runtime='all':
