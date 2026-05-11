@@ -4,7 +4,7 @@
 
 設計整理により、KCF は Mermaid / Draw.io の図形描画（rendering）と reference score に専念する。viewer、document export、CSV、PDF、Office は KDV（katana-document-viewer）へ移譲する。
 
-v0.1.6 では、旧 export/debug 実装 branch の内容をKCFへ再取り込みしない。KDVへ渡すべき論点だけを記録し、KCF側には export や viewer rendering 依存を増やさない。
+v0.1.7 では、旧 export/debug 実装 branch の内容をKCFへ再取り込みしない。KDVへ渡すべき論点だけを記録し、KCF側には export や viewer rendering 依存を増やさない。
 
 ## What Changes
 
@@ -32,6 +32,6 @@ v0.1.6 では、旧 export/debug 実装 branch の内容をKCFへ再取り込み
 
 ## Impact
 
-- `openspec/changes/v0-1-6-kdv-export-handoff/` — KDV移譲記録
+- `openspec/changes/v0-1-7-kdv-export-handoff/` — KDV移譲記録
 - `katana-document-viewer` — HTML / PDF / PNG / JPG export、CSV / PDF / Office viewerの移譲先
 - 旧 export/debug 実装 branch — 参照用の履歴。KCF masterへそのまま取り込まない
