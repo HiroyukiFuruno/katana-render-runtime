@@ -38,7 +38,6 @@ jobs:
       - uses: taiki-e/install-action@v2.77.1
         with:
           tool: cargo-llvm-cov
-      - run: just browser-install
       - name: Resolve version
         id: version
         shell: bash
