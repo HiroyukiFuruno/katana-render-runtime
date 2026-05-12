@@ -1,4 +1,4 @@
-# Tasks: katana-canvas-forge v0.1.7 KDV export handoff
+# Tasks: katana-canvas-forge v0.1.8 KDV export handoff
 
 ## 1. Scope Baseline
 
@@ -23,6 +23,6 @@
 
 ## 4. Quality Gate
 
-- [ ] 4.1 `npx -y @fission-ai/openspec validate v0-1-7-kdv-export-handoff --strict` を実行する
+- [ ] 4.1 `npx -y @fission-ai/openspec validate v0-1-8-kdv-export-handoff --strict` を実行する
 - [ ] 4.2 `npx -y @fission-ai/openspec validate v0-2-0-cli-publication --strict` を実行する
 - [ ] 4.3 `npx -y @fission-ai/openspec validate v0-2-1-remove-kdv-migrated-export --strict` を実行する

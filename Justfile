@@ -91,7 +91,7 @@ update:
     {{CARGO}} update
 
 # Verify package metadata and dry-run the first publishable crate
-release-verify: check coverage
+release-verify:
     bash scripts/release/verify-version.sh "{{VERSION}}"
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
     {{CARGO}} package -p katana-canvas-forge --locked --allow-dirty

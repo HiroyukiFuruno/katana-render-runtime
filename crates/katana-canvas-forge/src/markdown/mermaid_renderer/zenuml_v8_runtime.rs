@@ -26,12 +26,12 @@ pub(super) struct ZenumlV8RenderOps;
 impl ZenumlV8RenderOps {
     pub(super) fn render(
         source: &str,
-        _preset: &DiagramColorPreset,
+        preset: &DiagramColorPreset,
         _svg_id: String,
     ) -> Result<String, String> {
         let zenuml_asset = RuntimeAsset::zenuml_core();
         let zenuml_bundle = materialize_and_read(&zenuml_asset)?;
-        let preamble = build_preamble(source);
+        let preamble = build_preamble(source, preset.dark_mode);
         let mut scripts = dom_scripts();
         scripts.push(DiagramRuntimeScript::owned("zenuml-preamble.js", preamble));
         scripts.push(DiagramRuntimeScript::owned("zenuml.js", zenuml_bundle));
@@ -74,9 +74,9 @@ fn read_asset_file(path: &std::path::Path) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| format!("Failed to read zenuml.js: {e}"))
 }
 
-fn build_preamble(source: &str) -> String {
+fn build_preamble(source: &str, is_dark: bool) -> String {
     let source_json = serde_json::Value::String(source.to_owned()).to_string();
-    format!("var __zenuml_source__ = {source_json};")
+    format!("var __zenuml_source__ = {source_json};\nvar __zenuml_dark__ = {is_dark};")
 }
 
 #[cfg(test)]

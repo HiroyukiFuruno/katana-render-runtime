@@ -81,7 +81,7 @@ impl MermaidRenderOps {
         mode: DiagramRuntimeMode,
     ) -> PathBuf {
         let mut hasher = DefaultHasher::new();
-        "mermaid-render-theme-v124-zenuml-v8-renderer".hash(&mut hasher);
+        "mermaid-render-theme-v125-zenuml-v8-renderer".hash(&mut hasher);
         mode.mermaid_cache_profile().hash(&mut hasher);
         source.hash(&mut hasher);
         preset.mermaid_theme.hash(&mut hasher);
@@ -90,6 +90,7 @@ impl MermaidRenderOps {
         preset.fill.hash(&mut hasher);
         preset.stroke.hash(&mut hasher);
         preset.arrow.hash(&mut hasher);
+        preset.dark_mode.hash(&mut hasher);
         std::env::temp_dir()
             .join("katana_mermaid_cache")
             .join(format!(

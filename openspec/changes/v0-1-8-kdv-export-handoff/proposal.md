@@ -32,6 +32,6 @@ v0.1.7 では、旧 export/debug 実装 branch の内容をKCFへ再取り込み
 
 ## Impact
 
-- `openspec/changes/v0-1-7-kdv-export-handoff/` — KDV移譲記録
+- `openspec/changes/v0-1-8-kdv-export-handoff/` — KDV移譲記録
 - `katana-document-viewer` — HTML / PDF / PNG / JPG export、CSV / PDF / Office viewerの移譲先
 - 旧 export/debug 実装 branch — 参照用の履歴。KCF masterへそのまま取り込まない
