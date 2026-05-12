@@ -55,10 +55,10 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-      - uses: taiki-e/install-action@v2.77.1
+      - uses: taiki-e/install-action@v2.77.6
         with:
           tool: just
-      - uses: taiki-e/install-action@v2.77.1
+      - uses: taiki-e/install-action@v2.77.6
         with:
           tool: cargo-llvm-cov
       - run: just browser-install
