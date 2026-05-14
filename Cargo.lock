@@ -781,14 +781,13 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "include_dir",
- "mathjax_svg",
  "resvg",
  "serde",
  "serde_json",
  "thiserror",
  "tiny-skia",
  "tracing",
- "v8 147.4.0",
+ "v8",
  "xmltree",
 ]
 
@@ -865,17 +864,6 @@ name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
-
-[[package]]
-name = "mathjax_svg"
-version = "3.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad495ba668b38f70fa36349e597df582caf9055949b1dde96cce646e67c93e1c"
-dependencies = [
- "anyhow",
- "thiserror",
- "v8 139.0.0",
-]
 
 [[package]]
 name = "memchr"
@@ -1596,22 +1584,6 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
-
-[[package]]
-name = "v8"
-version = "139.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a33ccf9cc537275d7bb848e94f160986164e2ea5138e60166551d115c7ea8f1a"
-dependencies = [
- "bindgen",
- "bitflags",
- "fslock",
- "gzip-header",
- "home",
- "miniz_oxide",
- "paste",
- "which",
-]
 
 [[package]]
 name = "v8"

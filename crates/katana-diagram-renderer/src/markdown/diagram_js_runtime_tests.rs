@@ -1,6 +1,4 @@
-use super::{
-    DiagramRuntimeScript, DiagramV8Runtime, exception_message, required, shared_runtime_init_result,
-};
+use super::{DiagramRuntimeScript, DiagramV8Runtime, exception_message, required};
 
 #[test]
 fn renders_plain_script_value() {
@@ -67,21 +65,18 @@ fn assert_runtime_error(
 fn exception_message_reports_empty_try_catch() {
     let _ = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed("init.js", "'ok'")]);
     let mut isolate = v8::Isolate::new(Default::default());
-    let handle_scope = &mut v8::HandleScope::new(&mut isolate);
+    v8::scope!(let handle_scope, &mut isolate);
     let context = v8::Context::new(handle_scope, Default::default());
-    let scope = &mut v8::ContextScope::new(handle_scope, context);
-    let scope = &mut v8::TryCatch::new(scope);
+    let context_scope = &mut v8::ContextScope::new(handle_scope, context);
+    v8::tc_scope!(let scope, &mut **context_scope);
 
     assert_eq!(exception_message(scope), "unknown V8 exception");
 }
 
 #[test]
-fn allocation_and_init_error_helpers_are_error_first() {
+fn allocation_helper_is_error_first() {
     let missing = required::<()>(None, "missing value");
-    let init = shared_runtime_init_result(Err("init failed"));
 
     assert!(matches!(missing, Err(message) if message == "missing value"));
-    assert!(matches!(init, Err(message) if message.contains("init failed")));
     assert!(required(Some("ok"), "missing").is_ok());
-    assert!(shared_runtime_init_result(Ok::<String, &str>("ok".to_string())).is_ok());
 }
