@@ -1,6 +1,6 @@
 ---
 name: create_pull_request
-description: katana-canvas-forge の Pull Request を、自己レビューと品質ゲート後に GitHub CLI で作る。base branch を文脈から確認し、PR 本文に検証結果を含める。
+description: katana-diagram-renderer の Pull Request を、自己レビューと品質ゲート後に GitHub CLI で作る。base branch を文脈から確認し、PR 本文に検証結果を含める。
 ---
 
 # Create Pull Request

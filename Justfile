@@ -1,11 +1,15 @@
 set shell := ["bash", "-uc"]
 
+REPO_ROOT := justfile_directory()
 RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)
 RTK_CMD := if RTK == "" { "" } else { RTK + " " }
 JOBS := env_var_or_default("JOBS", "2")
 export RUSTFLAGS := env_var_or_default("RUSTFLAGS", "-D warnings")
 CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")
 VERSION := env_var_or_default("VERSION", `awk -F '"' '/^version = / { print $2; exit }' Cargo.toml`)
+VERSION_BARE := replace(VERSION, "v", "")
+TAG := "v" + VERSION_BARE
+RELEASE_REPO := env_var_or_default("RELEASE_REPO", "HiroyukiFuruno/katana-diagram-renderer")
 COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
 MERMAID_JS_VERSION := "3.3.1"
@@ -121,8 +125,15 @@ update:
     {{CARGO}} upgrade -i
     {{CARGO}} update
 
+# Verify VERSION follows the remote release line
+release-target-check:
+    bash scripts/release/verify-version.sh "{{VERSION}}"
+    python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --repo "{{RELEASE_REPO}}"
+    bash scripts/release/assert-tag-safe.sh "{{TAG}}" origin
+    bash scripts/release/assert-crates-not-published.sh "{{VERSION}}"
+
 # Verify package metadata and dry-run the first publishable crate
-release-verify:
+release-verify: release-target-check
     bash scripts/release/verify-version.sh "{{VERSION}}"
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
     {{CARGO}} package -p katana-diagram-renderer --locked --allow-dirty
@@ -136,7 +147,6 @@ release-openspec-archive:
 
 # Verify release branch readiness before merging
 release-check: release-openspec-archive release-verify
-    bash scripts/release/assert-crates-not-published.sh "{{VERSION}}"
 
 # Install Playwright Chromium for official Mermaid / Draw.io reference rendering
 browser-install:

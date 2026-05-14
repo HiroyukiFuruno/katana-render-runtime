@@ -2,8 +2,30 @@ name: release-preflight
 
 on:
   pull_request:
-    branches: [main, master]
+    branches: [master]
+    paths:
+      - "**.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Justfile"
+      - "package.json"
+      - "bun.lock"
+      - "biome.json"
+      - "tsconfig.json"
+      - ".github/workflows/**"
+      - "README.md"
+      - "docs/**"
+      - "openspec/**"
+      - "scripts/**"
+      - "tests/**"
+      - "crates/**"
+      - "vendor/**"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example v0.1.0. Defaults to Cargo.toml version."
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -13,35 +35,63 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release-preflight:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+  preflight:
+    name: preflight
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Skip non-release pull request
+        if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release/v')
+        run: echo "release-preflight is skipped for non-release pull requests."
+
+      - name: Checkout
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
-          components: clippy, rustfmt
-      - uses: actions/cache@v5.0.5
+          toolchain: stable
+          components: clippy, rustfmt, llvm-tools-preview
+
+      - name: Cache cargo
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-      - uses: taiki-e/install-action@v2.78.0
-        with:
-          tool: just
-      - uses: taiki-e/install-action@v2.78.0
-        with:
-          tool: cargo-llvm-cov
+          shared-key: release-preflight-ubuntu-stable-all-features
+
+      - name: Install Bun
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install JavaScript dependencies
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        run: bun install --frozen-lockfile
+
+      - name: Install just
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        uses: taiki-e/install-action@just
+
+      - name: Install cargo-llvm-cov
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        uses: taiki-e/install-action@cargo-llvm-cov
+
       - name: Resolve version
         id: version
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
         shell: bash
         run: |
-          version="$(awk -F '"' '/^version = / { print "v" $2; exit }' Cargo.toml)"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-      - run: just VERSION="${{ steps.version.outputs.version }}" release-check
+          bash scripts/release/resolve-release-version.sh \
+            "${{ github.event_name }}" \
+            "${{ inputs.version }}" \
+            "${{ github.head_ref }}"
+
+      - name: Release target check
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: just VERSION="${{ steps.version.outputs.version }}" release-target-check
+
+      - name: Release check
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        run: just VERSION="${{ steps.version.outputs.version }}" release-check

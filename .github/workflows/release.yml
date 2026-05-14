@@ -3,7 +3,7 @@ name: Release
 on:
   pull_request:
     types: [closed]
-    branches: [main, master]
+    branches: [master]
   workflow_dispatch:
     inputs:
       version:
@@ -37,53 +37,47 @@ jobs:
       )
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.ref }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
+          toolchain: stable
           components: clippy, rustfmt
-      - uses: actions/cache@v5.0.5
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-      - uses: taiki-e/install-action@v2.78.0
-        with:
-          tool: just
-      - uses: taiki-e/install-action@v2.78.0
-        with:
-          tool: cargo-llvm-cov
-      - run: just browser-install
+          shared-key: release-ubuntu-stable-publish
+
+      - name: Install just
+        uses: taiki-e/install-action@just
+
       - name: Resolve version
         id: version
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_VERSION: ${{ inputs.version }}
-          PULL_REQUEST_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         shell: bash
         run: |
-          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
-            version="${PULL_REQUEST_HEAD_REF}"
-            version="${version#release/}"
-          elif [[ -n "${INPUT_VERSION}" ]]; then
-            version="${INPUT_VERSION}"
-          else
-            version="$(awk -F '"' '/^version = / { print "v" $2; exit }' Cargo.toml)"
-          fi
-          bash scripts/release/verify-version.sh "${version}" >> "$GITHUB_OUTPUT"
-      - run: just VERSION="${{ steps.version.outputs.version }}" release-verify
+          bash scripts/release/resolve-release-version.sh \
+            "${{ github.event_name }}" \
+            "${{ inputs.version }}" \
+            "${{ github.event.pull_request.head.ref }}"
+
+      - name: Release target check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: just VERSION="${{ steps.version.outputs.version }}" release-target-check
+
+      - name: Verify release package
+        run: just VERSION="${{ steps.version.outputs.version }}" release-verify
+
       - name: Create release tag
         env:
           TAG: ${{ steps.version.outputs.version }}
         run: |
+          bash scripts/release/assert-tag-safe.sh "${TAG}" origin
           if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
             echo "Tag ${TAG} already exists."
             exit 0
@@ -92,6 +86,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "${TAG}" -m "Release ${TAG}"
           git push origin "refs/tags/${TAG}"
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,6 +97,7 @@ jobs:
           else
             gh release create "${TAG}" --verify-tag --latest --generate-notes
           fi
+
       - name: Publish crates.io
         if: github.event_name == 'pull_request' || inputs.publish_crates == true
         env:

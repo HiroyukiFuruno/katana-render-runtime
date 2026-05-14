@@ -19,7 +19,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
-  <a href="https://github.com/HiroyukiFuruno/katana-diagram-renderer/actions/workflows/ci.yml"><img src="https://github.com/HiroyukiFuruno/katana-diagram-renderer/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/HiroyukiFuruno/katana-diagram-renderer/actions/workflows/test-and-build.yml"><img src="https://github.com/HiroyukiFuruno/katana-diagram-renderer/actions/workflows/test-and-build.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/HiroyukiFuruno/katana-diagram-renderer/releases/latest"><img src="https://img.shields.io/github/v/release/HiroyukiFuruno/katana-diagram-renderer" alt="Latest Release"></a>
   <a href="https://crates.io/crates/katana-diagram-renderer"><img src="https://img.shields.io/crates/v/katana-diagram-renderer.svg" alt="crates.io"></a>
   <a href="https://docs.rs/katana-diagram-renderer"><img src="https://docs.rs/katana-diagram-renderer/badge.svg" alt="docs.rs"></a>

@@ -1,6 +1,6 @@
 ---
 name: bulk-modification-protocol
-description: katana-canvas-forge で複数ファイルの一括置換、削除、移動、生成を行う前に使う安全手順。事前確認、分割実行、diff 精査、ユーザー承認を強制する。
+description: katana-diagram-renderer で複数ファイルの一括置換、削除、移動、生成を行う前に使う安全手順。事前確認、分割実行、diff 精査、ユーザー承認を強制する。
 ---
 
 # Bulk Modification Protocol
@@ -36,7 +36,6 @@ git diff --stat
 
 - public API
 - renderer
-- exporter
 - CLI
 - vendor bundle
 - OpenSpec

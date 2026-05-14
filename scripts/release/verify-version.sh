@@ -22,3 +22,11 @@ fi
 
 echo "version=${version}"
 echo "version_bare=${version_bare}"
+
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  {
+    echo "version=${version}"
+    echo "version_bare=${version_bare}"
+    echo "cargo_version=${cargo_version}"
+  } >> "${GITHUB_OUTPUT}"
+fi

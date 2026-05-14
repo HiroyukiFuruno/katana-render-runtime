@@ -1,12 +1,12 @@
 ---
 name: lint-and-ast-lint
-description: katana-canvas-forge の静的検査と抽象構文木検査を厳格に実行する。renderer/export runtime の品質ゲート、clippy、format、test、禁止パターン確認、allow や exclude の不正追加防止で使う。
+description: katana-diagram-renderer の静的検査と抽象構文木検査を厳格に実行する。描画ランタイム（renderer runtime）の品質ゲート、clippy、format、test、禁止パターン確認、allow や exclude の不正追加防止で使う。
 ---
 
 # Lint and AST Lint
 
-このスキルは、kcf の品質ゲートを「通ればよい」ではなく「設計意図を守る検査」として扱います。
-描画と書き出しの実行基盤（renderer/export runtime）では、失敗経路、version pinning、checksum、外部プロセス境界を弱めないことを重視します。
+このスキルは、KDR の品質ゲートを「通ればよい」ではなく「設計意図を守る検査」として扱います。
+描画ランタイム（renderer runtime）では、失敗経路、版固定（version pinning）、チェックサム（checksum）、外部プロセス境界を弱めないことを重視します。
 
 ## 1. 入口を確認する
 
@@ -57,18 +57,18 @@ rg -n "serde_json::Value|Box<dyn Any>|HashMap<.*Value" crates
 
 調査で問題が見つかった場合は、構文ベースの検査へ昇格するか、今回の修正で直接直します。
 
-## 4. kcf 固有の禁止パターン
+## 4. KDR 固有の禁止パターン
 
-次は renderer/export runtime の品質を落とします。
+次は描画ランタイム（renderer runtime）の品質を落とします。
 
 - UI state に依存する型や引数
-- renderer と exporter の相互依存
+- 描画器（renderer）と CLI の相互依存
 - CLI からしか使えない library API
-- version pinning のない vendor bundle
-- checksum 不一致を warning 扱いにすること
-- external command の exit status、stderr、timeout を捨てること
+- 版固定（version pinning）のない vendor bundle
+- チェックサム（checksum）不一致を warning 扱いにすること
+- 外部コマンド（external command）の exit status、stderr、timeout を捨てること
 - `anyhow::Error` だけで public API の失敗種類を潰すこと
-- test fixture の期待値を実装に合わせて安易に更新すること
+- テスト fixture の期待値を実装に合わせて安易に更新すること
 
 ## 5. 報告形式
 

@@ -1,6 +1,6 @@
 ---
 name: commit_and_push
-description: katana-canvas-forge の変更を、検証、関心分離、自己レビューを済ませてから commit と push する。ユーザーが明示した場合だけ使う。
+description: katana-diagram-renderer の変更を、検証、関心分離、自己レビューを済ませてから commit と push する。ユーザーが明示した場合だけ使う。
 ---
 
 # Commit and Push

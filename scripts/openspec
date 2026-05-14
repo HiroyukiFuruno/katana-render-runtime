@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly OPENSPEC_NPX_PACKAGE="${KDR_OPENSPEC_NPX_PACKAGE:-@fission-ai/openspec@1.3.1}"
+
+main() {
+  if [[ -n "${KDR_OPENSPEC_BIN:-}" ]]; then
+    exec "${KDR_OPENSPEC_BIN}" "$@"
+  fi
+  local npx_bin
+  if ! npx_bin="$(resolve_npx)"; then
+    printf '%s\n' \
+      "OpenSpec launcher could not find npx or nvm-managed Node.js." \
+      "Install Node.js, set KDR_OPENSPEC_BIN, or install nvm at \${HOME}/.nvm." >&2
+    exit 127
+  fi
+
+  export PATH="$(dirname "${npx_bin}"):${PATH}"
+  exec "${npx_bin}" -y "${OPENSPEC_NPX_PACKAGE}" "$@"
+}
+
+resolve_npx() {
+  if command -v npx >/dev/null 2>&1; then
+    command -v npx
+    return 0
+  fi
+
+  load_nvm
+  if command -v npx >/dev/null 2>&1; then
+    command -v npx
+    return 0
+  fi
+
+  find_nvm_npx
+}
+
+load_nvm() {
+  local nvm_dir="${NVM_DIR:-${HOME}/.nvm}"
+  if [[ ! -s "${nvm_dir}/nvm.sh" ]]; then
+    return 0
+  fi
+
+  # shellcheck source=/dev/null
+  . "${nvm_dir}/nvm.sh" --no-use
+  use_nvm_version
+}
+
+use_nvm_version() {
+  if ! command -v nvm >/dev/null 2>&1; then
+    return 0
+  fi
+
+  nvm use --silent default >/dev/null 2>&1 || nvm use --silent node >/dev/null 2>&1 || true
+}
+
+find_nvm_npx() {
+  local nvm_dir="${NVM_DIR:-${HOME}/.nvm}"
+  local selected_npx=""
+  local candidate
+
+  shopt -s nullglob
+  for candidate in "${nvm_dir}"/versions/node/*/bin/npx; do
+    if [[ -x "${candidate}" ]]; then
+      selected_npx="${candidate}"
+    fi
+  done
+  shopt -u nullglob
+
+  if [[ -z "${selected_npx}" ]]; then
+    return 1
+  fi
+
+  printf '%s\n' "${selected_npx}"
+}
+
+main "$@"

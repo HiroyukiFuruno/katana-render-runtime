@@ -1,5 +1,5 @@
-target/
-tmp/
+/target
+tmp
 **/*.rs.bk
 Cargo.lock.bak
 .DS_Store
@@ -8,6 +8,14 @@ Cargo.lock.bak
 *.swp
 node_modules
 
-# openspec skills
-**/openspec-*/*.md
-**/opsx-*/*.md
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# openspec workfiles
+openspec*
+!openspec/
+!openspec/**
+opsx*
+!/scripts/openspec

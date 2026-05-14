@@ -1,6 +1,6 @@
 ---
 name: self-review
-description: katana-canvas-forge の差分をコミットや PR 前に自己レビューする。設計、テスト、品質ゲート、公開 API、renderer/exporter 境界を確認するときに使う。
+description: katana-diagram-renderer の差分をコミットや PR 前に自己レビューする。設計、テスト、品質ゲート、公開 API、描画ランタイムと CLI の境界を確認するときに使う。
 ---
 
 # Self Review
@@ -25,8 +25,8 @@ git diff --stat
 
 - library と CLI の責務が混ざっていない。
 - 公開 API は最小で、内部実装を漏らしていない。
-- renderer と exporter の境界が明確である。
-- external command、vendor bundle、checksum、version pinning の失敗が型で表現されている。
+- 描画器（renderer）と CLI の境界が明確である。
+- 外部コマンド（external command）、vendor bundle、チェックサム（checksum）、版固定（version pinning）の失敗が型で表現されている。
 - 仕様化されていない fallback を追加していない。
 - UI state、editor/preview、WebView、React の都合を入れていない。
 
