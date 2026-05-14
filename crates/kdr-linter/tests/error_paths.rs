@@ -1,5 +1,4 @@
 use kdr_linter::{KdrLintError, KdrLinter, workspace::WorkspaceModel};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -59,6 +58,7 @@ fn reports_manifest_read_error() -> TestResult<()> {
 }
 
 #[test]
+#[cfg(unix)]
 fn reports_source_read_error() -> TestResult<()> {
     let root = temp_root("source-read");
     write_valid_manifests(&root)?;
@@ -76,6 +76,7 @@ fn reports_source_read_error() -> TestResult<()> {
 }
 
 #[test]
+#[cfg(unix)]
 fn reports_workspace_walk_error() -> TestResult<()> {
     let root = temp_root("walk");
     write_valid_manifests(&root)?;
@@ -165,7 +166,10 @@ fn write_file(root: &Path, relative: &str, content: &str) -> TestResult<PathBuf>
     Ok(path)
 }
 
+#[cfg(unix)]
 fn set_mode(path: &Path, mode: u32) -> TestResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+
     let mut permissions = std::fs::metadata(path)?.permissions();
     permissions.set_mode(mode);
     std::fs::set_permissions(path, permissions)?;
