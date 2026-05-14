@@ -42,7 +42,7 @@ class CliOptions {
             argv,
             "--mermaid-zenuml-js",
             process.env.MERMAID_ZENUML_JS ||
-              "crates/katana-canvas-forge/vendor/mermaid-zenuml/0.2.2/mermaid-zenuml.min.js",
+              "crates/katana-diagram-renderer/vendor/mermaid-zenuml/0.2.2/mermaid-zenuml.min.js",
           ),
         ),
       ),

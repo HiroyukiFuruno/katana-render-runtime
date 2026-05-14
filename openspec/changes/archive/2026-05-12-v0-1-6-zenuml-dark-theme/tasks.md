@@ -1,9 +1,9 @@
-# Tasks: katana-canvas-forge v0.1.6 ZenUML dark mode theme
+# Tasks: katana-diagram-renderer v0.1.6 ZenUML dark mode theme
 
 - **標準ブランチ**: `release/v0.1.6`
 - **作業ブランチ**: `feature/v0.1.6-task-x`
 - **完了基準**: 全タスクが `[x]`、品質ゲート通過、PR マージ
-- **関連 issue**: [#12](https://github.com/HiroyukiFuruno/katana-canvas-forge/issues/12)
+- **関連 issue**: [#12](https://github.com/HiroyukiFuruno/katana-diagram-renderer/issues/12)
 
 ---
 

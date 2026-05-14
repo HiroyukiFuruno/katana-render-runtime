@@ -1,4 +1,4 @@
-# katana-canvas-forge Agent Rules
+# katana-diagram-renderer Agent Rules
 
 ## Branch Policy
 

@@ -1,4 +1,4 @@
-# Tasks: katana-canvas-forge v0.1.5 ZenUML V8 renderer
+# Tasks: katana-diagram-renderer v0.1.5 ZenUML V8 renderer
 
 - **標準ブランチ**: `release/v0.1.5`
 - **作業ブランチ**: `feature/v0.1.5-task-x`
@@ -8,12 +8,12 @@
 
 ## Phase 1: `@zenuml/core` vendor asset の準備
 
-**目的**: `zenuml.js` を kcf の vendor asset として管理可能にする。
+**目的**: `zenuml.js` を kdr の vendor asset として管理可能にする。
 
-**出力先**: `crates/katana-canvas-forge/vendor/zenuml-core/<version>/`
+**出力先**: `crates/katana-diagram-renderer/vendor/zenuml-core/<version>/`
 
 - [x] 1.1 `@zenuml/core` の最新バージョンを確認し、`dist/zenuml.js`（CJS）を
-  `crates/katana-canvas-forge/vendor/zenuml-core/<version>/zenuml.js` に配置する
+  `crates/katana-diagram-renderer/vendor/zenuml-core/<version>/zenuml.js` に配置する
 - [x] 1.2 `shasum -a 256 zenuml.js > zenuml.js.sha256` を実行して checksum を生成する
 - [x] 1.3 `Justfile` に `ZENUML_CORE_JS_VERSION` 変数と `verify-zenuml-core` recipe を追加する
   （`mermaid-zenuml` の `MERMAID_ZENUML_JS_VERSION` / `verify-zenuml` と同パターン）
@@ -27,7 +27,7 @@
 
 **目的**: `DiagramV8Runtime` で呼べる薄いブリッジスクリプトを作る。
 
-**出力先**: `crates/katana-canvas-forge/src/markdown/mermaid_renderer/js_runtime/render_zenuml_v8.js`
+**出力先**: `crates/katana-diagram-renderer/src/markdown/mermaid_renderer/js_runtime/render_zenuml_v8.js`
 
 - [x] 2.1 `render_zenuml_v8.js` を作成する
   - `zenuml.js` を eval 済みの V8 コンテキストで `renderToSvg` を呼ぶ
@@ -47,7 +47,7 @@
 
 **目的**: 旧 `ZenumlBrowserRenderOps` の代替 Rust 実装。
 
-**出力先**: `crates/katana-canvas-forge/src/markdown/mermaid_renderer/zenuml_v8_runtime.rs`
+**出力先**: `crates/katana-diagram-renderer/src/markdown/mermaid_renderer/zenuml_v8_runtime.rs`
 
 - [x] 3.1 `zenuml_v8_runtime.rs` を作成する
   - `ZenumlV8RenderOps::render(source, preset, svg_id)` を実装する

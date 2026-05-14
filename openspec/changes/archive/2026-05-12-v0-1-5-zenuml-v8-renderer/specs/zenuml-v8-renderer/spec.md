@@ -33,7 +33,7 @@ version と checksum を管理しなければならない（MUST）。
 
 - **GIVEN** runtime asset の初期化が実行される
 - **WHEN** ZenUML V8 renderer が `zenuml.js` を必要とする
-- **THEN** `crates/katana-canvas-forge/vendor/zenuml-core/<version>/zenuml.js` が materialize される
+- **THEN** `crates/katana-diagram-renderer/vendor/zenuml-core/<version>/zenuml.js` が materialize される
 - **THEN** materialize 前後で checksum が一致する
 
 ### Requirement: `~~~zenuml` 直接コードブロックを描画しなければならない

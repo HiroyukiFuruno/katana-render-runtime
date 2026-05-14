@@ -32,7 +32,7 @@ class LatestVersionClient {
     const response = await fetch(url, {
       headers: {
         accept: "application/json",
-        "user-agent": "katana-canvas-forge-release-tool",
+        "user-agent": "katana-diagram-renderer-release-tool",
       },
     });
     if (!response.ok) {

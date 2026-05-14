@@ -3,7 +3,7 @@
 ### 現行アーキテクチャ
 
 ```
-kcf (Rust)
+kdr (Rust)
   └─ ZenumlBrowserRenderOps::render()
        └─ ProcessService::create_command("node")   ← $PATH 依存
             └─ render_zenuml_browser.mjs
@@ -13,7 +13,7 @@ kcf (Rust)
 ### 新アーキテクチャ
 
 ```
-kcf (Rust)
+kdr (Rust)
   └─ ZenumlV8RenderOps::render()
        └─ DiagramV8Runtime::render(scripts)         ← in-process
             ├─ zenuml.js  (@zenuml/core vendor)
@@ -30,7 +30,7 @@ React DOM に描画するため、DOM なしでは SVG を返せない。
 一方 `@zenuml/core` の `renderToSvg()` は SVG 文字列を直接返す API であり、
 DOM / canvas がなくても character-estimate fallback で動作する（Spike 検証済み）。
 
-`zenuml.js`（CJS バンドル）を `crates/katana-canvas-forge/vendor/zenuml-core/<version>/`
+`zenuml.js`（CJS バンドル）を `crates/katana-diagram-renderer/vendor/zenuml-core/<version>/`
 に配置し、`mermaid-zenuml.min.js` と同様に runtime asset として materialize する。
 
 ### D2: `mermaid-zenuml.min.js` vendor asset は保持する

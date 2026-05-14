@@ -1,9 +1,9 @@
-# Tasks: katana-canvas-forge v0.1.8 KDV export handoff
+# Tasks: katana-diagram-renderer v0.1.8 KDV export handoff
 
 ## 1. Scope Baseline
 
 - [x] 1.1 旧 export/debug 実装 branch の内容を確認する
-- [x] 1.2 KCFに残す責務を Mermaid / Draw.io rendering、runtime asset、reference scoreへ限定する
+- [x] 1.2 KDRに残す責務を Mermaid / Draw.io rendering、runtime asset、reference scoreへ限定する
 - [x] 1.3 HTML / PDF / PNG / JPG export をKDVへ移譲する方針を記録する
 - [x] 1.4 CSV / PDF / Office viewer をKDVへ移譲する方針を記録する
 
@@ -14,12 +14,12 @@
 - [ ] 2.3 KDV側OpenSpecへ旧 export/debug 実装 branch の export/debug 論点を反映する
 - [ ] 2.4 KDV側でREADME相対パス解決、file path付き入力、macOS debug openの扱いを決める
 
-## 3. KCF Guardrail
+## 3. KDR Guardrail
 
-- [x] 3.1 旧 export/debug 実装 branch をKCF masterへmergeしない方針を記録する
-- [x] 3.2 KCF v0.2.0 CLI publicationからCSV / PDF / Office viewer renderingを外す
-- [x] 3.3 KCF v0.2.1にexport削除changeを追加する
-- [ ] 3.4 KDV v0.1.0実装完了後、KCF v0.2.1を開始する
+- [x] 3.1 旧 export/debug 実装 branch をKDR masterへmergeしない方針を記録する
+- [x] 3.2 KDR v0.2.0 CLI publicationからCSV / PDF / Office viewer renderingを外す
+- [x] 3.3 KDR v0.2.1にexport削除changeを追加する
+- [ ] 3.4 KDV v0.1.0実装完了後、KDR v0.2.1を開始する
 
 ## 4. Quality Gate
 

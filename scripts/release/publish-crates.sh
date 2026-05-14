@@ -29,6 +29,6 @@ wait_for_crate() {
   exit 1
 }
 
-publish_if_needed katana-canvas-forge
-wait_for_crate katana-canvas-forge
-publish_if_needed katana-canvas-forge-cli
+publish_if_needed katana-diagram-renderer
+wait_for_crate katana-diagram-renderer
+publish_if_needed katana-diagram-renderer-cli

@@ -31,7 +31,7 @@ class RuntimeAssetDownloader {
   }
 
   private async downloadDrawio(url: string, target: string) {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "kcf-drawio-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "kdr-drawio-"));
     const archive = path.join(tempDir, "draw.war");
     try {
       await this.downloadFile(url, archive);

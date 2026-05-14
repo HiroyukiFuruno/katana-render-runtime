@@ -40,10 +40,10 @@ v0.1.7 は「最低点を 99 以上へ上げる最終フェーズ」である。
 
 | 種別 | 範囲 | 実行手順 | 要求値 | 主な出力 |
 | --- | --- | --- | --- | --- |
-| Draw.io | CI 代表 | `just drawio-compare-ci 99` | 全 case 99 以上 | `tmp/kcf-drawio-ci/comparison` |
-| Draw.io | full 全対象 | `just drawio-compare-full 99` | 全 supported case 99 以上 | `tmp/kcf-drawio-full/*/comparison` |
-| Mermaid | CI 代表 | `just mermaid-compare-ci 99` | 全 case 99 以上 | `tmp/kcf-mermaid-ci/comparison` |
-| Mermaid | full 全対象 | `just mermaid-compare-full 99` | 全 supported case 99 以上 | `tmp/kcf-mermaid-full/*/comparison` |
+| Draw.io | CI 代表 | `just drawio-compare-ci 99` | 全 case 99 以上 | `tmp/kdr-drawio-ci/comparison` |
+| Draw.io | full 全対象 | `just drawio-compare-full 99` | 全 supported case 99 以上 | `tmp/kdr-drawio-full/*/comparison` |
+| Mermaid | CI 代表 | `just mermaid-compare-ci 99` | 全 case 99 以上 | `tmp/kdr-mermaid-ci/comparison` |
+| Mermaid | full 全対象 | `just mermaid-compare-full 99` | 全 supported case 99 以上 | `tmp/kdr-mermaid-full/*/comparison` |
 
 Draw.io full は `Justfile` の `drawio-compare-full` に列挙された `basic`、`official/diagrams`、`official/examples`、`official/blog`、`official/templates/*` を対象にする。
 
@@ -67,13 +67,13 @@ unsupported fixture は暗黙 skip しない。Mermaid ZenUML / unsupported fixt
 
 Jules は一度に全 fixture を直そうとしない。必ず次の小さい cycle を繰り返す。
 
-1. `just drawio-compare-ci 99` を実行し、最初に失敗した fixture 名、score、出力先 `tmp/kcf-drawio-ci/comparison` を記録する
-2. 失敗 fixture を含む最小 fixture directory だけを `just drawio-compare <fixture-dir> 99 tmp/kcf-v0.1.7-reference-score-improvement/<case>` で再実行する
-3. `tmp/kcf-v0.1.7-reference-score-improvement/<case>/comparison` の official PNG、kcf PNG、diff / report を見て差分を一種類だけ分類する
+1. `just drawio-compare-ci 99` を実行し、最初に失敗した fixture 名、score、出力先 `tmp/kdr-drawio-ci/comparison` を記録する
+2. 失敗 fixture を含む最小 fixture directory だけを `just drawio-compare <fixture-dir> 99 tmp/kdr-v0.1.7-reference-score-improvement/<case>` で再実行する
+3. `tmp/kdr-v0.1.7-reference-score-improvement/<case>/comparison` の official PNG、kdr PNG、diff / report を見て差分を一種類だけ分類する
 4. 分類に対応する最小ファイルだけを修正する
 5. 同じ case を再実行し、score が上がったことを確認する
 6. score が 99 以上になったら次の case に進む
-7. 失敗が full compare でだけ出る場合は、該当 fixture を含む最小 fixture directory だけを `just drawio-compare <fixture-dir> 99 tmp/kcf-v0.1.7-reference-score-improvement/full-<slug>` で切り出す
+7. 失敗が full compare でだけ出る場合は、該当 fixture を含む最小 fixture directory だけを `just drawio-compare <fixture-dir> 99 tmp/kdr-v0.1.7-reference-score-improvement/full-<slug>` で切り出す
 
 Jules は原因が分からない場合、推測で broad refactor をしない。report に「見えている差分」「触ったファイル」「次に疑う場所」を書いて cycle を止める。
 

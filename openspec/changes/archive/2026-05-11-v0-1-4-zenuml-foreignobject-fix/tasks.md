@@ -1,4 +1,4 @@
-# Tasks: katana-canvas-forge v0.1.4 ZenUML foreignObject fix
+# Tasks: katana-diagram-renderer v0.1.4 ZenUML foreignObject fix
 
 ## Branch Rule
 

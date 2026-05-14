@@ -2,8 +2,8 @@
 
 ## 1. 移譲記録
 
-- [x] 1.1 CSV viewer renderingをKCFではなくKDVへ移譲する方針を記録する
-- [x] 1.2 KCFにCSV viewer API、fixture、CLI entrypointを追加しないことを明記する
+- [x] 1.1 CSV viewer renderingをKDRではなくKDVへ移譲する方針を記録する
+- [x] 1.2 KDRにCSV viewer API、fixture、CLI entrypointを追加しないことを明記する
 - [ ] 1.3 KDV側OpenSpecへCSV viewerの入力、windowing、diagnostics、表示確認caseを移す
 
 ## 2. Verification

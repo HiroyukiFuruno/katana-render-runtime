@@ -2,14 +2,14 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DrawioRuntimeBundleDefinition } from "../../crates/katana-canvas-forge/src/markdown/diagram_runtime/source/drawio/runtime_definition";
-import { MermaidRuntimeBundleDefinition } from "../../crates/katana-canvas-forge/src/markdown/diagram_runtime/source/mermaid/runtime_definition";
+import { DrawioRuntimeBundleDefinition } from "../../crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/drawio/runtime_definition";
+import { MermaidRuntimeBundleDefinition } from "../../crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/mermaid/runtime_definition";
 import type {
   RuntimeBundleDefinition,
   RuntimeFragment,
   RuntimeFragmentTransform,
-} from "../../crates/katana-canvas-forge/src/markdown/diagram_runtime/source/shared/runtime_bundle";
-import { ZenumlRuntimeBundleDefinition } from "../../crates/katana-canvas-forge/src/markdown/diagram_runtime/source/zenuml/runtime_definition";
+} from "../../crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/shared/runtime_bundle";
+import { ZenumlRuntimeBundleDefinition } from "../../crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/zenuml/runtime_definition";
 
 type RuntimeBundleMode = "write" | "check";
 
@@ -98,7 +98,7 @@ class RuntimeBundleCommand {
     return path.join(
       this.root,
       "crates",
-      "katana-canvas-forge",
+      "katana-diagram-renderer",
       "src",
       "markdown",
       "diagram_runtime",
@@ -108,7 +108,7 @@ class RuntimeBundleCommand {
   }
 
   private checkGeneratedBundles(bundles: GeneratedBundle[]): void {
-    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "kcf-runtime-bundles-"));
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "kdr-runtime-bundles-"));
     try {
       for (const bundle of bundles) {
         const expected = fs.readFileSync(bundle.outputPath, "utf8");
@@ -154,7 +154,7 @@ class RuntimeBundleCommand {
     return path.join(
       this.root,
       "crates",
-      "katana-canvas-forge",
+      "katana-diagram-renderer",
       "src",
       "markdown",
       "diagram_runtime",

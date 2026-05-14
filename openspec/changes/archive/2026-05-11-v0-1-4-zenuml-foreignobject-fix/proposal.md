@@ -1,6 +1,6 @@
 ## Why
 
-kcf v0.1.3 の ZenUML 出力は `foreignObject` を含む SVG を返すが、KatanA の preview pipeline は `resvg`/`usvg` でラスタライズする前に `foreignObject` を削除するため、ZenUML の描画内容がすべて消えて白表示になる。通常の Mermaid / Draw.io は `foreignObject` を含まない SVG を返しているため consumer 側では問題が発生しておらず、ZenUML だけが例外的な出力形式を持っている。
+kdr v0.1.3 の ZenUML 出力は `foreignObject` を含む SVG を返すが、KatanA の preview pipeline は `resvg`/`usvg` でラスタライズする前に `foreignObject` を削除するため、ZenUML の描画内容がすべて消えて白表示になる。通常の Mermaid / Draw.io は `foreignObject` を含まない SVG を返しているため consumer 側では問題が発生しておらず、ZenUML だけが例外的な出力形式を持っている。
 
 ## What Changes
 

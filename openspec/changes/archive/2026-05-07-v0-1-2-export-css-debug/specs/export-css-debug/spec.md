@@ -31,11 +31,11 @@
 
 #### Scenario: export-debug を実行する
 
-- **WHEN** 開発者が `kcf export-debug --input sample.html` を実行する
-- **THEN** `/tmp/kcf-export-debug-<pid>.html` が生成される
-- **THEN** `/tmp/kcf-export-debug-<pid>.pdf` が生成される
-- **THEN** `/tmp/kcf-export-debug-<pid>.png` が生成される
-- **THEN** `/tmp/kcf-export-debug-<pid>.jpg` が生成される
+- **WHEN** 開発者が `kdr export-debug --input sample.html` を実行する
+- **THEN** `/tmp/kdr-export-debug-<pid>.html` が生成される
+- **THEN** `/tmp/kdr-export-debug-<pid>.pdf` が生成される
+- **THEN** `/tmp/kdr-export-debug-<pid>.png` が生成される
+- **THEN** `/tmp/kdr-export-debug-<pid>.jpg` が生成される
 - **THEN** HTML / PDF / PNG / JPG の順に macOS の `open` が呼ばれる
 
 #### Scenario: テストで opener を差し替える
@@ -55,12 +55,12 @@
 - **THEN** macOS の `open` を使う
 - **THEN** Windows の `start` や Linux の `xdg-open` 分岐を追加しない
 
-### Requirement: KCF export maintenance must remain migration-bound
+### Requirement: KDR export maintenance must remain migration-bound
 
-KCF SHALL treat this export maintenance as temporary compatibility work until KDV provides equivalent export behavior.
+KDR SHALL treat this export maintenance as temporary compatibility work until KDV provides equivalent export behavior.
 
 #### Scenario: KDV export becomes available
 
 - **WHEN** KDV provides equivalent HTML/PDF/PNG/JPG export
-- **THEN** KCF export maintenance is moved or deleted
-- **THEN** KCF continues to own external rendering, runtime assets, references, and score comparison
+- **THEN** KDR export maintenance is moved or deleted
+- **THEN** KDR continues to own external rendering, runtime assets, references, and score comparison

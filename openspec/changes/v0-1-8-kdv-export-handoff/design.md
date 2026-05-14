@@ -1,8 +1,8 @@
 ## Context
 
-KCFは図形描画のlibraryであり、document viewerやexport pipelineのownerではない。KME / KDV / KatanAの分離後は、KCFが担うべき範囲は Mermaid / Draw.io の外部描画、runtime asset、reference scoreである。
+KDRは図形描画のlibraryであり、document viewerやexport pipelineのownerではない。KMM / KDV / KatanAの分離後は、KDRが担うべき範囲は Mermaid / Draw.io の外部描画、runtime asset、reference scoreである。
 
-旧 export/debug 実装 branch は、利用側GUI品質ゲートを作るために export と viewer 的な機能まで含めた。しかし、その後の設計でKDVがviewer/exportを担うことになったため、KCFに同じ責務を残すと境界が崩れる。
+旧 export/debug 実装 branch は、利用側GUI品質ゲートを作るために export と viewer 的な機能まで含めた。しかし、その後の設計でKDVがviewer/exportを担うことになったため、KDRに同じ責務を残すと境界が崩れる。
 
 ## Handoff Policy
 
@@ -15,7 +15,7 @@ KCFは図形描画のlibraryであり、document viewerやexport pipelineのowne
 - viewer/exportの同一pipeline確認
 - 利用側GUI品質ゲートの考え方
 
-KCFに残す論点:
+KDRに残す論点:
 
 - Mermaid rendering
 - Draw.io rendering
@@ -31,11 +31,11 @@ KDV v0.1.0はMarkdown viewerとviewer/export共通pipelineを中心にし、HTML
 
 ## Branch Handling
 
-旧 export/debug 実装 branch は、KCF masterへmergeしない。必要な内容はKDV側OpenSpecへ移譲し、KCF側ではこのchangeを移譲記録として残す。
+旧 export/debug 実装 branch は、KDR masterへmergeしない。必要な内容はKDV側OpenSpecへ移譲し、KDR側ではこのchangeを移譲記録として残す。
 
 ## Verification
 
-- KCF active OpenSpecにCSV / PDF / Office viewer implementationが残っていない
-- KCF v0.2.0 CLI publicationがviewer/export拡張を公開範囲に含めない
+- KDR active OpenSpecにCSV / PDF / Office viewer implementationが残っていない
+- KDR v0.2.0 CLI publicationがviewer/export拡張を公開範囲に含めない
 - KDV v0.1.0 OpenSpecにviewer/export責務が存在する
-- KCF v0.2.1にexport削除の後続changeが存在する
+- KDR v0.2.1にexport削除の後続changeが存在する

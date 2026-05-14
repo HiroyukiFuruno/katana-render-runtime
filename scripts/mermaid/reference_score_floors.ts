@@ -77,7 +77,7 @@ export const MERMAID_VISUAL_ACCEPTED_SCORE_FLOORS: ReferenceScoreThreshold[] = [
   acceptedScore(
     "28-zen-uml",
     86,
-    "ZenUMLは公式側とKCF側のどちらも同じmermaid-zenuml assetで描画される。foreignObject再ラスタライズ時の余白と縮尺差が残るため、このスコアを品質下限として固定。",
+    "ZenUMLは公式側とKDR側のどちらも同じmermaid-zenuml assetで描画される。foreignObject再ラスタライズ時の余白と縮尺差が残るため、このスコアを品質下限として固定。",
   ),
 ];
 

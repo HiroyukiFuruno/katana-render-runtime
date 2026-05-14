@@ -34,14 +34,14 @@ class CliOptions {
         CliOptions.get(
           argv,
           "--resources",
-          "crates/katana-canvas-forge/src/markdown/drawio_renderer/js_runtime/resources",
+          "crates/katana-diagram-renderer/src/markdown/drawio_renderer/js_runtime/resources",
         ),
       ),
       resourceManifest: path.resolve(
         CliOptions.get(
           argv,
           "--resource-manifest",
-          "crates/katana-canvas-forge/src/markdown/drawio_renderer/js_runtime/resources/drawio-resource-manifest.json",
+          "crates/katana-diagram-renderer/src/markdown/drawio_renderer/js_runtime/resources/drawio-resource-manifest.json",
         ),
       ),
     };

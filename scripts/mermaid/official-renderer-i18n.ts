@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 
-const I18N_RUNTIME_DIR = "crates/katana-canvas-forge/src/markdown/mermaid_renderer/js_runtime";
+const I18N_RUNTIME_DIR = "crates/katana-diagram-renderer/src/markdown/mermaid_renderer/js_runtime";
 const RUNTIME_SCRIPTS = [
   "svg_bounds_attrs.js",
   "svg_path_bounds.js",

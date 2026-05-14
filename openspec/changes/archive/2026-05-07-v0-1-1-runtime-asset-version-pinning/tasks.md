@@ -1,4 +1,4 @@
-# Tasks: katana-canvas-forge v0.1.1 runtime asset version pinning
+# Tasks: katana-diagram-renderer v0.1.1 runtime asset version pinning
 
 ## Branch Rule
 
@@ -29,7 +29,7 @@ v0.1.0 transfer 後の Mermaid.js / Draw.io.js asset 管理状態を確認する
 
 ### 目的
 
-Mermaid.js / Draw.io.js の取り込み version を kcf 側で固定する。
+Mermaid.js / Draw.io.js の取り込み version を kdr 側で固定する。
 
 ### タスク
 

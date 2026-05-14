@@ -1,0 +1,19 @@
+[package]
+name = "katana-diagram-renderer-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "CLI front-end for katana-diagram-renderer: render, reference-update, compare, bench."
+
+[[bin]]
+name = "kdr"
+path = "src/main.rs"
+
+[dependencies]
+katana-diagram-renderer = { path = "../katana-diagram-renderer", version = "0.1.6" }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }

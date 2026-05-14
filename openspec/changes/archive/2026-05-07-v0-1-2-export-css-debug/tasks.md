@@ -1,4 +1,4 @@
-# Tasks: katana-canvas-forge v0.1.2 export CSS debug
+# Tasks: katana-diagram-renderer v0.1.2 export CSS debug
 
 > Status: 要件変更により破棄済み。`v0.1.2` は Mermaid ZenUML / unsupported fixture handling に再割当する。
 
@@ -27,7 +27,7 @@ v0.1.2 を export CSS 回帰修正と macOS デバッグ実行のフェーズと
 
 - [x] v0.1.2 の目的と非目的が artifact に残っている
 - [x] v0.1.4 との依存関係が明確である
-- [x] KDV移譲後のKCF側export削除方針と矛盾していない
+- [x] KDV移譲後のKDR側export削除方針と矛盾していない
 
 ---
 
@@ -78,11 +78,11 @@ native export の軽量CSS解釈で、`body` 向けCSSを正しく拾う。
 
 ### タスク
 
-- [x] 4.1 `kcf export-debug --input <html>` を追加する
-- [x] 4.2 `/tmp/kcf-export-debug-<pid>.html` を出力する
-- [x] 4.3 `/tmp/kcf-export-debug-<pid>.pdf` を出力する
-- [x] 4.4 `/tmp/kcf-export-debug-<pid>.png` を出力する
-- [x] 4.5 `/tmp/kcf-export-debug-<pid>.jpg` を出力する
+- [x] 4.1 `kdr export-debug --input <html>` を追加する
+- [x] 4.2 `/tmp/kdr-export-debug-<pid>.html` を出力する
+- [x] 4.3 `/tmp/kdr-export-debug-<pid>.pdf` を出力する
+- [x] 4.4 `/tmp/kdr-export-debug-<pid>.png` を出力する
+- [x] 4.5 `/tmp/kdr-export-debug-<pid>.jpg` を出力する
 - [x] 4.6 HTML / PDF / PNG / JPG の順に macOS の `open` を呼ぶ
 - [x] 4.7 テストでは実際のアプリを開かず、opener を差し替えて検証する
 
@@ -96,10 +96,10 @@ native export の軽量CSS解釈で、`body` 向けCSSを正しく拾う。
 
 ## 5. Final Verification
 
-- [x] 5.1 `cargo test -p katana-canvas-forge --test exporter_visual_transfer` を実行する
-- [x] 5.2 `cargo test -p katana-canvas-forge native_style -- --nocapture` を実行する
-- [x] 5.3 `cargo test -p katana-canvas-forge-cli export_debug -- --nocapture` を実行する
-- [x] 5.4 `cargo test -p katana-canvas-forge-cli cli_export_debug_writes_and_opens_four_formats -- --nocapture` を実行する
+- [x] 5.1 `cargo test -p katana-diagram-renderer --test exporter_visual_transfer` を実行する
+- [x] 5.2 `cargo test -p katana-diagram-renderer native_style -- --nocapture` を実行する
+- [x] 5.3 `cargo test -p katana-diagram-renderer-cli export_debug -- --nocapture` を実行する
+- [x] 5.4 `cargo test -p katana-diagram-renderer-cli cli_export_debug_writes_and_opens_four_formats -- --nocapture` を実行する
 - [x] 5.5 `just lint` と `just ast-lint` を実行する
 - [x] 5.6 `npx -y @fission-ai/openspec validate "export-css-debug" --strict` を実行する
 - [x] 5.7 `/self-review` を実行する

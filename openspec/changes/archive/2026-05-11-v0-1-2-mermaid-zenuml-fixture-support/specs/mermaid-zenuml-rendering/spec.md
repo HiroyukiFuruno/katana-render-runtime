@@ -21,7 +21,7 @@
 
 - **GIVEN** runtime asset の初期化が実行される
 - **WHEN** Mermaid renderer が ZenUML 対応JSを必要とする
-- **THEN** `crates/katana-canvas-forge/vendor/mermaid-zenuml/<version>/mermaid-zenuml.min.js` 由来の asset が materialize される
+- **THEN** `crates/katana-diagram-renderer/vendor/mermaid-zenuml/<version>/mermaid-zenuml.min.js` 由来の asset が materialize される
 - **THEN** materialize 前後で checksum が一致する
 - **THEN** 外部ネットワーク取得なしで render runtime に読み込める
 

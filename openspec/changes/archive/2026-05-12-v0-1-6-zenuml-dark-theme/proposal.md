@@ -3,8 +3,8 @@
 `RenderThemeMode::Dark` を渡しても ZenUML 図の内部カラー（ライフライン背景、
 Alt/Par ブロック、テキスト色など）がライトモードのまま描画される。
 
-KatanA 側 (`kcf_theme_adapter.rs`) は `RenderThemeSnapshot.mode = Dark` を正しく
-設定している。問題は kcf の ZenUML V8 レンダラー側にある。
+KatanA 側 (`kdr_theme_adapter.rs`) は `RenderThemeSnapshot.mode = Dark` を正しく
+設定している。問題は kdr の ZenUML V8 レンダラー側にある。
 
 `@zenuml/core` の `renderToSvg()` はオプションで `theme` を受け取り、
 `"dark"` を渡すことで内部 CSS 変数がダークパレットに切り替わる。
@@ -26,6 +26,6 @@ CSS 変数を適用するようにする。
 
 ## Deliverables
 
-- `crates/katana-canvas-forge/src/markdown/mermaid_renderer/js_runtime/render_zenuml_v8.js` — theme オプション接続
-- `crates/katana-canvas-forge/src/markdown/mermaid_renderer/zenuml_v8_runtime.rs` — theme 引数の pass-through 確認
+- `crates/katana-diagram-renderer/src/markdown/mermaid_renderer/js_runtime/render_zenuml_v8.js` — theme オプション接続
+- `crates/katana-diagram-renderer/src/markdown/mermaid_renderer/zenuml_v8_runtime.rs` — theme 引数の pass-through 確認
 - `openspec/changes/v0-1-6-zenuml-dark-theme/` — 本変更記録

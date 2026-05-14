@@ -15,11 +15,11 @@
   },
   "include": [
     "scripts/**/*.ts",
-    "crates/katana-canvas-forge/src/markdown/diagram_runtime/source/**/*.ts"
+    "crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/**/*.ts"
   ],
   "exclude": [
-    "crates/katana-canvas-forge/src/markdown/diagram_runtime/generated/**",
-    "crates/katana-canvas-forge/vendor/**",
+    "crates/katana-diagram-renderer/src/markdown/diagram_runtime/generated/**",
+    "crates/katana-diagram-renderer/vendor/**",
     "target/**",
     "tmp/**"
   ]

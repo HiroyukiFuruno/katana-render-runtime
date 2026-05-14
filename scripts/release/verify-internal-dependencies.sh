@@ -3,9 +3,9 @@ set -euo pipefail
 
 version="$(bash "$(dirname "$0")/verify-version.sh" "${1:-}" | awk -F= '$1 == "version_bare" { print $2 }')"
 
-dependency_line="$(grep '^katana-canvas-forge = ' crates/katana-canvas-forge-cli/Cargo.toml)"
+dependency_line="$(grep '^katana-diagram-renderer = ' crates/katana-diagram-renderer-cli/Cargo.toml)"
 if [[ "${dependency_line}" != *"version = \"${version}\""* ]]; then
-  echo "katana-canvas-forge-cli must depend on katana-canvas-forge version ${version}" >&2
+  echo "katana-diagram-renderer-cli must depend on katana-diagram-renderer version ${version}" >&2
   exit 1
 fi
 

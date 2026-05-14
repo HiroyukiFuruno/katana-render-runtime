@@ -2,7 +2,7 @@
 
 ### Requirement: CLI は library の薄い利用者として公開されなければならない
 
-システムは、CLI を `katana-canvas-forge` library の薄い利用者として公開しなければならない（MUST）。CLI は argument parsing、file I/O、exit code、stdout / stderr を担当し、Mermaid / Draw.io rendering、score、reference 更新の中核判断を再実装してはならない（MUST NOT）。
+システムは、CLI を `katana-diagram-renderer` library の薄い利用者として公開しなければならない（MUST）。CLI は argument parsing、file I/O、exit code、stdout / stderr を担当し、Mermaid / Draw.io rendering、score、reference 更新の中核判断を再実装してはならない（MUST NOT）。
 
 #### Scenario: CLI から render を実行する
 
@@ -78,8 +78,8 @@
 #### Scenario: KDVへ移譲した機能を公開CLIに戻さない
 
 - **WHEN** CLI 公開範囲を確認する
-- **THEN** CSV / PDF / Office viewer rendering はKCF CLIの公開commandに含まれない
-- **THEN** HTML / PDF / PNG / JPG export の新規拡張はKCF CLIの公開範囲に含まれない
+- **THEN** CSV / PDF / Office viewer rendering はKDR CLIの公開commandに含まれない
+- **THEN** HTML / PDF / PNG / JPG export の新規拡張はKDR CLIの公開範囲に含まれない
 
 #### Scenario: 破壊的変更を検出する
 

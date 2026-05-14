@@ -113,7 +113,7 @@ export class RuntimeAssetCatalogSource {
 
 export class RuntimeAssetPaths {
   static vendorDir(definition: RuntimeAssetDefinition, version = definition.version): string {
-    return path.join("crates", "katana-canvas-forge", "vendor", definition.kind, version);
+    return path.join("crates", "katana-diagram-renderer", "vendor", definition.kind, version);
   }
 
   static assetFile(definition: RuntimeAssetDefinition, version = definition.version): string {
@@ -129,7 +129,7 @@ export class RuntimeAssetPaths {
   }
 
   static runtimeAssetsRust(): string {
-    return path.join("crates", "katana-canvas-forge", "src", "markdown", "runtime_assets.rs");
+    return path.join("crates", "katana-diagram-renderer", "src", "markdown", "runtime_assets.rs");
   }
 
   static justfile(): string {

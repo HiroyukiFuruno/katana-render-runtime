@@ -1,5 +1,5 @@
 {
-  "name": "katana-canvas-forge",
+  "name": "katana-diagram-renderer",
   "private": true,
   "type": "module",
   "scripts": {

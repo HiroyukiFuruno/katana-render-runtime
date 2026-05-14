@@ -2,7 +2,7 @@
 
 ZenUML は Mermaid の `registerExternalDiagrams` を通じて描画されるが、描画結果が `<foreignObject>` + HTML/CSS の組み合わせになる。これは ZenUML の仕様上の特性であり、JS runtime で SVG ネイティブ要素へ変換することは現実的でない。
 
-KatanA の preview pipeline は kcf が返す SVG を `resvg`/`usvg` でラスタライズする前に `foreignObject` を削除する（`svg_rasterize.rs:70-84`）。このため ZenUML の描画内容が完全に消えて白表示になる。
+KatanA の preview pipeline は kdr が返す SVG を `resvg`/`usvg` でラスタライズする前に `foreignObject` を削除する（`svg_rasterize.rs:70-84`）。このため ZenUML の描画内容が完全に消えて白表示になる。
 
 現在の ZenUML render パス（`render_zenuml_browser.mjs`）はすでに Playwright を使った Chromium ヘッドレスブラウザ経由で動いている。`page.screenshot()` を使えば描画済みの DOM を PNG として取得できる。
 

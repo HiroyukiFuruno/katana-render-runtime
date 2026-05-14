@@ -2,18 +2,18 @@
 
 ### Requirement: Mermaid.js と Draw.io.js の取り込み version を固定しなければならない
 
-システムは、Mermaid.js と Draw.io.js の取り込み version を kcf repository 内で固定しなければならない（MUST）。固定 version は runtime metadata、checksum、reference snapshot の再現性に使われなければならない。
+システムは、Mermaid.js と Draw.io.js の取り込み version を kdr repository 内で固定しなければならない（MUST）。固定 version は runtime metadata、checksum、reference snapshot の再現性に使われなければならない。
 
 #### Scenario: Mermaid.js version を固定する
 
-- **WHEN** kcf が Mermaid runtime を初期化する
+- **WHEN** kdr が Mermaid runtime を初期化する
 - **THEN** 固定された Mermaid.js version の asset を読み込む
 - **THEN** runtime metadata は Mermaid.js の version と checksum を返す
 - **THEN** version が変わった場合は reference snapshot の更新を要求する
 
 #### Scenario: Draw.io.js version を固定する
 
-- **WHEN** kcf が Draw.io runtime を初期化する
+- **WHEN** kdr が Draw.io runtime を初期化する
 - **THEN** 固定された Draw.io.js version の asset を読み込む
 - **THEN** runtime metadata は Draw.io.js の version と checksum を返す
 - **THEN** version が変わった場合は resource manifest と reference snapshot の更新を要求する

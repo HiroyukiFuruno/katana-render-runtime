@@ -210,7 +210,7 @@ pub struct AppState {
 `Option` を許すのは、「未指定なら既定の取得処理を行う」など、未指定そのものが入力契約に含まれる境界だけとする。
 その場合も、境界で `Result<T, E>` に解決し、以降の内部処理へ `Option` / `None` を流してはならない。
 
-KCF の runtime path では、CLI の `--runtime` は未指定時に同梱 runtime を解決する意味があるため `Option<PathBuf>` を許す。
+KDR の runtime path では、CLI の `--runtime` は未指定時に同梱 runtime を解決する意味があるため `Option<PathBuf>` を許す。
 ただし `RuntimePathResolver` で `Result<PathBuf, RenderError>` に変換し、`MermaidRenderer` / `DrawioRenderer` などの内部 renderer は `PathBuf` を直接保持する。
 解決できない場合は暗黙 fallback ではなく、冒頭で error first に失敗させる。
 

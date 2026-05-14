@@ -1,8 +1,8 @@
 ## Context
 
-v0.1.0 は純粋な transfer。KatanA 既存実装を kcf に移すことだけを完了条件にする。
+v0.1.0 は純粋な transfer。KatanA 既存実装を kdr に移すことだけを完了条件にする。
 
-v0.1.1 は、その transfer 後に残る runtime asset 管理の課題を解決する patch。Mermaid.js / Draw.io.js の取り込み version、checksum、更新 recipe、reference snapshot 更新を kcf が所有する。
+v0.1.1 は、その transfer 後に残る runtime asset 管理の課題を解決する patch。Mermaid.js / Draw.io.js の取り込み version、checksum、更新 recipe、reference snapshot 更新を kdr が所有する。
 
 ## Goals
 
@@ -22,12 +22,12 @@ v0.1.1 は、その transfer 後に残る runtime asset 管理の課題を解決
 
 ## Asset Ownership
 
-kcf は runtime asset を repository 内で所有する。
+kdr は runtime asset を repository 内で所有する。
 
 - Mermaid.js: `vendor/mermaid/<version>/`
 - Draw.io.js: `vendor/drawio/<version>/`
 - checksum: asset と同じ directory に `.sha256` として配置する
-- manifest: Draw.io resource や runtime asset の一覧を kcf 内で管理する
+- manifest: Draw.io resource や runtime asset の一覧を kdr 内で管理する
 
 ## Just Recipe Design
 
@@ -47,4 +47,4 @@ CI/CD の通常経路は reference snapshot を再生成しない。CI/CD は re
 
 v0.1.0 は KatanA 既存実装を移すだけ。runtime asset 管理が未整理でも、既存実装相当で動く状態までを v0.1.0 とする。
 
-v0.1.1 は、v0.1.0 で移した runtime asset を kcf の所有物として固定し、更新可能にする。
+v0.1.1 は、v0.1.0 で移した runtime asset を kdr の所有物として固定し、更新可能にする。

@@ -4,7 +4,7 @@
 
 v0.1.2 は、KDV移譲まで維持する既存exportのCSS回帰を止める最小フェーズにする。
 
-KatanA 側では、HTML で指定した `body` の背景色が PDF / PNG / JPEG export に反映されることを確認していた。kcf への移植後、lint 対応などの過程で、`html, body { ... }` や `background: ...` のような指定を native export 側が拾えず、PDF と画像が白背景に戻るデグレードが起きている。
+KatanA 側では、HTML で指定した `body` の背景色が PDF / PNG / JPEG export に反映されることを確認していた。kdr への移植後、lint 対応などの過程で、`html, body { ... }` や `background: ...` のような指定を native export 側が拾えず、PDF と画像が白背景に戻るデグレードが起きている。
 
 画面上では、デバッグ実行時に HTML / PDF / PNG / JPG が macOS の既定アプリで順番に開く。PDF と画像は `/tmp` に出力する。
 
@@ -22,10 +22,10 @@ KatanA 側では、HTML で指定した `body` の背景色が PDF / PNG / JPEG 
 
 - Windows / Linux のデバッグ起動は v0.1.2 では扱わない
 - CSS 全体の描画エンジンを実装しない
-- KatanA の画面状態や preview 状態を kcf に持ち込まない
+- KatanA の画面状態や preview 状態を kdr に持ち込まない
 - viewer E2E の本格実装は v0.1.2 に含めない
 - 公開用途の安定した viewer CLI として固定しない
-- KDV移譲後もKCFがMarkdown exportを所有し続ける前提を作らない
+- KDV移譲後もKDRがMarkdown exportを所有し続ける前提を作らない
 
 ## Capabilities
 
@@ -36,7 +36,7 @@ KatanA 側では、HTML で指定した `body` の背景色が PDF / PNG / JPEG 
 
 ## Impact
 
-- `crates/katana-canvas-forge/src/markdown/export/` — native export の CSS 解釈を修正
-- `crates/katana-canvas-forge/tests/` — PDF / PNG / JPEG のCSS回帰テストを追加
-- `crates/katana-canvas-forge-cli/` — macOS専用の export デバッグコマンドを追加
+- `crates/katana-diagram-renderer/src/markdown/export/` — native export の CSS 解釈を修正
+- `crates/katana-diagram-renderer/tests/` — PDF / PNG / JPEG のCSS回帰テストを追加
+- `crates/katana-diagram-renderer-cli/` — macOS専用の export デバッグコマンドを追加
 - `openspec/changes/archive/2026-05-07-v0-1-2-export-css-debug/` — v0.1.2 の仕様とタスク

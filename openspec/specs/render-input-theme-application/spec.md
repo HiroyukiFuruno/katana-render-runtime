@@ -1,7 +1,7 @@
 # render-input-theme-application Specification
 
 ## Purpose
-外部 consumer が `RenderInput` 経由で渡した theme snapshot を、kcf の既定 preset より優先して runtime request と cache fingerprint に反映するための仕様を定義する。
+外部 consumer が `RenderInput` 経由で渡した theme snapshot を、kdr の既定 preset より優先して runtime request と cache fingerprint に反映するための仕様を定義する。
 ## Requirements
 ### Requirement: RenderInput の theme 情報で既定 preset を上書きできなければならない
 

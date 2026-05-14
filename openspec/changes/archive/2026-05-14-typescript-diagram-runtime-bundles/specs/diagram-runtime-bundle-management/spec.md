@@ -2,7 +2,7 @@
 
 ### Requirement: V8 へ渡す runtime code は生成済み JavaScript bundle でなければならない
 
-システムは、Mermaid / Draw.io / ZenUML の KCF runtime adapter を TypeScript source で管理しても、V8 へ渡す code は生成済み JavaScript bundle でなければならない（MUST）。V8 実行時に TypeScript source、type stripping、transpile、module resolution を要求してはならない（MUST NOT）。
+システムは、Mermaid / Draw.io / ZenUML の KDR runtime adapter を TypeScript source で管理しても、V8 へ渡す code は生成済み JavaScript bundle でなければならない（MUST）。V8 実行時に TypeScript source、type stripping、transpile、module resolution を要求してはならない（MUST NOT）。
 
 #### Scenario: Mermaid runtime を実行する
 
@@ -20,16 +20,16 @@
 
 ### Requirement: Runtime bundle は Mermaid / Draw.io / ZenUML ごとに分離されなければならない
 
-システムは、KCF runtime adapter の生成物を Mermaid / Draw.io / ZenUML ごとの独立した JavaScript bundle として管理しなければならない（MUST）。1つの巨大な `index-min.js` に全 runtime を暗黙統合してはならない（MUST NOT）。
+システムは、KDR runtime adapter の生成物を Mermaid / Draw.io / ZenUML ごとの独立した JavaScript bundle として管理しなければならない（MUST）。1つの巨大な `index-min.js` に全 runtime を暗黙統合してはならない（MUST NOT）。
 
 #### Scenario: 合意済み階層で TypeScript source を配置する
 
 - **WHEN** runtime TypeScript source を配置する
-- **THEN** shared helper は `crates/katana-canvas-forge/src/markdown/diagram_runtime/source/shared/` に置かれる
-- **THEN** Mermaid runtime source は `crates/katana-canvas-forge/src/markdown/diagram_runtime/source/mermaid/` に置かれる
-- **THEN** Draw.io runtime source は `crates/katana-canvas-forge/src/markdown/diagram_runtime/source/drawio/` に置かれる
-- **THEN** ZenUML runtime source は `crates/katana-canvas-forge/src/markdown/diagram_runtime/source/zenuml/` に置かれる
-- **THEN** generated bundle は `crates/katana-canvas-forge/src/markdown/diagram_runtime/generated/` に置かれる
+- **THEN** shared helper は `crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/shared/` に置かれる
+- **THEN** Mermaid runtime source は `crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/mermaid/` に置かれる
+- **THEN** Draw.io runtime source は `crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/drawio/` に置かれる
+- **THEN** ZenUML runtime source は `crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/zenuml/` に置かれる
+- **THEN** generated bundle は `crates/katana-diagram-renderer/src/markdown/diagram_runtime/generated/` に置かれる
 
 #### Scenario: Runtime bundle を生成する
 
@@ -62,7 +62,7 @@
 
 #### Scenario: Crate package を作成する
 
-- **WHEN** `cargo package -p katana-canvas-forge --locked --allow-dirty --list` 相当の package 内容確認を実行する
+- **WHEN** `cargo package -p katana-diagram-renderer --locked --allow-dirty --list` 相当の package 内容確認を実行する
 - **THEN** Mermaid / Draw.io / ZenUML の生成済み runtime bundle が package に含まれる
 - **THEN** TypeScript source を package に含めるかどうかは明示的な include / exclude 方針に従う
 - **THEN** package 利用者の `cargo build` は Rollup、Bun、Node、Deno を要求しない

@@ -9,9 +9,9 @@
 
 | ファイル | 変更内容 |
 |---------|---------|
-| `crates/katana-canvas-forge/src/markdown/mermaid_renderer/zenuml_v8_runtime.rs` | `_preset` → `preset` に変更し、`is_dark` を preamble に渡す |
-| `crates/katana-canvas-forge/src/markdown/mermaid_renderer/js_runtime/render_zenuml_v8.js` | `__zenuml_dark__` を読み取り `renderToSvg` の `options` に渡す |
-| `crates/katana-canvas-forge/src/markdown/mermaid_renderer/zenuml_v8_runtime_tests.rs` | ダーク/ライト両モードの unit test を追加 |
+| `crates/katana-diagram-renderer/src/markdown/mermaid_renderer/zenuml_v8_runtime.rs` | `_preset` → `preset` に変更し、`is_dark` を preamble に渡す |
+| `crates/katana-diagram-renderer/src/markdown/mermaid_renderer/js_runtime/render_zenuml_v8.js` | `__zenuml_dark__` を読み取り `renderToSvg` の `options` に渡す |
+| `crates/katana-diagram-renderer/src/markdown/mermaid_renderer/zenuml_v8_runtime_tests.rs` | ダーク/ライト両モードの unit test を追加 |
 
 ## 契約
 

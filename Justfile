@@ -13,10 +13,10 @@ MERMAID_ZENUML_JS_VERSION := "0.2.2"
 DRAWIO_JS_VERSION := "29.7.10"
 ZENUML_CORE_JS_VERSION := "3.47.9"
 PLAYWRIGHT_VERSION := "1.59.1"
-MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-canvas-forge/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
-MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-canvas-forge/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
-DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-canvas-forge/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
-DRAWIO_RESOURCE_DIR := "crates/katana-canvas-forge/src/markdown/drawio_renderer/js_runtime/resources"
+MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-diagram-renderer/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
+MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-diagram-renderer/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
+DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-diagram-renderer/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
+DRAWIO_RESOURCE_DIR := "crates/katana-diagram-renderer/src/markdown/drawio_renderer/js_runtime/resources"
 DRAWIO_RESOURCE_MANIFEST := DRAWIO_RESOURCE_DIR + "/drawio-resource-manifest.json"
 
 default: help
@@ -39,14 +39,14 @@ lint:
 
 # Run Rust syntax based structural checks
 ast-lint:
-    {{CARGO}} test -j {{JOBS}} -p kcf-linter ast_linter -- --nocapture
+    {{CARGO}} test -j {{JOBS}} -p kdr-linter ast_linter -- --nocapture
 
-# Check that kcf does not depend on KatanA UI crates
+# Check that kdr does not depend on KatanA UI crates
 dependency-leak:
     @dependencies="$({{CARGO}} tree --workspace -e normal)"; \
     pattern='(^|[[:space:]])(egui|katana-core|katana-ui|katana-platform|katana-native)([[:space:]]|$)'; \
     if printf '%s\n' "$dependencies" | grep -E "$pattern"; then \
-      echo "KatanA UI dependency leaked into katana-canvas-forge." >&2; \
+      echo "KatanA UI dependency leaked into katana-diagram-renderer." >&2; \
       exit 1; \
     fi
 
@@ -60,11 +60,11 @@ coverage:
 
 # Verify pinned runtime asset checksums
 runtime-asset-check:
-    cd crates/katana-canvas-forge/vendor/mermaid/{{MERMAID_JS_VERSION}} && shasum -a 256 -c mermaid.min.js.sha256
-    cd crates/katana-canvas-forge/vendor/mermaid-zenuml/{{MERMAID_ZENUML_JS_VERSION}} && shasum -a 256 -c mermaid-zenuml.min.js.sha256
-    cd crates/katana-canvas-forge/vendor/drawio/{{DRAWIO_JS_VERSION}} && shasum -a 256 -c drawio.min.js.sha256
-    cd crates/katana-canvas-forge/vendor/zenuml-core/{{ZENUML_CORE_JS_VERSION}} && shasum -a 256 -c zenuml.js.sha256
-    cd crates/katana-canvas-forge/src/markdown/diagram_runtime/generated && shasum -a 256 -c runtime-bundles.sha256
+    cd crates/katana-diagram-renderer/vendor/mermaid/{{MERMAID_JS_VERSION}} && shasum -a 256 -c mermaid.min.js.sha256
+    cd crates/katana-diagram-renderer/vendor/mermaid-zenuml/{{MERMAID_ZENUML_JS_VERSION}} && shasum -a 256 -c mermaid-zenuml.min.js.sha256
+    cd crates/katana-diagram-renderer/vendor/drawio/{{DRAWIO_JS_VERSION}} && shasum -a 256 -c drawio.min.js.sha256
+    cd crates/katana-diagram-renderer/vendor/zenuml-core/{{ZENUML_CORE_JS_VERSION}} && shasum -a 256 -c zenuml.js.sha256
+    cd crates/katana-diagram-renderer/src/markdown/diagram_runtime/generated && shasum -a 256 -c runtime-bundles.sha256
 
 # Generate TypeScript-managed diagram runtime bundles
 runtime-bundle-build:
@@ -84,7 +84,7 @@ typecheck:
 
 # Verify generated runtime bundles are included in the library crate package
 runtime-bundle-package-check:
-    @package_files="$({{CARGO}} package -p katana-canvas-forge --locked --allow-dirty --list)"; \
+    @package_files="$({{CARGO}} package -p katana-diagram-renderer --locked --allow-dirty --list)"; \
     for file in \
       "src/markdown/diagram_runtime/generated/mermaid-runtime.min.js" \
       "src/markdown/diagram_runtime/generated/drawio-runtime.min.js" \
@@ -125,10 +125,10 @@ update:
 release-verify:
     bash scripts/release/verify-version.sh "{{VERSION}}"
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
-    {{CARGO}} package -p katana-canvas-forge --locked --allow-dirty
-    {{CARGO}} package -p katana-canvas-forge-cli --locked --allow-dirty --list >/dev/null
-    bash scripts/release/verify-crate-size.sh katana-canvas-forge "{{VERSION}}"
-    {{CARGO}} publish -p katana-canvas-forge --dry-run --locked --allow-dirty
+    {{CARGO}} package -p katana-diagram-renderer --locked --allow-dirty
+    {{CARGO}} package -p katana-diagram-renderer-cli --locked --allow-dirty --list >/dev/null
+    bash scripts/release/verify-crate-size.sh katana-diagram-renderer "{{VERSION}}"
+    {{CARGO}} publish -p katana-diagram-renderer --dry-run --locked --allow-dirty
 
 # Verify completed OpenSpec changes are archived before release PRs
 release-openspec-archive:
@@ -170,18 +170,18 @@ drawio-update version:
     just drawio-compare-full
     just drawio-compare-ci
 
-# Render kcf Mermaid SVG fixtures
-mermaid-render fixtures output='tmp/kcf-mermaid-rendered':
+# Render kdr Mermaid SVG fixtures
+mermaid-render fixtures output='tmp/kdr-mermaid-rendered':
     @rm -rf "{{output}}"
     @mkdir -p "{{output}}"
     @for file in "{{fixtures}}"/*.md; do \
       slug=$(basename "$file" .md); \
-      {{CARGO}} run -p katana-canvas-forge-cli -- mermaid render --input "$file" --output "{{output}}/$slug.svg"; \
+      {{CARGO}} run -p katana-diagram-renderer-cli -- mermaid render --input "$file" --output "{{output}}/$slug.svg"; \
     done
 
 # Update official Mermaid reference SVG / PNG
 mermaid-reference fixtures:
-    bun run scripts/mermaid/diagram-update.ts --fixtures "{{fixtures}}" --output tmp/kcf-mermaid-official --markdown-output "{{fixtures}}/official-dark" --theme dark --mermaid-js "{{MERMAID_JS}}" --mermaid-zenuml-js "{{MERMAID_ZENUML_JS}}" --skip-errors
+    bun run scripts/mermaid/diagram-update.ts --fixtures "{{fixtures}}" --output tmp/kdr-mermaid-official --markdown-output "{{fixtures}}/official-dark" --theme dark --mermaid-js "{{MERMAID_JS}}" --mermaid-zenuml-js "{{MERMAID_ZENUML_JS}}" --skip-errors
 
 # Update all committed Mermaid reference SVG / PNG fixtures
 mermaid-reference-all:
@@ -189,32 +189,32 @@ mermaid-reference-all:
     just mermaid-reference tests/fixtures/mermaid/ja
     just mermaid-reference tests/fixtures/mermaid/representative
 
-# Compare committed official Mermaid reference with kcf rendering through ImageMagick score
-mermaid-compare fixtures min_score='99' output='tmp/kcf-mermaid':
+# Compare committed official Mermaid reference with kdr rendering through ImageMagick score
+mermaid-compare fixtures min_score='99' output='tmp/kdr-mermaid':
     just mermaid-render "{{fixtures}}" "{{output}}/rendered"
     bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser" --theme dark
     bun run scripts/mermaid/reference-compare.ts --official "{{fixtures}}/official-dark" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --theme dark --min-score "{{min_score}}"
 
 # Compare representative Mermaid patterns for CI/CD
 mermaid-compare-ci min_score='99':
-    just mermaid-compare tests/fixtures/mermaid/representative "{{min_score}}" tmp/kcf-mermaid-ci
+    just mermaid-compare tests/fixtures/mermaid/representative "{{min_score}}" tmp/kdr-mermaid-ci
 
 # Compare full Mermaid fixture sets for local release validation
 mermaid-compare-full min_score='99':
-    just mermaid-compare tests/fixtures/mermaid/en "{{min_score}}" tmp/kcf-mermaid-full/en
-    just mermaid-compare tests/fixtures/mermaid/ja "{{min_score}}" tmp/kcf-mermaid-full/ja
+    just mermaid-compare tests/fixtures/mermaid/en "{{min_score}}" tmp/kdr-mermaid-full/en
+    just mermaid-compare tests/fixtures/mermaid/ja "{{min_score}}" tmp/kdr-mermaid-full/ja
 
 # Render Mermaid fixtures for a timing smoke check
 mermaid-bench fixtures:
-    @start=$(date +%s); just mermaid-render "{{fixtures}}" tmp/kcf-mermaid-bench; end=$(date +%s); elapsed=$((end - start)); echo "mermaid fixtures rendered in ${elapsed}s"
+    @start=$(date +%s); just mermaid-render "{{fixtures}}" tmp/kdr-mermaid-bench; end=$(date +%s); elapsed=$((end - start)); echo "mermaid fixtures rendered in ${elapsed}s"
 
-# Render kcf Draw.io SVG fixtures
-drawio-render fixtures output='tmp/kcf-drawio-rendered':
+# Render kdr Draw.io SVG fixtures
+drawio-render fixtures output='tmp/kdr-drawio-rendered':
     @rm -rf "{{output}}"
     @mkdir -p "{{output}}"
     @for file in "{{fixtures}}"/*.drawio; do \
       slug=$(basename "$file" .drawio); \
-      {{CARGO}} run -p katana-canvas-forge-cli -- drawio render --input "$file" --output "{{output}}/$slug.svg"; \
+      {{CARGO}} run -p katana-diagram-renderer-cli -- drawio render --input "$file" --output "{{output}}/$slug.svg"; \
     done
 
 # Update official Draw.io reference SVG / PNG
@@ -255,8 +255,8 @@ drawio-reference-all:
         just drawio-reference "$fixtures"; \
       done
 
-# Compare committed official Draw.io reference with kcf rendering through ImageMagick score
-drawio-compare fixtures min_score='99' output='tmp/kcf-drawio' baseline='':
+# Compare committed official Draw.io reference with kdr rendering through ImageMagick score
+drawio-compare fixtures min_score='99' output='tmp/kdr-drawio' baseline='':
     just drawio-render "{{fixtures}}" "{{output}}/rendered"
     bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser"
     @if [ -n "{{baseline}}" ]; then \
@@ -267,11 +267,11 @@ drawio-compare fixtures min_score='99' output='tmp/kcf-drawio' baseline='':
 
 # Compare representative Draw.io patterns for CI/CD
 drawio-compare-ci min_score='99':
-    just drawio-compare tests/fixtures/drawio/representative "{{min_score}}" tmp/kcf-drawio-ci tests/fixtures/drawio/representative/score-baseline.json
+    just drawio-compare tests/fixtures/drawio/representative "{{min_score}}" tmp/kdr-drawio-ci tests/fixtures/drawio/representative/score-baseline.json
 
 # Compare basic Draw.io patterns as a smoke check
 drawio-compare-basic min_score='99':
-    just drawio-compare tests/fixtures/drawio/basic "{{min_score}}" tmp/kcf-drawio-basic
+    just drawio-compare tests/fixtures/drawio/basic "{{min_score}}" tmp/kdr-drawio-basic
 
 # Compare full Draw.io fixture sets for local release validation
 drawio-compare-full min_score='99':
@@ -305,9 +305,9 @@ drawio-compare-full min_score='99':
       "$root/official/templates/world"; do \
         slug=${fixtures#tests/fixtures/drawio/}; \
         slug=${slug//\//-}; \
-        just drawio-compare "$fixtures" "{{min_score}}" "tmp/kcf-drawio-full/$slug"; \
+        just drawio-compare "$fixtures" "{{min_score}}" "tmp/kdr-drawio-full/$slug"; \
       done
 
 # Render Draw.io fixtures for a timing smoke check
 drawio-bench fixtures:
-    @start=$(date +%s); just drawio-render "{{fixtures}}" tmp/kcf-drawio-bench; end=$(date +%s); elapsed=$((end - start)); echo "drawio fixtures rendered in ${elapsed}s"
+    @start=$(date +%s); just drawio-render "{{fixtures}}" tmp/kdr-drawio-bench; end=$(date +%s); elapsed=$((end - start)); echo "drawio fixtures rendered in ${elapsed}s"

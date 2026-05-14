@@ -71,7 +71,7 @@
 - **GIVEN** `just drawio-compare-ci 99` または `just drawio-compare-full 99` が失敗する
 - **WHEN** Jules が作業を開始する
 - **THEN** 最初に失敗した fixture 名、score、比較出力 directory を report に記録する
-- **THEN** 該当 fixture を含む最小 fixture directory だけを `just drawio-compare <fixture-dir> 99 tmp/kcf-v0.1.4-reference-score-improvement/<case>` で再実行する
+- **THEN** 該当 fixture を含む最小 fixture directory だけを `just drawio-compare <fixture-dir> 99 tmp/kdr-v0.1.4-reference-score-improvement/<case>` で再実行する
 - **THEN** 一度の cycle では一種類の差分だけを修正する
 
 #### Scenario: 原因が分からない

@@ -13,4 +13,4 @@
 - 代表ケース評価（representative evaluation）: `representative/` を使う。CI/CD の通常 gate とする。
 - 全量評価（full evaluation）: `en/` と `ja/` を使う。ローカルの release validation、runtime 更新、score 改善で実行する。
 
-公式 reference SVG / PNG は git 管理する。CI/CD では `reference-update` を実行せず、git 管理済み reference と kcf 出力だけを比較する。
+公式 reference SVG / PNG は git 管理する。CI/CD では `reference-update` を実行せず、git 管理済み reference と kdr 出力だけを比較する。
