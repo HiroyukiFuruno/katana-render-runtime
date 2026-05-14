@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -24,6 +26,7 @@ fn cli_renders_mermaid() -> TestResult<()> {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_delegates_reference_commands_to_just() -> TestResult<()> {
     let fixtures = std::env::temp_dir().join(format!("kdr-cli-fixtures-{}", std::process::id()));
     std::fs::create_dir_all(&fixtures)?;
@@ -57,6 +60,7 @@ fn cli_drawio_default_runtime_reports_error_without_stub_svg() -> TestResult<()>
     Ok(())
 }
 
+#[cfg(unix)]
 fn reference_status(
     kind: &str,
     action: &str,
@@ -75,6 +79,7 @@ fn command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_kdr"))
 }
 
+#[cfg(unix)]
 fn fake_just(name: &str, exit_code: i32) -> TestResult<PathBuf> {
     let dir = std::env::temp_dir().join(format!("kdr-fake-just-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir)?;
@@ -91,15 +96,6 @@ fn write_fake_just(dir: &Path, exit_code: i32) -> TestResult<()> {
     let mut permissions = std::fs::metadata(&just)?.permissions();
     permissions.set_mode(0o755);
     Ok(std::fs::set_permissions(&just, permissions)?)
-}
-
-#[cfg(windows)]
-fn write_fake_just(dir: &Path, exit_code: i32) -> TestResult<()> {
-    let just = dir.join("just.cmd");
-    Ok(std::fs::write(
-        &just,
-        format!("@echo off\r\nexit /b {exit_code}\r\n"),
-    )?)
 }
 
 fn temp_file(name: &str) -> PathBuf {
