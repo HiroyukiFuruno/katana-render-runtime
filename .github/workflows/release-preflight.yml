@@ -13,6 +13,7 @@ on:
       - "biome.json"
       - "tsconfig.json"
       - ".github/workflows/**"
+      - "assets/**"
       - "README.md"
       - "docs/**"
       - "openspec/**"
