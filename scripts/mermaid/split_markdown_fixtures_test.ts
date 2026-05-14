@@ -40,7 +40,7 @@ kanban
 ~~~
 `);
 
-  expect(fixtures[0].fileName).toBe("14-kanban.md");
+  expect(firstFixture(fixtures).fileName).toBe("14-kanban.md");
 });
 
 test("見出し3の小数点つき番号はslugに残さない", () => {
@@ -54,7 +54,7 @@ sequenceDiagram
 ~~~
 `);
 
-  expect(fixtures[0].fileName).toBe("04-01-sequence-diagram-simple.md");
+  expect(firstFixture(fixtures).fileName).toBe("04-01-sequence-diagram-simple.md");
 });
 
 test("空のMermaidブロックはemptyとして残す", () => {
@@ -64,6 +64,14 @@ test("空のMermaidブロックはemptyとして残す", () => {
 ~~~
 `);
 
-  expect(fixtures[0].fileName).toBe("29-empty.md");
-  expect(fixtures[0].source).toBe("");
+  expect(firstFixture(fixtures).fileName).toBe("29-empty.md");
+  expect(firstFixture(fixtures).source).toBe("");
 });
+
+function firstFixture(fixtures: ReturnType<typeof MarkdownMermaidFixtures.from>) {
+  const fixture = fixtures.at(0);
+  if (fixture === undefined) {
+    throw new Error("expected at least one Mermaid fixture");
+  }
+  return fixture;
+}

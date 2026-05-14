@@ -98,11 +98,15 @@ export class DrawioFixtureRepository {
 
 export class DrawioSourceKind {
   static fromLogicalPath(logicalPath: string): string {
-    const firstSegment = logicalPath.split("/")[0];
+    const firstSegment = DrawioSourceKind.firstSegment(logicalPath);
     return [SOURCE_KIND_BY_SEGMENT.get(firstSegment), firstSegment]
       .filter(DrawioSourceKind.isString)
       .slice(0, 1)
       .join("");
+  }
+
+  private static firstSegment(logicalPath: string): string {
+    return logicalPath.split("/").at(0) ?? "";
   }
 
   private static isString(value: string | undefined): value is string {

@@ -72,10 +72,11 @@ class LatestCheckCommand {
 
 class CliOptions {
   static definitions(argv: string[]): RuntimeAssetDefinition[] {
-    if (argv.length === 0 || argv[0] === "all") {
+    const kind = argv.at(0);
+    if (kind === undefined || kind === "all") {
       return RuntimeAssetCatalog.all();
     }
-    return [RuntimeAssetCatalog.byKind(argv[0])];
+    return [RuntimeAssetCatalog.byKind(kind)];
   }
 }
 

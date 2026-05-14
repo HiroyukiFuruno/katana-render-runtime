@@ -42,40 +42,69 @@ class ReferenceCompare {
 
   private loadBaselines(filePath: string): ReferenceScoreBaseline[] {
     const file = fs.readFileSync(filePath, "utf8");
-    const parsed: unknown = JSON.parse(file);
+    const parsed = JSON.parse(file);
     if (!Array.isArray(parsed)) {
       throw new Error(`Invalid baseline score file: expected array at ${filePath}`);
     }
-    return parsed.map((entry) => this.parseBaselineScore(entry, filePath));
+    return parsed.map((entry) => this.parseBaselineScore(BaselineScoreEntry.from(entry), filePath));
   }
 
-  private parseBaselineScore(entry: unknown, filePath: string): ReferenceScoreBaseline {
-    const source = this.assertBaselineScoreObject(entry, filePath);
+  private parseBaselineScore(entry: BaselineScoreEntry, filePath: string): ReferenceScoreBaseline {
     return {
-      slug: this.assertBaselineSlug(source.slug, filePath),
-      score: this.assertBaselineScore(source.score, filePath),
+      slug: this.assertBaselineSlug(entry.slug, filePath),
+      score: this.assertBaselineScore(entry.score, filePath),
     };
   }
 
-  private assertBaselineScoreObject(entry: unknown, filePath: string): Record<string, unknown> {
-    if (Object.prototype.toString.call(entry) !== "[object Object]") {
-      throw new Error(`Invalid baseline score entry: not an object in ${filePath}`);
-    }
-    return entry;
-  }
-
-  private assertBaselineSlug(slug: unknown, filePath: string): string {
+  private assertBaselineSlug(slug: string, filePath: string): string {
     if (typeof slug !== "string") {
       throw new Error(`Invalid baseline score entry in ${filePath}: ${JSON.stringify(slug)}`);
     }
     return slug;
   }
 
-  private assertBaselineScore(score: unknown, filePath: string): number {
+  private assertBaselineScore(score: number, filePath: string): number {
     if (typeof score !== "number") {
       throw new Error(`Invalid baseline score entry in ${filePath}: ${JSON.stringify(score)}`);
     }
     return score;
+  }
+}
+
+class BaselineScoreEntry {
+  constructor(
+    readonly slug: string,
+    readonly score: number,
+  ) {}
+
+  static from(entry: object): BaselineScoreEntry {
+    if (!BaselineScoreEntry.isObject(entry)) {
+      throw new Error("Invalid baseline score entry: not an object");
+    }
+    return new BaselineScoreEntry(
+      BaselineScoreEntry.stringValue(entry, "slug"),
+      BaselineScoreEntry.numberValue(entry, "score"),
+    );
+  }
+
+  private static isObject(entry: object): boolean {
+    return Object.prototype.toString.call(entry) === "[object Object]";
+  }
+
+  private static stringValue(entry: object, key: string): string {
+    const value = Reflect.get(entry, key);
+    if (typeof value !== "string") {
+      throw new Error(`Invalid baseline score string: ${key}`);
+    }
+    return value;
+  }
+
+  private static numberValue(entry: object, key: string): number {
+    const value = Reflect.get(entry, key);
+    if (typeof value !== "number") {
+      throw new Error(`Invalid baseline score number: ${key}`);
+    }
+    return value;
   }
 }
 

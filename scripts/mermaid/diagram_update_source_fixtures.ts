@@ -8,7 +8,7 @@ export class SourceFixtureRepository {
 
   list(): Fixture[] {
     const markdown = fs.readFileSync(this.inputPath, "utf8");
-    return MarkdownMermaidFixtures.fromMarkdown(markdown).map((fixture) => ({
+    return MarkdownMermaidFixtures.from(markdown).map((fixture) => ({
       fileName: fixture.fileName,
       filePath: this.inputPath,
       slug: path.basename(fixture.fileName, ".md"),

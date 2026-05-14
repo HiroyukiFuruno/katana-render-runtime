@@ -19,7 +19,10 @@ fn fake_bundle_renders_svg_and_rejects_non_svg_output() {
 
     let rendered =
         MermaidJsRuntimeOps::render("graph TD; A-->B", &path, DiagramColorPreset::dark());
-    assert!(rendered.as_ref().is_ok_and(|svg| svg.contains("<svg")));
+    assert!(
+        rendered.as_ref().is_ok_and(|svg| svg.contains("<svg")),
+        "{rendered:?}"
+    );
     assert!(ensure_svg("plain text").is_err());
     assert!(read_mermaid_bundle(std::path::Path::new("target/kcf-tests/missing.js")).is_err());
 }

@@ -33,7 +33,7 @@ interface DrawioGraphViewer {
 }
 
 interface DrawioWindow extends Window {
-  GraphViewer: DrawioGraphViewer;
+  GraphViewer?: DrawioGraphViewer;
 }
 
 export class OfficialDrawioRenderer {
@@ -93,7 +93,8 @@ export class OfficialDrawioRenderer {
             }),
           );
           diagram.appendChild(container);
-          (window as DrawioWindow).GraphViewer.createViewerForElement(container, (viewer) => {
+          const graphViewer = DrawioRuntime.requireGraphViewer(window as DrawioWindow);
+          graphViewer.createViewerForElement(container, (viewer) => {
             const svg = viewer.graph.getSvg();
             diagram.innerHTML = new XMLSerializer().serializeToString(svg);
             resolve(diagram.innerHTML);
@@ -143,8 +144,10 @@ export class OfficialDrawioRenderer {
       const svg = document.querySelector("#diagram svg") as SVGSVGElement;
       const viewBox = svg.viewBox.baseVal;
       const box = svg.getBoundingClientRect();
-      const width = Math.ceil([viewBox.width, box.width, 1].find((size) => size > 0));
-      const height = Math.ceil([viewBox.height, box.height, 1].find((size) => size > 0));
+      const positiveDimension = (primary: number, fallback: number): number =>
+        [primary, fallback].find((size) => size > 0) ?? 1;
+      const width = Math.ceil(positiveDimension(viewBox.width, box.width));
+      const height = Math.ceil(positiveDimension(viewBox.height, box.height));
       svg.setAttribute("width", String(width));
       svg.setAttribute("height", String(height));
       const capture = document.getElementById("capture") as HTMLElement;
@@ -200,3 +203,12 @@ class DrawioSource {
 }
 
 export { expandHome };
+
+class DrawioRuntime {
+  static requireGraphViewer(runtime: DrawioWindow): DrawioGraphViewer {
+    if (runtime.GraphViewer === undefined) {
+      throw new Error("Draw.io GraphViewer was not registered");
+    }
+    return runtime.GraphViewer;
+  }
+}

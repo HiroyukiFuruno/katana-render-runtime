@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DiagramTheme, type DiagramThemeName } from "./diagram_theme";
+import { type Fixture, FixtureRepository } from "./diagram_update_fixtures";
 import { MarkdownReferenceAssets } from "./diagram_update_markdown_assets";
-import { FixtureRepository, type Fixture } from "./diagram_update_fixtures";
 import { MarkdownReferenceWriter } from "./diagram_update_markdown_reference";
 import { SkippedFixtureReport } from "./diagram_update_skipped_report";
-import { OfficialMermaidRenderer, expandHome, type RendererOptions } from "./official-renderer";
+import { expandHome, OfficialMermaidRenderer, type RendererOptions } from "./official-renderer";
 
 interface CliParsedOptions extends RendererOptions {
   fixturesDir: string;
@@ -58,7 +58,7 @@ class CliOptions {
 
   private static get(argv: string[], name: string, fallback: string): string {
     const index = argv.indexOf(name);
-    return index >= 0 ? argv[index + 1] : fallback;
+    return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
   }
 
   private static exitIfHelp(argv: string[]) {
@@ -182,7 +182,7 @@ class MermaidDiagramUpdate {
 
 class ErrorSummary {
   static fromString(value: string): string {
-    return ErrorSummary.truncate(value.split("\n")[0]);
+    return ErrorSummary.truncate(value.split("\n").at(0) ?? "");
   }
 
   private static truncate(value: string): string {

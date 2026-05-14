@@ -1,14 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import { CropRect, type CliParsedOptions } from "../mermaid/reference_compare_options";
+import { type CliParsedOptions, CropRect } from "../mermaid/reference_compare_options";
 import { MagickOps } from "../mermaid/reference_image_ops";
 import { ReferencePairRepository } from "../mermaid/reference_pair_repository";
 import { ReferenceCompareReport, ReferenceCompareReportLabels } from "../mermaid/reference_report";
 import {
   type DrawioReferenceScoreBaseline,
+  type DrawioReferenceScoreRow,
   DrawioReferenceScorer,
   DrawioReferenceScores,
-  type DrawioReferenceScoreRow,
 } from "./reference-score";
 
 class CliOptions {
@@ -28,12 +28,13 @@ class CliOptions {
 
   private static get(argv: string[], name: string, fallback: string): string {
     const index = argv.indexOf(name);
-    return index >= 0 ? argv[index + 1] : fallback;
+    return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
   }
 
   private static getOptionalPath(argv: string[], name: string): string | null {
     const index = argv.indexOf(name);
-    return index >= 0 ? path.resolve(argv[index + 1]) : null;
+    const value = index >= 0 ? argv.at(index + 1) : undefined;
+    return value === undefined ? null : path.resolve(value);
   }
 
   private static number(argv: string[], name: string, fallback: number): number {

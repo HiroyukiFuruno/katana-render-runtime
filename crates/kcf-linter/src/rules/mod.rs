@@ -6,6 +6,7 @@ mod lazy_code;
 mod manifest_boundary;
 mod method_calls;
 mod prohibited_types;
+mod runtime_bundles;
 
 use crate::diagnostics::{KcfLintError, Violation};
 use crate::workspace::WorkspaceModel;
@@ -15,9 +16,10 @@ use function_length::FunctionLengthRule;
 use lazy_code::LazyCodeRule;
 use method_calls::ProhibitedMethodRule;
 use prohibited_types::ProhibitedTypeRule;
+use runtime_bundles::RuntimeBundleRule;
 
 type RuleCheck = fn(&WorkspaceModel) -> Result<Vec<Violation>, KcfLintError>;
-const SUPPLEMENTAL_RULE_COUNT: usize = 6;
+const SUPPLEMENTAL_RULE_COUNT: usize = 7;
 
 pub struct RuleRunner;
 
@@ -38,6 +40,7 @@ impl RuleRunner {
             LazyCodeRule::check,
             ProhibitedAttributeRule::check,
             ArchitectureRule::check,
+            RuntimeBundleRule::check,
         ]
     }
 }

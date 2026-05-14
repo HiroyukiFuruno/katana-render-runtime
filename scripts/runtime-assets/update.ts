@@ -1,13 +1,13 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import {
   RuntimeAssetCatalog,
   RuntimeAssetCatalogSource,
   RuntimeAssetChecksum,
-  RuntimeAssetPaths,
   type RuntimeAssetDefinition,
+  RuntimeAssetPaths,
 } from "./runtime-asset-common";
 
 class RuntimeAssetDownloader {
@@ -79,7 +79,11 @@ class RuntimeSourceUpdater {
     fs.writeFileSync(justfile, source, "utf8");
   }
 
-  private updateScriptCatalog(definition: RuntimeAssetDefinition, version: string, checksum: string) {
+  private updateScriptCatalog(
+    definition: RuntimeAssetDefinition,
+    version: string,
+    checksum: string,
+  ) {
     const catalogPath = RuntimeAssetPaths.runtimeAssetCommon();
     const source = fs.readFileSync(catalogPath, "utf8");
     const updated = RuntimeAssetCatalogSource.updatePinnedAsset(
@@ -135,7 +139,18 @@ class CliOptions {
         "Usage: bun run scripts/runtime-assets/update.ts <mermaid|mermaid-zenuml|drawio> <version>",
       );
     }
-    return new UpdateCommand(RuntimeAssetCatalog.byKind(argv[0]), argv[1]);
+    return new UpdateCommand(
+      RuntimeAssetCatalog.byKind(CliOptions.argAt(argv, 0)),
+      CliOptions.argAt(argv, 1),
+    );
+  }
+
+  private static argAt(argv: string[], index: number): string {
+    const value = argv.at(index);
+    if (value === undefined) {
+      throw new Error("Runtime asset update argument is missing");
+    }
+    return value;
   }
 }
 

@@ -64,22 +64,24 @@ fn read_asset_file_reports_missing_file_error() {
 }
 
 #[test]
-fn build_preamble_json_encodes_source() {
-    let preamble = super::build_preamble("title \"hello\"", false);
-    assert!(preamble.contains("var __zenuml_source__"));
-    assert!(preamble.contains(r#"\"hello\""#));
+fn render_script_json_encodes_source() {
+    let script = super::render_script("title \"hello\"", false);
+    assert_eq!(
+        script,
+        r#"katanaRunZenumlRuntime("title \"hello\"", false);"#
+    );
 }
 
 #[test]
-fn build_preamble_sets_dark_true() {
-    let preamble = super::build_preamble("A.method()", true);
-    assert!(preamble.contains("var __zenuml_dark__ = true;"));
+fn render_script_sets_dark_true() {
+    let script = super::render_script("A.method()", true);
+    assert_eq!(script, r#"katanaRunZenumlRuntime("A.method()", true);"#);
 }
 
 #[test]
-fn build_preamble_sets_dark_false() {
-    let preamble = super::build_preamble("A.method()", false);
-    assert!(preamble.contains("var __zenuml_dark__ = false;"));
+fn render_script_sets_dark_false() {
+    let script = super::render_script("A.method()", false);
+    assert_eq!(script, r#"katanaRunZenumlRuntime("A.method()", false);"#);
 }
 
 #[test]

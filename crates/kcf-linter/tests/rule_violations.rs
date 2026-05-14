@@ -67,7 +67,7 @@ fn required_kal_messages() -> [&'static str; 7] {
     ]
 }
 
-fn required_supplemental_rules() -> [&'static str; 7] {
+fn required_supplemental_rules() -> [&'static str; 8] {
     [
         "function-length",
         "prohibited-method",
@@ -76,6 +76,7 @@ fn required_supplemental_rules() -> [&'static str; 7] {
         "prohibited-attribute",
         "renderer-boundary",
         "cli-renderer-duplication",
+        "runtime-bundle-boundary",
     ]
 }
 

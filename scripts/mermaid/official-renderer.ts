@@ -2,8 +2,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { DiagramTheme, type MermaidThemeName, type DiagramThemeName } from "./diagram_theme";
-import { OfficialSourceNormalizer } from "./official-source-normalizer";
+import { DiagramTheme, type DiagramThemeName, type MermaidThemeName } from "./diagram_theme";
 import { OfficialRendererDeterminism } from "./official-renderer-determinism";
 import { MermaidRuntimeScripts } from "./official-renderer-i18n";
 import type {
@@ -14,6 +13,7 @@ import type {
   PageHandle,
   PlaywrightModule,
 } from "./official-renderer-types";
+import { OfficialSourceNormalizer } from "./official-source-normalizer";
 
 export { expandHome } from "./official-renderer-i18n";
 
@@ -174,21 +174,21 @@ export class OfficialMermaidRenderer {
     return page.evaluate(
       async ({ config, input, request }) => {
         const i18nWindow = window as MermaidI18nWindow;
-        const normalized = i18nWindow.katanaNormalizeMermaidSourceI18n(input.source);
-        const mermaidValue = i18nWindow.mermaid;
+        const normalized = MermaidRuntime.requireNormalizer(i18nWindow)(input.source);
+        const mermaidValue = MermaidRuntime.requireMermaid(i18nWindow);
         mermaidValue.initialize(config);
-        if (i18nWindow.katanaMermaidDiagramType(normalized.source) === "zenuml") {
+        if (MermaidRuntime.requireDiagramType(i18nWindow)(normalized.source) === "zenuml") {
           if (i18nWindow.__katanaMermaidZenuml === undefined) {
             throw new Error("ZenUML runtime asset was not registered");
           }
           await mermaidValue.registerExternalDiagrams([i18nWindow.__katanaMermaidZenuml]);
         }
         return mermaidValue.render(`official-${input.slug}`, normalized.source).then((result) => {
-          const restored = i18nWindow.katanaRestoreMermaidI18nText(
+          const restored = MermaidRuntime.requireRestore(i18nWindow)(
             result.svg,
             normalized.replacements,
           );
-          const normalizedSvg = i18nWindow.katanaNormalizeMermaidSvg(restored, {
+          const normalizedSvg = MermaidRuntime.requireSvgNormalizer(i18nWindow)(restored, {
             ...request,
             source: normalized.source,
           });
@@ -239,8 +239,15 @@ export class OfficialMermaidRenderer {
       const viewBox = String(svgElement.getAttribute("viewBox"))
         .split(/\s+/)
         .map((value) => Number(value));
-      const width = Math.ceil(viewBox[2]);
-      const height = Math.ceil(viewBox[3]);
+      const dimensionAt = (values: number[], index: number): number => {
+        const value = values.at(index);
+        if (value === undefined || !Number.isFinite(value)) {
+          throw new Error("Mermaid SVG viewBox is invalid");
+        }
+        return value;
+      };
+      const width = Math.ceil(dimensionAt(viewBox, 2));
+      const height = Math.ceil(dimensionAt(viewBox, 3));
       svgElement.setAttribute("width", String(width));
       svgElement.setAttribute("height", String(height));
       svgElement.style.maxWidth = `${width}px`;
@@ -264,5 +271,42 @@ html,body{margin:0;background:${this.theme.canvasBackground};color:${this.theme.
 #diagram{max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center}
 #diagram svg{max-width:100%;max-height:100%}
 </style></head><body><div id="capture"><div id="diagram"></div></div></body></html>`;
+  }
+}
+
+class MermaidRuntime {
+  static requireMermaid(runtime: MermaidI18nWindow) {
+    if (runtime.mermaid === undefined) {
+      throw new Error("Mermaid runtime was not registered");
+    }
+    return runtime.mermaid;
+  }
+
+  static requireDiagramType(runtime: MermaidI18nWindow) {
+    if (runtime.katanaMermaidDiagramType === undefined) {
+      throw new Error("Mermaid diagram-type helper was not registered");
+    }
+    return runtime.katanaMermaidDiagramType;
+  }
+
+  static requireNormalizer(runtime: MermaidI18nWindow) {
+    if (runtime.katanaNormalizeMermaidSourceI18n === undefined) {
+      throw new Error("Mermaid i18n normalizer was not registered");
+    }
+    return runtime.katanaNormalizeMermaidSourceI18n;
+  }
+
+  static requireRestore(runtime: MermaidI18nWindow) {
+    if (runtime.katanaRestoreMermaidI18nText === undefined) {
+      throw new Error("Mermaid i18n restore helper was not registered");
+    }
+    return runtime.katanaRestoreMermaidI18nText;
+  }
+
+  static requireSvgNormalizer(runtime: MermaidI18nWindow) {
+    if (runtime.katanaNormalizeMermaidSvg === undefined) {
+      throw new Error("Mermaid SVG normalizer was not registered");
+    }
+    return runtime.katanaNormalizeMermaidSvg;
   }
 }

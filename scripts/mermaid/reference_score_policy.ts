@@ -125,16 +125,12 @@ export class ReferenceScorePolicy {
     return baseline.score;
   }
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline競合時の判定で2段目分岐が必要。
   private assertUniqueIdentity(identity: string, baseline: ReferenceScoreBaseline): void {
     const existing = this.baselineByIdentity.get(identity);
-    const existingSlug = existing?.slug ?? baseline.slug;
-    switch (existingSlug) {
-      case baseline.slug:
-        return;
-      default:
-        this.throwAmbiguousBaselineIdentity(identity, existingSlug, baseline);
+    if (existing === undefined || existing.slug === baseline.slug) {
+      return;
     }
+    this.throwAmbiguousBaselineIdentity(identity, existing.slug, baseline);
   }
 
   private throwAmbiguousBaselineIdentity(

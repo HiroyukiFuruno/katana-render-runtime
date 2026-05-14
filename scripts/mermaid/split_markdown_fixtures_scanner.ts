@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
+import type { MarkdownMermaidFixture } from "./split_markdown_fixtures_core";
 import {
   type HeadingState,
   MarkdownMermaidFixtureFactory,
 } from "./split_markdown_fixtures_factory";
-import type { MarkdownMermaidFixture } from "./split_markdown_fixtures_core";
 
 type ScannerLineHandler = (
   scanner: MarkdownMermaidScanner,
@@ -13,6 +13,8 @@ type ScannerLineHandler = (
 ) => void;
 
 type HeadingApplier = (heading: HeadingState, title: string) => HeadingState;
+
+type FenceHandler = (scanner: MarkdownMermaidScanner, lines: string[], index: number) => void;
 
 interface MermaidBlock {
   source: string;
@@ -39,16 +41,19 @@ export class MarkdownMermaidScanner {
   }
 
   private scanLine(lines: string[], index: number, line: string) {
-    MarkdownMermaidScanner.lineHandlers()[Number(index <= this.skipUntilIndex)](
-      this,
-      lines,
-      index,
-      line,
-    );
+    MarkdownMermaidScanner.lineHandler(index <= this.skipUntilIndex)(this, lines, index, line);
   }
 
   private static lineHandlers(): ScannerLineHandler[] {
     return [MarkdownMermaidScanner.scanActiveLine, MarkdownMermaidScanner.skipLine];
+  }
+
+  private static lineHandler(isSkipped: boolean): ScannerLineHandler {
+    const handler = MarkdownMermaidScanner.lineHandlers().at(Number(isSkipped));
+    if (handler === undefined) {
+      throw new Error("Mermaid scanner line handler is missing");
+    }
+    return handler;
   }
 
   private static scanActiveLine(
@@ -69,11 +74,19 @@ export class MarkdownMermaidScanner {
   ) {}
 
   private scanFenceLine(lines: string[], index: number, line: string) {
-    MarkdownMermaidScanner.fenceHandlers()[Number(FenceLine.isStart(line))](this, lines, index);
+    MarkdownMermaidScanner.fenceHandler(FenceLine.isStart(line))(this, lines, index);
   }
 
-  private static fenceHandlers() {
+  private static fenceHandlers(): FenceHandler[] {
     return [MarkdownMermaidScanner.keepLine, MarkdownMermaidScanner.pushFenceBlock];
+  }
+
+  private static fenceHandler(isStart: boolean): FenceHandler {
+    const handler = MarkdownMermaidScanner.fenceHandlers().at(Number(isStart));
+    if (handler === undefined) {
+      throw new Error("Mermaid scanner fence handler is missing");
+    }
+    return handler;
   }
 
   private static keepLine(_scanner: MarkdownMermaidScanner, _lines: string[], _index: number) {}
@@ -96,9 +109,14 @@ class HeadingLine {
   ) {}
 
   static from(line: string): HeadingLine {
-    return [HeadingLine.level2(line), HeadingLine.level3(line)]
+    const heading = [HeadingLine.level2(line), HeadingLine.level3(line)]
       .filter((heading) => heading.isMatched())
-      .concat([HeadingLine.keep()])[0];
+      .concat([HeadingLine.keep()])
+      .at(0);
+    if (heading === undefined) {
+      throw new Error("Mermaid heading line is missing");
+    }
+    return heading;
   }
 
   private static level2(line: string): HeadingLine {
@@ -118,7 +136,7 @@ class HeadingLine {
   }
 
   apply(heading: HeadingState): HeadingState {
-    return HeadingLine.appliers()[this.level](heading, this.title);
+    return HeadingLine.applier(this.level)(heading, this.title);
   }
 
   private static appliers(): HeadingApplier[] {
@@ -128,6 +146,14 @@ class HeadingLine {
       HeadingLine.applyLevel2,
       HeadingLine.applyLevel3,
     ];
+  }
+
+  private static applier(level: number): HeadingApplier {
+    const applier = HeadingLine.appliers().at(level);
+    if (applier === undefined) {
+      throw new Error(`Mermaid heading applier is missing: ${level}`);
+    }
+    return applier;
   }
 
   private static keepHeading(heading: HeadingState, _title: string): HeadingState {
@@ -154,7 +180,7 @@ class HeadingLine {
 
 class MermaidFenceBlock {
   static read(lines: string[], startIndex: number): MermaidBlock {
-    const marker = FenceLine.marker(lines[startIndex]);
+    const marker = FenceLine.marker(MermaidFenceBlock.lineAt(lines, startIndex));
     const endOffset = lines.slice(startIndex + 1).findIndex((line) => line.trim() === marker);
     assert(endOffset >= 0, `Mermaid fence is not closed at line ${startIndex + 1}`);
     const endIndex = startIndex + 1 + endOffset;
@@ -166,6 +192,14 @@ class MermaidFenceBlock {
       endIndex,
     };
   }
+
+  private static lineAt(lines: string[], index: number): string {
+    const line = lines.at(index);
+    if (line === undefined) {
+      throw new Error(`Mermaid fence line is missing: ${index}`);
+    }
+    return line;
+  }
 }
 
 class FenceLine {
@@ -176,6 +210,8 @@ class FenceLine {
   static marker(line: string): string {
     const match = line.trim().match(/^(`{3,}|~{3,})/);
     assert(match, `Invalid Mermaid fence: ${line}`);
-    return match[1];
+    const marker = match.at(1);
+    assert(marker, `Invalid Mermaid fence marker: ${line}`);
+    return marker;
   }
 }

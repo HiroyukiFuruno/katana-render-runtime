@@ -66,11 +66,24 @@ export class CropRect {
     if (CropRect.isInvalidParts(parts)) {
       throw new Error(`Invalid crop rect: ${value}`);
     }
-    return new CropRect(parts[0], parts[1], parts[2], parts[3]);
+    return new CropRect(
+      CropRect.partAt(parts, 0),
+      CropRect.partAt(parts, 1),
+      CropRect.partAt(parts, 2),
+      CropRect.partAt(parts, 3),
+    );
   }
 
   private static isInvalidParts(parts: number[]): boolean {
     return [parts.length !== 4, parts.some((it) => Number.isNaN(it))].includes(true);
+  }
+
+  private static partAt(parts: number[], index: number): number {
+    const value = parts.at(index);
+    if (value === undefined) {
+      throw new Error("Invalid crop rect part count");
+    }
+    return value;
   }
 
   constructor(

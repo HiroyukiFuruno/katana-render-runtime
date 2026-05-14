@@ -1,5 +1,5 @@
 import type { MagickOps, NormalizedPair } from "./reference_image_ops";
-import { ReferenceScorePolicy, type ReferenceScoreBaseline } from "./reference_score_policy";
+import { type ReferenceScoreBaseline, ReferenceScorePolicy } from "./reference_score_policy";
 
 export interface ReferenceScoreRow {
   slug: string;
@@ -41,10 +41,10 @@ export class ReferenceScorer {
     return {
       slug: normalized.pair.slug,
       score,
-      canvasRmseScore: scores[0],
-      canvasMaeScore: scores[1],
-      contentRmseScore: scores[2],
-      contentMaeScore: scores[3],
+      canvasRmseScore: ReferenceScorer.scoreAt(scores, 0),
+      canvasMaeScore: ReferenceScorer.scoreAt(scores, 1),
+      contentRmseScore: ReferenceScorer.scoreAt(scores, 2),
+      contentMaeScore: ReferenceScorer.scoreAt(scores, 3),
       minScore: threshold.minScore,
       exceptionReason: threshold.reason,
       passed: score >= threshold.minScore,
@@ -66,5 +66,13 @@ export class ReferenceScorer {
 
   private scoreMetric(metric: string, left: string, right: string): number {
     return Math.max(0, 100 * (1 - this.magick.compareNormalizedError(metric, left, right)));
+  }
+
+  private static scoreAt(scores: number[], index: number): number {
+    const score = scores.at(index);
+    if (score === undefined) {
+      throw new Error("Reference score metric is missing");
+    }
+    return score;
   }
 }

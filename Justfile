@@ -64,13 +64,44 @@ runtime-asset-check:
     cd crates/katana-canvas-forge/vendor/mermaid-zenuml/{{MERMAID_ZENUML_JS_VERSION}} && shasum -a 256 -c mermaid-zenuml.min.js.sha256
     cd crates/katana-canvas-forge/vendor/drawio/{{DRAWIO_JS_VERSION}} && shasum -a 256 -c drawio.min.js.sha256
     cd crates/katana-canvas-forge/vendor/zenuml-core/{{ZENUML_CORE_JS_VERSION}} && shasum -a 256 -c zenuml.js.sha256
+    cd crates/katana-canvas-forge/src/markdown/diagram_runtime/generated && shasum -a 256 -c runtime-bundles.sha256
+
+# Generate TypeScript-managed diagram runtime bundles
+runtime-bundle-build:
+    bun run runtime-bundle:build
+
+# Verify generated diagram runtime bundles are synced with TypeScript source
+runtime-bundle-check:
+    bun run runtime-bundle:check
+
+# Run TypeScript formatter/linter gate
+biome:
+    bun run biome
+
+# Run strict TypeScript compiler checks
+typecheck:
+    bun run typecheck
+
+# Verify generated runtime bundles are included in the library crate package
+runtime-bundle-package-check:
+    @package_files="$({{CARGO}} package -p katana-canvas-forge --locked --allow-dirty --list)"; \
+    for file in \
+      "src/markdown/diagram_runtime/generated/mermaid-runtime.min.js" \
+      "src/markdown/diagram_runtime/generated/drawio-runtime.min.js" \
+      "src/markdown/diagram_runtime/generated/zenuml-runtime.min.js" \
+      "src/markdown/diagram_runtime/generated/runtime-bundles.sha256"; do \
+        if ! printf '%s\n' "$package_files" | grep -qx "$file"; then \
+          echo "missing runtime bundle package file: $file" >&2; \
+          exit 1; \
+        fi; \
+      done
 
 # Run TypeScript tests for runtime asset helper scripts
 runtime-asset-script-test:
     bun test scripts/runtime-assets/runtime-asset-common_test.ts
 
 # Run the local quality gate
-check: fmt-check lint unit-test ast-lint dependency-leak runtime-asset-check
+check: fmt-check lint unit-test ast-lint dependency-leak runtime-bundle-check biome typecheck runtime-asset-check runtime-bundle-package-check
     @echo "checks passed"
 
 # Sweep old build artifacts locally (older than 7 days)

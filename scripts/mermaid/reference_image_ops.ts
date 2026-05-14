@@ -1,5 +1,5 @@
-import { execFileSync, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import assert from "node:assert/strict";
+import { execFileSync, type SpawnSyncReturns, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { DiagramTheme, type DiagramThemeName } from "./diagram_theme";
@@ -117,7 +117,7 @@ export class MagickOps {
   private renderContactRow(pairImages: string[], index: number, rowIndex: number): string {
     const row = path.join(this.workDir, `row-${String(rowIndex).padStart(2, "0")}.png`);
     this.magick([
-      pairImages[index],
+      this.firstImage(pairImages, index),
       this.secondImage(pairImages, index),
       "-background",
       this.theme.canvasBackground,
@@ -128,7 +128,15 @@ export class MagickOps {
   }
 
   private secondImage(pairImages: string[], index: number): string {
-    return pairImages[index + 1] ?? pairImages[index];
+    return pairImages.at(index + 1) ?? this.firstImage(pairImages, index);
+  }
+
+  private firstImage(pairImages: string[], index: number): string {
+    const image = pairImages.at(index);
+    if (image === undefined) {
+      throw new Error(`Contact sheet image is missing at index ${index}`);
+    }
+    return image;
   }
 
   private magick(args: string[]) {
@@ -141,7 +149,14 @@ export class ImageSize {
     const [width, height] = value.trim().split(/\s+/).map(Number);
     assert(Number.isFinite(width), `ImageMagick identify parse failed: ${value.trim()}`);
     assert(Number.isFinite(height), `ImageMagick identify parse failed: ${value.trim()}`);
-    return new ImageSize(width, height);
+    return new ImageSize(ImageSize.partAt(width), ImageSize.partAt(height));
+  }
+
+  private static partAt(value: number | undefined): number {
+    if (value === undefined) {
+      throw new Error("ImageMagick identify result is incomplete");
+    }
+    return value;
   }
 
   constructor(
@@ -178,7 +193,15 @@ class ImageMetric {
     if (!match) {
       throw new Error(`ImageMagick metric parse failed: ${value.trim()}`);
     }
-    return Number(match[1]);
+    return Number(ImageMetric.matchedValue(match));
+  }
+
+  private static matchedValue(match: RegExpMatchArray): string {
+    const value = match.at(1);
+    if (value === undefined) {
+      throw new Error("ImageMagick metric result is incomplete");
+    }
+    return value;
   }
 }
 

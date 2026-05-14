@@ -18,7 +18,7 @@ export interface BrowserHandle {
 
 export interface PageHandle {
   setContent(html: string, options: { waitUntil: "load" }): Promise<void>;
-  addScriptTag(options: { path: string }): Promise<void>;
+  addScriptTag(options: { path: string }): Promise<void | object>;
   evaluate<Result>(callback: () => Result | Promise<Result>): Promise<Result>;
   evaluate<Result, Argument>(
     callback: (argument: Argument) => Result | Promise<Result>,
@@ -29,7 +29,7 @@ export interface PageHandle {
 }
 
 export interface LocatorHandle {
-  screenshot(options: { path: string; omitBackground: boolean }): Promise<void>;
+  screenshot(options: { path: string; omitBackground: boolean }): Promise<void | object>;
 }
 
 export interface MermaidConfig {
@@ -53,7 +53,7 @@ export interface MermaidGlobal {
 }
 
 export interface MermaidWindow extends Window {
-  mermaid: MermaidGlobal;
+  mermaid?: MermaidGlobal;
 }
 
 export interface MermaidI18nReplacement {
@@ -68,10 +68,10 @@ export interface MermaidI18nNormalizeResult {
 
 export interface MermaidI18nWindow extends MermaidWindow {
   __katanaMermaidZenuml?: object;
-  katanaMermaidDiagramType(source: string): string;
-  katanaNormalizeMermaidSourceI18n(source: string): MermaidI18nNormalizeResult;
-  katanaRestoreMermaidI18nText(svg: string, replacements: MermaidI18nReplacement[]): string;
-  katanaNormalizeMermaidSvg(
+  katanaMermaidDiagramType?: (source: string) => string;
+  katanaNormalizeMermaidSourceI18n?: (source: string) => MermaidI18nNormalizeResult;
+  katanaRestoreMermaidI18nText?: (svg: string, replacements: MermaidI18nReplacement[]) => string;
+  katanaNormalizeMermaidSvg?: (
     svg: string,
     request: {
       theme: "dark" | "default";
@@ -82,9 +82,9 @@ export interface MermaidI18nWindow extends MermaidWindow {
       source: string;
       background: string;
     },
-  ): string;
+  ) => string;
 }
 
 export interface FontReadyDocument extends Document {
-  fonts: { ready: Promise<void> };
+  fonts: FontFaceSet;
 }

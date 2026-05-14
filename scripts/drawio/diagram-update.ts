@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  expandHome,
-  OfficialDrawioRenderer,
   type DrawioRendererOptions,
   type DrawioRenderFixture,
+  expandHome,
+  OfficialDrawioRenderer,
 } from "./official-renderer";
 
 interface CliParsedOptions extends DrawioRendererOptions {
@@ -49,7 +49,7 @@ class CliOptions {
 
   private static get(argv: string[], name: string, fallback: string): string {
     const index = argv.indexOf(name);
-    return index >= 0 ? argv[index + 1] : fallback;
+    return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
   }
 
   private static exitIfHelp(argv: string[]) {

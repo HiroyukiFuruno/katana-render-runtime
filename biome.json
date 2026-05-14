@@ -1,0 +1,41 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "files": {
+    "includes": [
+      "scripts/**/*.ts",
+      "crates/katana-canvas-forge/src/markdown/diagram_runtime/source/**/*.ts",
+      "!crates/katana-canvas-forge/src/markdown/diagram_runtime/generated",
+      "!crates/katana-canvas-forge/vendor",
+      "!target",
+      "!tmp"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "complexity": {
+        "noExcessiveCognitiveComplexity": "error"
+      },
+      "style": {
+        "noDefaultExport": "error",
+        "useNodejsImportProtocol": "error"
+      },
+      "suspicious": {
+        "noExplicitAny": "error"
+      }
+    }
+  }
+}

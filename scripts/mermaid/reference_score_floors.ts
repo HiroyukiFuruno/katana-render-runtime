@@ -89,11 +89,7 @@ function visualAccepted(slug: string, minScore: number): ReferenceScoreThreshold
   );
 }
 
-function acceptedScore(
-  slug: string,
-  minScore: number,
-  reason: string,
-): ReferenceScoreThreshold {
+function acceptedScore(slug: string, minScore: number, reason: string): ReferenceScoreThreshold {
   return {
     slug,
     minScore,

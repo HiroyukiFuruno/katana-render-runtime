@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { DiagramTheme, type DiagramThemeName } from "./diagram_theme";
 import { PlaywrightLoader } from "./official-renderer";
-import { SvgRasterizeInput } from "./rasterize_svg_input";
 import type { BrowserHandle, FontReadyDocument, PageHandle } from "./official-renderer-types";
+import { SvgRasterizeInput } from "./rasterize_svg_input";
 
 interface CliParsedOptions {
   inputDir: string;
@@ -23,7 +23,7 @@ class CliOptions {
 
   private static get(argv: string[], name: string, fallback: string): string {
     const index = argv.indexOf(name);
-    return index >= 0 ? argv[index + 1] : fallback;
+    return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
   }
 
   private static exitIfHelp(argv: string[]) {
@@ -148,8 +148,15 @@ class SvgCaptureSizer {
       const viewBox = String(svgElement.getAttribute("viewBox"))
         .split(/\s+/)
         .map((value) => Number(value));
-      const width = Math.ceil(viewBox[2]);
-      const height = Math.ceil(viewBox[3]);
+      const dimensionAt = (values: number[], index: number): number => {
+        const value = values.at(index);
+        if (value === undefined || !Number.isFinite(value)) {
+          throw new Error("SVG viewBox is invalid");
+        }
+        return value;
+      };
+      const width = Math.ceil(dimensionAt(viewBox, 2));
+      const height = Math.ceil(dimensionAt(viewBox, 3));
       svgElement.setAttribute("width", String(width));
       svgElement.setAttribute("height", String(height));
       svgElement.style.maxWidth = `${width}px`;

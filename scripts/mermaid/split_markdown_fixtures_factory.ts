@@ -40,18 +40,27 @@ class FixtureFileName {
 class FixtureIndex {
   static from(heading: HeadingState): string {
     const level2 = String(FixtureIndex.level2Number(heading)).padStart(2, "0");
-    return [`${level2}-${String(heading.level3Index).padStart(2, "0")}`, level2][
-      Number(heading.level3Index === 0)
-    ];
+    if (heading.level3Index === 0) {
+      return level2;
+    }
+    return `${level2}-${String(heading.level3Index).padStart(2, "0")}`;
   }
 
   private static level2Number(heading: HeadingState): number {
     const match = heading.level2Title.match(/^(\d+)\./);
-    return FixtureIndex.level2NumberReaders()[Number(Boolean(match))](heading, match);
+    return FixtureIndex.level2NumberReader(Boolean(match))(heading, match);
   }
 
   private static level2NumberReaders(): Level2NumberReader[] {
     return [FixtureIndex.fallbackLevel2Number, FixtureIndex.parsedLevel2Number];
+  }
+
+  private static level2NumberReader(hasMatch: boolean): Level2NumberReader {
+    const reader = FixtureIndex.level2NumberReaders().at(Number(hasMatch));
+    if (reader === undefined) {
+      throw new Error("Mermaid fixture index reader is missing");
+    }
+    return reader;
   }
 
   private static fallbackLevel2Number(heading: HeadingState, _match: RegExpMatchArray | null) {
@@ -89,25 +98,22 @@ class DiagramKindName {
 
   private static firstToken(source: string): string {
     const kind = DiagramKindName.rawFirstToken(source);
-    return [kind, "empty"][Number(kind.length === 0)];
+    return kind.length === 0 ? "empty" : kind;
   }
 
   private static rawFirstToken(source: string): string {
-    return DiagramKindName.firstLine(source).trim().split(/\s+/).concat([""])[0];
+    return DiagramKindName.firstLine(source).trim().split(/\s+/).at(0) ?? "";
   }
 
   private static firstLine(source: string): string {
-    return source.split(/\r?\n/).concat([""])[0];
+    return source.split(/\r?\n/).at(0) ?? "";
   }
 }
 
 class MermaidSource {
   static withoutFrontmatter(source: string): string {
     const lines = source.split(/\r?\n/);
-    return MermaidSource.frontmatterReaders()[Number(MermaidSource.hasFrontmatter(lines))](
-      source,
-      lines,
-    );
+    return MermaidSource.frontmatterReader(lines)(source, lines);
   }
 
   private static hasFrontmatter(lines: string[]): boolean {
@@ -118,17 +124,35 @@ class MermaidSource {
     return [MermaidSource.original, MermaidSource.afterFrontmatter];
   }
 
+  private static frontmatterReader(lines: string[]): MermaidSourceReader {
+    const reader = MermaidSource.frontmatterReaders().at(
+      Number(MermaidSource.hasFrontmatter(lines)),
+    );
+    if (reader === undefined) {
+      throw new Error("Mermaid frontmatter reader is missing");
+    }
+    return reader;
+  }
+
   private static original(source: string, _lines: string[]): string {
     return source;
   }
 
   private static afterFrontmatter(source: string, lines: string[]): string {
     const endIndex = lines.slice(1).findIndex((line) => line.trim() === "---");
-    return MermaidSource.frontmatterBodyReaders()[Number(endIndex >= 0)](source, lines, endIndex);
+    return MermaidSource.frontmatterBodyReader(endIndex)(source, lines, endIndex);
   }
 
   private static frontmatterBodyReaders(): MermaidFrontmatterBodyReader[] {
     return [MermaidSource.originalWithEndOffset, MermaidSource.bodyAfterFrontmatter];
+  }
+
+  private static frontmatterBodyReader(endIndex: number): MermaidFrontmatterBodyReader {
+    const reader = MermaidSource.frontmatterBodyReaders().at(Number(endIndex >= 0));
+    if (reader === undefined) {
+      throw new Error("Mermaid frontmatter body reader is missing");
+    }
+    return reader;
   }
 
   private static originalWithEndOffset(source: string, _lines: string[], _endOffset: number) {

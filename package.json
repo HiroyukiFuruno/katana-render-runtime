@@ -1,0 +1,18 @@
+{
+  "name": "katana-canvas-forge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "biome": "biome check",
+    "runtime-bundle:build": "bun run scripts/runtime-bundles/bundle-runtime.ts --write",
+    "runtime-bundle:check": "bun run scripts/runtime-bundles/bundle-runtime.ts --check",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.15",
+    "@types/bun": "1.3.14",
+    "@types/node": "25.7.0",
+    "playwright": "1.59.1",
+    "typescript": "6.0.3"
+  }
+}

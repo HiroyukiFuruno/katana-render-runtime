@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  MarkdownMermaidFixtures,
   type MarkdownMermaidFixture,
+  MarkdownMermaidFixtures,
 } from "./split_markdown_fixtures_core";
 
 interface CliParsedOptions {
@@ -21,7 +21,7 @@ class CliOptions {
 
   private static get(argv: string[], name: string, fallback: string): string {
     const index = argv.indexOf(name);
-    return index >= 0 ? argv[index + 1] : fallback;
+    return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
   }
 
   private static exitIfHelp(argv: string[]) {

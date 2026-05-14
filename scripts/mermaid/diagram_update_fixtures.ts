@@ -3,6 +3,7 @@ import path from "node:path";
 import type { RenderFixture } from "./official-renderer";
 
 export interface Fixture extends RenderFixture {
+  fileName: string;
   filePath: string;
   markdown: string;
   fenceEnd: number;
@@ -52,9 +53,17 @@ class MermaidBlock {
       throw new Error(`Mermaid block not found: ${filePath}`);
     }
     return {
-      source: match[3].trim(),
+      source: MermaidBlock.source(match),
       end: match.index + match[0].length,
     };
+  }
+
+  private static source(match: RegExpExecArray): string {
+    const source = match.at(3);
+    if (source === undefined) {
+      throw new Error("Mermaid block body was not captured");
+    }
+    return source.trim();
   }
 }
 

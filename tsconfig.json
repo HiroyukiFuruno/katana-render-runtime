@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": false,
+    "noEmit": true,
+    "types": ["node", "bun"]
+  },
+  "include": [
+    "scripts/**/*.ts",
+    "crates/katana-canvas-forge/src/markdown/diagram_runtime/source/**/*.ts"
+  ],
+  "exclude": [
+    "crates/katana-canvas-forge/src/markdown/diagram_runtime/generated/**",
+    "crates/katana-canvas-forge/vendor/**",
+    "target/**",
+    "tmp/**"
+  ]
+}

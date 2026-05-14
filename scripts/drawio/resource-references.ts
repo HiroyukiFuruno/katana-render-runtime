@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { DrawioSourceKind, type DrawioResourceReference } from "./resource-common";
+import { type DrawioResourceReference, DrawioSourceKind } from "./resource-common";
 
 const IMAGE_EXTENSIONS = [".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"];
 const RESOURCE_GROUP_BY_PREFIX = new Map([
@@ -24,7 +24,7 @@ export class DrawioResourceReferenceExtractor {
 
   private imageReferences(fixturePath: string, source: string): DrawioResourceReference[] {
     return Array.from(source.matchAll(/image=([^;"&<]+)/g))
-      .map((match) => DrawioResourceValue.normalize(match[1]))
+      .map((match) => DrawioResourceValue.normalize(DrawioResourceMatch.capture(match)))
       .filter(DrawioResourceValue.isAuditableImage)
       .map((rawValue) => DrawioResourceValue.logicalImagePath(rawValue))
       .filter((logicalPath) => logicalPath.length > 0)
@@ -38,7 +38,7 @@ export class DrawioResourceReferenceExtractor {
 
   private stencilReferences(fixturePath: string, source: string): DrawioResourceReference[] {
     return Array.from(source.matchAll(/shape=mxgraph\.([^;"&<]+)/g))
-      .map((match) => DrawioResourceValue.stencilGroup(match[1]))
+      .map((match) => DrawioResourceValue.stencilGroup(DrawioResourceMatch.capture(match)))
       .flatMap((group) => DrawioResourceValue.stencilLogicalPaths(group))
       .map((logicalPath) => ({
         fixturePath,
@@ -46,6 +46,16 @@ export class DrawioResourceReferenceExtractor {
         sourceKind: "drawio-stencil",
         rawValue: logicalPath,
       }));
+  }
+}
+
+class DrawioResourceMatch {
+  static capture(match: RegExpMatchArray): string {
+    const value = match.at(1);
+    if (value === undefined) {
+      throw new Error("Draw.io resource reference was not captured");
+    }
+    return value;
   }
 }
 
