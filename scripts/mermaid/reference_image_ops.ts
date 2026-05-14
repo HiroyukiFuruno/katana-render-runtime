@@ -187,23 +187,23 @@ export class ImageSize {
   }
 }
 
-class ImageMetric {
-  static parseNormalizedError(value: string): number {
+const ImageMetric = {
+  parseNormalizedError(value: string): number {
     const match = value.match(/\(([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\)/i);
     if (!match) {
       throw new Error(`ImageMagick metric parse failed: ${value.trim()}`);
     }
     return Number(ImageMetric.matchedValue(match));
-  }
+  },
 
-  private static matchedValue(match: RegExpMatchArray): string {
+  matchedValue(match: RegExpMatchArray): string {
     const value = match.at(1);
     if (value === undefined) {
       throw new Error("ImageMagick metric result is incomplete");
     }
     return value;
-  }
-}
+  },
+};
 
 class ImageMetricResult {
   constructor(

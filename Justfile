@@ -105,7 +105,7 @@ runtime-asset-script-test:
     bun test scripts/runtime-assets/runtime-asset-common_test.ts
 
 # Run the local quality gate
-check: fmt-check lint unit-test ast-lint dependency-leak runtime-bundle-check biome typecheck runtime-asset-check runtime-bundle-package-check
+check: fmt-check lint runtime-bundle-check unit-test ast-lint dependency-leak biome typecheck runtime-asset-check runtime-bundle-package-check
     @echo "checks passed"
 
 # Sweep old build artifacts locally (older than 7 days)

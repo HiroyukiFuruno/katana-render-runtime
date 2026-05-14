@@ -3,8 +3,8 @@ import { type RuntimeFragment, RuntimeFragmentFactory } from "./runtime_bundle";
 const MERMAID_JS_RUNTIME =
   "crates/katana-diagram-renderer/src/markdown/mermaid_renderer/js_runtime";
 
-export class SharedDomFragments {
-  static all(): RuntimeFragment[] {
+export const SharedDomFragments = {
+  all(): RuntimeFragment[] {
     return [
       RuntimeFragmentFactory.verbatim(
         "browser-globals.js",
@@ -42,5 +42,5 @@ export class SharedDomFragments {
         `${MERMAID_JS_RUNTIME}/dom_text_measure.js`,
       ),
     ];
-  }
-}
+  },
+};

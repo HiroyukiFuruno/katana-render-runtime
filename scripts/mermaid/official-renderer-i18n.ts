@@ -31,15 +31,15 @@ const RUNTIME_SCRIPTS = [
   "svg_normalize.js",
 ];
 
-export class MermaidRuntimeScripts {
-  static paths(): string[] {
+export const MermaidRuntimeScripts = {
+  paths(): string[] {
     return RUNTIME_SCRIPTS.map((filename) => path.resolve(I18N_RUNTIME_DIR, filename));
-  }
+  },
 
-  static zenumlBridgePath(): string {
+  zenumlBridgePath(): string {
     return path.resolve(I18N_RUNTIME_DIR, "mermaid_zenuml_bridge.js");
-  }
-}
+  },
+};
 
 export function expandHome(value: string) {
   return value.startsWith("~/") ? path.join(os.homedir(), value.slice(2)) : value;

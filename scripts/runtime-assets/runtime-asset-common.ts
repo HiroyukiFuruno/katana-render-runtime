@@ -66,22 +66,22 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   },
 ];
 
-export class RuntimeAssetCatalog {
-  static all(): RuntimeAssetDefinition[] {
+export const RuntimeAssetCatalog = {
+  all(): RuntimeAssetDefinition[] {
     return DEFINITIONS;
-  }
+  },
 
-  static byKind(kind: string): RuntimeAssetDefinition {
+  byKind(kind: string): RuntimeAssetDefinition {
     const definition = DEFINITIONS.find((it) => it.kind === kind);
     if (definition === undefined) {
       throw new Error(`Unknown runtime asset: ${kind}`);
     }
     return definition;
-  }
-}
+  },
+};
 
-export class RuntimeAssetCatalogSource {
-  static updatePinnedAsset(
+export const RuntimeAssetCatalogSource = {
+  updatePinnedAsset(
     source: string,
     kind: RuntimeAssetKind,
     version: string,
@@ -90,9 +90,9 @@ export class RuntimeAssetCatalogSource {
     let updated = RuntimeAssetCatalogSource.replaceString(source, kind, "version", version);
     updated = RuntimeAssetCatalogSource.replaceString(updated, kind, "checksum", checksum);
     return updated;
-  }
+  },
 
-  private static replaceString(
+  replaceString(
     source: string,
     kind: RuntimeAssetKind,
     propertyName: "version" | "checksum",
@@ -108,50 +108,50 @@ export class RuntimeAssetCatalogSource {
       throw new Error(`Runtime asset catalog property not found: ${kind}.${propertyName}`);
     }
     return source.replace(block, block.replace(propertyPattern, `$1"${value}"`));
-  }
-}
+  },
+};
 
-export class RuntimeAssetPaths {
-  static vendorDir(definition: RuntimeAssetDefinition, version = definition.version): string {
+export const RuntimeAssetPaths = {
+  vendorDir(definition: RuntimeAssetDefinition, version = definition.version): string {
     return path.join("crates", "katana-diagram-renderer", "vendor", definition.kind, version);
-  }
+  },
 
-  static assetFile(definition: RuntimeAssetDefinition, version = definition.version): string {
+  assetFile(definition: RuntimeAssetDefinition, version = definition.version): string {
     return path.join(RuntimeAssetPaths.vendorDir(definition, version), definition.fileName);
-  }
+  },
 
-  static checksumFile(definition: RuntimeAssetDefinition, version = definition.version): string {
+  checksumFile(definition: RuntimeAssetDefinition, version = definition.version): string {
     return `${RuntimeAssetPaths.assetFile(definition, version)}.sha256`;
-  }
+  },
 
-  static justVersionVariable(definition: RuntimeAssetDefinition): string {
+  justVersionVariable(definition: RuntimeAssetDefinition): string {
     return `${definition.kind.toUpperCase().replaceAll("-", "_")}_JS_VERSION`;
-  }
+  },
 
-  static runtimeAssetsRust(): string {
+  runtimeAssetsRust(): string {
     return path.join("crates", "katana-diagram-renderer", "src", "markdown", "runtime_assets.rs");
-  }
+  },
 
-  static justfile(): string {
+  justfile(): string {
     return "Justfile";
-  }
+  },
 
-  static runtimeAssetCommon(): string {
+  runtimeAssetCommon(): string {
     return path.join("scripts", "runtime-assets", "runtime-asset-common.ts");
-  }
-}
+  },
+};
 
-export class RuntimeAssetChecksum {
-  static digestFile(filePath: string): string {
+export const RuntimeAssetChecksum = {
+  digestFile(filePath: string): string {
     const content = fs.readFileSync(filePath);
     return crypto.createHash("sha256").update(content).digest("hex");
-  }
+  },
 
-  static writeChecksumFile(definition: RuntimeAssetDefinition, version: string): string {
+  writeChecksumFile(definition: RuntimeAssetDefinition, version: string): string {
     const assetFile = RuntimeAssetPaths.assetFile(definition, version);
     const checksum = RuntimeAssetChecksum.digestFile(assetFile);
     const checksumFile = RuntimeAssetPaths.checksumFile(definition, version);
     fs.writeFileSync(checksumFile, `${checksum}  ${definition.fileName}\n`, "utf8");
     return checksum;
-  }
-}
+  },
+};

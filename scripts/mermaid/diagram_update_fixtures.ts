@@ -45,8 +45,8 @@ export class FixtureRepository {
   }
 }
 
-class MermaidBlock {
-  static extract(markdown: string, filePath: string): MermaidBlockResult {
+const MermaidBlock = {
+  extract(markdown: string, filePath: string): MermaidBlockResult {
     const pattern = /(^|\n)(`{3,}|~{3,})mermaid[^\n]*\n([\s\S]*?)\n\2[ \t]*(?=\n|$)/m;
     const match = pattern.exec(markdown);
     if (!match) {
@@ -56,19 +56,19 @@ class MermaidBlock {
       source: MermaidBlock.source(match),
       end: match.index + match[0].length,
     };
-  }
+  },
 
-  private static source(match: RegExpExecArray): string {
+  source(match: RegExpExecArray): string {
     const source = match.at(3);
     if (source === undefined) {
       throw new Error("Mermaid block body was not captured");
     }
     return source.trim();
-  }
-}
+  },
+};
 
-class MarkdownTitle {
-  static extract(markdown: string, fileName: string): string {
+const MarkdownTitle = {
+  extract(markdown: string, fileName: string): string {
     return markdown.match(/^#\s+(.+)$/m)?.[1] || path.basename(fileName, ".md");
-  }
-}
+  },
+};

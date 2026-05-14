@@ -182,33 +182,33 @@ html,body{margin:0;background:#1e1e1e;color:#e0e0e0;color-scheme:dark;font-famil
   }
 }
 
-class DrawioSource {
-  static prepare(source: string): string {
+const DrawioSource = {
+  prepare(source: string): string {
     const xml = source.trim().replace(/^<\?xml[^>]*>\s*/i, "");
     return DrawioSource.uncompressedModel(xml) ?? xml;
-  }
+  },
 
-  private static uncompressedModel(xml: string): string | null {
+  uncompressedModel(xml: string): string | null {
     const start = xml.indexOf("<mxGraphModel");
     const end = xml.indexOf("</mxGraphModel>");
     if (DrawioSource.hasModelRange(start, end)) {
       return xml.slice(start, end + "</mxGraphModel>".length);
     }
     return null;
-  }
+  },
 
-  private static hasModelRange(start: number, end: number): boolean {
+  hasModelRange(start: number, end: number): boolean {
     return [start >= 0, end >= start].every(Boolean);
-  }
-}
+  },
+};
 
 export { expandHome };
 
-class DrawioRuntime {
-  static requireGraphViewer(runtime: DrawioWindow): DrawioGraphViewer {
+const DrawioRuntime = {
+  requireGraphViewer(runtime: DrawioWindow): DrawioGraphViewer {
     if (runtime.GraphViewer === undefined) {
       throw new Error("Draw.io GraphViewer was not registered");
     }
     return runtime.GraphViewer;
-  }
-}
+  },
+};

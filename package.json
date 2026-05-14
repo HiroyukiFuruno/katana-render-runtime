@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "biome": "biome check",
+    "biome": "biome check --error-on-warnings",
     "runtime-bundle:build": "bun run scripts/runtime-bundles/bundle-runtime.ts --write",
     "runtime-bundle:check": "bun run scripts/runtime-bundles/bundle-runtime.ts --check",
     "typecheck": "tsc --noEmit"

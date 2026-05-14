@@ -11,30 +11,30 @@ interface CliParsedOptions {
   theme: DiagramThemeName;
 }
 
-class CliOptions {
-  static parse(argv: string[]): CliParsedOptions {
+const CliOptions = {
+  parse(argv: string[]): CliParsedOptions {
     CliOptions.exitIfHelp(argv);
     return {
       inputDir: path.resolve(CliOptions.get(argv, "--input", "tmp/mermaid-sample-official")),
       outputDir: path.resolve(CliOptions.get(argv, "--output", "tmp/mermaid-sample-browser")),
       theme: DiagramTheme.parse(CliOptions.get(argv, "--theme", "dark")).name,
     };
-  }
+  },
 
-  private static get(argv: string[], name: string, fallback: string): string {
+  get(argv: string[], name: string, fallback: string): string {
     const index = argv.indexOf(name);
     return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
-  }
+  },
 
-  private static exitIfHelp(argv: string[]) {
+  exitIfHelp(argv: string[]) {
     if (argv.includes("--help")) {
       console.log(
         "Usage: bun run scripts/mermaid/rasterize-svg-dir.ts --input DIR --output DIR [--theme dark|light]",
       );
       process.exit(0);
     }
-  }
-}
+  },
+};
 
 class SvgFixtureRepository {
   constructor(private inputDir: string) {}
@@ -141,8 +141,8 @@ html,body{margin:0;background:${this.theme.canvasBackground};color:${this.theme.
   }
 }
 
-class SvgCaptureSizer {
-  static resize(page: PageHandle): Promise<void> {
+const SvgCaptureSizer = {
+  resize(page: PageHandle): Promise<void> {
     return page.evaluate(() => {
       const svgElement = document.querySelector("#diagram svg") as SVGSVGElement;
       const viewBox = String(svgElement.getAttribute("viewBox"))
@@ -170,8 +170,8 @@ class SvgCaptureSizer {
       capture.style.width = `${width + 24}px`;
       capture.style.height = `${height + 24}px`;
     });
-  }
-}
+  },
+};
 
 new SvgBrowserRasterizer(CliOptions.parse(process.argv.slice(2))).run().catch((error: Error) => {
   console.error(error.message);

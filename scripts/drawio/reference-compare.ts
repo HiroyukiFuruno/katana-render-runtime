@@ -11,8 +11,8 @@ import {
   DrawioReferenceScores,
 } from "./reference-score";
 
-class CliOptions {
-  static parse(argv: string[]): CliParsedOptions {
+const CliOptions = {
+  parse(argv: string[]): CliParsedOptions {
     return {
       officialDir: path.resolve(
         CliOptions.get(argv, "--official", "tests/fixtures/drawio/basic/official"),
@@ -24,27 +24,27 @@ class CliOptions {
       minScore: CliOptions.number(argv, "--min-score", 99),
       theme: "dark",
     };
-  }
+  },
 
-  private static get(argv: string[], name: string, fallback: string): string {
+  get(argv: string[], name: string, fallback: string): string {
     const index = argv.indexOf(name);
     return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
-  }
+  },
 
-  private static getOptionalPath(argv: string[], name: string): string | null {
+  getOptionalPath(argv: string[], name: string): string | null {
     const index = argv.indexOf(name);
     const value = index >= 0 ? argv.at(index + 1) : undefined;
     return value === undefined ? null : path.resolve(value);
-  }
+  },
 
-  private static number(argv: string[], name: string, fallback: number): number {
+  number(argv: string[], name: string, fallback: number): number {
     const value = Number(CliOptions.get(argv, name, String(fallback)));
     if (!Number.isFinite(value)) {
       throw new Error(`Invalid number option: ${name}`);
     }
     return value;
-  }
-}
+  },
+};
 
 class ReferenceCompare {
   constructor(private options: CliParsedOptions) {}

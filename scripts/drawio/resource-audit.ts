@@ -23,8 +23,8 @@ interface CliParsedOptions {
   readonly manifestPath: string;
 }
 
-class CliOptions {
-  static parse(argv: string[]): CliParsedOptions {
+const CliOptions = {
+  parse(argv: string[]): CliParsedOptions {
     CliOptions.exitIfHelp(argv);
     const resourcesDir = path.resolve(
       CliOptions.get(
@@ -44,22 +44,22 @@ class CliOptions {
         ),
       ),
     };
-  }
+  },
 
-  private static get(argv: string[], name: string, fallback: string): string {
+  get(argv: string[], name: string, fallback: string): string {
     const index = argv.indexOf(name);
     return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
-  }
+  },
 
-  private static exitIfHelp(argv: string[]) {
+  exitIfHelp(argv: string[]) {
     if (argv.includes("--help")) {
       console.log(
         "Usage: bun run scripts/drawio/resource-audit.ts [--fixtures DIR] [--resources DIR] [--manifest FILE]",
       );
       process.exit(0);
     }
-  }
-}
+  },
+};
 
 class DrawioResourceAudit {
   constructor(private options: CliParsedOptions) {}

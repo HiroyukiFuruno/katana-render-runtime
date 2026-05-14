@@ -14,8 +14,8 @@ interface CliParsedOptions extends RendererOptions {
   skipErrors: boolean;
 }
 
-class CliOptions {
-  static parse(argv: string[]): CliParsedOptions {
+const CliOptions = {
+  parse(argv: string[]): CliParsedOptions {
     CliOptions.exitIfHelp(argv);
     const fixturesDir = path.resolve(
       CliOptions.get(argv, "--fixtures", "tests/fixtures/mermaid/en"),
@@ -50,26 +50,26 @@ class CliOptions {
       skipErrors: argv.includes("--skip-errors"),
       theme: CliOptions.theme(argv),
     };
-  }
+  },
 
-  private static theme(argv: string[]): DiagramThemeName {
+  theme(argv: string[]): DiagramThemeName {
     return DiagramTheme.parse(CliOptions.get(argv, "--theme", "dark")).name;
-  }
+  },
 
-  private static get(argv: string[], name: string, fallback: string): string {
+  get(argv: string[], name: string, fallback: string): string {
     const index = argv.indexOf(name);
     return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
-  }
+  },
 
-  private static exitIfHelp(argv: string[]) {
+  exitIfHelp(argv: string[]) {
     if (argv.includes("--help")) {
       console.log(
         "Usage: bun run scripts/mermaid/diagram-update.ts [--fixtures DIR] [--output DIR] [--markdown-output DIR] [--theme dark|light] [--mermaid-js FILE] [--mermaid-zenuml-js FILE]",
       );
       process.exit(0);
     }
-  }
-}
+  },
+};
 
 class MermaidDiagramUpdate {
   private options: CliParsedOptions;
@@ -180,15 +180,15 @@ class MermaidDiagramUpdate {
   }
 }
 
-class ErrorSummary {
-  static fromString(value: string): string {
+const ErrorSummary = {
+  fromString(value: string): string {
     return ErrorSummary.truncate(value.split("\n").at(0) ?? "");
-  }
+  },
 
-  private static truncate(value: string): string {
+  truncate(value: string): string {
     return value.length > 180 ? `${value.slice(0, 180)}...` : value;
-  }
-}
+  },
+};
 
 new MermaidDiagramUpdate(CliOptions.parse(process.argv.slice(2))).run().catch((error: Error) => {
   console.error(error.message);

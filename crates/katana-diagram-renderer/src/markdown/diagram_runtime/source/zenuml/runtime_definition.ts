@@ -1,16 +1,16 @@
 import { SharedDomFragments } from "../shared/dom_fragments";
 import { RuntimeBundleDefinition } from "../shared/runtime_bundle";
 
-export class ZenumlRuntimeBundleDefinition {
-  static create(): RuntimeBundleDefinition {
+export const ZenumlRuntimeBundleDefinition = {
+  create(): RuntimeBundleDefinition {
     return new RuntimeBundleDefinition(
       "zenuml",
       "zenuml-runtime.min.js",
       SharedDomFragments.all(),
       ZENUML_RUNTIME_ENTRYPOINT,
     );
-  }
-}
+  },
+};
 
 const ZENUML_RUNTIME_ENTRYPOINT = String.raw`
 function katanaInstallMermaidZenumlRuntimeAdapter() {

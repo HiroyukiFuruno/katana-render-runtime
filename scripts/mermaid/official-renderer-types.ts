@@ -18,7 +18,7 @@ export interface BrowserHandle {
 
 export interface PageHandle {
   setContent(html: string, options: { waitUntil: "load" }): Promise<void>;
-  addScriptTag(options: { path: string }): Promise<void | object>;
+  addScriptTag(options: { path: string }): Promise<undefined | object>;
   evaluate<Result>(callback: () => Result | Promise<Result>): Promise<Result>;
   evaluate<Result, Argument>(
     callback: (argument: Argument) => Result | Promise<Result>,
@@ -29,7 +29,7 @@ export interface PageHandle {
 }
 
 export interface LocatorHandle {
-  screenshot(options: { path: string; omitBackground: boolean }): Promise<void | object>;
+  screenshot(options: { path: string; omitBackground: boolean }): Promise<undefined | object>;
 }
 
 export interface MermaidConfig {

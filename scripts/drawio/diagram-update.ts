@@ -12,8 +12,8 @@ interface CliParsedOptions extends DrawioRendererOptions {
   fixturesDir: string;
 }
 
-class CliOptions {
-  static parse(argv: string[]): CliParsedOptions {
+const CliOptions = {
+  parse(argv: string[]): CliParsedOptions {
     CliOptions.exitIfHelp(argv);
     const fixturesDir = path.resolve(
       CliOptions.get(argv, "--fixtures", "tests/fixtures/drawio/basic"),
@@ -45,22 +45,22 @@ class CliOptions {
         ),
       ),
     };
-  }
+  },
 
-  private static get(argv: string[], name: string, fallback: string): string {
+  get(argv: string[], name: string, fallback: string): string {
     const index = argv.indexOf(name);
     return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
-  }
+  },
 
-  private static exitIfHelp(argv: string[]) {
+  exitIfHelp(argv: string[]) {
     if (argv.includes("--help")) {
       console.log(
         "Usage: bun run scripts/drawio/diagram-update.ts [--fixtures DIR] [--output DIR] [--drawio-js FILE]",
       );
       process.exit(0);
     }
-  }
-}
+  },
+};
 
 class DrawioFixtureRepository {
   constructor(private fixturesDir: string) {}

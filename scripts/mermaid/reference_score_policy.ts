@@ -144,18 +144,18 @@ export class ReferenceScorePolicy {
   }
 }
 
-class ReferenceScoreSlugPrefix {
-  static from(slug: string): string {
+const ReferenceScoreSlugPrefix = {
+  from(slug: string): string {
     return slug.match(/^\d{2}-\d{2}/)?.[0] ?? "";
-  }
+  },
 
-  static matches(slug: string, prefix: string): boolean {
+  matches(slug: string, prefix: string): boolean {
     return prefix.length > 0 && slug.startsWith(`${prefix}-`);
-  }
-}
+  },
+};
 
-class ReferenceScoreSlugIdentity {
-  static from(slug: string): string {
+const ReferenceScoreSlugIdentity = {
+  from(slug: string): string {
     return slug.match(/^\d{2}-\d{2}/)?.[0] ?? slug.match(/^\d{2}/)?.[0] ?? slug;
-  }
-}
+  },
+};

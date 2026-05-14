@@ -8,112 +8,109 @@ import {
 const MERMAID_JS_RUNTIME =
   "crates/katana-diagram-renderer/src/markdown/mermaid_renderer/js_runtime";
 
-export class MermaidRuntimeBundleDefinition {
-  static create(): RuntimeBundleDefinition {
+export const MermaidRuntimeBundleDefinition = {
+  create(): RuntimeBundleDefinition {
     return new RuntimeBundleDefinition(
       "mermaid",
       "mermaid-runtime.min.js",
-      [...SharedDomFragments.all(), ...MermaidRuntimeBundleDefinition.fragments()],
+      [...SharedDomFragments.all(), ...mermaidRuntimeFragments()],
       MERMAID_RUNTIME_ENTRYPOINT,
     );
-  }
+  },
+};
 
-  private static fragments(): RuntimeFragment[] {
-    return [
-      RuntimeFragmentFactory.verbatim(
-        "svg-bounds-attrs.js",
-        `${MERMAID_JS_RUNTIME}/svg_bounds_attrs.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-path-bounds.js",
-        `${MERMAID_JS_RUNTIME}/svg_path_bounds.js`,
-      ),
-      RuntimeFragmentFactory.verbatim("svg-bounds.js", `${MERMAID_JS_RUNTIME}/svg_bounds.js`),
-      RuntimeFragmentFactory.verbatim(
-        "svg-text-bounds.js",
-        `${MERMAID_JS_RUNTIME}/svg_text_bounds.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-architecture-icons.js",
-        `${MERMAID_JS_RUNTIME}/svg_architecture_icons.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-group-utils.js",
-        `${MERMAID_JS_RUNTIME}/svg_group_utils.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-viewbox-fixes.js",
-        `${MERMAID_JS_RUNTIME}/svg_viewbox_fixes.js`,
-      ),
-      RuntimeFragmentFactory.verbatim("svg-er-layout.js", `${MERMAID_JS_RUNTIME}/svg_er_layout.js`),
-      RuntimeFragmentFactory.verbatim("svg-er-fixes.js", `${MERMAID_JS_RUNTIME}/svg_er_fixes.js`),
-      RuntimeFragmentFactory.verbatim(
-        "svg-class-fixes.js",
-        `${MERMAID_JS_RUNTIME}/svg_class_fixes.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-visual-fixes.js",
-        `${MERMAID_JS_RUNTIME}/svg_visual_fixes.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-review-fixes.js",
-        `${MERMAID_JS_RUNTIME}/svg_review_fixes.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-review-ishikawa-fixes.js",
-        `${MERMAID_JS_RUNTIME}/svg_review_ishikawa_fixes.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-review-venn-fixes.js",
-        `${MERMAID_JS_RUNTIME}/svg_review_venn_fixes.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-review-treemap-fixes.js",
-        `${MERMAID_JS_RUNTIME}/svg_review_treemap_fixes.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-kanban-text.js",
-        `${MERMAID_JS_RUNTIME}/svg_kanban_text.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-kanban-viewbox.js",
-        `${MERMAID_JS_RUNTIME}/svg_kanban_viewbox.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-kanban-label-layout.js",
-        `${MERMAID_JS_RUNTIME}/svg_kanban_label_layout.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-kanban-fixes.js",
-        `${MERMAID_JS_RUNTIME}/svg_kanban_fixes.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-wardley-normalizer.js",
-        `${MERMAID_JS_RUNTIME}/svg_wardley_normalizer.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-diagram-normalizers.js",
-        `${MERMAID_JS_RUNTIME}/svg_diagram_normalizers.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "svg-dimensions.js",
-        `${MERMAID_JS_RUNTIME}/svg_dimensions.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "source-i18n-context.js",
-        `${MERMAID_JS_RUNTIME}/source_i18n_context.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "source-i18n-normalize.js",
-        `${MERMAID_JS_RUNTIME}/source_i18n_normalize.js`,
-      ),
-      RuntimeFragmentFactory.verbatim(
-        "mermaid-diagram-type.js",
-        `${MERMAID_JS_RUNTIME}/mermaid_diagram_type.js`,
-      ),
-      RuntimeFragmentFactory.verbatim("svg-normalize.js", `${MERMAID_JS_RUNTIME}/svg_normalize.js`),
-    ];
-  }
+function mermaidRuntimeFragments(): RuntimeFragment[] {
+  return [
+    RuntimeFragmentFactory.verbatim(
+      "svg-bounds-attrs.js",
+      `${MERMAID_JS_RUNTIME}/svg_bounds_attrs.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-path-bounds.js",
+      `${MERMAID_JS_RUNTIME}/svg_path_bounds.js`,
+    ),
+    RuntimeFragmentFactory.verbatim("svg-bounds.js", `${MERMAID_JS_RUNTIME}/svg_bounds.js`),
+    RuntimeFragmentFactory.verbatim(
+      "svg-text-bounds.js",
+      `${MERMAID_JS_RUNTIME}/svg_text_bounds.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-architecture-icons.js",
+      `${MERMAID_JS_RUNTIME}/svg_architecture_icons.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-group-utils.js",
+      `${MERMAID_JS_RUNTIME}/svg_group_utils.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-viewbox-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_viewbox_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim("svg-er-layout.js", `${MERMAID_JS_RUNTIME}/svg_er_layout.js`),
+    RuntimeFragmentFactory.verbatim("svg-er-fixes.js", `${MERMAID_JS_RUNTIME}/svg_er_fixes.js`),
+    RuntimeFragmentFactory.verbatim(
+      "svg-class-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_class_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-visual-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_visual_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-review-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_review_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-review-ishikawa-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_review_ishikawa_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-review-venn-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_review_venn_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-review-treemap-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_review_treemap_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-kanban-text.js",
+      `${MERMAID_JS_RUNTIME}/svg_kanban_text.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-kanban-viewbox.js",
+      `${MERMAID_JS_RUNTIME}/svg_kanban_viewbox.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-kanban-label-layout.js",
+      `${MERMAID_JS_RUNTIME}/svg_kanban_label_layout.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-kanban-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_kanban_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-wardley-normalizer.js",
+      `${MERMAID_JS_RUNTIME}/svg_wardley_normalizer.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-diagram-normalizers.js",
+      `${MERMAID_JS_RUNTIME}/svg_diagram_normalizers.js`,
+    ),
+    RuntimeFragmentFactory.verbatim("svg-dimensions.js", `${MERMAID_JS_RUNTIME}/svg_dimensions.js`),
+    RuntimeFragmentFactory.verbatim(
+      "source-i18n-context.js",
+      `${MERMAID_JS_RUNTIME}/source_i18n_context.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "source-i18n-normalize.js",
+      `${MERMAID_JS_RUNTIME}/source_i18n_normalize.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "mermaid-diagram-type.js",
+      `${MERMAID_JS_RUNTIME}/mermaid_diagram_type.js`,
+    ),
+    RuntimeFragmentFactory.verbatim("svg-normalize.js", `${MERMAID_JS_RUNTIME}/svg_normalize.js`),
+  ];
 }
 
 const MERMAID_RUNTIME_ENTRYPOINT = `

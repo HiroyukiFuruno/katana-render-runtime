@@ -6,8 +6,8 @@ export interface MarkdownMermaidFixture {
   source: string;
 }
 
-export class MarkdownMermaidFixtures {
-  static from(markdown: string): MarkdownMermaidFixture[] {
+export const MarkdownMermaidFixtures = {
+  from(markdown: string): MarkdownMermaidFixture[] {
     return new MarkdownMermaidScanner(markdown).scan();
-  }
-}
+  },
+};

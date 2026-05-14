@@ -274,39 +274,39 @@ html,body{margin:0;background:${this.theme.canvasBackground};color:${this.theme.
   }
 }
 
-class MermaidRuntime {
-  static requireMermaid(runtime: MermaidI18nWindow) {
+const MermaidRuntime = {
+  requireMermaid(runtime: MermaidI18nWindow) {
     if (runtime.mermaid === undefined) {
       throw new Error("Mermaid runtime was not registered");
     }
     return runtime.mermaid;
-  }
+  },
 
-  static requireDiagramType(runtime: MermaidI18nWindow) {
+  requireDiagramType(runtime: MermaidI18nWindow) {
     if (runtime.katanaMermaidDiagramType === undefined) {
       throw new Error("Mermaid diagram-type helper was not registered");
     }
     return runtime.katanaMermaidDiagramType;
-  }
+  },
 
-  static requireNormalizer(runtime: MermaidI18nWindow) {
+  requireNormalizer(runtime: MermaidI18nWindow) {
     if (runtime.katanaNormalizeMermaidSourceI18n === undefined) {
       throw new Error("Mermaid i18n normalizer was not registered");
     }
     return runtime.katanaNormalizeMermaidSourceI18n;
-  }
+  },
 
-  static requireRestore(runtime: MermaidI18nWindow) {
+  requireRestore(runtime: MermaidI18nWindow) {
     if (runtime.katanaRestoreMermaidI18nText === undefined) {
       throw new Error("Mermaid i18n restore helper was not registered");
     }
     return runtime.katanaRestoreMermaidI18nText;
-  }
+  },
 
-  static requireSvgNormalizer(runtime: MermaidI18nWindow) {
+  requireSvgNormalizer(runtime: MermaidI18nWindow) {
     if (runtime.katanaNormalizeMermaidSvg === undefined) {
       throw new Error("Mermaid SVG normalizer was not registered");
     }
     return runtime.katanaNormalizeMermaidSvg;
-  }
-}
+  },
+};

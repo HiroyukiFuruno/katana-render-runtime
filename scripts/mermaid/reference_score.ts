@@ -13,11 +13,11 @@ export interface ReferenceScoreRow {
   passed: boolean;
 }
 
-export class ReferenceScores {
-  static minimum(scores: ReferenceScoreRow[]): number {
+export const ReferenceScores = {
+  minimum(scores: ReferenceScoreRow[]): number {
     return Math.min(...scores.map((it) => it.score));
-  }
-}
+  },
+};
 
 export class ReferenceScorer {
   private policy: ReferenceScorePolicy;

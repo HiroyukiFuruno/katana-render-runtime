@@ -164,14 +164,14 @@ class RuntimeBundleCommand {
   }
 }
 
-class RuntimeBundleChecksum {
-  static digest(content: string): string {
+const RuntimeBundleChecksum = {
+  digest(content: string): string {
     return crypto.createHash("sha256").update(content).digest("hex");
-  }
-}
+  },
+};
 
-class RuntimeBundleCli {
-  static parse(argv: string[]): RuntimeBundleMode {
+const RuntimeBundleCli = {
+  parse(argv: string[]): RuntimeBundleMode {
     if (argv.includes("--write")) {
       return "write";
     }
@@ -179,7 +179,7 @@ class RuntimeBundleCli {
       return "check";
     }
     throw new Error("Usage: bun run scripts/runtime-bundles/bundle-runtime.ts --write|--check");
-  }
-}
+  },
+};
 
 new RuntimeBundleCommand(process.cwd(), RuntimeBundleCli.parse(process.argv.slice(2))).run();

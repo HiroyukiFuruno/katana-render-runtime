@@ -119,16 +119,16 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: just ast-lint
 
+      - name: Check runtime bundle sync
+        if: matrix.os != 'windows-latest'
+        run: just runtime-bundle-check
+
       - name: Run tests
         run: cargo test --workspace --all-targets --all-features --locked
 
       - name: Check dependency boundary
         if: matrix.os != 'windows-latest'
         run: just dependency-leak
-
-      - name: Check runtime bundle sync
-        if: matrix.os != 'windows-latest'
-        run: just runtime-bundle-check
 
       - name: Check TypeScript formatting and lint
         if: matrix.os != 'windows-latest'

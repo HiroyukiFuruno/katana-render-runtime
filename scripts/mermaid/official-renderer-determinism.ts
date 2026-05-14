@@ -22,8 +22,8 @@ const CONFIG: DeterminismConfig = {
   randomModulus: RANDOM_MODULUS,
 };
 
-export class OfficialRendererDeterminism {
-  static install(page: PageHandle): Promise<void> {
+export const OfficialRendererDeterminism = {
+  install(page: PageHandle): Promise<void> {
     return page.evaluate((config: DeterminismConfig) => {
       const fixedTime = Date.parse(config.fixedTimeIso);
       let randomState = config.randomInitialState;
@@ -35,5 +35,5 @@ export class OfficialRendererDeterminism {
 
       Date.now = () => fixedTime;
     }, CONFIG);
-  }
-}
+  },
+};

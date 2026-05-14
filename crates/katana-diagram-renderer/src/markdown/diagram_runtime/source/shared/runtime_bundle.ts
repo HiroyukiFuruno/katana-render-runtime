@@ -20,16 +20,16 @@ export class RuntimeBundleDefinition {
   ) {}
 }
 
-export class RuntimeFragmentFactory {
-  static verbatim(label: string, sourcePath: string): RuntimeFragment {
+export const RuntimeFragmentFactory = {
+  verbatim(label: string, sourcePath: string): RuntimeFragment {
     return {
       label,
       sourcePath,
       transform: "verbatim",
     };
-  }
+  },
 
-  static transformed(
+  transformed(
     label: string,
     sourcePath: string,
     transform: RuntimeFragmentTransform,
@@ -39,5 +39,5 @@ export class RuntimeFragmentFactory {
       sourcePath,
       transform,
     };
-  }
-}
+  },
+};

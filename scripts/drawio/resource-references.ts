@@ -49,55 +49,55 @@ export class DrawioResourceReferenceExtractor {
   }
 }
 
-class DrawioResourceMatch {
-  static capture(match: RegExpMatchArray): string {
+const DrawioResourceMatch = {
+  capture(match: RegExpMatchArray): string {
     const value = match.at(1);
     if (value === undefined) {
       throw new Error("Draw.io resource reference was not captured");
     }
     return value;
-  }
-}
+  },
+};
 
-class DrawioResourceValue {
-  static normalize(value: string): string {
+const DrawioResourceValue = {
+  normalize(value: string): string {
     return DrawioResourceValue.decode(value).trim().replace(/^\/+/, "");
-  }
+  },
 
-  static isAuditableImage(value: string): boolean {
+  isAuditableImage(value: string): boolean {
     if (value.startsWith("data:image/")) {
       return false;
     }
     const pathname = DrawioResourceValue.pathname(value);
     return IMAGE_EXTENSIONS.some((extension) => pathname.toLowerCase().endsWith(extension));
-  }
+  },
 
-  static logicalImagePath(value: string): string {
+  logicalImagePath(value: string): string {
     return DrawioResourceValue.pathname(value).replace(/^\/+/, "");
-  }
+  },
 
-  static stencilGroup(value: string): string {
+  stencilGroup(value: string): string {
     const prefix = value.split(/[.;"'& ]/)[0] || "";
     return DrawioResourceValue.resourceGroup(prefix.toLowerCase());
-  }
+  },
 
-  static stencilLogicalPaths(group: string): string[] {
+  stencilLogicalPaths(group: string): string[] {
     return [`stencils/${group}`];
-  }
+  },
 
-  private static resourceGroup(prefix: string): string {
+  resourceGroup(prefix: string): string {
     return RESOURCE_GROUP_BY_PREFIX.get(prefix) || prefix;
-  }
+  },
 
-  private static decode(value: string): string {
+  decode(value: string): string {
     try {
       return decodeURIComponent(value);
     } catch {
       return value;
     }
-  }
+  },
 
-  private static pathname(value: string): string {
+  pathname(value: string): string {
     return new URL(value, "https://katana.local").pathname;
-  }
-}
+  },
+};

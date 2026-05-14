@@ -178,8 +178,8 @@ class HeadingLine {
   }
 }
 
-class MermaidFenceBlock {
-  static read(lines: string[], startIndex: number): MermaidBlock {
+const MermaidFenceBlock = {
+  read(lines: string[], startIndex: number): MermaidBlock {
     const marker = FenceLine.marker(MermaidFenceBlock.lineAt(lines, startIndex));
     const endOffset = lines.slice(startIndex + 1).findIndex((line) => line.trim() === marker);
     assert(endOffset >= 0, `Mermaid fence is not closed at line ${startIndex + 1}`);
@@ -191,27 +191,27 @@ class MermaidFenceBlock {
         .trim(),
       endIndex,
     };
-  }
+  },
 
-  private static lineAt(lines: string[], index: number): string {
+  lineAt(lines: string[], index: number): string {
     const line = lines.at(index);
     if (line === undefined) {
       throw new Error(`Mermaid fence line is missing: ${index}`);
     }
     return line;
-  }
-}
+  },
+};
 
-class FenceLine {
-  static isStart(line: string): boolean {
+const FenceLine = {
+  isStart(line: string): boolean {
     return /^(`{3,}|~{3,})mermaid\b/.test(line.trim());
-  }
+  },
 
-  static marker(line: string): string {
+  marker(line: string): string {
     const match = line.trim().match(/^(`{3,}|~{3,})/);
     assert(match, `Invalid Mermaid fence: ${line}`);
     const marker = match.at(1);
     assert(marker, `Invalid Mermaid fence marker: ${line}`);
     return marker;
-  }
-}
+  },
+};

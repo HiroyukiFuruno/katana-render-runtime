@@ -24,11 +24,11 @@ interface DrawioReferenceScoreThreshold {
   readonly reason: string;
 }
 
-export class DrawioReferenceScores {
-  static minimum(scores: DrawioReferenceScoreRow[]): number {
+export const DrawioReferenceScores = {
+  minimum(scores: DrawioReferenceScoreRow[]): number {
     return Math.min(...scores.map((it) => it.score));
-  }
-}
+  },
+};
 
 export class DrawioReferenceScorePolicy {
   private baselineBySlug = new Map<string, number>();

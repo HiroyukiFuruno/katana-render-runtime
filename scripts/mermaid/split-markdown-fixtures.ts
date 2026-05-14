@@ -10,29 +10,29 @@ interface CliParsedOptions {
   outputDir: string;
 }
 
-class CliOptions {
-  static parse(argv: string[]): CliParsedOptions {
+const CliOptions = {
+  parse(argv: string[]): CliParsedOptions {
     CliOptions.exitIfHelp(argv);
     return {
       inputPath: path.resolve(CliOptions.get(argv, "--input", "assets/fixtures/sample_mermaid.md")),
       outputDir: path.resolve(CliOptions.get(argv, "--output", "tests/fixtures/mermaid/en")),
     };
-  }
+  },
 
-  private static get(argv: string[], name: string, fallback: string): string {
+  get(argv: string[], name: string, fallback: string): string {
     const index = argv.indexOf(name);
     return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
-  }
+  },
 
-  private static exitIfHelp(argv: string[]) {
+  exitIfHelp(argv: string[]) {
     if (argv.includes("--help")) {
       console.log(
         "Usage: bun run scripts/mermaid/split-markdown-fixtures.ts [--input FILE] [--output DIR]",
       );
       process.exit(0);
     }
-  }
-}
+  },
+};
 
 class FixtureWriter {
   constructor(private outputDir: string) {}

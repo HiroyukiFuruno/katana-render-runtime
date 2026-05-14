@@ -132,8 +132,8 @@ class UpdateCommand {
   }
 }
 
-class CliOptions {
-  static command(argv: string[]): UpdateCommand {
+const CliOptions = {
+  command(argv: string[]): UpdateCommand {
     if (argv.length !== 2) {
       throw new Error(
         "Usage: bun run scripts/runtime-assets/update.ts <mermaid|mermaid-zenuml|drawio> <version>",
@@ -143,15 +143,15 @@ class CliOptions {
       RuntimeAssetCatalog.byKind(CliOptions.argAt(argv, 0)),
       CliOptions.argAt(argv, 1),
     );
-  }
+  },
 
-  private static argAt(argv: string[], index: number): string {
+  argAt(argv: string[], index: number): string {
     const value = argv.at(index);
     if (value === undefined) {
       throw new Error("Runtime asset update argument is missing");
     }
     return value;
-  }
-}
+  },
+};
 
 await CliOptions.command(process.argv.slice(2)).run();

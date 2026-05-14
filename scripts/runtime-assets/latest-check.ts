@@ -70,15 +70,15 @@ class LatestCheckCommand {
   }
 }
 
-class CliOptions {
-  static definitions(argv: string[]): RuntimeAssetDefinition[] {
+const CliOptions = {
+  definitions(argv: string[]): RuntimeAssetDefinition[] {
     const kind = argv.at(0);
     if (kind === undefined || kind === "all") {
       return RuntimeAssetCatalog.all();
     }
     return [RuntimeAssetCatalog.byKind(kind)];
-  }
-}
+  },
+};
 
 await new LatestCheckCommand(
   CliOptions.definitions(process.argv.slice(2)),
