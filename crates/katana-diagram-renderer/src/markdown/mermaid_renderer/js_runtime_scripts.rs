@@ -355,6 +355,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn runtime_measures_svg_without_viewbox_with_dom_metrics_helper() {
+        let scripts = MermaidRuntimeScripts::build_with_zenuml(
+            fake_mermaid_measuring_svg_without_viewbox(),
+            "",
+            r##"{"source":"graph TD; A-->B","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff"}"##,
+        );
+
+        let rendered = DiagramV8Runtime::render(&scripts);
+
+        assert!(
+            rendered.as_ref().is_ok_and(|it| it.contains("800:600")),
+            "{rendered:?}"
+        );
+    }
+
     fn fake_mermaid() -> &'static str {
         r#"
 globalThis.mermaid = {
@@ -365,6 +381,23 @@ globalThis.mermaid = {
   render: async (id) => {
     const text = globalThis.__registeredDiagram ?? "missing";
     return { svg: `<svg id="${id}"><text>${text}</text></svg>` };
+  }
+};
+"#
+    }
+
+    fn fake_mermaid_measuring_svg_without_viewbox() -> &'static str {
+        r#"
+globalThis.mermaid = {
+  initialize() {},
+  render: async (id) => {
+    globalThis.innerWidth = 800;
+    globalThis.innerHeight = 600;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    document.body.appendChild(svg);
+    const box = svg.getBoundingClientRect();
+    svg.remove();
+    return { svg: `<svg id="${id}" viewBox="0 0 800 600"><text>${box.width}:${box.height}</text></svg>` };
   }
 };
 "#
