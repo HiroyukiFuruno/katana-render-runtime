@@ -2,7 +2,9 @@ use super::js_runtime::MermaidJsRuntimeOps;
 use super::types::MermaidRenderOps;
 use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::diagram_runtime::DiagramRuntimeMode;
-use crate::markdown::runtime_assets::MERMAID_DOWNLOAD_URL;
+use crate::markdown::runtime_assets::{
+    MERMAID_DOWNLOAD_URL, MERMAID_ZENUML_JS_CHECKSUM, MERMAID_ZENUML_JS_VERSION,
+};
 use crate::markdown::{DiagramBlock, DiagramResult};
 use std::{
     collections::hash_map::DefaultHasher,
@@ -12,6 +14,11 @@ use std::{
 };
 
 static MERMAID_SVG_RENDER_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+const MERMAID_RENDER_CACHE_SCHEMA: &str = "mermaid-render-theme-v128-zenuml-mermaid-plugin";
+const MERMAID_RUNTIME_BUNDLE_CHECKSUMS: &str =
+    include_str!("../diagram_runtime/generated/runtime-bundles.sha256");
+const MERMAID_ZENUML_PLUGIN_CACHE_KEY: (&str, &str) =
+    (MERMAID_ZENUML_JS_VERSION, MERMAID_ZENUML_JS_CHECKSUM);
 
 impl MermaidRenderOps {
     pub fn render_mermaid_with_runtime_path(
@@ -32,7 +39,7 @@ impl MermaidRenderOps {
         }
 
         let mode = DiagramRuntimeMode::current();
-        let cache_file = Self::cache_file_path(&block.source, preset, mode);
+        let cache_file = Self::cache_file_path(&block.source, mermaid_js, preset, mode);
         Self::render_mermaid_with_cache_file(block, mermaid_js, preset, &cache_file)
     }
 
@@ -77,11 +84,31 @@ impl MermaidRenderOps {
 
     fn cache_file_path(
         source: &str,
+        mermaid_js: &Path,
         preset: &DiagramColorPreset,
         mode: DiagramRuntimeMode,
     ) -> PathBuf {
+        Self::cache_file_path_with_zenuml_key(
+            source,
+            mermaid_js,
+            preset,
+            mode,
+            MERMAID_ZENUML_PLUGIN_CACHE_KEY,
+        )
+    }
+
+    fn cache_file_path_with_zenuml_key(
+        source: &str,
+        mermaid_js: &Path,
+        preset: &DiagramColorPreset,
+        mode: DiagramRuntimeMode,
+        zenuml_plugin_key: (&str, &str),
+    ) -> PathBuf {
         let mut hasher = DefaultHasher::new();
-        "mermaid-render-theme-v125-zenuml-v8-renderer".hash(&mut hasher);
+        MERMAID_RENDER_CACHE_SCHEMA.hash(&mut hasher);
+        MERMAID_RUNTIME_BUNDLE_CHECKSUMS.hash(&mut hasher);
+        zenuml_plugin_key.hash(&mut hasher);
+        mermaid_js.hash(&mut hasher);
         mode.mermaid_cache_profile().hash(&mut hasher);
         source.hash(&mut hasher);
         preset.mermaid_theme.hash(&mut hasher);

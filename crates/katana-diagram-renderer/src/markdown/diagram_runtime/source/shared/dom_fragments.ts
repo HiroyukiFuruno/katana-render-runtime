@@ -14,6 +14,10 @@ export const SharedDomFragments = {
       RuntimeFragmentFactory.verbatim("dom-style.js", `${MERMAID_JS_RUNTIME}/dom_style.js`),
       RuntimeFragmentFactory.verbatim("dom-html.js", `${MERMAID_JS_RUNTIME}/dom_html.js`),
       RuntimeFragmentFactory.verbatim("dom-node-html.js", `${MERMAID_JS_RUNTIME}/dom_node_html.js`),
+      RuntimeFragmentFactory.verbatim(
+        "dom-canvas-context.js",
+        `${MERMAID_JS_RUNTIME}/dom_canvas_context.js`,
+      ),
       RuntimeFragmentFactory.verbatim("dom-selector.js", `${MERMAID_JS_RUNTIME}/dom_selector.js`),
       RuntimeFragmentFactory.verbatim("dom-document.js", `${MERMAID_JS_RUNTIME}/dom_document.js`),
       RuntimeFragmentFactory.verbatim("dom-tree.js", `${MERMAID_JS_RUNTIME}/dom_tree.js`),

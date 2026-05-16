@@ -1,5 +1,5 @@
 function katanaNormalizeWrappedDrawioTextLabels(svg) {
-  katanaDrawioSourceCellLabels().forEach((entry) => {
+  katanaDrawioSourceLabelEntries().forEach((entry) => {
     katanaNormalizeWrappedDrawioTextLabel(svg, entry);
   });
 }

@@ -9,10 +9,14 @@ const KATANA_KANBAN_I18N_LINE_APPENDERS = [
 ];
 
 function katanaKanbanWrappedLabelLines(labelGroup) {
-  return Math.max(
-    katanaKanbanOuterLineCount(labelGroup),
-    katanaKanbanMeasuredLineCount(labelGroup),
-  );
+  const text = katanaKanbanLabelText(labelGroup);
+  if (!text) {
+    return 0;
+  }
+  if (!katanaKanbanNeedsI18nWrap(text)) {
+    return katanaKanbanAsciiLayoutLineCount(text);
+  }
+  return Math.max(katanaKanbanOuterLineCount(labelGroup), katanaKanbanMeasuredLineCount(labelGroup));
 }
 
 function katanaNormalizeKanbanLabelGroups(group) {
@@ -173,6 +177,10 @@ function katanaKanbanNonEmptyTextMeasuredLineCount(text) {
   if (katanaKanbanNeedsI18nWrap(text)) {
     return katanaKanbanWrapI18nLabel(text).length;
   }
+  return Math.ceil(katanaTextWidth(text) / KATANA_KANBAN_LABEL_WIDTH);
+}
+
+function katanaKanbanAsciiLayoutLineCount(text) {
   return Math.ceil(katanaTextWidth(text) / KATANA_KANBAN_LABEL_WIDTH);
 }
 

@@ -43,12 +43,97 @@ function katanaDrawioSourceCellShape(id) {
     .concat([""])[0];
 }
 
+function katanaDrawioElementCellStyleValue(element, name) {
+  return katanaDrawioSourceCellStyleValue(katanaDrawioElementCellId(element), name);
+}
+
+function katanaDrawioElementCellIsEdge(element) {
+  return KATANA_DRAWIO_SOURCE_CELL_EDGE_CACHE.has(katanaDrawioElementCellId(element));
+}
+
+function katanaDrawioElementCellHasStyleKey(element, name) {
+  return katanaDrawioSourceStyleForElement(element).has(name);
+}
+
+function katanaDrawioSourceCellStyleValue(id, name) {
+  return [KATANA_DRAWIO_SOURCE_CELL_STYLE_CACHE.get(id)]
+    .filter(Boolean)
+    .map((style) => style.get(name))
+    .filter(Boolean)
+    .concat([""])[0];
+}
+
+function katanaDrawioElementCellHasShadowStyle(element) {
+  return katanaDrawioSourceStyleHasShadow(katanaDrawioSourceStyleForElement(element));
+}
+
+function katanaDrawioSourceStyleForElement(element) {
+  return KATANA_DRAWIO_SOURCE_CELL_STYLE_CACHE.get(katanaDrawioElementCellId(element)) ?? new Map();
+}
+
+function katanaDrawioHasSourceShadowStyle() {
+  return Array.from(KATANA_DRAWIO_SOURCE_CELL_STYLE_CACHE.values()).some(
+    katanaDrawioSourceStyleHasShadow,
+  );
+}
+
+function katanaDrawioSourceStyleHasShadow(style) {
+  return [
+    katanaDrawioSourceStyleExplicitShadow(style),
+    katanaDrawioSourceStyleNamedShadow(style),
+  ].some(Boolean);
+}
+
+function katanaDrawioSourceStyleExplicitShadow(style) {
+  return style.get("shadow") === "1";
+}
+
+function katanaDrawioSourceStyleNamedShadow(style) {
+  return [
+    style.get("shadow") !== "0",
+    KATANA_DRAWIO_SHADOW_STYLE_NAMES.some((name) => style.has(name)),
+  ].every(Boolean);
+}
+
 function katanaDrawioSourceCellStyleMap() {
   return new Map(
-    Array.from(katanaDrawioSourceStyleRequestSource().matchAll(/<mxCell\b([^>]*)>/g))
-      .map(katanaDrawioSourceCellStyleEntry)
+    [
+      ...Array.from(katanaDrawioSourceStyleRequestSource().matchAll(/<mxCell\b([^>]*)>/g))
+        .map(katanaDrawioSourceCellStyleEntry),
+      ...katanaDrawioSourceObjectCellStyleEntries(),
+    ]
       .filter((entry) => entry[0]),
   );
+}
+
+function katanaDrawioSourceCellEdgeSet() {
+  return new Set(
+    Array.from(katanaDrawioSourceStyleRequestSource().matchAll(/<mxCell\b([^>]*)>/g))
+      .map(katanaDrawioSourceCellEdgeId)
+      .filter(Boolean),
+  );
+}
+
+function katanaDrawioSourceCellEdgeId(match) {
+  const attributes = katanaDrawioSourceStyleXmlAttributes(match[1]);
+  return attributes.get("edge") === "1" ? katanaDrawioSourceCellId(attributes) : "";
+}
+
+function katanaDrawioSourceObjectCellStyleEntries() {
+  return Array.from(
+    katanaDrawioSourceStyleRequestSource().matchAll(
+      /<(?:UserObject|object)\b([^>]*)>\s*<mxCell\b([^>]*)/g,
+    ),
+  ).map(katanaDrawioSourceObjectCellStyleEntry);
+}
+
+function katanaDrawioSourceObjectCellStyleEntry(match) {
+  const objectAttributes = katanaDrawioSourceStyleXmlAttributes(match[1]);
+  const cellAttributes = katanaDrawioSourceStyleXmlAttributes(match[2]);
+  return [
+    katanaDrawioSourceCellId(objectAttributes),
+    katanaDrawioSourceCellStyle(cellAttributes),
+  ];
 }
 
 function katanaDrawioSourceCellStyleEntry(match) {
@@ -90,4 +175,18 @@ function katanaDrawioSourceStyleEntry(value) {
   return String(value).split("=").concat(["", ""]).slice(0, 2);
 }
 
+const KATANA_DRAWIO_SHADOW_STYLE_NAMES = [
+  "fancy",
+  "gray",
+  "blue",
+  "green",
+  "turquoise",
+  "yellow",
+  "orange",
+  "red",
+  "pink",
+  "purple",
+];
+
 const KATANA_DRAWIO_SOURCE_CELL_STYLE_CACHE = katanaDrawioSourceCellStyleMap();
+const KATANA_DRAWIO_SOURCE_CELL_EDGE_CACHE = katanaDrawioSourceCellEdgeSet();

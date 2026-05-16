@@ -49,12 +49,28 @@ function mermaidRuntimeFragments(): RuntimeFragment[] {
     RuntimeFragmentFactory.verbatim("svg-er-layout.js", `${MERMAID_JS_RUNTIME}/svg_er_layout.js`),
     RuntimeFragmentFactory.verbatim("svg-er-fixes.js", `${MERMAID_JS_RUNTIME}/svg_er_fixes.js`),
     RuntimeFragmentFactory.verbatim(
+      "svg-er-viewbox-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_er_viewbox_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-class-layout-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_class_layout_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
       "svg-class-fixes.js",
       `${MERMAID_JS_RUNTIME}/svg_class_fixes.js`,
     ),
     RuntimeFragmentFactory.verbatim(
       "svg-visual-fixes.js",
       `${MERMAID_JS_RUNTIME}/svg_visual_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-sequence-activation-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_sequence_activation_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-requirement-localized-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_requirement_localized_fixes.js`,
     ),
     RuntimeFragmentFactory.verbatim(
       "svg-review-fixes.js",
@@ -93,6 +109,10 @@ function mermaidRuntimeFragments(): RuntimeFragment[] {
       `${MERMAID_JS_RUNTIME}/svg_wardley_normalizer.js`,
     ),
     RuntimeFragmentFactory.verbatim(
+      "svg-mindmap-layout-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_mindmap_layout_fixes.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
       "svg-diagram-normalizers.js",
       `${MERMAID_JS_RUNTIME}/svg_diagram_normalizers.js`,
     ),
@@ -108,6 +128,10 @@ function mermaidRuntimeFragments(): RuntimeFragment[] {
     RuntimeFragmentFactory.verbatim(
       "mermaid-diagram-type.js",
       `${MERMAID_JS_RUNTIME}/mermaid_diagram_type.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "svg-zenuml-fixes.js",
+      `${MERMAID_JS_RUNTIME}/svg_zenuml_fixes.js`,
     ),
     RuntimeFragmentFactory.verbatim("svg-normalize.js", `${MERMAID_JS_RUNTIME}/svg_normalize.js`),
   ];

@@ -3,10 +3,10 @@ function katanaReadViewBox(svg) {
   if (!match) {
     return null;
   }
-  return katanaViewBoxValues(match[1]);
+  return katanaSvgDimensionViewBoxValues(match[1]);
 }
 
-function katanaViewBoxValues(value) {
+function katanaSvgDimensionViewBoxValues(value) {
   const values = value.split(/\s+/).map((it) => Number(it));
   if (!katanaValidViewBoxValues(values)) {
     return null;

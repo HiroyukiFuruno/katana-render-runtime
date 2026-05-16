@@ -22,6 +22,55 @@ function katanaApplyCssEntry(style, entry) {
   style.setProperty(entry.slice(0, separator).trim(), entry.slice(separator + 1).trim());
 }
 
+[
+  "backgroundColor",
+  "border",
+  "borderBottom",
+  "borderColor",
+  "borderRadius",
+  "borderRightStyle",
+  "color",
+  "colorScheme",
+  "cursor",
+  "display",
+  "fill",
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "height",
+  "margin",
+  "marginBottom",
+  "maxHeight",
+  "maxWidth",
+  "opacity",
+  "overflow",
+  "padding",
+  "paddingBottom",
+  "position",
+  "right",
+  "stroke",
+  "stopColor",
+  "textAlign",
+  "top",
+  "verticalAlign",
+  "width",
+  "zIndex",
+].forEach(katanaInstallStyleDirectProperty);
+
+function katanaInstallStyleDirectProperty(camel) {
+  if (Object.getOwnPropertyDescriptor(KatanaStyle.prototype, camel)) {
+    return;
+  }
+  Object.defineProperty(KatanaStyle.prototype, camel, {
+    get() {
+      return this.getPropertyValue(katanaStyleKebabName(camel));
+    },
+    set(value) {
+      this.setProperty(katanaStyleKebabName(camel), value);
+    },
+  });
+}
+
 KatanaStyle.prototype.setProperty = function setProperty(name, value) {
   const kebab = katanaStyleKebabName(name);
   const camel = katanaStyleCamelName(name);
@@ -36,8 +85,12 @@ KatanaStyle.prototype.getPropertyValue = function getPropertyValue(name) {
   const key = String(name);
   const kebab = katanaStyleKebabName(key);
   const camel = katanaStyleCamelName(key);
-  return this.values[key] ?? this.values[kebab] ?? this.values[camel] ?? this[camel] ?? "";
+  return this.values[key] ?? this.values[kebab] ?? this.values[camel] ?? katanaStyleOwnValue(this, camel);
 };
+
+function katanaStyleOwnValue(style, camel) {
+  return Object.hasOwn(style, camel) ? style[camel] : "";
+}
 
 KatanaStyle.prototype.removeProperty = function removeProperty(name) {
   const value = this.getPropertyValue(name);

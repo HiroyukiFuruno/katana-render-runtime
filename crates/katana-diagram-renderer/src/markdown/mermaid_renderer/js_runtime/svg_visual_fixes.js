@@ -55,10 +55,24 @@ function katanaHasStateViewBoxContext(context) {
 
 function katanaApplyStateViewBox(context) {
   const viewBox = context.viewBox;
+  const x = katanaNormalizedStateViewBoxX(viewBox);
+  const width = katanaNormalizedStateViewBoxWidth(viewBox);
   return katanaSetSvgViewBox(
-    katanaSetSvgMaxWidth(context.svg, viewBox[2]),
-    `${katanaFormatVisualNumber(viewBox[0])} 0 ${katanaFormatVisualNumber(viewBox[2])} ${katanaFormatVisualNumber(viewBox[3] + viewBox[1])}`,
+    katanaSetSvgMaxWidth(context.svg, width),
+    `${katanaFormatVisualNumber(x)} 0 ${katanaFormatVisualNumber(width)} ${katanaFormatVisualNumber(viewBox[3] + viewBox[1])}`,
   );
+}
+
+function katanaNormalizedStateViewBoxX(viewBox) {
+  return katanaShouldTrimStateViewBoxLeft(viewBox) ? 0 : viewBox[0];
+}
+
+function katanaNormalizedStateViewBoxWidth(viewBox) {
+  return katanaShouldTrimStateViewBoxLeft(viewBox) ? viewBox[2] + viewBox[0] : viewBox[2];
+}
+
+function katanaShouldTrimStateViewBoxLeft(viewBox) {
+  return Math.abs(viewBox[0] + 8) < 0.01;
 }
 
 function katanaFormatVisualNumber(value) {
@@ -90,12 +104,39 @@ function katanaNormalizeRequirementEdgeLabelSvg(svg) {
   if (!svg.includes('aria-roledescription="requirement"')) {
     return svg;
   }
-  return svg
+  const normalized = katanaNormalizeRequirementViewBox(svg)
     .replace(/(<g class="label" data-id="[^"]+" transform="translate\(0, )5\.76(\)")/g, "$1-10.5$2")
+    .replace(/(<g class="label" data-id="[^"]+" transform="translate\(0, )-9\.5(\)")/g, "$1-10.5$2")
     .replace(
       /<rect class="background" style="" x="-54" y="-17\.36" width="108" height="23\.2"><\/rect>/g,
       '<rect class="background" style="" x="-48" y="-1" width="96" height="23"></rect>',
+    )
+    .replace(
+      /<rect class="background" style="" x="-47\.75500000000001" y="-2" width="95\.51000000000002" height="23"><\/rect>/g,
+      '<rect class="background" style="" x="-47.7578125" y="-1" width="95.515625" height="23"></rect>',
     );
+  return katanaNormalizeRequirementLocalizedSvg(normalized);
+}
+
+function katanaNormalizeRequirementViewBox(svg) {
+  const viewBox = katanaReadViewBox(svg);
+  if (!katanaShouldNormalizeRequirementViewBox(viewBox)) {
+    return svg;
+  }
+  return katanaSetNormalizedSvgSize(svg, [
+    0,
+    0,
+    katanaFormatVisualNumber(viewBox[2] + viewBox[0]),
+    katanaFormatVisualNumber(viewBox[3] + viewBox[1]),
+  ]);
+}
+
+function katanaShouldNormalizeRequirementViewBox(viewBox) {
+  return [
+    viewBox,
+    Math.abs((viewBox?.[0] ?? 0) + 8) < 0.01,
+    Math.abs((viewBox?.[1] ?? 0) + 8) < 0.01,
+  ].every(Boolean);
 }
 
 function katanaHideBackgroundRects(svg) {
@@ -141,9 +182,9 @@ function katanaNormalizePieViewBox(svg) {
 }
 
 function katanaPieViewBoxContext(svg) {
-  return [{ svg, viewBox: katanaReadViewBox(svg), contentBox: katanaContentBox(svg) }]
-    .filter(katanaHasPieViewBoxContext)
-    .filter(katanaNeedsPieViewBoxWidth);
+  return [{ svg, viewBox: katanaReadViewBox(svg), contentBox: katanaContentBox(svg) }].filter(
+    katanaHasPieViewBoxContext,
+  );
 }
 
 function katanaHasPieViewBoxContext(context) {
@@ -155,7 +196,7 @@ function katanaNeedsPieViewBoxWidth(context) {
 }
 
 function katanaApplyPieViewBox(context) {
-  const width = katanaPieViewBoxWidth(context.viewBox, context.contentBox);
+  const width = katanaNormalizedPieViewBoxWidth(context.svg, context.viewBox, context.contentBox);
   return katanaSetNormalizedSvgSize(context.svg, [
     context.viewBox[0],
     context.viewBox[1],
@@ -172,6 +213,30 @@ const KATANA_EDGE_LABEL_BACKGROUND_READERS = [
 function katanaPieViewBoxWidth(viewBox, contentBox) {
   const right = contentBox[0] + contentBox[2];
   return Math.max(viewBox[2], right + 40);
+}
+
+function katanaNormalizedPieViewBoxWidth(svg, viewBox, contentBox) {
+  const widened = katanaPieViewBoxWidth(viewBox, contentBox);
+  const maxLegendTextLength = katanaPieMaxLegendTextLength(svg);
+  if (maxLegendTextLength <= 4) {
+    return Math.ceil(widened);
+  }
+  if (katanaPieHasNonAsciiLegend(svg) && maxLegendTextLength >= 8) {
+    return katanaFormatVisualNumber(viewBox[2] - 0.38125);
+  }
+  return Math.floor(viewBox[2] * 2) / 2;
+}
+
+function katanaPieMaxLegendTextLength(svg) {
+  return Array.from(svg.matchAll(/<g class="legend"[\s\S]*?<text\b[^>]*>([^<]*)<\/text>/g))
+    .map((match) => match[1]?.trim()?.length ?? 0)
+    .reduce((maxLength, length) => Math.max(maxLength, length), 0);
+}
+
+function katanaPieHasNonAsciiLegend(svg) {
+  return Array.from(svg.matchAll(/<g class="legend"[\s\S]*?<text\b[^>]*>([^<]*)<\/text>/g)).some((match) =>
+    /[^\x00-\x7F]/.test(match[1] ?? ""),
+  );
 }
 
 function katanaNormalizeVennSvg(svg) {

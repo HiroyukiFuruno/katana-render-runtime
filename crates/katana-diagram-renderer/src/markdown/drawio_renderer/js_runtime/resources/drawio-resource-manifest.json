@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "resourcesRoot": "crates/katana-canvas-forge/src/markdown/drawio_renderer/js_runtime/resources",
+  "resourcesRoot": "crates/katana-diagram-renderer/src/markdown/drawio_renderer/js_runtime/resources",
   "resources": [
     {
       "logicalPath": "assets/img/drawlogo32.png",
@@ -1511,8 +1511,8 @@
     {
       "logicalPath": "shapes/mxCabinets.js",
       "sourceKind": "drawio-shapes",
-      "byteSize": 6419,
-      "sha256": "8f8686d628e714fb869cc4fdebfc29e8ae34e4c473e5a628bc3964ba8c236dea"
+      "byteSize": 6163,
+      "sha256": "f45ece9bec8a8ddd720123c83f39daf2396a78a875435b8e7080ff321ad30e60"
     },
     {
       "logicalPath": "shapes/mxCisco19.js",
@@ -1889,8 +1889,8 @@
     {
       "logicalPath": "stencils/cabinets.xml",
       "sourceKind": "drawio-stencils",
-      "byteSize": 76873,
-      "sha256": "d6e696cd452c0e89381f77ca8ace091b6b6da5115671fc812f97e19f43e76c4f"
+      "byteSize": 74515,
+      "sha256": "786ccd652850739ec637f70ba6c0d258b34831102e7022505731fef3afc52848"
     },
     {
       "logicalPath": "stencils/cisco_safe/architecture.xml",

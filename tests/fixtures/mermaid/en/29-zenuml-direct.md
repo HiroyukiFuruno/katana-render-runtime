@@ -10,3 +10,11 @@ OrderController.post(payload) {
   return "created"
 }
 ~~~
+
+<!-- katana-mermaid-official:start -->
+
+## 公式Mermaid.js描画
+
+![公式Mermaid.js描画: 29. ZenUML Direct Fence](official-dark/29-zenuml-direct.png)
+
+<!-- katana-mermaid-official:end -->

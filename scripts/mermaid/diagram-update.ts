@@ -42,7 +42,7 @@ const CliOptions = {
             argv,
             "--mermaid-zenuml-js",
             process.env.MERMAID_ZENUML_JS ||
-              "crates/katana-diagram-renderer/vendor/mermaid-zenuml/0.2.2/mermaid-zenuml.min.js",
+              "crates/katana-diagram-renderer/vendor/mermaid-zenuml/0.2.3/mermaid-zenuml.min.js",
           ),
         ),
       ),
@@ -75,6 +75,7 @@ class MermaidDiagramUpdate {
   private options: CliParsedOptions;
   private markdownAssets: MarkdownReferenceAssets;
   private skippedReport: SkippedFixtureReport;
+  private renderedCount = 0;
 
   constructor(options: CliParsedOptions) {
     this.options = options;
@@ -90,6 +91,7 @@ class MermaidDiagramUpdate {
     const writer = new MarkdownReferenceWriter(this.options.markdownOutputDir);
     await this.renderAll(renderer, writer, fixtures);
     this.skippedReport.write();
+    this.assertRendered(fixtures);
   }
 
   private prepareOutputDirs() {
@@ -153,9 +155,16 @@ class MermaidDiagramUpdate {
     fixture: Fixture,
   ) {
     await renderer.render(fixture);
+    this.renderedCount += 1;
     this.syncMarkdownAssets(fixture);
     this.writeMarkdownReference(writer, fixture);
     console.log(`updated ${fixture.slug}`);
+  }
+
+  private assertRendered(fixtures: Fixture[]) {
+    if (fixtures.length > 0 && this.renderedCount === 0) {
+      throw new Error("All Mermaid fixtures were skipped; check render-skipped.json");
+    }
   }
 
   private writeMarkdownReference(writer: MarkdownReferenceWriter, fixture: Fixture) {

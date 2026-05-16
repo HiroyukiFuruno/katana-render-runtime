@@ -205,6 +205,44 @@ class KatanaStyle {
   }
 }
 
+class KatanaCSSRule {
+  constructor(cssText) {
+    this.cssText = String(cssText);
+  }
+}
+
+class KatanaCSSStyleSheet {
+  constructor() {
+    this.cssRules = [];
+  }
+  insertRule(rule, index = this.cssRules.length) {
+    const insertIndex = katanaCssRuleInsertIndex(index, this.cssRules.length);
+    this.cssRules.splice(insertIndex, 0, new KatanaCSSRule(rule));
+    return insertIndex;
+  }
+  replaceSync(cssText) {
+    this.cssRules = katanaStyleSheetRuleTexts(cssText).map((it) => new KatanaCSSRule(it));
+  }
+}
+
+function katanaCssRuleInsertIndex(index, length) {
+  const parsed = Number(index);
+  if (!Number.isFinite(parsed)) {
+    return length;
+  }
+  return Math.max(0, Math.min(Math.trunc(parsed), length));
+}
+
+function katanaStyleSheetRuleTexts(cssText) {
+  const source = String(cssText ?? "").trim();
+  if (source.length === 0) {
+    return [];
+  }
+  return source.match(/[^{}]+\{[^{}]*\}/g) ?? [source];
+}
+
+globalThis.CSSStyleSheet = KatanaCSSStyleSheet;
+
 globalThis.getComputedStyle = (node) => ({
   getPropertyValue(name) {
     return node?.style?.getPropertyValue?.(name) ?? "";

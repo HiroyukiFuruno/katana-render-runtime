@@ -1,70 +1,11 @@
-const KATANA_EMPTY_DRAWIO_ATTRIBUTES = new Map();
-const KATANA_DRAWIO_ATTRIBUTE_READERS = [
-  katanaEmptyDrawioAttributes,
-  katanaReadableDrawioAttributes,
-];
-
 function katanaFillMissingDrawioTextLabels(svg) {
-  katanaDrawioSourceCellLabels().forEach((entry) => {
+  katanaDrawioSourceLabelEntries().forEach((entry) => {
     katanaFillMissingDrawioCellLabel(svg, entry);
   });
 }
 
-function katanaDrawioSourceCellLabels() {
-  return Array.from(katanaDrawioRequestSource().matchAll(/<mxCell\b([^>]*)>/g))
-    .map(katanaDrawioCellLabelEntry)
-    .filter(katanaHasDrawioCellLabel);
-}
-
 function katanaDrawioRequestSource() {
   return String(globalThis.__katanaDrawioRequest?.source ?? "");
-}
-
-function katanaDrawioCellLabelEntry(match) {
-  const attributes = katanaDrawioXmlAttributes(match[1]);
-  return {
-    id: katanaDrawioCellAttribute(attributes, "id"),
-    label: katanaDrawioHtmlLabelText(katanaDrawioCellAttribute(attributes, "value")),
-    style: katanaDrawioCellAttribute(attributes, "style"),
-  };
-}
-
-function katanaDrawioCellAttribute(attributes, name) {
-  return katanaDrawioAttributeReader(attributes).get(name) ?? "";
-}
-
-function katanaDrawioAttributeReader(attributes) {
-  return KATANA_DRAWIO_ATTRIBUTE_READERS[Number(katanaCanReadDrawioAttributes(attributes))](
-    attributes,
-  );
-}
-
-function katanaCanReadDrawioAttributes(attributes) {
-  return typeof attributes?.get === "function";
-}
-
-function katanaReadableDrawioAttributes(attributes) {
-  return attributes;
-}
-
-function katanaEmptyDrawioAttributes(_attributes) {
-  return KATANA_EMPTY_DRAWIO_ATTRIBUTES;
-}
-
-function katanaDrawioXmlAttributes(source) {
-  return new Map(
-    Array.from(String(source).matchAll(/([a-zA-Z0-9:_-]+)="([^"]*)"/g)).map(
-      katanaDrawioXmlAttributeEntry,
-    ),
-  );
-}
-
-function katanaDrawioXmlAttributeEntry(match) {
-  return [match[1], decodeHtmlEntities(match[2])];
-}
-
-function katanaHasDrawioCellLabel(entry) {
-  return [entry.id, entry.label].every(Boolean);
 }
 
 function katanaFillMissingDrawioCellLabel(svg, entry) {
@@ -172,8 +113,15 @@ function katanaDrawioBottomLabelPosition(box, entry, _lines, fontSize) {
 }
 
 function katanaDrawioRightLabelPosition(box, entry, lines, fontSize) {
-  const x = box.x + box.width + 2 + katanaDrawioSpacing(entry.style, "spacingLeft");
+  const x = box.x + box.width + 2 + katanaDrawioSpacing(entry.style, "spacingLeft") -
+    katanaDrawioAppliedLeftPadding() * 2;
   return katanaDrawioTextPosition(x, katanaDrawioCenteredTextY(box, lines, fontSize), "start");
+}
+
+function katanaDrawioLeftLabelPosition(box, entry, lines, fontSize) {
+  const x = box.x - 2 - katanaDrawioSpacing(entry.style, "spacingRight") -
+    katanaDrawioAppliedLeftPadding();
+  return katanaDrawioTextPosition(x, katanaDrawioCenteredTextY(box, lines, fontSize), "end");
 }
 
 function katanaDrawioTextPosition(x, y, anchor) {
@@ -195,5 +143,6 @@ function katanaDrawioTextLineDy(index, fontSize) {
 
 const KATANA_DRAWIO_LABEL_POSITIONERS = new Map([
   ["bottom", katanaDrawioBottomLabelPosition],
+  ["left", katanaDrawioLeftLabelPosition],
   ["right", katanaDrawioRightLabelPosition],
 ]);

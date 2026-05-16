@@ -2,6 +2,11 @@ function katanaDrawioSourceContentBox(svg) {
   return katanaDrawioSourceCropBox(svg, katanaDrawioSourceGeometryEntries());
 }
 
+function katanaDrawioSourceMinimumTop() {
+  const entries = katanaDrawioSourceGeometryEntries();
+  return entries.length === 0 ? Number.NaN : Math.min(...entries.map((entry) => entry.y));
+}
+
 function katanaDrawioSourceGeometryEntries() {
   return [
     ...katanaDrawioSourceCellGeometryEntries(),
@@ -9,6 +14,14 @@ function katanaDrawioSourceGeometryEntries() {
   ]
     .filter(katanaHasDrawioSourceGeometryEntry)
     .filter(katanaDrawioIsTopLevelSourceGeometryEntry);
+}
+
+function katanaDrawioSourceVertexGeometryEntries() {
+  return katanaDrawioSourceGeometryEntries().filter(katanaDrawioIsSourceVertexGeometryEntry);
+}
+
+function katanaDrawioIsSourceVertexGeometryEntry(entry) {
+  return entry.vertex;
 }
 
 function katanaDrawioSourceCellGeometryEntries() {
@@ -42,11 +55,20 @@ function katanaDrawioSourceGeometry(cellAttributes, geometryAttributes, fallback
   return {
     id: katanaDrawioCellAttribute(cellAttributes, "id"),
     parent: katanaDrawioSourceParentAttribute(cellAttributes, fallbackAttributes),
+    vertex: katanaDrawioBooleanSourceAttribute(cellAttributes, fallbackAttributes, "vertex"),
+    edge: katanaDrawioBooleanSourceAttribute(cellAttributes, fallbackAttributes, "edge"),
     x: katanaDrawioCoordinateAttribute(geometryAttributes, "x"),
     y: katanaDrawioCoordinateAttribute(geometryAttributes, "y"),
     width: katanaDrawioRequiredNumberAttribute(geometryAttributes, "width"),
     height: katanaDrawioRequiredNumberAttribute(geometryAttributes, "height"),
   };
+}
+
+function katanaDrawioBooleanSourceAttribute(attributes, fallbackAttributes, name) {
+  return [
+    katanaDrawioCellAttribute(attributes, name),
+    katanaDrawioOptionalCellAttribute(fallbackAttributes, name),
+  ].includes("1");
 }
 
 function katanaDrawioSourceParentAttribute(cellAttributes, fallbackAttributes) {
@@ -126,6 +148,11 @@ function katanaDrawioSourceCropBox(svg, entries) {
 
 function katanaDrawioSourceCropOffset(svg, entries) {
   return katanaDrawioMedianOffset(katanaDrawioSourceCropOffsets(svg, entries));
+}
+
+function katanaDrawioMeasuredSourceOrigin(svg, entries) {
+  const offset = katanaDrawioSourceCropOffset(svg, entries);
+  return offset ? { x: -offset.x, y: -offset.y } : null;
 }
 
 function katanaDrawioSourceCropOffsets(svg, entries) {

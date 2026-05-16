@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { DrawioReferenceScorePolicy } from "./reference-score";
 
-test("Draw.io baseline がある場合は既知差分の下限を使う", () => {
+test("Draw.io baseline があっても全体下限を下回らない", () => {
   const policy = new DrawioReferenceScorePolicy(99, [
     {
       slug: "examples-UMLdiagram",
@@ -11,7 +11,7 @@ test("Draw.io baseline がある場合は既知差分の下限を使う", () => 
 
   const threshold = policy.thresholdFor("examples-UMLdiagram");
 
-  expect(threshold.minScore).toBe(93.2);
+  expect(threshold.minScore).toBe(99);
   expect(threshold.reason).toContain("既知差分");
 });
 

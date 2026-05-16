@@ -12,13 +12,13 @@ test("runtime asset path は version を含む", () => {
   const drawio = RuntimeAssetCatalog.byKind("drawio");
 
   expect(RuntimeAssetPaths.assetFile(mermaid)).toBe(
-    "crates/katana-diagram-renderer/vendor/mermaid/3.3.1/mermaid.min.js",
+    `crates/katana-diagram-renderer/vendor/mermaid/${mermaid.version}/mermaid.min.js`,
   );
   expect(RuntimeAssetPaths.assetFile(zenuml)).toBe(
-    "crates/katana-diagram-renderer/vendor/mermaid-zenuml/0.2.2/mermaid-zenuml.min.js",
+    `crates/katana-diagram-renderer/vendor/mermaid-zenuml/${zenuml.version}/mermaid-zenuml.min.js`,
   );
   expect(RuntimeAssetPaths.assetFile(drawio)).toBe(
-    "crates/katana-diagram-renderer/vendor/drawio/29.7.10/drawio.min.js",
+    `crates/katana-diagram-renderer/vendor/drawio/${drawio.version}/drawio.min.js`,
   );
   expect(RuntimeAssetPaths.justVersionVariable(zenuml)).toBe("MERMAID_ZENUML_JS_VERSION");
 });

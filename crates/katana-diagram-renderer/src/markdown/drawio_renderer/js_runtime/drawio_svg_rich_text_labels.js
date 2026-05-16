@@ -5,17 +5,15 @@ function katanaNormalizeRichDrawioTextLabels(svg) {
 }
 
 function katanaDrawioRichTextLabelEntries() {
-  return Array.from(katanaDrawioRequestSource().matchAll(/<mxCell\b([^>]*)>/g))
+  return katanaDrawioSourceLabelEntries()
     .map(katanaDrawioRichTextLabelEntry)
     .filter(katanaHasRichDrawioTextLabel);
 }
 
-function katanaDrawioRichTextLabelEntry(match) {
-  const attributes = katanaDrawioXmlAttributes(match[1]);
-  const label = katanaDrawioCellAttribute(attributes, "value");
+function katanaDrawioRichTextLabelEntry(entry) {
   return {
-    id: katanaDrawioCellAttribute(attributes, "id"),
-    lines: katanaDrawioRichTextLines(label),
+    id: entry.id,
+    lines: katanaDrawioRichTextLines(entry.value),
   };
 }
 

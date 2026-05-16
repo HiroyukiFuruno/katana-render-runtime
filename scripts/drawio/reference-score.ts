@@ -51,7 +51,7 @@ export class DrawioReferenceScorePolicy {
       };
     }
     return {
-      minScore: Math.min(baseline, this.globalMinScore),
+      minScore: Math.max(baseline, this.globalMinScore),
       reason: `既知差分の下限を採用 (${slug})`,
     };
   }

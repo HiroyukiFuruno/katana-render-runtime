@@ -63,7 +63,11 @@ export class OfficialDrawioRenderer {
       viewport: { width: 1520, height: 845 },
       deviceScaleFactor: 1,
     });
-    await this.renderPage(page, fixture);
+    try {
+      await this.renderPage(page, fixture);
+    } finally {
+      await page.close();
+    }
   }
 
   private async renderPage(page: PageHandle, fixture: DrawioRenderFixture) {
@@ -71,7 +75,6 @@ export class OfficialDrawioRenderer {
     await page.addScriptTag({ path: this.options.drawioJs });
     const svg = this.resourceResolver.resolveSvg(await this.renderSvg(page, fixture));
     await this.capture(page, fixture, svg);
-    await page.close();
   }
 
   private renderSvg(page: PageHandle, fixture: DrawioRenderFixture): Promise<string> {
@@ -93,7 +96,13 @@ export class OfficialDrawioRenderer {
             }),
           );
           diagram.appendChild(container);
-          const graphViewer = DrawioRuntime.requireGraphViewer(window as DrawioWindow);
+          const requireGraphViewer = (runtime: DrawioWindow): DrawioGraphViewer => {
+            if (runtime.GraphViewer === undefined) {
+              throw new Error("Draw.io GraphViewer was not registered");
+            }
+            return runtime.GraphViewer;
+          };
+          const graphViewer = requireGraphViewer(window as DrawioWindow);
           graphViewer.createViewerForElement(container, (viewer) => {
             const svg = viewer.graph.getSvg();
             diagram.innerHTML = new XMLSerializer().serializeToString(svg);
@@ -203,12 +212,3 @@ const DrawioSource = {
 };
 
 export { expandHome };
-
-const DrawioRuntime = {
-  requireGraphViewer(runtime: DrawioWindow): DrawioGraphViewer {
-    if (runtime.GraphViewer === undefined) {
-      throw new Error("Draw.io GraphViewer was not registered");
-    }
-    return runtime.GraphViewer;
-  },
-};

@@ -174,21 +174,48 @@ export class OfficialMermaidRenderer {
     return page.evaluate(
       async ({ config, input, request }) => {
         const i18nWindow = window as MermaidI18nWindow;
-        const normalized = MermaidRuntime.requireNormalizer(i18nWindow)(input.source);
-        const mermaidValue = MermaidRuntime.requireMermaid(i18nWindow);
+        const requireMermaid = (runtime: MermaidI18nWindow) => {
+          if (runtime.mermaid === undefined) {
+            throw new Error("Mermaid runtime was not registered");
+          }
+          return runtime.mermaid;
+        };
+        const requireDiagramType = (runtime: MermaidI18nWindow) => {
+          if (runtime.katanaMermaidDiagramType === undefined) {
+            throw new Error("Mermaid diagram-type helper was not registered");
+          }
+          return runtime.katanaMermaidDiagramType;
+        };
+        const requireNormalizer = (runtime: MermaidI18nWindow) => {
+          if (runtime.katanaNormalizeMermaidSourceI18n === undefined) {
+            throw new Error("Mermaid i18n normalizer was not registered");
+          }
+          return runtime.katanaNormalizeMermaidSourceI18n;
+        };
+        const requireRestore = (runtime: MermaidI18nWindow) => {
+          if (runtime.katanaRestoreMermaidI18nText === undefined) {
+            throw new Error("Mermaid i18n restore helper was not registered");
+          }
+          return runtime.katanaRestoreMermaidI18nText;
+        };
+        const requireSvgNormalizer = (runtime: MermaidI18nWindow) => {
+          if (runtime.katanaNormalizeMermaidSvg === undefined) {
+            throw new Error("Mermaid SVG normalizer was not registered");
+          }
+          return runtime.katanaNormalizeMermaidSvg;
+        };
+        const normalized = requireNormalizer(i18nWindow)(input.source);
+        const mermaidValue = requireMermaid(i18nWindow);
         mermaidValue.initialize(config);
-        if (MermaidRuntime.requireDiagramType(i18nWindow)(normalized.source) === "zenuml") {
+        if (requireDiagramType(i18nWindow)(normalized.source) === "zenuml") {
           if (i18nWindow.__katanaMermaidZenuml === undefined) {
             throw new Error("ZenUML runtime asset was not registered");
           }
           await mermaidValue.registerExternalDiagrams([i18nWindow.__katanaMermaidZenuml]);
         }
         return mermaidValue.render(`official-${input.slug}`, normalized.source).then((result) => {
-          const restored = MermaidRuntime.requireRestore(i18nWindow)(
-            result.svg,
-            normalized.replacements,
-          );
-          const normalizedSvg = MermaidRuntime.requireSvgNormalizer(i18nWindow)(restored, {
+          const restored = requireRestore(i18nWindow)(result.svg, normalized.replacements);
+          const normalizedSvg = requireSvgNormalizer(i18nWindow)(restored, {
             ...request,
             source: normalized.source,
           });
@@ -236,18 +263,27 @@ export class OfficialMermaidRenderer {
   private resizeCapture(page: PageHandle): Promise<void> {
     return page.evaluate(() => {
       const svgElement = document.querySelector("#diagram svg") as SVGSVGElement;
-      const viewBox = String(svgElement.getAttribute("viewBox"))
+      const viewBox = String(svgElement.getAttribute("viewBox") ?? "")
         .split(/\s+/)
         .map((value) => Number(value));
       const dimensionAt = (values: number[], index: number): number => {
         const value = values.at(index);
-        if (value === undefined || !Number.isFinite(value)) {
-          throw new Error("Mermaid SVG viewBox is invalid");
-        }
-        return value;
+        return value === undefined || !Number.isFinite(value) ? 0 : value;
       };
-      const width = Math.ceil(dimensionAt(viewBox, 2));
-      const height = Math.ceil(dimensionAt(viewBox, 3));
+      const attributeDimension = (name: string): number => {
+        const value = String(svgElement.getAttribute(name) ?? "").replace(/px$/, "");
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      const box = svgElement.getBoundingClientRect();
+      const positiveDimension = (values: number[]): number =>
+        values.find((value) => value > 0) ?? 1;
+      const width = Math.ceil(
+        positiveDimension([dimensionAt(viewBox, 2), attributeDimension("width"), box.width]),
+      );
+      const height = Math.ceil(
+        positiveDimension([dimensionAt(viewBox, 3), attributeDimension("height"), box.height]),
+      );
       svgElement.setAttribute("width", String(width));
       svgElement.setAttribute("height", String(height));
       svgElement.style.maxWidth = `${width}px`;
@@ -273,40 +309,3 @@ html,body{margin:0;background:${this.theme.canvasBackground};color:${this.theme.
 </style></head><body><div id="capture"><div id="diagram"></div></div></body></html>`;
   }
 }
-
-const MermaidRuntime = {
-  requireMermaid(runtime: MermaidI18nWindow) {
-    if (runtime.mermaid === undefined) {
-      throw new Error("Mermaid runtime was not registered");
-    }
-    return runtime.mermaid;
-  },
-
-  requireDiagramType(runtime: MermaidI18nWindow) {
-    if (runtime.katanaMermaidDiagramType === undefined) {
-      throw new Error("Mermaid diagram-type helper was not registered");
-    }
-    return runtime.katanaMermaidDiagramType;
-  },
-
-  requireNormalizer(runtime: MermaidI18nWindow) {
-    if (runtime.katanaNormalizeMermaidSourceI18n === undefined) {
-      throw new Error("Mermaid i18n normalizer was not registered");
-    }
-    return runtime.katanaNormalizeMermaidSourceI18n;
-  },
-
-  requireRestore(runtime: MermaidI18nWindow) {
-    if (runtime.katanaRestoreMermaidI18nText === undefined) {
-      throw new Error("Mermaid i18n restore helper was not registered");
-    }
-    return runtime.katanaRestoreMermaidI18nText;
-  },
-
-  requireSvgNormalizer(runtime: MermaidI18nWindow) {
-    if (runtime.katanaNormalizeMermaidSvg === undefined) {
-      throw new Error("Mermaid SVG normalizer was not registered");
-    }
-    return runtime.katanaNormalizeMermaidSvg;
-  },
-};
