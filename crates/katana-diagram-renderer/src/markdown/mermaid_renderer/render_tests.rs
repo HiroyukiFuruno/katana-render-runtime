@@ -1,5 +1,6 @@
 use super::MermaidRenderOps;
 use crate::markdown::color_preset::DiagramColorPreset;
+use crate::markdown::diagram_runtime::DiagramRuntimeMode;
 use crate::markdown::{DiagramBlock, DiagramKind, DiagramResult};
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -61,6 +62,31 @@ fn runtime_path_partitions_svg_cache() -> TestResult<()> {
     assert!(matches!(first, DiagramResult::Ok(svg) if svg.contains("first-runtime")));
     assert!(matches!(second, DiagramResult::Ok(svg) if svg.contains("second-runtime")));
     Ok(())
+}
+
+#[test]
+fn zenuml_plugin_key_partitions_svg_cache() {
+    let runtime = std::path::Path::new("target/kdr-tests/mermaid.min.js");
+    let preset = DiagramColorPreset::current();
+    let mode = DiagramRuntimeMode::current();
+    let source = "zenuml\nA.method()";
+
+    let first = MermaidRenderOps::cache_file_path_with_zenuml_key(
+        source,
+        runtime,
+        preset,
+        mode,
+        ("0.2.3", "checksum-a"),
+    );
+    let second = MermaidRenderOps::cache_file_path_with_zenuml_key(
+        source,
+        runtime,
+        preset,
+        mode,
+        ("0.2.3", "checksum-b"),
+    );
+
+    assert_ne!(first, second);
 }
 
 #[test]
