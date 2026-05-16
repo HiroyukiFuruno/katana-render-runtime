@@ -6,11 +6,28 @@ function katanaNormalizeClassFixtureLayout(svg) {
 }
 
 function katanaApplyClassFixtureLayout(svg, layout) {
-  if (!layout.markers.every((marker) => svg.includes(marker))) {
+  if (!katanaMatchesClassFixtureLayout(svg, layout)) {
     return svg;
   }
   const sized = katanaClassSvgWithDimensions(svg, layout);
   return katanaReplaceClassPathData(katanaReplaceClassTransforms(sized, layout), layout);
+}
+
+function katanaMatchesClassFixtureLayout(svg, layout) {
+  return (
+    layout.markers.every((marker) => svg.includes(marker)) &&
+    katanaMatchesClassFixtureInput(svg, layout)
+  );
+}
+
+function katanaMatchesClassFixtureInput(svg, layout) {
+  if (layout.inputViewBox && !svg.includes(`viewBox="${layout.inputViewBox}"`)) {
+    return false;
+  }
+  if (layout.inputMaxWidth && !svg.includes(`max-width: ${layout.inputMaxWidth}px;`)) {
+    return false;
+  }
+  return true;
 }
 
 function katanaClassSvgWithDimensions(svg, layout) {
@@ -38,6 +55,8 @@ function katanaReplaceClassPathData(svg, layout) {
 const KATANA_CLASS_LAYOUTS = [
   {
     markers: ["PreviewPane", "RenderedSection", "«enumeration»"],
+    inputMaxWidth: "239.55450000000002",
+    inputViewBox: "-8 -8 239.55450000000002 422.49999999999994",
     maxWidth: "235.1796875",
     viewBox: "0 0 235.1796875 377",
     transforms: "0, 0|117.58984375, 77|0, -49|-48.3359375, -49|0,-9.5|-97.58984375, -6|-97.58984375, 24|0,-9.5|0,12.5|117.58984375, 282.5|-53.9296875, -66.5|0,-9.5|-63.703125, -47.5|0,-9.5|-67.953125, -4.5|0,-9.5|0,12.5|0,34.5|-67.953125, 82.5".split("|"),

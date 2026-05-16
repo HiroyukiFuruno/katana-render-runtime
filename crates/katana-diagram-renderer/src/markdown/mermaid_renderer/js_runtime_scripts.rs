@@ -30,6 +30,10 @@ const MERMAID_ZENUML: &str =
     include_str!("../../../vendor/mermaid-zenuml/0.2.3/mermaid-zenuml.min.js");
 
 #[cfg(test)]
+#[path = "js_runtime_scripts_class_tests.rs"]
+mod class_tests;
+
+#[cfg(test)]
 mod tests {
     use super::MermaidRuntimeScripts;
     use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
