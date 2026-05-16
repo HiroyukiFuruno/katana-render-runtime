@@ -82,12 +82,27 @@ function parseAttributes(source) {
 }
 
 function decodeHtmlEntities(value) {
+  if (globalThis.__katanaMermaidDiagramType === "block") {
+    return katanaDecodeHtmlEntitiesForBlock(value);
+  }
   return String(value)
     .replace(/&amp;nbsp;/g, "\u00A0")
     .replace(/&nbsp;/g, "\u00A0")
     .replace(/&#xa;/gi, "\n")
     .replace(/&#10;/g, "\n")
     .replace(/&#160;/g, "\u00A0")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function katanaDecodeHtmlEntitiesForBlock(value) {
+  return String(value)
+    .replace(/&amp;nbsp;/g, "&nbsp;")
+    .replace(/&#xa;/gi, "\n")
+    .replace(/&#10;/g, "\n")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&amp;/g, "&")

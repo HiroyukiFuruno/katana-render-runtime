@@ -1,4 +1,3 @@
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -79,12 +78,28 @@ fn command() -> Command {
 fn fake_just(name: &str, exit_code: i32) -> TestResult<PathBuf> {
     let dir = std::env::temp_dir().join(format!("kdr-fake-just-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir)?;
+    write_fake_just(&dir, exit_code)?;
+    Ok(dir)
+}
+
+#[cfg(unix)]
+fn write_fake_just(dir: &Path, exit_code: i32) -> TestResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+
     let just = dir.join("just");
     std::fs::write(&just, format!("#!/bin/sh\nexit {exit_code}\n"))?;
     let mut permissions = std::fs::metadata(&just)?.permissions();
     permissions.set_mode(0o755);
-    std::fs::set_permissions(&just, permissions)?;
-    Ok(dir)
+    Ok(std::fs::set_permissions(&just, permissions)?)
+}
+
+#[cfg(windows)]
+fn write_fake_just(dir: &Path, exit_code: i32) -> TestResult<()> {
+    let just = dir.join("just.cmd");
+    Ok(std::fs::write(
+        &just,
+        format!("@echo off\r\nexit /b {exit_code}\r\n"),
+    )?)
 }
 
 fn temp_file(name: &str) -> PathBuf {

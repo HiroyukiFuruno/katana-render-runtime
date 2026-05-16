@@ -119,7 +119,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Ok(path) if path.ends_with("vendor/drawio/29.7.10/drawio.min.js")
+            Ok(path) if path.ends_with("vendor/drawio/30.0.1/drawio.min.js")
         ));
     }
 

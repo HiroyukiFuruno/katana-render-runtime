@@ -1,16 +1,16 @@
 use std::path::PathBuf;
 
-pub const MERMAID_JS_VERSION: &str = "3.3.1";
+pub const MERMAID_JS_VERSION: &str = "11.15.0";
 pub const MERMAID_JS_CHECKSUM: &str =
-    "217b66ef4279c33c141b4afe22effad10a91c02558dc70917be2c0981e78ed87";
+    "70137e77bb273bb2ef972b86e8b0400cca8be53cb25bfc45911a186dc98665de";
 pub const MERMAID_DOWNLOAD_URL: &str =
-    "https://cdn.jsdelivr.net/npm/mermaid@3.3.1/dist/mermaid.min.js";
+    "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js";
 
-pub const MERMAID_ZENUML_JS_VERSION: &str = "0.2.2";
+pub const MERMAID_ZENUML_JS_VERSION: &str = "0.2.3";
 pub const MERMAID_ZENUML_JS_CHECKSUM: &str =
-    "39143c3cb4e7a1dc53938de0c85e5fd2aee1533ec4e07d7d95a6ef639956ff1f";
+    "28eeec88021d9e9728df4d005ff723a3d71da29a21dbcfa2a628232c35ef2ab6";
 pub const MERMAID_ZENUML_DOWNLOAD_URL: &str =
-    "https://cdn.jsdelivr.net/npm/@mermaid-js/mermaid-zenuml@0.2.2/dist/mermaid-zenuml.min.js";
+    "https://cdn.jsdelivr.net/npm/@mermaid-js/mermaid-zenuml@0.2.3/dist/mermaid-zenuml.min.js";
 
 pub const ZENUML_CORE_JS_VERSION: &str = "3.47.9";
 pub const ZENUML_CORE_JS_CHECKSUM: &str =
@@ -18,10 +18,10 @@ pub const ZENUML_CORE_JS_CHECKSUM: &str =
 pub const ZENUML_CORE_DOWNLOAD_URL: &str =
     "https://cdn.jsdelivr.net/npm/@zenuml/core@3.47.9/dist/zenuml.js";
 
-pub const DRAWIO_JS_VERSION: &str = "29.7.10";
+pub const DRAWIO_JS_VERSION: &str = "30.0.1";
 pub const DRAWIO_JS_CHECKSUM: &str =
-    "a8b7897de995a4e7dd3a541a5e7250d64a295440f728f0ddae72179cdf5a83d5";
-pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases";
+    "854c7a7645903617885434a63dfc37ca5a4c712e5907c0dedca731e1315239c7";
+pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v30.0.1";
 
 pub(crate) struct RuntimeAsset {
     kind: &'static str,
@@ -36,7 +36,7 @@ impl RuntimeAsset {
             kind: "mermaid",
             version: MERMAID_JS_VERSION,
             filename: "mermaid.min.js",
-            bytes: include_bytes!("../../vendor/mermaid/3.3.1/mermaid.min.js"),
+            bytes: include_bytes!("../../vendor/mermaid/11.15.0/mermaid.min.js"),
         }
     }
 
@@ -45,10 +45,11 @@ impl RuntimeAsset {
             kind: "drawio",
             version: DRAWIO_JS_VERSION,
             filename: "drawio.min.js",
-            bytes: include_bytes!("../../vendor/drawio/29.7.10/drawio.min.js"),
+            bytes: include_bytes!("../../vendor/drawio/30.0.1/drawio.min.js"),
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn zenuml_core() -> Self {
         Self {
             kind: "zenuml-core",
@@ -105,8 +106,8 @@ mod tests {
         let drawio = RuntimeAsset::drawio().materialized_path();
         let zenuml_core = RuntimeAsset::zenuml_core().materialized_path();
 
-        assert!(mermaid.ends_with("vendor/mermaid/3.3.1/mermaid.min.js"));
-        assert!(drawio.ends_with("vendor/drawio/29.7.10/drawio.min.js"));
+        assert!(mermaid.ends_with("vendor/mermaid/11.15.0/mermaid.min.js"));
+        assert!(drawio.ends_with("vendor/drawio/30.0.1/drawio.min.js"));
         assert!(zenuml_core.ends_with("vendor/zenuml-core/3.47.9/zenuml.js"));
     }
 

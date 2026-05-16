@@ -12,6 +12,9 @@ use std::{
 };
 
 static MERMAID_SVG_RENDER_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+const MERMAID_RENDER_CACHE_SCHEMA: &str = "mermaid-render-theme-v128-zenuml-mermaid-plugin";
+const MERMAID_RUNTIME_BUNDLE_CHECKSUMS: &str =
+    include_str!("../diagram_runtime/generated/runtime-bundles.sha256");
 
 impl MermaidRenderOps {
     pub fn render_mermaid_with_runtime_path(
@@ -32,7 +35,7 @@ impl MermaidRenderOps {
         }
 
         let mode = DiagramRuntimeMode::current();
-        let cache_file = Self::cache_file_path(&block.source, preset, mode);
+        let cache_file = Self::cache_file_path(&block.source, mermaid_js, preset, mode);
         Self::render_mermaid_with_cache_file(block, mermaid_js, preset, &cache_file)
     }
 
@@ -77,11 +80,14 @@ impl MermaidRenderOps {
 
     fn cache_file_path(
         source: &str,
+        mermaid_js: &Path,
         preset: &DiagramColorPreset,
         mode: DiagramRuntimeMode,
     ) -> PathBuf {
         let mut hasher = DefaultHasher::new();
-        "mermaid-render-theme-v125-zenuml-v8-renderer".hash(&mut hasher);
+        MERMAID_RENDER_CACHE_SCHEMA.hash(&mut hasher);
+        MERMAID_RUNTIME_BUNDLE_CHECKSUMS.hash(&mut hasher);
+        mermaid_js.hash(&mut hasher);
         mode.mermaid_cache_profile().hash(&mut hasher);
         source.hash(&mut hasher);
         preset.mermaid_theme.hash(&mut hasher);

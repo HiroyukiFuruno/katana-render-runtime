@@ -3,7 +3,7 @@ function katanaAnchoredTextNodeBox(node, text, x, y) {
   const height = katanaLineHeight(node);
   return katanaBox(
     katanaAnchoredTextLeft(katanaTextAnchor(node), x, width),
-    y - height * 0.8,
+    y - height * katanaTextBoxBaselineRatio(),
     width,
     height,
   );
@@ -27,7 +27,9 @@ function katanaTextAnchorValues(node) {
   return [
     node.getAttribute?.("text-anchor"),
     node.style?.getPropertyValue?.("text-anchor"),
+    katanaCssComputedStyleValue(node, "text-anchor"),
     node.parentNode?.getAttribute?.("text-anchor"),
+    katanaCssComputedStyleValue(node.parentNode, "text-anchor"),
   ];
 }
 
@@ -81,9 +83,39 @@ function katanaTextNodeWidth(node, text) {
 }
 
 function katanaTextWidthScale(node) {
-  return (
-    katanaFiniteFontSize(Number(String(katanaLineHeightFontSize(node)).replace("px", ""))) / 16
-  );
+  const fontSize =
+    katanaFiniteFontSize(Number(String(katanaLineHeightFontSize(node)).replace("px", ""))) / 16;
+  return fontSize * katanaTextWeightScale(node);
+}
+
+function katanaTextBoxBaselineRatio() {
+  return KATANA_TEXT_BOX_BASELINE_RATIOS[Number(katanaIsRequirementDiagram())]();
+}
+
+function katanaTextWeightScale(node) {
+  return KATANA_TEXT_WEIGHT_SCALES[
+    Number([katanaIsRequirementDiagram(), katanaHasBoldTextWeight(node)].every(Boolean))
+  ]();
+}
+
+function katanaHasBoldTextWeight(node) {
+  return katanaTextWeightValues(node).some(katanaIsBoldTextWeight);
+}
+
+function katanaTextWeightValues(node) {
+  return [
+    node.style?.getPropertyValue?.("font-weight"),
+    katanaCssComputedStyleValue(node, "font-weight"),
+    node.getAttribute?.("font-weight"),
+    node.parentNode?.style?.getPropertyValue?.("font-weight"),
+    katanaCssComputedStyleValue(node.parentNode, "font-weight"),
+    node.parentNode?.getAttribute?.("font-weight"),
+  ];
+}
+
+function katanaIsBoldTextWeight(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "bold" || Number(normalized) >= 600;
 }
 
 function katanaTextWidth(text) {
@@ -95,6 +127,9 @@ function katanaTextWidth(text) {
 }
 
 function katanaMeasuredTextValue(text) {
+  if (globalThis.__katanaMermaidDiagramType === "block") {
+    return String(text);
+  }
   return String(text).replace(/&(?:amp;)?nbsp;|&#160;/g, "\u00A0");
 }
 
@@ -180,6 +215,14 @@ const KATANA_KERNING_PAIR_WIDTH_READERS = [
   (left, right) => KATANA_ASCII_KERNING_PAIRS[`${left}${right}`] ?? 0,
   () => 0,
 ];
+
+const KATANA_TEXT_WEIGHT_SCALES = [() => 1, () => 1.055];
+
+const KATANA_TEXT_BOX_BASELINE_RATIOS = [() => 0.8, () => 0.8421052631578947];
+
+function katanaIsRequirementDiagram() {
+  return ["requirement", "requirementdiagram"].includes(globalThis.__katanaMermaidDiagramType);
+}
 
 KatanaNode.prototype.getComputedTextLength = function getComputedTextLength() {
   const lines = katanaComputedTextLines(this);

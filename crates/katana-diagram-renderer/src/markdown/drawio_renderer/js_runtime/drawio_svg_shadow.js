@@ -1,17 +1,14 @@
 function katanaApplyDrawioShadows(svg) {
-  Array.from(svg.querySelectorAll("g[data-cell-id]"))
-    .filter(katanaDrawioHasShadowStyle)
+  Array.from(svg.querySelectorAll("g"))
+    .filter(katanaDrawioElementHasCellId)
+    .filter(katanaDrawioElementCellHasShadowStyle)
     .map(katanaDrawioShadowTarget)
     .filter(Boolean)
     .forEach(katanaSetDrawioShadowStyle);
 }
 
-function katanaDrawioHasShadowStyle(group) {
-  return katanaDrawioSourceStyleForGroup(group).get("shadow") === "1";
-}
-
-function katanaDrawioSourceStyleForGroup(group) {
-  return KATANA_DRAWIO_SOURCE_CELL_STYLE_CACHE.get(katanaDrawioElementCellId(group)) ?? new Map();
+function katanaDrawioElementHasCellId(element) {
+  return element.hasAttribute("data-cell-id");
 }
 
 function katanaDrawioShadowTarget(group) {

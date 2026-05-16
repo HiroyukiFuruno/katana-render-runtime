@@ -1,7 +1,7 @@
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DrawioWarExtractor } from "./drawio-war-extractor";
 import {
   RuntimeAssetCatalog,
   RuntimeAssetCatalogSource,
@@ -35,22 +35,17 @@ class RuntimeAssetDownloader {
     const archive = path.join(tempDir, "draw.war");
     try {
       await this.downloadFile(url, archive);
-      const extracted = spawnSync("unzip", ["-p", archive, "js/app.min.js"], {
-        encoding: "buffer",
-      });
-      if (extracted.status !== 0) {
-        throw new Error(`Failed to extract js/app.min.js from ${url}`);
-      }
-      fs.writeFileSync(target, extracted.stdout);
+      new DrawioWarExtractor().extract(archive, target, url);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   }
 }
 
-class RuntimeSourceUpdater {
+export class RuntimeSourceUpdater {
   update(definition: RuntimeAssetDefinition, version: string, checksum: string) {
     this.updateRust(definition, version, checksum);
+    this.updateMermaidZenumlReferences(definition, version);
     this.updateJustfile(definition, version);
     this.updateScriptCatalog(definition, version, checksum);
   }
@@ -65,8 +60,28 @@ class RuntimeSourceUpdater {
       definition.rustDownloadConst,
       definition.releasePageUrl(version),
     );
-    source = this.replaceIncludePath(source, definition, version);
+    if (definition.kind !== "mermaid-zenuml") {
+      source = this.replaceVendorAssetVersion(source, definition, version);
+    }
     fs.writeFileSync(sourcePath, source, "utf8");
+  }
+
+  private updateMermaidZenumlReferences(definition: RuntimeAssetDefinition, version: string) {
+    if (definition.kind !== "mermaid-zenuml") {
+      return;
+    }
+    this.updateVendorReference(RuntimeAssetPaths.mermaidRuntimeScriptsRust(), definition, version);
+    this.updateVendorReference(RuntimeAssetPaths.mermaidDiagramUpdateScript(), definition, version);
+  }
+
+  private updateVendorReference(
+    sourcePath: string,
+    definition: RuntimeAssetDefinition,
+    version: string,
+  ) {
+    const source = fs.readFileSync(sourcePath, "utf8");
+    const updated = this.replaceVendorAssetVersion(source, definition, version);
+    fs.writeFileSync(sourcePath, updated, "utf8");
   }
 
   private updateJustfile(definition: RuntimeAssetDefinition, version: string) {
@@ -95,25 +110,31 @@ class RuntimeSourceUpdater {
     fs.writeFileSync(catalogPath, updated, "utf8");
   }
 
-  private replaceConst(source: string, constName: string, value: string): string {
+  replaceConst(source: string, constName: string, value: string): string {
     const replacement =
       value.length > 56
         ? `pub const ${constName}: &str =\n    "${value}";`
         : `pub const ${constName}: &str = "${value}";`;
-    const pattern = new RegExp(`pub const ${constName}: &str =(?:\\n\\s*)?"[^"]+";`);
+    const pattern = new RegExp(`pub const ${constName}: &str =\\s*"[^"]+";`);
     return source.replace(pattern, replacement);
   }
 
-  private replaceIncludePath(
+  replaceVendorAssetVersion(
     source: string,
     definition: RuntimeAssetDefinition,
     version: string,
   ): string {
-    const pattern = new RegExp(
-      `include_bytes!\\("\\.\\./\\.\\./vendor/${definition.kind}/[^/]+/${definition.fileName}"\\)`,
-    );
-    const replacement = `include_bytes!("../../vendor/${definition.kind}/${version}/${definition.fileName}")`;
-    return source.replace(pattern, replacement);
+    const kind = this.escapePattern(definition.kind);
+    const fileName = this.escapePattern(definition.fileName);
+    const pattern = new RegExp(`(vendor/${kind}/)[^/]+(/${fileName})`);
+    if (!pattern.test(source)) {
+      throw new Error(`Runtime asset include path not found: ${definition.kind}`);
+    }
+    return source.replace(pattern, `$1${version}$2`);
+  }
+
+  private escapePattern(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 }
 
@@ -154,4 +175,6 @@ const CliOptions = {
   },
 };
 
-await CliOptions.command(process.argv.slice(2)).run();
+if (import.meta.main) {
+  await CliOptions.command(process.argv.slice(2)).run();
+}

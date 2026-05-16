@@ -2,11 +2,12 @@ function katanaNormalizeClassSvg(svg) {
   if (!svg.includes('aria-roledescription="class"')) {
     return svg;
   }
-  return katanaRewriteBalancedGroups(
+  const normalized = katanaRewriteBalancedGroups(
     svg,
     /<g class="node default " id="[^"]*classId-[^"]*"/g,
     katanaNormalizeEmptyClassMethods,
   );
+  return katanaNormalizeClassFixtureLayout(normalized);
 }
 
 function katanaNormalizeEmptyClassMethods(node) {

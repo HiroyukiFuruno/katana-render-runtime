@@ -73,7 +73,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Ok(path) if path.ends_with("vendor/mermaid/3.3.1/mermaid.min.js")
+            Ok(path) if path.ends_with("vendor/mermaid/11.15.0/mermaid.min.js")
         ));
     }
 

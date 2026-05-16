@@ -1,4 +1,7 @@
 const KATANA_DRAWIO_EXTERNAL_IMAGE_EXPORT_BOTTOM_PADDING = 11;
+const KATANA_DRAWIO_SHADOW_EXPORT_RIGHT_PADDING = 10;
+const KATANA_DRAWIO_SHADOW_EXPORT_BOTTOM_PADDING = 11;
+const KATANA_DRAWIO_SOURCE_TOP_PADDING_LIMIT = 12;
 
 function katanaRemoveOversizedDrawioLabelBackgrounds(svg) {
   Array.from(svg.querySelectorAll("rect"))
@@ -43,16 +46,60 @@ function katanaCropDrawioSvgToContent(svg) {
 }
 
 function katanaDrawioCropBox(svg) {
-  return KATANA_DRAWIO_CROP_BOX_READERS[Number(katanaDrawioShouldMeasureRenderedContent())](svg);
+  return katanaDrawioAlignedCropBox(
+    KATANA_DRAWIO_CROP_BOX_READERS[Number(katanaDrawioShouldMeasureRenderedContent(svg))](svg),
+  );
 }
 
 const KATANA_DRAWIO_CROP_BOX_READERS = [
-  (svg) => [katanaDrawioSourceContentBox(svg), katanaDrawioContentBox(svg)].filter(Boolean)[0],
+  (svg) => katanaDrawioPreferredContentBox(svg),
   (svg) => katanaDrawioContentBox(svg),
 ];
 
-function katanaDrawioShouldMeasureRenderedContent() {
-  return katanaDrawioRequestSource().includes("mxgraph.aws3d.");
+function katanaDrawioPreferredContentBox(svg) {
+  if (katanaDrawioUsesDevicePageContentCrop()) {
+    return katanaDrawioContentBox(svg);
+  }
+  const sourceBox = katanaDrawioSourceContentBox(svg);
+  return katanaDrawioCanUseSourceContentBox(sourceBox) ? sourceBox : katanaDrawioContentBox(svg);
+}
+
+function katanaDrawioCanUseSourceContentBox(box) {
+  return [
+    box,
+    Number.isFinite(box?.x),
+    Number.isFinite(box?.y),
+    box?.width > 0,
+    box?.height > 0,
+  ].every(Boolean);
+}
+
+function katanaDrawioShouldMeasureRenderedContent(svg) {
+  return [
+    katanaDrawioRequestSource().includes("mxgraph.aws3d."),
+    katanaDrawioNeedsMeasuredContentBox(svg),
+  ].some(Boolean);
+}
+
+function katanaDrawioNeedsMeasuredContentBox(svg) {
+  if (!katanaDrawioSourceIsDeviceTemplate()) {
+    return false;
+  }
+  const sourceBox = katanaDrawioSourceContentBox(svg);
+  const contentBox = katanaDrawioContentBox(svg);
+  if (!sourceBox) {
+    return true;
+  }
+  return [
+    sourceBox,
+    contentBox,
+    sourceBox.width > 0,
+    contentBox.width > 0,
+    [
+      contentBox.width > sourceBox.width * 1.03,
+      contentBox.height > sourceBox.height * 1.03,
+    ].some(Boolean),
+  ].every(Boolean);
 }
 
 function katanaDrawioContentBox(svg) {
@@ -65,13 +112,33 @@ function katanaDrawioOptionalContentBox(svg) {
 }
 
 function katanaDrawioContentElements(svg) {
-  return katanaDrawioContentTagNames().flatMap((tagName) =>
-    Array.from(svg.querySelectorAll(tagName)),
-  );
+  return katanaDrawioContentTagNames()
+    .flatMap((tagName) => Array.from(svg.querySelectorAll(tagName)))
+    .filter((element) => !katanaShouldIgnoreDrawioContentElement(element));
 }
 
 function katanaDrawioContentTagNames() {
   return ["rect", "path", "ellipse", "circle", "line", "polygon", "polyline", "image", "text"];
+}
+
+function katanaShouldIgnoreDrawioContentElement(element) {
+  return katanaIsWrappedDrawioHtmlFallbackText(element);
+}
+
+function katanaIsWrappedDrawioHtmlFallbackText(element) {
+  const style = katanaDrawioSourceStyleForElement(element);
+  return [
+    element.localName === "text",
+    style.has("html"),
+    style.get("whiteSpace") === "wrap",
+    Boolean(katanaDrawioContentCellGroup(element)?.querySelector("foreignObject")),
+  ].every(Boolean);
+}
+
+function katanaDrawioContentCellGroup(element) {
+  return katanaDrawioElementAncestors(element)
+    .filter((node) => node.getAttribute?.("data-cell-id"))
+    .concat([null])[0];
 }
 
 function katanaDrawioElementBox(element) {
@@ -151,6 +218,23 @@ function katanaDrawioEmptyContentBox() {
   return { x: 0, y: 0, width: 1, height: 1 };
 }
 
+function katanaDrawioAlignedCropBox(box) {
+  if (katanaDrawioHasPreservedTopPadding(box)) {
+    return { x: box.x, y: 0, width: box.width, height: box.height + box.y };
+  }
+  return katanaDrawioHasOnePixelTopLeftCrop(box)
+    ? { x: 0, y: 0, width: box.width + 1, height: box.height + 1 }
+    : box;
+}
+
+function katanaDrawioHasPreservedTopPadding(box) {
+  return [box.x === 0, box.y > 0, box.y <= KATANA_DRAWIO_SOURCE_TOP_PADDING_LIMIT].every(Boolean);
+}
+
+function katanaDrawioHasOnePixelTopLeftCrop(box) {
+  return [box.x === 1, box.y === 1].every(Boolean);
+}
+
 function katanaApplyDrawioCrop(svg, box) {
   const paddedBox = katanaDrawioExportPaddedBox(box);
   katanaTranslateDrawioContent(svg, box);
@@ -161,8 +245,12 @@ function katanaApplyDrawioCrop(svg, box) {
 
 function katanaDrawioExportPaddedBox(box) {
   return {
-    width: box.width + 1,
-    height: box.height + katanaDrawioExportBottomPadding() + 1,
+    width: box.width + katanaDrawioShadowExportRightPadding() + 1,
+    height:
+      box.height +
+      katanaDrawioExportBottomPadding() +
+      katanaDrawioShadowExportBottomPadding() +
+      1,
   };
 }
 
@@ -170,6 +258,34 @@ function katanaDrawioExportBottomPadding() {
   return katanaDrawioHasExternalImageSource()
     ? KATANA_DRAWIO_EXTERNAL_IMAGE_EXPORT_BOTTOM_PADDING
     : 0;
+}
+
+function katanaDrawioShadowExportRightPadding() {
+  return katanaDrawioShouldApplyShadowExportPadding()
+    ? KATANA_DRAWIO_SHADOW_EXPORT_RIGHT_PADDING
+    : 0;
+}
+
+function katanaDrawioShadowExportBottomPadding() {
+  return katanaDrawioShouldApplyShadowExportPadding()
+    ? KATANA_DRAWIO_SHADOW_EXPORT_BOTTOM_PADDING
+    : 0;
+}
+
+function katanaDrawioShouldApplyShadowExportPadding() {
+  return [
+    katanaDrawioHasSourceShadowStyle(),
+    !katanaDrawioUsesDevicePageContentCrop(),
+  ].every(Boolean);
+}
+
+function katanaDrawioUsesDevicePageContentCrop() {
+  return [
+    katanaDrawioSourceHasPageBounds(),
+    katanaDrawioSourceIsDeviceTemplate(),
+    katanaDrawioSourceHasTransparentPageBackground(),
+    katanaDrawioSourceModelCount() === 1,
+  ].every(Boolean);
 }
 
 function katanaDrawioHasExternalImageSource() {

@@ -115,3 +115,87 @@ fn rendered_svg(svg: String) -> Result<String, String> {
 #[cfg(test)]
 #[path = "js_runtime_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "js_runtime_shadow_tests.rs"]
+mod shadow_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_color_tests.rs"]
+mod color_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_shape_color_tests.rs"]
+mod shape_color_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_neutral_color_tests.rs"]
+mod neutral_color_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_path_color_tests.rs"]
+mod path_color_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_palette_color_tests.rs"]
+mod palette_color_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_floorplan_color_tests.rs"]
+mod floorplan_color_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_table_color_tests.rs"]
+mod table_color_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_page_bounds_tests.rs"]
+mod page_bounds_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_page_crop_tests.rs"]
+mod page_crop_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_device_page_crop_tests.rs"]
+mod device_page_crop_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_page_layout_crop_tests.rs"]
+mod page_layout_crop_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_export_top_tests.rs"]
+mod export_top_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_label_crop_tests.rs"]
+mod label_crop_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_html_label_tests.rs"]
+mod html_label_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_html_label_content_tests.rs"]
+mod html_label_content_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_edge_label_tests.rs"]
+mod edge_label_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_html_text_source_color_tests.rs"]
+mod html_text_source_color_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_html_text_explicit_color_tests.rs"]
+mod html_text_explicit_color_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_image_label_tests.rs"]
+mod image_label_tests;
+
+#[cfg(test)]
+#[path = "js_runtime_plain_text_label_tests.rs"]
+mod plain_text_label_tests;

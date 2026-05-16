@@ -14,6 +14,8 @@ interface MermaidBlockResult {
   end: number;
 }
 
+type MermaidFenceLanguage = "mermaid" | "zenuml";
+
 export class FixtureRepository {
   private fixturesDir: string;
 
@@ -47,7 +49,7 @@ export class FixtureRepository {
 
 const MermaidBlock = {
   extract(markdown: string, filePath: string): MermaidBlockResult {
-    const pattern = /(^|\n)(`{3,}|~{3,})mermaid[^\n]*\n([\s\S]*?)\n\2[ \t]*(?=\n|$)/m;
+    const pattern = /(^|\n)(`{3,}|~{3,})(mermaid|zenuml)[^\n]*\n([\s\S]*?)\n\2[ \t]*(?=\n|$)/m;
     const match = pattern.exec(markdown);
     if (!match) {
       throw new Error(`Mermaid block not found: ${filePath}`);
@@ -59,11 +61,21 @@ const MermaidBlock = {
   },
 
   source(match: RegExpExecArray): string {
-    const source = match.at(3);
+    const language = MermaidBlock.language(match);
+    const source = match.at(4);
     if (source === undefined) {
       throw new Error("Mermaid block body was not captured");
     }
-    return source.trim();
+    const trimmed = source.trim();
+    return language === "zenuml" ? `zenuml\n${trimmed}` : trimmed;
+  },
+
+  language(match: RegExpExecArray): MermaidFenceLanguage {
+    const value = match.at(3);
+    if (value === "mermaid" || value === "zenuml") {
+      return value;
+    }
+    throw new Error("Mermaid block language was not captured");
   },
 };
 

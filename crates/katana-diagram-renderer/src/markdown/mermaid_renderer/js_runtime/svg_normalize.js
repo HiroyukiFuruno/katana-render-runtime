@@ -59,9 +59,11 @@ function katanaSvgDimensionScale() {
 }
 
 function katanaNormalizeFinalSvg(svg, request) {
-  return katanaNormalizeIshikawaSvg(
-    katanaEscapeTextMarkers(
-      katanaNormalizeEmptyTextFill(katanaNormalizeFontFamilyAttributes(svg), request),
+  return katanaNormalizeErViewBox(
+    katanaNormalizeIshikawaSvg(
+      katanaEscapeTextMarkers(
+        katanaNormalizeEmptyTextFill(katanaNormalizeFontFamilyAttributes(svg), request),
+      ),
     ),
   );
 }
@@ -88,7 +90,9 @@ function katanaNormalizeDiagramSpecificSvg(svg, request) {
   normalized = katanaNormalizeBlockSvg(normalized);
   normalized = katanaNormalizeWardleySvg(normalized, request);
   normalized = katanaNormalizeIshikawaSvg(normalized);
+  normalized = katanaNormalizeZenumlRuntimeSvg(normalized, request);
   normalized = katanaNormalizeReviewFeedbackSvg(normalized, request);
+  normalized = katanaNormalizeSequenceActivationSvg(normalized);
   return normalized;
 }
 

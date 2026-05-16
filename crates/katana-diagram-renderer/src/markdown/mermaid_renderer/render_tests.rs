@@ -42,6 +42,28 @@ fn render_with_runtime_path_handles_cache_and_runtime_errors() -> TestResult<()>
 }
 
 #[test]
+fn runtime_path_partitions_svg_cache() -> TestResult<()> {
+    let first_runtime = fake_mermaid_runtime("cache-runtime-one");
+    let second_runtime = fake_mermaid_runtime("cache-runtime-two");
+    std::fs::write(
+        &first_runtime,
+        fake_mermaid_bundle_with_text("first-runtime"),
+    )?;
+    std::fs::write(
+        &second_runtime,
+        fake_mermaid_bundle_with_text("second-runtime"),
+    )?;
+    let source = format!("graph TD; P{}-->Q", std::process::id());
+
+    let first = render_with_current_preset(&source, &first_runtime);
+    let second = render_with_current_preset(&source, &second_runtime);
+
+    assert!(matches!(first, DiagramResult::Ok(svg) if svg.contains("first-runtime")));
+    assert!(matches!(second, DiagramResult::Ok(svg) if svg.contains("second-runtime")));
+    Ok(())
+}
+
+#[test]
 fn render_reports_missing_and_empty_inputs_without_runtime() {
     let missing = std::path::Path::new("target/kdr-tests/missing-mermaid.min.js");
     assert!(matches!(
@@ -142,12 +164,41 @@ fn fake_mermaid_runtime(name: &str) -> std::path::PathBuf {
 }
 
 fn fake_mermaid_bundle() -> &'static str {
-    r#"
+    fake_mermaid_bundle_with_text("${source}")
+}
+
+fn fake_mermaid_bundle_with_text(text: &'static str) -> &'static str {
+    match text {
+        "${source}" => FAKE_MERMAID_BUNDLE_WITH_SOURCE,
+        "first-runtime" => FAKE_MERMAID_BUNDLE_WITH_FIRST_RUNTIME,
+        "second-runtime" => FAKE_MERMAID_BUNDLE_WITH_SECOND_RUNTIME,
+        _ => unreachable!("unsupported fake Mermaid bundle text"),
+    }
+}
+
+const FAKE_MERMAID_BUNDLE_WITH_SOURCE: &str = r#"
 globalThis.mermaid = {
   initialize() {},
   render: async (id, source) => ({
     svg: `<svg xmlns="http://www.w3.org/2000/svg" id="${id}" width="20" height="10" viewBox="0 0 20 10"><text>${source}</text></svg>`
   })
 };
-"#
-}
+"#;
+
+const FAKE_MERMAID_BUNDLE_WITH_FIRST_RUNTIME: &str = r#"
+globalThis.mermaid = {
+  initialize() {},
+  render: async (id) => ({
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" id="${id}" width="20" height="10" viewBox="0 0 20 10"><text>first-runtime</text></svg>`
+  })
+};
+"#;
+
+const FAKE_MERMAID_BUNDLE_WITH_SECOND_RUNTIME: &str = r#"
+globalThis.mermaid = {
+  initialize() {},
+  render: async (id) => ({
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" id="${id}" width="20" height="10" viewBox="0 0 20 10"><text>second-runtime</text></svg>`
+  })
+};
+"#;

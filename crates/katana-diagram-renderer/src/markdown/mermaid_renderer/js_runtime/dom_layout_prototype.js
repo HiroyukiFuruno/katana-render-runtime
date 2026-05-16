@@ -11,7 +11,7 @@ Object.defineProperty(KatanaNode.prototype, "textContent", {
 
 Object.defineProperty(KatanaNode.prototype, "innerText", {
   get() {
-    return this.textContent;
+    return katanaInnerText(this);
   },
   set(value) {
     this.textContent = value;
@@ -58,6 +58,19 @@ function katanaNodeChildren(node) {
   return node.children ?? [];
 }
 
+function katanaInnerText(node) {
+  if (!node) {
+    return "";
+  }
+  if (node.localName === "br") {
+    return "\n";
+  }
+  if (katanaIsHiddenLayoutNode(node)) {
+    return "";
+  }
+  return `${katanaOwnText(node)}${katanaNodeChildren(node).map(katanaInnerText).join("")}`;
+}
+
 KatanaNode.prototype.text = function text(...values) {
   if (values.length === 0) return this.textContent;
   this.textContent = values[0];
@@ -74,6 +87,12 @@ KatanaNode.prototype.getBoundingClientRect = function getBoundingClientRect() {
 };
 
 KatanaNode.prototype.getComputedTextLength = function getComputedTextLength() {
+  if (globalThis.__katanaMermaidDiagramType === "block") {
+    const text = katanaTextContent(this);
+    if (/^\u00a0+$/.test(text)) {
+      return Math.max(16, text.replace(/\u00a0/g, "&nbsp;").length * 8);
+    }
+  }
   return Math.max(16, katanaTextContent(this).length * 8);
 };
 

@@ -1,5 +1,6 @@
 function katanaNormalizeDrawioSvgColors(svg) {
   [svg, ...svg.querySelectorAll("*")].forEach(katanaNormalizeDrawioElementColors);
+  katanaRestoreDrawioHtmlTextSourceColors(svg);
 }
 
 function katanaNormalizeDrawioElementColors(element) {
@@ -8,6 +9,94 @@ function katanaNormalizeDrawioElementColors(element) {
     katanaNormalizeDrawioColorAttribute(element, name);
   });
   katanaNormalizeDrawioStyleTextColor(element);
+}
+
+function katanaRestoreDrawioHtmlTextSourceColors(svg) {
+  Array.from(svg.querySelectorAll("foreignObject div"))
+    .filter(katanaDrawioHasHtmlTextContentColor)
+    .map(katanaDrawioHtmlTextSourceColorEntry)
+    .filter((entry) => entry.color)
+    .forEach(katanaApplyDrawioHtmlTextSourceColor);
+}
+
+function katanaDrawioHasHtmlTextContentColor(element) {
+  const style = String(element.getAttribute("style") ?? "");
+  return [
+    katanaDrawioStylePropertyValue(style, "color"),
+    katanaDrawioStylePropertyValue(style, "font-size") !== "0",
+    katanaDrawioIsHtmlTextContentRoot(element) || !element.querySelector("div"),
+  ].every(Boolean);
+}
+
+function katanaDrawioIsHtmlTextContentRoot(element) {
+  return element.getAttribute?.("data-katana-drawio-html-text") === "content";
+}
+
+function katanaDrawioHtmlTextSourceColorEntry(element) {
+  return {
+    element,
+    color: katanaDrawioHtmlTextSourceColor(katanaDrawioSourceStyleForElement(element)),
+  };
+}
+
+function katanaDrawioHtmlTextSourceColor(style) {
+  const fontColor = katanaDrawioExplicitHtmlTextSourceFontColor(style);
+  if (fontColor) {
+    return katanaDrawioResolvedExplicitHtmlTextSourceColor(fontColor);
+  }
+  if (katanaDrawioSourceStyleUsesDarkHtmlTextBackgroundMap(style)) {
+    return "#ffffff";
+  }
+  if (katanaDrawioSourceStyleUsesDarkThemeFill(style)) {
+    return "#ffffff";
+  }
+  return "";
+}
+
+function katanaDrawioExplicitHtmlTextSourceFontColor(style) {
+  const color = katanaDrawioColorKey(style.get("fontColor") ?? "");
+  return ["", "default"].includes(color) ? "" : color;
+}
+
+function katanaDrawioResolvedExplicitHtmlTextSourceColor(color) {
+  if (!katanaDrawioIsDarkMode()) {
+    return color;
+  }
+  return (
+    katanaDrawioTextColorMapForTheme().get(color) ||
+    katanaDrawioOfficialDarkColor(color) ||
+    katanaDrawioResolvedTextColor(color)
+  );
+}
+
+function katanaDrawioSourceStyleUsesDarkHtmlTextBackgroundMap(style) {
+  return [
+    style.has("text"),
+    style.get("shape") === "text",
+    ["", "none"].includes(katanaDrawioColorKey(style.get("fillColor") ?? "")),
+  ].some(Boolean);
+}
+
+function katanaDrawioSourceStyleUsesDarkThemeFill(style) {
+  return [
+    katanaDrawioIsDarkMode(),
+    katanaDrawioColorLuminance(katanaDrawioResolvedSourceStyleFillColor(style)) < 0.45,
+  ].every(Boolean);
+}
+
+function katanaDrawioResolvedSourceStyleFillColor(style) {
+  const color = katanaDrawioColorKey(style.get("fillColor") ?? "");
+  return color
+    ? katanaDrawioColorMapForTheme().get(color) ||
+        katanaDrawioOfficialDarkColor(color) ||
+        katanaDrawioFallbackDarkColor(color) ||
+        color
+    : "#121212";
+}
+
+function katanaApplyDrawioHtmlTextSourceColor(entry) {
+  const style = String(entry.element.getAttribute("style") ?? "");
+  entry.element.setAttribute("style", katanaDrawioStyleWithProperty(style, "color", entry.color));
 }
 
 function katanaNormalizeDrawioColorAttribute(element, name) {
@@ -41,6 +130,7 @@ function katanaDrawioPaintServerPassthrough(color) {
 function katanaDrawioResolvedNonPaintColor(element, name, color) {
   const value = katanaDrawioColorKey(color);
   return (
+    katanaDrawioStencilPlaceholderColor(element, name, value) ||
     katanaDrawioShapeMappedColor(element, name, value) ||
     katanaDrawioContextMappedColor(element, name, value) ||
     katanaDrawioLightDarkExactColor(value) ||

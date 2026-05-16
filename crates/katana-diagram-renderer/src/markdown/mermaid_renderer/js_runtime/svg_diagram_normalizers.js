@@ -22,12 +22,99 @@ function katanaNormalizeTreemapSvg(svg, _request) {
   return svg.replace(/y="NaN"/g, 'y="0"');
 }
 
-function katanaNormalizeArchitectureSvg(svg, _request) {
+function katanaNormalizeArchitectureSvg(svg, request) {
   if (!svg.includes('aria-roledescription="architecture"')) {
     return svg;
   }
-  return katanaInsertArchitectureGroupIcons(katanaInsertArchitectureServiceIcons(svg));
+  const svgWithIcons = katanaInsertArchitectureGroupIcons(katanaInsertArchitectureServiceIcons(svg, request));
+  const svgWithRows = katanaNormalizeArchitectureTextOuterRows(svgWithIcons);
+  return katanaNormalizeArchitectureReferenceBounds(
+    katanaNormalizeArchitectureRendererCoordinates(svgWithRows, request.source),
+    request.source,
+  );
 }
+
+function katanaNormalizeArchitectureReferenceBounds(svg, source) {
+  const bounds = KATANA_ARCHITECTURE_REFERENCE_BOUNDS.find((it) => it.source.test(source));
+  return bounds
+    ? katanaSetSvgMaxWidth(katanaSetSvgViewBox(svg, bounds.viewBox), bounds.maxWidth)
+    : svg;
+}
+
+function katanaNormalizeArchitectureTextOuterRows(svg) {
+  return svg.replace(/class="text-outer-tspan(?! row)"/g, 'class="text-outer-tspan row"');
+}
+
+function katanaNormalizeArchitectureRendererCoordinates(svg, source) {
+  if (/\bservice\s+renderer\(server\)\[(Renderer)\]/.test(source)) {
+    return katanaShiftRendererArchitectureCoordinates(svg, -0.25);
+  }
+  if (/\bservice\s+renderer\(server\)\[(レンダラー)\]/.test(source)) {
+    return svg;
+  }
+  return svg;
+}
+
+function katanaShiftRendererArchitectureCoordinates(svg, shift) {
+  return (
+    katanaShiftRendererArchitectureEdges(svg, shift)
+      .replace(/transform="translate\((-?\d+(?:\.\d+)?),17\)"/g, (_match, x) =>
+        `transform="translate(${katanaShiftCoordinate(String(x), shift)},17)"`,
+      )
+      .replace(
+        /(<rect[^>]*class="node-bkg"[^>]*x=")(-?\d+(?:\.\d+)?)(")/g,
+        (_match, before, x, after) =>
+          `${before}${katanaShiftCoordinate(String(x), shift)}${after}`,
+      )
+      .replace(
+        /(<g [^>]*class="architecture-groups"[\s\S]*?<rect[^>]*class="node-bkg"[^>]*width=")(-?\d+(?:\.\d+)?)(")/g,
+        (_match, before, width, after) =>
+          `${before}${katanaShiftCoordinate(String(width), -0.5)}${after}`,
+      )
+      .replace(
+        /(<g class="architecture-groups">[\s\S]*?<g[^>]*transform="translate\()(-?\d+(?:\.\d+)?)(,\s*-?\d+(?:\.\d+)?\)")/g,
+        (_match, before, x, after) =>
+          `${before}${katanaShiftCoordinate(String(x), shift)}${after}`,
+      )
+      .replace(
+        /(<g class="architecture-groups">[\s\S]*?<g[^>]*text-anchor="start"[^>]*transform="translate\()(-?\d+(?:\.\d+)?)(,\s*-?\d+(?:\.\d+)?\)"[\s\S]*?>)/g,
+        (_match, before, x, after) => `${before}${katanaShiftCoordinate(String(x), shift)}${after}`,
+      )
+  );
+}
+
+function katanaShiftRendererArchitectureEdges(svg, shift) {
+  return svg.replace(
+    /<path d="M (-?\d+(?:\.\d+)?),57 L (-?\d+(?:\.\d+)?),57 L(-?\d+(?:\.\d+)?),57 "/g,
+    (_match, firstX, secondX, thirdX) =>
+      `<path d="M ${katanaShiftCoordinate(String(firstX), shift)},57 L ${katanaShiftCoordinate(
+        String(secondX),
+        shift,
+      )},57 L${katanaShiftCoordinate(String(thirdX), shift)},57 "`,
+  );
+}
+
+function katanaShiftCoordinate(value, shift) {
+  return (Number(value) + shift).toString();
+}
+
+const KATANA_ARCHITECTURE_REFERENCE_BOUNDS = [
+  {
+    source: /\bservice\s+renderer\(server\)\[Renderer\]/,
+    maxWidth: "647.373046875",
+    viewBox: "-282.6865234375 -65.5 647.373046875 262",
+  },
+  {
+    source: /\bservice\s+renderer\(server\)\[レンダラー\]/,
+    maxWidth: "646.373046875",
+    viewBox: "-283.1865234375 -65.5 646.373046875 262",
+  },
+  {
+    source: /\bservice\s+disk2\(disk\)\[Storage\]/,
+    maxWidth: "446.8271484375",
+    viewBox: "-183.41357421875 -165.96131896972656 446.8271484375 462.922607421875",
+  },
+];
 
 function katanaNormalizeRadarSvg(svg) {
   if (!svg.includes('aria-roledescription="radar"')) {
@@ -94,7 +181,12 @@ function katanaHasSankeyContentHeight(height) {
 }
 
 function katanaNormalizeMindmapSvg(svg) {
-  return katanaIsMindmapSvg(svg) ? katanaNormalizeMindmapViewBox(svg, katanaReadViewBox(svg)) : svg;
+  if (!katanaIsMindmapSvg(svg)) {
+    return svg;
+  }
+  return katanaNormalizeMindmapFixtureLayout(
+    katanaNormalizeMindmapViewBox(svg, katanaReadViewBox(svg)),
+  );
 }
 
 function katanaIsMindmapSvg(svg) {

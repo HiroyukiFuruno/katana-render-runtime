@@ -5,7 +5,7 @@ function katanaNormalizeDrawioForeignObjects(svg) {
 }
 
 function katanaNormalizeDrawioForeignObject(foreignObject) {
-  foreignObject.remove();
+  Array.from(foreignObject.children).forEach(katanaApplyDrawioXhtmlNamespace);
 }
 
 function katanaApplyDrawioXhtmlNamespace(node) {
@@ -13,5 +13,4 @@ function katanaApplyDrawioXhtmlNamespace(node) {
     return;
   }
   node.setAttribute("xmlns", KATANA_DRAWIO_XHTML_NAMESPACE);
-  Array.from(node.children).forEach(katanaApplyDrawioXhtmlNamespace);
 }

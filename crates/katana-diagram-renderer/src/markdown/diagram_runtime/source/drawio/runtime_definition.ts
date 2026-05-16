@@ -71,6 +71,10 @@ function drawioRuntimeFragments(): RuntimeFragment[] {
       `${DRAWIO_JS_RUNTIME}/drawio_svg_azure_colors.js`,
     ),
     RuntimeFragmentFactory.verbatim(
+      "drawio-svg-stencil-placeholder-colors.js",
+      `${DRAWIO_JS_RUNTIME}/drawio_svg_stencil_placeholder_colors.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
       "drawio-svg-colors.js",
       `${DRAWIO_JS_RUNTIME}/drawio_svg_colors.js`,
     ),
@@ -99,6 +103,10 @@ function drawioRuntimeFragments(): RuntimeFragment[] {
       `${DRAWIO_JS_RUNTIME}/drawio_svg_shadow.js`,
     ),
     RuntimeFragmentFactory.verbatim(
+      "drawio-svg-source-labels.js",
+      `${DRAWIO_JS_RUNTIME}/drawio_svg_source_labels.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
       "drawio-svg-labels.js",
       `${DRAWIO_JS_RUNTIME}/drawio_svg_labels.js`,
     ),
@@ -117,6 +125,10 @@ function drawioRuntimeFragments(): RuntimeFragment[] {
     RuntimeFragmentFactory.verbatim(
       "drawio-svg-html-text-styles.js",
       `${DRAWIO_JS_RUNTIME}/drawio_svg_html_text_styles.js`,
+    ),
+    RuntimeFragmentFactory.verbatim(
+      "drawio-svg-html-text-spacing.js",
+      `${DRAWIO_JS_RUNTIME}/drawio_svg_html_text_spacing.js`,
     ),
     RuntimeFragmentFactory.verbatim(
       "drawio-svg-html-text-labels.js",

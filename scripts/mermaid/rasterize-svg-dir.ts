@@ -86,11 +86,12 @@ class SvgBrowserRasterizer {
   private async rasterizeAll(repository: SvgFixtureRepository) {
     for (const fileName of repository.list()) {
       const svg = repository.read(fileName);
-      if (!new SvgRasterizeInput(svg).shouldRasterize()) {
+      const input = new SvgRasterizeInput(svg);
+      if (!input.shouldRasterize()) {
         console.log(`skipped ${fileName}`);
         continue;
       }
-      await this.rasterize(fileName, svg);
+      await this.rasterize(fileName, input.browserInnerHtml());
     }
   }
 
@@ -161,12 +162,6 @@ const SvgCaptureSizer = {
       svgElement.setAttribute("height", String(height));
       svgElement.style.maxWidth = `${width}px`;
       const capture = document.getElementById("capture") as HTMLElement;
-      if (svgElement.getAttribute("aria-roledescription") === "zenuml") {
-        capture.style.padding = "12px 0";
-        capture.style.width = `${width}px`;
-        capture.style.height = `${height + 24}px`;
-        return;
-      }
       capture.style.width = `${width + 24}px`;
       capture.style.height = `${height + 24}px`;
     });

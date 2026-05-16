@@ -2,9 +2,10 @@ const KATANA_DRAWIO_LIGHT_DARK_PATTERN =
   /light-dark\((rgb\([^)]+\)|#[\da-f]{6}),\s*(rgb\([^)]+\)|#[\da-f]{6}|var\(--ge-dark-color,\s*#[\da-f]{6}\))\)/gi;
 
 const KATANA_DRAWIO_STYLE_SVG_COLOR_ATTRIBUTES = ["fill", "stroke", "stop-color"];
+const KATANA_DRAWIO_LIGHT_DARK_ATTRIBUTE_PREFIX = "data-katana-light-dark-";
 
 function katanaResolveDrawioLightDarkStyleColors(element) {
-  const style = element.getAttribute("style");
+  const style = katanaDrawioElementStyleText(element);
   if (!style?.includes("light-dark(")) {
     return;
   }
@@ -12,6 +13,10 @@ function katanaResolveDrawioLightDarkStyleColors(element) {
   const resolvedStyle = katanaResolvedDrawioLightDarkStyle(style);
   element.setAttribute("style", resolvedStyle);
   katanaApplyDrawioStyleColorAttributes(element, resolvedStyle);
+}
+
+function katanaDrawioElementStyleText(element) {
+  return element.getAttribute("style") ?? element.style?.cssText ?? "";
 }
 
 function katanaResolvedDrawioLightDarkStyle(style) {
@@ -39,7 +44,12 @@ function katanaApplyDrawioStyleColorAttributes(element, style) {
     .filter(katanaHasDrawioStyleColorAttributeValue)
     .forEach((attribute) => {
       element.setAttribute(attribute.name, attribute.value);
+      element.setAttribute(katanaDrawioLightDarkAttributeName(attribute.name), "true");
     });
+}
+
+function katanaDrawioLightDarkAttributeName(name) {
+  return `${KATANA_DRAWIO_LIGHT_DARK_ATTRIBUTE_PREFIX}${name}`;
 }
 
 function katanaDrawioStyleColorAttribute(style, name) {

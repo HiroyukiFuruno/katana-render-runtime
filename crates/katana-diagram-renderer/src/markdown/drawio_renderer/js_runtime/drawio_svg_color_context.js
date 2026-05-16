@@ -1,4 +1,5 @@
 const KATANA_DRAWIO_LARGE_WHITE_PATH_AREA = 10000;
+const KATANA_DRAWIO_ANDROID_DEVICE_SCREEN_PATH_AREA = 10000;
 const KATANA_DRAWIO_AWS_SHAPE_PREFIXES = [
   "mxgraph.aws.",
   "mxgraph.aws2.",
@@ -18,42 +19,113 @@ const KATANA_DRAWIO_VISUAL_SHAPE_TAGS = new Set([
 ]);
 const KATANA_DRAWIO_PAINT_ATTRIBUTES = new Set(["fill", "stroke", "stop-color"]);
 const KATANA_DRAWIO_AZURE_DARK_ATTRIBUTES = new Set(["color", "fill", "stroke"]);
-const KATANA_DRAWIO_AWS_DOCUMENT_ORIGINAL_COLORS = new Set(["#007cbd", "#545b64"]);
-const KATANA_DRAWIO_AWS_ORIGINAL_COLORS = new Set([
-  "#000000",
-  "#007cbd",
-  "#277116",
-  "#292929",
-  "#545b64",
-  "#5e5e5e",
-  "#60a337",
-  "#5a30b5",
-  "#945df2",
-  "#bc1356",
-  "#f34482",
-  "#c7131f",
-  "#f54749",
-  "#d05c17",
-  "#f78e04",
-  "#ececec",
-  "#f4b934",
-  "#3334b9",
-  "#4d72f3",
-  "#4ab29a",
-  "rgb(0, 0, 0)",
-  "rgb(236, 236, 236)",
+const KATANA_DRAWIO_ANDROID_DEVICE_SHAPES = new Set([
+  "mxgraph.android.phone2",
+  "mxgraph.android.tab2",
 ]);
+const KATANA_DRAWIO_ANDROID_DEVICE_SCREEN_COLORS = new Set([
+  "#ededed",
+  "#202020",
+  "rgb(237, 237, 237)",
+  "rgb(32, 32, 32)",
+]);
+
+function katanaDrawioForcedAttributeColor(element, name, value) {
+  return katanaDrawioAndroidDeviceScreenFillColor(element, name, value);
+}
+
+function katanaNormalizeDrawioAndroidDeviceScreens(svg) {
+  Array.from(svg.querySelectorAll("path"))
+    .filter((path) => katanaDrawioIsAndroidDeviceScreenFill(path, "fill", katanaDrawioColorKey(path.getAttribute("fill"))))
+    .forEach((path) => {
+      path.setAttribute("fill", "transparent");
+    });
+}
 
 function katanaDrawioContextOriginalColor(element, name, value) {
   return (
     katanaDrawioAzureDocumentDarkColor(element, name, value) ||
     katanaDrawioAzureDarkColor(element, name, value) ||
     katanaDrawioLegacyAwsDarkColor(element, name, value) ||
-    katanaDrawioOriginalAwsGradientStopColor(element, name, value) ||
+    katanaDrawioPidWhiteFillColor(element, name, value) ||
     katanaDrawioSimpleDiagramDarkColor(element, name, value) ||
-    katanaDrawioLargeWhitePathColor(element, name, value) ||
-    katanaDrawioOriginalAwsShapeColor(element, name, value)
+    katanaDrawioFloorplanBlackPaintColor(element, name, value) ||
+    katanaDrawioOpaqueBlackPathColor(element, name, value) ||
+    katanaDrawioLargeWhitePathColor(element, name, value)
   );
+}
+
+function katanaDrawioFloorplanBlackPaintColor(element, name, value) {
+  return [
+    katanaDrawioIsDarkMode(),
+    ["fill", "stroke"].includes(name),
+    value === "#000000",
+    katanaDrawioElementCellShape(element).startsWith("mxgraph.floorplan."),
+  ].every(Boolean)
+    ? "#ebebeb"
+    : "";
+}
+
+function katanaDrawioPidWhiteFillColor(element, name, value) {
+  return katanaDrawioIsPidWhiteFill(element, name, value) ? "#121212" : "";
+}
+
+function katanaDrawioIsPidWhiteFill(element, name, value) {
+  return [
+    katanaDrawioIsDarkMode(),
+    name === "fill",
+    value === "white",
+    ["ellipse", "path"].includes(element.localName),
+    katanaDrawioElementHasWhiteSourceFill(element),
+    katanaDrawioIsPidWhiteFillSourceElement(element),
+  ].every(Boolean);
+}
+
+function katanaDrawioElementHasWhiteSourceFill(element) {
+  return ["#ffffff", "white"].includes(
+    katanaDrawioColorKey(katanaDrawioElementCellStyleValue(element, "fillColor")),
+  );
+}
+
+function katanaDrawioIsPidWhiteFillSourceElement(element) {
+  const shape = katanaDrawioElementCellShape(element);
+  const style = katanaDrawioSourceStyleForElement(element);
+  return [shape.startsWith("mxgraph.pid."), style.has("ellipse")].some(Boolean);
+}
+
+function katanaDrawioAndroidDeviceScreenFillColor(element, name, value) {
+  return katanaDrawioIsAndroidDeviceScreenFill(element, name, value) ? "transparent" : "";
+}
+
+function katanaDrawioIsAndroidDeviceScreenFill(element, name, value) {
+  return [
+    katanaDrawioIsDarkMode(),
+    element.localName === "path",
+    name === "fill",
+    KATANA_DRAWIO_ANDROID_DEVICE_SCREEN_COLORS.has(value),
+    katanaDrawioHasAndroidDeviceSource(),
+    katanaDrawioPathDataArea(element) > KATANA_DRAWIO_ANDROID_DEVICE_SCREEN_PATH_AREA,
+  ].every(Boolean);
+}
+
+function katanaDrawioHasAndroidDeviceSource() {
+  const source = katanaDrawioRequestSource();
+  return Array.from(KATANA_DRAWIO_ANDROID_DEVICE_SHAPES).some((shape) => source.includes(shape));
+}
+
+function katanaDrawioPathDataArea(element) {
+  const coordinates = Array.from(String(element.getAttribute("d") ?? "").matchAll(/-?\d+\.?\d*/g))
+    .map((match) => Number(match[0]))
+    .filter(Number.isFinite);
+  if (coordinates.length < 8) {
+    return 0;
+  }
+  const axisCoordinates = (offset) => coordinates.filter((_coordinate, index) => index % 2 === offset);
+  return katanaDrawioCoordinateSpan(axisCoordinates(0)) * katanaDrawioCoordinateSpan(axisCoordinates(1));
+}
+
+function katanaDrawioCoordinateSpan(coordinates) {
+  return Math.max(...coordinates) - Math.min(...coordinates);
 }
 
 function katanaDrawioAzureDarkColor(element, name, value) {
@@ -100,6 +172,40 @@ function katanaDrawioLargeWhitePathColor(element, name, value) {
   return "#121212";
 }
 
+function katanaDrawioOpaqueBlackPathColor(element, name, value) {
+  if (!katanaDrawioIsOpaqueBlackPath(element, name, value)) {
+    return "";
+  }
+  return "#ffffff";
+}
+
+function katanaDrawioIsOpaqueBlackPath(element, name, value) {
+  return [
+    katanaDrawioIsDarkMode(),
+    element.localName === "path",
+    katanaDrawioUsesOfficialWhiteBlackPath(element),
+    ["fill", "stroke"].includes(name),
+    value === "#000000",
+    katanaDrawioPaintOpacity(element, name) >= 1,
+  ].every(Boolean);
+}
+
+function katanaDrawioUsesOfficialWhiteBlackPath(element) {
+  return [
+    katanaDrawioElementCellIsEdge(element),
+    katanaDrawioElementCellHasStyleKey(element, "swimlane"),
+  ].some(Boolean);
+}
+
+function katanaDrawioPaintOpacity(element, name) {
+  const value =
+    element.getAttribute(`${name}-opacity`) ||
+    katanaDrawioStylePropertyValue(katanaDrawioElementStyleText(element), `${name}-opacity`) ||
+    element.getAttribute("opacity") ||
+    "1";
+  return Number.parseFloat(value);
+}
+
 function katanaDrawioIsLargeWhitePath(element, name, value) {
   return [
     katanaDrawioIsDarkMode(),
@@ -115,24 +221,6 @@ function katanaDrawioElementArea(element) {
   return box.width * box.height;
 }
 
-function katanaDrawioOriginalAwsShapeColor(element, name, value) {
-  return katanaDrawioShouldKeepOriginalAwsShapeColor(element, name, value) ? value : "";
-}
-
-function katanaDrawioOriginalAwsGradientStopColor(element, name, value) {
-  return katanaDrawioShouldKeepOriginalAwsGradientStopColor(element, name, value) ? value : "";
-}
-
-function katanaDrawioShouldKeepOriginalAwsShapeColor(element, name, value) {
-  return [
-    katanaDrawioIsDarkMode(),
-    katanaDrawioIsPaintAttribute(name),
-    katanaDrawioIsVisualShapeTag(element),
-    KATANA_DRAWIO_AWS_ORIGINAL_COLORS.has(value),
-    katanaDrawioIsAwsColorContext(element),
-  ].every(Boolean);
-}
-
 function katanaDrawioIsPaintAttribute(name) {
   return KATANA_DRAWIO_PAINT_ATTRIBUTES.has(name);
 }
@@ -141,23 +229,9 @@ function katanaDrawioIsVisualShapeTag(element) {
   return KATANA_DRAWIO_VISUAL_SHAPE_TAGS.has(element.localName);
 }
 
-function katanaDrawioIsAwsShapeElement(element) {
-  return KATANA_DRAWIO_AWS_SHAPE_PREFIXES.some((it) =>
-    katanaDrawioElementCellShape(element).startsWith(it),
-  );
-}
-
 function katanaDrawioIsAzureShapeElement(element) {
   return KATANA_DRAWIO_AZURE_SHAPE_PREFIXES.some((it) =>
     katanaDrawioElementCellShape(element).startsWith(it),
-  );
-}
-
-function katanaDrawioIsAwsColorContext(element) {
-  return (
-    katanaDrawioIsAwsShapeElement(element) ||
-    KATANA_DRAWIO_AWS_DOCUMENT_ORIGINAL_COLORS.has(element.getAttribute("fill")) ||
-    KATANA_DRAWIO_AWS_DOCUMENT_ORIGINAL_COLORS.has(element.getAttribute("stroke"))
   );
 }
 
@@ -165,15 +239,6 @@ function katanaDrawioIsLegacyAwsShapeElement(element) {
   return ["mxgraph.aws.", "mxgraph.aws3.", "mxgraph.aws4."].some((it) =>
     katanaDrawioElementCellShape(element).startsWith(it),
   );
-}
-
-function katanaDrawioShouldKeepOriginalAwsGradientStopColor(element, name, value) {
-  return [
-    katanaDrawioIsDarkMode(),
-    name === "stop-color",
-    element.localName === "stop",
-    KATANA_DRAWIO_AWS_ORIGINAL_COLORS.has(value),
-  ].every(Boolean);
 }
 
 const KATANA_DRAWIO_AWS_LEGACY_DARK_COLOR = new Map([

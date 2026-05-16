@@ -97,7 +97,7 @@ export class ReferenceScorePolicy {
     slug: string,
     threshold: ReferenceScoreThreshold,
   ): ReferenceScoreThreshold {
-    return threshold.slug === slug ? threshold : this.localizedThreshold(slug, threshold);
+    return this.localizedThreshold(slug, threshold);
   }
 
   private localizedThreshold(
@@ -107,6 +107,7 @@ export class ReferenceScorePolicy {
     return {
       ...threshold,
       slug,
+      minScore: Math.max(threshold.minScore, this.globalMinScore),
     };
   }
 

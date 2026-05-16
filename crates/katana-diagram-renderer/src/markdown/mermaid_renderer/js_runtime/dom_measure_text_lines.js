@@ -112,12 +112,12 @@ const KATANA_TEXT_LINE_STATE_READERS = [
   (state, tspan) => katanaStartTextLine(state, tspan),
 ];
 
-function katanaSumTspanLineY(values) {
-  return katanaOptionalSvgTextLength(values[0]) + katanaOptionalSvgTextLength(values[1]);
-}
-
 function katanaOptionalSvgTextLength(value) {
   return [value].filter(katanaIsSvgTextLengthValue).concat([0])[0];
+}
+
+function katanaSumTspanLineY(values) {
+  return katanaOptionalSvgTextLength(values[0]) + katanaOptionalSvgTextLength(values[1]);
 }
 
 const KATANA_TSPAN_LINE_Y_READERS = [() => null, (values) => katanaSumTspanLineY(values)];

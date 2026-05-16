@@ -1,15 +1,8 @@
 function katanaCssComputedStyleValue(node, name) {
-  const classNames = katanaCssClassNames(node);
-  if (classNames.length === 0) {
+  if (!node) {
     return "";
   }
-  return katanaCssRuleValue(katanaCssText(node), classNames, name);
-}
-
-function katanaCssClassNames(node) {
-  return String(node?.className ?? "")
-    .split(/\s+/)
-    .filter(Boolean);
+  return katanaCssRuleValue(katanaCssText(node), node, name);
 }
 
 function katanaCssText(node) {
@@ -47,18 +40,19 @@ function katanaIsCssStyleNode(node) {
   return node.localName === "style";
 }
 
-function katanaCssRuleValue(cssText, classNames, name) {
+function katanaCssRuleValue(cssText, node, name) {
   return (
     Array.from(cssText.matchAll(/([^{}]+)\{([^{}]+)\}/g))
-      .map((rule) => katanaCssRuleDeclarationValue(rule, classNames, name))
-      .find(Boolean) ?? ""
+      .map((rule) => katanaCssRuleDeclarationValue(rule, node, name))
+      .filter(Boolean)
+      .at(-1) ?? ""
   );
 }
 
-function katanaCssRuleDeclarationValue(rule, classNames, name) {
+function katanaCssRuleDeclarationValue(rule, node, name) {
   return (
     [rule]
-      .filter((it) => katanaCssRuleMatchesClass(it[1], classNames))
+      .filter((it) => katanaCssRuleMatchesNode(it[1], node))
       .map((it) => katanaCssDeclarationValue(it[2], name))[0] ?? ""
   );
 }
@@ -68,20 +62,86 @@ const KATANA_CSS_ROOT_READERS = [
   (node) => katanaCssRootNode(katanaCssParentNode(node)),
 ];
 
-function katanaCssRuleMatchesClass(selectorText, classNames) {
+function katanaCssRuleMatchesNode(selectorText, node) {
   return selectorText
     .split(",")
-    .some((selector) =>
-      classNames.some((className) => katanaCssSelectorMatches(selector, className)),
-    );
+    .some((selector) => katanaCssSelectorMatchesNode(node, selector));
 }
 
-function katanaCssSelectorMatches(selector, className) {
-  const classSelector = `.${className}`;
-  return String(selector)
-    .trim()
-    .split(/\s+/)
-    .some((part) => part === classSelector);
+function katanaCssSelectorMatchesNode(node, selector) {
+  const parts = String(selector).trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return false;
+  }
+  return katanaCssSelectorTailMatches(node, parts, parts.length - 1);
+}
+
+function katanaCssSelectorTailMatches(node, parts, index) {
+  if (!node || !katanaCssSimpleSelectorMatches(node, parts[index])) {
+    return false;
+  }
+  if (index === 0) {
+    return true;
+  }
+  return katanaCssAncestorMatches(node.parentNode, parts, index - 1);
+}
+
+function katanaCssAncestorMatches(node, parts, index) {
+  if (!node) {
+    return false;
+  }
+  if (katanaCssSelectorTailMatches(node, parts, index)) {
+    return true;
+  }
+  return katanaCssAncestorMatches(node.parentNode, parts, index);
+}
+
+function katanaCssSimpleSelectorMatches(node, selector) {
+  const normalized = katanaCssSimpleSelector(selector);
+  if (normalized === "*") {
+    return true;
+  }
+  if (normalized === ":root") {
+    return node === document.documentElement;
+  }
+  return [
+    katanaCssSelectorTagMatches(node, normalized),
+    katanaCssSelectorIdMatches(node, normalized),
+    katanaCssSelectorClassesMatch(node, normalized),
+    katanaCssSelectorAttributesMatch(node, normalized),
+  ].every(Boolean);
+}
+
+function katanaCssSimpleSelector(selector) {
+  return String(selector).trim().replace(/:{1,2}(?!root\b)[a-zA-Z-]+(?:\([^)]*\))?/g, "");
+}
+
+function katanaCssSelectorTagMatches(node, selector) {
+  const tag = selector.match(/^[a-zA-Z][a-zA-Z0-9:_-]*/)?.[0];
+  return tag ? node.localName === tag.toLowerCase() : true;
+}
+
+function katanaCssSelectorIdMatches(node, selector) {
+  const id = selector.match(/#([a-zA-Z0-9_-]+)/)?.[1];
+  return id ? node.id === id : true;
+}
+
+function katanaCssSelectorClassesMatch(node, selector) {
+  const classNames = String(node.className ?? "").split(/\s+/).filter(Boolean);
+  return Array.from(selector.matchAll(/\.([a-zA-Z0-9_-]+)/g))
+    .map((match) => match[1])
+    .every((className) => classNames.includes(className));
+}
+
+function katanaCssSelectorAttributesMatch(node, selector) {
+  return Array.from(selector.matchAll(/\[([a-zA-Z0-9:_-]+)(?:="([^"]*)")?\]/g))
+    .map((match) => katanaCssSelectorAttributeMatches(node, match[1], match[2]))
+    .every(Boolean);
+}
+
+function katanaCssSelectorAttributeMatches(node, name, value) {
+  const actual = node.getAttribute?.(name);
+  return value === undefined ? actual !== null : actual === value;
 }
 
 function katanaCssDeclarationValue(declarations, name) {

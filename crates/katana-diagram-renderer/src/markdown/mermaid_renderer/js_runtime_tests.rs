@@ -43,6 +43,89 @@ fn zenuml_source_uses_v8_renderer_from_mermaid_surface() {
     assert_zenuml_v8_svg(&rendered);
 }
 
+#[test]
+fn runtime_keeps_ascii_kanban_overflow_at_reference_height() {
+    let mermaid = RuntimeAsset::mermaid();
+    let rendered = mermaid
+        .materialize_at(mermaid.materialized_path())
+        .and_then(|mermaid_js| {
+            MermaidJsRuntimeOps::render(
+                "kanban\n    Todo\n      [export runtime]\n    Doing\n      [Rust-managed Mermaid]\n    Done\n      [Remove OS Chrome path]",
+                &mermaid_js,
+                DiagramColorPreset::dark(),
+            )
+        });
+
+    assert!(
+        rendered
+            .as_ref()
+            .is_ok_and(|svg| svg.contains("viewBox=\"90 -310 630 94\"")),
+        "{rendered:?}"
+    );
+    assert!(
+        rendered
+            .as_ref()
+            .is_ok_and(|svg| !svg.contains("height=\"56.6\"")),
+        "{rendered:?}"
+    );
+}
+
+#[test]
+fn runtime_normalizes_treemap_value_metrics() {
+    let mermaid = RuntimeAsset::mermaid();
+    let rendered = mermaid
+        .materialize_at(mermaid.materialized_path())
+        .and_then(|mermaid_js| {
+            MermaidJsRuntimeOps::render(
+                "treemap\n    title Runtime cost\n    \"Mermaid\" : 45\n    \"DOM shim\" : 25\n    \"Rasterize\" : 20\n    \"Cache\" : 10",
+                &mermaid_js,
+                DiagramColorPreset::dark(),
+            )
+        });
+
+    assert!(
+        rendered
+            .as_ref()
+            .is_ok_and(|svg| svg.contains("viewBox=\"2 -2.34375 996 430.34375\"")),
+        "{rendered:?}"
+    );
+    assert!(
+        rendered
+            .as_ref()
+            .is_ok_and(|svg| svg.contains("font-size: 23px") && svg.contains("fill: lightgrey")),
+        "{rendered:?}"
+    );
+}
+
+#[test]
+fn runtime_normalizes_block_nbsp_arrow_width() {
+    let mermaid = RuntimeAsset::mermaid();
+    let rendered = mermaid
+        .materialize_at(mermaid.materialized_path())
+        .and_then(|mermaid_js| {
+            MermaidJsRuntimeOps::render(
+                "block-beta\ncolumns 1\n  db((\"DB\"))\n  blockArrowId6<[\"&nbsp;&nbsp;&nbsp;\"]>(down)\n  block:ID\n    A\n    B[\"A wide one in the middle\"]\n    C\n  end\n  space\n  D\n  ID --> D\n  C --> D\n  style B fill:#969,stroke:#333,stroke-width:4px",
+                &mermaid_js,
+                DiagramColorPreset::dark(),
+            )
+        });
+
+    assert!(
+        rendered
+            .as_ref()
+            .is_ok_and(|svg| svg.contains("viewBox=\"-5 -128.5 605.816")),
+        "{rendered:?}"
+    );
+    assert!(
+        rendered
+            .as_ref()
+            .is_ok_and(|svg| svg.contains("id=\"katana-mermaid-svg")
+                && svg.contains("-blockArrowId6\"")
+                && svg.contains("points=\"28.73,0 0,-4 17.5,-4 17.5,-31")),
+        "{rendered:?}"
+    );
+}
+
 fn assert_zenuml_v8_svg(rendered: &Result<String, String>) {
     assert!(
         rendered

@@ -22,8 +22,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "mermaid",
     displayName: "Mermaid.js",
-    version: "3.3.1",
-    checksum: "217b66ef4279c33c141b4afe22effad10a91c02558dc70917be2c0981e78ed87",
+    version: "11.15.0",
+    checksum: "70137e77bb273bb2ef972b86e8b0400cca8be53cb25bfc45911a186dc98665de",
     fileName: "mermaid.min.js",
     rustVersionConst: "MERMAID_JS_VERSION",
     rustChecksumConst: "MERMAID_JS_CHECKSUM",
@@ -37,8 +37,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "mermaid-zenuml",
     displayName: "Mermaid ZenUML",
-    version: "0.2.2",
-    checksum: "39143c3cb4e7a1dc53938de0c85e5fd2aee1533ec4e07d7d95a6ef639956ff1f",
+    version: "0.2.3",
+    checksum: "28eeec88021d9e9728df4d005ff723a3d71da29a21dbcfa2a628232c35ef2ab6",
     fileName: "mermaid-zenuml.min.js",
     rustVersionConst: "MERMAID_ZENUML_JS_VERSION",
     rustChecksumConst: "MERMAID_ZENUML_JS_CHECKSUM",
@@ -52,8 +52,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "drawio",
     displayName: "Draw.io",
-    version: "29.7.10",
-    checksum: "a8b7897de995a4e7dd3a541a5e7250d64a295440f728f0ddae72179cdf5a83d5",
+    version: "30.0.1",
+    checksum: "854c7a7645903617885434a63dfc37ca5a4c712e5907c0dedca731e1315239c7",
     fileName: "drawio.min.js",
     rustVersionConst: "DRAWIO_JS_VERSION",
     rustChecksumConst: "DRAWIO_JS_CHECKSUM",
@@ -130,6 +130,21 @@ export const RuntimeAssetPaths = {
 
   runtimeAssetsRust(): string {
     return path.join("crates", "katana-diagram-renderer", "src", "markdown", "runtime_assets.rs");
+  },
+
+  mermaidRuntimeScriptsRust(): string {
+    return path.join(
+      "crates",
+      "katana-diagram-renderer",
+      "src",
+      "markdown",
+      "mermaid_renderer",
+      "js_runtime_scripts.rs",
+    );
+  },
+
+  mermaidDiagramUpdateScript(): string {
+    return path.join("scripts", "mermaid", "diagram-update.ts");
   },
 
   justfile(): string {

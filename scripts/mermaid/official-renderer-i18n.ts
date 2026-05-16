@@ -3,6 +3,8 @@ import path from "node:path";
 
 const I18N_RUNTIME_DIR = "crates/katana-diagram-renderer/src/markdown/mermaid_renderer/js_runtime";
 const RUNTIME_SCRIPTS = [
+  "dom_text_metrics.js",
+  "browser_text_measure.js",
   "svg_bounds_attrs.js",
   "svg_path_bounds.js",
   "svg_bounds.js",
@@ -12,6 +14,7 @@ const RUNTIME_SCRIPTS = [
   "svg_viewbox_fixes.js",
   "svg_er_layout.js",
   "svg_er_fixes.js",
+  "svg_er_viewbox_fixes.js",
   "svg_class_fixes.js",
   "svg_visual_fixes.js",
   "svg_review_fixes.js",
@@ -28,6 +31,7 @@ const RUNTIME_SCRIPTS = [
   "source_i18n_context.js",
   "source_i18n_normalize.js",
   "mermaid_diagram_type.js",
+  "svg_zenuml_fixes.js",
   "svg_normalize.js",
 ];
 

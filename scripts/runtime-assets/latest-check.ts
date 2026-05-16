@@ -1,6 +1,6 @@
 import { RuntimeAssetCatalog, type RuntimeAssetDefinition } from "./runtime-asset-common";
 
-interface MermaidLatestResponse {
+interface NpmLatestResponse {
   readonly version: string;
 }
 
@@ -8,17 +8,21 @@ interface GitHubLatestResponse {
   readonly tag_name: string;
 }
 
-class LatestVersionClient {
+export type RuntimeAssetFetch = (url: string, init: RequestInit) => Promise<Response>;
+
+export class LatestVersionClient {
+  constructor(private readonly fetcher: RuntimeAssetFetch = (url, init) => fetch(url, init)) {}
+
   async latest(definition: RuntimeAssetDefinition): Promise<string> {
-    if (definition.kind === "mermaid") {
-      return this.mermaid(definition.latestUrl);
+    if (definition.kind === "drawio") {
+      return this.drawio(definition.latestUrl);
     }
-    return this.drawio(definition.latestUrl);
+    return this.npm(definition.latestUrl);
   }
 
-  private async mermaid(url: string): Promise<string> {
+  private async npm(url: string): Promise<string> {
     const response = await this.get(url);
-    const body = (await response.json()) as MermaidLatestResponse;
+    const body = (await response.json()) as NpmLatestResponse;
     return body.version;
   }
 
@@ -29,7 +33,7 @@ class LatestVersionClient {
   }
 
   private async get(url: string): Promise<Response> {
-    const response = await fetch(url, {
+    const response = await this.fetcher(url, {
       headers: {
         accept: "application/json",
         "user-agent": "katana-diagram-renderer-release-tool",
@@ -66,7 +70,14 @@ class LatestCheckCommand {
     if (latest === definition.version) {
       return "none";
     }
-    return `just ${definition.kind}-update ${latest}`;
+    return `just ${this.updateRecipe(definition)} ${latest}`;
+  }
+
+  private updateRecipe(definition: RuntimeAssetDefinition): string {
+    if (definition.kind === "mermaid-zenuml") {
+      return "zenuml-update";
+    }
+    return `${definition.kind}-update`;
   }
 }
 
@@ -80,7 +91,9 @@ const CliOptions = {
   },
 };
 
-await new LatestCheckCommand(
-  CliOptions.definitions(process.argv.slice(2)),
-  new LatestVersionClient(),
-).run();
+if (import.meta.main) {
+  await new LatestCheckCommand(
+    CliOptions.definitions(process.argv.slice(2)),
+    new LatestVersionClient(),
+  ).run();
+}
