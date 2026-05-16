@@ -1,5 +1,8 @@
 use super::DrawioJsRuntimeOps;
 use crate::markdown::color_preset::DiagramColorPreset;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static TEMP_RUNTIME_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 const FAKE_BUNDLE_TEMPLATE: &str = r##"
 function Graph() {}
@@ -167,7 +170,8 @@ fn assert_restored_html_text_source_color_with_preset(
 }
 
 fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("{prefix}-{}.js", std::process::id()))
+    let counter = TEMP_RUNTIME_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("{prefix}-{}-{counter}.js", std::process::id()))
 }
 
 fn fake_bundle(wrong_color: &str) -> String {
