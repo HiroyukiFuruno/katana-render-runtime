@@ -46,6 +46,7 @@ export class RuntimeSourceUpdater {
   update(definition: RuntimeAssetDefinition, version: string, checksum: string) {
     this.updateRust(definition, version, checksum);
     this.updateMermaidZenumlReferences(definition, version);
+    this.updatePackageInclude(definition, version);
     this.updateJustfile(definition, version);
     this.updateScriptCatalog(definition, version, checksum);
   }
@@ -82,6 +83,12 @@ export class RuntimeSourceUpdater {
     const source = fs.readFileSync(sourcePath, "utf8");
     const updated = this.replaceVendorAssetVersion(source, definition, version);
     fs.writeFileSync(sourcePath, updated, "utf8");
+  }
+
+  private updatePackageInclude(definition: RuntimeAssetDefinition, version: string) {
+    const cargoToml = RuntimeAssetPaths.rendererCargoToml();
+    const source = fs.readFileSync(cargoToml, "utf8");
+    fs.writeFileSync(cargoToml, this.replacePackageIncludeVersion(source, definition, version));
   }
 
   private updateJustfile(definition: RuntimeAssetDefinition, version: string) {
@@ -129,6 +136,19 @@ export class RuntimeSourceUpdater {
     const pattern = new RegExp(`(vendor/${kind}/)[^/]+(/${fileName})`);
     if (!pattern.test(source)) {
       throw new Error(`Runtime asset include path not found: ${definition.kind}`);
+    }
+    return source.replace(pattern, `$1${version}$2`);
+  }
+
+  replacePackageIncludeVersion(
+    source: string,
+    definition: RuntimeAssetDefinition,
+    version: string,
+  ): string {
+    const kind = this.escapePattern(definition.kind);
+    const pattern = new RegExp(`("vendor/${kind}/)[^/]+(/\\*\\*",)`);
+    if (!pattern.test(source)) {
+      throw new Error(`Runtime asset package include not found: ${definition.kind}`);
     }
     return source.replace(pattern, `$1${version}$2`);
   }

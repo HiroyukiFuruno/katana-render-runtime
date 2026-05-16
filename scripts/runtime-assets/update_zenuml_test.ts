@@ -16,3 +16,15 @@ test("mermaid-zenuml の vendor include path を更新できる", () => {
 
   expect(updated).toContain("../../../vendor/mermaid-zenuml/0.2.3/mermaid-zenuml.min.js");
 });
+
+test("mermaid-zenuml の Cargo package include path を更新できる", () => {
+  const source = ["include = [", '    "vendor/mermaid-zenuml/0.2.2/**",', "]"].join("\n");
+
+  const updated = new RuntimeSourceUpdater().replacePackageIncludeVersion(
+    source,
+    RuntimeAssetCatalog.byKind("mermaid-zenuml"),
+    "0.2.3",
+  );
+
+  expect(updated).toContain('"vendor/mermaid-zenuml/0.2.3/**",');
+});

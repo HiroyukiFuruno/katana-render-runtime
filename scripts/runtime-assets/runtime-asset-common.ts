@@ -132,6 +132,10 @@ export const RuntimeAssetPaths = {
     return path.join("crates", "katana-diagram-renderer", "src", "markdown", "runtime_assets.rs");
   },
 
+  rendererCargoToml(): string {
+    return path.join("crates", "katana-diagram-renderer", "Cargo.toml");
+  },
+
   mermaidRuntimeScriptsRust(): string {
     return path.join(
       "crates",
