@@ -12,7 +12,7 @@ include = [
     "src/**/*.rs",
     "src/markdown/diagram_runtime/generated/*.js",
     "src/markdown/diagram_runtime/generated/*.sha256",
-    "vendor/drawio/30.0.1/**",
+    "vendor/drawio/30.0.2/**",
     "vendor/mermaid/11.15.0/**",
     "vendor/mermaid-zenuml/0.2.3/**",
     "vendor/zenuml-core/3.47.9/**",

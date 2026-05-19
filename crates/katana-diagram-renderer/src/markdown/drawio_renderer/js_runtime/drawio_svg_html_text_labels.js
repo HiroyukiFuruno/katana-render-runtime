@@ -197,7 +197,9 @@ function katanaNormalizedDrawioHtmlTextFallbackNode(node, lines) {
   }
   const tspans = Array.from(node.querySelectorAll("tspan"));
   if (tspans.length === 0) {
-    node.textContent = lines.join(" ");
+    node.replaceChildren(
+      ...lines.map((line, index) => katanaDrawioLineBreakTspan(node, line, index)),
+    );
     return node;
   }
   const mergedLines = lines.slice(0, tspans.length);

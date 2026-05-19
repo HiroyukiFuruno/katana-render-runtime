@@ -18,6 +18,19 @@ fn fake_bundle_replaces_multiline_plain_text_foreign_object_with_full_label() {
     assert_plain_text_svg_contains(&rendered);
 }
 
+#[test]
+fn fake_bundle_preserves_plain_text_line_breaks_in_svg_fallback() {
+    let path = temp_runtime_path("kdr-drawio-plain-text-fallback-line-break-unit");
+    assert!(std::fs::write(&path, fake_bundle_with_truncated_plain_text()).is_ok());
+
+    let rendered =
+        DrawioJsRuntimeOps::render(PLAIN_TEXT_LABEL_SOURCE, &path, DiagramColorPreset::light());
+
+    assert_render_contains(&rendered, r#"<tspan x="80" dy="0">First line</tspan>"#);
+    assert_render_contains(&rendered, r#"<tspan x="80" dy="15">Second line</tspan>"#);
+    assert_render_not_contains(&rendered, "First line Second line");
+}
+
 fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("{prefix}-{}.js", std::process::id()))
 }
@@ -36,6 +49,13 @@ fn assert_plain_text_svg_contains(rendered: &Result<String, String>) {
 fn assert_render_contains(rendered: &Result<String, String>, marker: &str) {
     assert!(
         rendered.as_ref().is_ok_and(|svg| svg.contains(marker)),
+        "{rendered:?}"
+    );
+}
+
+fn assert_render_not_contains(rendered: &Result<String, String>, marker: &str) {
+    assert!(
+        rendered.as_ref().is_ok_and(|svg| !svg.contains(marker)),
         "{rendered:?}"
     );
 }
@@ -65,6 +85,9 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
   div.textContent = "First line";
   foreignObject.appendChild(div);
   const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  text.setAttribute("x", "80");
+  text.setAttribute("y", "55");
+  text.setAttribute("font-size", "12px");
   text.textContent = "First line...";
   group.appendChild(rect);
   group.appendChild(foreignObject);

@@ -15,12 +15,13 @@ TBD - created by archiving change v0-1-1-runtime-asset-version-pinning. Update P
 - **THEN** version が変わった場合は reference snapshot の更新を要求する
 - **THEN** KDR 生成 `mermaid-runtime.min.js` の checksum が検証できる
 
-#### Scenario: Draw.io.js version を固定する
+#### Scenario: Draw.io.js version を 30.0.2 に固定する
 
 - **WHEN** kdr が Draw.io runtime を初期化する
-- **THEN** 固定された Draw.io.js version の asset を読み込む
-- **THEN** runtime metadata は Draw.io.js の version と checksum を返す
-- **THEN** version が変わった場合は resource manifest と reference snapshot の更新を要求する
+- **THEN** 固定された Draw.io.js `30.0.2` の asset を読み込む
+- **THEN** runtime metadata は Draw.io.js `30.0.2` と checksum を返す
+- **THEN** `vendor/drawio/30.0.2/drawio.min.js` と `drawio.min.js.sha256` が repository 管理されている
+- **THEN** Draw.io.js version 更新に伴う reference snapshot が review 可能な差分として残る
 - **THEN** KDR 生成 `drawio-runtime.min.js` の checksum が検証できる
 
 #### Scenario: ZenUML runtime bundle を固定する

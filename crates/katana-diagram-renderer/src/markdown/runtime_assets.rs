@@ -23,10 +23,10 @@ pub const ZENUML_CORE_JS_CHECKSUM: &str =
 pub const ZENUML_CORE_DOWNLOAD_URL: &str =
     "https://cdn.jsdelivr.net/npm/@zenuml/core@3.47.9/dist/zenuml.js";
 
-pub const DRAWIO_JS_VERSION: &str = "30.0.1";
+pub const DRAWIO_JS_VERSION: &str = "30.0.2";
 pub const DRAWIO_JS_CHECKSUM: &str =
-    "854c7a7645903617885434a63dfc37ca5a4c712e5907c0dedca731e1315239c7";
-pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v30.0.1";
+    "0435d7a829549490482d576a37556224fa190d538610c96908632e5cda7c601f";
+pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v30.0.2";
 
 pub(crate) struct RuntimeAsset {
     kind: &'static str,
@@ -50,7 +50,7 @@ impl RuntimeAsset {
             kind: "drawio",
             version: DRAWIO_JS_VERSION,
             filename: "drawio.min.js",
-            bytes: include_bytes!("../../vendor/drawio/30.0.1/drawio.min.js"),
+            bytes: include_bytes!("../../vendor/drawio/30.0.2/drawio.min.js"),
         }
     }
 
