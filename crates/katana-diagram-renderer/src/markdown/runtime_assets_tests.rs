@@ -12,7 +12,7 @@ fn materialized_paths_are_versioned() {
     let zenuml_core = RuntimeAsset::zenuml_core().materialized_path();
 
     assert!(mermaid.ends_with("vendor/mermaid/11.15.0/mermaid.min.js"));
-    assert!(drawio.ends_with("vendor/drawio/30.0.1/drawio.min.js"));
+    assert!(drawio.ends_with("vendor/drawio/30.0.2/drawio.min.js"));
     assert!(zenuml_core.ends_with("vendor/zenuml-core/3.47.9/zenuml.js"));
 }
 
