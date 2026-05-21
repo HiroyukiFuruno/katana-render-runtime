@@ -13,7 +13,8 @@ name = "kdr"
 path = "src/main.rs"
 
 [dependencies]
-katana-diagram-renderer = { path = "../katana-diagram-renderer", version = "0.1.3" }
+katana-diagram-renderer = { path = "../katana-diagram-renderer", version = "0.2.0" }
 clap = { workspace = true }
 anyhow = { workspace = true }
+serde_json = { workspace = true }
 tracing = { workspace = true }

@@ -35,9 +35,28 @@ fn cli_delegates_reference_commands_to_just() -> TestResult<()> {
     assert!(reference_status("mermaid", "reference-update", &fixtures, &success_path)?.success());
     assert!(reference_status("mermaid", "compare", &fixtures, &success_path)?.success());
     assert!(reference_status("drawio", "bench", &fixtures, &success_path)?.success());
+    assert!(reference_status("plantuml", "bench", &fixtures, &success_path)?.success());
 
     let failure_path = fake_just("failure", 7)?;
     assert!(!reference_status("drawio", "compare", &fixtures, &failure_path)?.success());
+    Ok(())
+}
+
+#[test]
+fn cli_plantuml_raw_fallback_logs_warning() -> TestResult<()> {
+    let input = temp_file("cli-plantuml.puml");
+    std::fs::write(&input, "@startuml\nAlice -> Bob: hello\n@enduml\n")?;
+
+    let output = command()
+        .args(["plantuml", "render", "--input"])
+        .arg(&input)
+        .arg("--runtime")
+        .arg(temp_file("missing-plantuml.jar"))
+        .output()?;
+
+    assert!(output.status.success());
+    assert!(String::from_utf8(output.stdout)?.contains("```plantuml"));
+    assert!(String::from_utf8(output.stderr)?.contains("plantuml-runtime-unavailable"));
     Ok(())
 }
 

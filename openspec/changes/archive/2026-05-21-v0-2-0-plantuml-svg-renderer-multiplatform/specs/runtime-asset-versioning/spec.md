@@ -30,9 +30,11 @@
 #### Scenario: PlantUML JAR version を固定する
 
 - **WHEN** kdr が PlantUML runtime を初期化する
-- **THEN** 固定された PlantUML JAR を読み込む
+- **THEN** 固定 version の PlantUML JAR を OS 別の保存領域（cache）または明示 path から読み込む
 - **THEN** runtime metadata は PlantUML の version と checksum を返す
-- **THEN** `plantuml.jar` と checksum manifest は review 可能な artifact として管理される
+- **THEN** checksum manifest は review 可能な artifact として管理される
+- **THEN** crate package は PlantUML JAR 本体を含めず checksum manifest を含む
+- **THEN** 保存領域（cache）に JAR が無い場合は固定 URL から download し、checksum 検証後に保存する
 - **THEN** PlantUML JAR version 更新に伴う fixture / reference snapshot 差分が review 可能に残る
 
 ### Requirement: latest 確認と取り込み更新を just recipe で提供しなければならない
@@ -48,8 +50,9 @@
 #### Scenario: 指定 version を取り込む
 
 - **WHEN** 開発者が update recipe に version を指定して実行する
-- **THEN** 対象 runtime asset を `vendor/<runtime>/<version>/` に取り込む
-- **THEN** checksum と manifest を更新する
+- **THEN** Mermaid.js / Draw.io.js は対象 runtime asset を `vendor/<runtime>/<version>/` に取り込む
+- **THEN** PlantUML は固定 JAR の download URL、checksum manifest、cache prefetch recipe を更新する
+- **THEN** checksum と manifest を更新または検証する
 - **THEN** full / representative の reference snapshot を再生成する
 - **THEN** local full compare と CI representative compare を実行して score 低下を検知する
 - **THEN** score が変わる場合は baseline 差分を review できる

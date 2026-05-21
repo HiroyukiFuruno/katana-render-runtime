@@ -18,6 +18,20 @@ class FetchStub {
   }
 }
 
+test("PlantUML latest は Maven metadata の最後の version を読む", async () => {
+  const fetchStub = new FetchStub(
+    "<metadata><versioning><versions><version>1.2026.1</version><version>1.2026.4</version></versions></versioning></metadata>",
+  );
+  const client = new LatestVersionClient(fetchStub.handler());
+
+  const latest = await client.latest(RuntimeAssetCatalog.byKind("plantuml"));
+
+  expect(latest).toBe("1.2026.4");
+  expect(fetchStub.requestedUrls).toEqual([
+    "https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/maven-metadata.xml",
+  ]);
+});
+
 test("ZenUML latest は npm registry の version を読む", async () => {
   const fetchStub = new FetchStub(JSON.stringify({ version: "0.2.3" }));
   const client = new LatestVersionClient(fetchStub.handler());

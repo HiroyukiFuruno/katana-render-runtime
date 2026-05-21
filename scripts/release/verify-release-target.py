@@ -84,21 +84,25 @@ def latest_remote_tag(remote: str) -> StableVersion | None:
     return max(versions) if versions else None
 
 
-def expected_next(latest: StableVersion | None) -> StableVersion:
+def expected_targets(latest: StableVersion | None) -> tuple[StableVersion, ...]:
     if latest is None:
-        return StableVersion(0, 1, 0)
-    return StableVersion(latest.major, latest.minor, latest.patch + 1)
+        return (StableVersion(0, 1, 0),)
+    return (
+        StableVersion(latest.major, latest.minor, latest.patch + 1),
+        StableVersion(latest.major, latest.minor + 1, 0),
+    )
 
 
 def main() -> int:
     args = parse_args()
     target = StableVersion.parse(args.target_version)
     latest = latest_github_release(args.repo) or latest_remote_tag(args.remote)
-    expected = expected_next(latest)
-    if target != expected:
+    expected = expected_targets(latest)
+    if target not in expected:
         latest_text = "no remote release" if latest is None else latest.tag()
+        expected_text = " or ".join(it.tag() for it in expected)
         print(
-            f"Release target sanity check failed: expected {expected.tag()} after {latest_text}, "
+            f"Release target sanity check failed: expected {expected_text} after {latest_text}, "
             f"got {target.tag()}.",
             file=sys.stderr,
         )

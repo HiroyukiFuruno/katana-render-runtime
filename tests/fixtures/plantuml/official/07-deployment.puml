@@ -1,0 +1,18 @@
+@startuml
+node "Developer Machine" as Dev {
+  artifact "kdr binary" as Cli
+  folder "bundled assets" as Assets
+}
+
+node "Embedded JVM" as JVM {
+  component "plantuml.jar" as Jar
+}
+
+database "Document Cache" as Cache
+cloud "GitHub Actions" as CI
+
+Cli --> JVM : JNI call
+Assets --> Jar : checksum verified
+Cli --> Cache : writes SVG
+CI ..> Cli : smoke test
+@enduml

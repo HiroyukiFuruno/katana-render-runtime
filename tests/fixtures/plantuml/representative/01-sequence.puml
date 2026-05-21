@@ -1,0 +1,10 @@
+@startuml
+actor User
+participant "KatanA" as K
+database "File System" as FS
+
+User -> K: Open file
+K -> FS: Read Markdown
+FS --> K: Content
+K --> User: Render preview
+@enduml

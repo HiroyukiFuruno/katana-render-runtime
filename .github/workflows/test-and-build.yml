@@ -137,6 +137,25 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --all-targets --all-features --locked
 
+      - name: Install PlantUML runtime
+        run: just plantuml-install
+
+      - name: Run PlantUML smoke check
+        if: matrix.os != 'windows-latest'
+        run: |
+          cargo run -p katana-diagram-renderer-cli -- plantuml render --input tests/fixtures/plantuml/representative/01-sequence.puml --output "$RUNNER_TEMP/plantuml-sequence.svg"
+          grep -q '<svg' "$RUNNER_TEMP/plantuml-sequence.svg"
+
+      - name: Run PlantUML smoke check on Windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "plantuml-sequence.svg"
+          cargo run -p katana-diagram-renderer-cli -- plantuml render --input tests/fixtures/plantuml/representative/01-sequence.puml --output $output
+          if (-not (Select-String -Path $output -Pattern "<svg" -Quiet)) {
+            throw "PlantUML smoke output did not contain SVG"
+          }
+
       - name: Check dependency boundary
         if: matrix.os != 'windows-latest'
         run: just dependency-leak
@@ -156,6 +175,10 @@ jobs:
       - name: Check packaged runtime bundles
         if: matrix.os == 'ubuntu-latest'
         run: just runtime-bundle-package-check
+
+      - name: Check packaged PlantUML runtime manifest
+        if: matrix.os == 'ubuntu-latest'
+        run: just plantuml-runtime-package-check
 
       - name: Run coverage
         if: matrix.os == 'ubuntu-latest'

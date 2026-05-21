@@ -57,8 +57,9 @@
 
 #### Scenario: compare command を実行する
 
-- **WHEN** `kdr plantuml compare --fixtures tests/fixtures/plantuml --min-score 99` を実行する
-- **THEN** PlantUML fixture の reference と KDR 出力を比較する
+- **WHEN** `kdr plantuml compare --fixtures tests/fixtures/plantuml/official --min-score 100` を実行する
+- **THEN** PlantUML fixture の公式 dark mode reference と KDR 出力を画像化して比較する
+- **THEN** sequence / use-case / class / object / activity / component / deployment / state / timing の 9 種類すべてが 100 点になる
 - **THEN** `libjvm` または `plantuml.jar` が解決できない場合は、比較不能として診断付きで失敗する
 
 ### Requirement: KDV が埋め込める SVG または code block を返さなければならない
@@ -79,22 +80,44 @@
 - **THEN** KDV は raw code block を表示できる
 - **THEN** KDV は PlantUML 描画不能を export 全体の失敗として扱わない
 
-### Requirement: PlantUML theme は RenderInput から反映しなければならない
+### Requirement: PlantUML theme は公式 theme / dark mode として反映しなければならない
 
-システムは、`RenderInput.context.theme` がある場合、その値から PlantUML の `skinparam` を生成し、描画 source に反映しなければならない（MUST）。PlantUML 既定色に任せてはならない（MUST NOT）。
+システムは、`RenderInput.context.theme` の dark / light を PlantUML 公式 dark mode として反映しなければならない（MUST）。
+システムは、API の `RenderInput.config.vendor_config.plantuml_theme` と CLI の `--theme` を PlantUML 公式 `!theme` directive として反映しなければならない（MUST）。
+システムは、API の `RenderInput.config.vendor_config.plantuml_theme_from` と CLI の `--theme-from` を PlantUML 公式 local / remote theme source として反映しなければならない（MUST）。
+システムは、API の `RenderInput.config.vendor_config.plantuml_theme_mode` と CLI の `--theme-mode` で `dark` / `light` を明示指定できなければならない（MUST）。
+システムは、CLI help で固定 PlantUML runtime が提供する theme 名一覧を表示し、公開 API で同じ一覧を返せなければならない（MUST）。
+システムは、class icon や visibility icon のような PlantUML 公式の意味表現を消す option を追加してはならない（MUST NOT）。
 
 #### Scenario: light / dark theme で fingerprint が変わる
 
 - **GIVEN** 同一 PlantUML source と light / dark の `RenderInput.context.theme`
 - **WHEN** PlantUML renderer をそれぞれ呼ぶ
 - **THEN** `cache_fingerprint` は異なる
-- **THEN** PlantUML の背景、文字、線、矢印、class、note、participant、activity node の色は theme snapshot に由来する
+- **THEN** dark mode の出力は PlantUML 公式の `ColorMapper.DARK_MODE` に由来する
+- **THEN** class icon と visibility icon は PlantUML 公式の意味表現を保持する
+
+#### Scenario: 公式 theme を切り替える
+
+- **GIVEN** 同一 PlantUML source と `plantuml_theme=cyborg`
+- **WHEN** PlantUML renderer を呼ぶ
+- **THEN** 描画 source には KDR 独自の色上書きではなく PlantUML の `!theme cyborg` 相当が渡される
+- **THEN** `cache_fingerprint` は theme 未指定時と異なる
+
+#### Scenario: CLI help と API で theme 候補を確認できる
+
+- **GIVEN** 利用者が `kdr plantuml render --help` を表示する
+- **WHEN** help text を確認する
+- **THEN** `--theme` の説明には指定可能な theme 名として `cyborg`、`black-knight`、`spacelab` が含まれる
+- **THEN** `--theme-mode` の候補として `dark` と `light` が含まれる
+- **WHEN** API 利用者が `PlantUmlRenderer::available_themes()` または `PlantUmlThemeCatalog::names()` を呼ぶ
+- **THEN** CLI help と同じ theme 名一覧を取得できる
 
 #### Scenario: KatanA のプレビュー背景で読める SVG を返す
 
 - **GIVEN** KatanA dark theme の `RenderInput.context.theme`
 - **WHEN** sequence / class / activity の PlantUML fixture を描画する
-- **THEN** SVG の背景は透明として扱える
-- **THEN** SVG 内の文字色は KatanA の preview text 色に合わせる
-- **THEN** 線と矢印は Mermaid / Draw.io と同じ視認性の色に合わせる
-- **THEN** PlantUML 既定の薄い背景色だけに依存した SVG を返さない
+- **THEN** SVG は PlantUML 公式 dark mode の背景、文字、線、矢印で描画される
+- **THEN** class fixture は class / abstract class / interface / enum / note / 関係線 / 属性 / メソッドを含む
+- **THEN** class icon や visibility icon は PlantUML 公式の意味色を残す
+- **THEN** 配色制御は SVG 後加工ではなく PlantUML の theme / dark mode 指定で行う

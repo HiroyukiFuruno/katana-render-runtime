@@ -81,6 +81,13 @@ export class ReferenceCompareReportLabels {
     );
   }
 
+  static plantuml(): ReferenceCompareReportLabels {
+    return new ReferenceCompareReportLabels(
+      "# PlantUML 公式参照比較",
+      "左が公式 PlantUML の SVG、右が KDR 生成 SVG です。どちらも同じブラウザー条件で画像化（rasterize）して比較しています。",
+    );
+  }
+
   constructor(
     public title: string,
     public description: string,

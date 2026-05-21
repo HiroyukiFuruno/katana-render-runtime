@@ -1,5 +1,8 @@
-## ADDED Requirements
+# plantuml-runtime-dependency-management Specification
 
+## Purpose
+TBD - created by archiving change v0-2-0-plantuml-svg-renderer-multiplatform. Update Purpose after archive.
+## Requirements
 ### Requirement: PlantUML runtime dependency を複数 OS で解決しなければならない
 
 システムは、macOS / Linux / Windows で `libjvm` と `plantuml.jar` を解決できなければならない（MUST）。解決できない場合、どの path と環境変数を確認したかを警告（warning）に含め、ログへ出し、raw code block を返して早期 return しなければならない（MUST）。
@@ -61,31 +64,49 @@
 - **THEN** 異なる `plantuml.jar` への切り替え要求は診断可能な error または warning として扱う
 - **THEN** Java 例外、timeout、thread safety の制約を `RenderOutput.diagnostics` または `RenderError` に mapping する
 
-### Requirement: plantuml.jar を固定 runtime asset として解決しなければならない
+### Requirement: plantuml.jar を固定 URL / checksum の cache runtime asset として解決しなければならない
 
-システムは、`plantuml.jar` を KDR 管理の固定 runtime asset として解決しなければならない（MUST）。実行時に network から暗黙 download してはならない（MUST NOT）。
+システムは、`plantuml.jar` を固定 version、download URL、checksum manifest で管理しなければならない（MUST）。crate package には JAR 本体を含めず、checksum manifest を含めなければならない（MUST）。既定では OS 別の保存領域（cache）に JAR を初回 download し、checksum 検証後に JVM classpath へ渡さなければならない（MUST）。
 
 #### Scenario: 明示 jar path を解決する
 
 - **GIVEN** `KDR_PLANTUML_JAR` または既存互換の `PLANTUML_JAR` が設定されている
 - **WHEN** PlantUML renderer が JAR を解決する
 - **THEN** 明示 path を優先する
-- **THEN** checksum が設定済みの場合は一致を検証する
+- **THEN** 明示 path は利用者管理の JAR として存在確認し、checksum を検証する
 - **THEN** path が存在しない場合は警告（warning）付き raw code block を返す
 
-#### Scenario: package 内 jar path を解決する
+#### Scenario: cache jar path を解決する
 
 - **GIVEN** 明示 jar path が未設定である
 - **WHEN** PlantUML renderer が JAR を解決する
-- **THEN** KDR package 内の固定 `plantuml.jar` 候補を確認する
-- **THEN** 実行ファイル隣接 path と `renderers/plantuml.jar` も候補にする
+- **THEN** KDR は OS 別の保存領域（cache）の固定 path を確認する
+- **THEN** 保存領域（cache）に JAR が存在する場合は checksum が manifest と一致することを確認する
+- **THEN** 保存領域（cache）に JAR が存在しない場合は固定 URL から download する
+- **THEN** download した JAR は checksum を検証してから保存領域（cache）へ配置する
+- **THEN** download または checksum 検証に失敗した場合は警告（warning）付き raw code block を返す
+- **THEN** 警告（warning）は network 接続、書き込み可能な `KDR_PLANTUML_CACHE_DIR` または API の `plantuml_cache_dir`、または `KDR_PLANTUML_JAR` 設定が必要であることを示す
+
+#### Scenario: API が cache directory を上書きする
+
+- **GIVEN** 公開 API の `RenderInput.config.vendor_config.plantuml_cache_dir` または `plantumlCacheDir` が設定されている
+- **WHEN** PlantUML renderer が JAR を解決する
+- **THEN** API 指定の保存領域（cache directory）を `KDR_PLANTUML_CACHE_DIR` と OS 既定値より優先する
+- **THEN** 保存領域（cache directory）だけの違いでは `cache_fingerprint` を変えない
+
+#### Scenario: CLI が cache directory を上書きする
+
+- **GIVEN** `kdr plantuml render --cache-dir <path>` が指定されている
+- **WHEN** CLI が `RenderInput` を作成する
+- **THEN** CLI は API と同じ `plantuml_cache_dir` に変換する
+- **THEN** `--runtime` と `--cache-dir` が同時に指定された場合は曖昧な解決として拒否する
 
 #### Scenario: user local jar path を解決する
 
-- **GIVEN** package 内 JAR が存在しない
+- **GIVEN** 保存領域（cache）内 JAR が存在せず、network からも取得できない
 - **WHEN** PlantUML renderer が JAR を解決する
-- **THEN** user local の KDR 管理 path を候補にする
-- **THEN** legacy KatanA の `~/.local/katana/plantuml.jar` は互換候補として扱える
+- **THEN** raw code fallback と warning で継続する
+- **THEN** legacy KatanA の `~/.local/katana/plantuml.jar` は既定候補にしない
 
 ### Requirement: 子 process 実行を採る場合は端末窓を出さずに実行しなければならない
 
@@ -114,6 +135,7 @@
 
 - **WHEN** GitHub Actions が macOS / Ubuntu / Windows job を実行する
 - **THEN** `libjvm` が利用可能か確認する
-- **THEN** 固定 `plantuml.jar` の checksum を確認する
+- **THEN** 固定 `plantuml.jar` を保存領域（cache）へ事前取得し、checksum を確認する
+- **THEN** crate package に `plantuml.jar.sha256` が含まれ、`plantuml.jar` 本体が含まれないことを確認する
 - **THEN** sequence fixture を SVG に描画する
 - **THEN** SVG 生成が必要な CI では raw code fallback を成功扱いせず job failure にする

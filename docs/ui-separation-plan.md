@@ -11,7 +11,7 @@ canonical: [`katana/docs/architecture/ui-separation/detailed-design-and-tasks.md
 
 `katana-diagram-renderer` (KDR) は **diagram rendering canonical** として位置付ける。
 
-- 純粋な diagram rendering (Mermaid / Draw.io / ZenUML) のみを所有する。
+- 純粋な diagram rendering (Mermaid / Draw.io / ZenUML / PlantUML) のみを所有する。
 - document export と viewer ownership は deliberately exclude (現状方針を維持)。
 - KCF (`katana-canvas-forge`) と責務が近いが、KDR は diagram に閉じ、export / artifact build は KDV forge に集約する。
 - 長期的には KCF が KDR を呼ぶ形に整理 (KCF が transitional layer に縮小)。
