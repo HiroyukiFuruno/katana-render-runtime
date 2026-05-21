@@ -134,6 +134,12 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: just runtime-bundle-check
 
+      - name: Install Graphviz for PlantUML
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y graphviz
+
       - name: Run tests
         run: cargo test --workspace --all-targets --all-features --locked
 

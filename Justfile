@@ -204,7 +204,7 @@ plantuml-install version=PLANTUML_JAR_VERSION output=PLANTUML_CACHE_JAR:
     tmp="$target.tmp"; \
     curl -fsSL "$url" -o "$tmp"; \
     expected="{{PLANTUML_JAR_CHECKSUM}}"; \
-    actual="$(shasum -a 256 "$tmp" | awk '{ print $1 }')"; \
+    actual="$(bash scripts/plantuml/sha256-file.sh "$tmp")"; \
     if [ "$actual" != "$expected" ]; then \
       echo "PlantUML checksum mismatch: expected=$expected actual=$actual" >&2; \
       rm -f "$tmp"; \

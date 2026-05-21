@@ -126,12 +126,13 @@
 
 ### Requirement: CI は複数 OS の PlantUML smoke check を実行しなければならない
 
-システムは、macOS / Ubuntu / Windows の CI で PlantUML の最小 smoke check を実行しなければならない（MUST）。少なくとも Java 解決、JAR 解決、sequence fixture の SVG 生成を確認しなければならない（MUST）。
+システムは、macOS / Ubuntu / Windows の CI で PlantUML の最小 smoke check を実行しなければならない（MUST）。少なくとも Java 解決、JAR 解決、Graphviz `dot` が必要な図の前提整備、sequence fixture の SVG 生成を確認しなければならない（MUST）。
 
 #### Scenario: CI matrix で PlantUML smoke check を実行する
 
 - **WHEN** GitHub Actions が macOS / Ubuntu / Windows job を実行する
 - **THEN** `libjvm` が利用可能か確認する
+- **THEN** Graphviz `dot` が必要な OS では test 前に Graphviz を install する
 - **THEN** 固定 `plantuml.jar` を保存領域（cache）へ事前取得し、checksum を確認する
 - **THEN** crate package に `plantuml.jar.sha256` が含まれ、`plantuml.jar` 本体が含まれないことを確認する
 - **THEN** sequence fixture を SVG に描画する
