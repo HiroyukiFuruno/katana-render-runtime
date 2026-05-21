@@ -160,6 +160,7 @@ mod tests {
 
     #[test]
     fn render_fingerprint_ignores_plantuml_cache_dir() {
+        let _guard = mode_guard();
         let default =
             CacheFingerprintOps::render(&input_with_vendor_config(None), "runtime", "checksum");
         let cache_dir = CacheFingerprintOps::render(
