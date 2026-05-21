@@ -47,12 +47,15 @@ export class RuntimeSourceUpdater {
     this.updateRust(definition, version, checksum);
     this.updateMermaidZenumlReferences(definition, version);
     this.updatePackageInclude(definition, version);
-    this.updateJustfile(definition, version);
+    this.updateJustfile(definition, version, checksum);
     this.updateScriptCatalog(definition, version, checksum);
   }
 
   private updateRust(definition: RuntimeAssetDefinition, version: string, checksum: string) {
-    const sourcePath = RuntimeAssetPaths.runtimeAssetsRust();
+    const sourcePath =
+      definition.kind === "plantuml"
+        ? RuntimeAssetPaths.plantumlAssetRust()
+        : RuntimeAssetPaths.runtimeAssetsRust();
     let source = fs.readFileSync(sourcePath, "utf8");
     source = this.replaceConst(source, definition.rustVersionConst, version);
     source = this.replaceConst(source, definition.rustChecksumConst, checksum);
@@ -61,7 +64,7 @@ export class RuntimeSourceUpdater {
       definition.rustDownloadConst,
       definition.releasePageUrl(version),
     );
-    if (definition.kind !== "mermaid-zenuml") {
+    if (definition.kind !== "mermaid-zenuml" && definition.kind !== "plantuml") {
       source = this.replaceVendorAssetVersion(source, definition, version);
     }
     fs.writeFileSync(sourcePath, source, "utf8");
@@ -91,13 +94,17 @@ export class RuntimeSourceUpdater {
     fs.writeFileSync(cargoToml, this.replacePackageIncludeVersion(source, definition, version));
   }
 
-  private updateJustfile(definition: RuntimeAssetDefinition, version: string) {
+  private updateJustfile(definition: RuntimeAssetDefinition, version: string, checksum: string) {
     const justfile = RuntimeAssetPaths.justfile();
     const constName = RuntimeAssetPaths.justVersionVariable(definition);
     const pattern = new RegExp(`${constName} := "[^"]+"`);
-    const source = fs
-      .readFileSync(justfile, "utf8")
-      .replace(pattern, `${constName} := "${version}"`);
+    let source = fs.readFileSync(justfile, "utf8").replace(pattern, `${constName} := "${version}"`);
+    if (definition.kind === "plantuml") {
+      source = source.replace(
+        /PLANTUML_JAR_CHECKSUM := "[^"]+"/,
+        `PLANTUML_JAR_CHECKSUM := "${checksum}"`,
+      );
+    }
     fs.writeFileSync(justfile, source, "utf8");
   }
 
@@ -146,6 +153,13 @@ export class RuntimeSourceUpdater {
     version: string,
   ): string {
     const kind = this.escapePattern(definition.kind);
+    if (definition.kind === "plantuml") {
+      const pattern = new RegExp(`("vendor/${kind}/)[^/]+(/plantuml\\.jar\\.sha256",)`);
+      if (!pattern.test(source)) {
+        throw new Error(`Runtime asset package include not found: ${definition.kind}`);
+      }
+      return source.replace(pattern, `$1${version}$2`);
+    }
     const pattern = new RegExp(`("vendor/${kind}/)[^/]+(/\\*\\*",)`);
     if (!pattern.test(source)) {
       throw new Error(`Runtime asset package include not found: ${definition.kind}`);
@@ -167,8 +181,11 @@ class UpdateCommand {
   async run() {
     await new RuntimeAssetDownloader().download(this.definition, this.version);
     const checksum = RuntimeAssetChecksum.writeChecksumFile(this.definition, this.version);
+    if (this.definition.kind === "plantuml") {
+      fs.rmSync(RuntimeAssetPaths.assetFile(this.definition, this.version), { force: true });
+    }
     new RuntimeSourceUpdater().update(this.definition, this.version, checksum);
-    console.log(`updated ${RuntimeAssetPaths.assetFile(this.definition, this.version)}`);
+    console.log(`updated ${RuntimeAssetPaths.checksumFile(this.definition, this.version)}`);
     console.log(`sha256=${checksum}`);
   }
 }
@@ -177,7 +194,7 @@ const CliOptions = {
   command(argv: string[]): UpdateCommand {
     if (argv.length !== 2) {
       throw new Error(
-        "Usage: bun run scripts/runtime-assets/update.ts <mermaid|mermaid-zenuml|drawio> <version>",
+        "Usage: bun run scripts/runtime-assets/update.ts <mermaid|mermaid-zenuml|drawio|plantuml> <version>",
       );
     }
     return new UpdateCommand(

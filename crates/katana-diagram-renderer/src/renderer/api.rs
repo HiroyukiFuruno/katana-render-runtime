@@ -6,6 +6,7 @@ use thiserror::Error;
 pub enum DiagramKind {
     Mermaid,
     Drawio,
+    PlantUml,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

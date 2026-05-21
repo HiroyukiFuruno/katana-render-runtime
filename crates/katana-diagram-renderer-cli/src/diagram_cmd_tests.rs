@@ -1,5 +1,5 @@
 use super::{DiagramCommand, DiagramSourceOps, MermaidMarkdownOps, RenderInputFactory};
-use crate::commands::DiagramAction;
+use crate::commands::{DiagramAction, ThemeModeArg};
 use katana_diagram_renderer::DiagramKind;
 
 #[test]
@@ -62,10 +62,53 @@ fn drawio_source_passes_through() {
 }
 
 #[test]
+fn extracts_plantuml_fence_from_markdown() {
+    let source = "```plantuml\n@startuml\nAlice -> Bob: hello\n@enduml\n```\n".to_string();
+    assert_eq!(
+        DiagramSourceOps::prepare(DiagramKind::PlantUml, source),
+        "@startuml\nAlice -> Bob: hello\n@enduml"
+    );
+}
+
+#[test]
 fn render_input_factory_sets_kind_and_source() {
-    let input = RenderInputFactory::create(DiagramKind::Mermaid, "graph TD; A".to_string());
+    let input = RenderInputFactory::create(
+        DiagramKind::Mermaid,
+        "graph TD; A".to_string(),
+        serde_json::Value::Null,
+    );
     assert_eq!(input.kind, DiagramKind::Mermaid);
     assert_eq!(input.source, "graph TD; A");
+}
+
+#[test]
+fn plantuml_theme_options_become_vendor_config() -> Result<(), Box<dyn std::error::Error>> {
+    let config = RenderInputFactory::vendor_config(
+        DiagramKind::PlantUml,
+        Some("cyborg".to_string()),
+        Some("/path/to/themes".to_string()),
+        Some(ThemeModeArg::Light),
+        Some("/tmp/kdr-cache".into()),
+    )?;
+
+    assert_eq!(config["plantuml_theme"], "cyborg");
+    assert_eq!(config["plantuml_theme_from"], "/path/to/themes");
+    assert_eq!(config["plantuml_theme_mode"], "light");
+    assert_eq!(config["plantuml_cache_dir"], "/tmp/kdr-cache");
+    Ok(())
+}
+
+#[test]
+fn non_plantuml_rejects_theme_options() {
+    let result = RenderInputFactory::vendor_config(
+        DiagramKind::Mermaid,
+        Some("dark".to_string()),
+        None,
+        None,
+        None,
+    );
+
+    assert!(result.is_err());
 }
 
 #[test]
@@ -77,8 +120,12 @@ fn mermaid_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Er
     std::fs::write(&input, "```mermaid\ngraph TD; A-->B\n```\n")?;
     let result = DiagramCommand::new(DiagramKind::Mermaid).run(DiagramAction::Render {
         input: input.clone(),
-        output,
+        output: Some(output),
         runtime: Some(runtime),
+        theme: None,
+        theme_from: None,
+        theme_mode: None,
+        cache_dir: None,
     });
 
     assert!(result.is_err());
@@ -95,8 +142,12 @@ fn drawio_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Err
     std::fs::write(&input, "<mxGraphModel />")?;
     let result = DiagramCommand::new(DiagramKind::Drawio).run(DiagramAction::Render {
         input: input.clone(),
-        output,
+        output: Some(output),
         runtime: Some(runtime),
+        theme: None,
+        theme_from: None,
+        theme_mode: None,
+        cache_dir: None,
     });
 
     assert!(result.is_err());

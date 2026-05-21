@@ -1,0 +1,8 @@
+@startuml
+:User: --> (Use)
+"Main Admin" as Admin
+"Use the application" as (Use)
+Admin --> (Admin the application)
+(Use) .> (Login) : include
+(Admin the application) .> (Audit) : extend
+@enduml

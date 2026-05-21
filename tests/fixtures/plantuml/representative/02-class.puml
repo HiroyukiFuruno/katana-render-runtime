@@ -1,0 +1,55 @@
+@startuml
+interface DiagramRenderer {
+  +render(block): RenderedSection
+}
+
+abstract class DiagramSection {
+  +id: SectionId
+  +source_range: Range
+  +render()
+}
+
+class PreviewPane {
+  -sections: Vec<RenderedSection>
+  -renderer: DiagramRenderer
+  +sections: Vec<RenderedSection>
+  +full_render(source, path)
+  +show_content(ui)
+}
+
+class PlantUmlRenderer {
+  -jar_path: PathBuf
+  +render(block): RenderedSection
+}
+
+enum RenderedSection {
+  Markdown
+  Image
+  Diagram
+  Error
+  Pending
+}
+
+enum DiagnosticLevel {
+  Warning
+  Error
+}
+
+class RenderDiagnostic {
+  +level: DiagnosticLevel
+  +message: String
+}
+
+note right of PreviewPane
+  KatanA preview owns rendered sections
+  and delegates PlantUML rendering to KDR.
+end note
+
+PreviewPane *-- RenderedSection : owns
+PreviewPane --> DiagramRenderer : delegates
+DiagramRenderer <|.. PlantUmlRenderer
+DiagramSection <|-- PreviewPane
+PlantUmlRenderer --> RenderedSection : returns
+RenderedSection o-- RenderDiagnostic : diagnostics
+RenderDiagnostic --> DiagnosticLevel
+@enduml

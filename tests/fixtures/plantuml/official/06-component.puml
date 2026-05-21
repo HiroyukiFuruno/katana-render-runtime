@@ -1,0 +1,15 @@
+@startuml
+[Markdown Engine] as Engine
+[Diagram Renderer] as KDR
+component "PlantUML Runtime" as PlantUML
+interface "SVG output" as SVG
+database "Runtime Cache" as Cache
+
+Engine --> KDR : render plantuml block
+KDR ..> PlantUML : SourceStringReader
+KDR --> SVG
+KDR --> Cache : checksum
+note right of KDR
+  Returns SVG or raw code with warning.
+end note
+@enduml

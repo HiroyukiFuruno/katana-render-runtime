@@ -29,6 +29,10 @@ pub enum DiagramValidationError {
 pub enum DiagramResult {
     Ok(String),
     OkPng(Vec<u8>),
+    RawCode {
+        source: String,
+        warning: String,
+    },
     Err {
         source: String,
         error: String,

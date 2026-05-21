@@ -11,5 +11,5 @@ pub use api::{
     RenderOutput, RenderPolicy, RenderThemeMode, RenderThemeSnapshot, Renderer, RendererProfile,
     RuntimeVersion,
 };
-pub use backends::{DrawioRenderer, MermaidRenderer};
+pub use backends::{DrawioRenderer, MermaidRenderer, PlantUmlRenderer};
 pub use runtime_path::RuntimePathResolver;

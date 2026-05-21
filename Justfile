@@ -19,10 +19,15 @@ MERMAID_JS_VERSION := "11.15.0"
 MERMAID_ZENUML_JS_VERSION := "0.2.3"
 DRAWIO_JS_VERSION := "30.0.2"
 ZENUML_CORE_JS_VERSION := "3.47.9"
+PLANTUML_JAR_VERSION := "1.2026.4"
+PLANTUML_JAR_CHECKSUM := "1783d4569855f2f0a17e65bd192add377c7f2b5e3e1781b65dc94d084de98699"
 PLAYWRIGHT_VERSION := "1.59.1"
 MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-diagram-renderer/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
 MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-diagram-renderer/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
 DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-diagram-renderer/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
+PLANTUML_JAR_URL := "https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/" + PLANTUML_JAR_VERSION + "/plantuml-lgpl-" + PLANTUML_JAR_VERSION + ".jar"
+PLANTUML_CACHE_DIR := env_var_or_default("KDR_PLANTUML_CACHE_DIR", `bash scripts/plantuml/cache-dir.sh`)
+PLANTUML_CACHE_JAR := PLANTUML_CACHE_DIR + "/" + PLANTUML_JAR_VERSION + "/plantuml.jar"
 DRAWIO_RESOURCE_DIR := "crates/katana-diagram-renderer/src/markdown/drawio_renderer/js_runtime/resources"
 DRAWIO_RESOURCE_MANIFEST := DRAWIO_RESOURCE_DIR + "/drawio-resource-manifest.json"
 
@@ -71,6 +76,8 @@ runtime-asset-check:
     cd crates/katana-diagram-renderer/vendor/mermaid-zenuml/{{MERMAID_ZENUML_JS_VERSION}} && shasum -a 256 -c mermaid-zenuml.min.js.sha256
     cd crates/katana-diagram-renderer/vendor/drawio/{{DRAWIO_JS_VERSION}} && shasum -a 256 -c drawio.min.js.sha256
     cd crates/katana-diagram-renderer/vendor/zenuml-core/{{ZENUML_CORE_JS_VERSION}} && shasum -a 256 -c zenuml.js.sha256
+    @grep -qx "{{PLANTUML_JAR_CHECKSUM}}  plantuml.jar" crates/katana-diagram-renderer/vendor/plantuml/{{PLANTUML_JAR_VERSION}}/plantuml.jar.sha256
+    @if [ -f "{{PLANTUML_CACHE_JAR}}" ]; then cd "$(dirname "{{PLANTUML_CACHE_JAR}}")" && shasum -a 256 -c "{{REPO_ROOT}}/crates/katana-diagram-renderer/vendor/plantuml/{{PLANTUML_JAR_VERSION}}/plantuml.jar.sha256"; fi
     cd crates/katana-diagram-renderer/src/markdown/diagram_runtime/generated && shasum -a 256 -c runtime-bundles.sha256
 
 # Generate TypeScript-managed diagram runtime bundles
@@ -103,12 +110,24 @@ runtime-bundle-package-check:
         fi; \
       done
 
+# Verify the PlantUML checksum manifest is included without packaging the JAR body
+plantuml-runtime-package-check:
+    @package_files="$({{CARGO}} package -p katana-diagram-renderer --locked --allow-dirty --list)"; \
+    if ! printf '%s\n' "$package_files" | grep -qx "vendor/plantuml/{{PLANTUML_JAR_VERSION}}/plantuml.jar.sha256"; then \
+      echo "missing PlantUML checksum manifest package file" >&2; \
+      exit 1; \
+    fi; \
+    if printf '%s\n' "$package_files" | grep -qx "vendor/plantuml/{{PLANTUML_JAR_VERSION}}/plantuml.jar"; then \
+      echo "PlantUML JAR body must not be included in the crates.io package" >&2; \
+      exit 1; \
+    fi
+
 # Run TypeScript tests for runtime asset helper scripts
 runtime-asset-script-test:
     bun test --path-ignore-patterns 'tmp/**' scripts/runtime-assets/runtime-asset-common_test.ts scripts/runtime-assets/update_test.ts scripts/runtime-assets/latest-check_test.ts scripts/runtime-assets/update_zenuml_test.ts
 
 # Run the local quality gate
-check: fmt-check lint runtime-bundle-check unit-test ast-lint dependency-leak biome typecheck runtime-asset-check runtime-bundle-package-check
+check: fmt-check lint runtime-bundle-check unit-test ast-lint dependency-leak biome typecheck runtime-asset-check runtime-bundle-package-check plantuml-runtime-package-check
     @echo "checks passed"
 
 # Sweep old build artifacts locally (older than 7 days)
@@ -171,6 +190,32 @@ mermaid-latest:
 # Show latest Draw.io version without changing files
 drawio-latest:
     just runtime-asset-latest drawio
+
+# Show latest PlantUML version without changing files
+plantuml-latest:
+    just runtime-asset-latest plantuml
+
+# Install pinned PlantUML LGPL JAR into the KDR cache
+plantuml-install version=PLANTUML_JAR_VERSION output=PLANTUML_CACHE_JAR:
+    @set -euo pipefail; \
+    url="https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/{{version}}/plantuml-lgpl-{{version}}.jar"; \
+    target="{{output}}"; \
+    mkdir -p "$(dirname "$target")"; \
+    tmp="$target.tmp"; \
+    curl -fsSL "$url" -o "$tmp"; \
+    expected="{{PLANTUML_JAR_CHECKSUM}}"; \
+    actual="$(bash scripts/plantuml/sha256-file.sh "$tmp")"; \
+    if [ "$actual" != "$expected" ]; then \
+      echo "PlantUML checksum mismatch: expected=$expected actual=$actual" >&2; \
+      rm -f "$tmp"; \
+      exit 1; \
+    fi; \
+    mv "$tmp" "$target"; \
+    echo "installed PlantUML {{version}} to $target"
+
+# Update the pinned PlantUML JAR version, URL, and checksum
+plantuml-update version:
+    bun run scripts/runtime-assets/update.ts plantuml "{{version}}"
 
 # Show latest Mermaid ZenUML plugin version without changing files
 zenuml-latest:
@@ -384,3 +429,54 @@ drawio-compare-full min_score='99':
 # Render Draw.io fixtures for a timing smoke check
 drawio-bench fixtures:
     @start=$(date +%s); just drawio-render "{{fixtures}}" tmp/kdr-drawio-bench; end=$(date +%s); elapsed=$((end - start)); echo "drawio fixtures rendered in ${elapsed}s"
+
+# Render kdr PlantUML SVG fixtures
+plantuml-render fixtures output='tmp/kdr-plantuml-rendered':
+    @rm -rf "{{output}}"
+    @mkdir -p "{{output}}"
+    @for file in "{{fixtures}}"/*.puml "{{fixtures}}"/*.md; do \
+      [ -e "$file" ] || continue; \
+      [ "$(basename "$file")" = "README.md" ] && continue; \
+      slug=$(basename "$file"); \
+      slug="${slug%.*}"; \
+      {{CARGO}} run -p katana-diagram-renderer-cli -- plantuml render --input "$file" --output "{{output}}/$slug.svg"; \
+    done
+
+# Render kdr PlantUML SVG fixtures with the prebuilt kdr binary
+plantuml-render-prebuilt fixtures output='tmp/kdr-plantuml-rendered':
+    @rm -rf "{{output}}"
+    @mkdir -p "{{output}}"
+    @for file in "{{fixtures}}"/*.puml "{{fixtures}}"/*.md; do \
+      [ -e "$file" ] || continue; \
+      [ "$(basename "$file")" = "README.md" ] && continue; \
+      slug=$(basename "$file"); \
+      slug="${slug%.*}"; \
+      "{{KDR_BIN}}" plantuml render --input "$file" --output "{{output}}/$slug.svg"; \
+    done
+
+# Update PlantUML reference SVG fixtures
+plantuml-reference fixtures output='tmp/kdr-plantuml-reference':
+    just plantuml-install
+    bun run scripts/plantuml/diagram-update.ts --fixtures "{{fixtures}}" --output "{{output}}/official-svg" --jar "{{PLANTUML_CACHE_JAR}}" --dark-mode
+    bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/official-svg" --output "{{fixtures}}/official-dark" --theme dark
+
+# Compare PlantUML fixtures with official dark-mode reference score
+plantuml-compare fixtures min_score='100' output='tmp/kdr-plantuml':
+    just plantuml-render "{{fixtures}}" "{{output}}/rendered"
+    bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser" --theme dark
+    bun run scripts/plantuml/reference-compare.ts --official "{{fixtures}}/official-dark" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}"
+
+# Compare PlantUML fixtures using the prebuilt kdr binary
+plantuml-compare-prebuilt fixtures min_score='100' output='tmp/kdr-plantuml':
+    just plantuml-render-prebuilt "{{fixtures}}" "{{output}}/rendered"
+    bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser" --theme dark
+    bun run scripts/plantuml/reference-compare.ts --official "{{fixtures}}/official-dark" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}"
+
+# Compare representative PlantUML patterns for CI/CD
+plantuml-compare-ci min_score='100':
+    just kdr-build
+    just plantuml-compare-prebuilt tests/fixtures/plantuml/official "{{min_score}}" tmp/kdr-plantuml-ci
+
+# Render PlantUML fixtures for a timing smoke check
+plantuml-bench fixtures:
+    @start=$(date +%s); just plantuml-render "{{fixtures}}" tmp/kdr-plantuml-bench; end=$(date +%s); elapsed=$((end - start)); echo "plantuml fixtures rendered in ${elapsed}s"

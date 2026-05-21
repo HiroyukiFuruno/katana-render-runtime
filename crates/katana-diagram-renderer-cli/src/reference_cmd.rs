@@ -38,6 +38,7 @@ impl ReferenceCommand {
         match kind {
             DiagramKind::Mermaid => "mermaid",
             DiagramKind::Drawio => "drawio",
+            DiagramKind::PlantUml => "plantuml",
         }
     }
 }
@@ -86,6 +87,10 @@ mod tests {
         assert_eq!(
             ReferenceCommand::recipe(DiagramKind::Drawio, "reference"),
             "drawio-reference"
+        );
+        assert_eq!(
+            ReferenceCommand::recipe(DiagramKind::PlantUml, "bench"),
+            "plantuml-bench"
         );
     }
 }

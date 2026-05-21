@@ -43,3 +43,28 @@ test("Rust runtime asset version const を 1 行形式でも更新できる", ()
 
   expect(updated).toBe('pub const DRAWIO_JS_VERSION: &str = "30.0.1";\n');
 });
+
+test("PlantUML package include は checksum manifest だけを更新する", () => {
+  const plantuml = {
+    kind: "plantuml",
+    displayName: "PlantUML JAR",
+    version: "1.2026.2",
+    checksum: "checksum",
+    fileName: "plantuml.jar",
+    rustVersionConst: "PLANTUML_JAR_VERSION",
+    rustChecksumConst: "PLANTUML_JAR_CHECKSUM",
+    rustDownloadConst: "PLANTUML_DOWNLOAD_URL",
+    latestUrl: "latest",
+    releasePageUrl: (version: string) => version,
+    downloadUrl: (version: string) => version,
+  } as const;
+  const source = 'include = ["vendor/plantuml/1.2026.2/plantuml.jar.sha256",]\n';
+
+  const updated = new RuntimeSourceUpdater().replacePackageIncludeVersion(
+    source,
+    plantuml,
+    "1.2026.4",
+  );
+
+  expect(updated).toBe('include = ["vendor/plantuml/1.2026.4/plantuml.jar.sha256",]\n');
+});

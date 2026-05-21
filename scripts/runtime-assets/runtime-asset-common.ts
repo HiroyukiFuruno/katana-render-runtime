@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-export type RuntimeAssetKind = "mermaid" | "mermaid-zenuml" | "drawio";
+export type RuntimeAssetKind = "mermaid" | "mermaid-zenuml" | "drawio" | "plantuml";
 
 export interface RuntimeAssetDefinition {
   readonly kind: RuntimeAssetKind;
@@ -63,6 +63,22 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
       `https://github.com/jgraph/drawio/releases/tag/v${version}`,
     downloadUrl: (version: string) =>
       `https://github.com/jgraph/drawio/releases/download/v${version}/draw.war`,
+  },
+  {
+    kind: "plantuml",
+    displayName: "PlantUML JAR",
+    version: "1.2026.4",
+    checksum: "1783d4569855f2f0a17e65bd192add377c7f2b5e3e1781b65dc94d084de98699",
+    fileName: "plantuml.jar",
+    rustVersionConst: "PLANTUML_JAR_VERSION",
+    rustChecksumConst: "PLANTUML_JAR_CHECKSUM",
+    rustDownloadConst: "PLANTUML_DOWNLOAD_URL",
+    latestUrl:
+      "https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/maven-metadata.xml",
+    releasePageUrl: (version: string) =>
+      `https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/${version}/plantuml-lgpl-${version}.jar`,
+    downloadUrl: (version: string) =>
+      `https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/${version}/plantuml-lgpl-${version}.jar`,
   },
 ];
 
@@ -125,11 +141,25 @@ export const RuntimeAssetPaths = {
   },
 
   justVersionVariable(definition: RuntimeAssetDefinition): string {
+    if (definition.kind === "plantuml") {
+      return "PLANTUML_JAR_VERSION";
+    }
     return `${definition.kind.toUpperCase().replaceAll("-", "_")}_JS_VERSION`;
   },
 
   runtimeAssetsRust(): string {
     return path.join("crates", "katana-diagram-renderer", "src", "markdown", "runtime_assets.rs");
+  },
+
+  plantumlAssetRust(): string {
+    return path.join(
+      "crates",
+      "katana-diagram-renderer",
+      "src",
+      "markdown",
+      "plantuml_renderer",
+      "asset.rs",
+    );
   },
 
   rendererCargoToml(): string {
@@ -164,6 +194,15 @@ export const RuntimeAssetChecksum = {
   digestFile(filePath: string): string {
     const content = fs.readFileSync(filePath);
     return crypto.createHash("sha256").update(content).digest("hex");
+  },
+
+  readChecksumFile(filePath: string): string {
+    const content = fs.readFileSync(filePath, "utf8").trim();
+    const checksum = content.split(/\s+/).at(0);
+    if (checksum === undefined) {
+      throw new Error(`Runtime asset checksum file is empty: ${filePath}`);
+    }
+    return checksum;
   },
 
   writeChecksumFile(definition: RuntimeAssetDefinition, version: string): string {

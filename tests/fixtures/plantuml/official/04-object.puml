@@ -1,0 +1,20 @@
+@startuml
+object document {
+  title = "Architecture Note"
+  section_count = 3
+}
+
+object preview {
+  mode = "dark"
+  visible = true
+}
+
+object renderer {
+  kind = "plantuml"
+  runtime = "bundled"
+}
+
+document *-- preview : contains
+preview --> renderer : asks
+renderer ..> document : reads
+@enduml

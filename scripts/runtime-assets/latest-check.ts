@@ -17,6 +17,9 @@ export class LatestVersionClient {
     if (definition.kind === "drawio") {
       return this.drawio(definition.latestUrl);
     }
+    if (definition.kind === "plantuml") {
+      return this.plantuml(definition.latestUrl);
+    }
     return this.npm(definition.latestUrl);
   }
 
@@ -30,6 +33,17 @@ export class LatestVersionClient {
     const response = await this.get(url);
     const body = (await response.json()) as GitHubLatestResponse;
     return body.tag_name.replace(/^v/, "");
+  }
+
+  private async plantuml(url: string): Promise<string> {
+    const response = await this.get(url);
+    const body = await response.text();
+    const versions = [...body.matchAll(/<version>([^<]+)<\/version>/g)].map((it) => it[1]);
+    const latest = versions.at(-1);
+    if (latest === undefined) {
+      throw new Error(`PlantUML metadata did not include versions: ${url}`);
+    }
+    return latest;
   }
 
   private async get(url: string): Promise<Response> {

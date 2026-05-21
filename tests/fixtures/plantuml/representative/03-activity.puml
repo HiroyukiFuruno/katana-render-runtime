@@ -1,0 +1,10 @@
+@startuml
+start
+:Read Markdown;
+if (Diagram block?) then (yes)
+  :Render in background;
+else (no)
+  :Build Markdown section;
+endif
+stop
+@enduml

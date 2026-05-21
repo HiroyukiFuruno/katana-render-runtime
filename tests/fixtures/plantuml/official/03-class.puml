@@ -1,0 +1,36 @@
+@startuml
+interface DiagramRenderer {
+  +render(input: RenderInput): RenderOutput
+}
+
+abstract class RuntimeBackend {
+  #runtime_path: PathBuf
+  +version(): RuntimeVersion
+}
+
+class PlantUmlRenderer {
+  -jar_path: PathBuf
+  +render(input: RenderInput): RenderOutput
+}
+
+enum RenderedSection {
+  Markdown
+  Image
+  Error
+  Pending
+}
+
+class PreviewPane {
+  -sections: Vec<RenderedSection>
+  +full_render(source, path)
+  +show_content(ui)
+}
+
+RuntimeBackend <|-- PlantUmlRenderer
+DiagramRenderer <|.. PlantUmlRenderer
+PreviewPane *-- RenderedSection
+PreviewPane --> DiagramRenderer : delegates
+note right of PlantUmlRenderer
+  Uses embedded JVM and bundled plantuml.jar.
+end note
+@enduml

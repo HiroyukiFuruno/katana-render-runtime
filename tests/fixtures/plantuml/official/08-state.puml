@@ -1,0 +1,17 @@
+@startuml
+[*] --> Pending
+Pending --> Rendering : runtime available
+Pending --> RawFallback : libjvm missing
+Rendering --> SvgReady : PlantUML success
+Rendering --> Error : invalid source
+RawFallback --> [*]
+SvgReady --> [*]
+Error --> [*]
+
+state Rendering {
+  [*] --> ResolveJar
+  ResolveJar --> ResolveJvm
+  ResolveJvm --> CallPlantUml
+  CallPlantUml --> [*]
+}
+@enduml

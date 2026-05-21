@@ -1,5 +1,6 @@
 use super::api::RenderInput;
 use crate::markdown::color_preset::DiagramColorPreset;
+use serde_json::Value;
 use std::hash::{Hash, Hasher};
 
 pub(super) struct CacheFingerprintOps;
@@ -13,6 +14,7 @@ impl CacheFingerprintOps {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         input.kind.hash(&mut hasher);
         input.source.hash(&mut hasher);
+        Self::rendering_vendor_config(&input.config.vendor_config).hash(&mut hasher);
         input.context.theme_fingerprint.hash(&mut hasher);
         Self::hash_effective_theme(&mut hasher, input);
         runtime_version.hash(&mut hasher);
@@ -40,6 +42,19 @@ impl CacheFingerprintOps {
         preset.monospace_font_candidates.hash(hasher);
         preset.emoji_font_candidates.hash(hasher);
         preset.editor_font_size.to_bits().hash(hasher);
+    }
+
+    fn rendering_vendor_config(value: &Value) -> String {
+        let Value::Object(map) = value else {
+            return value.to_string();
+        };
+        let mut rendering_map = map.clone();
+        rendering_map.remove("plantuml_cache_dir");
+        rendering_map.remove("plantumlCacheDir");
+        if rendering_map.is_empty() {
+            return Value::Null.to_string();
+        }
+        Value::Object(rendering_map).to_string()
     }
 }
 
@@ -130,6 +145,33 @@ mod tests {
         assert_ne!(checksum_a, checksum_b);
     }
 
+    #[test]
+    fn render_fingerprint_changes_with_vendor_config() {
+        let default =
+            CacheFingerprintOps::render(&input_with_vendor_config(None), "runtime", "checksum");
+        let themed = CacheFingerprintOps::render(
+            &input_with_vendor_config(Some("cyborg")),
+            "runtime",
+            "checksum",
+        );
+
+        assert_ne!(default, themed);
+    }
+
+    #[test]
+    fn render_fingerprint_ignores_plantuml_cache_dir() {
+        let _guard = mode_guard();
+        let default =
+            CacheFingerprintOps::render(&input_with_vendor_config(None), "runtime", "checksum");
+        let cache_dir = CacheFingerprintOps::render(
+            &input_with_plantuml_cache_dir("/tmp/kdr-plantuml-cache"),
+            "runtime",
+            "checksum",
+        );
+
+        assert_eq!(default, cache_dir);
+    }
+
     fn input(theme_fingerprint: Option<&str>) -> RenderInput {
         RenderInput {
             kind: DiagramKind::Mermaid,
@@ -154,6 +196,43 @@ mod tests {
                 theme_fingerprint: None,
                 document_id: None,
                 theme,
+            },
+        }
+    }
+
+    fn input_with_vendor_config(theme: Option<&str>) -> RenderInput {
+        let vendor_config = theme.map_or(serde_json::Value::Null, |theme| {
+            serde_json::json!({
+                "plantuml_theme": theme,
+            })
+        });
+        RenderInput {
+            kind: DiagramKind::PlantUml,
+            source: "@startuml\nclass A\n@enduml".to_string(),
+            config: RenderConfig { vendor_config },
+            policy: RenderPolicy::default(),
+            context: RenderContext {
+                theme_fingerprint: None,
+                document_id: None,
+                theme: None,
+            },
+        }
+    }
+
+    fn input_with_plantuml_cache_dir(cache_dir: &str) -> RenderInput {
+        RenderInput {
+            kind: DiagramKind::PlantUml,
+            source: "@startuml\nclass A\n@enduml".to_string(),
+            config: RenderConfig {
+                vendor_config: serde_json::json!({
+                    "plantuml_cache_dir": cache_dir,
+                }),
+            },
+            policy: RenderPolicy::default(),
+            context: RenderContext {
+                theme_fingerprint: None,
+                document_id: None,
+                theme: None,
             },
         }
     }
