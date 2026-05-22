@@ -3,9 +3,12 @@ use crate::markdown::diagram_js_runtime::DiagramRuntimeScript;
 pub(super) struct MathJaxRuntimeScripts;
 
 impl MathJaxRuntimeScripts {
-    pub(super) fn build(request_json: &str) -> Vec<DiagramRuntimeScript<'static>> {
+    pub(super) fn build(
+        runtime_source: String,
+        request_json: &str,
+    ) -> Vec<DiagramRuntimeScript<'static>> {
         vec![
-            DiagramRuntimeScript::borrowed("mathjax-runtime.min.js", MATHJAX_RUNTIME),
+            DiagramRuntimeScript::owned("mathjax-runtime.min.js", runtime_source),
             DiagramRuntimeScript::owned(
                 "render-mathjax.js",
                 format!("katanaRunMathJaxRuntime({request_json});"),
@@ -26,7 +29,7 @@ mod tests {
 
     #[test]
     fn build_loads_setup_before_mathjax_bundle() {
-        let scripts = MathJaxRuntimeScripts::build("{}");
+        let scripts = MathJaxRuntimeScripts::build("runtime".to_string(), "{}");
 
         assert_eq!(scripts[0].name, "mathjax-runtime.min.js");
         assert_eq!(scripts[1].name, "render-mathjax.js");

@@ -5,12 +5,23 @@ version="$(bash "$(dirname "$0")/verify-version.sh" "${1:-}" | awk -F= '$1 == "v
 
 cli_dependency_line="$(grep '^katana-render-runtime = ' crates/katana-diagram-renderer-cli/Cargo.toml)"
 wrapper_dependency_line="$(grep '^katana-render-runtime = ' crates/katana-diagram-renderer/Cargo.toml)"
+workspace_dependency_line="$(grep '^katana-render-runtime = ' Cargo.toml)"
+expected_workspace_path='path = "crates/katana-render-runtime"'
+expected_workspace_version="version = \"${version}\""
 if [[ "${cli_dependency_line}" != *"workspace = true"* ]]; then
   echo "katana-diagram-renderer-cli must depend on katana-render-runtime from the workspace" >&2
   exit 1
 fi
 if [[ "${wrapper_dependency_line}" != *"workspace = true"* ]]; then
   echo "katana-diagram-renderer wrapper must depend on katana-render-runtime from the workspace" >&2
+  exit 1
+fi
+if [[ "${workspace_dependency_line}" != *"${expected_workspace_path}"* ]]; then
+  echo "workspace katana-render-runtime dependency must point to crates/katana-render-runtime" >&2
+  exit 1
+fi
+if [[ "${workspace_dependency_line}" != *"${expected_workspace_version}"* ]]; then
+  echo "workspace katana-render-runtime dependency must use version ${version}" >&2
   exit 1
 fi
 

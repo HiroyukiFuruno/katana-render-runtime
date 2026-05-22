@@ -20,20 +20,29 @@ impl MathJaxJsRuntimeOps {
         preset: &DiagramColorPreset,
         display: bool,
     ) -> Result<String, String> {
-        if !mathjax_js.exists() {
-            return Err(format!(
-                "MathJax runtime asset is not installed: {}",
-                mathjax_js.display()
-            ));
-        }
+        let mathjax_source = runtime_source_from(mathjax_js)?;
         let request = MathJaxRenderRequest::new(source, preset, display);
         let request_json = request.to_json_value().to_string();
-        let scripts = MathJaxRuntimeScripts::build(&request_json);
+        let scripts = MathJaxRuntimeScripts::build(mathjax_source, &request_json);
         let output = DiagramV8Runtime::render(&scripts)?;
         match parse_response(&output)? {
             MathJaxRuntimeResponse::Svg { svg } => Ok(svg),
             MathJaxRuntimeResponse::Error { message } => Err(message),
         }
+    }
+}
+
+fn runtime_source_from(mathjax_js: &Path) -> Result<String, String> {
+    match std::fs::read_to_string(mathjax_js) {
+        Ok(source) => Ok(source),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(format!(
+            "MathJax runtime asset is not installed: {}",
+            mathjax_js.display()
+        )),
+        Err(error) => Err(format!(
+            "MathJax runtime asset could not be read: {}: {error}",
+            mathjax_js.display()
+        )),
     }
 }
 

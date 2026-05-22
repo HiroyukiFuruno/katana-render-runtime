@@ -58,6 +58,17 @@ fn mathjax_missing_runtime_path_returns_raw_string() -> Result<(), Box<dyn std::
 }
 
 #[test]
+fn mathjax_uses_explicit_runtime_path() -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = TempMathJaxRuntime::create()?;
+    let renderer = MathJaxRenderer::with_runtime_path(runtime.path.clone());
+    let output = renderer.render(&input("custom runtime", false))?;
+
+    assert!(output.svg.contains("data-runtime=\"custom\""));
+    assert!(output.diagnostics.errors.is_empty());
+    Ok(())
+}
+
+#[test]
 fn mathjax_theme_changes_cache_fingerprint() -> Result<(), Box<dyn std::error::Error>> {
     let renderer = renderer()?;
     let light = renderer.render(&input_with_theme(RenderThemeMode::Light))?;
@@ -129,6 +140,36 @@ struct ThemePalette {
     mermaid_theme: &'static str,
     note_bg: &'static str,
 }
+
+struct TempMathJaxRuntime {
+    path: std::path::PathBuf,
+}
+
+impl TempMathJaxRuntime {
+    fn create() -> Result<Self, Box<dyn std::error::Error>> {
+        let path = std::env::temp_dir().join(format!(
+            "katana-render-runtime-mathjax-custom-{}.js",
+            std::process::id()
+        ));
+        std::fs::write(&path, CUSTOM_MATHJAX_RUNTIME)?;
+        Ok(Self { path })
+    }
+}
+
+impl Drop for TempMathJaxRuntime {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+const CUSTOM_MATHJAX_RUNTIME: &str = r#"
+function katanaRunMathJaxRuntime(request) {
+  return JSON.stringify({
+    kind: "svg",
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8" data-runtime="custom"><text>${request.source}</text></svg>`
+  });
+}
+"#;
 
 impl ThemePalette {
     fn for_mode(mode: RenderThemeMode) -> Self {
