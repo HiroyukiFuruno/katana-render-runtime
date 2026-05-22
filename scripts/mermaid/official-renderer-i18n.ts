@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 
-const I18N_RUNTIME_DIR = "crates/katana-diagram-renderer/src/markdown/mermaid_renderer/js_runtime";
+const I18N_RUNTIME_DIR = "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime";
 const RUNTIME_SCRIPTS = [
   "dom_text_metrics.js",
   "browser_text_measure.js",

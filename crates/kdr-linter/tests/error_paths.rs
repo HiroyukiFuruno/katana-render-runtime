@@ -9,7 +9,7 @@ fn reports_rust_parse_error() -> TestResult<()> {
     write_valid_manifests(&root)?;
     write_file(
         &root,
-        "crates/katana-diagram-renderer/src/bad.rs",
+        "crates/katana-render-runtime/src/bad.rs",
         "fn broken(",
     )?;
 
@@ -23,11 +23,7 @@ fn reports_rust_parse_error() -> TestResult<()> {
 #[test]
 fn reports_toml_parse_error() -> TestResult<()> {
     let root = temp_root("toml");
-    write_file(
-        &root,
-        "crates/katana-diagram-renderer/Cargo.toml",
-        "[package",
-    )?;
+    write_file(&root, "crates/katana-render-runtime/Cargo.toml", "[package")?;
     write_file(
         &root,
         "crates/katana-diagram-renderer-cli/Cargo.toml",
@@ -46,7 +42,7 @@ fn reports_manifest_read_error() -> TestResult<()> {
     let root = temp_root("read");
     write_file(
         &root,
-        "crates/katana-diagram-renderer/src/lib.rs",
+        "crates/katana-render-runtime/src/lib.rs",
         "struct Ok;",
     )?;
 
@@ -64,7 +60,7 @@ fn reports_source_read_error() -> TestResult<()> {
     write_valid_manifests(&root)?;
     let source = write_file(
         &root,
-        "crates/katana-diagram-renderer/src/private.rs",
+        "crates/katana-render-runtime/src/private.rs",
         "struct Ok;",
     )?;
     set_mode(&source, 0o000)?;
@@ -80,7 +76,7 @@ fn reports_source_read_error() -> TestResult<()> {
 fn reports_workspace_walk_error() -> TestResult<()> {
     let root = temp_root("walk");
     write_valid_manifests(&root)?;
-    let blocked = root.join("crates/katana-diagram-renderer/src/blocked");
+    let blocked = root.join("crates/katana-render-runtime/src/blocked");
     std::fs::create_dir_all(&blocked)?;
     set_mode(&blocked, 0o000)?;
 
@@ -106,7 +102,7 @@ fn workspace_model_exposes_loaded_source() -> TestResult<()> {
     write_valid_manifests(&root)?;
     write_file(
         &root,
-        "crates/katana-diagram-renderer/src/lib.rs",
+        "crates/katana-render-runtime/src/lib.rs",
         "pub struct Loaded;",
     )?;
 
@@ -124,7 +120,7 @@ fn workspace_model_exposes_loaded_source() -> TestResult<()> {
 fn write_valid_manifests(root: &Path) -> TestResult<()> {
     write_file(
         root,
-        "crates/katana-diagram-renderer/Cargo.toml",
+        "crates/katana-render-runtime/Cargo.toml",
         lib_manifest(),
     )?;
     write_file(
@@ -138,7 +134,7 @@ fn write_valid_manifests(root: &Path) -> TestResult<()> {
 fn lib_manifest() -> &'static str {
     r#"
 [package]
-name = "katana-diagram-renderer"
+name = "katana-render-runtime"
 version = "0.1.0"
 edition = "2024"
 "#
@@ -152,7 +148,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-katana-diagram-renderer = { path = "../katana-diagram-renderer" }
+katana-render-runtime = { path = "../katana-render-runtime" }
 "#
 }
 

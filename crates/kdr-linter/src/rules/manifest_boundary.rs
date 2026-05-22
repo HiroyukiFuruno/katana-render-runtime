@@ -35,10 +35,7 @@ impl ManifestBoundaryRule {
     ) -> Result<(), KdrLintError> {
         let manifest = ManifestReader::read(path)?;
         let dependencies = ManifestReader::dependency_names(&manifest);
-        if dependencies
-            .iter()
-            .any(|it| it == "katana-diagram-renderer")
-        {
+        if dependencies.iter().any(|it| it == "katana-render-runtime") {
             return Ok(());
         }
         violations.push(Violation::new(
@@ -53,6 +50,7 @@ impl ManifestBoundaryRule {
 
     fn is_renderer_boundary_violation(dependency: &str) -> bool {
         UiDependencyPolicy::is_ui_dependency(dependency)
+            || dependency == "katana-diagram-renderer"
             || dependency == "katana-diagram-renderer-cli"
     }
 

@@ -8,7 +8,7 @@ mod system;
 use clap::Parser;
 use commands::{Cli, Commands};
 use diagram_cmd::DiagramCommand;
-use katana_diagram_renderer::DiagramKind;
+use katana_render_runtime::DiagramKind;
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {

@@ -42,7 +42,7 @@ const CliOptions = {
             argv,
             "--mermaid-zenuml-js",
             process.env.MERMAID_ZENUML_JS ||
-              "crates/katana-diagram-renderer/vendor/mermaid-zenuml/0.2.3/mermaid-zenuml.min.js",
+              "crates/katana-render-runtime/vendor/mermaid-zenuml/0.2.3/mermaid-zenuml.min.js",
           ),
         ),
       ),

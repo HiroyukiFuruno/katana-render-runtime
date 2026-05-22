@@ -3,7 +3,8 @@ set -euo pipefail
 
 package="${1:-}"
 version_input="${2:-}"
-max_bytes="${3:-10000000}"
+# crates.io rejects uploads above 10 MiB.
+max_bytes="${3:-10485760}"
 
 if [[ -z "${package}" ]]; then
   echo "package name is required." >&2

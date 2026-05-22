@@ -43,3 +43,13 @@ test("ZenUML latest は npm registry の version を読む", async () => {
     "https://registry.npmjs.org/@mermaid-js/mermaid-zenuml/latest",
   ]);
 });
+
+test("MathJax latest は npm registry の version を読む", async () => {
+  const fetchStub = new FetchStub(JSON.stringify({ version: "4.1.2" }));
+  const client = new LatestVersionClient(fetchStub.handler());
+
+  const latest = await client.latest(RuntimeAssetCatalog.byKind("mathjax"));
+
+  expect(latest).toBe("4.1.2");
+  expect(fetchStub.requestedUrls).toEqual(["https://registry.npmjs.org/mathjax/latest"]);
+});

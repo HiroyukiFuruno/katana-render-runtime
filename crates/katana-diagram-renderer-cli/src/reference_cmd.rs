@@ -1,6 +1,6 @@
 use crate::system::ProcessService;
 use anyhow::anyhow;
-use katana_diagram_renderer::DiagramKind;
+use katana_render_runtime::DiagramKind;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -39,6 +39,7 @@ impl ReferenceCommand {
             DiagramKind::Mermaid => "mermaid",
             DiagramKind::Drawio => "drawio",
             DiagramKind::PlantUml => "plantuml",
+            DiagramKind::MathJax => "mathjax",
         }
     }
 }
@@ -76,7 +77,7 @@ impl JustRecipe {
 #[cfg(test)]
 mod tests {
     use super::ReferenceCommand;
-    use katana_diagram_renderer::DiagramKind;
+    use katana_render_runtime::DiagramKind;
 
     #[test]
     fn recipe_name_uses_diagram_prefix() {
@@ -91,6 +92,10 @@ mod tests {
         assert_eq!(
             ReferenceCommand::recipe(DiagramKind::PlantUml, "bench"),
             "plantuml-bench"
+        );
+        assert_eq!(
+            ReferenceCommand::recipe(DiagramKind::MathJax, "bench"),
+            "mathjax-bench"
         );
     }
 }

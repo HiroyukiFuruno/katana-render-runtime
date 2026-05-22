@@ -6,14 +6,14 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 authors.workspace = true
-description = "CLI front-end for katana-diagram-renderer: render, reference-update, compare, bench."
+description = "CLI front-end for katana-render-runtime: render, reference-update, compare, bench."
 
 [[bin]]
 name = "kdr"
 path = "src/main.rs"
 
 [dependencies]
-katana-diagram-renderer = { path = "../katana-diagram-renderer", version = "0.2.0" }
+katana-render-runtime = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }

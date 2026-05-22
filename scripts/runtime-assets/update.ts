@@ -46,7 +46,9 @@ export class RuntimeSourceUpdater {
   update(definition: RuntimeAssetDefinition, version: string, checksum: string) {
     this.updateRust(definition, version, checksum);
     this.updateMermaidZenumlReferences(definition, version);
-    this.updatePackageInclude(definition, version);
+    if (definition.kind !== "mathjax") {
+      this.updatePackageInclude(definition, version);
+    }
     this.updateJustfile(definition, version, checksum);
     this.updateScriptCatalog(definition, version, checksum);
   }
@@ -64,7 +66,11 @@ export class RuntimeSourceUpdater {
       definition.rustDownloadConst,
       definition.releasePageUrl(version),
     );
-    if (definition.kind !== "mermaid-zenuml" && definition.kind !== "plantuml") {
+    if (
+      definition.kind !== "mermaid-zenuml" &&
+      definition.kind !== "plantuml" &&
+      definition.kind !== "mathjax"
+    ) {
       source = this.replaceVendorAssetVersion(source, definition, version);
     }
     fs.writeFileSync(sourcePath, source, "utf8");
@@ -194,7 +200,7 @@ const CliOptions = {
   command(argv: string[]): UpdateCommand {
     if (argv.length !== 2) {
       throw new Error(
-        "Usage: bun run scripts/runtime-assets/update.ts <mermaid|mermaid-zenuml|drawio|plantuml> <version>",
+        "Usage: bun run scripts/runtime-assets/update.ts <mermaid|mermaid-zenuml|drawio|mathjax|plantuml> <version>",
       );
     }
     return new UpdateCommand(
