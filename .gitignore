@@ -17,5 +17,6 @@ __pycache__/
 openspec*
 !openspec/
 !openspec/**
+openspec/**/.DS_Store
 opsx*
 !/scripts/openspec
