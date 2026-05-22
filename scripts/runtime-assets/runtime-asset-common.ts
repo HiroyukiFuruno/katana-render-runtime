@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-export type RuntimeAssetKind = "mermaid" | "mermaid-zenuml" | "drawio" | "plantuml";
+export type RuntimeAssetKind = "mermaid" | "mermaid-zenuml" | "drawio" | "mathjax" | "plantuml";
 
 export interface RuntimeAssetDefinition {
   readonly kind: RuntimeAssetKind;
@@ -63,6 +63,20 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
       `https://github.com/jgraph/drawio/releases/tag/v${version}`,
     downloadUrl: (version: string) =>
       `https://github.com/jgraph/drawio/releases/download/v${version}/draw.war`,
+  },
+  {
+    kind: "mathjax",
+    displayName: "MathJax",
+    version: "4.1.2",
+    checksum: "e201dba4a20191563337e7f95ebeef6724bd2fbdc079c431b4bb8ecdfc059c33",
+    fileName: "tex-svg.js",
+    rustVersionConst: "MATHJAX_JS_VERSION",
+    rustChecksumConst: "MATHJAX_JS_CHECKSUM",
+    rustDownloadConst: "MATHJAX_DOWNLOAD_URL",
+    latestUrl: "https://registry.npmjs.org/mathjax/latest",
+    releasePageUrl: (version: string) =>
+      `https://cdn.jsdelivr.net/npm/mathjax@${version}/tex-svg.js`,
+    downloadUrl: (version: string) => `https://cdn.jsdelivr.net/npm/mathjax@${version}/tex-svg.js`,
   },
   {
     kind: "plantuml",
@@ -129,7 +143,7 @@ export const RuntimeAssetCatalogSource = {
 
 export const RuntimeAssetPaths = {
   vendorDir(definition: RuntimeAssetDefinition, version = definition.version): string {
-    return path.join("crates", "katana-diagram-renderer", "vendor", definition.kind, version);
+    return path.join("crates", "katana-render-runtime", "vendor", definition.kind, version);
   },
 
   assetFile(definition: RuntimeAssetDefinition, version = definition.version): string {
@@ -148,13 +162,13 @@ export const RuntimeAssetPaths = {
   },
 
   runtimeAssetsRust(): string {
-    return path.join("crates", "katana-diagram-renderer", "src", "markdown", "runtime_assets.rs");
+    return path.join("crates", "katana-render-runtime", "src", "markdown", "runtime_assets.rs");
   },
 
   plantumlAssetRust(): string {
     return path.join(
       "crates",
-      "katana-diagram-renderer",
+      "katana-render-runtime",
       "src",
       "markdown",
       "plantuml_renderer",
@@ -163,13 +177,13 @@ export const RuntimeAssetPaths = {
   },
 
   rendererCargoToml(): string {
-    return path.join("crates", "katana-diagram-renderer", "Cargo.toml");
+    return path.join("crates", "katana-render-runtime", "Cargo.toml");
   },
 
   mermaidRuntimeScriptsRust(): string {
     return path.join(
       "crates",
-      "katana-diagram-renderer",
+      "katana-render-runtime",
       "src",
       "markdown",
       "mermaid_renderer",

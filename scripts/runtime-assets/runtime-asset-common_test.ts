@@ -10,19 +10,23 @@ test("runtime asset path は version を含む", () => {
   const mermaid = RuntimeAssetCatalog.byKind("mermaid");
   const zenuml = RuntimeAssetCatalog.byKind("mermaid-zenuml");
   const drawio = RuntimeAssetCatalog.byKind("drawio");
+  const mathjax = RuntimeAssetCatalog.byKind("mathjax");
   const plantuml = RuntimeAssetCatalog.byKind("plantuml");
 
   expect(RuntimeAssetPaths.assetFile(mermaid)).toBe(
-    `crates/katana-diagram-renderer/vendor/mermaid/${mermaid.version}/mermaid.min.js`,
+    `crates/katana-render-runtime/vendor/mermaid/${mermaid.version}/mermaid.min.js`,
   );
   expect(RuntimeAssetPaths.assetFile(zenuml)).toBe(
-    `crates/katana-diagram-renderer/vendor/mermaid-zenuml/${zenuml.version}/mermaid-zenuml.min.js`,
+    `crates/katana-render-runtime/vendor/mermaid-zenuml/${zenuml.version}/mermaid-zenuml.min.js`,
   );
   expect(RuntimeAssetPaths.assetFile(drawio)).toBe(
-    `crates/katana-diagram-renderer/vendor/drawio/${drawio.version}/drawio.min.js`,
+    `crates/katana-render-runtime/vendor/drawio/${drawio.version}/drawio.min.js`,
+  );
+  expect(RuntimeAssetPaths.assetFile(mathjax)).toBe(
+    `crates/katana-render-runtime/vendor/mathjax/${mathjax.version}/tex-svg.js`,
   );
   expect(RuntimeAssetPaths.assetFile(plantuml)).toBe(
-    `crates/katana-diagram-renderer/vendor/plantuml/${plantuml.version}/plantuml.jar`,
+    `crates/katana-render-runtime/vendor/plantuml/${plantuml.version}/plantuml.jar`,
   );
   expect(RuntimeAssetPaths.justVersionVariable(zenuml)).toBe("MERMAID_ZENUML_JS_VERSION");
   expect(RuntimeAssetPaths.justVersionVariable(plantuml)).toBe("PLANTUML_JAR_VERSION");
@@ -32,6 +36,7 @@ test("runtime asset checksum は固定ファイルと一致する", () => {
   const mermaid = RuntimeAssetCatalog.byKind("mermaid");
   const zenuml = RuntimeAssetCatalog.byKind("mermaid-zenuml");
   const drawio = RuntimeAssetCatalog.byKind("drawio");
+  const mathjax = RuntimeAssetCatalog.byKind("mathjax");
   const plantuml = RuntimeAssetCatalog.byKind("plantuml");
 
   expect(RuntimeAssetChecksum.digestFile(RuntimeAssetPaths.assetFile(mermaid))).toBe(
@@ -42,6 +47,9 @@ test("runtime asset checksum は固定ファイルと一致する", () => {
   );
   expect(RuntimeAssetChecksum.digestFile(RuntimeAssetPaths.assetFile(drawio))).toBe(
     drawio.checksum,
+  );
+  expect(RuntimeAssetChecksum.digestFile(RuntimeAssetPaths.assetFile(mathjax))).toBe(
+    mathjax.checksum,
   );
   expect(RuntimeAssetChecksum.readChecksumFile(RuntimeAssetPaths.checksumFile(plantuml))).toBe(
     plantuml.checksum,

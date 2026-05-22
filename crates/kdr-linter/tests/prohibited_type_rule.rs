@@ -27,7 +27,7 @@ fn assert_prohibited_type(name: &str, source: &str) -> TestResult<()> {
     let root = temp_root(name);
     write_file(
         &root,
-        "crates/katana-diagram-renderer/Cargo.toml",
+        "crates/katana-render-runtime/Cargo.toml",
         lib_manifest(),
     )?;
     write_file(
@@ -35,7 +35,7 @@ fn assert_prohibited_type(name: &str, source: &str) -> TestResult<()> {
         "crates/katana-diagram-renderer-cli/Cargo.toml",
         cli_manifest(),
     )?;
-    write_file(&root, "crates/katana-diagram-renderer/src/lib.rs", source)?;
+    write_file(&root, "crates/katana-render-runtime/src/lib.rs", source)?;
 
     let violations = KdrLinter::lint_workspace(&root)?;
     let report = ViolationReport::format(&violations);
@@ -79,7 +79,7 @@ type ImportedLock = RwLock<i32>;
 fn lib_manifest() -> &'static str {
     r#"
 [package]
-name = "katana-diagram-renderer"
+name = "katana-render-runtime"
 version = "0.1.0"
 edition = "2024"
 
@@ -95,7 +95,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-katana-diagram-renderer = { path = "../katana-diagram-renderer" }
+katana-render-runtime = { path = "../katana-render-runtime" }
 "#
 }
 

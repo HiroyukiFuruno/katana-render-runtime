@@ -50,7 +50,7 @@ export class LatestVersionClient {
     const response = await this.fetcher(url, {
       headers: {
         accept: "application/json",
-        "user-agent": "katana-diagram-renderer-release-tool",
+        "user-agent": "katana-render-runtime-release-tool",
       },
     });
     if (!response.ok) {

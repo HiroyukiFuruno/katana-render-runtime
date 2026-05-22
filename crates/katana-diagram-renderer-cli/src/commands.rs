@@ -1,11 +1,11 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use katana_diagram_renderer::PlantUmlThemeCatalog;
+use katana_render_runtime::PlantUmlThemeCatalog;
 use std::path::PathBuf;
 
 const DEFAULT_MIN_SCORE: f32 = 99.0;
 
 #[derive(Parser)]
-#[command(name = "kdr", version, about = "katana-diagram-renderer CLI")]
+#[command(name = "kdr", version, about = "katana-render-runtime CLI")]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Commands,

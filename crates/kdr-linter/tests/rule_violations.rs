@@ -11,12 +11,12 @@ fn reports_kal_shared_rule_families() -> TestResult<()> {
     write_manifests(&root)?;
     write_file(
         &root,
-        "crates/katana-diagram-renderer/src/bad.rs",
+        "crates/katana-render-runtime/src/bad.rs",
         &bad_lib_source(),
     )?;
     write_file(
         &root,
-        "crates/katana-diagram-renderer/src/long_type_only.rs",
+        "crates/katana-render-runtime/src/long_type_only.rs",
         &long_type_only_source(),
     )?;
     write_file(
@@ -38,7 +38,7 @@ fn reports_kdr_supplemental_rule_families() -> TestResult<()> {
     write_manifests(&root)?;
     write_file(
         &root,
-        "crates/katana-diagram-renderer/src/bad.rs",
+        "crates/katana-render-runtime/src/bad.rs",
         &bad_lib_source(),
     )?;
     write_file(
@@ -83,7 +83,7 @@ fn required_supplemental_rules() -> [&'static str; 8] {
 fn kal_report(root: &Path) -> String {
     let mut config = kal_config();
     config.source_roots = vec![
-        root.join("crates/katana-diagram-renderer/src"),
+        root.join("crates/katana-render-runtime/src"),
         root.join("crates/katana-diagram-renderer-cli/src"),
     ];
     let violations = KatanaAstLint::with_config(config).violations();
@@ -192,7 +192,7 @@ mod renderer {}
 fn write_manifests(root: &Path) -> TestResult<()> {
     write_file(
         root,
-        "crates/katana-diagram-renderer/Cargo.toml",
+        "crates/katana-render-runtime/Cargo.toml",
         lib_manifest(),
     )?;
     write_file(
@@ -205,7 +205,7 @@ fn write_manifests(root: &Path) -> TestResult<()> {
 fn lib_manifest() -> &'static str {
     r#"
 [package]
-name = "katana-diagram-renderer"
+name = "katana-render-runtime"
 version = "0.1.0"
 edition = "2024"
 

@@ -1,0 +1,41 @@
+[package]
+name = "katana-render-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description.workspace = true
+include = [
+    "Cargo.toml",
+    "src/**/*.rs",
+    "src/markdown/diagram_runtime/generated/*.js",
+    "src/markdown/diagram_runtime/generated/*.sha256",
+    "vendor/drawio/30.0.2/**",
+    "vendor/mermaid/11.15.0/**",
+    "vendor/mermaid-zenuml/0.2.3/**",
+    "vendor/plantuml/1.2026.4/plantuml.jar.sha256",
+    "vendor/zenuml-core/3.47.9/**",
+    "src/markdown/drawio_renderer/js_runtime/resources/drawio-resource-manifest.json",
+    "src/markdown/drawio_renderer/js_runtime/resources/shapes/**",
+    "src/markdown/drawio_renderer/js_runtime/resources/stencils/**",
+]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+base64 = { workspace = true }
+include_dir = { workspace = true }
+jni = { workspace = true }
+resvg = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tiny-skia = { workspace = true }
+tracing = { workspace = true }
+ureq = { workspace = true }
+v8 = { workspace = true }
+xmltree = { workspace = true }

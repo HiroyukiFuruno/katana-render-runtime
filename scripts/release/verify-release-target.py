@@ -33,7 +33,7 @@ class StableVersion:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target-version", required=True)
-    parser.add_argument("--repo", default="HiroyukiFuruno/katana-diagram-renderer")
+    parser.add_argument("--repo", default="HiroyukiFuruno/katana-render-runtime")
     parser.add_argument("--remote", default="origin")
     return parser.parse_args()
 
@@ -42,7 +42,7 @@ def request_headers() -> dict[str, str]:
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "katana-diagram-renderer-release-target-check",
+        "User-Agent": "katana-render-runtime-release-target-check",
     }
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if token:
