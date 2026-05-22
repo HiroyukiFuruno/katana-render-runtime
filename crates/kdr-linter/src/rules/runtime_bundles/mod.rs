@@ -9,22 +9,24 @@ use std::path::{Path, PathBuf};
 use type_script_tokens::RuntimeTypeScriptTokenRule;
 
 const RULE: &str = "runtime-bundle-boundary";
-const RUNTIME_ROOT: &str = "crates/katana-diagram-renderer/src/markdown/diagram_runtime";
-const GENERATED: &str = "crates/katana-diagram-renderer/src/markdown/diagram_runtime/generated";
-const SOURCE: &str = "crates/katana-diagram-renderer/src/markdown/diagram_runtime/source";
+const RUNTIME_ROOT: &str = "crates/katana-render-runtime/src/markdown/diagram_runtime";
+const GENERATED: &str = "crates/katana-render-runtime/src/markdown/diagram_runtime/generated";
+const SOURCE: &str = "crates/katana-render-runtime/src/markdown/diagram_runtime/source";
 const TS_SCRIPT_ROOT: &str = "scripts";
 const REQUIRED_PATHS: &[&str] = &[
     RUNTIME_ROOT,
     GENERATED,
     SOURCE,
-    "crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/shared",
-    "crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/mermaid",
-    "crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/drawio",
-    "crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/zenuml",
-    "crates/katana-diagram-renderer/src/markdown/diagram_runtime/generated/mermaid-runtime.min.js",
-    "crates/katana-diagram-renderer/src/markdown/diagram_runtime/generated/drawio-runtime.min.js",
-    "crates/katana-diagram-renderer/src/markdown/diagram_runtime/generated/zenuml-runtime.min.js",
-    "crates/katana-diagram-renderer/src/markdown/diagram_runtime/generated/runtime-bundles.sha256",
+    "crates/katana-render-runtime/src/markdown/diagram_runtime/source/shared",
+    "crates/katana-render-runtime/src/markdown/diagram_runtime/source/mermaid",
+    "crates/katana-render-runtime/src/markdown/diagram_runtime/source/drawio",
+    "crates/katana-render-runtime/src/markdown/diagram_runtime/source/zenuml",
+    "crates/katana-render-runtime/src/markdown/diagram_runtime/source/mathjax",
+    "crates/katana-render-runtime/src/markdown/diagram_runtime/generated/mermaid-runtime.min.js",
+    "crates/katana-render-runtime/src/markdown/diagram_runtime/generated/drawio-runtime.min.js",
+    "crates/katana-render-runtime/src/markdown/diagram_runtime/generated/zenuml-runtime.min.js",
+    "crates/katana-render-runtime/src/markdown/diagram_runtime/generated/mathjax-runtime.min.js",
+    "crates/katana-render-runtime/src/markdown/diagram_runtime/generated/runtime-bundles.sha256",
     "scripts/runtime-bundles/bundle-runtime.ts",
 ];
 

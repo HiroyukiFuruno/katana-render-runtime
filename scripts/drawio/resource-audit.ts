@@ -30,7 +30,7 @@ const CliOptions = {
       CliOptions.get(
         argv,
         "--resources",
-        "crates/katana-diagram-renderer/src/markdown/drawio_renderer/js_runtime/resources",
+        "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources",
       ),
     );
     return {

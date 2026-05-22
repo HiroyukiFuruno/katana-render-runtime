@@ -210,7 +210,7 @@ Even at the outermost boundary, do not use `Option` when omission has no specifi
 `Option` is allowed only at a boundary where omission is part of the input contract, such as "when omitted, resolve the default asset".
 Even then, the boundary must resolve the value into `Result<T, E>` and must not pass `Option` / `None` into internal processing.
 
-For KDR runtime paths, CLI `--runtime` may be `Option<PathBuf>` because an omitted value means resolving the bundled runtime.
+For KRR runtime paths, CLI `--runtime` may be `Option<PathBuf>` because an omitted value means resolving the bundled runtime.
 However, `RuntimePathResolver` must convert it into `Result<PathBuf, RenderError>`, and internal renderers such as `MermaidRenderer` / `DrawioRenderer` must hold `PathBuf` directly.
 If resolution fails, fail error-first at the beginning instead of using implicit fallback.
 

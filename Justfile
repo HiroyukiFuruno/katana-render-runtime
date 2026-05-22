@@ -12,23 +12,25 @@ KDR_BIN := env_var_or_default("KDR_BIN", REPO_ROOT + "/target/debug/kdr")
 VERSION := env_var_or_default("VERSION", `awk -F '"' '/^version = / { print $2; exit }' Cargo.toml`)
 VERSION_BARE := replace(VERSION, "v", "")
 TAG := "v" + VERSION_BARE
-RELEASE_REPO := env_var_or_default("RELEASE_REPO", "HiroyukiFuruno/katana-diagram-renderer")
+RELEASE_REPO := env_var_or_default("RELEASE_REPO", "HiroyukiFuruno/katana-render-runtime")
 COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
 MERMAID_JS_VERSION := "11.15.0"
 MERMAID_ZENUML_JS_VERSION := "0.2.3"
 DRAWIO_JS_VERSION := "30.0.2"
+MATHJAX_JS_VERSION := "4.1.2"
 ZENUML_CORE_JS_VERSION := "3.47.9"
 PLANTUML_JAR_VERSION := "1.2026.4"
 PLANTUML_JAR_CHECKSUM := "1783d4569855f2f0a17e65bd192add377c7f2b5e3e1781b65dc94d084de98699"
 PLAYWRIGHT_VERSION := "1.59.1"
-MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-diagram-renderer/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
-MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-diagram-renderer/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
-DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-diagram-renderer/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
+MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-render-runtime/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
+MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-render-runtime/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
+DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-render-runtime/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
+MATHJAX_JS := env_var_or_default("MATHJAX_JS", "crates/katana-render-runtime/vendor/mathjax/" + MATHJAX_JS_VERSION + "/tex-svg.js")
 PLANTUML_JAR_URL := "https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/" + PLANTUML_JAR_VERSION + "/plantuml-lgpl-" + PLANTUML_JAR_VERSION + ".jar"
 PLANTUML_CACHE_DIR := env_var_or_default("KDR_PLANTUML_CACHE_DIR", `bash scripts/plantuml/cache-dir.sh`)
 PLANTUML_CACHE_JAR := PLANTUML_CACHE_DIR + "/" + PLANTUML_JAR_VERSION + "/plantuml.jar"
-DRAWIO_RESOURCE_DIR := "crates/katana-diagram-renderer/src/markdown/drawio_renderer/js_runtime/resources"
+DRAWIO_RESOURCE_DIR := "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources"
 DRAWIO_RESOURCE_MANIFEST := DRAWIO_RESOURCE_DIR + "/drawio-resource-manifest.json"
 
 default: help
@@ -58,7 +60,7 @@ dependency-leak:
     @dependencies="$({{CARGO}} tree --workspace -e normal)"; \
     pattern='(^|[[:space:]])(egui|katana-core|katana-ui|katana-platform|katana-native)([[:space:]]|$)'; \
     if printf '%s\n' "$dependencies" | grep -E "$pattern"; then \
-      echo "KatanA UI dependency leaked into katana-diagram-renderer." >&2; \
+      echo "KatanA UI dependency leaked into katana-render-runtime." >&2; \
       exit 1; \
     fi
 
@@ -72,13 +74,14 @@ coverage:
 
 # Verify pinned runtime asset checksums
 runtime-asset-check:
-    cd crates/katana-diagram-renderer/vendor/mermaid/{{MERMAID_JS_VERSION}} && shasum -a 256 -c mermaid.min.js.sha256
-    cd crates/katana-diagram-renderer/vendor/mermaid-zenuml/{{MERMAID_ZENUML_JS_VERSION}} && shasum -a 256 -c mermaid-zenuml.min.js.sha256
-    cd crates/katana-diagram-renderer/vendor/drawio/{{DRAWIO_JS_VERSION}} && shasum -a 256 -c drawio.min.js.sha256
-    cd crates/katana-diagram-renderer/vendor/zenuml-core/{{ZENUML_CORE_JS_VERSION}} && shasum -a 256 -c zenuml.js.sha256
-    @grep -qx "{{PLANTUML_JAR_CHECKSUM}}  plantuml.jar" crates/katana-diagram-renderer/vendor/plantuml/{{PLANTUML_JAR_VERSION}}/plantuml.jar.sha256
-    @if [ -f "{{PLANTUML_CACHE_JAR}}" ]; then cd "$(dirname "{{PLANTUML_CACHE_JAR}}")" && shasum -a 256 -c "{{REPO_ROOT}}/crates/katana-diagram-renderer/vendor/plantuml/{{PLANTUML_JAR_VERSION}}/plantuml.jar.sha256"; fi
-    cd crates/katana-diagram-renderer/src/markdown/diagram_runtime/generated && shasum -a 256 -c runtime-bundles.sha256
+    cd crates/katana-render-runtime/vendor/mermaid/{{MERMAID_JS_VERSION}} && shasum -a 256 -c mermaid.min.js.sha256
+    cd crates/katana-render-runtime/vendor/mermaid-zenuml/{{MERMAID_ZENUML_JS_VERSION}} && shasum -a 256 -c mermaid-zenuml.min.js.sha256
+    cd crates/katana-render-runtime/vendor/drawio/{{DRAWIO_JS_VERSION}} && shasum -a 256 -c drawio.min.js.sha256
+    cd crates/katana-render-runtime/vendor/mathjax/{{MATHJAX_JS_VERSION}} && shasum -a 256 -c tex-svg.js.sha256
+    cd crates/katana-render-runtime/vendor/zenuml-core/{{ZENUML_CORE_JS_VERSION}} && shasum -a 256 -c zenuml.js.sha256
+    @grep -qx "{{PLANTUML_JAR_CHECKSUM}}  plantuml.jar" crates/katana-render-runtime/vendor/plantuml/{{PLANTUML_JAR_VERSION}}/plantuml.jar.sha256
+    @if [ -f "{{PLANTUML_CACHE_JAR}}" ]; then cd "$(dirname "{{PLANTUML_CACHE_JAR}}")" && shasum -a 256 -c "{{REPO_ROOT}}/crates/katana-render-runtime/vendor/plantuml/{{PLANTUML_JAR_VERSION}}/plantuml.jar.sha256"; fi
+    cd crates/katana-render-runtime/src/markdown/diagram_runtime/generated && shasum -a 256 -c runtime-bundles.sha256
 
 # Generate TypeScript-managed diagram runtime bundles
 runtime-bundle-build:
@@ -98,10 +101,11 @@ typecheck:
 
 # Verify generated runtime bundles are included in the library crate package
 runtime-bundle-package-check:
-    @package_files="$({{CARGO}} package -p katana-diagram-renderer --locked --allow-dirty --list)"; \
+    @package_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \
     for file in \
       "src/markdown/diagram_runtime/generated/mermaid-runtime.min.js" \
       "src/markdown/diagram_runtime/generated/drawio-runtime.min.js" \
+      "src/markdown/diagram_runtime/generated/mathjax-runtime.min.js" \
       "src/markdown/diagram_runtime/generated/zenuml-runtime.min.js" \
       "src/markdown/diagram_runtime/generated/runtime-bundles.sha256"; do \
         if ! printf '%s\n' "$package_files" | grep -qx "$file"; then \
@@ -112,7 +116,7 @@ runtime-bundle-package-check:
 
 # Verify the PlantUML checksum manifest is included without packaging the JAR body
 plantuml-runtime-package-check:
-    @package_files="$({{CARGO}} package -p katana-diagram-renderer --locked --allow-dirty --list)"; \
+    @package_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \
     if ! printf '%s\n' "$package_files" | grep -qx "vendor/plantuml/{{PLANTUML_JAR_VERSION}}/plantuml.jar.sha256"; then \
       echo "missing PlantUML checksum manifest package file" >&2; \
       exit 1; \
@@ -158,10 +162,11 @@ release-target-check:
 release-verify: release-target-check
     bash scripts/release/verify-version.sh "{{VERSION}}"
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
-    {{CARGO}} package -p katana-diagram-renderer --locked --allow-dirty
+    {{CARGO}} package -p katana-render-runtime --locked --allow-dirty
+    {{CARGO}} package -p katana-diagram-renderer --locked --allow-dirty --list >/dev/null
     {{CARGO}} package -p katana-diagram-renderer-cli --locked --allow-dirty --list >/dev/null
-    bash scripts/release/verify-crate-size.sh katana-diagram-renderer "{{VERSION}}"
-    {{CARGO}} publish -p katana-diagram-renderer --dry-run --locked --allow-dirty
+    bash scripts/release/verify-crate-size.sh katana-render-runtime "{{VERSION}}"
+    {{CARGO}} publish -p katana-render-runtime --dry-run --locked --allow-dirty
 
 # Verify completed OpenSpec changes are archived before release PRs
 release-openspec-archive:
@@ -179,7 +184,7 @@ browser-install:
 kdr-build:
     {{CARGO}} build -p katana-diagram-renderer-cli
 
-# Show latest Mermaid.js, ZenUML, and Draw.io versions without changing files
+# Show latest Mermaid.js, ZenUML, Draw.io, and MathJax versions without changing files
 runtime-asset-latest runtime='all':
     bun run scripts/runtime-assets/latest-check.ts "{{runtime}}"
 
@@ -191,11 +196,15 @@ mermaid-latest:
 drawio-latest:
     just runtime-asset-latest drawio
 
+# Show latest MathJax version without changing files
+mathjax-latest:
+    just runtime-asset-latest mathjax
+
 # Show latest PlantUML version without changing files
 plantuml-latest:
     just runtime-asset-latest plantuml
 
-# Install pinned PlantUML LGPL JAR into the KDR cache
+# Install pinned PlantUML LGPL JAR into the PlantUML cache
 plantuml-install version=PLANTUML_JAR_VERSION output=PLANTUML_CACHE_JAR:
     @set -euo pipefail; \
     url="https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/{{version}}/plantuml-lgpl-{{version}}.jar"; \
@@ -242,6 +251,12 @@ drawio-update version:
     just drawio-reference-all
     just drawio-compare-full
     just drawio-compare-ci
+
+# Update MathJax runtime asset
+mathjax-update version:
+    bun run scripts/runtime-assets/update.ts mathjax "{{version}}"
+    bun add -d @mathjax/src@"{{version}}"
+    bun run runtime-bundle:build
 
 # Render kdr Mermaid SVG fixtures
 mermaid-render fixtures output='tmp/kdr-mermaid-rendered':

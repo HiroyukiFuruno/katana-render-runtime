@@ -2,14 +2,15 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DrawioRuntimeBundleDefinition } from "../../crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/drawio/runtime_definition";
-import { MermaidRuntimeBundleDefinition } from "../../crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/mermaid/runtime_definition";
+import { DrawioRuntimeBundleDefinition } from "../../crates/katana-render-runtime/src/markdown/diagram_runtime/source/drawio/runtime_definition";
+import { MathJaxRuntimeBundleDefinition } from "../../crates/katana-render-runtime/src/markdown/diagram_runtime/source/mathjax/runtime_definition";
+import { MermaidRuntimeBundleDefinition } from "../../crates/katana-render-runtime/src/markdown/diagram_runtime/source/mermaid/runtime_definition";
 import type {
   RuntimeBundleDefinition,
   RuntimeFragment,
   RuntimeFragmentTransform,
-} from "../../crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/shared/runtime_bundle";
-import { ZenumlRuntimeBundleDefinition } from "../../crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/zenuml/runtime_definition";
+} from "../../crates/katana-render-runtime/src/markdown/diagram_runtime/source/shared/runtime_bundle";
+import { ZenumlRuntimeBundleDefinition } from "../../crates/katana-render-runtime/src/markdown/diagram_runtime/source/zenuml/runtime_definition";
 
 type RuntimeBundleMode = "write" | "check";
 
@@ -26,8 +27,10 @@ class RuntimeBundleCommand {
     private readonly mode: RuntimeBundleMode,
   ) {}
 
-  run(): void {
-    const bundles = this.definitions().map((definition) => this.generate(definition));
+  async run(): Promise<void> {
+    const bundles = await Promise.all(
+      this.definitions().map((definition) => this.generate(definition)),
+    );
     if (this.mode === "check") {
       this.checkGeneratedBundles(bundles);
       return;
@@ -40,15 +43,44 @@ class RuntimeBundleCommand {
       MermaidRuntimeBundleDefinition.create(),
       DrawioRuntimeBundleDefinition.create(),
       ZenumlRuntimeBundleDefinition.create(),
+      MathJaxRuntimeBundleDefinition.create(),
     ];
   }
 
-  private generate(definition: RuntimeBundleDefinition): GeneratedBundle {
+  private async generate(definition: RuntimeBundleDefinition): Promise<GeneratedBundle> {
+    if (definition.bundledEntryPath !== null) {
+      return this.generateBundled(definition);
+    }
     const content = [
       this.generatedHeader(definition),
       ...definition.fragments.map((fragment) => this.fragmentContent(fragment)),
       this.entrypointContent(definition),
     ].join("\n");
+    return {
+      definition,
+      outputPath: this.generatedPath(definition.outputFile),
+      content,
+      checksum: RuntimeBundleChecksum.digest(content),
+    };
+  }
+
+  private async generateBundled(definition: RuntimeBundleDefinition): Promise<GeneratedBundle> {
+    const entrypoint = path.join(this.root, definition.bundledEntryPath ?? "");
+    const result = await Bun.build({
+      entrypoints: [entrypoint],
+      format: "iife",
+      minify: true,
+      target: "browser",
+    });
+    if (!result.success) {
+      throw new Error(`Runtime bundle build failed: ${definition.name}`);
+    }
+    const output = result.outputs[0];
+    if (output === undefined) {
+      throw new Error(`Runtime bundle output is missing: ${definition.name}`);
+    }
+    const bundled = (await output.text()).trimEnd();
+    const content = [this.generatedHeader(definition), bundled, ""].join("\n");
     return {
       definition,
       outputPath: this.generatedPath(definition.outputFile),
@@ -98,7 +130,7 @@ class RuntimeBundleCommand {
     return path.join(
       this.root,
       "crates",
-      "katana-diagram-renderer",
+      "katana-render-runtime",
       "src",
       "markdown",
       "diagram_runtime",
@@ -154,7 +186,7 @@ class RuntimeBundleCommand {
     return path.join(
       this.root,
       "crates",
-      "katana-diagram-renderer",
+      "katana-render-runtime",
       "src",
       "markdown",
       "diagram_runtime",
@@ -182,4 +214,4 @@ const RuntimeBundleCli = {
   },
 };
 
-new RuntimeBundleCommand(process.cwd(), RuntimeBundleCli.parse(process.argv.slice(2))).run();
+await new RuntimeBundleCommand(process.cwd(), RuntimeBundleCli.parse(process.argv.slice(2))).run();

@@ -4,9 +4,9 @@ use crate::diagram_source::DiagramSourceOps;
 pub(crate) use crate::diagram_source::MermaidMarkdownOps;
 use crate::file_ops::FileOps;
 use crate::reference_cmd::ReferenceCommand;
-use katana_diagram_renderer::{
-    DiagramKind, DrawioRenderer, MermaidRenderer, PlantUmlRenderer, RenderConfig, RenderContext,
-    RenderInput, RenderOutput, RenderPolicy, Renderer, RuntimePathResolver,
+use katana_render_runtime::{
+    DiagramKind, DrawioRenderer, MathJaxRenderer, MermaidRenderer, PlantUmlRenderer, RenderConfig,
+    RenderContext, RenderInput, RenderOutput, RenderPolicy, Renderer, RuntimePathResolver,
 };
 use std::path::PathBuf;
 
@@ -92,6 +92,7 @@ impl DiagramCommand {
             DiagramKind::Mermaid => Box::new(MermaidRenderer::with_runtime_path(runtime_path)),
             DiagramKind::Drawio => Box::new(DrawioRenderer::with_runtime_path(runtime_path)),
             DiagramKind::PlantUml => Box::new(PlantUmlRenderer::with_runtime_path(runtime_path)),
+            DiagramKind::MathJax => Box::new(MathJaxRenderer::with_runtime_path(runtime_path)),
         }
     }
 

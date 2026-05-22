@@ -1,6 +1,6 @@
 use super::{DiagramCommand, DiagramSourceOps, MermaidMarkdownOps, RenderInputFactory};
 use crate::commands::{DiagramAction, ThemeModeArg};
-use katana_diagram_renderer::DiagramKind;
+use katana_render_runtime::DiagramKind;
 
 #[test]
 fn extracts_mermaid_fence_from_markdown() {

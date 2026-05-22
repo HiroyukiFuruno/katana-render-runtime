@@ -2,6 +2,20 @@ use super::{RULE, RuntimeBundleRule, SOURCE};
 use crate::diagnostics::{KdrLintError, Violation};
 use std::path::Path;
 
+const SHARED_DENIED: &[&str] = &["../mermaid", "../drawio", "../zenuml", "../mathjax"];
+const MERMAID_DENIED: &[&str] = &["../drawio", "../zenuml", "../mathjax"];
+const DRAWIO_DENIED: &[&str] = &["../mermaid", "../zenuml", "../mathjax"];
+const ZENUML_DENIED: &[&str] = &["../mermaid", "../drawio", "../mathjax"];
+const MATHJAX_DENIED: &[&str] = &["../mermaid", "../drawio", "../zenuml"];
+
+const SOURCE_BOUNDARIES: &[RuntimeSourceBoundary] = &[
+    RuntimeSourceBoundary::new("/source/shared/", SHARED_DENIED),
+    RuntimeSourceBoundary::new("/source/mermaid/", MERMAID_DENIED),
+    RuntimeSourceBoundary::new("/source/drawio/", DRAWIO_DENIED),
+    RuntimeSourceBoundary::new("/source/zenuml/", ZENUML_DENIED),
+    RuntimeSourceBoundary::new("/source/mathjax/", MATHJAX_DENIED),
+];
+
 pub(super) struct RuntimeSourceBoundaryRule;
 
 impl RuntimeSourceBoundaryRule {
@@ -15,31 +29,14 @@ impl RuntimeSourceBoundaryRule {
 
     fn check_import_boundary(file: &Path, source: &str, violations: &mut Vec<Violation>) {
         let path = file.to_string_lossy();
-        if path.contains("/source/shared/") {
-            Self::reject_imports(
-                file,
-                source,
-                ["../mermaid", "../drawio", "../zenuml"],
-                violations,
-            );
-        }
-        if path.contains("/source/mermaid/") {
-            Self::reject_imports(file, source, ["../drawio", "../zenuml"], violations);
-        }
-        if path.contains("/source/drawio/") {
-            Self::reject_imports(file, source, ["../mermaid", "../zenuml"], violations);
-        }
-        if path.contains("/source/zenuml/") {
-            Self::reject_imports(file, source, ["../mermaid", "../drawio"], violations);
+        for boundary in SOURCE_BOUNDARIES {
+            if path.contains(boundary.marker) {
+                Self::reject_imports(file, source, boundary.denied, violations);
+            }
         }
     }
 
-    fn reject_imports<const COUNT: usize>(
-        file: &Path,
-        source: &str,
-        denied: [&str; COUNT],
-        violations: &mut Vec<Violation>,
-    ) {
+    fn reject_imports(file: &Path, source: &str, denied: &[&str], violations: &mut Vec<Violation>) {
         for (line_index, line) in source.lines().enumerate() {
             if denied.iter().any(|entry| line.contains(entry)) {
                 violations.push(Violation::new(
@@ -51,5 +48,16 @@ impl RuntimeSourceBoundaryRule {
                 ));
             }
         }
+    }
+}
+
+struct RuntimeSourceBoundary {
+    marker: &'static str,
+    denied: &'static [&'static str],
+}
+
+impl RuntimeSourceBoundary {
+    const fn new(marker: &'static str, denied: &'static [&'static str]) -> Self {
+        Self { marker, denied }
     }
 }

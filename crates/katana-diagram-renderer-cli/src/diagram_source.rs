@@ -1,4 +1,4 @@
-use katana_diagram_renderer::DiagramKind;
+use katana_render_runtime::DiagramKind;
 
 const MIN_MARKDOWN_FENCE_MARKERS: usize = 3;
 
@@ -10,6 +10,7 @@ impl DiagramSourceOps {
             DiagramKind::Mermaid => MermaidMarkdownOps::extract(source),
             DiagramKind::Drawio => source,
             DiagramKind::PlantUml => PlantUmlMarkdownOps::extract(source),
+            DiagramKind::MathJax => source,
         }
     }
 }
