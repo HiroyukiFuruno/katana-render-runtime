@@ -5,14 +5,16 @@
 <h1 align="center">katana-render-runtime</h1>
 
 <p align="center">
-  Mermaid、Draw.io、PlantUML、MathJax を SVG へ変換する Rust の描画実行基盤（render runtime）。
+  A Rust runtime for rendering diagram and TeX source strings into SVG.
 </p>
 
 <p align="center">
-  <strong><a href="#installation">インストール（Installation）</a></strong> |
-  <strong><a href="#library-api">ライブラリ API（Library API）</a></strong> |
-  <strong><a href="#migration">移行（Migration）</a></strong> |
-  <strong><a href="docs/release.md">リリース（Release）</a></strong>
+  <strong><a href="#installation">Installation</a></strong> |
+  <strong><a href="#library-api">Library API</a></strong> |
+  <strong><a href="#cli">CLI</a></strong> |
+  <strong><a href="#migration">Migration</a></strong> |
+  <strong><a href="#supported-rendering">Supported Rendering</a></strong> |
+  <strong><a href="docs/release.md">Release</a></strong>
 </p>
 
 <p align="center">
@@ -26,43 +28,48 @@
 
 ---
 
-## KRR とは
+## Overview
 
-`katana-render-runtime` は、KatanA から切り出した描画実行基盤（render runtime）です。
+`katana-render-runtime` is a Katana-series Rust library for SVG rendering.
 
-上位アプリケーション（application）は Markdown 抽象構文木（AST）などで入力種別を判定し、この crate へ正規化済み入力文字列（input string）を渡します。KRR は受け取った文字列を SVG に変換します。HTML、PDF、PNG、JPG の生成や Markdown AST 解析は担当しません。
+It accepts a `RenderInput` made from a `RenderKind`, source string, render config, render policy, and render context. It returns a `RenderOutput` containing SVG, dimensions, runtime metadata, diagnostics, and a cache fingerprint.
 
-## 機能
+Upstream applications own Markdown AST parsing, preview UI state, and HTML / PDF / PNG / JPG export surfaces. This crate receives normalized source strings and renders SVG output.
 
-- Mermaid / Draw.io / ZenUML / PlantUML の SVG 描画（SVG rendering）。
-- MathJax v4 系による TeX 入力（TeX input）から SVG 出力（SVG output）への変換。
-- テーマ（theme）/ 暗色モード（dark mode）/ 診断（diagnostics）/ 寸法メタデータ（dimensions metadata）を含む共通 `RenderInput` / `RenderOutput` 契約（contract）。
-- 失敗時は panic せず、診断（diagnostics）付き raw 文字列（raw string）を返す代替出力（fallback）。
-- `krr` CLI による既存の図形描画 workflow。
+## Features
 
-## インストール（Installation）
+- Render Mermaid / Draw.io / ZenUML / PlantUML diagrams into SVG.
+- Render TeX input into SVG output through MathJax v4.
+- Use one `RenderInput` / `RenderOutput` contract across every renderer.
+- Apply theme and dark-mode data through `RenderThemeSnapshot`.
+- Return SVG dimensions, `viewBox`, runtime version data, diagnostics, and cache fingerprints.
+- Resolve packaged runtime assets for the supported renderers.
 
-Rust ライブラリ（Rust library）:
+## Installation
+
+Install the latest published crate:
 
 ```bash
 cargo add katana-render-runtime
 ```
 
-旧 crate 名が必要な既存利用側（consumer）:
+Existing consumers that still need the compatibility wrapper can use:
 
 ```bash
 cargo add katana-diagram-renderer
 ```
 
-CLI:
+## CLI
+
+Install the `krr` CLI:
 
 ```bash
 cargo install katana-render-runtime-cli
 ```
 
-## ライブラリ API（Library API）
+## Library API
 
-主要な入口:
+Primary entry points:
 
 - `RenderInput`
 - `RenderOutput`
@@ -72,43 +79,52 @@ cargo install katana-render-runtime-cli
 - `PlantUmlRenderer`
 - `MathJaxRenderer`
 
-MathJax は TeX 文字列を直接受け取ります。`$...$`、`$$...$$`、fenced `math` の検出は KDV / KMM 側の責務です。
+`RenderInput.source` must already contain the diagram or TeX source to render. The renderer returns SVG through `RenderOutput.svg`; related metadata is carried in the same output value.
 
-## 移行（Migration）
+## Migration
 
-`katana-diagram-renderer` は v0.3.0 から互換 wrapper です。新規実装の正本は `katana-render-runtime` にあります。
+`katana-diagram-renderer` is a compatibility wrapper from v0.3.0. New code should depend on `katana-render-runtime`.
 
 ```toml
 [dependencies]
 katana-render-runtime = "0.3"
 ```
 
-既存利用側（consumer）は一時的に次の指定でも動きます。
+Existing consumers can temporarily keep the wrapper dependency:
 
 ```toml
 [dependencies]
 katana-diagram-renderer = "0.3"
 ```
 
-ただし、新規依存（dependency）は `katana-render-runtime` を使ってください。
+## Supported Rendering
 
-## 非目標（Non-Goals）
+| `RenderKind` | Input | Output |
+| --- | --- | --- |
+| `Mermaid` | Mermaid source, including ZenUML diagrams | SVG |
+| `Drawio` | Draw.io diagram source | SVG |
+| `PlantUml` | PlantUML source | SVG |
+| `MathJax` | TeX source | SVG |
 
-- Markdown AST 解析。
-- HTML / PDF / PNG / JPG の export surface 生成。
-- preview UI、editor UI、KatanA UI state の所有。
-- KDV 側の pagination や document export。
+Each renderer exposes the same `Renderer` trait, so rendering code can switch renderer implementations without changing the output contract.
 
-## 構成（Layout）
+## Non-Goals
+
+- Markdown AST parsing.
+- HTML / PDF / PNG / JPG export surface generation.
+- Preview UI, editor UI, or KatanA UI state ownership.
+- KDV pagination or document export.
+
+## Layout
 
 ```text
 crates/
-  katana-render-runtime/          # 描画実行基盤（render runtime）library
-  katana-diagram-renderer/        # 互換 wrapper（compatibility wrapper）
+  katana-render-runtime/          # Rendering runtime library
+  katana-diagram-renderer/        # Compatibility wrapper
   katana-render-runtime-cli/      # krr CLI binary
 scripts/
-  mermaid/                        # 公式参照生成と採点（official reference generation and scoring）
-  drawio/                         # 公式参照生成と採点（official reference generation and scoring）
+  mermaid/                        # Mermaid reference rendering and scoring
+  drawio/                         # Draw.io reference rendering and scoring
   runtime-assets/                 # runtime asset latest / update helpers
 tests/fixtures/
   mermaid/
