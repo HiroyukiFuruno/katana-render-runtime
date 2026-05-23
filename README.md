@@ -67,6 +67,32 @@ Install the `krr` CLI:
 cargo install katana-render-runtime-cli
 ```
 
+Common usage examples:
+
+```bash
+# Render a Mermaid file to SVG
+krr mermaid render --input examples/sample.mmd --output out.svg
+
+# Render a PlantUML file with a theme
+krr plantuml render --input diagram.puml --output out.svg --theme cyborg --theme-mode light
+
+# Render without `--output` and print SVG to stdout
+krr drawio render --input diagram.drawio
+
+# Show supported subcommands and options
+krr --help
+```
+
+Reference and quality-check commands:
+
+```bash
+# Compare generated output to fixtures
+krr mermaid compare --fixtures tests/fixtures/mermaid --min-score 99.0
+
+# Update fixtures
+krr drawio reference-update --fixtures tests/fixtures/drawio
+```
+
 ## Library API
 
 Primary entry points:
