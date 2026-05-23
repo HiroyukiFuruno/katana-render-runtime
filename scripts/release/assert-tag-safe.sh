@@ -3,6 +3,14 @@ set -euo pipefail
 
 tag="${1:?tag is required}"
 remote="${2:-origin}"
+remote_source="${remote}"
+
+if [[ "${remote}" == "origin" && -n "${GITHUB_REPOSITORY:-}" ]]; then
+  github_token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  if [[ -n "${github_token}" ]]; then
+    remote_source="https://x-access-token:${github_token}@github.com/${GITHUB_REPOSITORY}.git"
+  fi
+fi
 
 local_exists=false
 local_target=""
@@ -12,12 +20,12 @@ if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
 fi
 
 remote_target="$(
-  git ls-remote --tags "${remote}" "refs/tags/${tag}^{}" |
+  git ls-remote --tags "${remote_source}" "refs/tags/${tag}^{}" |
     awk 'NR == 1 { print $1 }'
 )"
 if [[ -z "${remote_target}" ]]; then
   remote_target="$(
-    git ls-remote --tags "${remote}" "refs/tags/${tag}" |
+    git ls-remote --tags "${remote_source}" "refs/tags/${tag}" |
       awk 'NR == 1 { print $1 }'
   )"
 fi

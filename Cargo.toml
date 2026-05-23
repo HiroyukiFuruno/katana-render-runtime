@@ -2,13 +2,12 @@
 members = [
     "crates/kdr-linter",
     "crates/katana-render-runtime",
-    "crates/katana-diagram-renderer",
     "crates/katana-render-runtime-cli",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/HiroyukiFuruno/katana-render-runtime"
@@ -17,7 +16,7 @@ authors = ["Hiroyuki Furuno"]
 description = "Versioned render runtime for KatanA diagrams and math (Mermaid, Draw.io, ZenUML, PlantUML, MathJax)."
 
 [workspace.dependencies]
-katana-render-runtime = { path = "crates/katana-render-runtime", version = "0.3.1" }
+katana-render-runtime = { path = "crates/katana-render-runtime", version = "0.3.2" }
 katana-ast-lint = "0.5.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
