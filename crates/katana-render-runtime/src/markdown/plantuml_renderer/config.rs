@@ -38,10 +38,10 @@ mod tests {
     #[test]
     fn runtime_config_accepts_snake_and_camel_cache_dir() -> Result<(), String> {
         let snake = PlantUmlRuntimeConfig::from_value(&serde_json::json!({
-            "plantuml_cache_dir": "/tmp/kdr-cache",
+            "plantuml_cache_dir": "/tmp/krr-cache",
         }))?;
         let camel = PlantUmlRuntimeConfig::from_value(&serde_json::json!({
-            "plantumlCacheDir": "/tmp/kdr-cache",
+            "plantumlCacheDir": "/tmp/krr-cache",
         }))?;
 
         assert_eq!(snake.cache_dir(), camel.cache_dir());
@@ -51,7 +51,7 @@ mod tests {
     #[test]
     fn runtime_config_rejects_control_characters() {
         let result = PlantUmlRuntimeConfig::from_value(&serde_json::json!({
-            "plantuml_cache_dir": "/tmp/kdr\ncache",
+            "plantuml_cache_dir": "/tmp/krr\ncache",
         }));
 
         assert!(matches!(

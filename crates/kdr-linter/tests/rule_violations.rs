@@ -21,7 +21,7 @@ fn reports_kal_shared_rule_families() -> TestResult<()> {
     )?;
     write_file(
         &root,
-        "crates/katana-diagram-renderer-cli/src/bad.rs",
+        "crates/katana-render-runtime-cli/src/bad.rs",
         cli_duplicate_source(),
     )?;
 
@@ -43,7 +43,7 @@ fn reports_kdr_supplemental_rule_families() -> TestResult<()> {
     )?;
     write_file(
         &root,
-        "crates/katana-diagram-renderer-cli/src/bad.rs",
+        "crates/katana-render-runtime-cli/src/bad.rs",
         cli_duplicate_source(),
     )?;
 
@@ -84,7 +84,7 @@ fn kal_report(root: &Path) -> String {
     let mut config = kal_config();
     config.source_roots = vec![
         root.join("crates/katana-render-runtime/src"),
-        root.join("crates/katana-diagram-renderer-cli/src"),
+        root.join("crates/katana-render-runtime-cli/src"),
     ];
     let violations = KatanaAstLint::with_config(config).violations();
     violations
@@ -197,7 +197,7 @@ fn write_manifests(root: &Path) -> TestResult<()> {
     )?;
     write_file(
         root,
-        "crates/katana-diagram-renderer-cli/Cargo.toml",
+        "crates/katana-render-runtime-cli/Cargo.toml",
         cli_manifest_missing_lib(),
     )
 }
@@ -211,14 +211,14 @@ edition = "2024"
 
 [dependencies]
 egui = "0.1"
-cli_alias = { package = "katana-diagram-renderer-cli", version = "0.1" }
+cli_alias = { package = "katana-render-runtime-cli", version = "0.1" }
 "#
 }
 
 fn cli_manifest_missing_lib() -> &'static str {
     r#"
 [package]
-name = "katana-diagram-renderer-cli"
+name = "katana-render-runtime-cli"
 version = "0.1.0"
 edition = "2024"
 

@@ -37,7 +37,14 @@ impl PlantUmlRuntimeWarning {
 
     fn install_hint() -> String {
         format!(
-            "install a JDK with libjvm and set KDR_PLANTUML_JVM or JAVA_HOME; KDR downloads the pinned PlantUML JAR from {PLANTUML_DOWNLOAD_URL} into the cache on first use, so keep network access available, set KDR_PLANTUML_CACHE_DIR or API plantuml_cache_dir to a writable cache directory, or set KDR_PLANTUML_JAR to a readable plantuml.jar"
+            "install a JDK with libjvm and set KRR_PLANTUML_JVM, \
+             KDR_PLANTUML_JVM, or JAVA_HOME; KRR downloads the pinned \
+             PlantUML JAR from {PLANTUML_DOWNLOAD_URL} into the cache on \
+             first use, so keep network access available, set \
+             KRR_PLANTUML_CACHE_DIR or API plantuml_cache_dir to a writable \
+             cache directory, or set KRR_PLANTUML_JAR to a readable \
+             plantuml.jar. KDR_PLANTUML_* remains available as a legacy \
+             fallback"
         )
     }
 }

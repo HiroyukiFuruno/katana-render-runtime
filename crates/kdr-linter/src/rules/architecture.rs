@@ -5,7 +5,7 @@ use super::cli_duplication::CliDuplicationRule;
 use super::manifest_boundary::ManifestBoundaryRule;
 
 pub const LIB_CRATE: &str = "crates/katana-render-runtime";
-pub const CLI_CRATE: &str = "crates/katana-diagram-renderer-cli";
+pub const CLI_CRATE: &str = "crates/katana-render-runtime-cli";
 
 pub struct ArchitectureRule;
 

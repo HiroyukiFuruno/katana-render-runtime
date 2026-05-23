@@ -9,14 +9,14 @@ TBD - created by archiving change v0-2-0-plantuml-svg-renderer-multiplatform. Up
 
 #### Scenario: libjvm path を明示指定で解決する
 
-- **GIVEN** `KDR_PLANTUML_JVM` が設定されている
+- **GIVEN** `KRR_PLANTUML_JVM` が設定されている
 - **WHEN** PlantUML renderer が `libjvm` を解決する
-- **THEN** `KDR_PLANTUML_JVM` の path を最優先で使う
+- **THEN** `KRR_PLANTUML_JVM` の path を最優先で使う
 - **THEN** 存在しない場合は警告（warning）付き raw code block を返す
 
 #### Scenario: JAVA_HOME から libjvm を解決する
 
-- **GIVEN** `KDR_PLANTUML_JVM` が未設定で `JAVA_HOME` が設定されている
+- **GIVEN** `KRR_PLANTUML_JVM` と `KDR_PLANTUML_JVM` が未設定で `JAVA_HOME` が設定されている
 - **WHEN** PlantUML renderer が `libjvm` を解決する
 - **THEN** macOS / Linux では `$JAVA_HOME/lib/server/libjvm.*` 相当を候補にする
 - **THEN** Windows では `%JAVA_HOME%\\bin\\server\\jvm.dll` 相当を候補にする
@@ -70,9 +70,9 @@ TBD - created by archiving change v0-2-0-plantuml-svg-renderer-multiplatform. Up
 
 #### Scenario: 明示 jar path を解決する
 
-- **GIVEN** `KDR_PLANTUML_JAR` または既存互換の `PLANTUML_JAR` が設定されている
+- **GIVEN** `KRR_PLANTUML_JAR` または互換 fallback の `KDR_PLANTUML_JAR` / `PLANTUML_JAR` が設定されている
 - **WHEN** PlantUML renderer が JAR を解決する
-- **THEN** 明示 path を優先する
+- **THEN** `KRR_PLANTUML_JAR`、`KDR_PLANTUML_JAR`、`PLANTUML_JAR` の順で明示 path を優先する
 - **THEN** 明示 path は利用者管理の JAR として存在確認し、checksum を検証する
 - **THEN** path が存在しない場合は警告（warning）付き raw code block を返す
 
@@ -80,23 +80,24 @@ TBD - created by archiving change v0-2-0-plantuml-svg-renderer-multiplatform. Up
 
 - **GIVEN** 明示 jar path が未設定である
 - **WHEN** PlantUML renderer が JAR を解決する
-- **THEN** KDR は OS 別の保存領域（cache）の固定 path を確認する
+- **THEN** KRR は OS 別の保存領域（cache）の固定 path を確認する
 - **THEN** 保存領域（cache）に JAR が存在する場合は checksum が manifest と一致することを確認する
 - **THEN** 保存領域（cache）に JAR が存在しない場合は固定 URL から download する
 - **THEN** download した JAR は checksum を検証してから保存領域（cache）へ配置する
 - **THEN** download または checksum 検証に失敗した場合は警告（warning）付き raw code block を返す
-- **THEN** 警告（warning）は network 接続、書き込み可能な `KDR_PLANTUML_CACHE_DIR` または API の `plantuml_cache_dir`、または `KDR_PLANTUML_JAR` 設定が必要であることを示す
+- **THEN** 警告（warning）は network 接続、書き込み可能な `KRR_PLANTUML_CACHE_DIR` または API の `plantuml_cache_dir`、または `KRR_PLANTUML_JAR` 設定が必要であることを示す
+- **THEN** 旧名 `KDR_PLANTUML_*` は互換 fallback として案内される
 
 #### Scenario: API が cache directory を上書きする
 
 - **GIVEN** 公開 API の `RenderInput.config.vendor_config.plantuml_cache_dir` または `plantumlCacheDir` が設定されている
 - **WHEN** PlantUML renderer が JAR を解決する
-- **THEN** API 指定の保存領域（cache directory）を `KDR_PLANTUML_CACHE_DIR` と OS 既定値より優先する
+- **THEN** API 指定の保存領域（cache directory）を `KRR_PLANTUML_CACHE_DIR`、`KDR_PLANTUML_CACHE_DIR`、OS 既定値より優先する
 - **THEN** 保存領域（cache directory）だけの違いでは `cache_fingerprint` を変えない
 
 #### Scenario: CLI が cache directory を上書きする
 
-- **GIVEN** `kdr plantuml render --cache-dir <path>` が指定されている
+- **GIVEN** `krr plantuml render --cache-dir <path>` が指定されている
 - **WHEN** CLI が `RenderInput` を作成する
 - **THEN** CLI は API と同じ `plantuml_cache_dir` に変換する
 - **THEN** `--runtime` と `--cache-dir` が同時に指定された場合は曖昧な解決として拒否する
@@ -110,7 +111,7 @@ TBD - created by archiving change v0-2-0-plantuml-svg-renderer-multiplatform. Up
 
 ### Requirement: 子 process 実行を採る場合は端末窓を出さずに実行しなければならない
 
-システムは、JVM 埋め込みを採らず PlantUML process を使う場合、OS ごとの shell wrapper ではなく、KDR の process facade から起動しなければならない（MUST）。Windows では端末窓を表示してはならない（MUST NOT）。
+システムは、JVM 埋め込みを採らず PlantUML process を使う場合、OS ごとの shell wrapper ではなく、KRR の process facade から起動しなければならない（MUST）。Windows では端末窓を表示してはならない（MUST NOT）。
 
 #### Scenario: Windows で PlantUML を実行する
 

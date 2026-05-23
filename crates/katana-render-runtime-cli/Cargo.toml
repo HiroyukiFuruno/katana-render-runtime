@@ -1,5 +1,5 @@
 [package]
-name = "katana-diagram-renderer-cli"
+name = "katana-render-runtime-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,7 @@ authors.workspace = true
 description = "CLI front-end for katana-render-runtime: render, reference-update, compare, bench."
 
 [[bin]]
-name = "kdr"
+name = "krr"
 path = "src/main.rs"
 
 [dependencies]

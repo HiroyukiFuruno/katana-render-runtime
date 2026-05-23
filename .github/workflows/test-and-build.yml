@@ -149,7 +149,7 @@ jobs:
       - name: Run PlantUML smoke check
         if: matrix.os != 'windows-latest'
         run: |
-          cargo run -p katana-diagram-renderer-cli -- plantuml render --input tests/fixtures/plantuml/representative/01-sequence.puml --output "$RUNNER_TEMP/plantuml-sequence.svg"
+          cargo run -p katana-render-runtime-cli -- plantuml render --input tests/fixtures/plantuml/representative/01-sequence.puml --output "$RUNNER_TEMP/plantuml-sequence.svg"
           grep -q '<svg' "$RUNNER_TEMP/plantuml-sequence.svg"
 
       - name: Run PlantUML smoke check on Windows
@@ -157,7 +157,7 @@ jobs:
         shell: pwsh
         run: |
           $output = Join-Path $env:RUNNER_TEMP "plantuml-sequence.svg"
-          cargo run -p katana-diagram-renderer-cli -- plantuml render --input tests/fixtures/plantuml/representative/01-sequence.puml --output $output
+          cargo run -p katana-render-runtime-cli -- plantuml render --input tests/fixtures/plantuml/representative/01-sequence.puml --output $output
           if (-not (Select-String -Path $output -Pattern "<svg" -Quiet)) {
             throw "PlantUML smoke output did not contain SVG"
           }

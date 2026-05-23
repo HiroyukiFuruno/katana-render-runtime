@@ -51,7 +51,7 @@ impl ManifestBoundaryRule {
     fn is_renderer_boundary_violation(dependency: &str) -> bool {
         UiDependencyPolicy::is_ui_dependency(dependency)
             || dependency == "katana-diagram-renderer"
-            || dependency == "katana-diagram-renderer-cli"
+            || dependency == "katana-render-runtime-cli"
     }
 
     fn manifest_violation(path: &Path, dependency: String) -> Violation {

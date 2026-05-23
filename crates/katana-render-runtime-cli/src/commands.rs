@@ -5,7 +5,7 @@ use std::path::PathBuf;
 const DEFAULT_MIN_SCORE: f32 = 99.0;
 
 #[derive(Parser)]
-#[command(name = "kdr", version, about = "katana-render-runtime CLI")]
+#[command(name = "krr", version, about = "katana-render-runtime CLI")]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Commands,
@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn parses_mermaid_render_command() -> Result<(), Box<dyn std::error::Error>> {
         let cli = Cli::try_parse_from([
-            "kdr", "mermaid", "render", "--input", "in.md", "--output", "out.svg",
+            "krr", "mermaid", "render", "--input", "in.md", "--output", "out.svg",
         ])?;
         assert!(matches!(
             cli.command,
@@ -98,7 +98,7 @@ mod tests {
     #[test]
     fn parses_drawio_compare_command() -> Result<(), Box<dyn std::error::Error>> {
         let cli = Cli::try_parse_from([
-            "kdr",
+            "krr",
             "drawio",
             "compare",
             "--fixtures",
@@ -118,7 +118,7 @@ mod tests {
     #[test]
     fn parses_plantuml_render_command() -> Result<(), Box<dyn std::error::Error>> {
         let cli = Cli::try_parse_from([
-            "kdr",
+            "krr",
             "plantuml",
             "render",
             "--input",
@@ -145,13 +145,13 @@ mod tests {
     #[test]
     fn parses_plantuml_cache_dir() -> Result<(), Box<dyn std::error::Error>> {
         let cli = Cli::try_parse_from([
-            "kdr",
+            "krr",
             "plantuml",
             "render",
             "--input",
             "in.puml",
             "--cache-dir",
-            "/tmp/kdr-cache",
+            "/tmp/krr-cache",
         ])?;
         let Commands::Plantuml {
             action: DiagramAction::Render { cache_dir, .. },
@@ -160,13 +160,13 @@ mod tests {
             return Err("expected plantuml render command".into());
         };
 
-        assert_eq!(cache_dir, Some(std::path::PathBuf::from("/tmp/kdr-cache")));
+        assert_eq!(cache_dir, Some(std::path::PathBuf::from("/tmp/krr-cache")));
         Ok(())
     }
 
     #[test]
     fn plantuml_render_help_lists_theme_options() -> Result<(), Box<dyn std::error::Error>> {
-        let result = Cli::try_parse_from(["kdr", "plantuml", "render", "--help"]);
+        let result = Cli::try_parse_from(["krr", "plantuml", "render", "--help"]);
         let Err(error) = result else {
             return Err("expected help output".into());
         };

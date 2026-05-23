@@ -57,7 +57,7 @@ impl WorkspaceModel {
             root.join("crates/kdr-linter/src"),
             root.join("crates/kdr-linter/tests"),
             root.join("crates/katana-render-runtime/src"),
-            root.join("crates/katana-diagram-renderer-cli/src"),
+            root.join("crates/katana-render-runtime-cli/src"),
         ]
     }
 

@@ -19,7 +19,7 @@ mod tests {
 
     #[test]
     fn writes_and_reads_text() -> Result<(), Box<dyn std::error::Error>> {
-        let path = std::env::temp_dir().join(format!("kdr-file-{}.txt", std::process::id()));
+        let path = std::env::temp_dir().join(format!("krr-file-{}.txt", std::process::id()));
         FileOps::write(&path, b"ok")?;
         assert_eq!(FileOps::read_to_string(&path)?, "ok");
         std::fs::remove_file(path)?;
@@ -29,9 +29,9 @@ mod tests {
     #[test]
     fn read_and_write_errors_keep_path_context() {
         let missing =
-            std::env::temp_dir().join(format!("kdr-file-missing-{}.txt", std::process::id()));
+            std::env::temp_dir().join(format!("krr-file-missing-{}.txt", std::process::id()));
         let unwritable = std::env::temp_dir()
-            .join(format!("kdr-file-missing-dir-{}", std::process::id()))
+            .join(format!("krr-file-missing-dir-{}", std::process::id()))
             .join("out.txt");
 
         assert!(FileOps::read_to_string(&missing).is_err());

@@ -32,7 +32,7 @@ fn assert_prohibited_type(name: &str, source: &str) -> TestResult<()> {
     )?;
     write_file(
         &root,
-        "crates/katana-diagram-renderer-cli/Cargo.toml",
+        "crates/katana-render-runtime-cli/Cargo.toml",
         cli_manifest(),
     )?;
     write_file(&root, "crates/katana-render-runtime/src/lib.rs", source)?;
@@ -90,7 +90,7 @@ edition = "2024"
 fn cli_manifest() -> &'static str {
     r#"
 [package]
-name = "katana-diagram-renderer-cli"
+name = "katana-render-runtime-cli"
 version = "0.1.0"
 edition = "2024"
 
