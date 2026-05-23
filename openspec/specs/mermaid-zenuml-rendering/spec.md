@@ -1,7 +1,7 @@
 # mermaid-zenuml-rendering Specification
 
 ## Purpose
-Mermaid の ZenUML diagram を kdr の通常描画・参照生成・比較評価の対象として扱うための仕様を定義する。
+Mermaid の ZenUML diagram を KRR の通常描画・参照生成・比較評価の対象として扱うための仕様を定義する。
 ## Requirements
 ### Requirement: ZenUML diagram を描画しなければならない
 

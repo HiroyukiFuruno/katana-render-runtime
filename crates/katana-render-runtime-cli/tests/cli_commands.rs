@@ -6,6 +6,17 @@ use std::process::Command;
 type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[test]
+fn cli_help_uses_krr_root_command() -> TestResult<()> {
+    let output = command().arg("--help").output()?;
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(stdout.contains("Usage: krr <COMMAND>"), "{stdout}");
+    assert!(!stdout.contains("Usage: kdr <COMMAND>"), "{stdout}");
+    Ok(())
+}
+
+#[test]
 fn cli_renders_mermaid() -> TestResult<()> {
     let runtime = temp_file("cli-mermaid.js");
     std::fs::write(&runtime, fake_mermaid_bundle())?;
@@ -28,7 +39,7 @@ fn cli_renders_mermaid() -> TestResult<()> {
 #[test]
 #[cfg(unix)]
 fn cli_delegates_reference_commands_to_just() -> TestResult<()> {
-    let fixtures = std::env::temp_dir().join(format!("kdr-cli-fixtures-{}", std::process::id()));
+    let fixtures = std::env::temp_dir().join(format!("krr-cli-fixtures-{}", std::process::id()));
     std::fs::create_dir_all(&fixtures)?;
     let success_path = fake_just("success", 0)?;
 
@@ -95,12 +106,12 @@ fn reference_status(
 }
 
 fn command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_kdr"))
+    Command::new(env!("CARGO_BIN_EXE_krr"))
 }
 
 #[cfg(unix)]
 fn fake_just(name: &str, exit_code: i32) -> TestResult<PathBuf> {
-    let dir = std::env::temp_dir().join(format!("kdr-fake-just-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("krr-fake-just-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir)?;
     write_fake_just(&dir, exit_code)?;
     Ok(dir)
@@ -118,7 +129,7 @@ fn write_fake_just(dir: &Path, exit_code: i32) -> TestResult<()> {
 }
 
 fn temp_file(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("kdr-{name}-{}", std::process::id()))
+    std::env::temp_dir().join(format!("krr-{name}-{}", std::process::id()))
 }
 
 fn fake_mermaid_bundle() -> &'static str {

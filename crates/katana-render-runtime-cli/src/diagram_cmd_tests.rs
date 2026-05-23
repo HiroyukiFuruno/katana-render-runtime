@@ -88,13 +88,13 @@ fn plantuml_theme_options_become_vendor_config() -> Result<(), Box<dyn std::erro
         Some("cyborg".to_string()),
         Some("/path/to/themes".to_string()),
         Some(ThemeModeArg::Light),
-        Some("/tmp/kdr-cache".into()),
+        Some("/tmp/krr-cache".into()),
     )?;
 
     assert_eq!(config["plantuml_theme"], "cyborg");
     assert_eq!(config["plantuml_theme_from"], "/path/to/themes");
     assert_eq!(config["plantuml_theme_mode"], "light");
-    assert_eq!(config["plantuml_cache_dir"], "/tmp/kdr-cache");
+    assert_eq!(config["plantuml_cache_dir"], "/tmp/krr-cache");
     Ok(())
 }
 
@@ -113,9 +113,9 @@ fn non_plantuml_rejects_theme_options() {
 
 #[test]
 fn mermaid_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Error>> {
-    let input = std::env::temp_dir().join(format!("kdr-cli-mmd-{}.md", std::process::id()));
-    let output = std::env::temp_dir().join(format!("kdr-cli-mmd-{}.svg", std::process::id()));
-    let runtime = std::env::temp_dir().join("missing-kdr-mermaid-runtime.js");
+    let input = std::env::temp_dir().join(format!("krr-cli-mmd-{}.md", std::process::id()));
+    let output = std::env::temp_dir().join(format!("krr-cli-mmd-{}.svg", std::process::id()));
+    let runtime = std::env::temp_dir().join("missing-krr-mermaid-runtime.js");
 
     std::fs::write(&input, "```mermaid\ngraph TD; A-->B\n```\n")?;
     let result = DiagramCommand::new(DiagramKind::Mermaid).run(DiagramAction::Render {
@@ -135,9 +135,9 @@ fn mermaid_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Er
 
 #[test]
 fn drawio_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Error>> {
-    let input = std::env::temp_dir().join(format!("kdr-cli-drawio-{}.drawio", std::process::id()));
-    let output = std::env::temp_dir().join(format!("kdr-cli-drawio-{}.svg", std::process::id()));
-    let runtime = std::env::temp_dir().join("missing-kdr-drawio-runtime.js");
+    let input = std::env::temp_dir().join(format!("krr-cli-drawio-{}.drawio", std::process::id()));
+    let output = std::env::temp_dir().join(format!("krr-cli-drawio-{}.svg", std::process::id()));
+    let runtime = std::env::temp_dir().join("missing-krr-drawio-runtime.js");
 
     std::fs::write(&input, "<mxGraphModel />")?;
     let result = DiagramCommand::new(DiagramKind::Drawio).run(DiagramAction::Render {

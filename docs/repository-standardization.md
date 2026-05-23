@@ -5,7 +5,7 @@
 - 対象 repository の正本名は `katana-render-runtime`。
 - 作業 branch は公開配布に関わる場合 `release/vX.Y.Z` を使う。
 - `katana-render-runtime` は KDR の版番号（version）を引き継ぎ、`v0.3.0` から公開する。
-- 公開対象は GitHub リリース（GitHub Release）、`katana-render-runtime` crate、`katana-diagram-renderer` wrapper crate、`katana-diagram-renderer-cli` crate。
+- 公開対象は GitHub リリース（GitHub Release）、`katana-render-runtime` crate、`katana-diagram-renderer` wrapper crate、`katana-render-runtime-cli` crate。
 - KML 標準の検査名に合わせ、通常検査は `Test and Build (...)`、release 前検査は `preflight` とする。
 
 ## 対応項目

@@ -12,9 +12,9 @@ const PlantUmlCliOptions = {
         CliOptions.get(argv, "--official", "tests/fixtures/plantuml/official/official-dark"),
       ),
       katanaDir: path.resolve(
-        CliOptions.get(argv, "--katana", "tmp/kdr-plantuml/rendered-browser"),
+        CliOptions.get(argv, "--katana", "tmp/krr-plantuml/rendered-browser"),
       ),
-      outputDir: path.resolve(CliOptions.get(argv, "--output", "tmp/kdr-plantuml/comparison")),
+      outputDir: path.resolve(CliOptions.get(argv, "--output", "tmp/krr-plantuml/comparison")),
       katanaCrop: CropRect.parseOptional(CliOptions.get(argv, "--katana-crop", "none")),
       baselineScoresPath: null,
       minScore: CliOptions.number(argv, "--min-score", 100),

@@ -26,7 +26,7 @@ fn reports_toml_parse_error() -> TestResult<()> {
     write_file(&root, "crates/katana-render-runtime/Cargo.toml", "[package")?;
     write_file(
         &root,
-        "crates/katana-diagram-renderer-cli/Cargo.toml",
+        "crates/katana-render-runtime-cli/Cargo.toml",
         cli_manifest(),
     )?;
 
@@ -125,7 +125,7 @@ fn write_valid_manifests(root: &Path) -> TestResult<()> {
     )?;
     write_file(
         root,
-        "crates/katana-diagram-renderer-cli/Cargo.toml",
+        "crates/katana-render-runtime-cli/Cargo.toml",
         cli_manifest(),
     )?;
     Ok(())
@@ -143,7 +143,7 @@ edition = "2024"
 fn cli_manifest() -> &'static str {
     r#"
 [package]
-name = "katana-diagram-renderer-cli"
+name = "katana-render-runtime-cli"
 version = "0.1.0"
 edition = "2024"
 

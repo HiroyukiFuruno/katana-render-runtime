@@ -2,6 +2,15 @@ use super::asset::PlantUmlJarAssetOps;
 use super::types::PlantUmlRuntimeWarning;
 use std::path::{Path, PathBuf};
 
+const KRR_PLANTUML_JAR_ENV: &str = "KRR_PLANTUML_JAR";
+const KDR_PLANTUML_JAR_ENV: &str = "KDR_PLANTUML_JAR";
+const PLANTUML_JAR_ENV: &str = "PLANTUML_JAR";
+const KRR_PLANTUML_JVM_ENV: &str = "KRR_PLANTUML_JVM";
+const KDR_PLANTUML_JVM_ENV: &str = "KDR_PLANTUML_JVM";
+const JAVA_HOME_ENV: &str = "JAVA_HOME";
+const KRR_PLANTUML_CACHE_ENV: &str = "KRR_PLANTUML_CACHE_DIR";
+const KDR_PLANTUML_CACHE_ENV: &str = "KDR_PLANTUML_CACHE_DIR";
+
 pub(crate) struct PlantUmlRuntimePaths {
     pub(crate) jvm_path: PathBuf,
     pub(crate) jar_path: PathBuf,
@@ -11,14 +20,11 @@ pub(crate) struct PlantUmlRuntimePathOps;
 
 impl PlantUmlRuntimePathOps {
     pub(crate) fn surface_jar_path() -> PathBuf {
-        Self::env_path("KDR_PLANTUML_JAR")
-            .or_else(|| Self::env_path("PLANTUML_JAR"))
-            .unwrap_or_else(|| PlantUmlJarAssetOps::cache_path(None))
+        Self::surface_jar_env_path().unwrap_or_else(|| PlantUmlJarAssetOps::cache_path(None))
     }
 
     pub(crate) fn surface_jar_path_for_cache_dir(cache_dir: &Path) -> PathBuf {
-        Self::env_path("KDR_PLANTUML_JAR")
-            .or_else(|| Self::env_path("PLANTUML_JAR"))
+        Self::surface_jar_env_path()
             .unwrap_or_else(|| PlantUmlJarAssetOps::cache_path(Some(cache_dir)))
     }
 
@@ -58,9 +64,7 @@ impl PlantUmlRuntimePathOps {
     }
 
     fn can_override_cache_path(jar_path: &Path) -> bool {
-        Self::env_path("KDR_PLANTUML_JAR").is_none()
-            && Self::env_path("PLANTUML_JAR").is_none()
-            && Self::is_cache_jar_path(jar_path, None)
+        Self::surface_jar_env_path().is_none() && Self::is_cache_jar_path(jar_path, None)
     }
 
     fn is_cache_jar_path(jar_path: &Path, cache_dir: Option<&Path>) -> bool {
@@ -72,7 +76,13 @@ impl PlantUmlRuntimePathOps {
     }
 
     fn jar_env_names() -> Vec<&'static str> {
-        vec!["KDR_PLANTUML_JAR", "PLANTUML_JAR", "KDR_PLANTUML_CACHE_DIR"]
+        vec![
+            KRR_PLANTUML_JAR_ENV,
+            KDR_PLANTUML_JAR_ENV,
+            PLANTUML_JAR_ENV,
+            KRR_PLANTUML_CACHE_ENV,
+            KDR_PLANTUML_CACHE_ENV,
+        ]
     }
 
     fn resolve_existing_jvm() -> Result<PathBuf, PlantUmlRuntimeWarning> {
@@ -86,7 +96,7 @@ impl PlantUmlRuntimePathOps {
         Self::first_existing(candidates.clone()).ok_or_else(|| {
             PlantUmlRuntimeWarning::new(
                 "libjvm was not found",
-                vec!["KDR_PLANTUML_JVM", "JAVA_HOME"],
+                vec![KRR_PLANTUML_JVM_ENV, KDR_PLANTUML_JVM_ENV, JAVA_HOME_ENV],
                 Self::display_paths(&candidates),
             )
         })
@@ -98,8 +108,9 @@ impl PlantUmlRuntimePathOps {
 
     fn jvm_candidates() -> Vec<PathBuf> {
         let mut candidates = Vec::new();
-        Self::push_env_path(&mut candidates, "KDR_PLANTUML_JVM");
-        if let Some(java_home) = Self::env_path("JAVA_HOME") {
+        Self::push_env_path(&mut candidates, KRR_PLANTUML_JVM_ENV);
+        Self::push_env_path(&mut candidates, KDR_PLANTUML_JVM_ENV);
+        if let Some(java_home) = Self::env_path(JAVA_HOME_ENV) {
             candidates.extend(Self::java_home_jvm_candidates(&java_home));
         }
         candidates.extend(Self::platform_jvm_candidates());
@@ -157,6 +168,12 @@ impl PlantUmlRuntimePathOps {
         if let Some(path) = Self::env_path(name) {
             candidates.push(path);
         }
+    }
+
+    fn surface_jar_env_path() -> Option<PathBuf> {
+        [KRR_PLANTUML_JAR_ENV, KDR_PLANTUML_JAR_ENV, PLANTUML_JAR_ENV]
+            .into_iter()
+            .find_map(Self::env_path)
     }
 
     fn env_path(name: &'static str) -> Option<PathBuf> {

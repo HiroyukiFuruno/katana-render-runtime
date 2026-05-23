@@ -14,6 +14,9 @@ interface CliParsedOptions {
 
 class PlantUmlJarPath {
   default(): string {
+    if (process.env.KRR_PLANTUML_JAR !== undefined) {
+      return process.env.KRR_PLANTUML_JAR;
+    }
     if (process.env.KDR_PLANTUML_JAR !== undefined) {
       return process.env.KDR_PLANTUML_JAR;
     }
@@ -24,22 +27,25 @@ class PlantUmlJarPath {
   }
 
   private cacheRoot(): string {
+    if (process.env.KRR_PLANTUML_CACHE_DIR !== undefined) {
+      return process.env.KRR_PLANTUML_CACHE_DIR;
+    }
     if (process.env.KDR_PLANTUML_CACHE_DIR !== undefined) {
       return process.env.KDR_PLANTUML_CACHE_DIR;
     }
     if (process.platform === "darwin") {
-      return path.join(this.homeOrTemp(), "Library", "Caches", "kdr", "plantuml");
+      return path.join(this.homeOrTemp(), "Library", "Caches", "krr", "plantuml");
     }
     if (process.platform === "win32") {
       return path.join(
         process.env.LOCALAPPDATA ?? path.join(this.homeOrTemp(), "AppData", "Local"),
-        "kdr",
+        "krr",
         "plantuml",
       );
     }
     return path.join(
       process.env.XDG_CACHE_HOME ?? path.join(this.homeOrTemp(), ".cache"),
-      "kdr",
+      "krr",
       "plantuml",
     );
   }
@@ -55,7 +61,7 @@ const CliOptions = {
       fixtures: path.resolve(
         CliOptions.get(argv, "--fixtures", "tests/fixtures/plantuml/official"),
       ),
-      output: path.resolve(CliOptions.get(argv, "--output", "tmp/kdr-plantuml-official")),
+      output: path.resolve(CliOptions.get(argv, "--output", "tmp/krr-plantuml-official")),
       jar: path.resolve(CliOptions.get(argv, "--jar", new PlantUmlJarPath().default())),
       darkMode: argv.includes("--dark-mode"),
     };

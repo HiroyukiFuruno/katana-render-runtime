@@ -9,6 +9,8 @@ pub const PLANTUML_DOWNLOAD_URL: &str = "https://repo1.maven.org/maven2/net/sour
 const DOWNLOAD_LIMIT_BYTES: u64 = 32 * 1024 * 1024;
 const HEX_HIGH_NIBBLE_SHIFT: u8 = 4;
 const HEX_LOW_NIBBLE_MASK: u8 = 0x0f;
+const KRR_PLANTUML_CACHE_ENV: &str = "KRR_PLANTUML_CACHE_DIR";
+const KDR_PLANTUML_CACHE_ENV: &str = "KDR_PLANTUML_CACHE_DIR";
 
 pub(crate) struct PlantUmlJarAssetOps;
 
@@ -142,10 +144,9 @@ impl PlantUmlJarAssetOps {
         if let Some(path) = cache_dir {
             return path.to_path_buf();
         }
-        if let Some(path) = Self::env_path("KDR_PLANTUML_CACHE_DIR") {
-            return path;
-        }
-        Self::platform_cache_root()
+        Self::env_path(KRR_PLANTUML_CACHE_ENV)
+            .or_else(|| Self::env_path(KDR_PLANTUML_CACHE_ENV))
+            .unwrap_or_else(Self::platform_cache_root)
     }
 
     #[cfg(target_os = "macos")]
@@ -154,7 +155,7 @@ impl PlantUmlJarAssetOps {
             .map(|it| {
                 it.join("Library")
                     .join("Caches")
-                    .join("kdr")
+                    .join("krr")
                     .join("plantuml")
             })
             .unwrap_or_else(Self::temp_cache_root)
@@ -165,7 +166,7 @@ impl PlantUmlJarAssetOps {
         std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .or_else(|| Self::home_dir().map(|it| it.join("AppData").join("Local")))
-            .map(|it| it.join("kdr").join("plantuml"))
+            .map(|it| it.join("krr").join("plantuml"))
             .unwrap_or_else(Self::temp_cache_root)
     }
 
@@ -174,12 +175,12 @@ impl PlantUmlJarAssetOps {
         std::env::var_os("XDG_CACHE_HOME")
             .map(PathBuf::from)
             .or_else(|| Self::home_dir().map(|it| it.join(".cache")))
-            .map(|it| it.join("kdr").join("plantuml"))
+            .map(|it| it.join("krr").join("plantuml"))
             .unwrap_or_else(Self::temp_cache_root)
     }
 
     fn temp_cache_root() -> PathBuf {
-        std::env::temp_dir().join("kdr").join("plantuml")
+        std::env::temp_dir().join("krr").join("plantuml")
     }
 
     fn env_path(name: &'static str) -> Option<PathBuf> {

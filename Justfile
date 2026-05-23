@@ -8,7 +8,7 @@ FIXTURE_JOBS := env_var_or_default("FIXTURE_JOBS", JOBS)
 RUNTIME_UPDATE_LOG_DIR := env_var_or_default("RUNTIME_UPDATE_LOG_DIR", "tmp/runtime-update-logs")
 export RUSTFLAGS := env_var_or_default("RUSTFLAGS", "-D warnings")
 CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")
-KDR_BIN := env_var_or_default("KDR_BIN", REPO_ROOT + "/target/debug/kdr")
+KRR_BIN := env_var_or_default("KRR_BIN", REPO_ROOT + "/target/debug/krr")
 VERSION := env_var_or_default("VERSION", `awk -F '"' '/^version = / { print $2; exit }' Cargo.toml`)
 VERSION_BARE := replace(VERSION, "v", "")
 TAG := "v" + VERSION_BARE
@@ -28,7 +28,7 @@ MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-rend
 DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-render-runtime/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
 MATHJAX_JS := env_var_or_default("MATHJAX_JS", "crates/katana-render-runtime/vendor/mathjax/" + MATHJAX_JS_VERSION + "/tex-svg.js")
 PLANTUML_JAR_URL := "https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/" + PLANTUML_JAR_VERSION + "/plantuml-lgpl-" + PLANTUML_JAR_VERSION + ".jar"
-PLANTUML_CACHE_DIR := env_var_or_default("KDR_PLANTUML_CACHE_DIR", `bash scripts/plantuml/cache-dir.sh`)
+PLANTUML_CACHE_DIR := env_var_or_default("KRR_PLANTUML_CACHE_DIR", `bash scripts/plantuml/cache-dir.sh`)
 PLANTUML_CACHE_JAR := PLANTUML_CACHE_DIR + "/" + PLANTUML_JAR_VERSION + "/plantuml.jar"
 DRAWIO_RESOURCE_DIR := "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources"
 DRAWIO_RESOURCE_MANIFEST := DRAWIO_RESOURCE_DIR + "/drawio-resource-manifest.json"
@@ -55,7 +55,7 @@ lint:
 ast-lint:
     {{CARGO}} test -j {{JOBS}} -p kdr-linter ast_linter -- --nocapture
 
-# Check that kdr does not depend on KatanA UI crates
+# Check that katana-render-runtime does not depend on KatanA UI crates
 dependency-leak:
     @dependencies="$({{CARGO}} tree --workspace -e normal)"; \
     pattern='(^|[[:space:]])(egui|katana-core|katana-ui|katana-platform|katana-native)([[:space:]]|$)'; \
@@ -164,7 +164,7 @@ release-verify: release-target-check
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
     {{CARGO}} package -p katana-render-runtime --locked --allow-dirty
     {{CARGO}} package -p katana-diagram-renderer --locked --allow-dirty --list >/dev/null
-    {{CARGO}} package -p katana-diagram-renderer-cli --locked --allow-dirty --list >/dev/null
+    {{CARGO}} package -p katana-render-runtime-cli --locked --allow-dirty --list >/dev/null
     bash scripts/release/verify-crate-size.sh katana-render-runtime "{{VERSION}}"
     {{CARGO}} publish -p katana-render-runtime --dry-run --locked --allow-dirty
 
@@ -180,9 +180,9 @@ browser-install:
     @if ! command -v playwright >/dev/null 2>&1; then npm install --global "playwright@{{PLAYWRIGHT_VERSION}}"; fi
     @if [[ "$(uname -s)" == "Linux" ]]; then playwright install --with-deps chromium; else playwright install chromium; fi
 
-# Build the local kdr CLI once before parallel fixture compares
-kdr-build:
-    {{CARGO}} build -p katana-diagram-renderer-cli
+# Build the local krr CLI once before parallel fixture compares
+krr-build:
+    {{CARGO}} build -p katana-render-runtime-cli
 
 # Show latest Mermaid.js, ZenUML, Draw.io, and MathJax versions without changing files
 runtime-asset-latest runtime='all':
@@ -258,26 +258,26 @@ mathjax-update version:
     bun add -d @mathjax/src@"{{version}}"
     bun run runtime-bundle:build
 
-# Render kdr Mermaid SVG fixtures
-mermaid-render fixtures output='tmp/kdr-mermaid-rendered':
+# Render krr Mermaid SVG fixtures
+mermaid-render fixtures output='tmp/krr-mermaid-rendered':
     @rm -rf "{{output}}"
     @mkdir -p "{{output}}"
     @for file in "{{fixtures}}"/*.md; do \
       slug=$(basename "$file" .md); \
-      {{CARGO}} run -p katana-diagram-renderer-cli -- mermaid render --input "$file" --output "{{output}}/$slug.svg"; \
+      {{CARGO}} run -p katana-render-runtime-cli -- mermaid render --input "$file" --output "{{output}}/$slug.svg"; \
     done
 
-# Render kdr Mermaid SVG fixtures with the prebuilt kdr binary
-mermaid-render-prebuilt fixtures output='tmp/kdr-mermaid-rendered':
+# Render krr Mermaid SVG fixtures with the prebuilt krr binary
+mermaid-render-prebuilt fixtures output='tmp/krr-mermaid-rendered':
     @rm -rf "{{output}}"
     @mkdir -p "{{output}}"
     @for file in "{{fixtures}}"/*.md; do \
       slug=$(basename "$file" .md); \
-      "{{KDR_BIN}}" mermaid render --input "$file" --output "{{output}}/$slug.svg"; \
+      "{{KRR_BIN}}" mermaid render --input "$file" --output "{{output}}/$slug.svg"; \
     done
 
 # Update official Mermaid reference SVG / PNG
-mermaid-reference fixtures output='tmp/kdr-mermaid-official':
+mermaid-reference fixtures output='tmp/krr-mermaid-official':
     bun run scripts/mermaid/diagram-update.ts --fixtures "{{fixtures}}" --output "{{output}}" --markdown-output "{{fixtures}}/official-dark" --theme dark --mermaid-js "{{MERMAID_JS}}" --mermaid-zenuml-js "{{MERMAID_ZENUML_JS}}" --skip-errors
 
 # Update all committed Mermaid reference SVG / PNG fixtures
@@ -288,55 +288,55 @@ mermaid-reference-all:
       "tests/fixtures/mermaid/en" \
       "tests/fixtures/mermaid/ja" \
       "tests/fixtures/mermaid/representative" \
-      | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/mermaid/}; log="{{RUNTIME_UPDATE_LOG_DIR}}/mermaid-reference-${slug//\//-}.log"; if just mermaid-reference "$1" "tmp/kdr-mermaid-official/$slug" >"$log" 2>&1; then echo "mermaid reference passed: $slug (log: $log)"; else echo "mermaid reference failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {}
+      | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/mermaid/}; log="{{RUNTIME_UPDATE_LOG_DIR}}/mermaid-reference-${slug//\//-}.log"; if just mermaid-reference "$1" "tmp/krr-mermaid-official/$slug" >"$log" 2>&1; then echo "mermaid reference passed: $slug (log: $log)"; else echo "mermaid reference failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {}
 
-# Compare committed official Mermaid reference with kdr rendering through ImageMagick score
-mermaid-compare fixtures min_score='99' output='tmp/kdr-mermaid':
+# Compare committed official Mermaid reference with krr rendering through ImageMagick score
+mermaid-compare fixtures min_score='99' output='tmp/krr-mermaid':
     just mermaid-render "{{fixtures}}" "{{output}}/rendered"
     bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser" --theme dark
     bun run scripts/mermaid/reference-compare.ts --official "{{fixtures}}/official-dark" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --theme dark --min-score "{{min_score}}"
 
-# Compare Mermaid fixtures using the prebuilt kdr binary
-mermaid-compare-prebuilt fixtures min_score='99' output='tmp/kdr-mermaid':
+# Compare Mermaid fixtures using the prebuilt krr binary
+mermaid-compare-prebuilt fixtures min_score='99' output='tmp/krr-mermaid':
     just mermaid-render-prebuilt "{{fixtures}}" "{{output}}/rendered"
     bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser" --theme dark
     bun run scripts/mermaid/reference-compare.ts --official "{{fixtures}}/official-dark" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --theme dark --min-score "{{min_score}}"
 
 # Compare representative Mermaid patterns for CI/CD
 mermaid-compare-ci min_score='99':
-    just kdr-build
-    just mermaid-compare-prebuilt tests/fixtures/mermaid/representative "{{min_score}}" tmp/kdr-mermaid-ci
+    just krr-build
+    just mermaid-compare-prebuilt tests/fixtures/mermaid/representative "{{min_score}}" tmp/krr-mermaid-ci
 
 # Compare full Mermaid fixture sets for local release validation
 mermaid-compare-full min_score='99':
-    just kdr-build
+    just krr-build
     @set -euo pipefail; \
     mkdir -p "{{RUNTIME_UPDATE_LOG_DIR}}"; \
     printf '%s\n' \
       "tests/fixtures/mermaid/en" \
       "tests/fixtures/mermaid/ja" \
-      | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/mermaid/}; log="{{RUNTIME_UPDATE_LOG_DIR}}/mermaid-compare-${slug//\//-}.log"; if just mermaid-compare-prebuilt "$1" "$2" "tmp/kdr-mermaid-full/$slug" >"$log" 2>&1; then echo "mermaid compare passed: $slug (log: $log)"; else echo "mermaid compare failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {} "{{min_score}}"
+      | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/mermaid/}; log="{{RUNTIME_UPDATE_LOG_DIR}}/mermaid-compare-${slug//\//-}.log"; if just mermaid-compare-prebuilt "$1" "$2" "tmp/krr-mermaid-full/$slug" >"$log" 2>&1; then echo "mermaid compare passed: $slug (log: $log)"; else echo "mermaid compare failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {} "{{min_score}}"
 
 # Render Mermaid fixtures for a timing smoke check
 mermaid-bench fixtures:
-    @start=$(date +%s); just mermaid-render "{{fixtures}}" tmp/kdr-mermaid-bench; end=$(date +%s); elapsed=$((end - start)); echo "mermaid fixtures rendered in ${elapsed}s"
+    @start=$(date +%s); just mermaid-render "{{fixtures}}" tmp/krr-mermaid-bench; end=$(date +%s); elapsed=$((end - start)); echo "mermaid fixtures rendered in ${elapsed}s"
 
-# Render kdr Draw.io SVG fixtures
-drawio-render fixtures output='tmp/kdr-drawio-rendered':
+# Render krr Draw.io SVG fixtures
+drawio-render fixtures output='tmp/krr-drawio-rendered':
     @rm -rf "{{output}}"
     @mkdir -p "{{output}}"
     @for file in "{{fixtures}}"/*.drawio; do \
       slug=$(basename "$file" .drawio); \
-      {{CARGO}} run -p katana-diagram-renderer-cli -- drawio render --input "$file" --output "{{output}}/$slug.svg"; \
+      {{CARGO}} run -p katana-render-runtime-cli -- drawio render --input "$file" --output "{{output}}/$slug.svg"; \
     done
 
-# Render kdr Draw.io SVG fixtures with the prebuilt kdr binary
-drawio-render-prebuilt fixtures output='tmp/kdr-drawio-rendered':
+# Render krr Draw.io SVG fixtures with the prebuilt krr binary
+drawio-render-prebuilt fixtures output='tmp/krr-drawio-rendered':
     @rm -rf "{{output}}"
     @mkdir -p "{{output}}"
     @for file in "{{fixtures}}"/*.drawio; do \
       slug=$(basename "$file" .drawio); \
-      "{{KDR_BIN}}" drawio render --input "$file" --output "{{output}}/$slug.svg"; \
+      "{{KRR_BIN}}" drawio render --input "$file" --output "{{output}}/$slug.svg"; \
     done
 
 # Update official Draw.io reference SVG / PNG
@@ -377,8 +377,8 @@ drawio-reference-all:
       "$root/representative" \
       | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/drawio/}; log="{{RUNTIME_UPDATE_LOG_DIR}}/drawio-reference-${slug//\//-}.log"; if just drawio-reference "$1" >"$log" 2>&1; then echo "drawio reference passed: $slug (log: $log)"; else echo "drawio reference failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {}
 
-# Compare committed official Draw.io reference with kdr rendering through ImageMagick score
-drawio-compare fixtures min_score='99' output='tmp/kdr-drawio' baseline='':
+# Compare committed official Draw.io reference with krr rendering through ImageMagick score
+drawio-compare fixtures min_score='99' output='tmp/krr-drawio' baseline='':
     just drawio-render "{{fixtures}}" "{{output}}/rendered"
     bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser"
     @if [ -n "{{baseline}}" ]; then \
@@ -387,8 +387,8 @@ drawio-compare fixtures min_score='99' output='tmp/kdr-drawio' baseline='':
       bun run scripts/drawio/reference-compare.ts --official "{{fixtures}}/official" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}"; \
     fi
 
-# Compare Draw.io fixtures using the prebuilt kdr binary
-drawio-compare-prebuilt fixtures min_score='99' output='tmp/kdr-drawio' baseline='':
+# Compare Draw.io fixtures using the prebuilt krr binary
+drawio-compare-prebuilt fixtures min_score='99' output='tmp/krr-drawio' baseline='':
     just drawio-render-prebuilt "{{fixtures}}" "{{output}}/rendered"
     bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser"
     @if [ -n "{{baseline}}" ]; then \
@@ -399,17 +399,17 @@ drawio-compare-prebuilt fixtures min_score='99' output='tmp/kdr-drawio' baseline
 
 # Compare representative Draw.io patterns for CI/CD
 drawio-compare-ci min_score='99':
-    just kdr-build
-    just drawio-compare-prebuilt tests/fixtures/drawio/representative "{{min_score}}" tmp/kdr-drawio-ci tests/fixtures/drawio/representative/score-baseline.json
+    just krr-build
+    just drawio-compare-prebuilt tests/fixtures/drawio/representative "{{min_score}}" tmp/krr-drawio-ci tests/fixtures/drawio/representative/score-baseline.json
 
 # Compare basic Draw.io patterns as a smoke check
 drawio-compare-basic min_score='99':
-    just kdr-build
-    just drawio-compare-prebuilt tests/fixtures/drawio/basic "{{min_score}}" tmp/kdr-drawio-basic
+    just krr-build
+    just drawio-compare-prebuilt tests/fixtures/drawio/basic "{{min_score}}" tmp/krr-drawio-basic
 
 # Compare full Draw.io fixture sets for local release validation
 drawio-compare-full min_score='99':
-    just kdr-build
+    just krr-build
     @set -euo pipefail; \
     mkdir -p "{{RUNTIME_UPDATE_LOG_DIR}}"; \
     root="tests/fixtures/drawio"; \
@@ -439,14 +439,14 @@ drawio-compare-full min_score='99':
       "$root/official/templates/uml" \
       "$root/official/templates/venn" \
       "$root/official/templates/world" \
-      | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/drawio/}; output_slug=${slug//\//-}; log="{{RUNTIME_UPDATE_LOG_DIR}}/drawio-compare-$output_slug.log"; if just drawio-compare-prebuilt "$1" "$2" "tmp/kdr-drawio-full/$output_slug" >"$log" 2>&1; then echo "drawio compare passed: $slug (log: $log)"; else echo "drawio compare failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {} "{{min_score}}"
+      | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/drawio/}; output_slug=${slug//\//-}; log="{{RUNTIME_UPDATE_LOG_DIR}}/drawio-compare-$output_slug.log"; if just drawio-compare-prebuilt "$1" "$2" "tmp/krr-drawio-full/$output_slug" >"$log" 2>&1; then echo "drawio compare passed: $slug (log: $log)"; else echo "drawio compare failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {} "{{min_score}}"
 
 # Render Draw.io fixtures for a timing smoke check
 drawio-bench fixtures:
-    @start=$(date +%s); just drawio-render "{{fixtures}}" tmp/kdr-drawio-bench; end=$(date +%s); elapsed=$((end - start)); echo "drawio fixtures rendered in ${elapsed}s"
+    @start=$(date +%s); just drawio-render "{{fixtures}}" tmp/krr-drawio-bench; end=$(date +%s); elapsed=$((end - start)); echo "drawio fixtures rendered in ${elapsed}s"
 
-# Render kdr PlantUML SVG fixtures
-plantuml-render fixtures output='tmp/kdr-plantuml-rendered':
+# Render krr PlantUML SVG fixtures
+plantuml-render fixtures output='tmp/krr-plantuml-rendered':
     @rm -rf "{{output}}"
     @mkdir -p "{{output}}"
     @for file in "{{fixtures}}"/*.puml "{{fixtures}}"/*.md; do \
@@ -454,11 +454,11 @@ plantuml-render fixtures output='tmp/kdr-plantuml-rendered':
       [ "$(basename "$file")" = "README.md" ] && continue; \
       slug=$(basename "$file"); \
       slug="${slug%.*}"; \
-      {{CARGO}} run -p katana-diagram-renderer-cli -- plantuml render --input "$file" --output "{{output}}/$slug.svg"; \
+      {{CARGO}} run -p katana-render-runtime-cli -- plantuml render --input "$file" --output "{{output}}/$slug.svg"; \
     done
 
-# Render kdr PlantUML SVG fixtures with the prebuilt kdr binary
-plantuml-render-prebuilt fixtures output='tmp/kdr-plantuml-rendered':
+# Render krr PlantUML SVG fixtures with the prebuilt krr binary
+plantuml-render-prebuilt fixtures output='tmp/krr-plantuml-rendered':
     @rm -rf "{{output}}"
     @mkdir -p "{{output}}"
     @for file in "{{fixtures}}"/*.puml "{{fixtures}}"/*.md; do \
@@ -466,32 +466,32 @@ plantuml-render-prebuilt fixtures output='tmp/kdr-plantuml-rendered':
       [ "$(basename "$file")" = "README.md" ] && continue; \
       slug=$(basename "$file"); \
       slug="${slug%.*}"; \
-      "{{KDR_BIN}}" plantuml render --input "$file" --output "{{output}}/$slug.svg"; \
+      "{{KRR_BIN}}" plantuml render --input "$file" --output "{{output}}/$slug.svg"; \
     done
 
 # Update PlantUML reference SVG fixtures
-plantuml-reference fixtures output='tmp/kdr-plantuml-reference':
+plantuml-reference fixtures output='tmp/krr-plantuml-reference':
     just plantuml-install
     bun run scripts/plantuml/diagram-update.ts --fixtures "{{fixtures}}" --output "{{output}}/official-svg" --jar "{{PLANTUML_CACHE_JAR}}" --dark-mode
     bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/official-svg" --output "{{fixtures}}/official-dark" --theme dark
 
 # Compare PlantUML fixtures with official dark-mode reference score
-plantuml-compare fixtures min_score='100' output='tmp/kdr-plantuml':
+plantuml-compare fixtures min_score='100' output='tmp/krr-plantuml':
     just plantuml-render "{{fixtures}}" "{{output}}/rendered"
     bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser" --theme dark
     bun run scripts/plantuml/reference-compare.ts --official "{{fixtures}}/official-dark" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}"
 
-# Compare PlantUML fixtures using the prebuilt kdr binary
-plantuml-compare-prebuilt fixtures min_score='100' output='tmp/kdr-plantuml':
+# Compare PlantUML fixtures using the prebuilt krr binary
+plantuml-compare-prebuilt fixtures min_score='100' output='tmp/krr-plantuml':
     just plantuml-render-prebuilt "{{fixtures}}" "{{output}}/rendered"
     bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser" --theme dark
     bun run scripts/plantuml/reference-compare.ts --official "{{fixtures}}/official-dark" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}"
 
 # Compare representative PlantUML patterns for CI/CD
 plantuml-compare-ci min_score='100':
-    just kdr-build
-    just plantuml-compare-prebuilt tests/fixtures/plantuml/official "{{min_score}}" tmp/kdr-plantuml-ci
+    just krr-build
+    just plantuml-compare-prebuilt tests/fixtures/plantuml/official "{{min_score}}" tmp/krr-plantuml-ci
 
 # Render PlantUML fixtures for a timing smoke check
 plantuml-bench fixtures:
-    @start=$(date +%s); just plantuml-render "{{fixtures}}" tmp/kdr-plantuml-bench; end=$(date +%s); elapsed=$((end - start)); echo "plantuml fixtures rendered in ${elapsed}s"
+    @start=$(date +%s); just plantuml-render "{{fixtures}}" tmp/krr-plantuml-bench; end=$(date +%s); elapsed=$((end - start)); echo "plantuml fixtures rendered in ${elapsed}s"

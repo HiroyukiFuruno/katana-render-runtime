@@ -21,7 +21,7 @@
   <a href="https://github.com/HiroyukiFuruno/katana-render-runtime/releases/latest"><img src="https://img.shields.io/github/v/release/HiroyukiFuruno/katana-render-runtime" alt="Latest Release"></a>
   <a href="https://crates.io/crates/katana-render-runtime"><img src="https://img.shields.io/crates/v/katana-render-runtime.svg" alt="crates.io"></a>
   <a href="https://docs.rs/katana-render-runtime"><img src="https://docs.rs/katana-render-runtime/badge.svg" alt="docs.rs"></a>
-  <img src="https://img.shields.io/badge/cli-kdr-2563EB" alt="CLI: kdr">
+  <img src="https://img.shields.io/badge/cli-krr-2563EB" alt="CLI: krr">
 </p>
 
 ---
@@ -38,7 +38,7 @@
 - MathJax v4 系による TeX 入力（TeX input）から SVG 出力（SVG output）への変換。
 - テーマ（theme）/ 暗色モード（dark mode）/ 診断（diagnostics）/ 寸法メタデータ（dimensions metadata）を含む共通 `RenderInput` / `RenderOutput` 契約（contract）。
 - 失敗時は panic せず、診断（diagnostics）付き raw 文字列（raw string）を返す代替出力（fallback）。
-- `kdr` CLI による既存の図形描画 workflow。
+- `krr` CLI による既存の図形描画 workflow。
 
 ## インストール（Installation）
 
@@ -57,7 +57,7 @@ cargo add katana-diagram-renderer
 CLI:
 
 ```bash
-cargo install katana-diagram-renderer-cli
+cargo install katana-render-runtime-cli
 ```
 
 ## ライブラリ API（Library API）
@@ -105,7 +105,7 @@ katana-diagram-renderer = "0.3"
 crates/
   katana-render-runtime/          # 描画実行基盤（render runtime）library
   katana-diagram-renderer/        # 互換 wrapper（compatibility wrapper）
-  katana-diagram-renderer-cli/    # kdr CLI binary
+  katana-render-runtime-cli/      # krr CLI binary
 scripts/
   mermaid/                        # 公式参照生成と採点（official reference generation and scoring）
   drawio/                         # 公式参照生成と採点（official reference generation and scoring）

@@ -1,29 +1,29 @@
 # renderer-runtime-interface Specification
 
 ## Purpose
-KatanA 既存の Mermaid / Draw.io / reference score 能力を、KDR の中立 API と runtime 管理へ移した v0.1.0 transfer の完了仕様を定義する。
+KatanA 既存の Mermaid / Draw.io / reference score 能力を、KRR の中立 API と runtime 管理へ移した v0.1.0 transfer の完了仕様を定義する。
 ## Requirements
 ### Requirement: KatanA 側の既存能力を落とさない公開 API を提供しなければならない
 
-システムは、KatanA 側でできていた Mermaid / Draw.io / PlantUML / score の能力を落とさない kdr 公開 API を提供しなければならない（MUST）。KatanA 側の型名を完全一致させること自体は要求しないが、kdr 側で独自に縮小、改名、簡略化した結果として KatanA の既存描画機能を失わせてはならない（MUST NOT）。
+システムは、KatanA 側でできていた Mermaid / Draw.io / PlantUML / score の能力を落とさない KRR 公開 API を提供しなければならない（MUST）。KatanA 側の型名を完全一致させること自体は要求しないが、KRR 側で独自に縮小、改名、簡略化した結果として KatanA の既存描画機能を失わせてはならない（MUST NOT）。
 
-#### Scenario: KatanA consumer が kdr を利用する
+#### Scenario: KatanA consumer が KRR を利用する
 
-- **WHEN** KatanA が kdr を git dependency として利用する
+- **WHEN** KatanA が KRR を git dependency として利用する
 - **THEN** KatanA 側の adapter は型変換と呼び出し接続だけを担う
-- **THEN** kdr の `RenderInput` / `RenderOutput` / `RenderError` は KatanA 側の既存呼び出しに必要な情報を保持する
-- **THEN** kdr 独自都合の DTO 欠落や format 削減により KatanA 側の Mermaid / Draw.io / PlantUML 既存機能が落ちない
+- **THEN** KRR の `RenderInput` / `RenderOutput` / `RenderError` は KatanA 側の既存呼び出しに必要な情報を保持する
+- **THEN** KRR 独自都合の DTO 欠落や format 削減により KatanA 側の Mermaid / Draw.io / PlantUML 既存機能が落ちない
 
-#### Scenario: kdr 側で API を整理する
+#### Scenario: KRR 側で API を整理する
 
-- **WHEN** kdr が KatanA 側の `diagram_backend` 型名と異なる API を公開する
+- **WHEN** KRR が KatanA 側の `diagram_backend` 型名と異なる API を公開する
 - **THEN** 既存 KatanA interface との差分を design / tasks に記録する
-- **THEN** KatanA 側 adapter が必要とする情報を kdr 側の DTO で表現できる
+- **THEN** KatanA 側 adapter が必要とする情報を KRR 側の DTO で表現できる
 - **THEN** KatanA 側で実装済みだった描画、採点評価、PlantUML process 診断の機能差分を adapter 側で再実装させない
 
 ### Requirement: KatanA 既存描画 runtime を忠実移植しなければならない
 
-システムは、KatanA 既存の Mermaid / Draw.io / PlantUML 描画 runtime を、機能を削らず kdr へ移植しなければならない（MUST）。移植時は KatanA UI state と KatanA 固有 path 前提を剥がし、`Renderer` trait と中立 DTO（`RenderInput` / `RenderOutput` / `RenderConfig` / `RenderPolicy` / `RenderContext` / `RenderDiagnostics` / `RuntimeVersion` / `RendererProfile`）で公開しなければならない。
+システムは、KatanA 既存の Mermaid / Draw.io / PlantUML 描画 runtime を、機能を削らず KRR へ移植しなければならない（MUST）。移植時は KatanA UI state と KatanA 固有 path 前提を剥がし、`Renderer` trait と中立 DTO（`RenderInput` / `RenderOutput` / `RenderConfig` / `RenderPolicy` / `RenderContext` / `RenderDiagnostics` / `RuntimeVersion` / `RendererProfile`）で公開しなければならない。
 
 #### Scenario: KatanA から Mermaid を描画する
 
@@ -36,21 +36,21 @@ KatanA 既存の Mermaid / Draw.io / reference score 能力を、KDR の中立 A
 
 - **WHEN** KatanA が `Renderer::render(&RenderInput)` を Draw.io backend で呼ぶ
 - **THEN** システムは KatanA 既存 Draw.io runtime と同等の SVG とメタデータを返す
-- **THEN** Draw.io resource、stencil、image resolver は kdr 側の vendor/resource 管理に移される
+- **THEN** Draw.io resource、stencil、image resolver は KRR 側の vendor/resource 管理に移される
 - **THEN** KatanA UI state、preview state、workspace state への依存は持たない
 
 #### Scenario: KatanA から PlantUML を描画する
 
 - **WHEN** KatanA または KDV が `Renderer::render(&RenderInput)` を PlantUML backend で呼ぶ
 - **THEN** システムは KatanA 既存 PlantUML renderer と同等の SVG、または runtime 不足時の raw code block とメタデータを返す
-- **THEN** Java / `plantuml.jar` の解決と失敗診断は kdr 側で行う
+- **THEN** Java / `plantuml.jar` の解決と失敗診断は KRR 側で行う
 - **THEN** runtime 不足時の診断は CLI と公開 API で共通の warning code、原因、確認 path、install / env 設定の対処を持つ
 - **THEN** KatanA UI state、preview state、workspace state、KDV export state への依存は持たない
 
 #### Scenario: runtime asset を移植する
 
-- **WHEN** kdr が Mermaid / Draw.io / PlantUML runtime を初期化する
-- **THEN** KatanA 既存 runtime が必要とする Mermaid.js / Draw.io.js / PlantUML asset を kdr 側で読み込める
+- **WHEN** KRR が Mermaid / Draw.io / PlantUML runtime を初期化する
+- **THEN** KatanA 既存 runtime が必要とする Mermaid.js / Draw.io.js / PlantUML asset を KRR 側で読み込める
 - **THEN** 取り込み version 固定、最新版確認、取り込み just recipe の整備は runtime asset versioning の対象として分離する
 
 ### Requirement: runtime path は境界で非 null に解決しなければならない
@@ -72,19 +72,19 @@ KatanA 既存の Mermaid / Draw.io / reference score 能力を、KDR の中立 A
 
 ### Requirement: Mermaid / Draw.io の reference 採点評価を移植しなければならない
 
-システムは、KatanA 既存の Mermaid / Draw.io reference 生成と ImageMagick 採点評価を kdr へ移植しなければならない（MUST）。採点は SVG 文字列距離だけで代替してはならない。
+システムは、KatanA 既存の Mermaid / Draw.io reference 生成と ImageMagick 採点評価を KRR へ移植しなければならない（MUST）。採点は SVG 文字列距離だけで代替してはならない。
 
-#### Scenario: Mermaid reference と kdr 出力を採点する
+#### Scenario: Mermaid reference と KRR 出力を採点する
 
-- **WHEN** `kdr mermaid compare --min-score <score>` を実行する
-- **THEN** 公式 Mermaid.js reference SVG / PNG と kdr が出力した SVG / PNG を生成する
+- **WHEN** `krr mermaid compare --min-score <score>` を実行する
+- **THEN** 公式 Mermaid.js reference SVG / PNG と KRR が出力した SVG / PNG を生成する
 - **THEN** ImageMagick による canvas / content の画像比較 score を出力する
 - **THEN** 既存 baseline exception と score floor policy を保持する
 
-#### Scenario: Draw.io reference と kdr 出力を採点する
+#### Scenario: Draw.io reference と KRR 出力を採点する
 
-- **WHEN** `kdr drawio compare --min-score <score>` を実行する
-- **THEN** 公式 Draw.io reference SVG / PNG と kdr が出力した SVG / PNG を生成する
+- **WHEN** `krr drawio compare --min-score <score>` を実行する
+- **THEN** 公式 Draw.io reference SVG / PNG と KRR が出力した SVG / PNG を生成する
 - **THEN** ImageMagick による RMSE / MAE / PHASH / dimension coverage を使った score を出力する
 - **THEN** resource 解決と crop 正規化は KatanA 既存方式と同等に扱う
 
@@ -96,7 +96,7 @@ KatanA 既存の Mermaid / Draw.io / reference score 能力を、KDR の中立 A
 
 - **WHEN** CI/CD が Mermaid / Draw.io compare を実行する
 - **THEN** git 管理済みの公式 reference SVG / PNG を読み込む
-- **THEN** kdr 出力だけをその場で生成する
+- **THEN** KRR 出力だけをその場で生成する
 - **THEN** 公式 reference SVG / PNG を変更しない
 - **THEN** 外部 network から公式描画結果を再取得しない
 
@@ -124,13 +124,13 @@ KatanA 既存の Mermaid / Draw.io / reference score 能力を、KDR の中立 A
 - **WHEN** 開発者が release validation として full compare を実行する
 - **THEN** Mermaid は KatanA から移植した full fixture を比較する
 - **THEN** Draw.io は `basic` と `official` 配下の全カテゴリを比較する
-- **THEN** git 管理済み公式 reference SVG / PNG と kdr 出力だけを比較する
+- **THEN** git 管理済み公式 reference SVG / PNG と KRR 出力だけを比較する
 - **THEN** score 改善対象は v0.1.4 の作業として report に残す
 
-#### Scenario: kdr に egui / KatanA UI 依存を持たせない
+#### Scenario: KRR に egui / KatanA UI 依存を持たせない
 
 - **WHEN** `cargo tree --workspace` を実行する
-- **THEN** kdr workspace dependency graph に `egui`、KatanA UI state は含まれない
+- **THEN** KRR workspace dependency graph に `egui`、KatanA UI state は含まれない
 - **THEN** 描画結果は SVG 文字列とメタデータ（DTO）として返される
 
 ### Requirement: document viewer rendering 拡張をKDVへ移譲しなければならない
