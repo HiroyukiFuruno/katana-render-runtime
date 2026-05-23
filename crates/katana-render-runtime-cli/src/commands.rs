@@ -5,7 +5,12 @@ use std::path::PathBuf;
 const DEFAULT_MIN_SCORE: f32 = 99.0;
 
 #[derive(Parser)]
-#[command(name = "krr", version, about = "katana-render-runtime CLI")]
+#[command(
+    name = "krr",
+    bin_name = "krr",
+    version,
+    about = "katana-render-runtime CLI"
+)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Commands,
@@ -178,6 +183,20 @@ mod tests {
         assert!(help.contains("--theme-mode <THEME_MODE>"), "{help}");
         assert!(help.contains("[possible values: dark, light]"), "{help}");
         assert!(help.contains("--cache-dir <CACHE_DIR>"), "{help}");
+        Ok(())
+    }
+
+    #[test]
+    fn help_uses_canonical_krr_name_when_executable_has_extension()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let result = Cli::try_parse_from(["krr.exe", "--help"]);
+        let Err(error) = result else {
+            return Err("expected help output".into());
+        };
+        let help = error.to_string();
+
+        assert!(help.contains("Usage: krr <COMMAND>"), "{help}");
+        assert!(!help.contains("Usage: krr.exe <COMMAND>"), "{help}");
         Ok(())
     }
 }
