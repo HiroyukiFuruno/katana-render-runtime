@@ -163,7 +163,6 @@ release-verify: release-target-check
     bash scripts/release/verify-version.sh "{{VERSION}}"
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
     {{CARGO}} package -p katana-render-runtime --locked --allow-dirty
-    {{CARGO}} package -p katana-diagram-renderer --locked --allow-dirty --list >/dev/null
     {{CARGO}} package -p katana-render-runtime-cli --locked --allow-dirty --list >/dev/null
     bash scripts/release/verify-crate-size.sh katana-render-runtime "{{VERSION}}"
     {{CARGO}} publish -p katana-render-runtime --dry-run --locked --allow-dirty

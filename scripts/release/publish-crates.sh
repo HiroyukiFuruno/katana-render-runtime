@@ -31,6 +31,4 @@ wait_for_crate() {
 
 publish_if_needed katana-render-runtime
 wait_for_crate katana-render-runtime
-publish_if_needed katana-diagram-renderer
-wait_for_crate katana-diagram-renderer
 publish_if_needed katana-render-runtime-cli

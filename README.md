@@ -53,12 +53,6 @@ Install the latest published crate:
 cargo add katana-render-runtime
 ```
 
-Existing consumers that still need the compatibility wrapper can use:
-
-```bash
-cargo add katana-diagram-renderer
-```
-
 ## CLI
 
 Install the `krr` CLI:
@@ -109,18 +103,11 @@ Primary entry points:
 
 ## Migration
 
-`katana-diagram-renderer` is a compatibility wrapper from v0.3.0. New code should depend on `katana-render-runtime`.
+`katana-render-runtime` is the rendering runtime to use.
 
 ```toml
 [dependencies]
 katana-render-runtime = "0.3"
-```
-
-Existing consumers can temporarily keep the wrapper dependency:
-
-```toml
-[dependencies]
-katana-diagram-renderer = "0.3"
 ```
 
 ## Supported Rendering
@@ -146,7 +133,6 @@ Each renderer exposes the same `Renderer` trait, so rendering code can switch re
 ```text
 crates/
   katana-render-runtime/          # Rendering runtime library
-  katana-diagram-renderer/        # Compatibility wrapper
   katana-render-runtime-cli/      # krr CLI binary
 scripts/
   mermaid/                        # Mermaid reference rendering and scoring
