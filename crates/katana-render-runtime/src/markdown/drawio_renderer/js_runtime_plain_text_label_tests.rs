@@ -8,9 +8,16 @@ const PLAIN_TEXT_LABEL_SOURCE: &str = r#"<mxGraphModel><root>
 </mxCell>
 </root></mxGraphModel>"#;
 
+const PADDED_PLAIN_TEXT_LABEL_SOURCE: &str = r#"<mxGraphModel><root>
+<mxCell id="1" parent="0"/>
+<mxCell id="text" value="&#10;First line&#10;Second line&#10;" style="text;spacingTop=-5;whiteSpace=wrap" parent="1" vertex="1">
+  <mxGeometry x="20" y="30" width="120" height="60" as="geometry"/>
+</mxCell>
+</root></mxGraphModel>"#;
+
 #[test]
 fn fake_bundle_replaces_multiline_plain_text_foreign_object_with_full_label() {
-    let path = temp_runtime_path("kdr-drawio-plain-text-label-unit");
+    let path = temp_runtime_path("krr-drawio-plain-text-label-unit");
     assert!(std::fs::write(&path, fake_bundle_with_truncated_plain_text()).is_ok());
 
     let rendered =
@@ -20,7 +27,7 @@ fn fake_bundle_replaces_multiline_plain_text_foreign_object_with_full_label() {
 
 #[test]
 fn fake_bundle_preserves_plain_text_line_breaks_in_svg_fallback() {
-    let path = temp_runtime_path("kdr-drawio-plain-text-fallback-line-break-unit");
+    let path = temp_runtime_path("krr-drawio-plain-text-fallback-line-break-unit");
     assert!(std::fs::write(&path, fake_bundle_with_truncated_plain_text()).is_ok());
 
     let rendered =
@@ -29,6 +36,22 @@ fn fake_bundle_preserves_plain_text_line_breaks_in_svg_fallback() {
     assert_render_contains(&rendered, r#"<tspan x="80" dy="0">First line</tspan>"#);
     assert_render_contains(&rendered, r#"<tspan x="80" dy="15">Second line</tspan>"#);
     assert_render_not_contains(&rendered, "First line Second line");
+}
+
+#[test]
+fn fake_bundle_trims_padding_newlines_before_plain_text_html_label() {
+    let path = temp_runtime_path("krr-drawio-plain-text-padding-newlines-unit");
+    assert!(std::fs::write(&path, fake_bundle_with_truncated_plain_text()).is_ok());
+
+    let rendered = DrawioJsRuntimeOps::render(
+        PADDED_PLAIN_TEXT_LABEL_SOURCE,
+        &path,
+        DiagramColorPreset::light(),
+    );
+
+    assert_render_contains(&rendered, "First line<br></br>Second line");
+    assert_render_not_contains(&rendered, "<br></br>First line");
+    assert_render_not_contains(&rendered, "Second line<br></br>");
 }
 
 fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
@@ -41,6 +64,8 @@ fn fake_bundle_with_truncated_plain_text() -> &'static str {
 
 fn assert_plain_text_svg_contains(rendered: &Result<String, String>) {
     assert_render_contains(rendered, "First line<br></br>Second line");
+    assert_render_not_contains(rendered, "<br></br>First line");
+    assert_render_not_contains(rendered, "Second line<br></br>");
     assert_render_contains(rendered, "width: 118px");
     assert_render_contains(rendered, "padding-top: 32px");
     assert_render_contains(rendered, "margin-left: 22px");

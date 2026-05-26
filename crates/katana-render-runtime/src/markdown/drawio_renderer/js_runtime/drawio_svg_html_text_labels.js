@@ -36,9 +36,29 @@ function katanaDrawioHtmlTextLabelHtml(html) {
 
 function katanaDrawioHtmlTextNormalizedLabelHtml(html) {
   const normalized = katanaDrawioHtmlTextHasMarkup(html)
-    ? String(html)
+    ? katanaTrimDrawioEdgeHtmlTextBreaks(String(html))
     : katanaDrawioEscapedPlainHtmlText(html);
   return normalized.replace(/&nbsp;/gi, " ");
+}
+
+function katanaTrimDrawioEdgeHtmlTextBreaks(html) {
+  return katanaTrimDrawioTrailingHtmlTextBreaks(
+    katanaTrimDrawioLeadingHtmlTextBreaks(html),
+  );
+}
+
+function katanaTrimDrawioLeadingHtmlTextBreaks(html) {
+  return String(html).replace(
+    /^(?:(?:\s|&nbsp;)+|<br\s*\/?>|<div>\s*(?:<br\s*\/?>|&nbsp;)?\s*<\/div>)+/i,
+    "",
+  );
+}
+
+function katanaTrimDrawioTrailingHtmlTextBreaks(html) {
+  return String(html).replace(
+    /(?:(?:\s|&nbsp;)+|<br\s*\/?>|<div>\s*(?:<br\s*\/?>|&nbsp;)?\s*<\/div>)+$/i,
+    "",
+  );
 }
 
 function katanaDrawioHtmlTextHasMarkup(html) {
@@ -46,10 +66,26 @@ function katanaDrawioHtmlTextHasMarkup(html) {
 }
 
 function katanaDrawioEscapedPlainHtmlText(html) {
-  return String(html)
-    .split(/\r?\n/)
+  return katanaDrawioPlainHtmlTextLines(html)
     .map(katanaDrawioEscapePlainHtmlTextLine)
     .join("<br>");
+}
+
+function katanaDrawioPlainHtmlTextLines(html) {
+  const lines = String(html).split(/\r?\n/);
+  return katanaTrimDrawioEmptyEdgeTextLines(lines);
+}
+
+function katanaTrimDrawioEmptyEdgeTextLines(lines) {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && lines[start].trim() === "") {
+    start += 1;
+  }
+  while (end > start && lines[end - 1].trim() === "") {
+    end -= 1;
+  }
+  return lines.slice(start, end);
 }
 
 function katanaDrawioEscapePlainHtmlTextLine(line) {
