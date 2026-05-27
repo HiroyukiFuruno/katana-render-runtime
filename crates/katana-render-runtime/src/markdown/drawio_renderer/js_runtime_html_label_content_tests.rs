@@ -89,6 +89,25 @@ fn fake_bundle_trims_edge_breaks_before_markup_html_label() {
     assert_render_not_contains(&rendered, "Second line<br></br>");
 }
 
+#[test]
+fn fake_bundle_trims_styled_edge_breaks_before_markup_html_label() {
+    let path = temp_runtime_path("krr-drawio-html-styled-edge-breaks-unit");
+    assert!(std::fs::write(&path, fake_bundle()).is_ok());
+
+    let source = r#"<mxfile><diagram><mxGraphModel><root><mxCell id="card" value="&lt;br style=&quot;font-size: 12px;&quot;&gt;First line&lt;br style=&quot;font-size: 12px;&quot;&gt;Second line&lt;br style=&quot;font-size: 12px;&quot;&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;fontSize=12;" vertex="1" /></root></mxGraphModel></diagram></mxfile>"#;
+    let rendered = DrawioJsRuntimeOps::render(source, &path, DiagramColorPreset::dark());
+
+    assert_render_contains(
+        &rendered,
+        r#"First line<br style="font-size: 12px;"></br>Second line"#,
+    );
+    assert_render_not_contains(&rendered, r#"<br style="font-size: 12px;"></br>First line"#);
+    assert_render_not_contains(
+        &rendered,
+        r#"Second line<br style="font-size: 12px;"></br>"#,
+    );
+}
+
 fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("{prefix}-{}.js", std::process::id()))
 }
