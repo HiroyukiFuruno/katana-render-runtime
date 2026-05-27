@@ -108,6 +108,18 @@ fn fake_bundle_trims_styled_edge_breaks_before_markup_html_label() {
     );
 }
 
+#[test]
+fn fake_bundle_repositions_top_html_label_fallback_to_html_label_top() {
+    let path = temp_runtime_path("krr-drawio-html-top-fallback-unit");
+    assert!(std::fs::write(&path, fake_bundle()).is_ok());
+
+    let source = r#"<mxfile><diagram><mxGraphModel><root><mxCell id="topcard" value="First line&#xa;Second line" style="text;html=1;whiteSpace=wrap;overflow=hidden;fontSize=12;verticalAlign=top;" vertex="1" /></root></mxGraphModel></diagram></mxfile>"#;
+    let rendered = DrawioJsRuntimeOps::render(source, &path, DiagramColorPreset::dark());
+
+    assert_render_contains(&rendered, r#"<text x="170" y="120""#);
+    assert_render_not_contains(&rendered, r#"<text x="170" y="180""#);
+}
+
 fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("{prefix}-{}.js", std::process::id()))
 }
@@ -150,6 +162,7 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
   svg.appendChild(createGroup("actor", 0, 0, 30, 60));
   svg.appendChild(createGroup("math", 250, 100, 220, 120));
   svg.appendChild(createGroup("package", 100, 0, 450, 280));
+  svg.appendChild(createGroup("topcard", 100, 100, 140, 80));
   callback({
     graph: {
       getSvg() {
@@ -170,6 +183,12 @@ function createGroup(id, x, y, width, height) {
   shape.appendChild(rect);
   const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
   text.textContent = id;
+  if (id === "topcard") {
+    text.setAttribute("x", "170");
+    text.setAttribute("y", "180");
+    text.setAttribute("font-size", "12px");
+    text.setAttribute("text-anchor", "middle");
+  }
   group.appendChild(shape);
   if (id === "math") {
     const foreignObject = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");

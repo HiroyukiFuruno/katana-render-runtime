@@ -208,7 +208,7 @@ function katanaCreateDrawioHtmlTextLabel(entry, box, fallback) {
   const group = katanaCreateDrawioSvgElement("g");
   const switchNode = katanaCreateDrawioSvgElement("switch");
   switchNode.appendChild(katanaCreateDrawioHtmlTextForeignObject(entry, box));
-  const normalizedFallback = katanaNormalizedDrawioHtmlTextFallbackNodes(fallback, entry.label);
+  const normalizedFallback = katanaNormalizedDrawioHtmlTextFallbackNodes(fallback, entry, box);
   normalizedFallback.forEach((node) => {
     switchNode.appendChild(node);
   });
@@ -216,21 +216,22 @@ function katanaCreateDrawioHtmlTextLabel(entry, box, fallback) {
   return group;
 }
 
-function katanaNormalizedDrawioHtmlTextFallbackNodes(nodes, label) {
-  const lines = String(label)
+function katanaNormalizedDrawioHtmlTextFallbackNodes(nodes, entry, box) {
+  const lines = String(entry.label)
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean);
   if (lines.length === 0) {
     return nodes;
   }
-  return nodes.map((node) => katanaNormalizedDrawioHtmlTextFallbackNode(node, lines));
+  return nodes.map((node) => katanaNormalizedDrawioHtmlTextFallbackNode(node, lines, entry, box));
 }
 
-function katanaNormalizedDrawioHtmlTextFallbackNode(node, lines) {
+function katanaNormalizedDrawioHtmlTextFallbackNode(node, lines, entry, box) {
   if (node.tagName !== "text") {
     return node;
   }
+  katanaRepositionDrawioTopHtmlTextFallbackNode(node, entry, box);
   const tspans = Array.from(node.querySelectorAll("tspan"));
   if (tspans.length === 0) {
     node.replaceChildren(
@@ -248,6 +249,14 @@ function katanaNormalizedDrawioHtmlTextFallbackNode(node, lines) {
     tspan.textContent = mergedLines[index] ?? "";
   });
   return node;
+}
+
+function katanaRepositionDrawioTopHtmlTextFallbackNode(node, entry, box) {
+  if (!katanaDrawioHtmlTextAlignTop(entry.style)) {
+    return;
+  }
+  const y = katanaDrawioHtmlTextTop(entry.style, box) + katanaDrawioFontSize(entry.style);
+  node.setAttribute("y", String(Math.round(y)));
 }
 
 function katanaCreateDrawioHtmlTextForeignObject(entry, box) {
