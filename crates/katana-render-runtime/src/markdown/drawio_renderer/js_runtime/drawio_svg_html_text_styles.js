@@ -38,10 +38,13 @@ function katanaDrawioHtmlTextContentStyle(style) {
 
 function katanaDrawioHtmlTextAlignItems(style) {
   return (
-    KATANA_DRAWIO_HTML_TEXT_ALIGN_ITEMS.get(
-      katanaDrawioStyleValueFromMap(style, "verticalAlign", katanaDrawioDefaultVerticalAlign(style)),
-    ) ?? "center"
+    KATANA_DRAWIO_HTML_TEXT_ALIGN_ITEMS.get(katanaDrawioHtmlTextVerticalAlign(style)) ??
+    "center"
   );
+}
+
+function katanaDrawioHtmlTextVerticalAlign(style) {
+  return katanaDrawioStyleValueFromMap(style, "verticalAlign", katanaDrawioDefaultVerticalAlign(style));
 }
 
 function katanaDrawioHtmlTextJustifyContent(style) {
@@ -103,7 +106,7 @@ function katanaDrawioHtmlTextTop(style, box) {
         katanaDrawioHtmlTextOfficialTopOffset(),
     );
   }
-  const alignment = katanaDrawioStyleValueFromMap(style, "verticalAlign", "middle");
+  const alignment = katanaDrawioHtmlTextVerticalAlign(style);
   const textTop = (KATANA_DRAWIO_HTML_TEXT_TOP_BY_ALIGNMENT.get(alignment) ??
     katanaDrawioMiddleHtmlTextTop)(box);
   return Math.round(textTop + katanaDrawioMiddleHtmlTextSpacingTop(style, alignment));

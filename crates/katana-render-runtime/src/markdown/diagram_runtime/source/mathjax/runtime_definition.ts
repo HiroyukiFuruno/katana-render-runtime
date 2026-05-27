@@ -1,6 +1,6 @@
 import {
   RuntimeBundleDefinition,
-} from "../shared/runtime_bundle";
+} from "#shared/runtime_bundle";
 
 const MATHJAX_JS_RUNTIME =
   "crates/katana-render-runtime/src/markdown/mathjax_renderer/js_runtime";

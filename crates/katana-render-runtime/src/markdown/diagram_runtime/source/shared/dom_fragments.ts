@@ -1,4 +1,4 @@
-import { type RuntimeFragment, RuntimeFragmentFactory } from "./runtime_bundle";
+import { type RuntimeFragment, RuntimeFragmentFactory } from "#shared/runtime_bundle";
 
 const MERMAID_JS_RUNTIME =
   "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime";

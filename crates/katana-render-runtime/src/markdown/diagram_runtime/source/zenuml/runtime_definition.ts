@@ -1,5 +1,5 @@
-import { SharedDomFragments } from "../shared/dom_fragments";
-import { RuntimeBundleDefinition } from "../shared/runtime_bundle";
+import { SharedDomFragments } from "#shared/dom_fragments";
+import { RuntimeBundleDefinition } from "#shared/runtime_bundle";
 
 export const ZenumlRuntimeBundleDefinition = {
   create(): RuntimeBundleDefinition {
@@ -20,7 +20,7 @@ function katanaInstallMermaidZenumlRuntimeAdapter() {
   }
 }
 
-function katanaRunZenumlRuntime(source, isDark) {
+globalThis["katanaRunZenumlRuntime"] = function katanaRunZenumlRuntime(source, isDark) {
   const stripped = String(source).replace(/^zenuml[^\n]*\n?/, "");
   let svg = zenuml.renderToSvg(stripped).svg;
   if (isDark) {
@@ -61,7 +61,7 @@ function katanaRunZenumlRuntime(source, isDark) {
     svg = svg.replace('</svg>', darkStyle + '</svg>');
   }
   return svg;
-}
+};
 
 katanaInstallMermaidZenumlRuntimeAdapter();
 `;
