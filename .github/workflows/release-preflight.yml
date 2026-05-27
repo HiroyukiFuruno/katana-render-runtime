@@ -57,7 +57,7 @@ jobs:
 
       - name: Cache cargo
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.1
         with:
           shared-key: release-preflight-ubuntu-stable-all-features
 
@@ -65,7 +65,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.13
+          bun-version: 1.3.14
 
       - name: Install JavaScript dependencies
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
