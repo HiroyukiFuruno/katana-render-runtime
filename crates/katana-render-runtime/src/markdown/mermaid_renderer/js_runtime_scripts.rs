@@ -1,3 +1,4 @@
+use super::diagram_type::MermaidDiagramType;
 use crate::markdown::diagram_js_runtime::DiagramRuntimeScript;
 
 pub(super) struct MermaidRuntimeScripts;
@@ -12,26 +13,57 @@ impl MermaidRuntimeScripts {
         zenuml_bundle: &'a str,
         request_json: &str,
     ) -> Vec<DiagramRuntimeScript<'a>> {
-        vec![
+        let mut scripts = vec![
             DiagramRuntimeScript::borrowed("mermaid-runtime.min.js", MERMAID_RUNTIME),
             DiagramRuntimeScript::borrowed("mermaid.min.js", bundle),
             DiagramRuntimeScript::borrowed("mermaid-zenuml.min.js", zenuml_bundle),
-            DiagramRuntimeScript::owned("render-mermaid.js", render_script(request_json)),
-        ]
+        ];
+        if request_uses_zenuml_runtime(request_json) {
+            scripts.push(DiagramRuntimeScript::borrowed(
+                "zenuml-runtime.min.js",
+                ZENUML_RUNTIME,
+            ));
+        }
+        scripts.push(DiagramRuntimeScript::owned(
+            "render-mermaid.js",
+            render_script(request_json),
+        ));
+        scripts
     }
 }
 
 fn render_script(request_json: &str) -> String {
-    format!("katanaInstallMermaidZenumlRuntimeAdapter();\nkatanaRunMermaidRuntime({request_json});")
+    format!("katanaRunMermaidRuntime({request_json});")
+}
+
+fn request_uses_zenuml_runtime(request_json: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(request_json) else {
+        return false;
+    };
+    if value
+        .get("diagramType")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|diagram_type| diagram_type.eq_ignore_ascii_case("zenuml"))
+    {
+        return true;
+    }
+    let Some(source) = value.get("source").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    MermaidDiagramType::from_source(source) == MermaidDiagramType::Zenuml
 }
 
 const MERMAID_RUNTIME: &str = include_str!("../diagram_runtime/generated/mermaid-runtime.min.js");
 const MERMAID_ZENUML: &str =
     include_str!("../../../vendor/mermaid-zenuml/0.2.3/mermaid-zenuml.min.js");
+const ZENUML_RUNTIME: &str = include_str!("../diagram_runtime/generated/zenuml-runtime.min.js");
 
 #[cfg(test)]
 #[path = "js_runtime_scripts_class_tests.rs"]
 mod class_tests;
+#[cfg(test)]
+#[path = "js_runtime_scripts_entrypoint_tests.rs"]
+mod entrypoint_tests;
 
 #[cfg(test)]
 mod tests {

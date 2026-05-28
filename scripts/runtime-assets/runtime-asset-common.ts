@@ -52,8 +52,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "drawio",
     displayName: "Draw.io",
-    version: "30.0.2",
-    checksum: "0435d7a829549490482d576a37556224fa190d538610c96908632e5cda7c601f",
+    version: "30.0.4",
+    checksum: "93a96808a703bc389e5dc7f3769ad3f36ea11f4477a7bb4be82bcf6cfde6ee9d",
     fileName: "drawio.min.js",
     rustVersionConst: "DRAWIO_JS_VERSION",
     rustChecksumConst: "DRAWIO_JS_CHECKSUM",
@@ -81,8 +81,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "plantuml",
     displayName: "PlantUML JAR",
-    version: "1.2026.4",
-    checksum: "1783d4569855f2f0a17e65bd192add377c7f2b5e3e1781b65dc94d084de98699",
+    version: "1.2026.5",
+    checksum: "379955744583fa8306ab760122a6b0f8a032fcf833143ce473a4343a8b66b7ce",
     fileName: "plantuml.jar",
     rustVersionConst: "PLANTUML_JAR_VERSION",
     rustChecksumConst: "PLANTUML_JAR_CHECKSUM",

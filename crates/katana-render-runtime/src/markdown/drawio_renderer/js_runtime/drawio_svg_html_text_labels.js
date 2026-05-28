@@ -231,12 +231,12 @@ function katanaNormalizedDrawioHtmlTextFallbackNode(node, lines, entry, box) {
   if (node.tagName !== "text") {
     return node;
   }
-  katanaRepositionDrawioTopHtmlTextFallbackNode(node, entry, box);
   const tspans = Array.from(node.querySelectorAll("tspan"));
   if (tspans.length === 0) {
     node.replaceChildren(
       ...lines.map((line, index) => katanaDrawioLineBreakTspan(node, line, index)),
     );
+    katanaRepositionDrawioHtmlTextFallbackNode(node, entry, box, lines.length);
     return node;
   }
   const mergedLines = lines.slice(0, tspans.length);
@@ -248,15 +248,29 @@ function katanaNormalizedDrawioHtmlTextFallbackNode(node, lines, entry, box) {
   tspans.forEach((tspan, index) => {
     tspan.textContent = mergedLines[index] ?? "";
   });
+  katanaRepositionDrawioHtmlTextFallbackNode(node, entry, box, mergedLines.length);
   return node;
 }
 
-function katanaRepositionDrawioTopHtmlTextFallbackNode(node, entry, box) {
-  if (!katanaDrawioHtmlTextAlignTop(entry.style)) {
-    return;
-  }
-  const y = katanaDrawioHtmlTextTop(entry.style, box) + katanaDrawioFontSize(entry.style);
+function katanaRepositionDrawioHtmlTextFallbackNode(node, entry, box, lineCount) {
+  const y = katanaDrawioHtmlTextFallbackY(entry.style, box, lineCount);
   node.setAttribute("y", String(Math.round(y)));
+}
+
+function katanaDrawioHtmlTextFallbackY(style, box, lineCount) {
+  const top = katanaDrawioHtmlTextTop(style, box);
+  const fontSize = katanaDrawioFontSize(style);
+  const alignment = katanaDrawioHtmlTextVerticalAlign(style);
+  const height = katanaDrawioHtmlTextHeight(style, box);
+  const lineDy = Number(katanaDrawioTextLineDy(1, fontSize));
+  const lineOffset = Math.max(0, lineCount - 1) * lineDy;
+  if (alignment === "top") {
+    return top + fontSize;
+  }
+  if (alignment === "bottom") {
+    return top + height - lineOffset;
+  }
+  return top + height / 2 + fontSize / 2 - lineOffset / 2;
 }
 
 function katanaCreateDrawioHtmlTextForeignObject(entry, box) {

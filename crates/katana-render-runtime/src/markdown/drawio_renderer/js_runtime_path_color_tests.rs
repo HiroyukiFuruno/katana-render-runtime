@@ -34,6 +34,22 @@ fn fake_bundle_maps_opaque_black_vertex_path_to_official_dark_white() {
 }
 
 #[test]
+fn fake_bundle_maps_explicit_black_shape_stroke_to_official_dark_shape_stroke() {
+    let path = temp_runtime_path("kdr-drawio-explicit-black-shape-stroke-unit");
+    assert!(std::fs::write(&path, fake_black_path_bundle()).is_ok());
+
+    let source = r#"<mxGraphModel><root><mxCell id="cell" style="strokeColor=#000000;" vertex="1"><mxGeometry x="0" y="0" width="80" height="30" as="geometry"/></mxCell></root></mxGraphModel>"#;
+    let rendered = DrawioJsRuntimeOps::render(source, &path, DiagramColorPreset::dark());
+
+    assert!(
+        rendered
+            .as_ref()
+            .is_ok_and(|svg| svg.contains(r##"stroke="#ededed""##,)),
+        "{rendered:?}"
+    );
+}
+
+#[test]
 fn fake_bundle_maps_swimlane_black_path_to_official_dark_white() {
     let path = temp_runtime_path("kdr-drawio-swimlane-black-path-unit");
     assert!(std::fs::write(&path, fake_black_path_bundle()).is_ok());

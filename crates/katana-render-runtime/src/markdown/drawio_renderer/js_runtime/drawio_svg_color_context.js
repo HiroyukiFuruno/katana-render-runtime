@@ -50,9 +50,27 @@ function katanaDrawioContextOriginalColor(element, name, value) {
     katanaDrawioPidWhiteFillColor(element, name, value) ||
     katanaDrawioSimpleDiagramDarkColor(element, name, value) ||
     katanaDrawioFloorplanBlackPaintColor(element, name, value) ||
+    katanaDrawioExplicitBlackShapeStrokeColor(element, name, value) ||
     katanaDrawioOpaqueBlackPathColor(element, name, value) ||
     katanaDrawioLargeWhitePathColor(element, name, value)
   );
+}
+
+function katanaDrawioExplicitBlackShapeStrokeColor(element, name, value) {
+  return katanaDrawioIsExplicitBlackShapeStroke(element, name, value) ? "#ededed" : "";
+}
+
+function katanaDrawioIsExplicitBlackShapeStroke(element, name, value) {
+  return [
+    katanaDrawioIsDarkMode(),
+    name === "stroke",
+    KATANA_DRAWIO_SOURCE_BLACK_COLORS.has(value),
+    KATANA_DRAWIO_SOURCE_BLACK_COLORS.has(
+      katanaDrawioColorKey(katanaDrawioElementCellStyleValue(element, "strokeColor")),
+    ),
+    !katanaDrawioElementCellIsEdge(element),
+    katanaDrawioIsVisualShapeTag(element),
+  ].every(Boolean);
 }
 
 function katanaDrawioFloorplanBlackPaintColor(element, name, value) {
@@ -263,3 +281,5 @@ const KATANA_DRAWIO_AZURE_DARK_COLOR = new Map([
   ["stroke|#ffffff", "#121212"],
   ["stroke|rgb(255, 255, 255)", "rgb(18, 18, 18)"],
 ]);
+
+const KATANA_DRAWIO_SOURCE_BLACK_COLORS = new Set(["#000000", "black", "rgb(0, 0, 0)"]);

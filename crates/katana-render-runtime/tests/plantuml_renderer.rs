@@ -55,7 +55,7 @@ fn plantuml_api_exposes_available_theme_names() {
 
 #[test]
 fn plantuml_api_exposes_runtime_asset_metadata() {
-    assert_eq!(PLANTUML_JAR_VERSION, "1.2026.4");
+    assert_eq!(PLANTUML_JAR_VERSION, "1.2026.5");
     assert_eq!(PLANTUML_JAR_CHECKSUM.len(), 64);
     assert!(PLANTUML_DOWNLOAD_URL.contains("plantuml-lgpl"));
 }

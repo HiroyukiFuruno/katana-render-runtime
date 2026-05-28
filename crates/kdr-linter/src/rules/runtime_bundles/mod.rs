@@ -29,6 +29,22 @@ const REQUIRED_PATHS: &[&str] = &[
     "crates/katana-render-runtime/src/markdown/diagram_runtime/generated/runtime-bundles.sha256",
     "scripts/runtime-bundles/bundle-runtime.ts",
 ];
+const MERMAID_RENDER_SCRIPT: &str =
+    "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime_scripts.rs";
+const GENERATED_ENTRYPOINTS: &[(&str, &str)] = &[
+    (
+        "crates/katana-render-runtime/src/markdown/diagram_runtime/generated/mermaid-runtime.min.js",
+        "katanaRunMermaidRuntime",
+    ),
+    (
+        "crates/katana-render-runtime/src/markdown/diagram_runtime/generated/drawio-runtime.min.js",
+        "katanaRunDrawioRuntime",
+    ),
+    (
+        "crates/katana-render-runtime/src/markdown/diagram_runtime/generated/zenuml-runtime.min.js",
+        "katanaRunZenumlRuntime",
+    ),
+];
 
 pub(super) struct RuntimeBundleRule;
 
@@ -38,6 +54,7 @@ impl RuntimeBundleRule {
         let root = workspace.root();
         Self::check_paths(root, &mut violations);
         Self::check_rust_includes(workspace, &mut violations);
+        Self::check_runtime_entrypoints(root, &mut violations);
         RuntimeSourceBoundaryRule::check(root, &mut violations)?;
         RuntimeTypeScriptTokenRule::check(root, &mut violations)?;
         Ok(violations)
@@ -82,6 +99,45 @@ impl RuntimeBundleRule {
                 RULE,
                 "V8 runtime code must be included from generated bundles, not source fragments.",
             ));
+        }
+    }
+
+    fn check_runtime_entrypoints(root: &Path, violations: &mut Vec<Violation>) {
+        Self::check_mermaid_render_script(root, violations);
+        for (relative_path, entrypoint) in GENERATED_ENTRYPOINTS {
+            let path = root.join(relative_path);
+            let Ok(source) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let quoted = format!("globalThis[\"{entrypoint}\"]");
+            let dotted = format!("globalThis.{entrypoint}");
+            if !source.contains(&quoted) && !source.contains(&dotted) {
+                violations.push(Violation::new(
+                    path,
+                    1,
+                    1,
+                    RULE,
+                    format!("generated runtime bundle must publish `{entrypoint}` via globalThis."),
+                ));
+            }
+        }
+    }
+
+    fn check_mermaid_render_script(root: &Path, violations: &mut Vec<Violation>) {
+        let path = root.join(MERMAID_RENDER_SCRIPT);
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        for (line_index, line) in source.lines().enumerate() {
+            if line.contains("katanaInstallMermaidZenumlRuntimeAdapter()") {
+                violations.push(Violation::new(
+                    path.clone(),
+                    line_index + 1,
+                    1,
+                    RULE,
+                    "Mermaid render script must not call the ZenUML adapter installer directly.",
+                ));
+            }
         }
     }
 

@@ -1,9 +1,9 @@
-import { SharedDomFragments } from "../shared/dom_fragments";
+import { SharedDomFragments } from "#shared/dom_fragments";
 import {
   RuntimeBundleDefinition,
   type RuntimeFragment,
   RuntimeFragmentFactory,
-} from "../shared/runtime_bundle";
+} from "#shared/runtime_bundle";
 
 const DRAWIO_JS_RUNTIME = "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime";
 
@@ -163,8 +163,8 @@ function drawioRuntimeFragments(): RuntimeFragment[] {
 }
 
 const DRAWIO_RUNTIME_ENTRYPOINT = `
-function katanaRunDrawioRuntime() {
+globalThis["katanaRunDrawioRuntime"] = function katanaRunDrawioRuntime() {
   katanaInstallDrawioRuntimeAdapter();
   return katanaRenderDrawioSvg();
-}
+};
 `;

@@ -1,5 +1,5 @@
 function katanaDrawioHtmlTextAlignTop(style) {
-  return katanaDrawioStyleValueFromMap(style, "verticalAlign", katanaDrawioDefaultVerticalAlign(style)) === "top";
+  return katanaDrawioHtmlTextVerticalAlign(style) === "top";
 }
 
 function katanaDrawioUsesExplicitHtmlTextSpacing(style) {

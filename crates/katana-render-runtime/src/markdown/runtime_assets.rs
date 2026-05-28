@@ -23,10 +23,10 @@ pub const ZENUML_CORE_JS_CHECKSUM: &str =
 pub const ZENUML_CORE_DOWNLOAD_URL: &str =
     "https://cdn.jsdelivr.net/npm/@zenuml/core@3.47.9/dist/zenuml.js";
 
-pub const DRAWIO_JS_VERSION: &str = "30.0.2";
+pub const DRAWIO_JS_VERSION: &str = "30.0.4";
 pub const DRAWIO_JS_CHECKSUM: &str =
-    "0435d7a829549490482d576a37556224fa190d538610c96908632e5cda7c601f";
-pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v30.0.2";
+    "93a96808a703bc389e5dc7f3769ad3f36ea11f4477a7bb4be82bcf6cfde6ee9d";
+pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v30.0.4";
 
 pub const MATHJAX_JS_VERSION: &str = "4.1.2";
 pub const MATHJAX_JS_CHECKSUM: &str =
@@ -55,7 +55,7 @@ impl RuntimeAsset {
             kind: "drawio",
             version: DRAWIO_JS_VERSION,
             filename: "drawio.min.js",
-            bytes: include_bytes!("../../vendor/drawio/30.0.2/drawio.min.js"),
+            bytes: include_bytes!("../../vendor/drawio/30.0.4/drawio.min.js"),
         }
     }
 
