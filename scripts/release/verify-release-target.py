@@ -12,8 +12,8 @@ import sys
 from dataclasses import dataclass
 from urllib import error, request
 
-REQUIRED_LATEST_RELEASE = "v0.4.18"
-REQUIRED_TARGET_RELEASE = "v0.4.19"
+REQUIRED_LATEST_RELEASE = "v0.4.19"
+REQUIRED_TARGET_RELEASE = "v0.4.20"
 REQUIRED_RELEASE_COMMITS = ("02a73d293c04f9635fd3a822ac865bf81d4c8745",)
 
 

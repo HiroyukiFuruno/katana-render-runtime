@@ -1,0 +1,535 @@
+name: PR governance review sensor
+
+on:
+  # This workflow intentionally has no write permission, secrets, checkout, or
+  # PR-controlled command. Its uniquely named check is the required Actions
+  # latch; a trusted default-branch publisher must complete a matching App Check Run
+  # to this run before this job may succeed.
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
+  pull_request_review:
+    types:
+      - submitted
+      - edited
+      - dismissed
+  pull_request_review_comment:
+    types:
+      - created
+      - edited
+      - deleted
+
+permissions:
+  actions: read
+  checks: read
+
+concurrency:
+  group: pr-governance-review-latch-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  review-latch:
+    name: KRR / PR governance review latch
+    runs-on: ubuntu-latest
+    # The dispatcher may reconcile all 600 governed heads at the shared 8.1s
+    # Check Run pace (about 81 minutes). Keep a bounded cushion for its
+    # generation hand-off without approaching the Actions six-hour job limit.
+    timeout-minutes: 95
+    steps:
+      - name: Reject sensor reruns
+        env:
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          if [[ "${RUN_ATTEMPT}" != 1 ]]; then
+            echo 'Sensor reruns cannot reuse a previous source_run_id.' >&2
+            exit 1
+          fi
+
+      - name: Reject out-of-scope PR
+        if: ${{ github.event.pull_request.draft != false || github.event.pull_request.base.repo.full_name != github.repository || github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.base.ref != github.event.repository.default_branch }}
+        run: |
+          echo 'Only non-Draft local PRs targeting the default branch can satisfy the governance review latch.' >&2
+          exit 1
+
+      - name: Await matching trusted governance Check Run
+        if: ${{ github.run_attempt == 1 && github.event.pull_request.draft == false && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == github.event.repository.default_branch }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          # 600 * 8.1 = 4,860 seconds. Sixty-second polls permit at most
+          # 91 bounded three-read Check Run polls within this 90-minute wait.
+          POLL_INTERVAL_SECONDS: '60'
+          POLL_TIMEOUT_SECONDS: '5400'
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          import time
+          from urllib.parse import parse_qs, urlencode, urlsplit
+
+          check_name = "KRR / PR governance (trusted check)"
+          sha_pattern = re.compile(r"^[0-9a-fA-F]{40}$")
+          positive_number = re.compile(r"^[1-9][0-9]*$")
+          workflow_ref_pattern = re.compile(r"^[A-Za-z0-9._/-]+$")
+          sensor_events = {
+              "pull_request",
+              "pull_request_review",
+              "pull_request_review_comment",
+          }
+          sensor_workflow = ".github/workflows/pr-governance-review-events.yml"
+          writer_workflow = ".github/workflows/pr-governance-status-writer.yml"
+          # The reconciler's complete operating boundary.  The timeout below
+          # intentionally covers one such generation plus a fixed hand-off
+          # cushion, rather than granting an unbounded wait to the latch.
+          max_reconciliation_heads = 600
+          check_write_pace_seconds = 8.1
+          min_reconciliation_seconds = int(max_reconciliation_heads * check_write_pace_seconds)
+          max_latch_timeout_seconds = 5400
+          # One repository identity read, one source validation, up to 91
+          # bounded three-read source-bound Check Run polls (page one plus
+          # two progressing pages, with a final page-one race anchor), then
+          # repository/source/writer
+          # revalidation on success remain below this request budget.
+          max_latch_api_reads = 300
+
+          def fail(message: str) -> None:
+              print(message, file=sys.stderr)
+              raise SystemExit(1)
+
+          head_sha = os.environ.get("HEAD_SHA", "")
+          pr_number = os.environ.get("PR_NUMBER", "")
+          pr_base_sha = os.environ.get("PR_BASE_SHA", "")
+          pr_base_ref = os.environ.get("PR_BASE_REF", "")
+          default_branch = os.environ.get("DEFAULT_BRANCH", "")
+          source_run_id = os.environ.get("SOURCE_RUN_ID", "")
+          app_id = os.environ.get("CHECK_APP_ID", "")
+          repository = os.environ.get("GITHUB_REPOSITORY", "")
+          repository_pattern = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+          if repository_pattern.fullmatch(repository) is None:
+              fail("GitHub repository identity is invalid.")
+          repository_name = repository.rsplit("/", 1)[1]
+          repository_url = f"https://api.github.com/repos/{repository}"
+          try:
+              server_url = urlsplit(os.environ.get("GITHUB_SERVER_URL", ""))
+          except ValueError:
+              fail("GitHub server URL is invalid.")
+          if (
+              sha_pattern.fullmatch(head_sha) is None
+              or sha_pattern.fullmatch(pr_base_sha) is None
+          ):
+              fail("PR head SHA is invalid.")
+          if (
+              positive_number.fullmatch(pr_number) is None
+              or positive_number.fullmatch(source_run_id) is None
+              or not repository
+              or workflow_ref_pattern.fullmatch(pr_base_ref) is None
+              or workflow_ref_pattern.fullmatch(default_branch) is None
+              or default_branch in {".", ".."}
+              or default_branch.startswith("/")
+              or "//" in default_branch
+              or any(part in {"", ".", ".."} for part in default_branch.split("/"))
+              or pr_base_ref != default_branch
+              or pr_base_ref in {".", ".."}
+              or pr_base_ref.startswith("/")
+              or "//" in pr_base_ref
+              or any(part in {"", ".", ".."} for part in pr_base_ref.split("/"))
+          ):
+              fail("Sensor source run identity is invalid.")
+          if positive_number.fullmatch(app_id) is None:
+              fail("KRR_GOVERNANCE_APP_ID is not configured.")
+          if (
+              server_url.scheme != "https"
+              or not server_url.netloc
+              or server_url.path not in {"", "/"}
+              or server_url.query
+              or server_url.fragment
+          ):
+              fail("GitHub server URL is invalid.")
+          generation_pattern = re.compile(
+              rf"^krr-governance/v1/{re.escape(head_sha.lower())}/writer-([1-9][0-9]*)$"
+          )
+
+          try:
+              interval = int(os.environ["POLL_INTERVAL_SECONDS"])
+              timeout = int(os.environ["POLL_TIMEOUT_SECONDS"])
+          except (KeyError, ValueError):
+              fail("Governance latch polling configuration is invalid.")
+          check_run_polls = 1 + (timeout + interval - 1) // interval if interval > 0 else 0
+          if (
+              interval < 1
+              or timeout < min_reconciliation_seconds
+              or timeout > max_latch_timeout_seconds
+              or check_run_polls * 3 + 3 > max_latch_api_reads
+          ):
+              fail("Governance latch polling configuration is invalid.")
+
+          def workflow_path_matches(value: object, expected: str) -> bool:
+              if value == expected:
+                  return True
+              if not isinstance(value, str) or not value.startswith(expected + "@"):
+                  return False
+              ref = value[len(expected) + 1:]
+              return bool(
+                  workflow_ref_pattern.fullmatch(ref)
+                  and ref not in {".", ".."}
+                  and not ref.startswith("/")
+                  and "//" not in ref
+                  and all(part not in {"", ".", ".."} for part in ref.split("/"))
+              )
+
+          def details_writer_run_id(value: object) -> str | None:
+              if not isinstance(value, str):
+                  return None
+              try:
+                  parsed = urlsplit(value)
+              except ValueError:
+                  return None
+              expected_path = f"/{repository}/actions/runs/"
+              if (
+                  parsed.scheme != server_url.scheme
+                  or parsed.netloc != server_url.netloc
+                  or parsed.fragment
+              ):
+                  return None
+              match = re.fullmatch(re.escape(expected_path) + r"([1-9][0-9]*)", parsed.path)
+              if match is None:
+                  return None
+              try:
+                  source_values = parse_qs(parsed.query, keep_blank_values=True).get("source_run_id")
+              except ValueError:
+                  return None
+              return match.group(1) if source_values == [source_run_id] else None
+
+          def repository_rest_identity(value: object) -> tuple[int, str, str] | None:
+              if not isinstance(value, dict):
+                  return None
+              identifier = value.get("id")
+              name = value.get("name")
+              url = value.get("url")
+              full_name = value.get("full_name")
+              if (
+                  type(identifier) is not int or identifier < 1
+                  or not isinstance(name, str) or name != repository_name
+                  or not isinstance(url, str) or url != repository_url
+                  or ("full_name" in value and (not isinstance(full_name, str) or full_name != repository))
+              ):
+                  return None
+              return identifier, name, url
+
+          def source_repository_matches(value: object, expected: tuple[int, str, str]) -> bool:
+              if not isinstance(value, dict):
+                  return False
+              if (
+                  type(value.get("id")) is not int or value.get("id") != expected[0]
+                  or not isinstance(value.get("name"), str) or value.get("name") != expected[1]
+                  or not isinstance(value.get("url"), str) or value.get("url") != expected[2]
+              ):
+                  return False
+              return "full_name" not in value or value.get("full_name") == repository
+
+          def sensor_run_matches(value: object, expected: tuple[int, str, str]) -> bool:
+              if not isinstance(value, dict):
+                  return False
+              run_repository = value.get("repository")
+              pulls = value.get("pull_requests")
+              if not source_repository_matches(run_repository, expected):
+                  return False
+              if not isinstance(pulls, list) or len(pulls) != 1 or not isinstance(pulls[0], dict):
+                  return False
+              pull = pulls[0]
+              pull_base, pull_head = pull.get("base"), pull.get("head")
+              return bool(
+                  value.get("id") == int(source_run_id)
+                  and value.get("name") == "PR governance review sensor"
+                  and value.get("event") in sensor_events
+                  and workflow_path_matches(value.get("path"), sensor_workflow)
+                  and value.get("head_sha") == head_sha
+                  and value.get("status") == "in_progress"
+                  and value.get("conclusion") is None
+                  and value.get("run_attempt") == 1
+                  and type(value.get("run_number")) is int and value["run_number"] > 0
+                  and pull.get("number") == int(pr_number)
+                  and isinstance(pull_base, dict) and isinstance(pull_head, dict)
+                  and pull_base.get("sha") == pr_base_sha and pull_base.get("ref") == default_branch
+                  and pull_head.get("sha") == head_sha
+                  and isinstance(pull_base.get("repo"), dict) and isinstance(pull_head.get("repo"), dict)
+                  and source_repository_matches(pull_base["repo"], expected)
+                  and source_repository_matches(pull_head["repo"], expected)
+              )
+
+          def writer_run_matches(
+              value: object, writer_run_id: str, expected: tuple[int, str, str],
+          ) -> bool:
+              if not isinstance(value, dict):
+                  return False
+              run_repository = value.get("repository")
+              return bool(
+                  value.get("id") == int(writer_run_id)
+                  and value.get("name") == "PR governance status writer"
+                  and value.get("event") == "workflow_dispatch"
+                  and workflow_path_matches(value.get("path"), writer_workflow)
+                  and source_repository_matches(run_repository, expected)
+                  and value.get("run_attempt") == 1
+                  and (
+                      value.get("status") == "in_progress"
+                      or (value.get("status") == "completed" and value.get("conclusion") == "success")
+                  )
+              )
+
+          def api_json(
+              endpoint: str,
+              failure: str,
+              *,
+              terminal_page: bool = False,
+              inspect_link: bool = False,
+          ) -> object:
+              arguments = ["gh", "api"]
+              if terminal_page or inspect_link:
+                  arguments.append("--include")
+              arguments.append(endpoint)
+              try:
+                  result = subprocess.run(
+                      arguments,
+                      capture_output=True,
+                      text=True,
+                      check=False,
+                      timeout=20,
+                  )
+              except subprocess.TimeoutExpired:
+                  fail(failure)
+              if result.returncode != 0:
+                  fail(failure)
+              try:
+                  raw = result.stdout
+                  if terminal_page or inspect_link:
+                      headers, separator, raw = raw.replace("\r\n", "\n").partition("\n\n")
+                      if (
+                          not separator
+                          or not headers.startswith("HTTP/")
+                      ):
+                          fail(failure)
+                      has_next = re.search(r'(?im)^link:.*rel="next"', headers) is not None
+                      if terminal_page and has_next:
+                          fail(failure)
+                  value = json.loads(raw)
+                  return (value, has_next) if inspect_link else value
+              except json.JSONDecodeError:
+                  fail(failure)
+
+          def check_matches_source(check: object) -> bool:
+              if not isinstance(check, dict) or check.get("name") != check_name:
+                  return False
+              details_url = check.get("details_url")
+              if not isinstance(details_url, str):
+                  return False
+              app = check.get("app")
+              if not isinstance(app, dict) or str(app.get("id")) != app_id:
+                  return False
+              external_id = check.get("external_id")
+              writer_run_id = details_writer_run_id(details_url)
+              if (
+                  check.get("head_sha") != head_sha
+                  or not isinstance(external_id, str)
+                  or writer_run_id is None
+              ):
+                  return False
+              generation = generation_pattern.fullmatch(external_id)
+              return generation is not None and generation.group(1) == writer_run_id
+
+          endpoint = f"repos/{repository}/commits/{head_sha}/check-runs?" + urlencode({"check_name": check_name, "app_id": app_id, "filter": "all", "per_page": 100})
+
+          def check_run_page(
+              page: int,
+              *,
+              terminal_page: bool = False,
+              inspect_link: bool = False,
+          ) -> tuple[int, list[dict[str, object]], set[int]]:
+              value = api_json(
+                  endpoint + f"&page={page}",
+                  "Unable to read the trusted governance Check Run.",
+                  terminal_page=terminal_page,
+                  inspect_link=inspect_link,
+              )
+              has_next = False
+              if inspect_link:
+                  if (
+                      not isinstance(value, tuple)
+                      or len(value) != 2
+                      or type(value[1]) is not bool
+                  ):
+                      fail("Trusted governance Check Run response is invalid.")
+                  value, has_next = value
+              if not isinstance(value, dict) or type(value.get("total_count")) is not int:
+                  fail("Trusted governance Check Run response is invalid.")
+              total_count = value["total_count"]
+              runs = value.get("check_runs")
+              if total_count < 0 or not isinstance(runs, list) or len(runs) > 100:
+                  fail("Trusted governance Check Run response is invalid.")
+              if inspect_link and total_count <= 100 and has_next:
+                  fail("Trusted governance Check Run response changed during pagination.")
+              identifiers: set[int] = set()
+              for run in runs:
+                  identifier = run.get("id") if isinstance(run, dict) else None
+                  if type(identifier) is not int or identifier < 1 or identifier in identifiers:
+                      fail("Trusted governance Check Run response is invalid.")
+                  identifiers.add(identifier)
+              return total_count, runs, identifiers
+
+          # Historical runs for an unchanged SHA are retained indefinitely.
+          # A fresh sensor's Check Run can therefore be behind more than two
+          # 100-entry pages.  Scan the exact check-name/app/head endpoint in
+          # bounded source pages instead of making that history a terminal
+          # failure. Each poll reads page one and at most two new pages. A
+          # normal page-one transition (a new Check Run or a status update)
+          # restarts the bounded snapshot; only an unchanged final page-one
+          # anchor may authorize a candidate. This preserves the three-read
+          # per-poll budget above.
+          source_pages_per_poll = 2
+          max_source_check_pages = 1 + source_pages_per_poll * (check_run_polls - 1)
+          check_scan: dict[str, object] = {}
+
+          def begin_source_check_scan(
+              total_count: int,
+              first_page: list[dict[str, object]],
+              first_identifiers: set[int],
+          ) -> None:
+              page_count = max(1, (total_count + 99) // 100)
+              if (
+                  page_count > max_source_check_pages
+                  or len(first_page) != min(total_count, 100)
+              ):
+                  fail("Trusted governance Check Run response exceeds the bounded source page window.")
+              check_scan.clear()
+              check_scan.update({
+                  "snapshot": (total_count, first_page, first_identifiers),
+                  "page_count": page_count,
+                  "next_page": 2,
+                  "identifiers": set(first_identifiers),
+                  "matches": [check for check in first_page if check_matches_source(check)],
+                  # A one-page (including empty) response gets its terminal
+                  # Link fence on the next page-one anchor read.
+                  "complete": False,
+              })
+
+          def source_bound_trusted_check_runs() -> list[dict[str, object]] | None:
+              # A one-page snapshot needs its Link fence on the final anchor.
+              # Request the headers without prematurely rejecting a normal
+              # one-to-many page transition before it can be restarted.
+              first = check_run_page(
+                  1,
+                  inspect_link=bool(check_scan.get("page_count") == 1),
+              )
+              if not check_scan:
+                  begin_source_check_scan(*first)
+              elif first != check_scan.get("snapshot"):
+                  # Check Run ordering and history can change between polls.
+                  # The old snapshot, including any candidate collected from
+                  # it, is never reusable; restart from this complete page-one
+                  # snapshot and require its own final stable anchor.
+                  begin_source_check_scan(*first)
+              if check_scan["complete"]:
+                  matches = check_scan["matches"]
+                  if not isinstance(matches, list):
+                      fail("Trusted governance Check Run scan is invalid.")
+                  if len(matches) > 1:
+                      fail("Multiple trusted governance Check Runs match this sensor run.")
+                  check_scan.clear()
+                  return matches
+
+              total_count, _, _ = first
+              page_count = check_scan.get("page_count")
+              next_page = check_scan.get("next_page")
+              identifiers = check_scan.get("identifiers")
+              matches = check_scan.get("matches")
+              if (
+                  type(page_count) is not int
+                  or type(next_page) is not int
+                  or not isinstance(identifiers, set)
+                  or not isinstance(matches, list)
+              ):
+                  fail("Trusted governance Check Run scan is invalid.")
+              for _ in range(source_pages_per_poll):
+                  if next_page > page_count:
+                      check_scan["complete"] = True
+                      break
+                  page_total, page, page_identifiers = check_run_page(
+                      next_page,
+                      terminal_page=next_page == page_count,
+                  )
+                  expected_count = min(100, total_count - 100 * (next_page - 1))
+                  if (
+                      page_total != total_count
+                      or len(page) != expected_count
+                      or identifiers & page_identifiers
+                  ):
+                      fail("Trusted governance Check Run response changed during pagination.")
+                  identifiers.update(page_identifiers)
+                  matches.extend(check for check in page if check_matches_source(check))
+                  next_page += 1
+                  check_scan["next_page"] = next_page
+              if next_page > page_count:
+                  check_scan["complete"] = True
+              return None
+
+          deadline = time.monotonic() + timeout
+          repository_identity = repository_rest_identity(
+              api_json(f"repos/{repository}", "Repository REST identity is invalid.")
+          )
+          if repository_identity is None:
+              fail("Repository REST identity is invalid.")
+          if not sensor_run_matches(
+              api_json(f"repos/{repository}/actions/runs/{source_run_id}", "Sensor source run is invalid."),
+              repository_identity,
+          ):
+              fail("Sensor source run is invalid.")
+
+          while True:
+              matches = source_bound_trusted_check_runs()
+              if matches is None:
+                  if time.monotonic() >= deadline:
+                      fail("Timed out waiting for a matching trusted governance Check Run.")
+                  time.sleep(interval)
+                  continue
+              if matches:
+                  terminal = matches[0]
+                  if terminal.get("status") == "completed" and terminal.get("conclusion") == "success":
+                      writer_run_id = details_writer_run_id(terminal.get("details_url"))
+                      if writer_run_id is None:
+                          fail("Trusted governance Check Run writer generation is invalid.")
+                      if repository_rest_identity(
+                          api_json(f"repos/{repository}", "Repository REST identity is invalid.")
+                      ) != repository_identity:
+                          fail("Repository REST identity changed.")
+                      if not sensor_run_matches(
+                          api_json(f"repos/{repository}/actions/runs/{source_run_id}", "Sensor source run is invalid."),
+                          repository_identity,
+                      ):
+                          fail("Sensor source run is invalid.")
+                      if not writer_run_matches(
+                          api_json(f"repos/{repository}/actions/runs/{writer_run_id}", "Trusted governance writer run is invalid."),
+                          writer_run_id,
+                          repository_identity,
+                      ):
+                          fail("Trusted governance writer run is invalid.")
+                      raise SystemExit(0)
+                  if terminal.get("status") == "completed":
+                      fail("Trusted governance publisher reported failure.")
+
+              if time.monotonic() >= deadline:
+                  fail("Timed out waiting for a matching trusted governance Check Run.")
+              time.sleep(interval)
+          PY

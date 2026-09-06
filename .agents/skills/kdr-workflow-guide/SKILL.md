@@ -19,7 +19,12 @@ KDR は Mermaid、Draw.io、ZenUML などの図表描画ランタイムと `kdr`
 3. `/openspec-verify-change`
    - 実装が仕様、設計、タスクと一致しているか確認する。
 4. `/openspec-archive-change`
-   - 実装、検証、PR 統合が終わった変更だけ archive へ移す。
+   - 実装と検証が終わった変更だけ archive へ移す。リリース対象より前の完了済み change は、release gate 前に archive して正式な release commit に含める。
+
+通常の変更では PR 統合後に archive する運用も可能ですが、リリース作業では
+`/impl-release` の対象 version より前の完了済み change を `release-check` と
+`pre-pr` の前に archive します。archive の変更を正式な release commit に含め、
+merge 後まで先送りしません。未完了の change は完了条件を満たすまで archive しません。
 
 ## 2. 日常的な実装変更
 
@@ -66,6 +71,9 @@ KDR の品質ゲートは、描画ランタイム、runtime asset、CLI、crate 
 
 PR を作る前に `/self-review` と必要な品質ゲートを終えます。
 PR 作成は `/create_pull_request` を使い、ベースブランチは現在のブランチ名と作業文脈から決めます。
+Draftでのreview、指摘のreply/resolve、最新HEADのfinal reviewを終えたら、`just pr-ready-check "<pr>"` を実行してReady化します。Ready化後はユーザーから**freshなmerge承認**を得て、専用Appの `merge --apply` の**直前**に同じコマンドを再実行し、Ready PRの最新Issue/marker/thread/CI/base/headを再検証します。成功時のmergeはPR外のglobal skill `/Users/hiroyuki_furuno/.codex/skills/krr-pr-governance-bootstrap/SKILL.md` が定める専用Appの `merge --apply` だけを使い、人間、UI、通常のGitHub CLI merge、admin bypassは禁止です。`prepare --apply` は保存済みの人間用`gh auth`だけを使う例外であり、activate/merge/finalize/verifyのlive operationはfresh JWTとscript自身がmint・検証するApp IATを必要とします。`merge` の`--apply`なしdry-runだけは、人間用authによるpublic readに限定します。
+
+レビュー証跡では no-issues 応答を formal review と混同しない。trusted bot の canonical Issue comment 全体、`Reviewed commit` の10〜40桁hex prefixとcurrent HEAD、未編集（`created_at == updated_at`）、phase windowごとの候補一意性（重複はfail-closed）を確認する。optional details footerはcanonical summary/structure一致、nested/sentinel拒否、8192文字以下が必要。同一current HEAD・body digest・unresolved 0・Issue freshnessが揃う場合だけinitial no-issues証跡をfinalに再利用し、reactionは証跡にしない。formal review/指摘対応はfinal marker後の別evidenceを必須とし、strict marker、App-only merge、initial→final順序を維持する。
 
 ## 6. 持ち込まないもの
 

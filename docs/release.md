@@ -60,6 +60,22 @@ GitHub のブランチ保護（branch protection）では、少なくとも次�
 5. `katana-render-runtime` を crates.io に公開
 6. crates.io で `katana-render-runtime` が見えるまで待機
 7. `katana-render-runtime-cli` を crates.io に公開
+8. 公開済み GitHub Release を再確認し、clean・統合済み・未ロックの release branch / worktree だけを整理
+
+cleanup は `scripts/release/cleanup_release_state.py` が担当する。
+GitHub Release が未公開、対象 branch が未統合、worktree が dirty または locked、対象が default branch のいずれかなら削除せず失敗する。
+local release branch tip と remote-tracking（remote）release branch tip が共存する場合は、両方が default branch に統合済みであることを worktree 除去・branch 削除の前に検証する。local に未push commit がある場合は、何も削除せず fail-closed で失敗する。
+ローカルで再実行する場合も、対象branchを明示して同じ安全条件を使う。
+
+```bash
+python3 scripts/release/cleanup_release_state.py \
+  --version vX.Y.Z \
+  --release-branch release/vX.Y.Z \
+  --remote origin \
+  --default-branch master
+```
+
+Issue起点と依存更新証跡の書式は [Issue起点の変更契約](issue-driven-workflow.md) を参照する。
 
 ## 必要な秘匿値
 

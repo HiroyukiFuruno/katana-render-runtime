@@ -3,24 +3,6 @@ name: release-preflight
 on:
   pull_request:
     branches: [master]
-    paths:
-      - "**.rs"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "Justfile"
-      - "package.json"
-      - "bun.lock"
-      - "biome.json"
-      - "tsconfig.json"
-      - ".github/workflows/**"
-      - "assets/**"
-      - "README.md"
-      - "docs/**"
-      - "openspec/**"
-      - "scripts/**"
-      - "tests/**"
-      - "crates/**"
-      - "vendor/**"
   workflow_dispatch:
     inputs:
       version:

@@ -1,0 +1,305 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "valid-ellipsis",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": true,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "valid-sentence",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": true,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues. All required checks passed!\n\n**Reviewed commit:** `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "valid-footer",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": true,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`\n\n<details>\n<summary>ℹ️ About Codex in GitHub</summary>\n\nThis review was performed by Codex.\n</details>",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "valid-trailing-newline",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": true,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`\n",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-missing-punctuation",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues\n\n**Reviewed commit:** `bbbbbbbbbb`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-duplicate-codex-review",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`\n\nCodex Review: Didn't find any major issues...",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-duplicate-reviewed-commit",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`\n\n**Reviewed commit:** `bbbbbbbbbb`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-title-line-sentinel",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues... **Reviewed commit:** `bbbbbbbbbb`\n\n**Reviewed commit:** `bbbbbbbbbb`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-short-sha",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbb`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-wrong-sha",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `aaaaaaaaaa`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-wrong-bot",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "another-bot[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-edited",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:01Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-after-boundary",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`",
+        "created_at": "2026-08-29T09:30:00Z",
+        "updated_at": "2026-08-29T09:30:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-before-boundary",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`",
+        "created_at": "2026-08-29T11:00:00Z",
+        "updated_at": "2026-08-29T11:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-nested-details",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`\n\n<details>\n<summary>ℹ️ About Codex in GitHub</summary>\n<details>nested</details>\n</details>",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-codex-sentinel-in-details",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`\n\n<details>\n<summary>ℹ️ About Codex in GitHub</summary>\nCodex Review: hidden\n</details>",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-reviewed-sentinel-in-details",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`\n\n<details>\n<summary>ℹ️ About Codex in GitHub</summary>\n**Reviewed commit:** hidden\n</details>",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-oversize-details",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`\n\n<details>\n<summary>ℹ️ About Codex in GitHub</summary>\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n</details>",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-footer-trailing-text",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`\n\n<details>\n<summary>ℹ️ About Codex in GitHub</summary>\nvalid\n</details>\npostscript",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-malformed-time",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues...\n\n**Reviewed commit:** `bbbbbbbbbb`",
+        "created_at": "not-a-time",
+        "updated_at": "not-a-time",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    }
+  ]
+}
