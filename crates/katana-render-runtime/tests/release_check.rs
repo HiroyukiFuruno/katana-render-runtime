@@ -432,8 +432,9 @@ const SKILL_CONTRACTS: &[SkillContract] = &[
             RequiredTerm::Alternatives(&["resolve", "解決"]),
             RequiredTerm::Exact("final"),
             RequiredTerm::Exact("pr-ready-check"),
+            RequiredTerm::Exact("gh pr ready"),
         ],
-        promotes_ready: false,
+        promotes_ready: true,
     },
 ];
 
@@ -780,6 +781,8 @@ fn assert_ready_promotion_boundary(skill: &str, contract: &SkillContract) -> Tes
         );
         if contract.path == ".codex/skills/commit_and_push/SKILL.md" {
             assert_commit_and_push_ready_boundary(skill)?;
+        } else if contract.path == ".codex/skills/gh-address-comments/SKILL.md" {
+            assert_gh_address_comments_ready_boundary(skill)?;
         } else {
             assert_in_order(skill, READY_PROMOTION_ORDER)
                 .map_err(|error| format!("{}: {error}", contract.path))?;
@@ -797,6 +800,22 @@ fn assert_ready_promotion_boundary(skill: &str, contract: &SkillContract) -> Tes
         );
         assert_in_order(skill, contract.required_terms)?;
     }
+    Ok(())
+}
+
+fn assert_gh_address_comments_ready_boundary(skill: &str) -> TestResult {
+    assert_in_order(
+        skill,
+        &[
+            RequiredTerm::Exact("最後に `just pr-ready-check \"{pr_number}\"`"),
+            RequiredTerm::Exact("`pr-ready-check` 成功後は"),
+            RequiredTerm::Exact("`gh pr ready \"{pr_number}\"`"),
+            RequiredTerm::Exact("Ready化後にrequired checks"),
+            RequiredTerm::Exact("ユーザーから**freshなmerge承認**を得た直前に"),
+            RequiredTerm::Exact("同じ `just pr-ready-check \"{pr_number}\"`"),
+            RequiredTerm::Exact("merge --apply"),
+        ],
+    )?;
     Ok(())
 }
 
