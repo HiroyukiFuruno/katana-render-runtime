@@ -47,16 +47,19 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         self.assertIn('urlencode({"dispatcher_run_id": str(source.identifier), "carry_pending": str(carry_pending)})', self.writer)
         self.assertIn("Bind the writer scope to current App invalidations from one dispatcher.", self.writer)
         self.assertIn("Draft pull request cannot carry a terminal governance decision.", self.writer)
-        # Terminal writes are split into four bounded, ordered segments.  The
-        # segment boundary is part of the dispatch contract, not an old
-        # single-run request budget.
+        # Terminal writes are split into four bounded, ordered 125-head
+        # segments. The segment boundary is part of the dispatch contract,
+        # not an old single-run request budget.
         self.assertIn(
-            'terminal_write_budget = 150 if scope == "all" and os.environ.get("GITHUB_ACTIONS") == "true"',
+            'terminal_write_budget = MAX_TERMINAL_BATCH if scope == "all" and os.environ.get("GITHUB_ACTIONS") == "true"',
             self.writer,
         )
-        self.assertIn('re.fullmatch(r"[1-4]", raw_continuation_index)', self.writer)
-        self.assertIn("len(terminal_order) > 600", self.writer)
-        self.assertIn("start = (continuation_index - 1) * 150", self.writer)
+        self.assertIn("MAX_TERMINAL_BATCH = 125", self.writer)
+        self.assertIn("MAX_TERMINAL_CONTINUATIONS = 4", self.writer)
+        self.assertIn("MAX_TERMINAL_ORDER = MAX_TERMINAL_BATCH * MAX_TERMINAL_CONTINUATIONS", self.writer)
+        self.assertIn('re.fullmatch(rf"[1-{MAX_TERMINAL_CONTINUATIONS}]", raw_continuation_index)', self.writer)
+        self.assertIn("len(terminal_order) > MAX_TERMINAL_ORDER", self.writer)
+        self.assertIn("start = (continuation_index - 1) * MAX_TERMINAL_BATCH", self.writer)
         self.assertIn("terminal_batch != expected_terminal_batch", self.writer)
 
         snapshot = WRITER.OpenSnapshot(
@@ -260,10 +263,10 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         self.assertEqual(self.dispatcher.count("timeout-minutes: 15"), 2)
         self.assertIn("timeout-minutes: 30", self.dispatcher)
         self.assertIn("timeout-minutes: 290", self.dispatcher)
-        self.assertIn("bounded to 450 distinct heads", self.dispatcher)
+        self.assertIn("# 450-head bound is operational", self.dispatcher)
         self.assertIn("if len(positions) >= 450:", self.dispatcher)
         dispatcher_seconds = 450 * 8.1
-        terminal_seconds = 3 * 150 * 20.5
+        terminal_seconds = 4 * 125 * 20.5
         self.assertLess(dispatcher_seconds + terminal_seconds, 290 * 60)
         self.assertLess((15 + 15 + 30) * 60 + dispatcher_seconds + terminal_seconds, 21_000)
         self.assertEqual(self.dispatcher.count("ROOT_DEADLINE_EPOCH:"), 4)

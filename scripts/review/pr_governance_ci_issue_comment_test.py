@@ -16,8 +16,10 @@ class GovernanceCiAndIssueContractTest(unittest.TestCase):
     ) -> None:
         """The runner may execute only the script fetched at its trusted SHA."""
         loader_start = workflow.index(f'script_path = "{script_path}"')
-        loader_end = workflow.index("\n\n      - name:", loader_start)
-        loader = workflow[loader_start:loader_end]
+        # ``workflow`` is the already-isolated preflight job body.  The
+        # trusted loader is currently its final step, so there is no following
+        # step delimiter to rely on.
+        loader = workflow[loader_start:]
         for expected in (
             'workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get(\'DEFAULT_BRANCH\', \'\')}"',
             'request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")',
@@ -182,11 +184,19 @@ class GovernanceCiAndIssueContractTest(unittest.TestCase):
 
     def test_success_re_reads_ci_generation_from_one_final_shared_snapshot_before_post(self) -> None:
         self.assertIn("final_evidence_for_pr(decision.head, initial_evidence)", self.writer)
-        # The final shared snapshot must build the query through urlencode so
-        # the bounded endpoint remains correct even when a future parameter
-        # contains characters requiring escaping.
+        # The final shared snapshot must retain the initial pass's
+        # workflow-specific, exact-head endpoint.  A repository-wide runs
+        # query could admit unrelated retained runs into the decision.
         self.assertIn(
-            '"repos/{REPOSITORY}/actions/runs?" + urlencode({"head_sha": head, "per_page": 100})',
+            'for path, workflow_id in initial.workflow_ids.items():',
+            self.writer,
+        )
+        self.assertIn(
+            'urlencode({"event": "pull_request", "head_sha": head, "per_page": 100})',
+            self.writer,
+        )
+        self.assertIn(
+            'f"repos/{REPOSITORY}/actions/workflows/{workflow_id}/runs?{query}"',
             self.writer,
         )
         self.assertIn("def finalize_decision", self.writer)
