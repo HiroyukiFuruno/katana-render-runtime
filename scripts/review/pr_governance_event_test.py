@@ -391,7 +391,7 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
         )
 
     def test_source_bound_check_run_scan_rejects_ambiguous_raced_and_malformed_pages(self) -> None:
-        """Pagination may wait for a stable source snapshot, never accept an ambiguous one."""
+        """Pagination may wait for a stable source snapshot, never accept duplicate newest runs."""
         candidate = {
             "id": 201,
             "name": "KRR / PR governance (trusted check)",
@@ -401,18 +401,18 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
             "details_url": "https://github.com/owner/repository/actions/runs/91?source_run_id=17",
         }
 
-        for mode in ("ambiguous", "count-race", "duplicate", "malformed", "link-overflow"):
+        for mode in ("duplicate-newest-generation", "count-race", "duplicate", "malformed", "link-overflow"):
             with self.subTest(mode=mode):
                 namespace = self.namespace()
                 reader = namespace["source_bound_trusted_check_runs"]
                 assert callable(reader)
-                total = 202 if mode == "ambiguous" else 201
+                total = 202 if mode == "duplicate-newest-generation" else 201
                 pages: dict[int, object] = {
                     1: [{"id": value} for value in range(1, 101)],
                     2: [{"id": value} for value in range(101, 201)],
                     3: [candidate],
                 }
-                if mode == "ambiguous":
+                if mode == "duplicate-newest-generation":
                     pages[3] = [candidate, {**candidate, "id": 202}]
                 if mode == "duplicate":
                     pages[2] = [{"id": 100}, *[{"id": value} for value in range(101, 200)]]
@@ -435,10 +435,53 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
                     return subprocess.CompletedProcess(arguments, 0, payload, "")
 
                 with patch.object(subprocess, "run", side_effect=fake_run):
-                    if mode == "ambiguous":
+                    if mode == "duplicate-newest-generation":
                         self.assertIsNone(reader())
                     with self.assertRaises(SystemExit):
                         reader()
+
+    def test_source_bound_check_run_scan_selects_the_newest_writer_generation(self) -> None:
+        """A later governed event supersedes a historical check from the same sensor."""
+        namespace = self.namespace()
+        reader = namespace["source_bound_trusted_check_runs"]
+        assert callable(reader)
+
+        def candidate(identifier: int, writer_run_id: int) -> dict[str, object]:
+            return {
+                "id": identifier,
+                "name": "KRR / PR governance (trusted check)",
+                "app": {"id": 4_766_933},
+                "head_sha": self.head,
+                "external_id": f"krr-governance/v1/{self.head}/writer-{writer_run_id}",
+                "details_url": (
+                    "https://github.com/owner/repository/actions/runs/"
+                    f"{writer_run_id}?source_run_id=17"
+                ),
+                "status": "completed",
+                "conclusion": "success",
+            }
+
+        historical, current = candidate(201, 91), candidate(202, 92)
+        pages: dict[int, list[dict[str, object]]] = {
+            1: [{"id": value} for value in range(1, 101)],
+            2: [{"id": value} for value in range(101, 201)],
+            3: [historical, current],
+        }
+
+        def fake_run(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            endpoint = arguments[-1]
+            page_match = re.search(r"[?&]page=(\d+)", endpoint)
+            assert page_match is not None
+            page = int(page_match.group(1))
+            payload = json.dumps({"total_count": 202, "check_runs": pages[page]})
+            if "--include" in arguments:
+                self.assertEqual(page, 3)
+                payload = "HTTP/2 200 OK\n\n" + payload
+            return subprocess.CompletedProcess(arguments, 0, payload, "")
+
+        with patch.object(subprocess, "run", side_effect=fake_run):
+            self.assertIsNone(reader())
+            self.assertEqual(reader(), [current])
 
 
 class GovernanceDispatcherContractTest(unittest.TestCase):
@@ -826,7 +869,10 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         self.assertIn("name: Preflight workflow_run governance source", preflight)
         self.assertIn("pull_request_target_noop: ${{ steps.scope.outputs.pull_request_target_noop }}", preflight)
         self.assertIn('output.write("pull_request_target_noop="', preflight)
-        self.assertIn("- name: Record verified pull_request_target preflight no-op", preflight)
+        # preflightは権限付きのrecord stepを持たない。release fenceは旧証跡を
+        # 必須とし、欠落時は`reconciles`がTrueを返してbarrierをfail-closedで維持する。
+        self.assertNotIn("- name: Record verified pull_request_target preflight no-op", preflight)
+        self.assertIn('if len(matches)!=1: return True', release)
 
     def test_preflight_skips_only_stable_nondefault_or_unclaimed_issue_events(self) -> None:
         """No-op classification happens before the shared dispatcher lock."""
@@ -1175,8 +1221,21 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                 self.assertEqual(selected.returncode, 0, selected.stderr)
                 selection = dict(line.split("=", 1) for line in selection_output.read_text(encoding="utf-8").splitlines())
                 self.assertEqual(selection["preinvalidate_targets"], "[]")
-                self.assertEqual(selection["all_invalidation_targets"], "[72]")
+                # The early lane preserves the first current target even when
+                # the source itself is not preemptive; terminal work therefore
+                # starts after that bounded early reservation.
+                self.assertEqual(selection["priority_targets"], "[72]")
+                self.assertEqual(selection["all_invalidation_targets"], "[]")
                 self.assertEqual(selection["has_duplicate_governed_heads"], "false")
+                # The requested/pending CI source still reaches a writer via
+                # the reserved early lane; there is no terminal batch for a
+                # one-target snapshot.
+                self.assertIn(
+                    "WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}",
+                    self.workflow[self.workflow.index("Dispatch and bind the early event writer"):],
+                )
+                if selection["all_invalidation_targets"] == "[]":
+                    continue
 
                 posts: list[list[str]] = []
                 created: dict[int, dict[str, object]] = {}
@@ -1665,13 +1724,16 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             result = subprocess.run([sys.executable, "-c", self._workflow_program(current)], env=current_environment, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             selected = dict(line.split("=", 1) for line in current_output.read_text(encoding="utf-8").splitlines())
-            self.assertEqual(json.loads(selected["priority_targets"]), [72, 73])
+            self.assertEqual(
+                json.loads(selected["priority_targets"]),
+                [72, 73, *[number for number in range(1, 106) if number not in {72, 73}][:98]],
+            )
             self.assertEqual(selected["event_targets"], "[72,73]")
             self.assertEqual(json.loads(selected["event_targets"]), [72, 73])
             invalidations = json.loads(selected["all_invalidation_targets"])
             self.assertNotIn(72, invalidations)
             self.assertNotIn(73, invalidations)
-            self.assertEqual(invalidations[0], 1)
+            self.assertEqual(invalidations[0], 101)
             self.assertEqual(len(json.loads(selected["targets"])), 105)
         early = self.workflow.index("Dispatch and bind the early event writer")
         full = self.workflow.index("Invalidate every current pull request for the all-open writer")
@@ -1986,7 +2048,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                 self.assertIsNotNone(dispatch_program); assert dispatch_program is not None
                 snapshots = [[number, records[number]["head"]["sha"], records[number]["draft"]] for number in targets]
                 dispatch_env = environment | {
-                    "DEFAULT_BRANCH": "master", "WRITER_HEAD": "a" * 40, "DISPATCHER_RUN_ID": "9", "WRITER_SCOPE": "all", "WRITER_TARGETS": selected["event_targets"],
+                    "DEFAULT_BRANCH": "master", "WRITER_HEAD": "a" * 40, "DISPATCHER_RUN_ID": "9", "WRITER_SCOPE": "all", "WRITER_TARGETS": selected["priority_targets"],
                     "WRITER_ALL_OPEN_TARGETS": json.dumps(targets, separators=(",", ":")), "WRITER_ALL_OPEN_SNAPSHOTS": json.dumps(snapshots, separators=(",", ":")),
                     "WRITER_PRESERVED_TARGETS": "[]", "PRESERVED_WRITER_RUN_ID": "0", "WRITER_PREINVALIDATE_TARGETS": "[]", "WRITER_PRE_CHECK_MANIFEST_1": "[]", "WRITER_PRE_CHECK_MANIFEST_2": "[]",
                     "WRITER_TAIL_CHECK_MANIFEST_1": json.dumps(manifest, separators=(",", ":")), "WRITER_TAIL_CHECK_MANIFEST_2": "[]", "WRITER_PRESERVED_CHECK_MANIFEST": "[]", "WRITER_CARRY_TARGET_NUMBERS_1": "[]", "WRITER_CARRY_TARGET_NUMBERS_2": "[]", "GITHUB_OUTPUT": str(Path(tempfile.mkdtemp()) / "dispatch-output"),
@@ -2011,7 +2073,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             "preinvalidate_target_snapshots": "[]",
             "all_invalidation_targets": "[72,74]",
             "all_invalidation_target_snapshots": json.dumps([[72, first, False], [74, third, False]], separators=(",", ":")),
-            "duplicate_governed_heads": "[]", "event_targets": "[72,74]",
+            "duplicate_governed_heads": "[]", "event_targets": "[72,74]", "priority_targets": "[72,74]",
         }
         no_duplicate_posts, no_duplicate_manifest = run_all(no_duplicate, 0)
         self.assertEqual(set(no_duplicate_posts), {first, third})
@@ -2319,13 +2381,13 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                     self.assertEqual(values["has_targets"], "true")
                     self.assertEqual(json.loads(values["targets"]), [64, 65])
                     self.assertEqual(json.loads(values["event_targets"]), [64, 65])
-                    self.assertEqual(json.loads(values["priority_targets"]), [64])
+                    self.assertEqual(json.loads(values["priority_targets"]), [64, 65])
                     self.assertEqual(json.loads(values["preinvalidate_targets"]), [64])
                     self.assertEqual(json.loads(values["preinvalidate_chunk_1"]), [64])
                     self.assertEqual(json.loads(values["preinvalidate_chunk_2"]), [])
                     self.assertEqual(json.loads(values["preinvalidated_heads"]), ["d" * 40])
-                    self.assertEqual(json.loads(values["all_invalidation_targets"]), [65])
-                    self.assertEqual(json.loads(values["all_invalidation_chunk_1"]), [65])
+                    self.assertEqual(json.loads(values["all_invalidation_targets"]), [])
+                    self.assertEqual(json.loads(values["all_invalidation_chunk_1"]), [])
                     self.assertEqual(json.loads(values["all_invalidation_chunk_2"]), [])
                     self.assertEqual(values["duplicate_governed_heads"], "[]")
                     self.assertEqual(values["writer_head"], "a" * 40)
@@ -2967,7 +3029,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         self.assertNotIn("steps.targets.outputs.affected", self.workflow)
         self.assertIn("AFFECTED: ${{ steps.current-targets.outputs.all_invalidation_chunk_1 }}", self.workflow)
         self.assertIn("cancel-in-progress: ${{ needs.resolve_event.outputs.priority_targets != '[]' }}", self.workflow)
-        self.assertIn("WRITER_TARGETS: ${{ steps.current-targets.outputs.event_targets }}", self.workflow)
+        self.assertIn("WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}", self.workflow)
 
     def test_every_governance_snapshot_has_explicit_nullable_fork_boundary(self) -> None:
         """Every embedded snapshot program executes null-fork and malformed-shape cases."""
@@ -2991,6 +3053,8 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             programs[name] = self._workflow_program(match)
 
         all_targets = list(range(1, 601))
+        preserved_targets = all_targets[:100]
+        terminal_order = all_targets[100:]
         heads = {number: f"{number:040x}" for number in all_targets}
         snapshots = [[number, heads[number], False] for number in all_targets]
         manifest = [[number, 100_000 + number] for number in all_targets]
@@ -3098,6 +3162,8 @@ if "/actions/runs/" in joined:
     identifier = int(joined.rsplit("/", 1)[1])
     if identifier == 9:
         emit(source)
+    if identifier == 71:
+        emit({"id": 71, "name": "PR governance status writer", "display_title": "source=9 scope=early segment=0", "path": ".github/workflows/pr-governance-status-writer.yml@" + branch, "event": "workflow_dispatch", "repository": {"full_name": repository}, "head_branch": branch, "head_sha": head, "status": "completed", "conclusion": "success", "run_number": 1, "run_attempt": 1, "actor": {"login": bot, "type": "Bot"}, "triggering_actor": {"login": bot, "type": "Bot"}})
     index = identifier - 90_000
     emit({"id": identifier, "name": "PR governance status writer", "display_title": f"source=9 scope=all segment={index}", "path": ".github/workflows/pr-governance-status-writer.yml@" + branch, "event": "workflow_dispatch", "repository": {"full_name": repository}, "head_branch": branch, "head_sha": head, "status": "completed", "conclusion": "success", "run_number": index, "run_attempt": 1, "actor": {"login": bot, "type": "Bot"}, "triggering_actor": {"login": bot, "type": "Bot"}})
 if "/actions/workflows/pr-governance.yml/runs?" in joined:
@@ -3156,21 +3222,21 @@ raise SystemExit(91)
             index = step_names.index(name) - 3 + 1
             completed = list(range(90_001, 90_000 + index))
             common |= {
-                "WRITER_TARGETS": "[]",
+                "WRITER_TARGETS": json.dumps(preserved_targets, separators=(",", ":")),
                 "WRITER_ALL_OPEN_SNAPSHOTS": json.dumps(snapshots, separators=(",", ":")),
-                "WRITER_PRESERVED_TARGETS": "[]", "PRESERVED_WRITER_RUN_ID": "0",
+                "WRITER_PRESERVED_TARGETS": json.dumps(preserved_targets, separators=(",", ":")), "PRESERVED_WRITER_RUN_ID": "71",
                 "WRITER_CHECK_MANIFEST": json.dumps(manifest, separators=(",", ":")),
-                "WRITER_TERMINAL_ORDER": json.dumps(all_targets, separators=(",", ":")),
+                "WRITER_TERMINAL_ORDER": json.dumps(terminal_order, separators=(",", ":")),
                 "COMPLETED_WRITER_RUN_IDS": json.dumps(completed, separators=(",", ":")),
-                "TERMINAL_BATCH": json.dumps(all_targets[(index - 1) * 150:index * 150], separators=(",", ":")),
+                "TERMINAL_BATCH": json.dumps(terminal_order[(index - 1) * 125:index * 125], separators=(",", ":")),
                 "CONTINUATION_INDEX": str(index), "APP_BOT_LOGIN": "katana-rust-pr-governance-hf[bot]",
             }
             if index == 1:
                 return common | {
                     "WRITER_SCOPE": "all", "WRITER_ALL_OPEN_TARGETS": json.dumps(all_targets, separators=(",", ":")),
                     "WRITER_PREINVALIDATE_TARGETS": "[]", "WRITER_PRE_CHECK_MANIFEST_1": "[]", "WRITER_PRE_CHECK_MANIFEST_2": "[]",
-                    "WRITER_TAIL_CHECK_MANIFEST_1": json.dumps(manifest, separators=(",", ":")), "WRITER_TAIL_CHECK_MANIFEST_2": "[]",
-                    "WRITER_PRESERVED_CHECK_MANIFEST": "[]", "WRITER_CARRY_TARGET_NUMBERS_1": "[]", "WRITER_CARRY_TARGET_NUMBERS_2": "[]",
+                    "WRITER_TAIL_CHECK_MANIFEST_1": json.dumps(manifest[100:], separators=(",", ":")), "WRITER_TAIL_CHECK_MANIFEST_2": "[]",
+                    "WRITER_PRESERVED_CHECK_MANIFEST": json.dumps(manifest[:100], separators=(",", ":")), "WRITER_CARRY_TARGET_NUMBERS_1": "[]", "WRITER_CARRY_TARGET_NUMBERS_2": "[]",
                 }
             return common
 
@@ -5515,7 +5581,7 @@ raise SystemExit(91)
                 pre_targets = json.loads(values["preinvalidate_targets"])
                 self.assertEqual(targets, list(range(1, total + 1)))
                 self.assertEqual(pre_targets, targets)
-                self.assertEqual(priority, list(range(1, min(total, 40) + 1)))
+                self.assertEqual(priority, list(range(1, min(total, 100) + 1)))
                 chunks = [
                     json.loads(values[f"preinvalidate_chunk_{index}"])
                     for index in (1, 2)
@@ -5747,8 +5813,9 @@ raise SystemExit(91)
             self.assertEqual(json.loads(values["preinvalidate_chunk_1_snapshots"])[0][0], 1)
             self.assertEqual(json.loads(values["preinvalidate_chunk_2"]), [])
             self.assertEqual(json.loads(values["preinvalidate_chunk_2_snapshots"]), [])
-            self.assertEqual(json.loads(values["all_invalidation_targets"]), list(range(2, total + 1)))
-            self.assertEqual(json.loads(values["all_invalidation_target_snapshots"]), [[number, f"{number:040x}", False] for number in range(2, total + 1)])
+            self.assertEqual(json.loads(values["priority_targets"]), list(range(1, 101)))
+            self.assertEqual(json.loads(values["all_invalidation_targets"]), list(range(101, total + 1)))
+            self.assertEqual(json.loads(values["all_invalidation_target_snapshots"]), [[number, f"{number:040x}", False] for number in range(101, total + 1)])
             self.assertEqual(json.loads(values["all_invalidation_chunk_1"]), [])
             self.assertEqual(json.loads(values["all_invalidation_chunk_2"]), [])
             self.assertEqual(values["invalidation_head_cap_exceeded"], "true")
@@ -5982,10 +6049,10 @@ raise SystemExit(91)
             values = dict(line.split("=", 1) for line in current_output.read_text(encoding="utf-8").splitlines())
             self.assertEqual(json.loads(values["targets"]), list(range(1, total + 1)))
             self.assertEqual(len(json.loads(values["target_snapshots"])), total)
-            self.assertEqual(json.loads(values["priority_targets"]), [])
+            self.assertEqual(json.loads(values["priority_targets"]), list(range(1, min(total, 100) + 1)))
             self.assertEqual(json.loads(values["preinvalidate_targets"]), [])
-            self.assertEqual(json.loads(values["all_invalidation_targets"]), list(range(1, total + 1)))
-            self.assertEqual(len(json.loads(values["all_invalidation_target_snapshots"])), total)
+            self.assertEqual(json.loads(values["all_invalidation_targets"]), list(range(101, total + 1)))
+            self.assertEqual(len(json.loads(values["all_invalidation_target_snapshots"])), total - 100)
             self.assertEqual(values["invalidation_head_cap_exceeded"], "true")
             self.assertEqual(json.loads(values["all_invalidation_chunk_1"]), [])
             self.assertEqual(json.loads(values["all_invalidation_chunk_2"]), [])
@@ -6045,12 +6112,12 @@ raise SystemExit(91)
                         exec(hold_program, {"__name__": "__main__"})
 
     def test_terminal_writer_segments_are_contiguous_bounded_and_fail_closed(self) -> None:
-        """A 600-target manifest is partitioned into at most four ordered 150 slices."""
+        """A 600-target snapshot preserves 100 then partitions four 125 slices."""
         writer = (ROOT / "scripts/review/pr_governance_status_writer.py").read_text(encoding="utf-8")
         workflow = self.workflow
         for required in (
             "GOVERNANCE_TERMINAL_BATCH_NUMBERS", "GOVERNANCE_CONTINUATION_INDEX",
-            "len(terminal_batch) > 150", "continuation_index - 1) * 150",
+            "len(terminal_batch) > MAX_TERMINAL_BATCH", "continuation_index - 1) * MAX_TERMINAL_BATCH",
             "Writer terminal segment boundary is invalid.",
         ):
             self.assertIn(required, writer)
@@ -6070,22 +6137,22 @@ raise SystemExit(91)
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
-        for total in (41, 600):
+        for total in (101, 600):
             pulls = tuple({"number": number, "isDraft": False} for number in range(1, total + 1))
             snapshot = module.OpenSnapshot(tuple(range(1, total + 1)), {}, pulls)
-            order = module.governance_order(snapshot, frozenset(), tuple(range(1, min(total, 40) + 1)))
-            early = order[:40]
-            tail = order[40:]
-            self.assertEqual(early, tuple(range(1, min(total, 40) + 1)))
-            self.assertEqual(len(tail), max(0, total - 40))
+            order = module.governance_order(snapshot, frozenset(), tuple(range(1, min(total, 100) + 1)))
+            early = order[:100]
+            tail = order[100:]
+            self.assertEqual(early, tuple(range(1, min(total, 100) + 1)))
+            self.assertEqual(len(tail), max(0, total - 100))
             self.assertEqual(order, tuple(range(1, total + 1)))
-            segments = [order[start:start + 150] for start in range(0, len(order), 150)]
-            self.assertEqual([len(segment) for segment in segments], [150] * (total // 150) + ([total % 150] if total % 150 else []))
-            self.assertEqual(tuple(number for segment in segments for number in segment), order)
-            self.assertTrue(all(len(segment) <= 150 for segment in segments))
+            segments = [tail[start:start + 125] for start in range(0, len(tail), 125)]
+            self.assertEqual([len(segment) for segment in segments], [125] * (len(tail) // 125) + ([len(tail) % 125] if len(tail) % 125 else []))
+            self.assertEqual(tuple(number for segment in segments for number in segment), tail)
+            self.assertTrue(all(len(segment) <= 125 for segment in segments))
             self.assertLessEqual(len(segments), 4)
-            if total == 41:
-                self.assertEqual(tail, (41,))
+            if total == 101:
+                self.assertEqual(tail, (101,))
 
     def test_all_writer_dispatches_sequential_terminal_segments_and_stops_after_failure(self) -> None:
         """Each terminal segment has its own token/dispatch/await fail-closed chain."""
@@ -6146,12 +6213,12 @@ raise SystemExit(91)
 
         # Execute the dispatch and await blocks against a complete 600-target
         # fixture. This catches missing source/snapshot/carry API reads.
-        all_targets = list(range(1, 601)); preserved = all_targets[:40]
+        all_targets = list(range(1, 601)); preserved = all_targets[:100]
         heads = {number: f"{number:040x}" for number in all_targets}
         rest_repository = {"id": 101, "name": "repository", "url": "https://api.github.com/repos/owner/repository", "full_name": "owner/repository"}
         snapshots = [[number, heads[number], False] for number in all_targets]
         pre_manifest = [[number, 50_000 + number] for number in all_targets]
-        batches = [all_targets[40 + start:40 + start + 150] for start in range(0, 560, 150)]
+        batches = [all_targets[100 + start:100 + start + 125] for start in range(0, 500, 125)]
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary); output = directory / "output"
             candidates: list[dict[str, object]] = []; dispatches: list[list[str]] = []
@@ -6191,7 +6258,7 @@ raise SystemExit(91)
                     index = fields.get("inputs[continuation_index]", "")
                     order = json.loads(fields["inputs[terminal_order_numbers]"])
                     completed = json.loads(fields["inputs[completed_writer_run_ids]"])
-                    self.assertEqual(order, all_targets[40:])
+                    self.assertEqual(order, all_targets[100:])
                     self.assertEqual(completed, [70_000 + prior for prior in range(1, len(dispatches))])
                     candidate = {"id": 70_000 + len(dispatches), "name": "PR governance status writer", "display_title": f"source=9 scope=all segment={index}", "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch", "repository": rest_repository, "head_branch": "master", "head_sha": "a" * 40, "status": "completed", "conclusion": "success", "run_number": len(dispatches), "run_attempt": 1, "actor": {"login": "katana-rust-pr-governance-hf[bot]", "type": "Bot"}, "triggering_actor": {"login": "katana-rust-pr-governance-hf[bot]", "type": "Bot"}}
                     candidates.append(candidate)
@@ -6205,8 +6272,8 @@ raise SystemExit(91)
                 "WRITER_PRESERVED_TARGETS": json.dumps(preserved, separators=(",", ":")), "PRESERVED_WRITER_RUN_ID": "71",
                 "WRITER_CARRY_TARGET_NUMBERS": "[]", "WRITER_CARRY_TARGET_NUMBERS_1": "[]", "WRITER_CARRY_TARGET_NUMBERS_2": "[]", "WRITER_PREINVALIDATE_TARGETS": json.dumps(all_targets, separators=(",", ":")),
                 "WRITER_PRE_CHECK_MANIFEST_1": json.dumps(pre_manifest[:300], separators=(",", ":")), "WRITER_PRE_CHECK_MANIFEST_2": json.dumps(pre_manifest[300:], separators=(",", ":")),
-                "WRITER_TAIL_CHECK_MANIFEST_1": "[]", "WRITER_TAIL_CHECK_MANIFEST_2": "[]", "WRITER_PRESERVED_CHECK_MANIFEST": json.dumps(pre_manifest[:40], separators=(",", ":")),
-                "WRITER_TERMINAL_ORDER": json.dumps(all_targets[40:], separators=(",", ":")), "COMPLETED_WRITER_RUN_IDS": "[]",
+                "WRITER_TAIL_CHECK_MANIFEST_1": "[]", "WRITER_TAIL_CHECK_MANIFEST_2": "[]", "WRITER_PRESERVED_CHECK_MANIFEST": json.dumps(pre_manifest[:100], separators=(",", ":")),
+                "WRITER_TERMINAL_ORDER": json.dumps(all_targets[100:], separators=(",", ":")), "COMPLETED_WRITER_RUN_IDS": "[]",
                 "APP_BOT_LOGIN": "katana-rust-pr-governance-hf[bot]", "GITHUB_OUTPUT": str(output), "PATH": os.environ["PATH"],
             }
             for index, step in enumerate(dispatch_steps, 1):
@@ -6238,8 +6305,8 @@ raise SystemExit(91)
                         self.assertEqual(error.code, 0)
             self.assertEqual(len(dispatches), 4)
             sent_batches = [json.loads(next(item.split("=", 1)[1] for item in dispatch if item.startswith("inputs[terminal_batch_numbers]="))) for dispatch in dispatches]
-            self.assertEqual([number for batch in sent_batches for number in batch], all_targets[40:])
-            self.assertTrue(all(len(batch) <= 150 for batch in sent_batches))
+            self.assertEqual([number for batch in sent_batches for number in batch], all_targets[100:])
+            self.assertTrue(all(len(batch) <= 125 for batch in sent_batches))
             next_segment_if = self._step_if("Dispatch second repository-wide governance arbiter segment")
             success_values = {
                 "steps.dispatch-all-1.outputs.has_terminal_batch_2": "true",

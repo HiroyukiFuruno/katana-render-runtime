@@ -141,15 +141,6 @@ jobs:
               raise SystemExit("Trusted governance source is invalid.")
           exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
           PY
-
-      - name: Record verified pull_request_target preflight no-op
-        if: ${{ steps.scope.outputs.pull_request_target_noop == 'true' }}
-        run: test "${{ steps.scope.outputs.reconcile }}" = 'false' && test "${{ steps.scope.outputs.valid }}" = 'true'
-
-      - name: Record verified Issue preflight no-op
-        if: ${{ steps.scope.outputs.issue_event_noop == 'true' }}
-        run: test "${{ steps.scope.outputs.reconcile }}" = 'false' && test "${{ steps.scope.outputs.valid }}" = 'true'
-
   establish-resolver-failure-barrier:
     # `resolve_event` has to inspect the mutable open-PR snapshot before it
     # can choose a targeted invalidation.  Put the App-bound repository-wide
@@ -489,10 +480,10 @@ jobs:
     if: needs.resolve_event.outputs.reconcile == 'true' && github.run_attempt == 1
     environment: pr-governance
     runs-on: ubuntu-latest
-    # A complete generation is bounded to 450 distinct heads. At the 8.1s
-    # dispatcher pace this costs at most 3,645 seconds, followed by three
-    # 150-target terminal continuations (9,225 seconds). That leaves more
-    # than an hour of API/retry margin inside this 290-minute job and the
+    # A complete generation has at most 600 targets. The deterministic early
+    # writer preserves up to 100, leaving at most four 125-head terminal
+    # segments. This keeps the shared App REST rolling window below its 4,500
+    # request ceiling without extending the existing 290-minute job or the
     # 350-minute root generation deadline. A larger snapshot keeps the
     # App-bound barrier required for the next reconciliation instead of
     # timing out after it has left every head pending.
@@ -644,10 +635,15 @@ jobs:
           # pre-invalidator owns affected shared HEADs, then the all-open
           # hand-off pendingizes every remaining distinct HEAD and stops.
           # A priority writer owns a pending + terminal mutation for every
-          # target.  Keep the synchronous path below 100 mutations / 15
-          # minutes; every remaining affected head is already fail-closed by
-          # the dispatcher Check Run and is handed to the all-open arbiter.
-          priority_targets = [] if duplicate_governed_heads else preinvalidate_targets[:40]
+          # target in this deterministic bounded prefix. Keep the synchronous
+          # path below 100 mutations / 15 minutes; every remaining affected
+          # head is already fail-closed by the dispatcher Check Run and is
+          # handed to the all-open arbiter.
+          priority_seed = set(preinvalidate_targets)
+          priority_targets = [] if duplicate_governed_heads else (
+              preinvalidate_targets
+              + [number for number in targets if number not in priority_seed]
+          )[:100]
           # Preserve the resolver's source/claimant ordering.  Pagination can
           # place unrelated PRs first, but affected siblings must be
           # invalidated before that unrelated tail.  The early source itself
@@ -1335,7 +1331,7 @@ jobs:
           source=os.environ.get("DISPATCHER_RUN_ID", "")
           try: targets=json.loads(os.environ.get("TARGETS", ""))
           except json.JSONDecodeError as error: raise SystemExit("Early writer targets are invalid.") from error
-          if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch) or not re.fullmatch(r"[0-9a-fA-F]{40}", head) or not re.fullmatch(r"[1-9][0-9]*", source) or not isinstance(targets, list) or not targets or len(targets)>40 or any(type(number) is not int or number < 1 for number in targets) or len(set(targets)) != len(targets): raise SystemExit("Early writer boundary is invalid.")
+          if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch) or not re.fullmatch(r"[0-9a-fA-F]{40}", head) or not re.fullmatch(r"[1-9][0-9]*", source) or not isinstance(targets, list) or not targets or len(targets)>100 or any(type(number) is not int or number < 1 for number in targets) or len(set(targets)) != len(targets): raise SystemExit("Early writer boundary is invalid.")
           title=f"source={source} scope=early segment=0"
           workflow_path=".github/workflows/pr-governance-status-writer.yml"
           def path_matches(value):
@@ -1426,7 +1422,7 @@ jobs:
               if not isinstance(value,str) or not value.startswith(workflow_path+"@"): return False
               ref=value[len(workflow_path)+1:]
               return re.fullmatch(r"[A-Za-z0-9._/-]+",ref) is not None and ref not in {".",".."} and not ref.startswith("/") and "//" not in ref and all(part not in {"",".",".."} for part in ref.split("/"))
-          # The early writer has at most 40 mutations.  Polling every 30s
+          # The early writer has at most 100 mutations. Polling every 30s
           # bounds this wait at 15m without consuming 450 installation reads.
           for _ in range(30):
               remaining=deadline-time.time()
@@ -2118,7 +2114,7 @@ jobs:
           WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           WRITER_SCOPE: all
-          WRITER_TARGETS: ${{ steps.current-targets.outputs.event_targets }}
+          WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
           WRITER_ALL_OPEN_TARGETS: ${{ steps.current-targets.outputs.targets }}
           WRITER_ALL_OPEN_SNAPSHOTS: ${{ steps.current-targets.outputs.target_snapshots }}
           WRITER_PRESERVED_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
@@ -2260,10 +2256,10 @@ jobs:
               + [number for number in all_targets if not drafts[number] and number not in preserved and number not in priority and number not in carry_targets]
               + [number for number in all_targets if drafts[number] and number not in preserved and number not in priority and number not in carry_targets]
           )
-          if len(terminal_order) > 600 or len(set(terminal_order)) != len(terminal_order) or set(terminal_order) != set(all_targets) - set(preserved):
+          if len(terminal_order) > 500 or len(set(terminal_order)) != len(terminal_order) or set(terminal_order) != set(all_targets) - set(preserved):
               raise SystemExit("Governance terminal segment boundary is invalid.")
-          batches = [terminal_order[index:index + 150] for index in range(0, len(terminal_order), 150)]
-          if len(batches) > 4 or any(not batch or len(batch) > 150 for batch in batches):
+          batches = [terminal_order[index:index + 125] for index in range(0, len(terminal_order), 125)]
+          if len(batches) > 4 or any(not batch or len(batch) > 125 for batch in batches):
               raise SystemExit("Governance terminal segment boundary is invalid.")
           while len(batches) < 4:
               batches.append([])
@@ -2569,7 +2565,7 @@ jobs:
           DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
           WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
-          WRITER_TARGETS: ${{ steps.current-targets.outputs.event_targets }}
+          WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
           WRITER_ALL_OPEN_SNAPSHOTS: ${{ steps.current-targets.outputs.target_snapshots }}
           WRITER_PRESERVED_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ steps.dispatch-early.outputs.writer_run_id || '0' }}
@@ -2601,7 +2597,7 @@ jobs:
               targets, snapshots, preserved, manifest, batch, terminal_order, completed = (json.loads(value) for value in (raw_targets, raw_snapshots, raw_preserved, raw_manifest, raw_batch, raw_order, raw_completed))
           except json.JSONDecodeError as error:
               raise SystemExit("Governance terminal segment boundary is invalid.") from error
-          if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch) or re.fullmatch(r"[0-9a-fA-F]{40}", writer_head) is None or not re.fullmatch(r"[1-9][0-9]*", source) or index != "2" or not re.fullmatch(r"0|[1-9][0-9]*", preserved_writer) or any(not isinstance(value, list) for value in (targets, snapshots, preserved, manifest, batch, terminal_order, completed)) or any(type(number) is not int or number < 1 for number in targets + preserved + batch + terminal_order + completed) or len(set(targets)) != len(targets) or len(set(preserved)) != len(preserved) or len(set(terminal_order)) != len(terminal_order) or len(set(completed)) != len(completed) or len(completed) != 1 or len(batch) > 150 or not batch or json.dumps(targets, separators=(",", ":")) != raw_targets or json.dumps(snapshots, separators=(",", ":")) != raw_snapshots or json.dumps(preserved, separators=(",", ":")) != raw_preserved or json.dumps(manifest, separators=(",", ":")) != raw_manifest or json.dumps(batch, separators=(",", ":")) != raw_batch or json.dumps(terminal_order, separators=(",", ":")) != raw_order or json.dumps(completed, separators=(",", ":")) != raw_completed or batch != terminal_order[150:300] or not set(preserved).issubset(targets) or bool(preserved) != (preserved_writer != "0") or any(not isinstance(item, list) or len(item) != 2 or type(item[0]) is not int or item[0] < 1 or type(item[1]) is not int or item[1] < 1 for item in manifest) or len({item[0] for item in manifest}) != len(manifest) or len({item[1] for item in manifest}) != len(manifest):
+          if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch) or re.fullmatch(r"[0-9a-fA-F]{40}", writer_head) is None or not re.fullmatch(r"[1-9][0-9]*", source) or index != "2" or not re.fullmatch(r"0|[1-9][0-9]*", preserved_writer) or any(not isinstance(value, list) for value in (targets, snapshots, preserved, manifest, batch, terminal_order, completed)) or any(type(number) is not int or number < 1 for number in targets + preserved + batch + terminal_order + completed) or len(set(targets)) != len(targets) or len(set(preserved)) != len(preserved) or len(set(terminal_order)) != len(terminal_order) or len(set(completed)) != len(completed) or len(completed) != 1 or len(batch) > 125 or not batch or json.dumps(targets, separators=(",", ":")) != raw_targets or json.dumps(snapshots, separators=(",", ":")) != raw_snapshots or json.dumps(preserved, separators=(",", ":")) != raw_preserved or json.dumps(manifest, separators=(",", ":")) != raw_manifest or json.dumps(batch, separators=(",", ":")) != raw_batch or json.dumps(terminal_order, separators=(",", ":")) != raw_order or json.dumps(completed, separators=(",", ":")) != raw_completed or batch != terminal_order[125:250] or not set(preserved).issubset(targets) or bool(preserved) != (preserved_writer != "0") or any(not isinstance(item, list) or len(item) != 2 or type(item[0]) is not int or item[0] < 1 or type(item[1]) is not int or item[1] < 1 for item in manifest) or len({item[0] for item in manifest}) != len(manifest) or len({item[1] for item in manifest}) != len(manifest):
               raise SystemExit("Governance terminal segment boundary is invalid.")
           expected_snapshots = {}
           for item in snapshots:
@@ -2840,7 +2836,7 @@ jobs:
           DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
           WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
-          WRITER_TARGETS: ${{ steps.current-targets.outputs.event_targets }}
+          WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
           WRITER_ALL_OPEN_SNAPSHOTS: ${{ steps.current-targets.outputs.target_snapshots }}
           WRITER_PRESERVED_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ steps.dispatch-early.outputs.writer_run_id || '0' }}
@@ -2858,7 +2854,7 @@ jobs:
           repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); head=os.environ.get("WRITER_HEAD", ""); source=os.environ.get("DISPATCHER_RUN_ID", ""); index=os.environ.get("CONTINUATION_INDEX", ""); raw_targets=os.environ.get("WRITER_TARGETS", ""); raw_snapshots=os.environ.get("WRITER_ALL_OPEN_SNAPSHOTS", ""); raw_preserved=os.environ.get("WRITER_PRESERVED_TARGETS", ""); preserved_writer=os.environ.get("PRESERVED_WRITER_RUN_ID", ""); raw_manifest=os.environ.get("WRITER_CHECK_MANIFEST", ""); raw_batch=os.environ.get("TERMINAL_BATCH", ""); raw_order=os.environ.get("WRITER_TERMINAL_ORDER", ""); raw_completed=os.environ.get("COMPLETED_WRITER_RUN_IDS", "")
           try: targets,snapshots,preserved,manifest,batch,terminal_order,completed=(json.loads(item) for item in (raw_targets,raw_snapshots,raw_preserved,raw_manifest,raw_batch,raw_order,raw_completed))
           except json.JSONDecodeError as error: raise SystemExit("Governance terminal segment boundary is invalid.") from error
-          if not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or not re.fullmatch(r"[1-9][0-9]*",source) or index!="3" or not re.fullmatch(r"0|[1-9][0-9]*",preserved_writer) or any(not isinstance(item,list) for item in (targets,snapshots,preserved,manifest,batch,terminal_order,completed)) or any(type(number) is not int or number<1 for number in targets+preserved+batch+terminal_order+completed) or len(set(targets))!=len(targets) or len(set(preserved))!=len(preserved) or len(set(terminal_order))!=len(terminal_order) or len(set(completed))!=len(completed) or len(completed)!=2 or not batch or len(batch)>150 or json.dumps(targets,separators=(",",":"))!=raw_targets or json.dumps(snapshots,separators=(",",":"))!=raw_snapshots or json.dumps(preserved,separators=(",",":"))!=raw_preserved or json.dumps(manifest,separators=(",",":"))!=raw_manifest or json.dumps(batch,separators=(",",":"))!=raw_batch or json.dumps(terminal_order,separators=(",",":"))!=raw_order or json.dumps(completed,separators=(",",":"))!=raw_completed or batch!=terminal_order[300:450] or not set(preserved).issubset(targets) or bool(preserved)!=(preserved_writer!="0") or any(not isinstance(entry,list) or len(entry)!=2 or type(entry[0]) is not int or entry[0]<1 or type(entry[1]) is not int or entry[1]<1 for entry in manifest) or len({entry[0] for entry in manifest})!=len(manifest) or len({entry[1] for entry in manifest})!=len(manifest): raise SystemExit("Governance terminal segment boundary is invalid.")
+          if not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or not re.fullmatch(r"[1-9][0-9]*",source) or index!="3" or not re.fullmatch(r"0|[1-9][0-9]*",preserved_writer) or any(not isinstance(item,list) for item in (targets,snapshots,preserved,manifest,batch,terminal_order,completed)) or any(type(number) is not int or number<1 for number in targets+preserved+batch+terminal_order+completed) or len(set(targets))!=len(targets) or len(set(preserved))!=len(preserved) or len(set(terminal_order))!=len(terminal_order) or len(set(completed))!=len(completed) or len(completed)!=2 or not batch or len(batch)>125 or json.dumps(targets,separators=(",",":"))!=raw_targets or json.dumps(snapshots,separators=(",",":"))!=raw_snapshots or json.dumps(preserved,separators=(",",":"))!=raw_preserved or json.dumps(manifest,separators=(",",":"))!=raw_manifest or json.dumps(batch,separators=(",",":"))!=raw_batch or json.dumps(terminal_order,separators=(",",":"))!=raw_order or json.dumps(completed,separators=(",",":"))!=raw_completed or batch!=terminal_order[250:375] or not set(preserved).issubset(targets) or bool(preserved)!=(preserved_writer!="0") or any(not isinstance(entry,list) or len(entry)!=2 or type(entry[0]) is not int or entry[0]<1 or type(entry[1]) is not int or entry[1]<1 for entry in manifest) or len({entry[0] for entry in manifest})!=len(manifest) or len({entry[1] for entry in manifest})!=len(manifest): raise SystemExit("Governance terminal segment boundary is invalid.")
           expected={}
           for entry in snapshots:
               if not isinstance(entry,list) or len(entry)!=3 or type(entry[0]) is not int or entry[0]<1 or not isinstance(entry[1],str) or re.fullmatch(r"[0-9a-fA-F]{40}",entry[1]) is None or type(entry[2]) is not bool or entry[0] in expected: raise SystemExit("Governance terminal segment boundary is invalid.")
@@ -3068,7 +3064,7 @@ jobs:
           DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
           WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
-          WRITER_TARGETS: ${{ steps.current-targets.outputs.event_targets }}
+          WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
           WRITER_ALL_OPEN_SNAPSHOTS: ${{ steps.current-targets.outputs.target_snapshots }}
           WRITER_PRESERVED_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ steps.dispatch-early.outputs.writer_run_id || '0' }}
@@ -3086,7 +3082,7 @@ jobs:
           repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); head=os.environ.get("WRITER_HEAD", ""); source=os.environ.get("DISPATCHER_RUN_ID", ""); index=os.environ.get("CONTINUATION_INDEX", ""); raw_targets=os.environ.get("WRITER_TARGETS", ""); raw_snapshots=os.environ.get("WRITER_ALL_OPEN_SNAPSHOTS", ""); raw_preserved=os.environ.get("WRITER_PRESERVED_TARGETS", ""); preserved_writer=os.environ.get("PRESERVED_WRITER_RUN_ID", ""); raw_manifest=os.environ.get("WRITER_CHECK_MANIFEST", ""); raw_batch=os.environ.get("TERMINAL_BATCH", ""); raw_order=os.environ.get("WRITER_TERMINAL_ORDER", ""); raw_completed=os.environ.get("COMPLETED_WRITER_RUN_IDS", "")
           try: targets,snapshots,preserved,manifest,batch,terminal_order,completed=(json.loads(item) for item in (raw_targets,raw_snapshots,raw_preserved,raw_manifest,raw_batch,raw_order,raw_completed))
           except json.JSONDecodeError as error: raise SystemExit("Governance terminal segment boundary is invalid.") from error
-          if not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or not re.fullmatch(r"[1-9][0-9]*",source) or index!="4" or not re.fullmatch(r"0|[1-9][0-9]*",preserved_writer) or any(not isinstance(item,list) for item in (targets,snapshots,preserved,manifest,batch,terminal_order,completed)) or any(type(number) is not int or number<1 for number in targets+preserved+batch+terminal_order+completed) or len(set(targets))!=len(targets) or len(set(preserved))!=len(preserved) or len(set(terminal_order))!=len(terminal_order) or len(set(completed))!=len(completed) or len(completed)!=3 or not batch or len(batch)>150 or json.dumps(targets,separators=(",",":"))!=raw_targets or json.dumps(snapshots,separators=(",",":"))!=raw_snapshots or json.dumps(preserved,separators=(",",":"))!=raw_preserved or json.dumps(manifest,separators=(",",":"))!=raw_manifest or json.dumps(batch,separators=(",",":"))!=raw_batch or json.dumps(terminal_order,separators=(",",":"))!=raw_order or json.dumps(completed,separators=(",",":"))!=raw_completed or batch!=terminal_order[450:600] or not set(preserved).issubset(targets) or bool(preserved)!=(preserved_writer!="0") or any(not isinstance(entry,list) or len(entry)!=2 or type(entry[0]) is not int or entry[0]<1 or type(entry[1]) is not int or entry[1]<1 for entry in manifest) or len({entry[0] for entry in manifest})!=len(manifest) or len({entry[1] for entry in manifest})!=len(manifest): raise SystemExit("Governance terminal segment boundary is invalid.")
+          if not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or not re.fullmatch(r"[1-9][0-9]*",source) or index!="4" or not re.fullmatch(r"0|[1-9][0-9]*",preserved_writer) or any(not isinstance(item,list) for item in (targets,snapshots,preserved,manifest,batch,terminal_order,completed)) or any(type(number) is not int or number<1 for number in targets+preserved+batch+terminal_order+completed) or len(set(targets))!=len(targets) or len(set(preserved))!=len(preserved) or len(set(terminal_order))!=len(terminal_order) or len(set(completed))!=len(completed) or len(completed)!=3 or not batch or len(batch)>125 or json.dumps(targets,separators=(",",":"))!=raw_targets or json.dumps(snapshots,separators=(",",":"))!=raw_snapshots or json.dumps(preserved,separators=(",",":"))!=raw_preserved or json.dumps(manifest,separators=(",",":"))!=raw_manifest or json.dumps(batch,separators=(",",":"))!=raw_batch or json.dumps(terminal_order,separators=(",",":"))!=raw_order or json.dumps(completed,separators=(",",":"))!=raw_completed or batch!=terminal_order[375:500] or not set(preserved).issubset(targets) or bool(preserved)!=(preserved_writer!="0") or any(not isinstance(entry,list) or len(entry)!=2 or type(entry[0]) is not int or entry[0]<1 or type(entry[1]) is not int or entry[1]<1 for entry in manifest) or len({entry[0] for entry in manifest})!=len(manifest) or len({entry[1] for entry in manifest})!=len(manifest): raise SystemExit("Governance terminal segment boundary is invalid.")
           expected={}
           for entry in snapshots:
               if not isinstance(entry,list) or len(entry)!=3 or type(entry[0]) is not int or entry[0]<1 or not isinstance(entry[1],str) or re.fullmatch(r"[0-9a-fA-F]{40}",entry[1]) is None or type(entry[2]) is not bool or entry[0] in expected: raise SystemExit("Governance terminal segment boundary is invalid.")

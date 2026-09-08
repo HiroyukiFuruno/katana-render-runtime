@@ -2949,12 +2949,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not isinstance(current_reviews, list):
         raise TypeError("pull request reviews must be an array")
     graphql_budget = _ACTIVE_GRAPHQL_BUDGET or _GraphQLBudget()
-    # gh pr view exposes a bounded connection.  A full boundary (or an empty
-    # compatibility response) requires explicit GraphQL cursor pagination.
-    if not current_reviews or len(current_reviews) >= 100:
-        pull_request["reviews"] = _reviews(
-            repository, arguments.pr, budget=graphql_budget
-        )
+    # `gh pr view --json reviews` is a bounded, reduced projection: even a
+    # short result omits the immutable Bot identity fields required for formal
+    # review evidence.  Always replace it with the complete GraphQL snapshot.
+    pull_request["reviews"] = _reviews(
+        repository, arguments.pr, budget=graphql_budget
+    )
     comments = _paginated_api_array(
         f"repos/{repository}/issues/{arguments.pr}/comments"
     )

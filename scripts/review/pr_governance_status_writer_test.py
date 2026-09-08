@@ -1014,13 +1014,13 @@ class StatusWriterUnitTest(unittest.TestCase):
         # The preserved source is located via its exact writer-71 external
         # generation, not the current all-writer dispatcher generation.
         with self.identity(), patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}), \
-             patch.object(WRITER, "object_pages", return_value=[{"check_runs": [early_success]}]), \
+             patch.object(WRITER, "object_page", return_value={"total_count": 1, "check_runs": [early_success]}), \
              patch.object(WRITER, "check_run", return_value=marker):
             scoped, carry = WRITER.observed_invalidations(snapshot, source, "all", (72, 73), (72,), 71)
         self.assertEqual(scoped.numbers, (73,))
         self.assertEqual(carry, frozenset())
         with self.identity(), patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}), \
-             patch.object(WRITER, "object_pages", return_value=[{"check_runs": [early_success]}]), \
+             patch.object(WRITER, "object_page", return_value={"total_count": 1, "check_runs": [early_success]}), \
              patch.object(WRITER, "check_run", return_value=marker):
             with self.assertRaises(WRITER.GovernanceError):
                 WRITER.observed_invalidations(snapshot, source, "all", (72, 73), (72,), 72)
@@ -1035,7 +1035,7 @@ class StatusWriterUnitTest(unittest.TestCase):
                 "details_url": "https://github.com/owner/repository/actions/runs/71?" + WRITER.urlencode(stale_query),
             }
             with self.subTest(digest=digest), self.identity(), patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}), \
-                 patch.object(WRITER, "object_pages", return_value=[{"check_runs": [stale]}]), \
+                 patch.object(WRITER, "object_page", return_value={"total_count": 1, "check_runs": [stale]}), \
                  patch.object(WRITER, "check_run", return_value=marker):
                 with self.assertRaises(WRITER.GovernanceError):
                     WRITER.observed_invalidations(snapshot, source, "all", (72, 73), (72,), 71)
@@ -1059,8 +1059,8 @@ class StatusWriterUnitTest(unittest.TestCase):
                 self.assertEqual(WRITER.main(), 1)
                 source.assert_not_called()
 
-    def test_early_scope_rejects_more_than_forty_targets_before_api_reads(self) -> None:
-        targets = json.dumps(list(range(1, 42)), separators=(",", ":"))
+    def test_early_scope_rejects_more_than_one_hundred_targets_before_api_reads(self) -> None:
+        targets = json.dumps(list(range(1, WRITER.MAX_EARLY_TARGETS + 2)), separators=(",", ":"))
         with self.identity(), patch.dict(os.environ, {
             "GOVERNANCE_SCOPE": "early", "GOVERNANCE_TARGET_NUMBERS": targets,
             "GOVERNANCE_TERMINAL_BATCH_NUMBERS": "[]", "GOVERNANCE_CONTINUATION_INDEX": "0",
@@ -1072,14 +1072,14 @@ class StatusWriterUnitTest(unittest.TestCase):
         numbers = tuple(range(1, 302))
         snapshot = self.snapshot(numbers)
         manifest = json.dumps([[number, 10_000 + number] for number in numbers], separators=(",", ":"))
-        expected = tuple(range(151, 301))
+        expected = tuple(range(WRITER.MAX_TERMINAL_BATCH + 1, 2 * WRITER.MAX_TERMINAL_BATCH + 1))
         base = {
-            "GITHUB_ACTIONS": "true", "GOVERNANCE_SCOPE": "all", "GOVERNANCE_TARGET_NUMBERS": "[1]",
+            "GITHUB_ACTIONS": "true", "GOVERNANCE_SCOPE": "all", "GOVERNANCE_TARGET_NUMBERS": "[]",
             "GOVERNANCE_CHECK_MANIFEST": manifest, "GOVERNANCE_TERMINAL_BATCH_NUMBERS": json.dumps(list(expected), separators=(",", ":")),
             "GOVERNANCE_CONTINUATION_INDEX": "2",
         }
         for batch in (
-            expected[:-1], (150,) + expected[:-1], tuple(reversed(expected)),
+            expected[:-1], (WRITER.MAX_TERMINAL_BATCH,) + expected[:-1], tuple(reversed(expected)),
         ):
             with self.subTest(batch=batch[:2]), self.identity(), patch.dict(os.environ, base | {"GOVERNANCE_TERMINAL_BATCH_NUMBERS": json.dumps(list(batch), separators=(",", ":"))}), \
                  patch.object(WRITER, "trusted_dispatcher_source", return_value=WRITER.DispatcherSource(88, "issues", 1)), \
@@ -1090,10 +1090,56 @@ class StatusWriterUnitTest(unittest.TestCase):
                 self.assertEqual(WRITER.main(), 1)
             process.assert_not_called()
 
+    def test_all_scope_rejects_more_than_four_terminal_batches_before_api_reads(self) -> None:
+        terminal_order = json.dumps(list(range(1, WRITER.MAX_TERMINAL_ORDER + 2)), separators=(",", ":"))
+        with self.identity(), patch.dict(os.environ, {
+            "GITHUB_ACTIONS": "true", "GOVERNANCE_SCOPE": "all", "GOVERNANCE_TARGET_NUMBERS": "[]",
+            "GOVERNANCE_TERMINAL_ORDER_NUMBERS": terminal_order,
+            "GOVERNANCE_TERMINAL_BATCH_NUMBERS": "[1]", "GOVERNANCE_CONTINUATION_INDEX": "1",
+        }), patch.object(WRITER, "trusted_dispatcher_source") as source:
+            self.assertEqual(WRITER.main(), 1)
+        source.assert_not_called()
+
+    def test_all_scope_accepts_the_fourth_canonical_continuation_slice_after_early_preservation(self) -> None:
+        """The last all-terminal slice remains reachable after 100 early heads."""
+        numbers = tuple(range(1, 601))
+        snapshot = self.snapshot(numbers)
+        preserved = tuple(range(1, WRITER.MAX_EARLY_TARGETS + 1))
+        manifest = json.dumps([[number, 10_000 + number] for number in numbers], separators=(",", ":"))
+        terminal_numbers = tuple(number for number in numbers if number not in preserved)
+        terminal_order = json.dumps(list(terminal_numbers), separators=(",", ":"))
+        final_batch = terminal_numbers[3 * WRITER.MAX_TERMINAL_BATCH:]
+        final_snapshot = WRITER.OpenSnapshot(
+            final_batch, snapshot.claimants,
+            tuple(item for item in snapshot.pull_requests if item["number"] in final_batch),
+        )
+        environment = {
+            "GITHUB_ACTIONS": "true", "GOVERNANCE_SCOPE": "all",
+            "GOVERNANCE_TARGET_NUMBERS": json.dumps(list(preserved), separators=(",", ":")),
+            "GOVERNANCE_PRESERVED_TARGET_NUMBERS": json.dumps(list(preserved), separators=(",", ":")),
+            "GOVERNANCE_PRESERVED_WRITER_RUN_ID": "71",
+            "GOVERNANCE_CHECK_MANIFEST": manifest, "GOVERNANCE_TERMINAL_ORDER_NUMBERS": terminal_order,
+            "GOVERNANCE_TERMINAL_BATCH_NUMBERS": json.dumps(list(final_batch), separators=(",", ":")),
+            "GOVERNANCE_CONTINUATION_INDEX": str(WRITER.MAX_TERMINAL_CONTINUATIONS),
+            "GOVERNANCE_COMPLETED_WRITER_RUN_IDS": "[99,100,101]",
+        }
+        with self.identity(), patch.dict(os.environ, environment), \
+             patch.object(WRITER, "trusted_dispatcher_source", return_value=WRITER.DispatcherSource(88, "issues", 1)), \
+             patch.object(WRITER, "open_snapshot", return_value=snapshot), \
+             patch.object(WRITER, "observed_invalidations", return_value=(final_snapshot, frozenset())), \
+             patch.object(WRITER, "trusted_completed_terminal_writers") as completed, \
+             patch.object(WRITER, "evidence_snapshot", return_value=WRITER.EvidenceSnapshot({}, {}, {})), \
+             patch.object(WRITER, "process", return_value=None) as process:
+            self.assertEqual(WRITER.main(), 0)
+        completed.assert_called_once_with(
+            WRITER.DispatcherSource(88, "issues", 1), WRITER.MAX_TERMINAL_CONTINUATIONS, (99, 100, 101),
+        )
+        self.assertEqual([call.args[0] for call in process.call_args_list], list(final_batch))
+
     def test_four_all_segments_revalidate_and_terminalize_six_hundred_non_drafts(self) -> None:
         """Run four production all-writer processes through only a fake transport."""
-        preserved = tuple(range(1, 41))
-        terminal_numbers = tuple(range(41, 601))
+        preserved = tuple(range(1, WRITER.MAX_EARLY_TARGETS + 1))
+        terminal_numbers = tuple(range(WRITER.MAX_EARLY_TARGETS + 1, 601))
         all_numbers = (*preserved, *terminal_numbers)
         default_head = "d" * 40
         heads = {number: f"{number:040x}"[-40:] for number in all_numbers}
@@ -1114,12 +1160,12 @@ class StatusWriterUnitTest(unittest.TestCase):
                 "app": [], "default": [], "write": [], "graphql": [], "rebind": [],
                 "manifest": [], "dispatcher_source": [], "prior_writer": [], "registration": [], "await": [],
             }
-            for index in range(1, 6)
+            for index in range(1, WRITER.MAX_TERMINAL_CONTINUATIONS + 2)
         }
-        source_reads = {index: 0 for index in range(1, 6)}
-        snapshots = {index: 0 for index in range(1, 6)}
-        check_read_count = {index: 0 for index in range(1, 6)}
-        sleep_calls = {index: [] for index in range(1, 6)}
+        source_reads = {index: 0 for index in range(1, WRITER.MAX_TERMINAL_CONTINUATIONS + 2)}
+        snapshots = {index: 0 for index in range(1, WRITER.MAX_TERMINAL_CONTINUATIONS + 2)}
+        check_read_count = {index: 0 for index in range(1, WRITER.MAX_TERMINAL_CONTINUATIONS + 2)}
+        sleep_calls = {index: [] for index in range(1, WRITER.MAX_TERMINAL_CONTINUATIONS + 2)}
         terminal_patches: list[int] = []
         check_reads: dict[int, int] = {}
         drift_check_id = [0]
@@ -1418,7 +1464,7 @@ class StatusWriterUnitTest(unittest.TestCase):
             with patch.object(WRITER.subprocess, "run", side_effect=run), \
                 patch.object(WRITER.time, "sleep", side_effect=sleep), \
                 patch.object(WRITER.time, "monotonic", side_effect=monotonic):
-                for segment in range(1, 5):
+                for segment in range(1, WRITER.MAX_TERMINAL_CONTINUATIONS + 1):
                     current_segment[0] = segment
                     check_read_count[segment] = 0
                     start = clock[0]
@@ -1430,7 +1476,9 @@ class StatusWriterUnitTest(unittest.TestCase):
                     clock[0] += WRITER.TERMINAL_AWAIT_STARTUP_AND_EVIDENCE_RESERVE_SECONDS
                     writer_identifier = 98 + segment
                     writer_runs[writer_identifier] = writer_run(writer_identifier, segment)
-                    expected = terminal_numbers[(segment - 1) * 150:segment * 150]
+                    expected = terminal_numbers[
+                        (segment - 1) * WRITER.MAX_TERMINAL_BATCH:segment * WRITER.MAX_TERMINAL_BATCH
+                    ]
                     before = len(terminal_patches)
                     WRITER._last_check_write_at = None  # Separate workflow-dispatch process.
                     with self.subTest(segment=segment), patch.object(WRITER, "WRITER_RUN_ID", str(writer_identifier)), patch.dict(os.environ, common_environment | {
@@ -1487,14 +1535,14 @@ class StatusWriterUnitTest(unittest.TestCase):
                     }
                 check_reads.clear()
                 drift_check_id[0] = 10_000 + terminal_numbers[0]
-                current_segment[0] = 5
+                current_segment[0] = WRITER.MAX_TERMINAL_CONTINUATIONS + 1
                 WRITER._last_check_write_at = None
                 before_drift = len(terminal_patches)
                 writer_runs[103] = writer_run(103, 1)
                 with patch.object(WRITER, "WRITER_RUN_ID", "103"), patch.dict(os.environ, common_environment | {
                     "GH_TOKEN": "app-read-5", "CHECK_WRITE_TOKEN": "check-write-5",
                     "GOVERNANCE_COMPLETED_WRITER_RUN_IDS": "[]",
-                    "GOVERNANCE_TERMINAL_BATCH_NUMBERS": json.dumps(list(terminal_numbers[:150]), separators=(",", ":")),
+                    "GOVERNANCE_TERMINAL_BATCH_NUMBERS": json.dumps(list(terminal_numbers[:WRITER.MAX_TERMINAL_BATCH]), separators=(",", ":")),
                     "GOVERNANCE_CONTINUATION_INDEX": "1",
                 }):
                     self.assertEqual(WRITER.main(), 1)
@@ -1511,25 +1559,25 @@ class StatusWriterUnitTest(unittest.TestCase):
 
         installation_rest = [
             value
-            for segment in range(1, 5)
+            for segment in range(1, WRITER.MAX_TERMINAL_CONTINUATIONS + 1)
             for value in (
                 *transport[segment]["app"], *transport[segment]["write"],
                 *transport[segment]["registration"], *transport[segment]["await"],
             )
         ]
         graphql = [
-            value for segment in range(1, 5) for value in transport[segment]["graphql"]
+            value for segment in range(1, WRITER.MAX_TERMINAL_CONTINUATIONS + 1) for value in transport[segment]["graphql"]
         ]
-        # A 3610s dispatch-start barrier keeps the four
-        # 150-head sensor/final-page=3 segments below the shared limit.
+        # A 3610s dispatch-start barrier keeps the five
+        # 125-head sensor/final-page=3 segments below the shared limit.
         self.assertLessEqual(rolling_maximum(installation_rest), 4_500)
         self.assertLessEqual(rolling_maximum(graphql), 4_500)
         default_rest = [
-            value for segment in range(1, 5) for value in transport[segment]["default"]
+            value for segment in range(1, WRITER.MAX_TERMINAL_CONTINUATIONS + 1) for value in transport[segment]["default"]
         ]
         self.assertLessEqual(rolling_maximum(default_rest), 1_000)
-        self.assertEqual([round(duration, 6) for duration in durations], [3_705.0, 3_705.0, 3_705.0, 2_885.0])
-        writer_runtime_upper_bound = 150 * WRITER.ALL_TERMINAL_CHECK_WRITE_INTERVAL_SECONDS
+        self.assertEqual([round(duration, 6) for duration in durations], [3_192.5] * 4)
+        writer_runtime_upper_bound = WRITER.MAX_TERMINAL_BATCH * WRITER.ALL_TERMINAL_CHECK_WRITE_INTERVAL_SECONDS
         startup_and_initial_read_reserve = WRITER.TERMINAL_AWAIT_STARTUP_AND_EVIDENCE_RESERVE_SECONDS
         await_timeout = 125 * 30.0
         # The fake monotonic clock accumulates binary 20.5s steps; permit only
@@ -1542,7 +1590,7 @@ class StatusWriterUnitTest(unittest.TestCase):
             300.0 + writer_runtime_upper_bound + startup_and_initial_read_reserve,
             await_timeout,
         )
-        self.assertAlmostEqual(sum(durations), 14_000.0)
+        self.assertAlmostEqual(sum(durations), 12_770.0)
         self.assertEqual(clock[0], 15_000.0)
         # Conservative root bound serializes every awaited writer with its
         # startup/read reserve, then adds the independent 81m+15m hand-off.
@@ -1679,6 +1727,45 @@ class StatusWriterUnitTest(unittest.TestCase):
              patch.object(WRITER, "api_json", return_value=value) as api:
             self.assertEqual(WRITER.check_run_for_external_id(head, external), value)
         api.assert_called_once_with("repos/owner/repository/check-runs/701")
+
+    def test_unbound_check_read_uses_one_server_filtered_latest_generation(self) -> None:
+        """Retained same-head history cannot exhaust the current-generation reader."""
+        head = "a" * 40
+        external = WRITER.check_external_id(head)
+        current = {
+            "id": 701, "name": WRITER.CHECK_NAME, "head_sha": head,
+            "external_id": external, "updated_at": "2026-09-08T00:00:00Z",
+            "app": {"id": 42},
+        }
+        endpoints: list[str] = []
+
+        def page(endpoint: str, *, default_token: bool = False) -> dict[str, object]:
+            self.assertFalse(default_token)
+            endpoints.append(endpoint)
+            query = WRITER.parse_qs(WRITER.urlparse(endpoint).query)
+            self.assertEqual(query, {
+                "check_name": [WRITER.CHECK_NAME], "app_id": ["42"],
+                "filter": ["latest"], "per_page": ["100"],
+            })
+            return {"total_count": 1, "check_runs": [current]}
+
+        with self.identity(), patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}), \
+             patch.object(WRITER, "object_page", side_effect=page):
+            self.assertEqual(WRITER.check_run_for_external_id(head, external), current)
+        self.assertEqual(len(endpoints), 2)
+        self.assertTrue(all("filter=latest" in endpoint for endpoint in endpoints))
+        self.assertTrue(all(
+            "filter=all" not in endpoint
+            and "page" not in WRITER.parse_qs(WRITER.urlparse(endpoint).query)
+            for endpoint in endpoints
+        ))
+
+    def test_unbound_check_read_rejects_an_incomplete_latest_snapshot(self) -> None:
+        head = "a" * 40
+        with self.identity(), patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}), \
+             patch.object(WRITER, "object_page", return_value={"total_count": 2, "check_runs": [{}, {}]}):
+            with self.assertRaisesRegex(WRITER.GovernanceError, "Current Check Run snapshot"):
+                WRITER.check_run(head)
 
     def test_all_writer_never_posts_a_replacement_when_a_bound_generation_disappears(self) -> None:
         head = "a" * 40
@@ -1870,8 +1957,8 @@ class StatusWriterUnitTest(unittest.TestCase):
         self.assertEqual(process.call_count, 101)
         self.assertEqual(finalize.call_count, 100)
 
-    def test_event_sourced_all_segment_terminalizes_all_one_hundred_fifty_successes(self) -> None:
-        numbers = tuple(range(1, 151))
+    def test_event_sourced_all_segment_terminalizes_all_one_hundred_twenty_five_successes(self) -> None:
+        numbers = tuple(range(1, WRITER.MAX_TERMINAL_BATCH + 1))
         snapshot = self.snapshot(numbers)
         manifest = json.dumps([[number, 10_000 + number] for number in numbers], separators=(",", ":"))
         environment = {
@@ -1902,11 +1989,11 @@ class StatusWriterUnitTest(unittest.TestCase):
              patch.object(WRITER, "final_evidence_for_pr", return_value=WRITER.EvidenceSnapshot({}, {}, {})), \
              patch.object(WRITER, "finalize_decision", side_effect=finalize):
             self.assertEqual(WRITER.main(), 0)
-        self.assertEqual(process.call_count, 150)
+        self.assertEqual(process.call_count, WRITER.MAX_TERMINAL_BATCH)
         self.assertEqual(finalized, list(numbers))
 
     def test_all_segment_budget_exhaustion_fails_closed_instead_of_skipping_tail(self) -> None:
-        numbers = tuple(range(1, 151))
+        numbers = tuple(range(1, WRITER.MAX_TERMINAL_BATCH + 1))
         snapshot = self.snapshot(numbers)
         manifest = json.dumps([[number, 10_000 + number] for number in numbers], separators=(",", ":"))
         environment = {
@@ -1925,11 +2012,11 @@ class StatusWriterUnitTest(unittest.TestCase):
              patch.object(WRITER, "process", return_value=exhausted) as process, \
              patch.object(WRITER, "finalize_decision", return_value=True) as finalize:
             self.assertEqual(WRITER.main(), 1)
-        self.assertEqual(process.call_count, 76)
-        self.assertEqual(finalize.call_count, 75)
+        self.assertEqual(process.call_count, 63)
+        self.assertEqual(finalize.call_count, 62)
 
     def test_all_segment_fails_closed_when_a_manifested_terminal_is_not_published(self) -> None:
-        numbers = tuple(range(1, 151))
+        numbers = tuple(range(1, WRITER.MAX_TERMINAL_BATCH + 1))
         snapshot = self.snapshot(numbers)
         manifest = json.dumps([[number, 10_000 + number] for number in numbers], separators=(",", ":"))
         environment = {
@@ -2192,7 +2279,7 @@ class StatusWriterUnitTest(unittest.TestCase):
                 payload = next(value for value in checks.values() if value["id"] == identifier)
             elif endpoint.startswith("repos/owner/repository/commits/") and "/check-runs?" in endpoint:
                 head = endpoint.split("/commits/", 1)[1].split("/check-runs?", 1)[0]
-                payload = {"check_runs": [checks[head]]}
+                payload = {"total_count": 1, "check_runs": [checks[head]]}
             else:
                 self.fail(f"unexpected terminal transport: {command}")
             return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
@@ -2313,9 +2400,15 @@ class StatusWriterUnitTest(unittest.TestCase):
                 payload = dispatcher
             elif endpoint.startswith("repos/owner/repository/actions/workflows/66/runs?"):
                 payload = self.dispatcher_page(dispatcher)
-            elif endpoint.startswith("repos/owner/repository/actions/runs?head_sha="):
+            elif endpoint.startswith("repos/owner/repository/actions/workflows/pr-governance-review-events.yml/runs?"):
                 head = endpoint.split("head_sha=", 1)[1].split("&", 1)[0]
-                payload = run_pages[head]
+                payload = {"total_count": 1, "workflow_runs": [run_pages[head]["workflow_runs"][0]]}
+            elif endpoint.startswith("repos/owner/repository/actions/workflows/44/runs?"):
+                head = endpoint.split("head_sha=", 1)[1].split("&", 1)[0]
+                payload = {"total_count": 1, "workflow_runs": [run_pages[head]["workflow_runs"][1]]}
+            elif endpoint.startswith("repos/owner/repository/actions/workflows/45/runs?"):
+                head = endpoint.split("head_sha=", 1)[1].split("&", 1)[0]
+                payload = {"total_count": 1, "workflow_runs": [run_pages[head]["workflow_runs"][2]]}
             elif endpoint.startswith("repos/owner/repository/pulls/"):
                 payload = pulls[int(endpoint.rsplit("/", 1)[1])]
             elif endpoint.startswith("repos/owner/repository/check-runs/"):
@@ -2323,7 +2416,7 @@ class StatusWriterUnitTest(unittest.TestCase):
                 payload = next(value for value in checks.values() if value["id"] == identifier)
             elif endpoint.startswith("repos/owner/repository/commits/") and "/check-runs?" in endpoint:
                 head = endpoint.split("/commits/", 1)[1].split("/check-runs?", 1)[0]
-                payload = {"check_runs": [checks[head]]}
+                payload = {"total_count": 1, "check_runs": [checks[head]]}
             else:
                 self.fail(f"unexpected success terminal transport: {command}")
             return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
@@ -2340,10 +2433,10 @@ class StatusWriterUnitTest(unittest.TestCase):
         with self.identity(), patch.dict(os.environ, environment), patch.object(WRITER, "pace_check_write"), \
              patch.object(WRITER.subprocess, "run", side_effect=run):
             WRITER._bound_check_runs.clear()
-            for start in range(0, len(numbers), 150):
+            for start in range(0, len(numbers), WRITER.MAX_TERMINAL_BATCH):
                 before_reads = app_reads
                 before_writes = write_calls
-                for number in numbers[start:start + 150]:
+                for number in numbers[start:start + WRITER.MAX_TERMINAL_BATCH]:
                     head = f"{number:040x}"[-40:]
                     evidence = WRITER.final_evidence_for_pr(head, initial)
                     baseline = WRITER.check_fingerprint(checks[head])
@@ -2358,19 +2451,19 @@ class StatusWriterUnitTest(unittest.TestCase):
         self.assertEqual(read_tokens, {"app-read"})
         # final evidence, check fence, closer, and write fence(6)。
         # successは終端直前にdefault repo/refを各headで再確認する。
-        self.assertEqual(app_reads, 6_000)
-        self.assertEqual(segment_reads, [2_250, 2_250, 1_500])
-        self.assertLessEqual(max(segment_reads), 2_250)
-        self.assertEqual(segment_writes, [150, 150, 100])
+        self.assertEqual(app_reads, 7_600)
+        self.assertEqual(segment_reads, [2_375, 2_375, 2_375, 475])
+        self.assertLessEqual(max(segment_reads), 2_375)
+        self.assertEqual(segment_writes, [125, 125, 125, 25])
         # full snapshot/manifest rereadを100 REST、verifierを5 REST/headと
         # 保守的に加算しても、installation共有limitのrolling window内に収まる。
-        segment_seconds = 150 * WRITER.ALL_TERMINAL_CHECK_WRITE_INTERVAL_SECONDS
-        segment_rest_and_writes = 600 + 200 + (6 * 150) + 2_250 + 150
-        self.assertEqual(segment_seconds, 3_075)
+        segment_seconds = WRITER.MAX_TERMINAL_BATCH * WRITER.ALL_TERMINAL_CHECK_WRITE_INTERVAL_SECONDS
+        segment_rest_and_writes = 600 + 200 + (6 * WRITER.MAX_TERMINAL_BATCH) + 2_375 + WRITER.MAX_TERMINAL_BATCH
+        self.assertEqual(segment_seconds, 2_562.5)
         self.assertLess(segment_seconds, 3_600)
         self.assertLessEqual(segment_rest_and_writes, 4_500)
-        self.assertLessEqual(segment_rest_and_writes * 4, 4_500 * 4)
-        self.assertLess(4 * segment_seconds, 6 * 3_600)
+        self.assertLessEqual(segment_rest_and_writes * 5, 4_500 * 5)
+        self.assertLess(5 * segment_seconds, 6 * 3_600)
 
     def test_initial_and_final_closer_reads_use_the_app_token(self) -> None:
         current = self.pull(72)
@@ -2394,7 +2487,7 @@ class StatusWriterUnitTest(unittest.TestCase):
             self.assertEqual(WRITER.check_baseline("a" * 40), WRITER.check_fingerprint(value))
 
     def test_evidence_snapshot_uses_exact_head_queries_with_fixed_page_budget(self) -> None:
-        snapshot = self.snapshot(tuple(range(1, 151)))
+        snapshot = self.snapshot(tuple(range(1, WRITER.MAX_EVIDENCE_TARGETS + 1)))
         calls: list[tuple[str, bool]] = []
 
         def page(endpoint: str, *, default_token: bool = False):
@@ -2407,8 +2500,8 @@ class StatusWriterUnitTest(unittest.TestCase):
 
         with self.identity(), patch.object(WRITER, "object_page", side_effect=page), \
              patch.object(WRITER, "object_pages") as pages, patch.object(WRITER, "api_json", side_effect=api):
-            evidence = WRITER.evidence_snapshot(snapshot, tuple(range(1, 151)))
-        self.assertEqual(len(calls), 900)
+            evidence = WRITER.evidence_snapshot(snapshot, tuple(range(1, WRITER.MAX_EVIDENCE_TARGETS + 1)))
+        self.assertEqual(len(calls), 6 * WRITER.MAX_EVIDENCE_TARGETS)
         pages.assert_not_called()
         self.assertEqual(evidence.workflow_ids, {".github/workflows/test-and-build.yml": 44, ".github/workflows/release-preflight.yml": 45})
         for endpoint, default_token in calls:
@@ -2422,9 +2515,9 @@ class StatusWriterUnitTest(unittest.TestCase):
             else:
                 self.assertEqual(query.get("event"), ["pull_request"])
                 self.assertTrue(default_token)
-        self.assertEqual(sum("pr-governance-review-events.yml/runs?" in endpoint for endpoint, _ in calls), 300)
-        self.assertEqual(sum("/actions/workflows/44/runs?" in endpoint for endpoint, _ in calls), 300)
-        self.assertEqual(sum("/actions/workflows/45/runs?" in endpoint for endpoint, _ in calls), 300)
+        self.assertEqual(sum("pr-governance-review-events.yml/runs?" in endpoint for endpoint, _ in calls), 2 * WRITER.MAX_EVIDENCE_TARGETS)
+        self.assertEqual(sum("/actions/workflows/44/runs?" in endpoint for endpoint, _ in calls), 2 * WRITER.MAX_EVIDENCE_TARGETS)
+        self.assertEqual(sum("/actions/workflows/45/runs?" in endpoint for endpoint, _ in calls), 2 * WRITER.MAX_EVIDENCE_TARGETS)
 
     def test_terminal_workflow_enforces_conservative_3610_second_dispatch_barriers(self) -> None:
         workflow = (ROOT / ".github/workflows/pr-governance.yml").read_text(encoding="utf-8")
@@ -2440,7 +2533,10 @@ class StatusWriterUnitTest(unittest.TestCase):
             + workflow.count("deadline=int(started)+3750"),
             12,
         )
-        self.assertEqual(150 * WRITER.ALL_TERMINAL_CHECK_WRITE_INTERVAL_SECONDS, 3_075)
+        self.assertEqual(
+            WRITER.MAX_TERMINAL_BATCH * WRITER.ALL_TERMINAL_CHECK_WRITE_INTERVAL_SECONDS,
+            2_562.5,
+        )
         self.assertLessEqual(
             WRITER.TERMINAL_WRITER_STARTUP_RESERVE_SECONDS
             + WRITER.INITIAL_EVIDENCE_DEADLINE_SECONDS
@@ -2449,7 +2545,7 @@ class StatusWriterUnitTest(unittest.TestCase):
         )
         self.assertLessEqual(
             300
-            + 150 * WRITER.ALL_TERMINAL_CHECK_WRITE_INTERVAL_SECONDS
+            + WRITER.MAX_TERMINAL_BATCH * WRITER.ALL_TERMINAL_CHECK_WRITE_INTERVAL_SECONDS
             + WRITER.TERMINAL_AWAIT_STARTUP_AND_EVIDENCE_RESERVE_SECONDS,
             125 * 30,
         )
@@ -2783,16 +2879,28 @@ class StatusWriterUnitTest(unittest.TestCase):
                 WRITER.evidence_snapshot(snapshot, (72,))
         api.assert_not_called()
 
-    def test_final_evidence_uses_one_complete_head_specific_repository_page(self) -> None:
+    def test_final_evidence_uses_the_initial_workflow_specific_page_budgets(self) -> None:
         calls: list[str] = []
-        def api(endpoint: str, *, default_token: bool = False):
+        def page(endpoint: str, *, default_token: bool = False):
             self.assertFalse(default_token)
             calls.append(endpoint)
             return {"total_count": 0, "workflow_runs": []}
         initial = WRITER.EvidenceSnapshot({}, {".github/workflows/test-and-build.yml": 44, ".github/workflows/release-preflight.yml": 45}, {})
-        with self.identity(), patch.object(WRITER, "api_json", side_effect=api):
+        with self.identity(), patch.object(WRITER, "object_page", side_effect=page):
             WRITER.final_evidence_for_pr("a" * 40, initial)
-        self.assertEqual(calls, ["repos/owner/repository/actions/runs?head_sha=" + "a" * 40 + "&per_page=100"] * 2)
+        self.assertEqual(len(calls), 6)
+        self.assertTrue(all("repos/owner/repository/actions/runs?" not in endpoint for endpoint in calls))
+        self.assertEqual(sum("pr-governance-review-events.yml/runs?" in endpoint for endpoint in calls), 2)
+        self.assertEqual(sum("/actions/workflows/44/runs?" in endpoint for endpoint in calls), 2)
+        self.assertEqual(sum("/actions/workflows/45/runs?" in endpoint for endpoint in calls), 2)
+        for endpoint in calls:
+            query = WRITER.parse_qs(WRITER.urlparse(endpoint).query)
+            self.assertEqual(query.get("head_sha"), ["a" * 40])
+            self.assertEqual(query.get("per_page"), ["100"])
+            if "pr-governance-review-events.yml/runs?" in endpoint:
+                self.assertNotIn("event", query)
+            else:
+                self.assertEqual(query.get("event"), ["pull_request"])
 
     def test_final_evidence_rejects_a_full_or_incomplete_head_page(self) -> None:
         older = [{"id": number, "head_sha": "a" * 40} for number in range(1, 101)]
@@ -2802,7 +2910,7 @@ class StatusWriterUnitTest(unittest.TestCase):
             {"total_count": 98, "workflow_runs": older[:99]},
             {"total_count": 1, "workflow_runs": [{"id": 1, "head_sha": "b" * 40}]},
         ):
-            with self.subTest(page=page), self.identity(), patch.object(WRITER, "api_json", return_value=page):
+            with self.subTest(page=page), self.identity(), patch.object(WRITER, "object_page", return_value=page):
                 with self.assertRaises(WRITER.GovernanceError):
                     WRITER.final_evidence_for_pr("a" * 40, initial)
 
@@ -2814,9 +2922,9 @@ class StatusWriterUnitTest(unittest.TestCase):
             {".github/workflows/test-and-build.yml": 44, ".github/workflows/release-preflight.yml": 45},
             {},
         )
-        with self.identity(), patch.object(WRITER, "api_json", return_value=page):
+        with self.identity(), patch.object(WRITER, "object_page", return_value=page):
             evidence = WRITER.final_evidence_for_pr("a" * 40, initial)
-        self.assertEqual(len(evidence.workflow_runs[".github/workflows/test-and-build.yml"]), 0)
+        self.assertEqual(len(evidence.workflow_runs[".github/workflows/test-and-build.yml"]), 100)
 
     def test_exact_head_pagination_keeps_latest_sensor_and_ci_generation_on_refresh(self) -> None:
         head = "a" * 40
@@ -2869,13 +2977,19 @@ class StatusWriterUnitTest(unittest.TestCase):
 
         sensor_rerun = dict(sensors[-1])
         sensor_rerun.update({"id": 801, "run_number": 102})
-        final_values = [*sensors, sensor_rerun, ci, release]
-
         def final_page(endpoint: str, *, default_token: bool = False) -> dict[str, object]:
             self.assertFalse(default_token)
             query = WRITER.parse_qs(WRITER.urlparse(endpoint).query)
             page = int(query.get("page", ["1"])[0])
-            return {"total_count": len(final_values), "workflow_runs": final_values[100 * (page - 1):100 * page]}
+            if "pr-governance-review-events.yml/runs?" in endpoint:
+                values = [*sensors, sensor_rerun]
+            elif "/actions/workflows/44/runs?" in endpoint:
+                values = [ci]
+            elif "/actions/workflows/45/runs?" in endpoint:
+                values = [release]
+            else:
+                self.fail(f"unexpected final evidence endpoint: {endpoint}")
+            return {"total_count": len(values), "workflow_runs": values[100 * (page - 1):100 * page]}
 
         with self.identity(), patch.object(WRITER, "object_page", side_effect=final_page):
             refreshed = WRITER.final_evidence_for_pr(head, initial)
@@ -2904,10 +3018,19 @@ class StatusWriterUnitTest(unittest.TestCase):
         ci = self.generation(900)
         release = self.generation(901)
         release.update({"name": "release-preflight", "path": ".github/workflows/release-preflight.yml@master", "workflow_id": 45})
-        unrelated = {"id": 999, "head_sha": "a" * 40, "workflow_id": 999, "event": "push", "path": ".github/workflows/unrelated.yml@master"}
         initial = WRITER.EvidenceSnapshot({}, {".github/workflows/test-and-build.yml": 44, ".github/workflows/release-preflight.yml": 45}, {})
-        page = {"total_count": 4, "workflow_runs": [sensor, ci, release, unrelated]}
-        with self.identity(), patch.object(WRITER, "api_json", return_value=page):
+        def page(endpoint: str, *, default_token: bool = False) -> dict[str, object]:
+            if "pr-governance-review-events.yml/runs?" in endpoint:
+                values = [sensor]
+            elif "/actions/workflows/44/runs?" in endpoint:
+                values = [ci]
+            elif "/actions/workflows/45/runs?" in endpoint:
+                values = [release]
+            else:
+                self.fail(f"unexpected workflow-scoped final endpoint: {endpoint}")
+            return {"total_count": len(values), "workflow_runs": values}
+
+        with self.identity(), patch.object(WRITER, "object_page", side_effect=page):
             evidence = WRITER.final_evidence_for_pr("a" * 40, initial)
         self.assertEqual(evidence.sensor_runs["pull_request"], (sensor,))
         self.assertEqual(evidence.workflow_runs[".github/workflows/test-and-build.yml"], (ci,))
@@ -2983,21 +3106,26 @@ class StatusWriterUnitTest(unittest.TestCase):
                 with self.assertRaises(WRITER.GovernanceError):
                     WRITER.pages("ignored")
 
-    def test_check_pages_reach_a_later_pending_fence(self) -> None:
+    def test_current_check_snapshot_never_pages_retained_history(self) -> None:
         item = {"id": 102, "name": WRITER.CHECK_NAME, "head_sha": "a" * 40, "external_id": WRITER.check_external_id("a" * 40), "updated_at": "now", "app": {"id": 42}}
-        first = {"check_runs": [{"id": value} for value in range(1, 101)]}
-        payload = [first, {"check_runs": [item]}]
-        def api(endpoint: str, **_kwargs: object) -> object:
-            page = int(WRITER.parse_qs(WRITER.urlparse(endpoint).query)["page"][0])
-            return payload[page - 1] if page <= len(payload) else {"check_runs": []}
-        with self.identity(), patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}), patch.object(WRITER, "api_json", side_effect=api):
+        endpoints: list[str] = []
+
+        def page(endpoint: str, **_kwargs: object) -> object:
+            endpoints.append(endpoint)
+            query = WRITER.parse_qs(WRITER.urlparse(endpoint).query)
+            self.assertEqual(query.get("filter"), ["latest"])
+            self.assertNotIn("page", query)
+            return {"total_count": 1, "check_runs": [item]}
+
+        with self.identity(), patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}), patch.object(WRITER, "api_json", side_effect=page):
             self.assertEqual(WRITER.check_run("a" * 40), item)
+        self.assertEqual(len(endpoints), 2)
 
     def test_check_run_ignores_foreign_and_historical_generations(self) -> None:
         for mutate in (lambda value: value["app"].update(id=7), lambda value: value.update(external_id="wrong")):
             value = {"id": 99, "name": WRITER.CHECK_NAME, "head_sha": "a" * 40, "external_id": WRITER.check_external_id("a" * 40), "updated_at": "now", "app": {"id": 42}}
             mutate(value)
-            with self.subTest(value=value), self.identity(), patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}), patch.object(WRITER, "object_pages", return_value=[{"check_runs": [value]}]):
+            with self.subTest(value=value), self.identity(), patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}), patch.object(WRITER, "object_page", return_value={"total_count": 1, "check_runs": [value]}):
                 self.assertIsNone(WRITER.check_run("a" * 40))
 
     def test_check_fence_re_reads_same_id_and_evidence(self) -> None:
@@ -3418,7 +3546,7 @@ class StatusWriterUnitTest(unittest.TestCase):
                 payload = check
             elif endpoint.startswith("repos/owner/repository/commits/") and "/check-runs?" in endpoint:
                 calls.append("check-page")
-                payload = {"check_runs": [check]}
+                payload = {"total_count": 1, "check_runs": [check]}
             else:
                 self.fail(f"unexpected late-closer race transport: {arguments}")
             return subprocess.CompletedProcess(arguments, 0, json.dumps(payload), "")

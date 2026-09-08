@@ -339,6 +339,21 @@ class VerifyPrReadyTest(unittest.TestCase):
         )
         self.required_checks_patcher.start()
         self.addCleanup(self.required_checks_patcher.stop)
+        # Most `main` tests exercise a later gate and provide only the reduced
+        # `gh pr view` fixture.  Keep those fixtures focused; reader-specific
+        # tests below explicitly restore the production GraphQL reader.
+        self.reviews_patcher = patch.object(
+            subject,
+            "_reviews",
+            return_value=deepcopy(successful_state()[0]["reviews"]),
+        )
+        self.reviews_patcher.start()
+        self.addCleanup(self.reviews_patcher.stop)
+
+    def use_complete_review_reader(self) -> None:
+        """Restore the production reader for a complete-review contract test."""
+
+        self.reviews_patcher.stop()
 
     def errors(
         self,
@@ -2406,6 +2421,11 @@ class VerifyPrReadyTest(unittest.TestCase):
         self.assertIn("reply", " ".join(errors).lower())
 
     def test_reads_issue_comments_past_the_first_api_page(self) -> None:
+        self.use_complete_review_reader()
+        complete_reviews = [
+            formal_review(HEAD, "2026-08-29T03:01:30Z"),
+            formal_review(HEAD, "2026-08-29T03:03:30Z"),
+        ]
         pull_request = {
             "isDraft": True,
             "baseRefOid": "c" * 40,
@@ -2423,8 +2443,10 @@ class VerifyPrReadyTest(unittest.TestCase):
                 }
             ],
             "reviews": [
-                formal_review(HEAD, "2026-08-29T03:01:30Z"),
-                formal_review(HEAD, "2026-08-29T03:03:30Z"),
+                {
+                    "author": {"login": FORMAL_BOT},
+                    "state": "COMMENTED",
+                }
             ],
         }
         filler = [
@@ -2459,7 +2481,10 @@ class VerifyPrReadyTest(unittest.TestCase):
             },
         ]
 
+        review_queries = 0
+
         def gh_json(*arguments: str) -> object:
+            nonlocal review_queries
             if arguments[:2] == ("pr", "view"):
                 return pull_request
             if arguments[0] == "api" and arguments[1].startswith(
@@ -2467,6 +2492,26 @@ class VerifyPrReadyTest(unittest.TestCase):
             ):
                 return filler if "page=1&" in arguments[-1] else all_comments[100:]
             if arguments[0:2] == ("api", "graphql"):
+                query = next(
+                    argument for argument in arguments if argument.startswith("query=")
+                )
+                if "reviews(first: 100" in query:
+                    review_queries += 1
+                    return rate_limited({
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "reviews": {
+                                        "nodes": complete_reviews,
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    })
                 return rate_limited({
                     "data": {
                         "repository": {
@@ -2501,8 +2546,10 @@ class VerifyPrReadyTest(unittest.TestCase):
         ), patch.object(subject, "_open_pull_requests", return_value=current_canonical_closer()
         ):
             self.assertEqual(subject.main(["--pr", "72", "--repository", "owner/repo"]), 0)
+        self.assertEqual(review_queries, 2)
 
     def test_reads_review_past_the_first_graphql_page(self) -> None:
+        self.use_complete_review_reader()
         pull_request, threads, comments = successful_state()
         pull_request["reviews"] = []
 
@@ -2593,6 +2640,7 @@ class VerifyPrReadyTest(unittest.TestCase):
             self.assertEqual(subject.main(["--pr", "72", "--repository", "owner/repo"]), 0)
 
     def test_review_reader_selects_identity_body_and_refuses_a_raced_projection(self) -> None:
+        self.use_complete_review_reader()
         first = rate_limited({
             "data": {"repository": {"pullRequest": {"reviews": {
                 "nodes": [formal_review(HEAD, "2026-08-29T03:01:30Z")],
@@ -2615,6 +2663,7 @@ class VerifyPrReadyTest(unittest.TestCase):
         self.assertIn("body", query)
 
     def test_outer_review_connections_accept_the_page_boundary(self) -> None:
+        self.use_complete_review_reader()
         for connection_name, reader in (
             ("reviews", subject._reviews),
             ("reviewThreads", subject._review_threads),
@@ -2677,6 +2726,7 @@ class VerifyPrReadyTest(unittest.TestCase):
                 )
 
     def test_outer_review_connections_refuse_a_cursor_after_the_page_boundary(self) -> None:
+        self.use_complete_review_reader()
         for connection_name, reader in (
             ("reviews", subject._reviews),
             ("reviewThreads", subject._review_threads),
@@ -2734,6 +2784,7 @@ class VerifyPrReadyTest(unittest.TestCase):
                 )
 
     def test_outer_review_connections_reject_a_raced_invalid_second_cursor(self) -> None:
+        self.use_complete_review_reader()
         for connection_name, reader in (
             ("reviews", subject._reviews),
             ("reviewThreads", subject._review_threads),
@@ -2785,6 +2836,7 @@ class VerifyPrReadyTest(unittest.TestCase):
                 self.assertEqual(request.call_count, 2)
 
     def test_reviews_fails_closed_when_initial_page_changes_at_race_fence(self) -> None:
+        self.use_complete_review_reader()
         first = rate_limited({
             "data": {"repository": {"pullRequest": {"reviews": {
                 "nodes": [],
@@ -2855,6 +2907,8 @@ class VerifyPrReadyTest(unittest.TestCase):
 
     def test_graphql_server_budget_accumulates_nested_overflow_across_150_verifiers(self) -> None:
         """The real reader path stops before the shared server floor is spent."""
+
+        self.use_complete_review_reader()
 
         server_remaining = subject._GRAPHQL_REVIEW_BUDGET
         server_requests = 0
@@ -3006,6 +3060,7 @@ class VerifyPrReadyTest(unittest.TestCase):
             )
 
     def test_graphql_rate_limit_metadata_is_required_and_strict(self) -> None:
+        self.use_complete_review_reader()
         payload = {
             "data": {
                 "repository": {
@@ -3756,6 +3811,7 @@ class VerifyPrReadyTest(unittest.TestCase):
                 subject._review_threads("owner/repo", 72)
 
     def test_fails_closed_when_review_cursor_repeats(self) -> None:
+        self.use_complete_review_reader()
         payload = rate_limited({
             "data": {
                 "repository": {
@@ -4311,6 +4367,16 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
     branch = "master"
     app_id = 42
     source_run_id = 901
+
+    def setUp(self) -> None:
+        # These tests cover trusted Check Run state, not review pagination.
+        self.reviews_patcher = patch.object(
+            subject,
+            "_reviews",
+            return_value=deepcopy(successful_state()[0]["reviews"]),
+        )
+        self.reviews_patcher.start()
+        self.addCleanup(self.reviews_patcher.stop)
 
     @property
     def body_sha256(self) -> str:

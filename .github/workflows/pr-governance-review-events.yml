@@ -480,6 +480,35 @@ jobs:
                   "complete": False,
               })
 
+          def newest_source_bound_check_runs(
+              matches: list[dict[str, object]],
+          ) -> list[dict[str, object]]:
+              """Select one latest writer generation; duplicates stay fail-closed.
+
+              A single live sensor can receive several governed-event
+              reconciliations.  Every resulting trusted Check Run is bound to
+              that sensor, but only the newest writer generation represents
+              its current state.  Actions run identifiers are positive,
+              repository-unique generations, so the largest writer run id is
+              the authoritative generation.  Multiple Check Runs for that
+              same newest writer are ambiguous and cannot satisfy the latch.
+              """
+              newest_writer_run_id: int | None = None
+              newest: list[dict[str, object]] = []
+              for check in matches:
+                  writer_run_id = details_writer_run_id(check.get("details_url"))
+                  if writer_run_id is None:
+                      fail("Trusted governance Check Run writer generation is invalid.")
+                  writer_generation = int(writer_run_id)
+                  if newest_writer_run_id is None or writer_generation > newest_writer_run_id:
+                      newest_writer_run_id = writer_generation
+                      newest = [check]
+                  elif writer_generation == newest_writer_run_id:
+                      newest.append(check)
+              if len(newest) > 1:
+                  fail("Multiple trusted governance Check Runs match the newest sensor generation.")
+              return newest
+
           def source_bound_trusted_check_runs() -> list[dict[str, object]] | None:
               # A one-page snapshot needs its Link fence on the final anchor.
               # Request the headers without prematurely rejecting a normal
@@ -500,8 +529,7 @@ jobs:
                   matches = check_scan["matches"]
                   if not isinstance(matches, list):
                       fail("Trusted governance Check Run scan is invalid.")
-                  if len(matches) > 1:
-                      fail("Multiple trusted governance Check Runs match this sensor run.")
+                  matches = newest_source_bound_check_runs(matches)
                   check_scan.clear()
                   return matches
 

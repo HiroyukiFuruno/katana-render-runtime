@@ -37,7 +37,7 @@ CHECK_NAME = "KRR / PR governance (trusted check)"
 CHECK_EXTERNAL_PREFIX = "krr-governance/v1/"
 CHECK_WRITE_INTERVAL_SECONDS = 8.1
 # Four continuation writers share the App installation rate limit with their
-# registration and terminal polling.  20.5 seconds keeps each 150-write
+# registration and terminal polling.  20.5 seconds keeps each 125-write
 # continuation inside the terminal window after bounded registration,
 # bootstrap, and initial-evidence work.
 # hour below the 4,500-request operational ceiling.
@@ -51,7 +51,7 @@ INITIAL_EVIDENCE_DEADLINE_SECONDS = 180.0
 # checkout, and two App-token creations before this script starts.  Reserve
 # their realistic 120s upper bound separately from initial evidence, with a
 # final 30s scheduler margin: 120 + 180 + 30 <= 330 seconds.  The first
-# paced PATCH is already included in the 150-write interval below.
+# paced PATCH is already included in the 125-write interval below.
 TERMINAL_WRITER_STARTUP_RESERVE_SECONDS = 120.0
 TERMINAL_AWAIT_STARTUP_AND_EVIDENCE_RESERVE_SECONDS = 330.0
 DISPATCHER_NAME = "PR governance dispatcher"
@@ -71,10 +71,14 @@ DISPATCHER_TERMINAL_CONCLUSIONS = frozenset({
     "startup_failure", "success", "timed_out",
 })
 MAX_DISPATCHER_FENCE_RUNS = 100
-# A terminal continuation handles at most 150 PRs.  Every sensor/CI listing is
+# A terminal continuation handles at most 125 PRs.  Every sensor/CI listing is
 # restricted by the immutable current PR head and a small bounded page chain,
 # rather than paging arbitrary retained workflow history with the App token.
-MAX_EVIDENCE_TARGETS = 150
+MAX_TERMINAL_BATCH = 125
+MAX_TERMINAL_CONTINUATIONS = 4
+MAX_EARLY_TARGETS = 100
+MAX_TERMINAL_ORDER = MAX_TERMINAL_BATCH * MAX_TERMINAL_CONTINUATIONS
+MAX_EVIDENCE_TARGETS = MAX_TERMINAL_BATCH
 # GitHub returns at most 100 workflow runs per REST page.  Keep a separate
 # aggregate bound so an exact-head query can safely consume a small number of
 # pages without turning retained run history into an unbounded read loop or
@@ -86,7 +90,7 @@ MAX_EVIDENCE_RUNS_PER_QUERY = 300
 # a full sixth page fails closed instead of issuing an unbounded seventh read.
 MAX_SHARED_SNAPSHOT_PAGES = 6
 # The repository workflow token is limited to 1,000 REST reads/hour.  A
-# 150-head slice spends 903 of them on CI pages/fences, workflow IDs, and the
+# 125-head slice spends 903 of them on CI pages/fences, workflow IDs, and the
 # sensor's page-1 anchor.  Move page 2 for only this bounded prefix (never
 # data-dependent selection) to retain 47 reads of headroom while lowering the
 # shared App bucket's worst rolling window.
@@ -783,14 +787,32 @@ def _valid_check(value: object, head: str, *, external_id: str | None = None) ->
 
 
 def checks(head: str, *, default_token: bool = False) -> list[dict[str, Any]]:
-    values: list[dict[str, Any]] = []
-    query = urlencode({"check_name": CHECK_NAME, "app_id": check_app_id(), "filter": "all", "per_page": 100})
-    for page in object_pages(f"repos/{REPOSITORY}/commits/{head}/check-runs?{query}"):
-        runs = page.get("check_runs")
-        if not isinstance(runs, list) or not all(isinstance(item, dict) for item in runs):
-            raise GovernanceError("Check Run pagination is invalid.")
-        values.extend(runs)
-    return values
+    """Read the sole current trusted Check Run, never retained history.
+
+    A Check Run external ID is bound to one writer/dispatcher generation.  A
+    manifest-bound generation is reread by ID above; an unbound writer can
+    only adopt GitHub's server-side ``latest`` result and creates its own
+    unique generation when it is absent.  Paging ``filter=all`` here would
+    make an unchanged PR head permanently unverifiable after enough old
+    trusted generations have accumulated.
+    """
+    query = urlencode({"check_name": CHECK_NAME, "app_id": check_app_id(), "filter": "latest", "per_page": 100})
+    endpoint = f"repos/{REPOSITORY}/commits/{head}/check-runs?{query}"
+    value = object_page(endpoint, default_token=default_token)
+    runs = value.get("check_runs") if isinstance(value, dict) else None
+    total_count = value.get("total_count") if isinstance(value, dict) else None
+    if (
+        not isinstance(runs, list) or len(runs) > 1
+        or type(total_count) is not int or total_count != len(runs)
+        or not all(isinstance(item, dict) for item in runs)
+    ):
+        raise GovernanceError("Current Check Run snapshot is incomplete or invalid.")
+    # The exact page-one reread is the cursor fence for the intentionally
+    # single-result server-side snapshot.  A changed latest result must never
+    # be mistaken for the current writer generation.
+    if object_page(endpoint, default_token=default_token) != value:
+        raise GovernanceError("Current Check Run snapshot changed during refresh.")
+    return runs
 
 
 def reject_newer_dispatcher_barrier(head: str) -> None:
@@ -1225,12 +1247,12 @@ def observed_invalidations(
             ),
             frozenset(),
         )
-    prefix_length = (continuation_index - 1) * 150 if scope == "all" else 0
+    prefix_length = (continuation_index - 1) * MAX_TERMINAL_BATCH if scope == "all" else 0
     prefix = terminal_order[:prefix_length]
     if len(prefix) != prefix_length or len(set(prefix)) != len(prefix):
         raise GovernanceError("All-open terminal prefix boundary is invalid.")
     prefix_writer_ids = {
-        number: completed_writer_run_ids[index // 150]
+        number: completed_writer_run_ids[index // MAX_TERMINAL_BATCH]
         for index, number in enumerate(prefix)
     }
     expected_fresh = dispatcher_invalidation_url(source, 0)
@@ -1558,26 +1580,38 @@ def _evidence_snapshot_with_deadline(snapshot: OpenSnapshot, target_numbers: tup
 
 
 def final_evidence_for_pr(head: str, initial: EvidenceSnapshot) -> EvidenceSnapshot:
-    """Read every relevant current-head run through bounded repository pages."""
+    """Refresh only the exact workflow evidence admitted by the initial pass."""
     if SHA.fullmatch(head) is None:
         raise GovernanceError("Final evidence head is invalid.")
-    runs = bounded_head_runs(
-        f"repos/{REPOSITORY}/actions/runs?" + urlencode({"head_sha": head, "per_page": 100}),
+    # The initial pass permits three review-sensor pages and one page per CI
+    # workflow.  Preserve those endpoint-specific limits on the final pass;
+    # a repository-wide query would silently impose its smaller aggregate
+    # cap, or admit unrelated retained runs into the terminal decision.
+    sensor_values = bounded_head_runs(
+        f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+        + urlencode({"head_sha": head, "per_page": 100}),
         head,
-        "Final workflow-run",
+        "Final review sensor",
     )
     sensor_runs = {
         event: tuple(
-            run for run in runs
+            run for run in sensor_values
             if run.get("event") == event
             and workflow_path_matches(run.get("path"), ".github/workflows/pr-governance-review-events.yml")
         )
         for event in ("pull_request", "pull_request_review", "pull_request_review_comment")
     }
-    workflow_runs = {
-        path: tuple(run for run in runs if run.get("workflow_id") == workflow_id)
-        for path, workflow_id in initial.workflow_ids.items()
-    }
+    workflow_runs: dict[str, tuple[dict[str, Any], ...]] = {}
+    for path, workflow_id in initial.workflow_ids.items():
+        if type(workflow_id) is not int or workflow_id < 1:
+            raise GovernanceError("Cached CI workflow ID is invalid.")
+        query = urlencode({"event": "pull_request", "head_sha": head, "per_page": 100})
+        workflow_runs[path] = bounded_head_runs(
+            f"repos/{REPOSITORY}/actions/workflows/{workflow_id}/runs?{query}",
+            head,
+            "Final CI generation",
+            max_runs=MAX_EVIDENCE_RUNS_PER_PAGE,
+        )
     # Reuse only immutable default workflow IDs; byte guards have their own
     # per-head cache and still check each source workflow before use.
     return EvidenceSnapshot(sensor_runs, initial.workflow_ids, workflow_runs, initial.workflow_blobs)
@@ -2053,12 +2087,12 @@ def main() -> int:
         or (scope == "early" and not targets)
         or (scope == "early" and (preserved or preserved_writer_run_id != "0"))
         or (scope == "early" and (decoded_manifest or terminal_order or completed_writer_run_ids))
-        or (scope == "early" and (len(targets) > 40 or terminal_batch or raw_continuation_index != "0"))
+            or (scope == "early" and (len(targets) > MAX_EARLY_TARGETS or terminal_batch or raw_continuation_index != "0"))
         or (scope == "all" and os.environ.get("GITHUB_ACTIONS") == "true" and (
-            not re.fullmatch(r"[1-4]", raw_continuation_index)
-            or not terminal_order or len(terminal_order) > 600 or len(set(terminal_order)) != len(terminal_order)
+            not re.fullmatch(rf"[1-{MAX_TERMINAL_CONTINUATIONS}]", raw_continuation_index)
+            or not terminal_order or len(terminal_order) > MAX_TERMINAL_ORDER or len(set(terminal_order)) != len(terminal_order)
             or any(number < 1 for number in terminal_order)
-            or len(terminal_batch) > 150 or len(set(terminal_batch)) != len(terminal_batch)
+            or len(terminal_batch) > MAX_TERMINAL_BATCH or len(set(terminal_batch)) != len(terminal_batch)
             or any(number < 1 for number in terminal_batch)
             or len(completed_writer_run_ids) != int(raw_continuation_index) - 1
             or len(set(completed_writer_run_ids)) != len(completed_writer_run_ids)
@@ -2120,12 +2154,12 @@ def main() -> int:
         tuple(number for number in targets if number not in preserved) if scope == "all" else (),
     )
     if scope == "all" and os.environ.get("GITHUB_ACTIONS") == "true":
-        if len(terminal_order) > 600:
+        if len(terminal_order) > MAX_TERMINAL_ORDER:
             print("Writer terminal segment boundary exceeds four batches.", file=sys.stderr)
             return 1
-        start = (continuation_index - 1) * 150
+        start = (continuation_index - 1) * MAX_TERMINAL_BATCH
         expected_terminal_order = terminal_order[:start] + ordered_numbers
-        expected_terminal_batch = terminal_order[start:start + 150]
+        expected_terminal_batch = terminal_order[start:start + MAX_TERMINAL_BATCH]
         if (
             terminal_order != expected_terminal_order or not expected_terminal_batch
             or terminal_batch != expected_terminal_batch
@@ -2149,9 +2183,9 @@ def main() -> int:
         # decision and finalizing only after all contracts ran created an
         # avoidable window for Issue/review/CI state to become stale.
         # dispatcherは全headのpending Check Runを先に作るため、all segmentは
-        # 最大150 PATCHで完結する。all terminalの20.5秒paceは共有rolling上限を守る。
+        # 最大125 PATCHで完結する。all terminalの20.5秒paceは共有rolling上限を守る。
         # manifest欠落などで追加mutationが必要ならsegmentを成功扱いにしない。
-        terminal_write_budget = 150 if scope == "all" and os.environ.get("GITHUB_ACTIONS") == "true" else (
+        terminal_write_budget = MAX_TERMINAL_BATCH if scope == "all" and os.environ.get("GITHUB_ACTIONS") == "true" else (
             400 if dispatcher_source.event == "schedule" else 100
         )
         for number in numbers_to_process:
