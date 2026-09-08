@@ -70,6 +70,8 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         responses: dict[str, list[object]] | None = None,
         event_name: str = "issue_comment",
         loader_failure: str | None = None,
+        timeout_endpoint: str | None = None,
+        timeout_call: int = 1,
     ) -> dict[str, str]:
         """Return scope outputs while each endpoint may provide a read sequence.
 
@@ -92,6 +94,10 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
 
         def fake_run(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
             endpoint = arguments[-1]
+            call = reads.get(endpoint, 0) + 1
+            reads[endpoint] = call
+            if endpoint == timeout_endpoint and call == timeout_call:
+                raise subprocess.TimeoutExpired(arguments, 20)
             if endpoint == loader_failure:
                 return subprocess.CompletedProcess(arguments, 1, "", "unavailable")
             if endpoint == script_endpoint:
@@ -103,8 +109,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
             # loader read.
             if endpoint == f"repos/{REPOSITORY}" and sequence is not None:
                 sequence = [self.repository(), *sequence]
-            index = reads.get(endpoint, 0)
-            reads[endpoint] = index + 1
+            index = call - 1
             value = sequence[min(index, len(sequence) - 1)] if sequence else self.repository() if endpoint == f"repos/{REPOSITORY}" else self.pull()
             if value is False:
                 return subprocess.CompletedProcess(arguments, 1, "", "unavailable")
@@ -184,6 +189,33 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         ):
             with self.subTest(endpoint=endpoint, sequence=sequence):
                 self.assert_fail_closed(self.execute(responses={endpoint: sequence}))
+
+    def test_issue_source_timeouts_arm_the_resolver_barrier(self) -> None:
+        repository_endpoint = f"repos/{REPOSITORY}"
+        for event_name, url in (("issues", ""), ("issue_comment", PR_URL)):
+            with self.subTest(event_name=event_name):
+                result = self.execute(
+                    event_name=event_name,
+                    url=url,
+                    timeout_endpoint=repository_endpoint,
+                    # The trusted source loader reads the repository first;
+                    # this timeout is from the immutable preflight program.
+                    timeout_call=2,
+                )
+                self.assert_fail_closed(result)
+
+    def test_issue_snapshot_anchor_timeout_arms_the_resolver_barrier(self) -> None:
+        pages_endpoint = f"repos/{REPOSITORY}/pulls?state=open&per_page=100&page=1"
+        result = self.execute(
+            event_name="issues",
+            url="",
+            responses={pages_endpoint: [[]]},
+            timeout_endpoint=pages_endpoint,
+            # The first read is the snapshot; the second is its stable
+            # page-one anchor and must not escape without conservative output.
+            timeout_call=2,
+        )
+        self.assert_fail_closed(result)
 
     def test_repository_identity_and_default_branch_races_fail_closed(self) -> None:
         endpoint = f"repos/{REPOSITORY}"

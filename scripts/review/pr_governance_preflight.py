@@ -23,11 +23,14 @@ issue_event_noop = False
 priority = True
 
 def request(path):
-    result = subprocess.run(
-        ["gh", "api", "--hostname", "github.com", path],
-        capture_output=True, text=True, check=False,
-        timeout=20,
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "api", "--hostname", "github.com", path],
+            capture_output=True, text=True, check=False,
+            timeout=20,
+        )
+    except subprocess.TimeoutExpired:
+        return None
     if result.returncode != 0:
         return None
     try:
@@ -64,7 +67,13 @@ def request_pages(path):
         pages.append(value)
         if len(value) < 100 or page_number == 6:
             break
-    anchor = subprocess.run(["gh", "api", "--hostname", "github.com", f"{path}&page=1"], capture_output=True, text=True, check=False, timeout=20)
+    try:
+        anchor = subprocess.run(
+            ["gh", "api", "--hostname", "github.com", f"{path}&page=1"],
+            capture_output=True, text=True, check=False, timeout=20,
+        )
+    except subprocess.TimeoutExpired:
+        return None
     if anchor.returncode != 0:
         return None
     try:
