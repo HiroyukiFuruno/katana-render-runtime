@@ -30,7 +30,6 @@ _MARKER_PATTERN = re.compile(
     r"body-sha256=(?P<body_sha256>[0-9a-f]{64}) -->$"
 )
 _SUCCESSFUL_CONCLUSIONS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
-_VALID_REVIEW_STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "COMMENTED"})
 _SELF_CHECK_NAMES = frozenset(
     {
         "PR governance",
@@ -45,6 +44,26 @@ _CODEX_NO_ISSUES_COMMENT = re.compile(
     r"(?:\Z|\r?\n\Z|\r?\n\r?\n"
     r"<details>(?: <summary>|\r?\n<summary>)ℹ️ About Codex in GitHub</summary>\r?\n"
     r"(?:(?!<details>|</details>|Codex Review:|\*\*Reviewed commit:\*\*)[\s\S]){0,8192}</details>(?:\r?\n)?\Z)"
+)
+_CODEX_REVIEW_BOT_LOGIN = "chatgpt-codex-connector[bot]"
+_CODEX_REVIEW_GRAPHQL_LOGIN = "chatgpt-codex-connector"
+_CODEX_REVIEW_BOT_DATABASE_ID = 199175422
+_CODEX_REVIEW_BOT_NODE_ID = "BOT_kgDOC98s_g"
+_CODEX_REVIEW_BOT_TYPE = "Bot"
+_GITHUB_TIMESTAMP = re.compile(
+    r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z\Z"
+)
+# A submitted Codex review is accepted only in the shape emitted by the
+# connector.  Generic COMMENTED reviews are mutable-looking noise, not merge
+# authority.  The details payload may evolve, but its sole permitted wrapper
+# and the two evidence sentinels remain fixed and non-nestable.
+_CODEX_FORMAL_REVIEW = re.compile(
+    r"\A\r?\n### 💡 Codex Review\r?\n\r?\n"
+    r"Here are some automated review suggestions for this pull request\.\r?\n\r?\n"
+    r"\*\*Reviewed commit:\*\* `(?P<commit>[0-9a-f]{10,40})`[ \t]*\r?\n(?:[ \t]*\r?\n)+"
+    r"<details> <summary>ℹ️ About Codex in GitHub</summary>\r?\n"
+    r"(?:(?!<details>|</details>|### 💡 Codex Review|\*\*Reviewed commit:\*\*)[\s\S]){0,8192}"
+    r"</details>\r?\n?\Z"
 )
 _SHA = re.compile(r"[0-9a-fA-F]{40}")
 _TRUSTED_REPLY_ASSOCIATIONS = frozenset({"COLLABORATOR", "MEMBER", "OWNER"})
@@ -488,6 +507,87 @@ def _is_review_bot(login: str | None, review_bot: str) -> bool:
     ).casefold()
 
 
+def _is_exact_codex_review_bot(value: object, review_bot: str) -> bool:
+    """Accept only the immutable connector identity, never a lookalike bot."""
+
+    if review_bot != _CODEX_REVIEW_BOT_LOGIN or not isinstance(value, Mapping):
+        return False
+    numeric_id = value.get("id")
+    if type(numeric_id) is not int:
+        numeric_id = value.get("databaseId")
+    node_id = value.get("node_id")
+    if node_id is None and isinstance(value.get("id"), str):
+        node_id = value.get("id")
+    actor_type = value.get("type")
+    if actor_type is None:
+        actor_type = value.get("__typename")
+    return (
+        # GraphQL Actor.login omits GitHub REST's "[bot]" suffix.  The node,
+        # database id and concrete Bot typename bind that projection to the
+        # same immutable REST identity.
+        value.get("login") == _CODEX_REVIEW_GRAPHQL_LOGIN
+        and numeric_id == _CODEX_REVIEW_BOT_DATABASE_ID
+        and node_id == _CODEX_REVIEW_BOT_NODE_ID
+        and actor_type == _CODEX_REVIEW_BOT_TYPE
+    )
+
+
+def _strict_github_timestamp(value: object, field: str) -> datetime | None:
+    if not isinstance(value, str) or _GITHUB_TIMESTAMP.fullmatch(value) is None:
+        return None
+    try:
+        parsed = _timestamp(value, field)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed is not None and parsed.tzinfo is not None else None
+
+
+def _formal_review_completion_times(
+    reviews: Sequence[Mapping[str, object]],
+    review_bot: str,
+    head: str,
+    not_before: object,
+    before: object | None = None,
+) -> list[datetime]:
+    """Return exactly shaped, immutable-projection Codex formal reviews."""
+
+    not_before_time = _timestamp(not_before, "marker updated_at")
+    if not_before_time is None or not_before_time.tzinfo is None:
+        raise TypeError("marker updated_at must be an ISO-8601 timestamp")
+    before_time = _timestamp(before, "marker created_at")
+    completion_times: list[datetime] = []
+    for review in reviews:
+        if (
+            not _is_exact_codex_review_bot(review.get("author"), review_bot)
+            or review.get("state") != "COMMENTED"
+        ):
+            continue
+        commit = review.get("commit")
+        commit_oid = commit.get("oid") if isinstance(commit, Mapping) else None
+        if not isinstance(commit_oid, str) or re.fullmatch(r"[0-9a-f]{40}", commit_oid) is None:
+            continue
+        if commit_oid != head:
+            continue
+        body = review.get("body")
+        if not isinstance(body, str):
+            continue
+        if body.count("### 💡 Codex Review") != 1 or body.count("**Reviewed commit:**") != 1:
+            continue
+        result = _CODEX_FORMAL_REVIEW.fullmatch(body)
+        if result is None or not head.startswith(result.group("commit")):
+            continue
+        submitted_at = _strict_github_timestamp(
+            review.get("submittedAt"), "review submittedAt"
+        )
+        if (
+            submitted_at is not None
+            and submitted_at > not_before_time
+            and (before_time is None or submitted_at < before_time)
+        ):
+            completion_times.append(submitted_at)
+    return completion_times
+
+
 def _timestamp(value: object, field: str) -> datetime | None:
     if value is None:
         return None
@@ -504,27 +604,9 @@ def _review_completion_times(
     not_before: object,
     before: object | None = None,
 ) -> list[datetime]:
-    not_before_time = _timestamp(not_before, "marker updated_at")
-    if not_before_time is None:
-        raise TypeError("marker updated_at must be an ISO-8601 timestamp")
-    before_time = _timestamp(before, "marker created_at")
-    completion_times: list[datetime] = []
-    for review in reviews:
-        if not (
-            _is_review_bot(_bot_login(review.get("author")), review_bot)
-            and review.get("state") in _VALID_REVIEW_STATES
-            and isinstance(review.get("commit"), Mapping)
-            and review["commit"].get("oid") == head
-        ):
-            continue
-        submitted_at = _timestamp(review.get("submittedAt"), "review submittedAt")
-        if (
-            submitted_at is not None
-            and submitted_at > not_before_time
-            and (before_time is None or submitted_at < before_time)
-        ):
-            completion_times.append(submitted_at)
-    return completion_times
+    return _formal_review_completion_times(
+        reviews, review_bot, head, not_before, before
+    )
 
 
 def _review_is_for(
@@ -620,19 +702,20 @@ def _review_evidence_completion_times(
     ]
 
 
-def _no_issues_evidence_is_ambiguous(
+def _review_evidence_is_ambiguous(
+    reviews: Sequence[Mapping[str, object]],
     comments: Sequence[Mapping[str, object]],
     review_bot: str,
     head: str,
     not_before: object,
     before: object | None = None,
 ) -> bool:
-    """Require one canonical no-issues comment at most in each phase window."""
+    """Require exactly one complete Codex result in each review phase window."""
 
     return (
         len(
-            _no_issues_comment_completion_times(
-                comments, review_bot, head, not_before, before
+            _review_evidence_completion_times(
+                reviews, comments, review_bot, head, not_before, before
             )
         )
         > 1
@@ -1609,21 +1692,23 @@ def readiness_errors(
                 latest_final = latest_final_candidates[0]
 
     if latest_initial is not None and latest_final is not None:
-        if _no_issues_evidence_is_ambiguous(
+        if _review_evidence_is_ambiguous(
+            typed_reviews,
             comments,
             review_bot,
             latest_initial[1],
             _marker_updated_at(latest_initial[3]),
             _marker_updated_at(latest_final[3]),
         ):
-            errors.append("initial-final間の no-issues review evidence が曖昧です")
-    if latest_final is not None and _no_issues_evidence_is_ambiguous(
+            errors.append("initial-final間の Codex review evidence が曖昧です")
+    if latest_final is not None and _review_evidence_is_ambiguous(
+        typed_reviews,
         comments,
         review_bot,
         head,
         _marker_updated_at(latest_final[3]),
     ):
-        errors.append("final review後の no-issues review evidence が曖昧です")
+        errors.append("final review後の Codex review evidence が曖昧です")
 
     if not final_markers:
         errors.append("final review marker がありません")
@@ -2178,7 +2263,17 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       reviews(first: 100, after: $cursor) {
-        nodes { author { login } commit { oid } state submittedAt }
+        nodes {
+          author {
+            login
+            __typename
+            ... on Bot { databaseId id }
+          }
+          commit { oid }
+          state
+          submittedAt
+          body
+        }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -2946,7 +3041,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             pull_request,
             threads,
             comments,
-            review_bot="chatgpt-codex-connector",
+            review_bot=_CODEX_REVIEW_BOT_LOGIN,
             require_draft=arguments.require_draft,
             referenced_issues=referenced_issues,
             required_checks=initial_required_checks,
