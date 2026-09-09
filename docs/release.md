@@ -37,6 +37,36 @@ GitHub のブランチ保護（branch protection）では、少なくとも次�
 - `katana-render-runtime` の梱包（package）と公開の事前実行（publish dry-run）
 - `katana-render-runtime-cli` の梱包（package）収録対象確認
 
+## 依存更新の実行メモ
+
+依存更新は `just depends-update-all` で実施し、score 99・完全check・coverageまでの終了結果を確認する。更新ファイルが生成されたことだけで成功扱いにしない。
+
+runtime資産の定数更新・圧縮資産生成後は既存の `just fmt` でRust生成コードを整形してから検証する。checksumやURLの長さでrustfmtの改行位置が変わるため、更新スクリプトの文字列置換だけを整形済みとみなさない。
+
+更新・bundle生成後は `just check` と `just coverage` を先に通してから、時間のかかる全参照画像生成・比較へ進む。Clippyの合格だけではASTのファイル責務・行数制限の合格を保証しないため、テスト追加時も既存の `just ast-lint` を確認する。テスト本体、入力fixture、描画bundle、幾何検証helperを責務で分け、行数上限やテスト除外を変更して回避しない。`runtime-asset-script-test` は一括更新レシピの必須工程とこの順序を検証し、検査の削除・後回しを検出する。
+
+別ファイルへ抽出したテストhelperにもcoverageを確認する。幾何検証helperなら、有効な座標変換だけでなく不正SVG・属性欠落・比較対象欠落を拒否する入力をテストし、検証側が誤って成功しないことも保証する。未到達箇所は計測結果から特定し、ファイル名変更や除外設定で隠さない。
+
+coverageのレポートだけを読む場合は `cargo llvm-cov report` を使う。`report` を省くとテストを再実行する。`--no-clean` の増分計測は原因の切り分けに限定し、修正前後の異なるコード・feature構成の記録を最終証跡へ混ぜない。最終合否は既存の `just coverage` が行うclean後の全体計測で確認する。
+
+通常の行表示が到達済みでも未到達数が残る場合は、`cargo llvm-cov report --text --show-instantiations` でジェネリックの型・const引数ごとの実体を確認する。例えば要素数1の検証が不正入力の早期returnしか通っていなければ、同じ要素数の正常入力も検証する。クリーン計測の未到達を、根拠なく古い計測記録と判断しない。
+
+worktree間でbuild cacheを共有するために `CARGO_TARGET_DIR` を指定するときは、既存の `KRR_BIN` も同じtarget配下の `debug/krr` へ指定する。`KRR_BIN` の既定値は現在のworktreeの `target/debug/krr` なので、片方だけ変えるとbuild成功後のfixture描画が「実行ファイルなし」（exit 127）で失敗する。この場合はscoreを変更せず、両方の参照先を揃えて完全コマンドを再実行する。
+
+環境変数付きの検証コマンドは `rtk proxy env ... just ...` で実行する。`rtk env` は環境変数を表示する別コマンドなので、環境設定・コマンド実行用の `env` と取り違えない。`RUSTFLAGS='-D warnings'` などの値とfeature指定も揃え、不要な別profileの再ビルドを避ける。
+
+subagentへのworktree指定は指示文だけで済ませず、各実行の作業ディレクトリと編集先を絶対パスで固定し、作業前後にbranch・対象diffを照合する。レシピを検査するテストも実行時cwdへ依存せず、`import.meta.url` から所属repositoryのファイルを参照する。別worktreeの旧レシピを検査した結果を現行変更の証跡へ混ぜない。
+
+長時間実行ではsession IDとログ保存先を記録し、観測のtimeoutだけで再起動しない。同じ実行の終了codeを確認してから、失敗原因を修正して再実行する。lockfileを復元した後は `bun install --frozen-lockfile` で導入済みツールも一致させ、設定schemaとCLIのversionずれを持ち越さない。
+
+Draw.ioの `sketch` / `comic` の差分は、図形解釈やcrop補正の前に描画条件を確認する。KRRの共有runtimeは `Date.now` と `Math.random` を固定するため、公式rendererもvendor読込前に同じ条件を初期化する。`runtime-asset-script-test` は実際の共有runtimeと公式側の時刻・乱数列を照合し、設定の乖離を検出する。乱数だけの差か、canvas寸法・origin・path・文字の差かは、同条件の独立出力で切り分ける。
+
+crop補正は1枚の見た目から一般式を推測せず、公式exportで線幅などを変えた入力を検証する。別のtop-level図形や、親の外へはみ出す要素を切り落とさない回帰も追加する。参照画像は正しい入力条件の公式rendererから生成し、スコア下限を変えず全カテゴリを再検証する。
+
+線幅は偶数・奇数の両方で確認する。奇数幅のcrisp描画には親の `translate(0.5,0.5)` が含まれるため、layout frameの原点と変換済みpaint bboxを混同しない。既存のcrisp移動除去helperを使い、一般の座標変換や子要素のはみ出し保護は保持する。全件比較ではスコアだけでなく、入力・公式PNG・出力PNGのファイル名集合が一致することも確認し、出力欠落を成功に数えない。
+
+SVGが同一なのにPNGの文字が変わる場合は、参照側のfont読み込みも確認する。`document.fonts.ready` はstylesheet内のfont-faceが登録される前に解決する場合があるため、それ単独では十分でない。公式Draw.ioのcaptureは入力の `fontSource` stylesheetを明示ロードしてからfontsの完了を待ち、ロード失敗を成功扱いしない。font名の指定、FontFaceSetの登録・load状態、実画像の文字を照合し、参照側のfallbackに合わせてKRRの文字描画を変更しない。
+
 ## HTML 系プレビュー前提条件（release contract）
 
 `katana-render-runtime` の HTML/CSS の interactive preview は、外部ブラウザや WebView を経由せず、プラットフォームの system font fallback に依存する設計です。

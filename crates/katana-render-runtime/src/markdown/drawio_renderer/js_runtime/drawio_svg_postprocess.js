@@ -1,3 +1,5 @@
+const KATANA_DRAWIO_MULTIPAGE_CONTENT_BOTTOM_TOLERANCE = 1;
+
 function katanaPostprocessDrawioSvg(svg) {
   katanaRemoveDrawioCommentArtifacts(svg);
   katanaRemoveOversizedDrawioLabelBackgrounds(svg);
@@ -11,12 +13,17 @@ function katanaPostprocessDrawioSvg(svg) {
   katanaNormalizeDrawioForeignObjects(svg);
   katanaNormalizeDrawioGeometry(svg);
   const contentCropApplied = katanaShouldCropDrawioSvgToContent(svg);
+  let stackedSketchSwimlaneCropApplied = false;
   if (contentCropApplied) {
-    katanaCropDrawioSvgToContent(svg);
+    stackedSketchSwimlaneCropApplied = katanaCropDrawioSvgToContent(svg);
   }
   const pageSourceOriginAligned = katanaAlignDrawioPageSvgToSourceOrigin(svg);
   katanaAlignDrawioElevatedSourceCrop(svg, contentCropApplied);
-  katanaAlignDrawioUnmeasuredLeftPaint(svg, contentCropApplied);
+  katanaAlignDrawioUnmeasuredLeftPaint(
+    svg,
+    contentCropApplied,
+    stackedSketchSwimlaneCropApplied,
+  );
   katanaNormalizeDrawioArrowComparisonOrigin(svg);
   katanaAlignDrawioDisabledPageInfographicTop(svg);
   katanaNormalizeDrawioMultiPageCanvas(svg);
@@ -89,10 +96,12 @@ function katanaNormalizeDrawioMultiPageCanvas(svg) {
     [
       isDeviceSource,
       Math.abs(sourceBox?.y ?? Number.NaN) <= KATANA_DRAWIO_PAINT_EDGE_TOLERANCE,
-      katanaDrawioBoxBottom(contentBox) >= katanaDrawioBoxBottom(box),
+      katanaDrawioBoxBottom(contentBox) >=
+        katanaDrawioBoxBottom(box) - KATANA_DRAWIO_MULTIPAGE_CONTENT_BOTTOM_TOLERANCE,
     ].every(Boolean)
   ) {
     katanaSetDrawioCanvasHeight(svg, box, box.height - 1);
+    return;
   }
 }
 
@@ -138,6 +147,9 @@ function katanaDrawioIsFiveStepInfographicSource() {
 }
 
 function katanaShouldCropDrawioSvgToContent(svg) {
+  if (katanaDrawioStackedSketchSwimlaneBoardEntry()) {
+    return true;
+  }
   if (katanaDrawioIsKanbanExamplesSource()) {
     return true;
   }
@@ -613,7 +625,14 @@ function katanaAlignDrawioPageSvgToSourceOrigin(svg) {
   return true;
 }
 
-function katanaAlignDrawioUnmeasuredLeftPaint(svg, contentCropApplied) {
+function katanaAlignDrawioUnmeasuredLeftPaint(
+  svg,
+  contentCropApplied,
+  stackedSketchSwimlaneCropApplied,
+) {
+  if (stackedSketchSwimlaneCropApplied) {
+    return;
+  }
   const sourceBox = katanaDrawioSourceContentBox(svg);
   const svgBox = katanaDrawioSvgBox(svg);
   const contentBox = katanaDrawioContentBox(svg);

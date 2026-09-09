@@ -59,7 +59,9 @@ function katanaDrawioColorValue(node, name) {
 }
 
 function katanaCropDrawioSvgToContent(svg) {
-  katanaApplyDrawioCrop(svg, katanaDrawioCropBox(svg));
+  const stackedSketchSwimlaneBox = katanaDrawioStackedSketchSwimlaneCropBox(svg);
+  katanaApplyDrawioCrop(svg, stackedSketchSwimlaneBox ?? katanaDrawioCropBox(svg));
+  return Boolean(stackedSketchSwimlaneBox);
 }
 
 function katanaDrawioCropBox(svg) {
@@ -71,6 +73,206 @@ function katanaDrawioCropBox(svg) {
   return katanaDrawioHasSymmetricImplicitPageMargin(svg) && !katanaDrawioIsArrowComparisonSource()
     ? box
     : katanaDrawioAlignedCropBox(svg, box);
+}
+
+function katanaDrawioStackedSketchSwimlaneCropBox(svg) {
+  const board = katanaDrawioStackedSketchSwimlaneBoardEntry();
+  const box = board ? katanaDrawioSourceCropBox(svg, [board]) : null;
+  const frameBox = board ? katanaDrawioStackedSketchSwimlaneFrameBox(svg, board) : null;
+  if (!box || !frameBox) {
+    return null;
+  }
+  const strokeWidth = katanaDrawioSourceGeometryStrokeWidth(board);
+  const leadingPadding = Math.floor(strokeWidth / 2);
+  const trailingPadding = strokeWidth + 2 - leadingPadding;
+  const cropBox = {
+    x: frameBox.x - leadingPadding,
+    y: frameBox.y - leadingPadding,
+    width: box.width + leadingPadding + trailingPadding,
+    height: box.height + leadingPadding + trailingPadding,
+  };
+  const contentBox = katanaDrawioStackedSketchSwimlaneCropContentBox(
+    svg,
+    katanaDrawioStackedSketchSwimlaneBoundaryPaintContext(board),
+    cropBox,
+    strokeWidth,
+  );
+  const containsContent = katanaDrawioCropBoxContainsContent(cropBox, contentBox);
+  return containsContent ? cropBox : null;
+}
+
+function katanaDrawioStackedSketchSwimlaneFrameBox(svg, board) {
+  const group = katanaDrawioCellGroup(svg, board.id);
+  if (!group) {
+    return null;
+  }
+  const candidates = ["path", "rect"]
+    .flatMap((tagName) => katanaDrawioCellLocalElements(group, tagName))
+    .filter((element) => katanaDrawioIsStackedSketchSwimlaneFrameElement(element, board))
+    .map((element) => ({ element, box: katanaDrawioElementBoxWithoutCrispTranslate(element) }));
+  return candidates.map(({ box }) => box).concat([null])[0];
+}
+
+function katanaDrawioIsStackedSketchSwimlaneFrameElement(element, board) {
+  const box = katanaDrawioElementBox(element);
+  const hasSourceWidth = Math.abs(box.width - board.width) <= Math.max(4, board.width * 0.02);
+  const isTransparentHitRegion = [
+    element.localName === "path",
+    element.getAttribute("fill") === "none",
+    element.getAttribute("stroke") === "none",
+    element.getAttribute("pointer-events") === "all",
+  ].every(Boolean);
+  const isPlainBoardRect = [
+    element.localName === "rect",
+    Math.abs(box.height - board.height) <= Math.max(4, board.height * 0.02),
+  ].every(Boolean);
+  return [
+    hasSourceWidth,
+    isTransparentHitRegion || isPlainBoardRect,
+  ].every(Boolean);
+}
+
+function katanaDrawioStackedSketchSwimlaneBoardEntry() {
+  const entries = katanaDrawioSourceGeometryEntries();
+  return entries.length === 1 && katanaDrawioIsStackedSketchSwimlaneBoard(entries[0])
+    ? entries[0]
+    : null;
+}
+
+function katanaDrawioCropBoxContainsContent(cropBox, contentBox) {
+  const exportBox = {
+    x: cropBox.x,
+    y: cropBox.y,
+    width: cropBox.width + 1,
+    height: cropBox.height + 1,
+  };
+  return [
+    contentBox.x >= exportBox.x,
+    contentBox.y >= exportBox.y,
+    katanaDrawioBoxRight(contentBox) <= katanaDrawioBoxRight(exportBox),
+    katanaDrawioBoxBottom(contentBox) <= katanaDrawioBoxBottom(exportBox),
+  ].every(Boolean);
+}
+
+function katanaDrawioCropContentBox(svg) {
+  const boxes = katanaDrawioCropContentElements(svg)
+    .map(katanaDrawioElementBox)
+    .filter(katanaDrawioHasArea);
+  return katanaDrawioUnionBox(boxes) ?? katanaDrawioEmptyContentBox();
+}
+
+function katanaDrawioStackedSketchSwimlaneCropContentBox(
+  svg,
+  boundaryPaintContext,
+  cropBox,
+  strokeWidth,
+) {
+  const exportBox = {
+    x: cropBox.x,
+    y: cropBox.y,
+    width: cropBox.width + 1,
+    height: cropBox.height + 1,
+  };
+  const elements = katanaDrawioCropContentElements(svg).filter(
+    (element) =>
+      !katanaDrawioIsContainedStackedSketchSwimlaneBoundaryPaint(
+        element,
+        boundaryPaintContext,
+        exportBox,
+        strokeWidth,
+      ),
+  );
+  const boxes = elements.map(katanaDrawioElementBox).filter(katanaDrawioHasArea);
+  return katanaDrawioUnionBox(boxes) ?? katanaDrawioEmptyContentBox();
+}
+
+function katanaDrawioCropContentElements(svg) {
+  return katanaDrawioContentElements(svg).concat(
+    Array.from(svg.querySelectorAll("text")).filter(katanaIsWrappedDrawioHtmlFallbackText),
+  );
+}
+
+function katanaDrawioIsContainedStackedSketchSwimlaneBoundaryPaint(
+  element,
+  boundaryPaintContext,
+  exportBox,
+  strokeWidth,
+) {
+  if (
+    ![
+      element.localName === "path",
+      katanaDrawioIsStackedSketchSwimlaneBoundaryPaint(element, boundaryPaintContext),
+    ].every(Boolean)
+  ) {
+    return false;
+  }
+  const box = katanaDrawioElementBox(element);
+  const roughStrokeOverhang = Math.max(1, strokeWidth / 2);
+  return [
+    box.x >= exportBox.x - roughStrokeOverhang,
+    box.y >= exportBox.y - roughStrokeOverhang,
+    katanaDrawioBoxRight(box) <= katanaDrawioBoxRight(exportBox) + roughStrokeOverhang,
+    katanaDrawioBoxBottom(box) <= katanaDrawioBoxBottom(exportBox) + roughStrokeOverhang,
+  ].every(Boolean);
+}
+
+function katanaDrawioIsStackedSketchSwimlaneBoundaryPaint(element, boundaryPaintContext) {
+  const cellId = katanaDrawioContentCellGroup(element)?.getAttribute("data-cell-id");
+  const isBoardStroke = [
+    cellId === boundaryPaintContext.boardId,
+    ![null, "", "none"].includes(element.getAttribute("stroke")),
+  ].every(Boolean);
+  const isBoardOrColumnRoughFill = [
+    ![null, "", "none"].includes(element.getAttribute("fill")),
+    cellId === boundaryPaintContext.boardId || boundaryPaintContext.columnIds.has(cellId),
+  ].every(Boolean);
+  return isBoardStroke || isBoardOrColumnRoughFill;
+}
+
+function katanaDrawioStackedSketchSwimlaneBoundaryPaintContext(board) {
+  return {
+    boardId: board.id,
+    columnIds: new Set(
+      katanaDrawioAllSourceGeometryEntries()
+        .filter((entry) => katanaDrawioIsStackedSketchSwimlaneColumn(entry, board))
+        .map((entry) => entry.id),
+    ),
+  };
+}
+
+function katanaDrawioIsStackedSketchSwimlaneBoard(entry) {
+  const style = KATANA_DRAWIO_SOURCE_CELL_STYLE_CACHE.get(entry.id) ?? new Map();
+  return [
+    katanaDrawioSourceHasPageBounds(),
+    entry.vertex,
+    style.has("swimlane"),
+    style.get("childLayout") === "stackLayout",
+    style.get("horizontalStack") === "1",
+    style.get("sketch") === "1",
+    katanaDrawioStackedSketchSwimlaneColumnCount(entry) >= 2,
+  ].every(Boolean);
+}
+
+function katanaDrawioStackedSketchSwimlaneColumnCount(board) {
+  return katanaDrawioAllSourceGeometryEntries().filter((entry) =>
+    katanaDrawioIsStackedSketchSwimlaneColumn(entry, board),
+  ).length;
+}
+
+function katanaDrawioIsStackedSketchSwimlaneColumn(entry, board) {
+  const style = KATANA_DRAWIO_SOURCE_CELL_STYLE_CACHE.get(entry.id) ?? new Map();
+  return [
+    entry.parent === board.id,
+    entry.vertex,
+    entry.x >= 0,
+    entry.y >= 0,
+    katanaDrawioBoxRight(entry) <= board.width,
+    katanaDrawioBoxBottom(entry) <= board.height,
+    style.has("swimlane"),
+    style.get("childLayout") === "stackLayout",
+    style.get("horizontalStack") === "0",
+    style.get("sketch") === "1",
+  ].every(Boolean);
 }
 
 const KATANA_DRAWIO_CROP_BOX_READERS = [
