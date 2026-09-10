@@ -78,7 +78,7 @@ fn collect_font_family_values<'a>(
 
 fn font_family_value(value: &str, attribute_value: bool) -> &str {
     if !attribute_value {
-        return before_semicolon(value).trim_matches(['\'', '"']);
+        return before_declaration_boundary(value).trim_matches(['\'', '"']);
     }
     match value.as_bytes().first().copied() {
         Some(quote) if matches!(quote, b'\'' | b'"') => quoted_attribute_value(&value[1..], quote),
@@ -101,8 +101,21 @@ fn bare_attribute_value(value: &str) -> &str {
         .unwrap_or("")
 }
 
-fn before_semicolon(value: &str) -> &str {
-    value.split(';').next().unwrap_or("")
+fn before_declaration_boundary(value: &str) -> &str {
+    let value = value.split([';', '>']).next().unwrap_or("").trim_end();
+    let unmatched_quote = (*b"'\"")
+        .into_iter()
+        .filter(|&quote| {
+            value
+                .bytes()
+                .filter(|&character| character == quote)
+                .count()
+                % 2
+                == 1
+        })
+        .filter_map(|quote| value.bytes().position(|character| character == quote))
+        .min();
+    unmatched_quote.map_or(value, |index| &value[..index])
 }
 
 fn needs_unicode_fallback(character: char) -> bool {
@@ -137,7 +150,7 @@ fn is_emoji_character(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{font_family_value, is_cjk_character};
+    use super::{HtmlFontRequest, font_family_value, is_cjk_character};
 
     #[test]
     fn parses_css_and_bare_attribute_font_family_values() {
@@ -146,6 +159,21 @@ mod tests {
             "Noto Sans"
         );
         assert_eq!(font_family_value("Arial class=label", true), "Arial");
+    }
+
+    #[test]
+    fn stops_css_font_family_at_the_end_of_an_inline_style_attribute() {
+        assert_eq!(font_family_value("Arial\" class=label", false), "Arial");
+        assert_eq!(font_family_value("\"Noto Sans\"'", false), "Noto Sans");
+        assert_eq!(
+            font_family_value("Arial, \"Noto Sans\">", false),
+            "Arial, \"Noto Sans"
+        );
+        assert_eq!(
+            HtmlFontRequest::from_markup(r#"<span style="font-family: Arial">text</span>"#)
+                .families,
+            vec!["arial"]
+        );
     }
 
     #[test]

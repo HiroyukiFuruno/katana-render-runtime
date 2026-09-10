@@ -6,13 +6,15 @@ use super::session_interaction::discarded_runtime_error;
 use crate::renderer::backends::html_runtime::dom_state::HtmlDomBridgeState;
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 
+type LayoutMetric = (u64, f32, f32, f32, f32, f32);
+
 impl StaticHtmlRuntimeSession {
     pub(in crate::renderer::backends) fn update_layout_metrics(
         &mut self,
         viewport_width: f32,
         viewport_height: f32,
         scroll_y: f32,
-        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32)>,
+        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
     ) -> Result<bool, HtmlRuntimeError> {
         self.update_layout_metrics_from_boxes(
             viewport_width,
@@ -27,7 +29,7 @@ impl StaticHtmlRuntimeSession {
         viewport_width: f32,
         viewport_height: f32,
         scroll_y: f32,
-        boxes: Vec<(u64, f32, f32, f32, f32)>,
+        boxes: Vec<LayoutMetric>,
     ) -> Result<bool, HtmlRuntimeError> {
         let before = self.snapshot()?;
         {
@@ -80,6 +82,59 @@ mod tests {
             result,
             Err(HtmlRuntimeError::JavaScriptException(message)) if message.contains("refresh")
         ));
+    }
+
+    #[test]
+    fn intersection_observer_defers_initial_notification_until_layout_metrics_exist()
+    -> Result<(), HtmlRuntimeError> {
+        let mut session = start(
+            r#"<p id="target">target</p><script>
+                let notifications = 0;
+                new IntersectionObserver((entries) => {
+                    notifications += 1;
+                    entries[0].target.setAttribute("data-notifications", notifications);
+                }).observe(document.getElementById("target"));
+            </script>"#,
+        );
+
+        assert!(
+            !session.snapshot()?.contains("data-notifications"),
+            "observer must not receive synthetic geometry before the first layout metrics update"
+        );
+
+        session.update_layout_metrics(320.0, 240.0, 0.0, [])?;
+
+        assert!(
+            session.snapshot()?.contains("data-notifications=\"1\""),
+            "first layout metrics update must notify the observer"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn intersection_observer_reobserved_after_disconnect_is_refreshed()
+    -> Result<(), HtmlRuntimeError> {
+        let mut session = start(
+            r#"<p id="target">target</p><script>
+                let notifications = 0;
+                const observer = new IntersectionObserver((entries) => {
+                    notifications += 1;
+                    entries[0].target.setAttribute("data-notifications", notifications);
+                });
+                const target = document.getElementById("target");
+                observer.observe(target);
+                observer.disconnect();
+                observer.observe(target);
+            </script>"#,
+        );
+
+        session.update_layout_metrics(320.0, 240.0, 0.0, [])?;
+
+        assert!(
+            session.snapshot()?.contains("data-notifications=\"1\""),
+            "re-observing after disconnect must restore refresh registration"
+        );
+        Ok(())
     }
 
     #[test]

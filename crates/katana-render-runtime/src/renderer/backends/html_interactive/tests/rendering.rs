@@ -183,6 +183,17 @@ fn assert_pseudo_content_and_rotation_layout(
         "{}",
         layout.svg
     );
+    let node_id = session
+        .runtime
+        .node_for_element_id("toggle")
+        .ok_or_else(|| "toggle node is missing".to_string())?
+        .0;
+    let element = layout
+        .element_boxes
+        .iter()
+        .find(|element| element.node_id == node_id)
+        .ok_or_else(|| "toggle layout box is missing".to_string())?;
+    assert!((element.rotation_degrees - 90.0).abs() < f32::EPSILON);
     Ok(())
 }
 

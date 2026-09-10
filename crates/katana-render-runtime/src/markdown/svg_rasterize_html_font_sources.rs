@@ -1,6 +1,6 @@
 use super::super::{BUNDLED_SANS_SERIF_FONT, configure_generic_families};
 use super::request::HtmlFontRequest;
-use super::system::load_requested_system_font_family;
+use super::system::load_requested_system_font_families;
 use resvg::usvg;
 use std::{
     path::Path,
@@ -123,8 +123,16 @@ pub(super) fn build_html_font_db(request: &HtmlFontRequest) -> usvg::fontdb::Dat
     /* WHY: bundled Latin は一度だけ共有し、system font は必要な file source だけを登録する。 */
     database.load_font_source(bundled_font_source());
     for family in &request.families {
-        load_requested_font_family(&mut database, family, load_requested_system_font_family);
+        load_requested_font_family(&mut database, family);
     }
+    load_requested_system_font_families(
+        &mut database,
+        request
+            .families
+            .iter()
+            .map(String::as_str)
+            .filter(|family| !is_generic_font_family(family)),
+    );
     if request.needs_cjk {
         load_font_paths(&mut database, cjk_fallback_font_paths(request));
     }
@@ -156,15 +164,8 @@ fn load_font_paths(database: &mut usvg::fontdb::Database, paths: &[&str]) -> usi
     loaded
 }
 
-fn load_requested_font_family(
-    database: &mut usvg::fontdb::Database,
-    family: &str,
-    load_system_family: impl FnOnce(&mut usvg::fontdb::Database, &str),
-) {
+fn load_requested_font_family(database: &mut usvg::fontdb::Database, family: &str) {
     load_font_paths(database, paths_for_font_family(family));
-    if !is_generic_font_family(family) {
-        load_system_family(database, family);
-    }
 }
 
 fn cjk_fallback_font_paths(request: &HtmlFontRequest) -> &'static [&'static str] {
@@ -200,11 +201,10 @@ fn paths_for_font_family(family: &str) -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_html_font_db, cjk_fallback_font_paths, load_font_paths, load_requested_font_family,
-        paths_for_font_family,
+        build_html_font_db, cjk_fallback_font_paths, load_font_paths, paths_for_font_family,
     };
     use crate::markdown::svg_rasterize::font::html::request::HtmlFontRequest;
-    use std::{cell::Cell, path::PathBuf};
+    use std::path::PathBuf;
 
     #[test]
     fn generic_serif_includes_linux_system_serif_candidates() {
@@ -241,19 +241,6 @@ mod tests {
             liberation
                 .contains(&"/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf")
         );
-    }
-
-    #[test]
-    fn exact_named_family_is_loaded_after_related_selective_candidates() {
-        let mut database = resvg::usvg::fontdb::Database::new();
-        let system_family_loaded = Cell::new(false);
-
-        load_requested_font_family(&mut database, "courier new", |_, family| {
-            assert_eq!(family, "courier new");
-            system_family_loaded.set(true);
-        });
-
-        assert!(system_family_loaded.get());
     }
 
     #[test]

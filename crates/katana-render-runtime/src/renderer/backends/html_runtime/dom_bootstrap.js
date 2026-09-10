@@ -563,6 +563,7 @@ Object.defineProperties(globalThis, {
   scrollY: { get: () => __krrLayoutMetrics().scrollY },
 });
 const __krrIntersectionObservers = new Set();
+let __krrIntersectionLayoutMetricsReady = false;
 const __krrIntersectionRect = (first, second) => {
   const left = Math.max(first.left, second.left);
   const top = Math.max(first.top, second.top);
@@ -632,7 +633,8 @@ globalThis.IntersectionObserver = class IntersectionObserver {
       throw new TypeError("IntersectionObserver target must be an element");
     }
     this.targets.add(target);
-    this.__krrNotify([target]);
+    __krrIntersectionObservers.add(this);
+    if (__krrIntersectionLayoutMetricsReady) this.__krrNotify([target]);
   }
   unobserve(target) {
     this.targets.delete(target);
@@ -684,6 +686,7 @@ globalThis.IntersectionObserver = class IntersectionObserver {
   }
 };
 globalThis.__krrRefreshIntersectionObservers = () => {
+  __krrIntersectionLayoutMetricsReady = true;
   for (const observer of [...__krrIntersectionObservers]) {
     observer.__krrNotify([...observer.targets]);
   }

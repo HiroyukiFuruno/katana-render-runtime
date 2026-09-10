@@ -14,7 +14,15 @@ from urllib import error, request
 
 REQUIRED_LATEST_RELEASE = "v0.4.19"
 REQUIRED_TARGET_RELEASE = "v0.4.20"
-REQUIRED_RELEASE_COMMITS = ("02a73d293c04f9635fd3a822ac865bf81d4c8745",)
+# Keep the release intent explicit: the v0.4.18 baseline and fixes tracked by
+# the v0.4.20 release issues must all be present in the candidate.
+REQUIRED_RELEASE_COMMITS = (
+    "02a73d293c04f9635fd3a822ac865bf81d4c8745",
+    "8552c63457480379922c7076bcff604b5401ae20",  # #73
+    "694ac82a85d555485e46eb46cf882c8db11b2fe5",  # #74
+    "007ab829df39ed40bbfcfc19205ad21f3da32fe8",  # #76 implementation
+    "91f07699b26567658f76021050ca7ec7b5c10df1",  # #76 regression
+)
 
 
 @dataclass(frozen=True, order=True)

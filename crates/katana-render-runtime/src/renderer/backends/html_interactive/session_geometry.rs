@@ -37,6 +37,7 @@ impl HtmlInteractiveSession {
                         element.y,
                         element.width,
                         element.height,
+                        element.rotation_degrees,
                     )
                 }),
             )

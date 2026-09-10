@@ -58,6 +58,25 @@ fn fixed_observer_geometry_is_current_when_the_scroll_handler_runs() -> TestResu
     Ok(())
 }
 
+#[test]
+fn observer_dom_mutation_is_reflowed_before_the_scroll_handler_runs() -> TestResult {
+    let mut session = start_with_viewport(observer_mutation_document(), 160, 100)?;
+
+    session
+        .dispatch_input(HtmlBrowserInput::Scroll {
+            delta_x: 0.0,
+            delta_y: 80.0,
+        })
+        .map_err(to_string)?;
+
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    assert!(
+        snapshot.contains(r##"<p id="scroll-observed">current</p>"##),
+        "the scroll handler must run after observer-triggered reflow: {snapshot}"
+    );
+    Ok(())
+}
+
 fn intersection_document() -> &'static str {
     r##"<style>
 html, body { margin: 0; }
@@ -111,6 +130,30 @@ const observer = new IntersectionObserver((entries) => {
 observer.observe(document.getElementById("fixed"));
 window.addEventListener("scroll", () => {
   document.getElementById("scroll-observed").textContent = document.getElementById("intersection").textContent;
+});
+</script>"##
+}
+
+fn observer_mutation_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#before { height: 120px; }
+#trigger { height: 20px; }
+#changed { display: none; height: 20px; }
+#after { height: 300px; }
+</style>
+<div id=before></div><div id=trigger>Trigger</div><div id=changed>Changed</div><div id=after></div>
+<p id=geometry>initial</p><p id=scroll-observed>initial</p>
+<script>
+const changed = document.getElementById("changed");
+new IntersectionObserver((entries) => {
+  if (entries.some((entry) => entry.isIntersecting)) changed.style.display = "block";
+}).observe(document.getElementById("trigger"));
+new IntersectionObserver((entries) => {
+  if (entries.some((entry) => entry.isIntersecting)) document.getElementById("geometry").textContent = "current";
+}).observe(changed);
+window.addEventListener("scroll", () => {
+  document.getElementById("scroll-observed").textContent = document.getElementById("geometry").textContent;
 });
 </script>"##
 }
