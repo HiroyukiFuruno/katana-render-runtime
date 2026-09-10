@@ -28,30 +28,16 @@ fn concurrent_openers_each_receive_an_initial_frame() -> TestResult {
 
 #[test]
 fn open_reports_a_poisoned_cold_start_lock() -> TestResult {
-    COLD_OPEN_COMPLETED.store(false, std::sync::atomic::Ordering::Release);
-    let lock = COLD_OPEN_LOCK.get_or_init(|| std::sync::Mutex::new(()));
-    let poisoner = thread::spawn(|| {
-        let mutex = match COLD_OPEN_LOCK.get() {
-            Some(mutex) => mutex,
-            None => std::panic::resume_unwind(Box::new("cold-start lock should be initialized")),
-        };
-        let _guard = match mutex.lock() {
-            Ok(guard) => guard,
-            Err(_) => std::panic::resume_unwind(Box::new(
-                "cold-start lock should not already be poisoned",
-            )),
-        };
-        std::panic::resume_unwind(Box::new("poison the cold-start lock for the error path"));
-    });
-    assert!(poisoner.join().is_err());
-
-    let error = match HtmlRuntime.open(test_source()?, viewport()?) {
+    let cache = std::sync::Mutex::new(());
+    let guard = cache
+        .lock()
+        .map_err(|_| "fresh local cold-start lock must not be poisoned")?;
+    let poisoned = Err(std::sync::PoisonError::new(guard));
+    let error = match super::lock_cold_open(poisoned) {
         Ok(_) => return Err("a poisoned cold-start lock must fail closed".into()),
         Err(error) => error,
     };
     assert!(matches!(error, HtmlBrowserError::RuntimeFailure { .. }));
-    lock.clear_poison();
-    COLD_OPEN_COMPLETED.store(true, std::sync::atomic::Ordering::Release);
     Ok(())
 }
 

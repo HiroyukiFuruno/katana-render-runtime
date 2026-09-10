@@ -21,12 +21,7 @@ impl HtmlRuntime {
             return HtmlBrowserSession::start_in_process(source, viewport);
         }
 
-        let cold_open_lock = COLD_OPEN_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .map_err(|_| HtmlBrowserError::RuntimeFailure {
-                error: "HTML runtime cold-start lock is unavailable".to_string(),
-            })?;
+        let cold_open_lock = lock_cold_open(COLD_OPEN_LOCK.get_or_init(|| Mutex::new(())).lock())?;
         if COLD_OPEN_COMPLETED.load(Ordering::Acquire) {
             drop(cold_open_lock);
             return HtmlBrowserSession::start_in_process(source, viewport);
@@ -39,6 +34,14 @@ impl HtmlRuntime {
         drop(cold_open_lock);
         session
     }
+}
+
+fn lock_cold_open(
+    lock: std::sync::LockResult<std::sync::MutexGuard<'_, ()>>,
+) -> Result<std::sync::MutexGuard<'_, ()>, HtmlBrowserError> {
+    lock.map_err(|_| HtmlBrowserError::RuntimeFailure {
+        error: "HTML runtime cold-start lock is unavailable".to_string(),
+    })
 }
 
 #[cfg(test)]
