@@ -29,7 +29,7 @@ proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "3", features = ["full", "visit"] }
 toml = "1.1"
 base64 = "0.23"
-brotli-decompressor = "5.0.3"
+brotli-decompressor = "6.0.0"
 include_dir = "0.7.4"
 jni = { version = "0.22.4", features = ["invocation"] }
 resvg = "0.48"
@@ -42,7 +42,7 @@ html5ever = "0.39"
 markup5ever_rcdom = "0.39"
 xmltree = "0.12"
 percent-encoding = "2.3"
-cssparser = "0.37"
+cssparser = "0.38"
 taffy = { version = "0.14.0", default-features = false, features = ["std", "taffy_tree", "block_layout", "flexbox", "grid", "content_size", "parse"] }
 unicode-linebreak = "0.1.5"
 unicode-width = "0.2.2"
