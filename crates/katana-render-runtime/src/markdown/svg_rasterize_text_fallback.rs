@@ -1,12 +1,6 @@
 use super::font::{font_has_char, matching_fallback_face};
 use resvg::usvg;
-use std::cell::RefCell;
 use std::collections::HashMap;
-
-thread_local! {
-    static HTML_RESOLVED_FACE_CACHE: RefCell<HashMap<(usvg::fontdb::ID, char), usvg::fontdb::ID>> =
-        RefCell::new(HashMap::new());
-}
 
 pub(super) fn html_font_runs(
     database: &usvg::fontdb::Database,
@@ -14,18 +8,18 @@ pub(super) fn html_font_runs(
     text: &str,
 ) -> Vec<(usvg::fontdb::ID, String)> {
     let mut runs: Vec<(usvg::fontdb::ID, String)> = Vec::new();
+    let mut resolved_faces = HashMap::new();
     for character in text.chars() {
-        let face_id = HTML_RESOLVED_FACE_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            *cache.entry((base_face_id, character)).or_insert_with(|| {
+        let face_id = *resolved_faces
+            .entry((base_face_id, character))
+            .or_insert_with(|| {
                 if font_has_char(database, base_face_id, character) {
                     base_face_id
                 } else {
                     matching_fallback_face(database, base_face_id, character)
                         .unwrap_or(base_face_id)
                 }
-            })
-        });
+            });
         if let Some((run_face_id, run)) = runs.last_mut()
             && *run_face_id == face_id
         {
@@ -39,20 +33,25 @@ pub(super) fn html_font_runs(
 
 #[cfg(test)]
 mod tests {
-    use super::super::font::matching_font_face;
-    use super::{HTML_RESOLVED_FACE_CACHE, html_font_runs};
-    use crate::markdown::svg_rasterize::font::html_font_db;
+    use super::super::font::{font_has_char, matching_font_face};
+    use super::html_font_runs;
+    use crate::markdown::svg_rasterize::font::{bundled_font_db, html_font_db_for_text};
 
     #[test]
-    fn html_font_fallback_is_cached_per_character() {
-        HTML_RESOLVED_FACE_CACHE.with(|cache| cache.borrow_mut().clear());
-        let database = html_font_db();
-        let cache_size = matching_font_face(&database, "Noto Sans", 400, false).map(|base| {
-            let runs = html_font_runs(&database, base, "日本日本");
-            assert!(!runs.is_empty());
-            HTML_RESOLVED_FACE_CACHE.with(|cache| cache.borrow().len())
+    fn html_font_fallback_is_scoped_to_the_current_database() {
+        let bundled = bundled_font_db();
+        let bundled_base = matching_font_face(&bundled, "Noto Sans", 400, false);
+        let bundled_runs = bundled_base.map(|base| html_font_runs(&bundled, base, "日"));
+        let html = html_font_db_for_text("Noto Sans", "日");
+        let html_base = matching_font_face(&html, "Noto Sans", 400, false);
+        let used_html_fallback = html_base.is_some_and(|base| {
+            !font_has_char(&html, base, '日')
+                && html_font_runs(&html, base, "日本日本")
+                    .first()
+                    .is_some_and(|(fallback, _)| *fallback != base)
         });
 
-        assert_eq!(cache_size, Some(2));
+        assert!(bundled_runs.is_some_and(|runs| runs.len() == 1));
+        assert!(used_html_fallback);
     }
 }

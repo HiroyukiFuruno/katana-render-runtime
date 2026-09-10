@@ -1,5 +1,6 @@
 use super::font::{
-    bundled_font_db, html_font_db, html_rasterizer_options, rasterizer_options,
+    bundled_font_db, current_process_rss_kib, html_font_db_for_markup, html_font_db_for_text,
+    html_font_memory_snapshot, html_rasterizer_options, rasterizer_options,
     rasterizer_options_with_font_db,
 };
 use super::{RasterTarget, SvgRasterizeOps, effective_scale, parse_light_dark_function};
@@ -117,7 +118,7 @@ fn distinct_cell_count(
 
 #[test]
 fn rasterizer_prefers_the_bundled_noto_sans_before_system_fonts() -> Result<(), String> {
-    let database = html_font_db();
+    let database = html_font_db_for_text("Noto Sans", "KRR");
     let query = usvg::fontdb::Query {
         families: &[usvg::fontdb::Family::Name("Noto Sans")],
         weight: usvg::fontdb::Weight::NORMAL,
@@ -138,11 +139,70 @@ fn rasterizer_prefers_the_bundled_noto_sans_before_system_fonts() -> Result<(), 
 #[test]
 fn public_and_html_rasterizers_use_separate_font_databases() {
     let public = rasterizer_options();
-    let html = html_rasterizer_options();
+    let html = html_rasterizer_options("<svg/>");
 
     assert!(std::sync::Arc::ptr_eq(&public.fontdb, &bundled_font_db()));
-    assert!(std::sync::Arc::ptr_eq(&html.fontdb, &html_font_db()));
+    assert!(std::sync::Arc::ptr_eq(
+        &html.fontdb,
+        &html_font_db_for_markup("<svg/>")
+    ));
     assert!(!std::sync::Arc::ptr_eq(&public.fontdb, &html.fontdb));
+}
+
+#[test]
+fn cold_html_font_loading_keeps_system_font_bytes_out_of_the_process_cache() -> Result<(), String> {
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="192" height="48"><rect width="192" height="48" fill="#fff"/><text x="4" y="36" font-family="Helvetica Neue, Arial, sans-serif" font-size="28" fill="#14532d">日本🙂</text></svg>"##;
+    let rss_before = current_process_rss_kib();
+    let memory = render_cold_html_svg(svg)?;
+    let rss_after = current_process_rss_kib();
+
+    assert_cold_html_font_memory(&memory);
+    if let (Some(before), Some(after)) = (rss_before, rss_after) {
+        assert_cold_html_rss(before, after, memory.owned_font_bytes);
+    }
+    Ok(())
+}
+
+fn render_cold_html_svg(svg: &str) -> Result<super::font::HtmlFontMemorySnapshot, String> {
+    let options = html_rasterizer_options(svg);
+    let memory = html_font_memory_snapshot(&options.fontdb);
+    let tree = usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
+    let image = RasterTarget::new(tree.size(), 1.0)
+        .render(&tree)
+        .map_err(|error| error.to_string())?;
+    drop(tree);
+    drop(options);
+    drop(image);
+    Ok(memory)
+}
+
+fn assert_cold_html_font_memory(memory: &super::font::HtmlFontMemorySnapshot) {
+    assert!(
+        memory.owned_font_bytes <= 2 * 1024 * 1024,
+        "owned font bytes: {}",
+        memory.owned_font_bytes
+    );
+    assert!(
+        memory.system_font_file_faces > 0,
+        "CJK/emoji fallback must be registered as file-backed sources"
+    );
+    assert!(
+        memory.total_faces <= 64,
+        "lazy HTML database unexpectedly contains {} faces",
+        memory.total_faces
+    );
+}
+
+fn assert_cold_html_rss(before: usize, after: usize, owned_font_bytes: usize) {
+    let delta = after.saturating_sub(before);
+    eprintln!(
+        "cold HTML font cache: owned={} B, rss_before={before} KiB, rss_after={after} KiB, delta={delta} KiB",
+        owned_font_bytes
+    );
+    assert!(
+        delta < 64 * 1024,
+        "cold HTML RSS increased by {delta} KiB after file-backed font loading"
+    );
 }
 
 #[test]
