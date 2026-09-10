@@ -306,6 +306,9 @@ const __krrElement = (nodeId) => {
   return element;
 };
 const __krrElementPrototype = {
+  getBoundingClientRect() {
+    return JSON.parse(__krrNativeDom("boundingClientRect", this.__krrNodeId));
+  },
   get contentDocument() {
     return this.getAttribute("data-krr-local-frame") !== null ? document : null;
   },
@@ -552,7 +555,27 @@ globalThis.document = __krrInstallEventTarget({
 });
 globalThis.window = globalThis;
 __krrInstallEventTarget(globalThis);
+const __krrLayoutMetrics = () => JSON.parse(__krrNativeDom("layoutMetrics"));
+Object.defineProperties(globalThis, {
+  innerWidth: { get: () => __krrLayoutMetrics().width },
+  innerHeight: { get: () => __krrLayoutMetrics().height },
+  pageYOffset: { get: () => __krrLayoutMetrics().scrollY },
+  scrollY: { get: () => __krrLayoutMetrics().scrollY },
+});
 const __krrIntersectionObservers = new Set();
+const __krrIntersectionRect = (first, second) => {
+  const left = Math.max(first.left, second.left);
+  const top = Math.max(first.top, second.top);
+  const right = Math.min(first.right, second.right);
+  const bottom = Math.min(first.bottom, second.bottom);
+  const width = Math.max(0, right - left);
+  const height = Math.max(0, bottom - top);
+  return { x: left, y: top, width, height, top, right: left + width, bottom: top + height, left };
+};
+const __krrViewportRect = () => {
+  const { width, height } = __krrLayoutMetrics();
+  return { x: 0, y: 0, width, height, top: 0, right: width, bottom: height, left: 0 };
+};
 globalThis.IntersectionObserver = class IntersectionObserver {
   constructor(callback, options = {}) {
     if (typeof callback !== "function") {
@@ -589,30 +612,44 @@ globalThis.IntersectionObserver = class IntersectionObserver {
   }
   __krrNotify(targets) {
     const entries = targets.map((target) => {
-      const configured = target.getAttribute("data-krr-intersecting");
-      const isIntersecting = configured === null || configured === "true";
-      const ratioValue = target.getAttribute("data-krr-intersection-ratio");
-      const intersectionRatio =
-        ratioValue === null
-          ? isIntersecting
-            ? 1
-            : 0
-          : Math.max(0, Math.min(1, Number(ratioValue)));
-      return { target, isIntersecting, intersectionRatio };
+      const rootBounds = this.root ? this.root.getBoundingClientRect() : __krrViewportRect();
+      const boundingClientRect = target.getBoundingClientRect();
+      const intersectionRect = __krrIntersectionRect(rootBounds, boundingClientRect);
+      const targetArea = boundingClientRect.width * boundingClientRect.height;
+      const intersectionArea = intersectionRect.width * intersectionRect.height;
+      const isIntersecting = targetArea > 0 && intersectionArea > 0;
+      const intersectionRatio = targetArea > 0 ? intersectionArea / targetArea : 0;
+      return {
+        target,
+        isIntersecting,
+        intersectionRatio,
+        boundingClientRect,
+        intersectionRect,
+        rootBounds,
+        time: Date.now(),
+      };
     });
     const changed = entries.filter((entry) => {
       const previous = this.intersections.get(entry.target);
-      this.intersections.set(entry.target, entry.isIntersecting);
-      return previous === undefined || previous !== entry.isIntersecting;
+      this.intersections.set(entry.target, entry);
+      return (
+        previous === undefined ||
+        previous.isIntersecting !== entry.isIntersecting ||
+        this.thresholds.some(
+          (threshold) =>
+            entry.intersectionRatio >= threshold !== previous.intersectionRatio >= threshold,
+        )
+      );
     });
     if (changed.length > 0) this.callback(changed, this);
   }
 };
-window.addEventListener("scroll", () => {
+globalThis.__krrRefreshIntersectionObservers = () => {
   for (const observer of [...__krrIntersectionObservers]) {
     observer.__krrNotify([...observer.targets]);
   }
-});
+};
+window.addEventListener("scroll", globalThis.__krrRefreshIntersectionObservers);
 globalThis.__krrDispatchDocumentContentLoaded = () => {
   __krrDocumentReadyState = "interactive";
   document.dispatchEvent(new Event("readystatechange"));

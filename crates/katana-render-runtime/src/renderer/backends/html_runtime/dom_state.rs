@@ -1,3 +1,4 @@
+use self::geometry::HtmlLayoutMetrics;
 use super::super::html_document::HtmlDocument;
 use super::super::html_subresources::HtmlSubresourceLoader;
 use std::cell::RefCell;
@@ -5,6 +6,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+#[path = "dom_state_content_lookup.rs"]
+mod content_lookup;
+#[path = "dom_state_geometry.rs"]
+mod geometry;
 #[path = "dom_state_lookup.rs"]
 mod lookup;
 #[path = "dom_state_mutation.rs"]
@@ -15,6 +20,7 @@ mod request;
 pub(super) struct HtmlDomBridgeState {
     pub(super) document: RefCell<HtmlDocument>,
     pub(super) error: RefCell<Option<String>>,
+    layout_metrics: RefCell<HtmlLayoutMetrics>,
     event_targets: RefCell<HashMap<String, HashSet<u64>>>,
     resource_loader: Option<HtmlSubresourceLoader>,
     host_io_active: Arc<AtomicBool>,
@@ -25,6 +31,7 @@ impl HtmlDomBridgeState {
         Self {
             document: RefCell::new(document),
             error: RefCell::new(None),
+            layout_metrics: RefCell::new(HtmlLayoutMetrics::default()),
             event_targets: RefCell::new(HashMap::new()),
             resource_loader: None,
             host_io_active: Arc::new(AtomicBool::new(false)),
@@ -38,6 +45,7 @@ impl HtmlDomBridgeState {
         Self {
             document: RefCell::new(document),
             error: RefCell::new(None),
+            layout_metrics: RefCell::new(HtmlLayoutMetrics::default()),
             event_targets: RefCell::new(HashMap::new()),
             resource_loader: Some(resource_loader),
             host_io_active: Arc::new(AtomicBool::new(false)),

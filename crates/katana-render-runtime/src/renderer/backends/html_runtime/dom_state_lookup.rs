@@ -38,6 +38,8 @@ impl HtmlDomBridgeState {
             | "innerHTML"
             | "outerHTML"
             | "getAttribute"
+            | "boundingClientRect"
+            | "layoutMetrics"
             | "eventPath"
             | "closest" => Some(self.lookup(operation, arguments)),
             _ => None,
@@ -106,34 +108,6 @@ impl HtmlDomBridgeState {
             "createElement" => create_element(&mut document, argument(arguments, 0)?),
             _ => Err(format!(
                 "unsupported HTML node lookup operation: {operation}"
-            )),
-        }
-    }
-
-    fn lookup_content(&self, operation: &str, arguments: &[String]) -> Result<DomValue, String> {
-        let document = self.document.borrow();
-        match operation {
-            "textContent" => document
-                .text_content(node_id(argument(arguments, 0)?)?)
-                .map(DomValue::String),
-            "innerHTML" => document
-                .inner_html(node_id(argument(arguments, 0)?)?)
-                .map(DomValue::String),
-            "outerHTML" => document
-                .outer_html(node_id(argument(arguments, 0)?)?)
-                .map(DomValue::String),
-            "getAttribute" => Ok(document
-                .attribute(node_id(argument(arguments, 0)?)?, argument(arguments, 1)?)?
-                .map(DomValue::String)
-                .unwrap_or(DomValue::Null)),
-            "eventPath" => document
-                .event_path(node_id(argument(arguments, 0)?)?)
-                .map(DomValue::NodeIds),
-            "closest" => document
-                .closest_selector(node_id(argument(arguments, 0)?)?, argument(arguments, 1)?)
-                .map(|node| node.map(DomValue::NodeId).unwrap_or(DomValue::Null)),
-            _ => Err(format!(
-                "unsupported HTML content lookup operation: {operation}"
             )),
         }
     }

@@ -45,6 +45,27 @@ const ARIAL_FONT_PATHS: &[&str] = &[
 const TIMES_FONT_PATHS: &[&str] = &[
     "/System/Library/Fonts/Times.ttc",
     "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-BoldItalic.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSerif-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSerif-Italic.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSerif-BoldItalic.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Italic.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-BoldItalic.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSerif-Bold.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSerif-Italic.ttf",
+    "/usr/share/fonts/opentype/urw-base35/NimbusRoman-Regular.otf",
+    "/usr/share/fonts/opentype/urw-base35/NimbusRoman-Bold.otf",
+    "/usr/share/fonts/opentype/urw-base35/NimbusRoman-Italic.otf",
+    "/usr/share/fonts/truetype/freefont/FreeSerif.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSerifItalic.ttf",
     "C:/Windows/Fonts/times.ttf",
     "C:/Windows/Fonts/timesbd.ttf",
 ];
@@ -102,5 +123,21 @@ fn paths_for_font_family(family: &str) -> &'static [&'static str] {
         }
         "apple color emoji" | "segoe ui emoji" | "noto color emoji" => EMOJI_FONT_PATHS,
         _ => &[],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::paths_for_font_family;
+
+    #[test]
+    fn generic_serif_includes_linux_system_serif_candidates() {
+        let paths = paths_for_font_family("serif");
+
+        assert!(paths.contains(&"/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"));
+        assert!(
+            paths.contains(&"/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf")
+        );
+        assert!(paths.contains(&"/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf"));
     }
 }

@@ -1,8 +1,48 @@
-use super::super::html_browser::HtmlBrowserViewport;
-use super::HtmlInteractiveSession;
+use super::super::html_browser::{HtmlBrowserError, HtmlBrowserViewport};
 use super::types::{ElementBox, HitTarget, LayoutResult};
+use super::{HtmlInteractiveSession, runtime_failure};
 
 impl HtmlInteractiveSession {
+    pub(super) fn update_scroll(&mut self, render: &LayoutResult) {
+        self.scroll_y = self.scroll_y.min(max_scroll_for(render, self.viewport));
+    }
+
+    pub(super) fn sync_intersection_geometry(
+        &mut self,
+        render: &LayoutResult,
+    ) -> Result<bool, HtmlBrowserError> {
+        self.sync_intersection_geometry_from_boxes(&render.element_boxes)
+    }
+
+    pub(super) fn sync_intersection_geometry_from_current_layout(
+        &mut self,
+    ) -> Result<bool, HtmlBrowserError> {
+        let boxes = self.element_boxes.clone();
+        self.sync_intersection_geometry_from_boxes(&boxes)
+    }
+
+    fn sync_intersection_geometry_from_boxes(
+        &mut self,
+        boxes: &[ElementBox],
+    ) -> Result<bool, HtmlBrowserError> {
+        self.runtime
+            .update_layout_metrics(
+                self.viewport.logical_width(),
+                self.viewport.logical_height(),
+                self.scroll_y,
+                boxes.iter().map(|element| {
+                    (
+                        element.node_id,
+                        element.x,
+                        element.y,
+                        element.width,
+                        element.height,
+                    )
+                }),
+            )
+            .map_err(runtime_failure)
+    }
+
     pub(super) fn hit_target_at(&self, x: f32, y: f32) -> Option<&HitTarget> {
         let scale = self.viewport.device_scale_factor;
         let x = x / scale;

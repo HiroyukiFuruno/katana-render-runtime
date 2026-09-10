@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 mod session_interaction;
 #[path = "session_interactive_start.rs"]
 mod session_interactive_start;
+#[path = "session_layout_metrics.rs"]
+mod session_layout_metrics;
 #[path = "session_runtime.rs"]
 mod session_runtime;
 #[path = "session_snapshot.rs"]

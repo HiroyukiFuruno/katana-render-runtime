@@ -12,8 +12,14 @@ impl HtmlInteractiveSession {
     pub(super) fn render_frame(&mut self) -> Result<(), HtmlBrowserError> {
         let generation = self.generation + 1;
         let total_started = self.trace.start();
-        let render = self.traced_layout(generation)?;
-        self.update_scroll(&render);
+        let mut render = self.traced_layout(generation)?;
+        for _ in 0..2 {
+            self.update_scroll(&render);
+            if !self.sync_intersection_geometry(&render)? {
+                break;
+            }
+            render = self.traced_layout(generation)?;
+        }
         let pixels = self.traced_rasterize(generation, &render.svg)?;
         let started = self.trace.start();
         let result = self.store_frame(render, pixels);
@@ -146,12 +152,6 @@ impl HtmlInteractiveSession {
             "interactive raster dimensions are {width}x{height}, expected {}x{}",
             self.viewport.width, self.viewport.height
         )))
-    }
-
-    fn update_scroll(&mut self, render: &LayoutResult) {
-        self.scroll_y = self
-            .scroll_y
-            .min((render.content_height - self.viewport.logical_height()).max(0.0));
     }
 
     pub(super) fn store_frame(

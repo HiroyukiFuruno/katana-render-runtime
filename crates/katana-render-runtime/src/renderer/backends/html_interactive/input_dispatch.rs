@@ -65,7 +65,9 @@ impl HtmlInteractiveSession {
         self.resize_anchor = None;
         let logical_delta = delta_y / self.viewport.device_scale_factor;
         self.scroll_y = (self.scroll_y + logical_delta).clamp(0.0, self.max_scroll());
-        self.render_frame()
+        self.sync_intersection_geometry_from_current_layout()?;
+        let body = required_scroll_body(self.runtime.body_node())?;
+        self.dispatch_runtime_event(HtmlRuntimeEvent::Scroll { target: body })
     }
 
     fn activate_target_at(&mut self, x: f32, y: f32) -> Result<(), HtmlBrowserError> {
@@ -160,5 +162,19 @@ impl HtmlInteractiveSession {
     ) -> Result<(), HtmlBrowserError> {
         self.runtime.dispatch(event).map_err(runtime_failure)?;
         self.render_frame()
+    }
+}
+
+fn required_scroll_body(body: Option<HtmlNodeId>) -> Result<HtmlNodeId, HtmlBrowserError> {
+    body.ok_or_else(|| runtime_failure("HTML runtime body is unavailable"))
+}
+
+#[cfg(test)]
+mod scroll_body_tests {
+    use super::required_scroll_body;
+
+    #[test]
+    fn scroll_requires_a_runtime_body() {
+        assert!(required_scroll_body(None).is_err());
     }
 }

@@ -779,6 +779,29 @@ fn explicit_scroll_releases_fragment_resize_alignment() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn host_scroll_bubbles_to_window_scroll_listeners() -> TestResult {
+    let mut session = start(
+        "<p id=host-scroll>initial</p><div style='height: 1000px'></div><script>window.addEventListener('scroll', () => document.getElementById('host-scroll').textContent = 'received');</script>",
+    )?;
+
+    session
+        .dispatch_input(HtmlBrowserInput::Scroll {
+            delta_x: 0.0,
+            delta_y: 120.0,
+        })
+        .map_err(to_string)?;
+
+    assert!(
+        session
+            .runtime
+            .snapshot()
+            .map_err(to_string)?
+            .contains(">received<")
+    );
+    Ok(())
+}
+
 fn linked_fragment_document() -> String {
     "<!doctype html><html lang=en><head><meta charset=utf-8><style>\
      main { margin: 24px; padding: 24px; border: 2px solid #8e78a9; background: #f4d7ff; }\
