@@ -552,6 +552,7 @@ globalThis.document = __krrInstallEventTarget({
 });
 globalThis.window = globalThis;
 __krrInstallEventTarget(globalThis);
+const __krrIntersectionObservers = new Set();
 globalThis.IntersectionObserver = class IntersectionObserver {
   constructor(callback, options = {}) {
     if (typeof callback !== "function") {
@@ -564,24 +565,51 @@ globalThis.IntersectionObserver = class IntersectionObserver {
       ? options.threshold
       : [options.threshold || 0];
     this.targets = new Set();
+    this.intersections = new Map();
+    __krrIntersectionObservers.add(this);
   }
   observe(target) {
     if (!target || target.__krrNodeId === undefined) {
       throw new TypeError("IntersectionObserver target must be an element");
     }
     this.targets.add(target);
-    this.callback([{ target, isIntersecting: true, intersectionRatio: 1 }], this);
+    this.__krrNotify([target]);
   }
   unobserve(target) {
     this.targets.delete(target);
+    this.intersections.delete(target);
   }
   disconnect() {
     this.targets.clear();
+    this.intersections.clear();
+    __krrIntersectionObservers.delete(this);
   }
   takeRecords() {
     return [];
   }
+  __krrNotify(targets) {
+    const entries = targets.map((target) => {
+      const configured = target.getAttribute("data-krr-intersecting");
+      const isIntersecting = configured === null || configured === "true";
+      const ratioValue = target.getAttribute("data-krr-intersection-ratio");
+      const intersectionRatio = ratioValue === null
+        ? (isIntersecting ? 1 : 0)
+        : Math.max(0, Math.min(1, Number(ratioValue)));
+      return { target, isIntersecting, intersectionRatio };
+    });
+    const changed = entries.filter((entry) => {
+      const previous = this.intersections.get(entry.target);
+      this.intersections.set(entry.target, entry.isIntersecting);
+      return previous === undefined || previous !== entry.isIntersecting;
+    });
+    if (changed.length > 0) this.callback(changed, this);
+  }
 };
+window.addEventListener("scroll", () => {
+  for (const observer of [...__krrIntersectionObservers]) {
+    observer.__krrNotify([...observer.targets]);
+  }
+});
 globalThis.__krrDispatchDocumentContentLoaded = () => {
   __krrDocumentReadyState = "interactive";
   document.dispatchEvent(new Event("readystatechange"));
