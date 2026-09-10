@@ -23,6 +23,22 @@ fn intersection_observer_tracks_rendered_sections_after_real_host_scroll() -> Te
     Ok(())
 }
 
+#[test]
+fn negative_bottom_root_margin_changes_toc_during_real_host_scroll() -> TestResult {
+    let mut session = start_with_viewport(root_margin_document(), 160, 100)?;
+
+    assert_active_anchor(&session, "one")?;
+
+    session
+        .dispatch_input(HtmlBrowserInput::Scroll {
+            delta_x: 0.0,
+            delta_y: 80.0,
+        })
+        .map_err(to_string)?;
+
+    assert_active_anchor(&session, "two")
+}
+
 fn intersection_document() -> &'static str {
     r##"<style>
 html, body { margin: 0; }
@@ -43,6 +59,20 @@ document.querySelectorAll("section").forEach((section) => observer.observe(secti
 window.addEventListener("scroll", () => {
   document.getElementById("scroll-observed").textContent = document.querySelector(".toc-item.active").getAttribute("href");
 });
+</script>"##
+}
+
+fn root_margin_document() -> &'static str {
+    r##"<style>html, body { margin: 0; } nav { position: absolute; } section { height: 80px; }</style>
+<nav><a class=toc-item href=#one>One</a><a class=toc-item href=#two>Two</a></nav>
+<main><section id=one>First</section><section id=two>Second</section><div style="height: 120px"></div></main>
+<script>
+const observer = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    document.querySelector(`a[href="#${entry.target.id}"]`).classList.toggle("active", entry.isIntersecting);
+  }
+}, { rootMargin: "0px 0px -80px 0px" });
+document.querySelectorAll("section").forEach((section) => observer.observe(section));
 </script>"##
 }
 

@@ -576,6 +576,41 @@ const __krrViewportRect = () => {
   const { width, height } = __krrLayoutMetrics();
   return { x: 0, y: 0, width, height, top: 0, right: width, bottom: height, left: 0 };
 };
+const __krrParseRootMargin = (value) => {
+  const parts = String(value ?? "0px")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length < 1 || parts.length > 4) return null;
+  const parsed = parts.map((part) => {
+    const match = part.match(/^(-?(?:\d+(?:\.\d*)?|\.\d+))(px|%)$/);
+    if (!match) return null;
+    const amount = Number(match[1]);
+    return Number.isFinite(amount) ? { amount, unit: match[2] } : null;
+  });
+  if (parsed.some((part) => part === null)) return null;
+  const [top, right = top, bottom = top, left = right] = parsed;
+  return [top, right, bottom, left];
+};
+const __krrExpandRootBounds = (root, margins) => {
+  const [top, right, bottom, left] = margins;
+  const resolve = (margin) =>
+    margin.unit === "%" ? (root.width * margin.amount) / 100 : margin.amount;
+  const topOffset = resolve(top);
+  const rightOffset = resolve(right);
+  const bottomOffset = resolve(bottom);
+  const leftOffset = resolve(left);
+  return {
+    x: root.left - leftOffset,
+    y: root.top - topOffset,
+    width: root.width + leftOffset + rightOffset,
+    height: root.height + topOffset + bottomOffset,
+    top: root.top - topOffset,
+    right: root.right + rightOffset,
+    bottom: root.bottom + bottomOffset,
+    left: root.left - leftOffset,
+  };
+};
 globalThis.IntersectionObserver = class IntersectionObserver {
   constructor(callback, options = {}) {
     if (typeof callback !== "function") {
@@ -584,6 +619,7 @@ globalThis.IntersectionObserver = class IntersectionObserver {
     this.callback = callback;
     this.root = options.root || null;
     this.rootMargin = options.rootMargin || "0px";
+    this.__krrRootMargin = __krrParseRootMargin(this.rootMargin) || __krrParseRootMargin("0px");
     this.thresholds = Array.isArray(options.threshold)
       ? options.threshold
       : [options.threshold || 0];
@@ -612,7 +648,10 @@ globalThis.IntersectionObserver = class IntersectionObserver {
   }
   __krrNotify(targets) {
     const entries = targets.map((target) => {
-      const rootBounds = this.root ? this.root.getBoundingClientRect() : __krrViewportRect();
+      const rootBounds = __krrExpandRootBounds(
+        this.root ? this.root.getBoundingClientRect() : __krrViewportRect(),
+        this.__krrRootMargin,
+      );
       const boundingClientRect = target.getBoundingClientRect();
       const intersectionRect = __krrIntersectionRect(rootBounds, boundingClientRect);
       const targetArea = boundingClientRect.width * boundingClientRect.height;

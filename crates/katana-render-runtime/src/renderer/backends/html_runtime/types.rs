@@ -88,7 +88,6 @@ pub enum HtmlRuntimeEvent {
     Input { target: HtmlNodeId },
     KeyDown { target: HtmlNodeId, key: String },
     KeyUp { target: HtmlNodeId, key: String },
-    Scroll { target: HtmlNodeId },
     Toggle { target: HtmlNodeId },
 }
 
@@ -102,7 +101,6 @@ impl HtmlRuntimeEvent {
             Self::Input { .. } => HtmlRuntimeEventKind::Input,
             Self::KeyDown { .. } => HtmlRuntimeEventKind::KeyDown,
             Self::KeyUp { .. } => HtmlRuntimeEventKind::KeyUp,
-            Self::Scroll { .. } => HtmlRuntimeEventKind::Scroll,
             Self::Toggle { .. } => HtmlRuntimeEventKind::Toggle,
         }
     }
@@ -116,7 +114,6 @@ impl HtmlRuntimeEvent {
             | Self::Input { target }
             | Self::KeyDown { target, .. }
             | Self::KeyUp { target, .. }
-            | Self::Scroll { target }
             | Self::Toggle { target } => *target,
         }
     }

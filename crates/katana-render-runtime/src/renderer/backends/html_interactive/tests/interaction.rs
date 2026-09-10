@@ -780,9 +780,9 @@ fn explicit_scroll_releases_fragment_resize_alignment() -> TestResult {
 }
 
 #[test]
-fn host_scroll_bubbles_to_window_scroll_listeners() -> TestResult {
+fn host_scroll_is_dispatched_on_window_without_bubbling_to_body() -> TestResult {
     let mut session = start(
-        "<p id=host-scroll>initial</p><div style='height: 1000px'></div><script>window.addEventListener('scroll', () => document.getElementById('host-scroll').textContent = 'received');</script>",
+        "<p id=host-scroll>initial</p><div style='height: 1000px'></div><script>document.body.addEventListener('scroll', () => document.getElementById('host-scroll').textContent += '-body'); window.addEventListener('scroll', () => document.getElementById('host-scroll').textContent += '-window');</script>",
     )?;
 
     session
@@ -792,13 +792,9 @@ fn host_scroll_bubbles_to_window_scroll_listeners() -> TestResult {
         })
         .map_err(to_string)?;
 
-    assert!(
-        session
-            .runtime
-            .snapshot()
-            .map_err(to_string)?
-            .contains(">received<")
-    );
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    assert!(snapshot.contains(">initial-window<"), "{snapshot}");
+    assert!(!snapshot.contains("-body"), "{snapshot}");
     Ok(())
 }
 
