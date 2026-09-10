@@ -177,4 +177,24 @@ mod tests {
             r#"{"x":20,"y":10,"width":20,"height":40,"top":10,"right":40,"bottom":50,"left":20}"#
         );
     }
+
+    #[test]
+    fn half_turn_layout_box_removes_trigonometric_noise() {
+        let state = HtmlDomBridgeState::new(HtmlDocument::parse("<p id=target>text</p>"));
+        let target = state.document.borrow_mut().get_element_by_id("target");
+        assert!(target.is_some());
+        let mut node_ids = target.into_iter().collect::<Vec<_>>();
+        let node_id = node_ids.remove(0);
+        state.set_layout_metrics(
+            320.0,
+            240.0,
+            0.0,
+            [(node_id, 10.0, 100.0, 40.0, 20.0, 180.0)],
+        );
+
+        assert_eq!(
+            state.bounding_client_rect_json(node_id),
+            r#"{"x":10,"y":100,"width":40,"height":20,"top":100,"right":50,"bottom":120,"left":10}"#
+        );
+    }
 }
