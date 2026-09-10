@@ -39,6 +39,25 @@ fn negative_bottom_root_margin_changes_toc_during_real_host_scroll() -> TestResu
     assert_active_anchor(&session, "two")
 }
 
+#[test]
+fn fixed_observer_geometry_is_current_when_the_scroll_handler_runs() -> TestResult {
+    let mut session = start_with_viewport(fixed_observer_document(), 160, 100)?;
+
+    session
+        .dispatch_input(HtmlBrowserInput::Scroll {
+            delta_x: 0.0,
+            delta_y: 120.0,
+        })
+        .map_err(to_string)?;
+
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    assert!(
+        snapshot.contains(r##"<p id="scroll-observed">visible</p>"##),
+        "the scroll handler must receive the fixed element's reflowed geometry: {snapshot}"
+    );
+    Ok(())
+}
+
 fn intersection_document() -> &'static str {
     r##"<style>
 html, body { margin: 0; }
@@ -73,6 +92,26 @@ const observer = new IntersectionObserver((entries) => {
   }
 }, { rootMargin: "0px 0px -80px 0px" });
 document.querySelectorAll("section").forEach((section) => observer.observe(section));
+</script>"##
+}
+
+fn fixed_observer_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#fixed { position: fixed; top: 0; width: 160px; height: 20px; }
+#spacer { height: 400px; }
+</style>
+<div id=fixed>Fixed</div><div id=spacer></div><p id=intersection></p><p id=scroll-observed></p>
+<script>
+const observer = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    document.getElementById("intersection").textContent = entry.isIntersecting ? "visible" : "hidden";
+  }
+});
+observer.observe(document.getElementById("fixed"));
+window.addEventListener("scroll", () => {
+  document.getElementById("scroll-observed").textContent = document.getElementById("intersection").textContent;
+});
 </script>"##
 }
 

@@ -11,6 +11,7 @@
 
 pub mod markdown;
 pub mod renderer;
+mod system;
 
 pub use markdown::plantuml_renderer::{
     PLANTUML_DOWNLOAD_URL, PLANTUML_JAR_CHECKSUM, PLANTUML_JAR_VERSION, PlantUmlThemeCatalog,

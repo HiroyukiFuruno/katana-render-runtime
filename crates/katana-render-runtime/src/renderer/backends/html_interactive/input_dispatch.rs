@@ -65,6 +65,10 @@ impl HtmlInteractiveSession {
         self.resize_anchor = None;
         let logical_delta = delta_y / self.viewport.device_scale_factor;
         self.scroll_y = (self.scroll_y + logical_delta).clamp(0.0, self.max_scroll());
+        let layout = self.layout()?;
+        self.hit_targets = layout.hit_targets;
+        self.element_boxes = layout.element_boxes;
+        self.content_height = layout.content_height;
         self.sync_intersection_geometry_from_current_layout()?;
         self.runtime
             .dispatch_window_scroll()
