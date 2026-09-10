@@ -43,20 +43,27 @@ pub(in super::super) fn html_rasterizer_options(markup: &str) -> usvg::Options<'
 }
 
 pub(in super::super) fn html_font_db_for_markup(markup: &str) -> Arc<usvg::fontdb::Database> {
-    html_font_cache()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get_or_load(HtmlFontRequest::from_markup(markup))
+    html_font_db_for_request(html_font_cache(), HtmlFontRequest::from_markup(markup))
 }
 
 pub(in super::super) fn html_font_db_for_text(
     font_family: &str,
     text: &str,
 ) -> Arc<usvg::fontdb::Database> {
-    html_font_cache()
+    html_font_db_for_request(
+        html_font_cache(),
+        HtmlFontRequest::from_text(font_family, text),
+    )
+}
+
+fn html_font_db_for_request(
+    cache: &Mutex<HtmlFontDatabaseCache>,
+    request: HtmlFontRequest,
+) -> Arc<usvg::fontdb::Database> {
+    cache
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get_or_load(HtmlFontRequest::from_text(font_family, text))
+        .get_or_load(request)
 }
 
 fn html_font_cache() -> &'static Mutex<HtmlFontDatabaseCache> {
@@ -128,8 +135,11 @@ fn parse_process_rss(output: std::io::Result<std::process::Output>) -> Option<us
 
 #[cfg(test)]
 mod tests {
-    use super::parse_process_rss;
+    use super::{HtmlFontDatabaseCache, html_font_db_for_request, parse_process_rss};
+    use crate::markdown::svg_rasterize::font::html::request::HtmlFontRequest;
+    use std::collections::VecDeque;
     use std::process::Command;
+    use std::sync::Mutex;
 
     #[test]
     fn process_rss_parser_rejects_command_failures_and_invalid_output()
@@ -139,6 +149,34 @@ mod tests {
 
         let invalid_utf8 = Command::new("sh").args(["-c", "printf '\\377'"]).output()?;
         assert!(parse_process_rss(Ok(invalid_utf8)).is_none());
+
+        let nonzero_status = Command::new("sh").args(["-c", "exit 1"]).output()?;
+        assert!(parse_process_rss(Ok(nonzero_status)).is_none());
         Ok(())
+    }
+
+    #[test]
+    fn font_database_helper_recovers_a_poisoned_local_cache() {
+        let cache = Mutex::new(HtmlFontDatabaseCache {
+            entries: VecDeque::new(),
+        });
+        let poison = std::panic::catch_unwind(|| {
+            let guard = match cache.lock() {
+                Ok(guard) => guard,
+                Err(_) => return,
+            };
+            drop(guard);
+            let _guard = match cache.lock() {
+                Ok(guard) => guard,
+                Err(_) => return,
+            };
+            std::panic::resume_unwind(Box::new("poison local HTML font cache"));
+        });
+        assert!(poison.is_err());
+        let database = html_font_db_for_request(
+            &cache,
+            HtmlFontRequest::from_text("Noto Sans", "cache recovery"),
+        );
+        assert!(database.faces().next().is_some());
     }
 }
