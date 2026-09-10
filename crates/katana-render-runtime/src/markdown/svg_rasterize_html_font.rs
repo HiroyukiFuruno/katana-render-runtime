@@ -112,15 +112,18 @@ pub(in super::super) fn current_process_rss_kib() -> Option<usize> {
 
 #[cfg(test)]
 fn parse_process_rss(output: std::io::Result<std::process::Output>) -> Option<usize> {
-    let output = output.ok()?;
-    output
-        .status
-        .success()
-        .then_some(output.stdout)
-        .and_then(|stdout| String::from_utf8(stdout).ok())?
-        .trim()
-        .parse()
-        .ok()
+    let output = match output {
+        Ok(output) => output,
+        Err(_) => return None,
+    };
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = match String::from_utf8(output.stdout) {
+        Ok(stdout) => stdout,
+        Err(_) => return None,
+    };
+    stdout.trim().parse().ok()
 }
 
 #[cfg(test)]
