@@ -60,9 +60,14 @@ fn html_font_db_for_request(
     cache: &Mutex<HtmlFontDatabaseCache>,
     request: HtmlFontRequest,
 ) -> Arc<usvg::fontdb::Database> {
-    cache
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    get_or_load_from_lock(cache.lock(), request)
+}
+
+fn get_or_load_from_lock(
+    lock: std::sync::LockResult<std::sync::MutexGuard<'_, HtmlFontDatabaseCache>>,
+    request: HtmlFontRequest,
+) -> Arc<usvg::fontdb::Database> {
+    lock.unwrap_or_else(|poisoned| poisoned.into_inner())
         .get_or_load(request)
 }
 
@@ -135,7 +140,7 @@ fn parse_process_rss(output: std::io::Result<std::process::Output>) -> Option<us
 
 #[cfg(test)]
 mod tests {
-    use super::{HtmlFontDatabaseCache, html_font_db_for_request, parse_process_rss};
+    use super::{HtmlFontDatabaseCache, get_or_load_from_lock, parse_process_rss};
     use crate::markdown::svg_rasterize::font::html::request::HtmlFontRequest;
     use std::collections::VecDeque;
     use std::process::Command;
@@ -160,21 +165,13 @@ mod tests {
         let cache = Mutex::new(HtmlFontDatabaseCache {
             entries: VecDeque::new(),
         });
-        let poison = std::panic::catch_unwind(|| {
-            let guard = match cache.lock() {
-                Ok(guard) => guard,
-                Err(_) => return,
-            };
-            drop(guard);
-            let _guard = match cache.lock() {
-                Ok(guard) => guard,
-                Err(_) => return,
-            };
-            std::panic::resume_unwind(Box::new("poison local HTML font cache"));
-        });
-        assert!(poison.is_err());
-        let database = html_font_db_for_request(
-            &cache,
+        let guard = match cache.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        let poisoned = Err(std::sync::PoisonError::new(guard));
+        let database = get_or_load_from_lock(
+            poisoned,
             HtmlFontRequest::from_text("Noto Sans", "cache recovery"),
         );
         assert!(database.faces().next().is_some());
