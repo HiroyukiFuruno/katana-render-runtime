@@ -18,10 +18,11 @@ fn load_system_font_paths(
 }
 
 fn requested_system_font_paths(family: &str) -> BTreeSet<PathBuf> {
-    fontconfig_font_paths(family)
-        .into_iter()
-        .filter(|path| path.is_file())
-        .collect()
+    existing_system_font_paths(fontconfig_font_paths(family))
+}
+
+fn existing_system_font_paths(paths: impl IntoIterator<Item = PathBuf>) -> BTreeSet<PathBuf> {
+    paths.into_iter().filter(|path| path.is_file()).collect()
 }
 
 fn fontconfig_font_paths(family: &str) -> BTreeSet<PathBuf> {
@@ -70,8 +71,8 @@ fn fontconfig_families_include(families: &str, requested_family: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        fontconfig_families_include, load_requested_system_font_family, load_system_font_paths,
-        parse_fontconfig_font_paths, parse_fontconfig_output,
+        existing_system_font_paths, fontconfig_families_include, load_requested_system_font_family,
+        load_system_font_paths, parse_fontconfig_font_paths, parse_fontconfig_output,
     };
     use resvg::usvg;
     use std::{
@@ -153,6 +154,18 @@ mod tests {
         load_system_font_paths(&mut database, [font]);
 
         assert!(database.faces().next().is_some());
+    }
+
+    #[test]
+    fn existing_system_font_paths_discards_missing_paths() {
+        let existing =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+        let paths = existing_system_font_paths([
+            existing.clone(),
+            PathBuf::from("/krr-font-path-that-does-not-exist.ttf"),
+        ]);
+
+        assert_eq!(paths, [existing].into_iter().collect());
     }
 
     #[test]
