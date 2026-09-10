@@ -1377,16 +1377,26 @@ fn nested_bold_inline_content_uses_its_own_intrinsic_flex_width() -> TestResult 
 </ul>"#,
     )?;
     let layout = session.layout().map_err(to_string)?;
-    for text in [
-        "Excel 帳票出力",
-        "市場レポート・キャンペーン情報",
-        "等の横断参照",
-    ] {
-        assert_svg_text_presence(&layout.svg, text, true);
-    }
-    for text in ["力", "照"] {
-        assert_svg_text_presence(&layout.svg, text, false);
-    }
+    let lines = svg_text_contents(&layout.svg);
+    assert!(
+        lines.contains(&"Excel 帳票出力".to_string()),
+        "{lines:?}\n{}",
+        layout.svg
+    );
+    assert!(lines.len() >= 5, "{lines:?}\n{}", layout.svg);
+    let wrapped = &lines[3..];
+    assert_eq!(wrapped.len(), 2, "{lines:?}\n{}", layout.svg);
+    assert_eq!(
+        wrapped.concat(),
+        "市場レポート・キャンペーン情報等の横断参照",
+        "{lines:?}\n{}",
+        layout.svg
+    );
+    assert!(
+        wrapped.iter().all(|line| line.chars().count() > 1),
+        "{lines:?}\n{}",
+        layout.svg
+    );
     Ok(())
 }
 
@@ -1615,15 +1625,6 @@ fn svg_text_contents(svg: &str) -> Vec<String> {
         remaining = &remaining[content_end + "</text>".len()..];
     }
     contents
-}
-
-fn assert_svg_text_presence(svg: &str, text: &str, expected: bool) {
-    let lines = svg_text_contents(svg);
-    assert_eq!(
-        lines.iter().any(|line| line == text),
-        expected,
-        "{text}: {lines:?}\n{svg}"
-    );
 }
 
 #[test]
