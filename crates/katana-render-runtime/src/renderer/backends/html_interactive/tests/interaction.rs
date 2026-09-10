@@ -993,8 +993,9 @@ fn assert_removed_details_target_is_reported() -> TestResult {
 }
 
 fn assert_timeout_discards_runtime_for_later_input() -> TestResult {
-    let mut session =
-        start("<input id=entry value=initial><button id=run onclick=\"for (;;) {}\">Run</button>")?;
+    let mut session = start(
+        "<input id=entry value=initial><button id=run onclick=\"for (;;) {}\">Run</button><div style='height: 1000px'></div>",
+    )?;
     click_element(&mut session, "entry")?;
     let timeout = required_error(click_element(&mut session, "run"), "handler timeout")?;
     assert!(timeout.contains("timed out"));
