@@ -10,6 +10,19 @@ pub(super) fn load_requested_system_font_family(
     let faces = system_database
         .faces()
         .map(|face| (face.families.as_slice(), &face.source));
+    load_requested_font_paths(database, faces, family);
+}
+
+fn load_requested_font_paths<'a>(
+    database: &mut usvg::fontdb::Database,
+    faces: impl IntoIterator<
+        Item = (
+            &'a [(String, usvg::fontdb::Language)],
+            &'a usvg::fontdb::Source,
+        ),
+    >,
+    family: &str,
+) {
     let paths = requested_font_paths(faces, family);
     for path in paths {
         database.load_font_source(usvg::fontdb::Source::File(path));
@@ -48,7 +61,10 @@ fn source_path(source: &usvg::fontdb::Source) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_requested_system_font_family, requested_font_paths, source_path};
+    use super::{
+        load_requested_font_paths, load_requested_system_font_family, requested_font_paths,
+        source_path,
+    };
     use resvg::usvg;
     use std::{path::PathBuf, sync::Arc};
 
@@ -90,6 +106,22 @@ mod tests {
         );
 
         assert_eq!(paths, [file_path, shared_path].into_iter().collect());
+    }
+
+    #[test]
+    fn load_requested_font_paths_registers_matching_file_sources() {
+        let families = vec![(
+            "KRR Synthetic Family".to_string(),
+            usvg::fontdb::Language::English_UnitedStates,
+        )];
+        let file = usvg::fontdb::Source::File(PathBuf::from("/tmp/krr-font.ttf"));
+        let mut database = usvg::fontdb::Database::new();
+
+        load_requested_font_paths(
+            &mut database,
+            [(families.as_slice(), &file)],
+            "krr synthetic family",
+        );
     }
 
     #[test]
