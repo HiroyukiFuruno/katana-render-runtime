@@ -1,6 +1,9 @@
 use super::*;
+use std::sync::{Arc, Barrier};
+use std::thread;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+type OpenWorker = thread::JoinHandle<Result<(), String>>;
 const TEST_VIEWPORT_WIDTH: u32 = 160;
 const TEST_VIEWPORT_HEIGHT: u32 = 120;
 
@@ -15,6 +18,47 @@ fn open_starts_the_in_process_rust_runtime() -> TestResult {
     );
     session.close()?;
     Ok(())
+}
+
+#[test]
+fn concurrent_openers_each_receive_an_initial_frame() -> TestResult {
+    const CALLERS: usize = 4;
+    join_concurrent_open_workers(start_concurrent_open_workers(CALLERS))
+}
+
+fn start_concurrent_open_workers(callers: usize) -> Vec<OpenWorker> {
+    let start = Arc::new(Barrier::new(callers));
+    (0..callers)
+        .map(|_| {
+            let start = Arc::clone(&start);
+            thread::spawn(move || concurrent_open_worker(start))
+        })
+        .collect()
+}
+
+fn join_concurrent_open_workers(workers: Vec<OpenWorker>) -> TestResult {
+    for worker in workers {
+        worker
+            .join()
+            .map_err(|_| "concurrent HtmlRuntime::open worker panicked")??;
+    }
+    Ok(())
+}
+
+fn concurrent_open_worker(start: Arc<Barrier>) -> Result<(), String> {
+    start.wait();
+    let source = HtmlBrowserSource::new("<p>cold start</p>", "https://example.test/index.html")
+        .map_err(|error| error.to_string())?;
+    let viewport = HtmlBrowserViewport::new(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT, 1.0)
+        .map_err(|error| error.to_string())?;
+    let mut session = HtmlRuntime
+        .open(source, viewport)
+        .map_err(|error| error.to_string())?;
+    let initial_generation = session.latest_frame().map(|frame| frame.generation);
+    session.close().map_err(|error| error.to_string())?;
+    (initial_generation == Some(1))
+        .then_some(())
+        .ok_or_else(|| "missing initial frame".to_string())
 }
 
 #[test]
