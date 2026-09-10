@@ -592,9 +592,12 @@ globalThis.IntersectionObserver = class IntersectionObserver {
       const configured = target.getAttribute("data-krr-intersecting");
       const isIntersecting = configured === null || configured === "true";
       const ratioValue = target.getAttribute("data-krr-intersection-ratio");
-      const intersectionRatio = ratioValue === null
-        ? (isIntersecting ? 1 : 0)
-        : Math.max(0, Math.min(1, Number(ratioValue)));
+      const intersectionRatio =
+        ratioValue === null
+          ? isIntersecting
+            ? 1
+            : 0
+          : Math.max(0, Math.min(1, Number(ratioValue)));
       return { target, isIntersecting, intersectionRatio };
     });
     const changed = entries.filter((entry) => {
