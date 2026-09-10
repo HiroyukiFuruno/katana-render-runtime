@@ -161,19 +161,20 @@ mod tests {
     }
 
     #[test]
-    fn font_database_helper_recovers_a_poisoned_local_cache() {
+    fn font_database_helper_recovers_a_poisoned_local_cache()
+    -> Result<(), Box<dyn std::error::Error>> {
         let cache = Mutex::new(HtmlFontDatabaseCache {
             entries: VecDeque::new(),
         });
-        let guard = match cache.lock() {
-            Ok(guard) => guard,
-            Err(_) => return,
-        };
+        let guard = cache
+            .lock()
+            .map_err(|_| "fresh local cache must not be poisoned")?;
         let poisoned = Err(std::sync::PoisonError::new(guard));
         let database = get_or_load_from_lock(
             poisoned,
             HtmlFontRequest::from_text("Noto Sans", "cache recovery"),
         );
         assert!(database.faces().next().is_some());
+        Ok(())
     }
 }
