@@ -103,10 +103,16 @@ pub(in super::super) fn html_font_memory_snapshot(
 #[cfg(test)]
 pub(in super::super) fn current_process_rss_kib() -> Option<usize> {
     let process_id = std::process::id().to_string();
-    let output = std::process::Command::new("ps")
-        .args(["-o", "rss=", "-p", &process_id])
-        .output()
-        .ok()?;
+    parse_process_rss(
+        std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &process_id])
+            .output(),
+    )
+}
+
+#[cfg(test)]
+fn parse_process_rss(output: std::io::Result<std::process::Output>) -> Option<usize> {
+    let output = output.ok()?;
     output
         .status
         .success()
@@ -115,4 +121,21 @@ pub(in super::super) fn current_process_rss_kib() -> Option<usize> {
         .trim()
         .parse()
         .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_process_rss;
+    use std::process::Command;
+
+    #[test]
+    fn process_rss_parser_rejects_command_failures_and_invalid_output()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let command_failure = Command::new("definitely-not-a-real-command-for-krr").output();
+        assert!(parse_process_rss(command_failure).is_none());
+
+        let invalid_utf8 = Command::new("sh").args(["-c", "printf '\\377'"]).output()?;
+        assert!(parse_process_rss(Ok(invalid_utf8)).is_none());
+        Ok(())
+    }
 }
