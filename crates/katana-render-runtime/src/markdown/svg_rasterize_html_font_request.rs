@@ -134,3 +134,22 @@ fn is_emoji_character(character: char) -> bool {
         0x2300..=0x23FF | 0x2600..=0x27BF | 0x1F000..=0x1FAFF
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{font_family_value, is_cjk_character};
+
+    #[test]
+    fn parses_css_and_bare_attribute_font_family_values() {
+        assert_eq!(
+            font_family_value("'Noto Sans'; color: red", false),
+            "Noto Sans"
+        );
+        assert_eq!(font_family_value("Arial class=label", true), "Arial");
+    }
+
+    #[test]
+    fn recognizes_the_upper_cjk_extension_boundary() {
+        assert!(is_cjk_character('\u{20000}'));
+    }
+}
