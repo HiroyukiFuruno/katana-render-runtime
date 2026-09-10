@@ -5,7 +5,14 @@ pub(super) fn load_requested_system_font_family(
     database: &mut usvg::fontdb::Database,
     family: &str,
 ) {
-    for path in requested_system_font_paths(family) {
+    load_system_font_paths(database, requested_system_font_paths(family));
+}
+
+fn load_system_font_paths(
+    database: &mut usvg::fontdb::Database,
+    paths: impl IntoIterator<Item = PathBuf>,
+) {
+    for path in paths {
         database.load_font_source(usvg::fontdb::Source::File(path));
     }
 }
@@ -63,7 +70,7 @@ fn fontconfig_families_include(families: &str, requested_family: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        fontconfig_families_include, load_requested_system_font_family,
+        fontconfig_families_include, load_requested_system_font_family, load_system_font_paths,
         parse_fontconfig_font_paths, parse_fontconfig_output,
     };
     use resvg::usvg;
@@ -116,6 +123,36 @@ mod tests {
             "courier new",
         );
         assert!(invalid_utf8.is_empty());
+    }
+
+    #[test]
+    fn fontconfig_output_selects_an_exact_family_from_a_successful_process() {
+        let paths = parse_fontconfig_output(
+            Ok(Output {
+                status: ExitStatus::default(),
+                stdout: b"Courier New\t/tmp/courier-new.ttf\n".to_vec(),
+                stderr: Vec::new(),
+            }),
+            "courier new",
+        );
+
+        assert_eq!(
+            paths,
+            [PathBuf::from("/tmp/courier-new.ttf")]
+                .into_iter()
+                .collect()
+        );
+    }
+
+    #[test]
+    fn system_font_path_loader_registers_a_known_bundled_font() {
+        let font =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+        let mut database = usvg::fontdb::Database::new();
+
+        load_system_font_paths(&mut database, [font]);
+
+        assert!(database.faces().next().is_some());
     }
 
     #[test]
