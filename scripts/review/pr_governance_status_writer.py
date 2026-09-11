@@ -2009,6 +2009,73 @@ def governance_order(snapshot: OpenSnapshot, carry: frozenset[int], priority: tu
     )
 
 
+def terminalize_initial_evidence_failure(
+    snapshot: OpenSnapshot, numbers: tuple[int, ...], claimants: dict[str, frozenset[int]],
+) -> None:
+    """Close each reserved all-scope Check Run when the shared read window expires.
+
+    The initial snapshot intentionally has a short, shared deadline: allowing
+    a pathological exact-head history to hold the terminal writer indefinitely
+    would consume its finite writer window.  The dispatcher has already
+    created and identity-bound one pending Check Run for every all-scope
+    target, so an expired read window is sufficient evidence for a terminal
+    failure, never for a pending retry.  Drafts remain non-terminal by design.
+    """
+    if (
+        not isinstance(numbers, tuple) or not numbers
+        or len(numbers) > MAX_TERMINAL_BATCH or len(set(numbers)) != len(numbers)
+        or any(type(number) is not int or number < 1 for number in numbers)
+    ):
+        raise GovernanceError("Initial evidence failure target boundary is invalid.")
+    targets: dict[int, dict[str, object]] = {}
+    for pull_request in snapshot.pull_requests:
+        number = pull_request.get("number")
+        head = pull_request.get("head_sha")
+        draft = pull_request.get("isDraft")
+        if number in numbers:
+            if (
+                type(number) is not int or not isinstance(head, str)
+                or SHA.fullmatch(head) is None or type(draft) is not bool
+                or number in targets
+            ):
+                raise GovernanceError("Initial evidence failure target is invalid.")
+            targets[number] = pull_request
+    if set(targets) != set(numbers):
+        raise GovernanceError("Initial evidence failure target snapshot is incomplete.")
+    # All-scope invalidation reserved exactly one PATCH per non-Draft target.
+    # Refuse any future change that would turn this failure recovery into an
+    # unbudgeted burst before issuing a single terminal mutation.
+    terminal_numbers = tuple(
+        number for number in numbers if not targets[number]["isDraft"]
+    )
+    if len(terminal_numbers) > MAX_TERMINAL_BATCH:
+        raise GovernanceError("Initial evidence failure exceeds terminal write budget.")
+    empty_evidence = EvidenceSnapshot({}, {}, {})
+    for number in terminal_numbers:
+        try:
+            target = targets[number]
+            head = target["head_sha"]
+            if not isinstance(head, str):  # Defensive type narrowing for the mapping above.
+                raise GovernanceError("Initial evidence failure target is invalid.")
+            baseline = check_baseline(head)
+            if not baseline:
+                raise NoPostGovernanceError("Reserved all-open Check Run is missing.")
+            decision = PendingDecision(
+                number, head, "", baseline, "failure",
+                "Trusted PR governance failed closed.", None, None, None, "",
+            )
+            if decision_write_cost(decision) != 1:
+                raise GovernanceError("Initial evidence failure terminal write cost is invalid.")
+            # A changed fingerprint belongs to a later invalidator; do not let an
+            # expired writer overwrite it.  Its newer generation owns the barrier.
+            finalize_decision(decision, claimants, empty_evidence)
+        except GovernanceError as error:
+            # One changed Check Run must not strand unrelated reservations in
+            # this bounded segment.  The changed target remains owned by its
+            # newer writer; every other target still receives its own fence.
+            print(f"PR #{number}: initial evidence failure was not terminalized: {error}", file=sys.stderr)
+
+
 def main() -> int:
     global _terminal_deadline_monotonic
     if not REPOSITORY or not SERVER_URL or not NUMBER.fullmatch(WRITER_RUN_ID):
@@ -2173,6 +2240,13 @@ def main() -> int:
         initial_evidence = evidence_snapshot(scoped_snapshot, numbers_to_process)
     except GovernanceError as error:
         print(str(error), file=sys.stderr)
+        if scope == "all" and os.environ.get("GITHUB_ACTIONS") == "true":
+            try:
+                terminalize_initial_evidence_failure(
+                    scoped_snapshot, numbers_to_process, snapshot.claimants,
+                )
+            except GovernanceError as terminal_error:
+                print(f"Initial evidence failure could not be terminalized: {terminal_error}", file=sys.stderr)
         return 1
     failures = 0
     # Do not make one malformed/changed PR leave other open PRs stale.

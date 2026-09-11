@@ -3211,6 +3211,39 @@ class StatusWriterUnitTest(unittest.TestCase):
         )
         self.assertIsNone(WRITER._active_initial_evidence_deadline)
 
+    def test_initial_evidence_deadline_terminalizes_maximum_all_scope_non_drafts(self) -> None:
+        """An expired shared read window cannot strand 125 dispatcher barriers."""
+        numbers = tuple(range(1, WRITER.MAX_TERMINAL_BATCH + 1))
+        snapshot = self.snapshot(numbers, drafts=frozenset({numbers[-1]}))
+        finalized: list[WRITER.PendingDecision] = []
+
+        def baseline(head: str) -> tuple[str]:
+            return (head,)
+
+        def finalize(
+            decision: WRITER.PendingDecision,
+            claimants: dict[str, frozenset[int]],
+            evidence: WRITER.EvidenceSnapshot,
+        ) -> bool:
+            self.assertEqual(claimants, {})
+            self.assertEqual((evidence.sensor_runs, evidence.workflow_ids, evidence.workflow_runs), ({}, {}, {}))
+            finalized.append(decision)
+            return True
+
+        with patch.object(WRITER, "check_baseline", side_effect=baseline), \
+             patch.object(WRITER, "finalize_decision", side_effect=finalize):
+            WRITER.terminalize_initial_evidence_failure(snapshot, numbers, {})
+
+        self.assertEqual([decision.number for decision in finalized], list(numbers[:-1]))
+        self.assertTrue(all(
+            decision.state == "failure"
+            and decision.description == "Trusted PR governance failed closed."
+            and decision.sensor_id is None
+            and decision.generations is None
+            and decision.issue is None
+            for decision in finalized
+        ))
+
     def test_contract_verifiers_receive_only_the_read_token(self) -> None:
         class Result:
             returncode = 0
