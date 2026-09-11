@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -607,6 +608,141 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
             self.assertIsNone(reader())
             self.assertEqual(reader(), [])
         self.assertEqual(calls, [(1, False), (2, True), (1, False), (2, True), (1, False)])
+
+    def test_sensor_waits_for_a_newer_source_bound_generation_after_terminal_failure(self) -> None:
+        """A resolved thread can be repaired only by a later dispatcher generation."""
+
+        match = re.search(
+            r"(?ms)^      - name: Await matching trusted governance Check Run\n.*?^          python3 - <<'PY'\n(.*?)^          PY$",
+            self.sensor,
+        )
+        self.assertIsNotNone(match)
+        assert match is not None
+        program = textwrap.dedent(match.group(1))
+        head, base = "a" * 40, "b" * 40
+        repository = "owner/repo"
+        repository_identity = {
+            "id": 101,
+            "name": "repo",
+            "url": f"https://api.github.com/repos/{repository}",
+            "full_name": repository,
+        }
+        source = {
+            "id": 17,
+            "name": "PR governance review sensor",
+            "event": "pull_request_review",
+            "path": ".github/workflows/pr-governance-review-events.yml@master",
+            "head_sha": head,
+            "status": "in_progress",
+            "conclusion": None,
+            "run_attempt": 1,
+            "run_number": 4,
+            "repository": repository_identity,
+            "pull_requests": [{
+                "number": 72,
+                "base": {"sha": base, "ref": "master", "repo": repository_identity},
+                "head": {"sha": head, "repo": repository_identity},
+            }],
+        }
+
+        def check(identifier: int, writer: int, *, conclusion: str, external_id: str) -> dict[str, object]:
+            return {
+                "id": identifier,
+                "name": "KRR / PR governance (trusted check)",
+                "app": {"id": 4766933},
+                "head_sha": head,
+                "external_id": external_id,
+                "details_url": f"https://github.com/{repository}/actions/runs/{writer}?source_run_id=17",
+                "status": "completed",
+                "conclusion": conclusion,
+            }
+
+        failed = check(1, 91, conclusion="failure", external_id=f"krr-governance/v1/{head}/writer-91")
+        recovered = check(2, 92, conclusion="success", external_id=f"krr-governance/v1/{head}/dispatcher-93")
+        check_reads = 0
+        history_retained = True
+
+        def response(arguments: list[str], payload: object) -> subprocess.CompletedProcess[str]:
+            raw = json.dumps(payload)
+            if "--include" in arguments:
+                raw = "HTTP/2 200 OK\n\n" + raw
+            return subprocess.CompletedProcess(arguments, 0, raw, "")
+
+        def fake_run(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            nonlocal check_reads
+            endpoint = arguments[-1]
+            if endpoint == f"repos/{repository}":
+                return response(arguments, repository_identity)
+            if endpoint == f"repos/{repository}/actions/runs/17":
+                return response(arguments, source)
+            if "/check-runs?" in endpoint:
+                check_reads += 1
+                checks = [failed] if check_reads <= 2 else ([failed, recovered] if history_retained else [recovered])
+                return response(arguments, {"total_count": len(checks), "check_runs": checks})
+            if endpoint == f"repos/{repository}/actions/runs/92":
+                return response(arguments, {
+                    "id": 92,
+                    "name": "PR governance status writer",
+                    "event": "workflow_dispatch",
+                    "path": ".github/workflows/pr-governance-status-writer.yml@master",
+                    "repository": repository_identity,
+                    "run_attempt": 1,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "display_title": "source=93 scope=all segment=1",
+                    "head_branch": "master",
+                    "head_sha": base,
+                })
+            if endpoint == f"repos/{repository}/actions/runs/93":
+                return response(arguments, {
+                    "id": 93,
+                    "name": "PR governance dispatcher",
+                    "event": "issues",
+                    "path": ".github/workflows/pr-governance.yml@master",
+                    "repository": repository_identity,
+                    "head_branch": "master",
+                    "head_sha": base,
+                    "run_attempt": 1,
+                    "run_number": 9,
+                    "status": "completed",
+                    "conclusion": "success",
+                })
+            raise AssertionError(f"Unexpected endpoint: {endpoint}")
+
+        environment = {
+            "HEAD_SHA": head,
+            "PR_NUMBER": "72",
+            "PR_BASE_SHA": base,
+            "PR_BASE_REF": "master",
+            "DEFAULT_BRANCH": "master",
+            "SOURCE_RUN_ID": "17",
+            "CHECK_APP_ID": "4766933",
+            "POLL_INTERVAL_SECONDS": "60",
+            "POLL_TIMEOUT_SECONDS": "5400",
+            "GITHUB_REPOSITORY": repository,
+            "GITHUB_SERVER_URL": "https://github.com",
+        }
+        with patch.dict(os.environ, environment, clear=False), patch.object(
+            subprocess, "run", side_effect=fake_run,
+        ), patch.object(time, "sleep") as sleep:
+            with self.assertRaises(SystemExit) as completed:
+                exec(program, {"__name__": "__main__"})
+        self.assertEqual(completed.exception.code, 0)
+        self.assertEqual(check_reads, 4)
+        self.assertEqual(sleep.call_count, 3)
+
+        # A mutable Check Run cannot rewrite the observed failure into success:
+        # only a greater writer generation may release the latch.
+        check_reads = 0
+        history_retained = False
+        recovered = check(1, 91, conclusion="success", external_id=f"krr-governance/v1/{head}/writer-91")
+        with patch.dict(os.environ, environment, clear=False), patch.object(
+            subprocess, "run", side_effect=fake_run,
+        ), patch.object(time, "sleep"):
+            with self.assertRaises(SystemExit) as rejected:
+                exec(program, {"__name__": "__main__"})
+        self.assertEqual(rejected.exception.code, 1)
+        self.assertEqual(check_reads, 4)
 
 
 class GovernanceDispatcherFailClosedContractTest(unittest.TestCase):

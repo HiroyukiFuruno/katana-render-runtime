@@ -174,15 +174,12 @@ jobs:
       - name: Bind resolver-failure barrier to trusted default workflow source
         id: source
         env:
-          GH_TOKEN: ${{ github.token }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
           python3 - <<'PY'
-          import json
           import os
           import re
-          import subprocess
 
           repository = os.environ["GITHUB_REPOSITORY"]
           workflow_ref = os.environ.get("WORKFLOW_REF", "")
@@ -200,28 +197,6 @@ jobs:
               or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
           ):
               raise SystemExit("Resolver-failure barrier workflow source is invalid.")
-          source_env={"GH_TOKEN":os.environ.get("GH_TOKEN", ""),"PATH":os.environ["PATH"]}
-          if not source_env["GH_TOKEN"]:
-              raise SystemExit("Resolver-failure barrier source token is invalid.")
-          repository_result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}"],capture_output=True,text=True,check=False,env=source_env, timeout=20)
-          reference_result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/git/ref/heads/{branch}"],capture_output=True,text=True,check=False,env=source_env, timeout=20)
-          if repository_result.returncode!=0 or reference_result.returncode!=0:
-              raise SystemExit("Unable to bind resolver-failure barrier default branch source.")
-          try:
-              current_branch=json.loads(repository_result.stdout).get("default_branch"); current_head=json.loads(reference_result.stdout).get("object",{}).get("sha")
-          except json.JSONDecodeError as error:
-              raise SystemExit("Resolver-failure barrier default branch source is not JSON.") from error
-          if current_branch!=branch or not isinstance(current_head,str) or current_head.lower()!=workflow_sha.lower():
-              raise SystemExit("Resolver-failure barrier default branch source changed.")
-          blob_result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/contents/.github/workflows/pr-governance.yml?ref={workflow_sha}"],capture_output=True,text=True,check=False,env=source_env, timeout=20)
-          if blob_result.returncode!=0:
-              raise SystemExit("Unable to bind resolver-failure barrier workflow blob.")
-          try:
-              blob=json.loads(blob_result.stdout).get("sha")
-          except json.JSONDecodeError as error:
-              raise SystemExit("Resolver-failure barrier workflow blob is not JSON.") from error
-          if not isinstance(blob,str) or re.fullmatch(r"[0-9a-fA-F]{40}",blob) is None:
-              raise SystemExit("Resolver-failure barrier workflow blob is invalid.")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"default_branch={branch}\n")
               output.write(f"default_head={workflow_sha.lower()}\n")
@@ -365,6 +340,48 @@ jobs:
           response=mutate("PATCH"); after=request([protection_endpoint]); _after_required,after_records=records(after)
           if response is None or canonical(response)!=canonical(expected_required) or after_records!=expected_records or canonical(after)!=canonical(expected):
               raise SystemExit("Resolver-failure barrier atomic activation failed; manual recovery is required.")
+          PY
+
+      - name: Verify resolver-failure barrier source after activation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ steps.source.outputs.default_branch }}
+          DEFAULT_HEAD: ${{ steps.source.outputs.default_head }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+
+          repository=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); head=os.environ.get("DEFAULT_HEAD", ""); workflow_ref=os.environ.get("WORKFLOW_REF", ""); workflow_sha=os.environ.get("WORKFLOW_SHA", "")
+          prefix=f"{repository}/.github/workflows/pr-governance.yml@refs/heads/"
+          if (re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",repository) is None or re.fullmatch(r"[A-Za-z0-9._/-]+",branch) is None or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or workflow_ref!=prefix+branch or workflow_sha.lower()!=head.lower()):
+              raise SystemExit("Resolver-failure barrier workflow source is invalid.")
+          source_env={"GH_TOKEN":os.environ.get("GH_TOKEN", ""),"PATH":os.environ["PATH"]}
+          if not source_env["GH_TOKEN"]:
+              raise SystemExit("Resolver-failure barrier source token is invalid.")
+          repository_result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}"],capture_output=True,text=True,check=False,env=source_env, timeout=20)
+          reference_result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/git/ref/heads/{branch}"],capture_output=True,text=True,check=False,env=source_env, timeout=20)
+          if repository_result.returncode!=0 or reference_result.returncode!=0:
+              raise SystemExit("Unable to verify resolver-failure barrier default branch source.")
+          try:
+              current_branch=json.loads(repository_result.stdout).get("default_branch"); current_head=json.loads(reference_result.stdout).get("object",{}).get("sha")
+          except json.JSONDecodeError as error:
+              raise SystemExit("Resolver-failure barrier default branch source is not JSON.") from error
+          if current_branch!=branch or not isinstance(current_head,str) or current_head.lower()!=head.lower():
+              raise SystemExit("Resolver-failure barrier default branch source changed.")
+          blob_result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/contents/.github/workflows/pr-governance.yml?ref={head}"],capture_output=True,text=True,check=False,env=source_env, timeout=20)
+          if blob_result.returncode!=0:
+              raise SystemExit("Unable to verify resolver-failure barrier workflow blob.")
+          try:
+              blob=json.loads(blob_result.stdout).get("sha")
+          except json.JSONDecodeError as error:
+              raise SystemExit("Resolver-failure barrier workflow blob is not JSON.") from error
+          if not isinstance(blob,str) or re.fullmatch(r"[0-9a-fA-F]{40}",blob) is None:
+              raise SystemExit("Resolver-failure barrier workflow blob is invalid.")
           PY
 
       - name: Fail closed after classification barrier activation

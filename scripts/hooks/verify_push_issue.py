@@ -234,6 +234,23 @@ def pushed_branch_updates(
     return tuple(targets)
 
 
+def pushed_default_branch_sha(
+    updates: Sequence[tuple[str, str, str, str]],
+    *,
+    default_branch: str,
+) -> str | None:
+    """Return the local tip when this push also updates the default branch."""
+    candidates = [
+        local_sha
+        for _local_ref, local_sha, remote_ref, _remote_sha in updates
+        if local_sha != _ZERO_SHA
+        and remote_ref == f"refs/heads/{default_branch}"
+    ]
+    if len(candidates) > 1:
+        raise ContractViolation("pre-push default branch updateが重複しています")
+    return candidates[0] if candidates else None
+
+
 def issue_numbers(message: str, repository: str) -> set[int]:
     expected_repository = repository.casefold()
     numbers = {
@@ -1127,6 +1144,10 @@ def main() -> int:
             pushed_remote_url=pushed_remote_url,
             repository_name=repository_name,
         )
+        default_range_base = pushed_default_branch_sha(
+            updates,
+            default_branch=default_branch,
+        ) or default_ref
         push_updates = pushed_branch_updates(updates, default_branch=default_branch)
         validation_targets = list(push_updates) if push_updates else []
         if not validation_targets and not push_input.strip() and branch != default_branch:
@@ -1156,7 +1177,7 @@ def main() -> int:
                 "--reverse",
                 "-z",
                 "--format=%B",
-                f"{default_ref}..{target_revision}",
+                f"{default_range_base}..{target_revision}",
             )
             commit_messages = parse_commit_messages(commit_output)
             changed_output = _run_git(
@@ -1167,7 +1188,7 @@ def main() -> int:
                 "--find-renames",
                 "--find-copies",
                 "--find-copies-harder",
-                f"{default_ref}...{target_revision}",
+                f"{default_range_base}...{target_revision}",
             )
             changed_paths = parse_name_status_paths(changed_output)
             for message in commit_messages:

@@ -509,6 +509,13 @@ jobs:
                   fail("Multiple trusted governance Check Runs match the newest sensor generation.")
               return newest
 
+          def source_bound_generation(check: dict[str, object]) -> int:
+              """Return the immutable writer generation of a source-bound Check Run."""
+              writer_run_id = details_writer_run_id(check.get("details_url"))
+              if writer_run_id is None:
+                  fail("Trusted governance Check Run writer generation is invalid.")
+              return int(writer_run_id)
+
           def source_bound_trusted_check_runs() -> list[dict[str, object]] | None:
               # A one-page snapshot needs its Link fence on the final anchor.
               # Request the headers without prematurely rejecting a normal
@@ -580,6 +587,7 @@ jobs:
           ):
               fail("Sensor source run is invalid.")
 
+          failed_generation = 0
           while True:
               matches = source_bound_trusted_check_runs()
               if matches is None:
@@ -589,10 +597,11 @@ jobs:
                   continue
               if matches:
                   terminal = matches[0]
+                  terminal_generation = source_bound_generation(terminal)
                   if terminal.get("status") == "completed" and terminal.get("conclusion") == "success":
-                      writer_run_id = details_writer_run_id(terminal.get("details_url"))
-                      if writer_run_id is None:
-                          fail("Trusted governance Check Run writer generation is invalid.")
+                      if terminal_generation <= failed_generation:
+                          fail("Trusted governance Check Run did not advance after terminal failure.")
+                      writer_run_id = str(terminal_generation)
                       if repository_rest_identity(
                           api_json(f"repos/{repository}", "Repository REST identity is invalid.")
                       ) != repository_identity:
@@ -633,7 +642,10 @@ jobs:
                           fail("Trusted governance Check Run writer generation is invalid.")
                       raise SystemExit(0)
                   if terminal.get("status") == "completed":
-                      fail("Trusted governance publisher reported failure.")
+                      # Review-thread resolution does not emit an Actions event.
+                      # Keep the required latch pending until a fresh trusted
+                      # dispatcher/writer generation records the repaired state.
+                      failed_generation = max(failed_generation, terminal_generation)
 
               if time.monotonic() >= deadline:
                   fail("Timed out waiting for a matching trusted governance Check Run.")

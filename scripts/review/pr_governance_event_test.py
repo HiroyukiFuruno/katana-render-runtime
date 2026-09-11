@@ -4093,8 +4093,13 @@ raise SystemExit(91)
             self.workflow,
             re.DOTALL,
         )
-        self.assertIsNotNone(resolver); self.assertIsNotNone(activate); self.assertIsNotNone(source)
-        assert resolver is not None and activate is not None and source is not None
+        verify_source = re.search(
+            r"- name: Verify resolver-failure barrier source after activation.*?python3 - <<'PY'\n(.*?)\n          PY",
+            self.workflow,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(resolver); self.assertIsNotNone(activate); self.assertIsNotNone(source); self.assertIsNotNone(verify_source)
+        assert resolver is not None and activate is not None and source is not None and verify_source is not None
         self.assertIn("needs: establish-resolver-failure-barrier", self.workflow)
         self.assertIn("if: needs.resolve_event.outputs.reconcile == 'true'", self.workflow)
         resolver_job = self.workflow[
@@ -4120,7 +4125,11 @@ raise SystemExit(91)
         self.assertNotIn("actions/checkout", job)
         self.assertNotIn("github.event.pull_request", job)
         self.assertIn("repos/{repository}/git/ref/heads/{branch}", job)
-        self.assertIn("contents/.github/workflows/pr-governance.yml?ref={workflow_sha}", job)
+        self.assertIn("contents/.github/workflows/pr-governance.yml?ref={head}", job)
+        activation_position = job.index("- name: Activate resolver-failure merge barrier")
+        verification_position = job.index("- name: Verify resolver-failure barrier source after activation")
+        self.assertLess(activation_position, verification_position)
+        self.assertNotIn("subprocess.run", source.group(1))
         for step in (
             "Create resolver-failure barrier marker write token",
             "Create resolver-failure barrier marker read token",
@@ -4218,13 +4227,6 @@ raise SystemExit(91)
                 exec(self._workflow_program(source), {"__name__": "__main__"})
             source_values = dict(line.split("=", 1) for line in source_output.read_text(encoding="utf-8").splitlines())
             self.assertEqual(source_values, {"default_branch": "master", "default_head": "a" * 40})
-            source_state["head"] = "c" * 40
-            changed_source_output = directory / "changed-source-output"
-            with patch.dict(os.environ, source_environment | {"GITHUB_OUTPUT": str(changed_source_output)}, clear=True), patch("subprocess.run", side_effect=fake_source_run):
-                with self.assertRaises(SystemExit):
-                    exec(self._workflow_program(source), {"__name__": "__main__"})
-            self.assertFalse(changed_source_output.exists())
-
             activation_environment = {
                 "GITHUB_REPOSITORY": "owner/repository", "PATH": os.environ["PATH"],
                 "ADMIN_TOKEN": "admin", "DEFAULT_BRANCH": "master", "CHECK_APP_ID": "4766933",
@@ -4235,6 +4237,33 @@ raise SystemExit(91)
             records = protection["checks"]; self.assertIsInstance(records, list)
             self.assertIn({"context": barrier, "app_id": 4_766_933}, records)
             self.assertNotEqual({entry["context"] for entry in records}, {"CI / test"})
+
+            verification_environment = {
+                "GITHUB_REPOSITORY": "owner/repository", "GH_TOKEN": "source", "PATH": os.environ["PATH"],
+                "DEFAULT_BRANCH": "master", "DEFAULT_HEAD": "a" * 40,
+                "WORKFLOW_REF": "owner/repository/.github/workflows/pr-governance.yml@refs/heads/master",
+                "WORKFLOW_SHA": "a" * 40,
+            }
+            with patch.dict(os.environ, verification_environment, clear=True), patch("subprocess.run", side_effect=fake_source_run):
+                exec(self._workflow_program(verify_source), {"__name__": "__main__"})
+
+            source_state["head"] = "c" * 40
+            with patch.dict(os.environ, verification_environment, clear=True), patch("subprocess.run", side_effect=fake_source_run):
+                with self.assertRaises(SystemExit):
+                    exec(self._workflow_program(verify_source), {"__name__": "__main__"})
+            source_state["head"] = "a" * 40
+
+            def timeout_source_run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                self.assertEqual(route(arguments), "repos/owner/repository")
+                raise subprocess.TimeoutExpired(arguments, 20)
+
+            # Default-branch lookup is deliberately after activation: a timeout
+            # cannot preserve a former trusted or latch success without this
+            # App-bound required context.
+            with patch.dict(os.environ, verification_environment, clear=True), patch("subprocess.run", side_effect=timeout_source_run):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    exec(self._workflow_program(verify_source), {"__name__": "__main__"})
+            self.assertEqual(state["mutations"], ["ACTIVATE"])
 
             # Failure injection happens only after the barrier mutation. The
             # resolver has no output and the downstream job's `needs`/`if`

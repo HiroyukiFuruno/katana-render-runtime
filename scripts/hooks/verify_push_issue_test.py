@@ -623,6 +623,30 @@ class VerifyPushIssueTest(unittest.TestCase):
         )
         self.assertEqual(updates, (("feature-a", "a" * 40), ("feature-b", "b" * 40)))
 
+    def test_pushed_default_branch_sha_uses_local_tip_for_combined_push(self) -> None:
+        local_master_sha = "c" * 40
+        self.assertEqual(
+            subject.pushed_default_branch_sha(
+                (
+                    ("refs/heads/master", local_master_sha, "refs/heads/master", "a" * 40),
+                    ("refs/heads/feature", "d" * 40, "refs/heads/feature", "b" * 40),
+                ),
+                default_branch="master",
+            ),
+            local_master_sha,
+        )
+
+    def test_pushed_default_branch_sha_ignores_delete_and_other_branches(self) -> None:
+        self.assertIsNone(
+            subject.pushed_default_branch_sha(
+                (
+                    ("refs/heads/master", "0" * 40, "refs/heads/master", "a" * 40),
+                    ("refs/heads/feature", "d" * 40, "refs/heads/feature", "b" * 40),
+                ),
+                default_branch="master",
+            )
+        )
+
     def issue(
         self,
         number: int = 64,
