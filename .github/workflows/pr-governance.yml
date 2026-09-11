@@ -688,14 +688,19 @@ jobs:
               [number, *target_snapshots[number]]
               for number in all_invalidation_targets
           ]
-          # Every Check Run generation is scoped to a head.  Split the
-          # pre/all invalidators by distinct head, not by PR number: this
-          # preserves uniqueness even while a malformed shared head is being
-          # fail-closed.  Each 300-head chunk takes at most ~40.5 minutes at
-          # the Check Run pace, safely inside one App-token lifetime.  The
-          # 450-head bound is operational, not an enumeration bound: target
-          # discovery must still finish and publish the default-branch output
-          # so the global merge barrier can be activated before this run stops.
+          # Every Check Run generation is scoped to a head.  The priority
+          # pre-invalidator and the all-open invalidator share the same run
+          # budget, so cap their distinct-head union before either is split.
+          # This preserves uniqueness even while a malformed shared head is
+          # being fail-closed.  The 450-head bound is operational, not an
+          # enumeration bound: target discovery must still finish and publish
+          # the default-branch output so the global merge barrier can be
+          # activated before this run stops.
+          invalidation_governed_heads = {
+              target_snapshots[number][0]
+              for number in preinvalidate_targets + all_invalidation_targets
+          }
+          invalidation_head_cap_exceeded = len(invalidation_governed_heads) > 450
           def chunks_by_head(numbers):
               chunks = [[], []]
               positions = {}
@@ -703,15 +708,19 @@ jobs:
                   head = target_snapshots[number][0]
                   position = positions.get(head)
                   if position is None:
-                      if len(positions) >= 450:
-                          return [[], []], True
                       position = 0 if sum(1 for value in positions.values() if value == 0) < 300 else 1
                       positions[head] = position
                   chunks[position].append(number)
-              return chunks, False
-          pre_chunks, pre_head_cap_exceeded = chunks_by_head(preinvalidate_targets)
-          all_chunks, all_head_cap_exceeded = chunks_by_head(all_invalidation_targets)
-          invalidation_head_cap_exceeded = pre_head_cap_exceeded or all_head_cap_exceeded
+              return chunks
+          if invalidation_head_cap_exceeded:
+              # Do not publish a partial invalidation manifest: the active
+              # affected-head barrier remains fail-closed until a complete
+              # later reconciliation can govern every distinct head.
+              pre_chunks = [[], []]
+              all_chunks = [[], []]
+          else:
+              pre_chunks = chunks_by_head(preinvalidate_targets)
+              all_chunks = chunks_by_head(all_invalidation_targets)
           pre_chunk_snapshots = [
               [[number, *priority_identity_snapshots[number]] for number in chunk]
               for chunk in pre_chunks

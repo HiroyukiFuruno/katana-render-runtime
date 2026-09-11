@@ -182,6 +182,24 @@ class CleanupReleaseStateTest(unittest.TestCase):
         self.assertTrue(worktree.exists())
         self.assertTrue(self.remote_branch_exists("release/v9.9.9"))
 
+    def test_retains_linked_worktree_with_ignored_files(self) -> None:
+        self.create_release_branch(merge=True)
+        worktree = self.root / "release-worktree"
+        self.git("worktree", "add", str(worktree), "release/v9.9.9", cwd=self.repository)
+        exclude = Path(
+            self.git("rev-parse", "--git-path", "info/exclude", cwd=worktree).stdout.strip()
+        )
+        exclude.write_text("local-data/\n", encoding="utf-8")
+        (worktree / "local-data").mkdir()
+        (worktree / "local-data" / "state.json").write_text("local\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(subject.CleanupError, "dirty"):
+            self.cleanup()
+
+        self.assertTrue(worktree.exists())
+        self.assertTrue((worktree / "local-data" / "state.json").exists())
+        self.assertTrue(self.remote_branch_exists("release/v9.9.9"))
+
     def test_removes_clean_merged_linked_worktree(self) -> None:
         self.create_release_branch(merge=True)
         worktree = self.root / "release-worktree"

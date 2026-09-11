@@ -384,6 +384,17 @@ class VerifyPrReadyTest(unittest.TestCase):
     def test_accepts_two_phase_review_on_current_head(self) -> None:
         self.assertEqual(self.errors(), [])
 
+    def test_allow_ready_rejects_draft_pull_request(self) -> None:
+        pull_request, threads, comments = successful_state()
+        errors = subject.readiness_errors(
+            pull_request,
+            threads,
+            comments,
+            review_bot=BOT,
+            require_draft=False,
+        )
+        self.assertIn("Ready PR でのみ readiness gate を実行できます", errors)
+
     def test_accepts_actual_shaped_codex_formal_reviews(self) -> None:
         pull_request, threads, comments = successful_state()
         actual_shape = (
@@ -2019,6 +2030,24 @@ class VerifyPrReadyTest(unittest.TestCase):
                     initial_required_checks=required,
                     initial_issue_identity=(),
                     initial_closers=frozenset(),
+                )
+
+    def test_final_snapshot_rejects_ready_check_when_pr_returns_to_draft(self) -> None:
+        final_snapshot, _, _ = successful_state()
+        with patch.object(subject, "_gh_json", return_value=final_snapshot):
+            with self.assertRaisesRegex(ValueError, "expected Ready"):
+                subject._verify_final_readiness_snapshot_unchanged(
+                    repository="owner/repo",
+                    pull_request=72,
+                    initial_base="c" * 40,
+                    initial_head=HEAD,
+                    initial_base_branch="master",
+                    initial_body=BODY,
+                    initial_updated_at="2026-08-29T03:03:00Z",
+                    initial_required_checks=((), ()),
+                    initial_issue_identity=(),
+                    initial_closers=frozenset(),
+                    expected_is_draft=False,
                 )
 
     def test_main_rechecks_app_bound_producer_before_and_after_readiness(self) -> None:

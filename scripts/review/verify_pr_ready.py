@@ -1603,6 +1603,8 @@ def readiness_errors(
         raise TypeError("pull request isDraft must be a boolean")
     if require_draft and not is_draft:
         errors.append("Draft PR でのみ readiness gate を実行できます")
+    elif not require_draft and is_draft:
+        errors.append("Ready PR でのみ readiness gate を実行できます")
 
     status_rollup = pull_request["statusCheckRollup"]
     errors.extend(_status_check_rollup_errors(status_rollup, required_checks))
@@ -1878,6 +1880,7 @@ def _verify_final_readiness_snapshot_unchanged(
     initial_issue_identity: tuple[tuple[int, str, str, str, str], ...],
     initial_closers: frozenset[int],
     open_pull_requests: Sequence[Mapping[str, object]] | None = None,
+    expected_is_draft: bool | None = None,
 ) -> None:
     """Fence every mutable input that justified a successful readiness result."""
 
@@ -1888,13 +1891,14 @@ def _verify_final_readiness_snapshot_unchanged(
         "--repo",
         repository,
         "--json",
-        "baseRefOid,headRefOid,baseRefName,body,updatedAt,statusCheckRollup",
+        "isDraft,baseRefOid,headRefOid,baseRefName,body,updatedAt,statusCheckRollup",
     )
     if not isinstance(payload, dict):
         raise TypeError("pull request final snapshot response must be an object")
     current_base = payload.get("baseRefOid")
     current_head = payload.get("headRefOid")
     current_base_branch = payload.get("baseRefName")
+    current_is_draft = payload.get("isDraft")
     current_body = payload.get("body")
     current_updated_at = _required_timestamp_text(
         payload.get("updatedAt"), "pull request updatedAt"
@@ -1907,6 +1911,11 @@ def _verify_final_readiness_snapshot_unchanged(
         raise TypeError("pull request baseRefOid/headRefOid/baseRefName must be strings")
     if not isinstance(current_body, str):
         raise TypeError("pull request body must be a string")
+    if not isinstance(current_is_draft, bool):
+        raise TypeError("pull request isDraft must be a boolean")
+    if expected_is_draft is not None and current_is_draft != expected_is_draft:
+        state = "Draft" if expected_is_draft else "Ready"
+        raise ValueError(f"pull request draft state changed during readiness check; expected {state}")
     if (current_base, current_head) != (initial_base, initial_head):
         raise ValueError("pull request base/head changed during readiness check")
     if current_body != initial_body:
@@ -3079,6 +3088,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if arguments.open_pull_snapshot is not None and referenced_issues and not errors
             else None
         ),
+        expected_is_draft=arguments.require_draft,
     )
     if not arguments.require_draft:
         final_required_checks = _required_status_check_snapshot(repository, base_branch)

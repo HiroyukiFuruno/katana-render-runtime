@@ -4,6 +4,7 @@ import ast
 import importlib.util
 import re
 import sys
+import textwrap
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -263,8 +264,10 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         self.assertEqual(self.dispatcher.count("timeout-minutes: 15"), 2)
         self.assertIn("timeout-minutes: 30", self.dispatcher)
         self.assertIn("timeout-minutes: 290", self.dispatcher)
-        self.assertIn("# 450-head bound is operational", self.dispatcher)
-        self.assertIn("if len(positions) >= 450:", self.dispatcher)
+        self.assertIn("The 450-head bound is operational", self.dispatcher)
+        self.assertIn("invalidation_governed_heads = {", self.dispatcher)
+        self.assertIn("invalidation_head_cap_exceeded = len(invalidation_governed_heads) > 450", self.dispatcher)
+        self.assertIn("if invalidation_head_cap_exceeded:", self.dispatcher)
         dispatcher_seconds = 450 * 8.1
         terminal_seconds = 4 * 125 * 20.5
         self.assertLess(dispatcher_seconds + terminal_seconds, 290 * 60)
@@ -274,6 +277,29 @@ class GovernanceOverflowContractTest(unittest.TestCase):
             self.dispatcher.count("Terminal dispatch cannot complete before the root deadline."), 4
         )
         self.assertEqual(self.dispatcher.count("terminal_segment_seconds = 3_750"), 4)
+
+    def test_preinvalidation_and_all_open_union_of_550_heads_fails_closed_before_chunking(self) -> None:
+        """The two invalidator partitions must share one 450-head run budget."""
+        start = self.dispatcher_workflow.index("          invalidation_governed_heads = {")
+        end = self.dispatcher_workflow.index("          pre_chunk_snapshots = [", start)
+        source = textwrap.dedent(self.dispatcher_workflow[start:end])
+        preinvalidate_targets = list(range(1, 51))
+        all_invalidation_targets = list(range(51, 551))
+        namespace = {
+            "target_snapshots": {
+                number: (f"{number:040x}", False)
+                for number in preinvalidate_targets + all_invalidation_targets
+            },
+            "preinvalidate_targets": preinvalidate_targets,
+            "all_invalidation_targets": all_invalidation_targets,
+        }
+
+        exec(source, namespace)
+
+        self.assertEqual(len(namespace["invalidation_governed_heads"]), 550)
+        self.assertTrue(namespace["invalidation_head_cap_exceeded"])
+        self.assertEqual(namespace["pre_chunks"], [[], []])
+        self.assertEqual(namespace["all_chunks"], [[], []])
 
     def test_malformed_or_multi_closing_prs_fail_closed_without_aborting_other_prs(self) -> None:
         self.assertIn("A malformed multi-Issue closer is a claimant", self.writer)

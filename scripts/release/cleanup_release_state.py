@@ -262,6 +262,19 @@ def _validate_release_target(version: str, release_branch: str) -> None:
         )
 
 
+def _worktree_status(repository: Path, worktree: Path) -> str:
+    """Return tracked, untracked, and ignored entries in a worktree."""
+    return _run_git(
+        repository,
+        "-C",
+        str(worktree),
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--ignored",
+    ).stdout.strip()
+
+
 def cleanup_release_state(
     *,
     repository: Path,
@@ -278,7 +291,7 @@ def cleanup_release_state(
     checker = release_checker or _github_release_checker(repository, remote)
     if not checker(version):
         raise CleanupError(f"GitHub Release {version}の公開を確認できません")
-    dirty = _run_git(repository, "status", "--porcelain=v1").stdout.strip()
+    dirty = _worktree_status(repository, repository)
     if dirty:
         raise CleanupError("current worktree is dirty; cleanupを実行しません")
     audited_push_url = _verify_push_destinations(repository, remote)
@@ -320,13 +333,7 @@ def cleanup_release_state(
             raise CleanupError(f"cleanup対象branchがcurrent worktreeで使用中です: {worktree.path}")
         if worktree.locked:
             raise CleanupError(f"locked worktreeは保持します: {worktree.path}")
-        worktree_dirty = _run_git(
-            repository,
-            "-C",
-            str(worktree.path),
-            "status",
-            "--porcelain=v1",
-        ).stdout.strip()
+        worktree_dirty = _worktree_status(repository, worktree.path)
         if worktree_dirty:
             raise CleanupError(f"dirty worktreeは保持します: {worktree.path}")
 

@@ -5809,8 +5809,8 @@ raise SystemExit(91)
                 [heads[number] for number in range(1, total + 1)],
             )
 
-    def test_oversized_all_invalidation_keeps_affected_prechunk_and_holds_barrier(self) -> None:
-        """An oversized six-page snapshot preserves its priority prechunk and holds the barrier."""
+    def test_oversized_combined_invalidation_empties_both_chunks_and_holds_barrier(self) -> None:
+        """An oversized pre/all union emits no partial chunk and holds the barrier."""
         resolver = re.search(
             r"- name: Re-enumerate every current local governance pull request.*?python3 - <<'PY'\n(.*?)\n          PY",
             self.workflow,
@@ -5887,8 +5887,8 @@ raise SystemExit(91)
             self.assertEqual([entry[0] for entry in snapshots], targets)
             self.assertEqual(len(snapshots), total)
             self.assertEqual(json.loads(values["preinvalidate_targets"]), [1])
-            self.assertEqual(json.loads(values["preinvalidate_chunk_1"]), [1])
-            self.assertEqual(json.loads(values["preinvalidate_chunk_1_snapshots"])[0][0], 1)
+            self.assertEqual(json.loads(values["preinvalidate_chunk_1"]), [])
+            self.assertEqual(json.loads(values["preinvalidate_chunk_1_snapshots"]), [])
             self.assertEqual(json.loads(values["preinvalidate_chunk_2"]), [])
             self.assertEqual(json.loads(values["preinvalidate_chunk_2_snapshots"]), [])
             self.assertEqual(json.loads(values["priority_targets"]), list(range(1, 51)))
