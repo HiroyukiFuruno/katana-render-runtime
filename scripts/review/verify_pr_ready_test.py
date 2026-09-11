@@ -4155,6 +4155,25 @@ class VerifyPrReadyTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "CI status changed"):
                 subject.main(["--pr", "72", "--repository", "owner/repo"])
 
+    def test_rechecks_review_threads_immediately_before_success(self) -> None:
+        pull_request, threads, comments = successful_state()
+        changed_threads = deepcopy(threads)
+        changed_threads[0]["isResolved"] = False
+
+        with patch.object(subject, "_gh_json", return_value=pull_request), patch.object(
+            subject, "_paginated_api_array", return_value=comments
+        ), patch.object(
+            subject, "_review_threads", side_effect=[threads, changed_threads]
+        ), patch.object(
+            subject.issue_contract,
+            "referenced_issue_snapshot",
+            return_value=(self.issue(64, "2026-08-29T03:00:00Z"),),
+        ), patch.object(
+            subject, "_open_pull_requests", return_value=current_canonical_closer()
+        ):
+            with self.assertRaisesRegex(ValueError, "review threads changed"):
+                subject.main(["--pr", "72", "--repository", "owner/repo"])
+
     def test_rejects_required_status_check_configuration_change_before_success(self) -> None:
         pull_request, threads, comments = successful_state()
         changed_required_checks = (

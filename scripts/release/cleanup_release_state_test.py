@@ -172,6 +172,24 @@ class CleanupReleaseStateTest(unittest.TestCase):
         ).stdout
         self.assertEqual(preserved, "unpushed\n")
 
+    def test_allows_ignored_ci_output_in_current_worktree(self) -> None:
+        self.create_release_branch(merge=True)
+        exclude = Path(
+            self.git("rev-parse", "--git-path", "info/exclude", cwd=self.repository).stdout.strip()
+        )
+        if not exclude.is_absolute():
+            exclude = self.repository / exclude
+        exclude.write_text("target/\n", encoding="utf-8")
+        (self.repository / "target" / "package").mkdir(parents=True)
+        (self.repository / "target" / "package" / "artifact.crate").write_text(
+            "generated\n", encoding="utf-8"
+        )
+
+        actions = self.cleanup()
+
+        self.assertIn("remote branch release/v9.9.9 deleted", actions)
+        self.assertTrue((self.repository / "target" / "package" / "artifact.crate").exists())
+
     def test_retains_dirty_linked_worktree(self) -> None:
         self.create_release_branch(merge=True)
         worktree = self.root / "release-worktree"

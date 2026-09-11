@@ -80,7 +80,7 @@ P0/P1 は必ず内容を精査し、正当なら必須修正とする。不当�
 
 ## 3. 修正と検証
 
-- PR は Draft のまま保持する。Ready 化や merge はこの skill の範囲外で、別の governance gate に委ねる。
+- PR は `pr-ready-check` 成功まで Draft のまま保持する。成功後は section 6 の手順に従って `gh pr ready` で Ready for review へ遷移し、merge は別の governance gate に委ねる。
 - subagent には対象ファイル、変更可否、DoD、検証条件、禁止事項を短く明示する。
 - 修正後、各担当の focused check に加え、main が差分・依存関係・回帰を確認し、repo の完全な品質ゲートを実行する。
 - 不要な差分は早期に戻し、テスト都合で商用コードや品質基準を変更しない。

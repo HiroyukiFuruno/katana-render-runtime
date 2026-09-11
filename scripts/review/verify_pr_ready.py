@@ -3072,6 +3072,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         != initial_marker_identities
     ):
         raise ValueError("trusted review marker identities changed during readiness check")
+    final_threads = _review_threads(repository, arguments.pr, budget=graphql_budget)
+    if final_threads != threads:
+        raise ValueError("review threads changed during readiness check")
     _verify_final_readiness_snapshot_unchanged(
         repository=repository,
         pull_request=arguments.pr,

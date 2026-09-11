@@ -3224,6 +3224,7 @@ raise SystemExit(91)
                 return common | {
                     "TARGETS": json.dumps(barrier_targets, separators=(",", ":")),
                     "TARGET_SNAPSHOTS": json.dumps(barrier_snapshots, separators=(",", ":")),
+                    "PRESERVED_TARGETS": "[]", "PRESERVED_CHECK_MANIFEST": "[]", "PRESERVED_WRITER_RUN_ID": "0",
                     "PRE_MANIFEST_1": "[]", "PRE_MANIFEST_2": "[]",
                     "TAIL_MANIFEST_1": json.dumps(barrier_manifest, separators=(",", ":")),
                     "TAIL_MANIFEST_2": "[]", "DUPLICATE_GOVERNED_HEADS": "[]",
@@ -3763,7 +3764,7 @@ raise SystemExit(91)
                 self.assertEqual(token, "marker-write"); return completed({"id": 501, "name": barrier, "head_sha": head, "external_id": f"krr-governance-affected-head-barrier/v1/{head}/scheduler-99", "status": "completed", "conclusion": "success", "details_url": "https://github.com/owner/repository/actions/runs/99?barrier_marker=periodic", "app": {"id": 4_766_933}})
             if endpoint == "repos/owner/repository/check-runs/501":
                 self.assertEqual(token, "marker-read"); return completed({"id": 501, "name": barrier, "head_sha": head, "external_id": f"krr-governance-affected-head-barrier/v1/{head}/scheduler-99", "status": "completed", "conclusion": "success", "details_url": "https://github.com/owner/repository/actions/runs/99?barrier_marker=periodic", "app": {"id": 4_766_933}})
-            if endpoint in {"repos/owner/repository/check-runs/801", "repos/owner/repository/check-runs/802"}:
+            if endpoint in {"repos/owner/repository/check-runs/801", "repos/owner/repository/check-runs/802", "repos/owner/repository/check-runs/901"}:
                 self.assertEqual(token, "read"); identifier = int(endpoint.rsplit("/", 1)[1]); checks = state["manifest_checks"]
                 self.assertIsInstance(checks, dict); return completed(checks[identifier])
             raise AssertionError(arguments)
@@ -3794,8 +3795,35 @@ raise SystemExit(91)
             self.assertEqual(execute(activate, activate_env | {"PRIORITY": "false", "GITHUB_OUTPUT": str(recovery)}), 0)
             self.assertEqual(outputs(recovery)["active"], "true")
 
-            def release_env(targets: str, snapshots: str, manifest_1: str, manifest_2: str = "[]") -> dict[str, str]:
-                return common | {"READ_TOKEN": "read", "ADMIN_TOKEN": "admin", "TARGETS": targets, "TARGET_SNAPSHOTS": snapshots, "PRE_MANIFEST_1": manifest_1, "PRE_MANIFEST_2": manifest_2, "TAIL_MANIFEST_1": "[]", "TAIL_MANIFEST_2": "[]", "DUPLICATE_GOVERNED_HEADS": "[]"}
+            def release_env(targets: str, snapshots: str, manifest_1: str, manifest_2: str = "[]", *, preserved_targets: str = "[]", preserved_manifest: str = "[]", preserved_writer_run_id: str = "0") -> dict[str, str]:
+                return common | {"READ_TOKEN": "read", "ADMIN_TOKEN": "admin", "TARGETS": targets, "TARGET_SNAPSHOTS": snapshots, "PRESERVED_TARGETS": preserved_targets, "PRESERVED_CHECK_MANIFEST": preserved_manifest, "PRESERVED_WRITER_RUN_ID": preserved_writer_run_id, "PRE_MANIFEST_1": manifest_1, "PRE_MANIFEST_2": manifest_2, "TAIL_MANIFEST_1": "[]", "TAIL_MANIFEST_2": "[]", "DUPLICATE_GOVERNED_HEADS": "[]"}
+
+            # The pre-invalidator owns the affected event head only until the
+            # awaited early writer terminalizes it. Coverage must replace that
+            # transient pending entry with the terminal early-success proof;
+            # accepting the old pending manifest would release the barrier on
+            # a partial early event.
+            early_success = {
+                "id": 901, "name": "KRR / PR governance (trusted check)", "head_sha": head,
+                "external_id": f"krr-governance/v1/{head}/writer-77", "status": "completed",
+                "conclusion": "success", "details_url": "https://github.com/owner/repository/actions/runs/77?pr_head_sha=" + head,
+                "app": {"id": 4_766_933},
+            }
+            preserved_coverage = release_env(
+                "[72,73]", f'[[72,"{head}",false],[73,"{other}",false]]', "[[72,801]]", "[[73,802]]",
+                preserved_targets="[72]", preserved_manifest="[[72,901]]", preserved_writer_run_id="77",
+            )
+            early_manifest_checks = state["manifest_checks"]; self.assertIsInstance(early_manifest_checks, dict)
+            early_manifest_checks[901] = {**early_success, "status": "in_progress", "conclusion": None}
+            self.assertEqual(execute(release, preserved_coverage), 1)
+            self.assertEqual(state["mutations"], ["ACTIVATE"])
+            early_manifest_checks[901] = early_success
+            self.assertEqual(execute(release, preserved_coverage), 0)
+            self.assertEqual(state["mutations"], ["ACTIVATE", "DELETE"])
+            state["protection"] = json.loads(json.dumps(baseline)); state["mutations"] = []
+            del early_manifest_checks[901]
+            self.assertEqual(execute(activate, activate_env | {"PRIORITY": "true"}), 0)
+            self.assertEqual(state["mutations"], ["ACTIVATE"])
 
             self.assertEqual(execute(release, release_env("[72,73]", f'[[72,"{head}",false],[73,"{other}",false]]', "[[72,801]]")), 1)
             self.assertEqual(state["mutations"], ["ACTIVATE"])

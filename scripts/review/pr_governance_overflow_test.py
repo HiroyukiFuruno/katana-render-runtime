@@ -157,7 +157,7 @@ class GovernanceOverflowContractTest(unittest.TestCase):
     def test_every_governance_workflow_api_subprocess_has_a_twenty_second_timeout(self) -> None:
         """Keep the complete API-call inventory bounded as the three workflows grow."""
         workflows = (
-            ("dispatcher", self.dispatcher, 82),
+            ("dispatcher", self.dispatcher, 81),
             ("status writer", self.workflow, 2),
             ("review events", self.review_events, 1),
         )

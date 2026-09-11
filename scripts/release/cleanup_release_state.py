@@ -262,16 +262,25 @@ def _validate_release_target(version: str, release_branch: str) -> None:
         )
 
 
-def _worktree_status(repository: Path, worktree: Path) -> str:
-    """Return tracked, untracked, and ignored entries in a worktree."""
-    return _run_git(
-        repository,
+def _worktree_status(
+    repository: Path,
+    worktree: Path,
+    *,
+    include_ignored: bool = False,
+) -> str:
+    """Return entries that make a worktree unsafe to remove."""
+    arguments = [
         "-C",
         str(worktree),
         "status",
         "--porcelain=v1",
         "--untracked-files=all",
-        "--ignored",
+    ]
+    if include_ignored:
+        arguments.append("--ignored")
+    return _run_git(
+        repository,
+        *arguments,
     ).stdout.strip()
 
 
@@ -333,7 +342,7 @@ def cleanup_release_state(
             raise CleanupError(f"cleanup対象branchがcurrent worktreeで使用中です: {worktree.path}")
         if worktree.locked:
             raise CleanupError(f"locked worktreeは保持します: {worktree.path}")
-        worktree_dirty = _worktree_status(repository, worktree.path)
+        worktree_dirty = _worktree_status(repository, worktree.path, include_ignored=True)
         if worktree_dirty:
             raise CleanupError(f"dirty worktreeは保持します: {worktree.path}")
 
