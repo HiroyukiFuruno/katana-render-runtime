@@ -1726,14 +1726,14 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             selected = dict(line.split("=", 1) for line in current_output.read_text(encoding="utf-8").splitlines())
             self.assertEqual(
                 json.loads(selected["priority_targets"]),
-                [72, 73, *[number for number in range(1, 106) if number not in {72, 73}][:98]],
+                [72, 73, *[number for number in range(1, 106) if number not in {72, 73}][:48]],
             )
             self.assertEqual(selected["event_targets"], "[72,73]")
             self.assertEqual(json.loads(selected["event_targets"]), [72, 73])
             invalidations = json.loads(selected["all_invalidation_targets"])
             self.assertNotIn(72, invalidations)
             self.assertNotIn(73, invalidations)
-            self.assertEqual(invalidations[0], 101)
+            self.assertEqual(invalidations[0], 49)
             self.assertEqual(len(json.loads(selected["targets"])), 105)
         early = self.workflow.index("Dispatch and bind the early event writer")
         full = self.workflow.index("Invalidate every current pull request for the all-open writer")
@@ -2230,12 +2230,13 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             final_base: dict[str, object] | None = None, mode: str = "",
             expected: int = 0, final_tip: str | None = None,
             expected_state_files: tuple[str, ...] = (), number: int = 72,
-            final_number: object | None = None,
+            final_number: object | None = None, action: str = "opened",
+            state: str = "open",
         ) -> None:
             with self.subTest(case=label), tempfile.TemporaryDirectory() as temporary:
                 directory = Path(temporary); fake = directory / "gh"; output = directory / "output"; log = directory / "gh.log"
                 initial = {
-                    "number": number, "state": "open",
+                    "number": number, "state": state,
                     "base": {"sha": tip, "ref": "master", "repo": local},
                     "head": {"sha": head, "repo": initial_head_repository},
                 }
@@ -2262,7 +2263,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                 fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
                 final_tip_value = final_tip if final_tip is not None else (final["base"]["sha"] if isinstance(final["base"], dict) else tip)
                 environment = os.environ | {
-                    "EVENT_NAME": "pull_request_target", "PR_ACTION": "opened", "PR_NUMBER": str(number), "PR_HEAD_SHA": head,
+                    "EVENT_NAME": "pull_request_target", "PR_ACTION": action, "PR_NUMBER": str(number), "PR_HEAD_SHA": head,
                     "PR_BASE_SHA": source_base, "PR_BASE_REF": "master", "PR_BODY": "Fixes #64", "PR_PREVIOUS_BODY": "",
                     "GITHUB_REPOSITORY": "owner/repository", "DEFAULT_BRANCH": "master", "GITHUB_OUTPUT": str(output),
                     "INITIAL": json.dumps(initial), "FINAL": json.dumps(final), "PULLS": "[[]]",
@@ -2291,6 +2292,14 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             ("deleted-fork", None),
         ):
             run_case(label, head_repository, head_repository)
+
+        run_case(
+            "closed-fork-historical-base",
+            {"full_name": "fork/repository", "id": 202},
+            {"full_name": "fork/repository", "id": 202},
+            action="closed",
+            state="closed",
+        )
 
         run_case("malformed-fork", {"full_name": "fork/repository"}, {"full_name": "fork/repository"}, expected=1)
         run_case("fork-head-race", {"full_name": "fork/repository", "id": 202}, {"full_name": "fork/repository", "id": 203}, expected=1)
@@ -5581,7 +5590,7 @@ raise SystemExit(91)
                 pre_targets = json.loads(values["preinvalidate_targets"])
                 self.assertEqual(targets, list(range(1, total + 1)))
                 self.assertEqual(pre_targets, targets)
-                self.assertEqual(priority, list(range(1, min(total, 100) + 1)))
+                self.assertEqual(priority, list(range(1, min(total, 50) + 1)))
                 chunks = [
                     json.loads(values[f"preinvalidate_chunk_{index}"])
                     for index in (1, 2)
@@ -5813,9 +5822,9 @@ raise SystemExit(91)
             self.assertEqual(json.loads(values["preinvalidate_chunk_1_snapshots"])[0][0], 1)
             self.assertEqual(json.loads(values["preinvalidate_chunk_2"]), [])
             self.assertEqual(json.loads(values["preinvalidate_chunk_2_snapshots"]), [])
-            self.assertEqual(json.loads(values["priority_targets"]), list(range(1, 101)))
-            self.assertEqual(json.loads(values["all_invalidation_targets"]), list(range(101, total + 1)))
-            self.assertEqual(json.loads(values["all_invalidation_target_snapshots"]), [[number, f"{number:040x}", False] for number in range(101, total + 1)])
+            self.assertEqual(json.loads(values["priority_targets"]), list(range(1, 51)))
+            self.assertEqual(json.loads(values["all_invalidation_targets"]), list(range(51, total + 1)))
+            self.assertEqual(json.loads(values["all_invalidation_target_snapshots"]), [[number, f"{number:040x}", False] for number in range(51, total + 1)])
             self.assertEqual(json.loads(values["all_invalidation_chunk_1"]), [])
             self.assertEqual(json.loads(values["all_invalidation_chunk_2"]), [])
             self.assertEqual(values["invalidation_head_cap_exceeded"], "true")
@@ -6049,10 +6058,10 @@ raise SystemExit(91)
             values = dict(line.split("=", 1) for line in current_output.read_text(encoding="utf-8").splitlines())
             self.assertEqual(json.loads(values["targets"]), list(range(1, total + 1)))
             self.assertEqual(len(json.loads(values["target_snapshots"])), total)
-            self.assertEqual(json.loads(values["priority_targets"]), list(range(1, min(total, 100) + 1)))
+            self.assertEqual(json.loads(values["priority_targets"]), list(range(1, min(total, 50) + 1)))
             self.assertEqual(json.loads(values["preinvalidate_targets"]), [])
-            self.assertEqual(json.loads(values["all_invalidation_targets"]), list(range(101, total + 1)))
-            self.assertEqual(len(json.loads(values["all_invalidation_target_snapshots"])), total - 100)
+            self.assertEqual(json.loads(values["all_invalidation_targets"]), list(range(51, total + 1)))
+            self.assertEqual(len(json.loads(values["all_invalidation_target_snapshots"])), total - 50)
             self.assertEqual(values["invalidation_head_cap_exceeded"], "true")
             self.assertEqual(json.loads(values["all_invalidation_chunk_1"]), [])
             self.assertEqual(json.loads(values["all_invalidation_chunk_2"]), [])

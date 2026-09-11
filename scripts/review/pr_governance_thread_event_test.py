@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest
 from pathlib import Path
@@ -606,6 +607,71 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
             self.assertIsNone(reader())
             self.assertEqual(reader(), [])
         self.assertEqual(calls, [(1, False), (2, True), (1, False), (2, True), (1, False)])
+
+
+class GovernanceDispatcherFailClosedContractTest(unittest.TestCase):
+    """Exercise dispatcher boundaries that must remain safe during outages."""
+
+    def setUp(self) -> None:
+        root = Path(__file__).parents[2]
+        self.workflow = (root / ".github/workflows/pr-governance.yml").read_text(encoding="utf-8")
+
+    def _program(self, step_name: str) -> str:
+        match = re.search(
+            rf"(?ms)^      - name: {re.escape(step_name)}\n.*?^          python3 - <<'PY'\n(.*?)^          PY$",
+            self.workflow,
+        )
+        self.assertIsNotNone(match, step_name)
+        assert match is not None
+        return textwrap.dedent(match.group(1))
+
+    def test_issue_source_loader_timeout_arms_the_resolver_barrier(self) -> None:
+        """A timeout must preserve preflight outputs so the barrier job runs."""
+
+        program = self._program("Exclude unavailable fork sources before dispatcher lock")
+        self.assertIn("except subprocess.TimeoutExpired:", program)
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "github-output"
+            environment = {
+                "GITHUB_REPOSITORY": "owner/repository",
+                "DEFAULT_BRANCH": "master",
+                "WORKFLOW_REF": "owner/repository/.github/workflows/pr-governance.yml@refs/heads/master",
+                "WORKFLOW_SHA": "a" * 40,
+                "EVENT_NAME": "issues",
+                "GITHUB_OUTPUT": str(output),
+            }
+            with patch.dict(os.environ, environment, clear=False), patch.object(
+                subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired(["gh", "api"], 20),
+            ), self.assertRaises(SystemExit) as raised:
+                exec(program, {"__name__": "__main__"})
+            self.assertEqual(raised.exception.code, 0)
+            values = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
+            self.assertEqual(values["reconcile"], "true")
+            self.assertEqual(values["valid"], "false")
+            self.assertEqual(values["priority"], "true")
+            self.assertEqual(values["pull_request_target_noop"], "false")
+            self.assertEqual(values["issue_event_noop"], "false")
+            self.assertRegex(values["root_deadline_epoch"], r"^[1-9][0-9]*$")
+
+    def test_early_writer_cap_fits_pending_and_terminal_writes_inside_await(self) -> None:
+        """The priority writer cannot strand the all-open barrier at its await deadline."""
+
+        resolver = self._program("Re-enumerate every current local governance pull request")
+        dispatch = self._program("Dispatch and bind the early event writer")
+        await_writer = self._program("Await the bound early event writer before all-open invalidation")
+        self.assertIn("EARLY_WRITER_TARGET_CAP = 50", resolver)
+        self.assertIn(")[:EARLY_WRITER_TARGET_CAP]", resolver)
+        self.assertIn("len(targets)>50", dispatch)
+        self.assertIn("len(targets)>50", await_writer)
+        self.assertIn("deadline=time.time()+900", await_writer)
+
+        pace_seconds = 8.1
+        targets = 50
+        writes_per_target = 2  # pending then terminal
+        self.assertEqual(targets * writes_per_target * pace_seconds, 810)
+        self.assertGreaterEqual(900 - targets * writes_per_target * pace_seconds, 90)
 
 
 if __name__ == "__main__":

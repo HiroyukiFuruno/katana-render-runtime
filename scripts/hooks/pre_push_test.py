@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("pre-push.sh")
@@ -31,7 +32,7 @@ class PrePushDispatcherTest(unittest.TestCase):
         )
         self.write_executable(
             "just",
-            '#!/bin/sh\nprintf "check\\n" >> "$ORDER_LOG"\n'
+            '#!/bin/sh\nprintf "check:%s:%s\\n" "${GIT_DIR-unset}" "${GIT_WORK_TREE-unset}" >> "$ORDER_LOG"\n'
             'if [ "${JUST_CONSUME_STDIN:-0}" = "1" ]; then cat >/dev/null; fi\n'
             'exit "${JUST_EXIT:-0}"\n',
         )
@@ -78,12 +79,25 @@ class PrePushDispatcherTest(unittest.TestCase):
     def test_repository_check_runs_before_issue_contract(self) -> None:
         result = self.run_dispatcher()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), ["check", "issue"])
+        self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), ["check:unset:unset", "issue"])
+
+    def test_repository_check_scrubs_the_calling_hook_git_state(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "GIT_DIR": str(self.repository / ".git"),
+                "GIT_WORK_TREE": str(self.repository),
+            },
+            clear=False,
+        ):
+            result = self.run_dispatcher()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), ["check:unset:unset", "issue"])
 
     def test_issue_contract_does_not_run_when_repository_check_fails(self) -> None:
         result = self.run_dispatcher(just_exit=19)
         self.assertEqual(result.returncode, 19)
-        self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), ["check"])
+        self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), ["check:unset:unset"])
 
     def test_push_updates_survive_repository_check_stdin_consumption(self) -> None:
         update = (

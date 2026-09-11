@@ -106,10 +106,13 @@ jobs:
               raise SystemExit(0)
 
           def request(path):
-              result = subprocess.run(
-                  ["gh", "api", "--hostname", "github.com", path],
-                  capture_output=True, text=True, check=False, timeout=20,
-              )
+              try:
+                  result = subprocess.run(
+                      ["gh", "api", "--hostname", "github.com", path],
+                      capture_output=True, text=True, check=False, timeout=20,
+                  )
+              except subprocess.TimeoutExpired:
+                  arm_issue_source_failure("Trusted governance source timed out.")
               if result.returncode != 0:
                   arm_issue_source_failure("Unable to read trusted governance source.")
               try:
@@ -635,15 +638,17 @@ jobs:
           # pre-invalidator owns affected shared HEADs, then the all-open
           # hand-off pendingizes every remaining distinct HEAD and stops.
           # A priority writer owns a pending + terminal mutation for every
-          # target in this deterministic bounded prefix. Keep the synchronous
-          # path below 100 mutations / 15 minutes; every remaining affected
-          # head is already fail-closed by the dispatcher Check Run and is
-          # handed to the all-open arbiter.
+          # target in this deterministic bounded prefix. At the shared 8.1s
+          # Check Run pace, 50 targets consume at most 810 seconds; that
+          # leaves 90 seconds of the 900-second await for control-plane
+          # reads. Every remaining affected head is already fail-closed by
+          # the dispatcher Check Run and is handed to the all-open arbiter.
+          EARLY_WRITER_TARGET_CAP = 50
           priority_seed = set(preinvalidate_targets)
           priority_targets = [] if duplicate_governed_heads else (
               preinvalidate_targets
               + [number for number in targets if number not in priority_seed]
-          )[:100]
+          )[:EARLY_WRITER_TARGET_CAP]
           # Preserve the resolver's source/claimant ordering.  Pagination can
           # place unrelated PRs first, but affected siblings must be
           # invalidated before that unrelated tail.  The early source itself
@@ -1331,7 +1336,7 @@ jobs:
           source=os.environ.get("DISPATCHER_RUN_ID", "")
           try: targets=json.loads(os.environ.get("TARGETS", ""))
           except json.JSONDecodeError as error: raise SystemExit("Early writer targets are invalid.") from error
-          if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch) or not re.fullmatch(r"[0-9a-fA-F]{40}", head) or not re.fullmatch(r"[1-9][0-9]*", source) or not isinstance(targets, list) or not targets or len(targets)>100 or any(type(number) is not int or number < 1 for number in targets) or len(set(targets)) != len(targets): raise SystemExit("Early writer boundary is invalid.")
+          if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch) or not re.fullmatch(r"[0-9a-fA-F]{40}", head) or not re.fullmatch(r"[1-9][0-9]*", source) or not isinstance(targets, list) or not targets or len(targets)>50 or any(type(number) is not int or number < 1 for number in targets) or len(set(targets)) != len(targets): raise SystemExit("Early writer boundary is invalid.")
           title=f"source={source} scope=early segment=0"
           workflow_path=".github/workflows/pr-governance-status-writer.yml"
           def path_matches(value):
@@ -1422,8 +1427,9 @@ jobs:
               if not isinstance(value,str) or not value.startswith(workflow_path+"@"): return False
               ref=value[len(workflow_path)+1:]
               return re.fullmatch(r"[A-Za-z0-9._/-]+",ref) is not None and ref not in {".",".."} and not ref.startswith("/") and "//" not in ref and all(part not in {"",".",".."} for part in ref.split("/"))
-          # The early writer has at most 100 mutations. Polling every 30s
-          # bounds this wait at 15m without consuming 450 installation reads.
+          # The early writer has at most 50 targets and two paced writes per
+          # target. Its 810-second write budget leaves 90 seconds inside this
+          # 15-minute wait for polling and control-plane reads.
           for _ in range(30):
               remaining=deadline-time.time()
               if remaining<=0: break
@@ -1443,7 +1449,7 @@ jobs:
                   if not check_token: raise SystemExit("Early governance Check Run read token is invalid.")
                   try: targets=json.loads(os.environ.get("TARGETS", ""))
                   except json.JSONDecodeError as error: raise SystemExit("Early governance targets are invalid.") from error
-                  if not isinstance(targets,list) or not targets or any(type(number) is not int or number<1 for number in targets) or len(set(targets)) != len(targets): raise SystemExit("Early governance targets are invalid.")
+                  if not isinstance(targets,list) or not targets or len(targets)>50 or any(type(number) is not int or number<1 for number in targets) or len(set(targets)) != len(targets): raise SystemExit("Early governance targets are invalid.")
                   manifest=[]
                   for number in targets:
                       pull=subprocess.run(["gh","api",f"repos/{repository}/pulls/{number}"],capture_output=True,text=True,check=False,env={"GH_TOKEN":check_token,"PATH":os.environ["PATH"]}, timeout=20)

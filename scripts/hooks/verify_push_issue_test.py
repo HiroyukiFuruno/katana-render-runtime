@@ -18,6 +18,40 @@ import verify_push_issue as subject
 
 
 class VerifyPushIssueTest(unittest.TestCase):
+    _GIT_FIXTURE_ENVIRONMENT = (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_PREFIX",
+    )
+
+    def setUp(self) -> None:
+        """Keep temporary Git fixtures outside a caller's hook repository."""
+        saved = {
+            name: os.environ[name]
+            for name in self._GIT_FIXTURE_ENVIRONMENT
+            if name in os.environ
+        }
+        for name in self._GIT_FIXTURE_ENVIRONMENT:
+            os.environ.pop(name, None)
+
+        def restore() -> None:
+            for name in self._GIT_FIXTURE_ENVIRONMENT:
+                os.environ.pop(name, None)
+            os.environ.update(saved)
+
+        self.addCleanup(restore)
+
+    def test_temporary_git_fixtures_do_not_inherit_hook_repository_state(self) -> None:
+        self.assertTrue(
+            all(name not in os.environ for name in self._GIT_FIXTURE_ENVIRONMENT)
+        )
+
     @staticmethod
     def configure_live_fetch_remote(
         repository: Path,

@@ -408,7 +408,7 @@ elif event_name == "pull_request_target":
                 tip is None or current_base["sha"] != tip
                 or not isinstance(final_repo, dict) or final_repo.get("default_branch") != default_branch
                 or final_tip != tip
-                or not isinstance(final_pull, dict) or type(final_pull.get("number")) is not int or final_pull.get("number") != source_number_value or final_pull.get("state") != "open"
+                or not isinstance(final_pull, dict) or type(final_pull.get("number")) is not int or final_pull.get("number") != source_number_value or final_pull.get("state") != expected_state
                 or not isinstance(final_base, dict) or not isinstance(final_head, dict)
                 or final_base.get("ref") != default_branch or final_base.get("sha") != tip or final_head.get("sha") != source_head
                 or not isinstance(final_base_repo, dict) or final_base_repo.get("full_name") != repository
