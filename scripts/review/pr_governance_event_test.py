@@ -5495,6 +5495,46 @@ raise SystemExit(91)
                 self.assertEqual(maximum, expected_maximum)
                 self.assertLessEqual(maximum, 445)
 
+    def test_early_writer_await_encloses_the_configured_maximum_runtime(self) -> None:
+        """The dispatcher must not time out before its bounded writer can finish."""
+        selection = re.search(
+            r"- name: Re-enumerate every current local governance pull request.*?python3 - <<'PY'\n(.*?)\n          PY",
+            self.workflow,
+            re.DOTALL,
+        )
+        await_step = re.search(
+            r"- name: Await the bound early event writer before all-open invalidation.*?python3 - <<'PY'\n(.*?)\n          PY",
+            self.workflow,
+            re.DOTALL,
+        )
+        dispatch_step = re.search(
+            r"- name: Dispatch and bind the early event writer.*?python3 - <<'PY'\n(.*?)\n          PY",
+            self.workflow,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(selection); assert selection is not None
+        self.assertIsNotNone(await_step); assert await_step is not None
+        self.assertIsNotNone(dispatch_step); assert dispatch_step is not None
+        selection_program = self._workflow_program(selection)
+        await_program = self._workflow_program(await_step)
+        dispatch_program = self._workflow_program(dispatch_step)
+
+        target_cap = 50
+        startup_seconds = 120
+        initial_evidence_seconds = 180
+        write_interval_seconds = 8.1
+        writer_budget = startup_seconds + initial_evidence_seconds + target_cap * 2 * write_interval_seconds
+        await_seconds = 1200
+
+        self.assertIn(f"EARLY_WRITER_TARGET_CAP = {target_cap}", selection_program)
+        self.assertIn(f"len(targets)>{target_cap}", dispatch_program)
+        self.assertIn(f"len(targets)>{target_cap}", await_program)
+        self.assertIn(f"deadline=time.time()+{await_seconds}", await_program)
+        self.assertIn("for _ in range(40):", await_program)
+        self.assertGreater(writer_budget, 900)
+        self.assertLessEqual(writer_budget, await_seconds)
+        self.assertGreaterEqual(await_seconds - writer_budget, 90)
+
     def test_embedded_python_imports_modules_used_by_qualified_names(self) -> None:
         """Embedded workflow programs must import every referenced top-level module."""
         programs = re.findall(

@@ -665,13 +665,18 @@ class GovernanceDispatcherFailClosedContractTest(unittest.TestCase):
         self.assertIn(")[:EARLY_WRITER_TARGET_CAP]", resolver)
         self.assertIn("len(targets)>50", dispatch)
         self.assertIn("len(targets)>50", await_writer)
-        self.assertIn("deadline=time.time()+900", await_writer)
+        self.assertIn("deadline=time.time()+1200", await_writer)
+        self.assertIn("for _ in range(40):", await_writer)
 
         pace_seconds = 8.1
         targets = 50
         writes_per_target = 2  # pending then terminal
-        self.assertEqual(targets * writes_per_target * pace_seconds, 810)
-        self.assertGreaterEqual(900 - targets * writes_per_target * pace_seconds, 90)
+        startup_seconds = 120
+        initial_evidence_seconds = 180
+        writer_runtime = startup_seconds + initial_evidence_seconds + targets * writes_per_target * pace_seconds
+        self.assertEqual(writer_runtime, 1110)
+        self.assertGreater(writer_runtime, 900)
+        self.assertGreaterEqual(1200 - writer_runtime, 90)
 
 
 if __name__ == "__main__":

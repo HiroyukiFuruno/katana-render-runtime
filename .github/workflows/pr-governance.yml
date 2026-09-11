@@ -638,11 +638,14 @@ jobs:
           # pre-invalidator owns affected shared HEADs, then the all-open
           # hand-off pendingizes every remaining distinct HEAD and stops.
           # A priority writer owns a pending + terminal mutation for every
-          # target in this deterministic bounded prefix. At the shared 8.1s
-          # Check Run pace, 50 targets consume at most 810 seconds; that
-          # leaves 90 seconds of the 900-second await for control-plane
-          # reads. Every remaining affected head is already fail-closed by
-          # the dispatcher Check Run and is handed to the all-open arbiter.
+          # target in this deterministic bounded prefix. The writer reserves
+          # 120s for startup and 180s for initial evidence; at the shared
+          # 8.1s Check Run pace, 50 targets add at most 100 writes (810s).
+          # The 1,110-second total fits the 1,200-second await, so it cannot
+          # abandon a still-running writer and leave the all-open hand-off
+          # blocked behind its barrier. Every remaining affected head is
+          # already fail-closed by the dispatcher Check Run and is handed to
+          # the all-open arbiter.
           EARLY_WRITER_TARGET_CAP = 50
           priority_seed = set(preinvalidate_targets)
           priority_targets = [] if duplicate_governed_heads else (
@@ -1420,7 +1423,7 @@ jobs:
           from urllib.parse import urlparse
           repository=os.environ["GITHUB_REPOSITORY"]; identifier=os.environ.get("WRITER_RUN_ID", ""); branch=os.environ.get("DEFAULT_BRANCH", ""); head=os.environ.get("WRITER_HEAD", ""); source=os.environ.get("DISPATCHER_RUN_ID", "")
           if not re.fullmatch(r"[1-9][0-9]*",identifier) or not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or not re.fullmatch(r"[0-9a-fA-F]{40}",head) or not re.fullmatch(r"[1-9][0-9]*",source): raise SystemExit("Early governance writer ID is invalid.")
-          deadline=time.time()+900
+          deadline=time.time()+1200
           workflow_path=".github/workflows/pr-governance-status-writer.yml"; title=f"source={source} scope=early segment=0"
           def path_matches(value):
               if value == workflow_path: return True
@@ -1428,9 +1431,10 @@ jobs:
               ref=value[len(workflow_path)+1:]
               return re.fullmatch(r"[A-Za-z0-9._/-]+",ref) is not None and ref not in {".",".."} and not ref.startswith("/") and "//" not in ref and all(part not in {"",".",".."} for part in ref.split("/"))
           # The early writer has at most 50 targets and two paced writes per
-          # target. Its 810-second write budget leaves 90 seconds inside this
-          # 15-minute wait for polling and control-plane reads.
-          for _ in range(30):
+          # target. Its 810-second write budget plus 120 seconds of startup
+          # and 180 seconds of initial evidence fits within this 20-minute
+          # wait, leaving 90 seconds for polling and control-plane reads.
+          for _ in range(40):
               remaining=deadline-time.time()
               if remaining<=0: break
               try: result=subprocess.run(["gh","api",f"repos/{repository}/actions/runs/{identifier}"],capture_output=True,text=True,check=False,timeout=min(20,remaining))
