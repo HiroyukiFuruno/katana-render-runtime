@@ -1,9 +1,15 @@
+#[path = "svg_rasterize_html_font_entities.rs"]
+mod entities;
 #[path = "svg_rasterize_html_font_request.rs"]
 mod request;
 #[path = "svg_rasterize_html_font_sources.rs"]
 mod sources;
 #[path = "svg_rasterize_html_font_system.rs"]
 mod system;
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_font_request_tests.rs"]
+mod request_tests;
 
 use request::HtmlFontRequest;
 use resvg::usvg;

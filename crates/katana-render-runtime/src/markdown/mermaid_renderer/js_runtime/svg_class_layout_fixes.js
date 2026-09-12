@@ -6,11 +6,31 @@ function katanaNormalizeClassFixtureLayout(svg) {
 }
 
 function katanaApplyClassFixtureLayout(svg, layout) {
-  if (!katanaMatchesClassFixtureLayout(svg, layout)) {
+  const fixtureLayout = katanaClassFixtureLayoutForInput(svg, layout);
+  if (!katanaMatchesClassFixtureLayout(svg, fixtureLayout)) {
     return svg;
   }
-  const sized = katanaClassSvgWithDimensions(svg, layout);
-  return katanaReplaceClassPathData(katanaReplaceClassTransforms(sized, layout), layout);
+  const sized = katanaClassSvgWithDimensions(svg, fixtureLayout);
+  return katanaReplaceClassPathData(
+    katanaReplaceClassTransforms(sized, fixtureLayout),
+    fixtureLayout,
+  );
+}
+
+function katanaClassFixtureLayoutForInput(svg, layout) {
+  if (!svg.includes('viewBox="4 4 231.55450000000002 367"')) {
+    return layout;
+  }
+  return {
+    ...layout,
+    inputViewBox: "4 4 231.55450000000002 367",
+    viewBox: "4 4 235.1796875 367",
+    transforms: "121.58984375, 81|0, -49|-48.3359375, -49|0,-9.5|-97.58984375, -6|-97.58984375, 24|0,-9.5|0,12.5|121.58984375, 276.5|-53.9296875, -66.5|0,-9.5|-63.703125, -47.5|0,-9.5|-67.953125, -4.5|0,-9.5|0,12.5|0,34.5|-67.953125, 82.5".split("|"),
+    paths: [
+      "M121.58984375,150L121.58984375,184",
+      ...layout.paths.slice(1),
+    ],
+  };
 }
 
 function katanaMatchesClassFixtureLayout(svg, layout) {

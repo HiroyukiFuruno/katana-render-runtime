@@ -38,11 +38,13 @@ sha2 = "0.11"
 tiny-skia = "0.12"
 ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 v8 = "=152.2.0"
+# `markup5ever_rcdom` is published only for the 0.39 markup5ever generation.
+# Keep the parser in the same type universe; the official 0.40 RcDom is not published.
 html5ever = "0.39"
 markup5ever_rcdom = "0.39"
 xmltree = "0.12"
 percent-encoding = "2.3"
-cssparser = "0.37"
+cssparser = "0.38"
 taffy = { version = "0.14.0", default-features = false, features = ["std", "taffy_tree", "block_layout", "flexbox", "grid", "content_size", "parse"] }
 unicode-linebreak = "0.1.5"
 unicode-width = "0.2.2"

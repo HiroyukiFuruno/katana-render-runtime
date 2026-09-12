@@ -1,1 +1,2 @@
 crates/katana-canvas-forge/vendor/**/*.js binary
+crates/katana-render-runtime/vendor/**/*.js binary

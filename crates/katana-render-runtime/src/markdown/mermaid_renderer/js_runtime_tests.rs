@@ -104,16 +104,30 @@ fn runtime_normalizes_block_nbsp_arrow_width() {
         .materialize_at(mermaid.materialized_path())
         .and_then(|mermaid_js| {
             MermaidJsRuntimeOps::render(
-                "block-beta\ncolumns 1\n  db((\"DB\"))\n  blockArrowId6<[\"&nbsp;&nbsp;&nbsp;\"]>(down)\n  block:ID\n    A\n    B[\"A wide one in the middle\"]\n    C\n  end\n  space\n  D\n  ID --> D\n  C --> D\n  style B fill:#969,stroke:#333,stroke-width:4px",
+                block_nbsp_arrow_source(),
                 &mermaid_js,
                 DiagramColorPreset::dark(),
             )
         });
 
+    assert_block_nbsp_arrow_svg(&rendered);
+}
+
+fn block_nbsp_arrow_source() -> &'static str {
+    "block-beta\ncolumns 1\n  db((\"DB\"))\n  blockArrowId6<[\"&nbsp;&nbsp;&nbsp;\"]>(down)\n  block:ID\n    A\n    B[\"A wide one in the middle\"]\n    C\n  end\n  space\n  D\n  ID --> D\n  C --> D\n  style B fill:#969,stroke:#333,stroke-width:4px"
+}
+
+fn assert_block_nbsp_arrow_svg(rendered: &Result<String, String>) {
     assert!(
         rendered
             .as_ref()
             .is_ok_and(|svg| svg.contains("viewBox=\"-5 -136.4375 675.234375 284.9375\"")),
+        "{rendered:?}"
+    );
+    assert!(
+        rendered.as_ref().is_ok_and(|svg| {
+            svg.contains("data-look=\"classic\" transform=\"translate(332.6171875, -118)\"")
+        }),
         "{rendered:?}"
     );
     assert!(

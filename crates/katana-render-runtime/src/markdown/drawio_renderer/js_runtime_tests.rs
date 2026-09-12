@@ -13,6 +13,37 @@ use crate::markdown::runtime_assets::RuntimeAsset;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+const NAMESPACED_DESCENDANTS_BUNDLE: &str = r#"
+function Graph() {}
+const mxUtils = {};
+const Editor = { convertHtmlToText(value) { return String(value); } };
+function GraphViewer() {}
+GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
+  const svgNamespace = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNamespace, "svg");
+  svg.setAttribute("width", "20");
+  svg.setAttribute("height", "10");
+  svg.setAttribute("viewBox", "0 0 20 10");
+  const group = document.createElementNS(svgNamespace, "g");
+  const foreignObject = document.createElementNS(svgNamespace, "foreignObject");
+  const htmlForeignObject = document.createElement("foreignObject");
+  group.appendChild(foreignObject);
+  group.appendChild(htmlForeignObject);
+  svg.appendChild(group);
+  const xml = mxUtils.createXmlDocument();
+  const xmlRoot = xml.createElementNS(svgNamespace, "svg");
+  xmlRoot.appendChild(xml.createElementNS(svgNamespace, "foreignObject"));
+  xmlRoot.appendChild(xml.createElement("foreignObject"));
+  xml.appendChild(xmlRoot);
+  svg.setAttribute("data-node-namespace-count", group.getElementsByTagNameNS(svgNamespace, "foreignObject").length);
+  svg.setAttribute("data-document-namespace-count", xml.getElementsByTagNameNS(svgNamespace, "foreignObject").length);
+  svg.setAttribute("data-any-namespace-count", group.getElementsByTagNameNS("*", "foreignObject").length);
+  svg.setAttribute("data-any-local-name-count", group.getElementsByTagNameNS(svgNamespace, "*").length);
+  svg.setAttribute("data-all-descendant-count", group.getElementsByTagNameNS("*", "*").length);
+  callback({ graph: { getSvg() { return svg; } } });
+};
+"#;
+
 #[test]
 fn bundle_cache_reads_once() {
     let path = temp_runtime_path("kdr-drawio-runtime-unit");
@@ -45,6 +76,26 @@ fn fake_bundle_renders_svg() {
         DrawioJsRuntimeOps::render("<mxGraphModel />", &path, DiagramColorPreset::light());
 
     assert!(rendered.as_ref().is_ok_and(|svg| svg.contains("<svg")));
+}
+
+#[test]
+fn fake_bundle_finds_namespaced_foreign_object_descendants() {
+    let path = temp_runtime_path("krr-drawio-namespaced-descendants");
+    assert!(std::fs::write(&path, NAMESPACED_DESCENDANTS_BUNDLE).is_ok());
+
+    let rendered =
+        DrawioJsRuntimeOps::render("<mxGraphModel />", &path, DiagramColorPreset::light());
+
+    assert!(
+        rendered.as_ref().is_ok_and(|svg| {
+            svg.contains(r#"data-node-namespace-count="1""#)
+                && svg.contains(r#"data-document-namespace-count="1""#)
+                && svg.contains(r#"data-any-namespace-count="1""#)
+                && svg.contains(r#"data-any-local-name-count="1""#)
+                && svg.contains(r#"data-all-descendant-count="2""#)
+        }),
+        "{rendered:?}"
+    );
 }
 
 #[test]

@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use super::entities::decode_xml_entities;
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(super) struct HtmlFontRequest {
     pub(super) families: Vec<String>,
@@ -13,7 +15,8 @@ impl HtmlFontRequest {
         let mut families = BTreeSet::new();
         for value in font_family_values(markup) {
             for family in value.split(',') {
-                let family = family.trim().trim_matches(['\'', '"']);
+                let decoded_family = decode_xml_entities(family);
+                let family = decoded_family.trim().trim_matches(['\'', '"']);
                 if !family.is_empty() {
                     families.insert(family.to_lowercase());
                 }
@@ -43,9 +46,10 @@ fn normalized_font_families(font_family: &str) -> Vec<String> {
     font_family
         .split(',')
         .map(str::trim)
-        .map(|family| family.trim_matches(['\'', '"']))
+        .map(decode_xml_entities)
+        .map(|family| family.trim().trim_matches(['\'', '"']).to_string())
         .filter(|family| !family.is_empty())
-        .map(str::to_lowercase)
+        .map(|family| family.to_lowercase())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
