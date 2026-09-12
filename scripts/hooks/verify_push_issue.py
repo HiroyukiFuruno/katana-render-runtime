@@ -234,23 +234,6 @@ def pushed_branch_updates(
     return tuple(targets)
 
 
-def pushed_default_branch_sha(
-    updates: Sequence[tuple[str, str, str, str]],
-    *,
-    default_branch: str,
-) -> str | None:
-    """Return the local tip when this push also updates the default branch."""
-    candidates = [
-        local_sha
-        for _local_ref, local_sha, remote_ref, _remote_sha in updates
-        if local_sha != _ZERO_SHA
-        and remote_ref == f"refs/heads/{default_branch}"
-    ]
-    if len(candidates) > 1:
-        raise ContractViolation("pre-push default branch updateが重複しています")
-    return candidates[0] if candidates else None
-
-
 def issue_numbers(message: str, repository: str) -> set[int]:
     expected_repository = repository.casefold()
     numbers = {
@@ -1144,10 +1127,11 @@ def main() -> int:
             pushed_remote_url=pushed_remote_url,
             repository_name=repository_name,
         )
-        default_range_base = pushed_default_branch_sha(
-            updates,
-            default_branch=default_branch,
-        ) or default_ref
+        # A non-atomic multi-ref push may update the feature branch while the
+        # default-branch update is rejected.  Always validate from the live
+        # remote tip fetched above; a local default tip is not an accepted
+        # substitute for the base of a feature range.
+        default_range_base = default_ref
         push_updates = pushed_branch_updates(updates, default_branch=default_branch)
         validation_targets = list(push_updates) if push_updates else []
         if not validation_targets and not push_input.strip() and branch != default_branch:

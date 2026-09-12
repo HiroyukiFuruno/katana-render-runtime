@@ -623,29 +623,64 @@ class VerifyPushIssueTest(unittest.TestCase):
         )
         self.assertEqual(updates, (("feature-a", "a" * 40), ("feature-b", "b" * 40)))
 
-    def test_pushed_default_branch_sha_uses_local_tip_for_combined_push(self) -> None:
-        local_master_sha = "c" * 40
-        self.assertEqual(
-            subject.pushed_default_branch_sha(
-                (
-                    ("refs/heads/master", local_master_sha, "refs/heads/master", "a" * 40),
-                    ("refs/heads/feature", "d" * 40, "refs/heads/feature", "b" * 40),
-                ),
-                default_branch="master",
-            ),
-            local_master_sha,
-        )
-
-    def test_pushed_default_branch_sha_ignores_delete_and_other_branches(self) -> None:
-        self.assertIsNone(
-            subject.pushed_default_branch_sha(
-                (
-                    ("refs/heads/master", "0" * 40, "refs/heads/master", "a" * 40),
-                    ("refs/heads/feature", "d" * 40, "refs/heads/feature", "b" * 40),
-                ),
-                default_branch="master",
+    def test_nonatomic_combined_push_uses_remote_default_as_feature_base(self) -> None:
+        """A rejected default update must not hide unreferenced local commits."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            binary_directory = root / "bin"
+            repository.mkdir()
+            binary_directory.mkdir()
+            for command in (
+                ["git", "init", "--initial-branch=master"],
+                ["git", "config", "user.name", "Issue Contract Test"],
+                ["git", "config", "user.email", "issue@example.com"],
+            ):
+                subprocess.run(command, cwd=repository, check=True, capture_output=True, text=True)
+            (repository / "base.txt").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "add", "base.txt"], cwd=repository, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "initial"], cwd=repository, check=True, capture_output=True, text=True)
+            remote_url = "https://github.com/HiroyukiFuruno/katana-render-runtime.git"
+            self.configure_live_fetch_remote(repository, remote="origin", push_url=remote_url)
+            subprocess.run(["git", "update-ref", "refs/remotes/origin/master", "HEAD"], cwd=repository, check=True)
+            subprocess.run(["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master"], cwd=repository, check=True)
+            # This commit exists only in the local default branch.  If the
+            # hook uses that local tip as base, the feature range omits it.
+            (repository / "local-only.txt").write_text("must be checked\n", encoding="utf-8")
+            subprocess.run(["git", "add", "local-only.txt"], cwd=repository, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "local default change"], cwd=repository, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "switch", "-c", "feature/non-atomic"], cwd=repository, check=True, capture_output=True, text=True)
+            (repository / "feature.txt").write_text("feature\n", encoding="utf-8")
+            subprocess.run(["git", "add", "feature.txt"], cwd=repository, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "feat: feature", "-m", "Refs #64"], cwd=repository, check=True, capture_output=True, text=True)
+            feature_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repository, check=True, capture_output=True, text=True).stdout.strip()
+            local_default_sha = subprocess.run(["git", "rev-parse", "master"], cwd=repository, check=True, capture_output=True, text=True).stdout.strip()
+            fake_gh = binary_directory / "gh"
+            fake_gh.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' '{\"number\":64,\"state\":\"OPEN\",\"body\":\"Issue body\",\"url\":\"https://github.com/HiroyukiFuruno/katana-render-runtime/issues/64\"}'\n",
+                encoding="utf-8",
             )
-        )
+            fake_gh.chmod(fake_gh.stat().st_mode | stat.S_IXUSR)
+            self.install_fake_push_remote_git(binary_directory)
+            environment = os.environ.copy()
+            environment["PATH"] = f"{binary_directory}:{environment['PATH']}"
+            environment["KRR_TEST_REAL_GIT"] = str(shutil.which("git"))
+            environment["KRR_TEST_PUSH_REMOTE_REF"] = "refs/remotes/origin/master"
+            result = subprocess.run(
+                [sys.executable, str(Path(subject.__file__))],
+                cwd=repository,
+                env=environment,
+                input=(
+                    f"refs/heads/master {local_default_sha} refs/heads/master {'0' * 40}\n"
+                    f"refs/heads/feature/non-atomic {feature_sha} refs/heads/feature/non-atomic {'0' * 40}\n"
+                ),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("commit 1に対象repositoryのIssue参照がありません", result.stderr)
 
     def issue(
         self,
