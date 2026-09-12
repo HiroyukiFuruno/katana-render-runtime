@@ -42,6 +42,14 @@ CHECK_WRITE_INTERVAL_SECONDS = 8.1
 # bootstrap, and initial-evidence work.
 # hour below the 4,500-request operational ceiling.
 ALL_TERMINAL_CHECK_WRITE_INTERVAL_SECONDS = 20.5
+# Initial-evidence expiry is recovered with one exact PATCH for each already
+# dispatcher-bound Check Run.  The recovery validates the writer and trusted
+# default ref once, then deliberately publishes only ``failure``.  A later
+# dispatcher can repair that fail-closed result, but an older recovery can
+# never grant merge permission.  Three bounded reads cover the batch fence
+# (writer run plus repository/default-ref rebind); the paced PATCHs are the
+# only per-head network operations.
+INITIAL_EVIDENCE_FAILURE_RECOVERY_FENCE_REQUESTS = 3
 # Every ``gh api`` child is bounded independently.  Initial evidence also uses
 # a shared monotonic deadline so a sequence of individually successful slow
 # reads cannot consume the terminal writer's await reserve.
@@ -910,6 +918,16 @@ def pace_check_write() -> None:
         time.sleep(delay)
         now = time.monotonic()
     _last_check_write_at = now
+
+
+def initial_evidence_failure_recovery_budget_seconds(target_count: int) -> float:
+    """Return the bounded terminal window required to close one all-open slice."""
+    if type(target_count) is not int or not 0 <= target_count <= MAX_TERMINAL_BATCH:
+        raise GovernanceError("Initial evidence failure recovery target count is invalid.")
+    return (
+        INITIAL_EVIDENCE_FAILURE_RECOVERY_FENCE_REQUESTS * GITHUB_API_TIMEOUT_SECONDS
+        + target_count * ALL_TERMINAL_CHECK_WRITE_INTERVAL_SECONDS
+    )
 
 
 def write_check(
@@ -2050,30 +2068,60 @@ def terminalize_initial_evidence_failure(
     )
     if len(terminal_numbers) > MAX_TERMINAL_BATCH:
         raise GovernanceError("Initial evidence failure exceeds terminal write budget.")
-    empty_evidence = EvidenceSnapshot({}, {}, {})
+    if _terminal_deadline_monotonic is not None:
+        remaining = _terminal_deadline_monotonic - time.monotonic()
+        required = initial_evidence_failure_recovery_budget_seconds(len(terminal_numbers))
+        if remaining < required:
+            raise GovernanceError("Initial evidence failure recovery cannot fit the terminal deadline.")
+
+    # ``observed_invalidations`` has already read each manifest-bound ID and
+    # verified its dispatcher external ID before initial evidence starts.  Do
+    # the expensive, global writer/default-branch fences once, rather than
+    # re-reading every Check Run and workflow generation after the read window
+    # has already elapsed.  This path can only make a Check Run fail: a later
+    # dispatcher may supersede it, but this writer cannot make a stale head
+    # mergeable.
+    ensure_writer_run_is_active()
+    rebind_trusted_default_writer()
+    failures = 0
     for number in terminal_numbers:
         try:
             target = targets[number]
             head = target["head_sha"]
             if not isinstance(head, str):  # Defensive type narrowing for the mapping above.
                 raise GovernanceError("Initial evidence failure target is invalid.")
-            baseline = check_baseline(head)
-            if not baseline:
-                raise NoPostGovernanceError("Reserved all-open Check Run is missing.")
-            decision = PendingDecision(
-                number, head, "", baseline, "failure",
-                "Trusted PR governance failed closed.", None, None, None, "",
-            )
-            if decision_write_cost(decision) != 1:
-                raise GovernanceError("Initial evidence failure terminal write cost is invalid.")
-            # A changed fingerprint belongs to a later invalidator; do not let an
-            # expired writer overwrite it.  Its newer generation owns the barrier.
-            finalize_decision(decision, claimants, empty_evidence)
+            identifier = _bound_check_ids_by_number.get(number)
+            external_id = check_external_id(head)
+            if (
+                type(identifier) is not int or identifier < 1
+                or _bound_check_runs.get((head, external_id)) != identifier
+            ):
+                raise GovernanceError("Initial evidence failure Check Run manifest is invalid.")
+            details = target_url()
+            pace_check_write()
+            arguments = [
+                "--method", "PATCH", f"repos/{REPOSITORY}/check-runs/{identifier}",
+                "-f", f"details_url={details}", "-f", f"output[title]={CHECK_NAME}",
+                "-f", "output[summary]=Trusted PR governance failed closed.",
+                "-f", "status=completed", "-f", "conclusion=failure",
+            ]
+            try:
+                value = json.loads(command(arguments, check_write=True))
+            except json.JSONDecodeError as error:
+                raise GovernanceError("Initial evidence failure Check Run response is not JSON.") from error
+            checked = _valid_check(value, head, external_id=external_id)
+            if (
+                checked["id"] != identifier or checked.get("status") != "completed"
+                or checked.get("conclusion") != "failure" or checked.get("details_url") != details
+            ):
+                raise GovernanceError("Initial evidence failure Check Run write is invalid.")
         except GovernanceError as error:
-            # One changed Check Run must not strand unrelated reservations in
-            # this bounded segment.  The changed target remains owned by its
-            # newer writer; every other target still receives its own fence.
+            failures += 1
+            # A per-head transport fault must not strand every other
+            # reservation in the bounded recovery slice.
             print(f"PR #{number}: initial evidence failure was not terminalized: {error}", file=sys.stderr)
+    if failures:
+        raise GovernanceError("Initial evidence failure recovery was incomplete.")
 
 
 def main() -> int:

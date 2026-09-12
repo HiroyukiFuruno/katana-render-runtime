@@ -3212,37 +3212,80 @@ class StatusWriterUnitTest(unittest.TestCase):
         self.assertIsNone(WRITER._active_initial_evidence_deadline)
 
     def test_initial_evidence_deadline_terminalizes_maximum_all_scope_non_drafts(self) -> None:
-        """An expired shared read window cannot strand 125 dispatcher barriers."""
+        """An expired read window closes all 125 reservations within one writer budget."""
         numbers = tuple(range(1, WRITER.MAX_TERMINAL_BATCH + 1))
-        snapshot = self.snapshot(numbers, drafts=frozenset({numbers[-1]}))
-        finalized: list[WRITER.PendingDecision] = []
+        snapshot = self.snapshot(numbers)
+        commands: list[list[str]] = []
 
-        def baseline(head: str) -> tuple[str]:
-            return (head,)
+        def command(arguments: list[str], *, check_write: bool = False, **_kwargs: object) -> str:
+            self.assertTrue(check_write)
+            commands.append(arguments)
+            identifier = int(next(value.rsplit("/", 1)[1] for value in arguments if value.startswith("repos/owner/repository/check-runs/")))
+            number = identifier - 10_000
+            head = f"{number:040x}"[-40:]
+            return json.dumps({
+                "id": identifier, "name": WRITER.CHECK_NAME, "head_sha": head,
+                "external_id": WRITER.check_external_id(head), "updated_at": f"recovered-{number}",
+                "app": {"id": 42}, "status": "completed", "conclusion": "failure",
+                "details_url": f"https://github.com/owner/repository/actions/runs/99",
+            })
 
-        def finalize(
-            decision: WRITER.PendingDecision,
-            claimants: dict[str, frozenset[int]],
-            evidence: WRITER.EvidenceSnapshot,
-        ) -> bool:
-            self.assertEqual(claimants, {})
-            self.assertEqual((evidence.sensor_runs, evidence.workflow_ids, evidence.workflow_runs), ({}, {}, {}))
-            finalized.append(decision)
-            return True
+        previous_ids = dict(WRITER._bound_check_ids_by_number)
+        previous_runs = dict(WRITER._bound_check_runs)
+        previous_deadline = WRITER._terminal_deadline_monotonic
+        def restore_bindings() -> None:
+            WRITER._bound_check_ids_by_number.clear()
+            WRITER._bound_check_ids_by_number.update(previous_ids)
+            WRITER._bound_check_runs.clear()
+            WRITER._bound_check_runs.update(previous_runs)
+            WRITER._terminal_deadline_monotonic = previous_deadline
+        self.addCleanup(restore_bindings)
+        WRITER._bound_check_ids_by_number.clear()
+        WRITER._bound_check_runs.clear()
+        WRITER._terminal_deadline_monotonic = None
+        for number in numbers:
+            head = f"{number:040x}"[-40:]
+            identifier = 10_000 + number
+            WRITER._bound_check_ids_by_number[number] = identifier
+            WRITER._bound_check_runs[(head, WRITER.check_external_id(head))] = identifier
 
-        with patch.object(WRITER, "check_baseline", side_effect=baseline), \
-             patch.object(WRITER, "finalize_decision", side_effect=finalize):
+        with self.identity(), patch.dict(os.environ, {
+            "GITHUB_ACTIONS": "true", "GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master",
+            "KRR_GOVERNANCE_CHECK_APP_ID": "42", "CHECK_WRITE_TOKEN": "write-token",
+        }), patch.object(WRITER, "ensure_writer_run_is_active") as writer_fence, \
+             patch.object(WRITER, "rebind_trusted_default_writer") as default_fence, \
+             patch.object(WRITER, "pace_check_write") as pace, \
+             patch.object(WRITER, "command", side_effect=command), \
+             patch.object(WRITER, "check_baseline", side_effect=AssertionError("per-head reread is forbidden")), \
+             patch.object(WRITER, "finalize_decision", side_effect=AssertionError("per-head finalizer is forbidden")):
             WRITER.terminalize_initial_evidence_failure(snapshot, numbers, {})
 
-        self.assertEqual([decision.number for decision in finalized], list(numbers[:-1]))
-        self.assertTrue(all(
-            decision.state == "failure"
-            and decision.description == "Trusted PR governance failed closed."
-            and decision.sensor_id is None
-            and decision.generations is None
-            and decision.issue is None
-            for decision in finalized
-        ))
+        writer_fence.assert_called_once_with()
+        default_fence.assert_called_once_with()
+        self.assertEqual(pace.call_count, WRITER.MAX_TERMINAL_BATCH)
+        self.assertEqual(len(commands), WRITER.MAX_TERMINAL_BATCH)
+        self.assertEqual(
+            [int(next(value.rsplit("/", 1)[1] for value in command if value.startswith("repos/owner/repository/check-runs/"))) for command in commands],
+            [10_000 + number for number in numbers],
+        )
+        self.assertLessEqual(
+            WRITER.INITIAL_EVIDENCE_DEADLINE_SECONDS
+            + WRITER.initial_evidence_failure_recovery_budget_seconds(WRITER.MAX_TERMINAL_BATCH),
+            3_750.0,
+        )
+
+    def test_initial_evidence_failure_refuses_to_start_without_the_full_terminal_budget(self) -> None:
+        snapshot = self.snapshot((1,))
+        previous = WRITER._terminal_deadline_monotonic
+        WRITER._terminal_deadline_monotonic = 79.0
+        try:
+            with patch.object(WRITER.time, "monotonic", return_value=0.0), \
+                 patch.object(WRITER, "ensure_writer_run_is_active") as writer_fence:
+                with self.assertRaisesRegex(WRITER.GovernanceError, "cannot fit the terminal deadline"):
+                    WRITER.terminalize_initial_evidence_failure(snapshot, (1,), {})
+            writer_fence.assert_not_called()
+        finally:
+            WRITER._terminal_deadline_monotonic = previous
 
     def test_contract_verifiers_receive_only_the_read_token(self) -> None:
         class Result:
