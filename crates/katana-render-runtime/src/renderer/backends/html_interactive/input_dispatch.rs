@@ -64,8 +64,30 @@ impl HtmlInteractiveSession {
     fn scroll(&mut self, delta_y: f32) -> Result<(), HtmlBrowserError> {
         self.resize_anchor = None;
         let logical_delta = delta_y / self.viewport.device_scale_factor;
-        self.scroll_y = (self.scroll_y + logical_delta).clamp(0.0, self.max_scroll());
+        let next_scroll = (self.scroll_y + logical_delta).clamp(0.0, self.max_scroll());
+        if next_scroll == self.scroll_y {
+            return Ok(());
+        }
+        self.scroll_y = next_scroll;
+        self.refresh_scroll_layout()?;
+        if self.sync_intersection_geometry_from_current_layout()? {
+            /* WHY: Observer callbacks can mutate the DOM. The scroll listener
+             * must observe the resulting geometry, not the preceding layout. */
+            self.refresh_scroll_layout()?;
+            self.sync_intersection_geometry_from_current_layout()?;
+        }
+        self.runtime
+            .dispatch_window_scroll()
+            .map_err(runtime_failure)?;
         self.render_frame()
+    }
+
+    fn refresh_scroll_layout(&mut self) -> Result<(), HtmlBrowserError> {
+        let layout = self.layout()?;
+        self.hit_targets = layout.hit_targets;
+        self.element_boxes = layout.element_boxes;
+        self.content_height = layout.content_height;
+        Ok(())
     }
 
     fn activate_target_at(&mut self, x: f32, y: f32) -> Result<(), HtmlBrowserError> {

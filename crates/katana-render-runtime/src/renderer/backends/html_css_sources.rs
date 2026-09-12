@@ -68,7 +68,7 @@ fn stylesheet_reference(node: &Handle) -> Option<String> {
     let attributes = attrs.borrow();
     let rel = attributes
         .iter()
-        .find(|attribute| attribute.name.local.as_ref().eq_ignore_ascii_case("rel"))?
+        .find(|attribute| attribute.name.local.as_str().eq_ignore_ascii_case("rel"))?
         .value
         .to_string();
     rel.split_ascii_whitespace()
@@ -76,7 +76,7 @@ fn stylesheet_reference(node: &Handle) -> Option<String> {
         .then(|| {
             attributes
                 .iter()
-                .find(|attribute| attribute.name.local.as_ref().eq_ignore_ascii_case("href"))
+                .find(|attribute| attribute.name.local.as_str().eq_ignore_ascii_case("href"))
                 .map(|attribute| attribute.value.to_string())
         })
         .flatten()

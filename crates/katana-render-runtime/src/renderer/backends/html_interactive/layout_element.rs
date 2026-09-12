@@ -100,6 +100,7 @@ impl HtmlLayoutRenderer {
             y: 0.0,
             width: 0.0,
             height: 0.0,
+            rotation_degrees: 0.0,
         });
         index
     }
@@ -119,6 +120,7 @@ impl HtmlLayoutRenderer {
             y,
             width,
             height: (bottom - y - layout.style.margin_bottom).max(0.0),
+            rotation_degrees: layout.style.rotation_degrees,
         };
     }
 

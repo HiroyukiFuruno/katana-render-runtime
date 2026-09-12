@@ -153,6 +153,9 @@ class KatanaNode {
   getElementsByTagName(tagName) {
     return this.querySelectorAll(String(tagName).toLowerCase());
   }
+  getElementsByTagNameNS(namespaceURI, localName) {
+    return katanaNamespaceTagDescendants(this, String(namespaceURI), String(localName));
+  }
   addEventListener() {}
   removeEventListener() {}
   dispatchEvent() {
@@ -192,6 +195,37 @@ function katanaDomBackedProperty(field, fallback) {
 
 function katanaFirstQuerySelectorResult(node, selector) {
   return node.querySelectorAll(selector)[0] ?? null;
+}
+
+function katanaNamespaceTagDescendants(root, namespaceURI, localName) {
+  const matches = [];
+  katanaCollectNamespaceTagDescendants(root, namespaceURI, localName, matches);
+  return matches;
+}
+
+function katanaCollectNamespaceTagDescendants(node, namespaceURI, localName, matches) {
+  for (const child of node.children) {
+    if (katanaMatchesNamespaceTag(child, namespaceURI, localName)) {
+      matches.push(child);
+    }
+    katanaCollectNamespaceTagDescendants(child, namespaceURI, localName, matches);
+  }
+}
+
+function katanaMatchesNamespaceTag(node, namespaceURI, localName) {
+  return [
+    node.nodeType === 1,
+    katanaMatchesNamespace(node.namespaceURI, namespaceURI),
+    katanaMatchesLocalName(node, localName),
+  ].every(Boolean);
+}
+
+function katanaMatchesNamespace(nodeNamespace, namespaceURI) {
+  return namespaceURI === "*" || nodeNamespace === namespaceURI;
+}
+
+function katanaMatchesLocalName(node, localName) {
+  return localName === "*" || node.serializedName === localName;
 }
 
 function katanaRawNodeName(tagName) {

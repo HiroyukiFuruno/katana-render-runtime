@@ -251,7 +251,7 @@ mod tests {
         assert!(
             matches!(
                 &children[0].data,
-                NodeData::Element { name, .. } if name.local.as_ref() == "li"
+                NodeData::Element { name, .. } if name.local.as_str() == "li"
             ),
             "fragment child was not a list item"
         );
@@ -394,7 +394,7 @@ mod tests {
         let root = fragment_root(&dom.document);
 
         assert!(
-            matches!(&root.data, markup5ever_rcdom::NodeData::Element { name, .. } if name.local.as_ref() == "body")
+            matches!(&root.data, markup5ever_rcdom::NodeData::Element { name, .. } if name.local.as_str() == "body")
         );
     }
 
@@ -414,7 +414,7 @@ mod tests {
         let root = fragment_root(&dom.document);
 
         assert!(
-            matches!(&root.data, NodeData::Element { name, .. } if name.local.as_ref() == "html")
+            matches!(&root.data, NodeData::Element { name, .. } if name.local.as_str() == "html")
         );
     }
 

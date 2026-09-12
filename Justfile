@@ -17,13 +17,13 @@ TAG := "v" + VERSION_BARE
 RELEASE_REPO := env_var_or_default("RELEASE_REPO", "HiroyukiFuruno/katana-render-runtime")
 COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
-MERMAID_JS_VERSION := "11.17.2"
-MERMAID_ZENUML_JS_VERSION := "0.2.3"
-DRAWIO_JS_VERSION := "31.3.2"
+MERMAID_JS_VERSION := "12.0.0"
+MERMAID_ZENUML_JS_VERSION := "1.0.0"
+DRAWIO_JS_VERSION := "31.4.5"
 MATHJAX_JS_VERSION := "4.1.3"
-ZENUML_CORE_JS_VERSION := "3.47.9"
-PLANTUML_JAR_VERSION := "1.2026.7"
-PLANTUML_JAR_CHECKSUM := "1eb8cd1d0253227f3652586bc3b53cb3d5cfe69b5dcca41ce9b92ab1ce4f58ff"
+ZENUML_CORE_JS_VERSION := "4.3.0"
+PLANTUML_JAR_VERSION := "1.2026.8"
+PLANTUML_JAR_CHECKSUM := "1057dd8b346bed26a48ffebe6054e16fc785dda7c91f37f6c19030a4aab8a942"
 PLAYWRIGHT_VERSION := "1.60.0"
 MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-render-runtime/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
 MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-render-runtime/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
@@ -152,6 +152,7 @@ plantuml-runtime-package-check:
 # Run TypeScript tests for runtime asset helper scripts
 runtime-asset-script-test:
     bun test --path-ignore-patterns 'tmp/**' scripts/runtime-assets/runtime-asset-common_test.ts scripts/runtime-assets/update_test.ts scripts/runtime-assets/latest-check_test.ts scripts/runtime-assets/update_zenuml_test.ts scripts/runtime-assets/depends-update-all_test.ts scripts/runtime-assets/runtime-package-asset-compressor_test.ts
+    bun test --path-ignore-patterns 'tmp/**' scripts/drawio/reference_score_test.ts scripts/drawio/official-runtime-determinism_test.ts scripts/drawio/official-source-fonts_test.ts
 
 [private]
 runtime-package-asset-check:
@@ -224,14 +225,16 @@ depends-update-all:
     bun run scripts/runtime-assets/depends-update-all.ts
     bun run scripts/drawio/resource-update.ts --resources "{{DRAWIO_RESOURCE_DIR}}" --manifest "{{DRAWIO_RESOURCE_MANIFEST}}"
     bun run scripts/runtime-assets/runtime-package-asset-compressor.ts --write
+    just fmt
     just runtime-bundle-build
+    just check
+    just coverage
     just mermaid-reference-all
     just mermaid-compare-full
     just mermaid-compare-ci
     just drawio-reference-all
     just drawio-compare-full
     just drawio-compare-ci
-    just check
 
 # Install pinned PlantUML LGPL JAR into the PlantUML cache
 plantuml-install version=PLANTUML_JAR_VERSION output=PLANTUML_CACHE_JAR:

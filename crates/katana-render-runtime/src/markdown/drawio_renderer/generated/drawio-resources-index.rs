@@ -1,7 +1,69 @@
-pub(super) const DRAWIO_RESOURCE_ARCHIVE_UNCOMPRESSED_LENGTH: usize = 1020564;
-include!("drawio-resources-media-index.rs");
-include!("drawio-resources-data-index.rs");
+pub(super) const DRAWIO_RESOURCE_ARCHIVE_UNCOMPRESSED_LENGTH: usize = 45764460;
+include!("drawio-resources-assets-img-index.rs");
+include!("drawio-resources-data-icons-index.rs");
+include!("drawio-resources-icon-cache1-index.rs");
+include!("drawio-resources-img-clipart-index.rs");
+include!("drawio-resources-img-lib-index.rs");
+include!("drawio-resources-shapes-bpmn-index.rs");
+include!("drawio-resources-shapes-emoji-index.rs");
+include!("drawio-resources-shapes-er-index.rs");
+include!("drawio-resources-shapes-ios7-index.rs");
+include!("drawio-resources-shapes-mockup-index.rs");
+include!("drawio-resources-shapes-index.rs");
+include!("drawio-resources-shapes-pid2-index.rs");
+include!("drawio-resources-shapes-rack-index.rs");
+include!("drawio-resources-stencils-index.rs");
+include!("drawio-resources-stencils-android-index.rs");
+include!("drawio-resources-stencils-aws-index.rs");
+include!("drawio-resources-stencils-aws2-index.rs");
+include!("drawio-resources-stencils-cisco_safe-index.rs");
+include!("drawio-resources-stencils-cisco-index.rs");
+include!("drawio-resources-stencils-clipart-index.rs");
+include!("drawio-resources-stencils-electrical-index.rs");
+include!("drawio-resources-stencils-gcp-index.rs");
+include!("drawio-resources-stencils-ios7-index.rs");
+include!("drawio-resources-stencils-mockup-index.rs");
+include!("drawio-resources-stencils-mscae-index.rs");
+include!("drawio-resources-stencils-office-index.rs");
+include!("drawio-resources-stencils-pid-index.rs");
+include!("drawio-resources-stencils-rack-index.rs");
+include!("drawio-resources-stencils-signs-index.rs");
+include!("drawio-resources-stencils-veeam-index.rs");
+include!("drawio-resources-ti-gratis-vektor-index.rs");
+include!("drawio-resources-wikipedia-commons-index.rs");
+include!("drawio-resources-wikipedia-de-index.rs");
 pub(super) const DRAWIO_RESOURCE_ARCHIVE_INDEXES: &[DrawioResourceArchiveIndex] = &[
-    DRAWIO_RESOURCE_ARCHIVE_MEDIA_INDEX,
-    DRAWIO_RESOURCE_ARCHIVE_DATA_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_ASSETS_IMG_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_DATA_ICONS_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_ICON_CACHE1_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_IMG_CLIPART_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_IMG_LIB_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_SHAPES_BPMN_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_SHAPES_EMOJI_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_SHAPES_ER_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_SHAPES_IOS7_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_SHAPES_MOCKUP_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_SHAPES_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_SHAPES_PID2_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_SHAPES_RACK_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_ANDROID_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_AWS_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_AWS2_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_CISCO_SAFE_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_CISCO_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_CLIPART_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_ELECTRICAL_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_GCP_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_IOS7_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_MOCKUP_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_MSCAE_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_OFFICE_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_PID_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_RACK_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_SIGNS_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_STENCILS_VEEAM_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_TI_GRATIS_VEKTOR_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_WIKIPEDIA_COMMONS_INDEX,
+    DRAWIO_RESOURCE_ARCHIVE_WIKIPEDIA_DE_INDEX,
 ];

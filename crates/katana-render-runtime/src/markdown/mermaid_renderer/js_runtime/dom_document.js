@@ -46,6 +46,9 @@ const document = {
   getElementsByTagName(tagName) {
     return this.documentElement.querySelectorAll(String(tagName).toLowerCase());
   },
+  getElementsByTagNameNS(namespaceURI, localName) {
+    return this.documentElement.getElementsByTagNameNS(namespaceURI, localName);
+  },
   importNode(node, deep) {
     const clone = node.cloneNode(deep);
     clone.ownerDocument = document;

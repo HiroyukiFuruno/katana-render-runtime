@@ -12,9 +12,43 @@ import sys
 from dataclasses import dataclass
 from urllib import error, request
 
-REQUIRED_LATEST_RELEASE = "v0.4.18"
-REQUIRED_TARGET_RELEASE = "v0.4.19"
-REQUIRED_RELEASE_COMMITS = ("02a73d293c04f9635fd3a822ac865bf81d4c8745",)
+REQUIRED_LATEST_RELEASE = "v0.4.19"
+REQUIRED_TARGET_RELEASE = "v0.4.20"
+# Keep the release intent explicit: the v0.4.18 baseline and fixes tracked by
+# the v0.4.20 release issues must all be present in the candidate.
+REQUIRED_RELEASE_COMMITS = (
+    "02a73d293c04f9635fd3a822ac865bf81d4c8745",
+    "8552c63457480379922c7076bcff604b5401ae20",  # #73
+    "694ac82a85d555485e46eb46cf882c8db11b2fe5",  # #74
+    "007ab829df39ed40bbfcfc19205ad21f3da32fe8",  # #76 implementation
+    "91f07699b26567658f76021050ca7ec7b5c10df1",  # #76 regression
+    "88d77e45b7b22d7886e2c09cb0ed1432bf237772",  # #76 review repair
+    "d34f6ea22dee7bda77201a57470d430cb658382b",  # #76 Windows regression
+    "0c67cff9713fca21b1de35315c4ee3f18ae0c0e8",  # #76 observer repair
+    "180d1e3ab6ec3ce3182273fed3a19e28a740dfd1",  # #76 font regression
+    "65793ab7855881a6b9042d8d400d69f21a09358a",  # #76 Linux coverage
+    "28d2a9b7f88497db3ae103ed406cceb1bd0f6ef5",  # #76 review repair
+    "ecba4e40d4bc3419c610d3013f8bd723dd2a449d",  # #76 process boundary
+    "9c6915c05db47068bb8fc8649279fa0aad9a1dc5",  # #76 Linux regression
+    "817f0e889286be30ce5a549539eeb6d2f4d166de",  # #76 file filter
+    "bcca7a5fa4bc06ad30b2917b33cd312f771a5828",  # #76 review repair
+    "e395b23ac88ced4bcb116d6cc4e468e4376fc392",  # #76 scroll regression
+    "fb83a4a7ec423f2a2b41d0f4954b43a496171c68",  # #76 geometry regression
+    "72a5f61dda084653406d972c1ee591dc965054ba",  # #76 runtime assets
+    "8ec7a153a26750527dcd9a3e17425bc606e576ea",  # #76 latest dependency migration
+    "99b31884d04de4322df28b0df02a8e7e7d9f3a54",  # #76 final regression repair
+)
+# A squash merge deliberately rewrites commit ancestry.  These refs identify
+# the complete v0.4.20 PR tree independently of that ancestry.  Do not shorten
+# this range to the initial implementation: each terminal repair is release
+# critical and a reconstructed squash must contain every changed path.
+REQUIRED_RELEASE_BASE = "0fbf6ee965b3a5f43f609034a59d0c9042353027"
+RELEASE_GATE_PATHS = frozenset(
+    {
+        "scripts/release/verify-release-target.py",
+        "scripts/release/verify_release_target_test.py",
+    }
+)
 
 
 @dataclass(frozen=True, order=True)
@@ -97,9 +131,11 @@ def latest_remote_tag(remote: str) -> StableVersion | None:
     return max(versions) if versions else None
 
 
-def missing_required_commits(head_ref: str) -> list[str]:
+def missing_required_commits(
+    head_ref: str, required_commits: tuple[str, ...] = REQUIRED_RELEASE_COMMITS
+) -> list[str]:
     missing: list[str] = []
-    for commit in REQUIRED_RELEASE_COMMITS:
+    for commit in required_commits:
         result = subprocess.run(
             ["git", "merge-base", "--is-ancestor", commit, head_ref],
             check=False,
@@ -109,6 +145,84 @@ def missing_required_commits(head_ref: str) -> list[str]:
         if result.returncode != 0:
             missing.append(commit)
     return missing
+
+
+def release_tree_matches(
+    head_ref: str,
+    release_base: str = REQUIRED_RELEASE_BASE,
+    release_tree: str | None = None,
+) -> bool:
+    """Return whether a squash candidate preserves the required release tree.
+
+    The normal gate derives expected blobs from the required commits so later
+    gate/test edits do not make the expected tree self-referential.  The
+    explicit tree argument remains for the focused synthetic regression test.
+    """
+    if release_tree is not None:
+        changed_paths = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-renames",
+                release_base,
+                release_tree,
+            ],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        if changed_paths.returncode != 0:
+            return False
+        paths = tuple(path for path in changed_paths.stdout.split("\0") if path)
+        if not paths:
+            return False
+        result = subprocess.run(
+            ["git", "diff", "--quiet", "--no-ext-diff", release_tree, head_ref, "--", *paths],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return result.returncode == 0
+
+    expected_blobs: dict[str, str | None] = {}
+    for commit in REQUIRED_RELEASE_COMMITS:
+        changed = subprocess.run(
+            ["git", "diff", "--name-only", "-z", "--no-renames", f"{commit}^", commit],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        if changed.returncode != 0:
+            return False
+        for path in (item for item in changed.stdout.split("\0") if item):
+            if path in RELEASE_GATE_PATHS:
+                continue
+            blob = subprocess.run(
+                ["git", "rev-parse", f"{commit}:{path}"],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            expected_blobs[path] = blob.stdout.strip() if blob.returncode == 0 else None
+    if not expected_blobs:
+        return False
+    for path, expected in expected_blobs.items():
+        present = subprocess.run(
+            ["git", "rev-parse", f"{head_ref}:{path}"],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        actual = present.stdout.strip() if present.returncode == 0 else None
+        if actual != expected:
+            return False
+    return True
 
 
 def main() -> int:
@@ -133,10 +247,11 @@ def main() -> int:
         )
         return 1
     missing_commits = missing_required_commits(args.head_ref)
-    if missing_commits:
+    if missing_commits and not release_tree_matches(args.head_ref):
         print(
             "Release target sanity check failed: release branch is missing required "
-            f"commit(s): {', '.join(missing_commits)}.",
+            "commit(s) and does not reproduce their required release tree: "
+            f"{', '.join(missing_commits)}.",
             file=sys.stderr,
         )
         return 1

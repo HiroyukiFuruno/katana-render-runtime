@@ -1,0 +1,16 @@
+pub(super) const DRAWIO_RESOURCE_ARCHIVE_STENCILS_CISCO_INDEX: &[DrawioResourceArchiveEntry] = &[
+    ("stencils/cisco/buildings.xml", 18641299, 35021),
+    ("stencils/cisco/computers_and_peripherals.xml", 18676320, 65662),
+    ("stencils/cisco/controllers_and_modules.xml", 18741982, 32756),
+    ("stencils/cisco/directors.xml", 18774738, 14854),
+    ("stencils/cisco/hubs_and_gateways.xml", 18789592, 21454),
+    ("stencils/cisco/misc.xml", 18811046, 458142),
+    ("stencils/cisco/modems_and_phones.xml", 19269188, 82775),
+    ("stencils/cisco/people.xml", 19351963, 95665),
+    ("stencils/cisco/routers.xml", 19447628, 86743),
+    ("stencils/cisco/security.xml", 19534371, 26877),
+    ("stencils/cisco/servers.xml", 19561248, 46328),
+    ("stencils/cisco/storage.xml", 19607576, 52561),
+    ("stencils/cisco/switches.xml", 19660137, 86992),
+    ("stencils/cisco/wireless.xml", 19747129, 37411),
+];

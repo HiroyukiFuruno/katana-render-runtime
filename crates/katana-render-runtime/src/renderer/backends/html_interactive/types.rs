@@ -93,6 +93,7 @@ pub(super) struct ElementBox {
     pub(super) y: f32,
     pub(super) width: f32,
     pub(super) height: f32,
+    pub(super) rotation_degrees: f32,
 }
 
 #[derive(Debug, Clone, Copy)]

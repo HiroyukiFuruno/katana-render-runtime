@@ -82,7 +82,7 @@ fn fallback_text_width(
         escape_xml_attribute(font_family),
         escape_xml_text(text)
     );
-    let tree = usvg::Tree::from_str(&svg, &html_rasterizer_options())
+    let tree = usvg::Tree::from_str(&svg, &html_rasterizer_options(&svg))
         .map_err(|error| SvgRasterizeError::ParseFailed(error.to_string()))?;
     Ok(tree
         .node_by_id("krr-text-measure")

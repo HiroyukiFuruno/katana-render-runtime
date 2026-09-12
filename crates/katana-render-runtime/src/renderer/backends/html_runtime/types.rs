@@ -54,6 +54,7 @@ pub(crate) enum HtmlRuntimeEventKind {
     Input,
     KeyDown,
     KeyUp,
+    Scroll,
     Toggle,
 }
 
@@ -67,6 +68,7 @@ impl HtmlRuntimeEventKind {
             Self::Input => "input",
             Self::KeyDown => "keydown",
             Self::KeyUp => "keyup",
+            Self::Scroll => "scroll",
             Self::Toggle => "toggle",
         }
     }

@@ -1,72 +1,72 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import ts from "typescript";
+import type { AnyNode, CallExpression } from "acorn";
+import { parse as parseLoose } from "acorn-loose";
+import { full } from "acorn-walk";
 import type { RuntimeBundlePaths } from "./runtime-bundle-paths";
 import type { GeneratedBundle } from "./runtime-bundle-types";
 import { runtimeEntryName } from "./runtime-entry-names";
 
-function isEvalCall(node: ts.CallExpression): boolean {
-  if (ts.isIdentifier(node.expression)) {
-    return node.expression.text === "eval";
-  }
-  return ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "eval";
+function isIdentifier(node: AnyNode, name: string): boolean {
+  return node.type === "Identifier" && node.name === name;
 }
 
-function hasExportModifier(node: ts.Node): boolean {
+function isEvalCall(node: AnyNode): node is CallExpression {
+  if (node.type !== "CallExpression") {
+    return false;
+  }
+  const callee = node.callee;
   return (
-    ts.canHaveModifiers(node) &&
-    ts
-      .getModifiers(node)
-      ?.some(
-        (modifier) =>
-          modifier.kind === ts.SyntaxKind.ExportKeyword ||
-          modifier.kind === ts.SyntaxKind.DefaultKeyword,
-      ) === true
+    isIdentifier(callee, "eval") ||
+    (callee.type === "MemberExpression" && isIdentifier(callee.property, "eval"))
   );
+}
+
+function isModuleSyntax(node: AnyNode): boolean {
+  if (
+    node.type === "ImportDeclaration" ||
+    node.type === "ImportExpression" ||
+    node.type === "ExportNamedDeclaration" ||
+    node.type === "ExportDefaultDeclaration" ||
+    node.type === "ExportAllDeclaration"
+  ) {
+    return true;
+  }
+  return (
+    node.type === "MetaProperty" &&
+    isIdentifier(node.meta, "import") &&
+    isIdentifier(node.property, "meta")
+  );
+}
+
+function evalStringSource(node: AnyNode): string | undefined {
+  if (!isEvalCall(node)) {
+    return undefined;
+  }
+  const [argument] = node.arguments;
+  return argument?.type === "Literal" && typeof argument.value === "string"
+    ? argument.value
+    : undefined;
 }
 
 function inspectModuleSyntax(source: string): {
   evaluatedSources: string[];
   found: boolean;
 } {
-  const file = ts.createSourceFile(
-    "runtime-bundle.js",
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.JS,
-  );
+  const file = parseLoose(source, { ecmaVersion: "latest", sourceType: "module" });
   const evaluatedSources: string[] = [];
   let found = false;
 
-  const visit = (node: ts.Node): void => {
-    if (
-      ts.isImportDeclaration(node) ||
-      ts.isImportEqualsDeclaration(node) ||
-      ts.isExportDeclaration(node) ||
-      ts.isExportAssignment(node) ||
-      hasExportModifier(node) ||
-      (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) ||
-      (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword)
-    ) {
+  full(file, (node) => {
+    if (isModuleSyntax(node)) {
       found = true;
-      return;
     }
-
-    if (ts.isCallExpression(node) && isEvalCall(node)) {
-      const sourceArgument = node.arguments[0];
-      if (
-        sourceArgument !== undefined &&
-        (ts.isStringLiteral(sourceArgument) || ts.isNoSubstitutionTemplateLiteral(sourceArgument))
-      ) {
-        evaluatedSources.push(sourceArgument.text);
-      }
+    const evaluatedSource = evalStringSource(node);
+    if (evaluatedSource !== undefined) {
+      evaluatedSources.push(evaluatedSource);
     }
-    ts.forEachChild(node, visit);
-  };
-
-  visit(file);
+  });
   return { evaluatedSources, found };
 }
 

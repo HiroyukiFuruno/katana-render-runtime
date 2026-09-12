@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Regression tests for the consecutive KRR release target guard."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from importlib import util
+from pathlib import Path
+
+
+SCRIPT = Path(__file__).with_name("verify-release-target.py")
+REQUIRED_COMMITS = (
+    "02a73d293c04f9635fd3a822ac865bf81d4c8745",
+    "8552c63457480379922c7076bcff604b5401ae20",
+    "694ac82a85d555485e46eb46cf882c8db11b2fe5",
+    "007ab829df39ed40bbfcfc19205ad21f3da32fe8",
+    "91f07699b26567658f76021050ca7ec7b5c10df1",
+    "88d77e45b7b22d7886e2c09cb0ed1432bf237772",
+    "d34f6ea22dee7bda77201a57470d430cb658382b",
+    "0c67cff9713fca21b1de35315c4ee3f18ae0c0e8",
+    "180d1e3ab6ec3ce3182273fed3a19e28a740dfd1",
+    "65793ab7855881a6b9042d8d400d69f21a09358a",
+    "28d2a9b7f88497db3ae103ed406cceb1bd0f6ef5",
+    "ecba4e40d4bc3419c610d3013f8bd723dd2a449d",
+    "9c6915c05db47068bb8fc8649279fa0aad9a1dc5",
+    "817f0e889286be30ce5a549539eeb6d2f4d166de",
+    "bcca7a5fa4bc06ad30b2917b33cd312f771a5828",
+    "e395b23ac88ced4bcb116d6cc4e468e4376fc392",
+    "fb83a4a7ec423f2a2b41d0f4954b43a496171c68",
+    "72a5f61dda084653406d972c1ee591dc965054ba",
+    "8ec7a153a26750527dcd9a3e17425bc606e576ea",
+    "99b31884d04de4322df28b0df02a8e7e7d9f3a54",
+    "8ec7a153a26750527dcd9a3e17425bc606e576ea",
+)
+
+MODULE_SPEC = util.spec_from_file_location("verify_release_target", SCRIPT)
+assert MODULE_SPEC is not None and MODULE_SPEC.loader is not None
+VERIFY_RELEASE_TARGET = util.module_from_spec(MODULE_SPEC)
+sys.modules[MODULE_SPEC.name] = VERIFY_RELEASE_TARGET
+MODULE_SPEC.loader.exec_module(VERIFY_RELEASE_TARGET)
+
+
+class VerifyReleaseTargetTests(unittest.TestCase):
+    def run_check(
+        self, target: str, latest: str, head_ref: str = "HEAD"
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--target-version",
+                target,
+                "--latest-version",
+                latest,
+                "--head-ref",
+                head_ref,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_accepts_v0420_after_published_v0419(self) -> None:
+        result = self.run_check("v0.4.20", "v0.4.19")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_allows_idempotent_retry_after_v0420(self) -> None:
+        result = self.run_check("v0.4.20", "v0.4.20")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_v0420_before_v0419_is_published(self) -> None:
+        result = self.run_check("v0.4.20", "v0.4.18")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_rejects_skipped_target(self) -> None:
+        result = self.run_check("v0.4.21", "v0.4.19")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_rejects_old_target(self) -> None:
+        result = self.run_check("v0.4.19", "v0.4.19")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_accepts_head_containing_every_v0420_issue_commit(self) -> None:
+        result = self.run_check("v0.4.20", "v0.4.19")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_head_missing_a_v0420_issue_commit(self) -> None:
+        for commit in REQUIRED_COMMITS[1:]:
+            parent = subprocess.run(
+                ["git", "rev-parse", f"{commit}^"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            result = self.run_check("v0.4.20", "v0.4.19", parent)
+            self.assertNotEqual(result.returncode, 0, commit)
+
+    def test_rejects_the_pre_terminal_repair_head(self) -> None:
+        result = self.run_check(
+            "v0.4.20", "v0.4.19", "91f07699b26567658f76021050ca7ec7b5c10df1"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("88d77e45b7b22d7886e2c09cb0ed1432bf237772", result.stderr)
+
+    def test_accepts_the_complete_intended_release_head(self) -> None:
+        result = self.run_check(
+            "v0.4.20", "v0.4.19", "99b31884d04de4322df28b0df02a8e7e7d9f3a54"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_the_pre_latest_dependency_release_tree(self) -> None:
+        result = self.run_check(
+            "v0.4.20", "v0.4.19", "72a5f61dda084653406d972c1ee591dc965054ba"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("99b31884d04de4322df28b0df02a8e7e7d9f3a54", result.stderr)
+
+    def test_accepts_squash_tree_but_rejects_an_incomplete_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = Path(temporary_directory)
+
+            def git(*args: str) -> str:
+                return subprocess.run(
+                    ["git", *args],
+                    cwd=repository,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+
+            def commit(name: str, content: str, message: str) -> str:
+                (repository / name).write_text(content, encoding="utf-8")
+                git("add", name)
+                git("commit", "-q", "-m", message)
+                return git("rev-parse", "HEAD")
+
+            git("init", "-q")
+            git("config", "user.email", "release-test@example.invalid")
+            git("config", "user.name", "Release Target Test")
+            base = commit("runtime.txt", "baseline\n", "base")
+            required_first = commit("runtime.txt", "first required change\n", "required first")
+            required_tree = commit("coverage.txt", "required regression\n", "required final")
+            (repository / "assets.txt").write_text("required assets\n", encoding="utf-8")
+            git("add", "assets.txt")
+            git("commit", "-q", "-m", "required terminal assets")
+            required_tree = git("rev-parse", "HEAD")
+
+            git("switch", "-q", "-c", "squash", base)
+            (repository / "runtime.txt").write_text("first required change\n", encoding="utf-8")
+            (repository / "coverage.txt").write_text("required regression\n", encoding="utf-8")
+            (repository / "assets.txt").write_text("required assets\n", encoding="utf-8")
+            git("add", "runtime.txt", "coverage.txt", "assets.txt")
+            git("commit", "-q", "-m", "squash required changes")
+            squash = git("rev-parse", "HEAD")
+
+            git("switch", "-q", "-c", "incomplete", base)
+            incomplete = commit("runtime.txt", "first required change\n", "incomplete squash")
+
+            required_commits = (required_first, required_tree)
+            original_directory = Path.cwd()
+            try:
+                os.chdir(repository)
+                self.assertEqual(
+                    VERIFY_RELEASE_TARGET.missing_required_commits(squash, required_commits),
+                    list(required_commits),
+                )
+                self.assertTrue(
+                    VERIFY_RELEASE_TARGET.release_tree_matches(squash, base, required_tree)
+                )
+                self.assertFalse(
+                    VERIFY_RELEASE_TARGET.release_tree_matches(incomplete, base, required_tree)
+                )
+                self.assertEqual(
+                    VERIFY_RELEASE_TARGET.missing_required_commits(required_tree, required_commits),
+                    [],
+                )
+            finally:
+                os.chdir(original_directory)
+
+    def test_preflight_passes_github_token_to_every_release_target_invocation(self) -> None:
+        workflow = (SCRIPT.parents[2] / ".github/workflows/release-preflight.yml").read_text(
+            encoding="utf-8"
+        )
+        for step in ("Release target check", "Release check"):
+            with self.subTest(step=step):
+                start = workflow.index(f"- name: {step}")
+                end = workflow.find("\n      - name:", start + 1)
+                body = workflow[start:] if end == -1 else workflow[start:end]
+                self.assertIn("GH_TOKEN: ${{ github.token }}", body)
+
+
+if __name__ == "__main__":
+    unittest.main()

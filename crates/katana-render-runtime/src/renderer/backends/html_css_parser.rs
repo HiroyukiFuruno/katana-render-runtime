@@ -2,8 +2,7 @@ use super::{CssDeclaration, CssRule, declarations_for};
 use crate::renderer::backends::html_css_selector::CssSelector;
 use cssparser::{
     AtRuleParser, BasicParseErrorKind, CowRcStr, DeclarationParser, ParseError, Parser,
-    ParserInput, ParserState, QualifiedRuleParser, RuleBodyItemParser, RuleBodyParser,
-    StyleSheetParser, Token,
+    ParserState, QualifiedRuleParser, RuleBodyItemParser, RuleBodyParser, StyleSheetParser, Token,
 };
 
 #[path = "html_css_parser_value.rs"]
@@ -11,18 +10,16 @@ mod value;
 use value::{normalized_property_name, parse_declaration_value};
 
 pub(super) fn rules(source: &str) -> Vec<CssRule> {
-    let mut input = ParserInput::new(source);
-    let mut input = Parser::new(&mut input);
+    let mut input = Parser::new(source);
     parse_stylesheet(&mut input, Vec::new())
 }
 
 pub(super) fn declarations(source: &str) -> Vec<CssDeclaration> {
-    let mut input = ParserInput::new(source);
-    let mut input = Parser::new(&mut input);
+    let mut input = Parser::new(source);
     parse_declaration_body(&mut input)
 }
 
-fn parse_stylesheet<'i, 't>(input: &mut Parser<'i, 't>, media: Vec<String>) -> Vec<CssRule> {
+fn parse_stylesheet<'i>(input: &mut Parser<'i>, media: Vec<String>) -> Vec<CssRule> {
     let mut parser = StylesheetRuleParser { media };
     StyleSheetParser::new(input, &mut parser)
         .filter_map(Result::ok)
@@ -39,22 +36,22 @@ impl<'i> QualifiedRuleParser<'i> for StylesheetRuleParser {
     type QualifiedRule = Vec<CssRule>;
     type Error = ();
 
-    fn parse_prelude<'t>(
+    fn parse_prelude(
         &mut self,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self::Prelude, ParseError<'i, Self::Error>> {
+        input: &mut Parser<'i>,
+    ) -> Result<Self::Prelude, ParseError<Self::Error>> {
         input.parse_comma_separated(|selector| {
             let source = consume_source(selector);
-            CssSelector::parse(source.trim()).ok_or_else(|| selector.new_custom_error(()))
+            CssSelector::parse(source.trim()).ok_or_else(|| ParseError::custom(()))
         })
     }
 
-    fn parse_block<'t>(
+    fn parse_block(
         &mut self,
         selectors: Self::Prelude,
         _start: &ParserState,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self::QualifiedRule, ParseError<'i, Self::Error>> {
+        input: &mut Parser<'i>,
+    ) -> Result<Self::QualifiedRule, ParseError<Self::Error>> {
         let declarations = parse_declaration_body(input);
         if selectors.is_empty() || declarations.is_empty() {
             return Ok(Vec::new());
@@ -72,30 +69,32 @@ impl<'i> AtRuleParser<'i> for StylesheetRuleParser {
     type AtRule = Vec<CssRule>;
     type Error = ();
 
-    fn parse_prelude<'t>(
+    fn parse_prelude(
         &mut self,
         name: CowRcStr<'i>,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self::Prelude, ParseError<'i, Self::Error>> {
+        input: &mut Parser<'i>,
+    ) -> Result<Self::Prelude, ParseError<Self::Error>> {
         if !name.eq_ignore_ascii_case("media") {
-            return Err(input.new_error(BasicParseErrorKind::AtRuleInvalid(name)));
+            return Err(ParseError::from_basic_kind(
+                BasicParseErrorKind::AtRuleInvalid,
+            ));
         }
         Ok(consume_source(input).trim().to_string())
     }
 
-    fn parse_block<'t>(
+    fn parse_block(
         &mut self,
         query: Self::Prelude,
         _start: &ParserState,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self::AtRule, ParseError<'i, Self::Error>> {
+        input: &mut Parser<'i>,
+    ) -> Result<Self::AtRule, ParseError<Self::Error>> {
         let mut media = self.media.clone();
         media.push(query);
         Ok(parse_stylesheet(input, media))
     }
 }
 
-fn parse_declaration_body<'i, 't>(input: &mut Parser<'i, 't>) -> Vec<CssDeclaration> {
+fn parse_declaration_body<'i>(input: &mut Parser<'i>) -> Vec<CssDeclaration> {
     let mut parser = CssDeclarationParser;
     RuleBodyParser::new(input, &mut parser)
         .filter_map(Result::ok)
@@ -109,12 +108,12 @@ impl<'i> DeclarationParser<'i> for CssDeclarationParser {
     type Declaration = Vec<CssDeclaration>;
     type Error = ();
 
-    fn parse_value<'t>(
+    fn parse_value(
         &mut self,
         name: CowRcStr<'i>,
-        input: &mut Parser<'i, 't>,
+        input: &mut Parser<'i>,
         _declaration_start: &ParserState,
-    ) -> Result<Self::Declaration, ParseError<'i, Self::Error>> {
+    ) -> Result<Self::Declaration, ParseError<Self::Error>> {
         let (value, important) = parse_declaration_value(input)?;
         let name = normalized_property_name(name);
         Ok(declarations_for(name, value, important))
@@ -143,13 +142,13 @@ impl RuleBodyItemParser<'_, Vec<CssDeclaration>, ()> for CssDeclarationParser {
     }
 }
 
-fn consume_source<'i>(input: &mut Parser<'i, '_>) -> &'i str {
+fn consume_source<'i>(input: &mut Parser<'i>) -> &'i str {
     let start = input.position();
     let _ = consume_nested(input);
     input.slice_from(start)
 }
 
-fn consume_nested<'i, 't>(input: &mut Parser<'i, 't>) -> Result<(), ParseError<'i, ()>> {
+fn consume_nested(input: &mut Parser<'_>) -> Result<(), ParseError<()>> {
     while !input.is_exhausted() {
         let token = input.next_including_whitespace_and_comments()?.clone();
         if matches!(
@@ -214,8 +213,7 @@ mod tests {
 
     #[test]
     fn parser_nested_tokens_are_consumed_in_source_slice() {
-        let mut parser_input = cssparser::ParserInput::new("func(a(b(c)));");
-        let mut parser = cssparser::Parser::new(&mut parser_input);
+        let mut parser = cssparser::Parser::new("func(a(b(c)));");
         let source = consume_source(&mut parser);
 
         assert_eq!(source, "func(a(b(c)));");
