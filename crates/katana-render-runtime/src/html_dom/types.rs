@@ -106,22 +106,20 @@ impl Node {
             .children
             .borrow()
             .iter()
-            .map(|child| child.clone_with_subtree())
+            .map(|child| child.clone_with_subtree(&selectedcontent))
             .collect();
     }
 
-    fn clone_with_subtree(&self) -> Rc<Self> {
-        Rc::new(Self {
-            parent: Cell::new(self.parent()),
-            data: self.data.clone(),
-            children: RefCell::new(
-                self.children
-                    .borrow()
-                    .iter()
-                    .map(|child| child.clone_with_subtree())
-                    .collect(),
-            ),
-        })
+    fn clone_with_subtree(&self, parent: &Rc<Self>) -> Rc<Self> {
+        let clone = Self::new(self.data.clone());
+        clone.parent.set(Some(Rc::downgrade(parent)));
+        *clone.children.borrow_mut() = self
+            .children
+            .borrow()
+            .iter()
+            .map(|child| child.clone_with_subtree(&clone))
+            .collect();
+        clone
     }
 
     fn parent(&self) -> Option<Weak<Self>> {

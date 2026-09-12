@@ -35,13 +35,14 @@ REQUIRED_RELEASE_COMMITS = (
     "e395b23ac88ced4bcb116d6cc4e468e4376fc392",  # #76 scroll regression
     "fb83a4a7ec423f2a2b41d0f4954b43a496171c68",  # #76 geometry regression
     "72a5f61dda084653406d972c1ee591dc965054ba",  # #76 runtime assets
+    "8ec7a153a26750527dcd9a3e17425bc606e576ea",  # #76 latest dependency migration
 )
 # A squash merge deliberately rewrites commit ancestry.  These refs identify
 # the complete v0.4.20 PR tree independently of that ancestry.  Do not shorten
 # this range to the initial implementation: each terminal repair is release
 # critical and a reconstructed squash must contain every changed path.
 REQUIRED_RELEASE_BASE = "0fbf6ee965b3a5f43f609034a59d0c9042353027"
-REQUIRED_RELEASE_TREE = "72a5f61dda084653406d972c1ee591dc965054ba"
+REQUIRED_RELEASE_TREE = "8ec7a153a26750527dcd9a3e17425bc606e576ea"
 
 
 @dataclass(frozen=True, order=True)
