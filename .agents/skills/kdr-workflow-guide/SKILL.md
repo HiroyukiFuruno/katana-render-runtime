@@ -19,7 +19,12 @@ KDR は Mermaid、Draw.io、ZenUML などの図表描画ランタイムと `kdr`
 3. `/openspec-verify-change`
    - 実装が仕様、設計、タスクと一致しているか確認する。
 4. `/openspec-archive-change`
-   - 実装、検証、PR 統合が終わった変更だけ archive へ移す。
+   - 実装と検証が終わった変更だけ archive へ移す。リリース対象より前の完了済み change は、release gate 前に archive して正式な release commit に含める。
+
+通常の変更では PR 統合後に archive する運用も可能ですが、リリース作業では
+`/impl-release` の対象 version より前の完了済み change を `release-check` と
+`pre-pr` の前に archive します。archive の変更を正式な release commit に含め、
+merge 後まで先送りしません。未完了の change は完了条件を満たすまで archive しません。
 
 ## 2. 日常的な実装変更
 
@@ -29,7 +34,7 @@ KDR は Mermaid、Draw.io、ZenUML などの図表描画ランタイムと `kdr`
 2. バグ修正なら先に再現テストを追加する。
 3. 変更後に `/lint-and-ast-lint` で必要な品質ゲートを通す。
 4. `/self-review` で差分を見直す。
-5. ユーザーが明示した場合だけ `/commit_and_push` を使う。
+5. ユーザーがcommit/pushまたはrelease完了までの継続実行を明示した場合は `/commit_and_push` を使い、通常の中間承認待ちで止めない。未承認の外部公開、不可逆対象の未確定、実権限・秘密情報の不足、または成果を変える仕様判断だけを停止条件とする。
 
 ### Branch Policy
 
@@ -45,7 +50,7 @@ KDR は Mermaid、Draw.io、ZenUML などの図表描画ランタイムと `kdr`
 - 事前に安全な差分か確認する。
 - 大きな置換は責務ごとの小さい単位に分ける。
 - 変更後は `git diff` を読み、消してはいけない理由や制約を巻き込んでいないか確認する。
-- ファイル編集とコミットは同じ流れで続けない。検証結果をユーザーに報告してから承認を待つ。
+- ファイル編集とコミットは同じ流れで続けない。検証と差分精査を完了してから、既承認の継続作業ならそのまま次工程へ進める。追加承認は不可逆対象の未確定または成果を変える判断に限る。
 
 ## 4. 品質ゲート
 
@@ -66,6 +71,9 @@ KDR の品質ゲートは、描画ランタイム、runtime asset、CLI、crate 
 
 PR を作る前に `/self-review` と必要な品質ゲートを終えます。
 PR 作成は `/create_pull_request` を使い、ベースブランチは現在のブランチ名と作業文脈から決めます。
+Draftでのreview、指摘のreply/resolve、最新HEADのfinal reviewを終えたら、`just pr-ready-check "<pr>"` を実行してReady化します。Ready化後はユーザーから**freshなmerge承認**を得て、専用Appの `merge --apply` の**直前**に同じコマンドを再実行し、Ready PRの最新Issue/marker/thread/CI/base/headを再検証します。成功時のmergeはPR外のglobal skill `/Users/hiroyuki_furuno/.codex/skills/krr-pr-governance-bootstrap/SKILL.md` が定める専用Appの `merge --apply` だけを使い、人間、UI、通常のGitHub CLI merge、admin bypassは禁止です。`prepare --apply` は保存済みの人間用`gh auth`だけを使う例外であり、activate/merge/finalize/verifyのlive operationはfresh JWTとscript自身がmint・検証するApp IATを必要とします。`merge` の`--apply`なしdry-runだけは、人間用authによるpublic readに限定します。
+
+レビュー証跡では no-issues 応答を formal review と混同しない。trusted bot の canonical Issue comment 全体、`Reviewed commit` の10〜40桁hex prefixとcurrent HEAD、未編集（`created_at == updated_at`）、phase windowごとの候補一意性（重複はfail-closed）を確認する。optional details footerはcanonical summary/structure一致、nested/sentinel拒否、8192文字以下が必要。同一current HEAD・body digest・unresolved 0・Issue freshnessが揃う場合だけinitial no-issues証跡をfinalに再利用し、reactionは証跡にしない。formal review/指摘対応はfinal marker後の別evidenceを必須とし、strict marker、App-only merge、initial→final順序を維持する。
 
 ## 6. 持ち込まないもの
 
@@ -76,3 +84,7 @@ KDR には次の katana 固有スキルを持ち込みません。
 - アイコン管理
 - changelog 作成
 - アプリ固有のスクリーンショット運用
+
+## 継続実行と停止条件
+
+レビュー指摘の戻し、CI、registry、cloud review の待機、進捗報告は停止理由にしない。待機中も競合しない調査・検証・Issue/PR証跡・cleanup準備を進め、結果取得後はDraft→全件取得/分類→責務単位の並列委譲→修正/検証/push→reply/resolve→最新HEADのinitial/final review→pr-ready-check→Ready→承認後mergeを継続する。停止は不可逆操作の対象未確定、実際の権限/秘密情報不足、仕様変更の判断に限定する。

@@ -170,8 +170,14 @@ runtime-package-asset-check:
         fi; \
       done
 
+# Verify repository hook and release cleanup contracts
+automation-contract-test:
+    python3 -m unittest discover -s scripts/hooks -p '*_test.py'
+    python3 -m unittest discover -s scripts/release -p '*_test.py'
+    python3 -m unittest discover -s scripts/review -p '*_test.py'
+
 # Run the local quality gate
-check: fmt-check lint runtime-bundle-check runtime-asset-script-test unit-test ast-lint dependency-leak biome typecheck runtime-asset-check runtime-package-asset-check runtime-bundle-package-check html-runtime-package-check plantuml-runtime-package-check
+check: fmt-check lint runtime-bundle-check runtime-asset-script-test automation-contract-test unit-test ast-lint dependency-leak biome typecheck runtime-asset-check runtime-package-asset-check runtime-bundle-package-check html-runtime-package-check plantuml-runtime-package-check
     @echo "checks passed"
 
 # Sweep old build artifacts locally (older than 7 days)
@@ -185,6 +191,7 @@ clean: sweep
 # Verify VERSION follows the remote release line
 release-target-check:
     bash scripts/release/verify-version.sh "{{VERSION}}"
+    python3 scripts/release/verify_dependency_freshness.py
     python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --repo "{{RELEASE_REPO}}"
     bash scripts/release/assert-tag-safe.sh "{{TAG}}" origin
     bash scripts/release/assert-crates-not-published.sh "{{VERSION}}"
@@ -207,6 +214,37 @@ release-openspec-archive:
 # Verify release branch readiness before merging
 release-check: release-openspec-archive check coverage release-verify
 
+# Verify pull request readiness before merging
+pr-ready-check pr:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pr={{quote(pr)}}
+    if [[ ! "$pr" =~ ^[1-9][0-9]*$ ]]; then
+      echo "pr-ready-check requires a positive numeric pull request number" >&2
+      exit 2
+    fi
+    pr_metadata="$(gh pr view "$pr" --json baseRefOid,headRefOid,headRefName,baseRefName,isDraft)"
+    repository_metadata="$(gh repo view --json nameWithOwner)"
+    if ! IFS="$(printf '\011')" read -r repository_owner repository_name repository repository_extra < <(python3 -c 'import json, re, sys; value = json.loads(sys.argv[1]).get("nameWithOwner"); match = re.fullmatch(r"([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", value) if isinstance(value, str) else None; match or sys.exit("gh returned incomplete or unsafe repository metadata"); print(match.group(1), match.group(2), value, sep=chr(9))' "$repository_metadata"); then
+      echo "gh returned incomplete repository metadata" >&2
+      exit 2
+    fi
+    if [[ -n "${repository_extra:-}" || -z "$repository_owner" || -z "$repository_name" || -z "$repository" ]]; then
+      echo "gh returned incomplete repository metadata" >&2
+      exit 2
+    fi
+    default_metadata="$(gh api graphql -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name target{__typename ... on Commit {oid}}}}}' -f owner="$repository_owner" -f name="$repository_name")"
+    if ! IFS="$(printf '\011')" read -r base_sha head_sha branch base_branch parsed_repository trusted_default_sha readiness_mode extra < <(python3 -c 'import json, re, sys; pull = json.loads(sys.argv[1]); repository = sys.argv[2]; graph = json.loads(sys.argv[3]); data = graph.get("data") if isinstance(graph, dict) else None; node = data.get("repository") if isinstance(data, dict) else None; default = node.get("defaultBranchRef") if isinstance(node, dict) else None; target = default.get("target") if isinstance(default, dict) else None; fields = (pull.get("baseRefOid"), pull.get("headRefOid"), pull.get("headRefName"), pull.get("baseRefName"), repository, target.get("oid") if isinstance(target, dict) else None, pull.get("isDraft")); valid = isinstance(fields[0], str) and re.fullmatch(r"[0-9a-fA-F]{40}", fields[0]) and isinstance(fields[1], str) and re.fullmatch(r"[0-9a-fA-F]{40}", fields[1]) and isinstance(fields[2], str) and not any(ord(character) < 32 or ord(character) == 127 for character in fields[2]) and isinstance(fields[3], str) and re.fullmatch(r"[A-Za-z0-9._/-]+", fields[3]) and isinstance(default, dict) and isinstance(default.get("name"), str) and re.fullmatch(r"[A-Za-z0-9._/-]+", default["name"]) and fields[3] == default["name"] and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", fields[4]) and isinstance(target, dict) and target.get("__typename") == "Commit" and isinstance(fields[5], str) and re.fullmatch(r"[0-9a-fA-F]{40}", fields[5]) and isinstance(fields[6], bool); valid or sys.exit("gh returned incomplete or unsafe PR/default metadata"); print(*fields[:6], "require-draft" if fields[6] else "allow-ready", sep=chr(9))' "$pr_metadata" "$repository" "$default_metadata"); then
+      echo "gh returned incomplete PR metadata" >&2
+      exit 2
+    fi
+    if [[ -n "${extra:-}" || -z "$base_sha" || -z "$head_sha" || -z "$branch" || -z "$base_branch" || -z "$parsed_repository" || "$parsed_repository" != "$repository" || -z "$trusted_default_sha" || ( "$readiness_mode" != "require-draft" && "$readiness_mode" != "allow-ready" ) ]]; then
+      echo "gh returned incomplete PR metadata" >&2
+      exit 2
+    fi
+    python3 scripts/hooks/verify_push_issue.py --pr-number "$pr" --pr-base-sha "$base_sha" --pr-head-sha "$head_sha" --pr-branch "$branch" --repository "$repository" --trusted-default-sha "$trusted_default_sha"
+    python3 scripts/review/verify_pr_ready.py --pr "$pr" --repository "$repository" "--$readiness_mode" --expected-base-sha "$base_sha" --expected-head-sha "$head_sha"
+
 # Install Playwright Chromium for official Mermaid / Draw.io reference rendering
 browser-install:
     @if [[ "$(uname -s)" == "Linux" ]]; then bunx playwright install --with-deps chromium; else bunx playwright install chromium; fi
@@ -217,10 +255,9 @@ krr-build:
 
 # Force-update all Rust and JavaScript dependencies plus pinned runtime assets, then run required checks
 depends-update-all:
-    {{CARGO}} upgrade -i
+    {{CARGO}} upgrade --incompatible allow --pinned allow --recursive true
     {{CARGO}} update
     bun update --latest
-    bun add -d typescript@6.0.3
     bun run scripts/runtime-assets/depends-update-all.ts
     bun run scripts/drawio/resource-update.ts --resources "{{DRAWIO_RESOURCE_DIR}}" --manifest "{{DRAWIO_RESOURCE_MANIFEST}}"
     bun run scripts/runtime-assets/runtime-package-asset-compressor.ts --write
@@ -232,6 +269,7 @@ depends-update-all:
     just drawio-compare-full
     just drawio-compare-ci
     just check
+    just coverage
 
 # Install pinned PlantUML LGPL JAR into the PlantUML cache
 plantuml-install version=PLANTUML_JAR_VERSION output=PLANTUML_CACHE_JAR:

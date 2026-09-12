@@ -17,10 +17,11 @@ pre-commit:
       run: just ast-lint
 
 pre-push:
+  parallel: false
   commands:
-    check:
-      glob: "{*.rs,*.toml,*.lock,Justfile}"
-      run: just check
+    dispatch:
+      run: bash scripts/hooks/pre-push.sh "{1}" "{2}"
+      use_stdin: true
 
 pre-pr:
   commands:

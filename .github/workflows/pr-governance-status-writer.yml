@@ -1,0 +1,228 @@
+name: PR governance status writer
+
+run-name: source=${{ inputs.dispatcher_run_id }} scope=${{ inputs.scope }} segment=${{ inputs.continuation_index }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      dispatcher_run_id:
+        description: Immutable dispatcher run that created this writer request.
+        required: true
+        type: string
+      scope:
+        description: Trusted dispatcher scope; early is the event boundary and all is the full snapshot.
+        required: true
+        type: choice
+        options: [early, all]
+      target_numbers:
+        description: Canonical JSON target array; early requires its exact nonempty set and all carries the ordered affected-event subset before unrelated PRs.
+        required: true
+        type: string
+      preserved_target_numbers:
+        description: Canonical JSON early-success target array that all scope preserves through the full pass.
+        required: true
+        type: string
+      preserved_writer_run_id:
+        description: Bound early writer run ID, or 0 when no early success is preserved.
+        required: true
+        type: string
+      check_manifest:
+        description: Canonical immutable Check Run manifest emitted by the dispatcher invalidator.
+        required: true
+        type: string
+      terminal_batch_numbers:
+        description: Canonical JSON terminal slice; early is empty and all is at most 150 numbers.
+        required: true
+        type: string
+      continuation_index:
+        description: Trusted all-snapshot terminal segment 1 through 4; early is always zero.
+        required: true
+        type: string
+      terminal_order_numbers:
+        # This public dispatch value is accepted only after bootstrap binds
+        # the governance App Bot sender and the default-branch workflow bytes.
+        description: Canonical full terminal order; early is empty and all is the complete non-preserved suffix.
+        required: true
+        type: string
+      completed_writer_run_ids:
+        # The writer independently rebinds every prior ID; callers cannot
+        # turn a successful-looking foreign run into a continuation grant.
+        description: Canonical completed prior all-writer run IDs; early and segment one are empty.
+        required: true
+        type: string
+      terminal_deadline_epoch:
+        description: Absolute terminal-window deadline for all-scope continuations; zero for early scope.
+        required: false
+        default: '0'
+        type: string
+
+# This workflow never accepts a PR ref or a caller supplied target. The
+# bootstrap job binds both the executed bytes and the ref to default.
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+  checks: read
+
+jobs:
+  bootstrap-validation:
+    name: Validate trusted default-branch writer
+    # workflow_dispatch inputs are public API surface.  Only the governance
+    # App may create an authoritative writer; a human or another App cannot
+    # reuse a historical dispatcher/early-writer ID to skip a fresh pass.
+    if: >-
+      vars.KRR_GOVERNANCE_APP_BOT_LOGIN != '' &&
+      github.actor == vars.KRR_GOVERNANCE_APP_BOT_LOGIN &&
+      github.triggering_actor == vars.KRR_GOVERNANCE_APP_BOT_LOGIN &&
+      github.event.sender.type == 'Bot' &&
+      github.event.sender.login == vars.KRR_GOVERNANCE_APP_BOT_LOGIN
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Bind this dispatch to the repository default branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess, time
+          repository=os.environ["GITHUB_REPOSITORY"]
+          deadline=time.monotonic()+120
+          def request(endpoint):
+              remaining=deadline-time.monotonic()
+              if remaining<=0: raise SystemExit("Writer bootstrap API deadline elapsed.")
+              try: result=subprocess.run(["gh","api",endpoint],capture_output=True,text=True,check=False,timeout=min(20,remaining))
+              except subprocess.TimeoutExpired as error: raise SystemExit("Writer bootstrap API timed out.") from error
+              if time.monotonic()>deadline: raise SystemExit("Writer bootstrap API deadline elapsed.")
+              return result
+          result=request(f"repos/{repository}")
+          if result.returncode != 0: raise SystemExit("Unable to load repository default branch.")
+          try: repo=json.loads(result.stdout)
+          except json.JSONDecodeError as error: raise SystemExit("Repository response is not JSON.") from error
+          branch=repo.get("default_branch") if isinstance(repo,dict) else None
+          if not isinstance(branch,str) or not re.fullmatch(r"[A-Za-z0-9._/-]+",branch): raise SystemExit("Repository default branch is invalid.")
+          if os.environ.get("GITHUB_REF") != f"refs/heads/{branch}": raise SystemExit("Writer is not running from the trusted default branch.")
+          commit=request(f"repos/{repository}/git/ref/heads/{branch}")
+          if commit.returncode != 0: raise SystemExit("Unable to load default branch head.")
+          try: head=json.loads(commit.stdout).get("object",{}).get("sha")
+          except json.JSONDecodeError as error: raise SystemExit("Default branch head is not JSON.") from error
+          if not isinstance(head,str) or not re.fullmatch(r"[0-9a-fA-F]{40}",head) or os.environ.get("GITHUB_SHA") != head: raise SystemExit("Writer SHA does not match default branch head.")
+          for ref in (branch, head):
+              blob=request(f"repos/{repository}/contents/.github/workflows/pr-governance-status-writer.yml?ref={ref}")
+              if blob.returncode != 0: raise SystemExit("Unable to load writer workflow blob.")
+              try: payload=json.loads(blob.stdout); sha=payload.get("sha") if isinstance(payload,dict) else None
+              except json.JSONDecodeError as error: raise SystemExit("Writer workflow blob is not JSON.") from error
+              if not isinstance(sha,str) or not re.fullmatch(r"[0-9a-fA-F]{40}",sha): raise SystemExit("Writer workflow blob is invalid.")
+              if ref == branch: default_blob=sha
+              elif sha != default_blob: raise SystemExit("Writer workflow differs from default branch.")
+          PY
+
+  write-status:
+    name: Write authoritative governance Check Runs
+    needs: bootstrap-validation
+    environment: pr-governance
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pr-governance-status-${{ github.repository_id }}
+      # A review/Ready source must acquire the singleton before it mutates
+      # its Check Run.  This stops the old all-open generation first, so the
+      # early writer owns pending -> revalidation -> terminal atomically.
+      cancel-in-progress: ${{ inputs.scope == 'early' }}
+    steps:
+      - name: Rebind trusted default branch before token creation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess, time
+          repository = os.environ["GITHUB_REPOSITORY"]
+          expected_head = os.environ.get("GITHUB_SHA", "")
+          if re.fullmatch(r"[0-9a-fA-F]{40}", expected_head) is None:
+              raise SystemExit("Writer SHA is invalid.")
+          deadline = time.monotonic() + 120
+          def get(endpoint):
+              remaining = deadline - time.monotonic()
+              if remaining <= 0:
+                  raise SystemExit("Trusted default-branch rebind deadline elapsed.")
+              try:
+                  result = subprocess.run(["gh", "api", endpoint], capture_output=True, text=True, check=False, timeout=min(20, remaining))
+              except subprocess.TimeoutExpired as error:
+                  raise SystemExit("Trusted default-branch rebind timed out.") from error
+              if time.monotonic() > deadline:
+                  raise SystemExit("Trusted default-branch rebind deadline elapsed.")
+              if result.returncode != 0:
+                  raise SystemExit("Unable to rebind trusted default branch.")
+              try:
+                  return json.loads(result.stdout)
+              except json.JSONDecodeError as error:
+                  raise SystemExit("Trusted default response is not JSON.") from error
+          repository_value = get(f"repos/{repository}")
+          branch = repository_value.get("default_branch") if isinstance(repository_value, dict) else None
+          if not isinstance(branch, str) or re.fullmatch(r"[A-Za-z0-9._/-]+", branch) is None:
+              raise SystemExit("Repository default branch is invalid.")
+          reference = get(f"repos/{repository}/git/ref/heads/{branch}")
+          head = reference.get("object", {}).get("sha") if isinstance(reference, dict) and isinstance(reference.get("object"), dict) else None
+          if head != expected_head:
+              raise SystemExit("Trusted default branch advanced while writer was queued.")
+          default_blob = get(f"repos/{repository}/contents/.github/workflows/pr-governance-status-writer.yml?ref={branch}")
+          immutable_blob = get(f"repos/{repository}/contents/.github/workflows/pr-governance-status-writer.yml?ref={expected_head}")
+          default_digest = default_blob.get("sha") if isinstance(default_blob, dict) else None
+          immutable_digest = immutable_blob.get("sha") if isinstance(immutable_blob, dict) else None
+          if not isinstance(default_digest, str) or re.fullmatch(r"[0-9a-fA-F]{40}", default_digest) is None or default_digest != immutable_digest:
+              raise SystemExit("Writer workflow differs from trusted default branch.")
+          PY
+
+      - name: Checkout trusted default branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          # bootstrap-validation bound this immutable dispatch SHA to default.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Create Check Run writer App token
+        id: check-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: write
+
+      - name: Create read-only governance App token
+        id: read-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-administration: read
+          permission-checks: read
+          permission-contents: read
+          permission-issues: read
+          permission-pull-requests: read
+
+      - name: Revalidate every current open pull request and publish fenced states
+        env:
+          # The high-rate read path and Check Run writer are two separate App
+          # tokens. The script never carries either across the other boundary.
+          GH_TOKEN: ${{ steps.read-token.outputs.token }}
+          DEFAULT_READ_TOKEN: ${{ github.token }}
+          CHECK_WRITE_TOKEN: ${{ steps.check-token.outputs.token }}
+          KRR_GOVERNANCE_CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          GOVERNANCE_DISPATCHER_RUN_ID: ${{ inputs.dispatcher_run_id }}
+          GOVERNANCE_SCOPE: ${{ inputs.scope }}
+          GOVERNANCE_TARGET_NUMBERS: ${{ inputs.target_numbers }}
+          GOVERNANCE_PRESERVED_TARGET_NUMBERS: ${{ inputs.preserved_target_numbers }}
+          GOVERNANCE_PRESERVED_WRITER_RUN_ID: ${{ inputs.preserved_writer_run_id }}
+          GOVERNANCE_CHECK_MANIFEST: ${{ inputs.check_manifest }}
+          GOVERNANCE_TERMINAL_BATCH_NUMBERS: ${{ inputs.terminal_batch_numbers }}
+          GOVERNANCE_CONTINUATION_INDEX: ${{ inputs.continuation_index }}
+          GOVERNANCE_TERMINAL_ORDER_NUMBERS: ${{ inputs.terminal_order_numbers }}
+          GOVERNANCE_COMPLETED_WRITER_RUN_IDS: ${{ inputs.completed_writer_run_ids }}
+          GOVERNANCE_TERMINAL_DEADLINE_EPOCH: ${{ inputs.terminal_deadline_epoch }}
+          GOVERNANCE_TERMINAL_DEADLINE_REQUIRED: 'true'
+          KRR_GOVERNANCE_APP_BOT_LOGIN: ${{ vars.KRR_GOVERNANCE_APP_BOT_LOGIN }}
+        run: python3 scripts/review/pr_governance_status_writer.py
