@@ -191,6 +191,7 @@ clean: sweep
 # Verify VERSION follows the remote release line
 release-target-check:
     bash scripts/release/verify-version.sh "{{VERSION}}"
+    python3 scripts/release/verify_dependency_freshness.py
     python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --repo "{{RELEASE_REPO}}"
     bash scripts/release/assert-tag-safe.sh "{{TAG}}" origin
     bash scripts/release/assert-crates-not-published.sh "{{VERSION}}"
@@ -254,10 +255,9 @@ krr-build:
 
 # Force-update all Rust and JavaScript dependencies plus pinned runtime assets, then run required checks
 depends-update-all:
-    {{CARGO}} upgrade -i
+    {{CARGO}} upgrade --incompatible allow --pinned allow --recursive true
     {{CARGO}} update
     bun update --latest
-    bun add -d typescript@6.0.3
     bun run scripts/runtime-assets/depends-update-all.ts
     bun run scripts/drawio/resource-update.ts --resources "{{DRAWIO_RESOURCE_DIR}}" --manifest "{{DRAWIO_RESOURCE_MANIFEST}}"
     bun run scripts/runtime-assets/runtime-package-asset-compressor.ts --write
