@@ -208,8 +208,12 @@ fn local_quality_gate_runs_repository_automation_contract_tests()
     let automation = recipe_body(&justfile, "automation-contract-test")?;
 
     assert!(check.contains("automation-contract-test"));
-    assert!(automation.contains("unittest discover -s scripts/hooks"));
-    assert!(automation.contains("cleanup_release_state_test.py"));
+    for script_dir in ["scripts/hooks", "scripts/release", "scripts/review"] {
+        assert!(
+            automation.contains(&format!("unittest discover -s {script_dir} -p '*_test.py'")),
+            "automation contract gate must discover tests under {script_dir}"
+        );
+    }
     Ok(())
 }
 
