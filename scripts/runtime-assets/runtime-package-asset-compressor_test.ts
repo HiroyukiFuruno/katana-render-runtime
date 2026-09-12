@@ -37,8 +37,13 @@ test("Draw.io resource archive はpath順で連結しRust indexを生成する",
   ]);
 
   expect(brotliDecompressSync(archive.compressedBytes).toString()).toBe("ABCZ");
-  expect(archive.mediaIndexSource).toContain('("a/file.xml", 0, 3)');
-  expect(archive.mediaIndexSource).toContain('("z/file.svg", 3, 1)');
+  expect(archive.indexSources).toHaveLength(2);
+  expect(archive.indexSources.map((it) => it.fileName)).toEqual([
+    "drawio-resources-a-index.rs",
+    "drawio-resources-z-index.rs",
+  ]);
+  expect(archive.indexSources.at(0)?.source).toContain('("a/file.xml", 0, 3)');
+  expect(archive.indexSources.at(1)?.source).toContain('("z/file.svg", 3, 1)');
   expect(archive.indexSource).toContain("UNCOMPRESSED_LENGTH: usize = 4");
   expect(archive.indexSource).toContain("DRAWIO_RESOURCE_ARCHIVE_INDEXES");
 });

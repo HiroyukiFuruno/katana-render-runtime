@@ -23,6 +23,10 @@ REQUIRED_RELEASE_COMMITS = (
     "007ab829df39ed40bbfcfc19205ad21f3da32fe8",  # #76 implementation
     "91f07699b26567658f76021050ca7ec7b5c10df1",  # #76 regression
 )
+# A squash merge deliberately rewrites commit ancestry.  These refs identify
+# the expected release tree independently of that ancestry.
+REQUIRED_RELEASE_BASE = "eb44d1524dabde351e729308ae21f632b71c4cd6"
+REQUIRED_RELEASE_TREE = "91f07699b26567658f76021050ca7ec7b5c10df1"
 
 
 @dataclass(frozen=True, order=True)
@@ -105,9 +109,11 @@ def latest_remote_tag(remote: str) -> StableVersion | None:
     return max(versions) if versions else None
 
 
-def missing_required_commits(head_ref: str) -> list[str]:
+def missing_required_commits(
+    head_ref: str, required_commits: tuple[str, ...] = REQUIRED_RELEASE_COMMITS
+) -> list[str]:
     missing: list[str] = []
-    for commit in REQUIRED_RELEASE_COMMITS:
+    for commit in required_commits:
         result = subprocess.run(
             ["git", "merge-base", "--is-ancestor", commit, head_ref],
             check=False,
@@ -117,6 +123,41 @@ def missing_required_commits(head_ref: str) -> list[str]:
         if result.returncode != 0:
             missing.append(commit)
     return missing
+
+
+def release_tree_matches(
+    head_ref: str,
+    release_base: str = REQUIRED_RELEASE_BASE,
+    release_tree: str = REQUIRED_RELEASE_TREE,
+) -> bool:
+    """Return whether the candidate preserves every path changed by the release."""
+    changed_paths = subprocess.run(
+        [
+            "git",
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            release_base,
+            release_tree,
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if changed_paths.returncode != 0:
+        return False
+    paths = tuple(path for path in changed_paths.stdout.split("\0") if path)
+    if not paths:
+        return False
+    result = subprocess.run(
+        ["git", "diff", "--quiet", "--no-ext-diff", release_tree, head_ref, "--", *paths],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
 
 
 def main() -> int:
@@ -141,10 +182,11 @@ def main() -> int:
         )
         return 1
     missing_commits = missing_required_commits(args.head_ref)
-    if missing_commits:
+    if missing_commits and not release_tree_matches(args.head_ref):
         print(
             "Release target sanity check failed: release branch is missing required "
-            f"commit(s): {', '.join(missing_commits)}.",
+            "commit(s) and does not reproduce their required release tree: "
+            f"{', '.join(missing_commits)}.",
             file=sys.stderr,
         )
         return 1

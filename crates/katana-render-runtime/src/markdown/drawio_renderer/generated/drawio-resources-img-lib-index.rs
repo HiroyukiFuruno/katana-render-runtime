@@ -1,10 +1,4 @@
-pub(super) const DRAWIO_RESOURCE_ARCHIVE_MEDIA_INDEX: &[DrawioResourceArchiveEntry] = &[
-    ("assets/img/drawlogo32.png", 0, 35590),
-    ("icon-cache1/Boxicons_Solid_Vol_1-2638/bxs-city-680.svg", 263420, 417),
-    ("icon-cache1/Business___Finance_glyph_V1-2601/322_hill_landscape_nature_mountain_scene-499.svg", 263837, 7383),
-    ("icon-cache1/Energy_and_Power_Glyph_24_px-2259/Beach_morning_sea_sunrise_sunset-511.svg", 271220, 1041),
-    ("icon-cache1/Transportation-2441/london_under_underground_city_mining_underpass_parking-845.svg", 272261, 1615),
-    ("img/clipart/Gear_128x128.png", 273876, 4801),
+pub(super) const DRAWIO_RESOURCE_ARCHIVE_IMG_LIB_INDEX: &[DrawioResourceArchiveEntry] = &[
     ("img/lib/active_directory/user_accounts.svg", 278677, 3251),
     ("img/lib/atlassian/Atlassian_Logo.svg", 281928, 822),
     ("img/lib/azure2/analytics/Log_Analytics_Workspaces.svg", 282750, 4017),
@@ -143,9 +137,4 @@ pub(super) const DRAWIO_RESOURCE_ARCHIVE_MEDIA_INDEX: &[DrawioResourceArchiveEnt
     ("img/lib/ibm/vpc/VPCTag.svg", 679671, 1957),
     ("img/lib/ibm/vpc/ZoneTag.svg", 681628, 812),
     ("img/lib/mscae/Active_Directory.svg", 682440, 1781),
-    ("ti/gratis-vektor/p3/7570850-backend-entwicklungszeilensymbol-vektor.jpg", 684221, 80078),
-    ("wikipedia/commons/f/fd/Ghostscript_Tiger.svg", 764299, 68630),
-    ("wikipedia/commons/f/ff/Horse_clipart.svg", 832929, 52369),
-    ("wikipedia/commons/thumb/f/ff/Horse_clipart.svg/512px-Horse_clipart.svg.png", 885298, 124794),
-    ("wikipedia/de/8/89/FirefoxLogo.svg", 1010092, 10472),
 ];

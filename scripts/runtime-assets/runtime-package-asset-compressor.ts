@@ -23,8 +23,6 @@ const DRAWIO_RESOURCE_ROOT = path.join(
 const DRAWIO_RESOURCE_ARCHIVE_EXCLUDED_ROOT_ENTRIES = new Set([
   "drawio-libs",
   "drawio-resource-manifest.json",
-  "shapes",
-  "stencils",
 ]);
 const DRAWIO_RESOURCE_GENERATED_DIR = path.join(
   "crates",
@@ -36,14 +34,6 @@ const DRAWIO_RESOURCE_GENERATED_DIR = path.join(
 );
 const DRAWIO_RESOURCE_ARCHIVE = path.join(DRAWIO_RESOURCE_GENERATED_DIR, "drawio-resources.bin.br");
 const DRAWIO_RESOURCE_INDEX = path.join(DRAWIO_RESOURCE_GENERATED_DIR, "drawio-resources-index.rs");
-const DRAWIO_RESOURCE_MEDIA_INDEX = path.join(
-  DRAWIO_RESOURCE_GENERATED_DIR,
-  "drawio-resources-media-index.rs",
-);
-const DRAWIO_RESOURCE_DATA_INDEX = path.join(
-  DRAWIO_RESOURCE_GENERATED_DIR,
-  "drawio-resources-data-index.rs",
-);
 const ZENUML_RUNTIME_ASSET_GENERATED_DIR = path.join(
   "crates",
   "katana-render-runtime",
@@ -68,8 +58,12 @@ export interface DrawioResourceArchiveFile {
 export interface DrawioResourceArchive {
   readonly compressedBytes: Buffer;
   readonly indexSource: string;
-  readonly mediaIndexSource: string;
-  readonly dataIndexSource: string;
+  readonly indexSources: readonly DrawioResourceArchiveIndexSource[];
+}
+
+export interface DrawioResourceArchiveIndexSource {
+  readonly fileName: string;
+  readonly source: string;
 }
 
 export interface ZenumlRuntimeAssetArchiveFile {
@@ -96,33 +90,55 @@ export function buildDrawioResourceArchive(
 ): DrawioResourceArchive {
   const sorted = [...files].sort((left, right) => left.path.localeCompare(right.path));
   const contents: Buffer[] = [];
-  const mediaEntries: string[] = [];
-  const dataEntries: string[] = [];
+  const groupedEntries = new Map<string, string[]>();
   let offset = 0;
   for (const file of sorted) {
     const bytes = Buffer.from(file.bytes);
     contents.push(bytes);
     const entry = `    (${JSON.stringify(file.path)}, ${offset}, ${bytes.length}),`;
-    (file.path.startsWith("data/") ? dataEntries : mediaEntries).push(entry);
+    const group = drawioResourceArchiveGroup(file.path);
+    const entries = groupedEntries.get(group) ?? [];
+    entries.push(entry);
+    groupedEntries.set(group, entries);
     offset += bytes.length;
   }
   const rawBytes = Buffer.concat(contents);
+  const indexSources = [...groupedEntries.entries()].map(([group, entries]) => {
+    const name = drawioResourceArchiveIndexName(group);
+    return {
+      fileName: `drawio-resources-${group}-index.rs`,
+      source: indexArraySource(name, entries),
+      name,
+    };
+  });
   const indexSource = [
     `pub(super) const DRAWIO_RESOURCE_ARCHIVE_UNCOMPRESSED_LENGTH: usize = ${rawBytes.length};`,
-    'include!("drawio-resources-media-index.rs");',
-    'include!("drawio-resources-data-index.rs");',
+    ...indexSources.map(({ fileName }) => `include!("${fileName}");`),
     "pub(super) const DRAWIO_RESOURCE_ARCHIVE_INDEXES: &[DrawioResourceArchiveIndex] = &[",
-    "    DRAWIO_RESOURCE_ARCHIVE_MEDIA_INDEX,",
-    "    DRAWIO_RESOURCE_ARCHIVE_DATA_INDEX,",
+    ...indexSources.map(({ name }) => `    ${name},`),
     "];",
     "",
   ].join("\n");
   return {
     compressedBytes: compressRuntimePackageAsset(rawBytes),
     indexSource,
-    mediaIndexSource: indexArraySource("DRAWIO_RESOURCE_ARCHIVE_MEDIA_INDEX", mediaEntries),
-    dataIndexSource: indexArraySource("DRAWIO_RESOURCE_ARCHIVE_DATA_INDEX", dataEntries),
+    indexSources: indexSources.map(({ fileName, source }) => ({ fileName, source })),
   };
+}
+
+function drawioResourceArchiveGroup(filePath: string): string {
+  const [root, child] = filePath.split("/");
+  if (root === undefined || !/^[a-z0-9_-]+$/.test(root)) {
+    throw new Error(`Unsupported Draw.io resource path: ${filePath}`);
+  }
+  if (child === undefined || !/^[a-z0-9_-]+$/.test(child)) {
+    return root;
+  }
+  return `${root}-${child}`;
+}
+
+function drawioResourceArchiveIndexName(group: string): string {
+  return `DRAWIO_RESOURCE_ARCHIVE_${group.toUpperCase().replaceAll("-", "_")}_INDEX`;
 }
 
 function indexArraySource(name: string, entries: readonly string[]): string {
@@ -220,8 +236,14 @@ export class RuntimePackageAssetCompressor {
     const archive = buildDrawioResourceArchive(this.drawioResourceFiles(DRAWIO_RESOURCE_ROOT));
     this.syncFile(mode, DRAWIO_RESOURCE_ARCHIVE, archive.compressedBytes);
     this.syncFile(mode, DRAWIO_RESOURCE_INDEX, Buffer.from(archive.indexSource, "utf8"));
-    this.syncFile(mode, DRAWIO_RESOURCE_MEDIA_INDEX, Buffer.from(archive.mediaIndexSource, "utf8"));
-    this.syncFile(mode, DRAWIO_RESOURCE_DATA_INDEX, Buffer.from(archive.dataIndexSource, "utf8"));
+    for (const source of archive.indexSources) {
+      this.syncFile(
+        mode,
+        path.join(DRAWIO_RESOURCE_GENERATED_DIR, source.fileName),
+        Buffer.from(source.source, "utf8"),
+      );
+    }
+    this.removeStaleDrawioResourceIndexes(mode, archive.indexSources);
   }
 
   private syncZenumlRuntimeAssets(mode: CompressionMode): void {
@@ -272,6 +294,27 @@ export class RuntimePackageAssetCompressor {
     if (actual === undefined || !actual.equals(expected)) {
       throw new Error(`Compressed runtime package asset is stale: ${target}`);
     }
+  }
+
+  private removeStaleDrawioResourceIndexes(
+    mode: CompressionMode,
+    sources: readonly DrawioResourceArchiveIndexSource[],
+  ): void {
+    const expected = new Set(sources.map(({ fileName }) => fileName));
+    const stale = fs
+      .readdirSync(DRAWIO_RESOURCE_GENERATED_DIR)
+      .filter((fileName) => /^drawio-resources-.+-index\.rs$/.test(fileName))
+      .filter((fileName) => !expected.has(fileName));
+    if (stale.length === 0) {
+      return;
+    }
+    if (mode === "--write") {
+      for (const fileName of stale) {
+        fs.unlinkSync(path.join(DRAWIO_RESOURCE_GENERATED_DIR, fileName));
+      }
+      return;
+    }
+    throw new Error(`Stale Draw.io resource indexes: ${stale.join(", ")}`);
   }
 }
 

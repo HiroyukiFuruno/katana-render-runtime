@@ -1,4 +1,4 @@
-pub(super) const DRAWIO_RESOURCE_ARCHIVE_DATA_INDEX: &[DrawioResourceArchiveEntry] = &[
+pub(super) const DRAWIO_RESOURCE_ARCHIVE_DATA_ICONS_INDEX: &[DrawioResourceArchiveEntry] = &[
     ("data/icons/actnia-ecommerce-delivery/24/gold-128.png", 35590, 1747),
     ("data/icons/aquatic-4/128/Blue-whale-large-mammal-ocean-128.png", 37337, 4657),
     ("data/icons/boxicons-solid-vol-1/24/bxs-basket-128.png", 41994, 1527),

@@ -23,8 +23,6 @@ include = [
     "vendor/plantuml/1.2026.8/plantuml.jar.sha256",
     "vendor/zenuml-core/4.3.0/zenuml.js.sha256",
     "src/markdown/generated/zenuml-runtime-assets.bin.br",
-    "src/markdown/drawio_renderer/js_runtime/resources/shapes/**",
-    "src/markdown/drawio_renderer/js_runtime/resources/stencils/**",
     "src/markdown/drawio_renderer/generated/drawio-resources.bin.br",
 ]
 
