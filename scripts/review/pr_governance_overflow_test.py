@@ -257,21 +257,36 @@ class GovernanceOverflowContractTest(unittest.TestCase):
                 300_000,
             )
 
-    def test_phase_deadlines_bound_a_450_head_generation_inside_the_root_deadline(self) -> None:
+    def test_phase_deadlines_bound_the_complete_300_head_schedule_inside_the_job_deadline(self) -> None:
         phase_seconds = (15 + 15 + 30 + 290) * 60
         self.assertLess(phase_seconds, 6 * 60 * 60)
         self.assertIn("root_deadline_epoch = int(time.time()) + 21_000", self.dispatcher)
         self.assertEqual(self.dispatcher.count("timeout-minutes: 15"), 2)
         self.assertIn("timeout-minutes: 30", self.dispatcher)
         self.assertIn("timeout-minutes: 290", self.dispatcher)
-        self.assertIn("The 450-head bound is operational", self.dispatcher)
+        self.assertIn("The operational cap includes the whole job", self.dispatcher)
         self.assertIn("invalidation_governed_heads = {", self.dispatcher)
-        self.assertIn("invalidation_head_cap_exceeded = len(invalidation_governed_heads) > 450", self.dispatcher)
+        self.assertIn("def complete_reconciliation_seconds(head_count):", self.dispatcher)
+        self.assertIn("TERMINAL_INTER_SEGMENT_SECONDS = 3_610", self.dispatcher)
+        self.assertIn("RECONCILIATION_CONTROL_PLANE_RESERVE_SECONDS = 60 * 60", self.dispatcher)
+        self.assertIn("len(invalidation_governed_heads) > max_invalidation_governed_heads", self.dispatcher)
         self.assertIn("if invalidation_head_cap_exceeded:", self.dispatcher)
-        dispatcher_seconds = 450 * 8.1
-        terminal_seconds = 4 * 125 * 20.5
-        self.assertLess(dispatcher_seconds + terminal_seconds, 290 * 60)
-        self.assertLess((15 + 15 + 30) * 60 + dispatcher_seconds + terminal_seconds, 21_000)
+        early_writer_seconds = 120 + 180 + 50 * 2 * 8.1
+
+        def complete_seconds(head_count: int) -> float:
+            terminal_heads = max(0, head_count - 50)
+            terminal_segments = (terminal_heads + 125 - 1) // 125
+            terminal_schedule = 0 if terminal_segments == 0 else 3_750 + (terminal_segments - 1) * max(3_750, 3_610)
+            return head_count * 8.1 + early_writer_seconds + terminal_schedule
+
+        cap = max(
+            head_count
+            for head_count in range(1, 601)
+            if complete_seconds(head_count) <= 290 * 60 - 60 * 60
+        )
+        self.assertEqual(cap, 300)
+        self.assertLessEqual(complete_seconds(cap), 290 * 60 - 60 * 60)
+        self.assertGreater(complete_seconds(cap + 1), 290 * 60 - 60 * 60)
         self.assertEqual(self.dispatcher.count("ROOT_DEADLINE_EPOCH:"), 4)
         self.assertEqual(
             self.dispatcher.count("Terminal dispatch cannot complete before the root deadline."), 4
@@ -279,13 +294,22 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         self.assertEqual(self.dispatcher.count("terminal_segment_seconds = 3_750"), 4)
 
     def test_preinvalidation_and_all_open_union_of_550_heads_fails_closed_before_chunking(self) -> None:
-        """The two invalidator partitions must share one 450-head run budget."""
-        start = self.dispatcher_workflow.index("          invalidation_governed_heads = {")
+        """The two invalidator partitions must share one computed run budget."""
+        start = self.dispatcher_workflow.index("          def complete_reconciliation_seconds(head_count):")
         end = self.dispatcher_workflow.index("          pre_chunk_snapshots = [", start)
         source = textwrap.dedent(self.dispatcher_workflow[start:end])
         preinvalidate_targets = list(range(1, 51))
         all_invalidation_targets = list(range(51, 551))
         namespace = {
+            "EARLY_WRITER_TARGET_CAP": 50,
+            "CHECK_RUN_WRITE_PACE_SECONDS": 8.1,
+            "EARLY_WRITER_STARTUP_SECONDS": 120,
+            "EARLY_WRITER_INITIAL_EVIDENCE_SECONDS": 180,
+            "TERMINAL_BATCH_HEAD_CAP": 125,
+            "TERMINAL_SEGMENT_SECONDS": 3_750,
+            "TERMINAL_INTER_SEGMENT_SECONDS": 3_610,
+            "RECONCILIATION_JOB_TIMEOUT_SECONDS": 290 * 60,
+            "RECONCILIATION_CONTROL_PLANE_RESERVE_SECONDS": 60 * 60,
             "target_snapshots": {
                 number: (f"{number:040x}", False)
                 for number in preinvalidate_targets + all_invalidation_targets
@@ -297,6 +321,7 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         exec(source, namespace)
 
         self.assertEqual(len(namespace["invalidation_governed_heads"]), 550)
+        self.assertEqual(namespace["max_invalidation_governed_heads"], 300)
         self.assertTrue(namespace["invalidation_head_cap_exceeded"])
         self.assertEqual(namespace["pre_chunks"], [[], []])
         self.assertEqual(namespace["all_chunks"], [[], []])

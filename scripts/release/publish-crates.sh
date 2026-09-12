@@ -48,3 +48,4 @@ wait_for_crate() {
 publish_if_needed katana-render-runtime
 wait_for_crate katana-render-runtime
 publish_if_needed katana-render-runtime-cli
+wait_for_crate katana-render-runtime-cli

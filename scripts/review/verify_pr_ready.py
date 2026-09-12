@@ -3075,6 +3075,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     final_threads = _review_threads(repository, arguments.pr, budget=graphql_budget)
     if final_threads != threads:
         raise ValueError("review threads changed during readiness check")
+    # The initial evidence snapshot is no longer authoritative once the final
+    # fence begins.  Re-read the complete review connection and re-evaluate
+    # every review condition with the final comments/threads so a late review
+    # or canonical no-issues comment cannot inherit an earlier success.
+    final_reviews = _reviews(repository, arguments.pr, budget=graphql_budget)
+    if final_reviews != pull_request["reviews"]:
+        raise ValueError("reviews changed during readiness check")
+    final_readiness_errors = readiness_errors(
+        {**pull_request, "reviews": final_reviews},
+        final_threads,
+        final_comments,
+        review_bot=_CODEX_REVIEW_BOT_LOGIN,
+        require_draft=arguments.require_draft,
+        referenced_issues=referenced_issues,
+        required_checks=initial_required_checks,
+    )
+    if final_readiness_errors:
+        raise ValueError(
+            "review readiness changed during readiness check: "
+            + "; ".join(final_readiness_errors)
+        )
     _verify_final_readiness_snapshot_unchanged(
         repository=repository,
         pull_request=arguments.pr,

@@ -173,7 +173,7 @@ runtime-package-asset-check:
 # Verify repository hook and release cleanup contracts
 automation-contract-test:
     python3 -m unittest discover -s scripts/hooks -p '*_test.py'
-    python3 -m unittest discover -s scripts/release -p 'cleanup_release_state_test.py'
+    python3 -m unittest discover -s scripts/release -p '*_test.py'
     python3 -m unittest discover -s scripts/review -p '*_test.py'
 
 # Run the local quality gate

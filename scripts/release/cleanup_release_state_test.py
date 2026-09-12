@@ -393,6 +393,52 @@ class CleanupReleaseStateTest(unittest.TestCase):
         self.assertEqual(push_arguments[1], str(self.remote))
         self.assertFalse(self.remote_branch_exists("release/v9.9.9"))
 
+    def test_uses_audited_url_for_all_network_operations_after_remote_config_changes(self) -> None:
+        self.create_release_branch(merge=True)
+        changed_remote = self.root / "changed-fetch-remote.git"
+        self.git("init", "--bare", "--initial-branch=master", str(changed_remote), cwd=self.root)
+        original_url = str(self.remote)
+        network_calls: list[tuple[str, ...]] = []
+        original_run_git = subject._run_git
+        changed = False
+
+        def change_config_after_audit(repository: Path, *arguments: str, **kwargs: object):
+            nonlocal changed
+            if arguments[:1] in (("fetch",), ("pull",), ("push",), ("ls-remote",)):
+                network_calls.append(arguments)
+            if arguments[:1] == ("fetch",) and not changed:
+                changed = True
+                self.git(
+                    "remote",
+                    "set-url",
+                    "origin",
+                    str(changed_remote),
+                    cwd=self.repository,
+                )
+            return original_run_git(repository, *arguments, **kwargs)
+
+        with mock.patch.object(subject, "_run_git", side_effect=change_config_after_audit):
+            self.cleanup()
+
+        self.assertTrue(changed)
+        self.assertGreaterEqual(len(network_calls), 4)
+        self.assertTrue(
+            all(
+                (
+                    call[2]
+                    if call[0] == "pull"
+                    else call[3]
+                    if call[0] == "ls-remote"
+                    else call[1]
+                )
+                == original_url
+                for call in network_calls
+                if call[0] in {"fetch", "pull", "push", "ls-remote"}
+            ),
+            network_calls,
+        )
+        self.assertFalse(self.remote_branch_exists("release/v9.9.9"))
+
     def test_canonicalizes_github_fetch_and_push_url_variants(self) -> None:
         ssh = subject._remote_repository_identity(
             self.repository,

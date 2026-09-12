@@ -4126,8 +4126,13 @@ raise SystemExit(91)
             self.workflow,
             re.DOTALL,
         )
-        self.assertIsNotNone(resolver); self.assertIsNotNone(activate); self.assertIsNotNone(source); self.assertIsNotNone(verify_source)
-        assert resolver is not None and activate is not None and source is not None and verify_source is not None
+        marker = re.search(
+            r"- name: Publish resolver-failure barrier App marker.*?python3 - <<'PY'\n(.*?)\n          PY",
+            job,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(resolver); self.assertIsNotNone(activate); self.assertIsNotNone(source); self.assertIsNotNone(verify_source); self.assertIsNotNone(marker)
+        assert resolver is not None and activate is not None and source is not None and verify_source is not None and marker is not None
         self.assertIn("needs: establish-resolver-failure-barrier", self.workflow)
         self.assertIn("if: needs.resolve_event.outputs.reconcile == 'true'", self.workflow)
         resolver_job = self.workflow[
@@ -4156,7 +4161,13 @@ raise SystemExit(91)
         self.assertIn("contents/.github/workflows/pr-governance.yml?ref={head}", job)
         activation_position = job.index("- name: Activate resolver-failure merge barrier")
         verification_position = job.index("- name: Verify resolver-failure barrier source after activation")
+        marker_position = job.index("- name: Publish resolver-failure barrier App marker")
         self.assertLess(activation_position, verification_position)
+        # Add the App-bound required context before obtaining marker tokens or
+        # writing the Check Run.  A marker/Issue mutation failure then leaves
+        # this missing required context as the merge fence.
+        self.assertLess(activation_position, marker_position)
+        self.assertLess(verification_position, marker_position)
         self.assertNotIn("subprocess.run", source.group(1))
         for step in (
             "Create resolver-failure barrier marker write token",
@@ -4291,6 +4302,28 @@ raise SystemExit(91)
             with patch.dict(os.environ, verification_environment, clear=True), patch("subprocess.run", side_effect=timeout_source_run):
                 with self.assertRaises(subprocess.TimeoutExpired):
                     exec(self._workflow_program(verify_source), {"__name__": "__main__"})
+            self.assertEqual(state["mutations"], ["ACTIVATE"])
+
+            def failed_marker_run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                self.assertEqual(arguments[:4], ["gh", "api", "--hostname", "github.com"])
+                environment = kwargs.get("env"); self.assertIsInstance(environment, dict)
+                self.assertEqual(environment.get("GH_TOKEN"), "marker-write")  # type: ignore[union-attr]
+                self.assertEqual(route(arguments), "repos/owner/repository/check-runs")
+                self.assertEqual(arguments[arguments.index("--method") + 1], "POST")
+                return response({}, 1)
+
+            marker_environment = {
+                "GITHUB_REPOSITORY": "owner/repository", "GITHUB_SERVER_URL": "https://github.com",
+                "PATH": os.environ["PATH"], "CHECK_WRITE_TOKEN": "marker-write",
+                "CHECK_READ_TOKEN": "marker-read", "DEFAULT_HEAD": "a" * 40,
+                "DISPATCHER_RUN_ID": "99", "CHECK_APP_ID": "4766933",
+            }
+            # Marker publication is deliberately allowed to fail only after
+            # activation.  The action stops before target resolution and the
+            # required barrier remains present.
+            with patch.dict(os.environ, marker_environment, clear=True), patch("subprocess.run", side_effect=failed_marker_run):
+                with self.assertRaises(SystemExit):
+                    exec(self._workflow_program(marker), {"__name__": "__main__"})
             self.assertEqual(state["mutations"], ["ACTIVATE"])
 
             # Failure injection happens only after the barrier mutation. The
@@ -5619,7 +5652,7 @@ raise SystemExit(91)
                 self.assertIn("time", imported, f"workflow heredoc #{index} uses time without importing it")
 
     def test_large_priority_targets_are_resolved_into_complete_ttl_safe_chunks(self) -> None:
-        """The resolver and preinvalidators cover the 450-head generation bound."""
+        """The resolver and preinvalidators cover the computed 300-head generation bound."""
         resolver = re.search(
             r"- name: Re-enumerate every current local governance pull request.*?python3 - <<'PY'\n(.*?)\n          PY",
             self.workflow, re.DOTALL,
@@ -5629,7 +5662,7 @@ raise SystemExit(91)
             r"- name: Pre-invalidate priority event heads.*?python3 - <<'PY'\n(.*?)\n          PY",
             self.workflow, re.DOTALL,
         )
-        # One token pair cannot safely span 450 writes. The workflow must
+        # One token pair cannot safely span 300 writes. The workflow must
         # expose two independently tokenized 300-head pre-invalidation steps.
         self.assertGreaterEqual(len(pre_blocks), 2)
         self.assertIn("terminal_batch_numbers", self.workflow)
@@ -5646,7 +5679,7 @@ raise SystemExit(91)
                 "head": {"sha": head, "repo": {"full_name": "owner/repository"}},
             }
 
-        for total in (41, 450):
+        for total in (41, 300):
             with self.subTest(total=total), tempfile.TemporaryDirectory() as temporary:
                 directory = Path(temporary); output = directory / "output"
                 pages = [
@@ -5702,7 +5735,7 @@ raise SystemExit(91)
                 self.assertTrue(all(len(chunk) <= 300 for chunk in chunks))
 
     def test_large_preinvalidation_posts_each_distinct_head_once_with_fresh_token_pair(self) -> None:
-        """The two 300-head chunks cover the bounded generation exactly once."""
+        """The bounded preinvalidation chunks cover the generation exactly once."""
         resolver = re.search(
             r"- name: Re-enumerate every current local governance pull request.*?python3 - <<'PY'\n(.*?)\n          PY",
             self.workflow, re.DOTALL,
@@ -5713,7 +5746,7 @@ raise SystemExit(91)
             self.workflow, re.DOTALL,
         )
         self.assertGreaterEqual(len(pre_blocks), 2)
-        total = 450
+        total = 300
         heads = {number: f"{number:040x}" for number in range(1, total + 1)}
         pages = [[
             {
@@ -5830,8 +5863,13 @@ raise SystemExit(91)
                     exec(textwrap.dedent(block), {"__name__": "__main__"})
             self.assertEqual(len(posts), total)
             self.assertEqual(len({next(item.split("=", 1)[1] for item in post if item.startswith("external_id=")) for post in posts}), total)
-            self.assertEqual(read_tokens, {"read-1", "read-2"})
-            self.assertEqual(write_tokens, {"write-1", "write-2"})
+            expected_chunk_indexes = {
+                index
+                for index in (1, 2)
+                if json.loads(values[f"preinvalidate_chunk_{index}"])
+            }
+            self.assertEqual(read_tokens, {f"read-{index}" for index in expected_chunk_indexes})
+            self.assertEqual(write_tokens, {f"write-{index}" for index in expected_chunk_indexes})
             self.assertEqual(
                 [next(item.split("=", 1)[1] for item in post if item.startswith("head_sha=")) for post in posts],
                 [heads[number] for number in range(1, total + 1)],
@@ -6025,7 +6063,7 @@ raise SystemExit(91)
             self.assertEqual(len(json.loads(values["target_snapshots"])), len(governed))
 
     def test_nonpriority_workflow_run_oversized_snapshot_seeds_barrier_and_stops_before_dispatch(self) -> None:
-        """A non-priority CI workflow_run arms the barrier before the 450-head cap stops it."""
+        """A non-priority CI workflow_run arms the barrier before the computed cap stops it."""
         source_resolver = re.search(
             r"- name: Resolve current open pull requests from the trusted default branch.*?python3 - <<'PY'\n(.*?)\n          PY",
             self.workflow,

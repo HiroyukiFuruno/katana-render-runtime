@@ -51,13 +51,13 @@ def _ref_exists(repository: Path, reference: str) -> bool:
     )
 
 
-def _remote_branch_exists(repository: Path, remote: str, branch: str) -> bool:
+def _remote_branch_exists(repository: Path, remote_url: str, branch: str) -> bool:
     result = _run_git(
         repository,
         "ls-remote",
         "--exit-code",
         "--heads",
-        remote,
+        remote_url,
         branch,
         check=False,
     )
@@ -67,11 +67,11 @@ def _remote_branch_exists(repository: Path, remote: str, branch: str) -> bool:
     return result.returncode == 0
 
 
-def _fetch_remote_branch(repository: Path, remote: str, branch: str) -> None:
+def _fetch_remote_branch(repository: Path, remote_url: str, remote: str, branch: str) -> None:
     _run_git(
         repository,
         "fetch",
-        remote,
+        remote_url,
         f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}",
     )
 
@@ -233,6 +233,7 @@ def _github_release_checker(repository: Path, remote: str) -> ReleaseChecker:
 def _switch_and_update_default(
     repository: Path,
     remote: str,
+    remote_url: str,
     default_branch: str,
     actions: list[str],
 ) -> None:
@@ -250,7 +251,7 @@ def _switch_and_update_default(
                 f"{remote}/{default_branch}",
             )
         actions.append(f"switched to {default_branch}")
-    _run_git(repository, "pull", "--ff-only", remote, default_branch)
+    _run_git(repository, "pull", "--ff-only", remote_url, default_branch)
     actions.append(f"pulled {remote}/{default_branch} with --ff-only")
 
 
@@ -306,18 +307,20 @@ def cleanup_release_state(
     audited_push_url = _verify_push_destinations(repository, remote)
 
     actions: list[str] = [f"public release {version} verified"]
-    _run_git(repository, "fetch", remote, "--prune")
+    # 監査後はremote名を再解決しない。設定変更で別の送信先へ向けられても、
+    # この実行で監査したimmutable URLだけをネットワーク操作に使う。
+    _run_git(repository, "fetch", audited_push_url, "--prune")
     if not _ref_exists(repository, f"refs/remotes/{remote}/{default_branch}"):
-        _fetch_remote_branch(repository, remote, default_branch)
-    _switch_and_update_default(repository, remote, default_branch, actions)
-    _run_git(repository, "fetch", remote, "--prune")
+        _fetch_remote_branch(repository, audited_push_url, remote, default_branch)
+    _switch_and_update_default(repository, remote, audited_push_url, default_branch, actions)
+    _run_git(repository, "fetch", audited_push_url, "--prune")
 
-    remote_exists = _remote_branch_exists(repository, remote, release_branch)
+    remote_exists = _remote_branch_exists(repository, audited_push_url, release_branch)
     audited_remote_sha: str | None = None
     if remote_exists:
         # Refresh even when a tracking ref already exists; ancestry must be
         # checked against the remote tip observed by this cleanup run.
-        _fetch_remote_branch(repository, remote, release_branch)
+        _fetch_remote_branch(repository, audited_push_url, remote, release_branch)
     if remote_exists:
         # Keep the exact commit that passed the ancestry audit. The lease below
         # makes a concurrent remote update fail instead of deleting its tip.

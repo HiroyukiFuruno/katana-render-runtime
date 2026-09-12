@@ -2575,7 +2575,10 @@ class VerifyPrReadyTest(unittest.TestCase):
         ), patch.object(subject, "_open_pull_requests", return_value=current_canonical_closer()
         ):
             self.assertEqual(subject.main(["--pr", "72", "--repository", "owner/repo"]), 0)
-        self.assertEqual(review_queries, 2)
+        # Each complete GraphQL read re-fetches its first page for a stable
+        # pagination snapshot; the final readiness fence performs that read a
+        # second time before it can report success.
+        self.assertEqual(review_queries, 4)
 
     def test_reads_review_past_the_first_graphql_page(self) -> None:
         self.use_complete_review_reader()
@@ -4172,6 +4175,61 @@ class VerifyPrReadyTest(unittest.TestCase):
             subject, "_open_pull_requests", return_value=current_canonical_closer()
         ):
             with self.assertRaisesRegex(ValueError, "review threads changed"):
+                subject.main(["--pr", "72", "--repository", "owner/repo"])
+
+    def test_rechecks_complete_reviews_immediately_before_success(self) -> None:
+        pull_request, threads, comments = successful_state()
+        initial_reviews = deepcopy(pull_request["reviews"])
+        assert isinstance(initial_reviews, list)
+        changed_reviews = [
+            *initial_reviews,
+            formal_review(HEAD, "2026-08-29T03:02:45Z"),
+        ]
+
+        with patch.object(subject, "_gh_json", return_value=pull_request), patch.object(
+            subject, "_paginated_api_array", return_value=comments
+        ), patch.object(
+            subject, "_review_threads", return_value=threads
+        ), patch.object(
+            subject,
+            "_reviews",
+            side_effect=[initial_reviews, changed_reviews],
+        ), patch.object(
+            subject.issue_contract,
+            "referenced_issue_snapshot",
+            return_value=(self.issue(64, "2026-08-29T03:00:00Z"),),
+        ), patch.object(
+            subject, "_open_pull_requests", return_value=current_canonical_closer()
+        ):
+            with self.assertRaisesRegex(ValueError, "reviews changed"):
+                subject.main(["--pr", "72", "--repository", "owner/repo"])
+
+    def test_rechecks_canonical_comment_evidence_immediately_before_success(self) -> None:
+        pull_request, threads, comments = successful_state()
+        changed_comments = [
+            *comments,
+            no_issues_review(
+                3,
+                HEAD,
+                created_at="2026-08-29T03:02:45Z",
+            ),
+        ]
+
+        with patch.object(subject, "_gh_json", return_value=pull_request), patch.object(
+            subject,
+            "_paginated_api_array",
+            side_effect=[comments, changed_comments],
+        ), patch.object(subject, "_review_threads", return_value=threads), patch.object(
+            subject.issue_contract,
+            "referenced_issue_snapshot",
+            return_value=(self.issue(64, "2026-08-29T03:00:00Z"),),
+        ), patch.object(
+            subject, "_open_pull_requests", return_value=current_canonical_closer()
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "review readiness changed.*曖昧",
+            ):
                 subject.main(["--pr", "72", "--repository", "owner/repo"])
 
     def test_rejects_required_status_check_configuration_change_before_success(self) -> None:

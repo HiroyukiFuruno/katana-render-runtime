@@ -202,70 +202,6 @@ jobs:
               output.write(f"default_head={workflow_sha.lower()}\n")
           PY
 
-      - name: Create resolver-failure barrier marker write token
-        id: marker-write
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
-        with:
-          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-checks: write
-
-      - name: Create resolver-failure barrier marker read token
-        id: marker-read
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
-        with:
-          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-checks: read
-
-      - name: Publish resolver-failure barrier App marker
-        env:
-          CHECK_WRITE_TOKEN: ${{ steps.marker-write.outputs.token }}
-          CHECK_READ_TOKEN: ${{ steps.marker-read.outputs.token }}
-          DEFAULT_HEAD: ${{ steps.source.outputs.default_head }}
-          DISPATCHER_RUN_ID: ${{ github.run_id }}
-          CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-        run: |
-          python3 - <<'PY'
-          import json, os, re, subprocess, time
-          from urllib.parse import urlencode
-
-          repository=os.environ["GITHUB_REPOSITORY"]; head=os.environ.get("DEFAULT_HEAD", ""); dispatcher=os.environ.get("DISPATCHER_RUN_ID", ""); configured_app=os.environ.get("CHECK_APP_ID", "")
-          write_token=os.environ.get("CHECK_WRITE_TOKEN", ""); read_token=os.environ.get("CHECK_READ_TOKEN", "")
-          context="KRR / PR governance affected-head barrier"; app_id=4_766_933
-          if configured_app!=str(app_id) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or re.fullmatch(r"[1-9][0-9]*",dispatcher) is None or not write_token or not read_token or write_token==read_token:
-              raise SystemExit("Resolver-failure barrier marker identity is invalid.")
-          external=f"krr-governance-affected-head-barrier/v1/{head.lower()}/resolver-{dispatcher}"
-          details=f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/{dispatcher}?"+urlencode({"barrier_marker":"resolver"})
-          write_env={"GH_TOKEN":write_token,"PATH":os.environ["PATH"]}; read_env={"GH_TOKEN":read_token,"PATH":os.environ["PATH"]}
-          # This job shares the dispatcher generation lock with every
-          # invalidator/writer. Pace the marker Check Run as part of that
-          # single App write budget rather than creating an uncounted burst.
-          time.sleep(8.1)
-          created=subprocess.run(["gh","api","--hostname","github.com","--method","POST",f"repos/{repository}/check-runs","-f",f"name={context}","-f",f"head_sha={head}","-f",f"external_id={external}","-f","status=completed","-f","conclusion=success","-f",f"details_url={details}"],capture_output=True,text=True,check=False,env=write_env, timeout=20)
-          if created.returncode!=0:
-              raise SystemExit("Unable to publish resolver-failure barrier marker.")
-          try:
-              posted=json.loads(created.stdout); identifier=posted.get("id") if isinstance(posted,dict) else None
-          except json.JSONDecodeError as error:
-              raise SystemExit("Resolver-failure barrier marker is not JSON.") from error
-          if type(identifier) is not int or identifier<1 or posted.get("name")!=context or posted.get("head_sha")!=head or posted.get("external_id")!=external or posted.get("status")!="completed" or posted.get("conclusion")!="success" or posted.get("details_url")!=details or not isinstance(posted.get("app"),dict) or posted["app"].get("id")!=app_id:
-              raise SystemExit("Resolver-failure barrier marker is invalid.")
-          reread=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
-          if reread.returncode!=0:
-              raise SystemExit("Unable to re-read resolver-failure barrier marker.")
-          try:
-              marker=json.loads(reread.stdout)
-          except json.JSONDecodeError as error:
-              raise SystemExit("Resolver-failure barrier marker re-read is not JSON.") from error
-          if not isinstance(marker,dict) or marker.get("id")!=identifier or marker.get("name")!=context or marker.get("head_sha")!=head or marker.get("external_id")!=external or marker.get("status")!="completed" or marker.get("conclusion")!="success" or marker.get("details_url")!=details or not isinstance(marker.get("app"),dict) or marker["app"].get("id")!=app_id:
-              raise SystemExit("Resolver-failure barrier marker re-read is invalid.")
-          PY
-
       - name: Create resolver-failure barrier branch-protection token
         id: protection-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
@@ -393,6 +329,74 @@ jobs:
 
           if os.environ.get("EVENT_SOURCE_VALID") != "true":
               raise SystemExit("Workflow_run governance source classification is invalid; barrier remains active.")
+          PY
+
+      # The required App context is made merge-blocking before any marker
+      # token or Check Run request.  A failed Issue/comment mutation or marker
+      # publication therefore leaves the missing required context in place
+      # instead of exposing a prior trusted success.
+      - name: Create resolver-failure barrier marker write token
+        id: marker-write
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: write
+
+      - name: Create resolver-failure barrier marker read token
+        id: marker-read
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: read
+
+      - name: Publish resolver-failure barrier App marker
+        env:
+          CHECK_WRITE_TOKEN: ${{ steps.marker-write.outputs.token }}
+          CHECK_READ_TOKEN: ${{ steps.marker-read.outputs.token }}
+          DEFAULT_HEAD: ${{ steps.source.outputs.default_head }}
+          DISPATCHER_RUN_ID: ${{ github.run_id }}
+          CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess, time
+          from urllib.parse import urlencode
+
+          repository=os.environ["GITHUB_REPOSITORY"]; head=os.environ.get("DEFAULT_HEAD", ""); dispatcher=os.environ.get("DISPATCHER_RUN_ID", ""); configured_app=os.environ.get("CHECK_APP_ID", "")
+          write_token=os.environ.get("CHECK_WRITE_TOKEN", ""); read_token=os.environ.get("CHECK_READ_TOKEN", "")
+          context="KRR / PR governance affected-head barrier"; app_id=4_766_933
+          if configured_app!=str(app_id) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or re.fullmatch(r"[1-9][0-9]*",dispatcher) is None or not write_token or not read_token or write_token==read_token:
+              raise SystemExit("Resolver-failure barrier marker identity is invalid.")
+          external=f"krr-governance-affected-head-barrier/v1/{head.lower()}/resolver-{dispatcher}"
+          details=f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/{dispatcher}?"+urlencode({"barrier_marker":"resolver"})
+          write_env={"GH_TOKEN":write_token,"PATH":os.environ["PATH"]}; read_env={"GH_TOKEN":read_token,"PATH":os.environ["PATH"]}
+          # This job shares the dispatcher generation lock with every
+          # invalidator/writer. Pace the marker Check Run as part of that
+          # single App write budget rather than creating an uncounted burst.
+          time.sleep(8.1)
+          created=subprocess.run(["gh","api","--hostname","github.com","--method","POST",f"repos/{repository}/check-runs","-f",f"name={context}","-f",f"head_sha={head}","-f",f"external_id={external}","-f","status=completed","-f","conclusion=success","-f",f"details_url={details}"],capture_output=True,text=True,check=False,env=write_env, timeout=20)
+          if created.returncode!=0:
+              raise SystemExit("Unable to publish resolver-failure barrier marker.")
+          try:
+              posted=json.loads(created.stdout); identifier=posted.get("id") if isinstance(posted,dict) else None
+          except json.JSONDecodeError as error:
+              raise SystemExit("Resolver-failure barrier marker is not JSON.") from error
+          if type(identifier) is not int or identifier<1 or posted.get("name")!=context or posted.get("head_sha")!=head or posted.get("external_id")!=external or posted.get("status")!="completed" or posted.get("conclusion")!="success" or posted.get("details_url")!=details or not isinstance(posted.get("app"),dict) or posted["app"].get("id")!=app_id:
+              raise SystemExit("Resolver-failure barrier marker is invalid.")
+          reread=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
+          if reread.returncode!=0:
+              raise SystemExit("Unable to re-read resolver-failure barrier marker.")
+          try:
+              marker=json.loads(reread.stdout)
+          except json.JSONDecodeError as error:
+              raise SystemExit("Resolver-failure barrier marker re-read is not JSON.") from error
+          if not isinstance(marker,dict) or marker.get("id")!=identifier or marker.get("name")!=context or marker.get("head_sha")!=head or marker.get("external_id")!=external or marker.get("status")!="completed" or marker.get("conclusion")!="success" or marker.get("details_url")!=details or not isinstance(marker.get("app"),dict) or marker["app"].get("id")!=app_id:
+              raise SystemExit("Resolver-failure barrier marker re-read is invalid.")
           PY
 
   resolve_event:
@@ -664,6 +668,14 @@ jobs:
           # already fail-closed by the dispatcher Check Run and is handed to
           # the all-open arbiter.
           EARLY_WRITER_TARGET_CAP = 50
+          CHECK_RUN_WRITE_PACE_SECONDS = 8.1
+          EARLY_WRITER_STARTUP_SECONDS = 120
+          EARLY_WRITER_INITIAL_EVIDENCE_SECONDS = 180
+          TERMINAL_BATCH_HEAD_CAP = 125
+          TERMINAL_SEGMENT_SECONDS = 3_750
+          TERMINAL_INTER_SEGMENT_SECONDS = 3_610
+          RECONCILIATION_JOB_TIMEOUT_SECONDS = 290 * 60
+          RECONCILIATION_CONTROL_PLANE_RESERVE_SECONDS = 60 * 60
           priority_seed = set(preinvalidate_targets)
           priority_targets = [] if duplicate_governed_heads else (
               preinvalidate_targets
@@ -692,15 +704,54 @@ jobs:
           # pre-invalidator and the all-open invalidator share the same run
           # budget, so cap their distinct-head union before either is split.
           # This preserves uniqueness even while a malformed shared head is
-          # being fail-closed.  The 450-head bound is operational, not an
-          # enumeration bound: target discovery must still finish and publish
-          # the default-branch output so the global merge barrier can be
-          # activated before this run stops.
+          # being fail-closed.  The operational cap includes the whole job,
+          # rather than just its initial Check Run writes: an early writer
+          # needs pending + terminal writes, and terminal continuations must
+          # respect the 3,610-second App REST window.  Count invalidation
+          # writes serially even though the two chunks can overlap; the
+          # deliberately pessimistic model leaves an hour for enumeration,
+          # registrations, evidence reads, and control-plane variance before
+          # the 290-minute Actions deadline.  Target discovery still finishes
+          # and publishes the default-branch output so the global merge
+          # barrier can be activated before an oversized run stops.
+          def complete_reconciliation_seconds(head_count):
+              terminal_heads = max(0, head_count - EARLY_WRITER_TARGET_CAP)
+              terminal_segments = (
+                  terminal_heads + TERMINAL_BATCH_HEAD_CAP - 1
+              ) // TERMINAL_BATCH_HEAD_CAP
+              # A continuation cannot start until both the previous segment
+              # is terminal and the shared rate window has elapsed.
+              terminal_schedule = (
+                  0 if terminal_segments == 0 else TERMINAL_SEGMENT_SECONDS
+                  + (terminal_segments - 1) * max(
+                      TERMINAL_SEGMENT_SECONDS,
+                      TERMINAL_INTER_SEGMENT_SECONDS,
+                  )
+              )
+              early_writer = (
+                  EARLY_WRITER_STARTUP_SECONDS
+                  + EARLY_WRITER_INITIAL_EVIDENCE_SECONDS
+                  + EARLY_WRITER_TARGET_CAP * 2 * CHECK_RUN_WRITE_PACE_SECONDS
+              )
+              return (
+                  head_count * CHECK_RUN_WRITE_PACE_SECONDS
+                  + early_writer
+                  + terminal_schedule
+              )
+
+          max_invalidation_governed_heads = max(
+              head_count
+              for head_count in range(1, 601)
+              if complete_reconciliation_seconds(head_count)
+              <= RECONCILIATION_JOB_TIMEOUT_SECONDS - RECONCILIATION_CONTROL_PLANE_RESERVE_SECONDS
+          )
           invalidation_governed_heads = {
               target_snapshots[number][0]
               for number in preinvalidate_targets + all_invalidation_targets
           }
-          invalidation_head_cap_exceeded = len(invalidation_governed_heads) > 450
+          invalidation_head_cap_exceeded = (
+              len(invalidation_governed_heads) > max_invalidation_governed_heads
+          )
           def chunks_by_head(numbers):
               chunks = [[], []]
               positions = {}
