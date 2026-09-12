@@ -113,7 +113,7 @@ fn attach_child_document(
 
 fn collect_iframes(node: &Handle, frames: &mut Vec<(Handle, Option<String>)>) {
     if let NodeData::Element { name, attrs, .. } = &node.data
-        && name.local.as_ref().eq_ignore_ascii_case("iframe")
+        && name.local.as_str().eq_ignore_ascii_case("iframe")
     {
         frames.push((
             node.clone(),

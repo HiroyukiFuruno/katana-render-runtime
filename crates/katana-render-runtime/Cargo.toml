@@ -36,7 +36,9 @@ brotli-decompressor = { workspace = true }
 include_dir = { workspace = true }
 jni = { workspace = true }
 html5ever = { workspace = true }
-markup5ever_rcdom = { workspace = true }
+markup5ever = { workspace = true }
+tendril = { workspace = true }
+xml5ever = { workspace = true }
 resvg = { workspace = true }
 rustybuzz = { workspace = true }
 serde = { workspace = true }

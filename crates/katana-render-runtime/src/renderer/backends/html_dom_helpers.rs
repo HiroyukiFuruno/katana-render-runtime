@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 pub(super) fn collect_scripts(node: &Handle, scripts: &mut Vec<String>) -> Result<(), String> {
     if let NodeData::Element { name, attrs, .. } = &node.data
-        && name.local.as_ref().eq_ignore_ascii_case("script")
+        && name.local.as_str().eq_ignore_ascii_case("script")
     {
         if let Some(source) = attribute_value(&attrs.borrow(), "src") {
             return Err(format!("external script is not supported: {source}"));
@@ -39,7 +39,7 @@ pub(super) fn attribute_value<'a>(
 ) -> Option<&'a str> {
     attributes
         .iter()
-        .find(|attribute| attribute.name.local.as_ref().eq_ignore_ascii_case(name))
+        .find(|attribute| attribute.name.local.as_str().eq_ignore_ascii_case(name))
         .map(|attribute| attribute.value.as_ref())
 }
 

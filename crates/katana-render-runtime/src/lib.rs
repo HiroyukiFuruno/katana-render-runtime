@@ -9,10 +9,14 @@
 //! Static HTML document parsing and CSS resolution remain export-only renderer
 //! internals. Interactive viewers use the in-process Rust/V8 browser-session API.
 
+extern crate self as markup5ever_rcdom;
+
+mod html_dom;
 pub mod markdown;
 pub mod renderer;
 mod system;
 
+pub use html_dom::{Handle, Node, NodeData, RcDom, SerializableHandle, WeakHandle};
 pub use markdown::plantuml_renderer::{
     PLANTUML_DOWNLOAD_URL, PLANTUML_JAR_CHECKSUM, PLANTUML_JAR_VERSION, PlantUmlThemeCatalog,
 };
