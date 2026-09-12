@@ -84,3 +84,7 @@ KDR には次の katana 固有スキルを持ち込みません。
 - アイコン管理
 - changelog 作成
 - アプリ固有のスクリーンショット運用
+
+## 継続実行と停止条件
+
+レビュー指摘の戻し、CI、registry、cloud review の待機、進捗報告は停止理由にしない。待機中も競合しない調査・検証・Issue/PR証跡・cleanup準備を進め、結果取得後はDraft→全件取得/分類→責務単位の並列委譲→修正/検証/push→reply/resolve→最新HEADのinitial/final review→pr-ready-check→Ready→承認後mergeを継続する。停止は不可逆操作の対象未確定、実際の権限/秘密情報不足、仕様変更の判断に限定する。

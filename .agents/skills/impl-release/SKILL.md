@@ -169,3 +169,7 @@ gh run list --workflow Release --limit 5
 - [ ] `just pr-ready-check "<number>"`（Issue OPEN / 依存更新証跡 / PR range Issue contract / current `pr_body_sha256` exactly one を含む）後に Ready 化
 - [ ] Ready 化後に merge 承認を得て、global bootstrap skillの `merge --apply` 直前の `just pr-ready-check "<number>"` 成功後にApp-only merge
 - [ ] release-check / pre-pr の前に対象 version 以前の完了済み OpenSpec change を archive し、Release workflow を確認
+
+## 継続実行と停止条件
+
+レビュー指摘の戻し、CI、registry、cloud review の待機、進捗報告は停止理由にしない。待機中も競合しない調査・検証・Issue証跡・cleanup準備を進め、結果取得後はDraft→全件取得/分類→責務単位の並列委譲→修正/検証/push→reply/resolve→最新HEADのinitial/final review→pr-ready-check→Ready→承認後mergeを完走する。停止は不可逆操作の対象未確定、実際の権限/秘密情報不足、仕様変更の判断に限定する。

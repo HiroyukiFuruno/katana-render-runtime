@@ -199,3 +199,7 @@ review botの「no issues」はformal reviewではなく、trusted botがPR Issu
 - [ ] Ready 化後にユーザーの merge 承認を得て、global bootstrap skillの `merge --apply` 直前の `just pr-ready-check "<number>"` が成功している
 - [ ] release-check / pre-pr の前に対象 version 以前の完了済み OpenSpec change を archive している
 - [ ] merge 後に Release workflow が起動している
+
+## 継続実行と停止条件
+
+レビュー指摘の戻し、CI、registry、cloud review の待機、進捗報告は停止理由にしない。待機中も競合しない調査・検証・Issue証跡・cleanup準備を進め、結果取得後はDraft→全件取得/分類→責務単位の並列委譲→修正/検証/push→reply/resolve→最新HEADのinitial/final review→pr-ready-check→Ready→承認後mergeを完走する。停止は不可逆操作の対象未確定、実際の権限/秘密情報不足、仕様変更の判断に限定する。

@@ -16,6 +16,7 @@
 ## PR Review Gate
 
 - Pull Request は必ず Draft として作成する。Ready PR を直接作成してはならない。
+- レビュー指摘、CI、review bot、registryなどの外部待機は、進捗報告または作業停止の理由にしてはならない。Draft → 全review結果・threadの取得と分類 → P0/P1対応 → 各threadへのreply/resolve → 最新HEADのinitial review → final review → `pr-ready-check` → Ready → 承認後の保護mergeまでを一連の工程として扱い、外部待機中も非衝突の検証、Issue/PR証跡、依存調査、cleanup準備を継続する。停止できるのは、不可逆操作の直前、権限・秘密情報が必要な境界、または仕様変更の判断が必要な場合だけとする。
 - Draft 上で初回 cloud review を依頼し、review thread を全件取得・分類する。review依頼コメントは `<!-- krr-review phase=initial head=[0-9a-f]{40} body-sha256=[0-9a-f]{64} -->` の厳密な属性順序・空白・小文字hex文法にする。投稿直前にcurrent PR本文を再取得し、string以外、NUL、lone surrogate、UTF-8 strict不能をfail-closedで拒否して、正規化しないUTF-8 bytesのSHA-256を記録する。Cloud review は GitHub の approving review ではないため、approval として数えない。
 - review botの「no issues」はformal reviewではなく、trusted botがPR Issueへ投稿したcanonical commentだけを完了証跡として受理する。本文は `Codex Review: Didn't find any major issues...` または同じcanonical prefixの短文に続き、`**Reviewed commit:** \`<10〜40桁の小文字SHA prefix>\`` を含み、current HEADがそのprefixで始まらなければならない。`created_at == updated_at` を必須とし、phaseのmarker間にcanonical候補は高々1件とする。任意のdetailsは省略またはcanonicalな1つだけ（summary `ℹ️ About Codex in GitHub`、本文8192文字以内）を許可し、nested details、details外のclosing/sentinel文字列、重複canonical行は拒否する。reactionや任意のbot commentは証跡にしない。
 - 分離可能な指摘修正は subagent へファイルまたは責務単位で並列委譲し、main agent はハーネス、統合判断、検証を担当する。

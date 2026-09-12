@@ -129,3 +129,7 @@ review botの「no issues」はformal reviewではなく、trusted botがPR Issu
 ## 6. 完了判定
 
 最後に `just pr-ready-check "{pr_number}"` を実行し、最新 HEAD・本文 digest の post-marker bot review、未resolve thread 0、CI、DoD を機械確認する。この local gate は参照Issueが OPEN であること、依存更新証跡が揃っていること、PR range の Issue contract が完全一致すること（不足・余分を含む）も先に検証する。writer/trusted Check Run の success evidence は、query中の current `pr_body_sha256` が **ちょうど1個** で完全一致する場合だけ有効である。欠落、duplicate、old digest、差異はいずれも fail-closed であり success と見なさない。CI green のみ、レビュー依頼済みのみ、または局所テスト通過のみでは完了としない。`pr-ready-check` 成功後は、PRがDraftであることを確認してから `gh pr ready "{pr_number}"` でReady for reviewへ遷移する。Ready化後にrequired checksが最新HEADで成功していることを確認し、ユーザーから**freshなmerge承認**を得た直前に、同じ `just pr-ready-check "{pr_number}"` を再実行してReady PRを再検証する。Ready化、required checks確認、merge直前の再ゲートのいずれかが失敗した場合はmergeへ進まない。成功時のmergeはPR外のglobal skill `/Users/hiroyuki_furuno/.codex/skills/krr-pr-governance-bootstrap/SKILL.md` が定める専用Appの `merge --apply` だけを使い、人間、UI、通常のGitHub CLI merge、admin bypassは禁止する。`prepare --apply` は保存済みの人間用`gh auth`だけを使う例外であり、activate/merge/finalize/verifyのlive operationはfresh JWTとscript自身がmint・検証するApp IATを必要とする。`merge` の`--apply`なしdry-runだけは、人間用authによるpublic readに限定する。
+
+## 継続実行と停止条件
+
+レビュー指摘の戻し、CI、registry、cloud review の待機、進捗報告は停止理由にしない。待機中も、競合しない調査・検証・Issue/PR証跡・cleanup準備を進め、結果を取得したら同じDraft→全件取得/分類→並列委譲→修正/検証/push→reply/resolve→最新HEADのinitial/final review→pr-ready-check→Ready→承認後mergeのループへ直ちに戻る。正当な指摘は受領後に止まらず修正へ進める。停止を許容するのは、不可逆操作の対象未確定、実際の権限または秘密情報不足、または仕様変更の判断が必要な場合だけである。

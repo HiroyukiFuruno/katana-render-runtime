@@ -59,6 +59,12 @@ just pr-ready-check 72
 
 8. `pr-ready-check` 成功後にだけReady化する。Ready化後のmergeはユーザーの明示承認を得てから行い、mergeの直前に同じ `just pr-ready-check 72` を再実行して現在のReady PRを再検証する。mergeはPR checkout外のglobal bootstrap skillが提供する `merge --apply` だけを使う。UI、通常のGitHub CLI merge、人間/admin bypassは使用しない。
 
+### 待機中の継続と停止条件
+
+レビュー指摘、CI、review bot、registry、GitHub APIなどの外部待機は、進捗報告や作業停止の理由ではない。待機中も、現在のHEADに対するローカル検証、Issue/PR契約の再確認、依存関係調査、レビュー証跡の整理、release/cleanup準備など、他の担当や待機中の処理と衝突しない作業を継続する。結果を受け取ったら、全指摘の分類、P0/P1修正、各threadへのreply/resolve、最新HEADでのinitial review、final review、`pr-ready-check`、Ready化、承認後mergeまでを中断せず連続して進める。
+
+停止できるのは、不可逆操作の直前に必要な承認、権限・秘密情報をユーザーが保持する境界、または要件・仕様を変更する判断だけである。単なる報告、レビュー結果待ち、CI待ち、作業量の多さ、担当subagentの完了待ちは停止条件ではない。並列化可能な実装・テスト・調査・文書化は責務単位で並列委譲し、main agentはハーネス、統合判断、最新HEADの完全ゲートを担当する。
+
 ```bash
 gh pr ready 72
 ```

@@ -297,6 +297,55 @@ class GovernanceCiAndIssueContractTest(unittest.TestCase):
                 )
                 self.assertNotIn("push 後、最終 cloud review", text)
 
+    def test_primary_flow_documents_forbid_routine_stops_during_the_draft_loop(self) -> None:
+        """Documentation must keep authorized work moving through review and release waits.
+
+        This is intentionally a vocabulary-level contract rather than an exact
+        paragraph match: the canonical guidance is mirrored between the root
+        policy, the workflow guide, and the two skill directories, and each
+        document can explain the same rule in its local voice.
+        """
+        root = Path(__file__).parents[2]
+        for relative in (
+            "AGENTS.md",
+            "docs/issue-driven-workflow.md",
+            ".codex/skills/gh-address-comments/SKILL.md",
+            ".codex/skills/impl-release/SKILL.md",
+            ".agents/skills/impl-release/SKILL.md",
+            ".codex/skills/create_pull_request/SKILL.md",
+            ".agents/skills/create_pull_request/SKILL.md",
+            ".codex/skills/kdr-workflow-guide/SKILL.md",
+            ".agents/skills/kdr-workflow-guide/SKILL.md",
+        ):
+            with self.subTest(path=relative):
+                text = (root / relative).read_text(encoding="utf-8")
+                # Draft must retain the full review-repair loop; Ready is a
+                # consequence of the final gate, never a shortcut around it.
+                self.assertIn("Draft", text)
+                self.assertRegex(text, r"(?s)(?:初回|initial).{0,4000}(?:最終|final)")
+                self.assertRegex(text, r"(?s)(?:reply.{0,120}resolve|resolve.{0,120}reply)")
+                self.assertIn("pr-ready-check", text)
+                self.assertIn("Ready", text)
+                # A review finding, an external-review/CI/registry wait, or a
+                # progress report is not a stop condition.  The permitted
+                # boundary remains only an irreversible decision, missing
+                # authority/secret, or a requirement-changing decision.
+                for required in (
+                    r"レビュー指摘",
+                    r"\bCI\b",
+                    r"registry",
+                    r"進捗報告",
+                    r"(?:cloud review|review bot|外部.{0,40}(?:review|レビュー))",
+                    r"(?:停止理由にしない|停止.{0,80}(?:してはならない|しない|せず|ない|ず))",
+                ):
+                    with self.subTest(path=relative, required=required):
+                        self.assertRegex(text, required)
+                self.assertRegex(
+                    text,
+                    r"(?s)(?:不可逆|権限|secret|秘密情報|仕様).{0,300}"
+                    r"(?:停止条件|停止|確認|判断)",
+                )
+
     def test_bootstrap_mirrors_require_a_fresh_app_jwt_for_verify(self) -> None:
         root = Path(__file__).parents[2]
         for relative in (
