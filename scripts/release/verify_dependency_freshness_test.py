@@ -46,7 +46,20 @@ class DependencyFreshnessTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def run_check(self, responses: dict[str, object]) -> tuple[int, str, str]:
+    @staticmethod
+    def metadata_for_direct_serde(version: str = "1.0.0") -> dict[str, object]:
+        member_id = "path+file:///workspace/crates/renderer#renderer@0.1.0"
+        serde_id = f"registry+https://github.com/rust-lang/crates.io-index#serde@{version}"
+        return {
+            "workspace_members": [member_id],
+            "packages": [
+                {"id": member_id, "name": "renderer", "version": "0.1.0", "source": None},
+                {"id": serde_id, "name": "serde", "version": version, "source": "registry+https://github.com/rust-lang/crates.io-index"},
+            ],
+            "resolve": {"nodes": [{"id": member_id, "deps": [{"name": "serde", "pkg": serde_id}]}]},
+        }
+
+    def run_check(self, responses: dict[str, object], metadata: dict[str, object] | None = None) -> tuple[int, str, str]:
         def fake_fetch(url: str) -> bytes:
             response = responses[url]
             if isinstance(response, Exception):
@@ -54,7 +67,12 @@ class DependencyFreshnessTest(unittest.TestCase):
             return json.dumps(response).encode("utf-8")
 
         stdout, stderr = io.StringIO(), io.StringIO()
-        with patch.object(freshness, "fetch", fake_fetch), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        with (
+            patch.object(freshness, "fetch", fake_fetch),
+            patch.object(freshness, "cargo_metadata", return_value=metadata or self.metadata_for_direct_serde()),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
             result = freshness.main([str(self.root)])
         return result, stdout.getvalue(), stderr.getvalue()
 
@@ -78,6 +96,30 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("Rust serde: 1.0.0 -> 1.1.0", stderr)
         self.assertIn("just depends-update-all", stderr)
+
+    def test_direct_rust_edge_is_not_masked_by_newer_transitive_same_name(self) -> None:
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.1.0"}}
+        metadata = self.metadata_for_direct_serde()
+        metadata["resolve"]["nodes"][0]["deps"][0]["name"] = "renamed-serde"
+        metadata["packages"].append(
+            {
+                "id": "registry+https://github.com/rust-lang/crates.io-index#serde@2.0.0",
+                "name": "serde",
+                "version": "2.0.0",
+                "source": "registry+https://github.com/rust-lang/crates.io-index",
+            }
+        )
+        result, _, stderr = self.run_check(responses, metadata)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust serde: 1.0.0 -> 1.1.0", stderr)
+
+    def test_missing_direct_package_metadata_fails_closed(self) -> None:
+        metadata = self.metadata_for_direct_serde()
+        metadata["resolve"]["nodes"][0]["deps"][0]["pkg"] = "missing-package-id"
+        result, _, stderr = self.run_check(self.clean_responses(), metadata)
+        self.assertEqual(result, 1)
+        self.assertIn("direct Rust package missing from cargo metadata", stderr)
 
     def test_stale_javascript_dependency_rejects_release(self) -> None:
         responses = self.clean_responses()

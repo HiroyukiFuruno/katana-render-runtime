@@ -26,6 +26,15 @@ class Worktree:
     locked: bool
 
 
+@dataclass(frozen=True)
+class RemoteBinding:
+    remote: str
+    fetch_url: str
+    push_url: str
+    identity: str
+    github_repository: str | None
+
+
 def _run_git(
     repository: Path,
     *arguments: str,
@@ -171,11 +180,9 @@ def _remote_urls(repository: Path, remote: str, *, push: bool) -> tuple[str, ...
     return urls
 
 
-def _verify_push_destinations(repository: Path, remote: str) -> str:
-    fetch_destinations = {
-        _remote_repository_identity(repository, remote_url)
-        for remote_url in _remote_urls(repository, remote, push=False)
-    }
+def _bind_remote(repository: Path, remote: str) -> RemoteBinding:
+    fetch_urls = _remote_urls(repository, remote, push=False)
+    fetch_destinations = {_remote_repository_identity(repository, remote_url) for remote_url in fetch_urls}
     if len(fetch_destinations) != 1:
         raise CleanupError(f"remote {remote}のfetch URLが複数repositoryを指しています")
     fetch_destination = next(iter(fetch_destinations))
@@ -187,21 +194,20 @@ def _verify_push_destinations(repository: Path, remote: str) -> str:
         raise CleanupError(
             f"remote {remote}のpush URLが監査対象と異なるrepositoryを指しています"
         )
-    # git push <remote> は設定された全push URLへ送るため、監査後の設定変更や
-    # 同一repositoryの重複URLによって削除先が変わらないよう、監査済みの先頭URLを固定する。
-    return audited_push_urls[0]
+    # remote名を再解決しない。監査時点のsource/destinationとrepository identityを
+    # 固定し、設定変更で公開確認・read・deleteの対象が分離しないようにする。
+    return RemoteBinding(
+        remote=remote,
+        fetch_url=fetch_urls[0],
+        push_url=audited_push_urls[0],
+        identity=fetch_destination,
+        github_repository=_github_repository_name(fetch_urls[0]),
+    )
 
 
-def _repository_name(repository: Path, remote: str) -> str:
-    remote_url = _run_git(repository, "remote", "get-url", remote).stdout.strip()
-    github_repository = _github_repository_name(remote_url)
-    if github_repository is not None:
-        return github_repository
-    raise CleanupError(f"GitHub repositoryをremote URLから判定できません: {remote_url}")
-
-
-def _github_release_checker(repository: Path, remote: str) -> ReleaseChecker:
-    repository_name = _repository_name(repository, remote)
+def _github_release_checker(repository_name: str | None) -> ReleaseChecker:
+    if repository_name is None:
+        raise CleanupError("GitHub repositoryをremote URLから判定できません")
 
     def is_public(version: str) -> bool:
         result = subprocess.run(
@@ -298,42 +304,39 @@ def cleanup_release_state(
     if release_branch == default_branch:
         raise CleanupError("default branchをcleanup対象にはできません")
     _validate_release_target(version, release_branch)
-    checker = release_checker or _github_release_checker(repository, remote)
+    binding = _bind_remote(repository, remote)
+    checker = release_checker or _github_release_checker(binding.github_repository)
     if not checker(version):
         raise CleanupError(f"GitHub Release {version}の公開を確認できません")
     dirty = _worktree_status(repository, repository)
     if dirty:
         raise CleanupError("current worktree is dirty; cleanupを実行しません")
-    audited_push_url = _verify_push_destinations(repository, remote)
-
     actions: list[str] = [f"public release {version} verified"]
-    # 監査後はremote名を再解決しない。設定変更で別の送信先へ向けられても、
-    # この実行で監査したimmutable URLだけをネットワーク操作に使う。
-    _run_git(repository, "fetch", audited_push_url, "--prune")
-    if not _ref_exists(repository, f"refs/remotes/{remote}/{default_branch}"):
-        _fetch_remote_branch(repository, audited_push_url, remote, default_branch)
-    _switch_and_update_default(repository, remote, audited_push_url, default_branch, actions)
-    _run_git(repository, "fetch", audited_push_url, "--prune")
+    _run_git(repository, "fetch", binding.fetch_url, "--prune")
+    if not _ref_exists(repository, f"refs/remotes/{binding.remote}/{default_branch}"):
+        _fetch_remote_branch(repository, binding.fetch_url, binding.remote, default_branch)
+    _switch_and_update_default(repository, binding.remote, binding.fetch_url, default_branch, actions)
+    _run_git(repository, "fetch", binding.fetch_url, "--prune")
 
-    remote_exists = _remote_branch_exists(repository, audited_push_url, release_branch)
+    remote_exists = _remote_branch_exists(repository, binding.fetch_url, release_branch)
     audited_remote_sha: str | None = None
     if remote_exists:
         # Refresh even when a tracking ref already exists; ancestry must be
         # checked against the remote tip observed by this cleanup run.
-        _fetch_remote_branch(repository, audited_push_url, remote, release_branch)
+        _fetch_remote_branch(repository, binding.fetch_url, binding.remote, release_branch)
     if remote_exists:
         # Keep the exact commit that passed the ancestry audit. The lease below
         # makes a concurrent remote update fail instead of deleting its tip.
-        audited_remote_sha = _remote_branch_sha(repository, remote, release_branch)
+        audited_remote_sha = _remote_branch_sha(repository, binding.remote, release_branch)
     local_exists = _ref_exists(repository, f"refs/heads/{release_branch}")
     target_worktrees = [tree for tree in _worktrees(repository) if tree.branch == release_branch]
-    default_ref = f"{remote}/{default_branch}"
+    default_ref = f"{binding.remote}/{default_branch}"
     # local/remote refが共存する場合は、どちらのtipも統合先へ含まれる
     # ことをmutation前に確認する。localだけ進んだ状態でworktreeやremote
     # refを先に削除すると、未push commitを失うためfail-closedにする。
     target_refs = []
     if remote_exists:
-        target_refs.append(f"{remote}/{release_branch}")
+        target_refs.append(f"{binding.remote}/{release_branch}")
     if local_exists:
         target_refs.append(release_branch)
     for target_ref in target_refs:
@@ -361,7 +364,7 @@ def cleanup_release_state(
         _run_git(
             repository,
             "push",
-            audited_push_url,
+            binding.push_url,
             f"--force-with-lease=refs/heads/{release_branch}:{audited_remote_sha}",
             f":refs/heads/{release_branch}",
         )

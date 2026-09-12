@@ -393,6 +393,53 @@ class CleanupReleaseStateTest(unittest.TestCase):
         self.assertEqual(push_arguments[1], str(self.remote))
         self.assertFalse(self.remote_branch_exists("release/v9.9.9"))
 
+    def test_binds_remote_before_publication_check_can_change_remote_config(self) -> None:
+        self.create_release_branch(merge=True)
+        changed_remote = self.root / "changed-fetch-remote.git"
+        self.git("init", "--bare", "--initial-branch=master", str(changed_remote), cwd=self.root)
+
+        def publication_check(_version: str) -> bool:
+            self.git("remote", "set-url", "origin", str(changed_remote), cwd=self.repository)
+            return True
+
+        actions = subject.cleanup_release_state(
+            repository=self.repository,
+            version="v9.9.9",
+            release_branch="release/v9.9.9",
+            remote="origin",
+            default_branch="master",
+            release_checker=publication_check,
+        )
+
+        self.assertIn("remote branch release/v9.9.9 deleted", actions)
+        self.git("remote", "set-url", "origin", str(self.remote), cwd=self.repository)
+        self.assertFalse(self.remote_branch_exists("release/v9.9.9"))
+
+    def test_uses_fetch_url_for_remote_reads_and_push_url_for_remote_delete(self) -> None:
+        self.create_release_branch(merge=True)
+        push_url = self.remote.resolve().as_uri()
+        self.git("remote", "set-url", "--add", "--push", "origin", push_url, cwd=self.repository)
+        original_run_git = subject._run_git
+        network_calls: list[tuple[str, ...]] = []
+
+        def record_network_call(repository: Path, *arguments: str, **kwargs: object):
+            if arguments[:1] in (("fetch",), ("pull",), ("push",), ("ls-remote",)):
+                network_calls.append(arguments)
+            return original_run_git(repository, *arguments, **kwargs)
+
+        with mock.patch.object(subject, "_run_git", side_effect=record_network_call):
+            self.cleanup()
+
+        source_urls = [
+            arguments[1] if arguments[0] == "fetch" else arguments[2] if arguments[0] == "pull" else arguments[3]
+            for arguments in network_calls
+            if arguments[0] in {"fetch", "pull", "ls-remote"}
+        ]
+        delete_urls = [arguments[1] for arguments in network_calls if arguments[0] == "push"]
+        self.assertTrue(source_urls)
+        self.assertTrue(all(url == str(self.remote) for url in source_urls), source_urls)
+        self.assertEqual(delete_urls, [push_url])
+
     def test_uses_audited_url_for_all_network_operations_after_remote_config_changes(self) -> None:
         self.create_release_branch(merge=True)
         changed_remote = self.root / "changed-fetch-remote.git"

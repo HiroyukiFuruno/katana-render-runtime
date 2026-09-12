@@ -6,8 +6,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
-import tomllib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,10 +44,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_toml(path: Path) -> dict[str, object]:
-    return tomllib.loads(path.read_text(encoding="utf-8"))
-
-
 def load_bun_lock(path: Path) -> dict[str, object]:
     source = path.read_text(encoding="utf-8")
     result: list[str] = []
@@ -72,38 +68,60 @@ def load_bun_lock(path: Path) -> dict[str, object]:
     return json.loads("".join(result))
 
 
-def package_name(alias: str, spec: object) -> str | None:
-    if isinstance(spec, str):
-        return alias
-    if not isinstance(spec, dict) or "path" in spec:
-        return None
-    return str(spec.get("package", alias)) if "version" in spec else None
+def cargo_metadata(root: Path) -> dict[str, object]:
+    command = ["cargo", "metadata", "--format-version=1", "--all-features", "--locked", "--manifest-path", str(root / "Cargo.toml")]
+    try:
+        completed = subprocess.run(command, check=True, capture_output=True, text=True)
+        payload = json.loads(completed.stdout)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cargo metadata failed: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("cargo metadata response must be a JSON object")
+    return payload
 
 
 def rust_packages(root: Path) -> list[Package]:
-    workspace = load_toml(root / "Cargo.toml").get("workspace", {})
-    workspace_deps = workspace.get("dependencies", {}) if isinstance(workspace, dict) else {}
-    names: set[str] = set()
-    for manifest_path in root.glob("crates/*/Cargo.toml"):
-        manifest = load_toml(manifest_path)
-        for section in ("dependencies", "dev-dependencies", "build-dependencies"):
-            dependencies = manifest.get(section, {})
-            if not isinstance(dependencies, dict):
+    metadata = cargo_metadata(root)
+    packages = metadata.get("packages")
+    workspace_members = metadata.get("workspace_members")
+    resolve = metadata.get("resolve")
+    if not isinstance(packages, list) or not isinstance(workspace_members, list) or not isinstance(resolve, dict):
+        raise ValueError("cargo metadata response is missing package resolution data")
+    packages_by_id = {
+        item.get("id"): item
+        for item in packages
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    nodes = resolve.get("nodes")
+    if not isinstance(nodes, list):
+        raise ValueError("cargo metadata response is missing resolve nodes")
+    nodes_by_id = {
+        item.get("id"): item
+        for item in nodes
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    direct: dict[str, Package] = {}
+    for member_id in workspace_members:
+        node = nodes_by_id.get(member_id)
+        if node is None or not isinstance(node.get("deps"), list):
+            raise ValueError(f"workspace member missing from cargo metadata resolution: {member_id}")
+        for dependency in node["deps"]:
+            if not isinstance(dependency, dict):
+                raise ValueError("invalid cargo metadata dependency edge")
+            package_id = dependency.get("pkg")
+            if not isinstance(package_id, str) or package_id not in packages_by_id:
+                raise ValueError(f"direct Rust package missing from cargo metadata: {package_id}")
+            package = packages_by_id[package_id]
+            if not str(package.get("source", "")).startswith("registry+"):
                 continue
-            for alias, spec in dependencies.items():
-                resolved = workspace_deps.get(alias, spec) if isinstance(spec, dict) and spec.get("workspace") else spec
-                name = package_name(str(alias), resolved)
-                if name is not None:
-                    names.add(name)
-    lock = load_toml(root / "Cargo.lock")
-    versions: dict[str, list[str]] = {}
-    for item in lock.get("package", []):
-        if isinstance(item, dict) and item.get("source", "").startswith("registry+"):
-            versions.setdefault(str(item["name"]), []).append(str(item["version"]))
-    missing = sorted(name for name in names if name not in versions)
-    if missing:
-        raise ValueError(f"direct Rust package missing from Cargo.lock: {', '.join(missing)}")
-    return [Package("Rust", name, max(versions[name], key=Version.parse).strip()) for name in sorted(names)]
+            name, version = package.get("name"), package.get("version")
+            if not isinstance(name, str) or not isinstance(version, str):
+                raise ValueError(f"invalid cargo metadata package: {package_id}")
+            Version.parse(version)
+            direct[str(package_id)] = Package("Rust", name, version)
+    if not direct:
+        raise ValueError("cargo metadata did not contain direct registry Rust dependencies")
+    return sorted(direct.values(), key=lambda package: (package.name, Version.parse(package.current)))
 
 
 def js_packages(root: Path) -> list[Package]:
