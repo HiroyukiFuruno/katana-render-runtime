@@ -33,6 +33,8 @@ REQUIRED_COMMITS = (
     "fb83a4a7ec423f2a2b41d0f4954b43a496171c68",
     "72a5f61dda084653406d972c1ee591dc965054ba",
     "8ec7a153a26750527dcd9a3e17425bc606e576ea",
+    "99b31884d04de4322df28b0df02a8e7e7d9f3a54",
+    "8ec7a153a26750527dcd9a3e17425bc606e576ea",
 )
 
 MODULE_SPEC = util.spec_from_file_location("verify_release_target", SCRIPT)
@@ -106,7 +108,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
 
     def test_accepts_the_complete_intended_release_head(self) -> None:
         result = self.run_check(
-            "v0.4.20", "v0.4.19", "8ec7a153a26750527dcd9a3e17425bc606e576ea"
+            "v0.4.20", "v0.4.19", "99b31884d04de4322df28b0df02a8e7e7d9f3a54"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -115,7 +117,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
             "v0.4.20", "v0.4.19", "72a5f61dda084653406d972c1ee591dc965054ba"
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("8ec7a153a26750527dcd9a3e17425bc606e576ea", result.stderr)
+        self.assertIn("99b31884d04de4322df28b0df02a8e7e7d9f3a54", result.stderr)
 
     def test_accepts_squash_tree_but_rejects_an_incomplete_tree(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
