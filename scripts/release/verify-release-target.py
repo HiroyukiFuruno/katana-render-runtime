@@ -22,11 +22,26 @@ REQUIRED_RELEASE_COMMITS = (
     "694ac82a85d555485e46eb46cf882c8db11b2fe5",  # #74
     "007ab829df39ed40bbfcfc19205ad21f3da32fe8",  # #76 implementation
     "91f07699b26567658f76021050ca7ec7b5c10df1",  # #76 regression
+    "88d77e45b7b22d7886e2c09cb0ed1432bf237772",  # #76 review repair
+    "d34f6ea22dee7bda77201a57470d430cb658382b",  # #76 Windows regression
+    "0c67cff9713fca21b1de35315c4ee3f18ae0c0e8",  # #76 observer repair
+    "180d1e3ab6ec3ce3182273fed3a19e28a740dfd1",  # #76 font regression
+    "65793ab7855881a6b9042d8d400d69f21a09358a",  # #76 Linux coverage
+    "28d2a9b7f88497db3ae103ed406cceb1bd0f6ef5",  # #76 review repair
+    "ecba4e40d4bc3419c610d3013f8bd723dd2a449d",  # #76 process boundary
+    "9c6915c05db47068bb8fc8649279fa0aad9a1dc5",  # #76 Linux regression
+    "817f0e889286be30ce5a549539eeb6d2f4d166de",  # #76 file filter
+    "bcca7a5fa4bc06ad30b2917b33cd312f771a5828",  # #76 review repair
+    "e395b23ac88ced4bcb116d6cc4e468e4376fc392",  # #76 scroll regression
+    "fb83a4a7ec423f2a2b41d0f4954b43a496171c68",  # #76 geometry regression
+    "72a5f61dda084653406d972c1ee591dc965054ba",  # #76 runtime assets
 )
 # A squash merge deliberately rewrites commit ancestry.  These refs identify
-# the expected release tree independently of that ancestry.
-REQUIRED_RELEASE_BASE = "eb44d1524dabde351e729308ae21f632b71c4cd6"
-REQUIRED_RELEASE_TREE = "91f07699b26567658f76021050ca7ec7b5c10df1"
+# the complete v0.4.20 PR tree independently of that ancestry.  Do not shorten
+# this range to the initial implementation: each terminal repair is release
+# critical and a reconstructed squash must contain every changed path.
+REQUIRED_RELEASE_BASE = "0fbf6ee965b3a5f43f609034a59d0c9042353027"
+REQUIRED_RELEASE_TREE = "72a5f61dda084653406d972c1ee591dc965054ba"
 
 
 @dataclass(frozen=True, order=True)

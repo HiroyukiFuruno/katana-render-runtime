@@ -4,12 +4,12 @@
 
 | runtime | version | file | sha256 |
 | --- | --- | --- | --- |
-| Mermaid.js | 11.17.2 | `crates/katana-render-runtime/vendor/mermaid/11.17.2/mermaid.min.js` | `581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8` |
-| Mermaid ZenUML | 0.2.3 | `crates/katana-render-runtime/vendor/mermaid-zenuml/0.2.3/mermaid-zenuml.min.js` | `28eeec88021d9e9728df4d005ff723a3d71da29a21dbcfa2a628232c35ef2ab6` |
-| Draw.io | 31.3.2 | `crates/katana-render-runtime/vendor/drawio/31.3.2/drawio.min.js` | `0c44747cb40c92738082b8dc045787df9fa1f309985b0c0d916e65adef8923fd` |
+| Mermaid.js | 12.0.0 | `crates/katana-render-runtime/vendor/mermaid/12.0.0/mermaid.min.js` | `28fca7ae6ebc7ed7bb63bde63136a74bfef14f296a57e403657eeb8b32836073` |
+| Mermaid ZenUML | 1.0.0 | `crates/katana-render-runtime/vendor/mermaid-zenuml/1.0.0/mermaid-zenuml.min.js` | `f75662869d22aac58870e52370fe4c46b89b9710bf4b03df93b3227b5e18e730` |
+| Draw.io | 31.4.5 | `crates/katana-render-runtime/vendor/drawio/31.4.5/drawio.min.js` | `ec8b66e744a9e5dbf3870129c297385595f55a548f75b952f209548d49610536` |
 | MathJax | 4.1.3 | `crates/katana-render-runtime/vendor/mathjax/4.1.3/tex-svg.js` | `23c036deccc0f2374834a47e4032e452419f3ac027bf17e17c104e2746b19f4c` |
-| ZenUML Core | 3.47.9 | `crates/katana-render-runtime/vendor/zenuml-core/3.47.9/zenuml.js` | `ece11a311907401113f965e110c25c04c6a9b3dcbbb234bf2cd593a3f3ebe3df` |
-| PlantUML | 1.2026.7 | `crates/katana-render-runtime/vendor/plantuml/1.2026.7/plantuml.jar.sha256` | `1eb8cd1d0253227f3652586bc3b53cb3d5cfe69b5dcca41ce9b92ab1ce4f58ff` |
+| ZenUML Core | 4.3.0 | `crates/katana-render-runtime/vendor/zenuml-core/4.3.0/zenuml.js` | `7e48bc62d5ef65d2f30747da6dc7da01b7175ff9c637dda066a4b92c2d8bdf4d` |
+| PlantUML | 1.2026.8 | `crates/katana-render-runtime/vendor/plantuml/1.2026.8/plantuml.jar.sha256` | `1057dd8b346bed26a48ffebe6054e16fc785dda7c91f37f6c19030a4aab8a942` |
 
 MathJax は公式配布の JavaScript asset を repository 上で checksum 管理し、実行に使う自己完結 bundle は
 `crates/katana-render-runtime/src/markdown/diagram_runtime/generated/runtime-bundles.sha256`

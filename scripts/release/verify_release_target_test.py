@@ -19,6 +19,19 @@ REQUIRED_COMMITS = (
     "694ac82a85d555485e46eb46cf882c8db11b2fe5",
     "007ab829df39ed40bbfcfc19205ad21f3da32fe8",
     "91f07699b26567658f76021050ca7ec7b5c10df1",
+    "88d77e45b7b22d7886e2c09cb0ed1432bf237772",
+    "d34f6ea22dee7bda77201a57470d430cb658382b",
+    "0c67cff9713fca21b1de35315c4ee3f18ae0c0e8",
+    "180d1e3ab6ec3ce3182273fed3a19e28a740dfd1",
+    "65793ab7855881a6b9042d8d400d69f21a09358a",
+    "28d2a9b7f88497db3ae103ed406cceb1bd0f6ef5",
+    "ecba4e40d4bc3419c610d3013f8bd723dd2a449d",
+    "9c6915c05db47068bb8fc8649279fa0aad9a1dc5",
+    "817f0e889286be30ce5a549539eeb6d2f4d166de",
+    "bcca7a5fa4bc06ad30b2917b33cd312f771a5828",
+    "e395b23ac88ced4bcb116d6cc4e468e4376fc392",
+    "fb83a4a7ec423f2a2b41d0f4954b43a496171c68",
+    "72a5f61dda084653406d972c1ee591dc965054ba",
 )
 
 MODULE_SPEC = util.spec_from_file_location("verify_release_target", SCRIPT)
@@ -83,6 +96,19 @@ class VerifyReleaseTargetTests(unittest.TestCase):
             result = self.run_check("v0.4.20", "v0.4.19", parent)
             self.assertNotEqual(result.returncode, 0, commit)
 
+    def test_rejects_the_pre_terminal_repair_head(self) -> None:
+        result = self.run_check(
+            "v0.4.20", "v0.4.19", "91f07699b26567658f76021050ca7ec7b5c10df1"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("88d77e45b7b22d7886e2c09cb0ed1432bf237772", result.stderr)
+
+    def test_accepts_the_complete_intended_release_head(self) -> None:
+        result = self.run_check(
+            "v0.4.20", "v0.4.19", "72a5f61dda084653406d972c1ee591dc965054ba"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_accepts_squash_tree_but_rejects_an_incomplete_tree(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = Path(temporary_directory)
@@ -108,11 +134,16 @@ class VerifyReleaseTargetTests(unittest.TestCase):
             base = commit("runtime.txt", "baseline\n", "base")
             required_first = commit("runtime.txt", "first required change\n", "required first")
             required_tree = commit("coverage.txt", "required regression\n", "required final")
+            (repository / "assets.txt").write_text("required assets\n", encoding="utf-8")
+            git("add", "assets.txt")
+            git("commit", "-q", "-m", "required terminal assets")
+            required_tree = git("rev-parse", "HEAD")
 
             git("switch", "-q", "-c", "squash", base)
             (repository / "runtime.txt").write_text("first required change\n", encoding="utf-8")
             (repository / "coverage.txt").write_text("required regression\n", encoding="utf-8")
-            git("add", "runtime.txt", "coverage.txt")
+            (repository / "assets.txt").write_text("required assets\n", encoding="utf-8")
+            git("add", "runtime.txt", "coverage.txt", "assets.txt")
             git("commit", "-q", "-m", "squash required changes")
             squash = git("rev-parse", "HEAD")
 
