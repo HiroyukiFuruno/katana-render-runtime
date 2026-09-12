@@ -45,7 +45,9 @@ test("一括更新はRustのmajorとpinned依存を含め、TypeScriptを旧版�
   const recipeStart = justfile.indexOf("depends-update-all:");
   const recipe = justfile.slice(recipeStart, justfile.indexOf("\n\n", recipeStart));
 
-  expect(recipe).toContain("{{CARGO}} upgrade --incompatible allow --pinned allow --recursive true");
+  expect(recipe).toContain(
+    "{{CARGO}} upgrade --incompatible allow --pinned allow --recursive true",
+  );
   expect(recipe).toContain("bun update --latest");
   expect(recipe).not.toMatch(/bun add -d typescript@/);
 });
