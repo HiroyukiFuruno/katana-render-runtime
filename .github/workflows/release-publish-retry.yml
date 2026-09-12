@@ -59,7 +59,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.version }}
-        run: gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest --verify-tag
+        # A retry can publish an older tag; preserve an existing Latest release.
+        run: gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --verify-tag
 
       - name: Cleanup published release state
         env:

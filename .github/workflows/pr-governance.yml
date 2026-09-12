@@ -125,23 +125,25 @@ jobs:
 
           repository_record = request(f"repos/{repository}")
           if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
-              raise SystemExit("Governance runner default branch changed.")
+              arm_issue_source_failure("Governance runner default branch changed.")
           content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
           encoded = content.get("content")
+          blob_sha = content.get("sha")
           if (
               content.get("type") != "file"
               or content.get("encoding") != "base64"
               or not isinstance(encoded, str)
               or len(encoded) > 300_000
-              or re.fullmatch(r"[0-9a-fA-F]{40}", content.get("sha", "")) is None
+              or not isinstance(blob_sha, str)
+              or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
           ):
-              raise SystemExit("Trusted governance source is invalid.")
+              arm_issue_source_failure("Trusted governance source is invalid.")
           try:
               program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
-          except (ValueError, UnicodeError) as error:
-              raise SystemExit("Trusted governance source cannot be decoded.") from error
+          except (ValueError, UnicodeError):
+              arm_issue_source_failure("Trusted governance source cannot be decoded.")
           if not program or "\x00" in program:
-              raise SystemExit("Trusted governance source is invalid.")
+              arm_issue_source_failure("Trusted governance source is invalid.")
           exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
           PY
   establish-resolver-failure-barrier:
@@ -702,9 +704,11 @@ jobs:
           ]
           # Every Check Run generation is scoped to a head.  The priority
           # pre-invalidator and the all-open invalidator share the same run
-          # budget, so cap their distinct-head union before either is split.
-          # This preserves uniqueness even while a malformed shared head is
-          # being fail-closed.  The operational cap includes the whole job,
+          # budget, but their union omits the early writer's preserved heads.
+          # Cap the complete governed population before either is split, and
+          # subtract only the heads that this run actually preserves. This
+          # keeps the terminal-segment estimate valid for partial priorities.
+          # The operational cap includes the whole job,
           # rather than just its initial Check Run writes: an early writer
           # needs pending + terminal writes, and terminal continuations must
           # respect the 3,610-second App REST window.  Count invalidation
@@ -714,8 +718,12 @@ jobs:
           # the 290-minute Actions deadline.  Target discovery still finishes
           # and publishes the default-branch output so the global merge
           # barrier can be activated before an oversized run stops.
+          governed_heads = {target_snapshots[number][0] for number in targets}
+          preserved_governed_heads = {
+              target_snapshots[number][0] for number in priority_targets
+          }
           def complete_reconciliation_seconds(head_count):
-              terminal_heads = max(0, head_count - EARLY_WRITER_TARGET_CAP)
+              terminal_heads = max(0, head_count - len(preserved_governed_heads))
               terminal_segments = (
                   terminal_heads + TERMINAL_BATCH_HEAD_CAP - 1
               ) // TERMINAL_BATCH_HEAD_CAP
@@ -739,7 +747,7 @@ jobs:
                   + terminal_schedule
               )
 
-          max_invalidation_governed_heads = max(
+          max_governed_heads = max(
               head_count
               for head_count in range(1, 601)
               if complete_reconciliation_seconds(head_count)
@@ -750,7 +758,7 @@ jobs:
               for number in preinvalidate_targets + all_invalidation_targets
           }
           invalidation_head_cap_exceeded = (
-              len(invalidation_governed_heads) > max_invalidation_governed_heads
+              len(governed_heads) > max_governed_heads
           )
           def chunks_by_head(numbers):
               chunks = [[], []]

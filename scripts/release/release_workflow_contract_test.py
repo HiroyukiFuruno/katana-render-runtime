@@ -37,7 +37,9 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertLess(publish, public)
         self.assertLess(public, cleanup)
         self.assertIn("contents: write", self.retry)
-        self.assertIn('gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest --verify-tag', self.retry)
+        retry_publish = self.retry[public:cleanup]
+        self.assertIn('gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --verify-tag', retry_publish)
+        self.assertNotIn("--latest", retry_publish)
         self.assertIn("python3 scripts/release/cleanup_release_state.py", self.retry)
 
 

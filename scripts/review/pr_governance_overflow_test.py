@@ -265,11 +265,12 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         self.assertIn("timeout-minutes: 30", self.dispatcher)
         self.assertIn("timeout-minutes: 290", self.dispatcher)
         self.assertIn("The operational cap includes the whole job", self.dispatcher)
-        self.assertIn("invalidation_governed_heads = {", self.dispatcher)
+        self.assertIn("governed_heads = {target_snapshots[number][0] for number in targets}", self.dispatcher)
+        self.assertIn("preserved_governed_heads = {", self.dispatcher)
         self.assertIn("def complete_reconciliation_seconds(head_count):", self.dispatcher)
         self.assertIn("TERMINAL_INTER_SEGMENT_SECONDS = 3_610", self.dispatcher)
         self.assertIn("RECONCILIATION_CONTROL_PLANE_RESERVE_SECONDS = 60 * 60", self.dispatcher)
-        self.assertIn("len(invalidation_governed_heads) > max_invalidation_governed_heads", self.dispatcher)
+        self.assertIn("len(governed_heads) > max_governed_heads", self.dispatcher)
         self.assertIn("if invalidation_head_cap_exceeded:", self.dispatcher)
         early_writer_seconds = 120 + 180 + 50 * 2 * 8.1
 
@@ -295,7 +296,7 @@ class GovernanceOverflowContractTest(unittest.TestCase):
 
     def test_preinvalidation_and_all_open_union_of_550_heads_fails_closed_before_chunking(self) -> None:
         """The two invalidator partitions must share one computed run budget."""
-        start = self.dispatcher_workflow.index("          def complete_reconciliation_seconds(head_count):")
+        start = self.dispatcher_workflow.index("          governed_heads = {target_snapshots[number][0] for number in targets}")
         end = self.dispatcher_workflow.index("          pre_chunk_snapshots = [", start)
         source = textwrap.dedent(self.dispatcher_workflow[start:end])
         preinvalidate_targets = list(range(1, 51))
@@ -314,6 +315,8 @@ class GovernanceOverflowContractTest(unittest.TestCase):
                 number: (f"{number:040x}", False)
                 for number in preinvalidate_targets + all_invalidation_targets
             },
+            "targets": preinvalidate_targets + all_invalidation_targets,
+            "priority_targets": preinvalidate_targets,
             "preinvalidate_targets": preinvalidate_targets,
             "all_invalidation_targets": all_invalidation_targets,
         }
@@ -321,7 +324,43 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         exec(source, namespace)
 
         self.assertEqual(len(namespace["invalidation_governed_heads"]), 550)
-        self.assertEqual(namespace["max_invalidation_governed_heads"], 300)
+        self.assertEqual(namespace["max_governed_heads"], 300)
+        self.assertTrue(namespace["invalidation_head_cap_exceeded"])
+        self.assertEqual(namespace["pre_chunks"], [[], []])
+        self.assertEqual(namespace["all_chunks"], [[], []])
+
+    def test_terminal_budget_uses_all_governed_heads_not_invalidation_union(self) -> None:
+        """A 50-head early prefix cannot hide its remaining terminal segment."""
+        start = self.dispatcher_workflow.index("          governed_heads = {target_snapshots[number][0] for number in targets}")
+        end = self.dispatcher_workflow.index("          pre_chunk_snapshots = [", start)
+        source = textwrap.dedent(self.dispatcher_workflow[start:end])
+        targets = list(range(1, 350))
+        priority_targets = list(range(1, 51))
+        preinvalidate_targets = [1]
+        all_invalidation_targets = list(range(51, 350))
+        namespace = {
+            "EARLY_WRITER_TARGET_CAP": 50,
+            "CHECK_RUN_WRITE_PACE_SECONDS": 8.1,
+            "EARLY_WRITER_STARTUP_SECONDS": 120,
+            "EARLY_WRITER_INITIAL_EVIDENCE_SECONDS": 180,
+            "TERMINAL_BATCH_HEAD_CAP": 125,
+            "TERMINAL_SEGMENT_SECONDS": 3_750,
+            "TERMINAL_INTER_SEGMENT_SECONDS": 3_610,
+            "RECONCILIATION_JOB_TIMEOUT_SECONDS": 290 * 60,
+            "RECONCILIATION_CONTROL_PLANE_RESERVE_SECONDS": 60 * 60,
+            "target_snapshots": {number: (f"{number:040x}", False) for number in targets},
+            "targets": targets,
+            "priority_targets": priority_targets,
+            "preinvalidate_targets": preinvalidate_targets,
+            "all_invalidation_targets": all_invalidation_targets,
+        }
+
+        exec(source, namespace)
+
+        self.assertEqual(len(namespace["invalidation_governed_heads"]), 300)
+        self.assertEqual(len(namespace["governed_heads"]), 349)
+        self.assertEqual(len(namespace["preserved_governed_heads"]), 50)
+        self.assertEqual(namespace["max_governed_heads"], 300)
         self.assertTrue(namespace["invalidation_head_cap_exceeded"])
         self.assertEqual(namespace["pre_chunks"], [[], []])
         self.assertEqual(namespace["all_chunks"], [[], []])

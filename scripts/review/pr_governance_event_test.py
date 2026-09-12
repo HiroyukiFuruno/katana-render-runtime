@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import base64
 import json
 import importlib.util
 import os
@@ -873,6 +874,79 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         # 必須とし、欠落時は`reconciles`がTrueを返してbarrierをfail-closedで維持する。
         self.assertNotIn("- name: Record verified pull_request_target preflight no-op", preflight)
         self.assertIn('if len(matches)!=1: return True', release)
+
+    def test_issue_source_validation_failures_arm_the_resolver_barrier(self) -> None:
+        """A malformed immutable source must not leave prior success reusable."""
+        scope_match = re.search(
+            r"- name: Exclude unavailable fork sources before dispatcher lock.*?python3 - <<'PY'\n(.*?)\n          PY",
+            self.actual_workflow,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(scope_match)
+        assert scope_match is not None
+        scope = self._workflow_program(scope_match)
+        valid_source = {
+            "type": "file",
+            "encoding": "base64",
+            "sha": "b" * 40,
+            "content": base64.b64encode(b"print('trusted source')\n").decode("ascii"),
+        }
+        invalid_sources = {
+            "shape": {**valid_source, "type": "directory"},
+            "encoding": {**valid_source, "encoding": "utf-8"},
+            "digest": {**valid_source, "sha": "not-a-blob"},
+            "null-digest": {**valid_source, "sha": None},
+            "numeric-digest": {**valid_source, "sha": 1},
+            "list-digest": {**valid_source, "sha": []},
+            "base64": {**valid_source, "content": "%%%"},
+            "utf8": {**valid_source, "content": base64.b64encode(b"\xff").decode("ascii")},
+            "empty": {**valid_source, "content": ""},
+            "nul": {**valid_source, "content": base64.b64encode(b"\x00").decode("ascii")},
+        }
+
+        def fake_run(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            self.assertEqual(arguments[:4], ["gh", "api", "--hostname", "github.com"])
+            endpoint = arguments[-1]
+            if endpoint == "repos/owner/repository":
+                return subprocess.CompletedProcess(arguments, 0, '{"default_branch":"master"}', "")
+            if endpoint == (
+                "repos/owner/repository/contents/scripts/review/"
+                "pr_governance_preflight.py?ref=" + "a" * 40
+            ):
+                return subprocess.CompletedProcess(arguments, 0, json.dumps(source), "")
+            raise AssertionError(arguments)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "scope-output"
+            environment = {
+                "GITHUB_REPOSITORY": "owner/repository",
+                "GITHUB_OUTPUT": str(output),
+                "GH_TOKEN": "source",
+                "PATH": os.environ["PATH"],
+                "DEFAULT_BRANCH": "master",
+                "WORKFLOW_REF": "owner/repository/.github/workflows/pr-governance.yml@refs/heads/master",
+                "WORKFLOW_SHA": "a" * 40,
+                "EVENT_NAME": "issues",
+                "EVENT_ACTION": "edited",
+            }
+            for label, source in invalid_sources.items():
+                with self.subTest(validation=label):
+                    output.write_text("", encoding="utf-8")
+                    with patch.dict(os.environ, environment, clear=True), patch(
+                        "subprocess.run", side_effect=fake_run
+                    ), self.assertRaises(SystemExit) as exit_error:
+                        exec(scope, {"__name__": "__main__"})
+                    self.assertEqual(exit_error.exception.code, 0)
+                    values = dict(
+                        line.split("=", 1)
+                        for line in output.read_text(encoding="utf-8").splitlines()
+                    )
+                    self.assertEqual(values["reconcile"], "true")
+                    self.assertEqual(values["valid"], "false")
+                    self.assertEqual(values["priority"], "true")
+                    self.assertEqual(values["pull_request_target_noop"], "false")
+                    self.assertEqual(values["issue_event_noop"], "false")
+                    self.assertRegex(values["root_deadline_epoch"], r"[1-9][0-9]*")
 
     def test_preflight_skips_only_stable_nondefault_or_unclaimed_issue_events(self) -> None:
         """No-op classification happens before the shared dispatcher lock."""
