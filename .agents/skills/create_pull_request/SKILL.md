@@ -1,5 +1,5 @@
 ---
-name: create_pull_request
+name: create-pull-request
 description: katana-diagram-renderer の Pull Request を、自己レビューと品質ゲート後に GitHub CLI で作る。base branch を文脈から確認し、PR 本文に検証結果を含める。
 ---
 
@@ -86,6 +86,10 @@ gh pr comment "$pr_url" --body "<!-- krr-review phase=initial head=$head_sha bod
 `--base` は必須です。`isDraft=true` を確認してから初回 review を依頼します。
 
 ## 5. Review と指摘対応
+
+まず初回reviewの結果を取得・分類し、修正→検証→push→各threadへのreply/resolveを完了します。PR Issueコメントだけでなくformal reviewsとreviewThreadsを全ページ確認し、コメント欄が空でも未応答と判断しません。pushまたは本文編集があればcurrent HEAD/bodyのinitial reviewからやり直します。
+
+以下のfinal marker投稿は、current HEAD/bodyに一致するinitial reviewが完了し、対応対象の未処理指摘と未resolve threadが0件になった後にだけ実行します。初回依頼直後の連続実行は禁止です。
 
 ```bash
 pr_json="$(gh api "repos/<owner>/<repo>/pulls/$pr_number")"

@@ -97,7 +97,7 @@ except UnicodeEncodeError:
    @codex review"
    ```
 
-2. review、review thread、PR コメントをすべて取得し、P0/P1/その他、対応要否、担当を分類する。
+2. formal review、review thread、PR Issueコメントを全ページ取得し、P0/P1/その他、対応要否、担当を分類する。Issueコメント不在だけで未応答と判断しない。取得失敗は観測を復旧し、指摘があれば待機せず対応する。
 3. 修正が必要な指摘は、対象ファイルと DoD を明示して修正担当 subagent へ移譲する。同じファイル・責務を複数担当に重ねない。
 4. P0/P1 に限らず対応対象と判断した通常指摘も、修正担当 subagent が **修正 → ローカル検証 → push → 該当 thread への reply → resolve** の順で完了させる。CI が green でも、未resolve の指摘があれば完了扱いにしない。
 5. 最終 review は、pushまたはPR本文編集が発生した場合に限り、まず current HEAD/body digestで新しい initial marker付きcloud reviewを完了してから実施する。依頼直前にGitHub APIからcurrent PRの`headRefOid`と`body`を再取得し、push/body変更前のinitial/final markerとreview証跡を無効化する。旧initialと新finalだけを組み合わせる経路は禁止する。HEAD/bodyが不変でpushもbody編集もない場合だけ、既存のinitialからfinalへ進める。最終reviewのmarkerと`@codex review`は同じコメント本文にこの順で含める。

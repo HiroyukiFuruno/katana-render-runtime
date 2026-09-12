@@ -1978,6 +1978,53 @@ def _verify_final_readiness_snapshot_unchanged(
         raise ValueError("open PR closer set changed during readiness check")
 
 
+def _verify_final_pull_request_identity_unchanged(
+    *,
+    repository: str,
+    pull_request: int,
+    initial_base: str,
+    initial_head: str,
+    initial_base_branch: str,
+    initial_body: str,
+    expected_is_draft: bool,
+) -> None:
+    """Fence the PR identity after the final review evidence refresh."""
+
+    payload = _gh_json(
+        "pr",
+        "view",
+        str(pull_request),
+        "--repo",
+        repository,
+        "--json",
+        "isDraft,baseRefOid,headRefOid,baseRefName,body",
+    )
+    if not isinstance(payload, dict):
+        raise TypeError("pull request final identity response must be an object")
+    current_base = payload.get("baseRefOid")
+    current_head = payload.get("headRefOid")
+    current_base_branch = payload.get("baseRefName")
+    current_body = payload.get("body")
+    current_is_draft = payload.get("isDraft")
+    if (
+        not isinstance(current_base, str)
+        or not isinstance(current_head, str)
+        or not isinstance(current_base_branch, str)
+        or not isinstance(current_body, str)
+        or not isinstance(current_is_draft, bool)
+    ):
+        raise TypeError("pull request final identity fields are invalid")
+    if current_is_draft != expected_is_draft:
+        state = "Draft" if expected_is_draft else "Ready"
+        raise ValueError(f"pull request draft state changed during readiness check; expected {state}")
+    if (current_base, current_head) != (initial_base, initial_head):
+        raise ValueError("pull request base/head changed during readiness check")
+    if current_base_branch != initial_base_branch:
+        raise ValueError("pull request base branch changed during readiness check")
+    if current_body != initial_body:
+        raise ValueError("pull request body changed during readiness check")
+
+
 def _open_pull_request_closers(
     *,
     repository: str,
@@ -3062,40 +3109,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     if not isinstance(initial_body, str):
         raise TypeError("pull request body must be a string")
-    final_comments = _paginated_api_array(
-        f"repos/{repository}/issues/{arguments.pr}/comments"
-    )
-    if (
-        _review_marker_identities(
-            _review_markers(final_comments, marker_author_login)
-        )
-        != initial_marker_identities
-    ):
-        raise ValueError("trusted review marker identities changed during readiness check")
-    final_threads = _review_threads(repository, arguments.pr, budget=graphql_budget)
-    if final_threads != threads:
-        raise ValueError("review threads changed during readiness check")
-    # The initial evidence snapshot is no longer authoritative once the final
-    # fence begins.  Re-read the complete review connection and re-evaluate
-    # every review condition with the final comments/threads so a late review
-    # or canonical no-issues comment cannot inherit an earlier success.
-    final_reviews = _reviews(repository, arguments.pr, budget=graphql_budget)
-    if final_reviews != pull_request["reviews"]:
-        raise ValueError("reviews changed during readiness check")
-    final_readiness_errors = readiness_errors(
-        {**pull_request, "reviews": final_reviews},
-        final_threads,
-        final_comments,
-        review_bot=_CODEX_REVIEW_BOT_LOGIN,
-        require_draft=arguments.require_draft,
-        referenced_issues=referenced_issues,
-        required_checks=initial_required_checks,
-    )
-    if final_readiness_errors:
-        raise ValueError(
-            "review readiness changed during readiness check: "
-            + "; ".join(final_readiness_errors)
-        )
     _verify_final_readiness_snapshot_unchanged(
         repository=repository,
         pull_request=arguments.pr,
@@ -3132,6 +3145,48 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if governance_error is not None or final_governance_evidence != governance_evidence:
             raise ValueError("governance evidence changed during readiness check")
+    # The governance refresh can take longer than the earlier PR snapshot
+    # fence.  Re-read every review evidence source afterwards so an edit,
+    # deletion, dismissal, or reopened thread cannot inherit prior success.
+    final_comments = _paginated_api_array(
+        f"repos/{repository}/issues/{arguments.pr}/comments"
+    )
+    if (
+        _review_marker_identities(
+            _review_markers(final_comments, marker_author_login)
+        )
+        != initial_marker_identities
+    ):
+        raise ValueError("trusted review marker identities changed during readiness check")
+    final_threads = _review_threads(repository, arguments.pr, budget=graphql_budget)
+    if final_threads != threads:
+        raise ValueError("review threads changed during readiness check")
+    final_reviews = _reviews(repository, arguments.pr, budget=graphql_budget)
+    if final_reviews != pull_request["reviews"]:
+        raise ValueError("reviews changed during readiness check")
+    final_readiness_errors = readiness_errors(
+        {**pull_request, "reviews": final_reviews},
+        final_threads,
+        final_comments,
+        review_bot=_CODEX_REVIEW_BOT_LOGIN,
+        require_draft=arguments.require_draft,
+        referenced_issues=referenced_issues,
+        required_checks=initial_required_checks,
+    )
+    if final_readiness_errors:
+        raise ValueError(
+            "review readiness changed during readiness check: "
+            + "; ".join(final_readiness_errors)
+        )
+    _verify_final_pull_request_identity_unchanged(
+        repository=repository,
+        pull_request=arguments.pr,
+        initial_base=base,
+        initial_head=head,
+        initial_base_branch=base_branch,
+        initial_body=initial_body,
+        expected_is_draft=arguments.require_draft,
+    )
     print(f"PR #{arguments.pr} is ready")
     return 0
 

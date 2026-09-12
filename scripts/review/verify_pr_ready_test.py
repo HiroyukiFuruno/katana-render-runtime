@@ -4724,7 +4724,15 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
         )
 
     def _allow_ready(
-        self, sources: list[dict[str, object]], *, exclude_trusted_governance_check: bool = False
+        self,
+        sources: list[dict[str, object]],
+        *,
+        exclude_trusted_governance_check: bool = False,
+        comment_snapshots: list[list[dict[str, object]]] | None = None,
+        thread_snapshots: list[list[dict[str, object]]] | None = None,
+        review_snapshots: list[list[dict[str, object]]] | None = None,
+        final_pull_snapshot: dict[str, object] | None = None,
+        trace: list[str] | None = None,
     ) -> int:
         pull = {
             "isDraft": False,
@@ -4737,13 +4745,31 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
             "statusCheckRollup": [],
             "reviews": [{}],
         }
+        pull_snapshots = [pull, final_pull_snapshot or pull]
         source_queue = list(sources)
         latest_source = source_queue[0]
+        comment_snapshots = comment_snapshots or [[], []]
+        thread_snapshots = thread_snapshots or [[], []]
+        review_snapshots = review_snapshots or [
+            deepcopy(successful_state()[0]["reviews"]),
+            deepcopy(successful_state()[0]["reviews"]),
+        ]
+
+        def next_snapshot(
+            snapshots: list[list[dict[str, object]]], label: str
+        ) -> list[dict[str, object]]:
+            if trace is not None:
+                trace.append(label)
+            if not snapshots:
+                raise AssertionError(f"unexpected extra {label} snapshot")
+            return snapshots.pop(0)
 
         def gh_json(*arguments: str) -> object:
             nonlocal latest_source
             if arguments[:2] == ("pr", "view"):
-                return pull
+                if not pull_snapshots:
+                    raise AssertionError("unexpected extra pull request snapshot")
+                return pull_snapshots.pop(0)
             endpoint = next(
                 (
                     argument
@@ -4780,13 +4806,31 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
                 }]
             raise AssertionError(f"unexpected gh call: {arguments}")
 
+        original_governance_check = subject._governance_check_error
+
+        def observed_governance_check(*arguments: object, **keywords: object) -> str | None:
+            if trace is not None:
+                trace.append("governance")
+            return original_governance_check(*arguments, **keywords)
+
         with patch.object(subject, "_gh_json", side_effect=gh_json), patch.object(
-            subject, "_paginated_api_array", return_value=[]
-        ), patch.object(subject, "_review_threads", return_value=[]
+            subject,
+            "_paginated_api_array",
+            side_effect=lambda *_: next_snapshot(comment_snapshots, "comments"),
+        ), patch.object(
+            subject,
+            "_review_threads",
+            side_effect=lambda *_args, **_keywords: next_snapshot(thread_snapshots, "threads"),
+        ), patch.object(
+            subject,
+            "_reviews",
+            side_effect=lambda *_args, **_keywords: next_snapshot(review_snapshots, "reviews"),
         ), patch.object(
             subject.issue_contract, "referenced_issue_snapshot", return_value=()
         ), patch.object(subject, "closing_reference_errors", return_value=[]), patch.object(
             subject, "readiness_errors", return_value=[]
+        ), patch.object(
+            subject, "_governance_check_error", side_effect=observed_governance_check
         ), patch.object(subject, "_verify_final_readiness_snapshot_unchanged"):
             return subject.main(
                 [
@@ -5330,6 +5374,66 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
         changed["pull_requests"][0]["base"]["sha"] = "d" * 40  # type: ignore[index]
         with self.assertRaisesRegex(ValueError, "governance evidence changed"):
             self._allow_ready([self._source(), changed])
+
+    def test_allow_ready_refreshes_all_review_evidence_after_governance(self) -> None:
+        trace: list[str] = []
+        self.assertEqual(
+            self._allow_ready([self._source(), self._source()], trace=trace), 0
+        )
+        final_governance = max(
+            index for index, item in enumerate(trace) if item == "governance"
+        )
+        for evidence in ("comments", "threads", "reviews"):
+            with self.subTest(evidence=evidence):
+                final_evidence = max(
+                    index for index, item in enumerate(trace) if item == evidence
+                )
+                self.assertLess(final_governance, final_evidence)
+
+    def test_allow_ready_rejects_review_evidence_changed_after_governance(self) -> None:
+        initial_reviews = deepcopy(successful_state()[0]["reviews"])
+        initial_comments = [marker(1, "initial", HEAD), marker(2, "final", HEAD)]
+        initial_threads = [{"id": "thread-1", "isResolved": True, "comments": []}]
+        variants = {
+            "edited": {**initial_comments[1], "updated_at": "2026-08-29T03:04:00Z"},
+            "deleted": None,
+            "dismissed": {**initial_reviews[1], "state": "DISMISSED"},
+            "reopened": {**initial_threads[0], "isResolved": False},
+        }
+        for name, changed in variants.items():
+            with self.subTest(change=name):
+                comments = [initial_comments, initial_comments]
+                threads = [initial_threads, initial_threads]
+                reviews = [initial_reviews, initial_reviews]
+                if name == "edited":
+                    comments[1] = [initial_comments[0], changed]  # type: ignore[list-item]
+                elif name == "deleted":
+                    comments[1] = initial_comments[:1]
+                elif name == "dismissed":
+                    reviews[1] = [initial_reviews[0], changed]  # type: ignore[list-item]
+                else:
+                    threads[1] = [changed]  # type: ignore[list-item]
+                with self.assertRaisesRegex(ValueError, "marker|threads|reviews"):
+                    self._allow_ready(
+                        [self._source(), self._source()],
+                        comment_snapshots=comments,
+                        thread_snapshots=threads,
+                        review_snapshots=reviews,
+                    )
+
+    def test_allow_ready_rejects_head_and_body_changed_during_governance(self) -> None:
+        changed_pull = {
+            "isDraft": False,
+            "baseRefOid": self.base,
+            "headRefOid": "c" * 40,
+            "baseRefName": self.branch,
+            "body": "Closes #65",
+        }
+        with self.assertRaisesRegex(ValueError, "base/head"):
+            self._allow_ready(
+                [self._source(), self._source()],
+                final_pull_snapshot=changed_pull,
+            )
 
 
 if __name__ == "__main__":
