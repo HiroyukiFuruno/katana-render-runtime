@@ -224,7 +224,7 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
     let recipe = recipe_body(&justfile, "depends-update-all")?;
 
     for required in [
-        "{{CARGO}} upgrade -i",
+        "{{CARGO}} upgrade --incompatible allow --pinned allow --recursive true",
         "{{CARGO}} update",
         "bun update --latest",
         "runtime-assets/depends-update-all.ts",
