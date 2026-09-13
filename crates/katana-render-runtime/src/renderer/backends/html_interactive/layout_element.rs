@@ -203,20 +203,82 @@ mod tests {
     use super::HtmlLayoutRenderer;
     use crate::renderer::backends::html_browser::HtmlBrowserViewport;
     use crate::renderer::backends::html_document::HtmlDocumentNode;
-    use crate::renderer::backends::html_interactive::types::LayoutResult;
+    use crate::renderer::backends::html_interactive::types::{
+        ElementBox, LayoutResult, rectangle_corners,
+    };
     use std::collections::HashMap;
 
+    const HALF_TURN_DEGREES: f32 = 180.0;
+    const TEST_BOX_CENTER_X: f32 = 20.0;
+    const TEST_BOX_CENTER_Y: f32 = 10.0;
+    const TEST_BOX_WIDTH: f32 = 40.0;
+    const TEST_BOX_HEIGHT: f32 = 20.0;
+
     #[test]
-    fn ancestor_rotation_updates_descendant_element_boxes() -> Result<(), String> {
-        let layout = render_rotated_ancestor()?;
-        assert_eq!(descendant_axis_aligned(&layout)?, (60.0, -30.0, 10.0, 20.0));
-        Ok(())
+    fn ancestor_rotation_updates_descendant_element_boxes() {
+        assert_eq!(
+            render_rotated_ancestor()
+                .as_ref()
+                .map(descendant_axis_aligned),
+            Ok(Some((60.0, -30.0, 10.0, 20.0)))
+        );
+    }
+
+    #[test]
+    fn absent_rotated_element_box_leaves_paint_unchanged() {
+        let mut renderer = test_renderer();
+        let paint_start = renderer.svg.len();
+        renderer.rotate_element_range(paint_start, 0, 1, HALF_TURN_DEGREES);
+        assert_eq!(renderer.svg.len(), paint_start);
+    }
+
+    #[test]
+    fn half_turn_rotation_removes_sine_noise() {
+        let mut element_box = test_element_box();
+        element_box.rotate_about(HALF_TURN_DEGREES, TEST_BOX_CENTER_X, TEST_BOX_CENTER_Y);
+        assert_eq!(
+            element_box.transformed_corners,
+            [
+                (TEST_BOX_WIDTH, TEST_BOX_HEIGHT),
+                (0.0, TEST_BOX_HEIGHT),
+                (0.0, 0.0),
+                (TEST_BOX_WIDTH, 0.0),
+            ]
+        );
+    }
+
+    fn test_renderer() -> HtmlLayoutRenderer {
+        HtmlLayoutRenderer::new(
+            HtmlBrowserViewport {
+                width: 320,
+                height: 240,
+                device_scale_factor: 1.0,
+            },
+            0.0,
+            &HashMap::new(),
+            None,
+        )
+    }
+
+    fn test_element_box() -> ElementBox {
+        ElementBox {
+            node_id: 1,
+            x: 0.0,
+            y: 0.0,
+            width: TEST_BOX_WIDTH,
+            height: TEST_BOX_HEIGHT,
+            transformed_corners: rectangle_corners(0.0, 0.0, TEST_BOX_WIDTH, TEST_BOX_HEIGHT),
+        }
     }
 
     fn render_rotated_ancestor() -> Result<LayoutResult, String> {
         HtmlLayoutRenderer::render(
             &rotated_ancestor_nodes(),
-            HtmlBrowserViewport::new(320, 240, 1.0).map_err(|error| error.to_string())?,
+            HtmlBrowserViewport {
+                width: 320,
+                height: 240,
+                device_scale_factor: 1.0,
+            },
             0.0,
             &HashMap::new(),
             None,
@@ -240,12 +302,11 @@ mod tests {
         }]
     }
 
-    fn descendant_axis_aligned(layout: &LayoutResult) -> Result<(f32, f32, f32, f32), String> {
+    fn descendant_axis_aligned(layout: &LayoutResult) -> Option<(f32, f32, f32, f32)> {
         layout
             .element_boxes
             .iter()
             .find(|element| element.node_id == 2)
             .map(|target| target.transformed_axis_aligned())
-            .ok_or_else(|| "rotated descendant box is missing".to_string())
     }
 }
