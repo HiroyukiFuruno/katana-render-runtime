@@ -221,7 +221,6 @@ depends-update-all:
     {{CARGO}} upgrade -i
     {{CARGO}} update
     bun update --latest
-    bun add -d typescript@6.0.3
     bun run scripts/runtime-assets/depends-update-all.ts
     bun run scripts/drawio/resource-update.ts --resources "{{DRAWIO_RESOURCE_DIR}}" --manifest "{{DRAWIO_RESOURCE_MANIFEST}}"
     bun run scripts/runtime-assets/runtime-package-asset-compressor.ts --write

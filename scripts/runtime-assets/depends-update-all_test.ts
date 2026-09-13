@@ -75,7 +75,7 @@ test("depends-update-all は既存の更新・品質・比較ステップを各1
   for (const step of requiredSteps) {
     expect(lines.filter((line) => line === step)).toHaveLength(1);
   }
-  expect(lines.filter((line) => /^bun add -d typescript@[^\s]+$/.test(line))).toHaveLength(1);
+  expect(lines.some((line) => /^bun add -d typescript@/.test(line))).toBe(false);
 });
 
 test("depends-update-all は資産生成・整形・ビルド・品質検査・比較の順で実行する", async () => {

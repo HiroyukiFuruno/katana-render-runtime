@@ -35,7 +35,7 @@ just depends-update-all
 
 `depends-update-all` は Rust・JavaScript 依存を breaking change を含めて更新し、Mermaid.js、ZenUML、Draw.io、MathJax、PlantUML の各最新リリースを取り込む。必要な基準画像、リソース、生成 bundle を更新し、比較と品質ゲートまで実行する。
 
-TypeScript 7 は現在の `@rollup/plugin-typescript` と型互換ではないため、型検査が通る 6.0.3 に自動的に戻す。他の JavaScript 依存は最新へ更新する。
+TypeScript を含む JavaScript 依存は、`bun update --latest` が解決する最新互換版を維持する。更新ターゲットで特定の旧版へ戻す固定は設けず、型検査で互換性を確認する。
 
 ## Mermaid version 更新時の score 回復 tips
 
