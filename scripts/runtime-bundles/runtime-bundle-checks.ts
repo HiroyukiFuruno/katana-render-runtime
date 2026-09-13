@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { AnyNode, CallExpression } from "acorn";
+import type { AnyNode, CallExpression, TemplateLiteral } from "acorn";
 import { parse as parseLoose } from "acorn-loose";
 import { full } from "acorn-walk";
 import type { RuntimeBundlePaths } from "./runtime-bundle-paths";
@@ -45,9 +45,25 @@ function evalStringSource(node: AnyNode): string | undefined {
     return undefined;
   }
   const [argument] = node.arguments;
-  return argument?.type === "Literal" && typeof argument.value === "string"
-    ? argument.value
-    : undefined;
+  if (argument?.type === "Literal" && typeof argument.value === "string") {
+    return argument.value;
+  }
+  return argument === undefined ? undefined : noSubstitutionTemplateSource(argument);
+}
+
+function noSubstitutionTemplateSource(argument: AnyNode): string | undefined {
+  if (argument.type !== "TemplateLiteral") {
+    return undefined;
+  }
+  const template = argument as TemplateLiteral;
+  if (template.expressions.length !== 0 || template.quasis.length !== 1) {
+    return undefined;
+  }
+  const [quasi] = template.quasis;
+  if (quasi === undefined) {
+    return undefined;
+  }
+  return quasi.value.cooked ?? quasi.value.raw;
 }
 
 function inspectModuleSyntax(source: string): {
