@@ -106,16 +106,16 @@ class VerifyReleaseTargetTests(unittest.TestCase):
 
     def test_accepts_the_complete_intended_release_head(self) -> None:
         result = self.run_check(
-            "v0.4.20", "v0.4.19", "c9fe447dedd8c6eceea188cc3aebce13c0df8e76"
+            "v0.4.20", "v0.4.19", "96a231c7f8aff499c8efd89a8ab0eca6a547cd33"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rejects_the_previous_release_terminal(self) -> None:
         result = self.run_check(
-            "v0.4.20", "v0.4.19", "100ce22913a3674bddac618b02ab97b54893c6a1"
+            "v0.4.20", "v0.4.19", "c9fe447dedd8c6eceea188cc3aebce13c0df8e76"
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("c9fe447dedd8c6eceea188cc3aebce13c0df8e76", result.stderr)
+        self.assertIn("96a231c7f8aff499c8efd89a8ab0eca6a547cd33", result.stderr)
 
     def test_accepts_actual_head_equivalent_squash_but_rejects_changed_required_path(
         self,
