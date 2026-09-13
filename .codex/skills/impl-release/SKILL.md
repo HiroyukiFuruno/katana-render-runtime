@@ -64,12 +64,12 @@ PR 作成前に、対象 version 以前の完了済み OpenSpec change を archi
 
 ```bash
 lefthook run pre-pr
-pr_url="$(gh pr create --base master --head release/vX.Y.Z --title "Prepare vX.Y.Z release" --body-file <pr-body-file>)"
+pr_url="$(gh pr create --draft --base master --head release/vX.Y.Z --title "Prepare vX.Y.Z release" --body-file <pr-body-file>)"
 gh pr comment "${pr_url}" --body '@codex review'
 ```
 
 PR 作成後は必ず `@codex review` をコメントします。
-レビュー（review）はローカルの自己レビューではなく cloud review を正とし、指摘は GitHub 上の review comment から取得して対応します。
+ローカル自己レビューも行い、cloud reviewの指摘はPR Issueコメント、formal reviews、reviewThreadsを全ページ取得して確認します。Issueコメント不在を「レビュー未応答」と取り違えないこと。各指摘は検証とpush後に根拠返信・個別resolveし、取得失敗なら観測を復旧します。
 
 ## Phase 5: PR gate
 
@@ -102,8 +102,12 @@ cloud review の指摘がある場合は修正し、通常の commit / push で�
 承認後だけ merge します。
 
 ```bash
-gh pr merge --merge --delete-branch "${pr_url}"
+# PR外のglobal krr-pr-governance-bootstrap skillを読み、専用Appのmerge --applyを使用する
 ```
+
+この指定だけで通常release PRを処理できるとは判断しない。現行global scriptはbootstrap用の3 workflow変更を必須とし、通常release/smoke PRを拒否する制約がある。固定diffに対する非mutating検査で適用可能性を確認し、未対応なら既存の保護を外さず許可経路の設計を相談する。bootstrap統合をユーザー指定のrelease前提へ勝手に追加せず、独立した依存更新・検証は継続する。
+
+通常の `gh pr merge`、UI、admin bypassで保護を迂回しません。Ready化前およびmerge直前に既存のreadiness gateで最新HEAD・review・thread・required checksを検証します。
 
 merge 後、Release workflow と crates.io 公開結果を確認します。
 
@@ -117,4 +121,6 @@ gh run list --workflow Release --limit 5
 - [ ] PR に `@codex review` コメントが最低2回投稿されている
 - [ ] `Test and Build (...)` と `preflight` が通っている
 - [ ] 最後の cloud review の指摘が解消されている
-- [ ] merge 後に Release workflow が起動している
+- [ ] Rust/JSの最新依存を確認・更新し、更新後の完全品質ゲートを通している
+- [ ] merge 後の Release workflow が成功し、GitHub Releaseとcrates.ioの対象versionが公開されている
+- [ ] 対応済みIssueを更新し、branch-hygieneに従って不要branch/worktree/stashを整理している

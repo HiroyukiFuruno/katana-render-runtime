@@ -67,6 +67,8 @@ crop補正は1枚の見た目から一般式を推測せず、公式exportで線
 
 SVGが同一なのにPNGの文字が変わる場合は、参照側のfont読み込みも確認する。`document.fonts.ready` はstylesheet内のfont-faceが登録される前に解決する場合があるため、それ単独では十分でない。公式Draw.ioのcaptureは入力の `fontSource` stylesheetを明示ロードしてからfontsの完了を待ち、ロード失敗を成功扱いしない。font名の指定、FontFaceSetの登録・load状態、実画像の文字を照合し、参照側のfallbackに合わせてKRRの文字描画を変更しない。
 
+検証ログの要約にテスト名やpanicが出たことだけで、そのテストの失敗と判断しない。終了code、`test result`、coverageの未到達行を確認する。要約で原因が欠落した場合は、元の実行終了を確認してから `rtk proxy env CARGO='rtk proxy cargo' just coverage` で同じ品質条件の生ログを取得する。実行中のcoverageとの二重起動はしない。
+
 ## HTML 系プレビュー前提条件（release contract）
 
 `katana-render-runtime` の HTML/CSS の interactive preview は、外部ブラウザや WebView を経由せず、プラットフォームの system font fallback に依存する設計です。
