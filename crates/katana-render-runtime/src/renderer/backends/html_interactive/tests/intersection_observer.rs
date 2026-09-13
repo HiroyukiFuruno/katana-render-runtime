@@ -77,6 +77,27 @@ fn observer_dom_mutation_is_reflowed_before_the_scroll_handler_runs() -> TestRes
     Ok(())
 }
 
+#[test]
+fn observer_content_collapse_clamps_scroll_before_the_scroll_handler_runs() -> TestResult {
+    let mut session = start_with_viewport(observer_collapse_document(), 160, 100)?;
+
+    session
+        .dispatch_input(HtmlBrowserInput::Scroll {
+            delta_x: 0.0,
+            delta_y: 400.0,
+        })
+        .map_err(to_string)?;
+
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    let expected_scroll = session.max_scroll();
+    assert_eq!(session.scroll_y, expected_scroll);
+    assert!(
+        snapshot.contains(&format!(r##"data-scroll-y="{expected_scroll}""##)),
+        "the scroll handler must receive the collapsed layout's max scroll {expected_scroll}: {snapshot}"
+    );
+    Ok(())
+}
+
 fn intersection_document() -> &'static str {
     r##"<style>
 html, body { margin: 0; }
@@ -154,6 +175,27 @@ new IntersectionObserver((entries) => {
 }).observe(changed);
 window.addEventListener("scroll", () => {
   document.getElementById("scroll-observed").textContent = document.getElementById("geometry").textContent;
+});
+</script>"##
+}
+
+fn observer_collapse_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#collapse { height: 400px; }
+#trigger { height: 20px; }
+#after { height: 100px; }
+</style>
+<div id=collapse></div><div id=trigger>Trigger</div><div id=after></div>
+<p id=scroll-observed>initial</p>
+<script>
+new IntersectionObserver((entries) => {
+  if (entries.some((entry) => entry.isIntersecting)) {
+    document.getElementById("collapse").style.display = "none";
+  }
+}).observe(document.getElementById("trigger"));
+window.addEventListener("scroll", () => {
+  document.getElementById("scroll-observed").setAttribute("data-scroll-y", window.scrollY);
 });
 </script>"##
 }

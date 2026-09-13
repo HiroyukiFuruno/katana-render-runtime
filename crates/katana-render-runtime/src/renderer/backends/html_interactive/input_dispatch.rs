@@ -74,6 +74,7 @@ impl HtmlInteractiveSession {
             /* WHY: Observer callbacks can mutate the DOM. The scroll listener
              * must observe the resulting geometry, not the preceding layout. */
             self.refresh_scroll_layout()?;
+            self.scroll_y = self.scroll_y.min(self.max_scroll());
             self.sync_intersection_geometry_from_current_layout()?;
         }
         self.runtime
