@@ -145,3 +145,27 @@ P2対応の範囲判定:
 - cdd0e63: observer空時はmetrics/readyだけ更新してsnapshotを省略。unobserve/disconnect、Clickによるlate observe、prepare/refresh例外とtimeout破棄、実scroll回帰を確認。scrollがreadyを準備する偽陽性を排除した。
 - /tmp/krr-release-check-eval-observer-final.log は終了コード0。通常/coverage/配布crate各1025 tests PASS（既存ignore1）、22,676行/2,869関数とも未到達0。配布crate8,532,217/10,485,760B、publish dry-run PASS。
 - 描画757件の証跡元bfcbd52に対する監査済み非描画path照合と、最新bundle/assets一致検査を満たすため、同じ描画入力/実装の全比較証跡を継承する。公開後のIssue/cleanupまで未完了。
+
+## 61e7ba6 の CI・constructor 入力レビュー
+
+- [x] 通常push成功。terminal100ce22913a3674bddac618b02ab97b54893c6a1の包含契約12件PASS。
+- [x] eval/observer指摘へ返信3999552141/3999552215を公開し個別resolve。
+- [x] CI34755720866の4OSとpreflight34755720863はすべてSUCCESS。Linux22,642行/未到達0、font system208行/未到達0。
+- [x] initial marker5653114163（11:57:47Z）、formal review5190630703（12:06:27Z）。P0/P1=0、次のP2が2件。
+- [ ] 3999569312 / PRRT_kwDOSdqU6c6h4nNh: 不正rootMarginの黙示的0px fallbackをSyntaxErrorへ修正。
+- [ ] 3999569316 / PRRT_kwDOSdqU6c6h4nNk: threshold数値変換と検証。有限の範囲外はRangeError、WebIDL doubleのNaN/InfinityはTypeError。空配列/defaultと昇順を維持する。
+- [ ] dom_bootstrap.js実装担当と実runtime回帰テスト担当を分離。統合後の完全gate・包含pin・push・固有返信/resolve・最新HEADレビューを継続する。
+
+今回の入力検証はHTML専用経路。最終diffが既存の監査済みallowlist内でbundle/assets不変かつ完全gateがPASSなら、bfcbd52の描画757件証跡を引き継ぐ。Ready・App live操作・公開はまだ実施していない。
+
+- constructor回帰は実runtimeでfocused PASS、対象clippy/fmt/diff-check PASS。数値NaN/±Infinity、疎配列、boxed BigInt、数値文字列とrootMarginの4値getterを含む。初回REDの終了ログは実装との同時実行により捕捉できず、RED確認済みとは主張しない。
+- 独立監査のSet/TypedArray入力は既存未対応で今回の後退ではないため、Issue #78 comment5653211288へHTML parity残件として記録。公開DoDへ追加しない。
+- `/tmp/krr-release-check-constructor-final.log` で完全gateを実行中。
+- [ ] 停止原因となるcommit skill冒頭の承認待ち記述を、承認済み範囲では検証報告後に継続するルールへ是正。.codex/skills/commit_and_push/SKILL.md と .agents/skills/commit_and_push/SKILL.md を別担当で限定修正する。App操作固有のfresh承認・品質gateは不変。この2pathは実行コードでも描画入力でもないskill文書のため、内容確認後に非描画証跡allowlistへ追加する。
+
+- [/] commit skill両版の本文冒頭2行を修正しmainも独立diff確認。承認済み範囲では検証報告後に通常commit/pushを続行し、未承認公開/範囲拡大/App固有fresh承認は維持する。2pathは文書のみと確認し、描画証跡allowlistへ追加。diff-check PASS。skill quick_validateは両版の既存frontmatter名commit_and_pushのhyphen-case違反で拒否し、本文変更に関係しない既存命名問題までPASSと主張しない。
+- 初回完全gateはconstructor_validation_sourceの関数長33/30でexit101。事前の対象crate clippyはrepo固有の明示lintを有効にしていなかった。fixtureの責務分離と実入口just lint/ast-lint/fmt-checkへ是正し、閾値不変で再実行する。
+- fixtureをprelude/正常値/不正値の責務で分割し、関数8/14/13/15行・ファイル277行へ収めた。just fmt-check / lint / ast-lintとdiff-checkはすべてPASS。完全gate再実行ログは `/tmp/krr-release-check-constructor-retry.log`。
+- 最終候補の依存再照合も成功: cargo outdated --workspace全最新、bun outdated候補なし。既存LatestVersionClientによる6配布元照合もMermaid12.0.0/Mermaid ZenUML1.0.0/ZenUML Core4.3.0/Draw.io31.4.5/MathJax4.1.3/PlantUML1.2026.8でcurrent=latest。再更新の必要なし。
+- 再実行は通常1026件PASS後、ASTがテスト本体の33行を検出してexit101。先の担当報告は起動行だけから成功を推定しており誤りだった。テスト本体/正常値/不正値/assert helperを9/16/17/5行へ分離、ファイル296行。raw AST直接テストとCARGO='rtk proxy cargo' just ast-lintの両方で実テスト1件PASSを確認した。新しい完全gateログは `/tmp/krr-release-check-constructor-ast-final.log`。
+- 最終完全gateは終了コード0。通常/coverage/配布crate各1026件PASS（既存ignore1）、22,676行・2,869関数とも未到達0。配布crate362files/8,533,227B（上限10,485,760B）、publish dry-run成功。最終diff11pathの非描画allowlist照合・未追跡0・生成bundle/assets整合も成功し、bfcbd52の757件全PASS証跡を継承。実公開は未実施。

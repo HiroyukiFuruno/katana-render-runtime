@@ -10,6 +10,10 @@ Issueコメントだけでレビュー未到着と判断しない。formal revie
 
 focused test、format、lint、ASTの責務境界を先に確認する。特にhelperやfixtureを追加すると、テストが成功していても関数長・ファイル長のゲートを超えることがある。閾値を緩めず、責務のまとまりで分離してから完全検証へ進む。
 
+対象crateへの `cargo clippy -- -D warnings` だけをrepoのstrict lint成功と読み替えない。`just lint` は `clippy::too_many_lines` などを明示的に有効化するため、完全gate前の検査も既存入口を使う。raw JS文字列を返すRust fixtureも関数長の対象となる。
+
+subagentの検証報告は、起動行や無出力を成功と推定したものを受理しない。toolの実終了コードと、テストなら実際の対象・件数を照合する。縮約ログで判定できなければ `CARGO='rtk proxy cargo'` と既存入口で生の結果を確認する。これは検査の省略やwrapperを失敗原因と決めつける根拠ではない。
+
 coverageの未到達箇所は行・関数・regionを区別し、対象と同じソース版で特定する。テストhelperのerror closureも対象になるため、製品コードをcoverage都合で変える前に実際の未到達経路を確認する。
 
 OS固有の探索を追加した場合、手元OSのcoverage成功をLinuxの成功と同一視しない。機能のないOSで常に空を返すstubと共通分岐を組み合わせると、到達不能行が生まれる。OSごとの実際の責務に合うcfg構造を確認し、coverage対象除外やテスト用の製品分岐で埋め合わせない。
@@ -19,6 +23,8 @@ OS固有の探索を追加した場合、手元OSのcoverage成功をLinuxの成
 DOM移行では通常childrenだけでなくtemplate専用Documentのような別格納先を確認し、要素全体とChildrenOnlyの両入口で入れ子・順序・escapingを回帰化する。Observerは交差フラグだけでなくratio/rectも同時に検証し、Element rootとDocument rootを分ける。DOM ancestryとlayoutのcontaining-block chainは同一ではないため、限定修正を完全仕様準拠と説明しない。
 
 parser移行時は通常の文字列だけでなく、置換なしtemplate literalのcooked値など旧ASTで対応していた構文形も照合する。状態準備の回帰は、その状態を副作用で準備する別イベントを使わない（例: layout-ready検証にscroll refreshを混ぜず、Click経由のlate observeで確認する）。新しいJS評価を追加したら、既存のtimeout時runtime破棄契約も全入口へ適用する。
+
+Web APIの入力検証は、API固有の範囲検査とWebIDLの型変換を分けて一次仕様と照合する。IntersectionObserverでは有限の範囲外thresholdはRangeError、NaN/Infinityはdouble変換のTypeErrorである。Array.mapが疎配列の穴を飛ばすこと、Numberがboxed BigIntを受理することも検証漏れになるため、正常値・空列・数値文字列・疎配列・変換拒否を実runtime回帰へ固定する。根拠: [Intersection Observer初期化](https://www.w3.org/TR/intersection-observer/#initialize-new-intersection-observer)、[WebIDL double](https://webidl.spec.whatwg.org/#es-double)。
 
 成功済みの重い描画比較を再利用する場合、証跡元SHA・結果・変更call chainを固定し、最終差分が監査済みの非描画pathだけであることを機械照合する。HTML observerや検査器の限定修正でも、依存lock・vendor/asset・生成bundle/checksum・diagram renderer・共有V8/font/SVG・外部rasterizerのいずれかが変われば再利用しない。閾値や比較対象を減らすのではなく、同じ描画入力と実装に対する既存証跡を引き継ぐ。変更したHTMLを含む完全release-checkとbundle不変検査は新HEADで必ず実行する。
 
