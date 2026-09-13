@@ -39,3 +39,25 @@ DoD: #73/#74/#75/#76を含むv0.4.20を公開し、対応Issueと不要な作業
 - [/] ユーザーが通常release用の専用App admission追加を承認。global script実装と契約テストを別担当で並行実施。PR #72は前提化せず、既存CI/review/App保護を維持する。
 
 Issue #75は「#72統合を公開の前提にしない」と明示する。現行global scriptのbootstrap専用制約は通常release modeを追加して解消する。専用Appが固定SHA/body/diffとIssue/review/CIを独立検証し、専用Check Runを既存checksを保持したままrequiredへ追加する。対応表・保護phase・再検証契約はglobal skillのreferences/release-admission-contract.mdへ固定。保護緩和や通常gh mergeは行わない。
+
+## 0d601be の再レビュー
+
+- [x] f9ed707/5f178db/0d601beを通常push。追加observer2件は公開reply/resolve済み。
+- [x] 4OS CIとpreflightすべてPASS。Mermaid/Draw.io full・CIは終了コード0（/tmp/krr-visual-final-20260913-retry.log）。
+- [ ] 3999114957 / PRRT_kwDOSdqU6c6h3bir: mixed serif/sansのCJK候補欠落（mixed_cjk_repair）。
+- [ ] 3999114958 / PRRT_kwDOSdqU6c6h3bis: fontconfigなしの名前付きfont探索（native_font_lookup_repair）。
+- [ ] 3999114960 / PRRT_kwDOSdqU6c6h3bit: observer reflow後のscroll clamp（observer_scroll_reclamp）。
+- [ ] 各修正の固有再現テスト、完全ゲート、最終terminal更新、push/reply/resolve、新HEAD initial/final review。
+
+フォント2件は過去の汎用「対応済み」返信と現コードが一致しなかった。過去の返信や全体CIだけを修正証拠にせず、指摘ごとの現HEAD・再現入力・assert・検証結果を照合してからresolveする。Issue #78へ延期済みの別項目は今回へ混ぜない。
+
+追加3件の個別検証:
+- mixed CJK: 修正前RED・修正後GREEN。既存sans/serif定数を合成し、混在時の両集合包含とserif単独の非混入を確認。focused 44件、AST PASS。
+- native font: macOS Helveticaをfontconfigなしで探索。File/Binary同familyの実fontでFileのみ選択を検証。system module 10件・strict lint PASS。Windows Segoe UI専用回帰を追加し、実行はWindows CIで確認する（ローカルcross実行はSDK不足で未検証）。
+- observer scroll: 修正前handler offset 400でRED、修正後GREEN。handler観測値・session.scroll_y・新max_scrollの完全一致をassert。observer 9件・strict lint PASS。
+- 統合release-check: /tmp/krr-release-check-font-scroll-final.log、描画全比較: /tmp/krr-visual-font-scroll-final.log を実行中。個別PASSだけで公開完了やreview解決とは扱わない。
+- 統合通常検査・coverageは22,580行/未到達0でPASS。配布crate並列テストでcold RSS増分66,704KiBにより失敗。配布crateの同一テストを完全修飾名で単独実行すると1件PASS（増分10,944KiB、owned556,216B）。プロセス全体RSSに他testの割当てが混入する測定上の問題として、同一test executableの専用子プロセスへcold測定を隔離。64MiB/2MiB/64facesの全基準は不変、子testが実際に1件PASSしたことも確認する。
+- RSS隔離後のfocused test PASS。完全再検証を /tmp/krr-release-check-isolated-rss-final.log で実行中。
+- RSS隔離の追加で親testfileがASTの300行上限を超えたため、メモリ検証のtest/helperを専用moduleへ分離。親238行、新module87行、focused1件・AST・strict lint・fmt・diff-check PASS。完全再検証は /tmp/krr-release-check-memory-module-final.log。
+- 再利用手順は [release-review-tips.md](release-review-tips.md) にまとめた。
+- 最終再実行は終了コード0で完全PASS。coverage22,580行/2,858関数とも未到達0。360fileの配布crate並列testとpublish dry-runも成功。フォント修正acec216、scroll修正50630ab、RSS隔離d0a65bbへcommit済み。Mermaid full/CIとDraw.io fullは再比較PASS、Draw.io CIは実行中。push後は最新commitのWindows Segoe UI回帰を含むCIとinitial/final reviewを再確認する。
