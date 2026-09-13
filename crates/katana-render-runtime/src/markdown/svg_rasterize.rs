@@ -39,7 +39,7 @@ impl SvgRasterizeOps {
         svg_text: &str,
         scale: f32,
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
-        Self::rasterize_with_options(svg_text, scale, &html_rasterizer_options())
+        Self::rasterize_with_options(svg_text, scale, &html_rasterizer_options(svg_text))
     }
 
     pub(crate) fn measure_html_text(

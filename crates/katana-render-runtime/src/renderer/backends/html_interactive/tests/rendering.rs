@@ -149,6 +149,44 @@ fn pseudo_content_appearance_and_rotation_render_as_css_generated_boxes() -> Tes
     Ok(())
 }
 
+#[test]
+fn ancestor_rotation_updates_client_rect_and_intersection_geometry() -> TestResult {
+    let session = start_with_viewport(ancestor_rotation_document(), 16, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    assert_ancestor_rotation_geometry(&snapshot)
+}
+
+fn ancestor_rotation_document() -> &'static str {
+    r#"<style>
+html, body { margin: 0; }
+#spacer { height: 40px; }
+#ancestor { width: 100px; height: 40px; transform: rotate(90deg); }
+#target { width: 20px; height: 10px; }
+</style>
+<div id=spacer></div><div id=ancestor><div id=target></div></div>
+<script>
+const target = document.getElementById("target");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  const rect = entry.boundingClientRect;
+  target.setAttribute("data-rect", `${rect.x}:${rect.y}:${rect.width}:${rect.height}`);
+  target.setAttribute("data-intersection", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}).observe(target);
+</script>"#
+}
+
+fn assert_ancestor_rotation_geometry(snapshot: &str) -> TestResult {
+    assert!(
+        snapshot.contains(r#"data-rect="18:52:10:16""#),
+        "{snapshot}"
+    );
+    assert!(
+        snapshot.contains(r#"data-intersection="false:0""#),
+        "{snapshot}"
+    );
+    Ok(())
+}
+
 fn pseudo_content_and_rotation_html() -> &'static str {
     r#"<style>
 html, body { margin: 0; }
@@ -183,6 +221,17 @@ fn assert_pseudo_content_and_rotation_layout(
         "{}",
         layout.svg
     );
+    let node_id = session
+        .runtime
+        .node_for_element_id("toggle")
+        .ok_or_else(|| "toggle node is missing".to_string())?
+        .0;
+    let element = layout
+        .element_boxes
+        .iter()
+        .find(|element| element.node_id == node_id)
+        .ok_or_else(|| "toggle layout box is missing".to_string())?;
+    assert_ne!(element.transformed_corners[0], (element.x, element.y));
     Ok(())
 }
 
@@ -1377,26 +1426,26 @@ fn nested_bold_inline_content_uses_its_own_intrinsic_flex_width() -> TestResult 
 </ul>"#,
     )?;
     let layout = session.layout().map_err(to_string)?;
-
+    let lines = svg_text_contents(&layout.svg);
     assert!(
-        layout.svg.contains(">Excel 帳票出力</text>"),
-        "{}",
+        lines.contains(&"Excel 帳票出力".to_string()),
+        "{lines:?}\n{}",
+        layout.svg
+    );
+    assert!(lines.len() >= 5, "{lines:?}\n{}", layout.svg);
+    let wrapped = &lines[3..];
+    assert_eq!(wrapped.len(), 2, "{lines:?}\n{}", layout.svg);
+    assert_eq!(
+        wrapped.concat(),
+        "市場レポート・キャンペーン情報等の横断参照",
+        "{lines:?}\n{}",
         layout.svg
     );
     assert!(
-        layout
-            .svg
-            .contains(">市場レポート・キャンペーン情報</text>"),
-        "{}",
+        wrapped.iter().all(|line| line.chars().count() > 1),
+        "{lines:?}\n{}",
         layout.svg
     );
-    assert!(
-        layout.svg.contains(">等の横断参照</text>"),
-        "{}",
-        layout.svg
-    );
-    assert!(!layout.svg.contains(">力</text>"), "{}", layout.svg);
-    assert!(!layout.svg.contains(">照</text>"), "{}", layout.svg);
     Ok(())
 }
 

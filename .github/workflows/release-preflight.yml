@@ -114,4 +114,6 @@ jobs:
       - name: Release check
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
         timeout-minutes: 75
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: just VERSION="${{ steps.version.outputs.version }}" release-check

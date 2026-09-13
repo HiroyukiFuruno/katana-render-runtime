@@ -223,3 +223,21 @@ fn fake_bundle_unions_aws_source_and_rendered_crop_bounds() {
         "{rendered:?}"
     );
 }
+
+#[path = "js_runtime_page_crop_geometry.rs"]
+mod page_crop_geometry;
+
+#[path = "js_runtime_page_crop_geometry_tests.rs"]
+mod page_crop_geometry_tests;
+
+#[path = "js_runtime_page_crop_source_fixtures.rs"]
+mod page_crop_source_fixtures;
+
+#[path = "js_runtime_page_crop_bundle_fixtures.rs"]
+mod page_crop_bundle_fixtures;
+
+#[path = "js_runtime_page_crop_sketch_tests.rs"]
+mod page_crop_sketch_tests;
+
+#[path = "js_runtime_page_crop_multipage_tests.rs"]
+mod page_crop_multipage_tests;

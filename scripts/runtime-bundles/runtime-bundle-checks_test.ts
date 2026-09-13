@@ -25,3 +25,12 @@ test("evalラッパー内の実コードだけをモジュール構文として�
   ).toBeFalse();
   expect(containsRuntimeModuleSyntax(`globalThis.eval('export const value=1;');`)).toBeTrue();
 });
+
+test("置換なしtemplate literalのeval payloadを検査する", () => {
+  const templateWithSubstitution = "globalThis.eval(`export const $" + "{value}=1`);";
+
+  expect(containsRuntimeModuleSyntax('globalThis.eval(`import "dependency"`);')).toBeTrue();
+  expect(containsRuntimeModuleSyntax("globalThis.eval(`export const value=1;`);")).toBeTrue();
+  expect(containsRuntimeModuleSyntax("globalThis.eval(`\\u0065xport const value=1;`);")).toBeTrue();
+  expect(containsRuntimeModuleSyntax(templateWithSubstitution)).toBeFalse();
+});

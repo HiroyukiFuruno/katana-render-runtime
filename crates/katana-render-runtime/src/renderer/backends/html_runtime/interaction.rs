@@ -21,6 +21,18 @@ pub(super) fn event<'scope>(
     Ok(event)
 }
 
+pub(super) fn dispatch_window_event(
+    scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>,
+    event_type: &str,
+) -> Result<(), HtmlRuntimeError> {
+    let event_type = serde_json::to_string(event_type).map_err(event_serialization_error)?;
+    let source = format!(
+        "window.dispatchEvent(new Event({event_type}, {{ bubbles: false, cancelable: false }}))"
+    );
+    evaluate_value(scope, "krr-html-window-event", &source)?;
+    Ok(())
+}
+
 fn event_flags(event_type: &str) -> (bool, bool) {
     match event_type {
         "focus" | "blur" | "toggle" => (false, false),

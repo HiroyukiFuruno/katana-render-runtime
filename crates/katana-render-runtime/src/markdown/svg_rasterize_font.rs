@@ -1,4 +1,12 @@
 use resvg::usvg;
+#[path = "svg_rasterize_html_font.rs"]
+mod html;
+#[cfg(test)]
+pub(super) use html::{
+    HtmlFontMemorySnapshot, current_process_rss_kib, html_font_db_for_markup,
+    html_font_memory_snapshot,
+};
+pub(super) use html::{html_font_db_for_text, html_rasterizer_options};
 
 const BUNDLED_SANS_SERIF_FONT: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const SANS_SERIF_FAMILIES: &[&str] = &[
@@ -45,10 +53,6 @@ pub(super) fn rasterizer_options() -> usvg::Options<'static> {
     rasterizer_options_with_font_db(bundled_font_db())
 }
 
-pub(super) fn html_rasterizer_options() -> usvg::Options<'static> {
-    rasterizer_options_with_font_db(html_font_db())
-}
-
 pub(super) fn rasterizer_options_with_font_db(
     fontdb: std::sync::Arc<usvg::fontdb::Database>,
 ) -> usvg::Options<'static> {
@@ -70,20 +74,7 @@ pub(super) fn bundled_font_db() -> std::sync::Arc<usvg::fontdb::Database> {
     }))
 }
 
-pub(super) fn html_font_db() -> std::sync::Arc<usvg::fontdb::Database> {
-    static FONT_DB: std::sync::OnceLock<std::sync::Arc<usvg::fontdb::Database>> =
-        std::sync::OnceLock::new();
-    std::sync::Arc::clone(FONT_DB.get_or_init(|| {
-        let mut db = usvg::fontdb::Database::new();
-        /* WHY: HTML は bundled Latin を優先しつつ、追加 script を host font で補う。 */
-        db.load_font_data(BUNDLED_SANS_SERIF_FONT.to_vec());
-        db.load_system_fonts();
-        configure_generic_families(&mut db);
-        std::sync::Arc::new(db)
-    }))
-}
-
-fn configure_generic_families(database: &mut usvg::fontdb::Database) {
+pub(super) fn configure_generic_families(database: &mut usvg::fontdb::Database) {
     database.set_sans_serif_family(first_available_family(database, SANS_SERIF_FAMILIES));
     database.set_serif_family(first_available_family(database, SERIF_FAMILIES));
     database.set_monospace_family(first_available_family(database, MONOSPACE_FAMILIES));

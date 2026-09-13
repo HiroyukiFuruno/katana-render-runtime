@@ -103,7 +103,7 @@ impl HtmlDocument {
         let mut attrs = attrs.borrow_mut();
         if let Some(attribute) = attrs
             .iter_mut()
-            .find(|attribute| attribute.name.local.as_ref() == name)
+            .find(|attribute| attribute.name.local.as_str() == name)
         {
             attribute.value = value.into();
         } else {
@@ -130,7 +130,7 @@ impl HtmlDocument {
         }
         attrs
             .borrow_mut()
-            .retain(|attribute| attribute.name.local.as_ref() != name);
+            .retain(|attribute| attribute.name.local.as_str() != name);
         Ok(())
     }
 
@@ -150,7 +150,7 @@ impl HtmlDocument {
         let mut attributes = attrs.borrow_mut();
         if let Some(index) = attributes
             .iter()
-            .position(|attribute| attribute.name.local.as_ref() == name)
+            .position(|attribute| attribute.name.local.as_str() == name)
         {
             attributes.remove(index);
             return Ok(false);

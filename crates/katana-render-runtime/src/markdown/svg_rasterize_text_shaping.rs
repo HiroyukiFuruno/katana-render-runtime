@@ -1,4 +1,4 @@
-use super::font::html_font_db;
+use super::font::html_font_db_for_text;
 use resvg::usvg;
 
 #[path = "svg_rasterize_text_fallback.rs"]
@@ -24,7 +24,7 @@ pub(super) fn shaped_text_width(
     letter_spacing: f32,
     font_feature_settings: Option<&str>,
 ) -> Option<f32> {
-    let database = html_font_db();
+    let database = html_font_db_for_text(font_family, text);
     let base_face_id = matching_font_face(&database, font_family, font_weight, italic)?;
     let mut advance = 0.0;
     for (face_id, run) in html_font_runs(&database, base_face_id, text) {
@@ -44,7 +44,7 @@ pub(super) fn shaped_html_text_dx(
     font_feature_settings: Option<&str>,
 ) -> Option<Vec<f32>> {
     font_feature_settings?;
-    let database = html_font_db();
+    let database = html_font_db_for_text(font_family, text);
     let base_face_id = matching_font_face(&database, font_family, font_weight, italic)?;
     let mut state = TextDxState::new(text.chars().count());
     for (face_id, run) in html_font_runs(&database, base_face_id, text) {
@@ -194,12 +194,12 @@ mod tests {
         collect_character_metrics, rustybuzz_features, shape_face_character_metrics,
         shape_text_with_face, shaped_html_text_dx,
     };
-    use crate::markdown::svg_rasterize::font::{bundled_font_db, html_font_db};
+    use crate::markdown::svg_rasterize::font::{bundled_font_db, html_font_db_for_text};
     use resvg::usvg;
 
     #[test]
     fn html_text_measurement_uses_per_character_font_fallback() {
-        let database = html_font_db();
+        let database = html_font_db_for_text("Noto Sans", "A日本B");
         let used_fallback =
             matching_font_face(&database, "Noto Sans", 400, false).and_then(|base| {
                 matching_fallback_face(&database, base, '日').map(|fallback| {
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn character_metrics_reject_right_to_left_runs() {
-        let database = html_font_db();
+        let database = html_font_db_for_text("Noto Sans", "مرحبا");
         let metrics = matching_font_face(&database, "Noto Sans", 400, false)
             .and_then(|face_id| {
                 database.with_face_data(face_id, |data, face_index| {
