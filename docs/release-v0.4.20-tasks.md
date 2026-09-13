@@ -98,3 +98,27 @@ Issue #75は「#72統合を公開の前提にしない」と明示する。現�
 - mainはstash第3parent 4e91bcabff2e03b29603ed905bcad9ea53b90f02も確認。未追跡5filesはDraw.io31.4.1のjs/br/sha256とZenUML4.2.1のjs/sha256のみ。固有実装修正はなく、公開確認後の整理候補。公開前にはdropしない。
 
 最終ローカル結果: Mermaid full/CI・Draw.io full/CIの全工程が終了コード0。29 reports/757 entriesすべてPASS、最小99.01819（Mermaid CI99.59、Draw.io CI99.50）。参照画像・品質基準を変更せず、05b08b3までの修正と最新JS型依存を検証済み。次工程は台帳commit・terminal pin更新・通常push・追加2threadへの返信/解決・新HEAD initial/final review・新HEAD CI。保護mergeと公開は未実施。
+
+## bdd0405 の CI・再レビュー
+
+- [x] 通常push成功、remote HEAD bdd04054d85149fe7318a23eff742f0fb6ff0fa9。pre-push は lefthook の output=failure で just check を無出力実行する。helper stdin待機/CLOSED socketだけでは通信障害と断定できず、親Gitとhook子孫を先に確認する。先の2回の中断は誤診だった。
+- [x] P1 3999248718 は返信3999349150、P2 3999248722は返信3999349269を公開し、それぞれ個別resolve成功。
+- [x] CI34750907289の4OSとpreflight34750907295はすべてSUCCESS。Linux実coverageは22,591行/未到達0、font_systemも208行/未到達0。macOSとの差はOS別コンパイル対象による。
+- [x] initial marker5652641730（2026-09-13T10:13:01Z）で最新HEAD/body digest固定。formal review5190400892でP0/P1=0、下記P2が2件。
+- [ ] 3999359327 / PRRT_kwDOSdqU6c6h4Dtr: template_contentsをserializeしないためnested markupが欠落。serialize専任へRED/GREENとIncludeNode/ChildrenOnly双方の回帰を委譲。
+- [ ] 3999359329 / PRRT_kwDOSdqU6c6h4Dtt: custom observer rootの外でも座標が重なると交差扱い。observer専任へ祖先関係・intersectionRect/ratioの一貫性と実host回帰を委譲。
+- [ ] 修正統合・完全gate・terminal更新・通常push・返信/resolve・新HEAD initial/final reviewを実施する。Ready化・App live操作・公開は未実施。
+
+通常release App activateのread-only dry-runは最終markerが旧HEADのためfail-closed。書込/JWT/IAT生成はなし。PR #72を前提化せず、最新レビュー完了後に再検証する。
+
+P2対応の範囲判定:
+- templateは修正前RED→修正後focused5件GREEN、strict clippy/fmt/diff-check PASS。host自身のChildrenOnlyもtemplate専用Documentから選択する。
+- observerは実hostでroot内child=true:1、重畳sibling/root自身=false:0・empty rectをRED→GREENで確認。Document rootのviewport経路も回帰追加。
+- 独立監査はcontaining-block chainの欠落をP1候補としたが、mainは今回差分が生む後退ではない既存のCSS互換制約として別管理と判断。現行ElementBox/bridgeにCB親情報がなく、今回のDOM sibling除外と別にlayout metadataの横断追加を要する。既存のparity Issue #78へ再現条件・仕様・必要metadata・検証DoDを明記（comment5652697628）。DOM ancestryをCB完全準拠と主張しない。今回の目次追従契約・品質閾値は変更しない。
+
+追加修正の完全ゲート:
+- d70393f（template/#75）と9b8098a（observer/#73）へ通常commit。Document root回帰はrootBounds=160x100、intersectionRect=160x20、ratio1までassertする。
+- /tmp/krr-release-check-template-root-final.log は終了コード0。通常/coverage/配布crate各1020 tests PASS（既存ignore1）、coverage22,647行/2,867関数とも未到達0。配布crate8,531,741/10,485,760B、publish dry-runも成功。公開自体は未実施。
+- cargo outdated --workspace、bun outdatedを再照合し、追加更新候補なし。
+- /tmp/krr-visual-template-root-final.log は実行中。Mermaid full/CI、Draw.io basic/official diagrams/examplesまでPASS。完了後の数値はPR/Issue証跡へ記録する。未完了の比較を成功扱いしない。
+- 次工程はterminal包含固定、通常push、全描画比較完了確認、固有返信/resolve、新HEAD initial/final review・CI・App admission。その後の保護merge/公開/Issue/cleanupまでを維持する。

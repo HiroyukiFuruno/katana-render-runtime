@@ -16,6 +16,8 @@ OS固有の探索を追加した場合、手元OSのcoverage成功をLinuxの成
 
 圧縮資産を増やす変更では、配布サイズだけでなく最小入力の展開量・保持量も確認する。selectorより前の全展開やprocess-wide cacheは、圧縮サイズから見えない常駐メモリ増加を生む。独立グループの非選択時に展開しないことを契約テストへ固定し、展開後データの寿命と配布上限も併せて検証する。
 
+DOM移行では通常childrenだけでなくtemplate専用Documentのような別格納先を確認し、要素全体とChildrenOnlyの両入口で入れ子・順序・escapingを回帰化する。Observerは交差フラグだけでなくratio/rectも同時に検証し、Element rootとDocument rootを分ける。DOM ancestryとlayoutのcontaining-block chainは同一ではないため、限定修正を完全仕様準拠と説明しない。
+
 ## RSS測定と並列テスト
 
 プロセス全体のRSS差分には同時実行中の別テストの割当ても入る。coldメモリ検査は同じtest executableを専用子プロセスで1件だけ実行し、他テストの並列性を保ったまま測定対象を隔離する。終了成功だけでなく、完全修飾名のテストが実際に1件PASSしたことを確認する。RSS・所有データ量などの受入閾値は変更しない。
@@ -25,3 +27,5 @@ OS固有の探索を追加した場合、手元OSのcoverage成功をLinuxの成
 引数を取るjust recipeを続けて列挙すると、次のrecipe名が前の引数として解釈される場合がある。例えば描画比較は `just mermaid-compare-full 99` と `just drawio-compare-full 99` を個別に呼ぶ。
 
 長時間コマンドのログは`pipefail`付きで保存し、実際の終了コードと成果物の数値を併せて確認する。zshの予約変数`status`を終了コード保存に使わない。描画比較は参照画像の再生成と区別し、基準を更新して差分を隠さない。
+
+通常pushが無出力でも、lefthookのoutput=failureでpre-pushのjust checkが実行中の場合がある。remote-helperのstdin待ちやCLOSED socketだけで通信障害と断定して中断しない。対象の親Gitとhook子孫を限定して確認し、hook終了コードとremote HEADを照合する。hookを無効化して再試行しない。
