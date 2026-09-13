@@ -47,11 +47,17 @@ fn existing_system_font_paths(paths: impl IntoIterator<Item = PathBuf>) -> BTree
     paths.into_iter().filter(|path| path.is_file()).collect()
 }
 
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))]
 fn platform_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
     let native_paths = native_system_font_paths(families);
     if !native_paths.is_empty() {
         return native_paths;
     }
+    fontconfig_font_paths(families)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
+fn platform_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
     fontconfig_font_paths(families)
 }
 
@@ -61,11 +67,6 @@ fn native_system_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
     let mut database = usvg::fontdb::Database::new();
     database.load_system_fonts();
     named_font_paths(&database, families)
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
-fn native_system_font_paths(_families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
-    BTreeSet::new()
 }
 
 #[cfg(any(test, target_os = "windows", target_os = "macos", target_os = "ios"))]
