@@ -1,5 +1,5 @@
 use super::super::StaticHtmlRuntime;
-use super::super::types::HtmlRuntimeError;
+use super::super::types::{HtmlNodeId, HtmlRuntimeError, HtmlRuntimeEvent};
 use super::StaticHtmlRuntimeSession;
 
 type LayoutMetric = (u64, f32, f32, f32, f32, f32);
@@ -50,6 +50,58 @@ fn node_id_rejects_a_missing_observer_fixture() {
     ));
 }
 
+#[test]
+fn empty_observer_registry_skips_the_refresh_callback() -> Result<(), HtmlRuntimeError> {
+    for source in [unobserved_observer_source(), disconnected_observer_source()] {
+        let mut session = start(source);
+        assert!(!session.update_layout_metrics(100.0, 100.0, 0.0, [])?);
+    }
+    Ok(())
+}
+
+#[test]
+fn metrics_remain_ready_when_an_observer_is_registered_after_an_empty_refresh()
+-> Result<(), HtmlRuntimeError> {
+    let mut session = start(late_observer_source());
+    let target = node_id(&mut session, "target")?;
+
+    assert!(!session.update_layout_metrics(
+        100.0,
+        100.0,
+        0.0,
+        [(target, 0.0, 0.0, 10.0, 10.0, 0.0)]
+    )?);
+    session.dispatch(HtmlRuntimeEvent::Click {
+        target: HtmlNodeId(target),
+    })?;
+
+    assert!(
+        session
+            .snapshot()?
+            .contains(r#"data-intersection="true:1""#)
+    );
+    Ok(())
+}
+
+#[test]
+fn observer_work_preparation_surfaces_exceptions() {
+    let mut session = start(prepare_exception_source());
+    let result = session.update_layout_metrics(100.0, 100.0, 0.0, []);
+    assert!(matches!(
+        result,
+        Err(HtmlRuntimeError::JavaScriptException(message)) if message.contains("prepare")
+    ));
+}
+
+#[test]
+fn observer_work_preparation_timeout_discards_the_runtime() {
+    let mut session = start(prepare_timeout_source());
+    let result = session.update_layout_metrics(100.0, 100.0, 0.0, []);
+    assert_eq!(result, Err(HtmlRuntimeError::ExecutionTimeout));
+    assert!(session.isolate.is_none());
+    assert!(session.context.is_none());
+}
+
 fn observed_target_boxes(
     visible: u64,
     hidden: u64,
@@ -95,4 +147,40 @@ fn hidden_and_removed_observer_source() -> &'static str {
         for (const target of [document.getElementById("visible"), hidden, removed]) observer.observe(target);
         window.addEventListener("scroll", () => { hidden.style.display = "none"; removed.remove(); });
     </script>"#
+}
+
+fn unobserved_observer_source() -> &'static str {
+    r#"<p id="target">target</p><script>
+        const observer = new IntersectionObserver(() => {});
+        observer.observe(document.getElementById("target"));
+        observer.unobserve(document.getElementById("target"));
+        globalThis.__krrRefreshIntersectionObservers = () => { throw new Error("unexpected refresh"); };
+    </script>"#
+}
+
+fn disconnected_observer_source() -> &'static str {
+    r#"<p id="target">target</p><script>
+        const observer = new IntersectionObserver(() => {});
+        observer.observe(document.getElementById("target"));
+        observer.disconnect();
+        globalThis.__krrRefreshIntersectionObservers = () => { throw new Error("unexpected refresh"); };
+    </script>"#
+}
+
+fn late_observer_source() -> &'static str {
+    r#"<p id="target">target</p><script>
+        const target = document.getElementById("target");
+        const observer = new IntersectionObserver((entries) => {
+            target.setAttribute("data-intersection", `${entries[0].isIntersecting}:${entries[0].intersectionRatio}`);
+        });
+        target.addEventListener("click", () => observer.observe(target));
+    </script>"#
+}
+
+fn prepare_exception_source() -> &'static str {
+    r#"<script>globalThis.__krrPrepareIntersectionObservers = () => { throw new Error("prepare"); };</script>"#
+}
+
+fn prepare_timeout_source() -> &'static str {
+    r#"<script>globalThis.__krrPrepareIntersectionObservers = () => { for (;;) {} };</script>"#
 }

@@ -1,5 +1,6 @@
 use super::super::script::{
-    check_bridge_error, dom_state_unavailable_error, evaluate, perform_microtask_checkpoint,
+    check_bridge_error, dom_state_unavailable_error, evaluate, evaluate_value,
+    perform_microtask_checkpoint,
 };
 use super::StaticHtmlRuntimeSession;
 use super::session_interaction::discarded_runtime_error;
@@ -31,14 +32,38 @@ impl StaticHtmlRuntimeSession {
         scroll_y: f32,
         boxes: Vec<LayoutMetric>,
     ) -> Result<bool, HtmlRuntimeError> {
-        let before = self.snapshot()?;
         self.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes)?;
+        let observer_work = self.has_intersection_observer_work();
+        if matches!(observer_work, Err(HtmlRuntimeError::ExecutionTimeout)) {
+            self.discard();
+        }
+        if !observer_work? {
+            return Ok(false);
+        }
+        let before = self.snapshot()?;
         let refresh_result = self.refresh_intersection_observers();
         if matches!(refresh_result, Err(HtmlRuntimeError::ExecutionTimeout)) {
             self.discard();
         }
         refresh_result?;
         self.snapshot_changed(&before)
+    }
+
+    fn has_intersection_observer_work(&mut self) -> Result<bool, HtmlRuntimeError> {
+        let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
+        let context = self.context.as_ref().ok_or_else(discarded_runtime_error)?;
+        v8::scope!(let handle_scope, isolate);
+        let context = v8::Local::new(handle_scope, context);
+        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
+        v8::tc_scope!(let scope, &mut **context_scope);
+        let has_work = evaluate_value(
+            scope,
+            "krr-html-intersection-observer-work",
+            "globalThis.__krrPrepareIntersectionObservers();",
+        )?
+        .is_true();
+        check_bridge_error(scope)?;
+        Ok(has_work)
     }
 
     fn set_layout_metrics(
@@ -92,7 +117,7 @@ mod tests {
     #[test]
     fn layout_metrics_surfaces_observer_refresh_exceptions() {
         let mut session = start(
-            "<script>globalThis.__krrRefreshIntersectionObservers = () => { throw new Error('refresh'); };</script>",
+            "<p id=target>target</p><script>new IntersectionObserver(() => {}).observe(document.getElementById('target')); globalThis.__krrRefreshIntersectionObservers = () => { throw new Error('refresh'); };</script>",
         );
         let result = session.update_layout_metrics(320.0, 240.0, 0.0, []);
         assert!(matches!(
@@ -104,7 +129,7 @@ mod tests {
     #[test]
     fn layout_metrics_timeout_discards_the_runtime() {
         let mut session = start(
-            "<script>globalThis.__krrRefreshIntersectionObservers = () => { for (;;) {} };</script>",
+            "<p id=target>target</p><script>new IntersectionObserver(() => {}).observe(document.getElementById('target')); globalThis.__krrRefreshIntersectionObservers = () => { for (;;) {} };</script>",
         );
 
         let result = session.update_layout_metrics(320.0, 240.0, 0.0, []);
@@ -259,5 +284,15 @@ mod tests {
         session.isolate = None;
         let result = session.snapshot_changed("");
         assert!(matches!(result, Err(HtmlRuntimeError::DomBridge(_))));
+    }
+
+    #[test]
+    fn observer_work_rejects_a_discarded_runtime() {
+        let mut session = start("<p>content</p>");
+        session.isolate = None;
+        assert!(matches!(
+            session.has_intersection_observer_work(),
+            Err(HtmlRuntimeError::DomBridge(_))
+        ));
     }
 }

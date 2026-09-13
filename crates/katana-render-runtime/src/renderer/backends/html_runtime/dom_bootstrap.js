@@ -722,10 +722,14 @@ globalThis.IntersectionObserver = class IntersectionObserver {
   }
 };
 globalThis.__krrRefreshIntersectionObservers = () => {
-  __krrIntersectionLayoutMetricsReady = true;
+  globalThis.__krrPrepareIntersectionObservers();
   for (const observer of [...__krrIntersectionObservers]) {
     observer.__krrNotify([...observer.targets]);
   }
+};
+globalThis.__krrPrepareIntersectionObservers = () => {
+  __krrIntersectionLayoutMetricsReady = true;
+  return [...__krrIntersectionObservers].some((observer) => observer.targets.size > 0);
 };
 window.addEventListener("scroll", globalThis.__krrRefreshIntersectionObservers);
 globalThis.__krrDispatchDocumentContentLoaded = () => {
