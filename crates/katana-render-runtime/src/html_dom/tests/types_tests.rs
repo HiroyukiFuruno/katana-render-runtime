@@ -108,6 +108,95 @@ fn selectedcontent_clones_selected_option_subtree() {
     assert_cloned_subtree_parent_path(&dom.document, &select, &selectedcontent, &option);
 }
 
+#[test]
+fn selectedcontent_clone_does_not_share_template_contents() {
+    let (selectedcontent, source_template, source_contents) = selectedcontent_template_fixture();
+    let cloned_template = selectedcontent.children.borrow()[0].clone();
+    let cloned_contents = template_contents(&cloned_template);
+    assert!(!std::rc::Rc::ptr_eq(&cloned_contents, &source_contents));
+    assert!(parent_of(&cloned_contents).is_none());
+    replace_text(&cloned_contents.children.borrow()[0], "changed");
+    assert_text(&source_contents.children.borrow()[0], "source");
+    assert_nested_template_is_independent(&source_template, &cloned_template);
+}
+
+fn selectedcontent_template_fixture() -> (
+    super::super::Handle,
+    super::super::Handle,
+    super::super::Handle,
+) {
+    let dom = RcDom::default();
+    let select = element("select");
+    let selectedcontent = element("selectedcontent");
+    let option = selected_option();
+    let template = element("template");
+    let source_contents = Node::new(NodeData::Document);
+    append_child(&source_contents, text("source"));
+    append_child(&source_contents, template_with_contents("nested"));
+    set_template_contents(&template, source_contents.clone());
+    append_child(&option, template.clone());
+    append_selectedcontent_fixture(&dom, &select, &selectedcontent, &option, text("chosen"));
+    dom.maybe_clone_an_option_into_selectedcontent(&option);
+    (selectedcontent, template, source_contents)
+}
+
+fn template_with_contents(value: &str) -> super::super::Handle {
+    let template = element("template");
+    let contents = Node::new(NodeData::Document);
+    append_child(&contents, text(value));
+    set_template_contents(&template, contents);
+    template
+}
+
+fn set_template_contents(template: &super::super::Handle, contents: super::super::Handle) {
+    let NodeData::Element {
+        template_contents, ..
+    } = &template.data
+    else {
+        unreachable!("fixture creates a template")
+    };
+    *template_contents.borrow_mut() = Some(contents);
+}
+
+fn template_contents(template: &super::super::Handle) -> super::super::Handle {
+    let NodeData::Element {
+        template_contents, ..
+    } = &template.data
+    else {
+        unreachable!("fixture creates a template")
+    };
+    let Some(contents) = template_contents.borrow().clone() else {
+        unreachable!("fixture assigns template contents")
+    };
+    contents
+}
+
+fn assert_nested_template_is_independent(
+    source_template: &super::super::Handle,
+    cloned_template: &super::super::Handle,
+) {
+    let source_nested = template_contents(source_template).children.borrow()[1].clone();
+    let cloned_nested = template_contents(cloned_template).children.borrow()[1].clone();
+    assert!(!std::rc::Rc::ptr_eq(
+        &template_contents(&source_nested),
+        &template_contents(&cloned_nested),
+    ));
+}
+
+fn replace_text(node: &super::super::Handle, value: &str) {
+    let NodeData::Text { contents } = &node.data else {
+        unreachable!("fixture creates text")
+    };
+    *contents.borrow_mut() = StrTendril::from_slice(value);
+}
+
+fn assert_text(node: &super::super::Handle, value: &str) {
+    let NodeData::Text { contents } = &node.data else {
+        unreachable!("fixture creates text")
+    };
+    assert_eq!(contents.borrow().as_ref(), value);
+}
+
 fn selected_option() -> super::super::Handle {
     let option = element("option");
     if let NodeData::Element { attrs, .. } = &option.data {

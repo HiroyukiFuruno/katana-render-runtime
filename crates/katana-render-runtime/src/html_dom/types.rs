@@ -111,14 +111,34 @@ impl Node {
     }
 
     fn clone_with_subtree(&self, parent: &Rc<Self>) -> Rc<Self> {
-        let clone = Self::new(self.data.clone());
+        let clone = self.clone_unparented_subtree();
         clone.parent.set(Some(Rc::downgrade(parent)));
+        clone
+    }
+
+    fn clone_unparented_subtree(&self) -> Rc<Self> {
+        let cloned_template_contents = match &self.data {
+            NodeData::Element {
+                template_contents, ..
+            } => template_contents
+                .borrow()
+                .as_ref()
+                .map(|contents| contents.clone_unparented_subtree()),
+            _ => None,
+        };
+        let clone = Self::new(self.data.clone());
         *clone.children.borrow_mut() = self
             .children
             .borrow()
             .iter()
             .map(|child| child.clone_with_subtree(&clone))
             .collect();
+        if let NodeData::Element {
+            template_contents, ..
+        } = &clone.data
+        {
+            *template_contents.borrow_mut() = cloned_template_contents;
+        }
         clone
     }
 
