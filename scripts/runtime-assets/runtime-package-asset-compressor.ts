@@ -105,14 +105,26 @@ export function buildDrawioResourceArchive(
 ): DrawioResourceArchive {
   const sorted = [...files].sort((left, right) => left.path.localeCompare(right.path));
   const groupedFiles = new Map<string, DrawioResourceArchiveFile[]>();
+  const groupOrder = new Map<string, number>();
+  let nextGroupOrder = 0;
   for (const file of sorted) {
     const group = drawioResourceArchiveGroup(file.path);
+    const legacyGroup = drawioResourceArchiveLegacyGroup(file.path);
     const entries = groupedFiles.get(group) ?? [];
     entries.push(file);
     groupedFiles.set(group, entries);
+    if (!groupOrder.has(group)) {
+      const legacyOrder = groupOrder.get(legacyGroup);
+      groupOrder.set(group, legacyOrder ?? nextGroupOrder);
+      if (legacyOrder === undefined) {
+        groupOrder.set(legacyGroup, nextGroupOrder);
+        nextGroupOrder += 1;
+      }
+    }
   }
-  const groups: DrawioResourceArchiveGroup[] = [...groupedFiles.entries()].map(
-    ([name, entries]) => {
+  const groups: DrawioResourceArchiveGroup[] = [...groupedFiles.entries()]
+    .sort(([left], [right]) => (groupOrder.get(left) ?? 0) - (groupOrder.get(right) ?? 0))
+    .map(([name, entries]) => {
       const contents: Buffer[] = [];
       const indexEntries: string[] = [];
       let offset = 0;
@@ -133,8 +145,7 @@ export function buildDrawioResourceArchive(
           name: indexName,
         },
       };
-    },
-  );
+    });
   const compressedBytes: Buffer[] = [];
   const groupEntries: string[] = [];
   const groupInfos: DrawioResourceArchiveGroupInfo[] = [];
@@ -171,6 +182,14 @@ export function buildDrawioResourceArchive(
 }
 
 function drawioResourceArchiveGroup(filePath: string): string {
+  const directStencil = /^stencils\/([a-z0-9_-]+)\.xml$/.exec(filePath);
+  if (directStencil !== null) {
+    return `stencils-${directStencil[1]}`;
+  }
+  return drawioResourceArchiveLegacyGroup(filePath);
+}
+
+function drawioResourceArchiveLegacyGroup(filePath: string): string {
   if (filePath === "stencils/basic.xml") {
     return "stencils-basic";
   }

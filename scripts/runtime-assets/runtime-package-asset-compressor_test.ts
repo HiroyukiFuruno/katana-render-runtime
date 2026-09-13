@@ -63,3 +63,36 @@ test("Draw.io resource archive はgroupごとに独立圧縮しRust indexを生�
   expect(archive.indexSource).toContain("uncompressed_length: 3");
   expect(archive.indexSource).toContain("DRAWIO_RESOURCE_ARCHIVE_GROUPS");
 });
+
+test("Draw.io stencil resources は旧flatten順を維持しdirect・basic・nestedを別groupで展開する", () => {
+  const archive = buildDrawioResourceArchive([
+    { path: "stencils/aws4.xml", bytes: Buffer.from("AWS4") },
+    { path: "stencils/basic.xml", bytes: Buffer.from("BASIC") },
+    { path: "stencils/bpmn.xml", bytes: Buffer.from("BPMN") },
+    { path: "stencils/archimate/archimate.xml", bytes: Buffer.from("NESTED") },
+  ]);
+
+  expect(archive.indexSources.map((source) => source.fileName)).toEqual([
+    "drawio-resources-stencils-archimate-index.rs",
+    "drawio-resources-stencils-aws4-index.rs",
+    "drawio-resources-stencils-bpmn-index.rs",
+    "drawio-resources-stencils-basic-index.rs",
+  ]);
+  expect(
+    archive.groups.map((group) => ({
+      name: group.name,
+      uncompressedLength: group.uncompressedLength,
+      bytes: brotliDecompressSync(
+        archive.compressedBytes.subarray(
+          group.compressedStart,
+          group.compressedStart + group.compressedLength,
+        ),
+      ).toString(),
+    })),
+  ).toEqual([
+    { name: "stencils-archimate", uncompressedLength: 6, bytes: "NESTED" },
+    { name: "stencils-aws4", uncompressedLength: 4, bytes: "AWS4" },
+    { name: "stencils-bpmn", uncompressedLength: 4, bytes: "BPMN" },
+    { name: "stencils-basic", uncompressedLength: 5, bytes: "BASIC" },
+  ]);
+});
