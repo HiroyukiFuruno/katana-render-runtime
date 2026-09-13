@@ -4,7 +4,8 @@ use super::layout::HtmlLayoutRenderer;
 use super::layout_container::horizontal_box_geometry;
 use super::style::{CssPosition, CssStyle};
 use super::types::{
-    DetailsContext, ElementBox, ElementRenderContext, HitTarget, HitTargetKind, LayoutContext,
+    DetailsContext, ELEMENT_BOX_CORNER_COUNT, ElementBox, ElementRenderContext, HitTarget,
+    HitTargetKind, LayoutContext, element_box_center_after, rectangle_corners,
 };
 
 impl HtmlLayoutRenderer {
@@ -43,26 +44,25 @@ impl HtmlLayoutRenderer {
     ) -> f32 {
         let mut style = CssStyle::from_element(element.tag, element.attributes, layout.style);
         let paint_start = self.svg.len();
+        let element_box_start = self.element_boxes.len();
         let bottom = self.render_positioned_or_flow_element(element, layout, &mut style);
-        self.finish_element_paint(paint_start, element.node_id, &style);
+        self.finish_element_paint(paint_start, element_box_start, element.node_id, &style);
         bottom
     }
 
-    fn finish_element_paint(&mut self, paint_start: usize, node_id: u64, style: &CssStyle) {
-        if style.rotation_degrees != 0.0
-            && let Some(element_box) = self
-                .element_boxes
-                .iter()
-                .rev()
-                .find(|element_box| element_box.node_id == node_id)
-        {
-            self.wrap_rotated_range(
-                paint_start,
-                style.rotation_degrees,
-                element_box.x + element_box.width / 2.0,
-                element_box.y - self.scroll_y + element_box.height / 2.0,
-            );
-        }
+    fn finish_element_paint(
+        &mut self,
+        paint_start: usize,
+        element_box_start: usize,
+        node_id: u64,
+        style: &CssStyle,
+    ) {
+        self.rotate_element_range(
+            paint_start,
+            element_box_start,
+            node_id,
+            style.rotation_degrees,
+        );
         if style.opacity < 1.0 {
             self.wrap_painted_range(paint_start, style.opacity);
         }
@@ -73,6 +73,31 @@ impl HtmlLayoutRenderer {
         }
     }
 
+    fn rotate_element_range(
+        &mut self,
+        paint_start: usize,
+        element_box_start: usize,
+        node_id: u64,
+        rotation_degrees: f32,
+    ) {
+        if rotation_degrees == 0.0 {
+            return;
+        }
+        let Some((center_x, center_y)) =
+            element_box_center_after(&self.element_boxes, element_box_start, node_id)
+        else {
+            return;
+        };
+        self.wrap_rotated_range(
+            paint_start,
+            rotation_degrees,
+            center_x,
+            center_y - self.scroll_y,
+        );
+        for element_box in &mut self.element_boxes[element_box_start..] {
+            element_box.rotate_about(rotation_degrees, center_x, center_y);
+        }
+    }
     pub(super) fn render_styled_element(
         &mut self,
         element: ElementRenderContext<'_>,
@@ -100,7 +125,7 @@ impl HtmlLayoutRenderer {
             y: 0.0,
             width: 0.0,
             height: 0.0,
-            rotation_degrees: 0.0,
+            transformed_corners: [(0.0, 0.0); ELEMENT_BOX_CORNER_COUNT],
         });
         index
     }
@@ -114,13 +139,14 @@ impl HtmlLayoutRenderer {
     ) {
         let (x, width) = horizontal_box_geometry(layout.x, layout.width, layout.style);
         let y = layout.y + layout.style.margin_top;
+        let height = (bottom - y - layout.style.margin_bottom).max(0.0);
         self.element_boxes[index] = ElementBox {
             node_id,
             x,
             y,
             width,
-            height: (bottom - y - layout.style.margin_bottom).max(0.0),
-            rotation_degrees: layout.style.rotation_degrees,
+            height,
+            transformed_corners: rectangle_corners(x, y, width, height),
         };
     }
 
@@ -169,5 +195,57 @@ impl HtmlLayoutRenderer {
         if let Some(anchor) = anchor.filter(|anchor| !anchor.is_empty()) {
             self.anchor_positions.entry(anchor.to_string()).or_insert(y);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HtmlLayoutRenderer;
+    use crate::renderer::backends::html_browser::HtmlBrowserViewport;
+    use crate::renderer::backends::html_document::HtmlDocumentNode;
+    use crate::renderer::backends::html_interactive::types::LayoutResult;
+    use std::collections::HashMap;
+
+    #[test]
+    fn ancestor_rotation_updates_descendant_element_boxes() -> Result<(), String> {
+        let layout = render_rotated_ancestor()?;
+        assert_eq!(descendant_axis_aligned(&layout)?, (60.0, -30.0, 10.0, 20.0));
+        Ok(())
+    }
+
+    fn render_rotated_ancestor() -> Result<LayoutResult, String> {
+        HtmlLayoutRenderer::render(
+            &rotated_ancestor_nodes(),
+            HtmlBrowserViewport::new(320, 240, 1.0).map_err(|error| error.to_string())?,
+            0.0,
+            &HashMap::new(),
+            None,
+        )
+    }
+
+    fn rotated_ancestor_nodes() -> Vec<HtmlDocumentNode> {
+        vec![HtmlDocumentNode::Element {
+            node_id: 1,
+            tag: "div".to_string(),
+            attributes: vec![(
+                "style".to_string(),
+                "width: 100px; height: 40px; transform: rotate(90deg)".to_string(),
+            )],
+            children: vec![HtmlDocumentNode::Element {
+                node_id: 2,
+                tag: "div".to_string(),
+                attributes: vec![("style".to_string(), "width: 20px; height: 10px".to_string())],
+                children: Vec::new(),
+            }],
+        }]
+    }
+
+    fn descendant_axis_aligned(layout: &LayoutResult) -> Result<(f32, f32, f32, f32), String> {
+        layout
+            .element_boxes
+            .iter()
+            .find(|element| element.node_id == 2)
+            .map(|target| target.transformed_axis_aligned())
+            .ok_or_else(|| "rotated descendant box is missing".to_string())
     }
 }

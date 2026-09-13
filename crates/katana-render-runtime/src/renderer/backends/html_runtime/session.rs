@@ -7,6 +7,9 @@ mod session_interactive_start;
 #[path = "session_layout_metrics.rs"]
 mod session_layout_metrics;
 #[cfg(test)]
+#[path = "session_layout_metrics_intersection_registry_tests.rs"]
+mod session_layout_metrics_intersection_registry_tests;
+#[cfg(test)]
 #[path = "session_layout_metrics_intersection_tests.rs"]
 mod session_layout_metrics_intersection_tests;
 #[path = "session_runtime.rs"]

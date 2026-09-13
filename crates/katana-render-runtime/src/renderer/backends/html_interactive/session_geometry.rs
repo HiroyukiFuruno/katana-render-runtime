@@ -31,14 +31,8 @@ impl HtmlInteractiveSession {
                 self.viewport.logical_height(),
                 self.scroll_y,
                 boxes.iter().map(|element| {
-                    (
-                        element.node_id,
-                        element.x,
-                        element.y,
-                        element.width,
-                        element.height,
-                        element.rotation_degrees,
-                    )
+                    let (x, y, width, height) = element.transformed_axis_aligned();
+                    (element.node_id, x, y, width, height, 0.0)
                 }),
             )
             .map_err(runtime_failure)

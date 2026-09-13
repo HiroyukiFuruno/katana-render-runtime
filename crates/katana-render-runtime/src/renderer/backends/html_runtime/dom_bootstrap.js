@@ -670,19 +670,20 @@ globalThis.IntersectionObserver = class IntersectionObserver {
     );
     this.targets = new Set();
     this.intersections = new Map();
-    __krrIntersectionObservers.add(this);
   }
   observe(target) {
     if (!target || target.__krrNodeId === undefined) {
       throw new TypeError("IntersectionObserver target must be an element");
     }
+    const wasEmpty = this.targets.size === 0;
     this.targets.add(target);
-    __krrIntersectionObservers.add(this);
+    if (wasEmpty) __krrIntersectionObservers.add(this);
     if (__krrIntersectionLayoutMetricsReady) this.__krrNotify([target]);
   }
   unobserve(target) {
     this.targets.delete(target);
     this.intersections.delete(target);
+    if (this.targets.size === 0) __krrIntersectionObservers.delete(this);
   }
   disconnect() {
     this.targets.clear();
