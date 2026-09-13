@@ -601,21 +601,36 @@ const __krrViewportRect = () => {
   return { x: 0, y: 0, width, height, top: 0, right: width, bottom: height, left: 0 };
 };
 const __krrParseRootMargin = (value) => {
-  const parts = String(value ?? "0px")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  if (parts.length < 1 || parts.length > 4) return null;
+  const parts = String(value).trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) parts.push("0px");
+  if (parts.length > 4) return null;
   const parsed = parts.map((part) => {
-    const match = part.match(/^(-?(?:\d+(?:\.\d*)?|\.\d+))(px|%)$/);
+    const match = part.match(/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(px|%)$/);
     if (!match) return null;
-    const amount = Number(match[1]);
-    return Number.isFinite(amount) ? { amount, unit: match[2] } : null;
+    const amount = Number(part.slice(0, -match[1].length));
+    return Number.isFinite(amount) ? { amount, unit: match[1] } : null;
   });
   if (parsed.some((part) => part === null)) return null;
   const [top, right = top, bottom = top, left = right] = parsed;
   return [top, right, bottom, left];
 };
+const __krrNormalizeThresholds = (value) => {
+  const values = Array.isArray(value) ? Array.from(value) : [value];
+  const thresholds = values.map((threshold) => {
+    const number = +threshold;
+    if (!Number.isFinite(number)) {
+      throw new TypeError("IntersectionObserver threshold must be a finite number");
+    }
+    if (number < 0 || number > 1) {
+      throw new RangeError("IntersectionObserver threshold must be between 0 and 1");
+    }
+    return number;
+  });
+  thresholds.sort((first, second) => first - second);
+  return thresholds.length === 0 ? [0] : thresholds;
+};
+const __krrSerializeRootMargin = (margins) =>
+  margins.map((margin) => `${margin.amount}${margin.unit}`).join(" ");
 const __krrExpandRootBounds = (root, margins) => {
   const [top, right, bottom, left] = margins;
   const resolve = (margin) =>
@@ -642,11 +657,17 @@ globalThis.IntersectionObserver = class IntersectionObserver {
     }
     this.callback = callback;
     this.root = options.root || null;
-    this.rootMargin = options.rootMargin || "0px";
-    this.__krrRootMargin = __krrParseRootMargin(this.rootMargin) || __krrParseRootMargin("0px");
-    this.thresholds = Array.isArray(options.threshold)
-      ? options.threshold
-      : [options.threshold || 0];
+    const rootMargin = String(options.rootMargin === undefined ? "0px" : options.rootMargin);
+    this.__krrRootMargin = __krrParseRootMargin(rootMargin);
+    if (this.__krrRootMargin === null) {
+      throw new SyntaxError(
+        "IntersectionObserver rootMargin must use 1 to 4 px or percentage values",
+      );
+    }
+    this.rootMargin = __krrSerializeRootMargin(this.__krrRootMargin);
+    this.thresholds = __krrNormalizeThresholds(
+      options.threshold === undefined ? 0 : options.threshold,
+    );
     this.targets = new Set();
     this.intersections = new Map();
     __krrIntersectionObservers.add(this);
