@@ -40,11 +40,59 @@ fn requested_system_font_families<'a>(
 }
 
 fn requested_system_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
-    existing_system_font_paths(fontconfig_font_paths(families))
+    existing_system_font_paths(platform_font_paths(families))
 }
 
 fn existing_system_font_paths(paths: impl IntoIterator<Item = PathBuf>) -> BTreeSet<PathBuf> {
     paths.into_iter().filter(|path| path.is_file()).collect()
+}
+
+fn platform_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
+    let native_paths = native_system_font_paths(families);
+    if !native_paths.is_empty() {
+        return native_paths;
+    }
+    fontconfig_font_paths(families)
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))]
+fn native_system_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
+    /* WHY: 一時DBはinstalled face metadataだけを走査し、選択したFile sourceだけを呼出元DBへ残す。 */
+    let mut database = usvg::fontdb::Database::new();
+    database.load_system_fonts();
+    named_font_paths(&database, families)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
+fn native_system_font_paths(_families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
+    BTreeSet::new()
+}
+
+#[cfg(any(test, target_os = "windows", target_os = "macos", target_os = "ios"))]
+fn named_font_paths(
+    database: &usvg::fontdb::Database,
+    requested_families: &BTreeSet<&str>,
+) -> BTreeSet<PathBuf> {
+    database
+        .faces()
+        .filter(|face| face_has_requested_family(face, requested_families))
+        .filter_map(|face| match &face.source {
+            usvg::fontdb::Source::File(path) => Some(path.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[cfg(any(test, target_os = "windows", target_os = "macos", target_os = "ios"))]
+fn face_has_requested_family(
+    face: &usvg::fontdb::FaceInfo,
+    requested_families: &BTreeSet<&str>,
+) -> bool {
+    face.families.iter().any(|(family, _)| {
+        requested_families
+            .iter()
+            .any(|requested| family.eq_ignore_ascii_case(requested))
+    })
 }
 
 fn fontconfig_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
@@ -100,7 +148,8 @@ mod tests {
     use super::{
         MAX_SYSTEM_FONT_FAMILIES_PER_REQUEST, existing_system_font_paths,
         fontconfig_families_include, load_requested_system_font_families, load_system_font_paths,
-        parse_fontconfig_font_paths, parse_fontconfig_output, requested_system_font_families,
+        named_font_paths, parse_fontconfig_font_paths, parse_fontconfig_output,
+        requested_system_font_families,
     };
     use resvg::usvg;
     use std::{
@@ -186,6 +235,38 @@ mod tests {
         load_system_font_paths(&mut database, [font]);
 
         assert!(database.faces().next().is_some());
+    }
+
+    #[test]
+    fn named_font_discovery_selects_only_requested_file_backed_faces()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let font =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+        let mut database = usvg::fontdb::Database::new();
+        database.load_font_source(usvg::fontdb::Source::File(font.clone()));
+        database.load_font_data(std::fs::read(&font)?);
+
+        let paths = named_font_paths(&database, &["noto sans"].into_iter().collect());
+
+        assert_eq!(paths, [font].into_iter().collect());
+        assert!(named_font_paths(&database, &["Segoe UI"].into_iter().collect()).is_empty());
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_font_discovery_finds_macos_helvetica_without_fontconfig() {
+        let paths = super::native_system_font_paths(&["Helvetica"].into_iter().collect());
+
+        assert!(!paths.is_empty());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_font_discovery_finds_windows_segoe_ui_without_fontconfig() {
+        let paths = super::native_system_font_paths(&["Segoe UI"].into_iter().collect());
+
+        assert!(!paths.is_empty());
     }
 
     #[test]

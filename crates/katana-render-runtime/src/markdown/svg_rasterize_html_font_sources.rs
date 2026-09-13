@@ -7,16 +7,10 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-const CJK_FONT_PATHS: &[&str] = &[
-    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-    "/System/Library/Fonts/Hiragino Sans GB.ttc",
-    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    "C:/Windows/Fonts/YuGothR.ttc",
-    "C:/Windows/Fonts/meiryo.ttc",
-];
+#[path = "svg_rasterize_html_font_paths.rs"]
+mod paths;
+use paths::{CJK_FONT_PATHS, CJK_SERIF_FONT_PATHS};
+
 const EMOJI_FONT_PATHS: &[&str] = &[
     "/System/Library/Fonts/Apple Color Emoji.ttc",
     "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
@@ -86,17 +80,6 @@ const LIBERATION_SANS_FONT_PATHS: &[&str] = &[
     "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf",
 ];
-const CJK_SERIF_FONT_PATHS: &[&str] = &[
-    "/System/Library/Fonts/Hiragino Mincho ProN.ttc",
-    "/System/Library/Fonts/Hiragino Mincho Pro.ttc",
-    "/System/Library/Fonts/ヒラギノ明朝 ProN.ttc",
-    "/System/Library/Fonts/Supplemental/Yu Mincho.ttc",
-    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSerifCJK-Regular.ttc",
-    "C:/Windows/Fonts/YuMincho.ttc",
-    "C:/Windows/Fonts/msmincho.ttc",
-];
 const MONOSPACE_FONT_PATHS: &[&str] = &[
     "/System/Library/Fonts/Menlo.ttc",
     "/System/Library/Fonts/Courier.ttc",
@@ -134,7 +117,8 @@ pub(super) fn build_html_font_db(request: &HtmlFontRequest) -> usvg::fontdb::Dat
             .filter(|family| !is_generic_font_family(family)),
     );
     if request.needs_cjk {
-        load_font_paths(&mut database, cjk_fallback_font_paths(request));
+        let fallback_paths = cjk_fallback_font_paths(request);
+        load_font_paths(&mut database, &fallback_paths);
     }
     if request.needs_emoji {
         load_font_paths(&mut database, EMOJI_FONT_PATHS);
@@ -168,11 +152,20 @@ fn load_requested_font_family(database: &mut usvg::fontdb::Database, family: &st
     load_font_paths(database, paths_for_font_family(family));
 }
 
-fn cjk_fallback_font_paths(request: &HtmlFontRequest) -> &'static [&'static str] {
-    if request.families.iter().any(|family| family == "serif") {
-        return CJK_SERIF_FONT_PATHS;
+fn cjk_fallback_font_paths(request: &HtmlFontRequest) -> Vec<&'static str> {
+    let has_serif = request.families.iter().any(|family| family == "serif");
+    let has_sans_serif = request.families.iter().any(|family| family == "sans-serif");
+    if has_serif && has_sans_serif {
+        return CJK_FONT_PATHS
+            .iter()
+            .chain(CJK_SERIF_FONT_PATHS)
+            .copied()
+            .collect();
     }
-    CJK_FONT_PATHS
+    if has_serif {
+        return CJK_SERIF_FONT_PATHS.to_vec();
+    }
+    CJK_FONT_PATHS.to_vec()
 }
 
 fn is_generic_font_family(family: &str) -> bool {
@@ -199,99 +192,5 @@ fn paths_for_font_family(family: &str) -> &'static [&'static str] {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        build_html_font_db, cjk_fallback_font_paths, load_font_paths, paths_for_font_family,
-    };
-    use crate::markdown::svg_rasterize::font::html::request::HtmlFontRequest;
-    use std::path::PathBuf;
-
-    #[test]
-    fn generic_serif_includes_linux_system_serif_candidates() {
-        let paths = paths_for_font_family("serif");
-
-        assert!(paths.contains(&"/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"));
-        assert!(
-            paths.contains(&"/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf")
-        );
-        assert!(paths.contains(&"/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf"));
-    }
-
-    #[test]
-    fn generic_serif_cjk_uses_serif_fallback_candidates() {
-        let request = HtmlFontRequest {
-            families: vec!["serif".to_string()],
-            needs_cjk: true,
-            needs_emoji: false,
-            needs_unicode_fallback: false,
-        };
-        let paths = cjk_fallback_font_paths(&request);
-
-        assert!(paths.contains(&"/usr/share/fonts/noto-cjk/NotoSerifCJK-Regular.ttc"));
-        assert!(!paths.contains(&"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"));
-    }
-
-    #[test]
-    fn named_installed_latin_families_use_selective_candidates() {
-        let dejavu = paths_for_font_family("dejavu sans");
-        let liberation = paths_for_font_family("liberation sans");
-
-        assert!(dejavu.contains(&"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"));
-        assert!(
-            liberation
-                .contains(&"/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf")
-        );
-    }
-
-    #[test]
-    fn courier_new_keeps_platform_exact_family_candidates_without_fontconfig() {
-        let paths = paths_for_font_family("courier new");
-
-        assert!(paths.contains(&"/System/Library/Fonts/Supplemental/Courier New.ttf"));
-        assert!(paths.contains(&"C:/Windows/Fonts/cour.ttf"));
-    }
-
-    #[test]
-    fn generic_monospace_includes_bold_and_italic_candidates() {
-        let paths = paths_for_font_family("monospace");
-
-        assert!(paths.contains(&"/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"));
-        assert!(paths.contains(&"/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Oblique.ttf"));
-        assert!(paths.contains(&"/usr/share/fonts/truetype/dejavu/DejaVuSansMono-BoldOblique.ttf"));
-    }
-
-    #[test]
-    fn named_serif_cjk_families_use_serif_candidates() {
-        for family in ["noto serif jp", "noto serif cjk jp", "yu mincho"] {
-            let paths = paths_for_font_family(family);
-            assert!(paths.contains(&"/usr/share/fonts/noto-cjk/NotoSerifCJK-Regular.ttc"));
-            assert!(!paths.contains(&"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"));
-        }
-    }
-
-    #[test]
-    fn load_font_paths_registers_existing_files_only() -> Result<(), std::io::Error> {
-        let existing = std::env::current_exe()?;
-        let existing = existing.to_string_lossy().into_owned();
-        let missing = PathBuf::from("/krr-font-path-that-does-not-exist.ttf");
-        let missing = missing.to_string_lossy().into_owned();
-        let paths = [existing.as_str(), missing.as_str()];
-        let mut database = resvg::usvg::fontdb::Database::new();
-
-        assert_eq!(load_font_paths(&mut database, &paths), 1);
-        Ok(())
-    }
-
-    #[test]
-    fn build_html_font_db_exercises_all_optional_source_requests() {
-        let request = HtmlFontRequest {
-            families: vec!["krr-family-that-cannot-exist-7f0b".to_string()],
-            needs_cjk: true,
-            needs_emoji: true,
-            needs_unicode_fallback: true,
-        };
-
-        let database = build_html_font_db(&request);
-        assert!(database.faces().count() >= 1);
-    }
-}
+#[path = "svg_rasterize_html_font_sources_tests.rs"]
+mod tests;
