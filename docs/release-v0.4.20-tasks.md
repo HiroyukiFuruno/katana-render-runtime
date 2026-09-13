@@ -188,3 +188,10 @@ App live操作・JWT/IAT生成・Ready・merge・実公開は未実施。通常r
 - mainは45d3353のGit objectと新生成物のinclude/indexを独立解析してBrotli展開し、全466件の順序付き `(path, raw bytes)` 完全一致、重複なし、各groupの連続offset・展開長・archive末尾を確認（exit0）。raw合計45,764,460B不変、34→65groups、圧縮4,783,331→4,797,802B。AWS4選択時のstencil展開は20,757,335→6,507,954Bへ限定される。
 - 変更はgenerator/回帰/圧縮生成物/docsだけでselector・元資産・描画実装・依存lockは不変。独立call chain監査も順序付き全列が等しければ任意selectorの部分列が等しいと確認したため、bfcbd52の757比較PASS証跡を継承する。完全gateと生成整合・配布上限は新差分で再検証する。
 - `/tmp/krr-release-check-direct-stencils-final.log` の完全release-checkは終了コード0。通常/coverage/配布crate各1026件PASS（既存ignore1）、22,676行・2,869関数とも未到達0。圧縮資産の再計算一致、393filesの配布crate8,549,952/10,485,760B、publish dry-runも成功した。Rust/JS/runtime6種も再照合して全latest、manifest/lock追加変更なし。
+
+## c3f36a0 のtemplate content cloneレビュー
+
+- [x] final review5191047537のP2 3999910505 / PRRT_kwDOSdqU6c6h5fwYを分類。`selectedcontent`へoptionをcloneする際、template_contentsのRcがsource/cloneで共有されることを回帰でRED（exit101）再現した。静的rendererの可視入力での直接退行は未確認だが、公開RcDomのclone契約とhtml5everのoption閉じhookで実害があるため今回修正する。
+- [x] `clone_unparented_subtree`でtemplate contents documentとその子孫を再帰deep cloneし、document rootのparent=Noneを維持。通常childrenの親リンク、attrs/textのclone、Drop所有権は既存契約を維持する。回帰はsource/cloneのRc非共有、clone側mutationのsource非影響、nested template contentsの再帰独立、template rootのparentなしを確認。
+- [x] strict lint / AST lint、focused回帰、fmt/diff-checkがPASS。`/tmp/krr-release-check-template-content-final.log` の完全release-checkは終了コード0。通常/coverage/配布crate各1027件PASS（既存ignore1）、22,693行・2,871関数とも未到達0、393filesの配布crateとpublish dry-run成功。
+- [ ] 製品/回帰/記録をcommitし、包含terminalを更新、通常push後にP2 threadへのreply/resolve、最新HEAD initial/final review・CIを再実行する。Ready/App merge/公開はそれらの完了後。
