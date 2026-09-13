@@ -6,6 +6,88 @@ use super::super::tree::append_child;
 use super::super::{Node, NodeData, RcDom};
 use super::{assert_panics, element, parent_of, text};
 
+struct RetainedTemplateFixture {
+    parent: Option<super::super::Handle>,
+    child: super::super::Handle,
+    child_descendant: super::super::Handle,
+    contents: super::super::Handle,
+    contents_descendant: super::super::Handle,
+}
+
+#[test]
+fn dropping_parent_preserves_retained_child_and_template_subtrees() {
+    let mut fixture = retained_template_fixture();
+    drop(fixture.parent.take());
+    assert_retained_template_subtrees(fixture);
+}
+
+fn retained_template_fixture() -> RetainedTemplateFixture {
+    let parent = Node::new(NodeData::Document);
+    let child = element("template");
+    let child_descendant = text("retained child");
+    let contents = Node::new(NodeData::Document);
+    let contents_descendant = text("retained template child");
+    append_child(&child, child_descendant.clone());
+    append_child(&contents, contents_descendant.clone());
+    if let NodeData::Element {
+        template_contents, ..
+    } = &child.data
+    {
+        *template_contents.borrow_mut() = Some(contents.clone());
+    }
+    append_child(&parent, child.clone());
+    RetainedTemplateFixture {
+        parent: Some(parent),
+        child,
+        child_descendant,
+        contents,
+        contents_descendant,
+    }
+}
+
+fn assert_retained_template_subtrees(fixture: RetainedTemplateFixture) {
+    assert!(std::rc::Rc::ptr_eq(
+        &fixture.child.children.borrow()[0],
+        &fixture.child_descendant
+    ));
+    assert!(std::rc::Rc::ptr_eq(
+        &fixture.contents.children.borrow()[0],
+        &fixture.contents_descendant
+    ));
+    let NodeData::Element {
+        template_contents, ..
+    } = &fixture.child.data
+    else {
+        unreachable!("fixture creates an element")
+    };
+    assert!(
+        template_contents
+            .borrow()
+            .as_ref()
+            .is_some_and(|contents| std::rc::Rc::ptr_eq(contents, &fixture.contents))
+    );
+}
+
+#[test]
+fn dropping_unretained_template_drains_template_contents() {
+    let parent = Node::new(NodeData::Document);
+    let template = element("template");
+    let contents = Node::new(NodeData::Document);
+    let contents_weak = std::rc::Rc::downgrade(&contents);
+    let NodeData::Element {
+        template_contents, ..
+    } = &template.data
+    else {
+        unreachable!("fixture creates an element")
+    };
+    *template_contents.borrow_mut() = Some(contents);
+    append_child(&parent, template);
+
+    drop(parent);
+
+    assert!(contents_weak.upgrade().is_none());
+}
+
 #[test]
 fn selectedcontent_clones_selected_option_subtree() {
     let dom = RcDom::default();
