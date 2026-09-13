@@ -37,12 +37,14 @@ REQUIRED_RELEASE_COMMITS = (
     "72a5f61dda084653406d972c1ee591dc965054ba",  # #76 runtime assets
     "8ec7a153a26750527dcd9a3e17425bc606e576ea",  # #76 latest dependency migration
     "99b31884d04de4322df28b0df02a8e7e7d9f3a54",  # #76 final regression repair
+    "703a7b564fe275f85eb1f2308650ae971554365e",  # #75 最新依存と共有DOM修正を含む最終状態
 )
-# A squash merge deliberately rewrites commit ancestry.  These refs identify
-# the complete v0.4.20 PR tree independently of that ancestry.  Do not shorten
-# this range to the initial implementation: each terminal repair is release
-# critical and a reconstructed squash must contain every changed path.
+# squash merge は commit の祖先関係を意図的に書き換える。この不変refは、
+# 再構成した squash と比較する最終 release 状態である。後続のrelease変更を
+# 統合したら、最終の非gate release commit へ進める。最終treeとの比較により、
+# 後続のrelease修正と依存更新を保持する。
 REQUIRED_RELEASE_BASE = "0fbf6ee965b3a5f43f609034a59d0c9042353027"
+REQUIRED_RELEASE_TERMINAL = "703a7b564fe275f85eb1f2308650ae971554365e"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
@@ -150,79 +152,45 @@ def missing_required_commits(
 def release_tree_matches(
     head_ref: str,
     release_base: str = REQUIRED_RELEASE_BASE,
-    release_tree: str | None = None,
+    release_tree: str = REQUIRED_RELEASE_TERMINAL,
 ) -> bool:
     """Return whether a squash candidate preserves the required release tree.
 
-    The normal gate derives expected blobs from the required commits so later
-    gate/test edits do not make the expected tree self-referential.  The
-    explicit tree argument remains for the focused synthetic regression test.
+    Gate implementation changes are excluded so a later gate repair is not
+    self-referential. Every other path changed from base to terminal must be
+    byte-identical in a candidate whose required commits were squash-rewritten.
     """
-    if release_tree is not None:
-        changed_paths = subprocess.run(
-            [
-                "git",
-                "diff",
-                "--name-only",
-                "-z",
-                "--no-renames",
-                release_base,
-                release_tree,
-            ],
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
-        if changed_paths.returncode != 0:
-            return False
-        paths = tuple(path for path in changed_paths.stdout.split("\0") if path)
-        if not paths:
-            return False
-        result = subprocess.run(
-            ["git", "diff", "--quiet", "--no-ext-diff", release_tree, head_ref, "--", *paths],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        return result.returncode == 0
-
-    expected_blobs: dict[str, str | None] = {}
-    for commit in REQUIRED_RELEASE_COMMITS:
-        changed = subprocess.run(
-            ["git", "diff", "--name-only", "-z", "--no-renames", f"{commit}^", commit],
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
-        if changed.returncode != 0:
-            return False
-        for path in (item for item in changed.stdout.split("\0") if item):
-            if path in RELEASE_GATE_PATHS:
-                continue
-            blob = subprocess.run(
-                ["git", "rev-parse", f"{commit}:{path}"],
-                check=False,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-            )
-            expected_blobs[path] = blob.stdout.strip() if blob.returncode == 0 else None
-    if not expected_blobs:
+    changed_paths = subprocess.run(
+        [
+            "git",
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            release_base,
+            release_tree,
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if changed_paths.returncode != 0:
         return False
-    for path, expected in expected_blobs.items():
-        present = subprocess.run(
-            ["git", "rev-parse", f"{head_ref}:{path}"],
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
-        actual = present.stdout.strip() if present.returncode == 0 else None
-        if actual != expected:
-            return False
-    return True
+    paths = tuple(
+        path
+        for path in changed_paths.stdout.split("\0")
+        if path and path not in RELEASE_GATE_PATHS
+    )
+    if not paths:
+        return False
+    result = subprocess.run(
+        ["git", "diff", "--quiet", "--no-ext-diff", release_tree, head_ref, "--", *paths],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
 
 
 def main() -> int:

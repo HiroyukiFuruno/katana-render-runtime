@@ -10,43 +10,34 @@ import tempfile
 import unittest
 from importlib import util
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("verify-release-target.py")
-REQUIRED_COMMITS = (
-    "02a73d293c04f9635fd3a822ac865bf81d4c8745",
-    "8552c63457480379922c7076bcff604b5401ae20",
-    "694ac82a85d555485e46eb46cf882c8db11b2fe5",
-    "007ab829df39ed40bbfcfc19205ad21f3da32fe8",
-    "91f07699b26567658f76021050ca7ec7b5c10df1",
-    "88d77e45b7b22d7886e2c09cb0ed1432bf237772",
-    "d34f6ea22dee7bda77201a57470d430cb658382b",
-    "0c67cff9713fca21b1de35315c4ee3f18ae0c0e8",
-    "180d1e3ab6ec3ce3182273fed3a19e28a740dfd1",
-    "65793ab7855881a6b9042d8d400d69f21a09358a",
-    "28d2a9b7f88497db3ae103ed406cceb1bd0f6ef5",
-    "ecba4e40d4bc3419c610d3013f8bd723dd2a449d",
-    "9c6915c05db47068bb8fc8649279fa0aad9a1dc5",
-    "817f0e889286be30ce5a549539eeb6d2f4d166de",
-    "bcca7a5fa4bc06ad30b2917b33cd312f771a5828",
-    "e395b23ac88ced4bcb116d6cc4e468e4376fc392",
-    "fb83a4a7ec423f2a2b41d0f4954b43a496171c68",
-    "72a5f61dda084653406d972c1ee591dc965054ba",
-    "8ec7a153a26750527dcd9a3e17425bc606e576ea",
-    "99b31884d04de4322df28b0df02a8e7e7d9f3a54",
-    "8ec7a153a26750527dcd9a3e17425bc606e576ea",
-)
-
 MODULE_SPEC = util.spec_from_file_location("verify_release_target", SCRIPT)
 assert MODULE_SPEC is not None and MODULE_SPEC.loader is not None
 VERIFY_RELEASE_TARGET = util.module_from_spec(MODULE_SPEC)
 sys.modules[MODULE_SPEC.name] = VERIFY_RELEASE_TARGET
 MODULE_SPEC.loader.exec_module(VERIFY_RELEASE_TARGET)
+REQUIRED_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_COMMITS
+
+
+def isolated_git_environment() -> dict[str, str]:
+    """Keep test repositories independent from a caller's Git worktree."""
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("GIT_")
+    }
 
 
 class VerifyReleaseTargetTests(unittest.TestCase):
     def run_check(
-        self, target: str, latest: str, head_ref: str = "HEAD"
+        self,
+        target: str,
+        latest: str,
+        head_ref: str = "HEAD",
+        cwd: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
@@ -62,7 +53,19 @@ class VerifyReleaseTargetTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+            cwd=cwd,
+            env=isolated_git_environment(),
         )
+
+    def source_git(self, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args],
+            cwd=SCRIPT.parents[2],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=isolated_git_environment(),
+        ).stdout.strip()
 
     def test_accepts_v0420_after_published_v0419(self) -> None:
         result = self.run_check("v0.4.20", "v0.4.19")
@@ -90,12 +93,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
 
     def test_rejects_head_missing_a_v0420_issue_commit(self) -> None:
         for commit in REQUIRED_COMMITS[1:]:
-            parent = subprocess.run(
-                ["git", "rev-parse", f"{commit}^"],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
+            parent = self.source_git("rev-parse", f"{commit}^")
             result = self.run_check("v0.4.20", "v0.4.19", parent)
             self.assertNotEqual(result.returncode, 0, commit)
 
@@ -108,20 +106,54 @@ class VerifyReleaseTargetTests(unittest.TestCase):
 
     def test_accepts_the_complete_intended_release_head(self) -> None:
         result = self.run_check(
-            "v0.4.20", "v0.4.19", "99b31884d04de4322df28b0df02a8e7e7d9f3a54"
+            "v0.4.20", "v0.4.19", "703a7b564fe275f85eb1f2308650ae971554365e"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_rejects_the_pre_latest_dependency_release_tree(self) -> None:
+    def test_rejects_the_previous_release_terminal(self) -> None:
         result = self.run_check(
-            "v0.4.20", "v0.4.19", "72a5f61dda084653406d972c1ee591dc965054ba"
+            "v0.4.20", "v0.4.19", "99b31884d04de4322df28b0df02a8e7e7d9f3a54"
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("99b31884d04de4322df28b0df02a8e7e7d9f3a54", result.stderr)
+        self.assertIn("703a7b564fe275f85eb1f2308650ae971554365e", result.stderr)
 
-    def test_accepts_squash_tree_but_rejects_an_incomplete_tree(self) -> None:
+    def test_accepts_actual_head_equivalent_squash_but_rejects_changed_required_path(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            repository = Path(temporary_directory)
+            temporary_root = Path(temporary_directory)
+            repository = temporary_root / "candidate"
+            isolation_parent = temporary_root / "pre-push-parent.git"
+            inherited_work_tree = temporary_root / "inherited-work-tree"
+
+            repository.mkdir()
+            subprocess.run(
+                ["git", "init", "--bare", "-q", str(isolation_parent)],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=isolated_git_environment(),
+            )
+            source_repository = Path(self.source_git("rev-parse", "--show-toplevel"))
+            source_config_before = self.source_git("config", "--local", "--null", "--list")
+            source_head_before = self.source_git("rev-parse", "HEAD")
+            source_refs_before = self.source_git(
+                "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads"
+            )
+            parent_config_before = (isolation_parent / "config").read_bytes()
+            parent_refs_before = subprocess.run(
+                [
+                    "git",
+                    f"--git-dir={isolation_parent}",
+                    "for-each-ref",
+                    "--format=%(refname) %(objectname)",
+                    "refs/heads",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=isolated_git_environment(),
+            ).stdout
 
             def git(*args: str) -> str:
                 return subprocess.run(
@@ -130,56 +162,93 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     check=True,
                     capture_output=True,
                     text=True,
+                    env=isolated_git_environment(),
                 ).stdout.strip()
 
-            def commit(name: str, content: str, message: str) -> str:
-                (repository / name).write_text(content, encoding="utf-8")
-                git("add", name)
-                git("commit", "-q", "-m", message)
-                return git("rev-parse", "HEAD")
-
-            git("init", "-q")
-            git("config", "user.email", "release-test@example.invalid")
-            git("config", "user.name", "Release Target Test")
-            base = commit("runtime.txt", "baseline\n", "base")
-            required_first = commit("runtime.txt", "first required change\n", "required first")
-            required_tree = commit("coverage.txt", "required regression\n", "required final")
-            (repository / "assets.txt").write_text("required assets\n", encoding="utf-8")
-            git("add", "assets.txt")
-            git("commit", "-q", "-m", "required terminal assets")
-            required_tree = git("rev-parse", "HEAD")
-
-            git("switch", "-q", "-c", "squash", base)
-            (repository / "runtime.txt").write_text("first required change\n", encoding="utf-8")
-            (repository / "coverage.txt").write_text("required regression\n", encoding="utf-8")
-            (repository / "assets.txt").write_text("required assets\n", encoding="utf-8")
-            git("add", "runtime.txt", "coverage.txt", "assets.txt")
-            git("commit", "-q", "-m", "squash required changes")
-            squash = git("rev-parse", "HEAD")
-
-            git("switch", "-q", "-c", "incomplete", base)
-            incomplete = commit("runtime.txt", "first required change\n", "incomplete squash")
-
-            required_commits = (required_first, required_tree)
-            original_directory = Path.cwd()
-            try:
-                os.chdir(repository)
-                self.assertEqual(
-                    VERIFY_RELEASE_TARGET.missing_required_commits(squash, required_commits),
-                    list(required_commits),
+            with patch.dict(
+                os.environ,
+                {
+                    "GIT_DIR": str(isolation_parent),
+                    "GIT_WORK_TREE": str(inherited_work_tree),
+                    "GIT_COMMON_DIR": str(isolation_parent),
+                    "GIT_INDEX_FILE": str(isolation_parent / "index"),
+                    "GIT_OBJECT_DIRECTORY": str(isolation_parent / "objects"),
+                    "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(isolation_parent / "objects"),
+                    "GIT_CONFIG_GLOBAL": str(isolation_parent / "config"),
+                },
+            ):
+                git("init", "-q")
+                git("config", "user.email", "release-test@example.invalid")
+                git("config", "user.name", "Release Target Test")
+                git("fetch", "-q", str(source_repository), "HEAD:refs/heads/release")
+                git("branch", "-f", "terminal", VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_TERMINAL)
+                git("branch", "-f", "base", VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE)
+                squash = git(
+                    "commit-tree",
+                    "release^{tree}",
+                    "-p",
+                    "base",
+                    "-m",
+                    "actual release tree as a squash",
                 )
-                self.assertTrue(
-                    VERIFY_RELEASE_TARGET.release_tree_matches(squash, base, required_tree)
+
+                accepted = self.run_check("v0.4.20", "v0.4.19", squash, repository)
+                self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+                git("switch", "-q", "-c", "changed-required-path", squash)
+                changed_path = "Cargo.toml"
+                self.assertIn(
+                    changed_path,
+                    subprocess.run(
+                        [
+                            "git",
+                            "diff",
+                            "--name-only",
+                            VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE,
+                            VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_TERMINAL,
+                        ],
+                        cwd=repository,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env=isolated_git_environment(),
+                    ).stdout.splitlines(),
                 )
-                self.assertFalse(
-                    VERIFY_RELEASE_TARGET.release_tree_matches(incomplete, base, required_tree)
-                )
-                self.assertEqual(
-                    VERIFY_RELEASE_TARGET.missing_required_commits(required_tree, required_commits),
-                    [],
-                )
-            finally:
-                os.chdir(original_directory)
+                with (repository / changed_path).open("a", encoding="utf-8") as manifest:
+                    manifest.write("\n# 必須release pathの変更\n")
+                git("add", changed_path)
+                git("commit", "-q", "-m", "change required release path")
+                rejected = self.run_check("v0.4.20", "v0.4.19", "HEAD", repository)
+                self.assertNotEqual(rejected.returncode, 0)
+
+            self.assertEqual(
+                self.source_git("config", "--local", "--null", "--list"),
+                source_config_before,
+            )
+            self.assertEqual(self.source_git("rev-parse", "HEAD"), source_head_before)
+            self.assertEqual(
+                self.source_git(
+                    "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads"
+                ),
+                source_refs_before,
+            )
+            self.assertEqual((isolation_parent / "config").read_bytes(), parent_config_before)
+            self.assertEqual(
+                subprocess.run(
+                    [
+                        "git",
+                        f"--git-dir={isolation_parent}",
+                        "for-each-ref",
+                        "--format=%(refname) %(objectname)",
+                        "refs/heads",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=isolated_git_environment(),
+                ).stdout,
+                parent_refs_before,
+            )
 
     def test_preflight_passes_github_token_to_every_release_target_invocation(self) -> None:
         workflow = (SCRIPT.parents[2] / ".github/workflows/release-preflight.yml").read_text(
