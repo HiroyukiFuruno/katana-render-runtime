@@ -84,6 +84,10 @@ impl HtmlDomBridgeState {
             json_number(left),
         )
     }
+
+    pub(super) fn has_layout_box(&self, node_id: u64) -> bool {
+        self.layout_metrics.borrow().boxes.contains_key(&node_id)
+    }
 }
 
 impl HtmlLayoutBox {

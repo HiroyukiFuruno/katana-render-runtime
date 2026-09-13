@@ -23,6 +23,14 @@ impl HtmlDomBridgeState {
             "boundingClientRect" => Ok(Some(DomValue::String(
                 self.bounding_client_rect_json(node_id(argument(arguments, 0)?)?),
             ))),
+            "layoutBoxPresent" => Ok(Some(DomValue::String(
+                if self.has_layout_box(node_id(argument(arguments, 0)?)?) {
+                    "1"
+                } else {
+                    "0"
+                }
+                .to_string(),
+            ))),
             "layoutMetrics" => Ok(Some(DomValue::String(self.layout_metrics_json()))),
             _ => Ok(None),
         }

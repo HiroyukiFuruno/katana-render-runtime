@@ -39,6 +39,7 @@ impl HtmlDomBridgeState {
             | "outerHTML"
             | "getAttribute"
             | "boundingClientRect"
+            | "layoutBoxPresent"
             | "layoutMetrics"
             | "eventPath"
             | "closest" => Some(self.lookup(operation, arguments)),

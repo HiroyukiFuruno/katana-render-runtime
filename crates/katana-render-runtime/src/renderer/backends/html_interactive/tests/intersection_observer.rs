@@ -98,6 +98,18 @@ fn observer_content_collapse_clamps_scroll_before_the_scroll_handler_runs() -> T
     Ok(())
 }
 
+#[test]
+fn hidden_and_detached_observer_targets_transition_after_real_host_reflow() -> TestResult {
+    let mut session = start_with_viewport(hidden_and_detached_document(), 160, 100)?;
+
+    assert_observer_states(&session, "true:1", "true:1")?;
+
+    dispatch_scroll(&mut session)?;
+    dispatch_scroll(&mut session)?;
+
+    assert_observer_states(&session, "false:0", "false:0")
+}
+
 fn intersection_document() -> &'static str {
     r##"<style>
 html, body { margin: 0; }
@@ -198,6 +210,57 @@ window.addEventListener("scroll", () => {
   document.getElementById("scroll-observed").setAttribute("data-scroll-y", window.scrollY);
 });
 </script>"##
+}
+
+fn hidden_and_detached_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#hidden, #removed { height: 20px; }
+#spacer { height: 400px; }
+</style>
+<div id=hidden>Hidden</div><div id=removed>Removed</div><div id=spacer></div><p id=observed></p>
+<script>
+const observed = document.getElementById("observed");
+const hidden = document.getElementById("hidden");
+const removed = document.getElementById("removed");
+const observer = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    observed.setAttribute(`data-${entry.target.id}`, `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  }
+});
+observer.observe(hidden);
+observer.observe(removed);
+window.addEventListener("scroll", () => {
+  hidden.style.display = "none";
+  removed.remove();
+});
+</script>"##
+}
+
+fn dispatch_scroll(session: &mut super::super::HtmlInteractiveSession) -> TestResult {
+    session
+        .dispatch_input(HtmlBrowserInput::Scroll {
+            delta_x: 0.0,
+            delta_y: 10.0,
+        })
+        .map_err(to_string)
+}
+
+fn assert_observer_states(
+    session: &super::super::HtmlInteractiveSession,
+    hidden: &str,
+    removed: &str,
+) -> TestResult {
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    assert!(
+        snapshot.contains(&format!(r##"data-hidden="{hidden}""##)),
+        "expected hidden target to be {hidden}: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(&format!(r##"data-removed="{removed}""##)),
+        "expected removed target to be {removed}: {snapshot}"
+    );
+    Ok(())
 }
 
 fn assert_active_anchor(
