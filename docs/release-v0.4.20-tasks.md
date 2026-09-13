@@ -169,3 +169,22 @@ P2対応の範囲判定:
 - 最終候補の依存再照合も成功: cargo outdated --workspace全最新、bun outdated候補なし。既存LatestVersionClientによる6配布元照合もMermaid12.0.0/Mermaid ZenUML1.0.0/ZenUML Core4.3.0/Draw.io31.4.5/MathJax4.1.3/PlantUML1.2026.8でcurrent=latest。再更新の必要なし。
 - 再実行は通常1026件PASS後、ASTがテスト本体の33行を検出してexit101。先の担当報告は起動行だけから成功を推定しており誤りだった。テスト本体/正常値/不正値/assert helperを9/16/17/5行へ分離、ファイル296行。raw AST直接テストとCARGO='rtk proxy cargo' just ast-lintの両方で実テスト1件PASSを確認した。新しい完全gateログは `/tmp/krr-release-check-constructor-ast-final.log`。
 - 最終完全gateは終了コード0。通常/coverage/配布crate各1026件PASS（既存ignore1）、22,676行・2,869関数とも未到達0。配布crate362files/8,533,227B（上限10,485,760B）、publish dry-run成功。最終diff11pathの非描画allowlist照合・未追跡0・生成bundle/assets整合も成功し、bfcbd52の757件全PASS証跡を継承。実公開は未実施。
+
+## 45d3353 の公開前レビュー
+
+- [x] 製品33094ec、docs/skill c9fe447、包含gate45d33534b04cbcb5f51d3791164e56da5632b569まで通常push成功。包含12testsは実ログRan12/OK、main pycompile/diff-checkも終了0。terminalはc9fe447dedd8c6eceea188cc3aebce13c0df8e76。
+- [x] constructor指摘へ返信3999711468/3999711520を公開し個別resolve。
+- [x] CI34759168778は4OS全SUCCESS、preflight34759168777もSUCCESS。Linux job103728775593は22,642行/未到達0。font fileの273/2はRegionsであり、Linesは208/0とheaderを含めmainが再照合した。
+- [x] initial5653496419（13:13:16Z）、final5653547318（13:23:26Z）、再final5653604363（13:35:03Z）は同HEAD/body digest。各reviewのP0/P1=0。
+- [x] invalid root P2 3999724570は正常TOC/cold-startと独立し、Issue #78 comment5653543976へ同期TypeErrorと正常root維持のDoDを記録。返信3999731870→resolve。
+- [x] font cache lock P2 3999748788は並列性と重複DB生成/ピークRSSのトレードオフがあり、Issue #78 comment5653600459へsingle-flight/latency/peak RSS計測を追跡。返信3999754741→resolve。修正済みとは扱わない。
+- [x] iterable threshold P2 3999772683は既存Issue #78 comment5653211288の追跡項目と一致。返信3999782729→resolve。
+- [ ] final review5190913740のP2 3999772685 / PRRT_kwDOSdqU6c6h5I0D: direct stencils/*.xmlがregexにより共通stencils groupへ落ち、20,757,335Bをまとめて展開する漏れを補正。テスト先行RED担当、generator実装担当、raw byte一致/描画証跡境界監査担当へ分離した。
+- [ ] 全466resourceの旧新展開byte一致・lookup欠落重複なし・配布上限と完全gateを確認し、包含pin/push/固有返信/resolve/最新reviewへ続ける。生成物の圧縮境界変更による描画証跡の再利用可否は検証後に判断し、未知の実装・入力変更は再利用しない。
+
+App live操作・JWT/IAT生成・Ready・merge・実公開は未実施。通常release経路を使いPR72は公開前提にしない。公開後はKDV task01a04a99-ba8b-7f12-8b68-188c349307deとKatanA task01a02aed-b44b-7891-b445-4e1bfbafc41fへ証跡を送る。KatanAで公開V8 150/152の二重link障害が再現し、KDVは公開KRR152.2.0へのregistry-only追従とsingleton/link検証を予定している。
+
+- direct stencil回帰はRED→GREEN。mainもBun4tests/21expects/exit0を独立確認した。旧bucketを分割しても旧flatten順を保ち、basicとnestedの位置を変更しない。
+- mainは45d3353のGit objectと新生成物のinclude/indexを独立解析してBrotli展開し、全466件の順序付き `(path, raw bytes)` 完全一致、重複なし、各groupの連続offset・展開長・archive末尾を確認（exit0）。raw合計45,764,460B不変、34→65groups、圧縮4,783,331→4,797,802B。AWS4選択時のstencil展開は20,757,335→6,507,954Bへ限定される。
+- 変更はgenerator/回帰/圧縮生成物/docsだけでselector・元資産・描画実装・依存lockは不変。独立call chain監査も順序付き全列が等しければ任意selectorの部分列が等しいと確認したため、bfcbd52の757比較PASS証跡を継承する。完全gateと生成整合・配布上限は新差分で再検証する。
+- `/tmp/krr-release-check-direct-stencils-final.log` の完全release-checkは終了コード0。通常/coverage/配布crate各1026件PASS（既存ignore1）、22,676行・2,869関数とも未到達0。圧縮資産の再計算一致、393filesの配布crate8,549,952/10,485,760B、publish dry-runも成功した。Rust/JS/runtime6種も再照合して全latest、manifest/lock追加変更なし。
