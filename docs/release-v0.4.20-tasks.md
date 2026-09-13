@@ -122,3 +122,26 @@ P2対応の範囲判定:
 - cargo outdated --workspace、bun outdatedを再照合し、追加更新候補なし。
 - /tmp/krr-visual-template-root-final.log は実行中。Mermaid full/CI、Draw.io basic/official diagrams/examplesまでPASS。完了後の数値はPR/Issue証跡へ記録する。未完了の比較を成功扱いしない。
 - 次工程はterminal包含固定、通常push、全描画比較完了確認、固有返信/resolve、新HEAD initial/final review・CI・App admission。その後の保護merge/公開/Issue/cleanupまでを維持する。
+
+## bfcbd52 の完了証跡と追加レビュー
+
+- [x] terminal26f32eaf7319a3e681a957922939a82b9bbf179aへ固定（12契約PASS）、bfcbd5243f243cebd4da832919e53cadac1f789bまで通常push成功。
+- [x] template/root指摘へ返信3999428594/3999428648を公開し個別resolve。
+- [x] CI34753164108は4OS全SUCCESS、preflight34753164106もSUCCESS。Linuxは22,613行/未到達0。
+- [x] /tmp/krr-visual-template-root-final.log 全工程終了コード0。29 reports/757 entries全PASS、最小99.01819（Draw.io CI20件・最小99.50）。Issue #75 comment5652951620へ完了証跡を記録。
+- [x] initial marker5652946406（11:21:21Z）で最新HEAD/body固定。formal review5190548074（11:27:49Z）はP0/P1=0、下記P2が2件。
+- [ ] 3999483176 / PRRT_kwDOSdqU6c6h4YXF: Acorn移行でevalのno-substitution TemplateLiteralを検査しない。TS gate/test担当へRED→GREENを委譲。
+- [ ] 3999483181 / PRRT_kwDOSdqU6c6h4YXK: observer不在でもlayout更新ごとにDOM全snapshotを2回実行。HTML session担当へ軽量判定・snapshot省略とlate observe/metrics/timeout回帰を委譲。
+- [ ] 修正後の完全release-check、影響範囲と生成物不変確認、terminal/push/reply/resolve、新HEADレビュー・CI・App admissionを継続する。公開前提・品質基準は不変。
+
+この追加2件の描画証跡引継ぎ条件:
+- Terra独立監査とmainのcall site確認により、eval変更はcheck-mode検査器のみ、observer変更はHTML session経路のみと確認。図比較はDiagramV8Runtime→SVG→Playwrightであり、HTML sessionを呼ばない。
+- 証跡元SHAはbfcbd5243f243cebd4da832919e53cadac1f789b（757件全PASS）。git diffの全変更pathが、HTML runtimeの上記3files、TS checks/test、docs2files、包含gate2filesの監査済みallowlist内であることを機械照合。現時点7pathすべて一致、生成bundle/manifest・vendor/asset・lock・diagram renderer・共通V8/font/SVG・rasterizer変更なし。
+- 最終diffでも同じallowlist照合とbundle --checkを実行する。未知pathや描画入力変更が出たら再利用を拒否し再比較する。HTMLを含む完全release-checkは新差分で再実行するため、品質基準や受入対象の削減ではない。
+- mainはprepare timeoutでruntime破棄する経路と、late observe回帰がscroll副作用による偽陽性にならないことを追加確認するよう指示。
+
+追加修正の最終ローカル証跡:
+- 7bb3cc8: evalの置換なしtemplateをcooked値で検査。RED→GREEN、import/export/escape/substitution除外と既存literal挙動、Bun4件/型/Biome/bundle --check PASS。生成bundleは不変。
+- cdd0e63: observer空時はmetrics/readyだけ更新してsnapshotを省略。unobserve/disconnect、Clickによるlate observe、prepare/refresh例外とtimeout破棄、実scroll回帰を確認。scrollがreadyを準備する偽陽性を排除した。
+- /tmp/krr-release-check-eval-observer-final.log は終了コード0。通常/coverage/配布crate各1025 tests PASS（既存ignore1）、22,676行/2,869関数とも未到達0。配布crate8,532,217/10,485,760B、publish dry-run PASS。
+- 描画757件の証跡元bfcbd52に対する監査済み非描画path照合と、最新bundle/assets一致検査を満たすため、同じ描画入力/実装の全比較証跡を継承する。公開後のIssue/cleanupまで未完了。
