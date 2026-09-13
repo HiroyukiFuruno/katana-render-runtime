@@ -32,27 +32,44 @@ impl StaticHtmlRuntimeSession {
         boxes: Vec<LayoutMetric>,
     ) -> Result<bool, HtmlRuntimeError> {
         let before = self.snapshot()?;
-        {
-            let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
-            let state = isolate
-                .get_slot::<HtmlDomBridgeState>()
-                .ok_or_else(dom_state_unavailable_error)?;
-            state.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes);
-
-            let context = self.context.as_ref().ok_or_else(discarded_runtime_error)?;
-            v8::scope!(let handle_scope, isolate);
-            let context = v8::Local::new(handle_scope, context);
-            let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-            v8::tc_scope!(let scope, &mut **context_scope);
-            evaluate(
-                scope,
-                "krr-html-intersection-layout-sync",
-                "globalThis.__krrRefreshIntersectionObservers();",
-            )
-            .and_then(|()| perform_microtask_checkpoint(scope))
-            .and_then(|()| check_bridge_error(scope))?;
+        self.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes)?;
+        let refresh_result = self.refresh_intersection_observers();
+        if matches!(refresh_result, Err(HtmlRuntimeError::ExecutionTimeout)) {
+            self.discard();
         }
+        refresh_result?;
         self.snapshot_changed(&before)
+    }
+
+    fn set_layout_metrics(
+        &mut self,
+        viewport_width: f32,
+        viewport_height: f32,
+        scroll_y: f32,
+        boxes: Vec<LayoutMetric>,
+    ) -> Result<(), HtmlRuntimeError> {
+        let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
+        let state = isolate
+            .get_slot::<HtmlDomBridgeState>()
+            .ok_or_else(dom_state_unavailable_error)?;
+        state.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes);
+        Ok(())
+    }
+
+    fn refresh_intersection_observers(&mut self) -> Result<(), HtmlRuntimeError> {
+        let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
+        let context = self.context.as_ref().ok_or_else(discarded_runtime_error)?;
+        v8::scope!(let handle_scope, isolate);
+        let context = v8::Local::new(handle_scope, context);
+        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
+        v8::tc_scope!(let scope, &mut **context_scope);
+        evaluate(
+            scope,
+            "krr-html-intersection-layout-sync",
+            "globalThis.__krrRefreshIntersectionObservers();",
+        )
+        .and_then(|()| perform_microtask_checkpoint(scope))
+        .and_then(|()| check_bridge_error(scope))
     }
 
     fn snapshot_changed(&self, before: &str) -> Result<bool, HtmlRuntimeError> {
@@ -63,7 +80,7 @@ impl StaticHtmlRuntimeSession {
 #[cfg(test)]
 mod tests {
     use super::super::StaticHtmlRuntime;
-    use super::HtmlRuntimeError;
+    use super::{HtmlRuntimeError, LayoutMetric};
 
     fn start(source: &str) -> super::StaticHtmlRuntimeSession {
         let start = StaticHtmlRuntime.start(source);
@@ -81,6 +98,23 @@ mod tests {
         assert!(matches!(
             result,
             Err(HtmlRuntimeError::JavaScriptException(message)) if message.contains("refresh")
+        ));
+    }
+
+    #[test]
+    fn layout_metrics_timeout_discards_the_runtime() {
+        let mut session = start(
+            "<script>globalThis.__krrRefreshIntersectionObservers = () => { for (;;) {} };</script>",
+        );
+
+        let result = session.update_layout_metrics(320.0, 240.0, 0.0, []);
+
+        assert_eq!(result, Err(HtmlRuntimeError::ExecutionTimeout));
+        assert!(session.isolate.is_none());
+        assert!(session.context.is_none());
+        assert!(matches!(
+            session.update_layout_metrics(320.0, 240.0, 0.0, []),
+            Err(HtmlRuntimeError::DomBridge(_))
         ));
     }
 
@@ -135,6 +169,72 @@ mod tests {
             "re-observing after disconnect must restore refresh registration"
         );
         Ok(())
+    }
+
+    #[test]
+    fn intersection_observer_distinguishes_touching_and_separated_zero_area_rectangles()
+    -> Result<(), HtmlRuntimeError> {
+        let mut session = start(intersection_observer_geometry_source());
+        let boxes = observer_geometry_boxes(&mut session)?;
+        session.update_layout_metrics(100.0, 100.0, 0.0, boxes)?;
+
+        let snapshot = session.snapshot()?;
+        for (id, expected) in [
+            ("touching", "true:0"),
+            ("zero", "true:1"),
+            ("separated", "false:0"),
+        ] {
+            assert!(
+                snapshot.contains(&format!(r#"id="{id}" data-intersection="{expected}""#)),
+                "expected #{id} to report {expected}: {snapshot}"
+            );
+        }
+        Ok(())
+    }
+
+    fn observer_geometry_boxes(
+        session: &mut super::super::StaticHtmlRuntimeSession,
+    ) -> Result<[LayoutMetric; 3], HtmlRuntimeError> {
+        Ok([
+            (node_id(session, "touching")?, 0.0, 100.0, 10.0, 10.0, 0.0),
+            (node_id(session, "zero")?, 20.0, 20.0, 0.0, 0.0, 0.0),
+            (node_id(session, "separated")?, 150.0, 20.0, 0.0, 0.0, 0.0),
+        ])
+    }
+
+    fn intersection_observer_geometry_source() -> &'static str {
+        r#"<p id="touching">touching</p><p id="zero">zero</p><p id="separated">separated</p><script>
+            const observer = new IntersectionObserver((entries) => {
+                for (const entry of entries) {
+                    entry.target.setAttribute(
+                        "data-intersection",
+                        `${entry.isIntersecting}:${entry.intersectionRatio}`,
+                    );
+                }
+            });
+            for (const id of ["touching", "zero", "separated"]) {
+                observer.observe(document.getElementById(id));
+            }
+        </script>"#
+    }
+
+    fn node_id(
+        session: &mut super::super::StaticHtmlRuntimeSession,
+        id: &str,
+    ) -> Result<u64, HtmlRuntimeError> {
+        session
+            .node_for_element_id(id)
+            .map(|node| node.0)
+            .ok_or_else(|| HtmlRuntimeError::DomBridge(format!("missing test node #{id}")))
+    }
+
+    #[test]
+    fn node_id_reports_a_missing_test_fixture() {
+        let mut session = start("<p>content</p>");
+        assert!(matches!(
+            node_id(&mut session, "missing"),
+            Err(HtmlRuntimeError::DomBridge(message)) if message == "missing test node #missing"
+        ));
     }
 
     #[test]

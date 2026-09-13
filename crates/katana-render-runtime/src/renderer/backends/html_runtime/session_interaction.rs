@@ -108,7 +108,7 @@ impl StaticHtmlRuntimeSession {
         })
     }
 
-    fn discard(&mut self) {
+    pub(super) fn discard(&mut self) {
         self.context.take();
         self.isolate.take();
     }

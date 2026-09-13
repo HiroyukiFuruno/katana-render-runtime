@@ -573,6 +573,11 @@ const __krrIntersectionRect = (first, second) => {
   const height = Math.max(0, bottom - top);
   return { x: left, y: top, width, height, top, right: left + width, bottom: top + height, left };
 };
+const __krrRectsIntersectOrAreEdgeAdjacent = (first, second) =>
+  first.left <= second.right &&
+  second.left <= first.right &&
+  first.top <= second.bottom &&
+  second.top <= first.bottom;
 const __krrViewportRect = () => {
   const { width, height } = __krrLayoutMetrics();
   return { x: 0, y: 0, width, height, top: 0, right: width, bottom: height, left: 0 };
@@ -658,8 +663,9 @@ globalThis.IntersectionObserver = class IntersectionObserver {
       const intersectionRect = __krrIntersectionRect(rootBounds, boundingClientRect);
       const targetArea = boundingClientRect.width * boundingClientRect.height;
       const intersectionArea = intersectionRect.width * intersectionRect.height;
-      const isIntersecting = targetArea > 0 && intersectionArea > 0;
-      const intersectionRatio = targetArea > 0 ? intersectionArea / targetArea : 0;
+      const isIntersecting = __krrRectsIntersectOrAreEdgeAdjacent(rootBounds, boundingClientRect);
+      const intersectionRatio =
+        targetArea > 0 ? intersectionArea / targetArea : isIntersecting ? 1 : 0;
       return {
         target,
         isIntersecting,
