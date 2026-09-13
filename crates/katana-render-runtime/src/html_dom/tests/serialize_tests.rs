@@ -190,6 +190,31 @@ fn html5ever_parsing_and_serialization_cover_all_serializable_node_kinds() {
     assert_eq!(dom.errors.borrow().as_slice(), ["synthetic parse error"]);
 }
 
+#[test]
+fn serialization_preserves_nested_template_contents_and_escaping() -> io::Result<()> {
+    let dom = html5ever::parse_document(RcDom::default(), Default::default()).one(
+        "<div data-note='outside &amp; \"quoted\"'>ordinary &amp; text<template><section data-note='inner &amp; \"quoted\"'>nested &amp; text<template><span>deep &amp; text</span></template></section></template></div>".to_string(),
+    );
+
+    let html = dom.document.children.borrow()[0].clone();
+    let body = html.children.borrow()[1].clone();
+    let container = body.children.borrow()[0].clone();
+    let template = container.children.borrow()[1].clone();
+    let output = serialize_node(dom.document.clone(), TraversalScope::ChildrenOnly(None))?;
+    let template_contents = serialize_node(template, TraversalScope::ChildrenOnly(None))?;
+
+    assert!(output.contains(r#"data-note="outside &amp; &quot;quoted&quot;""#));
+    assert!(output.contains("ordinary &amp; text"));
+    assert!(output.contains(r#"<template><section data-note="inner &amp; &quot;quoted&quot;""#));
+    assert!(output.contains("nested &amp; text<template><span>deep &amp; text</span></template>"));
+    assert!(template_contents.contains(r#"<section data-note="inner &amp; &quot;quoted&quot;""#));
+    assert!(
+        template_contents
+            .contains("nested &amp; text<template><span>deep &amp; text</span></template>")
+    );
+    Ok(())
+}
+
 fn serialize_node(
     node: super::super::Handle,
     traversal_scope: TraversalScope,

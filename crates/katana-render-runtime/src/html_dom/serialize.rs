@@ -88,6 +88,7 @@ fn serialize_element(
     handle: &Handle,
     name: &QualName,
     attrs: &RefCell<Vec<Attribute>>,
+    template_contents: &RefCell<Option<Handle>>,
 ) -> io::Result<()> {
     let attributes = attrs.borrow();
     let mut pairs = Vec::with_capacity(attributes.len());
@@ -96,12 +97,26 @@ fn serialize_element(
     }
     serializer.start_elem(name.clone(), &pairs)?;
     drop(attributes);
-    operations.reserve(1 + handle.children.borrow().len());
     operations.push_front(SerializeOp::Close(name.clone()));
-    for child in handle.children.borrow().iter().rev() {
+    queue_element_children(operations, handle, template_contents);
+    Ok(())
+}
+
+fn queue_element_children(
+    operations: &mut VecDeque<SerializeOp>,
+    handle: &Handle,
+    template_contents: &RefCell<Option<Handle>>,
+) {
+    let template_contents = template_contents.borrow();
+    queue_child_container(operations, template_contents.as_ref().unwrap_or(handle));
+}
+
+fn queue_child_container(operations: &mut VecDeque<SerializeOp>, handle: &Handle) {
+    let children = handle.children.borrow();
+    operations.reserve(1 + children.len());
+    for child in children.iter().rev() {
         operations.push_front(SerializeOp::Open(child.clone()));
     }
-    Ok(())
 }
 
 fn serialize_open(
@@ -113,8 +128,16 @@ fn serialize_open(
         NodeData::Element {
             ref name,
             ref attrs,
+            ref template_contents,
             ..
-        } => serialize_element(serializer, operations, handle, name, attrs),
+        } => serialize_element(
+            serializer,
+            operations,
+            handle,
+            name,
+            attrs,
+            template_contents,
+        ),
         NodeData::Doctype { ref name, .. } => serializer.write_doctype(name),
         NodeData::Text { ref contents } => serializer.write_text(&contents.borrow()),
         NodeData::Comment { ref contents } => serializer.write_comment(contents),
@@ -127,11 +150,18 @@ fn serialize_open(
 }
 
 fn queue_children(operations: &mut VecDeque<SerializeOp>, handle: &Handle) {
-    let children = handle.children.borrow();
-    for child in children.iter() {
-        operations.push_back(SerializeOp::Open(child.clone()));
+    match handle.data {
+        NodeData::Element {
+            ref template_contents,
+            ..
+        } => queue_element_children(operations, handle, template_contents),
+        _ => {
+            let children = handle.children.borrow();
+            for child in children.iter() {
+                operations.push_back(SerializeOp::Open(child.clone()));
+            }
+        }
     }
-    drop(children);
 }
 
 fn serialize_operations(
