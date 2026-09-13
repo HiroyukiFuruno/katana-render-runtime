@@ -46,13 +46,14 @@ REQUIRED_RELEASE_COMMITS = (
     "c9fe447dedd8c6eceea188cc3aebce13c0df8e76",  # #75 observer入力検証/手順是正の最終非gate状態
     "96a231c7f8aff499c8efd89a8ab0eca6a547cd33",  # #75 圧縮資産検証/docs の最終非gate状態
     "28604a1de5f341d1ef7e05bc9cbe4682deb05721",  # #75 template content clone検証/docs の最終非gate状態
+    "4cb8294423fccaa4c1c92a91a200d6949b71b762",  # #75 IntersectionObserver/祖先回転補正
 )
 # squash merge は commit の祖先関係を意図的に書き換える。この不変refは、
 # 再構成した squash と比較する最終 release 状態である。後続のrelease変更を
 # 統合したら、最終の非gate release commit へ進める。最終treeとの比較により、
 # 後続のrelease修正と依存更新を保持する。
 REQUIRED_RELEASE_BASE = "0fbf6ee965b3a5f43f609034a59d0c9042353027"
-REQUIRED_RELEASE_TERMINAL = "28604a1de5f341d1ef7e05bc9cbe4682deb05721"
+REQUIRED_RELEASE_TERMINAL = "4cb8294423fccaa4c1c92a91a200d6949b71b762"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",

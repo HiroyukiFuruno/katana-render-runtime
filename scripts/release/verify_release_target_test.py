@@ -106,16 +106,24 @@ class VerifyReleaseTargetTests(unittest.TestCase):
 
     def test_accepts_the_complete_intended_release_head(self) -> None:
         result = self.run_check(
-            "v0.4.20", "v0.4.19", "28604a1de5f341d1ef7e05bc9cbe4682deb05721"
+            "v0.4.20", "v0.4.19", "4cb8294423fccaa4c1c92a91a200d6949b71b762"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_head_missing_current_release_required_p2(self) -> None:
+        parent = self.source_git(
+            "rev-parse", "4cb8294423fccaa4c1c92a91a200d6949b71b762^"
+        )
+        result = self.run_check("v0.4.20", "v0.4.19", parent)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("4cb8294423fccaa4c1c92a91a200d6949b71b762", result.stderr)
 
     def test_rejects_the_previous_release_terminal(self) -> None:
         result = self.run_check(
             "v0.4.20", "v0.4.19", "96a231c7f8aff499c8efd89a8ab0eca6a547cd33"
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("28604a1de5f341d1ef7e05bc9cbe4682deb05721", result.stderr)
+        self.assertIn("4cb8294423fccaa4c1c92a91a200d6949b71b762", result.stderr)
 
     def test_accepts_actual_head_equivalent_squash_but_rejects_changed_required_path(
         self,
