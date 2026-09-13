@@ -11,9 +11,9 @@ DoD: #73/#74/#75/#76を含むv0.4.20を公開し、対応Issueと不要な作業
 
 ## 残作業
 
-- [ ] P1 3996222743: terminal release treeとsquashの一致検証（release_squash_fix、release guardとテスト）
-- [ ] P2 3997311759: retained DOM descendantsをDropが消さない（shared_dom_teardown、html_dom）
-- [ ] P2 3997311761: TypeScript 6強制downgradeを除去（refresh_dependencies）
+- [x] P1 3996222743: terminal release treeとsquashの一致検証。a65a89aまでpush、reply/resolve済み。
+- [x] P2 3997311759: retained DOM descendantsをDropが消さない。dc481cfをpush、reply/resolve済み。
+- [x] P2 3997311761: TypeScript 6強制downgradeを除去。23acb8fをpush、reply/resolve済み。
 - [ ] 最終差分の統合レビュー、完全release-check、描画スコア、依存最新性を確認
   - 未到達2行にsole-owner template Drop回帰を追加。再実行でcoverage 22,495行・未到達0・100% PASS、Mermaid full/CI PASS（代表最小99.59）。Draw.io完全比較も完走（後段に結果）。全更新raw log: /var/folders/ql/4640yx8s22zg367pjjld7yc00000gn/T/krr-depends-update-all.Dyy9IKJC6U。
   - release-openspec-archive / release-verify PASS。配布crate357files、8,512,055/10,485,760 bytes、配布crate自体1004tests PASS（ignored1）、publish dry-run成功。公開そのものは未実行。
@@ -25,6 +25,17 @@ DoD: #73/#74/#75/#76を含むv0.4.20を公開し、対応Issueと不要な作業
 
 禁止: 品質ゲート緩和、通常CLI/admin merge、他人の差分破棄、未検証の完了報告。
 
-## 公開経路の判断事項
+## 新HEADのレビューと公開経路
 
-Issue #75は「#72統合を公開の前提にしない」と明示する。一方、現在唯一許可されたglobal App scriptは3 governance workflowのallowlistとbootstrap/final phaseを必須にする導入専用設計で、通常release PRを扱えない。#72統合を勝手にDoDへ追加せず、通常release用の保護経路を整備するか、#72先行へ方針変更するかをユーザーへ相談中。CI/review/固定SHA/App-only保護はどちらでも維持する。
+- [x] a65a89aまで4commitを通常push。既知3threadへ公開reply/resolve。最新HEADのinitial marker 5651431554を投稿。
+- [x] 最新HEADの4OS CI・preflight成功。
+- [ ] 追加P2 PRRT_kwDOSdqU6c6h2yTG: observer refresh timeoutでruntimeをdiscardする（observer_review_repairs）。
+- [ ] 追加P2 PRRT_kwDOSdqU6c6h2yTJ: edge-adjacent intersectionを正しく扱う（observer_review_repairs）。
+- [ ] 新修正後のbundle生成、完全品質ゲート、最終non-gate commitへterminal pin更新、再push/review。
+  - 追加2件の修正とfocused 8件・lint・AST・fmtはPASS。完全release-checkは通常検査PASS後、coverage 22,570行中未到達1行で停止（/tmp/krr-release-check-final.fIJyUd）。ゲートは緩和せずテスト補完中。描画比較を並行実行。
+  - テストhelperの未到達error closureへ回帰を追加し、focused 9件・AST・fmt PASS。製品コードはcoverage都合で変更していない。完全release-checkを /tmp/krr-release-check-final-coverage-retry.log へ記録して再実行。
+  - 再実行は終了コード0で全工程PASS。coverage 22,576行/未到達0・2,855関数/未到達0、配布crateテストとpublish dry-runも成功。公開自体は未実施。
+  - Rust/npm/Maven/GitHubの最新公開版をread-only再照合し、追加更新なし。Mermaid full/CI PASS（CI最小99.59）、Draw.io full/CIは実行中。
+- [/] ユーザーが通常release用の専用App admission追加を承認。global script実装と契約テストを別担当で並行実施。PR #72は前提化せず、既存CI/review/App保護を維持する。
+
+Issue #75は「#72統合を公開の前提にしない」と明示する。現行global scriptのbootstrap専用制約は通常release modeを追加して解消する。専用Appが固定SHA/body/diffとIssue/review/CIを独立検証し、専用Check Runを既存checksを保持したままrequiredへ追加する。対応表・保護phase・再検証契約はglobal skillのreferences/release-admission-contract.mdへ固定。保護緩和や通常gh mergeは行わない。

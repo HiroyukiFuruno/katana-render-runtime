@@ -105,7 +105,7 @@ cloud review の指摘がある場合は修正し、通常の commit / push で�
 # PR外のglobal krr-pr-governance-bootstrap skillを読み、専用Appのmerge --applyを使用する
 ```
 
-この指定だけで通常release PRを処理できるとは判断しない。現行global scriptはbootstrap用の3 workflow変更を必須とし、通常release/smoke PRを拒否する制約がある。固定diffに対する非mutating検査で適用可能性を確認し、未対応なら既存の保護を外さず許可経路の設計を相談する。bootstrap統合をユーザー指定のrelease前提へ勝手に追加せず、独立した依存更新・検証は継続する。
+通常releaseはglobal skillの明示 `--mode release` を使い、bootstrap統合を公開前提にしない。global skillと参照contractを読み、固定base/head/body/diff、完全workflow allowlist、Issue、最新review、全required CIをPR checkout外で独立検証する。Draftで専用Appのrelease admission checkを既存checksを保持したままrequiredへ追加し、Ready後は同じ専用scriptのmergeだけを使う。チェックが欠けている場合や既存保護が変わった場合は拒否し、通常CLI mergeへ迂回しない。Issueは公開後のDoD完了までOPENを維持する。
 
 通常の `gh pr merge`、UI、admin bypassで保護を迂回しません。Ready化前およびmerge直前に既存のreadiness gateで最新HEAD・review・thread・required checksを検証します。
 
