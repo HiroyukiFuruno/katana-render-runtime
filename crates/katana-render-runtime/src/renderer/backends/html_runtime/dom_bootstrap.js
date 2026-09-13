@@ -573,6 +573,16 @@ const __krrIntersectionRect = (first, second) => {
   const height = Math.max(0, bottom - top);
   return { x: left, y: top, width, height, top, right: left + width, bottom: top + height, left };
 };
+const __krrEmptyIntersectionRect = () => ({
+  x: 0,
+  y: 0,
+  width: 0,
+  height: 0,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+});
 const __krrRectsIntersectOrAreEdgeAdjacent = (first, second) =>
   first.left <= second.right &&
   second.left <= first.right &&
@@ -582,6 +592,10 @@ const __krrObservedElementBox = (element) => ({
   boundingClientRect: element.getBoundingClientRect(),
   isPresent: __krrNativeDom("layoutBoxPresent", element.__krrNodeId) === "1",
 });
+const __krrTargetIsDescendantOfRoot = (target, root) => {
+  const path = __krrNativeDom("eventPath", target.__krrNodeId);
+  return Array.isArray(path) && path.slice(1).includes(root.__krrNodeId);
+};
 const __krrViewportRect = () => {
   const { width, height } = __krrLayoutMetrics();
   return { x: 0, y: 0, width, height, top: 0, right: width, bottom: height, left: 0 };
@@ -659,19 +673,25 @@ globalThis.IntersectionObserver = class IntersectionObserver {
   }
   __krrNotify(targets) {
     const entries = targets.map((target) => {
+      const elementRoot = this.root && this.root !== document ? this.root : null;
       const rootBounds = __krrExpandRootBounds(
-        this.root ? this.root.getBoundingClientRect() : __krrViewportRect(),
+        elementRoot ? elementRoot.getBoundingClientRect() : __krrViewportRect(),
         this.__krrRootMargin,
       );
       const targetBox = __krrObservedElementBox(target);
       const boundingClientRect = targetBox.boundingClientRect;
-      const intersectionRect = __krrIntersectionRect(rootBounds, boundingClientRect);
+      const targetWithinRoot = !elementRoot || __krrTargetIsDescendantOfRoot(target, elementRoot);
+      const intersectionRect = targetWithinRoot
+        ? __krrIntersectionRect(rootBounds, boundingClientRect)
+        : __krrEmptyIntersectionRect();
       const targetArea = boundingClientRect.width * boundingClientRect.height;
       const intersectionArea = intersectionRect.width * intersectionRect.height;
       const isIntersecting =
-        targetBox.isPresent && __krrRectsIntersectOrAreEdgeAdjacent(rootBounds, boundingClientRect);
+        targetWithinRoot &&
+        targetBox.isPresent &&
+        __krrRectsIntersectOrAreEdgeAdjacent(rootBounds, boundingClientRect);
       const intersectionRatio =
-        targetBox.isPresent && targetArea > 0
+        targetWithinRoot && targetBox.isPresent && targetArea > 0
           ? intersectionArea / targetArea
           : isIntersecting
             ? 1

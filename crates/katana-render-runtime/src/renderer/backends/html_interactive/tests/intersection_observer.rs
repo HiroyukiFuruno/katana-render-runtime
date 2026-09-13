@@ -110,6 +110,49 @@ fn hidden_and_detached_observer_targets_transition_after_real_host_reflow() -> T
     assert_observer_states(&session, "false:0", "false:0")
 }
 
+#[test]
+fn explicit_root_rejects_overlapping_siblings_and_its_own_target() -> TestResult {
+    let session = start_with_viewport(explicit_root_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    for (target, expected) in [
+        ("child", "true:1"),
+        ("outside", "false:0"),
+        ("root", "false:0"),
+    ] {
+        assert!(
+            snapshot.contains(&format!(r##"data-{target}="{expected}""##)),
+            "expected explicit-root target #{target} to be {expected}: {snapshot}"
+        );
+    }
+    for target in ["outside", "root"] {
+        assert!(
+            snapshot.contains(&format!(r##"data-{target}-intersection="0:0""##)),
+            "expected explicit-root target #{target} to have an empty intersection: {snapshot}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn document_root_uses_viewport_geometry() -> TestResult {
+    let session = start_with_viewport(document_root_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    assert!(
+        snapshot.contains(r##"data-document-target="true:1""##),
+        "document root must observe in-viewport targets: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-root-bounds="160:100""##),
+        "document root bounds must use the viewport: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-document-intersection="160:20""##),
+        "document root intersection must retain the target geometry: {snapshot}"
+    );
+    Ok(())
+}
+
 fn intersection_document() -> &'static str {
     r##"<style>
 html, body { margin: 0; }
@@ -234,6 +277,42 @@ window.addEventListener("scroll", () => {
   hidden.style.display = "none";
   removed.remove();
 });
+</script>"##
+}
+
+fn explicit_root_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: absolute; top: 0; left: 0; width: 120px; height: 80px; }
+#child, #outside { position: absolute; top: 0; left: 0; width: 120px; height: 80px; }
+</style>
+<div id=root><div id=child>Child</div></div><div id=outside>Outside</div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+const observed = document.getElementById("observed");
+const observer = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    observed.setAttribute(`data-${entry.target.id}`, `${entry.isIntersecting}:${entry.intersectionRatio}`);
+    observed.setAttribute(`data-${entry.target.id}-intersection`, `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+  }
+}, { root });
+for (const target of [document.getElementById("child"), document.getElementById("outside"), root]) {
+  observer.observe(target);
+}
+</script>"##
+}
+
+fn document_root_document() -> &'static str {
+    r##"<style>html, body { margin: 0; } #document-target { height: 20px; }</style>
+<div id=document-target>Document target</div><p id=observed></p>
+<script>
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  observed.setAttribute("data-document-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  observed.setAttribute("data-root-bounds", `${entry.rootBounds.width}:${entry.rootBounds.height}`);
+  observed.setAttribute("data-document-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+}, { root: document }).observe(document.getElementById("document-target"));
 </script>"##
 }
 
