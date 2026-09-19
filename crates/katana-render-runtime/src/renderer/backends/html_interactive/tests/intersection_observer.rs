@@ -156,6 +156,22 @@ fn fragmentable_inline_target_uses_union_area_and_ancestor_clip_in_real_host() -
 }
 
 #[test]
+fn fully_visible_wrapped_inline_target_reaches_threshold_one_in_real_host() -> TestResult {
+    let session = start_with_viewport(fully_visible_wrapped_inline_document(), 80, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-full-fragment-ratio="1""##),
+        "a fully visible wrapped inline target must report ratio one: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-full-fragment-threshold="true""##),
+        "a fully visible wrapped inline target must meet threshold one: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn edge_adjacent_target_keeps_its_intersection_coordinates() -> TestResult {
     let session = start_with_viewport(edge_adjacent_document(), 100, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -389,6 +405,22 @@ new IntersectionObserver((entries) => {
   observed.setAttribute("data-fragment-bounding-height", entry.boundingClientRect.height);
   observed.setAttribute("data-fragment-bounding-width", entry.boundingClientRect.width);
 }, { root: document.getElementById("root") }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn fully_visible_wrapped_inline_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { width: 80px; height: 200px; overflow: hidden; }
+</style>
+<div id=root><span id=target>one two three four five six seven eight</span></div><p id=observed></p>
+<script>
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  observed.setAttribute("data-full-fragment-ratio", entry.intersectionRatio);
+  observed.setAttribute("data-full-fragment-threshold", entry.intersectionRatio >= 1);
+}, { root: document.getElementById("root"), threshold: 1 }).observe(document.getElementById("target"));
 </script>"##
 }
 

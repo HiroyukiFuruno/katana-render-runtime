@@ -711,10 +711,7 @@ const __krrIntersectionEntry = (observer, target) => {
       : edgeAdjacentIntersectionFragments,
   );
   const targetArea = boundingClientRect.width * boundingClientRect.height;
-  const intersectionArea = intersectionFragments.reduce(
-    (area, rect) => area + rect.width * rect.height,
-    0,
-  );
+  const intersectionArea = intersectionRect.width * intersectionRect.height;
   const isIntersecting =
     targetWithinRoot &&
     targetBox.isPresent &&
