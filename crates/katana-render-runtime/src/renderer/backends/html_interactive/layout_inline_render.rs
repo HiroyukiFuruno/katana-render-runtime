@@ -108,6 +108,7 @@ impl HtmlLayoutRenderer {
             inline.cursor_x = inline.x;
             inline.bottom = inline.y;
         }
+        let element_box_start = self.element_boxes.len();
         inline.bottom = inline.bottom.max(self.render_node(
             node,
             inline.cursor_x,
@@ -116,8 +117,25 @@ impl HtmlLayoutRenderer {
             inherited,
             details,
         ));
+        self.record_inline_atomic_fragment(element_box_start);
         inline.cursor_x += inline_width;
         inline.has_items = true;
+    }
+
+    fn record_inline_atomic_fragment(&mut self, element_box_start: usize) {
+        let Some(element_box) = self.element_boxes.get(element_box_start) else {
+            return;
+        };
+        if !element_box.inline_fragments.is_empty() {
+            return;
+        }
+        let (x, y, width, height) = (
+            element_box.x,
+            element_box.y,
+            element_box.width,
+            element_box.height,
+        );
+        self.record_inline_fragment(x, y, width, height);
     }
 
     fn render_inline_text(&mut self, text: &str, style: &CssStyle, inline: &mut InlineFlowState) {

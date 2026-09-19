@@ -610,20 +610,8 @@ const __krrTargetIsDescendantOfRoot = (target, root) => {
   return __krrPathNodeIndex(path.slice(1), root.__krrNodeId) >= 0;
 };
 const __krrMetadataBelongsToRoot = (metadata, target, root) => {
-  if (metadata === null) return true;
-  if (metadata.positioning === "in-flow") return Array.isArray(metadata.clips);
-  const path = __krrNativeDom("eventPath", target.__krrNodeId);
-  if (__krrPathNodeIndex(path, root.__krrNodeId) < 0) return false;
-  if (metadata.positioning === "fixed") return false;
-  if (metadata.positioning === "absolute") {
-    if (!Number.isSafeInteger(metadata.containingBlock)) return false;
-    const containingBlockIndex = __krrPathNodeIndex(path, metadata.containingBlock);
-    const rootIndex = __krrPathNodeIndex(path, root.__krrNodeId);
-    if (containingBlockIndex < 0 || rootIndex < 0 || containingBlockIndex > rootIndex) return false;
-  } else {
-    return false;
-  }
-  return (
+  if (metadata === null || typeof metadata !== "object") return false;
+  const hasValidGeometry =
     Array.isArray(metadata.clips) &&
     metadata.clips.every(
       (clip) =>
@@ -638,8 +626,18 @@ const __krrMetadataBelongsToRoot = (metadata, target, root) => {
         [fragment.x, fragment.y, fragment.width, fragment.height].every(Number.isFinite) &&
         fragment.width >= 0 &&
         fragment.height >= 0,
-    )
-  );
+    );
+  if (!hasValidGeometry) return false;
+  if (metadata.positioning === "in-flow") return true;
+  const path = __krrNativeDom("eventPath", target.__krrNodeId);
+  if (__krrPathNodeIndex(path, root.__krrNodeId) < 0) return false;
+  if (metadata.positioning === "fixed") return false;
+  if (metadata.positioning !== "absolute" || !Number.isSafeInteger(metadata.containingBlock)) {
+    return false;
+  }
+  const containingBlockIndex = __krrPathNodeIndex(path, metadata.containingBlock);
+  const rootIndex = __krrPathNodeIndex(path, root.__krrNodeId);
+  return containingBlockIndex >= 0 && rootIndex >= 0 && containingBlockIndex <= rootIndex;
 };
 const __krrClipsWithinRoot = (metadata, target, root) => {
   if (!metadata || !Array.isArray(metadata.clips)) return [];
@@ -698,10 +696,21 @@ const __krrIntersectionEntry = (observer, target) => {
         ),
       )
     : [];
-  const intersectionRect = __krrBoundingIntersectionRect(
-    intersectionFragments.filter((rect) => rect.width > 0 && rect.height > 0),
+  const positiveIntersectionFragments = intersectionFragments.filter(
+    (rect) => rect.width > 0 && rect.height > 0,
   );
-  const targetArea = targetFragments.reduce((area, rect) => area + rect.width * rect.height, 0);
+  const edgeAdjacentIntersectionFragments =
+    rootClips.length === 0
+      ? intersectionFragments.filter((_, index) =>
+          __krrRectsIntersectOrAreEdgeAdjacent(rootBounds, targetFragments[index]),
+        )
+      : [];
+  const intersectionRect = __krrBoundingIntersectionRect(
+    positiveIntersectionFragments.length > 0
+      ? positiveIntersectionFragments
+      : edgeAdjacentIntersectionFragments,
+  );
+  const targetArea = boundingClientRect.width * boundingClientRect.height;
   const intersectionArea = intersectionFragments.reduce(
     (area, rect) => area + rect.width * rect.height,
     0,

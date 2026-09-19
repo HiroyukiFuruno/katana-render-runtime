@@ -134,6 +134,9 @@ fn fragmentable_inline_target_uses_union_area_and_ancestor_clip_in_real_host() -
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
     let ratio = observed_number(&snapshot, "data-fragment-ratio")?;
     let intersection_height = observed_number(&snapshot, "data-fragment-height")?;
+    let intersection_width = observed_number(&snapshot, "data-fragment-width")?;
+    let bounding_height = observed_number(&snapshot, "data-fragment-bounding-height")?;
+    let bounding_width = observed_number(&snapshot, "data-fragment-bounding-width")?;
 
     assert!(
         ratio > 0.0 && ratio < 1.0,
@@ -142,6 +145,28 @@ fn fragmentable_inline_target_uses_union_area_and_ancestor_clip_in_real_host() -
     assert!(
         intersection_height > 0.0 && intersection_height < 40.0,
         "the intersection must use the visible fragment, not the target's union bounding box: {snapshot}"
+    );
+    let expected_ratio =
+        intersection_width * intersection_height / (bounding_width * bounding_height);
+    assert!(
+        (ratio - expected_ratio).abs() < 0.0001,
+        "the ratio denominator must be the target boundingClientRect area: expected {expected_ratio}, got {ratio}: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
+fn edge_adjacent_target_keeps_its_intersection_coordinates() -> TestResult {
+    let session = start_with_viewport(edge_adjacent_document(), 100, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-edge="true:0""##),
+        "an edge-adjacent target must intersect at ratio zero: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-edge-rect="100:0:0:20""##),
+        "an edge-adjacent intersection must retain its zero-width edge coordinates: {snapshot}"
     );
     Ok(())
 }
@@ -360,7 +385,26 @@ new IntersectionObserver((entries) => {
   const entry = entries[0];
   observed.setAttribute("data-fragment-ratio", entry.intersectionRatio);
   observed.setAttribute("data-fragment-height", entry.intersectionRect.height);
+  observed.setAttribute("data-fragment-width", entry.intersectionRect.width);
+  observed.setAttribute("data-fragment-bounding-height", entry.boundingClientRect.height);
+  observed.setAttribute("data-fragment-bounding-width", entry.boundingClientRect.width);
 }, { root: document.getElementById("root") }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn edge_adjacent_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#edge { position: absolute; left: 100px; top: 0; width: 20px; height: 20px; }
+</style>
+<div id=edge>Edge</div><p id=observed></p>
+<script>
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  const observed = document.getElementById("observed");
+  observed.setAttribute("data-edge", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  observed.setAttribute("data-edge-rect", `${entry.intersectionRect.x}:${entry.intersectionRect.y}:${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+}).observe(document.getElementById("edge"));
 </script>"##
 }
 
