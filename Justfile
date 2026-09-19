@@ -205,8 +205,16 @@ release-openspec-archive:
     bash scripts/release/check-openspec-release-archive.sh --self-test
     bash scripts/release/check-openspec-release-archive.sh "{{VERSION}}"
 
-# Verify release branch readiness before merging
-release-check: release-openspec-archive check coverage release-verify
+# Run the complete Linux quality gate shared by CI and release preflight.
+# Keep this target limited to repository quality checks so a successful CI run
+# can be reused as evidence by the release-specific verification step.
+release-quality: check coverage
+
+# Run checks that are specific to a concrete release version and publication.
+release-specific: release-openspec-archive release-verify
+
+# Verify release branch readiness before merging.
+release-check: release-quality release-specific
 
 # Install Playwright Chromium for official Mermaid / Draw.io reference rendering
 browser-install:

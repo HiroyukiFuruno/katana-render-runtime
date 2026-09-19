@@ -258,15 +258,50 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 parent_refs_before,
             )
 
-    def test_preflight_runs_the_release_target_gate_once_through_release_check(self) -> None:
-        workflow = (SCRIPT.parents[2] / ".github/workflows/release-preflight.yml").read_text(
+    def test_release_quality_target_keeps_quality_and_release_checks_separate(self) -> None:
+        justfile = (SCRIPT.parents[2] / "Justfile").read_text(encoding="utf-8")
+        self.assertIn("release-quality: check coverage", justfile)
+        self.assertIn(
+            "release-specific: release-openspec-archive release-verify", justfile
+        )
+        self.assertIn("release-check: release-quality release-specific", justfile)
+
+    def test_linux_ci_and_preflight_run_the_identical_shared_quality_target(self) -> None:
+        repository = SCRIPT.parents[2]
+        ci_workflow = (repository / ".github/workflows/test-and-build.yml").read_text(
             encoding="utf-8"
         )
-        self.assertNotIn("- name: Release target check", workflow)
-        start = workflow.index("- name: Release check")
-        end = workflow.find("\n      - name:", start + 1)
-        body = workflow[start:] if end == -1 else workflow[start:end]
-        self.assertIn("GH_TOKEN: ${{ github.token }}", body)
+        preflight = (repository / ".github/workflows/release-preflight.yml").read_text(
+            encoding="utf-8"
+        )
+
+        ci_start = ci_workflow.index("- name: Run shared release quality gate")
+        ci_end = ci_workflow.find("\n      - name:", ci_start + 1)
+        ci_quality = (
+            ci_workflow[ci_start:] if ci_end == -1 else ci_workflow[ci_start:ci_end]
+        )
+        self.assertIn("if: matrix.os == 'ubuntu-latest'", ci_quality)
+        self.assertIn("run: just release-quality", ci_quality)
+        self.assertNotIn("run: just coverage", ci_workflow)
+
+        preflight_start = preflight.index("- name: Run shared release quality gate")
+        preflight_end = preflight.find("\n      - name:", preflight_start + 1)
+        preflight_quality = (
+            preflight[preflight_start:]
+            if preflight_end == -1
+            else preflight[preflight_start:preflight_end]
+        )
+        self.assertIn("run: just release-quality", preflight_quality)
+        self.assertNotIn("GH_TOKEN: ${{ github.token }}", preflight_quality)
+        self.assertNotIn("release-target-check", preflight)
+
+        release_start = preflight.index("- name: Release-specific verification")
+        release_specific = preflight[release_start:]
+        self.assertIn("GH_TOKEN: ${{ github.token }}", release_specific)
+        self.assertIn(
+            'run: just VERSION="${{ steps.version.outputs.version }}" release-specific',
+            release_specific,
+        )
 
 
 if __name__ == "__main__":

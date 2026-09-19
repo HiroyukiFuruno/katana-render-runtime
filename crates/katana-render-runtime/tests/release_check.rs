@@ -4,20 +4,28 @@ use std::{
 };
 
 #[test]
-fn release_check_requires_all_quality_and_publish_readiness_gates()
+fn release_check_composes_shared_quality_and_release_specific_gates()
 -> Result<(), Box<dyn std::error::Error>> {
     let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
-    let recipe = recipe_body(&justfile, "release-check")?;
+    let release_check = recipe_body(&justfile, "release-check")?;
+    let release_quality = recipe_body(&justfile, "release-quality")?;
+    let release_specific = recipe_body(&justfile, "release-specific")?;
 
-    for required_gate in [
-        "release-openspec-archive",
-        "check",
-        "coverage",
-        "release-verify",
+    for (recipe_name, recipe, required_gate) in [
+        ("release-check", release_check, "release-quality"),
+        ("release-check", release_check, "release-specific"),
+        ("release-quality", release_quality, "check"),
+        ("release-quality", release_quality, "coverage"),
+        (
+            "release-specific",
+            release_specific,
+            "release-openspec-archive",
+        ),
+        ("release-specific", release_specific, "release-verify"),
     ] {
         assert!(
             recipe.contains(required_gate),
-            "release-check must require {required_gate}"
+            "{recipe_name} must require {required_gate}"
         );
     }
     Ok(())

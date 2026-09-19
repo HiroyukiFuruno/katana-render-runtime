@@ -105,9 +105,14 @@ jobs:
             "${{ inputs.version }}" \
             "${{ github.head_ref }}"
 
-      - name: Release check
+      - name: Run shared release quality gate
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
         timeout-minutes: 75
+        run: just release-quality
+
+      - name: Release-specific verification
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        timeout-minutes: 30
         env:
           GH_TOKEN: ${{ github.token }}
-        run: just VERSION="${{ steps.version.outputs.version }}" release-check
+        run: just VERSION="${{ steps.version.outputs.version }}" release-specific

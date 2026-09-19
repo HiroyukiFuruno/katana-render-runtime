@@ -131,10 +131,11 @@ jobs:
         uses: taiki-e/install-action@just
 
       - name: Check Rust types
+        if: matrix.os != 'ubuntu-latest'
         run: cargo check --workspace --locked
 
       - name: Check formatting
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && matrix.os != 'ubuntu-latest'
         run: just fmt-check
 
       - name: Run Windows format check
@@ -142,15 +143,15 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run linter
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && matrix.os != 'ubuntu-latest'
         run: just lint
 
       - name: Run AST linter
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && matrix.os != 'ubuntu-latest'
         run: just ast-lint
 
       - name: Check runtime bundle sync
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && matrix.os != 'ubuntu-latest'
         run: just runtime-bundle-check
 
       - name: Install Linux runtime test prerequisites
@@ -164,9 +165,11 @@ jobs:
         run: brew install graphviz
 
       - name: Install PlantUML runtime
+        if: matrix.os != 'ubuntu-latest'
         run: just plantuml-install
 
       - name: Run tests
+        if: matrix.os != 'ubuntu-latest'
         timeout-minutes: 45
         run: just unit-test
 
@@ -187,41 +190,27 @@ jobs:
           }
 
       - name: Check dependency boundary
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && matrix.os != 'ubuntu-latest'
         run: just dependency-leak
 
       - name: Check TypeScript formatting and lint
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && matrix.os != 'ubuntu-latest'
         run: just biome
 
       - name: Check TypeScript types
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && matrix.os != 'ubuntu-latest'
         run: just typecheck
 
       - name: Check runtime asset checksums
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && matrix.os != 'ubuntu-latest'
         run: just runtime-asset-check
 
-      - name: Check packaged runtime bundles
+      - name: Run shared release quality gate
         if: matrix.os == 'ubuntu-latest'
-        run: just runtime-bundle-package-check
+        timeout-minutes: 75
+        run: just release-quality
 
-      - name: Check packaged PlantUML runtime manifest
-        if: matrix.os == 'ubuntu-latest'
-        run: just plantuml-runtime-package-check
-
-      - name: Free Ubuntu build space before coverage
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          cargo llvm-cov clean --workspace || true
-          rm -rf target/llvm-cov-target target/debug/deps target/debug/incremental target/debug/build target/debug/examples target/debug/.fingerprint target/package
-          df -h .
-
-      - name: Run coverage
-        if: matrix.os == 'ubuntu-latest'
-        run: just coverage
-
-      - name: Free Ubuntu build space after coverage
+      - name: Free Ubuntu build space after shared quality gate
         if: matrix.os == 'ubuntu-latest' && always()
         run: |
           cargo llvm-cov clean --workspace || true
