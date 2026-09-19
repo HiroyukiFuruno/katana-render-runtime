@@ -156,6 +156,25 @@ fn fragmentable_inline_target_uses_union_area_and_ancestor_clip_in_real_host() -
 }
 
 #[test]
+fn clipped_wrapped_inline_uses_its_full_bounding_rect_in_real_host() -> TestResult {
+    let session = start_with_viewport(clipped_wrapped_inline_document(), 80, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    let intersection_width = observed_number(&snapshot, "data-clipped-intersection-width")?;
+    let bounding_width = observed_number(&snapshot, "data-clipped-bounding-width")?;
+    let ratio = observed_number(&snapshot, "data-clipped-ratio")?;
+
+    assert!(
+        (intersection_width - bounding_width).abs() < 0.0001,
+        "clipping a wide line must retain the target bounding width when only a short wrapped line remains visible: {snapshot}"
+    );
+    assert!(
+        ratio > 0.0 && ratio < 1.0,
+        "the clipped target must retain a partial intersection ratio: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn fully_visible_wrapped_inline_target_reaches_threshold_one_in_real_host() -> TestResult {
     let session = start_with_viewport(fully_visible_wrapped_inline_document(), 80, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -404,6 +423,24 @@ new IntersectionObserver((entries) => {
   observed.setAttribute("data-fragment-width", entry.intersectionRect.width);
   observed.setAttribute("data-fragment-bounding-height", entry.boundingClientRect.height);
   observed.setAttribute("data-fragment-bounding-width", entry.boundingClientRect.width);
+}, { root: document.getElementById("root") }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn clipped_wrapped_inline_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { width: 80px; height: 20px; overflow: hidden; }
+#target { position: relative; top: -20px; }
+</style>
+<div id=root><span id=target>one two three four five six seven eight</span></div><p id=observed></p>
+<script>
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  observed.setAttribute("data-clipped-intersection-width", entry.intersectionRect.width);
+  observed.setAttribute("data-clipped-bounding-width", entry.boundingClientRect.width);
+  observed.setAttribute("data-clipped-ratio", entry.intersectionRatio);
 }, { root: document.getElementById("root") }).observe(document.getElementById("target"));
 </script>"##
 }

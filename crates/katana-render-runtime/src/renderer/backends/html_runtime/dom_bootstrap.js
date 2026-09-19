@@ -664,10 +664,6 @@ const __krrClipRect = (clip) => {
     left: clip.x,
   };
 };
-const __krrTargetFragments = (metadata, boundingClientRect) =>
-  Array.isArray(metadata?.fragments) && metadata.fragments.length > 0
-    ? metadata.fragments.map(__krrClipRect)
-    : [boundingClientRect];
 const __krrViewportRect = () => {
   const { width, height } = __krrLayoutMetrics();
   return { x: 0, y: 0, width, height, top: 0, right: width, bottom: height, left: 0 };
@@ -687,7 +683,7 @@ const __krrIntersectionEntry = (observer, target) => {
   const rootClips = elementRoot
     ? __krrClipsWithinRoot(targetBox.metadata, target, elementRoot)
     : [];
-  const targetFragments = __krrTargetFragments(targetBox.metadata, boundingClientRect);
+  const targetFragments = [boundingClientRect];
   const intersectionFragments = targetWithinRoot
     ? targetFragments.map((fragment) =>
         rootClips.reduce(
