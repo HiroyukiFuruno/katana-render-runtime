@@ -1,5 +1,4 @@
 use base64::Engine;
-use include_dir::{Dir, include_dir};
 
 #[path = "js_runtime_resource_archive.rs"]
 mod archive;
@@ -8,18 +7,12 @@ mod selector;
 use archive::DrawioResourceArchive;
 use selector::DrawioResourceSelector;
 
-static DRAWIO_SHAPE_DIR: Dir<'_> =
-    include_dir!("$CARGO_MANIFEST_DIR/src/markdown/drawio_renderer/js_runtime/resources/shapes");
-static DRAWIO_STENCIL_DIR: Dir<'_> =
-    include_dir!("$CARGO_MANIFEST_DIR/src/markdown/drawio_renderer/js_runtime/resources/stencils");
 pub(super) struct DrawioResourceCatalog;
 
 impl DrawioResourceCatalog {
     pub(super) fn builtin(source: &str) -> Result<Vec<DrawioResource>, String> {
         let selector = DrawioResourceSelector::new(source);
         let mut resources = Vec::new();
-        collect_directory_resources(&DRAWIO_SHAPE_DIR, "shapes", &selector, &mut resources);
-        collect_directory_resources(&DRAWIO_STENCIL_DIR, "stencils", &selector, &mut resources);
         DrawioResourceArchive::collect(&selector, &mut resources)?;
         Ok(resources)
     }
@@ -43,23 +36,6 @@ impl DrawioResourceEncoding {
             Self::Text => "text",
             Self::Base64 => "base64",
         }
-    }
-}
-
-fn collect_directory_resources(
-    directory: &Dir<'_>,
-    prefix: &str,
-    selector: &DrawioResourceSelector<'_>,
-    resources: &mut Vec<DrawioResource>,
-) {
-    for file in directory.files() {
-        let path = format!("{prefix}/{}", file.path().to_string_lossy());
-        if selector.includes(&path) {
-            resources.push(drawio_resource(path, file.contents()));
-        }
-    }
-    for child in directory.dirs() {
-        collect_directory_resources(child, prefix, selector, resources);
     }
 }
 

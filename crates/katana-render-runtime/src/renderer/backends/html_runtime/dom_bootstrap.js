@@ -306,6 +306,9 @@ const __krrElement = (nodeId) => {
   return element;
 };
 const __krrElementPrototype = {
+  getBoundingClientRect() {
+    return JSON.parse(__krrNativeDom("boundingClientRect", this.__krrNodeId));
+  },
   get contentDocument() {
     return this.getAttribute("data-krr-local-frame") !== null ? document : null;
   },
@@ -552,6 +555,101 @@ globalThis.document = __krrInstallEventTarget({
 });
 globalThis.window = globalThis;
 __krrInstallEventTarget(globalThis);
+const __krrLayoutMetrics = () => JSON.parse(__krrNativeDom("layoutMetrics"));
+Object.defineProperties(globalThis, {
+  innerWidth: { get: () => __krrLayoutMetrics().width },
+  innerHeight: { get: () => __krrLayoutMetrics().height },
+  pageYOffset: { get: () => __krrLayoutMetrics().scrollY },
+  scrollY: { get: () => __krrLayoutMetrics().scrollY },
+});
+const __krrIntersectionObservers = new Set();
+let __krrIntersectionLayoutMetricsReady = false;
+const __krrIntersectionRect = (first, second) => {
+  const left = Math.max(first.left, second.left);
+  const top = Math.max(first.top, second.top);
+  const right = Math.min(first.right, second.right);
+  const bottom = Math.min(first.bottom, second.bottom);
+  const width = Math.max(0, right - left);
+  const height = Math.max(0, bottom - top);
+  return { x: left, y: top, width, height, top, right: left + width, bottom: top + height, left };
+};
+const __krrEmptyIntersectionRect = () => ({
+  x: 0,
+  y: 0,
+  width: 0,
+  height: 0,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+});
+const __krrRectsIntersectOrAreEdgeAdjacent = (first, second) =>
+  first.left <= second.right &&
+  second.left <= first.right &&
+  first.top <= second.bottom &&
+  second.top <= first.bottom;
+const __krrObservedElementBox = (element) => ({
+  boundingClientRect: element.getBoundingClientRect(),
+  isPresent: __krrNativeDom("layoutBoxPresent", element.__krrNodeId) === "1",
+});
+const __krrTargetIsDescendantOfRoot = (target, root) => {
+  const path = __krrNativeDom("eventPath", target.__krrNodeId);
+  return Array.isArray(path) && path.slice(1).includes(root.__krrNodeId);
+};
+const __krrViewportRect = () => {
+  const { width, height } = __krrLayoutMetrics();
+  return { x: 0, y: 0, width, height, top: 0, right: width, bottom: height, left: 0 };
+};
+const __krrParseRootMargin = (value) => {
+  const parts = String(value).trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) parts.push("0px");
+  if (parts.length > 4) return null;
+  const parsed = parts.map((part) => {
+    const match = part.match(/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(px|%)$/);
+    if (!match) return null;
+    const amount = Number(part.slice(0, -match[1].length));
+    return Number.isFinite(amount) ? { amount, unit: match[1] } : null;
+  });
+  if (parsed.some((part) => part === null)) return null;
+  const [top, right = top, bottom = top, left = right] = parsed;
+  return [top, right, bottom, left];
+};
+const __krrNormalizeThresholds = (value) => {
+  const values = Array.isArray(value) ? Array.from(value) : [value];
+  const thresholds = values.map((threshold) => {
+    const number = +threshold;
+    if (!Number.isFinite(number)) {
+      throw new TypeError("IntersectionObserver threshold must be a finite number");
+    }
+    if (number < 0 || number > 1) {
+      throw new RangeError("IntersectionObserver threshold must be between 0 and 1");
+    }
+    return number;
+  });
+  thresholds.sort((first, second) => first - second);
+  return thresholds.length === 0 ? [0] : thresholds;
+};
+const __krrSerializeRootMargin = (margins) =>
+  margins.map((margin) => `${margin.amount}${margin.unit}`).join(" ");
+const __krrExpandRootBounds = (root, margins) => {
+  const [top, right, bottom, left] = margins;
+  const resolve = (margin) =>
+    margin.unit === "%" ? (root.width * margin.amount) / 100 : margin.amount;
+  const topOffset = resolve(top);
+  const rightOffset = resolve(right);
+  const bottomOffset = resolve(bottom);
+  const leftOffset = resolve(left);
+  return {
+    x: root.left - leftOffset,
+    y: root.top - topOffset,
+    width: root.width + leftOffset + rightOffset,
+    height: root.height + topOffset + bottomOffset,
+    top: root.top - topOffset,
+    right: root.right + rightOffset,
+    bottom: root.bottom + bottomOffset,
+    left: root.left - leftOffset,
+  };
+};
 globalThis.IntersectionObserver = class IntersectionObserver {
   constructor(callback, options = {}) {
     if (typeof callback !== "function") {
@@ -559,29 +657,103 @@ globalThis.IntersectionObserver = class IntersectionObserver {
     }
     this.callback = callback;
     this.root = options.root || null;
-    this.rootMargin = options.rootMargin || "0px";
-    this.thresholds = Array.isArray(options.threshold)
-      ? options.threshold
-      : [options.threshold || 0];
+    const rootMargin = String(options.rootMargin === undefined ? "0px" : options.rootMargin);
+    this.__krrRootMargin = __krrParseRootMargin(rootMargin);
+    if (this.__krrRootMargin === null) {
+      throw new SyntaxError(
+        "IntersectionObserver rootMargin must use 1 to 4 px or percentage values",
+      );
+    }
+    this.rootMargin = __krrSerializeRootMargin(this.__krrRootMargin);
+    this.thresholds = __krrNormalizeThresholds(
+      options.threshold === undefined ? 0 : options.threshold,
+    );
     this.targets = new Set();
+    this.intersections = new Map();
   }
   observe(target) {
     if (!target || target.__krrNodeId === undefined) {
       throw new TypeError("IntersectionObserver target must be an element");
     }
+    const wasEmpty = this.targets.size === 0;
     this.targets.add(target);
-    this.callback([{ target, isIntersecting: true, intersectionRatio: 1 }], this);
+    if (wasEmpty) __krrIntersectionObservers.add(this);
+    if (__krrIntersectionLayoutMetricsReady) this.__krrNotify([target]);
   }
   unobserve(target) {
     this.targets.delete(target);
+    this.intersections.delete(target);
+    if (this.targets.size === 0) __krrIntersectionObservers.delete(this);
   }
   disconnect() {
     this.targets.clear();
+    this.intersections.clear();
+    __krrIntersectionObservers.delete(this);
   }
   takeRecords() {
     return [];
   }
+  __krrNotify(targets) {
+    const entries = targets.map((target) => {
+      const elementRoot = this.root && this.root !== document ? this.root : null;
+      const rootBounds = __krrExpandRootBounds(
+        elementRoot ? elementRoot.getBoundingClientRect() : __krrViewportRect(),
+        this.__krrRootMargin,
+      );
+      const targetBox = __krrObservedElementBox(target);
+      const boundingClientRect = targetBox.boundingClientRect;
+      const targetWithinRoot = !elementRoot || __krrTargetIsDescendantOfRoot(target, elementRoot);
+      const intersectionRect = targetWithinRoot
+        ? __krrIntersectionRect(rootBounds, boundingClientRect)
+        : __krrEmptyIntersectionRect();
+      const targetArea = boundingClientRect.width * boundingClientRect.height;
+      const intersectionArea = intersectionRect.width * intersectionRect.height;
+      const isIntersecting =
+        targetWithinRoot &&
+        targetBox.isPresent &&
+        __krrRectsIntersectOrAreEdgeAdjacent(rootBounds, boundingClientRect);
+      const intersectionRatio =
+        targetWithinRoot && targetBox.isPresent && targetArea > 0
+          ? intersectionArea / targetArea
+          : isIntersecting
+            ? 1
+            : 0;
+      return {
+        target,
+        isIntersecting,
+        intersectionRatio,
+        boundingClientRect,
+        intersectionRect,
+        rootBounds,
+        time: Date.now(),
+      };
+    });
+    const changed = entries.filter((entry) => {
+      const previous = this.intersections.get(entry.target);
+      this.intersections.set(entry.target, entry);
+      return (
+        previous === undefined ||
+        previous.isIntersecting !== entry.isIntersecting ||
+        this.thresholds.some(
+          (threshold) =>
+            entry.intersectionRatio >= threshold !== previous.intersectionRatio >= threshold,
+        )
+      );
+    });
+    if (changed.length > 0) this.callback(changed, this);
+  }
 };
+globalThis.__krrRefreshIntersectionObservers = () => {
+  globalThis.__krrPrepareIntersectionObservers();
+  for (const observer of [...__krrIntersectionObservers]) {
+    observer.__krrNotify([...observer.targets]);
+  }
+};
+globalThis.__krrPrepareIntersectionObservers = () => {
+  __krrIntersectionLayoutMetricsReady = true;
+  return [...__krrIntersectionObservers].some((observer) => observer.targets.size > 0);
+};
+window.addEventListener("scroll", globalThis.__krrRefreshIntersectionObservers);
 globalThis.__krrDispatchDocumentContentLoaded = () => {
   __krrDocumentReadyState = "interactive";
   document.dispatchEvent(new Event("readystatechange"));

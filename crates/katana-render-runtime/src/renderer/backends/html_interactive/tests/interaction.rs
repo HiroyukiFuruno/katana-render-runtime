@@ -779,6 +779,43 @@ fn explicit_scroll_releases_fragment_resize_alignment() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn host_scroll_is_dispatched_on_window_without_bubbling_to_body() -> TestResult {
+    let mut session = start(
+        "<p id=host-scroll>initial</p><div style='height: 1000px'></div><script>document.body.addEventListener('scroll', () => document.getElementById('host-scroll').textContent += '-body'); window.addEventListener('scroll', () => document.getElementById('host-scroll').textContent += '-window');</script>",
+    )?;
+
+    session
+        .dispatch_input(HtmlBrowserInput::Scroll {
+            delta_x: 0.0,
+            delta_y: 120.0,
+        })
+        .map_err(to_string)?;
+
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    assert!(snapshot.contains(">initial-window<"), "{snapshot}");
+    assert!(!snapshot.contains("-body"), "{snapshot}");
+    Ok(())
+}
+
+#[test]
+fn clamped_host_scroll_does_not_dispatch_a_window_event() -> TestResult {
+    let mut session = start(
+        "<p id=host-scroll>initial</p><div style='height: 1000px'></div><script>window.addEventListener('scroll', () => document.getElementById('host-scroll').textContent = 'dispatched');</script>",
+    )?;
+
+    session
+        .dispatch_input(HtmlBrowserInput::Scroll {
+            delta_x: 0.0,
+            delta_y: -120.0,
+        })
+        .map_err(to_string)?;
+
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    assert!(snapshot.contains(">initial<"), "{snapshot}");
+    Ok(())
+}
+
 fn linked_fragment_document() -> String {
     "<!doctype html><html lang=en><head><meta charset=utf-8><style>\
      main { margin: 24px; padding: 24px; border: 2px solid #8e78a9; background: #f4d7ff; }\
@@ -956,8 +993,9 @@ fn assert_removed_details_target_is_reported() -> TestResult {
 }
 
 fn assert_timeout_discards_runtime_for_later_input() -> TestResult {
-    let mut session =
-        start("<input id=entry value=initial><button id=run onclick=\"for (;;) {}\">Run</button>")?;
+    let mut session = start(
+        "<input id=entry value=initial><button id=run onclick=\"for (;;) {}\">Run</button><div style='height: 1000px'></div>",
+    )?;
     click_element(&mut session, "entry")?;
     let timeout = required_error(click_element(&mut session, "run"), "handler timeout")?;
     assert!(timeout.contains("timed out"));

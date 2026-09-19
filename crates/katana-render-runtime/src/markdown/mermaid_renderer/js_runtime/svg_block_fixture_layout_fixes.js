@@ -16,14 +16,21 @@ function katanaNormalizeBlockFixtureLayout(svg) {
 
 function katanaReplaceBlockNodeTransforms(svg, layout) {
   let index = 0;
-  return svg.replace(
-    /(<g class="node [^"]*" id="[^"]+" transform="translate\()[^)]*(\)")/g,
-    (match, start, end) => {
-      const transform = layout.nodeTransforms[index];
-      index += 1;
-      return transform ? `${start}${transform}${end}` : match;
-    },
-  );
+  return svg.replace(/<g\b[^>]*>/g, (tag) => {
+    const classAttribute = tag.match(/\bclass="([^"]*)"/);
+    if (!classAttribute?.[1].split(/\s+/).includes("node") || !/\bid="[^"]+"/.test(tag)) {
+      return tag;
+    }
+    const transformAttribute = /\btransform="translate\([^"]*"/;
+    if (!transformAttribute.test(tag)) {
+      return tag;
+    }
+    const transform = layout.nodeTransforms[index];
+    index += 1;
+    return transform
+      ? tag.replace(transformAttribute, 'transform="translate(' + transform + ')"')
+      : tag;
+  });
 }
 
 function katanaReplaceBlockShapes(svg, layout) {

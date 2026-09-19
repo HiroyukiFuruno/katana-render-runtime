@@ -50,7 +50,7 @@ fn serialize_svg_attributes(
 fn serialize_source_attributes(attributes: &[Attribute], output: &mut String, root: bool) -> bool {
     let mut has_xmlns = false;
     for attribute in attributes {
-        let local = attribute.name.local.as_ref();
+        let local = attribute.name.local.as_str();
         has_xmlns |= local.eq_ignore_ascii_case("xmlns");
         if root && matches_ignore_ascii_case(local, &["x", "y", "width", "height", "style"]) {
             continue;

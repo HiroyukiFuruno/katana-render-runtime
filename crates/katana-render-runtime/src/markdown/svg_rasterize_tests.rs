@@ -1,6 +1,6 @@
 use super::font::{
-    bundled_font_db, html_font_db, html_rasterizer_options, rasterizer_options,
-    rasterizer_options_with_font_db,
+    bundled_font_db, html_font_db_for_markup, html_font_db_for_text, html_rasterizer_options,
+    rasterizer_options, rasterizer_options_with_font_db,
 };
 use super::{RasterTarget, SvgRasterizeOps, effective_scale, parse_light_dark_function};
 use crate::markdown::color_preset::DiagramColorPreset;
@@ -8,6 +8,9 @@ use crate::markdown::mermaid_renderer::MermaidRenderOps;
 use crate::markdown::runtime_assets::RuntimeAsset;
 use crate::markdown::{DiagramBlock, DiagramKind, DiagramResult};
 use resvg::usvg;
+
+#[path = "svg_rasterize_font_memory_tests.rs"]
+mod font_memory_tests;
 
 const RGBA_CHANNELS: usize = 4;
 
@@ -117,7 +120,7 @@ fn distinct_cell_count(
 
 #[test]
 fn rasterizer_prefers_the_bundled_noto_sans_before_system_fonts() -> Result<(), String> {
-    let database = html_font_db();
+    let database = html_font_db_for_text("Noto Sans", "KRR");
     let query = usvg::fontdb::Query {
         families: &[usvg::fontdb::Family::Name("Noto Sans")],
         weight: usvg::fontdb::Weight::NORMAL,
@@ -138,10 +141,13 @@ fn rasterizer_prefers_the_bundled_noto_sans_before_system_fonts() -> Result<(), 
 #[test]
 fn public_and_html_rasterizers_use_separate_font_databases() {
     let public = rasterizer_options();
-    let html = html_rasterizer_options();
+    let html = html_rasterizer_options("<svg/>");
 
     assert!(std::sync::Arc::ptr_eq(&public.fontdb, &bundled_font_db()));
-    assert!(std::sync::Arc::ptr_eq(&html.fontdb, &html_font_db()));
+    assert!(std::sync::Arc::ptr_eq(
+        &html.fontdb,
+        &html_font_db_for_markup("<svg/>")
+    ));
     assert!(!std::sync::Arc::ptr_eq(&public.fontdb, &html.fontdb));
 }
 

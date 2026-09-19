@@ -1,9 +1,9 @@
 use super::consume_nested;
 use cssparser::{CowRcStr, ParseError, Parser, Token};
 
-pub(super) fn parse_declaration_value<'i, 't>(
-    input: &mut Parser<'i, 't>,
-) -> Result<(String, bool), ParseError<'i, ()>> {
+pub(super) fn parse_declaration_value(
+    input: &mut Parser<'_>,
+) -> Result<(String, bool), ParseError<()>> {
     let start = input.position();
     let mut value_end = start;
     let mut important = false;
@@ -23,7 +23,7 @@ pub(super) fn parse_declaration_value<'i, 't>(
     }
     let value = input.slice(start..value_end).trim().to_string();
     if value.is_empty() {
-        return Err(input.new_custom_error(()));
+        return Err(ParseError::custom(()));
     }
     Ok((value, important))
 }
@@ -36,7 +36,7 @@ pub(super) fn normalized_property_name(name: CowRcStr<'_>) -> String {
     }
 }
 
-fn is_important_delimiter(token: &Token<'_>, input: &mut Parser<'_, '_>) -> bool {
+fn is_important_delimiter(token: &Token<'_>, input: &mut Parser<'_>) -> bool {
     *token == Token::Delim('!')
         && input
             .try_parse(|tail| {

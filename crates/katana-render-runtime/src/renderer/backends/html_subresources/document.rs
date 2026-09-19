@@ -117,7 +117,7 @@ fn is_stylesheet(node: &Handle) -> bool {
 }
 
 fn is_tag(node: &Handle, expected: &str) -> bool {
-    matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref().eq_ignore_ascii_case(expected))
+    matches!(&node.data, NodeData::Element { name, .. } if name.local.as_str().eq_ignore_ascii_case(expected))
 }
 
 fn attribute(node: &Handle, expected: &str) -> Option<String> {
@@ -127,7 +127,7 @@ fn attribute(node: &Handle, expected: &str) -> Option<String> {
     attrs
         .borrow()
         .iter()
-        .find(|attribute| attribute.name.local.as_ref().eq_ignore_ascii_case(expected))
+        .find(|attribute| attribute.name.local.as_str().eq_ignore_ascii_case(expected))
         .map(|attribute| attribute.value.to_string())
 }
 
@@ -138,7 +138,7 @@ fn set_attribute(node: &Handle, expected: &str, value: &str) {
     if let Some(attribute) = attrs
         .borrow_mut()
         .iter_mut()
-        .find(|attribute| attribute.name.local.as_ref().eq_ignore_ascii_case(expected))
+        .find(|attribute| attribute.name.local.as_str().eq_ignore_ascii_case(expected))
     {
         attribute.value = value.into();
     }

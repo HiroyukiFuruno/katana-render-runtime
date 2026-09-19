@@ -1,5 +1,5 @@
 use super::super::dom_state::HtmlDomBridgeState;
-use super::super::interaction::{event, event_default_prevented};
+use super::super::interaction::{dispatch_window_event, event, event_default_prevented};
 use super::super::script::{HtmlTryCatchScope, check_bridge_error, dom_state_unavailable_error};
 use super::super::types::HtmlNodeId;
 use super::super::types::{
@@ -35,6 +35,16 @@ impl StaticHtmlRuntimeSession {
         event: HtmlRuntimeEvent,
     ) -> Result<HtmlRuntimeDispatch, HtmlRuntimeError> {
         let result = self.run_event(event);
+        if matches!(result, Err(HtmlRuntimeError::ExecutionTimeout)) {
+            self.discard();
+        }
+        result
+    }
+
+    pub(crate) fn dispatch_window_scroll(
+        &mut self,
+    ) -> Result<HtmlRuntimeDispatch, HtmlRuntimeError> {
+        let result = self.run_window_event(HtmlRuntimeEventKind::Scroll);
         if matches!(result, Err(HtmlRuntimeError::ExecutionTimeout)) {
             self.discard();
         }
@@ -79,7 +89,26 @@ impl StaticHtmlRuntimeSession {
         })
     }
 
-    fn discard(&mut self) {
+    fn run_window_event(
+        &mut self,
+        kind: HtmlRuntimeEventKind,
+    ) -> Result<HtmlRuntimeDispatch, HtmlRuntimeError> {
+        {
+            let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
+            let context = self.context.as_ref().ok_or_else(discarded_runtime_error)?;
+            v8::scope!(let handle_scope, isolate);
+            let context = v8::Local::new(handle_scope, context);
+            let context_scope = &mut v8::ContextScope::new(handle_scope, context);
+            v8::tc_scope!(let scope, &mut **context_scope);
+            dispatch_window_event(scope, kind.as_str())?;
+        }
+        Ok(HtmlRuntimeDispatch {
+            content: self.snapshot()?,
+            navigation: None,
+        })
+    }
+
+    pub(super) fn discard(&mut self) {
         self.context.take();
         self.isolate.take();
     }

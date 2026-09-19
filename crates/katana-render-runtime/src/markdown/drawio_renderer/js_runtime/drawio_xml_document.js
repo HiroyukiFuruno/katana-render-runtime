@@ -31,6 +31,8 @@ function katanaSetupDrawioXmlDocumentQueries(detached) {
     katanaDrawioDocumentElement(detached)?.querySelector(`#${id}`) ?? null;
   detached.getElementsByTagName = (tagName) =>
     katanaDrawioDocumentElement(detached)?.getElementsByTagName(tagName) ?? [];
+  detached.getElementsByTagNameNS = (namespaceURI, localName) =>
+    katanaDrawioDocumentElement(detached)?.getElementsByTagNameNS(namespaceURI, localName) ?? [];
 }
 
 function katanaDrawioAppendDocumentChild(detached, child) {

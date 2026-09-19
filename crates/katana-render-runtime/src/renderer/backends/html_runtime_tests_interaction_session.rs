@@ -53,6 +53,18 @@ fn discards_the_v8_session_after_event_timeout() {
     );
 }
 
+#[test]
+fn window_scroll_timeout_discards_the_v8_session() {
+    let mut session =
+        must_session("<script>window.addEventListener('scroll', () => { for (;;) {} });</script>");
+    let dispatch = session.dispatch_window_scroll();
+    assert!(matches!(dispatch, Err(HtmlRuntimeError::ExecutionTimeout)));
+    assert!(matches!(
+        session.snapshot(),
+        Err(HtmlRuntimeError::DomBridge(message)) if message.contains("discarded")
+    ));
+}
+
 fn must_session(source: &str) -> StaticHtmlRuntimeSession {
     must_result(StaticHtmlRuntime.start(source))
 }

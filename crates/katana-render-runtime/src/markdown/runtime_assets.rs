@@ -19,28 +19,28 @@ const ZENUML_RUNTIME_ASSET_ARCHIVE: &[u8] =
 #[cfg(test)]
 include!("generated/zenuml-runtime-assets-index.rs");
 
-pub const MERMAID_JS_VERSION: &str = "11.17.2";
+pub const MERMAID_JS_VERSION: &str = "12.0.0";
 pub const MERMAID_JS_CHECKSUM: &str =
-    "581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8";
+    "28fca7ae6ebc7ed7bb63bde63136a74bfef14f296a57e403657eeb8b32836073";
 pub const MERMAID_DOWNLOAD_URL: &str =
-    "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js";
+    "https://cdn.jsdelivr.net/npm/mermaid@12.0.0/dist/mermaid.min.js";
 
-pub const MERMAID_ZENUML_JS_VERSION: &str = "0.2.3";
+pub const MERMAID_ZENUML_JS_VERSION: &str = "1.0.0";
 pub const MERMAID_ZENUML_JS_CHECKSUM: &str =
-    "28eeec88021d9e9728df4d005ff723a3d71da29a21dbcfa2a628232c35ef2ab6";
+    "f75662869d22aac58870e52370fe4c46b89b9710bf4b03df93b3227b5e18e730";
 pub const MERMAID_ZENUML_DOWNLOAD_URL: &str =
-    "https://cdn.jsdelivr.net/npm/@mermaid-js/mermaid-zenuml@0.2.3/dist/mermaid-zenuml.min.js";
+    "https://cdn.jsdelivr.net/npm/@mermaid-js/mermaid-zenuml@1.0.0/dist/mermaid-zenuml.min.js";
 
-pub const ZENUML_CORE_JS_VERSION: &str = "3.47.9";
+pub const ZENUML_CORE_JS_VERSION: &str = "4.3.0";
 pub const ZENUML_CORE_JS_CHECKSUM: &str =
-    "ece11a311907401113f965e110c25c04c6a9b3dcbbb234bf2cd593a3f3ebe3df";
+    "7e48bc62d5ef65d2f30747da6dc7da01b7175ff9c637dda066a4b92c2d8bdf4d";
 pub const ZENUML_CORE_DOWNLOAD_URL: &str =
-    "https://cdn.jsdelivr.net/npm/@zenuml/core@3.47.9/dist/zenuml.js";
+    "https://cdn.jsdelivr.net/npm/@zenuml/core@4.3.0/dist/zenuml.js";
 
-pub const DRAWIO_JS_VERSION: &str = "31.3.2";
+pub const DRAWIO_JS_VERSION: &str = "31.4.5";
 pub const DRAWIO_JS_CHECKSUM: &str =
-    "0c44747cb40c92738082b8dc045787df9fa1f309985b0c0d916e65adef8923fd";
-pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v31.3.2";
+    "ec8b66e744a9e5dbf3870129c297385595f55a548f75b952f209548d49610536";
+pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v31.4.5";
 
 pub const MATHJAX_JS_VERSION: &str = "4.1.3";
 pub const MATHJAX_JS_CHECKSUM: &str =
@@ -61,7 +61,7 @@ impl RuntimeAsset {
             version: MERMAID_JS_VERSION,
             filename: "mermaid.min.js",
             source: RuntimeAssetSource::Brotli {
-                bytes: include_bytes!("../../vendor/mermaid/11.17.2/mermaid.min.js.br"),
+                bytes: include_bytes!("../../vendor/mermaid/12.0.0/mermaid.min.js.br"),
                 cache: &MERMAID_RUNTIME_ASSET_BYTES,
             },
         }
@@ -73,7 +73,7 @@ impl RuntimeAsset {
             version: DRAWIO_JS_VERSION,
             filename: "drawio.min.js",
             source: RuntimeAssetSource::Brotli {
-                bytes: include_bytes!("../../vendor/drawio/31.3.2/drawio.min.js.br"),
+                bytes: include_bytes!("../../vendor/drawio/31.4.5/drawio.min.js.br"),
                 cache: &DRAWIO_RUNTIME_ASSET_BYTES,
             },
         }

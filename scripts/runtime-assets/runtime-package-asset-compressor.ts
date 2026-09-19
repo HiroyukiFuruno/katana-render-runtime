@@ -23,8 +23,6 @@ const DRAWIO_RESOURCE_ROOT = path.join(
 const DRAWIO_RESOURCE_ARCHIVE_EXCLUDED_ROOT_ENTRIES = new Set([
   "drawio-libs",
   "drawio-resource-manifest.json",
-  "shapes",
-  "stencils",
 ]);
 const DRAWIO_RESOURCE_GENERATED_DIR = path.join(
   "crates",
@@ -36,14 +34,6 @@ const DRAWIO_RESOURCE_GENERATED_DIR = path.join(
 );
 const DRAWIO_RESOURCE_ARCHIVE = path.join(DRAWIO_RESOURCE_GENERATED_DIR, "drawio-resources.bin.br");
 const DRAWIO_RESOURCE_INDEX = path.join(DRAWIO_RESOURCE_GENERATED_DIR, "drawio-resources-index.rs");
-const DRAWIO_RESOURCE_MEDIA_INDEX = path.join(
-  DRAWIO_RESOURCE_GENERATED_DIR,
-  "drawio-resources-media-index.rs",
-);
-const DRAWIO_RESOURCE_DATA_INDEX = path.join(
-  DRAWIO_RESOURCE_GENERATED_DIR,
-  "drawio-resources-data-index.rs",
-);
 const ZENUML_RUNTIME_ASSET_GENERATED_DIR = path.join(
   "crates",
   "katana-render-runtime",
@@ -68,8 +58,27 @@ export interface DrawioResourceArchiveFile {
 export interface DrawioResourceArchive {
   readonly compressedBytes: Buffer;
   readonly indexSource: string;
-  readonly mediaIndexSource: string;
-  readonly dataIndexSource: string;
+  readonly indexSources: readonly DrawioResourceArchiveIndexSource[];
+  readonly groups: readonly DrawioResourceArchiveGroupInfo[];
+}
+
+export interface DrawioResourceArchiveIndexSource {
+  readonly fileName: string;
+  readonly source: string;
+}
+
+export interface DrawioResourceArchiveGroupInfo {
+  readonly name: string;
+  readonly compressedStart: number;
+  readonly compressedLength: number;
+  readonly uncompressedLength: number;
+}
+
+interface DrawioResourceArchiveGroup {
+  readonly name: string;
+  readonly compressedBytes: Buffer;
+  readonly uncompressedLength: number;
+  readonly indexSource: DrawioResourceArchiveIndexSource & { readonly name: string };
 }
 
 export interface ZenumlRuntimeAssetArchiveFile {
@@ -95,34 +104,107 @@ export function buildDrawioResourceArchive(
   files: readonly DrawioResourceArchiveFile[],
 ): DrawioResourceArchive {
   const sorted = [...files].sort((left, right) => left.path.localeCompare(right.path));
-  const contents: Buffer[] = [];
-  const mediaEntries: string[] = [];
-  const dataEntries: string[] = [];
-  let offset = 0;
+  const groupedFiles = new Map<string, DrawioResourceArchiveFile[]>();
+  const groupOrder = new Map<string, number>();
+  let nextGroupOrder = 0;
   for (const file of sorted) {
-    const bytes = Buffer.from(file.bytes);
-    contents.push(bytes);
-    const entry = `    (${JSON.stringify(file.path)}, ${offset}, ${bytes.length}),`;
-    (file.path.startsWith("data/") ? dataEntries : mediaEntries).push(entry);
-    offset += bytes.length;
+    const group = drawioResourceArchiveGroup(file.path);
+    const legacyGroup = drawioResourceArchiveLegacyGroup(file.path);
+    const entries = groupedFiles.get(group) ?? [];
+    entries.push(file);
+    groupedFiles.set(group, entries);
+    if (!groupOrder.has(group)) {
+      const legacyOrder = groupOrder.get(legacyGroup);
+      groupOrder.set(group, legacyOrder ?? nextGroupOrder);
+      if (legacyOrder === undefined) {
+        groupOrder.set(legacyGroup, nextGroupOrder);
+        nextGroupOrder += 1;
+      }
+    }
   }
-  const rawBytes = Buffer.concat(contents);
+  const groups: DrawioResourceArchiveGroup[] = [...groupedFiles.entries()]
+    .sort(([left], [right]) => (groupOrder.get(left) ?? 0) - (groupOrder.get(right) ?? 0))
+    .map(([name, entries]) => {
+      const contents: Buffer[] = [];
+      const indexEntries: string[] = [];
+      let offset = 0;
+      for (const file of entries) {
+        const bytes = Buffer.from(file.bytes);
+        contents.push(bytes);
+        indexEntries.push(`    (${JSON.stringify(file.path)}, ${offset}, ${bytes.length}),`);
+        offset += bytes.length;
+      }
+      const indexName = drawioResourceArchiveIndexName(name);
+      return {
+        name,
+        compressedBytes: compressRuntimePackageAsset(Buffer.concat(contents)),
+        uncompressedLength: offset,
+        indexSource: {
+          fileName: `drawio-resources-${name}-index.rs`,
+          source: indexArraySource(indexName, indexEntries),
+          name: indexName,
+        },
+      };
+    });
+  const compressedBytes: Buffer[] = [];
+  const groupEntries: string[] = [];
+  const groupInfos: DrawioResourceArchiveGroupInfo[] = [];
+  let compressedOffset = 0;
+  for (const group of groups) {
+    compressedBytes.push(group.compressedBytes);
+    groupEntries.push(
+      `    DrawioResourceArchiveGroup { compressed_start: ${compressedOffset}, compressed_length: ${group.compressedBytes.length}, uncompressed_length: ${group.uncompressedLength}, index: ${group.indexSource.name} },`,
+    );
+    groupInfos.push({
+      name: group.name,
+      compressedStart: compressedOffset,
+      compressedLength: group.compressedBytes.length,
+      uncompressedLength: group.uncompressedLength,
+    });
+    compressedOffset += group.compressedBytes.length;
+  }
   const indexSource = [
-    `pub(super) const DRAWIO_RESOURCE_ARCHIVE_UNCOMPRESSED_LENGTH: usize = ${rawBytes.length};`,
-    'include!("drawio-resources-media-index.rs");',
-    'include!("drawio-resources-data-index.rs");',
-    "pub(super) const DRAWIO_RESOURCE_ARCHIVE_INDEXES: &[DrawioResourceArchiveIndex] = &[",
-    "    DRAWIO_RESOURCE_ARCHIVE_MEDIA_INDEX,",
-    "    DRAWIO_RESOURCE_ARCHIVE_DATA_INDEX,",
+    ...groups.map(({ indexSource }) => `include!("${indexSource.fileName}");`),
+    "pub(super) const DRAWIO_RESOURCE_ARCHIVE_GROUPS: &[DrawioResourceArchiveGroup] = &[",
+    ...groupEntries,
     "];",
     "",
   ].join("\n");
   return {
-    compressedBytes: compressRuntimePackageAsset(rawBytes),
+    compressedBytes: Buffer.concat(compressedBytes),
     indexSource,
-    mediaIndexSource: indexArraySource("DRAWIO_RESOURCE_ARCHIVE_MEDIA_INDEX", mediaEntries),
-    dataIndexSource: indexArraySource("DRAWIO_RESOURCE_ARCHIVE_DATA_INDEX", dataEntries),
+    indexSources: groups.map(({ indexSource }) => ({
+      fileName: indexSource.fileName,
+      source: indexSource.source,
+    })),
+    groups: groupInfos,
   };
+}
+
+function drawioResourceArchiveGroup(filePath: string): string {
+  const directStencil = /^stencils\/([a-z0-9_-]+)\.xml$/.exec(filePath);
+  if (directStencil !== null) {
+    return `stencils-${directStencil[1]}`;
+  }
+  return drawioResourceArchiveLegacyGroup(filePath);
+}
+
+function drawioResourceArchiveLegacyGroup(filePath: string): string {
+  if (filePath === "stencils/basic.xml") {
+    return "stencils-basic";
+  }
+  const [root, child] = filePath.split("/");
+  if (root === undefined || !/^[a-z0-9_-]+$/.test(root)) {
+    throw new Error(`Unsupported Draw.io resource path: ${filePath}`);
+  }
+  if (child === undefined || !/^[a-z0-9_-]+$/.test(child)) {
+    return root;
+  }
+  return `${root}-${child}`;
+}
+
+function drawioResourceArchiveIndexName(group: string): string {
+  return `DRAWIO_RESOURCE_ARCHIVE_${group.toUpperCase().replaceAll("-", "_")}_INDEX`;
 }
 
 function indexArraySource(name: string, entries: readonly string[]): string {
@@ -220,8 +302,14 @@ export class RuntimePackageAssetCompressor {
     const archive = buildDrawioResourceArchive(this.drawioResourceFiles(DRAWIO_RESOURCE_ROOT));
     this.syncFile(mode, DRAWIO_RESOURCE_ARCHIVE, archive.compressedBytes);
     this.syncFile(mode, DRAWIO_RESOURCE_INDEX, Buffer.from(archive.indexSource, "utf8"));
-    this.syncFile(mode, DRAWIO_RESOURCE_MEDIA_INDEX, Buffer.from(archive.mediaIndexSource, "utf8"));
-    this.syncFile(mode, DRAWIO_RESOURCE_DATA_INDEX, Buffer.from(archive.dataIndexSource, "utf8"));
+    for (const source of archive.indexSources) {
+      this.syncFile(
+        mode,
+        path.join(DRAWIO_RESOURCE_GENERATED_DIR, source.fileName),
+        Buffer.from(source.source, "utf8"),
+      );
+    }
+    this.removeStaleDrawioResourceIndexes(mode, archive.indexSources);
   }
 
   private syncZenumlRuntimeAssets(mode: CompressionMode): void {
@@ -272,6 +360,27 @@ export class RuntimePackageAssetCompressor {
     if (actual === undefined || !actual.equals(expected)) {
       throw new Error(`Compressed runtime package asset is stale: ${target}`);
     }
+  }
+
+  private removeStaleDrawioResourceIndexes(
+    mode: CompressionMode,
+    sources: readonly DrawioResourceArchiveIndexSource[],
+  ): void {
+    const expected = new Set(sources.map(({ fileName }) => fileName));
+    const stale = fs
+      .readdirSync(DRAWIO_RESOURCE_GENERATED_DIR)
+      .filter((fileName) => /^drawio-resources-.+-index\.rs$/.test(fileName))
+      .filter((fileName) => !expected.has(fileName));
+    if (stale.length === 0) {
+      return;
+    }
+    if (mode === "--write") {
+      for (const fileName of stale) {
+        fs.unlinkSync(path.join(DRAWIO_RESOURCE_GENERATED_DIR, fileName));
+      }
+      return;
+    }
+    throw new Error(`Stale Draw.io resource indexes: ${stale.join(", ")}`);
   }
 }
 

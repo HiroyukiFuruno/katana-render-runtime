@@ -7,6 +7,8 @@ import type {
   PageHandle,
 } from "../mermaid/official-renderer-types";
 import { OfficialDrawioResourceResolver } from "./official-resource-resolver";
+import { installDrawioDeterminism } from "./official-runtime-determinism";
+import { OfficialDrawioSourceFonts } from "./official-source-fonts";
 
 export interface DrawioRendererOptions {
   outputDir: string;
@@ -72,12 +74,14 @@ export class OfficialDrawioRenderer {
 
   private async renderPage(page: PageHandle, fixture: DrawioRenderFixture) {
     await page.setContent(this.baseHtml(), { waitUntil: "load" });
+    await page.evaluate(installDrawioDeterminism);
     await page.addScriptTag({ path: this.options.drawioJs });
-    const svg = this.resourceResolver.resolveSvg(await this.renderSvg(page, fixture));
-    await this.capture(page, fixture, svg);
+    const source = DrawioSource.prepare(fixture.source);
+    const svg = this.resourceResolver.resolveSvg(await this.renderSvg(page, source));
+    await this.capture(page, fixture, svg, source);
   }
 
-  private renderSvg(page: PageHandle, fixture: DrawioRenderFixture): Promise<string> {
+  private renderSvg(page: PageHandle, source: string): Promise<string> {
     return page.evaluate(
       (input) =>
         new Promise<string>((resolve) => {
@@ -110,18 +114,23 @@ export class OfficialDrawioRenderer {
           });
         }),
       {
-        slug: fixture.slug,
-        source: DrawioSource.prepare(fixture.source),
+        source,
       },
     );
   }
 
-  private async capture(page: PageHandle, fixture: DrawioRenderFixture, svg: string) {
+  private async capture(
+    page: PageHandle,
+    fixture: DrawioRenderFixture,
+    svg: string,
+    source: string,
+  ) {
     fs.writeFileSync(path.join(this.options.outputDir, `${fixture.slug}.svg`), svg, "utf8");
     await page.evaluate((markup) => {
       const diagram = document.getElementById("diagram") as HTMLElement;
       diagram.innerHTML = markup;
     }, svg);
+    await OfficialDrawioSourceFonts.install(page, source);
     await this.waitForSvgImages(page);
     await this.resizeCapture(page);
     await page.evaluate(() => (document as FontReadyDocument).fonts.ready);

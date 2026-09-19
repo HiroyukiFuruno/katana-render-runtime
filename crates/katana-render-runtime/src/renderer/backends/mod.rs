@@ -18,6 +18,8 @@ mod html_runtime_dom_error_tests;
 #[cfg(test)]
 mod html_runtime_interaction_tests;
 #[cfg(test)]
+mod html_runtime_intersection_observer_tests;
+#[cfg(test)]
 mod html_runtime_tests;
 mod html_snapshot;
 mod html_subresources;

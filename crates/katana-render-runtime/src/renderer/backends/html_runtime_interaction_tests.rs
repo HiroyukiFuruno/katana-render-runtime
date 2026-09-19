@@ -115,31 +115,6 @@ fn evaluates_attribute_removal_and_style_mutation_bridge() -> TestResult {
 }
 
 #[test]
-fn intersection_observer_accepts_document_collections_and_class_list_updates() -> TestResult {
-    let output = render(
-        r##"<a class="toc-item active" href="#one">One</a>
-        <a class="toc-item" href="#two">Two</a>
-        <section id="one">First</section><section id="two">Second</section>
-        <script>
-          const sections = document.querySelectorAll('[id]');
-          const links = document.querySelectorAll('.toc-item');
-          const observer = new IntersectionObserver((entries) => {
-            entries.forEach((entry) => {
-              if (entry.isIntersecting) entry.target.classList.add('observed');
-            });
-          });
-          links.forEach((link) => link.classList.remove('active'));
-          sections.forEach((section) => observer.observe(section));
-          observer.disconnect();
-        </script>"##,
-    )?;
-
-    assert!(!output.contains("toc-item active"), "{output}");
-    assert!(output.contains("observed"), "{output}");
-    Ok(())
-}
-
-#[test]
 fn dispatches_document_and_window_lifecycle_events_in_browser_order() -> TestResult {
     let output = render(
         r#"<p id=status></p><script>
