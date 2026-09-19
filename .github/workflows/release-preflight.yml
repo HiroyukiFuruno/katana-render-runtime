@@ -105,8 +105,67 @@ jobs:
             "${{ inputs.version }}" \
             "${{ github.head_ref }}"
 
+      # This is deliberately loaded from master, rather than the release PR.
+      # A release PR may change its own evidence policy but cannot make that
+      # policy trusted for skipping the quality gate it changes.
+      - name: Load trusted CI evidence consumer
+        id: evidence_loader
+        if: startsWith(github.head_ref, 'release/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          trusted_directory="$RUNNER_TEMP/krr-ci-evidence-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -m 700 "$trusted_directory"
+          git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
+          trusted_source="$(git rev-parse --verify origin/master^{commit})"
+          for source in consume.py schema.py tree_digest.py; do
+            git cat-file -e "$trusted_source:scripts/ci_evidence/$source"
+            git show "$trusted_source:scripts/ci_evidence/$source" >"$trusted_directory/$source"
+          done
+          chmod 500 "$trusted_directory/consume.py"
+          echo "directory=$trusted_directory" >> "$GITHUB_OUTPUT"
+          echo "source=$trusted_source" >> "$GITHUB_OUTPUT"
+
+      - name: Check trusted Linux CI evidence
+        id: reusable_quality
+        if: startsWith(github.head_ref, 'release/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          evidence_file="$RUNNER_TEMP/krr-ci-evidence.json"
+          set +e
+          python3 "${{ steps.evidence_loader.outputs.directory }}/consume.py" \
+            --repository "${{ github.repository }}" \
+            --pr-number "${{ github.event.pull_request.number }}" \
+            --head-sha "${{ github.event.pull_request.head.sha }}" \
+            --head-ref "${{ github.event.pull_request.head.ref }}" \
+            --profile linux-release-quality-v1 \
+            --output "$evidence_file"
+          status=$?
+          set -e
+          case "$status" in
+            0)
+              test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["decision"])' "$evidence_file")" = reuse
+              echo "reuse=true" >> "$GITHUB_OUTPUT"
+              echo "Reusing trusted Linux quality evidence from master-loaded consumer ${{ steps.evidence_loader.outputs.source }}."
+              cat "$evidence_file"
+              ;;
+            10)
+              test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["decision"])' "$evidence_file")" = rerun
+              echo "reuse=false" >> "$GITHUB_OUTPUT"
+              echo "No unique matching trusted evidence; running the complete Linux quality gate."
+              cat "$evidence_file"
+              ;;
+            *)
+              echo "Trusted evidence consumer failed (exit $status); refusing to silently skip the quality gate." >&2
+              exit "$status"
+              ;;
+          esac
+
       - name: Run shared release quality gate
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        if: github.event_name == 'workflow_dispatch' || (startsWith(github.head_ref, 'release/v') && steps.reusable_quality.outputs.reuse != 'true')
         timeout-minutes: 75
         run: just release-quality
 
