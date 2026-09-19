@@ -171,6 +171,38 @@ fn explicit_root_rejects_overlapping_siblings_and_its_own_target() -> TestResult
 }
 
 #[test]
+fn explicit_root_rejects_absolute_targets_positioned_by_an_outer_ancestor() -> TestResult {
+    let session = start_with_viewport(
+        absolute_target_with_outer_containing_block_document(),
+        160,
+        100,
+    )?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-escaped="false:0""##),
+        "an absolute target positioned by an ancestor outside the element root must be excluded: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-escaped-intersection="0:0""##),
+        "an excluded absolute target must have an empty intersection: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
+fn element_root_margin_is_not_clipped_by_the_root_overflow() -> TestResult {
+    let session = start_with_viewport(root_margin_with_overflow_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-margin-target="true:1""##),
+        "the element root's own overflow clip must not trim its expanded root margin: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn document_root_uses_viewport_geometry() -> TestResult {
     let session = start_with_viewport(document_root_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -351,6 +383,40 @@ const observer = new IntersectionObserver((entries) => {
 for (const target of [document.getElementById("child"), document.getElementById("outside"), root]) {
   observer.observe(target);
 }
+</script>"##
+}
+
+fn absolute_target_with_outer_containing_block_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#outer { position: relative; width: 120px; height: 80px; }
+#root { width: 120px; height: 80px; }
+#escaped { position: absolute; top: 0; left: 0; width: 120px; height: 80px; }
+</style>
+<div id=outer><div id=root><div id=escaped>Escaped</div></div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-escaped", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  document.getElementById("observed").setAttribute("data-escaped-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+}, { root }).observe(document.getElementById("escaped"));
+</script>"##
+}
+
+fn root_margin_with_overflow_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 80px; height: 20px; overflow: hidden; }
+#margin-target { position: absolute; top: -5px; left: 0; width: 80px; height: 10px; }
+</style>
+<div id=root><div id=margin-target>Margin target</div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-margin-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root, rootMargin: "10px" }).observe(document.getElementById("margin-target"));
 </script>"##
 }
 

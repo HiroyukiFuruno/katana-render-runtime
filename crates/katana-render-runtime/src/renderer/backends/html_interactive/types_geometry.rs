@@ -1,4 +1,4 @@
-use super::{ELEMENT_BOX_CORNER_COUNT, ElementBox};
+use super::{ELEMENT_BOX_CORNER_COUNT, ElementBox, OverflowClip};
 
 const TRIGONOMETRIC_ZERO_EPSILON: f32 = 0.000_001;
 
@@ -57,6 +57,9 @@ impl ElementBox {
 
     pub(crate) fn rotate_about(&mut self, degrees: f32, center_x: f32, center_y: f32) {
         rotate_corners(&mut self.transformed_corners, degrees, center_x, center_y);
+        for overflow_clip in &mut self.overflow_clips {
+            rotate_overflow_clip(overflow_clip, degrees, center_x, center_y);
+        }
         for fragment in &mut self.inline_fragments {
             fragment.rotate_about(degrees, center_x, center_y);
         }
@@ -88,6 +91,27 @@ fn rotate_corners(
     }
 }
 
+fn rotate_overflow_clip(
+    overflow_clip: &mut OverflowClip,
+    degrees: f32,
+    center_x: f32,
+    center_y: f32,
+) {
+    let mut corners = ElementBox::rectangle_corners(
+        overflow_clip.x,
+        overflow_clip.y,
+        overflow_clip.width,
+        overflow_clip.height,
+    );
+    rotate_corners(&mut corners, degrees, center_x, center_y);
+    (
+        overflow_clip.x,
+        overflow_clip.y,
+        overflow_clip.width,
+        overflow_clip.height,
+    ) = axis_aligned_bounds(&corners);
+}
+
 fn axis_aligned_bounds(corners: &[(f32, f32); ELEMENT_BOX_CORNER_COUNT]) -> (f32, f32, f32, f32) {
     let (mut left, mut top) = corners[0];
     let (mut right, mut bottom) = (left, top);
@@ -98,4 +122,49 @@ fn axis_aligned_bounds(corners: &[(f32, f32); ELEMENT_BOX_CORNER_COUNT]) -> (f32
         bottom = bottom.max(*y);
     }
     (left, top, right - left, bottom - top)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::renderer::backends::html_interactive::types::ElementPositioningContext;
+
+    #[test]
+    fn rotating_element_box_rotates_overflow_clip_geometry() {
+        let mut element_box = element_box_with_overflow_clip();
+
+        element_box.rotate_about(90.0, 0.0, 0.0);
+
+        assert_eq!(element_box.overflow_clips, vec![rotated_overflow_clip()]);
+    }
+
+    fn element_box_with_overflow_clip() -> ElementBox {
+        ElementBox {
+            node_id: 1,
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 20.0,
+            transformed_corners: ElementBox::rectangle_corners(0.0, 0.0, 10.0, 20.0),
+            positioning_context: ElementPositioningContext::InFlow,
+            overflow_clips: vec![OverflowClip {
+                owner_node_id: 2,
+                x: 10.0,
+                y: 0.0,
+                width: 20.0,
+                height: 10.0,
+            }],
+            inline_fragments: Vec::new(),
+        }
+    }
+
+    fn rotated_overflow_clip() -> OverflowClip {
+        OverflowClip {
+            owner_node_id: 2,
+            x: -10.0,
+            y: 10.0,
+            width: 10.0,
+            height: 20.0,
+        }
+    }
 }

@@ -617,11 +617,9 @@ const __krrMetadataBelongsToRoot = (metadata, target, root) => {
   if (metadata.positioning === "fixed") return false;
   if (metadata.positioning === "absolute") {
     if (!Number.isSafeInteger(metadata.containingBlock)) return false;
-    if (
-      __krrPathNodeIndex(path, metadata.containingBlock) < 0 ||
-      __krrPathNodeIndex(path, root.__krrNodeId) < 0
-    )
-      return false;
+    const containingBlockIndex = __krrPathNodeIndex(path, metadata.containingBlock);
+    const rootIndex = __krrPathNodeIndex(path, root.__krrNodeId);
+    if (containingBlockIndex < 0 || rootIndex < 0 || containingBlockIndex > rootIndex) return false;
   } else {
     return false;
   }
@@ -651,7 +649,7 @@ const __krrClipsWithinRoot = (metadata, target, root) => {
     ? []
     : metadata.clips.filter((clip) => {
         const clipIndex = __krrPathNodeIndex(path, clip.owner);
-        return clipIndex >= 0 && clipIndex <= rootIndex;
+        return clipIndex >= 0 && clipIndex < rootIndex;
       });
 };
 const __krrClipRect = (clip) => {
