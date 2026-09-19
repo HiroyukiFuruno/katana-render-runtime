@@ -643,13 +643,15 @@ const __krrClipsWithinRoot = (metadata, target, root) => {
   if (!metadata || !Array.isArray(metadata.clips)) return [];
   const path = __krrNativeDom("eventPath", target.__krrNodeId);
   const rootIndex = __krrPathNodeIndex(path, root.__krrNodeId);
-  return rootIndex < 0
-    ? []
-    : metadata.clips.filter((clip) => {
-        const clipIndex = __krrPathNodeIndex(path, clip.owner);
-        return clipIndex >= 0 && clipIndex < rootIndex;
-      });
+  if (rootIndex < 0) return null;
+  const clipIndexes = metadata.clips.map((clip) => __krrPathNodeIndex(path, clip.owner));
+  if (clipIndexes.some((clipIndex) => clipIndex < 0)) return null;
+  return metadata.clips.filter((_, index) => clipIndexes[index] < rootIndex);
 };
+const __krrTargetWithinRoot = (target, root, metadata, clipsAreConsistent) =>
+  __krrTargetIsDescendantOfRoot(target, root) &&
+  clipsAreConsistent &&
+  __krrMetadataBelongsToRoot(metadata, target, root);
 const __krrClipRect = (clip) => {
   const scrollY = __krrLayoutMetrics().scrollY;
   const top = clip.y - scrollY;
@@ -676,13 +678,13 @@ const __krrIntersectionEntry = (observer, target) => {
   );
   const targetBox = __krrObservedElementBox(target);
   const boundingClientRect = targetBox.boundingClientRect;
-  const targetWithinRoot =
-    !elementRoot ||
-    (__krrTargetIsDescendantOfRoot(target, elementRoot) &&
-      __krrMetadataBelongsToRoot(targetBox.metadata, target, elementRoot));
-  const rootClips = elementRoot
+  const requestedRootClips = elementRoot
     ? __krrClipsWithinRoot(targetBox.metadata, target, elementRoot)
     : [];
+  const rootClips = requestedRootClips ?? [];
+  const targetWithinRoot =
+    !elementRoot ||
+    __krrTargetWithinRoot(target, elementRoot, targetBox.metadata, requestedRootClips !== null);
   const targetFragments = [boundingClientRect];
   const intersectionFragments = targetWithinRoot
     ? targetFragments.map((fragment) =>

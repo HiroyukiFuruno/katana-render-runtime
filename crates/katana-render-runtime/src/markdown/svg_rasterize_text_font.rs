@@ -40,11 +40,7 @@ pub(super) fn font_runs(
 ) -> Vec<(usvg::fontdb::ID, String)> {
     let mut runs: Vec<(usvg::fontdb::ID, String)> = Vec::new();
     for character in text.chars() {
-        let face_id = if font_has_char(database, base_face_id, character) {
-            base_face_id
-        } else {
-            matching_fallback_face(database, base_face_id, character).unwrap_or(base_face_id)
-        };
+        let face_id = resolved_base_face(database, base_face_id, character);
         if let Some((run_face_id, run)) = runs.last_mut()
             && *run_face_id == face_id
         {
@@ -56,32 +52,53 @@ pub(super) fn font_runs(
     runs
 }
 
+#[cfg(test)]
+fn resolved_base_face(
+    database: &usvg::fontdb::Database,
+    base_face_id: usvg::fontdb::ID,
+    character: char,
+) -> usvg::fontdb::ID {
+    if font_has_char(database, base_face_id, character) {
+        return base_face_id;
+    }
+    let (weight, italic) = database
+        .face(base_face_id)
+        .map_or((usvg::fontdb::Weight::NORMAL.0, false), |face| {
+            (face.weight.0, face.style == usvg::fontdb::Style::Italic)
+        });
+    matching_fallback_face(database, base_face_id, character, weight, italic)
+        .unwrap_or(base_face_id)
+}
+
 pub(super) fn matching_fallback_face(
     database: &usvg::fontdb::Database,
     base_face_id: usvg::fontdb::ID,
     character: char,
+    requested_weight: u16,
+    requested_italic: bool,
 ) -> Option<usvg::fontdb::ID> {
     let base_face = database.face(base_face_id)?;
+    let requested_style = if requested_italic {
+        usvg::fontdb::Style::Italic
+    } else {
+        usvg::fontdb::Style::Normal
+    };
+    let requested_weight = usvg::fontdb::Weight(requested_weight);
     database
         .faces()
         .filter(|face| face.id != base_face_id)
         .filter(|face| font_has_char(database, face.id, character))
-        .min_by_key(|face| fallback_face_score(face, base_face))
+        .min_by_key(|face| {
+            fallback_attribute_score(
+                face.style,
+                face.weight,
+                face.stretch,
+                requested_style,
+                requested_weight,
+                base_face.stretch,
+            )
+        })
         .map(|face| face.id)
-}
-
-fn fallback_face_score(
-    candidate: &usvg::fontdb::FaceInfo,
-    requested: &usvg::fontdb::FaceInfo,
-) -> u8 {
-    fallback_attribute_score(
-        candidate.style,
-        candidate.weight,
-        candidate.stretch,
-        requested.style,
-        requested.weight,
-        requested.stretch,
-    )
 }
 
 fn fallback_attribute_score(

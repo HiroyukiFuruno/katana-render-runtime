@@ -27,7 +27,7 @@ pub(super) fn shaped_text_width(
     let database = html_font_db_for_text(font_family, text);
     let base_face_id = matching_font_face(&database, font_family, font_weight, italic)?;
     let mut advance = 0.0;
-    for (face_id, run) in html_font_runs(&database, base_face_id, text) {
+    for (face_id, run) in html_font_runs(&database, base_face_id, text, font_weight, italic) {
         advance +=
             shape_text_with_face(&database, face_id, &run, font_size, font_feature_settings)?;
     }
@@ -47,7 +47,7 @@ pub(super) fn shaped_html_text_dx(
     let database = html_font_db_for_text(font_family, text);
     let base_face_id = matching_font_face(&database, font_family, font_weight, italic)?;
     let mut state = TextDxState::new(text.chars().count());
-    for (face_id, run) in html_font_runs(&database, base_face_id, text) {
+    for (face_id, run) in html_font_runs(&database, base_face_id, text, font_weight, italic) {
         state.append_run(&database, face_id, &run, font_size, font_feature_settings)?;
     }
     state.finish()
@@ -202,7 +202,7 @@ mod tests {
         let database = html_font_db_for_text("Noto Sans", "A日本B");
         let used_fallback =
             matching_font_face(&database, "Noto Sans", 400, false).and_then(|base| {
-                matching_fallback_face(&database, base, '日').map(|fallback| {
+                matching_fallback_face(&database, base, '日', 400, false).map(|fallback| {
                     !font_has_char(&database, base, '日')
                         && font_has_char(&database, fallback, '日')
                         && font_runs(&database, base, "A日本B").len() == 3
@@ -213,7 +213,7 @@ mod tests {
         let bundled_database = bundled_font_db();
         let bundled_only = matching_font_face(&bundled_database, "Noto Sans", 400, false)
             .is_some_and(|base| {
-                matching_fallback_face(&bundled_database, base, '日').is_none()
+                matching_fallback_face(&bundled_database, base, '日', 400, false).is_none()
                     && font_runs(&bundled_database, base, "A日本B").len() == 1
             });
         assert!(bundled_only);
@@ -226,7 +226,7 @@ mod tests {
         assert!(face_id.is_some(), "bundled Noto Sans must be available");
         let removed_face_is_rejected = face_id.is_some_and(|face_id| {
             database.remove_face(face_id);
-            matching_fallback_face(&database, face_id, '日').is_none()
+            matching_fallback_face(&database, face_id, '日', 400, false).is_none()
                 && !font_has_char(&database, face_id, 'A')
                 && shape_text_with_face(&database, face_id, "A", 16.0, None).is_none()
         });
