@@ -2,8 +2,11 @@ use super::super::html_document::HtmlDocumentNode;
 use super::style::CssStyle;
 use std::collections::HashMap;
 
-const TRIGONOMETRIC_ZERO_EPSILON: f32 = 0.000_001;
 pub(super) const ELEMENT_BOX_CORNER_COUNT: usize = 4;
+
+#[path = "types_geometry.rs"]
+mod geometry;
+pub(super) use geometry::InlineFragment;
 
 #[derive(Clone, Copy)]
 pub(super) struct ElementRenderContext<'a> {
@@ -97,67 +100,25 @@ pub(super) struct ElementBox {
     pub(super) width: f32,
     pub(super) height: f32,
     pub(super) transformed_corners: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
+    pub(super) positioning_context: ElementPositioningContext,
+    pub(super) overflow_clips: Vec<OverflowClip>,
+    pub(super) inline_fragments: Vec<InlineFragment>,
 }
 
-pub(super) fn rectangle_corners(
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-) -> [(f32, f32); ELEMENT_BOX_CORNER_COUNT] {
-    [
-        (x, y),
-        (x + width, y),
-        (x + width, y + height),
-        (x, y + height),
-    ]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ElementPositioningContext {
+    InFlow,
+    FixedViewport,
+    AbsoluteContainingBlock { owner_node_id: Option<u64> },
 }
 
-pub(super) fn element_box_center_after(
-    boxes: &[ElementBox],
-    element_box_start: usize,
-    node_id: u64,
-) -> Option<(f32, f32)> {
-    boxes
-        .iter()
-        .skip(element_box_start)
-        .find(|element_box| element_box.node_id == node_id)
-        .map(|element_box| {
-            (
-                element_box.x + element_box.width / 2.0,
-                element_box.y + element_box.height / 2.0,
-            )
-        })
-}
-
-impl ElementBox {
-    pub(super) fn rotate_about(&mut self, degrees: f32, center_x: f32, center_y: f32) {
-        let (mut sin, mut cos) = degrees.to_radians().sin_cos();
-        if sin.abs() < TRIGONOMETRIC_ZERO_EPSILON {
-            sin = 0.0;
-        }
-        if cos.abs() < TRIGONOMETRIC_ZERO_EPSILON {
-            cos = 0.0;
-        }
-        for (x, y) in &mut self.transformed_corners {
-            let relative_x = *x - center_x;
-            let relative_y = *y - center_y;
-            *x = center_x + relative_x * cos - relative_y * sin;
-            *y = center_y + relative_x * sin + relative_y * cos;
-        }
-    }
-
-    pub(super) fn transformed_axis_aligned(&self) -> (f32, f32, f32, f32) {
-        let (mut left, mut top) = self.transformed_corners[0];
-        let (mut right, mut bottom) = (left, top);
-        for (x, y) in self.transformed_corners.iter().skip(1) {
-            left = left.min(*x);
-            top = top.min(*y);
-            right = right.max(*x);
-            bottom = bottom.max(*y);
-        }
-        (left, top, right - left, bottom - top)
-    }
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct OverflowClip {
+    pub(super) owner_node_id: u64,
+    pub(super) x: f32,
+    pub(super) y: f32,
+    pub(super) width: f32,
+    pub(super) height: f32,
 }
 
 #[derive(Debug, Clone, Copy)]

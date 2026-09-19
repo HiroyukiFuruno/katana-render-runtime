@@ -1,5 +1,14 @@
 use resvg::usvg;
 
+const EXACT_FACE_MATCH: u8 = 0;
+const STYLE_AND_WEIGHT_MATCH: u8 = 1;
+const STYLE_AND_STRETCH_MATCH: u8 = 2;
+const WEIGHT_AND_STRETCH_MATCH: u8 = 3;
+const STYLE_MATCH: u8 = 4;
+const WEIGHT_MATCH: u8 = 5;
+const STRETCH_MATCH: u8 = 6;
+const NO_FACE_ATTRIBUTE_MATCH: u8 = 7;
+
 pub(super) fn matching_font_face(
     database: &usvg::fontdb::Database,
     font_family: &str,
@@ -56,17 +65,46 @@ pub(super) fn matching_fallback_face(
     database
         .faces()
         .filter(|face| face.id != base_face_id)
-        .filter(|face| {
-            [
-                face.style == base_face.style,
-                face.weight == base_face.weight,
-                face.stretch == base_face.stretch,
-            ]
-            .into_iter()
-            .any(|matches| matches)
-        })
-        .find(|face| font_has_char(database, face.id, character))
+        .filter(|face| font_has_char(database, face.id, character))
+        .min_by_key(|face| fallback_face_score(face, base_face))
         .map(|face| face.id)
+}
+
+fn fallback_face_score(
+    candidate: &usvg::fontdb::FaceInfo,
+    requested: &usvg::fontdb::FaceInfo,
+) -> u8 {
+    fallback_attribute_score(
+        candidate.style,
+        candidate.weight,
+        candidate.stretch,
+        requested.style,
+        requested.weight,
+        requested.stretch,
+    )
+}
+
+fn fallback_attribute_score(
+    candidate_style: usvg::fontdb::Style,
+    candidate_weight: usvg::fontdb::Weight,
+    candidate_stretch: usvg::fontdb::Stretch,
+    requested_style: usvg::fontdb::Style,
+    requested_weight: usvg::fontdb::Weight,
+    requested_stretch: usvg::fontdb::Stretch,
+) -> u8 {
+    let same_style = candidate_style == requested_style;
+    let same_weight = candidate_weight == requested_weight;
+    let same_stretch = candidate_stretch == requested_stretch;
+    match (same_style, same_weight, same_stretch) {
+        (true, true, true) => EXACT_FACE_MATCH,
+        (true, true, false) => STYLE_AND_WEIGHT_MATCH,
+        (true, false, true) => STYLE_AND_STRETCH_MATCH,
+        (false, true, true) => WEIGHT_AND_STRETCH_MATCH,
+        (true, false, false) => STYLE_MATCH,
+        (false, true, false) => WEIGHT_MATCH,
+        (false, false, true) => STRETCH_MATCH,
+        (false, false, false) => NO_FACE_ATTRIBUTE_MATCH,
+    }
 }
 
 pub(super) fn font_has_char(
@@ -99,5 +137,33 @@ pub(super) fn fontdb_family(name: &str) -> usvg::fontdb::Family<'_> {
         "fantasy" => usvg::fontdb::Family::Fantasy,
         "monospace" => usvg::fontdb::Family::Monospace,
         _ => usvg::fontdb::Family::Name(name),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fallback_attribute_score;
+    use resvg::usvg::fontdb::{Stretch, Style, Weight};
+
+    #[test]
+    fn styled_cjk_fallback_prefers_the_exact_style_and_weight_face() {
+        let styled = fallback_attribute_score(
+            Style::Italic,
+            Weight::BOLD,
+            Stretch::Normal,
+            Style::Italic,
+            Weight::BOLD,
+            Stretch::Normal,
+        );
+        let regular = fallback_attribute_score(
+            Style::Normal,
+            Weight::NORMAL,
+            Stretch::Normal,
+            Style::Italic,
+            Weight::BOLD,
+            Stretch::Normal,
+        );
+
+        assert!(styled < regular);
     }
 }

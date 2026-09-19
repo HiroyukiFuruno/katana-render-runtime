@@ -1,5 +1,5 @@
 use super::super::html_browser::{HtmlBrowserError, HtmlBrowserViewport};
-use super::types::{ElementBox, HitTarget, LayoutResult};
+use super::types::{ElementBox, ElementPositioningContext, HitTarget, LayoutResult};
 use super::{HtmlInteractiveSession, runtime_failure};
 
 impl HtmlInteractiveSession {
@@ -26,7 +26,7 @@ impl HtmlInteractiveSession {
         boxes: &[ElementBox],
     ) -> Result<bool, HtmlBrowserError> {
         self.runtime
-            .update_layout_metrics(
+            .update_layout_metrics_with_intersection_metadata(
                 self.viewport.logical_width(),
                 self.viewport.logical_height(),
                 self.scroll_y,
@@ -34,6 +34,7 @@ impl HtmlInteractiveSession {
                     let (x, y, width, height) = element.transformed_axis_aligned();
                     (element.node_id, x, y, width, height, 0.0)
                 }),
+                boxes.iter().map(intersection_metadata),
             )
             .map_err(runtime_failure)
     }
@@ -61,6 +62,55 @@ impl HtmlInteractiveSession {
     pub(super) fn max_scroll(&self) -> f32 {
         (self.content_height - self.viewport.logical_height()).max(0.0)
     }
+}
+
+fn intersection_metadata(element: &ElementBox) -> (u64, String) {
+    let (positioning, containing_block) = intersection_positioning(element);
+    let clips = intersection_clips(element);
+    let fragments = intersection_fragments(element);
+    (
+        element.node_id,
+        format!(
+            "{{\"positioning\":\"{positioning}\",\"containingBlock\":{containing_block},\"clips\":[{clips}],\"fragments\":[{fragments}]}}"
+        ),
+    )
+}
+
+fn intersection_positioning(element: &ElementBox) -> (&'static str, String) {
+    match element.positioning_context {
+        ElementPositioningContext::InFlow => ("in-flow", "null".to_string()),
+        ElementPositioningContext::FixedViewport => ("fixed", "null".to_string()),
+        ElementPositioningContext::AbsoluteContainingBlock { owner_node_id } => (
+            "absolute",
+            owner_node_id.map_or_else(|| "null".to_string(), |owner| owner.to_string()),
+        ),
+    }
+}
+
+fn intersection_clips(element: &ElementBox) -> String {
+    element
+        .overflow_clips
+        .iter()
+        .map(|clip| {
+            format!(
+                "{{\"owner\":{},\"x\":{},\"y\":{},\"width\":{},\"height\":{}}}",
+                clip.owner_node_id, clip.x, clip.y, clip.width, clip.height
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn intersection_fragments(element: &ElementBox) -> String {
+    element
+        .inline_fragments
+        .iter()
+        .map(|fragment| {
+            let (x, y, width, height) = fragment.transformed_axis_aligned();
+            format!("{{\"x\":{x},\"y\":{y},\"width\":{width},\"height\":{height}}}")
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 pub(super) fn max_scroll_for(render: &LayoutResult, viewport: HtmlBrowserViewport) -> f32 {

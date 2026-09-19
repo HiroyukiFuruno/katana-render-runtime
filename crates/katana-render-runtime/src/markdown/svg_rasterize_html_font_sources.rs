@@ -9,7 +9,7 @@ use std::{
 
 #[path = "svg_rasterize_html_font_paths.rs"]
 mod paths;
-use paths::{CJK_FONT_PATHS, CJK_SERIF_FONT_PATHS};
+use paths::{CJK_FONT_PATHS, CJK_SERIF_FONT_PATHS, CURSIVE_FONT_PATHS, FANTASY_FONT_PATHS};
 
 const EMOJI_FONT_PATHS: &[&str] = &[
     "/System/Library/Fonts/Apple Color Emoji.ttc",
@@ -183,6 +183,8 @@ fn paths_for_font_family(family: &str) -> &'static [&'static str] {
         "liberation sans" => LIBERATION_SANS_FONT_PATHS,
         "times" | "times new roman" | "serif" => TIMES_FONT_PATHS,
         "menlo" | "consolas" | "courier" | "courier new" | "monospace" => MONOSPACE_FONT_PATHS,
+        "cursive" => CURSIVE_FONT_PATHS,
+        "fantasy" => FANTASY_FONT_PATHS,
         "hiragino sans" | "hiragino sans gb" | "yu gothic" | "meiryo" | "noto sans jp"
         | "noto sans cjk jp" => CJK_FONT_PATHS,
         "noto serif jp" | "noto serif cjk jp" | "yu mincho" => CJK_SERIF_FONT_PATHS,

@@ -1,7 +1,7 @@
 use super::super::html_browser::HtmlBrowserViewport;
 use super::layout::{ContainingBlock, HtmlLayoutRenderer};
 use super::style::{CssPosition, CssStyle};
-use super::types::{DetailsContext, LayoutContext};
+use super::types::{DetailsContext, LayoutContext, OverflowClip};
 use std::rc::Rc;
 
 #[path = "layout_container_helpers.rs"]
@@ -34,6 +34,7 @@ impl HtmlLayoutRenderer {
         let geometry = container_geometry(x, y, width, style);
         let box_start = self.svg.len();
         let content_start = self.svg.len();
+        let descendant_box_start = self.element_boxes.len();
         let containing_block =
             self.resolve_container_containing_block(children, &geometry, style, details);
         if let Some(block) = containing_block {
@@ -44,6 +45,7 @@ impl HtmlLayoutRenderer {
             self.pop_containing_block();
         }
         let height = container_height(bottom, geometry.start, style);
+        self.record_overflow_clip(descendant_box_start, &geometry, height, style);
         self.paint_container_box(box_start, content_start, &geometry, height, style);
         geometry.start + height + style.margin_bottom
     }
@@ -67,11 +69,37 @@ impl HtmlLayoutRenderer {
                 self.accept_auto_container_height(measured, style)
             });
         Some(ContainingBlock {
+            owner_node_id: self.current_element_owner(),
             x: geometry.box_x,
             y: geometry.start,
             width: geometry.box_width,
             height,
         })
+    }
+
+    fn record_overflow_clip(
+        &mut self,
+        descendant_box_start: usize,
+        geometry: &ContainerGeometry,
+        height: f32,
+        style: &CssStyle,
+    ) {
+        if !style.clips_overflow() {
+            return;
+        }
+        let Some(owner_node_id) = self.current_element_owner() else {
+            return;
+        };
+        let clip = OverflowClip {
+            owner_node_id,
+            x: geometry.box_x,
+            y: geometry.start,
+            width: geometry.box_width,
+            height,
+        };
+        for element_box in &mut self.element_boxes[descendant_box_start..] {
+            element_box.overflow_clips.push(clip);
+        }
     }
 
     fn accept_auto_container_height(

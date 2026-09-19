@@ -295,6 +295,7 @@ const __krrClassToken = (token) => {
   return token;
 };
 const __krrElements = new Map();
+const __krrElementInstances = new WeakSet();
 const __krrElement = (nodeId) => {
   if (nodeId === null || nodeId === undefined || nodeId === "") return null;
   const normalizedId = String(nodeId);
@@ -303,6 +304,7 @@ const __krrElement = (nodeId) => {
   const element = __krrInstallEventTarget(Object.create(__krrElementPrototype));
   Object.defineProperty(element, "__krrNodeId", { value: normalizedId });
   __krrElements.set(normalizedId, element);
+  __krrElementInstances.add(element);
   return element;
 };
 const __krrElementPrototype = {
@@ -583,6 +585,14 @@ const __krrEmptyIntersectionRect = () => ({
   bottom: 0,
   left: 0,
 });
+const __krrBoundingIntersectionRect = (rects) => {
+  if (rects.length === 0) return __krrEmptyIntersectionRect();
+  const left = Math.min(...rects.map((rect) => rect.left));
+  const top = Math.min(...rects.map((rect) => rect.top));
+  const right = Math.max(...rects.map((rect) => rect.right));
+  const bottom = Math.max(...rects.map((rect) => rect.bottom));
+  return { x: left, y: top, width: right - left, height: bottom - top, top, right, bottom, left };
+};
 const __krrRectsIntersectOrAreEdgeAdjacent = (first, second) =>
   first.left <= second.right &&
   second.left <= first.right &&
@@ -591,14 +601,134 @@ const __krrRectsIntersectOrAreEdgeAdjacent = (first, second) =>
 const __krrObservedElementBox = (element) => ({
   boundingClientRect: element.getBoundingClientRect(),
   isPresent: __krrNativeDom("layoutBoxPresent", element.__krrNodeId) === "1",
+  metadata: JSON.parse(__krrNativeDom("intersectionMetadata", element.__krrNodeId)),
 });
+const __krrPathNodeIndex = (path, nodeId) =>
+  Array.isArray(path) ? path.findIndex((value) => String(value) === String(nodeId)) : -1;
 const __krrTargetIsDescendantOfRoot = (target, root) => {
   const path = __krrNativeDom("eventPath", target.__krrNodeId);
-  return Array.isArray(path) && path.slice(1).includes(root.__krrNodeId);
+  return __krrPathNodeIndex(path.slice(1), root.__krrNodeId) >= 0;
 };
+const __krrMetadataBelongsToRoot = (metadata, target, root) => {
+  if (metadata === null) return true;
+  if (metadata.positioning === "in-flow") return Array.isArray(metadata.clips);
+  const path = __krrNativeDom("eventPath", target.__krrNodeId);
+  if (__krrPathNodeIndex(path, root.__krrNodeId) < 0) return false;
+  if (metadata.positioning === "fixed") return false;
+  if (metadata.positioning === "absolute") {
+    if (!Number.isSafeInteger(metadata.containingBlock)) return false;
+    if (
+      __krrPathNodeIndex(path, metadata.containingBlock) < 0 ||
+      __krrPathNodeIndex(path, root.__krrNodeId) < 0
+    )
+      return false;
+  } else {
+    return false;
+  }
+  return (
+    Array.isArray(metadata.clips) &&
+    metadata.clips.every(
+      (clip) =>
+        Number.isSafeInteger(clip.owner) &&
+        [clip.x, clip.y, clip.width, clip.height].every(Number.isFinite) &&
+        clip.width >= 0 &&
+        clip.height >= 0,
+    ) &&
+    Array.isArray(metadata.fragments) &&
+    metadata.fragments.every(
+      (fragment) =>
+        [fragment.x, fragment.y, fragment.width, fragment.height].every(Number.isFinite) &&
+        fragment.width >= 0 &&
+        fragment.height >= 0,
+    )
+  );
+};
+const __krrClipsWithinRoot = (metadata, target, root) => {
+  if (!metadata || !Array.isArray(metadata.clips)) return [];
+  const path = __krrNativeDom("eventPath", target.__krrNodeId);
+  const rootIndex = __krrPathNodeIndex(path, root.__krrNodeId);
+  return rootIndex < 0
+    ? []
+    : metadata.clips.filter((clip) => {
+        const clipIndex = __krrPathNodeIndex(path, clip.owner);
+        return clipIndex >= 0 && clipIndex <= rootIndex;
+      });
+};
+const __krrClipRect = (clip) => {
+  const scrollY = __krrLayoutMetrics().scrollY;
+  const top = clip.y - scrollY;
+  return {
+    x: clip.x,
+    y: top,
+    width: clip.width,
+    height: clip.height,
+    top,
+    right: clip.x + clip.width,
+    bottom: top + clip.height,
+    left: clip.x,
+  };
+};
+const __krrTargetFragments = (metadata, boundingClientRect) =>
+  Array.isArray(metadata?.fragments) && metadata.fragments.length > 0
+    ? metadata.fragments.map(__krrClipRect)
+    : [boundingClientRect];
 const __krrViewportRect = () => {
   const { width, height } = __krrLayoutMetrics();
   return { x: 0, y: 0, width, height, top: 0, right: width, bottom: height, left: 0 };
+};
+const __krrIntersectionEntry = (observer, target) => {
+  const elementRoot = observer.root && observer.root !== document ? observer.root : null;
+  const rootBounds = __krrExpandRootBounds(
+    elementRoot ? elementRoot.getBoundingClientRect() : __krrViewportRect(),
+    observer.__krrRootMargin,
+  );
+  const targetBox = __krrObservedElementBox(target);
+  const boundingClientRect = targetBox.boundingClientRect;
+  const targetWithinRoot =
+    !elementRoot ||
+    (__krrTargetIsDescendantOfRoot(target, elementRoot) &&
+      __krrMetadataBelongsToRoot(targetBox.metadata, target, elementRoot));
+  const rootClips = elementRoot
+    ? __krrClipsWithinRoot(targetBox.metadata, target, elementRoot)
+    : [];
+  const targetFragments = __krrTargetFragments(targetBox.metadata, boundingClientRect);
+  const intersectionFragments = targetWithinRoot
+    ? targetFragments.map((fragment) =>
+        rootClips.reduce(
+          (rect, clip) => __krrIntersectionRect(rect, __krrClipRect(clip)),
+          __krrIntersectionRect(rootBounds, fragment),
+        ),
+      )
+    : [];
+  const intersectionRect = __krrBoundingIntersectionRect(
+    intersectionFragments.filter((rect) => rect.width > 0 && rect.height > 0),
+  );
+  const targetArea = targetFragments.reduce((area, rect) => area + rect.width * rect.height, 0);
+  const intersectionArea = intersectionFragments.reduce(
+    (area, rect) => area + rect.width * rect.height,
+    0,
+  );
+  const isIntersecting =
+    targetWithinRoot &&
+    targetBox.isPresent &&
+    (rootClips.length > 0
+      ? intersectionFragments.some((rect) => rect.width > 0 && rect.height > 0)
+      : targetFragments.some((rect) => __krrRectsIntersectOrAreEdgeAdjacent(rootBounds, rect)));
+  const intersectionRatio =
+    targetWithinRoot && targetBox.isPresent && targetArea > 0
+      ? intersectionArea / targetArea
+      : isIntersecting
+        ? 1
+        : 0;
+  return {
+    target,
+    isIntersecting,
+    intersectionRatio,
+    boundingClientRect,
+    intersectionRect,
+    rootBounds,
+    time: Date.now(),
+  };
 };
 const __krrParseRootMargin = (value) => {
   const parts = String(value).trim().split(/\s+/).filter(Boolean);
@@ -614,8 +744,19 @@ const __krrParseRootMargin = (value) => {
   const [top, right = top, bottom = top, left = right] = parsed;
   return [top, right, bottom, left];
 };
+const __krrThresholdValues = (value) => {
+  if (value === null || (typeof value !== "object" && typeof value !== "function")) {
+    return [value];
+  }
+  const iterator = value[Symbol.iterator];
+  if (iterator === null || iterator === undefined) return [value];
+  if (typeof iterator !== "function") {
+    throw new TypeError("IntersectionObserver threshold iterator must be callable");
+  }
+  return Array.from({ [Symbol.iterator]: () => iterator.call(value) });
+};
 const __krrNormalizeThresholds = (value) => {
-  const values = Array.isArray(value) ? Array.from(value) : [value];
+  const values = __krrThresholdValues(value);
   const thresholds = values.map((threshold) => {
     const number = +threshold;
     if (!Number.isFinite(number)) {
@@ -656,7 +797,12 @@ globalThis.IntersectionObserver = class IntersectionObserver {
       throw new TypeError("IntersectionObserver callback must be a function");
     }
     this.callback = callback;
-    this.root = options.root || null;
+    const suppliedRoot = options.root;
+    const root = suppliedRoot === undefined ? null : suppliedRoot;
+    if (root !== null && root !== document && !__krrElementInstances.has(root)) {
+      throw new TypeError("IntersectionObserver root must be null, document, or an element");
+    }
+    this.root = root;
     const rootMargin = String(options.rootMargin === undefined ? "0px" : options.rootMargin);
     this.__krrRootMargin = __krrParseRootMargin(rootMargin);
     if (this.__krrRootMargin === null) {
@@ -694,40 +840,7 @@ globalThis.IntersectionObserver = class IntersectionObserver {
     return [];
   }
   __krrNotify(targets) {
-    const entries = targets.map((target) => {
-      const elementRoot = this.root && this.root !== document ? this.root : null;
-      const rootBounds = __krrExpandRootBounds(
-        elementRoot ? elementRoot.getBoundingClientRect() : __krrViewportRect(),
-        this.__krrRootMargin,
-      );
-      const targetBox = __krrObservedElementBox(target);
-      const boundingClientRect = targetBox.boundingClientRect;
-      const targetWithinRoot = !elementRoot || __krrTargetIsDescendantOfRoot(target, elementRoot);
-      const intersectionRect = targetWithinRoot
-        ? __krrIntersectionRect(rootBounds, boundingClientRect)
-        : __krrEmptyIntersectionRect();
-      const targetArea = boundingClientRect.width * boundingClientRect.height;
-      const intersectionArea = intersectionRect.width * intersectionRect.height;
-      const isIntersecting =
-        targetWithinRoot &&
-        targetBox.isPresent &&
-        __krrRectsIntersectOrAreEdgeAdjacent(rootBounds, boundingClientRect);
-      const intersectionRatio =
-        targetWithinRoot && targetBox.isPresent && targetArea > 0
-          ? intersectionArea / targetArea
-          : isIntersecting
-            ? 1
-            : 0;
-      return {
-        target,
-        isIntersecting,
-        intersectionRatio,
-        boundingClientRect,
-        intersectionRect,
-        rootBounds,
-        time: Date.now(),
-      };
-    });
+    const entries = targets.map((target) => __krrIntersectionEntry(this, target));
     const changed = entries.filter((entry) => {
       const previous = this.intersections.get(entry.target);
       this.intersections.set(entry.target, entry);

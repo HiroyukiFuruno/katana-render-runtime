@@ -12,13 +12,14 @@ pub(super) struct HtmlLayoutMetrics {
     boxes: HashMap<u64, HtmlLayoutBox>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct HtmlLayoutBox {
     x: f32,
     y: f32,
     width: f32,
     height: f32,
     rotation_degrees: f32,
+    intersection_metadata: Option<String>,
 }
 
 impl HtmlDomBridgeState {
@@ -40,6 +41,7 @@ impl HtmlDomBridgeState {
                         width,
                         height,
                         rotation_degrees,
+                        intersection_metadata: None,
                     },
                 )
             })
@@ -50,6 +52,18 @@ impl HtmlDomBridgeState {
             scroll_y,
             boxes,
         };
+    }
+
+    pub(crate) fn set_intersection_metadata(
+        &self,
+        metadata: impl IntoIterator<Item = (u64, String)>,
+    ) {
+        let mut metrics = self.layout_metrics.borrow_mut();
+        for (node_id, value) in metadata {
+            if let Some(layout_box) = metrics.boxes.get_mut(&node_id) {
+                layout_box.intersection_metadata = Some(value);
+            }
+        }
     }
 
     pub(super) fn layout_metrics_json(&self) -> String {
@@ -67,7 +81,7 @@ impl HtmlDomBridgeState {
         let Some(rect) = metrics.boxes.get(&node_id) else {
             return empty_rect_json();
         };
-        let rect = rect.rotated_axis_aligned();
+        let rect = rect.clone().rotated_axis_aligned();
         let left = rect.x;
         let top = rect.y - metrics.scroll_y;
         let right = left + rect.width;
@@ -87,6 +101,15 @@ impl HtmlDomBridgeState {
 
     pub(super) fn has_layout_box(&self, node_id: u64) -> bool {
         self.layout_metrics.borrow().boxes.contains_key(&node_id)
+    }
+
+    pub(super) fn intersection_metadata_json(&self, node_id: u64) -> String {
+        self.layout_metrics
+            .borrow()
+            .boxes
+            .get(&node_id)
+            .and_then(|layout_box| layout_box.intersection_metadata.clone())
+            .unwrap_or_else(|| "null".to_string())
     }
 }
 
@@ -111,6 +134,7 @@ impl HtmlLayoutBox {
             width,
             height,
             rotation_degrees: self.rotation_degrees,
+            intersection_metadata: self.intersection_metadata,
         }
     }
 }

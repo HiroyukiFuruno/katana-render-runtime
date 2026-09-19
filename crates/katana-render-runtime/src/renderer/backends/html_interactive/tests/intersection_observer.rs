@@ -1,4 +1,4 @@
-use super::support::{TestResult, start_with_viewport, to_string};
+use super::support::{TestResult, click_element, start_with_viewport, to_string};
 use crate::renderer::backends::html_browser::HtmlBrowserInput;
 
 #[test]
@@ -99,6 +99,24 @@ fn observer_content_collapse_clamps_scroll_before_the_scroll_handler_runs() -> T
 }
 
 #[test]
+fn post_event_observers_stabilize_two_reflow_rounds_before_the_frame_is_exposed() -> TestResult {
+    let mut session = start_with_viewport(post_event_observer_document(), 160, 100)?;
+
+    click_element(&mut session, "trigger")?;
+
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    assert!(
+        snapshot.contains(r##"id="second" data-observer-stage="second""##),
+        "the second observer must see layout produced by the click-triggered first observer: {snapshot}"
+    );
+    assert!(
+        !snapshot.contains("data-observer-stage=\"third\""),
+        "the host must bound one event's observer reflow work to two rounds: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn hidden_and_detached_observer_targets_transition_after_real_host_reflow() -> TestResult {
     let mut session = start_with_viewport(hidden_and_detached_document(), 160, 100)?;
 
@@ -108,6 +126,24 @@ fn hidden_and_detached_observer_targets_transition_after_real_host_reflow() -> T
     dispatch_scroll(&mut session)?;
 
     assert_observer_states(&session, "false:0", "false:0")
+}
+
+#[test]
+fn fragmentable_inline_target_uses_union_area_and_ancestor_clip_in_real_host() -> TestResult {
+    let session = start_with_viewport(fragmentable_inline_document(), 80, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    let ratio = observed_number(&snapshot, "data-fragment-ratio")?;
+    let intersection_height = observed_number(&snapshot, "data-fragment-height")?;
+
+    assert!(
+        ratio > 0.0 && ratio < 1.0,
+        "the clipped first inline fragment must be a strict subset of the target union: {snapshot}"
+    );
+    assert!(
+        intersection_height > 0.0 && intersection_height < 40.0,
+        "the intersection must use the visible fragment, not the target's union bounding box: {snapshot}"
+    );
+    Ok(())
 }
 
 #[test]
@@ -280,6 +316,22 @@ window.addEventListener("scroll", () => {
 </script>"##
 }
 
+fn fragmentable_inline_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { width: 80px; height: 20px; overflow: hidden; }
+</style>
+<div id=root><span id=target>one two three four five six seven eight</span></div><p id=observed></p>
+<script>
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  observed.setAttribute("data-fragment-ratio", entry.intersectionRatio);
+  observed.setAttribute("data-fragment-height", entry.intersectionRect.height);
+}, { root: document.getElementById("root") }).observe(document.getElementById("target"));
+</script>"##
+}
+
 fn explicit_root_document() -> &'static str {
     r##"<style>
 html, body { margin: 0; }
@@ -314,6 +366,18 @@ new IntersectionObserver((entries) => {
   observed.setAttribute("data-document-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
 }, { root: document }).observe(document.getElementById("document-target"));
 </script>"##
+}
+
+fn observed_number(snapshot: &str, attribute: &str) -> TestResult<f32> {
+    let prefix = format!("{attribute}=\"");
+    let value = snapshot
+        .split(&prefix)
+        .nth(1)
+        .and_then(|tail| tail.split('"').next())
+        .ok_or_else(|| format!("missing {attribute}: {snapshot}"))?;
+    value
+        .parse::<f32>()
+        .map_err(|error| format!("invalid {attribute} {value:?}: {error}"))
 }
 
 fn dispatch_scroll(session: &mut super::super::HtmlInteractiveSession) -> TestResult {
@@ -352,4 +416,32 @@ fn assert_active_anchor(
         "expected #{active} to be active: {snapshot}"
     );
     Ok(())
+}
+
+fn post_event_observer_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#first, #second { display: none; height: 20px; }
+</style>
+<button id=trigger>Trigger</button><div id=first>First</div><div id=second>Second</div>
+<script>
+const first = document.getElementById("first");
+const second = document.getElementById("second");
+const third = new IntersectionObserver((entries) => {
+  if (entries.some((entry) => entry.isIntersecting)) second.setAttribute("data-observer-stage", "third");
+});
+const secondObserver = new IntersectionObserver((entries) => {
+  if (entries.some((entry) => entry.isIntersecting)) {
+    second.setAttribute("data-observer-stage", "second");
+    third.observe(second);
+  }
+});
+const firstObserver = new IntersectionObserver((entries) => {
+  if (entries.some((entry) => entry.isIntersecting)) {
+    first.style.display = "block";
+    secondObserver.observe(first);
+  }
+});
+document.getElementById("trigger").addEventListener("click", () => firstObserver.observe(document.getElementById("trigger")));
+</script>"##
 }

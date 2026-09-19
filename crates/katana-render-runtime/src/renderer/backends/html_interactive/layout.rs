@@ -20,7 +20,7 @@ pub(super) struct HtmlLayoutRenderer {
     pub(super) viewport_width: f32,
     pub(super) next_clip_id: u64,
     pub(super) next_gradient_id: u64,
-    pub(super) containing_blocks: Vec<ContainingBlock>,
+    pub(super) ownership: LayoutOwnership,
     pub(super) clickable_nodes: std::collections::HashSet<u64>,
     pub(super) document_paint_start: usize,
     pub(super) deferred_paint: Vec<DeferredPaint>,
@@ -36,13 +36,25 @@ pub(super) struct DeferredPaint {
 
 #[derive(Clone, Copy)]
 pub(super) struct ContainingBlock {
+    pub(super) owner_node_id: Option<u64>,
     pub(super) x: f32,
     pub(super) y: f32,
     pub(super) width: f32,
     pub(super) height: f32,
 }
 
+#[derive(Default)]
+pub(super) struct LayoutOwnership {
+    pub(super) containing_blocks: Vec<ContainingBlock>,
+    pub(super) rendering_elements: Vec<u64>,
+    pub(super) inline_fragment_owners: Vec<u64>,
+}
+
 impl HtmlLayoutRenderer {
+    pub(super) fn current_element_owner(&self) -> Option<u64> {
+        self.ownership.rendering_elements.last().copied()
+    }
+
     #[cfg(test)]
     pub(super) fn render(
         nodes: &[HtmlDocumentNode],
@@ -155,7 +167,7 @@ impl HtmlLayoutRenderer {
             viewport_width: viewport.logical_width(),
             next_clip_id: 0,
             next_gradient_id: 0,
-            containing_blocks: Vec::new(),
+            ownership: LayoutOwnership::default(),
             clickable_nodes: clickable_nodes.clone(),
             document_paint_start,
             deferred_paint: Vec::new(),

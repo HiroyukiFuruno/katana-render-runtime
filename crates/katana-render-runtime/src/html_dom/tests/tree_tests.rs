@@ -42,6 +42,18 @@ fn tree_operations_move_merge_and_reparent_nodes() {
 }
 
 #[test]
+fn dropping_parent_detaches_a_retained_direct_child() {
+    let parent = Node::new(NodeData::Document);
+    let child = element("span");
+    append_child(&parent, child.clone());
+
+    drop(parent);
+
+    assert!(parent_and_index(&child).is_none());
+    assert!(child.parent.take().is_none());
+}
+
+#[test]
 fn tree_sink_exercises_document_element_template_and_attributes() {
     let dom = RcDom::default();
     let document = dom.get_document();

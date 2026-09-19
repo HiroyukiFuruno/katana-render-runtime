@@ -2,7 +2,7 @@ use super::constants::CONTROL_HEIGHT;
 use super::layout::{ContainingBlock, HtmlLayoutRenderer};
 use super::layout_input::is_checkbox;
 use super::style::{CssPosition, CssStyle};
-use super::types::{ElementRenderContext, LayoutContext};
+use super::types::{ElementPositioningContext, ElementRenderContext, LayoutContext};
 
 fn horizontal_position(containing: ContainingBlock, style: &CssStyle, static_x: f32) -> (f32, f32) {
     let left = style.inset_left;
@@ -137,19 +137,37 @@ impl HtmlLayoutRenderer {
         (x, y, width)
     }
 
+    pub(super) fn element_positioning_context(
+        &self,
+        position: CssPosition,
+    ) -> ElementPositioningContext {
+        match position {
+            CssPosition::Fixed => ElementPositioningContext::FixedViewport,
+            CssPosition::Absolute => ElementPositioningContext::AbsoluteContainingBlock {
+                owner_node_id: self.positioning_containing_block(position).owner_node_id,
+            },
+            CssPosition::Static | CssPosition::Relative | CssPosition::Sticky => {
+                ElementPositioningContext::InFlow
+            }
+        }
+    }
+
     fn positioning_containing_block(&self, position: CssPosition) -> ContainingBlock {
         if position == CssPosition::Fixed {
             return ContainingBlock {
+                owner_node_id: None,
                 x: 0.0,
                 y: self.scroll_y,
                 width: self.viewport_width,
                 height: self.viewport_height,
             };
         }
-        self.containing_blocks
+        self.ownership
+            .containing_blocks
             .last()
             .copied()
             .unwrap_or(ContainingBlock {
+                owner_node_id: None,
                 x: 0.0,
                 y: 0.0,
                 width: self.viewport_width,
@@ -158,11 +176,11 @@ impl HtmlLayoutRenderer {
     }
 
     pub(super) fn push_containing_block(&mut self, block: ContainingBlock) {
-        self.containing_blocks.push(block);
+        self.ownership.containing_blocks.push(block);
     }
 
     pub(super) fn pop_containing_block(&mut self) {
-        self.containing_blocks.pop();
+        self.ownership.containing_blocks.pop();
     }
 }
 
@@ -177,6 +195,7 @@ mod tests {
 
     fn containing_block() -> ContainingBlock {
         ContainingBlock {
+            owner_node_id: None,
             x: 10.0,
             y: 20.0,
             width: 200.0,
@@ -242,15 +261,15 @@ mod tests {
         let mut renderer = HtmlLayoutRenderer::new(viewport, 0.0, &HashMap::new(), None);
         let block = containing_block();
 
-        assert!(renderer.containing_blocks.is_empty());
+        assert!(renderer.ownership.containing_blocks.is_empty());
         renderer.push_containing_block(block);
-        assert_eq!(renderer.containing_blocks.len(), 1);
-        assert_eq!(renderer.containing_blocks[0].x, block.x);
-        assert_eq!(renderer.containing_blocks[0].y, block.y);
-        assert_eq!(renderer.containing_blocks[0].width, block.width);
-        assert_eq!(renderer.containing_blocks[0].height, block.height);
+        assert_eq!(renderer.ownership.containing_blocks.len(), 1);
+        assert_eq!(renderer.ownership.containing_blocks[0].x, block.x);
+        assert_eq!(renderer.ownership.containing_blocks[0].y, block.y);
+        assert_eq!(renderer.ownership.containing_blocks[0].width, block.width);
+        assert_eq!(renderer.ownership.containing_blocks[0].height, block.height);
 
         renderer.pop_containing_block();
-        assert!(renderer.containing_blocks.is_empty());
+        assert!(renderer.ownership.containing_blocks.is_empty());
     }
 }

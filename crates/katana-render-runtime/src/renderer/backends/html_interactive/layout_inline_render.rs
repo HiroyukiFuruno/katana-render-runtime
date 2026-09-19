@@ -2,8 +2,8 @@ use super::super::super::html_document::HtmlDocumentNode;
 use super::super::constants::LAYOUT_FLOAT_EPSILON;
 use super::super::document::wrap_text_with_initial_width;
 use super::super::layout::HtmlLayoutRenderer;
-use super::super::style::{CssStyle, CssTextAlign};
-use super::super::types::DetailsContext;
+use super::super::style::CssStyle;
+use super::super::types::{DetailsContext, ElementPositioningContext};
 use super::InlineMeasurement;
 use super::floats::InlineFloat;
 use super::state::InlineFlowState;
@@ -78,12 +78,19 @@ impl HtmlLayoutRenderer {
         details: DetailsContext,
         inline: &mut InlineFlowState,
     ) {
-        let HtmlDocumentNode::Element { children, .. } = node else {
+        let HtmlDocumentNode::Element {
+            node_id, children, ..
+        } = node
+        else {
             return;
         };
+        let element_box_index = self.start_element_box(*node_id, ElementPositioningContext::InFlow);
+        self.ownership.inline_fragment_owners.push(*node_id);
         for index in 0..children.len() {
             self.render_inline_or_block_node(children, index, style, details, inline);
         }
+        debug_assert_eq!(self.ownership.inline_fragment_owners.pop(), Some(*node_id));
+        self.finish_inline_fragment_box(element_box_index, *node_id);
     }
 
     pub(super) fn render_inline_node(
@@ -122,32 +129,6 @@ impl HtmlLayoutRenderer {
         self.paint_inline_lines(&lines, initial_x, initial_y, style, inline);
         advance_inline_text(inline, text, &lines, remaining_width, initial_y, style);
         inline.has_items = true;
-    }
-
-    fn paint_inline_lines(
-        &mut self,
-        lines: &[String],
-        initial_x: f32,
-        initial_y: f32,
-        style: &CssStyle,
-        inline: &InlineFlowState,
-    ) {
-        let mut paint_style = style.clone();
-        paint_style.text_align = CssTextAlign::Start;
-        for (index, line) in lines.iter().enumerate() {
-            let line_x = if index == 0 { initial_x } else { inline.x };
-            let (leading_width, visible_line) = InlineMeasurement::visible_line(line, style);
-            let line_x = line_x + leading_width;
-            let line_y = initial_y + index as f32 * style.line_height;
-            let visible_line = visible_line.to_string();
-            self.paint_text_lines(
-                std::slice::from_ref(&visible_line),
-                line_x,
-                (inline.x + inline.width - line_x).max(super::super::constants::MIN_LAYOUT_WIDTH),
-                line_y + style.font_size,
-                &paint_style,
-            );
-        }
     }
 
     pub(super) fn render_block_node(

@@ -10,6 +10,7 @@ use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 type LayoutMetric = (u64, f32, f32, f32, f32, f32);
 
 impl StaticHtmlRuntimeSession {
+    #[cfg(test)]
     pub(in crate::renderer::backends) fn update_layout_metrics(
         &mut self,
         viewport_width: f32,
@@ -17,11 +18,29 @@ impl StaticHtmlRuntimeSession {
         scroll_y: f32,
         boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
     ) -> Result<bool, HtmlRuntimeError> {
+        self.update_layout_metrics_with_intersection_metadata(
+            viewport_width,
+            viewport_height,
+            scroll_y,
+            boxes,
+            [],
+        )
+    }
+
+    pub(in crate::renderer::backends) fn update_layout_metrics_with_intersection_metadata(
+        &mut self,
+        viewport_width: f32,
+        viewport_height: f32,
+        scroll_y: f32,
+        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
+        metadata: impl IntoIterator<Item = (u64, String)>,
+    ) -> Result<bool, HtmlRuntimeError> {
         self.update_layout_metrics_from_boxes(
             viewport_width,
             viewport_height,
             scroll_y,
             boxes.into_iter().collect(),
+            metadata.into_iter().collect(),
         )
     }
 
@@ -31,8 +50,9 @@ impl StaticHtmlRuntimeSession {
         viewport_height: f32,
         scroll_y: f32,
         boxes: Vec<LayoutMetric>,
+        metadata: Vec<(u64, String)>,
     ) -> Result<bool, HtmlRuntimeError> {
-        self.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes)?;
+        self.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes, metadata)?;
         let observer_work = self.has_intersection_observer_work();
         if matches!(observer_work, Err(HtmlRuntimeError::ExecutionTimeout)) {
             self.discard();
@@ -72,12 +92,14 @@ impl StaticHtmlRuntimeSession {
         viewport_height: f32,
         scroll_y: f32,
         boxes: Vec<LayoutMetric>,
+        metadata: Vec<(u64, String)>,
     ) -> Result<(), HtmlRuntimeError> {
         let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
         let state = isolate
             .get_slot::<HtmlDomBridgeState>()
             .ok_or_else(dom_state_unavailable_error)?;
         state.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes);
+        state.set_intersection_metadata(metadata);
         Ok(())
     }
 
