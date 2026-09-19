@@ -258,16 +258,15 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 parent_refs_before,
             )
 
-    def test_preflight_passes_github_token_to_every_release_target_invocation(self) -> None:
+    def test_preflight_runs_the_release_target_gate_once_through_release_check(self) -> None:
         workflow = (SCRIPT.parents[2] / ".github/workflows/release-preflight.yml").read_text(
             encoding="utf-8"
         )
-        for step in ("Release target check", "Release check"):
-            with self.subTest(step=step):
-                start = workflow.index(f"- name: {step}")
-                end = workflow.find("\n      - name:", start + 1)
-                body = workflow[start:] if end == -1 else workflow[start:end]
-                self.assertIn("GH_TOKEN: ${{ github.token }}", body)
+        self.assertNotIn("- name: Release target check", workflow)
+        start = workflow.index("- name: Release check")
+        end = workflow.find("\n      - name:", start + 1)
+        body = workflow[start:] if end == -1 else workflow[start:end]
+        self.assertIn("GH_TOKEN: ${{ github.token }}", body)
 
 
 if __name__ == "__main__":

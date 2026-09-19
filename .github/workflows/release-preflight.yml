@@ -105,12 +105,6 @@ jobs:
             "${{ inputs.version }}" \
             "${{ github.head_ref }}"
 
-      - name: Release target check
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: just VERSION="${{ steps.version.outputs.version }}" release-target-check
-
       - name: Release check
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
         timeout-minutes: 75
