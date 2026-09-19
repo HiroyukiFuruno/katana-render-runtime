@@ -29,7 +29,10 @@ on:
         type: string
 
 permissions:
+  actions: read
+  checks: read
   contents: read
+  pull-requests: read
 
 env:
   CARGO_INCREMENTAL: 0
