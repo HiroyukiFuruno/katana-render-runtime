@@ -44,6 +44,27 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
 };
 "#;
 
+const DETERMINISTIC_DATE_BUNDLE: &str = r#"
+const Editor = { convertHtmlToText(value) { return String(value); } };
+function GraphViewer() {}
+GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", "20");
+  svg.setAttribute("height", "10");
+  svg.setAttribute("viewBox", "0 0 20 10");
+  const explicit = new Date("2024-02-03T04:05:06.000Z");
+  const invalid = new Date(undefined);
+  svg.setAttribute("data-date-now", String(new Date().getTime()));
+  svg.setAttribute("data-date-call", String(Date.parse(Date())));
+  svg.setAttribute("data-date-explicit", String(explicit.getTime()));
+  svg.setAttribute("data-date-parse", String(Date.parse("2024-02-03T04:05:06.000Z")));
+  svg.setAttribute("data-date-utc", String(Date.UTC(2024, 1, 3, 4, 5, 6)));
+  svg.setAttribute("data-date-invalid", String(Number.isNaN(invalid.getTime())));
+  svg.setAttribute("data-date-prototype", String(Object.getPrototypeOf(explicit) === Date.prototype));
+  callback({ graph: { getSvg() { return svg; } } });
+};
+"#;
+
 #[test]
 fn bundle_cache_reads_once() {
     let path = temp_runtime_path("kdr-drawio-runtime-unit");
@@ -76,6 +97,31 @@ fn fake_bundle_renders_svg() {
         DrawioJsRuntimeOps::render("<mxGraphModel />", &path, DiagramColorPreset::light());
 
     assert!(rendered.as_ref().is_ok_and(|svg| svg.contains("<svg")));
+}
+
+#[test]
+fn generated_runtime_uses_deterministic_date_without_changing_date_apis() -> Result<(), String> {
+    let path = temp_runtime_path("kdr-drawio-deterministic-date");
+    assert!(std::fs::write(&path, DETERMINISTIC_DATE_BUNDLE).is_ok());
+
+    let rendered =
+        DrawioJsRuntimeOps::render("<mxGraphModel />", &path, DiagramColorPreset::light());
+
+    let svg = rendered.map_err(|error| error.to_string())?;
+    for expected in [
+        r#"data-date-now="1767225600000""#,
+        r#"data-date-call="1767225600000""#,
+        r#"data-date-explicit="1706933106000""#,
+        r#"data-date-parse="1706933106000""#,
+        r#"data-date-utc="1706933106000""#,
+        r#"data-date-invalid="true""#,
+        r#"data-date-prototype="true""#,
+    ] {
+        if !svg.contains(expected) {
+            return Err(format!("missing {expected}: {svg}"));
+        }
+    }
+    Ok(())
 }
 
 #[test]

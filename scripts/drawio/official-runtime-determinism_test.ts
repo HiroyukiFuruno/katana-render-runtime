@@ -81,3 +81,44 @@ test("runtime context ごとの乱数状態は他の context の消費から独�
     expect(sampleDeterminism(advanced, 100).randoms).not.toEqual(untouchedSample.randoms);
   }
 });
+
+test("公式 Draw.io renderer は Date constructor を固定し静的APIとprototypeを維持する", () => {
+  const context = createOfficialRendererContext();
+  const sample = runInContext(
+    `(() => {
+      const explicit = new Date("2024-02-03T04:05:06.000Z");
+      const explicitUndefined = new Date(undefined);
+      return {
+        implicit: new Date().getTime(),
+        called: Date(),
+        explicit: explicit.getTime(),
+        explicitUndefinedIsInvalid: Number.isNaN(explicitUndefined.getTime()),
+        parsed: Date.parse("2024-02-03T04:05:06.000Z"),
+        utc: Date.UTC(2024, 1, 3, 4, 5, 6),
+        prototypeCompatible: Object.getPrototypeOf(explicit) === Date.prototype,
+        datePrototypeCompatible: Date.prototype.toISOString.call(explicit),
+      };
+    })()`,
+    context,
+  ) as {
+    implicit: number;
+    called: string;
+    explicit: number;
+    explicitUndefinedIsInvalid: boolean;
+    parsed: number;
+    utc: number;
+    prototypeCompatible: boolean;
+    datePrototypeCompatible: string;
+  };
+
+  expect(sample).toEqual({
+    implicit: FIXED_NOW,
+    called: new Date(FIXED_NOW).toString(),
+    explicit: Date.parse("2024-02-03T04:05:06.000Z"),
+    explicitUndefinedIsInvalid: true,
+    parsed: Date.parse("2024-02-03T04:05:06.000Z"),
+    utc: Date.UTC(2024, 1, 3, 4, 5, 6),
+    prototypeCompatible: true,
+    datePrototypeCompatible: "2024-02-03T04:05:06.000Z",
+  });
+});

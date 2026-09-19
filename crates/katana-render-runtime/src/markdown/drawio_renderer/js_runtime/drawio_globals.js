@@ -37,6 +37,21 @@ globalThis.localStorage = {
 };
 globalThis.sessionStorage = globalThis.localStorage;
 globalThis.atob = katanaDrawioAtob;
+const KATANA_DRAWIO_DETERMINISTIC_NOW = Date.parse("2026-01-01T00:00:00.000Z");
+const katanaDrawioOriginalDate = globalThis.Date;
+globalThis.Date = new Proxy(katanaDrawioOriginalDate, {
+  apply(target, thisArg) {
+    return Reflect.construct(target, [KATANA_DRAWIO_DETERMINISTIC_NOW]).toString();
+  },
+  construct(target, args, newTarget) {
+    return Reflect.construct(
+      target,
+      args.length === 0 ? [KATANA_DRAWIO_DETERMINISTIC_NOW] : args,
+      newTarget,
+    );
+  },
+});
+globalThis.Date.now = () => KATANA_DRAWIO_DETERMINISTIC_NOW;
 Date.prototype.toLocaleDateString = katanaDrawioLocaleDate;
 Date.prototype.toLocaleString = katanaDrawioLocaleDate;
 
