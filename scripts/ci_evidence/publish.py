@@ -27,6 +27,7 @@ SCHEMA = "krr-ci-evidence-publisher-v1"
 PROFILE_SCHEMA = "krr-ci-evidence-profile-v1"
 CHECK_ID = "linux-release-quality"
 WORKFLOW_PATH = ".github/workflows/test-and-build.yml"
+CHECK_TITLE = "Trusted Linux release-quality evidence published"
 CANONICAL_JOB_NAME = "Test and Build (ubuntu-latest, linux64)"
 CANONICAL_STEP_NAME = "Run shared release quality gate"
 ACTIONS_APP_ID = 15368
@@ -111,12 +112,11 @@ def _pull_request(run: Mapping[str, Any], default_branch: str, repository: str) 
     request = _mapping(requests[0], "workflow_run.pull_requests[0]")
     head = _mapping(request.get("head"), "workflow_run.pull_requests[0].head")
     base = _mapping(request.get("base"), "workflow_run.pull_requests[0].base")
-    head_repository = _mapping(head.get("repo"), "pull request head.repo")
-    base_repository = _mapping(base.get("repo"), "pull request base.repo")
-    if _string(head_repository.get("full_name"), "pull request head.repo.full_name") != repository:
+    # workflow_run の pull_requests 内の repository は最小表現で full_name を持たない。
+    # フォークを拒否する判定は完全な head_repository を使う。
+    head_repository = _mapping(run.get("head_repository"), "workflow_run.head_repository")
+    if _string(head_repository.get("full_name"), "workflow_run.head_repository.full_name") != repository:
         raise PublishError("workflow run must come from a local pull request")
-    if _string(base_repository.get("full_name"), "pull request base.repo.full_name") != repository:
-        raise PublishError("pull request base repository does not match")
     if _sha(head.get("sha"), "pull request head.sha") != _sha(run.get("head_sha"), "workflow_run.head_sha"):
         raise PublishError("pull request head SHA does not match workflow run")
     if _string(base.get("ref"), "pull request base.ref") != default_branch:
@@ -251,7 +251,7 @@ def publish(event: object, repository: str, rest: RestAdapter) -> tuple[dict[str
         "head_sha": head_sha,
         "status": "in_progress",
         "output": {
-            "title": "Publishing trusted Linux release-quality evidence",
+            "title": CHECK_TITLE,
             "summary": f"manifest-sha256: {manifest_digest}",
             "text": (
                 f"source-run: {run_id}\n"
@@ -278,6 +278,7 @@ def complete_check(repository: str, check_id: int, rest: RestAdapter) -> None:
         {
             "status": "completed",
             "conclusion": "success",
+            "output": {"title": CHECK_TITLE},
         },
     )
     if _assert_actions_identity(response) != check_id:

@@ -30,6 +30,7 @@ def event() -> dict[str, object]:
             "path": ".github/workflows/test-and-build.yml",
             "run_attempt": 1,
             "head_sha": SHA_A,
+            "head_repository": {"full_name": "acme/krr"},
             "pull_requests": [
                 {
                     "number": 9,
@@ -95,10 +96,14 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(body["head_sha"], SHA_A)
         self.assertEqual(body["status"], "in_progress")
         self.assertIn("ci-evidence-linux-release-quality-42", body["output"]["text"])
+        self.assertEqual(body["output"]["title"], "Trusted Linux release-quality evidence published")
         complete_check("acme/krr", check_id, adapter)
         self.assertEqual(adapter.writes[1][0:2], ("PATCH", "/repos/acme/krr/check-runs/7"))
         self.assertEqual(adapter.writes[1][2]["conclusion"], "success")
-        self.assertNotIn("output", adapter.writes[1][2])
+        self.assertEqual(
+            adapter.writes[1][2]["output"]["title"],
+            "Trusted Linux release-quality evidence published",
+        )
 
     def test_rejects_retry_and_stale_default_branch(self) -> None:
         retried = event()
@@ -113,7 +118,7 @@ class PublishTests(unittest.TestCase):
 
     def test_rejects_forked_or_noncanonical_workflow_run(self) -> None:
         fork = event()
-        fork["workflow_run"]["pull_requests"][0]["head"]["repo"]["full_name"] = "fork/krr"
+        fork["workflow_run"]["head_repository"]["full_name"] = "fork/krr"
         with self.assertRaisesRegex(PublishError, "local pull request"):
             publish(fork, "acme/krr", Adapter())
 
