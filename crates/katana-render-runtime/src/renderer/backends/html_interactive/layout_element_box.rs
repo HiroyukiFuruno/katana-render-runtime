@@ -1,6 +1,7 @@
 use super::super::layout_container::horizontal_box_geometry;
+use super::super::style::CssStyle;
 use super::super::types::{
-    ELEMENT_BOX_CORNER_COUNT, ElementBox, ElementPositioningContext, LayoutContext,
+    ELEMENT_BOX_CORNER_COUNT, ElementBox, ElementPositioningContext, LayoutContext, OverflowClip,
 };
 use super::HtmlLayoutRenderer;
 
@@ -11,14 +12,6 @@ impl HtmlLayoutRenderer {
         positioning_context: ElementPositioningContext,
     ) -> usize {
         let index = self.element_boxes.len();
-        let ancestor_node_ids = match positioning_context {
-            ElementPositioningContext::AbsoluteContainingBlock { .. } => {
-                self.ownership.rendering_elements.clone()
-            }
-            ElementPositioningContext::InFlow | ElementPositioningContext::FixedViewport => {
-                Vec::new()
-            }
-        };
         self.element_boxes.push(ElementBox {
             node_id,
             x: 0.0,
@@ -27,11 +20,23 @@ impl HtmlLayoutRenderer {
             height: 0.0,
             transformed_corners: [(0.0, 0.0); ELEMENT_BOX_CORNER_COUNT],
             positioning_context,
-            ancestor_node_ids,
+            ancestor_node_ids: self.ancestor_node_ids(positioning_context),
             overflow_clips: Vec::new(),
+            padding_edge: OverflowClip::new(node_id, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
             inline_fragments: Vec::new(),
         });
         index
+    }
+
+    fn ancestor_node_ids(&self, positioning_context: ElementPositioningContext) -> Vec<u64> {
+        match positioning_context {
+            ElementPositioningContext::AbsoluteContainingBlock { .. } => {
+                self.ownership.rendering_elements.clone()
+            }
+            ElementPositioningContext::InFlow | ElementPositioningContext::FixedViewport => {
+                Vec::new()
+            }
+        }
     }
 
     pub(super) fn finish_element_box(
@@ -51,5 +56,30 @@ impl HtmlLayoutRenderer {
         element_box.width = width;
         element_box.height = height;
         element_box.transformed_corners = ElementBox::rectangle_corners(x, y, width, height);
+        element_box.padding_edge = padding_edge(node_id, x, y, width, height, layout.style);
     }
+}
+
+fn padding_edge(
+    node_id: u64,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    style: &CssStyle,
+) -> OverflowClip {
+    let padding_x = x + style.border_left_width();
+    let padding_y = y + style.border_top_width();
+    let padding_width = (width - style.border_left_width() - style.border_right_width()).max(0.0);
+    let padding_height = (height - style.border_top_width() - style.border_bottom_width()).max(0.0);
+    let (radius_x, radius_y) = style.resolved_border_radius(width, height);
+    OverflowClip::new(
+        node_id,
+        padding_x,
+        padding_y,
+        padding_width,
+        padding_height,
+        (radius_x - style.border_left_width().max(style.border_right_width())).max(0.0),
+        (radius_y - style.border_top_width().max(style.border_bottom_width())).max(0.0),
+    )
 }

@@ -67,11 +67,12 @@ impl HtmlInteractiveSession {
 fn intersection_metadata(element: &ElementBox) -> (u64, String) {
     let (positioning, containing_block) = intersection_positioning(element);
     let clips = intersection_clips(element);
+    let padding_edge = intersection_clip(&element.padding_edge);
     let fragments = intersection_fragments(element);
     (
         element.node_id,
         format!(
-            "{{\"positioning\":\"{positioning}\",\"containingBlock\":{containing_block},\"clips\":[{clips}],\"fragments\":[{fragments}]}}"
+            "{{\"positioning\":\"{positioning}\",\"containingBlock\":{containing_block},\"paddingEdge\":{padding_edge},\"clips\":[{clips}],\"fragments\":[{fragments}]}}"
         ),
     )
 }
@@ -91,14 +92,22 @@ fn intersection_clips(element: &ElementBox) -> String {
     element
         .overflow_clips
         .iter()
-        .map(|clip| {
-            format!(
-                "{{\"owner\":{},\"x\":{},\"y\":{},\"width\":{},\"height\":{}}}",
-                clip.owner_node_id, clip.x, clip.y, clip.width, clip.height
-            )
-        })
+        .map(intersection_clip)
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn intersection_clip(clip: &super::types::OverflowClip) -> String {
+    let corners = clip
+        .transformed_corners
+        .iter()
+        .map(|(x, y)| format!("[{x},{y}]"))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"owner\":{},\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"corners\":[{corners}],\"radiusX\":{},\"radiusY\":{}}}",
+        clip.owner_node_id, clip.x, clip.y, clip.width, clip.height, clip.radius_x, clip.radius_y
+    )
 }
 
 fn intersection_fragments(element: &ElementBox) -> String {

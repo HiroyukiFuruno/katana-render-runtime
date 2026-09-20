@@ -291,6 +291,42 @@ fn bordered_element_root_uses_its_padding_edge_for_intersection() -> TestResult 
 }
 
 #[test]
+fn element_root_uses_padding_edge_without_overflow_clip() -> TestResult {
+    let session = start_with_viewport(unclipped_bordered_element_root_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-target="false:0""##),
+        "a target in the root border must not intersect even without overflow clipping: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
+fn rotated_overflow_clip_keeps_its_shape_in_real_host() -> TestResult {
+    let session = start_with_viewport(rotated_overflow_clip_document(), 180, 180)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-target="false:0""##),
+        "a target in the rotated clip AABB but outside its shape must not intersect: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
+fn rounded_element_root_clip_excludes_its_corner_in_real_host() -> TestResult {
+    let session = start_with_viewport(rounded_element_root_document(), 160, 120)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-target="false:0""##),
+        "a target entirely inside the rectangular corner but outside the rounded root clip must not intersect: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn separated_ancestor_clip_does_not_revive_edge_contact() -> TestResult {
     let session = start_with_viewport(separated_ancestor_clip_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -596,6 +632,55 @@ html, body { margin: 0; }
 #target { position: absolute; top: 0; left: 4px; width: 20px; height: 3px; }
 </style>
 <div id=root><div id=target>Border</div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn unclipped_bordered_element_root_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 80px; height: 40px; border: 4px solid; }
+#target { position: absolute; top: 0; left: 4px; width: 20px; height: 3px; }
+</style>
+<div id=root><div id=target>Border</div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn rotated_overflow_clip_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 160px; height: 160px; }
+#clip { position: relative; width: 100px; height: 100px; overflow: hidden; transform: rotate(45deg); }
+#target { position: absolute; left: 120px; top: 0; width: 20px; height: 20px; }
+</style>
+<div id=root><div id=clip><div id=target>Outside</div></div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn rounded_element_root_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 100px; height: 100px; border-radius: 50%; overflow: hidden; }
+#target { position: absolute; left: 0; top: 0; width: 10px; height: 10px; }
+</style>
+<div id=root><div id=target>Corner</div></div><p id=observed></p>
 <script>
 const root = document.getElementById("root");
 new IntersectionObserver((entries) => {

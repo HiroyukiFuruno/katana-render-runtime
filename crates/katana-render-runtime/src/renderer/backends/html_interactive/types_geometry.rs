@@ -57,6 +57,7 @@ impl ElementBox {
 
     pub(crate) fn rotate_about(&mut self, degrees: f32, center_x: f32, center_y: f32) {
         rotate_corners(&mut self.transformed_corners, degrees, center_x, center_y);
+        rotate_overflow_clip(&mut self.padding_edge, degrees, center_x, center_y);
         for overflow_clip in &mut self.overflow_clips {
             rotate_overflow_clip(overflow_clip, degrees, center_x, center_y);
         }
@@ -97,19 +98,18 @@ fn rotate_overflow_clip(
     center_x: f32,
     center_y: f32,
 ) {
-    let mut corners = ElementBox::rectangle_corners(
-        overflow_clip.x,
-        overflow_clip.y,
-        overflow_clip.width,
-        overflow_clip.height,
+    rotate_corners(
+        &mut overflow_clip.transformed_corners,
+        degrees,
+        center_x,
+        center_y,
     );
-    rotate_corners(&mut corners, degrees, center_x, center_y);
     (
         overflow_clip.x,
         overflow_clip.y,
         overflow_clip.width,
         overflow_clip.height,
-    ) = axis_aligned_bounds(&corners);
+    ) = axis_aligned_bounds(&overflow_clip.transformed_corners);
 }
 
 fn axis_aligned_bounds(corners: &[(f32, f32); ELEMENT_BOX_CORNER_COUNT]) -> (f32, f32, f32, f32) {
@@ -148,24 +148,15 @@ mod tests {
             transformed_corners: ElementBox::rectangle_corners(0.0, 0.0, 10.0, 20.0),
             positioning_context: ElementPositioningContext::InFlow,
             ancestor_node_ids: Vec::new(),
-            overflow_clips: vec![OverflowClip {
-                owner_node_id: 2,
-                x: 10.0,
-                y: 0.0,
-                width: 20.0,
-                height: 10.0,
-            }],
+            overflow_clips: vec![OverflowClip::new(2, 10.0, 0.0, 20.0, 10.0, 0.0, 0.0)],
+            padding_edge: OverflowClip::new(1, 0.0, 0.0, 10.0, 20.0, 0.0, 0.0),
             inline_fragments: Vec::new(),
         }
     }
 
     fn rotated_overflow_clip() -> OverflowClip {
-        OverflowClip {
-            owner_node_id: 2,
-            x: -10.0,
-            y: 10.0,
-            width: 10.0,
-            height: 20.0,
-        }
+        let mut clip = OverflowClip::new(2, 10.0, 0.0, 20.0, 10.0, 0.0, 0.0);
+        rotate_overflow_clip(&mut clip, 90.0, 0.0, 0.0);
+        clip
     }
 }

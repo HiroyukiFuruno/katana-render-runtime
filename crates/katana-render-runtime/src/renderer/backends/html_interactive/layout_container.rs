@@ -91,13 +91,8 @@ impl HtmlLayoutRenderer {
             return;
         };
         let (x, y, width, height) = overflow_clip_geometry(geometry, height, style);
-        let clip = OverflowClip {
-            owner_node_id,
-            x,
-            y,
-            width,
-            height,
-        };
+        let (radius_x, radius_y) = overflow_clip_radius(geometry, height, style);
+        let clip = OverflowClip::new(owner_node_id, x, y, width, height, radius_x, radius_y);
         for element_box in &mut self.element_boxes[descendant_box_start..] {
             if overflow_clip_applies_to(element_box, owner_node_id) {
                 element_box.overflow_clips.push(clip);

@@ -345,6 +345,15 @@ mod tests {
             positioning_context: ElementPositioningContext::InFlow,
             ancestor_node_ids: Vec::new(),
             overflow_clips: Vec::new(),
+            padding_edge: super::super::types::OverflowClip::new(
+                1,
+                0.0,
+                0.0,
+                TEST_BOX_WIDTH,
+                TEST_BOX_HEIGHT,
+                0.0,
+                0.0,
+            ),
             inline_fragments: Vec::new(),
         }
     }

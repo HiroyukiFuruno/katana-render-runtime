@@ -104,6 +104,8 @@ pub(super) struct ElementBox {
     /// 開始時点のDOM祖先。絶対配置要素へ適用する overflow clip を判定する。
     pub(super) ancestor_node_ids: Vec<u64>,
     pub(super) overflow_clips: Vec<OverflowClip>,
+    /// IntersectionObserver の element root は overflow の有無にかかわらず padding edge を基準にする。
+    pub(super) padding_edge: OverflowClip,
     pub(super) inline_fragments: Vec<InlineFragment>,
 }
 
@@ -121,6 +123,33 @@ pub(super) struct OverflowClip {
     pub(super) y: f32,
     pub(super) width: f32,
     pub(super) height: f32,
+    /// 回転後も clip の実形状を保つための四隅。x/y/width/height は AABB を保持する。
+    pub(super) transformed_corners: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
+    pub(super) radius_x: f32,
+    pub(super) radius_y: f32,
+}
+
+impl OverflowClip {
+    pub(super) fn new(
+        owner_node_id: u64,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        radius_x: f32,
+        radius_y: f32,
+    ) -> Self {
+        Self {
+            owner_node_id,
+            x,
+            y,
+            width,
+            height,
+            transformed_corners: ElementBox::rectangle_corners(x, y, width, height),
+            radius_x,
+            radius_y,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
