@@ -131,6 +131,7 @@ jobs:
 
       - name: Check trusted Linux CI evidence
         id: reusable_quality
+        timeout-minutes: 110
         if: startsWith(github.head_ref, 'release/v')
         shell: bash
         env:
@@ -138,34 +139,50 @@ jobs:
         run: |
           set -euo pipefail
           evidence_file="$RUNNER_TEMP/krr-ci-evidence.json"
-          set +e
-          python3 "${{ steps.evidence_loader.outputs.directory }}/consume.py" \
-            --repository "${{ github.repository }}" \
-            --pr-number "${{ github.event.pull_request.number }}" \
-            --head-sha "${{ github.event.pull_request.head.sha }}" \
-            --head-ref "${{ github.event.pull_request.head.ref }}" \
-            --profile linux-release-quality-v1 \
-            --output "$evidence_file"
-          status=$?
-          set -e
-          case "$status" in
-            0)
-              test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["decision"])' "$evidence_file")" = reuse
-              echo "reuse=true" >> "$GITHUB_OUTPUT"
-              echo "Reusing trusted Linux quality evidence from master-loaded consumer ${{ steps.evidence_loader.outputs.source }}."
-              cat "$evidence_file"
-              ;;
-            10)
-              test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["decision"])' "$evidence_file")" = rerun
-              echo "reuse=false" >> "$GITHUB_OUTPUT"
-              echo "No unique matching trusted evidence; running the complete Linux quality gate."
-              cat "$evidence_file"
-              ;;
-            *)
-              echo "Trusted evidence consumer failed (exit $status); refusing to silently skip the quality gate." >&2
-              exit "$status"
-              ;;
-          esac
+          poll_attempt=0
+          poll_max_attempts=120
+          poll_interval_seconds=45
+
+          while (( poll_attempt < poll_max_attempts )); do
+            poll_attempt=$((poll_attempt + 1))
+            set +e
+            python3 "${{ steps.evidence_loader.outputs.directory }}/consume.py" \
+              --repository "${{ github.repository }}" \
+              --pr-number "${{ github.event.pull_request.number }}" \
+              --head-sha "${{ github.event.pull_request.head.sha }}" \
+              --head-ref "${{ github.event.pull_request.head.ref }}" \
+              --profile linux-release-quality-v1 \
+              --output "$evidence_file"
+            status=$?
+            set -e
+            case "$status" in
+              0)
+                test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["decision"])' "$evidence_file")" = reuse
+                echo "reuse=true" >> "$GITHUB_OUTPUT"
+                echo "Reusing trusted Linux quality evidence from master-loaded consumer ${{ steps.evidence_loader.outputs.source }} after $poll_attempt poll(s)."
+                cat "$evidence_file"
+                exit 0
+                ;;
+              10)
+                test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["decision"])' "$evidence_file")" = rerun
+                if (( poll_attempt == poll_max_attempts )); then
+                  echo "No unique matching trusted evidence after $poll_attempt bounded poll(s); running the complete Linux quality gate."
+                  echo "reuse=false" >> "$GITHUB_OUTPUT"
+                  cat "$evidence_file"
+                  exit 0
+                fi
+                echo "Trusted evidence is not ready (poll $poll_attempt/$poll_max_attempts); retrying in ${poll_interval_seconds}s."
+                sleep "$poll_interval_seconds"
+                ;;
+              *)
+                echo "Trusted evidence consumer failed (exit $status); refusing to silently skip the quality gate." >&2
+                exit "$status"
+                ;;
+            esac
+          done
+
+          echo "Evidence polling exhausted without a decision; refusing to silently skip the quality gate." >&2
+          exit 1
 
       - name: Run shared release quality gate
         if: github.event_name == 'workflow_dispatch' || (startsWith(github.head_ref, 'release/v') && steps.reusable_quality.outputs.reuse != 'true')
