@@ -380,6 +380,18 @@ fn asymmetric_border_keeps_the_uncovered_inner_corner_rounded_in_real_host() -> 
 }
 
 #[test]
+fn rounded_clip_keeps_corner_radii_when_arc_centers_overlap_in_real_host() -> TestResult {
+    let session = start_with_viewport(overlapping_arc_center_document(), 160, 120)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-bottom-right-start="60:100""##),
+        "the bottom-right arc must retain its own radius when its center overlaps the top-right arc: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn separated_ancestor_clip_does_not_revive_edge_contact() -> TestResult {
     let session = start_with_viewport(separated_ancestor_clip_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -810,6 +822,25 @@ new IntersectionObserver((entries) => {
   document.getElementById("observed").setAttribute("data-poly", JSON.stringify(__krrRoundedClipPolygon(metadata.clips[0])));
   document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
 }, { root }).observe(target);
+</script>"##
+}
+
+fn overlapping_arc_center_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 100px; height: 100px; border-radius: 5px 60px 40px 5px / 5px 60px 40px 5px; overflow: hidden; }
+#target { position: absolute; left: 50px; top: 50px; width: 10px; height: 10px; }
+</style>
+<div id=root><div id=target>Corner</div></div><p id=observed></p>
+<script>
+const clip = {
+  corners: [[0, 0], [100, 0], [100, 100], [0, 100]],
+  radii: [[5, 5], [40, 60], [40, 40], [5, 5]],
+  radiusX: 0,
+  radiusY: 0,
+};
+const point = __krrRoundedClipPolygon(clip)[17];
+document.getElementById("observed").setAttribute("data-bottom-right-start", `${Math.round(point.x)}:${Math.round(point.y)}`);
 </script>"##
 }
 

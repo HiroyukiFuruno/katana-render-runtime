@@ -811,10 +811,9 @@ const __krrRoundedClipPolygon = (clip) => {
     [scaledRadii[3][0], height - scaledRadii[3][1], Math.PI / 2, Math.PI],
     [scaledRadii[0][0], scaledRadii[0][1], Math.PI, Math.PI * 1.5],
   ];
-  return arcs.flatMap(([centerX, centerY, start, end]) =>
+  return arcs.flatMap(([centerX, centerY, start, end], arcIndex) =>
     Array.from({ length: 9 }, (_, index) => {
       const angle = start + ((end - start) * index) / 8;
-      const arcIndex = arcs.findIndex((arc) => arc[0] === centerX && arc[1] === centerY);
       const [radiusX, radiusY] = scaledRadii[(arcIndex + 1) % 4];
       return pointAt(centerX + radiusX * Math.cos(angle), centerY + radiusY * Math.sin(angle));
     }),

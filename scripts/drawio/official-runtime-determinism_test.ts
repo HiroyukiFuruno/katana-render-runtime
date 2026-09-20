@@ -34,6 +34,21 @@ function sampleDateCallInTimezone(timezone: string): string {
   return result.stdout;
 }
 
+function sampleLocaleTimeCallInTimezone(timezone: string): string {
+  const script = `
+    const installDrawioDeterminism = ${installDrawioDeterminism.toString()};
+    installDrawioDeterminism();
+    process.stdout.write(new Date().toLocaleTimeString());
+  `;
+  const result = spawnSync(process.execPath, ["-e", script], {
+    env: { ...process.env, TZ: timezone },
+    encoding: "utf8",
+  });
+  expect(result.status).toBe(0);
+  expect(result.stderr).toBe("");
+  return result.stdout;
+}
+
 type Runtime = {
   createContext: () => Context;
 };
@@ -144,5 +159,13 @@ test("公式 Draw.io renderer の Date() はホストのタイムゾーンに依
   const pacific = sampleDateCallInTimezone("America/Los_Angeles");
 
   expect(utc).toBe("Thu, 01 Jan 2026 00:00:00 GMT");
+  expect(pacific).toBe(utc);
+});
+
+test("公式 Draw.io renderer の Graph global time はホストのタイムゾーンに依存しない", () => {
+  const utc = sampleLocaleTimeCallInTimezone("UTC");
+  const pacific = sampleLocaleTimeCallInTimezone("America/Los_Angeles");
+
+  expect(utc).toBe("00:00:00");
   expect(pacific).toBe(utc);
 });

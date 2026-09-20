@@ -10,6 +10,9 @@ export function installDrawioDeterminism() {
     },
   });
   Date.now = () => deterministicNow;
+  originalDate.prototype.toLocaleTimeString = function katanaDrawioLocaleTime() {
+    return this.toISOString().slice(11, 19);
+  };
 
   let randomState = 0x12345678;
   Math.random = () => {

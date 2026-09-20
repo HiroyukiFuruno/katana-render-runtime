@@ -54,9 +54,14 @@ globalThis.Date = new Proxy(katanaDrawioOriginalDate, {
 globalThis.Date.now = () => KATANA_DRAWIO_DETERMINISTIC_NOW;
 Date.prototype.toLocaleDateString = katanaDrawioLocaleDate;
 Date.prototype.toLocaleString = katanaDrawioLocaleDate;
+Date.prototype.toLocaleTimeString = katanaDrawioLocaleTime;
 
 function katanaDrawioLocaleDate() {
   return this.toISOString().slice(0, 10);
+}
+
+function katanaDrawioLocaleTime() {
+  return this.toISOString().slice(11, 19);
 }
 
 function katanaDrawioAtob(value) {
