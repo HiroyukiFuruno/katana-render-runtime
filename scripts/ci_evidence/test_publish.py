@@ -53,6 +53,8 @@ class Adapter:
                     "title": "Trusted Linux release-quality evidence published",
                     "summary": "manifest-sha256: " + "c" * 64,
                     "text": "source-run: 42\nartifact: ci-evidence-linux-release-quality-42",
+                    "annotations_count": 0,
+                    "annotations_url": "https://api.github.com/repos/acme/krr/check-runs/7/annotations",
                 },
             },
             ("GET", "/repos/acme/krr/git/ref/heads/master"): {"object": {"sha": SHA_B}},
@@ -123,6 +125,8 @@ class PublishTests(unittest.TestCase):
             adapter.writes[1][2]["output"]["text"],
             "source-run: 42\nartifact: ci-evidence-linux-release-quality-42",
         )
+        self.assertNotIn("annotations_count", adapter.writes[1][2]["output"])
+        self.assertNotIn("annotations_url", adapter.writes[1][2]["output"])
 
     def test_rejects_retry_and_stale_default_branch(self) -> None:
         retried = event()

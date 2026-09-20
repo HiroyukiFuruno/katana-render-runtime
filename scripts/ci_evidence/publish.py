@@ -280,6 +280,14 @@ def complete_check(repository: str, check_id: int, rest: RestAdapter) -> None:
     if _assert_actions_identity(current) != check_id:
         raise PublishError("check run lookup returned a different check run ID")
     current_output = _mapping(_mapping(current, "check run response").get("output"), "check run response.output")
+    # GitHub replaces the complete output object on PATCH, but fields such as
+    # annotations_count and annotations_url are read-only response metadata.
+    # Rebuild only the writable output fields to avoid a 422 from the API.
+    writable_output = {
+        field: current_output[field]
+        for field in ("title", "summary", "text")
+        if field in current_output
+    }
     response = rest.request(
         "PATCH",
         f"/repos/{repository}/check-runs/{check_id}",
@@ -288,7 +296,7 @@ def complete_check(repository: str, check_id: int, rest: RestAdapter) -> None:
             "conclusion": "success",
             # GitHub replaces the complete output object on PATCH.  Preserve
             # the source-run and artifact metadata written by publish().
-            "output": dict(current_output),
+            "output": writable_output,
         },
     )
     if _assert_actions_identity(response) != check_id:
