@@ -41,6 +41,7 @@ pub(super) struct ContainingBlock {
     pub(super) y: f32,
     pub(super) width: f32,
     pub(super) height: f32,
+    pub(super) establishes_fixed_containing_block: bool,
 }
 
 #[derive(Default)]

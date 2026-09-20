@@ -1,6 +1,9 @@
 use super::super::html_browser::{HtmlBrowserError, HtmlBrowserViewport};
-use super::types::{ElementBox, ElementPositioningContext, HitTarget, LayoutResult};
+use super::types::{ElementBox, HitTarget, LayoutResult};
 use super::{HtmlInteractiveSession, runtime_failure};
+
+#[path = "session_geometry_positioning.rs"]
+mod positioning;
 
 impl HtmlInteractiveSession {
     pub(super) fn update_scroll(&mut self, render: &LayoutResult) {
@@ -65,7 +68,8 @@ impl HtmlInteractiveSession {
 }
 
 fn intersection_metadata(element: &ElementBox) -> (u64, String) {
-    let (positioning, containing_block, viewport_escape) = intersection_positioning(element);
+    let (positioning, containing_block, viewport_escape) =
+        positioning::intersection_positioning(element);
     let clips = intersection_clips(element);
     let clips_overflow = element.clips_overflow;
     let padding_edge = intersection_clip(&element.padding_edge);
@@ -76,21 +80,6 @@ fn intersection_metadata(element: &ElementBox) -> (u64, String) {
             "{{\"positioning\":\"{positioning}\",\"containingBlock\":{containing_block},\"viewportEscape\":{viewport_escape},\"paddingEdge\":{padding_edge},\"clipsOverflow\":{clips_overflow},\"clips\":[{clips}],\"fragments\":[{fragments}]}}"
         ),
     )
-}
-
-fn intersection_positioning(element: &ElementBox) -> (&'static str, String, bool) {
-    match element.positioning_context {
-        ElementPositioningContext::InFlow => ("in-flow", "null".to_string(), false),
-        ElementPositioningContext::FixedViewport => ("fixed", "null".to_string(), true),
-        ElementPositioningContext::AbsoluteContainingBlock {
-            owner_node_id,
-            viewport_escape,
-        } => (
-            "absolute",
-            owner_node_id.map_or_else(|| "null".to_string(), |owner| owner.to_string()),
-            viewport_escape,
-        ),
-    }
 }
 
 fn intersection_clips(element: &ElementBox) -> String {

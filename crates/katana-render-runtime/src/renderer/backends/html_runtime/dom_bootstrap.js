@@ -649,7 +649,10 @@ const __krrMetadataBelongsToRoot = (metadata, target, root) => {
   const path = __krrNativeDom("eventPath", target.__krrNodeId);
   if (__krrPathNodeIndex(path, root.__krrNodeId) < 0) return false;
   if (metadata.positioning === "fixed") return false;
-  if (metadata.positioning !== "absolute" || !Number.isSafeInteger(metadata.containingBlock)) {
+  if (
+    (metadata.positioning !== "absolute" && metadata.positioning !== "fixed-containing-block") ||
+    !Number.isSafeInteger(metadata.containingBlock)
+  ) {
     return false;
   }
   const containingBlockIndex = __krrPathNodeIndex(path, metadata.containingBlock);

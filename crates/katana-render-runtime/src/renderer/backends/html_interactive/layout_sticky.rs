@@ -85,6 +85,7 @@ mod tests {
             y: 0.0,
             width: 320.0,
             height: 500.0,
+            establishes_fixed_containing_block: false,
         });
         let mut style = sticky_style();
         style.inset_top = Some(0.0);

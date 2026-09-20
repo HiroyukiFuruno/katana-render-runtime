@@ -31,7 +31,8 @@ impl HtmlLayoutRenderer {
 
     fn ancestor_node_ids(&self, positioning_context: ElementPositioningContext) -> Vec<u64> {
         match positioning_context {
-            ElementPositioningContext::AbsoluteContainingBlock { .. } => {
+            ElementPositioningContext::FixedContainingBlock { .. }
+            | ElementPositioningContext::AbsoluteContainingBlock { .. } => {
                 self.ownership.rendering_elements.clone()
             }
             ElementPositioningContext::InFlow | ElementPositioningContext::FixedViewport => {

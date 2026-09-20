@@ -2,8 +2,10 @@ use super::constants::CONTROL_HEIGHT;
 use super::layout::{ContainingBlock, HtmlLayoutRenderer};
 use super::layout_input::is_checkbox;
 use super::style::{CssPosition, CssStyle};
-use super::types::{ElementPositioningContext, ElementRenderContext, LayoutContext};
+use super::types::{ElementRenderContext, LayoutContext};
 
+#[path = "layout_position_context.rs"]
+mod context;
 #[path = "layout_position_ownership.rs"]
 mod ownership;
 
@@ -140,45 +142,6 @@ impl HtmlLayoutRenderer {
         (x, y, width)
     }
 
-    pub(super) fn element_positioning_context(
-        &self,
-        position: CssPosition,
-    ) -> ElementPositioningContext {
-        match position {
-            CssPosition::Fixed => ElementPositioningContext::FixedViewport,
-            CssPosition::Absolute => ElementPositioningContext::AbsoluteContainingBlock {
-                owner_node_id: self.positioning_containing_block(position).owner_node_id,
-                viewport_escape: self.in_flow_positioning_context().escapes_element_root(),
-            },
-            CssPosition::Static | CssPosition::Relative | CssPosition::Sticky => {
-                self.in_flow_positioning_context()
-            }
-        }
-    }
-
-    fn positioning_containing_block(&self, position: CssPosition) -> ContainingBlock {
-        if position == CssPosition::Fixed {
-            return ContainingBlock {
-                owner_node_id: None,
-                x: 0.0,
-                y: self.scroll_y,
-                width: self.viewport_width,
-                height: self.viewport_height,
-            };
-        }
-        self.ownership
-            .containing_blocks
-            .last()
-            .copied()
-            .unwrap_or(ContainingBlock {
-                owner_node_id: None,
-                x: 0.0,
-                y: 0.0,
-                width: self.viewport_width,
-                height: self.viewport_height,
-            })
-    }
-
     pub(super) fn push_containing_block(&mut self, block: ContainingBlock) {
         self.ownership.containing_blocks.push(block);
     }
@@ -204,6 +167,7 @@ mod tests {
             y: 20.0,
             width: 200.0,
             height: 100.0,
+            establishes_fixed_containing_block: false,
         }
     }
 

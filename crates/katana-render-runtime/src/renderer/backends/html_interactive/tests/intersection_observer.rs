@@ -356,6 +356,26 @@ fn explicit_root_rejects_static_targets_with_out_of_flow_ancestors() -> TestResu
 }
 
 #[test]
+fn explicit_root_accepts_fixed_target_within_transformed_containing_block() -> TestResult {
+    let session = start_with_viewport(
+        transformed_containing_block_fixed_target_document(),
+        160,
+        100,
+    )?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-transformed-fixed="true:1""##),
+        "a fixed target positioned by a transformed ancestor inside the element root must intersect: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-transformed-fixed-intersection="120:20""##),
+        "a transformed containing block must preserve the fixed target intersection geometry: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn explicit_root_rejects_absolute_target_inside_fixed_ancestor() -> TestResult {
     let session = start_with_viewport(fixed_ancestor_absolute_target_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -932,6 +952,25 @@ new IntersectionObserver((entries) => {
     observed.setAttribute(`data-${entry.target.id}-intersection`, `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
   }
 }, { root }).observe(document.getElementById("absolute-child"));
+</script>"##
+}
+
+fn transformed_containing_block_fixed_target_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { width: 120px; height: 80px; }
+#transformed { transform: rotate(0deg); width: 120px; height: 20px; }
+#transformed-fixed { position: fixed; top: 0; left: 0; width: 120px; height: 20px; }
+</style>
+<div id=root><div id=transformed><div id=transformed-fixed>Transformed fixed</div></div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  const observed = document.getElementById("observed");
+  observed.setAttribute("data-transformed-fixed", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  observed.setAttribute("data-transformed-fixed-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+}, { root }).observe(document.getElementById("transformed-fixed"));
 </script>"##
 }
 

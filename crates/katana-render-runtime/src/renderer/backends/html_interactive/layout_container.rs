@@ -58,7 +58,7 @@ impl HtmlLayoutRenderer {
         style: &CssStyle,
         details: DetailsContext,
     ) -> Option<ContainingBlock> {
-        if style.position == CssPosition::Static {
+        if style.position == CssPosition::Static && !style.has_transform {
             return None;
         }
         let height = style
@@ -75,6 +75,7 @@ impl HtmlLayoutRenderer {
             y: geometry.start,
             width: geometry.box_width,
             height,
+            establishes_fixed_containing_block: style.has_transform,
         })
     }
 
@@ -236,28 +237,32 @@ fn overflow_clip_radius(
 }
 
 fn overflow_clip_applies_to(element_box: &super::types::ElementBox, owner_node_id: u64) -> bool {
-    match element_box.positioning_context {
-        ElementPositioningContext::InFlow => true,
-        ElementPositioningContext::FixedViewport => false,
-        ElementPositioningContext::AbsoluteContainingBlock {
-            viewport_escape: true,
-            ..
-        } => false,
-        ElementPositioningContext::AbsoluteContainingBlock {
-            owner_node_id: Some(containing_block_owner),
-            viewport_escape: false,
-        } => element_box
-            .ancestor_node_ids
-            .iter()
-            .position(|ancestor| *ancestor == containing_block_owner)
-            .is_some_and(|containing_block_index| {
-                element_box.ancestor_node_ids[..=containing_block_index].contains(&owner_node_id)
-            }),
-        ElementPositioningContext::AbsoluteContainingBlock {
-            owner_node_id: None,
-            viewport_escape: false,
-        } => false,
+    let context = element_box.positioning_context;
+    if context.escapes_element_root() {
+        return false;
     }
+    if context == ElementPositioningContext::InFlow {
+        return true;
+    }
+    context
+        .containing_block_owner()
+        .is_some_and(|containing_block_owner| {
+            contains_overflow_clip_owner(element_box, owner_node_id, containing_block_owner)
+        })
+}
+
+fn contains_overflow_clip_owner(
+    element_box: &super::types::ElementBox,
+    owner_node_id: u64,
+    containing_block_owner: u64,
+) -> bool {
+    element_box
+        .ancestor_node_ids
+        .iter()
+        .position(|ancestor| *ancestor == containing_block_owner)
+        .is_some_and(|containing_block_index| {
+            element_box.ancestor_node_ids[..=containing_block_index].contains(&owner_node_id)
+        })
 }
 
 #[cfg(test)]

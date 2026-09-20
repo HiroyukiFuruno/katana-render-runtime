@@ -104,8 +104,10 @@ impl CssStyle {
         let value = value.trim();
         if value.eq_ignore_ascii_case("none") {
             self.rotation_degrees = 0.0;
+            self.has_transform = false;
         } else if let Some(rotation) = css_rotation_degrees(value) {
             self.rotation_degrees = rotation;
+            self.has_transform = true;
         }
     }
 
