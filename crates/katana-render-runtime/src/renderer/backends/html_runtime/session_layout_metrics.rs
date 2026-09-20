@@ -269,7 +269,7 @@ mod tests {
 
     fn root_clip_edge_contact_metadata(clip: u64) -> String {
         format!(
-            r#"{{"positioning":"in-flow","clips":[{{"owner":{clip},"x":0,"y":0,"width":10,"height":10}}],"fragments":[]}}"#
+            r#"{{"positioning":"in-flow","viewportEscape":false,"clips":[{{"owner":{clip},"x":0,"y":0,"width":10,"height":10}}],"fragments":[]}}"#
         )
     }
 
