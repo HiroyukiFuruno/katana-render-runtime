@@ -340,6 +340,38 @@ fn bordered_element_root_uses_its_padding_edge_for_intersection() -> TestResult 
 }
 
 #[test]
+fn zero_sized_overflow_root_does_not_resurrect_a_distant_target() -> TestResult {
+    let session = start_with_viewport(zero_sized_overflow_root_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-target="false:0""##),
+        "a zero-sized overflow root must not make a distant target intersect: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-intersection="0:0""##),
+        "a zero-sized overflow root must produce an empty intersection: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
+fn collapsed_root_margin_does_not_resurrect_a_distant_target() -> TestResult {
+    let session = start_with_viewport(collapsed_root_margin_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-target="false:0""##),
+        "a point-sized root margin must not make a distant target intersect: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-intersection="0:0""##),
+        "a point-sized root margin must produce an empty intersection: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn element_root_uses_border_box_without_overflow_clip() -> TestResult {
     let session = start_with_viewport(unclipped_bordered_element_root_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -774,6 +806,42 @@ new IntersectionObserver((entries) => {
   const entry = entries[0];
   document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
 }, { root }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn zero_sized_overflow_root_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 0; height: 0; overflow: hidden; }
+#target { position: absolute; left: 100px; top: 100px; width: 20px; height: 20px; }
+</style>
+<div id=root><div id=target>Distant target</div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  const observed = document.getElementById("observed");
+  observed.setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  observed.setAttribute("data-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+}, { root }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn collapsed_root_margin_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 100px; height: 100px; }
+#target { position: absolute; left: 100px; top: 100px; width: 20px; height: 20px; }
+</style>
+<div id=root><div id=target>Distant target</div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  const observed = document.getElementById("observed");
+  observed.setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  observed.setAttribute("data-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+}, { root, rootMargin: "-50px" }).observe(document.getElementById("target"));
 </script>"##
 }
 

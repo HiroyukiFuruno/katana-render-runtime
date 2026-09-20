@@ -705,8 +705,36 @@ const __krrPolygonRect = (polygon) => {
 };
 const __krrCross = (first, second, point) =>
   (second.x - first.x) * (point.y - first.y) - (second.y - first.y) * (point.x - first.x);
+const __krrPolygonIsPoint = (polygon) =>
+  polygon.length > 0 &&
+  polygon.every((point) => point.x === polygon[0].x && point.y === polygon[0].y);
+const __krrPointInPolygon = (point, polygon) => {
+  if (polygon.length === 0) return false;
+  let inside = false;
+  for (let index = 0; index < polygon.length; index += 1) {
+    const first = polygon[index];
+    const second = polygon[(index + 1) % polygon.length];
+    const cross = __krrCross(first, second, point);
+    const withinSegment =
+      cross === 0 &&
+      point.x >= Math.min(first.x, second.x) &&
+      point.x <= Math.max(first.x, second.x) &&
+      point.y >= Math.min(first.y, second.y) &&
+      point.y <= Math.max(first.y, second.y);
+    if (withinSegment) return true;
+    if (first.y > point.y !== second.y > point.y) {
+      const intersectionX =
+        first.x + ((second.x - first.x) * (point.y - first.y)) / (second.y - first.y);
+      if (point.x < intersectionX) inside = !inside;
+    }
+  }
+  return inside;
+};
 const __krrPolygonIntersection = (subject, clip) => {
   if (subject.length === 0 || clip.length === 0) return [];
+  if (__krrPolygonIsPoint(clip)) {
+    return __krrPointInPolygon(clip[0], subject) ? [clip[0]] : [];
+  }
   let output = subject;
   for (let index = 0; index < clip.length && output.length > 0; index += 1) {
     const first = clip[index];
