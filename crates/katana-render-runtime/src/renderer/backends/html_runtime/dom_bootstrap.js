@@ -628,7 +628,6 @@ const __krrTargetIsDescendantOfRoot = (target, root) => {
 const __krrMetadataBelongsToRoot = (metadata, target, root) => {
   if (metadata === null || typeof metadata !== "object") return false;
   const hasValidGeometry =
-    typeof metadata.clipsOverflow === "boolean" &&
     Array.isArray(metadata.clips) &&
     metadata.clips.every(
       (clip) =>
