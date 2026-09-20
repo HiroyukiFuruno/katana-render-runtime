@@ -51,8 +51,8 @@ class Api:
             f"/repos/{REPO}/actions/workflows/test-and-build.yml/runs": {"workflow_runs": [run]},
             f"/repos/{REPO}/actions/runs/{RUN}/jobs": {"jobs": [{"name": "Test and Build (ubuntu-latest, linux64)", "status": "completed", "conclusion": "success", "steps": [{"name": "Run shared release quality gate", "status": "completed", "conclusion": "success"}]}]},
             f"/repos/{REPO}/actions/artifacts": {"artifacts": [{"id": 5, "name": "ci-evidence-linux-release-quality-42", "expired": False, "archive_download_url": "https://artifact.test/5", "workflow_run": {"id": 50}}]},
-            f"/repos/{REPO}/actions/runs/50": {"id": 50, "event": "workflow_run", "path": ".github/workflows/ci-evidence-publisher.yml", "conclusion": "success"},
-            f"/repos/{REPO}/commits/{SHA}/check-runs": {"check_runs": [{"id": 6, "name": CHECK, "head_sha": SHA, "status": "completed", "conclusion": "success", "app": {"id": APP_ID, "slug": "github-actions"}, "output": {"title": CHECK_TITLE}}]},
+            f"/repos/{REPO}/actions/runs/50": {"id": 50, "event": "workflow_run", "path": ".github/workflows/ci-evidence-publisher.yml", "status": "completed", "conclusion": "success"},
+            f"/repos/{REPO}/commits/{SHA}/check-runs": {"check_runs": [{"id": 6, "name": CHECK, "head_sha": SHA, "status": "completed", "conclusion": "success", "app": {"id": APP_ID, "slug": "github-actions"}, "output": {"title": CHECK_TITLE, "text": f"source-run: {RUN}\nartifact: ci-evidence-linux-release-quality-{RUN}"}, "details_url": f"https://github.com/{REPO}/actions/runs/50"}]},
         }
         self.artifact = zip_manifest(manifest)
 
@@ -134,11 +134,28 @@ class ConsumeTests(unittest.TestCase):
                 with self.assertRaises(ReusePending):
                     self.verify(api)
 
-    def test_unpublished_artifact_is_retried(self) -> None:
+    def test_unpublished_artifact_waits_only_for_its_running_publisher(self) -> None:
         api = Api()
         api.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"] = []
+        publisher = api.values[f"/repos/{REPO}/actions/runs/50"]
+        publisher["status"] = "in_progress"
+        publisher["conclusion"] = None
         with self.assertRaises(ReusePending):
             self.verify(api)
+
+    def test_unpublished_artifact_falls_back_when_publisher_failed_or_is_missing(self) -> None:
+        for state in ("failed", "missing"):
+            with self.subTest(state=state):
+                api = Api()
+                api.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"] = []
+                if state == "failed":
+                    publisher = api.values[f"/repos/{REPO}/actions/runs/50"]
+                    publisher["status"] = "completed"
+                    publisher["conclusion"] = "failure"
+                else:
+                    api.values[f"/repos/{REPO}/commits/{SHA}/check-runs"]["check_runs"] = []
+                with self.assertRaises(ReuseUnavailable):
+                    self.verify(api)
 
     def test_pending_and_permanent_mismatch_have_distinct_cli_outcomes(self) -> None:
         pending_source = Api()
@@ -147,6 +164,8 @@ class ConsumeTests(unittest.TestCase):
         source["conclusion"] = None
         pending_artifact = Api()
         pending_artifact.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"] = []
+        pending_artifact.values[f"/repos/{REPO}/actions/runs/50"]["status"] = "queued"
+        pending_artifact.values[f"/repos/{REPO}/actions/runs/50"]["conclusion"] = None
         pending_publisher = Api()
         pending_publisher.values[f"/repos/{REPO}/actions/runs/50"]["conclusion"] = None
         unavailable = Api()

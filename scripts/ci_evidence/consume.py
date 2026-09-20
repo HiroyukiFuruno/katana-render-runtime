@@ -197,6 +197,47 @@ def verify_job(get: Getter, repository: str, run_id: int) -> None:
     matches(text(candidates[0].get("conclusion"), "step.conclusion"), "success", "quality step conclusion")
 
 
+def publisher_run_id(check: Mapping[str, Any], repository: str, source_run_id: int) -> int:
+    """Bind an in-progress publisher check to the CI run that triggered it."""
+
+    matches(text(check.get("name"), "publisher check.name"), CHECK, "publisher check name")
+    app = obj(check.get("app"), "publisher check app")
+    matches(number(app.get("id"), "publisher check app.id"), APP_ID, "publisher check app")
+    matches(text(app.get("slug"), "publisher check app.slug"), "github-actions", "publisher check app slug")
+    matches(text(obj(check.get("output"), "publisher check.output").get("title"), "publisher check title"), CHECK_TITLE, "publisher check title")
+    lines = text(obj(check.get("output"), "publisher check.output").get("text"), "publisher check.output.text").splitlines()
+    if not lines or lines[0] != f"source-run: {source_run_id}":
+        raise ReuseUnavailable("publisher check does not identify the source CI run")
+    details = urllib.parse.urlparse(text(check.get("details_url"), "publisher check.details_url"))
+    if details.scheme != "https" or details.netloc != "github.com" or details.query or details.fragment:
+        raise ReuseUnavailable("publisher check details URL is invalid")
+    parts = details.path.strip("/").split("/")
+    expected = repository.split("/") + ["actions", "runs"]
+    if parts[:4] != expected or len(parts) < 5 or not parts[4].isdigit() or int(parts[4]) <= 0:
+        raise ReuseUnavailable("publisher check details URL does not identify an Actions run")
+    return int(parts[4])
+
+
+def pending_publisher(get: Getter, repository: str, head_sha: str, source_run_id: int) -> None:
+    """Wait only for the Actions publisher run proven to belong to this source run."""
+
+    checks = [obj(item, "check") for item in pages(get, f"/repos/{repository}/commits/{head_sha}/check-runs?check_name={urllib.parse.quote(CHECK, safe='')}", "check_runs")]
+    checks = [item for item in checks if item.get("name") == CHECK]
+    if len(checks) != 1:
+        raise ReuseUnavailable("publisher workflow run is missing or not unique")
+    publisher_id = publisher_run_id(checks[0], repository, source_run_id)
+    publisher = obj(get(f"/repos/{repository}/actions/runs/{publisher_id}"), "publisher run")
+    matches(number(publisher.get("id"), "publisher run.id"), publisher_id, "publisher run ID")
+    matches(text(publisher.get("event"), "publisher run.event"), "workflow_run", "publisher run event")
+    matches(text(publisher.get("path"), "publisher run.path"), PUBLISHER_WORKFLOW, "publisher workflow")
+    status = text(publisher.get("status"), "publisher run.status")
+    if status in PENDING_WORKFLOW_STATUSES:
+        raise ReusePending(f"publisher workflow run is still {status}")
+    matches(status, "completed", "publisher run status")
+    matches(text(publisher.get("conclusion"), "publisher run.conclusion"), "success", "publisher conclusion")
+    raise ReuseUnavailable("publisher completed without publishing its evidence artifact")
+
+
 def manifest(download: Downloader, artifact: Mapping[str, Any]) -> object:
     data = download(text(artifact.get("archive_download_url"), "artifact archive URL"))
     try:
@@ -244,7 +285,7 @@ def verify_reusable_evidence(get: Getter, download: Downloader, *, repository: s
     artifacts = [obj(item, "artifact") for item in pages(get, f"/repos/{repository}/actions/artifacts?name={urllib.parse.quote(artifact_name, safe='')}", "artifacts")]
     artifacts = [item for item in artifacts if item.get("name") == artifact_name]
     if not artifacts:
-        raise ReusePending("evidence artifact has not been published yet")
+        pending_publisher(get, repository, head_sha, run_id)
     if len(artifacts) != 1:
         raise ReuseUnavailable("matching evidence artifact is not unique")
     artifact = artifacts[0]
