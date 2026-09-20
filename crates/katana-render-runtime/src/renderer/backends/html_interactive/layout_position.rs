@@ -4,6 +4,9 @@ use super::layout_input::is_checkbox;
 use super::style::{CssPosition, CssStyle};
 use super::types::{ElementPositioningContext, ElementRenderContext, LayoutContext};
 
+#[path = "layout_position_ownership.rs"]
+mod ownership;
+
 fn horizontal_position(containing: ContainingBlock, style: &CssStyle, static_x: f32) -> (f32, f32) {
     let left = style.inset_left;
     let right = style.inset_right;
@@ -147,7 +150,7 @@ impl HtmlLayoutRenderer {
                 owner_node_id: self.positioning_containing_block(position).owner_node_id,
             },
             CssPosition::Static | CssPosition::Relative | CssPosition::Sticky => {
-                ElementPositioningContext::InFlow
+                self.in_flow_positioning_context()
             }
         }
     }

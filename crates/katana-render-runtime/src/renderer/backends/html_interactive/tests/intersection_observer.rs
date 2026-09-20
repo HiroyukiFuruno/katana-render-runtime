@@ -338,6 +338,24 @@ fn explicit_root_rejects_absolute_targets_positioned_by_an_outer_ancestor() -> T
 }
 
 #[test]
+fn explicit_root_rejects_static_targets_with_out_of_flow_ancestors() -> TestResult {
+    let session = start_with_viewport(out_of_flow_ancestor_targets_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    for target in ["fixed-child", "absolute-child"] {
+        assert!(
+            snapshot.contains(&format!(r##"data-{target}="false:0""##)),
+            "a static target inheriting an out-of-flow ancestor must be excluded from its element root: {snapshot}"
+        );
+        assert!(
+            snapshot.contains(&format!(r##"data-{target}-intersection="0:0""##)),
+            "an excluded static target must have an empty intersection: {snapshot}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn element_root_margin_is_not_clipped_by_the_root_overflow() -> TestResult {
     let session = start_with_viewport(root_margin_with_overflow_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -870,6 +888,34 @@ new IntersectionObserver((entries) => {
   document.getElementById("observed").setAttribute("data-escaped", `${entry.isIntersecting}:${entry.intersectionRatio}`);
   document.getElementById("observed").setAttribute("data-escaped-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
 }, { root }).observe(document.getElementById("escaped"));
+</script>"##
+}
+
+fn out_of_flow_ancestor_targets_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#outer { position: relative; width: 120px; height: 80px; }
+#root { width: 120px; height: 80px; }
+#fixed-ancestor { position: fixed; top: 0; left: 0; width: 120px; height: 20px; }
+#absolute-ancestor { position: absolute; top: 20px; left: 0; width: 120px; height: 20px; }
+#fixed-child, #absolute-child { width: 120px; height: 20px; }
+</style>
+<div id=outer><div id=root><div id=fixed-ancestor><div id=fixed-child>Fixed child</div></div><div id=absolute-ancestor><div id=absolute-child>Absolute child</div></div></div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    observed.setAttribute(`data-${entry.target.id}`, `${entry.isIntersecting}:${entry.intersectionRatio}`);
+    observed.setAttribute(`data-${entry.target.id}-intersection`, `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+  }
+}, { root }).observe(document.getElementById("fixed-child"));
+new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    observed.setAttribute(`data-${entry.target.id}`, `${entry.isIntersecting}:${entry.intersectionRatio}`);
+    observed.setAttribute(`data-${entry.target.id}-intersection`, `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+  }
+}, { root }).observe(document.getElementById("absolute-child"));
 </script>"##
 }
 
