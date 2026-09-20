@@ -222,7 +222,11 @@ test("公式 Draw.io renderer の locale Date API はホストのタイムゾー
   const utc = sampleLocaleCalls("UTC", "en_US.UTF-8");
   const pacific = sampleLocaleCalls("America/Los_Angeles", "de_DE.UTF-8");
 
-  expect(utc).toEqual({ date: "2026-01-01", string: "2026-01-01", time: "00:00:00" });
+  expect(utc).toEqual({
+    date: "2026-01-01",
+    string: "2026-01-01T00:00:00.000Z",
+    time: "00:00:00",
+  });
   expect(pacific).toEqual(utc);
 });
 

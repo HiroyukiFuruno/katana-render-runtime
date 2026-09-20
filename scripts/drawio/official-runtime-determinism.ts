@@ -63,8 +63,8 @@ export function installDrawioDeterminism() {
   datePrototype.toLocaleDateString = function katanaDrawioLocaleDate() {
     return this.toISOString().slice(0, 10);
   };
-  datePrototype.toLocaleString = function katanaDrawioLocaleDate() {
-    return this.toISOString().slice(0, 10);
+  datePrototype.toLocaleString = function katanaDrawioLocaleString() {
+    return this.toISOString();
   };
   datePrototype.toLocaleTimeString = function katanaDrawioLocaleTime() {
     return this.toISOString().slice(11, 19);
