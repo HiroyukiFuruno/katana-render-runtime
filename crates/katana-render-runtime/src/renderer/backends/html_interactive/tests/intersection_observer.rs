@@ -558,6 +558,18 @@ fn rounded_element_root_clip_excludes_its_corner_in_real_host() -> TestResult {
 }
 
 #[test]
+fn rounded_element_root_margin_keeps_its_corner_excluded_in_real_host() -> TestResult {
+    let session = start_with_viewport(rounded_element_root_margin_document(), 160, 120)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-target="false:0""##),
+        "a non-zero root margin must preserve the rounded root corner exclusion: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn asymmetric_border_keeps_the_uncovered_inner_corner_rounded_in_real_host() -> TestResult {
     let session = start_with_viewport(asymmetric_border_root_document(), 160, 120)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -1190,6 +1202,22 @@ new IntersectionObserver((entries) => {
   const entry = entries[0];
   document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
 }, { root }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn rounded_element_root_margin_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 100px; height: 100px; border-radius: 50%; overflow: hidden; }
+#target { position: absolute; left: -10px; top: 0; width: 5px; height: 5px; }
+</style>
+<div id=root><div id=target>Corner</div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root, rootMargin: "10px" }).observe(document.getElementById("target"));
 </script>"##
 }
 

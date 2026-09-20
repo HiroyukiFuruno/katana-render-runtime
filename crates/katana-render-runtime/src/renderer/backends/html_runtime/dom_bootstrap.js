@@ -875,6 +875,74 @@ const __krrElementRootBaseBounds = (elementRoot, rootMetadata, rootHasOverflowCl
 const __krrRootOverflowClip = (metadata) =>
   metadata?.clipsOverflow === true ? metadata.paddingEdge : null;
 const __krrRootMarginIsZero = (margin) => margin.every((part) => part.amount === 0);
+const __krrRootMarginOffsets = (root, margins) => {
+  const [top, right, bottom, left] = margins;
+  const resolve = (margin) =>
+    margin.unit === "%" ? (root.width * margin.amount) / 100 : margin.amount;
+  return [resolve(top), resolve(right), resolve(bottom), resolve(left)];
+};
+const __krrExpandedRootClip = (clip, rootBounds, margins) => {
+  if (!clip || __krrRootMarginIsZero(margins)) return clip;
+  const rawCorners =
+    Array.isArray(clip.corners) &&
+    clip.corners.length === 4 &&
+    clip.corners.every(
+      (corner) => Array.isArray(corner) && corner.length === 2 && corner.every(Number.isFinite),
+    )
+      ? clip.corners.map(([x, y]) => ({ x, y }))
+      : [
+          { x: clip.x, y: clip.y },
+          { x: clip.x + clip.width, y: clip.y },
+          { x: clip.x + clip.width, y: clip.y + clip.height },
+          { x: clip.x, y: clip.y + clip.height },
+        ];
+  const width = Math.hypot(rawCorners[1].x - rawCorners[0].x, rawCorners[1].y - rawCorners[0].y);
+  const height = Math.hypot(rawCorners[3].x - rawCorners[0].x, rawCorners[3].y - rawCorners[0].y);
+  if (width === 0 || height === 0) return clip;
+  const horizontal = {
+    x: (rawCorners[1].x - rawCorners[0].x) / width,
+    y: (rawCorners[1].y - rawCorners[0].y) / width,
+  };
+  const vertical = {
+    x: (rawCorners[3].x - rawCorners[0].x) / height,
+    y: (rawCorners[3].y - rawCorners[0].y) / height,
+  };
+  const [top, right, bottom, left] = __krrRootMarginOffsets(rootBounds, margins);
+  const offset = (corner, horizontalOffset, verticalOffset) => ({
+    x: corner.x + horizontal.x * horizontalOffset + vertical.x * verticalOffset,
+    y: corner.y + horizontal.y * horizontalOffset + vertical.y * verticalOffset,
+  });
+  const radii =
+    Array.isArray(clip.radii) &&
+    clip.radii.length === 4 &&
+    clip.radii.every(
+      (radius) =>
+        Array.isArray(radius) &&
+        radius.length === 2 &&
+        radius.every((value) => Number.isFinite(value)),
+    )
+      ? clip.radii
+      : [[Number(clip.radiusX) || 0, Number(clip.radiusY) || 0]].concat(
+          Array.from({ length: 3 }, () => [Number(clip.radiusX) || 0, Number(clip.radiusY) || 0]),
+        );
+  const expandedRadii = radii.map(([radiusX, radiusY], index) => {
+    const horizontalOffset = index === 0 || index === 3 ? left : right;
+    const verticalOffset = index === 0 || index === 1 ? top : bottom;
+    return [Math.max(0, radiusX + horizontalOffset), Math.max(0, radiusY + verticalOffset)];
+  });
+  return {
+    ...clip,
+    corners: [
+      offset(rawCorners[0], -left, -top),
+      offset(rawCorners[1], right, -top),
+      offset(rawCorners[2], right, bottom),
+      offset(rawCorners[3], -left, bottom),
+    ].map(({ x, y }) => [x, y]),
+    radii: expandedRadii,
+    radiusX: Math.max(...expandedRadii.map(([radiusX]) => radiusX)),
+    radiusY: Math.max(...expandedRadii.map(([, radiusY]) => radiusY)),
+  };
+};
 const __krrIntersectionEntry = (observer, target) => {
   const elementRoot = observer.root && observer.root !== document ? observer.root : null;
   const targetBox = __krrObservedElementBox(target);
@@ -897,7 +965,11 @@ const __krrIntersectionEntry = (observer, target) => {
   const targetFragments = [boundingClientRect];
   const clippedRoot = __krrClippedRootBounds(rootBounds, rootClips);
   const clippedRootBounds = clippedRoot.rect;
-  const rootShape = __krrRootMarginIsZero(observer.__krrRootMargin) ? rootOverflowClip : null;
+  const rootShape = __krrExpandedRootClip(
+    rootOverflowClip,
+    rootBaseBounds,
+    observer.__krrRootMargin,
+  );
   const clipShapes = rootShape ? [...rootClips, rootShape] : rootClips;
   const clippedFragments = targetWithinRoot
     ? targetFragments.map((fragment) => __krrClipFragment(fragment, clippedRootBounds, clipShapes))
@@ -983,13 +1055,7 @@ const __krrNormalizeThresholds = (value) => {
 const __krrSerializeRootMargin = (margins) =>
   margins.map((margin) => `${margin.amount}${margin.unit}`).join(" ");
 const __krrExpandRootBounds = (root, margins) => {
-  const [top, right, bottom, left] = margins;
-  const resolve = (margin) =>
-    margin.unit === "%" ? (root.width * margin.amount) / 100 : margin.amount;
-  const topOffset = resolve(top);
-  const rightOffset = resolve(right);
-  const bottomOffset = resolve(bottom);
-  const leftOffset = resolve(left);
+  const [topOffset, rightOffset, bottomOffset, leftOffset] = __krrRootMarginOffsets(root, margins);
   return {
     x: root.left - leftOffset,
     y: root.top - topOffset,
