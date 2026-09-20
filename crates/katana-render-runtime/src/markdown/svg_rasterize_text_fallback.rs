@@ -87,4 +87,23 @@ mod tests {
         assert!(bundled_runs.is_some_and(|runs| runs.len() == 1));
         assert!(used_html_fallback);
     }
+
+    #[test]
+    fn html_font_fallback_accepts_requested_weight_and_style() {
+        let html = html_font_db_for_text("Noto Sans", "日");
+        let requested_faces = [(700, false), (700, true)]
+            .into_iter()
+            .map(|(weight, italic)| {
+                matching_font_face(&html, "Noto Sans", weight, italic).is_some_and(|base| {
+                    html_font_runs(&html, base, "日", weight, italic)
+                        .first()
+                        .is_some_and(|(fallback, _)| {
+                            *fallback != base && font_has_char(&html, *fallback, '日')
+                        })
+                })
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(requested_faces, [true, true]);
+    }
 }
