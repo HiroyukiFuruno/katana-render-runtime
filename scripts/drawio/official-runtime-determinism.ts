@@ -10,13 +10,41 @@ export function installDrawioDeterminism() {
     },
   });
   Date.now = () => deterministicNow;
-  originalDate.prototype.toLocaleDateString = function katanaDrawioLocaleDate() {
+  const datePrototype = originalDate.prototype;
+  const utcGetters = [
+    ["getDate", "getUTCDate"],
+    ["getDay", "getUTCDay"],
+    ["getFullYear", "getUTCFullYear"],
+    ["getHours", "getUTCHours"],
+    ["getMilliseconds", "getUTCMilliseconds"],
+    ["getMinutes", "getUTCMinutes"],
+    ["getMonth", "getUTCMonth"],
+    ["getSeconds", "getUTCSeconds"],
+  ] as const;
+  for (const [localGetter, utcGetter] of utcGetters) {
+    const utcMethod = datePrototype[utcGetter];
+    Object.defineProperty(datePrototype, localGetter, {
+      configurable: true,
+      writable: true,
+      value: function katanaDrawioUtcGetter(this: Date) {
+        return utcMethod.call(this);
+      },
+    });
+  }
+  Object.defineProperty(datePrototype, "getTimezoneOffset", {
+    configurable: true,
+    writable: true,
+    value: function katanaDrawioUtcTimezoneOffset() {
+      return 0;
+    },
+  });
+  datePrototype.toLocaleDateString = function katanaDrawioLocaleDate() {
     return this.toISOString().slice(0, 10);
   };
-  originalDate.prototype.toLocaleString = function katanaDrawioLocaleDate() {
+  datePrototype.toLocaleString = function katanaDrawioLocaleDate() {
     return this.toISOString().slice(0, 10);
   };
-  originalDate.prototype.toLocaleTimeString = function katanaDrawioLocaleTime() {
+  datePrototype.toLocaleTimeString = function katanaDrawioLocaleTime() {
     return this.toISOString().slice(11, 19);
   };
 

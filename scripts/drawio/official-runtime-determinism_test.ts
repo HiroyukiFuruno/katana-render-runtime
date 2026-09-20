@@ -60,6 +60,28 @@ function sampleLocaleCalls(
   return JSON.parse(result.stdout) as { date: string; string: string; time: string };
 }
 
+function sampleFormattedPlaceholderInTimezone(timezone: string): string {
+  const script = `
+    const installDrawioDeterminism = ${installDrawioDeterminism.toString()};
+    installDrawioDeterminism();
+    const date = new Date();
+    const pad = (value) => String(value).padStart(2, "0");
+    process.stdout.write(
+      [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join("-") +
+        "T" +
+        [pad(date.getHours()), pad(date.getMinutes()), pad(date.getSeconds())].join(":") +
+        "Z",
+    );
+  `;
+  const result = spawnSync(process.execPath, ["-e", script], {
+    env: { ...process.env, TZ: timezone },
+    encoding: "utf8",
+  });
+  expect(result.status).toBe(0);
+  expect(result.stderr).toBe("");
+  return result.stdout;
+}
+
 type Runtime = {
   createContext: () => Context;
 };
@@ -179,4 +201,12 @@ test("公式 Draw.io renderer の locale Date API はホストのタイムゾー
 
   expect(utc).toEqual({ date: "2026-01-01", string: "2026-01-01", time: "00:00:00" });
   expect(pacific).toEqual(utc);
+});
+
+test("公式 Draw.io renderer の formatted date placeholder はホストのタイムゾーンに依存しない", () => {
+  const utc = sampleFormattedPlaceholderInTimezone("UTC");
+  const pacific = sampleFormattedPlaceholderInTimezone("America/Los_Angeles");
+
+  expect(utc).toBe("2026-01-01T00:00:00Z");
+  expect(pacific).toBe(utc);
 });
