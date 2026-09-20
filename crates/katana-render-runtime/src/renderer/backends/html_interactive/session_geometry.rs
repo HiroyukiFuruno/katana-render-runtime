@@ -104,9 +104,22 @@ fn intersection_clip(clip: &super::types::OverflowClip) -> String {
         .map(|(x, y)| format!("[{x},{y}]"))
         .collect::<Vec<_>>()
         .join(",");
+    let radii = clip
+        .corner_radii
+        .iter()
+        .map(|(radius_x, radius_y)| format!("[{radius_x},{radius_y}]"))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"owner\":{},\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"corners\":[{corners}],\"radiusX\":{},\"radiusY\":{}}}",
-        clip.owner_node_id, clip.x, clip.y, clip.width, clip.height, clip.radius_x, clip.radius_y
+        "{{\"owner\":{},\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"corners\":[{corners}],\"radiusX\":{},\"radiusY\":{},\"radii\":[{radii}]}}",
+        clip.owner_node_id,
+        clip.x,
+        clip.y,
+        clip.width,
+        clip.height,
+        clip.radius_x,
+        clip.radius_y,
+        radii = radii
     )
 }
 

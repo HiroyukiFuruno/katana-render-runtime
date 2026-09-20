@@ -1,3 +1,4 @@
+use super::super::constants::BORDER_RADIUS_CORNER_COUNT;
 use super::{CssBoxSizing, CssOverflow, CssStyle};
 
 impl CssStyle {
@@ -119,6 +120,24 @@ impl CssStyle {
             horizontal.min(width / 2.0).max(0.0),
             vertical.min(height / 2.0).max(0.0),
         )
+    }
+
+    pub(in super::super) fn resolved_inner_border_radii(
+        &self,
+        width: f32,
+        height: f32,
+    ) -> [(f32, f32); BORDER_RADIUS_CORNER_COUNT] {
+        let (horizontal, vertical) = self.resolved_border_radius(width, height);
+        let left = self.border_left_width();
+        let right = self.border_right_width();
+        let top = self.border_top_width();
+        let bottom = self.border_bottom_width();
+        [
+            ((horizontal - left).max(0.0), (vertical - top).max(0.0)),
+            ((horizontal - right).max(0.0), (vertical - top).max(0.0)),
+            ((horizontal - right).max(0.0), (vertical - bottom).max(0.0)),
+            ((horizontal - left).max(0.0), (vertical - bottom).max(0.0)),
+        ]
     }
 
     pub(in super::super) fn assign_outer_width(&mut self, outer_width: f32) {

@@ -127,6 +127,8 @@ pub(super) struct OverflowClip {
     pub(super) transformed_corners: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
     pub(super) radius_x: f32,
     pub(super) radius_y: f32,
+    /// 内側の角丸半径を左上、右上、右下、左下の順で保持する。
+    pub(super) corner_radii: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
 }
 
 impl OverflowClip {
@@ -148,7 +150,24 @@ impl OverflowClip {
             transformed_corners: ElementBox::rectangle_corners(x, y, width, height),
             radius_x,
             radius_y,
+            corner_radii: [(radius_x, radius_y); ELEMENT_BOX_CORNER_COUNT],
         }
+    }
+
+    pub(super) fn with_corner_radii(
+        mut self,
+        corner_radii: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
+    ) -> Self {
+        self.corner_radii = corner_radii;
+        self.radius_x = corner_radii
+            .iter()
+            .map(|(radius_x, _)| *radius_x)
+            .fold(0.0, f32::max);
+        self.radius_y = corner_radii
+            .iter()
+            .map(|(_, radius_y)| *radius_y)
+            .fold(0.0, f32::max);
+        self
     }
 }
 

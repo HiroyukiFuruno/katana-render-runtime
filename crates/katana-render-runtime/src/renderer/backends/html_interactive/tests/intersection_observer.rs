@@ -292,6 +292,22 @@ fn element_root_margin_is_not_clipped_by_the_root_overflow() -> TestResult {
 }
 
 #[test]
+fn over_shrunk_root_margin_remains_empty_in_real_host() -> TestResult {
+    let session = start_with_viewport(over_shrunk_root_margin_document(), 160, 120)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-target="false:0""##),
+        "a root margin that crosses both root axes must remain non-intersecting: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-intersection="0:0""##),
+        "an over-shrunk root margin must produce an empty intersection rectangle: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn bordered_element_root_uses_its_padding_edge_for_intersection() -> TestResult {
     let session = start_with_viewport(bordered_element_root_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -347,6 +363,18 @@ fn rounded_element_root_clip_excludes_its_corner_in_real_host() -> TestResult {
     assert!(
         snapshot.contains(r##"data-target="false:0""##),
         "a target entirely inside the rectangular corner but outside the rounded root clip must not intersect: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
+fn asymmetric_border_keeps_the_uncovered_inner_corner_rounded_in_real_host() -> TestResult {
+    let session = start_with_viewport(asymmetric_border_root_document(), 160, 120)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-target="false:0""##),
+        "the inner right corner must retain its radius when only the left border is wide: {snapshot}"
     );
     Ok(())
 }
@@ -666,6 +694,23 @@ new IntersectionObserver((entries) => {
 </script>"##
 }
 
+fn over_shrunk_root_margin_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 100px; height: 100px; }
+#target { position: absolute; left: 40px; top: 40px; width: 20px; height: 20px; }
+</style>
+<div id=root><div id=target>Central target</div></div><p id=observed></p>
+<script>
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  observed.setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  observed.setAttribute("data-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+}, { root: document.getElementById("root"), rootMargin: "-60px" }).observe(document.getElementById("target"));
+</script>"##
+}
+
 fn bordered_element_root_document() -> &'static str {
     r##"<style>
 html, body { margin: 0; }
@@ -745,6 +790,26 @@ new IntersectionObserver((entries) => {
   const entry = entries[0];
   document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
 }, { root }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn asymmetric_border_root_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 100px; height: 100px; border-radius: 20px; border-left: 20px solid; overflow: hidden; }
+#target { position: absolute; left: 115px; top: 0; width: 10px; height: 5px; }
+</style>
+<div id=root><div id=target>Corner</div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+const target = document.getElementById("target");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  const metadata = JSON.parse(__krrNativeDom("intersectionMetadata", target.__krrNodeId));
+  document.getElementById("observed").setAttribute("data-meta", JSON.stringify(metadata));
+  document.getElementById("observed").setAttribute("data-poly", JSON.stringify(__krrRoundedClipPolygon(metadata.clips[0])));
+  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root }).observe(target);
 </script>"##
 }
 

@@ -1,4 +1,5 @@
 use super::super::html_browser::HtmlBrowserViewport;
+use super::constants::BORDER_RADIUS_CORNER_COUNT;
 use super::layout::{ContainingBlock, HtmlLayoutRenderer};
 use super::style::{CssPosition, CssStyle};
 use super::types::{DetailsContext, ElementPositioningContext, LayoutContext, OverflowClip};
@@ -91,8 +92,9 @@ impl HtmlLayoutRenderer {
             return;
         };
         let (x, y, width, height) = overflow_clip_geometry(geometry, height, style);
-        let (radius_x, radius_y) = overflow_clip_radius(geometry, height, style);
-        let clip = OverflowClip::new(owner_node_id, x, y, width, height, radius_x, radius_y);
+        let corner_radii = overflow_clip_radius(geometry, height, style);
+        let clip = OverflowClip::new(owner_node_id, x, y, width, height, 0.0, 0.0)
+            .with_corner_radii(corner_radii);
         for element_box in &mut self.element_boxes[descendant_box_start..] {
             if overflow_clip_applies_to(element_box, owner_node_id) {
                 element_box.overflow_clips.push(clip);
@@ -175,8 +177,8 @@ impl HtmlLayoutRenderer {
     ) {
         if style.clips_overflow() {
             let (x, y, width, height) = overflow_clip_geometry(geometry, height, style);
-            let radius = overflow_clip_radius(geometry, height, style);
-            self.clip_painted_range(content_start, x, y, width, height, radius);
+            let corner_radii = overflow_clip_radius(geometry, height, style);
+            self.clip_painted_range(content_start, x, y, width, height, corner_radii);
         }
         self.insert_box(
             box_start,
@@ -225,12 +227,12 @@ fn overflow_clip_geometry(
     (geometry.box_x + left, geometry.start + top, width, height)
 }
 
-fn overflow_clip_radius(geometry: &ContainerGeometry, height: f32, style: &CssStyle) -> (f32, f32) {
-    let (horizontal, vertical) = style.resolved_border_radius(geometry.box_width, height);
-    (
-        (horizontal - style.border_left_width().max(style.border_right_width())).max(0.0),
-        (vertical - style.border_top_width().max(style.border_bottom_width())).max(0.0),
-    )
+fn overflow_clip_radius(
+    geometry: &ContainerGeometry,
+    height: f32,
+    style: &CssStyle,
+) -> [(f32, f32); BORDER_RADIUS_CORNER_COUNT] {
+    style.resolved_inner_border_radii(geometry.box_width, height)
 }
 
 fn overflow_clip_applies_to(element_box: &super::types::ElementBox, owner_node_id: u64) -> bool {

@@ -72,14 +72,14 @@ fn padding_edge(
     let padding_y = y + style.border_top_width();
     let padding_width = (width - style.border_left_width() - style.border_right_width()).max(0.0);
     let padding_height = (height - style.border_top_width() - style.border_bottom_width()).max(0.0);
-    let (radius_x, radius_y) = style.resolved_border_radius(width, height);
     OverflowClip::new(
         node_id,
         padding_x,
         padding_y,
         padding_width,
         padding_height,
-        (radius_x - style.border_left_width().max(style.border_right_width())).max(0.0),
-        (radius_y - style.border_top_width().max(style.border_bottom_width())).max(0.0),
+        0.0,
+        0.0,
     )
+    .with_corner_radii(style.resolved_inner_border_radii(width, height))
 }

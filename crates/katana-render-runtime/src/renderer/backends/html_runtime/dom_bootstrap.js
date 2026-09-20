@@ -593,6 +593,7 @@ const __krrBoundingIntersectionRect = (rects) => {
   const bottom = Math.max(...rects.map((rect) => rect.bottom));
   return { x: left, y: top, width: right - left, height: bottom - top, top, right, bottom, left };
 };
+const __krrRectHasCrossedEdges = (rect) => rect.left > rect.right || rect.top > rect.bottom;
 const __krrRectsIntersectOrAreEdgeAdjacent = (first, second) =>
   first.left <= second.right &&
   second.left <= first.right &&
@@ -681,12 +682,15 @@ const __krrClipRect = (clip) => {
     left: clip.x,
   };
 };
-const __krrRectPolygon = (rect) => [
-  { x: rect.left, y: rect.top },
-  { x: rect.right, y: rect.top },
-  { x: rect.right, y: rect.bottom },
-  { x: rect.left, y: rect.bottom },
-];
+const __krrRectPolygon = (rect) =>
+  __krrRectHasCrossedEdges(rect)
+    ? []
+    : [
+        { x: rect.left, y: rect.top },
+        { x: rect.right, y: rect.top },
+        { x: rect.right, y: rect.bottom },
+        { x: rect.left, y: rect.bottom },
+      ];
 const __krrPolygonRect = (polygon) => {
   if (polygon.length === 0) return __krrEmptyIntersectionRect();
   const left = Math.min(...polygon.map((point) => point.x));
@@ -698,6 +702,7 @@ const __krrPolygonRect = (polygon) => {
 const __krrCross = (first, second, point) =>
   (second.x - first.x) * (point.y - first.y) - (second.y - first.y) * (point.x - first.x);
 const __krrPolygonIntersection = (subject, clip) => {
+  if (subject.length === 0 || clip.length === 0) return [];
   let output = subject;
   for (let index = 0; index < clip.length && output.length > 0; index += 1) {
     const first = clip[index];
@@ -740,9 +745,53 @@ const __krrRoundedClipPolygon = (clip) => {
   const corners = __krrClipCorners(clip);
   const width = Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y);
   const height = Math.hypot(corners[2].x - corners[1].x, corners[2].y - corners[1].y);
-  const radiusX = Math.min(Math.max(0, Number(clip.radiusX) || 0), width / 2);
-  const radiusY = Math.min(Math.max(0, Number(clip.radiusY) || 0), height / 2);
-  if (radiusX === 0 || radiusY === 0 || width === 0 || height === 0) return corners;
+  const fallbackRadius = [
+    [Number(clip.radiusX) || 0, Number(clip.radiusY) || 0],
+    [Number(clip.radiusX) || 0, Number(clip.radiusY) || 0],
+    [Number(clip.radiusX) || 0, Number(clip.radiusY) || 0],
+    [Number(clip.radiusX) || 0, Number(clip.radiusY) || 0],
+  ];
+  const radii =
+    Array.isArray(clip.radii) &&
+    clip.radii.length === 4 &&
+    clip.radii.every(
+      (radius) =>
+        Array.isArray(radius) &&
+        radius.length === 2 &&
+        radius.every((value) => Number.isFinite(value)),
+    )
+      ? clip.radii
+      : fallbackRadius;
+  if (width === 0 || height === 0) return corners;
+  const normalizedRadii = radii.map(([radiusX, radiusY]) => [
+    Math.max(0, radiusX),
+    Math.max(0, radiusY),
+  ]);
+  const horizontalScale = Math.min(
+    1,
+    width /
+      Math.max(
+        normalizedRadii[0][0] + normalizedRadii[1][0],
+        normalizedRadii[2][0] + normalizedRadii[3][0],
+        width,
+      ),
+  );
+  const verticalScale = Math.min(
+    1,
+    height /
+      Math.max(
+        normalizedRadii[0][1] + normalizedRadii[3][1],
+        normalizedRadii[1][1] + normalizedRadii[2][1],
+        height,
+      ),
+  );
+  const scaledRadii = normalizedRadii.map(([radiusX, radiusY]) => [
+    radiusX * horizontalScale,
+    radiusY * verticalScale,
+  ]);
+  if (scaledRadii.every(([radiusX, radiusY]) => radiusX === 0 || radiusY === 0)) {
+    return corners;
+  }
   const origin = corners[0];
   const horizontal = {
     x: (corners[1].x - origin.x) / width,
@@ -757,14 +806,16 @@ const __krrRoundedClipPolygon = (clip) => {
     y: origin.y + horizontal.y * x + vertical.y * y,
   });
   const arcs = [
-    [width - radiusX, radiusY, -Math.PI / 2, 0],
-    [width - radiusX, height - radiusY, 0, Math.PI / 2],
-    [radiusX, height - radiusY, Math.PI / 2, Math.PI],
-    [radiusX, radiusY, Math.PI, Math.PI * 1.5],
+    [width - scaledRadii[1][0], scaledRadii[1][1], -Math.PI / 2, 0],
+    [width - scaledRadii[2][0], height - scaledRadii[2][1], 0, Math.PI / 2],
+    [scaledRadii[3][0], height - scaledRadii[3][1], Math.PI / 2, Math.PI],
+    [scaledRadii[0][0], scaledRadii[0][1], Math.PI, Math.PI * 1.5],
   ];
   return arcs.flatMap(([centerX, centerY, start, end]) =>
     Array.from({ length: 9 }, (_, index) => {
       const angle = start + ((end - start) * index) / 8;
+      const arcIndex = arcs.findIndex((arc) => arc[0] === centerX && arc[1] === centerY);
+      const [radiusX, radiusY] = scaledRadii[(arcIndex + 1) % 4];
       return pointAt(centerX + radiusX * Math.cos(angle), centerY + radiusY * Math.sin(angle));
     }),
   );

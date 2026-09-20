@@ -24,3 +24,4 @@ pub(super) const PARAGRAPH_MARGIN: f32 = 10.0;
 pub(super) const LINE_HEIGHT_FACTOR: f32 = 1.2;
 pub(super) const TEXT_CHARACTER_WIDTH_FACTOR: f32 = 0.55;
 pub(super) const MONOSPACE_CHARACTER_WIDTH_FACTOR: f32 = 0.6;
+pub(super) const BORDER_RADIUS_CORNER_COUNT: usize = 4;
