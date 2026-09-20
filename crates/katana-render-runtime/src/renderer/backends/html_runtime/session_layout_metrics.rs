@@ -239,6 +239,47 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn intersection_observer_keeps_edge_contact_inside_an_element_root_clip()
+    -> Result<(), HtmlRuntimeError> {
+        let mut session = start(root_clip_edge_contact_source());
+        let root = node_id(&mut session, "root")?;
+        let clip = node_id(&mut session, "clip")?;
+        let target = node_id(&mut session, "target")?;
+        session.update_layout_metrics_with_intersection_metadata(
+            100.0,
+            100.0,
+            0.0,
+            [
+                (root, 0.0, 0.0, 100.0, 100.0, 0.0),
+                (clip, 0.0, 0.0, 10.0, 10.0, 0.0),
+                (target, 10.0, 0.0, 10.0, 10.0, 0.0),
+            ],
+            [(target, root_clip_edge_contact_metadata(clip))],
+        )?;
+
+        assert!(
+            session
+                .snapshot()?
+                .contains(r#"id="target" data-intersection="true:0""#),
+            "edge contact with a root clipping ancestor must remain intersecting"
+        );
+        Ok(())
+    }
+
+    fn root_clip_edge_contact_metadata(clip: u64) -> String {
+        format!(
+            r#"{{"positioning":"in-flow","clips":[{{"owner":{clip},"x":0,"y":0,"width":10,"height":10}}],"fragments":[]}}"#
+        )
+    }
+
+    fn root_clip_edge_contact_source() -> &'static str {
+        r#"<div id="root"><div id="clip"><div id="target">target</div></div></div><script>
+            const root = document.getElementById("root"); const target = document.getElementById("target");
+            new IntersectionObserver((entries) => { entries[0].target.setAttribute("data-intersection", `${entries[0].isIntersecting}:${entries[0].intersectionRatio}`); }, { root }).observe(target);
+        </script>"#
+    }
+
     fn observer_geometry_boxes(
         session: &mut super::super::StaticHtmlRuntimeSession,
     ) -> Result<[LayoutMetric; 3], HtmlRuntimeError> {

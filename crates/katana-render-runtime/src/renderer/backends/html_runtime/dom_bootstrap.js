@@ -686,23 +686,22 @@ const __krrIntersectionEntry = (observer, target) => {
     !elementRoot ||
     __krrTargetWithinRoot(target, elementRoot, targetBox.metadata, requestedRootClips !== null);
   const targetFragments = [boundingClientRect];
+  const clippedRootBounds = rootClips.reduce(
+    (rect, clip) => __krrIntersectionRect(rect, __krrClipRect(clip)),
+    rootBounds,
+  );
   const intersectionFragments = targetWithinRoot
     ? targetFragments.map((fragment) =>
-        rootClips.reduce(
-          (rect, clip) => __krrIntersectionRect(rect, __krrClipRect(clip)),
-          __krrIntersectionRect(rootBounds, fragment),
-        ),
+        __krrIntersectionRect(clippedRootBounds, fragment),
       )
     : [];
   const positiveIntersectionFragments = intersectionFragments.filter(
     (rect) => rect.width > 0 && rect.height > 0,
   );
   const edgeAdjacentIntersectionFragments =
-    rootClips.length === 0
-      ? intersectionFragments.filter((_, index) =>
-          __krrRectsIntersectOrAreEdgeAdjacent(rootBounds, targetFragments[index]),
-        )
-      : [];
+    intersectionFragments.filter((_, index) =>
+      __krrRectsIntersectOrAreEdgeAdjacent(clippedRootBounds, targetFragments[index]),
+    );
   const intersectionRect = __krrBoundingIntersectionRect(
     positiveIntersectionFragments.length > 0
       ? positiveIntersectionFragments
@@ -713,9 +712,11 @@ const __krrIntersectionEntry = (observer, target) => {
   const isIntersecting =
     targetWithinRoot &&
     targetBox.isPresent &&
-    (rootClips.length > 0
-      ? intersectionFragments.some((rect) => rect.width > 0 && rect.height > 0)
-      : targetFragments.some((rect) => __krrRectsIntersectOrAreEdgeAdjacent(rootBounds, rect)));
+    intersectionFragments.some(
+      (rect, index) =>
+        (rect.width > 0 && rect.height > 0) ||
+        __krrRectsIntersectOrAreEdgeAdjacent(clippedRootBounds, targetFragments[index]),
+    );
   const intersectionRatio =
     targetWithinRoot && targetBox.isPresent && targetArea > 0
       ? intersectionArea / targetArea
