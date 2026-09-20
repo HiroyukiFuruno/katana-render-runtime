@@ -1,13 +1,5 @@
 use super::weight::css_weight_match_distance;
 use resvg::usvg;
-const EXACT_FACE_MATCH: u8 = 0;
-const STYLE_AND_WEIGHT_MATCH: u8 = 1;
-const STYLE_AND_STRETCH_MATCH: u8 = 2;
-const WEIGHT_AND_STRETCH_MATCH: u8 = 3;
-const STYLE_MATCH: u8 = 4;
-const WEIGHT_MATCH: u8 = 5;
-const STRETCH_MATCH: u8 = 6;
-const NO_FACE_ATTRIBUTE_MATCH: u8 = 7;
 pub(super) fn matching_font_face(
     database: &usvg::fontdb::Database,
     font_family: &str,
@@ -103,23 +95,18 @@ fn fallback_attribute_score(
     requested_style: usvg::fontdb::Style,
     requested_weight: usvg::fontdb::Weight,
     requested_stretch: usvg::fontdb::Stretch,
-) -> (u8, (u8, u16)) {
-    let same_style = candidate_style == requested_style;
-    let same_weight = candidate_weight == requested_weight;
-    let same_stretch = candidate_stretch == requested_stretch;
-    let attribute_match = match (same_style, same_weight, same_stretch) {
-        (true, true, true) => EXACT_FACE_MATCH,
-        (true, true, false) => STYLE_AND_WEIGHT_MATCH,
-        (true, false, true) => STYLE_AND_STRETCH_MATCH,
-        (false, true, true) => WEIGHT_AND_STRETCH_MATCH,
-        (true, false, false) => STYLE_MATCH,
-        (false, true, false) => WEIGHT_MATCH,
-        (false, false, true) => STRETCH_MATCH,
-        (false, false, false) => NO_FACE_ATTRIBUTE_MATCH,
-    };
+) -> (u8, u8, u8, u16) {
+    let stretch_mismatch = u8::from(candidate_stretch != requested_stretch);
+    let style_mismatch = u8::from(candidate_style != requested_style);
+    let (weight_phase, weight_distance) =
+        css_weight_match_distance(candidate_weight, requested_weight);
+    /* WHY: CSS fallback matching compares stretch, style, then weight. 重みの距離は
+    属性一致の判定後に比較し、近い weight が stretch/style の一致を越えないようにする。 */
     (
-        attribute_match,
-        css_weight_match_distance(candidate_weight, requested_weight),
+        stretch_mismatch,
+        style_mismatch,
+        weight_phase,
+        weight_distance,
     )
 }
 pub(super) fn font_has_char(
@@ -157,17 +144,6 @@ pub(super) fn fontdb_family(name: &str) -> usvg::fontdb::Family<'_> {
 mod tests {
     use super::fallback_attribute_score;
     use resvg::usvg::fontdb::{Stretch, Style, Weight};
-
-    const FALLBACK_CANDIDATES: [(Style, Weight, Stretch); 8] = [
-        (Style::Normal, Weight(500), Stretch::Normal),
-        (Style::Normal, Weight(500), Stretch::Condensed),
-        (Style::Normal, Weight::BOLD, Stretch::Normal),
-        (Style::Italic, Weight(500), Stretch::Normal),
-        (Style::Normal, Weight::BOLD, Stretch::Condensed),
-        (Style::Italic, Weight(500), Stretch::Condensed),
-        (Style::Italic, Weight::BOLD, Stretch::Normal),
-        (Style::Italic, Weight::BOLD, Stretch::Condensed),
-    ];
 
     #[test]
     fn styled_cjk_fallback_prefers_the_exact_style_and_weight_face() {
@@ -236,27 +212,24 @@ mod tests {
     }
 
     #[test]
-    fn fallback_attribute_score_covers_each_face_attribute_combination() {
-        let requested_style = Style::Normal;
-        let requested_weight = Weight(500);
-        let requested_stretch = Stretch::Normal;
-        let scores = FALLBACK_CANDIDATES
-            .into_iter()
-            .map(|(style, weight, stretch)| {
-                fallback_attribute_score(
-                    style,
-                    weight,
-                    stretch,
-                    requested_style,
-                    requested_weight,
-                    requested_stretch,
-                )
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            scores.iter().map(|score| score.0).collect::<Vec<_>>(),
-            [0, 1, 2, 3, 4, 5, 6, 7]
+    fn fallback_matching_prefers_normal_stretch_regular_over_condensed_bold() {
+        let regular = fallback_attribute_score(
+            Style::Normal,
+            Weight::NORMAL,
+            Stretch::Normal,
+            Style::Normal,
+            Weight::BOLD,
+            Stretch::Normal,
         );
+        let condensed_bold = fallback_attribute_score(
+            Style::Normal,
+            Weight::BOLD,
+            Stretch::Condensed,
+            Style::Normal,
+            Weight::BOLD,
+            Stretch::Normal,
+        );
+
+        assert!(regular < condensed_bold);
     }
 }
