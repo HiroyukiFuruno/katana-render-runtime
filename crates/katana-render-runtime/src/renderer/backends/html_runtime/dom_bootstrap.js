@@ -777,9 +777,11 @@ const __krrViewportRect = () => {
   const { width, height } = __krrLayoutMetrics();
   return { x: 0, y: 0, width, height, top: 0, right: width, bottom: height, left: 0 };
 };
-const __krrElementRootBaseBounds = (elementRoot, rootMetadata) => {
+const __krrElementRootBaseBounds = (elementRoot, rootMetadata, rootHasOverflowClip) => {
   if (!elementRoot) return __krrViewportRect();
-  if (rootMetadata?.paddingEdge) return __krrClipRect(rootMetadata.paddingEdge);
+  if (rootHasOverflowClip && rootMetadata?.paddingEdge) {
+    return __krrClipRect(rootMetadata.paddingEdge);
+  }
   return elementRoot.getBoundingClientRect();
 };
 const __krrRootMarginIsZero = (margin) => margin.every((part) => part.amount === 0);
@@ -795,7 +797,11 @@ const __krrIntersectionEntry = (observer, target) => {
   const targetWithinRoot =
     !elementRoot ||
     __krrTargetWithinRoot(target, elementRoot, targetBox.metadata, requestedRootClipData !== null);
-  const rootBaseBounds = __krrElementRootBaseBounds(elementRoot, rootBox?.metadata);
+  const rootBaseBounds = __krrElementRootBaseBounds(
+    elementRoot,
+    rootBox?.metadata,
+    Boolean(requestedRootClipData?.rootClip),
+  );
   const rootBounds = __krrExpandRootBounds(rootBaseBounds, observer.__krrRootMargin);
   const targetFragments = [boundingClientRect];
   const clippedRoot = __krrClippedRootBounds(rootBounds, rootClips);

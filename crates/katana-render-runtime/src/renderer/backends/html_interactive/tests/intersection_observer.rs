@@ -291,13 +291,13 @@ fn bordered_element_root_uses_its_padding_edge_for_intersection() -> TestResult 
 }
 
 #[test]
-fn element_root_uses_padding_edge_without_overflow_clip() -> TestResult {
+fn element_root_uses_border_box_without_overflow_clip() -> TestResult {
     let session = start_with_viewport(unclipped_bordered_element_root_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
 
     assert!(
-        snapshot.contains(r##"data-target="false:0""##),
-        "a target in the root border must not intersect even without overflow clipping: {snapshot}"
+        snapshot.contains(r##"data-target="true:1""##),
+        "an overflow-visible element root must use its border box for intersection: {snapshot}"
     );
     Ok(())
 }
