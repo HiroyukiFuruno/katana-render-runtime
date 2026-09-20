@@ -237,6 +237,7 @@ def publish(event: object, repository: str, rest: RestAdapter) -> tuple[dict[str
         "profile": profile,
         "schema": SCHEMA,
         "source_run": {
+            "base_sha": base_sha,
             "head_sha": head_sha,
             "id": run_id,
             "pull_request": _integer(pull_request.get("number"), "pull request number"),
@@ -278,7 +279,10 @@ def complete_check(repository: str, check_id: int, rest: RestAdapter) -> None:
         {
             "status": "completed",
             "conclusion": "success",
-            "output": {"title": CHECK_TITLE},
+            "output": {
+                "title": CHECK_TITLE,
+                "summary": "CI evidence artifact uploaded successfully.",
+            },
         },
     )
     if _assert_actions_identity(response) != check_id:

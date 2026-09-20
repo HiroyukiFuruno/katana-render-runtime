@@ -17,6 +17,7 @@ from tree_digest import digest_input_tree
 
 
 SHA = "a" * 40
+BASE_SHA = "c" * 40
 TREE = "b" * 40
 REPO = "acme/krr"
 PR = 9
@@ -39,10 +40,10 @@ def zip_manifest(value: object) -> bytes:
 class Api:
     def __init__(self) -> None:
         input_tree = digest_input_tree(tree())
-        manifest = {"schema": "krr-ci-evidence-publisher-v1", "check_id": "linux-release-quality", "input": input_tree, "profile": expected_profile(WORKFLOW), "source_run": {"id": RUN, "head_sha": SHA, "pull_request": PR, "run_attempt": 1, "workflow_path": ".github/workflows/test-and-build.yml"}}
+        manifest = {"schema": "krr-ci-evidence-publisher-v1", "check_id": "linux-release-quality", "input": input_tree, "profile": expected_profile(WORKFLOW), "source_run": {"id": RUN, "head_sha": SHA, "base_sha": BASE_SHA, "pull_request": PR, "run_attempt": 1, "workflow_path": ".github/workflows/test-and-build.yml"}}
         run = {"id": RUN, "event": "pull_request", "head_sha": SHA, "head_branch": REF, "path": ".github/workflows/test-and-build.yml", "run_attempt": 1, "status": "completed", "conclusion": "success", "head_repository": {"full_name": REPO}, "pull_requests": [{"number": PR}]}
         self.values: dict[str, object] = {
-            f"/repos/{REPO}/pulls/{PR}": {"number": PR, "state": "open", "head": {"sha": SHA, "ref": REF}, "base": {"ref": "master"}},
+            f"/repos/{REPO}/pulls/{PR}": {"number": PR, "state": "open", "head": {"sha": SHA, "ref": REF}, "base": {"ref": "master", "sha": BASE_SHA}},
             f"/repos/{REPO}/git/trees/{SHA}": tree(),
             f"/repos/{REPO}/contents/.github/workflows/test-and-build.yml": {"encoding": "base64", "content": base64.b64encode(WORKFLOW).decode()},
             f"/repos/{REPO}/actions/workflows/test-and-build.yml/runs": {"workflow_runs": [run]},
@@ -106,6 +107,12 @@ class ConsumeTests(unittest.TestCase):
             self.verify(api)
         api = Api()
         api.values[f"/repos/{REPO}/commits/{SHA}/check-runs"]["check_runs"][0]["app"]["id"] = 1
+        with self.assertRaises(ReuseUnavailable):
+            self.verify(api)
+
+    def test_base_change_invalidates_source_evidence(self) -> None:
+        api = Api()
+        api.values[f"/repos/{REPO}/pulls/{PR}"]["base"]["sha"] = "d" * 40
         with self.assertRaises(ReuseUnavailable):
             self.verify(api)
 

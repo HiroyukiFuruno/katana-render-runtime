@@ -8,6 +8,7 @@ import unicodedata
 
 EVIDENCE_DIRECTORY = "ci-evidence/"
 REGULAR_FILE_MODES = frozenset(("100644", "100755"))
+DIRECTORY_MODE = "040000"
 OID_LENGTH = 40
 
 
@@ -68,7 +69,7 @@ def _validate_oid(oid: str) -> None:
         _fail("tree entry oid must be lowercase hexadecimal")
 
 
-def _validate_entry(entry: object, index: int) -> tuple[str, str, str]:
+def _validate_entry(entry: object, index: int) -> tuple[str, str, str, str]:
     item = _require_mapping(entry, f"tree[{index}]")
     path = _require_string(item.get("path"), f"tree[{index}].path")
     mode = _require_string(item.get("mode"), f"tree[{index}].mode")
@@ -76,16 +77,20 @@ def _validate_entry(entry: object, index: int) -> tuple[str, str, str]:
     oid = _require_string(item.get("sha"), f"tree[{index}].sha")
 
     _validate_path(path)
-    if entry_type != "blob":
-        _fail(f"tree[{index}] must be a blob, got {entry_type!r}")
-    if mode not in REGULAR_FILE_MODES:
-        _fail(f"tree[{index}] must use a regular-file mode, got {mode!r}")
+    if entry_type == "blob":
+        if mode not in REGULAR_FILE_MODES:
+            _fail(f"tree[{index}] must use a regular-file mode, got {mode!r}")
+    elif entry_type == "tree":
+        if mode != DIRECTORY_MODE:
+            _fail(f"tree[{index}] must use a directory mode, got {mode!r}")
+    else:
+        _fail(f"tree[{index}] must be a blob or tree, got {entry_type!r}")
     _validate_oid(oid)
 
     size = item.get("size")
     if size is not None and (type(size) is not int or size < 0):
         _fail(f"tree[{index}].size must be a non-negative integer when present")
-    return path, mode, oid
+    return path, mode, oid, entry_type
 
 
 def canonical_entries(git_tree: object) -> tuple[CanonicalTreeEntry, ...]:
@@ -109,11 +114,11 @@ def canonical_entries(git_tree: object) -> tuple[CanonicalTreeEntry, ...]:
     seen_paths: set[str] = set()
     included: list[CanonicalTreeEntry] = []
     for index, raw_entry in enumerate(raw_entries):
-        path, mode, oid = _validate_entry(raw_entry, index)
+        path, mode, oid, entry_type = _validate_entry(raw_entry, index)
         if path in seen_paths:
             _fail(f"git tree has duplicate path {path!r}")
         seen_paths.add(path)
-        if not path.startswith(EVIDENCE_DIRECTORY):
+        if entry_type == "blob" and not path.startswith(EVIDENCE_DIRECTORY):
             included.append(CanonicalTreeEntry(path=path, mode=mode, oid=oid))
 
     included.sort(key=lambda entry: entry.path.encode("utf-8"))

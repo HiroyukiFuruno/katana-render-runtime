@@ -90,6 +90,7 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(manifest["input"]["input_tree"]["entries"][0]["path"], "src/lib.rs")
         self.assertEqual(len(manifest["profile"]["digest"]), 64)
         self.assertEqual(manifest["profile"]["profile"]["workflow_path"], ".github/workflows/test-and-build.yml")
+        self.assertEqual(manifest["source_run"]["base_sha"], SHA_B)
         self.assertEqual(len(adapter.writes), 1)
         _, path, body = adapter.writes[0]
         self.assertEqual(path, "/repos/acme/krr/check-runs")
@@ -103,6 +104,10 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(
             adapter.writes[1][2]["output"]["title"],
             "Trusted Linux release-quality evidence published",
+        )
+        self.assertEqual(
+            adapter.writes[1][2]["output"]["summary"],
+            "CI evidence artifact uploaded successfully.",
         )
 
     def test_rejects_retry_and_stale_default_branch(self) -> None:

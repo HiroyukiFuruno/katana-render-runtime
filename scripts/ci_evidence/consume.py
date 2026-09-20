@@ -218,6 +218,7 @@ def verify_reusable_evidence(get: Getter, download: Downloader, *, repository: s
     matches(sha(head.get("sha"), "pull request.head.sha"), head_sha, "pull request SHA")
     matches(text(head.get("ref"), "pull request.head.ref"), head_ref, "pull request ref")
     matches(text(base.get("ref"), "pull request.base.ref"), "master", "pull request base")
+    base_sha = sha(base.get("sha"), "pull request.base.sha")
     raw_tree = get(f"/repos/{repository}/git/trees/{head_sha}?recursive=1")
     try:
         tree = digest_input_tree(raw_tree)
@@ -253,6 +254,7 @@ def verify_reusable_evidence(get: Getter, download: Downloader, *, repository: s
     source_data = obj(data.get("source_run"), "manifest source")
     matches(source_data.get("id"), run_id, "manifest source run")
     matches(source_data.get("head_sha"), head_sha, "manifest source SHA")
+    matches(source_data.get("base_sha"), base_sha, "manifest source base SHA")
     matches(source_data.get("pull_request"), pr_number, "manifest source pull request")
     matches(source_data.get("run_attempt"), 1, "manifest source attempt")
     matches(source_data.get("workflow_path"), SOURCE_WORKFLOW, "manifest source workflow")

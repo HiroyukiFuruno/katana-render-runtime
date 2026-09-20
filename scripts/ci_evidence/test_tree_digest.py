@@ -26,6 +26,10 @@ def blob(path: str, oid: str = OID_A, mode: str = "100644", **extra: object) -> 
     return {"path": path, "mode": mode, "type": "blob", "sha": oid, **extra}
 
 
+def directory(path: str, oid: str = OID_A, mode: str = "040000", **extra: object) -> dict[str, object]:
+    return {"path": path, "mode": mode, "type": "tree", "sha": oid, **extra}
+
+
 class TreeDigestTests(unittest.TestCase):
     def test_canonical_digest_is_order_independent_and_excludes_only_evidence_directory(self) -> None:
         source = tree(
@@ -33,6 +37,7 @@ class TreeDigestTests(unittest.TestCase):
             blob("ci-evidence/run.json", OID_A),
             blob("README.md", OID_A),
             blob("ci-evidence-not-excluded.json", OID_B),
+            directory("src", OID_B),
         )
         reversed_source = tree(*reversed(source["tree"]))
 
@@ -50,6 +55,7 @@ class TreeDigestTests(unittest.TestCase):
             tree(blob("link", OID_A, mode="120000")),
             tree({"path": "submodule", "mode": "160000", "type": "commit", "sha": OID_A}),
             tree(blob("dir", OID_A, mode="040000")),
+            tree(directory("dir", OID_A, mode="100644")),
             tree(blob("bad-oid", "A" * 40)),
             tree(blob("bad-length", "a" * 39)),
             tree(blob("ci-evidence/bad-link", OID_A, mode="120000")),
