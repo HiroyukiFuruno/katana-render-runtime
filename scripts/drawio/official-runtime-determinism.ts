@@ -10,6 +10,12 @@ export function installDrawioDeterminism() {
     },
   });
   Date.now = () => deterministicNow;
+  originalDate.prototype.toLocaleDateString = function katanaDrawioLocaleDate() {
+    return this.toISOString().slice(0, 10);
+  };
+  originalDate.prototype.toLocaleString = function katanaDrawioLocaleDate() {
+    return this.toISOString().slice(0, 10);
+  };
   originalDate.prototype.toLocaleTimeString = function katanaDrawioLocaleTime() {
     return this.toISOString().slice(11, 19);
   };

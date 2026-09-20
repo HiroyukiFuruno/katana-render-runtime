@@ -34,19 +34,30 @@ function sampleDateCallInTimezone(timezone: string): string {
   return result.stdout;
 }
 
-function sampleLocaleTimeCallInTimezone(timezone: string): string {
+function sampleLocaleCalls(
+  timezone: string,
+  locale: string,
+): {
+  date: string;
+  string: string;
+  time: string;
+} {
   const script = `
     const installDrawioDeterminism = ${installDrawioDeterminism.toString()};
     installDrawioDeterminism();
-    process.stdout.write(new Date().toLocaleTimeString());
+    process.stdout.write(JSON.stringify({
+      date: new Date().toLocaleDateString(),
+      string: new Date().toLocaleString(),
+      time: new Date().toLocaleTimeString(),
+    }));
   `;
   const result = spawnSync(process.execPath, ["-e", script], {
-    env: { ...process.env, TZ: timezone },
+    env: { ...process.env, TZ: timezone, LANG: locale, LC_ALL: locale },
     encoding: "utf8",
   });
   expect(result.status).toBe(0);
   expect(result.stderr).toBe("");
-  return result.stdout;
+  return JSON.parse(result.stdout) as { date: string; string: string; time: string };
 }
 
 type Runtime = {
@@ -162,10 +173,10 @@ test("公式 Draw.io renderer の Date() はホストのタイムゾーンに依
   expect(pacific).toBe(utc);
 });
 
-test("公式 Draw.io renderer の Graph global time はホストのタイムゾーンに依存しない", () => {
-  const utc = sampleLocaleTimeCallInTimezone("UTC");
-  const pacific = sampleLocaleTimeCallInTimezone("America/Los_Angeles");
+test("公式 Draw.io renderer の locale Date API はホストのタイムゾーンとロケールに依存しない", () => {
+  const utc = sampleLocaleCalls("UTC", "en_US.UTF-8");
+  const pacific = sampleLocaleCalls("America/Los_Angeles", "de_DE.UTF-8");
 
-  expect(utc).toBe("00:00:00");
-  expect(pacific).toBe(utc);
+  expect(utc).toEqual({ date: "2026-01-01", string: "2026-01-01", time: "00:00:00" });
+  expect(pacific).toEqual(utc);
 });

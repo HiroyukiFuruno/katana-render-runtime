@@ -599,8 +599,11 @@ const __krrRectsIntersectOrAreEdgeAdjacent = (first, second) =>
   second.left <= first.right &&
   first.top <= second.bottom &&
   second.top <= first.bottom;
-const __krrClippedRootBounds = (rootBounds, clips) =>
-  clips.reduce(
+const __krrClippedRootBounds = (rootBounds, clips) => {
+  if (__krrRectHasCrossedEdges(rootBounds)) {
+    return { rect: rootBounds, separated: true };
+  }
+  return clips.reduce(
     (state, clip) => {
       const clipRect = __krrClipRect(clip);
       return {
@@ -610,6 +613,7 @@ const __krrClippedRootBounds = (rootBounds, clips) =>
     },
     { rect: rootBounds, separated: false },
   );
+};
 const __krrObservedElementBox = (element) => ({
   boundingClientRect: element.getBoundingClientRect(),
   isPresent: __krrNativeDom("layoutBoxPresent", element.__krrNodeId) === "1",

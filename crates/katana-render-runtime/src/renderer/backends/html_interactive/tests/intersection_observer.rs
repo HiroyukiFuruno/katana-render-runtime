@@ -308,6 +308,26 @@ fn over_shrunk_root_margin_remains_empty_in_real_host() -> TestResult {
 }
 
 #[test]
+fn over_shrunk_root_margin_stays_empty_through_an_overflow_ancestor() -> TestResult {
+    let session = start_with_viewport(
+        over_shrunk_root_margin_with_ancestor_clip_document(),
+        160,
+        120,
+    )?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-target="false:0""##),
+        "an overflow ancestor must not revive a root whose negative margin crossed both axes: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-intersection="0:0""##),
+        "a crossed root must keep an empty intersection after ancestor clipping: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn bordered_element_root_uses_its_padding_edge_for_intersection() -> TestResult {
     let session = start_with_viewport(bordered_element_root_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -713,6 +733,24 @@ html, body { margin: 0; }
 #target { position: absolute; left: 40px; top: 40px; width: 20px; height: 20px; }
 </style>
 <div id=root><div id=target>Central target</div></div><p id=observed></p>
+<script>
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  observed.setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  observed.setAttribute("data-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+}, { root: document.getElementById("root"), rootMargin: "-60px" }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn over_shrunk_root_margin_with_ancestor_clip_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 100px; height: 100px; }
+#clip { width: 100px; height: 100px; overflow: hidden; }
+#target { width: 20px; height: 20px; margin: 40px; }
+</style>
+<div id=root><div id=clip><div id=target>Central target</div></div></div><p id=observed></p>
 <script>
 const observed = document.getElementById("observed");
 new IntersectionObserver((entries) => {
