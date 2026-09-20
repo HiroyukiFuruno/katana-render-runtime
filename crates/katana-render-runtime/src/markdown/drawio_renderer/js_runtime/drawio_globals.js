@@ -55,6 +55,7 @@ globalThis.Date.now = () => KATANA_DRAWIO_DETERMINISTIC_NOW;
 Date.prototype.toLocaleDateString = katanaDrawioLocaleDate;
 Date.prototype.toLocaleString = katanaDrawioLocaleDate;
 Date.prototype.toLocaleTimeString = katanaDrawioLocaleTime;
+Date.prototype.toString = katanaDrawioDateString;
 Date.prototype.getDate = Date.prototype.getUTCDate;
 Date.prototype.getDay = Date.prototype.getUTCDay;
 Date.prototype.getFullYear = Date.prototype.getUTCFullYear;
@@ -74,6 +75,29 @@ function katanaDrawioLocaleDate() {
 
 function katanaDrawioLocaleTime() {
   return this.toISOString().slice(11, 19);
+}
+
+function katanaDrawioDateString() {
+  if (Number.isNaN(this.getTime())) {
+    return "Invalid Date";
+  }
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${weekdays[this.getUTCDay()]} ${months[this.getUTCMonth()]} ${pad(this.getUTCDate())} ${this.getUTCFullYear()} ${pad(this.getUTCHours())}:${pad(this.getUTCMinutes())}:${pad(this.getUTCSeconds())} GMT+0000 (Coordinated Universal Time)`;
 }
 
 function katanaDrawioAtob(value) {

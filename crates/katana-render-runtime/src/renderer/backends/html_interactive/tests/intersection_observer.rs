@@ -210,6 +210,23 @@ fn positioned_inline_block_is_excluded_from_parent_inline_fragments() -> TestRes
 }
 
 #[test]
+fn empty_inline_parent_ignores_out_of_flow_child_fragments() -> TestResult {
+    let session = start_with_viewport(
+        empty_inline_parent_with_positioned_children_document(),
+        160,
+        100,
+    )?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    let bounding_height = observed_number(&snapshot, "data-empty-positioned-height")?;
+
+    assert_eq!(
+        bounding_height, 0.0,
+        "out-of-flow children must not inflate an empty inline parent's bounding rect: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn clipped_wrapped_inline_uses_its_full_bounding_rect_in_real_host() -> TestResult {
     let session = start_with_viewport(clipped_wrapped_inline_document(), 80, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -731,6 +748,21 @@ html, body { margin: 0; }
 const observed = document.getElementById("observed");
 new IntersectionObserver((entries) => {
   observed.setAttribute("data-positioned-inline-width", entries[0].boundingClientRect.width);
+}).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn empty_inline_parent_with_positioned_children_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#absolute { position: absolute; left: 0; top: 200px; width: 40px; height: 20px; }
+#fixed { position: fixed; left: 40px; top: 200px; width: 40px; height: 20px; }
+</style>
+<span id=target><span id=absolute></span><span id=fixed></span></span><p id=observed></p>
+<script>
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  observed.setAttribute("data-empty-positioned-height", entries[0].boundingClientRect.height);
 }).observe(document.getElementById("target"));
 </script>"##
 }
