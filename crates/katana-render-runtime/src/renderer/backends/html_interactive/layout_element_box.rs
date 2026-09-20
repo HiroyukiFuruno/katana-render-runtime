@@ -11,6 +11,14 @@ impl HtmlLayoutRenderer {
         positioning_context: ElementPositioningContext,
     ) -> usize {
         let index = self.element_boxes.len();
+        let ancestor_node_ids = match positioning_context {
+            ElementPositioningContext::AbsoluteContainingBlock { .. } => {
+                self.ownership.rendering_elements.clone()
+            }
+            ElementPositioningContext::InFlow | ElementPositioningContext::FixedViewport => {
+                Vec::new()
+            }
+        };
         self.element_boxes.push(ElementBox {
             node_id,
             x: 0.0,
@@ -19,6 +27,7 @@ impl HtmlLayoutRenderer {
             height: 0.0,
             transformed_corners: [(0.0, 0.0); ELEMENT_BOX_CORNER_COUNT],
             positioning_context,
+            ancestor_node_ids,
             overflow_clips: Vec::new(),
             inline_fragments: Vec::new(),
         });

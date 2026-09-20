@@ -99,7 +99,7 @@ impl HtmlLayoutRenderer {
             height,
         };
         for element_box in &mut self.element_boxes[descendant_box_start..] {
-            if overflow_clip_applies_to(element_box.positioning_context, owner_node_id) {
+            if overflow_clip_applies_to(element_box, owner_node_id) {
                 element_box.overflow_clips.push(clip);
             }
         }
@@ -238,16 +238,22 @@ fn overflow_clip_radius(geometry: &ContainerGeometry, height: f32, style: &CssSt
     )
 }
 
-fn overflow_clip_applies_to(
-    positioning_context: ElementPositioningContext,
-    owner_node_id: u64,
-) -> bool {
-    match positioning_context {
+fn overflow_clip_applies_to(element_box: &super::types::ElementBox, owner_node_id: u64) -> bool {
+    match element_box.positioning_context {
         ElementPositioningContext::InFlow => true,
         ElementPositioningContext::FixedViewport => false,
         ElementPositioningContext::AbsoluteContainingBlock {
-            owner_node_id: containing_block_owner,
-        } => containing_block_owner == Some(owner_node_id),
+            owner_node_id: Some(containing_block_owner),
+        } => element_box
+            .ancestor_node_ids
+            .iter()
+            .position(|ancestor| *ancestor == containing_block_owner)
+            .is_some_and(|containing_block_index| {
+                element_box.ancestor_node_ids[..=containing_block_index].contains(&owner_node_id)
+            }),
+        ElementPositioningContext::AbsoluteContainingBlock {
+            owner_node_id: None,
+        } => false,
     }
 }
 

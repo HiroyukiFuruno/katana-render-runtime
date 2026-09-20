@@ -277,6 +277,23 @@ mod tests {
     }
 
     #[test]
+    fn absolute_target_keeps_containing_block_and_outer_ancestor_overflow_clips()
+    -> Result<(), String> {
+        let layout = HtmlLayoutRenderer::render(
+            &absolute_target_with_containing_block_ancestor_overflow_clips(),
+            HtmlBrowserViewport {
+                width: 320,
+                height: 240,
+                device_scale_factor: 1.0,
+            },
+            0.0,
+            &HashMap::new(),
+            None,
+        )?;
+        assert_absolute_target_clip_owners(&layout, 4, 2, &[2, 1])
+    }
+
+    #[test]
     fn absent_rotated_element_box_leaves_paint_unchanged() {
         let mut renderer = test_renderer();
         let paint_start = renderer.svg.len();
@@ -326,6 +343,7 @@ mod tests {
                 TEST_BOX_HEIGHT,
             ),
             positioning_context: ElementPositioningContext::InFlow,
+            ancestor_node_ids: Vec::new(),
             overflow_clips: Vec::new(),
             inline_fragments: Vec::new(),
         }
@@ -408,6 +426,65 @@ mod tests {
                 }],
             }],
         }]
+    }
+
+    fn absolute_target_with_containing_block_ancestor_overflow_clips() -> Vec<HtmlDocumentNode> {
+        vec![styled_element(
+            1,
+            "width: 100px; height: 100px; overflow: hidden",
+            vec![styled_element(
+                2,
+                "position: relative; width: 80px; height: 80px; overflow: hidden",
+                vec![styled_element(
+                    3,
+                    "width: 40px; height: 40px; overflow: hidden",
+                    vec![styled_element(
+                        4,
+                        "position: absolute; width: 120px; height: 120px",
+                        Vec::new(),
+                    )],
+                )],
+            )],
+        )]
+    }
+
+    fn styled_element(
+        node_id: u64,
+        style: &str,
+        children: Vec<HtmlDocumentNode>,
+    ) -> HtmlDocumentNode {
+        HtmlDocumentNode::Element {
+            node_id,
+            tag: "div".to_string(),
+            attributes: vec![("style".to_string(), style.to_string())],
+            children,
+        }
+    }
+
+    fn assert_absolute_target_clip_owners(
+        layout: &LayoutResult,
+        target_node_id: u64,
+        containing_block_node_id: u64,
+        expected_clip_owners: &[u64],
+    ) -> Result<(), String> {
+        let target = layout
+            .element_boxes
+            .iter()
+            .find(|element| element.node_id == target_node_id)
+            .ok_or("target element box must exist")?;
+        assert_eq!(
+            target.positioning_context,
+            ElementPositioningContext::AbsoluteContainingBlock {
+                owner_node_id: Some(containing_block_node_id),
+            }
+        );
+        let owners = target
+            .overflow_clips
+            .iter()
+            .map(|clip| clip.owner_node_id)
+            .collect::<Vec<_>>();
+        assert_eq!(owners, expected_clip_owners);
+        Ok(())
     }
 
     fn descendant_axis_aligned(layout: &LayoutResult) -> Option<(f32, f32, f32, f32)> {

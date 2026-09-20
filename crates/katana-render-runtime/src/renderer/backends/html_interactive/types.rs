@@ -101,6 +101,8 @@ pub(super) struct ElementBox {
     pub(super) height: f32,
     pub(super) transformed_corners: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
     pub(super) positioning_context: ElementPositioningContext,
+    /// 開始時点のDOM祖先。絶対配置要素へ適用する overflow clip を判定する。
+    pub(super) ancestor_node_ids: Vec<u64>,
     pub(super) overflow_clips: Vec<OverflowClip>,
     pub(super) inline_fragments: Vec<InlineFragment>,
 }
