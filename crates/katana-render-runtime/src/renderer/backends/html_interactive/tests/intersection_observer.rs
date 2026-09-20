@@ -191,6 +191,22 @@ fn fully_visible_wrapped_inline_target_reaches_threshold_one_in_real_host() -> T
 }
 
 #[test]
+fn empty_inline_target_uses_its_insertion_position() -> TestResult {
+    let session = start_with_viewport(empty_inline_document(), 100, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-empty="false:0"##),
+        "an empty inline target below the viewport must not intersect at the viewport origin: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-empty-rect="0:120:0:0"##),
+        "an empty inline target must retain its insertion position: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn edge_adjacent_target_keeps_its_intersection_coordinates() -> TestResult {
     let session = start_with_viewport(edge_adjacent_document(), 100, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -458,6 +474,22 @@ new IntersectionObserver((entries) => {
   observed.setAttribute("data-full-fragment-ratio", entry.intersectionRatio);
   observed.setAttribute("data-full-fragment-threshold", entry.intersectionRatio >= 1);
 }, { root: document.getElementById("root"), threshold: 1 }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn empty_inline_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#spacer { height: 120px; }
+</style>
+<div id=spacer></div><span id=empty></span><p id=observed></p>
+<script>
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  const observed = document.getElementById("observed");
+  observed.setAttribute("data-empty", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  observed.setAttribute("data-empty-rect", `${entry.boundingClientRect.x}:${entry.boundingClientRect.y}:${entry.boundingClientRect.width}:${entry.boundingClientRect.height}`);
+}).observe(document.getElementById("empty"));
 </script>"##
 }
 

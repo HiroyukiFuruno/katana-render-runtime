@@ -1,7 +1,7 @@
 use super::super::html_browser::HtmlBrowserViewport;
 use super::layout::{ContainingBlock, HtmlLayoutRenderer};
 use super::style::{CssPosition, CssStyle};
-use super::types::{DetailsContext, LayoutContext, OverflowClip};
+use super::types::{DetailsContext, ElementPositioningContext, LayoutContext, OverflowClip};
 use std::rc::Rc;
 
 #[path = "layout_container_helpers.rs"]
@@ -90,15 +90,18 @@ impl HtmlLayoutRenderer {
         let Some(owner_node_id) = self.current_element_owner() else {
             return;
         };
+        let (x, y, width, height) = overflow_clip_geometry(geometry, height, style);
         let clip = OverflowClip {
             owner_node_id,
-            x: geometry.box_x,
-            y: geometry.start,
-            width: geometry.box_width,
+            x,
+            y,
+            width,
             height,
         };
         for element_box in &mut self.element_boxes[descendant_box_start..] {
-            element_box.overflow_clips.push(clip);
+            if overflow_clip_applies_to(element_box.positioning_context, owner_node_id) {
+                element_box.overflow_clips.push(clip);
+            }
         }
     }
 
@@ -176,15 +179,9 @@ impl HtmlLayoutRenderer {
         style: &CssStyle,
     ) {
         if style.clips_overflow() {
-            let radius = style.resolved_border_radius(geometry.box_width, height);
-            self.clip_painted_range(
-                content_start,
-                geometry.box_x,
-                geometry.start,
-                geometry.box_width,
-                height,
-                radius,
-            );
+            let (x, y, width, height) = overflow_clip_geometry(geometry, height, style);
+            let radius = overflow_clip_radius(geometry, height, style);
+            self.clip_painted_range(content_start, x, y, width, height, radius);
         }
         self.insert_box(
             box_start,
@@ -218,6 +215,39 @@ impl HtmlLayoutRenderer {
             available_height,
         );
         accept_flow_result(&mut self.layout_error, result, geometry.start)
+    }
+}
+
+fn overflow_clip_geometry(
+    geometry: &ContainerGeometry,
+    height: f32,
+    style: &CssStyle,
+) -> (f32, f32, f32, f32) {
+    let left = style.border_left_width();
+    let top = style.border_top_width();
+    let width = (geometry.box_width - left - style.border_right_width()).max(0.0);
+    let height = (height - top - style.border_bottom_width()).max(0.0);
+    (geometry.box_x + left, geometry.start + top, width, height)
+}
+
+fn overflow_clip_radius(geometry: &ContainerGeometry, height: f32, style: &CssStyle) -> (f32, f32) {
+    let (horizontal, vertical) = style.resolved_border_radius(geometry.box_width, height);
+    (
+        (horizontal - style.border_left_width().max(style.border_right_width())).max(0.0),
+        (vertical - style.border_top_width().max(style.border_bottom_width())).max(0.0),
+    )
+}
+
+fn overflow_clip_applies_to(
+    positioning_context: ElementPositioningContext,
+    owner_node_id: u64,
+) -> bool {
+    match positioning_context {
+        ElementPositioningContext::InFlow => true,
+        ElementPositioningContext::FixedViewport => false,
+        ElementPositioningContext::AbsoluteContainingBlock {
+            owner_node_id: containing_block_owner,
+        } => containing_block_owner == Some(owner_node_id),
     }
 }
 

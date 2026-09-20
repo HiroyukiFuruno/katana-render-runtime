@@ -85,12 +85,13 @@ impl HtmlLayoutRenderer {
             return;
         };
         let element_box_index = self.start_element_box(*node_id, ElementPositioningContext::InFlow);
+        let (insertion_x, insertion_y) = (inline.cursor_x, inline.y);
         self.ownership.inline_fragment_owners.push(*node_id);
         for index in 0..children.len() {
             self.render_inline_or_block_node(children, index, style, details, inline);
         }
         debug_assert_eq!(self.ownership.inline_fragment_owners.pop(), Some(*node_id));
-        self.finish_inline_fragment_box(element_box_index, *node_id);
+        self.finish_inline_fragment_box(element_box_index, *node_id, insertion_x, insertion_y);
     }
 
     pub(super) fn render_inline_node(

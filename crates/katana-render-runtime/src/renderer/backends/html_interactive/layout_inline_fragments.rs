@@ -6,13 +6,13 @@ impl HtmlLayoutRenderer {
         &mut self,
         index: usize,
         node_id: u64,
+        insertion_x: f32,
+        insertion_y: f32,
     ) {
         let element_box = &mut self.element_boxes[index];
         debug_assert_eq!(element_box.node_id, node_id);
-        let Some((x, y, width, height)) = inline_fragment_bounds(&element_box.inline_fragments)
-        else {
-            return;
-        };
+        let (x, y, width, height) = inline_fragment_bounds(&element_box.inline_fragments)
+            .unwrap_or((insertion_x, insertion_y, 0.0, 0.0));
         element_box.x = x;
         element_box.y = y;
         element_box.width = width;

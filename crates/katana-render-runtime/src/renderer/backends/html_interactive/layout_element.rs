@@ -222,6 +222,10 @@ mod tests {
             &HashMap::new(),
             None,
         )?;
+        assert_positioned_overflow_target(&layout)
+    }
+
+    fn assert_positioned_overflow_target(layout: &LayoutResult) -> Result<(), String> {
         let target = layout
             .element_boxes
             .iter()
@@ -236,7 +240,39 @@ mod tests {
         );
         assert_eq!(target.overflow_clips.len(), 1);
         assert_eq!(target.overflow_clips[0].owner_node_id, 1);
-        assert_eq!(target.overflow_clips[0].height, 30.0);
+        assert_eq!(target.overflow_clips[0].height, 38.0);
+        assert_eq!(target.overflow_clips[0].x, 2.0);
+        assert_eq!(target.overflow_clips[0].y, 2.0);
+        assert_eq!(target.overflow_clips[0].width, 108.0);
+        Ok(())
+    }
+
+    #[test]
+    fn absolute_target_ignores_overflow_clip_outside_its_containing_block() -> Result<(), String> {
+        let layout = HtmlLayoutRenderer::render(
+            &absolute_target_with_unrelated_overflow_clip_nodes(),
+            HtmlBrowserViewport {
+                width: 320,
+                height: 240,
+                device_scale_factor: 1.0,
+            },
+            0.0,
+            &HashMap::new(),
+            None,
+        )?;
+        let target = layout
+            .element_boxes
+            .iter()
+            .find(|element| element.node_id == 3)
+            .ok_or("target element box must exist")?;
+
+        assert_eq!(
+            target.positioning_context,
+            ElementPositioningContext::AbsoluteContainingBlock {
+                owner_node_id: Some(1),
+            }
+        );
+        assert!(target.overflow_clips.is_empty());
         Ok(())
     }
 
@@ -332,7 +368,7 @@ mod tests {
             tag: "div".to_string(),
             attributes: vec![(
                 "style".to_string(),
-                "position: relative; width: 100px; height: 30px; overflow: hidden".to_string(),
+                "position: relative; width: 100px; height: 30px; border: 2px solid #000; padding: 4px; overflow: hidden".to_string(),
             )],
             children: vec![HtmlDocumentNode::Element {
                 node_id: 2,
@@ -342,6 +378,34 @@ mod tests {
                     "position: absolute; top: 0; width: 20px; height: 50px".to_string(),
                 )],
                 children: Vec::new(),
+            }],
+        }]
+    }
+
+    fn absolute_target_with_unrelated_overflow_clip_nodes() -> Vec<HtmlDocumentNode> {
+        vec![HtmlDocumentNode::Element {
+            node_id: 1,
+            tag: "div".to_string(),
+            attributes: vec![(
+                "style".to_string(),
+                "position: relative; width: 100px; height: 100px".to_string(),
+            )],
+            children: vec![HtmlDocumentNode::Element {
+                node_id: 2,
+                tag: "div".to_string(),
+                attributes: vec![(
+                    "style".to_string(),
+                    "width: 20px; height: 20px; overflow: hidden".to_string(),
+                )],
+                children: vec![HtmlDocumentNode::Element {
+                    node_id: 3,
+                    tag: "div".to_string(),
+                    attributes: vec![(
+                        "style".to_string(),
+                        "position: absolute; width: 50px; height: 50px".to_string(),
+                    )],
+                    children: Vec::new(),
+                }],
             }],
         }]
     }

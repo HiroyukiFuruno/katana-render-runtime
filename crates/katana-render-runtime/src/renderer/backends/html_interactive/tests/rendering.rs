@@ -629,6 +629,7 @@ fn assert_box_model_svg(svg: &str) {
     ));
     for expected in [
         r#"<clipPath id="krr-clip-0">"#,
+        r#"<rect x="2" y="46" width="96" height="36" rx="4" ry="4"/>"#,
         r#"font-family="Inter, sans-serif""#,
         r#"font-style="italic""#,
         r#"letter-spacing="2""#,
