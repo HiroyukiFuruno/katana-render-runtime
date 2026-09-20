@@ -19,8 +19,13 @@ class ReleasePreflightWorkflowTests(unittest.TestCase):
         self.assertIn("poll_interval_seconds=45", evidence_step)
         self.assertIn("while (( poll_attempt < poll_max_attempts ))", evidence_step)
         self.assertIn('sleep "$poll_interval_seconds"', evidence_step)
-        self.assertIn('echo "reuse=false" >> "$GITHUB_OUTPUT"', evidence_step)
-        self.assertIn("No unique matching trusted evidence after", evidence_step)
+        self.assertIn('              10)', evidence_step)
+        self.assertIn('              11)', evidence_step)
+        self.assertIn('"decision"])' , evidence_step)
+        self.assertIn(')" = rerun', evidence_step)
+        self.assertIn(')" = pending', evidence_step)
+        self.assertIn("Trusted evidence cannot be reused; running the complete Linux quality gate.", evidence_step)
+        self.assertIn("Trusted evidence publisher remained pending after", evidence_step)
         self.assertIn("Trusted evidence consumer failed (exit $status)", evidence_step)
 
     def test_quality_gate_runs_only_after_polling_falls_back(self) -> None:

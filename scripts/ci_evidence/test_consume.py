@@ -5,14 +5,16 @@ import copy
 import io
 import json
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from consume import APP_ID, CHECK, CHECK_TITLE, EvidenceError, PROFILE, ReuseUnavailable, canonical_json_bytes, expected_profile, verify_reusable_evidence
+from consume import APP_ID, CHECK, CHECK_TITLE, EvidenceError, PROFILE, ReusePending, ReuseUnavailable, canonical_json_bytes, expected_profile, main, verify_reusable_evidence
 from tree_digest import digest_input_tree
 
 
@@ -119,8 +121,24 @@ class ConsumeTests(unittest.TestCase):
     def test_in_progress_publisher_run_is_retried(self) -> None:
         api = Api()
         api.values[f"/repos/{REPO}/actions/runs/50"]["conclusion"] = None
-        with self.assertRaises(ReuseUnavailable):
+        with self.assertRaises(ReusePending):
             self.verify(api)
+
+    def test_pending_publisher_and_permanent_mismatch_have_distinct_cli_outcomes(self) -> None:
+        pending = Api()
+        pending.values[f"/repos/{REPO}/actions/runs/50"]["conclusion"] = None
+        unavailable = Api()
+        unavailable.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"] = []
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "evidence.json"
+            arguments = ["--repository", REPO, "--pr-number", str(PR), "--head-sha", SHA, "--head-ref", REF, "--profile", PROFILE, "--output", str(output)]
+            with patch("consume.clients", return_value=(pending.get, pending.download)):
+                self.assertEqual(main(arguments), 11)
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["decision"], "pending")
+            with patch("consume.clients", return_value=(unavailable.get, unavailable.download)):
+                self.assertEqual(main(arguments), 10)
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["decision"], "rerun")
 
     def test_malformed_tree_or_manifest_is_a_hard_failure(self) -> None:
         api = Api()
