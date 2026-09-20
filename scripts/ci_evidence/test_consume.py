@@ -124,18 +124,42 @@ class ConsumeTests(unittest.TestCase):
         with self.assertRaises(ReusePending):
             self.verify(api)
 
-    def test_pending_publisher_and_permanent_mismatch_have_distinct_cli_outcomes(self) -> None:
-        pending = Api()
-        pending.values[f"/repos/{REPO}/actions/runs/50"]["conclusion"] = None
+    def test_pending_source_run_statuses_are_retried(self) -> None:
+        for status in ("in_progress", "queued", "requested", "waiting", "pending"):
+            with self.subTest(status=status):
+                api = Api()
+                source = api.values[f"/repos/{REPO}/actions/workflows/test-and-build.yml/runs"]["workflow_runs"][0]
+                source["status"] = status
+                source["conclusion"] = None
+                with self.assertRaises(ReusePending):
+                    self.verify(api)
+
+    def test_unpublished_artifact_is_retried(self) -> None:
+        api = Api()
+        api.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"] = []
+        with self.assertRaises(ReusePending):
+            self.verify(api)
+
+    def test_pending_and_permanent_mismatch_have_distinct_cli_outcomes(self) -> None:
+        pending_source = Api()
+        source = pending_source.values[f"/repos/{REPO}/actions/workflows/test-and-build.yml/runs"]["workflow_runs"][0]
+        source["status"] = "in_progress"
+        source["conclusion"] = None
+        pending_artifact = Api()
+        pending_artifact.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"] = []
+        pending_publisher = Api()
+        pending_publisher.values[f"/repos/{REPO}/actions/runs/50"]["conclusion"] = None
         unavailable = Api()
-        unavailable.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"] = []
+        unavailable.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"].append(copy.deepcopy(unavailable.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"][0]))
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "evidence.json"
             arguments = ["--repository", REPO, "--pr-number", str(PR), "--head-sha", SHA, "--head-ref", REF, "--profile", PROFILE, "--output", str(output)]
-            with patch("consume.clients", return_value=(pending.get, pending.download)):
-                self.assertEqual(main(arguments), 11)
-            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["decision"], "pending")
+            for pending in (pending_source, pending_artifact, pending_publisher):
+                with self.subTest(pending=pending):
+                    with patch("consume.clients", return_value=(pending.get, pending.download)):
+                        self.assertEqual(main(arguments), 11)
+                    self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["decision"], "pending")
             with patch("consume.clients", return_value=(unavailable.get, unavailable.download)):
                 self.assertEqual(main(arguments), 10)
             self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["decision"], "rerun")

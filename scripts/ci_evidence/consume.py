@@ -38,6 +38,7 @@ STEP = "Run shared release quality gate"
 CHECK = "KRR / CI evidence (linux release quality)"
 CHECK_TITLE = "Trusted Linux release-quality evidence published"
 ARTIFACT_PREFIX = "ci-evidence-linux-release-quality-"
+PENDING_WORKFLOW_STATUSES = frozenset(("in_progress", "queued", "requested", "waiting", "pending"))
 SHA = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 MAX_BYTES = 65536
@@ -164,8 +165,6 @@ def source_run(value: object, repository: str, pr: int, head: str, ref: str) -> 
     value = obj(value, "workflow run")
     if value.get("event") != "pull_request" or value.get("head_sha") != head or value.get("head_branch") != ref:
         return None
-    matches(text(value.get("status"), "workflow run.status"), "completed", "workflow run status")
-    matches(text(value.get("conclusion"), "workflow run.conclusion"), "success", "workflow run conclusion")
     matches(text(value.get("path"), "workflow run.path"), SOURCE_WORKFLOW, "source workflow path")
     matches(number(value.get("run_attempt"), "workflow run.run_attempt"), 1, "source workflow attempt")
     number(value.get("id"), "workflow run.id")
@@ -174,6 +173,11 @@ def source_run(value: object, repository: str, pr: int, head: str, ref: str) -> 
     if len(requests) != 1:
         raise ReuseUnavailable("source workflow pull request is not unique")
     matches(number(obj(requests[0], "workflow pull request").get("number"), "workflow pull request number"), pr, "source workflow pull request")
+    status = text(value.get("status"), "workflow run.status")
+    if status in PENDING_WORKFLOW_STATUSES:
+        raise ReusePending(f"source workflow run is still {status}")
+    matches(status, "completed", "workflow run status")
+    matches(text(value.get("conclusion"), "workflow run.conclusion"), "success", "workflow run conclusion")
     return value
 
 
@@ -239,6 +243,8 @@ def verify_reusable_evidence(get: Getter, download: Downloader, *, repository: s
     artifact_name = ARTIFACT_PREFIX + str(run_id)
     artifacts = [obj(item, "artifact") for item in pages(get, f"/repos/{repository}/actions/artifacts?name={urllib.parse.quote(artifact_name, safe='')}", "artifacts")]
     artifacts = [item for item in artifacts if item.get("name") == artifact_name]
+    if not artifacts:
+        raise ReusePending("evidence artifact has not been published yet")
     if len(artifacts) != 1:
         raise ReuseUnavailable("matching evidence artifact is not unique")
     artifact = artifacts[0]
