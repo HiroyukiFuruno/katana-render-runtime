@@ -53,7 +53,7 @@ globalThis.Date = new Proxy(katanaDrawioOriginalDate, {
 });
 globalThis.Date.now = () => KATANA_DRAWIO_DETERMINISTIC_NOW;
 Date.prototype.toLocaleDateString = katanaDrawioLocaleDate;
-Date.prototype.toLocaleString = katanaDrawioLocaleDate;
+Date.prototype.toLocaleString = katanaDrawioLocaleString;
 Date.prototype.toLocaleTimeString = katanaDrawioLocaleTime;
 Date.prototype.toString = katanaDrawioDateString;
 Date.prototype.getDate = Date.prototype.getUTCDate;
@@ -71,6 +71,10 @@ Date.prototype.getTimezoneOffset = () => 0;
 
 function katanaDrawioLocaleDate() {
   return this.toISOString().slice(0, 10);
+}
+
+function katanaDrawioLocaleString() {
+  return this.toISOString();
 }
 
 function katanaDrawioLocaleTime() {

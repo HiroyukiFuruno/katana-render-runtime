@@ -55,15 +55,12 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
   const explicit = new Date("2024-02-03T04:05:06.000Z"); const invalid = new Date(undefined);
   svg.setAttribute("data-date-now", String(new Date().getTime()));
   svg.setAttribute("data-date-call", String(Date.parse(Date()))); svg.setAttribute("data-date-call-string", Date());
-  svg.setAttribute("data-date-explicit", String(explicit.getTime()));
+  svg.setAttribute("data-date-explicit", String(explicit.getTime())); svg.setAttribute("data-date-locale-string", explicit.toLocaleString()); svg.setAttribute("data-timestamp", new Date().toLocaleString());
   svg.setAttribute("data-date-string", String(explicit)); svg.setAttribute("data-date-parse", String(Date.parse("2024-02-03T04:05:06.000Z")));
   svg.setAttribute("data-date-utc", String(Date.UTC(2024, 1, 3, 4, 5, 6))); svg.setAttribute("data-date-invalid", String(Number.isNaN(invalid.getTime())));
   svg.setAttribute("data-date-prototype", String(Object.getPrototypeOf(explicit) === Date.prototype));
   svg.setAttribute("data-date-local-getters", [
-    explicit.getFullYear(),
-    explicit.getMonth(),
-    explicit.getDate(),
-    explicit.getDay(),
+    explicit.getFullYear(), explicit.getMonth(), explicit.getDate(), explicit.getDay(),
     explicit.getHours(),
     explicit.getMinutes(),
     explicit.getSeconds(), explicit.getMilliseconds(),
@@ -122,6 +119,8 @@ fn generated_runtime_uses_deterministic_date_without_changing_date_apis() -> Res
         r#"data-date-call="1767225600000""#,
         r#"data-date-call-string="Thu Jan 01 2026 00:00:00 GMT+0000 (Coordinated Universal Time)""#,
         r#"data-date-explicit="1706933106000""#,
+        r#"data-date-locale-string="2024-02-03T04:05:06.000Z""#,
+        r#"data-timestamp="2026-01-01T00:00:00.000Z""#,
         r#"data-date-string="Sat Feb 03 2024 04:05:06 GMT+0000 (Coordinated Universal Time)""#,
         r#"data-date-parse="1706933106000""#,
         r#"data-date-utc="1706933106000""#,
