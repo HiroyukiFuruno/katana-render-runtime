@@ -279,6 +279,18 @@ fn element_root_margin_is_not_clipped_by_the_root_overflow() -> TestResult {
 }
 
 #[test]
+fn bordered_element_root_uses_its_padding_edge_for_intersection() -> TestResult {
+    let session = start_with_viewport(bordered_element_root_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-target="false:0""##),
+        "a target positioned in the root border must not intersect its padding-edge root: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn separated_ancestor_clip_does_not_revive_edge_contact() -> TestResult {
     let session = start_with_viewport(separated_ancestor_clip_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -574,6 +586,22 @@ new IntersectionObserver((entries) => {
   const entry = entries[0];
   document.getElementById("observed").setAttribute("data-margin-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
 }, { root, rootMargin: "10px" }).observe(document.getElementById("margin-target"));
+</script>"##
+}
+
+fn bordered_element_root_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 80px; height: 40px; border: 4px solid; overflow: hidden; }
+#target { position: absolute; top: 0; left: 4px; width: 20px; height: 3px; }
+</style>
+<div id=root><div id=target>Border</div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root }).observe(document.getElementById("target"));
 </script>"##
 }
 

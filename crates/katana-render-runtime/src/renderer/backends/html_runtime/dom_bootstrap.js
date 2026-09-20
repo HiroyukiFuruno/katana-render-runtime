@@ -657,7 +657,11 @@ const __krrClipsWithinRoot = (metadata, target, root) => {
   if (rootIndex < 0) return null;
   const clipIndexes = metadata.clips.map((clip) => __krrPathNodeIndex(path, clip.owner));
   if (clipIndexes.some((clipIndex) => clipIndex < 0)) return null;
-  return metadata.clips.filter((_, index) => clipIndexes[index] < rootIndex);
+  const rootClipIndex = clipIndexes.indexOf(rootIndex);
+  return {
+    rootClip: rootClipIndex >= 0 ? metadata.clips[rootClipIndex] : null,
+    ancestorClips: metadata.clips.filter((_, index) => clipIndexes[index] < rootIndex),
+  };
 };
 const __krrTargetWithinRoot = (target, root, metadata, clipsAreConsistent) =>
   __krrTargetIsDescendantOfRoot(target, root) &&
@@ -681,21 +685,24 @@ const __krrViewportRect = () => {
   const { width, height } = __krrLayoutMetrics();
   return { x: 0, y: 0, width, height, top: 0, right: width, bottom: height, left: 0 };
 };
+const __krrElementRootBaseBounds = (elementRoot, rootClipData) => {
+  if (!elementRoot) return __krrViewportRect();
+  if (rootClipData?.rootClip) return __krrClipRect(rootClipData.rootClip);
+  return elementRoot.getBoundingClientRect();
+};
 const __krrIntersectionEntry = (observer, target) => {
   const elementRoot = observer.root && observer.root !== document ? observer.root : null;
-  const rootBounds = __krrExpandRootBounds(
-    elementRoot ? elementRoot.getBoundingClientRect() : __krrViewportRect(),
-    observer.__krrRootMargin,
-  );
   const targetBox = __krrObservedElementBox(target);
   const boundingClientRect = targetBox.boundingClientRect;
-  const requestedRootClips = elementRoot
+  const requestedRootClipData = elementRoot
     ? __krrClipsWithinRoot(targetBox.metadata, target, elementRoot)
-    : [];
-  const rootClips = requestedRootClips ?? [];
+    : { rootClip: null, ancestorClips: [] };
+  const rootClips = requestedRootClipData?.ancestorClips ?? [];
   const targetWithinRoot =
     !elementRoot ||
-    __krrTargetWithinRoot(target, elementRoot, targetBox.metadata, requestedRootClips !== null);
+    __krrTargetWithinRoot(target, elementRoot, targetBox.metadata, requestedRootClipData !== null);
+  const rootBaseBounds = __krrElementRootBaseBounds(elementRoot, requestedRootClipData);
+  const rootBounds = __krrExpandRootBounds(rootBaseBounds, observer.__krrRootMargin);
   const targetFragments = [boundingClientRect];
   const clippedRoot = __krrClippedRootBounds(rootBounds, rootClips);
   const clippedRootBounds = clippedRoot.rect;

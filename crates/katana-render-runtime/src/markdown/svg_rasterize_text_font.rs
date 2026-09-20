@@ -103,7 +103,7 @@ fn fallback_attribute_score(
     requested_style: usvg::fontdb::Style,
     requested_weight: usvg::fontdb::Weight,
     requested_stretch: usvg::fontdb::Stretch,
-) -> (u8, u16) {
+) -> (u8, (u8, u16)) {
     let same_style = candidate_style == requested_style;
     let same_weight = candidate_weight == requested_weight;
     let same_stretch = candidate_stretch == requested_stretch;
