@@ -156,6 +156,19 @@ fn fragmentable_inline_target_uses_union_area_and_ancestor_clip_in_real_host() -
 }
 
 #[test]
+fn positioned_inline_block_is_excluded_from_parent_inline_fragments() -> TestResult {
+    let session = start_with_viewport(positioned_inline_block_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    let bounding_width = observed_number(&snapshot, "data-positioned-inline-width")?;
+
+    assert!(
+        bounding_width < 200.0,
+        "an out-of-flow inline-block must not widen its parent inline target: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn clipped_wrapped_inline_uses_its_full_bounding_rect_in_real_host() -> TestResult {
     let session = start_with_viewport(clipped_wrapped_inline_document(), 80, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -310,6 +323,18 @@ fn rotated_overflow_clip_keeps_its_shape_in_real_host() -> TestResult {
     assert!(
         snapshot.contains(r##"data-target="false:0""##),
         "a target in the rotated clip AABB but outside its shape must not intersect: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
+fn rotated_rounded_overflow_clip_preserves_corner_geometry_in_real_host() -> TestResult {
+    let session = start_with_viewport(rotated_rounded_overflow_clip_document(), 180, 180)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains("data-target=\"true:"),
+        "a target inside the rotated rounded clip must intersect: {snapshot}"
     );
     Ok(())
 }
@@ -503,6 +528,22 @@ new IntersectionObserver((entries) => {
 </script>"##
 }
 
+fn positioned_inline_block_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#target { display: inline; }
+#absolute { display: inline-block; position: absolute; left: 200px; top: 0; width: 40px; height: 20px; }
+#fixed { display: inline-block; position: fixed; left: 300px; top: 0; width: 40px; height: 20px; }
+</style>
+<span id=target>before<span id=absolute></span><span id=fixed></span>after</span><p id=observed></p>
+<script>
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  observed.setAttribute("data-positioned-inline-width", entries[0].boundingClientRect.width);
+}).observe(document.getElementById("target"));
+</script>"##
+}
+
 fn clipped_wrapped_inline_document() -> &'static str {
     r##"<style>
 html, body { margin: 0; }
@@ -665,6 +706,23 @@ html, body { margin: 0; }
 #target { position: absolute; left: 120px; top: 0; width: 20px; height: 20px; }
 </style>
 <div id=root><div id=clip><div id=target>Outside</div></div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn rotated_rounded_overflow_clip_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 160px; height: 160px; }
+#clip { position: relative; width: 120px; height: 40px; overflow: hidden; border-radius: 20px; transform: rotate(45deg); }
+#target { position: absolute; left: 30px; top: 5px; width: 10px; height: 10px; }
+</style>
+<div id=root><div id=clip><div id=target>Rounded edge</div></div></div><p id=observed></p>
 <script>
 const root = document.getElementById("root");
 new IntersectionObserver((entries) => {

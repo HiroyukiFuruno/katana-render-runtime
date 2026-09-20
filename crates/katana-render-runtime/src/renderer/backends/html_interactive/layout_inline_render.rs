@@ -127,6 +127,9 @@ impl HtmlLayoutRenderer {
         let Some(element_box) = self.element_boxes.get(element_box_start) else {
             return;
         };
+        if element_box.positioning_context != ElementPositioningContext::InFlow {
+            return;
+        }
         if !element_box.inline_fragments.is_empty() {
             return;
         }

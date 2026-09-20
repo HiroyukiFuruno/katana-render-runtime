@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { type Context, createContext, runInContext } from "node:vm";
 
@@ -17,6 +18,21 @@ type DeterminismSample = {
   clock: number;
   randoms: number[];
 };
+
+function sampleDateCallInTimezone(timezone: string): string {
+  const script = `
+    const installDrawioDeterminism = ${installDrawioDeterminism.toString()};
+    installDrawioDeterminism();
+    process.stdout.write(Date());
+  `;
+  const result = spawnSync(process.execPath, ["-e", script], {
+    env: { ...process.env, TZ: timezone },
+    encoding: "utf8",
+  });
+  expect(result.status).toBe(0);
+  expect(result.stderr).toBe("");
+  return result.stdout;
+}
 
 type Runtime = {
   createContext: () => Context;
@@ -113,7 +129,7 @@ test("公式 Draw.io renderer は Date constructor を固定し静的APIとproto
 
   expect(sample).toEqual({
     implicit: FIXED_NOW,
-    called: new Date(FIXED_NOW).toString(),
+    called: new Date(FIXED_NOW).toUTCString(),
     explicit: Date.parse("2024-02-03T04:05:06.000Z"),
     explicitUndefinedIsInvalid: true,
     parsed: Date.parse("2024-02-03T04:05:06.000Z"),
@@ -121,4 +137,12 @@ test("公式 Draw.io renderer は Date constructor を固定し静的APIとproto
     prototypeCompatible: true,
     datePrototypeCompatible: "2024-02-03T04:05:06.000Z",
   });
+});
+
+test("公式 Draw.io renderer の Date() はホストのタイムゾーンに依存しない", () => {
+  const utc = sampleDateCallInTimezone("UTC");
+  const pacific = sampleDateCallInTimezone("America/Los_Angeles");
+
+  expect(utc).toBe("Thu, 01 Jan 2026 00:00:00 GMT");
+  expect(pacific).toBe(utc);
 });

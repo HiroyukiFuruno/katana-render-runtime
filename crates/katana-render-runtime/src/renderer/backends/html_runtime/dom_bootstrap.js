@@ -738,26 +738,28 @@ const __krrClipCorners = (clip) => {
 };
 const __krrRoundedClipPolygon = (clip) => {
   const corners = __krrClipCorners(clip);
-  const radiusX = Math.min(Math.max(0, Number(clip.radiusX) || 0), clip.width / 2);
-  const radiusY = Math.min(Math.max(0, Number(clip.radiusY) || 0), clip.height / 2);
-  if (radiusX === 0 || radiusY === 0 || clip.width === 0 || clip.height === 0) return corners;
+  const width = Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y);
+  const height = Math.hypot(corners[2].x - corners[1].x, corners[2].y - corners[1].y);
+  const radiusX = Math.min(Math.max(0, Number(clip.radiusX) || 0), width / 2);
+  const radiusY = Math.min(Math.max(0, Number(clip.radiusY) || 0), height / 2);
+  if (radiusX === 0 || radiusY === 0 || width === 0 || height === 0) return corners;
   const origin = corners[0];
   const horizontal = {
-    x: (corners[1].x - origin.x) / clip.width,
-    y: (corners[1].y - origin.y) / clip.width,
+    x: (corners[1].x - origin.x) / width,
+    y: (corners[1].y - origin.y) / width,
   };
   const vertical = {
-    x: (corners[3].x - origin.x) / clip.height,
-    y: (corners[3].y - origin.y) / clip.height,
+    x: (corners[3].x - origin.x) / height,
+    y: (corners[3].y - origin.y) / height,
   };
   const pointAt = (x, y) => ({
     x: origin.x + horizontal.x * x + vertical.x * y,
     y: origin.y + horizontal.y * x + vertical.y * y,
   });
   const arcs = [
-    [clip.width - radiusX, radiusY, -Math.PI / 2, 0],
-    [clip.width - radiusX, clip.height - radiusY, 0, Math.PI / 2],
-    [radiusX, clip.height - radiusY, Math.PI / 2, Math.PI],
+    [width - radiusX, radiusY, -Math.PI / 2, 0],
+    [width - radiusX, height - radiusY, 0, Math.PI / 2],
+    [radiusX, height - radiusY, Math.PI / 2, Math.PI],
     [radiusX, radiusY, Math.PI, Math.PI * 1.5],
   ];
   return arcs.flatMap(([centerX, centerY, start, end]) =>

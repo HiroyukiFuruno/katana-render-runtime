@@ -3,7 +3,7 @@ export function installDrawioDeterminism() {
   const originalDate = globalThis.Date;
   globalThis.Date = new Proxy(originalDate, {
     apply(target) {
-      return Reflect.construct(target, [deterministicNow]).toString();
+      return Reflect.construct(target, [deterministicNow]).toUTCString();
     },
     construct(target, args, newTarget) {
       return Reflect.construct(target, args.length === 0 ? [deterministicNow] : args, newTarget);
