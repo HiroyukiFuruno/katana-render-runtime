@@ -691,17 +691,14 @@ const __krrIntersectionEntry = (observer, target) => {
     rootBounds,
   );
   const intersectionFragments = targetWithinRoot
-    ? targetFragments.map((fragment) =>
-        __krrIntersectionRect(clippedRootBounds, fragment),
-      )
+    ? targetFragments.map((fragment) => __krrIntersectionRect(clippedRootBounds, fragment))
     : [];
   const positiveIntersectionFragments = intersectionFragments.filter(
     (rect) => rect.width > 0 && rect.height > 0,
   );
-  const edgeAdjacentIntersectionFragments =
-    intersectionFragments.filter((_, index) =>
-      __krrRectsIntersectOrAreEdgeAdjacent(clippedRootBounds, targetFragments[index]),
-    );
+  const edgeAdjacentIntersectionFragments = intersectionFragments.filter((_, index) =>
+    __krrRectsIntersectOrAreEdgeAdjacent(clippedRootBounds, targetFragments[index]),
+  );
   const intersectionRect = __krrBoundingIntersectionRect(
     positiveIntersectionFragments.length > 0
       ? positiveIntersectionFragments
