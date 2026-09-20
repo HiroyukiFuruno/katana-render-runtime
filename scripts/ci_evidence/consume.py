@@ -245,6 +245,8 @@ def verify_reusable_evidence(get: Getter, download: Downloader, *, repository: s
     matches(number(publisher.get("id"), "publisher run.id"), publisher_id, "publisher run ID")
     matches(text(publisher.get("event"), "publisher run.event"), "workflow_run", "publisher run event")
     matches(text(publisher.get("path"), "publisher run.path"), PUBLISHER_WORKFLOW, "publisher workflow")
+    if publisher.get("conclusion") is None:
+        raise ReuseUnavailable("publisher workflow run is still in progress")
     matches(text(publisher.get("conclusion"), "publisher run.conclusion"), "success", "publisher conclusion")
     data = obj(manifest(download, artifact), "manifest")
     matches(data.get("schema"), "krr-ci-evidence-publisher-v1", "manifest schema")

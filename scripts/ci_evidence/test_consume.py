@@ -116,6 +116,12 @@ class ConsumeTests(unittest.TestCase):
         with self.assertRaises(ReuseUnavailable):
             self.verify(api)
 
+    def test_in_progress_publisher_run_is_retried(self) -> None:
+        api = Api()
+        api.values[f"/repos/{REPO}/actions/runs/50"]["conclusion"] = None
+        with self.assertRaises(ReuseUnavailable):
+            self.verify(api)
+
     def test_malformed_tree_or_manifest_is_a_hard_failure(self) -> None:
         api = Api()
         api.values[f"/repos/{REPO}/git/trees/{SHA}"]["truncated"] = True
