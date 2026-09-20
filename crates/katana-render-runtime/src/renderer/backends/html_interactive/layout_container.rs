@@ -240,7 +240,12 @@ fn overflow_clip_applies_to(element_box: &super::types::ElementBox, owner_node_i
         ElementPositioningContext::InFlow => true,
         ElementPositioningContext::FixedViewport => false,
         ElementPositioningContext::AbsoluteContainingBlock {
+            viewport_escape: true,
+            ..
+        } => false,
+        ElementPositioningContext::AbsoluteContainingBlock {
             owner_node_id: Some(containing_block_owner),
+            viewport_escape: false,
         } => element_box
             .ancestor_node_ids
             .iter()
@@ -250,6 +255,7 @@ fn overflow_clip_applies_to(element_box: &super::types::ElementBox, owner_node_i
             }),
         ElementPositioningContext::AbsoluteContainingBlock {
             owner_node_id: None,
+            viewport_escape: false,
         } => false,
     }
 }
@@ -346,7 +352,6 @@ mod container_contract_tests {
         style.overflow = super::super::style::CssOverflow::Clip;
         let geometry = geometry(300.0, &style);
         renderer.record_overflow_clip(0, &geometry, 20.0, &style);
-
         let element_box = ElementBox {
             node_id: 1,
             x: 0.0,
@@ -356,6 +361,7 @@ mod container_contract_tests {
             transformed_corners: [(0.0, 0.0); 4],
             positioning_context: ElementPositioningContext::AbsoluteContainingBlock {
                 owner_node_id: None,
+                viewport_escape: false,
             },
             ancestor_node_ids: Vec::new(),
             overflow_clips: Vec::new(),

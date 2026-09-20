@@ -236,6 +236,7 @@ mod tests {
             target.positioning_context,
             ElementPositioningContext::AbsoluteContainingBlock {
                 owner_node_id: Some(1),
+                viewport_escape: false,
             }
         );
         assert_eq!(target.overflow_clips.len(), 1);
@@ -270,6 +271,7 @@ mod tests {
             target.positioning_context,
             ElementPositioningContext::AbsoluteContainingBlock {
                 owner_node_id: Some(1),
+                viewport_escape: false,
             }
         );
         assert!(target.overflow_clips.is_empty());
@@ -486,6 +488,7 @@ mod tests {
             target.positioning_context,
             ElementPositioningContext::AbsoluteContainingBlock {
                 owner_node_id: Some(containing_block_node_id),
+                viewport_escape: false,
             }
         );
         let owners = target

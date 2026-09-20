@@ -65,7 +65,7 @@ impl HtmlInteractiveSession {
 }
 
 fn intersection_metadata(element: &ElementBox) -> (u64, String) {
-    let (positioning, containing_block) = intersection_positioning(element);
+    let (positioning, containing_block, viewport_escape) = intersection_positioning(element);
     let clips = intersection_clips(element);
     let clips_overflow = element.clips_overflow;
     let padding_edge = intersection_clip(&element.padding_edge);
@@ -73,18 +73,22 @@ fn intersection_metadata(element: &ElementBox) -> (u64, String) {
     (
         element.node_id,
         format!(
-            "{{\"positioning\":\"{positioning}\",\"containingBlock\":{containing_block},\"paddingEdge\":{padding_edge},\"clipsOverflow\":{clips_overflow},\"clips\":[{clips}],\"fragments\":[{fragments}]}}"
+            "{{\"positioning\":\"{positioning}\",\"containingBlock\":{containing_block},\"viewportEscape\":{viewport_escape},\"paddingEdge\":{padding_edge},\"clipsOverflow\":{clips_overflow},\"clips\":[{clips}],\"fragments\":[{fragments}]}}"
         ),
     )
 }
 
-fn intersection_positioning(element: &ElementBox) -> (&'static str, String) {
+fn intersection_positioning(element: &ElementBox) -> (&'static str, String, bool) {
     match element.positioning_context {
-        ElementPositioningContext::InFlow => ("in-flow", "null".to_string()),
-        ElementPositioningContext::FixedViewport => ("fixed", "null".to_string()),
-        ElementPositioningContext::AbsoluteContainingBlock { owner_node_id } => (
+        ElementPositioningContext::InFlow => ("in-flow", "null".to_string(), false),
+        ElementPositioningContext::FixedViewport => ("fixed", "null".to_string(), true),
+        ElementPositioningContext::AbsoluteContainingBlock {
+            owner_node_id,
+            viewport_escape,
+        } => (
             "absolute",
             owner_node_id.map_or_else(|| "null".to_string(), |owner| owner.to_string()),
+            viewport_escape,
         ),
     }
 }

@@ -6,7 +6,10 @@ pub(super) const ELEMENT_BOX_CORNER_COUNT: usize = 4;
 
 #[path = "types_geometry.rs"]
 mod geometry;
+#[path = "types_positioning.rs"]
+mod positioning;
 pub(super) use geometry::InlineFragment;
+pub(super) use positioning::ElementPositioningContext;
 
 #[derive(Clone, Copy)]
 pub(super) struct ElementRenderContext<'a> {
@@ -109,13 +112,6 @@ pub(super) struct ElementBox {
     /// overflow clip を持つ IntersectionObserver の element root は padding edge を基準にする。
     pub(super) padding_edge: OverflowClip,
     pub(super) inline_fragments: Vec<InlineFragment>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ElementPositioningContext {
-    InFlow,
-    FixedViewport,
-    AbsoluteContainingBlock { owner_node_id: Option<u64> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

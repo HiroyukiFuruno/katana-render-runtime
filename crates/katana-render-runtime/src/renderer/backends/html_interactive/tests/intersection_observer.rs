@@ -356,6 +356,22 @@ fn explicit_root_rejects_static_targets_with_out_of_flow_ancestors() -> TestResu
 }
 
 #[test]
+fn explicit_root_rejects_absolute_target_inside_fixed_ancestor() -> TestResult {
+    let session = start_with_viewport(fixed_ancestor_absolute_target_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-fixed-absolute="false:0""##),
+        "an absolute target inside a fixed ancestor must remain outside its element root: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-fixed-absolute-intersection="0:0""##),
+        "a fixed-ancestor absolute target must have an empty intersection: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn element_root_margin_is_not_clipped_by_the_root_overflow() -> TestResult {
     let session = start_with_viewport(root_margin_with_overflow_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -916,6 +932,25 @@ new IntersectionObserver((entries) => {
     observed.setAttribute(`data-${entry.target.id}-intersection`, `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
   }
 }, { root }).observe(document.getElementById("absolute-child"));
+</script>"##
+}
+
+fn fixed_ancestor_absolute_target_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { width: 120px; height: 80px; }
+#fixed-ancestor { position: fixed; top: 0; left: 0; width: 120px; height: 20px; }
+#fixed-absolute { position: absolute; top: 0; left: 0; width: 120px; height: 20px; }
+</style>
+<div id=root><div id=fixed-ancestor><div id=fixed-absolute>Fixed absolute</div></div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  const observed = document.getElementById("observed");
+  observed.setAttribute("data-fixed-absolute", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  observed.setAttribute("data-fixed-absolute-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+}, { root }).observe(document.getElementById("fixed-absolute"));
 </script>"##
 }
 

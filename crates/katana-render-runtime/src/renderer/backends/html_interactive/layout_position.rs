@@ -148,6 +148,7 @@ impl HtmlLayoutRenderer {
             CssPosition::Fixed => ElementPositioningContext::FixedViewport,
             CssPosition::Absolute => ElementPositioningContext::AbsoluteContainingBlock {
                 owner_node_id: self.positioning_containing_block(position).owner_node_id,
+                viewport_escape: self.in_flow_positioning_context().escapes_element_root(),
             },
             CssPosition::Static | CssPosition::Relative | CssPosition::Sticky => {
                 self.in_flow_positioning_context()

@@ -643,7 +643,8 @@ const __krrMetadataBelongsToRoot = (metadata, target, root) => {
         fragment.width >= 0 &&
         fragment.height >= 0,
     );
-  if (!hasValidGeometry) return false;
+  if (!hasValidGeometry || typeof metadata.viewportEscape !== "boolean") return false;
+  if (metadata.viewportEscape) return false;
   if (metadata.positioning === "in-flow") return true;
   const path = __krrNativeDom("eventPath", target.__krrNodeId);
   if (__krrPathNodeIndex(path, root.__krrNodeId) < 0) return false;
