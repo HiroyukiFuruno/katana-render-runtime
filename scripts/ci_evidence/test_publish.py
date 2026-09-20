@@ -46,6 +46,15 @@ class Adapter:
     def __init__(self) -> None:
         workflow = b"name: CI\\n"
         self.responses: dict[tuple[str, str], object] = {
+            ("GET", "/repos/acme/krr/check-runs/7"): {
+                "id": 7,
+                "app": {"id": ACTIONS_APP_ID, "slug": "github-actions"},
+                "output": {
+                    "title": "Trusted Linux release-quality evidence published",
+                    "summary": "manifest-sha256: " + "c" * 64,
+                    "text": "source-run: 42\nartifact: ci-evidence-linux-release-quality-42",
+                },
+            },
             ("GET", "/repos/acme/krr/git/ref/heads/master"): {"object": {"sha": SHA_B}},
             ("GET", f"/repos/acme/krr/contents/.github/workflows/test-and-build.yml?ref={SHA_B}"): content(workflow),
             ("GET", f"/repos/acme/krr/contents/.github/workflows/test-and-build.yml?ref={SHA_A}"): content(workflow),
@@ -108,7 +117,11 @@ class PublishTests(unittest.TestCase):
         )
         self.assertEqual(
             adapter.writes[1][2]["output"]["summary"],
-            "CI evidence artifact uploaded successfully.",
+            "manifest-sha256: " + "c" * 64,
+        )
+        self.assertEqual(
+            adapter.writes[1][2]["output"]["text"],
+            "source-run: 42\nartifact: ci-evidence-linux-release-quality-42",
         )
 
     def test_rejects_retry_and_stale_default_branch(self) -> None:

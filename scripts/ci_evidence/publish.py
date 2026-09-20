@@ -276,16 +276,19 @@ def complete_check(repository: str, check_id: int, rest: RestAdapter) -> None:
         raise PublishError("repository must be an owner/name pair")
     if check_id <= 0:
         raise PublishError("check run ID must be positive")
+    current = rest.request("GET", f"/repos/{repository}/check-runs/{check_id}")
+    if _assert_actions_identity(current) != check_id:
+        raise PublishError("check run lookup returned a different check run ID")
+    current_output = _mapping(_mapping(current, "check run response").get("output"), "check run response.output")
     response = rest.request(
         "PATCH",
         f"/repos/{repository}/check-runs/{check_id}",
         {
             "status": "completed",
             "conclusion": "success",
-            "output": {
-                "title": CHECK_TITLE,
-                "summary": "CI evidence artifact uploaded successfully.",
-            },
+            # GitHub replaces the complete output object on PATCH.  Preserve
+            # the source-run and artifact metadata written by publish().
+            "output": dict(current_output),
         },
     )
     if _assert_actions_identity(response) != check_id:
