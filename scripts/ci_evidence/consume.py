@@ -223,8 +223,14 @@ def pending_publisher(get: Getter, repository: str, head_sha: str, source_run_id
 
     checks = [obj(item, "check") for item in pages(get, f"/repos/{repository}/commits/{head_sha}/check-runs?check_name={urllib.parse.quote(CHECK, safe='')}", "check_runs")]
     checks = [item for item in checks if item.get("name") == CHECK]
+    # The publisher creates its check from its first step.  A successful source
+    # run can therefore be visible before the workflow_run delivery has started
+    # the publisher.  That absence is transient and must use the caller's
+    # bounded retry budget; a present but ambiguous check is never trusted.
+    if not checks:
+        raise ReusePending("publisher workflow has not created its check yet")
     if len(checks) != 1:
-        raise ReuseUnavailable("publisher workflow run is missing or not unique")
+        raise ReuseUnavailable("publisher workflow check is not unique")
     publisher_id = publisher_run_id(checks[0], repository, source_run_id)
     publisher = obj(get(f"/repos/{repository}/actions/runs/{publisher_id}"), "publisher run")
     matches(number(publisher.get("id"), "publisher run.id"), publisher_id, "publisher run ID")

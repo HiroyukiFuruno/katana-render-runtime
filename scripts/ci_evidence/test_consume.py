@@ -143,8 +143,15 @@ class ConsumeTests(unittest.TestCase):
         with self.assertRaises(ReusePending):
             self.verify(api)
 
-    def test_unpublished_artifact_falls_back_when_publisher_failed_or_is_missing(self) -> None:
-        for state in ("failed", "missing"):
+    def test_unpublished_artifact_waits_before_publisher_creates_a_check(self) -> None:
+        api = Api()
+        api.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"] = []
+        api.values[f"/repos/{REPO}/commits/{SHA}/check-runs"]["check_runs"] = []
+        with self.assertRaises(ReusePending):
+            self.verify(api)
+
+    def test_unpublished_artifact_falls_back_when_publisher_failed_or_check_is_invalid(self) -> None:
+        for state in ("failed", "duplicate", "invalid"):
             with self.subTest(state=state):
                 api = Api()
                 api.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"] = []
@@ -152,8 +159,12 @@ class ConsumeTests(unittest.TestCase):
                     publisher = api.values[f"/repos/{REPO}/actions/runs/50"]
                     publisher["status"] = "completed"
                     publisher["conclusion"] = "failure"
+                elif state == "duplicate":
+                    checks = api.values[f"/repos/{REPO}/commits/{SHA}/check-runs"]["check_runs"]
+                    checks.append(copy.deepcopy(checks[0]))
                 else:
-                    api.values[f"/repos/{REPO}/commits/{SHA}/check-runs"]["check_runs"] = []
+                    check = api.values[f"/repos/{REPO}/commits/{SHA}/check-runs"]["check_runs"][0]
+                    check["app"]["id"] = 1
                 with self.assertRaises(ReuseUnavailable):
                     self.verify(api)
 
@@ -168,13 +179,16 @@ class ConsumeTests(unittest.TestCase):
         pending_artifact.values[f"/repos/{REPO}/actions/runs/50"]["conclusion"] = None
         pending_publisher = Api()
         pending_publisher.values[f"/repos/{REPO}/actions/runs/50"]["conclusion"] = None
+        pending_startup = Api()
+        pending_startup.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"] = []
+        pending_startup.values[f"/repos/{REPO}/commits/{SHA}/check-runs"]["check_runs"] = []
         unavailable = Api()
         unavailable.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"].append(copy.deepcopy(unavailable.values[f"/repos/{REPO}/actions/artifacts"]["artifacts"][0]))
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "evidence.json"
             arguments = ["--repository", REPO, "--pr-number", str(PR), "--head-sha", SHA, "--head-ref", REF, "--profile", PROFILE, "--output", str(output)]
-            for pending in (pending_source, pending_artifact, pending_publisher):
+            for pending in (pending_source, pending_artifact, pending_publisher, pending_startup):
                 with self.subTest(pending=pending):
                     with patch("consume.clients", return_value=(pending.get, pending.download)):
                         self.assertEqual(main(arguments), 11)
