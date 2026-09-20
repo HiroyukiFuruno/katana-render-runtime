@@ -117,11 +117,11 @@ fn generated_runtime_uses_deterministic_date_without_changing_date_apis() -> Res
     for expected in [
         r#"data-date-now="1767225600000""#,
         r#"data-date-call="1767225600000""#,
-        r#"data-date-call-string="Thu Jan 01 2026 00:00:00 GMT+0000 (Coordinated Universal Time)""#,
+        r#"data-date-call-string="Thu Jan 01 2026 00:00:00 GMT+0000 (UTC)""#,
         r#"data-date-explicit="1706933106000""#,
         r#"data-date-locale-string="2024-02-03T04:05:06.000Z""#,
         r#"data-timestamp="2026-01-01T00:00:00.000Z""#,
-        r#"data-date-string="Sat Feb 03 2024 04:05:06 GMT+0000 (Coordinated Universal Time)""#,
+        r#"data-date-string="Sat Feb 03 2024 04:05:06 GMT+0000 (UTC)""#,
         r#"data-date-parse="1706933106000""#,
         r#"data-date-utc="1706933106000""#,
         r#"data-date-invalid="true""#,

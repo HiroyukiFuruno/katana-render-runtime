@@ -13,6 +13,13 @@ const SHARED_DOM_BROWSER_GLOBALS = readFileSync(
   ),
   "utf8",
 );
+const EMBEDDED_DRAWIO_GLOBALS = readFileSync(
+  new URL(
+    "../../crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/drawio_globals.js",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 type DeterminismSample = {
   clock: number;
@@ -103,6 +110,12 @@ type Runtime = {
 
 function createSharedDomContext(): Context {
   const context = createContext({});
+  runInContext(SHARED_DOM_BROWSER_GLOBALS, context);
+  return context;
+}
+
+function createEmbeddedDrawioContext(): Context {
+  const context = createContext({ document: { referrer: "" } });
   runInContext(SHARED_DOM_BROWSER_GLOBALS, context);
   return context;
 }
@@ -216,6 +229,17 @@ test("公式 Draw.io renderer の Date.prototype.toString はホストのタイ�
 
   expect(utc).toBe("Sat Feb 03 2024 04:05:06 GMT+0000 (UTC)");
   expect(pacific).toBe(utc);
+});
+
+test("公式と埋め込み Draw.io runtime の longTime 相当の Date token 表記が一致する", () => {
+  const embedded = createEmbeddedDrawioContext();
+  runInContext(EMBEDDED_DRAWIO_GLOBALS, embedded);
+  const embeddedDate = runInContext(`new Date("2024-02-03T04:05:06.000Z").toString()`, embedded);
+  const official = createOfficialRendererContext();
+  const officialDate = runInContext(`new Date("2024-02-03T04:05:06.000Z").toString()`, official);
+
+  expect(embeddedDate).toBe("Sat Feb 03 2024 04:05:06 GMT+0000 (UTC)");
+  expect(officialDate).toBe(embeddedDate);
 });
 
 test("公式 Draw.io renderer の locale Date API はホストのタイムゾーンとロケールに依存しない", () => {

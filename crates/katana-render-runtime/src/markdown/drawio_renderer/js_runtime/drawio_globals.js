@@ -101,7 +101,7 @@ function katanaDrawioDateString() {
     "Dec",
   ];
   const pad = (value) => String(value).padStart(2, "0");
-  return `${weekdays[this.getUTCDay()]} ${months[this.getUTCMonth()]} ${pad(this.getUTCDate())} ${this.getUTCFullYear()} ${pad(this.getUTCHours())}:${pad(this.getUTCMinutes())}:${pad(this.getUTCSeconds())} GMT+0000 (Coordinated Universal Time)`;
+  return `${weekdays[this.getUTCDay()]} ${months[this.getUTCMonth()]} ${pad(this.getUTCDate())} ${this.getUTCFullYear()} ${pad(this.getUTCHours())}:${pad(this.getUTCMinutes())}:${pad(this.getUTCSeconds())} GMT+0000 (UTC)`;
 }
 
 function katanaDrawioAtob(value) {
