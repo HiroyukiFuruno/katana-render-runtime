@@ -356,6 +356,29 @@ fn explicit_root_rejects_static_targets_with_out_of_flow_ancestors() -> TestResu
 }
 
 #[test]
+fn explicit_root_rejects_fragmentable_inline_targets_inside_escaped_positioned_ancestors()
+-> TestResult {
+    let session = start_with_viewport(
+        fragmentable_inline_target_with_escaped_positioned_ancestor_document(),
+        160,
+        100,
+    )?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    for target in ["fixed-inline", "absolute-inline"] {
+        assert!(
+            snapshot.contains(&format!(r##"data-{target}="false:0""##)),
+            "a fragmentable inline target inheriting an escaped positioned ancestor must be excluded from its element root: {snapshot}"
+        );
+        assert!(
+            snapshot.contains(&format!(r##"data-{target}-intersection="0:0""##)),
+            "an excluded fragmentable inline target must have an empty intersection: {snapshot}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn explicit_root_accepts_fixed_target_within_transformed_containing_block() -> TestResult {
     let session = start_with_viewport(
         transformed_containing_block_fixed_target_document(),
@@ -964,6 +987,30 @@ new IntersectionObserver((entries) => {
     observed.setAttribute(`data-${entry.target.id}-intersection`, `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
   }
 }, { root }).observe(document.getElementById("absolute-child"));
+</script>"##
+}
+
+fn fragmentable_inline_target_with_escaped_positioned_ancestor_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#outer { position: relative; width: 120px; height: 80px; }
+#root { width: 120px; height: 80px; }
+#fixed-ancestor { position: fixed; top: 0; left: 0; width: 120px; height: 20px; }
+#fixed-absolute { position: absolute; top: 0; left: 0; width: 120px; height: 20px; }
+#absolute-ancestor { position: absolute; top: 20px; left: 0; width: 120px; height: 20px; }
+#fixed-inline, #absolute-inline { display: inline; }
+</style>
+<div id=outer><div id=root><div id=fixed-ancestor><div id=fixed-absolute><span id=fixed-inline>Fixed inline target</span></div></div><div id=absolute-ancestor><span id=absolute-inline>Absolute inline target</span></div></div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+const observed = document.getElementById("observed");
+for (const target of [document.getElementById("fixed-inline"), document.getElementById("absolute-inline")]) {
+  new IntersectionObserver((entries) => {
+    const entry = entries[0];
+    observed.setAttribute(`data-${entry.target.id}`, `${entry.isIntersecting}:${entry.intersectionRatio}`);
+    observed.setAttribute(`data-${entry.target.id}-intersection`, `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+  }, { root }).observe(target);
+}
 </script>"##
 }
 

@@ -84,7 +84,8 @@ impl HtmlLayoutRenderer {
         else {
             return;
         };
-        let element_box_index = self.start_element_box(*node_id, ElementPositioningContext::InFlow);
+        let element_box_index =
+            self.start_element_box(*node_id, self.in_flow_positioning_context());
         let (insertion_x, insertion_y) = (inline.cursor_x, inline.y);
         self.ownership.inline_fragment_owners.push(*node_id);
         for index in 0..children.len() {

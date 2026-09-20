@@ -2,7 +2,9 @@ use super::super::layout::HtmlLayoutRenderer;
 use super::super::types::ElementPositioningContext;
 
 impl HtmlLayoutRenderer {
-    pub(super) fn in_flow_positioning_context(&self) -> ElementPositioningContext {
+    pub(in crate::renderer::backends::html_interactive) fn in_flow_positioning_context(
+        &self,
+    ) -> ElementPositioningContext {
         self.ownership
             .rendering_elements
             .iter()
