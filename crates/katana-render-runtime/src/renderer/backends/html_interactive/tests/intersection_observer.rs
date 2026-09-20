@@ -156,6 +156,24 @@ fn fragmentable_inline_target_uses_union_area_and_ancestor_clip_in_real_host() -
 }
 
 #[test]
+fn fragmentable_inline_line_break_retains_line_height_in_real_host() -> TestResult {
+    let session = start_with_viewport(fragmentable_inline_line_break_document(), 80, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    let bounding_width = observed_number(&snapshot, "data-line-break-bounding-width")?;
+    let bounding_height = observed_number(&snapshot, "data-line-break-bounding-height")?;
+
+    assert_eq!(
+        bounding_width, 0.0,
+        "a line break has no inline width: {snapshot}"
+    );
+    assert!(
+        bounding_height > 0.0,
+        "a line break must retain its line-height fragment: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn positioned_inline_block_is_excluded_from_parent_inline_fragments() -> TestResult {
     let session = start_with_viewport(positioned_inline_block_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -617,6 +635,22 @@ new IntersectionObserver((entries) => {
   observed.setAttribute("data-fragment-bounding-height", entry.boundingClientRect.height);
   observed.setAttribute("data-fragment-bounding-width", entry.boundingClientRect.width);
 }, { root: document.getElementById("root") }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn fragmentable_inline_line_break_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#target { line-height: 24px; }
+</style>
+<span id=target><br></span><p id=observed></p>
+<script>
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  const rect = entries[0].boundingClientRect;
+  observed.setAttribute("data-line-break-bounding-width", rect.width);
+  observed.setAttribute("data-line-break-bounding-height", rect.height);
+}).observe(document.getElementById("target"));
 </script>"##
 }
 

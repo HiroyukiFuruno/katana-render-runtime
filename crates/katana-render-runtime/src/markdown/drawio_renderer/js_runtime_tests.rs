@@ -61,6 +61,17 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
   svg.setAttribute("data-date-utc", String(Date.UTC(2024, 1, 3, 4, 5, 6)));
   svg.setAttribute("data-date-invalid", String(Number.isNaN(invalid.getTime())));
   svg.setAttribute("data-date-prototype", String(Object.getPrototypeOf(explicit) === Date.prototype));
+  svg.setAttribute("data-date-local-getters", [
+    explicit.getFullYear(),
+    explicit.getMonth(),
+    explicit.getDate(),
+    explicit.getDay(),
+    explicit.getHours(),
+    explicit.getMinutes(),
+    explicit.getSeconds(), explicit.getMilliseconds(),
+    explicit.getYear(),
+    explicit.getTimezoneOffset(),
+  ].join(","));
   callback({ graph: { getSvg() { return svg; } } });
 };
 "#;
@@ -116,6 +127,7 @@ fn generated_runtime_uses_deterministic_date_without_changing_date_apis() -> Res
         r#"data-date-utc="1706933106000""#,
         r#"data-date-invalid="true""#,
         r#"data-date-prototype="true""#,
+        r#"data-date-local-getters="2024,1,3,6,4,5,6,0,124,0""#,
     ] {
         if !svg.contains(expected) {
             return Err(format!("missing {expected}: {svg}"));

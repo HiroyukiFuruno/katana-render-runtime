@@ -9,8 +9,17 @@ impl HtmlLayoutRenderer {
         insertion_x: f32,
         insertion_y: f32,
     ) {
+        let line_break_fragment = self.element_boxes[index + 1..]
+            .iter()
+            .find(|element_box| element_box.width > 0.0 && element_box.height > 0.0)
+            .map(|element_box| {
+                InlineFragment::new(insertion_x, element_box.y, 0.0, element_box.height)
+            });
         let element_box = &mut self.element_boxes[index];
         debug_assert_eq!(element_box.node_id, node_id);
+        if let Some(line_break_fragment) = line_break_fragment {
+            element_box.inline_fragments.push(line_break_fragment);
+        }
         let (x, y, width, height) = inline_fragment_bounds(&element_box.inline_fragments)
             .unwrap_or((insertion_x, insertion_y, 0.0, 0.0));
         element_box.x = x;
@@ -27,7 +36,7 @@ impl HtmlLayoutRenderer {
         width: f32,
         height: f32,
     ) {
-        if width <= 0.0 || height <= 0.0 {
+        if width < 0.0 || height <= 0.0 {
             return;
         }
         for owner in &self.ownership.inline_fragment_owners {

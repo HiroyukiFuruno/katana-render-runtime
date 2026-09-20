@@ -55,6 +55,18 @@ globalThis.Date.now = () => KATANA_DRAWIO_DETERMINISTIC_NOW;
 Date.prototype.toLocaleDateString = katanaDrawioLocaleDate;
 Date.prototype.toLocaleString = katanaDrawioLocaleDate;
 Date.prototype.toLocaleTimeString = katanaDrawioLocaleTime;
+Date.prototype.getDate = Date.prototype.getUTCDate;
+Date.prototype.getDay = Date.prototype.getUTCDay;
+Date.prototype.getFullYear = Date.prototype.getUTCFullYear;
+Date.prototype.getHours = Date.prototype.getUTCHours;
+Date.prototype.getMilliseconds = Date.prototype.getUTCMilliseconds;
+Date.prototype.getMinutes = Date.prototype.getUTCMinutes;
+Date.prototype.getMonth = Date.prototype.getUTCMonth;
+Date.prototype.getSeconds = Date.prototype.getUTCSeconds;
+Date.prototype.getYear = function katanaDrawioGetYear() {
+  return this.getUTCFullYear() - 1900;
+};
+Date.prototype.getTimezoneOffset = () => 0;
 
 function katanaDrawioLocaleDate() {
   return this.toISOString().slice(0, 10);
