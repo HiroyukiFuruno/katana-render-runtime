@@ -359,6 +359,7 @@ mod container_contract_tests {
             },
             ancestor_node_ids: Vec::new(),
             overflow_clips: Vec::new(),
+            clips_overflow: false,
             padding_edge: OverflowClip::new(1, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
             inline_fragments: Vec::new(),
         };

@@ -104,7 +104,9 @@ pub(super) struct ElementBox {
     /// 開始時点のDOM祖先。絶対配置要素へ適用する overflow clip を判定する。
     pub(super) ancestor_node_ids: Vec<u64>,
     pub(super) overflow_clips: Vec<OverflowClip>,
-    /// IntersectionObserver の element root は overflow の有無にかかわらず padding edge を基準にする。
+    /// 自身が overflow clip を持つか。element root の基準矩形に使う。
+    pub(super) clips_overflow: bool,
+    /// overflow clip を持つ IntersectionObserver の element root は padding edge を基準にする。
     pub(super) padding_edge: OverflowClip,
     pub(super) inline_fragments: Vec<InlineFragment>,
 }

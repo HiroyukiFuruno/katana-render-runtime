@@ -34,6 +34,21 @@ function sampleDateCallInTimezone(timezone: string): string {
   return result.stdout;
 }
 
+function sampleDateToStringInTimezone(timezone: string): string {
+  const script = `
+    const installDrawioDeterminism = ${installDrawioDeterminism.toString()};
+    installDrawioDeterminism();
+    process.stdout.write(new Date("2024-02-03T04:05:06.000Z").toString());
+  `;
+  const result = spawnSync(process.execPath, ["-e", script], {
+    env: { ...process.env, TZ: timezone },
+    encoding: "utf8",
+  });
+  expect(result.status).toBe(0);
+  expect(result.stderr).toBe("");
+  return result.stdout;
+}
+
 function sampleLocaleCalls(
   timezone: string,
   locale: string,
@@ -192,6 +207,14 @@ test("公式 Draw.io renderer の Date() はホストのタイムゾーンに依
   const pacific = sampleDateCallInTimezone("America/Los_Angeles");
 
   expect(utc).toBe("Thu, 01 Jan 2026 00:00:00 GMT");
+  expect(pacific).toBe(utc);
+});
+
+test("公式 Draw.io renderer の Date.prototype.toString はホストのタイムゾーン名に依存しない", () => {
+  const utc = sampleDateToStringInTimezone("UTC");
+  const pacific = sampleDateToStringInTimezone("America/Los_Angeles");
+
+  expect(utc).toBe("Sat Feb 03 2024 04:05:06 GMT+0000 (UTC)");
   expect(pacific).toBe(utc);
 });
 

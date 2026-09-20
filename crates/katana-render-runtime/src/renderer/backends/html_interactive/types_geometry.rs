@@ -149,6 +149,7 @@ mod tests {
             positioning_context: ElementPositioningContext::InFlow,
             ancestor_node_ids: Vec::new(),
             overflow_clips: vec![OverflowClip::new(2, 10.0, 0.0, 20.0, 10.0, 0.0, 0.0)],
+            clips_overflow: false,
             padding_edge: OverflowClip::new(1, 0.0, 0.0, 10.0, 20.0, 0.0, 0.0),
             inline_fragments: Vec::new(),
         }

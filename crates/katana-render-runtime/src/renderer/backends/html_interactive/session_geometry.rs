@@ -67,12 +67,13 @@ impl HtmlInteractiveSession {
 fn intersection_metadata(element: &ElementBox) -> (u64, String) {
     let (positioning, containing_block) = intersection_positioning(element);
     let clips = intersection_clips(element);
+    let clips_overflow = element.clips_overflow;
     let padding_edge = intersection_clip(&element.padding_edge);
     let fragments = intersection_fragments(element);
     (
         element.node_id,
         format!(
-            "{{\"positioning\":\"{positioning}\",\"containingBlock\":{containing_block},\"paddingEdge\":{padding_edge},\"clips\":[{clips}],\"fragments\":[{fragments}]}}"
+            "{{\"positioning\":\"{positioning}\",\"containingBlock\":{containing_block},\"paddingEdge\":{padding_edge},\"clipsOverflow\":{clips_overflow},\"clips\":[{clips}],\"fragments\":[{fragments}]}}"
         ),
     )
 }

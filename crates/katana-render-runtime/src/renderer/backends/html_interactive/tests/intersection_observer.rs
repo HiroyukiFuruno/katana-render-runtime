@@ -174,6 +174,29 @@ fn fragmentable_inline_line_break_retains_line_height_in_real_host() -> TestResu
 }
 
 #[test]
+fn fragmentable_inline_consecutive_line_breaks_retain_each_line_height_in_real_host() -> TestResult
+{
+    let session = start_with_viewport(
+        fragmentable_inline_consecutive_line_breaks_document(),
+        80,
+        100,
+    )?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+    let bounding_width = observed_number(&snapshot, "data-line-breaks-bounding-width")?;
+    let bounding_height = observed_number(&snapshot, "data-line-breaks-bounding-height")?;
+
+    assert_eq!(
+        bounding_width, 0.0,
+        "consecutive line breaks have no inline width: {snapshot}"
+    );
+    assert_eq!(
+        bounding_height, 48.0,
+        "each consecutive line break must retain its line-height fragment: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn positioned_inline_block_is_excluded_from_parent_inline_fragments() -> TestResult {
     let session = start_with_viewport(positioned_inline_block_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -354,6 +377,32 @@ fn bordered_element_root_uses_its_padding_edge_for_intersection() -> TestResult 
         snapshot.contains(r##"data-target="false:0""##),
         "a target positioned in the root border must not intersect its padding-edge root: {snapshot}"
     );
+    assert!(
+        snapshot.contains(r##"data-root-metadata="present""##),
+        "an element root must expose intersection metadata for its own root bounds: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
+fn bordered_overflow_root_uses_padding_edge_for_external_positioned_targets() -> TestResult {
+    let session = start_with_viewport(
+        bordered_overflow_root_with_external_positioned_targets_document(),
+        160,
+        100,
+    )?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-root-clips-overflow="true""##),
+        "an overflow root must serialize its own clip metadata: {snapshot}"
+    );
+    for target in ["absolute", "fixed"] {
+        assert!(
+            snapshot.contains(&format!(r##"data-{target}-root-bounds="4:4:80:40""##)),
+            "a bordered overflow root must expose its padding edge to an external {target} target: {snapshot}"
+        );
+    }
     Ok(())
 }
 
@@ -654,6 +703,22 @@ new IntersectionObserver((entries) => {
 </script>"##
 }
 
+fn fragmentable_inline_consecutive_line_breaks_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#target { line-height: 24px; }
+</style>
+<span id=target><br><br></span><p id=observed></p>
+<script>
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  const rect = entries[0].boundingClientRect;
+  observed.setAttribute("data-line-breaks-bounding-width", rect.width);
+  observed.setAttribute("data-line-breaks-bounding-height", rect.height);
+}).observe(document.getElementById("target"));
+</script>"##
+}
+
 fn positioned_inline_block_document() -> &'static str {
     r##"<style>
 html, body { margin: 0; }
@@ -838,8 +903,39 @@ html, body { margin: 0; }
 const root = document.getElementById("root");
 new IntersectionObserver((entries) => {
   const entry = entries[0];
-  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  const observed = document.getElementById("observed");
+  observed.setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  observed.setAttribute("data-root-metadata", __krrNativeDom("intersectionMetadata", root.__krrNodeId) === "null" ? "missing" : "present");
 }, { root }).observe(document.getElementById("target"));
+</script>"##
+}
+
+fn bordered_overflow_root_with_external_positioned_targets_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#outer { position: relative; width: 120px; height: 80px; }
+#root { width: 80px; height: 40px; border: 4px solid; overflow: hidden; }
+#absolute { position: absolute; top: 0; left: 0; width: 20px; height: 3px; }
+#fixed { position: fixed; top: 0; left: 0; width: 20px; height: 3px; }
+</style>
+<div id=outer><div id=root><div id=absolute>Absolute</div><div id=fixed>Fixed</div></div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  const rootMetadata = JSON.parse(__krrNativeDom("intersectionMetadata", root.__krrNodeId));
+  observed.setAttribute("data-root-clips-overflow", String(rootMetadata?.clipsOverflow));
+  for (const entry of entries) {
+    const bounds = entry.rootBounds;
+    observed.setAttribute(`data-${entry.target.id}-root-bounds`, `${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`);
+  }
+}, { root }).observe(document.getElementById("absolute"));
+new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    const bounds = entry.rootBounds;
+    observed.setAttribute(`data-${entry.target.id}-root-bounds`, `${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`);
+  }
+}, { root }).observe(document.getElementById("fixed"));
 </script>"##
 }
 

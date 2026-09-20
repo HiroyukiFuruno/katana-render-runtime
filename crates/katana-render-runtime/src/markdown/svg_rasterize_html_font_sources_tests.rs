@@ -73,7 +73,9 @@ fn generic_cursive_and_fantasy_load_only_their_source_backed_candidates() {
     let fantasy = paths_for_font_family("fantasy");
 
     assert!(cursive.contains(&"/System/Library/Fonts/Supplemental/Apple Chancery.ttf"));
+    assert!(cursive.contains(&"/usr/share/fonts/opentype/urw-base35/Z003-MediumItalic.otf"));
     assert!(cursive.contains(&"C:/Windows/Fonts/comic.ttf"));
+    assert!(cursive.contains(&"C:/Windows/Fonts/comicbd.ttf"));
     assert!(fantasy.contains(&"/System/Library/Fonts/Supplemental/Impact.ttf"));
     assert!(fantasy.contains(&"C:/Windows/Fonts/impact.ttf"));
     assert!(!cursive.iter().any(|path| fantasy.contains(path)));

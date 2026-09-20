@@ -628,6 +628,7 @@ const __krrTargetIsDescendantOfRoot = (target, root) => {
 const __krrMetadataBelongsToRoot = (metadata, target, root) => {
   if (metadata === null || typeof metadata !== "object") return false;
   const hasValidGeometry =
+    typeof metadata.clipsOverflow === "boolean" &&
     Array.isArray(metadata.clips) &&
     metadata.clips.every(
       (clip) =>
@@ -868,6 +869,8 @@ const __krrElementRootBaseBounds = (elementRoot, rootMetadata, rootHasOverflowCl
   }
   return elementRoot.getBoundingClientRect();
 };
+const __krrRootOverflowClip = (metadata) =>
+  metadata?.clipsOverflow === true ? metadata.paddingEdge : null;
 const __krrRootMarginIsZero = (margin) => margin.every((part) => part.amount === 0);
 const __krrIntersectionEntry = (observer, target) => {
   const elementRoot = observer.root && observer.root !== document ? observer.root : null;
@@ -878,21 +881,20 @@ const __krrIntersectionEntry = (observer, target) => {
     : { rootClip: null, ancestorClips: [] };
   const rootClips = requestedRootClipData?.ancestorClips ?? [];
   const rootBox = elementRoot ? __krrObservedElementBox(elementRoot) : null;
+  const rootOverflowClip = __krrRootOverflowClip(rootBox?.metadata);
   const targetWithinRoot =
     !elementRoot ||
     __krrTargetWithinRoot(target, elementRoot, targetBox.metadata, requestedRootClipData !== null);
   const rootBaseBounds = __krrElementRootBaseBounds(
     elementRoot,
     rootBox?.metadata,
-    Boolean(requestedRootClipData?.rootClip),
+    Boolean(rootOverflowClip),
   );
   const rootBounds = __krrExpandRootBounds(rootBaseBounds, observer.__krrRootMargin);
   const targetFragments = [boundingClientRect];
   const clippedRoot = __krrClippedRootBounds(rootBounds, rootClips);
   const clippedRootBounds = clippedRoot.rect;
-  const rootShape = __krrRootMarginIsZero(observer.__krrRootMargin)
-    ? requestedRootClipData?.rootClip
-    : null;
+  const rootShape = __krrRootMarginIsZero(observer.__krrRootMargin) ? rootOverflowClip : null;
   const clipShapes = rootShape ? [...rootClips, rootShape] : rootClips;
   const clippedFragments = targetWithinRoot
     ? targetFragments.map((fragment) => __krrClipFragment(fragment, clippedRootBounds, clipShapes))

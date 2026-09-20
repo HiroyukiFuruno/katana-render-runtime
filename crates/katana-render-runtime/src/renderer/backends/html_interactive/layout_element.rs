@@ -345,6 +345,7 @@ mod tests {
             positioning_context: ElementPositioningContext::InFlow,
             ancestor_node_ids: Vec::new(),
             overflow_clips: Vec::new(),
+            clips_overflow: false,
             padding_edge: super::super::types::OverflowClip::new(
                 1,
                 0.0,

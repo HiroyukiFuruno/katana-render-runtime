@@ -38,6 +38,28 @@ export function installDrawioDeterminism() {
       return 0;
     },
   });
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  datePrototype.toString = function katanaDrawioUtcString(this: Date) {
+    if (Number.isNaN(this.getTime())) {
+      return "Invalid Date";
+    }
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return `${weekdays[this.getUTCDay()]} ${months[this.getUTCMonth()]} ${pad(this.getUTCDate())} ${this.getUTCFullYear()} ${pad(this.getUTCHours())}:${pad(this.getUTCMinutes())}:${pad(this.getUTCSeconds())} GMT+0000 (UTC)`;
+  };
   datePrototype.toLocaleDateString = function katanaDrawioLocaleDate() {
     return this.toISOString().slice(0, 10);
   };

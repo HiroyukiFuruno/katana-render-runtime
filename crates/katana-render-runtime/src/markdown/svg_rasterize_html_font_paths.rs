@@ -31,9 +31,11 @@ pub(super) const CJK_SERIF_FONT_PATHS: &[&str] = &[
 
 pub(super) const CURSIVE_FONT_PATHS: &[&str] = &[
     "/System/Library/Fonts/Supplemental/Apple Chancery.ttf",
+    "/usr/share/fonts/opentype/urw-base35/Z003-MediumItalic.otf",
     "/usr/share/fonts/opentype/urw-base35/URWChancery-MediumItalic.otf",
     "/usr/share/fonts/type1/urw-base35/URWChancery-MediumItalic.t1",
     "C:/Windows/Fonts/comic.ttf",
+    "C:/Windows/Fonts/comicbd.ttf",
     "C:/Windows/Fonts/comici.ttf",
     "C:/Windows/Fonts/comicz.ttf",
 ];

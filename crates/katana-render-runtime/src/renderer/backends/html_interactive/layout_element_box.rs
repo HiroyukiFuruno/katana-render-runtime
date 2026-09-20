@@ -22,6 +22,7 @@ impl HtmlLayoutRenderer {
             positioning_context,
             ancestor_node_ids: self.ancestor_node_ids(positioning_context),
             overflow_clips: Vec::new(),
+            clips_overflow: false,
             padding_edge: OverflowClip::new(node_id, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
             inline_fragments: Vec::new(),
         });
@@ -56,6 +57,7 @@ impl HtmlLayoutRenderer {
         element_box.width = width;
         element_box.height = height;
         element_box.transformed_corners = ElementBox::rectangle_corners(x, y, width, height);
+        element_box.clips_overflow = layout.style.clips_overflow();
         element_box.padding_edge = padding_edge(node_id, x, y, width, height, layout.style);
     }
 }
