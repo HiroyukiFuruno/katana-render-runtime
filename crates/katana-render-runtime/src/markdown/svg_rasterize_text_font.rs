@@ -158,6 +158,17 @@ mod tests {
     use super::fallback_attribute_score;
     use resvg::usvg::fontdb::{Stretch, Style, Weight};
 
+    const FALLBACK_CANDIDATES: [(Style, Weight, Stretch); 8] = [
+        (Style::Normal, Weight(500), Stretch::Normal),
+        (Style::Normal, Weight(500), Stretch::Condensed),
+        (Style::Normal, Weight::BOLD, Stretch::Normal),
+        (Style::Italic, Weight(500), Stretch::Normal),
+        (Style::Normal, Weight::BOLD, Stretch::Condensed),
+        (Style::Italic, Weight(500), Stretch::Condensed),
+        (Style::Italic, Weight::BOLD, Stretch::Normal),
+        (Style::Italic, Weight::BOLD, Stretch::Condensed),
+    ];
+
     #[test]
     fn styled_cjk_fallback_prefers_the_exact_style_and_weight_face() {
         let styled = fallback_attribute_score(
@@ -222,5 +233,30 @@ mod tests {
         );
 
         assert!(regular < bold);
+    }
+
+    #[test]
+    fn fallback_attribute_score_covers_each_face_attribute_combination() {
+        let requested_style = Style::Normal;
+        let requested_weight = Weight(500);
+        let requested_stretch = Stretch::Normal;
+        let scores = FALLBACK_CANDIDATES
+            .into_iter()
+            .map(|(style, weight, stretch)| {
+                fallback_attribute_score(
+                    style,
+                    weight,
+                    stretch,
+                    requested_style,
+                    requested_weight,
+                    requested_stretch,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            scores.iter().map(|score| score.0).collect::<Vec<_>>(),
+            [0, 1, 2, 3, 4, 5, 6, 7]
+        );
     }
 }

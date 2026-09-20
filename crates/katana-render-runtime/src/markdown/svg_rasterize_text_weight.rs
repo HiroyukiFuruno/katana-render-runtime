@@ -94,4 +94,24 @@ mod tests {
                 < css_weight_match_distance(Weight(700), Weight(500))
         );
     }
+
+    #[test]
+    fn directional_requests_cover_both_css_search_directions() {
+        assert_eq!(
+            css_weight_match_distance(Weight(700), Weight(300)),
+            (1, 400)
+        );
+        assert_eq!(
+            css_weight_match_distance(Weight(500), Weight(300)),
+            (1, 200)
+        );
+        assert_eq!(
+            css_weight_match_distance(Weight(300), Weight(700)),
+            (1, 400)
+        );
+        assert_eq!(
+            css_weight_match_distance(Weight(800), Weight(700)),
+            (0, 100)
+        );
+    }
 }

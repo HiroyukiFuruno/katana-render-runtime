@@ -262,6 +262,9 @@ mod container_contract_tests {
     };
     use crate::renderer::backends::html_browser::HtmlBrowserViewport;
     use crate::renderer::backends::html_document::HtmlDocumentNode;
+    use crate::renderer::backends::html_interactive::types::{
+        ElementBox, ElementPositioningContext, OverflowClip,
+    };
     use std::collections::HashMap;
 
     fn geometry(width: f32, style: &CssStyle) -> ContainerGeometry {
@@ -327,6 +330,37 @@ mod container_contract_tests {
 
         assert_eq!(height, style.minimum_outer_height());
         assert_eq!(renderer.layout_error.as_deref(), Some("measurement failed"));
+    }
+
+    #[test]
+    fn overflow_clip_and_positioning_helpers_fail_closed_without_an_owner() {
+        let viewport = HtmlBrowserViewport {
+            width: 320,
+            height: 240,
+            device_scale_factor: 1.0,
+        };
+        let mut renderer = HtmlLayoutRenderer::new(viewport, 0.0, &HashMap::new(), None);
+        let mut style = CssStyle::browser_default();
+        style.overflow = super::super::style::CssOverflow::Clip;
+        let geometry = geometry(300.0, &style);
+        renderer.record_overflow_clip(0, &geometry, 20.0, &style);
+
+        let element_box = ElementBox {
+            node_id: 1,
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            transformed_corners: [(0.0, 0.0); 4],
+            positioning_context: ElementPositioningContext::AbsoluteContainingBlock {
+                owner_node_id: None,
+            },
+            ancestor_node_ids: Vec::new(),
+            overflow_clips: Vec::new(),
+            padding_edge: OverflowClip::new(1, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
+            inline_fragments: Vec::new(),
+        };
+        assert!(!super::overflow_clip_applies_to(&element_box, 1));
     }
 
     #[test]
