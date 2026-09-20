@@ -34,6 +34,7 @@ jobs:
           python3 scripts/ci_evidence/publish.py \
             --event "$GITHUB_EVENT_PATH" \
             --repository "$GITHUB_REPOSITORY" \
+            --publisher-run-id "$GITHUB_RUN_ID" \
             --output ci-evidence/manifest.json
 
       - name: Upload immutable evidence manifest

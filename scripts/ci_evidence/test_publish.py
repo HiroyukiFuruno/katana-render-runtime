@@ -83,7 +83,7 @@ class Adapter:
 class PublishTests(unittest.TestCase):
     def test_publishes_canonical_input_profile_and_actions_check(self) -> None:
         adapter = Adapter()
-        manifest, check_id = publish(event(), "acme/krr", adapter)
+        manifest, check_id = publish(event(), "acme/krr", 50, adapter)
         self.assertEqual(check_id, 7)
         self.assertEqual(manifest["check_id"], "linux-release-quality")
         self.assertEqual(len(manifest["input"]["digest"]), 64)
@@ -95,6 +95,7 @@ class PublishTests(unittest.TestCase):
         _, path, body = adapter.writes[0]
         self.assertEqual(path, "/repos/acme/krr/check-runs")
         self.assertEqual(body["head_sha"], SHA_A)
+        self.assertEqual(body["details_url"], "https://github.com/acme/krr/actions/runs/50")
         self.assertEqual(body["status"], "in_progress")
         self.assertIn("ci-evidence-linux-release-quality-42", body["output"]["text"])
         self.assertEqual(body["output"]["title"], "Trusted Linux release-quality evidence published")
@@ -114,23 +115,23 @@ class PublishTests(unittest.TestCase):
         retried = event()
         retried["workflow_run"]["run_attempt"] = 2
         with self.assertRaisesRegex(PublishError, "first attempt"):
-            publish(retried, "acme/krr", Adapter())
+            publish(retried, "acme/krr", 50, Adapter())
 
         adapter = Adapter()
         adapter.responses[("GET", "/repos/acme/krr/git/ref/heads/master")] = {"object": {"sha": SHA_A}}
         with self.assertRaisesRegex(PublishError, "stale"):
-            publish(event(), "acme/krr", adapter)
+            publish(event(), "acme/krr", 50, adapter)
 
     def test_rejects_forked_or_noncanonical_workflow_run(self) -> None:
         fork = event()
         fork["workflow_run"]["head_repository"]["full_name"] = "fork/krr"
         with self.assertRaisesRegex(PublishError, "local pull request"):
-            publish(fork, "acme/krr", Adapter())
+            publish(fork, "acme/krr", 50, Adapter())
 
         wrong_workflow = event()
         wrong_workflow["workflow_run"]["path"] = ".github/workflows/other.yml"
         with self.assertRaisesRegex(PublishError, "canonical CI workflow"):
-            publish(wrong_workflow, "acme/krr", Adapter())
+            publish(wrong_workflow, "acme/krr", 50, Adapter())
 
     def test_rejects_workflow_byte_mismatch_or_noncanonical_job(self) -> None:
         adapter = Adapter()
@@ -138,14 +139,14 @@ class PublishTests(unittest.TestCase):
             ("GET", f"/repos/acme/krr/contents/.github/workflows/test-and-build.yml?ref={SHA_A}")
         ] = content(b"changed")
         with self.assertRaisesRegex(PublishError, "workflow bytes differ"):
-            publish(event(), "acme/krr", adapter)
+            publish(event(), "acme/krr", 50, adapter)
 
         adapter = Adapter()
         jobs = copy.deepcopy(adapter.responses[("GET", "/repos/acme/krr/actions/runs/42/jobs?per_page=100")])
         jobs["jobs"][0]["steps"][0]["conclusion"] = "failure"
         adapter.responses[("GET", "/repos/acme/krr/actions/runs/42/jobs?per_page=100")] = jobs
         with self.assertRaisesRegex(PublishError, "did not succeed"):
-            publish(event(), "acme/krr", adapter)
+            publish(event(), "acme/krr", 50, adapter)
 
     def test_rejects_non_actions_check_identity_before_accepting_evidence(self) -> None:
         class WrongIdentity(Adapter):
@@ -155,7 +156,7 @@ class PublishTests(unittest.TestCase):
                 return super().request(method, path, body)
 
         with self.assertRaisesRegex(PublishError, "GitHub Actions App"):
-            publish(event(), "acme/krr", WrongIdentity())
+            publish(event(), "acme/krr", 50, WrongIdentity())
 
 
 if __name__ == "__main__":

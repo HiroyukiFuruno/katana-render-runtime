@@ -6,15 +6,16 @@ import io
 import json
 import sys
 import tempfile
+import urllib.request
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import zipfile
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from consume import APP_ID, CHECK, CHECK_TITLE, EvidenceError, PROFILE, ReusePending, ReuseUnavailable, canonical_json_bytes, expected_profile, main, verify_reusable_evidence
+from consume import APP_ID, CHECK, CHECK_TITLE, EvidenceError, MAX_MANIFEST_BYTES, PROFILE, ReusePending, ReuseUnavailable, canonical_json_bytes, clients, expected_profile, main, manifest, verify_reusable_evidence
 from tree_digest import digest_input_tree
 
 
@@ -36,6 +37,13 @@ def zip_manifest(value: object) -> bytes:
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_STORED) as archive:
         archive.writestr("manifest.json", canonical_json_bytes(value) + b"\n")
+    return output.getvalue()
+
+
+def zip_manifest_bytes(value: bytes) -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", value)
     return output.getvalue()
 
 
@@ -206,6 +214,50 @@ class ConsumeTests(unittest.TestCase):
         api.artifact = b"not a zip"
         with self.assertRaises(EvidenceError):
             self.verify(api)
+
+    def test_manifest_limit_accepts_current_scale_and_rejects_larger_payloads(self) -> None:
+        current_scale = canonical_json_bytes({"entries": ["x" * 599_000]}) + b"\n"
+        accepted = manifest(
+            lambda _url: zip_manifest_bytes(current_scale),
+            {"archive_download_url": "https://artifact.test/current"},
+        )
+        self.assertEqual(accepted, {"entries": ["x" * 599_000]})
+        oversized = canonical_json_bytes({"entries": ["x" * MAX_MANIFEST_BYTES]}) + b"\n"
+        with self.assertRaisesRegex(EvidenceError, "bounded"):
+            manifest(
+                lambda _url: zip_manifest_bytes(oversized),
+                {"archive_download_url": "https://artifact.test/oversized"},
+            )
+
+    def test_cross_host_artifact_redirect_drops_github_authorization(self) -> None:
+        holder: dict[str, object] = {}
+
+        def build_opener(handler: object) -> MagicMock:
+            holder["handler"] = handler
+            return MagicMock()
+
+        with patch("consume.urllib.request.build_opener", side_effect=build_opener):
+            clients("https://api.github.com", REPO, "secret")
+        request = urllib.request.Request(
+            "https://api.github.com/repos/acme/krr/actions/artifacts/5/zip",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": "Bearer secret",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        redirect = holder["handler"].redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            {},
+            "https://objects.example/evidence.zip",
+        )
+        self.assertIsNotNone(redirect)
+        self.assertIsNone(redirect.get_header("Authorization"))
+        self.assertIsNone(redirect.get_header("X-github-api-version"))
+        self.assertEqual(redirect.get_header("Accept"), "application/vnd.github+json")
 
 
 if __name__ == "__main__":

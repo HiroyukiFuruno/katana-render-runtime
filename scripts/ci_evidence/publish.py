@@ -185,11 +185,13 @@ def _profile(workflow_bytes: bytes) -> dict[str, object]:
     return {"digest": hashlib.sha256(canonical_json_bytes(profile)).hexdigest(), "profile": profile}
 
 
-def publish(event: object, repository: str, rest: RestAdapter) -> tuple[dict[str, object], int]:
+def publish(event: object, repository: str, publisher_run_id: int, rest: RestAdapter) -> tuple[dict[str, object], int]:
     """Validate one CI run, write its canonical manifest, and make an Actions check."""
 
     if REPOSITORY_RE.fullmatch(repository) is None:
         raise PublishError("repository must be an owner/name pair")
+    if publisher_run_id <= 0:
+        raise PublishError("publisher run ID must be positive")
     root = _mapping(event, "event")
     repo = _mapping(root.get("repository"), "event.repository")
     default_branch = _string(repo.get("default_branch"), "event.repository.default_branch")
@@ -250,6 +252,7 @@ def publish(event: object, repository: str, rest: RestAdapter) -> tuple[dict[str
     output = {
         "name": "KRR / CI evidence (linux release quality)",
         "head_sha": head_sha,
+        "details_url": f"https://github.com/{repository}/actions/runs/{publisher_run_id}",
         "status": "in_progress",
         "output": {
             "title": CHECK_TITLE,
@@ -336,17 +339,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--complete-check", type=int)
+    parser.add_argument("--publisher-run-id", type=int)
     args = parser.parse_args(argv)
     try:
         adapter = GitHubAdapter(os.environ.get("GITHUB_TOKEN", ""))
         if args.complete_check is not None:
-            if args.output is not None:
-                raise PublishError("--output cannot be used with --complete-check")
+            if args.output is not None or args.publisher_run_id is not None:
+                raise PublishError("--output and --publisher-run-id cannot be used with --complete-check")
             complete_check(args.repository, args.complete_check, adapter)
         else:
             if args.output is None:
                 raise PublishError("--output is required when publishing a manifest")
-            manifest, check_id = publish(_read_json(args.event), args.repository, adapter)
+            if args.publisher_run_id is None:
+                raise PublishError("--publisher-run-id is required when publishing a manifest")
+            manifest, check_id = publish(_read_json(args.event), args.repository, args.publisher_run_id, adapter)
             if args.output.exists() and not args.output.is_file():
                 raise PublishError("output is not a regular file")
             args.output.parent.mkdir(parents=True, exist_ok=True)

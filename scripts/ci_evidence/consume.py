@@ -41,7 +41,10 @@ ARTIFACT_PREFIX = "ci-evidence-linux-release-quality-"
 PENDING_WORKFLOW_STATUSES = frozenset(("in_progress", "queued", "requested", "waiting", "pending"))
 SHA = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-MAX_BYTES = 65536
+# 現在の入力treeは約600 KiB、ZIPは約134 KiBになるため、ダウンロードと展開後を
+# 別々に制限する。前者はネットワーク/メモリ使用量、後者は展開サイズを抑える。
+MAX_ARCHIVE_BYTES = 256 * 1024
+MAX_MANIFEST_BYTES = 1024 * 1024
 
 
 class EvidenceError(RuntimeError):
@@ -105,11 +108,45 @@ def clients(api_url: str, repository: str, token: str) -> tuple[Getter, Download
     if not base.startswith("https://") or REPOSITORY.fullmatch(repository) is None or not token:
         raise EvidenceError("invalid GitHub API configuration")
 
-    def request(path: str, accept: str, limit: int | None = None) -> bytes:
+    api_origin = urllib.parse.urlsplit(base).netloc
+
+    class ArtifactRedirect(urllib.request.HTTPRedirectHandler):
+        """署名済みartifact storageへGitHub資格情報を送らない。"""
+
+        def redirect_request(
+            self,
+            request: urllib.request.Request,
+            file: object,
+            code: int,
+            message: str,
+            headers: object,
+            new_url: str,
+        ) -> urllib.request.Request | None:
+            destination = urllib.parse.urlsplit(new_url)
+            if destination.scheme != "https":
+                raise EvidenceError("artifact redirect destination must use HTTPS")
+            if destination.netloc == api_origin:
+                return super().redirect_request(request, file, code, message, headers, new_url)
+            safe_headers = {
+                name: value
+                for name, value in request.header_items()
+                if name.lower() not in {"authorization", "x-github-api-version"}
+            }
+            return urllib.request.Request(
+                new_url,
+                headers=safe_headers,
+                origin_req_host=request.origin_req_host,
+                unverifiable=True,
+            )
+
+    artifact_opener = urllib.request.build_opener(ArtifactRedirect())
+
+    def request(path: str, accept: str, limit: int | None = None, *, artifact: bool = False) -> bytes:
         url = path if path.startswith("https://") else base + path
         request_value = urllib.request.Request(url, headers={"Accept": accept, "Authorization": f"Bearer {token}", "X-GitHub-Api-Version": "2022-11-28"})
         try:
-            with urllib.request.urlopen(request_value, timeout=30) as response:
+            opener = artifact_opener if artifact else urllib.request
+            with opener.urlopen(request_value, timeout=30) as response:
                 if response.status != 200:
                     raise EvidenceError(f"GitHub API returned HTTP {response.status}")
                 return response.read() if limit is None else response.read(limit + 1)
@@ -123,8 +160,8 @@ def clients(api_url: str, repository: str, token: str) -> tuple[Getter, Download
             raise EvidenceError("GitHub API returned invalid JSON") from exc
 
     def download(url: str) -> bytes:
-        data = request(url, "application/vnd.github+json", MAX_BYTES)
-        if len(data) > MAX_BYTES:
+        data = request(url, "application/vnd.github+json", MAX_ARCHIVE_BYTES, artifact=True)
+        if len(data) > MAX_ARCHIVE_BYTES:
             raise EvidenceError("evidence artifact is too large")
         return data
 
@@ -249,7 +286,7 @@ def manifest(download: Downloader, artifact: Mapping[str, Any]) -> object:
     try:
         with zipfile.ZipFile(BytesIO(data)) as archive:
             entries = archive.infolist()
-            if len(entries) != 1 or entries[0].filename != "manifest.json" or entries[0].is_dir() or entries[0].file_size > MAX_BYTES or (entries[0].external_attr >> 16) & 0o170000 == 0o120000:
+            if len(entries) != 1 or entries[0].filename != "manifest.json" or entries[0].is_dir() or entries[0].file_size > MAX_MANIFEST_BYTES or (entries[0].external_attr >> 16) & 0o170000 == 0o120000:
                 raise EvidenceError("artifact must contain one bounded regular manifest.json")
             data = archive.read(entries[0])
     except (OSError, zipfile.BadZipFile) as exc:
