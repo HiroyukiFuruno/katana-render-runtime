@@ -279,6 +279,18 @@ fn element_root_margin_is_not_clipped_by_the_root_overflow() -> TestResult {
 }
 
 #[test]
+fn separated_ancestor_clip_does_not_revive_edge_contact() -> TestResult {
+    let session = start_with_viewport(separated_ancestor_clip_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-target="false:0""##),
+        "an ancestor clip separated from the root must remain non-intersecting: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn document_root_uses_viewport_geometry() -> TestResult {
     let session = start_with_viewport(document_root_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -562,6 +574,23 @@ new IntersectionObserver((entries) => {
   const entry = entries[0];
   document.getElementById("observed").setAttribute("data-margin-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
 }, { root, rootMargin: "10px" }).observe(document.getElementById("margin-target"));
+</script>"##
+}
+
+fn separated_ancestor_clip_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 100px; height: 100px; overflow: hidden; }
+#outer-clip { position: absolute; left: 200px; top: 0; width: 100px; height: 100px; overflow: hidden; }
+#inner-clip { width: 100px; height: 100px; overflow: hidden; }
+#target { width: 100px; height: 20px; }
+</style>
+<div id=root><div id=outer-clip><div id=inner-clip><div id=target>Target</div></div></div></div><p id=observed></p>
+<script>
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root: document.getElementById("root") }).observe(document.getElementById("target"));
 </script>"##
 }
 

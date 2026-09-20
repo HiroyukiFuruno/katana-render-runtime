@@ -598,6 +598,17 @@ const __krrRectsIntersectOrAreEdgeAdjacent = (first, second) =>
   second.left <= first.right &&
   first.top <= second.bottom &&
   second.top <= first.bottom;
+const __krrClippedRootBounds = (rootBounds, clips) =>
+  clips.reduce(
+    (state, clip) => {
+      const clipRect = __krrClipRect(clip);
+      return {
+        rect: __krrIntersectionRect(state.rect, clipRect),
+        separated: state.separated || !__krrRectsIntersectOrAreEdgeAdjacent(state.rect, clipRect),
+      };
+    },
+    { rect: rootBounds, separated: false },
+  );
 const __krrObservedElementBox = (element) => ({
   boundingClientRect: element.getBoundingClientRect(),
   isPresent: __krrNativeDom("layoutBoxPresent", element.__krrNodeId) === "1",
@@ -686,18 +697,18 @@ const __krrIntersectionEntry = (observer, target) => {
     !elementRoot ||
     __krrTargetWithinRoot(target, elementRoot, targetBox.metadata, requestedRootClips !== null);
   const targetFragments = [boundingClientRect];
-  const clippedRootBounds = rootClips.reduce(
-    (rect, clip) => __krrIntersectionRect(rect, __krrClipRect(clip)),
-    rootBounds,
-  );
+  const clippedRoot = __krrClippedRootBounds(rootBounds, rootClips);
+  const clippedRootBounds = clippedRoot.rect;
   const intersectionFragments = targetWithinRoot
     ? targetFragments.map((fragment) => __krrIntersectionRect(clippedRootBounds, fragment))
     : [];
   const positiveIntersectionFragments = intersectionFragments.filter(
     (rect) => rect.width > 0 && rect.height > 0,
   );
-  const edgeAdjacentIntersectionFragments = intersectionFragments.filter((_, index) =>
-    __krrRectsIntersectOrAreEdgeAdjacent(clippedRootBounds, targetFragments[index]),
+  const edgeAdjacentIntersectionFragments = intersectionFragments.filter(
+    (_, index) =>
+      !clippedRoot.separated &&
+      __krrRectsIntersectOrAreEdgeAdjacent(clippedRootBounds, targetFragments[index]),
   );
   const intersectionRect = __krrBoundingIntersectionRect(
     positiveIntersectionFragments.length > 0
@@ -712,7 +723,8 @@ const __krrIntersectionEntry = (observer, target) => {
     intersectionFragments.some(
       (rect, index) =>
         (rect.width > 0 && rect.height > 0) ||
-        __krrRectsIntersectOrAreEdgeAdjacent(clippedRootBounds, targetFragments[index]),
+        (!clippedRoot.separated &&
+          __krrRectsIntersectOrAreEdgeAdjacent(clippedRootBounds, targetFragments[index])),
     );
   const intersectionRatio =
     targetWithinRoot && targetBox.isPresent && targetArea > 0
