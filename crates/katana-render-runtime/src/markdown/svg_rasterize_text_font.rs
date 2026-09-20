@@ -1,5 +1,5 @@
+use super::weight::css_weight_match_distance;
 use resvg::usvg;
-
 const EXACT_FACE_MATCH: u8 = 0;
 const STYLE_AND_WEIGHT_MATCH: u8 = 1;
 const STYLE_AND_STRETCH_MATCH: u8 = 2;
@@ -8,7 +8,6 @@ const STYLE_MATCH: u8 = 4;
 const WEIGHT_MATCH: u8 = 5;
 const STRETCH_MATCH: u8 = 6;
 const NO_FACE_ATTRIBUTE_MATCH: u8 = 7;
-
 pub(super) fn matching_font_face(
     database: &usvg::fontdb::Database,
     font_family: &str,
@@ -31,7 +30,6 @@ pub(super) fn matching_font_face(
         },
     })
 }
-
 #[cfg(test)]
 pub(super) fn font_runs(
     database: &usvg::fontdb::Database,
@@ -51,7 +49,6 @@ pub(super) fn font_runs(
     }
     runs
 }
-
 #[cfg(test)]
 fn resolved_base_face(
     database: &usvg::fontdb::Database,
@@ -69,7 +66,6 @@ fn resolved_base_face(
     matching_fallback_face(database, base_face_id, character, weight, italic)
         .unwrap_or(base_face_id)
 }
-
 pub(super) fn matching_fallback_face(
     database: &usvg::fontdb::Database,
     base_face_id: usvg::fontdb::ID,
@@ -100,7 +96,6 @@ pub(super) fn matching_fallback_face(
         })
         .map(|face| face.id)
 }
-
 fn fallback_attribute_score(
     candidate_style: usvg::fontdb::Style,
     candidate_weight: usvg::fontdb::Weight,
@@ -108,11 +103,11 @@ fn fallback_attribute_score(
     requested_style: usvg::fontdb::Style,
     requested_weight: usvg::fontdb::Weight,
     requested_stretch: usvg::fontdb::Stretch,
-) -> u8 {
+) -> (u8, u16) {
     let same_style = candidate_style == requested_style;
     let same_weight = candidate_weight == requested_weight;
     let same_stretch = candidate_stretch == requested_stretch;
-    match (same_style, same_weight, same_stretch) {
+    let attribute_match = match (same_style, same_weight, same_stretch) {
         (true, true, true) => EXACT_FACE_MATCH,
         (true, true, false) => STYLE_AND_WEIGHT_MATCH,
         (true, false, true) => STYLE_AND_STRETCH_MATCH,
@@ -121,9 +116,12 @@ fn fallback_attribute_score(
         (false, true, false) => WEIGHT_MATCH,
         (false, false, true) => STRETCH_MATCH,
         (false, false, false) => NO_FACE_ATTRIBUTE_MATCH,
-    }
+    };
+    (
+        attribute_match,
+        css_weight_match_distance(candidate_weight, requested_weight),
+    )
 }
-
 pub(super) fn font_has_char(
     database: &usvg::fontdb::Database,
     face_id: usvg::fontdb::ID,
@@ -136,7 +134,6 @@ pub(super) fn font_has_char(
         })
         .unwrap_or(false)
 }
-
 fn css_font_family_names(value: &str) -> Vec<String> {
     value
         .split(',')
@@ -145,7 +142,6 @@ fn css_font_family_names(value: &str) -> Vec<String> {
         .filter(|name| !name.is_empty())
         .collect()
 }
-
 pub(super) fn fontdb_family(name: &str) -> usvg::fontdb::Family<'_> {
     match name.to_ascii_lowercase().as_str() {
         "serif" => usvg::fontdb::Family::Serif,
@@ -182,5 +178,49 @@ mod tests {
         );
 
         assert!(styled < regular);
+    }
+
+    #[test]
+    fn non_exact_weight_uses_css_directional_matching() {
+        let bold = fallback_attribute_score(
+            Style::Normal,
+            Weight::BOLD,
+            Stretch::Normal,
+            Style::Normal,
+            Weight(600),
+            Stretch::Normal,
+        );
+        let regular = fallback_attribute_score(
+            Style::Normal,
+            Weight::NORMAL,
+            Stretch::Normal,
+            Style::Normal,
+            Weight(600),
+            Stretch::Normal,
+        );
+
+        assert!(bold < regular);
+    }
+
+    #[test]
+    fn css_weight_matching_prefers_four_hundred_for_a_five_hundred_request() {
+        let bold = fallback_attribute_score(
+            Style::Normal,
+            Weight::BOLD,
+            Stretch::Normal,
+            Style::Normal,
+            Weight(500),
+            Stretch::Normal,
+        );
+        let regular = fallback_attribute_score(
+            Style::Normal,
+            Weight::NORMAL,
+            Stretch::Normal,
+            Style::Normal,
+            Weight(500),
+            Stretch::Normal,
+        );
+
+        assert!(regular < bold);
     }
 }

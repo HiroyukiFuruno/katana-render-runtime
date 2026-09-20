@@ -5,6 +5,8 @@ use resvg::usvg;
 mod fallback;
 #[path = "svg_rasterize_text_font.rs"]
 mod font;
+#[path = "svg_rasterize_text_weight.rs"]
+mod weight;
 
 use fallback::html_font_runs;
 use font::matching_font_face;
