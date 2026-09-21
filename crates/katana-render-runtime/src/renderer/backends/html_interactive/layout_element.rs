@@ -188,8 +188,10 @@ mod tests {
     use super::HtmlLayoutRenderer;
     use crate::renderer::backends::html_browser::HtmlBrowserViewport;
     use crate::renderer::backends::html_document::HtmlDocumentNode;
+    use crate::renderer::backends::html_interactive::style::CssStyle;
     use crate::renderer::backends::html_interactive::types::{
-        ElementBox, ElementPositioningContext, LayoutResult,
+        DetailsContext, ElementBox, ElementPositioningContext, ElementRenderContext, LayoutContext,
+        LayoutResult,
     };
     use std::collections::HashMap;
 
@@ -211,18 +213,18 @@ mod tests {
 
     #[test]
     fn element_boxes_keep_positioning_owner_and_overflow_clip_metadata() {
-        let layout = render_test_layout(&positioned_overflow_nodes());
-        assert!(layout.is_ok_and(|layout| positioned_overflow_target_matches(&layout)));
-        let empty_layout = render_test_layout(&[]);
-        assert!(empty_layout.is_ok_and(|layout| !positioned_overflow_target_matches(&layout)));
+        assert!(
+            render_test_layout(&positioned_overflow_nodes())
+                .is_ok_and(|layout| positioned_overflow_target_matches(&layout))
+        );
+        assert!(
+            render_test_layout(&[])
+                .is_ok_and(|layout| !positioned_overflow_target_matches(&layout))
+        );
     }
 
     fn positioned_overflow_target_matches(layout: &LayoutResult) -> bool {
-        let Some(target) = layout
-            .element_boxes
-            .iter()
-            .find(|element| element.node_id == 2)
-        else {
+        let Some(target) = element_box_for(layout, 2) else {
             return false;
         };
 
@@ -240,36 +242,81 @@ mod tests {
     }
 
     #[test]
+    fn styled_element_records_click_targets_and_anchors() {
+        let mut renderer = test_renderer();
+        let index = record_interactive_metadata(&mut renderer);
+
+        assert_eq!(renderer.anchor_positions.get("section-link"), Some(&12.0));
+        assert_eq!(renderer.hit_targets[index].node_id, 9);
+        assert_eq!(renderer.hit_targets[index].y, 12.0);
+        assert_eq!(renderer.hit_targets[index].height, 24.0);
+    }
+
+    fn record_interactive_metadata(renderer: &mut HtmlLayoutRenderer) -> usize {
+        let attributes = vec![
+            ("id".to_string(), "section-link".to_string()),
+            ("onclick".to_string(), "activate()".to_string()),
+        ];
+        let children = vec![HtmlDocumentNode::Text("Open".to_string())];
+        let element = ElementRenderContext {
+            node_id: 9,
+            tag: "div",
+            attributes: &attributes,
+            children: &children,
+        };
+        let style = CssStyle::from_element("div", &attributes, &CssStyle::browser_default());
+        let index = renderer.hit_targets.len();
+        renderer.start_click_target(element);
+        assert_eq!(renderer.hit_targets.len(), index + 1);
+        renderer.record_anchor(element, 12.0);
+        renderer.finish_click_target(
+            index,
+            9,
+            LayoutContext::new(4.0, 12.0, 80.0, &style, DetailsContext::NONE),
+            36.0,
+        );
+        index
+    }
+
+    #[test]
     fn absolute_target_ignores_overflow_clip_outside_its_containing_block() {
-        let layout = render_test_layout(&absolute_target_with_unrelated_overflow_clip_nodes());
-        assert!(layout.is_ok_and(|layout| {
-            layout
-                .element_boxes
-                .iter()
-                .find(|element| element.node_id == 3)
-                .is_some_and(|target| {
-                    target.positioning_context
-                        == ElementPositioningContext::AbsoluteContainingBlock {
-                            owner_node_id: Some(1),
-                            viewport_escape: false,
-                        }
-                        && target.overflow_clips.is_empty()
-                })
-        }));
+        assert!(
+            render_test_layout(&absolute_target_with_unrelated_overflow_clip_nodes()).is_ok_and(
+                |layout| {
+                    element_box_for(&layout, 3).is_some_and(|target| {
+                        target.positioning_context
+                            == ElementPositioningContext::AbsoluteContainingBlock {
+                                owner_node_id: Some(1),
+                                viewport_escape: false,
+                            }
+                            && target.overflow_clips.is_empty()
+                    })
+                }
+            )
+        );
     }
 
     #[test]
     fn absolute_target_keeps_containing_block_and_outer_ancestor_overflow_clips() {
-        let layout =
-            render_test_layout(&absolute_target_with_containing_block_ancestor_overflow_clips());
         assert!(
-            layout
-                .is_ok_and(|layout| { absolute_target_clip_owners_match(&layout, 4, 2, &[2, 1]) })
+            render_test_layout(&absolute_target_with_containing_block_ancestor_overflow_clips())
+                .is_ok_and(|layout| absolute_target_clip_owners_match(&layout, 4, 2, &[2, 1]))
         );
-        let empty_layout = render_test_layout(&[]);
         assert!(
-            empty_layout
-                .is_ok_and(|layout| { !absolute_target_clip_owners_match(&layout, 4, 2, &[2, 1]) })
+            render_test_layout(&absolute_target_with_containing_block_ancestor_overflow_clips())
+                .is_ok_and(|layout| !absolute_target_clip_owners_match(&layout, 4, 2, &[1]))
+        );
+        assert!(
+            render_test_layout(&absolute_target_with_containing_block_ancestor_overflow_clips())
+                .is_ok_and(|layout| !absolute_target_clip_owners_match(&layout, 4, 2, &[99, 1]))
+        );
+        assert!(
+            render_test_layout(&[]).is_ok_and(|layout| !absolute_target_clip_owners_match(
+                &layout,
+                4,
+                2,
+                &[2, 1]
+            ))
         );
     }
 
@@ -321,6 +368,13 @@ mod tests {
             &HashMap::new(),
             None,
         )
+    }
+
+    fn element_box_for(layout: &LayoutResult, node_id: u64) -> Option<&ElementBox> {
+        layout
+            .element_boxes
+            .iter()
+            .find(|element_box| element_box.node_id == node_id)
     }
 
     fn test_element_box() -> ElementBox {
@@ -471,11 +525,7 @@ mod tests {
         containing_block_node_id: u64,
         owner_node_ids: &[u64],
     ) -> bool {
-        let Some(target) = layout
-            .element_boxes
-            .iter()
-            .find(|element| element.node_id == target_node_id)
-        else {
+        let Some(target) = element_box_for(layout, target_node_id) else {
             return false;
         };
 
@@ -484,11 +534,22 @@ mod tests {
                 owner_node_id: Some(containing_block_node_id),
                 viewport_escape: false,
             }
-            && target
-                .overflow_clips
-                .iter()
-                .map(|clip| clip.owner_node_id)
-                .eq(owner_node_ids.iter().copied())
+            && overflow_clip_owner_ids_match(&target.overflow_clips, owner_node_ids)
+    }
+
+    fn overflow_clip_owner_ids_match(
+        clips: &[crate::renderer::backends::html_interactive::types::OverflowClip],
+        owner_node_ids: &[u64],
+    ) -> bool {
+        if clips.len() != owner_node_ids.len() {
+            return false;
+        }
+        for (clip, owner_node_id) in clips.iter().zip(owner_node_ids) {
+            if clip.owner_node_id != *owner_node_id {
+                return false;
+            }
+        }
+        true
     }
 
     fn descendant_axis_aligned(layout: &LayoutResult) -> Option<(f32, f32, f32, f32)> {
