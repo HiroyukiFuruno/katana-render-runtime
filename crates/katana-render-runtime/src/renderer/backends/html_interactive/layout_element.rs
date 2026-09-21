@@ -210,89 +210,67 @@ mod tests {
     }
 
     #[test]
-    fn element_boxes_keep_positioning_owner_and_overflow_clip_metadata() -> Result<(), String> {
-        let layout = HtmlLayoutRenderer::render(
-            &positioned_overflow_nodes(),
-            HtmlBrowserViewport {
-                width: 320,
-                height: 240,
-                device_scale_factor: 1.0,
-            },
-            0.0,
-            &HashMap::new(),
-            None,
-        )?;
-        assert_positioned_overflow_target(&layout)
+    fn element_boxes_keep_positioning_owner_and_overflow_clip_metadata() {
+        let layout = render_test_layout(&positioned_overflow_nodes());
+        assert!(layout.is_ok_and(|layout| positioned_overflow_target_matches(&layout)));
+        let empty_layout = render_test_layout(&[]);
+        assert!(empty_layout.is_ok_and(|layout| !positioned_overflow_target_matches(&layout)));
     }
 
-    fn assert_positioned_overflow_target(layout: &LayoutResult) -> Result<(), String> {
-        let target = layout
+    fn positioned_overflow_target_matches(layout: &LayoutResult) -> bool {
+        let Some(target) = layout
             .element_boxes
             .iter()
             .find(|element| element.node_id == 2)
-            .ok_or("target element box must exist")?;
+        else {
+            return false;
+        };
 
-        assert_eq!(
-            target.positioning_context,
-            ElementPositioningContext::AbsoluteContainingBlock {
+        target.positioning_context
+            == ElementPositioningContext::AbsoluteContainingBlock {
                 owner_node_id: Some(1),
                 viewport_escape: false,
             }
-        );
-        assert_eq!(target.overflow_clips.len(), 1);
-        assert_eq!(target.overflow_clips[0].owner_node_id, 1);
-        assert_eq!(target.overflow_clips[0].height, 38.0);
-        assert_eq!(target.overflow_clips[0].x, 2.0);
-        assert_eq!(target.overflow_clips[0].y, 2.0);
-        assert_eq!(target.overflow_clips[0].width, 108.0);
-        Ok(())
+            && target.overflow_clips.len() == 1
+            && target.overflow_clips[0].owner_node_id == 1
+            && target.overflow_clips[0].height == 38.0
+            && target.overflow_clips[0].x == 2.0
+            && target.overflow_clips[0].y == 2.0
+            && target.overflow_clips[0].width == 108.0
     }
 
     #[test]
-    fn absolute_target_ignores_overflow_clip_outside_its_containing_block() -> Result<(), String> {
-        let layout = HtmlLayoutRenderer::render(
-            &absolute_target_with_unrelated_overflow_clip_nodes(),
-            HtmlBrowserViewport {
-                width: 320,
-                height: 240,
-                device_scale_factor: 1.0,
-            },
-            0.0,
-            &HashMap::new(),
-            None,
-        )?;
-        let target = layout
-            .element_boxes
-            .iter()
-            .find(|element| element.node_id == 3)
-            .ok_or("target element box must exist")?;
-
-        assert_eq!(
-            target.positioning_context,
-            ElementPositioningContext::AbsoluteContainingBlock {
-                owner_node_id: Some(1),
-                viewport_escape: false,
-            }
-        );
-        assert!(target.overflow_clips.is_empty());
-        Ok(())
+    fn absolute_target_ignores_overflow_clip_outside_its_containing_block() {
+        let layout = render_test_layout(&absolute_target_with_unrelated_overflow_clip_nodes());
+        assert!(layout.is_ok_and(|layout| {
+            layout
+                .element_boxes
+                .iter()
+                .find(|element| element.node_id == 3)
+                .is_some_and(|target| {
+                    target.positioning_context
+                        == ElementPositioningContext::AbsoluteContainingBlock {
+                            owner_node_id: Some(1),
+                            viewport_escape: false,
+                        }
+                        && target.overflow_clips.is_empty()
+                })
+        }));
     }
 
     #[test]
-    fn absolute_target_keeps_containing_block_and_outer_ancestor_overflow_clips()
-    -> Result<(), String> {
-        let layout = HtmlLayoutRenderer::render(
-            &absolute_target_with_containing_block_ancestor_overflow_clips(),
-            HtmlBrowserViewport {
-                width: 320,
-                height: 240,
-                device_scale_factor: 1.0,
-            },
-            0.0,
-            &HashMap::new(),
-            None,
-        )?;
-        assert_absolute_target_clip_owners(&layout, 4, 2, &[2, 1])
+    fn absolute_target_keeps_containing_block_and_outer_ancestor_overflow_clips() {
+        let layout =
+            render_test_layout(&absolute_target_with_containing_block_ancestor_overflow_clips());
+        assert!(
+            layout
+                .is_ok_and(|layout| { absolute_target_clip_owners_match(&layout, 4, 2, &[2, 1]) })
+        );
+        let empty_layout = render_test_layout(&[]);
+        assert!(
+            empty_layout
+                .is_ok_and(|layout| { !absolute_target_clip_owners_match(&layout, 4, 2, &[2, 1]) })
+        );
     }
 
     #[test]
@@ -320,6 +298,20 @@ mod tests {
 
     fn test_renderer() -> HtmlLayoutRenderer {
         HtmlLayoutRenderer::new(
+            HtmlBrowserViewport {
+                width: 320,
+                height: 240,
+                device_scale_factor: 1.0,
+            },
+            0.0,
+            &HashMap::new(),
+            None,
+        )
+    }
+
+    fn render_test_layout(nodes: &[HtmlDocumentNode]) -> Result<LayoutResult, String> {
+        HtmlLayoutRenderer::render(
+            nodes,
             HtmlBrowserViewport {
                 width: 320,
                 height: 240,
@@ -473,31 +465,30 @@ mod tests {
         }
     }
 
-    fn assert_absolute_target_clip_owners(
+    fn absolute_target_clip_owners_match(
         layout: &LayoutResult,
         target_node_id: u64,
         containing_block_node_id: u64,
-        expected_clip_owners: &[u64],
-    ) -> Result<(), String> {
-        let target = layout
+        owner_node_ids: &[u64],
+    ) -> bool {
+        let Some(target) = layout
             .element_boxes
             .iter()
             .find(|element| element.node_id == target_node_id)
-            .ok_or("target element box must exist")?;
-        assert_eq!(
-            target.positioning_context,
-            ElementPositioningContext::AbsoluteContainingBlock {
+        else {
+            return false;
+        };
+
+        target.positioning_context
+            == ElementPositioningContext::AbsoluteContainingBlock {
                 owner_node_id: Some(containing_block_node_id),
                 viewport_escape: false,
             }
-        );
-        let owners = target
-            .overflow_clips
-            .iter()
-            .map(|clip| clip.owner_node_id)
-            .collect::<Vec<_>>();
-        assert_eq!(owners, expected_clip_owners);
-        Ok(())
+            && target
+                .overflow_clips
+                .iter()
+                .map(|clip| clip.owner_node_id)
+                .eq(owner_node_ids.iter().copied())
     }
 
     fn descendant_axis_aligned(layout: &LayoutResult) -> Option<(f32, f32, f32, f32)> {

@@ -246,17 +246,7 @@ mod tests {
         let root = node_id(&mut session, "root")?;
         let clip = node_id(&mut session, "clip")?;
         let target = node_id(&mut session, "target")?;
-        session.update_layout_metrics_with_intersection_metadata(
-            100.0,
-            100.0,
-            0.0,
-            [
-                (root, 0.0, 0.0, 100.0, 100.0, 0.0),
-                (clip, 0.0, 0.0, 10.0, 10.0, 0.0),
-                (target, 10.0, 0.0, 10.0, 10.0, 0.0),
-            ],
-            [(target, root_clip_edge_contact_metadata(clip))],
-        )?;
+        apply_root_clip_edge_contact_metrics(&mut session, root, clip, target);
 
         assert!(
             session
@@ -265,6 +255,30 @@ mod tests {
             "edge contact with a root clipping ancestor must remain intersecting"
         );
         Ok(())
+    }
+
+    fn apply_root_clip_edge_contact_metrics(
+        session: &mut super::StaticHtmlRuntimeSession,
+        root: u64,
+        clip: u64,
+        target: u64,
+    ) {
+        assert!(
+            session
+                .update_layout_metrics_with_intersection_metadata(
+                    100.0,
+                    100.0,
+                    0.0,
+                    [
+                        (root, 0.0, 0.0, 100.0, 100.0, 0.0),
+                        (clip, 0.0, 0.0, 10.0, 10.0, 0.0),
+                        (target, 10.0, 0.0, 10.0, 10.0, 0.0),
+                    ],
+                    [(target, root_clip_edge_contact_metadata(clip))],
+                )
+                .is_ok(),
+            "layout metrics must accept root clip metadata"
+        );
     }
 
     fn root_clip_edge_contact_metadata(clip: u64) -> String {

@@ -36,3 +36,48 @@ impl ElementPositioningContext {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ElementPositioningContext;
+
+    #[test]
+    fn containing_block_owner_returns_owner_for_positioned_contexts() {
+        assert_eq!(
+            ElementPositioningContext::FixedContainingBlock {
+                owner_node_id: 7,
+                viewport_escape: false,
+            }
+            .containing_block_owner(),
+            Some(7)
+        );
+        assert_eq!(
+            ElementPositioningContext::AbsoluteContainingBlock {
+                owner_node_id: Some(11),
+                viewport_escape: true,
+            }
+            .containing_block_owner(),
+            Some(11)
+        );
+    }
+
+    #[test]
+    fn viewport_contexts_have_no_containing_block_owner() {
+        assert_eq!(
+            ElementPositioningContext::InFlow.containing_block_owner(),
+            None
+        );
+        assert_eq!(
+            ElementPositioningContext::FixedViewport.containing_block_owner(),
+            None
+        );
+        assert_eq!(
+            ElementPositioningContext::AbsoluteContainingBlock {
+                owner_node_id: None,
+                viewport_escape: false,
+            }
+            .containing_block_owner(),
+            None
+        );
+    }
+}

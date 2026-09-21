@@ -87,3 +87,28 @@ fn inline_fragment_bounds(fragments: &[InlineFragment]) -> Option<(f32, f32, f32
     }
     Some((x, y, right - x, bottom - y))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::layout::HtmlLayoutRenderer;
+    use super::super::super::types::ElementPositioningContext;
+    use crate::renderer::backends::html_browser::HtmlBrowserViewport;
+    use std::collections::HashMap;
+
+    #[test]
+    fn record_inline_fragment_ignores_negative_width_and_zero_height() {
+        let viewport = HtmlBrowserViewport {
+            width: 320,
+            height: 240,
+            device_scale_factor: 1.0,
+        };
+        let mut renderer = HtmlLayoutRenderer::new(viewport, 0.0, &HashMap::new(), None);
+        renderer.start_element_box(7, ElementPositioningContext::InFlow);
+        renderer.ownership.inline_fragment_owners.push(7);
+
+        renderer.record_inline_fragment(1.0, 2.0, -1.0, 3.0);
+        renderer.record_inline_fragment(1.0, 2.0, 4.0, 0.0);
+
+        assert!(renderer.element_boxes[0].inline_fragments.is_empty());
+    }
+}
