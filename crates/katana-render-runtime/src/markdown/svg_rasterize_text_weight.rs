@@ -85,6 +85,10 @@ mod tests {
             css_weight_match_distance(Weight(500), Weight(425))
                 < css_weight_match_distance(Weight(400), Weight(425))
         );
+        assert_eq!(
+            css_weight_match_distance(Weight(300), Weight(450)),
+            (2, 100)
+        );
     }
 
     #[test]
