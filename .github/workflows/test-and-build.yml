@@ -27,28 +27,6 @@ on:
       - "vendor/**"
   pull_request:
     branches: [master]
-    paths:
-      - "**.rs"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "Justfile"
-      - "package.json"
-      - "bun.lock"
-      - "biome.json"
-      - "tsconfig.json"
-      - ".codex/**"
-      - ".agents/**"
-      - ".agent/**"
-      - ".claude/**"
-      - ".github/workflows/**"
-      - "assets/**"
-      - "README.md"
-      - "docs/**"
-      - "openspec/**"
-      - "scripts/**"
-      - "tests/**"
-      - "crates/**"
-      - "vendor/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

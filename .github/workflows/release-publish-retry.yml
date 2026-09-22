@@ -9,7 +9,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   CARGO_INCREMENTAL: 0
@@ -54,3 +54,22 @@ jobs:
         run: |
           cd release-source
           bash ../release-tools/scripts/release/publish-crates.sh "${{ inputs.version }}"
+
+      - name: Publish complete GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.version }}
+        # A retry can publish an older tag; preserve an existing Latest release.
+        run: gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --verify-tag
+
+      - name: Cleanup published release state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_BRANCH: release/${{ inputs.version }}
+        run: |
+          cd release-tools
+          python3 scripts/release/cleanup_release_state.py \
+            --version "${{ inputs.version }}" \
+            --release-branch "${RELEASE_BRANCH}" \
+            --remote origin \
+            --default-branch master

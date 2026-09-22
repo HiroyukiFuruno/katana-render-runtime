@@ -43,7 +43,7 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "mermaid-zenuml",
     displayName: "Mermaid ZenUML",
-    version: "1.0.0",
+    version: "1.0.1",
     checksum: "f75662869d22aac58870e52370fe4c46b89b9710bf4b03df93b3227b5e18e730",
     fileName: "mermaid-zenuml.min.js",
     rustVersionConst: "MERMAID_ZENUML_JS_VERSION",
@@ -73,8 +73,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "drawio",
     displayName: "Draw.io",
-    version: "31.4.5",
-    checksum: "ec8b66e744a9e5dbf3870129c297385595f55a548f75b952f209548d49610536",
+    version: "31.4.6",
+    checksum: "2d0fef32815c79f1bb51f225effddfc57e111461bccf8386eed29c7cce3ab088",
     fileName: "drawio.min.js",
     rustVersionConst: "DRAWIO_JS_VERSION",
     rustChecksumConst: "DRAWIO_JS_CHECKSUM",
