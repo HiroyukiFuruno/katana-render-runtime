@@ -229,9 +229,9 @@ class _GraphQLBudget:
 
 
 class _SharedGraphQLLedger:
-    """Atomically lease the all-writer GraphQL budget across verifier processes."""
+    """Atomically reserve all-writer GraphQL and REST budgets across processes."""
 
-    _SCHEMA = 1
+    _SCHEMA = 2
     _LEASE = _GRAPHQL_MAX_QUERY_COST
     # The all-writer phase starts up to 150 independent verifier processes.
     # Each reservation fsyncs the shared state, so a healthy serialized queue
@@ -276,10 +276,11 @@ class _SharedGraphQLLedger:
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError("shared GraphQL ledger is malformed") from error
         if not isinstance(state, dict) or set(state) != {
-            "reservations", "schema", "snapshot_sha256", "spent"
+            "reservations", "rest_spent", "schema", "snapshot_sha256", "spent"
         }:
             raise ValueError("shared GraphQL ledger schema is invalid")
         reservations = state.get("reservations")
+        rest_spent = state.get("rest_spent")
         spent = state.get("spent")
         if (
             state.get("schema") != self._SCHEMA
@@ -287,6 +288,9 @@ class _SharedGraphQLLedger:
             or type(spent) is not int
             or spent < 0
             or spent > _GRAPHQL_REVIEW_BUDGET - _GRAPHQL_REMAINING_FLOOR
+            or type(rest_spent) is not int
+            or rest_spent < 0
+            or rest_spent > _REST_BUDGET - _REST_REMAINING_FLOOR
             or not isinstance(reservations, dict)
             or any(
                 not isinstance(token, str)
@@ -374,6 +378,7 @@ class _SharedGraphQLLedger:
     def _initialize(self) -> None:
         initial = {
             "reservations": {},
+            "rest_spent": 0,
             "schema": self._SCHEMA,
             "snapshot_sha256": self.snapshot_sha256,
             "spent": 0,
@@ -445,6 +450,18 @@ class _SharedGraphQLLedger:
             if lease != self._LEASE or spent < lease - cost:
                 raise ValueError("shared GraphQL ledger reservation is invalid")
             state["spent"] = spent - lease + cost
+
+        self._update(mutate)
+
+    def reserve_rest_request(self) -> None:
+        """Reserve one primary REST request before it reaches the shared bucket."""
+
+        def mutate(state: dict[str, object]) -> None:
+            rest_spent = state["rest_spent"]
+            assert isinstance(rest_spent, int)
+            if rest_spent >= _REST_BUDGET - _REST_REMAINING_FLOOR:
+                raise ValueError("shared REST ledger budget is exhausted")
+            state["rest_spent"] = rest_spent + 1
 
         self._update(mutate)
 
@@ -1787,6 +1804,8 @@ def _gh_json(*arguments: str) -> Any:
         budget.observe_rate_limit(_gh_json("api", "rate_limit"))
     if rest_get and _ACTIVE_REST_BUDGET is not None:
         _ACTIVE_REST_BUDGET.consume()
+    if rest_get and _ACTIVE_SHARED_GRAPHQL_LEDGER is not None:
+        _ACTIVE_SHARED_GRAPHQL_LEDGER.reserve_rest_request()
     graphql_entry = len(arguments) >= 2 and (
         arguments[:2] == ("pr", "view")
         or arguments[:2] == ("repo", "view")
@@ -3135,42 +3154,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if governance_error is not None or final_governance_evidence != governance_evidence:
             raise ValueError("governance evidence changed during readiness check")
-    # The governance refresh can take longer than the earlier PR snapshot
-    # fence.  Re-read every review evidence source afterwards so an edit,
-    # deletion, dismissal, or reopened thread cannot inherit prior success.
-    final_comments = _paginated_api_array(
-        f"repos/{repository}/issues/{arguments.pr}/comments"
-    )
-    if (
-        _review_marker_identities(
-            _review_markers(final_comments, marker_author_login)
-        )
-        != initial_marker_identities
-    ):
-        raise ValueError("trusted review marker identities changed during readiness check")
-    final_threads = _review_threads(repository, arguments.pr, budget=graphql_budget)
-    if final_threads != threads:
-        raise ValueError("review threads changed during readiness check")
-    final_reviews = _reviews(repository, arguments.pr, budget=graphql_budget)
-    if final_reviews != pull_request["reviews"]:
-        raise ValueError("reviews changed during readiness check")
-    final_readiness_errors = readiness_errors(
-        {**pull_request, "reviews": final_reviews},
-        final_threads,
-        final_comments,
-        review_bot=_CODEX_REVIEW_BOT_LOGIN,
-        require_draft=arguments.require_draft,
-        referenced_issues=referenced_issues,
-        required_checks=initial_required_checks,
-    )
-    if final_readiness_errors:
-        raise ValueError(
-            "review readiness changed during readiness check: "
-            + "; ".join(final_readiness_errors)
-        )
-    # 最初の完全 readiness fence 後に review evidence を再取得した。
-    # 成功結果までの間に CI/protection、canonical Issue、sibling closer、Ready PR の
-    # governance evidence が変化しても通過しないよう、ここで完全 fence を再実行する。
+    # ガバナンス再照会の前後で CI/protection、canonical Issue、sibling closer、Ready
+    # PR の証跡が変化しても通過しないよう、完全 fence を再実行する。
     _verify_final_readiness_snapshot_unchanged(
         repository=repository,
         pull_request=arguments.pr,
@@ -3212,6 +3197,48 @@ def main(argv: Sequence[str] | None = None) -> int:
             or post_review_governance_evidence != governance_evidence
         ):
             raise ValueError("governance evidence changed during readiness check")
+    # 最終のガバナンス再照会は review evidence を参照するため、その後に全 evidence を
+    # もう一度走査する。これにより途中の review 作成・編集・dismiss・thread reopen を
+    # 古い成功結果へ継承させない。
+    final_comments = _paginated_api_array(
+        f"repos/{repository}/issues/{arguments.pr}/comments"
+    )
+    if (
+        _review_marker_identities(
+            _review_markers(final_comments, marker_author_login)
+        )
+        != initial_marker_identities
+    ):
+        raise ValueError("trusted review marker identities changed during readiness check")
+    final_threads = _review_threads(repository, arguments.pr, budget=graphql_budget)
+    if final_threads != threads:
+        raise ValueError("review threads changed during readiness check")
+    final_reviews = _reviews(repository, arguments.pr, budget=graphql_budget)
+    if final_reviews != pull_request["reviews"]:
+        raise ValueError("reviews changed during readiness check")
+    final_readiness_errors = readiness_errors(
+        {**pull_request, "reviews": final_reviews},
+        final_threads,
+        final_comments,
+        review_bot=_CODEX_REVIEW_BOT_LOGIN,
+        require_draft=arguments.require_draft,
+        referenced_issues=referenced_issues,
+        required_checks=initial_required_checks,
+    )
+    if final_readiness_errors:
+        raise ValueError(
+            "review readiness changed during readiness check: "
+            + "; ".join(final_readiness_errors)
+        )
+    _verify_final_pull_request_identity_unchanged(
+        repository=repository,
+        pull_request=arguments.pr,
+        initial_base=base,
+        initial_head=head,
+        initial_base_branch=base_branch,
+        initial_body=initial_body,
+        expected_is_draft=arguments.require_draft,
+    )
     print(f"PR #{arguments.pr} is ready")
     return 0
 

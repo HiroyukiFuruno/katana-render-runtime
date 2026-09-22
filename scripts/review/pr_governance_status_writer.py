@@ -2297,6 +2297,14 @@ def main() -> int:
                 print(f"Initial evidence failure could not be terminalized: {terminal_error}", file=sys.stderr)
         return 1
     failures = 0
+    # A terminal success cannot rely only on the snapshot that fed the
+    # contract verifier: another local PR can have claimed the same Issue
+    # while that verifier was running.  Refresh the complete claimant index
+    # once per terminal writer segment, lazily only when a success is ready.
+    # Reusing that fence for the segment keeps the additional read O(N), not
+    # O(N^2) across every terminal candidate.
+    terminal_claimants = snapshot.claimants
+    terminal_claimants_refreshed = False
     # Do not make one malformed/changed PR leave other open PRs stale.
     with _snapshot_file() as source:
         json.dump(list(snapshot.pull_requests), source)
@@ -2321,6 +2329,9 @@ def main() -> int:
                     continue
                 decision = process(number, snapshot.claimants, source.name, initial_evidence, defer_terminal=True)
                 if decision is not None:
+                    if decision.state == "success" and not terminal_claimants_refreshed:
+                        terminal_claimants = open_snapshot().claimants
+                        terminal_claimants_refreshed = True
                     cost = decision_write_cost(decision)
                     if cost > terminal_write_budget:
                         failures += 1
@@ -2331,7 +2342,11 @@ def main() -> int:
                         final_evidence_for_pr(decision.head, initial_evidence)
                         if decision.state == "success" else initial_evidence
                     )
-                    terminalized = finalize_decision(decision, snapshot.claimants, final_evidence)
+                    terminalized = finalize_decision(
+                        decision,
+                        terminal_claimants if decision.state == "success" else snapshot.claimants,
+                        final_evidence,
+                    )
                     if (
                         scope == "all" and os.environ.get("GITHUB_ACTIONS") == "true"
                         and not terminalized

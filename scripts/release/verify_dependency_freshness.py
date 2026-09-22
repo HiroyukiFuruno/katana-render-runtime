@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject releases whose direct dependencies or pinned runtime assets are stale."""
+"""Reject releases whose resolved dependencies or pinned runtime assets are stale."""
 
 from __future__ import annotations
 
@@ -131,40 +131,63 @@ def rust_packages(root: Path) -> list[Package]:
         for item in nodes
         if isinstance(item, dict) and isinstance(item.get("id"), str)
     }
-    direct: dict[str, Package] = {}
-    for member_id in workspace_members:
-        node = nodes_by_id.get(member_id)
-        if node is None or not isinstance(node.get("deps"), list):
-            raise ValueError(f"workspace member missing from cargo metadata resolution: {member_id}")
-        for dependency in node["deps"]:
+    unresolved = list(workspace_members)
+    expanded: set[str] = set()
+    resolved_ids: set[str] = set()
+    direct_ids: set[str] = set()
+    while unresolved:
+        package_id = unresolved.pop()
+        if package_id in expanded:
+            continue
+        node = nodes_by_id.get(package_id)
+        if node is None:
+            if package_id in workspace_members:
+                raise ValueError(f"workspace member missing from cargo metadata resolution: {package_id}")
+            continue
+        expanded.add(package_id)
+        dependencies = node.get("deps")
+        if not isinstance(dependencies, list):
+            raise ValueError(f"resolved Rust package missing dependency data: {package_id}")
+        for dependency in dependencies:
             if not isinstance(dependency, dict):
                 raise ValueError("invalid cargo metadata dependency edge")
-            package_id = dependency.get("pkg")
-            if not isinstance(package_id, str) or package_id not in packages_by_id:
-                raise ValueError(f"direct Rust package missing from cargo metadata: {package_id}")
-            package = packages_by_id[package_id]
-            if not str(package.get("source", "")).startswith("registry+"):
-                continue
-            name, version = package.get("name"), package.get("version")
-            if not isinstance(name, str) or not isinstance(version, str):
-                raise ValueError(f"invalid cargo metadata package: {package_id}")
-            Version.parse(version)
-            direct[str(package_id)] = Package("Rust", name, version)
-    if not direct:
-        raise ValueError("cargo metadata did not contain direct registry Rust dependencies")
-    return sorted(direct.values(), key=lambda package: (package.name, Version.parse(package.current)))
+            dependency_id = dependency.get("pkg")
+            if not isinstance(dependency_id, str):
+                raise ValueError("invalid cargo metadata dependency edge")
+            if package_id in workspace_members:
+                direct_ids.add(dependency_id)
+            resolved_ids.add(dependency_id)
+            unresolved.append(dependency_id)
+    resolved: dict[str, Package] = {}
+    for package_id in resolved_ids:
+        package = packages_by_id.get(package_id)
+        if package is None:
+            kind = "direct" if package_id in direct_ids else "resolved"
+            raise ValueError(f"{kind} Rust package missing from cargo metadata: {package_id}")
+        if not str(package.get("source", "")).startswith("registry+"):
+            continue
+        name, version = package.get("name"), package.get("version")
+        if not isinstance(name, str) or not isinstance(version, str):
+            raise ValueError(f"invalid cargo metadata package: {package_id}")
+        Version.parse(version)
+        resolved[package_id] = Package("Rust", name, version)
+    if not resolved:
+        raise ValueError("cargo metadata did not contain resolved registry Rust dependencies")
+    return sorted(resolved.values(), key=lambda package: (package.name, Version.parse(package.current)))
 
 
 def js_packages(root: Path) -> list[Package]:
-    manifest = json.loads((root / "package.json").read_text(encoding="utf-8"))
-    names = set().union(*(set(manifest.get(section, {})) for section in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")))
     lock = load_bun_lock(root / "bun.lock")
     entries = lock.get("packages", {})
+    if not isinstance(entries, dict):
+        raise ValueError("bun.lock is missing package resolution data")
     packages: list[Package] = []
-    for name in sorted(names):
+    for name in sorted(entries):
+        if not isinstance(name, str):
+            raise ValueError("invalid bun.lock package name")
         entry = entries.get(name)
         if not isinstance(entry, list) or not entry or not isinstance(entry[0], str):
-            raise ValueError(f"direct JavaScript package missing from bun.lock: {name}")
+            raise ValueError(f"resolved JavaScript package missing from bun.lock: {name}")
         prefix = f"{name}@"
         if not entry[0].startswith(prefix):
             raise ValueError(f"invalid bun.lock package entry: {name}")
@@ -174,11 +197,48 @@ def js_packages(root: Path) -> list[Package]:
 
 def runtime_assets(root: Path) -> list[Package]:
     source = (root / RUNTIME_CATALOG).read_text(encoding="utf-8")
-    pattern = re.compile(r'kind:\s*"(?P<kind>[^"]+)".*?version:\s*"(?P<version>[^"]+)".*?latestUrl:\s*"(?P<url>[^"]+)"', re.DOTALL)
-    matches = list(pattern.finditer(source))
-    if not matches:
+    entries: list[str] = []
+    depth, start = 0, 0
+    quote: str | None = None
+    escaped = False
+    for index, character in enumerate(source):
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = None
+            continue
+        if character in ('"', "'", "`"):
+            quote = character
+        elif character == "{":
+            if depth == 0:
+                start = index + 1
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth < 0:
+                raise ValueError("runtime asset catalog has unbalanced braces")
+            if depth == 0:
+                entries.append(source[start:index])
+    if quote is not None or depth != 0:
+        raise ValueError("runtime asset catalog has unbalanced syntax")
+    assets: list[Package] = []
+    for entry in entries:
+        properties = {
+            name: match.group("value")
+            for name in ("kind", "version", "latestUrl")
+            if (match := re.search(rf'\b{name}:\s*"(?P<value>[^"]+)"', entry)) is not None
+        }
+        if "kind" not in properties or "{" in properties["kind"]:
+            continue
+        if set(properties) != {"kind", "version", "latestUrl"}:
+            raise ValueError("runtime asset catalog entry is missing a pinned asset property")
+        assets.append(Package("Runtime asset", f"{properties['kind']}|{properties['latestUrl']}", properties["version"]))
+    if not assets:
         raise ValueError("runtime asset catalog did not contain pinned assets")
-    return [Package("Runtime asset", f"{match['kind']}|{match['url']}", match["version"]) for match in matches]
+    return assets
 
 
 def fetch(url: str) -> bytes:
@@ -247,7 +307,7 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(stale), file=sys.stderr)
         print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
         return 1
-    print(f"Dependency freshness check passed ({len(packages)} direct dependencies and pinned runtime assets).")
+    print(f"Dependency freshness check passed ({len(packages)} resolved dependencies and pinned runtime assets).")
     return 0
 
 

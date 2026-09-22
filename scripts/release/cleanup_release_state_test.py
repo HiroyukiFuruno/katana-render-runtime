@@ -256,6 +256,26 @@ class CleanupReleaseStateTest(unittest.TestCase):
         self.cleanup()
         self.assertFalse(self.remote_branch_exists("release/v9.9.9"))
 
+    def test_refreshes_stale_release_tracking_ref_before_ancestry_audit(self) -> None:
+        self.create_release_branch(merge=True)
+        self.git("switch", "-c", "stale-tracking-ref", cwd=self.repository)
+        (self.repository / "stale.txt").write_text("stale\n", encoding="utf-8")
+        self.git("add", "stale.txt", cwd=self.repository)
+        self.git("commit", "-m", "stale tracking ref", cwd=self.repository)
+        stale_sha = self.git("rev-parse", "HEAD", cwd=self.repository).stdout.strip()
+        self.git("switch", "master", cwd=self.repository)
+        self.git(
+            "update-ref",
+            "refs/remotes/origin/release/v9.9.9",
+            stale_sha,
+            cwd=self.repository,
+        )
+
+        actions = self.cleanup()
+
+        self.assertIn("remote branch release/v9.9.9 deleted", actions)
+        self.assertFalse(self.remote_branch_exists("release/v9.9.9"))
+
     def test_refuses_remote_delete_when_branch_advances_after_audit(self) -> None:
         self.create_release_branch(merge=True)
         racing_repository = self.root / "racing-repository"

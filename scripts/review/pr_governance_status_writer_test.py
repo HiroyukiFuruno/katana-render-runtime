@@ -1496,7 +1496,9 @@ class StatusWriterUnitTest(unittest.TestCase):
                     writer_runs[writer_identifier] = writer_run(writer_identifier, segment, "completed")
                     self.assertEqual(terminal_patches[before:], list(expected))
                     self.assertEqual(source_reads[segment], 1)
-                    self.assertEqual(snapshots[segment], 7)
+                    # Initial validation and the one lazy terminal-claimant
+                    # fence each consume the complete seven-page snapshot.
+                    self.assertEqual(snapshots[segment], 14)
                     self.assertEqual(len(WRITER._bound_check_runs), len(all_numbers))
                     self.assertEqual(
                         WRITER._bound_check_runs[(heads[preserved[0]], f"krr-governance/v1/{heads[preserved[0]]}/writer-71")],
@@ -1856,6 +1858,30 @@ class StatusWriterUnitTest(unittest.TestCase):
             self.assertEqual(WRITER.main(), 0)
         self.assertEqual(calls, ["process-72", "finalize-72", "process-73", "finalize-73"])
         final_evidence.assert_not_called()
+
+    def test_main_refreshes_claimants_once_before_terminal_successes(self) -> None:
+        initial = self.snapshot((72,), {"64": frozenset({72})})
+        refreshed = self.snapshot((72, 73), {"64": frozenset({72, 73})})
+        decision = WRITER.PendingDecision(
+            72, "a" * 40, "b" * 40, (101,), "success", "ok", 77, (), "64", "c" * 64,
+        )
+        seen_claimants: list[dict[str, frozenset[int]]] = []
+
+        def finalize(_decision, claimants, _evidence):
+            seen_claimants.append(claimants)
+            return True
+
+        with self.identity(), patch.dict(os.environ, {"GOVERNANCE_DISPATCHER_RUN_ID": "88"}), \
+             patch.object(WRITER, "trusted_dispatcher_source", return_value=WRITER.DispatcherSource(88, "issues", 1)), \
+             patch.object(WRITER, "open_snapshot", side_effect=[initial, refreshed]) as open_snapshot, \
+             patch.object(WRITER, "observed_invalidations", return_value=(initial, frozenset())), \
+             patch.object(WRITER, "evidence_snapshot", return_value=WRITER.EvidenceSnapshot({}, {}, {})), \
+             patch.object(WRITER, "process", return_value=decision), \
+             patch.object(WRITER, "final_evidence_for_pr", return_value=WRITER.EvidenceSnapshot({}, {}, {})), \
+             patch.object(WRITER, "finalize_decision", side_effect=finalize):
+            self.assertEqual(WRITER.main(), 0)
+        self.assertEqual(open_snapshot.call_count, 2)
+        self.assertEqual(seen_claimants, [refreshed.claimants])
 
     def test_main_continues_after_one_pr_fails(self) -> None:
         with patch.dict(os.environ, {"GOVERNANCE_DISPATCHER_RUN_ID": "88"}), patch.object(WRITER, "REPOSITORY", "owner/repository"), \
@@ -2458,7 +2484,8 @@ class StatusWriterUnitTest(unittest.TestCase):
         # full snapshot/manifest rereadを100 REST、verifierを5 REST/headと
         # 保守的に加算しても、installation共有limitのrolling window内に収まる。
         segment_seconds = WRITER.MAX_TERMINAL_BATCH * WRITER.ALL_TERMINAL_CHECK_WRITE_INTERVAL_SECONDS
-        segment_rest_and_writes = 600 + 200 + (6 * WRITER.MAX_TERMINAL_BATCH) + 2_375 + WRITER.MAX_TERMINAL_BATCH
+        # One terminal claimant fence adds the complete seven-page PR scan.
+        segment_rest_and_writes = 600 + 200 + 7 + (6 * WRITER.MAX_TERMINAL_BATCH) + 2_375 + WRITER.MAX_TERMINAL_BATCH
         self.assertEqual(segment_seconds, 2_562.5)
         self.assertLess(segment_seconds, 3_600)
         self.assertLessEqual(segment_rest_and_writes, 4_500)

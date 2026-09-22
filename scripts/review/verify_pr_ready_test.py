@@ -14,7 +14,7 @@ import time
 import unittest
 from copy import deepcopy
 from pathlib import Path
-from unittest.mock import mock_open, patch
+from unittest.mock import Mock, mock_open, patch
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -3073,7 +3073,7 @@ class VerifyPrReadyTest(unittest.TestCase):
 
     def test_review_graphql_page_cap_fits_the_125_head_shared_ledger(self) -> None:
         # Each readiness check reads reviews and reviewThreads twice (initial
-        # and final), and every outer page is fetched once then re-read at its
+        # and post-governance final), and every outer page is fetched once then re-read at its
         # pagination race fence.  These are real API requests, not a logical
         # two-connection count.
         review_snapshot_requests = (
@@ -3089,9 +3089,9 @@ class VerifyPrReadyTest(unittest.TestCase):
         self.assertEqual(bounded_review_requests, 2_000)
 
         # The shared ledger also sees the one GraphQL preflight plus the
-        # repository and three PR projections for each verifier invocation.
-        fixed_graphql_requests = subject._MAX_ALL_WRITER_TARGETS * 5
-        self.assertEqual(fixed_graphql_requests, 625)
+        # repository and four PR projections for each verifier invocation.
+        fixed_graphql_requests = subject._MAX_ALL_WRITER_TARGETS * 6
+        self.assertEqual(fixed_graphql_requests, 750)
         self.assertLessEqual(
             bounded_review_requests + fixed_graphql_requests,
             subject._GRAPHQL_REVIEW_BUDGET - subject._GRAPHQL_REMAINING_FLOOR,
@@ -3578,28 +3578,26 @@ class VerifyPrReadyTest(unittest.TestCase):
                 subject._ACTIVE_SHARED_GRAPHQL_LEDGER = previous_ledger
 
     def test_rest_budget_accumulates_primary_cost_across_all_writer_verifiers(self) -> None:
-        server_remaining = subject._REST_BUDGET
-        requests = 0
-        for _process in range(subject._MAX_ALL_WRITER_TARGETS):
-            budget = subject._RestBudget()
-            budget.observe_rate_limit(rest_rate_limited(remaining=server_remaining))
-            for _request in range(30):
-                try:
-                    budget.consume()
-                except ValueError:
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot = Path(directory) / "open-pulls.json"
+            snapshot.write_text("[]", encoding="utf-8")
+            os.chmod(snapshot, 0o600)
+            requests = 0
+            for _process in range(subject._MAX_ALL_WRITER_TARGETS):
+                ledger = subject._SharedGraphQLLedger.from_open_pull_snapshot(str(snapshot))
+                for _request in range(30):
+                    try:
+                        ledger.reserve_rest_request()
+                    except ValueError:
+                        break
+                    requests += 1
+                if requests == subject._REST_BUDGET - subject._REST_REMAINING_FLOOR:
                     break
-                server_remaining -= 1
-                requests += 1
-            if server_remaining <= subject._REST_REMAINING_FLOOR:
-                break
 
-        self.assertEqual(requests, subject._REST_BUDGET - subject._REST_REMAINING_FLOOR)
-        self.assertEqual(server_remaining, subject._REST_REMAINING_FLOOR)
-        self.assertLessEqual(requests, subject._MAX_ALL_WRITER_TARGETS * 30)
-        exhausted = subject._RestBudget()
-        exhausted.observe_rate_limit(rest_rate_limited(remaining=server_remaining))
-        with self.assertRaisesRegex(ValueError, "next request"):
-            exhausted.before_request()
+            self.assertEqual(requests, subject._REST_BUDGET - subject._REST_REMAINING_FLOOR)
+            ledger = subject._SharedGraphQLLedger.from_open_pull_snapshot(str(snapshot))
+            with self.assertRaisesRegex(ValueError, "shared REST ledger budget"):
+                ledger.reserve_rest_request()
 
     def test_rest_budget_rejects_malformed_or_low_rate_limit(self) -> None:
         budget = subject._RestBudget()
@@ -3624,6 +3622,12 @@ class VerifyPrReadyTest(unittest.TestCase):
     def test_gh_json_bootstraps_and_charges_rest_budget_but_excludes_rate_limit(self) -> None:
         subject._ACTIVE_REST_BUDGET = None
         self.addCleanup(setattr, subject, "_ACTIVE_REST_BUDGET", None)
+        shared_ledger = Mock()
+        previous_ledger = subject._ACTIVE_SHARED_GRAPHQL_LEDGER
+        subject._ACTIVE_SHARED_GRAPHQL_LEDGER = shared_ledger
+        self.addCleanup(
+            setattr, subject, "_ACTIVE_SHARED_GRAPHQL_LEDGER", previous_ledger
+        )
         responses = [
             subprocess.CompletedProcess(
                 ["gh"], 0, json.dumps(rest_rate_limited()), ""
@@ -3643,6 +3647,7 @@ class VerifyPrReadyTest(unittest.TestCase):
         self.assertEqual(
             subject._ACTIVE_REST_BUDGET.remaining, subject._REST_BUDGET - 1
         )
+        shared_ledger.reserve_rest_request.assert_called_once_with()
 
     def test_gh_json_preflights_and_charges_graphql_backed_pr_view(self) -> None:
         subject._ACTIVE_GRAPHQL_BUDGET = None
@@ -5008,6 +5013,10 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
             if readiness_fence_calls == 2 and post_review_readiness_error is not None:
                 raise post_review_readiness_error
 
+        def observed_identity_fence(**_kwargs: object) -> None:
+            if trace is not None:
+                trace.append("identity")
+
         with patch.object(subject, "_gh_json", side_effect=gh_json), patch.object(
             subject,
             "_paginated_api_array",
@@ -5034,6 +5043,10 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
             subject,
             "_verify_final_readiness_snapshot_unchanged",
             side_effect=observed_readiness_fence,
+        ), patch.object(
+            subject,
+            "_verify_final_pull_request_identity_unchanged",
+            side_effect=observed_identity_fence,
         ):
             return subject.main(
                 [
@@ -5578,7 +5591,7 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "governance evidence changed"):
             self._allow_ready([self._source(), changed])
 
-    def test_allow_ready_refreshes_review_evidence_between_governance_fences(self) -> None:
+    def test_allow_ready_refreshes_review_evidence_after_final_governance_fence(self) -> None:
         trace: list[str] = []
         self.assertEqual(
             self._allow_ready([self._source(), self._source()], trace=trace), 0
@@ -5592,16 +5605,12 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
                 final_evidence = max(
                     index for index, item in enumerate(trace) if item == evidence
                 )
-                self.assertLess(governance_indexes[1], final_evidence)
-                self.assertLess(final_evidence, governance_indexes[2])
+                self.assertLess(governance_indexes[2], final_evidence)
 
-    def test_allow_ready_runs_complete_post_review_fence_before_final_governance(self) -> None:
+    def test_allow_ready_refences_pr_identity_after_final_review_scan(self) -> None:
         trace: list[str] = []
         self.assertEqual(
             self._allow_ready([self._source(), self._source()], trace=trace), 0
-        )
-        post_review_fence = max(
-            index for index, item in enumerate(trace) if item == "readiness"
         )
         post_review_governance = max(
             index for index, item in enumerate(trace) if item == "governance"
@@ -5609,10 +5618,13 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
         for evidence in ("comments", "threads", "reviews"):
             with self.subTest(evidence=evidence):
                 self.assertLess(
+                    post_review_governance,
                     max(index for index, item in enumerate(trace) if item == evidence),
-                    post_review_fence,
                 )
-        self.assertLess(post_review_fence, post_review_governance)
+        self.assertLess(
+            max(index for index, item in enumerate(trace) if item in {"comments", "threads", "reviews"}),
+            trace.index("identity"),
+        )
 
     def test_allow_ready_rejects_review_evidence_changed_after_governance(self) -> None:
         initial_reviews = deepcopy(successful_state()[0]["reviews"])

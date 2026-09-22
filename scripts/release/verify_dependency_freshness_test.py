@@ -100,10 +100,10 @@ class DependencyFreshnessTest(unittest.TestCase):
             "https://example.test/runtime": {"version": "1.0.0"},
         }
 
-    def test_clean_direct_dependencies_and_runtime_assets_pass(self) -> None:
+    def test_clean_resolved_dependencies_and_runtime_assets_pass(self) -> None:
         result, stdout, stderr = self.run_check(self.clean_responses())
         self.assertEqual(result, 0, stderr)
-        self.assertIn("passed (3 direct dependencies and pinned runtime assets)", stdout)
+        self.assertIn("passed (3 resolved dependencies and pinned runtime assets)", stdout)
 
     def test_stale_rust_dependency_rejects_release_with_repair_command(self) -> None:
         responses = self.clean_responses()
@@ -129,6 +129,22 @@ class DependencyFreshnessTest(unittest.TestCase):
         result, _, stderr = self.run_check(responses, metadata)
         self.assertEqual(result, 1)
         self.assertIn("Rust serde: 1.0.0 -> 1.1.0", stderr)
+
+    def test_stale_transitive_rust_dependency_rejects_release(self) -> None:
+        metadata = self.metadata_for_direct_serde()
+        transitive_id = "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.0"
+        metadata["packages"].append(
+            {"id": transitive_id, "name": "itoa", "version": "1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index"}
+        )
+        serde_id = metadata["resolve"]["nodes"][0]["deps"][0]["pkg"]
+        metadata["resolve"]["nodes"].extend(
+            [{"id": serde_id, "deps": [{"name": "itoa", "pkg": transitive_id}]}, {"id": transitive_id, "deps": []}]
+        )
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/itoa"] = {"crate": {"newest_version": "1.1.0"}}
+        result, _, stderr = self.run_check(responses, metadata)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust itoa: 1.0.0 -> 1.1.0", stderr)
 
     def test_direct_rust_dependency_uses_resolved_package_id_not_dependency_name(self) -> None:
         responses = self.clean_responses()
@@ -162,6 +178,17 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("JavaScript example: 1.0.0 -> 2.0.0", stderr)
 
+    def test_stale_transitive_javascript_dependency_rejects_release(self) -> None:
+        (self.root / "bun.lock").write_text(
+            json.dumps({"packages": {"example": ["example@1.0.0", "", {}], "transitive": ["transitive@1.0.0", "", {}]}}),
+            encoding="utf-8",
+        )
+        responses = self.clean_responses()
+        responses["https://registry.npmjs.org/transitive/latest"] = {"version": "1.1.0"}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("JavaScript transitive: 1.0.0 -> 1.1.0", stderr)
+
     def test_numeric_prerelease_update_rejects_release(self) -> None:
         (self.root / "bun.lock").write_text(json.dumps({"packages": {"example": ["example@1.0.0-beta.2", "", {}]}}), encoding="utf-8")
         responses = self.clean_responses()
@@ -176,6 +203,14 @@ class DependencyFreshnessTest(unittest.TestCase):
         result, _, stderr = self.run_check(responses)
         self.assertEqual(result, 1)
         self.assertIn("Runtime asset mermaid: 1.0.0 -> 1.2.0", stderr)
+
+    def test_runtime_asset_catalog_properties_are_order_independent(self) -> None:
+        (self.root / "scripts/runtime-assets/runtime-asset-common.ts").write_text(
+            'const assets = [\n  {\n    latestUrl: "https://example.test/runtime",\n    version: "1.0.0",\n    kind: "mermaid",\n  },\n];\n',
+            encoding="utf-8",
+        )
+        result, _, stderr = self.run_check(self.clean_responses())
+        self.assertEqual(result, 0, stderr)
 
     def test_transport_failure_is_fail_closed(self) -> None:
         responses = self.clean_responses()
