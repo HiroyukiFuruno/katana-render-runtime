@@ -41,6 +41,12 @@ _FULL_ISSUE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _SHORT_ISSUE_PATTERN = re.compile(r"(?<![\w/])#(?P<number>[1-9]\d*)\b")
+_REFS_ISSUE_PATTERN = re.compile(
+    r"\brefs\b(?:[ \t]*:[ \t]*|[ \t]+)[\[(\'\"]?(?P<reference>#[1-9]\d*\b|https://github\.com/[^/\s]+/[^/\s]+/issues/[1-9]\d*"
+    + _ISSUE_URL_TERMINATOR
+    + r")",
+    re.IGNORECASE,
+)
 _CLOSING_ISSUE_REFERENCE_PATTERN = re.compile(
     r"\b(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?)\b"
     r"(?:[ \t]*:[ \t]*|[ \t]+)"
@@ -235,15 +241,19 @@ def pushed_branch_updates(
 
 
 def issue_numbers(message: str, repository: str) -> set[int]:
+    """Return same-repository Issues named by explicit ``Refs`` clauses only."""
+
     expected_repository = repository.casefold()
-    numbers = {
-        int(match.group("number"))
-        for match in _FULL_ISSUE_PATTERN.finditer(message)
-        if f"{match.group('owner')}/{match.group('repo')}".casefold() == expected_repository
-    }
-    numbers.update(
-        int(match.group("number")) for match in _SHORT_ISSUE_PATTERN.finditer(message)
-    )
+    numbers: set[int] = set()
+    for line in message.splitlines():
+        clause = re.search(r"\brefs\b(?:[ \t]*:[ \t]*|[ \t]+)(?P<references>.+)$", line, re.IGNORECASE)
+        if clause is None:
+            continue
+        references = clause.group("references")
+        numbers.update(int(match.group("number")) for match in _SHORT_ISSUE_PATTERN.finditer(references))
+        for match in _FULL_ISSUE_PATTERN.finditer(references):
+            if f"{match.group('owner')}/{match.group('repo')}".casefold() == expected_repository:
+                numbers.add(int(match.group("number")))
     return numbers
 
 
@@ -252,9 +262,16 @@ def closing_issue_numbers(body: str, repository: str) -> set[int]:
 
     if not isinstance(body, str):
         raise ContractViolation("PR本文の形式が不正です")
+    expected_repository = repository.casefold()
     numbers: set[int] = set()
-    for match in _CLOSING_ISSUE_REFERENCE_PATTERN.finditer(body):
-        numbers.update(issue_numbers(match.group("reference"), repository))
+    for clause in _CLOSING_ISSUE_REFERENCE_PATTERN.finditer(body):
+        reference = clause.group("reference")
+        if reference.startswith("#"):
+            numbers.add(int(reference[1:]))
+            continue
+        match = _FULL_ISSUE_PATTERN.fullmatch(reference)
+        if match is not None and f"{match.group('owner')}/{match.group('repo')}".casefold() == expected_repository:
+            numbers.add(int(match.group("number")))
     return numbers
 
 

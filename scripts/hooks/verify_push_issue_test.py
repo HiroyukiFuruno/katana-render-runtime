@@ -462,6 +462,7 @@ class VerifyPushIssueTest(unittest.TestCase):
             'Refs "https://github.com/HiroyukiFuruno/katana-render-runtime/issues/642"'
         )
         self.assertEqual(subject.issue_numbers(valid, repository), {64, 640, 641, 642})
+        self.assertEqual(subject.issue_numbers("changelog: avoid #64", repository), set())
         malformed = "Refs https://github.com/HiroyukiFuruno/katana-render-runtime/issues/64x"
         self.assertEqual(subject.issue_numbers(malformed, repository), set())
         with self.assertRaisesRegex(subject.ContractViolation, "Issue参照"):
