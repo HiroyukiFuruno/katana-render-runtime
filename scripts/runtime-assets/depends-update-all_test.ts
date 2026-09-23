@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import fs from "node:fs";
 import { type DependencyCommandRunner, DependencyUpdateAllCommand } from "./depends-update-all";
 import { RuntimeAssetCatalog, type RuntimeAssetDefinition } from "./runtime-asset-common";
 
@@ -39,6 +40,18 @@ test("更新が必要なランタイム資産だけを最新バージョンへ�
   ]);
 });
 
+test("一括更新はRustのmajorとpinned依存を含め、TypeScriptを旧版へ戻さない", () => {
+  const justfile = fs.readFileSync("Justfile", "utf8");
+  const recipeStart = justfile.indexOf("depends-update-all:");
+  const recipe = justfile.slice(recipeStart, justfile.indexOf("\n\n", recipeStart));
+
+  expect(recipe).toContain(
+    "{{CARGO}} upgrade --incompatible allow --pinned allow --recursive true",
+  );
+  expect(recipe).toContain("bun update --latest");
+  expect(recipe).not.toMatch(/bun add -d typescript@/);
+});
+
 async function dependsUpdateRecipeLines(): Promise<string[]> {
   const justfile = await Bun.file(new URL("../../Justfile", import.meta.url)).text();
   const recipe = justfile.match(/^depends-update-all:\n([\s\S]*?)(?=^\S)/m)?.[1];
@@ -54,7 +67,7 @@ async function dependsUpdateRecipeLines(): Promise<string[]> {
 test("depends-update-all は既存の更新・品質・比較ステップを各1回保持する", async () => {
   const lines = await dependsUpdateRecipeLines();
   const requiredSteps = [
-    "{{CARGO}} upgrade -i",
+    "{{CARGO}} upgrade --incompatible allow --pinned allow --recursive true",
     "{{CARGO}} update",
     "bun update --latest",
     "bun run scripts/runtime-assets/depends-update-all.ts",
