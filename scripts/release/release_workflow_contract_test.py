@@ -12,6 +12,12 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.retry = (root / ".github/workflows/release-publish-retry.yml").read_text(encoding="utf-8")
         self.publisher = (root / "scripts/release/publish-crates.sh").read_text(encoding="utf-8")
 
+    def test_release_checks_install_the_bun_resolver_before_freshness_validation(self) -> None:
+        for job in (self.release[self.release.index("  release-context:"):self.release.index("  release:\n")], self.release[self.release.index("  release:\n"):]):
+            self.assertIn("uses: oven-sh/setup-bun@v2", job)
+            self.assertIn("bun-version: 1.4.2", job)
+            self.assertIn("run: bun install --frozen-lockfile", job)
+
     def test_release_target_check_requires_dependency_freshness_before_tagging(self) -> None:
         justfile = (Path(__file__).parents[2] / "Justfile").read_text(encoding="utf-8")
         freshness = justfile.index("python3 scripts/release/verify_dependency_freshness.py")

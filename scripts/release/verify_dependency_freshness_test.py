@@ -177,7 +177,9 @@ class DependencyFreshnessTest(unittest.TestCase):
             "": True,
             "Locking 0 packages to latest compatible versions": True,
             "Locking 1 package to latest compatible versions": False,
+            "Locking 1 package to latest compatible version": False,
             "Locking 2 packages to latest compatible versions": False,
+            "Locking 0 packages (Rust 1.95.0) to latest compatible version": True,
         }
         for cargo_output, expected in cases.items():
             with self.subTest(cargo_output=cargo_output), patch.object(

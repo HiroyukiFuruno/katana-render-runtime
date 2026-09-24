@@ -20,6 +20,7 @@ VERIFY_RELEASE_TARGET = util.module_from_spec(MODULE_SPEC)
 sys.modules[MODULE_SPEC.name] = VERIFY_RELEASE_TARGET
 MODULE_SPEC.loader.exec_module(VERIFY_RELEASE_TARGET)
 REQUIRED_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_COMMITS
+FINAL_RELEASE_TREE = "51d80307f9e63ea5e2d264dd9ae3108eb6f2aa86"
 
 
 def isolated_git_environment() -> dict[str, str]:
@@ -114,6 +115,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
     def test_accepts_actual_head_equivalent_squash_but_rejects_changed_required_path(
         self,
     ) -> None:
+        self.assertEqual(VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_TERMINAL, FINAL_RELEASE_TREE)
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_root = Path(temporary_directory)
             repository = temporary_root / "candidate"
@@ -175,14 +177,14 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 git("config", "user.email", "release-test@example.invalid")
                 git("config", "user.name", "Release Target Test")
                 git("fetch", "-q", str(source_repository), "HEAD:refs/heads/release")
-                git("branch", "-f", "terminal", VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_TERMINAL)
+                git("branch", "-f", "final-release", FINAL_RELEASE_TREE)
                 git("branch", "-f", "base", VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE)
                 squash = git(
                     "commit-tree",
-                    # The candidate may contain later governance work.  Model
-                    # the documented squash exception with the immutable
-                    # required release terminal tree itself.
-                    "terminal^{tree}",
+                    # Model the documented squash exception with the actual
+                    # final non-gate v0.4.21 release tree, rather than the
+                    # terminal constant under test.
+                    "final-release^{tree}",
                     "-p",
                     "base",
                     "-m",
