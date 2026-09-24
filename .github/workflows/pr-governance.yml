@@ -220,7 +220,7 @@ jobs:
 
       - name: Create resolver-failure barrier branch-protection token
         id: protection-token
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -353,7 +353,7 @@ jobs:
       # instead of exposing a prior trusted success.
       - name: Create resolver-failure barrier marker write token
         id: marker-write
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -363,7 +363,7 @@ jobs:
 
       - name: Create resolver-failure barrier marker read token
         id: marker-read
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -912,7 +912,7 @@ jobs:
         if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.current-targets.outputs.has_preinvalidate_targets == 'true' || steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true') && steps.barrier-source.outcome == 'success'
         id: barrier-marker-write
         continue-on-error: true
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -924,7 +924,7 @@ jobs:
         if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.current-targets.outputs.has_preinvalidate_targets == 'true' || steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true') && steps.barrier-source.outcome == 'success'
         id: barrier-marker-read
         continue-on-error: true
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -972,7 +972,7 @@ jobs:
         if: always() && steps.barrier-source.outcome == 'success'
         id: barrier-protection-activate
         continue-on-error: true
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -1045,7 +1045,7 @@ jobs:
       - name: Create first priority invalidator write token
         if: always() && steps.barrier-source.outcome == 'success' && steps.current-targets.outputs.has_preinvalidate_chunk_1 == 'true'
         id: pre-invalidator-write-1
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -1056,7 +1056,7 @@ jobs:
       - name: Create first priority invalidator read token
         if: always() && steps.barrier-source.outcome == 'success' && steps.current-targets.outputs.has_preinvalidate_chunk_1 == 'true'
         id: pre-invalidator-read-1
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -1141,7 +1141,7 @@ jobs:
       - name: Create second priority invalidator write token
         if: always() && steps.barrier-source.outcome == 'success' && steps.current-targets.outputs.has_preinvalidate_chunk_2 == 'true'
         id: pre-invalidator-write-2
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -1152,7 +1152,7 @@ jobs:
       - name: Create second priority invalidator read token
         if: always() && steps.barrier-source.outcome == 'success' && steps.current-targets.outputs.has_preinvalidate_chunk_2 == 'true'
         id: pre-invalidator-read-2
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -1280,7 +1280,7 @@ jobs:
       - name: Create dispatcher App token after priority preinvalidation
         if: steps.current-targets.outputs.has_targets == 'true'
         id: dispatcher-token
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -1536,7 +1536,7 @@ jobs:
       - name: Create fresh early Check Run read token
         if: steps.current-targets.outputs.has_priority_targets == 'true'
         id: early-check-read-token
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -1646,7 +1646,7 @@ jobs:
       - name: Create retained-history audit read token
         if: steps.current-targets.outputs.has_all_invalidation_chunk_1 == 'true' || steps.current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
         id: retained-history-read
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -1775,7 +1775,7 @@ jobs:
       - name: Create first all-open invalidator write token
         if: steps.current-targets.outputs.has_all_invalidation_chunk_1 == 'true'
         id: all-invalidator-write-1
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -1786,7 +1786,7 @@ jobs:
       - name: Create first all-open invalidator read token
         if: steps.current-targets.outputs.has_all_invalidation_chunk_1 == 'true'
         id: all-invalidator-read-1
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -1921,7 +1921,7 @@ jobs:
       - name: Create second all-open invalidator write token
         if: steps.current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
         id: all-invalidator-write-2
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -1932,7 +1932,7 @@ jobs:
       - name: Create second all-open invalidator read token
         if: steps.current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
         id: all-invalidator-read-2
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -2020,7 +2020,7 @@ jobs:
       - name: Create fresh affected-head barrier read token
         if: steps.affected-barrier.outputs.active == 'true'
         id: barrier-read-release
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -2034,7 +2034,7 @@ jobs:
       - name: Create fresh affected-head barrier branch-protection token
         if: steps.affected-barrier.outputs.active == 'true'
         id: barrier-protection-release
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -2249,7 +2249,7 @@ jobs:
       - name: Create fresh all-writer dispatcher token
         if: steps.current-targets.outputs.has_targets == 'true'
         id: all-dispatcher-token
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -2601,7 +2601,7 @@ jobs:
         # installation REST rate bucket, so the paced writer remains required.
         if: steps.dispatch-all-1.outputs.has_terminal_batch_1 == 'true' && steps.dispatch-all-1.outputs.writer_run_id != ''
         id: terminal-read-1
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -2723,7 +2723,7 @@ jobs:
       - name: Create second terminal segment dispatcher token
         if: steps.dispatch-all-1.outputs.has_terminal_batch_2 == 'true' && steps.await-all-1.outcome == 'success' && steps.await-all-1.outputs.success == 'true'
         id: terminal-dispatch-2
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -2901,7 +2901,7 @@ jobs:
         # This new token renews expiry, not the installation rate limit.
         if: steps.dispatch-all-1.outputs.has_terminal_batch_2 == 'true' && steps.await-all-1.outcome == 'success' && steps.await-all-1.outputs.success == 'true' && steps.dispatch-all-2.outputs.writer_run_id != ''
         id: terminal-read-2
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -2994,7 +2994,7 @@ jobs:
       - name: Create third terminal segment dispatcher token
         if: steps.dispatch-all-1.outputs.has_terminal_batch_3 == 'true' && steps.await-all-2.outcome == 'success' && steps.await-all-2.outputs.success == 'true'
         id: terminal-dispatch-3
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -3131,7 +3131,7 @@ jobs:
         # This new token renews expiry, not the installation rate limit.
         if: steps.dispatch-all-1.outputs.has_terminal_batch_3 == 'true' && steps.await-all-2.outcome == 'success' && steps.await-all-2.outputs.success == 'true' && steps.dispatch-all-3.outputs.writer_run_id != ''
         id: terminal-read-3
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -3222,7 +3222,7 @@ jobs:
       - name: Create fourth terminal segment dispatcher token
         if: steps.dispatch-all-1.outputs.has_terminal_batch_4 == 'true' && steps.await-all-3.outcome == 'success' && steps.await-all-3.outputs.success == 'true'
         id: terminal-dispatch-4
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
@@ -3359,7 +3359,7 @@ jobs:
         # This new token renews expiry, not the installation rate limit.
         if: steps.dispatch-all-1.outputs.has_terminal_batch_4 == 'true' && steps.await-all-3.outcome == 'success' && steps.await-all-3.outputs.success == 'true' && steps.dispatch-all-4.outputs.writer_run_id != ''
         id: terminal-read-4
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
