@@ -35,6 +35,34 @@ class DependencyFreshnessTest(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 freshness.Version.parse(value)
 
+    def test_latest_parses_each_supported_dependency_ecosystem(self) -> None:
+        responses = {
+            "https://crates.io/api/v1/crates/serde": json.dumps(
+                {"crate": {"newest_version": "1.2.0"}}
+            ).encode("utf-8"),
+            "https://registry.npmjs.org/@scope%2Fexample/latest": json.dumps(
+                {"version": "2.3.0"}
+            ).encode("utf-8"),
+            "https://example.test/drawio": json.dumps({"tag_name": "v3.4.0"}).encode("utf-8"),
+            "https://example.test/plantuml": b"<metadata><version>1.0.0</version><version>1.1.0</version></metadata>",
+            "https://example.test/mermaid": json.dumps({"version": "4.5.0"}).encode("utf-8"),
+        }
+
+        def fake_fetch(url: str) -> bytes:
+            return responses[url]
+
+        packages = [
+            freshness.Package("Rust", "serde", "1.0.0"),
+            freshness.Package("JavaScript", "@scope/example", "2.0.0"),
+            freshness.Package("Runtime asset", "drawio|https://example.test/drawio", "3.0.0"),
+            freshness.Package("Runtime asset", "plantuml|https://example.test/plantuml", "1.0.0"),
+            freshness.Package("Runtime asset", "mermaid|https://example.test/mermaid", "4.0.0"),
+        ]
+        with patch.object(freshness, "fetch", fake_fetch):
+            self.assertEqual([freshness.latest(package) for package in packages], [
+                "1.2.0", "2.3.0", "3.4.0", "1.1.0", "4.5.0"
+            ])
+
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
