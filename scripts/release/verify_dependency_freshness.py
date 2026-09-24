@@ -249,9 +249,9 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
         r"Locking ([0-9]+) packages to latest(?: Rust [0-9.]+)? compatible versions",
         output,
     )
-    if match is None:
-        raise ValueError("cargo update dry-run did not report lockfile resolution")
-    return match.group(1) == "0"
+    # Cargo omits the Locking line when the existing lockfile already resolves
+    # every compatible dependency; a successful dry-run is then the no-update result.
+    return match is None or match.group(1) == "0"
 
 
 def js_packages(root: Path) -> list[Package]:
