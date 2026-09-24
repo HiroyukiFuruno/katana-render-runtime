@@ -691,6 +691,32 @@ def _validate_pr_canonical_issue(
         )
 
 
+def _has_closed_release_issue_evidence(
+    *,
+    repository: str,
+    references: set[int],
+    issue_loader: IssueLoader,
+) -> bool:
+    """Validate a completed release's immutable Issue evidence."""
+
+    if not references:
+        return False
+    issues: list[Issue] = []
+    for number in sorted(references):
+        issue = issue_loader(number)
+        if issue is None:
+            raise ContractViolation(f"Issue #{number}を対象repositoryで確認できません")
+        if type(issue.number) is not int or issue.number != number:
+            raise ContractViolation(f"Issue #{number}のsnapshot番号が一致しません")
+        canonical_url = f"https://github.com/{repository}/issues/{number}"
+        if not isinstance(issue.url, str) or issue.url.casefold() != canonical_url.casefold():
+            raise ContractViolation(
+                f"Issue #{number}は対象repositoryのcanonical Issue URLではありません"
+            )
+        issues.append(issue)
+    return all(issue.state == "CLOSED" for issue in issues)
+
+
 def validate_pr_range(
     *,
     repository: str,
@@ -720,16 +746,22 @@ def validate_pr_range(
     references: set[int] = set()
     for message in commit_messages:
         references.update(issue_numbers(message, repository))
-    if len(references) != 1:
+    closed_release_evidence = branch.startswith("release/v") and _has_closed_release_issue_evidence(
+        repository=repository,
+        references=references,
+        issue_loader=issue_loader,
+    )
+    if not closed_release_evidence and len(references) != 1:
         raise ContractViolation(
             "PR rangeの参照Issueは同一repositoryのcanonicalなOPEN Issue 1件である必要があります: "
             f"件数={len(references)}"
         )
-    _validate_pr_canonical_issue(
-        repository=repository,
-        number=next(iter(references)),
-        issue_loader=issue_loader,
-    )
+    if not closed_release_evidence:
+        _validate_pr_canonical_issue(
+            repository=repository,
+            number=next(iter(references)),
+            issue_loader=issue_loader,
+        )
 
     changed_paths = _pr_changed_paths(
         repository=repository, base_sha=base_sha, head_sha=head_sha

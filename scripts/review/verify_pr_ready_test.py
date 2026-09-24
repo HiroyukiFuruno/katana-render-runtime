@@ -1168,6 +1168,37 @@ class VerifyPrReadyTest(unittest.TestCase):
         )
         self.assertIn("OPEN", " ".join(errors))
 
+    def test_closing_contract_accepts_all_closed_release_evidence(self) -> None:
+        closed_issues = tuple(
+            subject.issue_contract.Issue(
+                number=number,
+                state="CLOSED",
+                body="Release evidence",
+                url=f"https://github.com/owner/repo/issues/{number}",
+                updated_at="2026-08-29T03:03:00Z",
+            )
+            for number in (64, 78, 80)
+        )
+        self.assertEqual(
+            subject.closing_reference_errors(
+                repository="owner/repo",
+                body="v0.4.21 release preparation",
+                referenced_issues=closed_issues,
+                allow_closed_release_evidence=True,
+            ),
+            [],
+        )
+        self.assertTrue(
+            subject._allows_closed_release_evidence(
+                "release/v0.4.21", closed_issues
+            )
+        )
+        self.assertFalse(
+            subject._allows_closed_release_evidence(
+                "feature/release", closed_issues
+            )
+        )
+
     def test_closing_contract_rejects_noncanonical_issue_url(self) -> None:
         issue = subject.issue_contract.Issue(
             number=64,

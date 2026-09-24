@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import total_ordering
@@ -178,6 +179,55 @@ def rust_packages(root: Path) -> list[Package]:
     return sorted(resolved.values(), key=lambda package: (package.name, Version.parse(package.current)))
 
 
+def rust_manifest_dependencies(root: Path) -> list[Package]:
+    """Return direct registry requirements updated by ``cargo upgrade``."""
+    dependencies_by_version: dict[tuple[str, str], Package] = {}
+    for manifest in sorted(root.glob("**/Cargo.toml")):
+        if any(part in {"target", "vendor", ".git", ".worktrees"} for part in manifest.relative_to(root).parts):
+            continue
+        try:
+            payload = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"Rust manifest must be a table: {manifest}")
+        sections = ("dependencies", "dev-dependencies", "build-dependencies")
+        tables = [payload.get(section) for section in sections]
+        workspace = payload.get("workspace")
+        if isinstance(workspace, dict):
+            tables.append(workspace.get("dependencies"))
+        for dependencies in tables:
+            if not isinstance(dependencies, dict):
+                continue
+            for declared_name, declaration in dependencies.items():
+                if not isinstance(declared_name, str):
+                    raise ValueError(f"invalid Rust dependency name in {manifest}")
+                version: object | None = declaration
+                package_name = declared_name
+                if isinstance(declaration, dict):
+                    if "path" in declaration or "git" in declaration or declaration.get("workspace") is True:
+                        continue
+                    version = declaration.get("version")
+                    package = declaration.get("package")
+                    if package is not None:
+                        if not isinstance(package, str):
+                            raise ValueError(f"invalid Rust dependency package name in {manifest}: {declared_name}")
+                        package_name = package
+                if not isinstance(version, str):
+                    continue
+                match = re.fullmatch(r"(?:=|\^|~)?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", version)
+                if match is None:
+                    raise ValueError(f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}")
+                # cargo upgrade leaves broad requirements such as `1` and `1.0`
+                # unchanged; three-component requirements are its update target.
+                if match.group(2) is None or match.group(3) is None:
+                    continue
+                declared = ".".join((match.group(1), match.group(2), match.group(3)))
+                Version.parse(declared)
+                dependencies_by_version[(package_name, declared)] = Package("Rust manifest dependency", package_name, declared)
+    return sorted(dependencies_by_version.values(), key=lambda package: (package.name, Version.parse(package.current)))
+
+
 def rust_lock_is_latest_compatible(root: Path) -> bool:
     """Use Cargo's resolver to validate direct and transitive lock freshness.
 
@@ -313,6 +363,11 @@ def latest(package: Package) -> str:
         if not isinstance(payload, dict):
             raise ValueError(f"latest version response must be a JSON object: {package.name}")
         value = payload.get("version")
+    elif package.ecosystem == "Rust manifest dependency":
+        payload = json.loads(fetch(f"https://crates.io/api/v1/crates/{parse.quote(package.name, safe='')}").decode("utf-8"))
+        if not isinstance(payload, dict) or not isinstance(payload.get("crate"), dict):
+            raise ValueError(f"latest version response must be a JSON object: {package.name}")
+        value = payload["crate"].get("newest_version")
     else:
         kind, url = package.name.split("|", maxsplit=1)
         body = fetch(url).decode("utf-8")
@@ -348,6 +403,7 @@ def main(argv: list[str] | None = None) -> int:
             print("Rust Cargo.lock is not at the latest compatible resolution.", file=sys.stderr)
             print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
             return 1
+        rust_manifest = rust_manifest_dependencies(args.root)
         javascript = js_packages(args.root)
         if not js_lock_is_latest_compatible(args.root):
             print("Dependency freshness check rejected this release:", file=sys.stderr)
@@ -355,8 +411,9 @@ def main(argv: list[str] | None = None) -> int:
             print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
             return 1
         packages = runtime_assets(args.root)
+        freshness_packages = [*rust_manifest, *packages]
         with ThreadPoolExecutor(max_workers=8) as executor:
-            resolved = list(zip(packages, executor.map(latest, packages, timeout=TIMEOUT_SECONDS * len(packages))))
+            resolved = list(zip(freshness_packages, executor.map(latest, freshness_packages, timeout=TIMEOUT_SECONDS * len(freshness_packages))))
     except (ValueError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         print(f"Dependency freshness check failed closed: {exc}", file=sys.stderr)
         return 1

@@ -1199,6 +1199,67 @@ class VerifyPushIssueTest(unittest.TestCase):
                     issue_loader=lambda number: self.issue(number),
                 )
 
+    def test_pr_range_accepts_all_closed_release_issue_evidence(self) -> None:
+        base_sha = "a" * 40
+        head_sha = "b" * 40
+        compare = {
+            "base_commit": {"sha": base_sha},
+            "merge_base_commit": {"sha": base_sha},
+            "status": "ahead",
+            "ahead_by": 1,
+            "behind_by": 0,
+            "total_commits": 1,
+            "commits": [
+                {
+                    "sha": head_sha,
+                    "commit": {"message": "release: v0.4.21\n\nRefs #64 #78 #80"},
+                }
+            ],
+            "files": [{"filename": "Cargo.lock"}],
+        }
+        issues = {
+            number: self.issue(number, state="CLOSED")
+            for number in (64, 78, 80)
+        }
+        with patch.object(subject, "_gh_json", return_value=compare):
+            self.assertEqual(
+                subject.validate_pr_range(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    pr_number=87,
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                    branch="release/v0.4.21",
+                    issue_loader=issues.get,
+                ),
+                {64, 78, 80},
+            )
+
+    def test_pr_range_rejects_closed_issue_outside_release_branch(self) -> None:
+        base_sha = "a" * 40
+        head_sha = "b" * 40
+        compare = {
+            "base_commit": {"sha": base_sha},
+            "merge_base_commit": {"sha": base_sha},
+            "status": "ahead",
+            "ahead_by": 1,
+            "behind_by": 0,
+            "total_commits": 1,
+            "commits": [
+                {"sha": head_sha, "commit": {"message": "fix: linked\n\nRefs #64"}}
+            ],
+            "files": [{"filename": "scripts/hooks/pre-push.sh"}],
+        }
+        with patch.object(subject, "_gh_json", return_value=compare):
+            with self.assertRaisesRegex(subject.ContractViolation, "OPEN"):
+                subject.validate_pr_range(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    pr_number=87,
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                    branch="fix/issue-contract",
+                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
+                )
+
     def test_pr_range_rejects_noncanonical_issue_url(self) -> None:
         base_sha = "a" * 40
         head_sha = "b" * 40

@@ -860,12 +860,28 @@ def closing_reference_errors(
     repository: str,
     body: object,
     referenced_issues: Sequence[issue_contract.Issue],
+    allow_closed_release_evidence: bool = False,
 ) -> list[str]:
-    """Require one canonical open Issue in both commits and the PR body."""
+    """Validate canonical Issue evidence for ordinary and release PRs."""
 
     if not isinstance(body, str):
         raise TypeError("pull request body must be a string")
     errors: list[str] = []
+    if allow_closed_release_evidence:
+        if not referenced_issues or any(issue.state != "CLOSED" for issue in referenced_issues):
+            raise ValueError("closed release evidence requires one or more CLOSED Issues")
+        for issue in referenced_issues:
+            if type(issue.number) is not int or issue.number < 1:
+                errors.append("commit範囲のrelease Issue番号が不正です")
+            elif (
+                not isinstance(issue.url, str)
+                or issue.url.casefold()
+                != f"https://github.com/{repository}/issues/{issue.number}".casefold()
+            ):
+                errors.append(
+                    f"Issue #{issue.number}は対象repositoryのcanonical Issue URLではありません"
+                )
+        return errors
     if len(referenced_issues) != 1:
         errors.append(
             "commit範囲の参照Issueはちょうど1件のOPEN Issueである必要があります: "
@@ -907,6 +923,20 @@ def closing_reference_errors(
             + "; ".join(details)
         )
     return errors
+
+
+def _allows_closed_release_evidence(
+    head_branch: object,
+    referenced_issues: Sequence[issue_contract.Issue],
+) -> bool:
+    """Allow completed release evidence only from a release/v* head branch."""
+
+    return (
+        isinstance(head_branch, str)
+        and head_branch.startswith("release/v")
+        and bool(referenced_issues)
+        and all(issue.state == "CLOSED" for issue in referenced_issues)
+    )
 
 
 def _open_pull_requests(repository: str) -> list[dict[str, object]]:
@@ -1900,6 +1930,7 @@ def _verify_final_readiness_snapshot_unchanged(
     initial_required_checks: _RequiredStatusChecks,
     initial_issue_identity: tuple[tuple[int, str, str, str, str], ...],
     initial_closers: frozenset[int],
+    allow_closed_release_evidence: bool = False,
     open_pull_requests: Sequence[Mapping[str, object]] | None = None,
     expected_is_draft: bool | None = None,
 ) -> None:
@@ -1980,8 +2011,11 @@ def _verify_final_readiness_snapshot_unchanged(
     )
     if current_issue_identity != initial_issue_identity:
         raise ValueError("canonical Issue snapshot changed during readiness check")
-    if len(current_issues) != 1:
+    if not allow_closed_release_evidence and len(current_issues) != 1:
         raise ValueError("canonical Issue snapshot is no longer exactly one Issue")
+
+    if allow_closed_release_evidence:
+        return
 
     current_closers = frozenset(
         number
@@ -3005,7 +3039,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--repo",
         repository,
         "--json",
-        "isDraft,baseRefOid,headRefOid,baseRefName,body,updatedAt,statusCheckRollup,reviews,author",
+        "isDraft,baseRefOid,headRefOid,baseRefName,headRefName,body,updatedAt,statusCheckRollup,reviews,author",
     )
     if not isinstance(pull_request, dict):
         raise TypeError("pull request response must be an object")
@@ -3040,12 +3074,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         base_sha=base,
         head_sha=head,
     )
+    allow_closed_release_evidence = _allows_closed_release_evidence(
+        pull_request.get("headRefName"), referenced_issues
+    )
     initial_body = pull_request.get("body")
     initial_body_sha256 = _body_sha256(initial_body)
     errors = closing_reference_errors(
         repository=repository,
         body=initial_body,
         referenced_issues=referenced_issues,
+        allow_closed_release_evidence=allow_closed_release_evidence,
     )
     binding_error = _governance_app_binding_error(initial_required_checks)
     if binding_error is not None:
@@ -3075,7 +3113,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             errors.append(governance_error)
     initial_issue_identity: tuple[tuple[int, str, str, str, str], ...] = ()
     initial_closers: frozenset[int] = frozenset()
-    if referenced_issues and not errors:
+    if referenced_issues and not errors and not allow_closed_release_evidence:
         open_pull_requests = (
             _open_pull_request_snapshot(arguments.open_pull_snapshot)
             if arguments.open_pull_snapshot is not None
@@ -3129,9 +3167,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         initial_required_checks=initial_required_checks,
         initial_issue_identity=initial_issue_identity,
         initial_closers=initial_closers,
+        allow_closed_release_evidence=allow_closed_release_evidence,
         open_pull_requests=(
             open_pull_requests
-            if arguments.open_pull_snapshot is not None and referenced_issues and not errors
+            if (
+                arguments.open_pull_snapshot is not None
+                and referenced_issues
+                and not errors
+                and not allow_closed_release_evidence
+            )
             else None
         ),
         expected_is_draft=arguments.require_draft,
@@ -3167,9 +3211,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         initial_required_checks=initial_required_checks,
         initial_issue_identity=initial_issue_identity,
         initial_closers=initial_closers,
+        allow_closed_release_evidence=allow_closed_release_evidence,
         open_pull_requests=(
             open_pull_requests
-            if arguments.open_pull_snapshot is not None and referenced_issues
+            if (
+                arguments.open_pull_snapshot is not None
+                and referenced_issues
+                and not allow_closed_release_evidence
+            )
             else None
         ),
         expected_is_draft=arguments.require_draft,

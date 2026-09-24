@@ -113,6 +113,30 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertEqual(result, 0, stderr)
         self.assertIn("passed (3 resolved dependencies and pinned runtime assets)", stdout)
 
+    def test_stale_direct_rust_manifest_dependency_rejects_release(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"=1.0.0\"\n",
+            encoding="utf-8",
+        )
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.1.0"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency serde: 1.0.0 -> 1.1.0", stderr)
+        self.assertIn("just depends-update-all", stderr)
+
+    def test_stale_non_exact_rust_manifest_dependency_rejects_release(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"1.0.0\"\n",
+            encoding="utf-8",
+        )
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.1.0"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency serde: 1.0.0 -> 1.1.0", stderr)
+        self.assertIn("just depends-update-all", stderr)
+
     def test_stale_rust_lock_rejects_release_with_repair_command(self) -> None:
         result, _, stderr = self.run_check(self.clean_responses(), rust_fresh=False)
         self.assertEqual(result, 1)
