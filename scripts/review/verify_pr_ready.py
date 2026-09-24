@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import fcntl
 import hashlib
 import json
@@ -66,6 +68,12 @@ _CODEX_FORMAL_REVIEW = re.compile(
     r"</details>\r?\n?\Z"
 )
 _SHA = re.compile(r"[0-9a-fA-F]{40}")
+_RELEASE_BRANCH_VERSION = re.compile(
+    r"\Arelease/v(?P<version>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))\Z"
+)
+_WORKSPACE_VERSION = re.compile(
+    r'\Aversion\s*=\s*"(?P<version>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))"\s*(?:#.*)?\Z'
+)
 _TRUSTED_REPLY_ASSOCIATIONS = frozenset({"COLLABORATOR", "MEMBER", "OWNER"})
 _TRUSTED_MARKER_ASSOCIATIONS = frozenset({"COLLABORATOR", "MEMBER", "OWNER"})
 _TRUSTED_CHECK = "KRR / PR governance (trusted check)"
@@ -925,18 +933,79 @@ def closing_reference_errors(
     return errors
 
 
-def _allows_closed_release_evidence(
-    head_branch: object,
-    referenced_issues: Sequence[issue_contract.Issue],
-) -> bool:
-    """Allow completed release evidence only from a release/v* head branch."""
+def _workspace_version_at_head(repository: str, head: str) -> str:
+    """Read the immutable workspace version from the reviewed commit."""
+
+    if _SHA.fullmatch(head) is None:
+        raise ValueError("release head SHA is invalid")
+    payload = _gh_json(
+        "api",
+        f"repos/{repository}/contents/Cargo.toml",
+        "--method",
+        "GET",
+        "-f",
+        f"ref={head}",
+    )
+    if not isinstance(payload, Mapping):
+        raise TypeError("release manifest response must be an object")
+    if payload.get("encoding") != "base64" or not isinstance(payload.get("content"), str):
+        raise TypeError("release manifest content must be base64")
+    encoded = payload["content"].replace("\n", "")
+    try:
+        manifest = base64.b64decode(encoded, validate=True).decode("utf-8", "strict")
+    except (UnicodeDecodeError, ValueError, binascii.Error) as error:
+        raise ValueError("release manifest content is invalid") from error
+
+    in_workspace_package = False
+    version: str | None = None
+    for line in manifest.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_workspace_package = stripped == "[workspace.package]"
+            continue
+        if not in_workspace_package:
+            continue
+        match = _WORKSPACE_VERSION.fullmatch(stripped)
+        if match is not None:
+            if version is not None:
+                raise ValueError("release manifest has duplicate workspace version")
+            version = match.group("version")
+    if version is None:
+        raise ValueError("release manifest workspace version is unavailable")
+    return version
+
+
+def _same_repository_head(head_repository: object, repository: str) -> bool:
+    """Accept only a source repository that is exactly the governed repository."""
 
     return (
-        isinstance(head_branch, str)
-        and head_branch.startswith("release/v")
-        and bool(referenced_issues)
-        and all(issue.state == "CLOSED" for issue in referenced_issues)
+        isinstance(head_repository, Mapping)
+        and isinstance(head_repository.get("nameWithOwner"), str)
+        and head_repository["nameWithOwner"].casefold() == repository.casefold()
     )
+
+
+def _allows_closed_release_evidence(
+    *,
+    repository: str,
+    head_branch: object,
+    head_repository: object,
+    head: str,
+    referenced_issues: Sequence[issue_contract.Issue],
+) -> bool:
+    """Allow closed Issue evidence only for the exact reviewed release version."""
+
+    if (
+        not isinstance(head_branch, str)
+        or not _same_repository_head(head_repository, repository)
+        or not referenced_issues
+        or not all(issue.state == "CLOSED" for issue in referenced_issues)
+    ):
+        return False
+    match = _RELEASE_BRANCH_VERSION.fullmatch(head_branch)
+    if match is None:
+        return False
+    return _workspace_version_at_head(repository, head) == match.group("version")
 
 
 def _open_pull_requests(repository: str) -> list[dict[str, object]]:
@@ -3039,7 +3108,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--repo",
         repository,
         "--json",
-        "isDraft,baseRefOid,headRefOid,baseRefName,headRefName,body,updatedAt,statusCheckRollup,reviews,author",
+        "isDraft,baseRefOid,headRefOid,baseRefName,headRefName,headRepository,body,updatedAt,statusCheckRollup,reviews,author",
     )
     if not isinstance(pull_request, dict):
         raise TypeError("pull request response must be an object")
@@ -3075,7 +3144,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         head_sha=head,
     )
     allow_closed_release_evidence = _allows_closed_release_evidence(
-        pull_request.get("headRefName"), referenced_issues
+        repository=repository,
+        head_branch=pull_request.get("headRefName"),
+        head_repository=pull_request.get("headRepository"),
+        head=head,
+        referenced_issues=referenced_issues,
     )
     initial_body = pull_request.get("body")
     initial_body_sha256 = _body_sha256(initial_body)
@@ -3113,32 +3186,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             errors.append(governance_error)
     initial_issue_identity: tuple[tuple[int, str, str, str, str], ...] = ()
     initial_closers: frozenset[int] = frozenset()
-    if referenced_issues and not errors and not allow_closed_release_evidence:
-        open_pull_requests = (
-            _open_pull_request_snapshot(arguments.open_pull_snapshot)
-            if arguments.open_pull_snapshot is not None
-            else _open_pull_requests(repository)
+    if referenced_issues and not errors:
+        initial_issue_identity = _canonical_issue_identity(
+            repository=repository,
+            referenced_issues=referenced_issues,
         )
-        errors.extend(
-            closing_open_pull_request_errors(
-                repository=repository,
-                current_pull_request=arguments.pr,
-                referenced_issues=referenced_issues,
-                open_pull_requests=open_pull_requests,
+        if not allow_closed_release_evidence:
+            open_pull_requests = (
+                _open_pull_request_snapshot(arguments.open_pull_snapshot)
+                if arguments.open_pull_snapshot is not None
+                else _open_pull_requests(repository)
             )
-        )
-        if not errors:
-            initial_issue_identity = _canonical_issue_identity(
-                repository=repository,
-                referenced_issues=referenced_issues,
-            )
-            initial_closers = frozenset(
-                _open_pull_request_closers(
+            errors.extend(
+                closing_open_pull_request_errors(
                     repository=repository,
-                    issue_number=referenced_issues[0].number,
+                    current_pull_request=arguments.pr,
+                    referenced_issues=referenced_issues,
                     open_pull_requests=open_pull_requests,
                 )
             )
+            if not errors:
+                initial_closers = frozenset(
+                    _open_pull_request_closers(
+                        repository=repository,
+                        issue_number=referenced_issues[0].number,
+                        open_pull_requests=open_pull_requests,
+                    )
+                )
     errors.extend(
         readiness_errors(
             pull_request,

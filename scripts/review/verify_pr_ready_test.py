@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import fcntl
 import json
 import hashlib
@@ -270,6 +271,8 @@ def successful_state() -> tuple[
         "baseRefOid": "c" * 40,
         "baseRefName": "master",
         "headRefOid": HEAD,
+        "headRefName": "feature/pr-ready",
+        "headRepository": {"nameWithOwner": "owner/repo"},
         "body": BODY,
         "author": {"login": "HiroyukiFuruno"},
         "updatedAt": "2026-08-29T03:03:00Z",
@@ -1168,6 +1171,27 @@ class VerifyPrReadyTest(unittest.TestCase):
         )
         self.assertIn("OPEN", " ".join(errors))
 
+    def test_workspace_version_at_head_reads_only_workspace_package_version(self) -> None:
+        manifest = (
+            '[package]\nversion = "9.9.9"\n'
+            '[workspace.package]\nversion = "0.4.21"\n'
+            '[workspace.dependencies]\nexample = "1"\n'
+        )
+        payload = {
+            "encoding": "base64",
+            "content": base64.b64encode(manifest.encode("utf-8")).decode("ascii"),
+        }
+        with patch.object(subject, "_gh_json", return_value=payload) as gh_json:
+            self.assertEqual(subject._workspace_version_at_head("owner/repo", HEAD), "0.4.21")
+        gh_json.assert_called_once_with(
+            "api",
+            "repos/owner/repo/contents/Cargo.toml",
+            "--method",
+            "GET",
+            "-f",
+            f"ref={HEAD}",
+        )
+
     def test_closing_contract_accepts_all_closed_release_evidence(self) -> None:
         closed_issues = tuple(
             subject.issue_contract.Issue(
@@ -1188,16 +1212,50 @@ class VerifyPrReadyTest(unittest.TestCase):
             ),
             [],
         )
-        self.assertTrue(
-            subject._allows_closed_release_evidence(
-                "release/v0.4.21", closed_issues
+        with patch.object(subject, "_workspace_version_at_head", return_value="0.4.21") as version_at_head:
+            self.assertTrue(
+                subject._allows_closed_release_evidence(
+                    repository="owner/repo",
+                    head_branch="release/v0.4.21",
+                    head_repository={"nameWithOwner": "owner/repo"},
+                    head=HEAD,
+                    referenced_issues=closed_issues,
+                )
             )
-        )
-        self.assertFalse(
-            subject._allows_closed_release_evidence(
-                "feature/release", closed_issues
+            version_at_head.assert_called_once_with("owner/repo", HEAD)
+        for branch in ("feature/release", "release/v0.4.21.1", "release/v01.4.21"):
+            with self.subTest(branch=branch), patch.object(subject, "_workspace_version_at_head") as version_at_head:
+                self.assertFalse(
+                    subject._allows_closed_release_evidence(
+                        repository="owner/repo",
+                        head_branch=branch,
+                        head_repository={"nameWithOwner": "owner/repo"},
+                        head=HEAD,
+                        referenced_issues=closed_issues,
+                    )
+                )
+                version_at_head.assert_not_called()
+        with patch.object(subject, "_workspace_version_at_head") as version_at_head:
+            self.assertFalse(
+                subject._allows_closed_release_evidence(
+                    repository="owner/repo",
+                    head_branch="release/v0.4.21",
+                    head_repository={"nameWithOwner": "fork/repo"},
+                    head=HEAD,
+                    referenced_issues=closed_issues,
+                )
             )
-        )
+            version_at_head.assert_not_called()
+        with patch.object(subject, "_workspace_version_at_head", return_value="0.4.20"):
+            self.assertFalse(
+                subject._allows_closed_release_evidence(
+                    repository="owner/repo",
+                    head_branch="release/v0.4.21",
+                    head_repository={"nameWithOwner": "owner/repo"},
+                    head=HEAD,
+                    referenced_issues=closed_issues,
+                )
+            )
 
     def test_closing_contract_rejects_noncanonical_issue_url(self) -> None:
         issue = subject.issue_contract.Issue(
@@ -4223,6 +4281,35 @@ class VerifyPrReadyTest(unittest.TestCase):
                 ),
                 0,
             )
+
+    def test_closed_release_issue_identity_is_fenced(self) -> None:
+        pull_request, threads, comments = successful_state()
+        pull_request["headRefName"] = "release/v0.4.21"
+        closed_issue = subject.issue_contract.Issue(
+            number=64,
+            state="CLOSED",
+            body="Release evidence",
+            url="https://github.com/owner/repo/issues/64",
+            updated_at="2026-08-29T03:00:00Z",
+        )
+        edited_issue = subject.issue_contract.Issue(
+            number=64,
+            state="CLOSED",
+            body="Changed release evidence",
+            url="https://github.com/owner/repo/issues/64",
+            updated_at="2026-08-29T03:00:00Z",
+        )
+        with patch.object(subject, "_gh_json", return_value=pull_request), patch.object(
+            subject, "_paginated_api_array", return_value=comments
+        ), patch.object(subject, "_review_threads", return_value=threads), patch.object(
+            subject, "_workspace_version_at_head", return_value="0.4.21"
+        ), patch.object(
+            subject.issue_contract,
+            "referenced_issue_snapshot",
+            side_effect=[(closed_issue,), (edited_issue,)],
+        ):
+            with self.assertRaisesRegex(ValueError, "canonical Issue snapshot changed"):
+                subject.main(["--pr", "72", "--repository", "owner/repo"])
 
     def test_rejects_trusted_marker_added_before_the_final_fence(self) -> None:
         pull_request, threads, comments = successful_state()
