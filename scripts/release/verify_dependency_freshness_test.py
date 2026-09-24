@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 MODULE_PATH = Path(__file__).with_name("verify_dependency_freshness.py")
@@ -170,6 +171,21 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("Rust Cargo.lock is not at the latest compatible resolution", stderr)
         self.assertIn("just depends-update-all", stderr)
+
+    def test_cargo_update_dry_run_distinguishes_zero_singular_and_plural_updates(self) -> None:
+        cases = {
+            "": True,
+            "Locking 0 packages to latest compatible versions": True,
+            "Locking 1 package to latest compatible versions": False,
+            "Locking 2 packages to latest compatible versions": False,
+        }
+        for cargo_output, expected in cases.items():
+            with self.subTest(cargo_output=cargo_output), patch.object(
+                freshness.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=0, stdout=cargo_output, stderr=""),
+            ):
+                self.assertEqual(freshness.rust_lock_is_latest_compatible(self.root), expected)
 
     def test_rust_metadata_retains_direct_and_transitive_resolution(self) -> None:
         metadata = self.metadata_for_direct_serde()

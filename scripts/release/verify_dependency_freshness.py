@@ -246,7 +246,7 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
         raise ValueError(f"cargo update dry-run failed: {completed.stderr.strip()}")
     output = f"{completed.stdout}\n{completed.stderr}"
     match = re.search(
-        r"Locking ([0-9]+) packages to latest(?: Rust [0-9.]+)? compatible versions",
+        r"Locking ([0-9]+) packages? to latest(?: Rust [0-9.]+)? compatible versions",
         output,
     )
     # Cargo omits the Locking line when the existing lockfile already resolves
