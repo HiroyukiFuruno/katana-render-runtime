@@ -18,7 +18,12 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         target = justfile.index("python3 scripts/release/verify-release-target.py")
         self.assertLess(freshness, target)
         self.assertIn('run: just VERSION="${{ steps.version.outputs.version }}" release-target-check', self.release)
-        self.assertIn('run: just VERSION="${{ steps.version.outputs.version }}" release-check', self.preflight)
+        self.assertIn("- name: Release quality gate", self.preflight)
+        self.assertIn("timeout-minutes: 65", self.preflight)
+        self.assertIn("run: just release-quality", self.preflight)
+        self.assertIn("- name: Release-specific verification", self.preflight)
+        self.assertIn("timeout-minutes: 35", self.preflight)
+        self.assertIn('run: just VERSION="${{ steps.version.outputs.version }}" release-specific', self.preflight)
 
     def test_public_release_and_cleanup_follow_both_registry_publications(self) -> None:
         publish = self.release.index("- name: Publish crates.io")

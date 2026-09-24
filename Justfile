@@ -203,7 +203,7 @@ release-verify: release-target-check
     bash scripts/release/verify-version.sh "{{VERSION}}"
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
     {{CARGO}} package -p katana-render-runtime --locked --allow-dirty
-    {{CARGO}} test --manifest-path "target/package/katana-render-runtime-{{VERSION_BARE}}/Cargo.toml" --lib --locked
+    {{CARGO}} test --manifest-path "target/package/katana-render-runtime-{{VERSION_BARE}}/Cargo.toml" --lib --locked{{TEST_THREAD_ARGS}}
     {{CARGO}} package -p katana-render-runtime-cli --locked --allow-dirty --list >/dev/null
     bash scripts/release/verify-crate-size.sh katana-render-runtime "{{VERSION}}"
     {{CARGO}} publish -p katana-render-runtime --dry-run --locked --allow-dirty
@@ -213,8 +213,14 @@ release-openspec-archive:
     bash scripts/release/check-openspec-release-archive.sh --self-test
     bash scripts/release/check-openspec-release-archive.sh "{{VERSION}}"
 
+# Run the complete quality gate before release-specific verification.
+release-quality: check coverage
+
+# Verify the concrete release version and packaged artifact.
+release-specific: release-openspec-archive release-verify
+
 # Verify release branch readiness before merging
-release-check: release-openspec-archive check coverage release-verify
+release-check: release-quality release-specific
 
 # Verify pull request readiness before merging
 pr-ready-check pr:

@@ -7,17 +7,26 @@ use std::{
 fn release_check_requires_all_quality_and_publish_readiness_gates()
 -> Result<(), Box<dyn std::error::Error>> {
     let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
-    let recipe = recipe_body(&justfile, "release-check")?;
+    let release_check = recipe_body(&justfile, "release-check")?;
+    let quality = recipe_body(&justfile, "release-quality")?;
+    let specific = recipe_body(&justfile, "release-specific")?;
 
-    for required_gate in [
-        "release-openspec-archive",
-        "check",
-        "coverage",
-        "release-verify",
-    ] {
+    for required_gate in ["release-quality", "release-specific"] {
         assert!(
-            recipe.contains(required_gate),
+            release_check.contains(required_gate),
             "release-check must require {required_gate}"
+        );
+    }
+    for required_gate in ["check", "coverage"] {
+        assert!(
+            quality.contains(required_gate),
+            "release-quality must require {required_gate}"
+        );
+    }
+    for required_gate in ["release-openspec-archive", "release-verify"] {
+        assert!(
+            specific.contains(required_gate),
+            "release-specific must require {required_gate}"
         );
     }
     Ok(())
@@ -29,7 +38,7 @@ fn release_verify_tests_the_packaged_library_sources() -> Result<(), Box<dyn std
     let recipe = recipe_body(&justfile, "release-verify")?;
 
     assert!(recipe.contains(
-        "test --manifest-path \"target/package/katana-render-runtime-{{VERSION_BARE}}/Cargo.toml\" --lib --locked"
+        "test --manifest-path \"target/package/katana-render-runtime-{{VERSION_BARE}}/Cargo.toml\" --lib --locked{{TEST_THREAD_ARGS}}"
     ));
     Ok(())
 }
