@@ -68,6 +68,34 @@ fn generic_monospace_includes_bold_and_italic_candidates() {
 }
 
 #[test]
+fn generic_cursive_and_fantasy_load_only_their_source_backed_candidates() {
+    let cursive = paths_for_font_family("cursive");
+    let fantasy = paths_for_font_family("fantasy");
+
+    assert!(cursive.contains(&"/System/Library/Fonts/Supplemental/Apple Chancery.ttf"));
+    assert!(cursive.contains(&"/usr/share/fonts/opentype/urw-base35/Z003-MediumItalic.otf"));
+    assert!(cursive.contains(&"C:/Windows/Fonts/comic.ttf"));
+    assert!(cursive.contains(&"C:/Windows/Fonts/comicbd.ttf"));
+    assert!(fantasy.contains(&"/System/Library/Fonts/Supplemental/Impact.ttf"));
+    assert!(fantasy.contains(&"C:/Windows/Fonts/impact.ttf"));
+    assert!(!cursive.iter().any(|path| fantasy.contains(path)));
+}
+
+#[test]
+fn cjk_candidates_include_bold_faces_for_styled_fallback() {
+    let request = HtmlFontRequest {
+        families: vec!["sans-serif".to_string()],
+        needs_cjk: true,
+        needs_emoji: false,
+        needs_unicode_fallback: false,
+    };
+    let paths = cjk_fallback_font_paths(&request);
+
+    assert!(paths.contains(&"/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc"));
+    assert!(paths.contains(&"C:/Windows/Fonts/YuGothB.ttc"));
+}
+
+#[test]
 fn named_serif_cjk_families_use_serif_candidates() {
     for family in ["noto serif jp", "noto serif cjk jp", "yu mincho"] {
         let paths = paths_for_font_family(family);

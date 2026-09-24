@@ -2,8 +2,14 @@ use super::super::html_document::HtmlDocumentNode;
 use super::style::CssStyle;
 use std::collections::HashMap;
 
-const TRIGONOMETRIC_ZERO_EPSILON: f32 = 0.000_001;
 pub(super) const ELEMENT_BOX_CORNER_COUNT: usize = 4;
+
+#[path = "types_geometry.rs"]
+mod geometry;
+#[path = "types_positioning.rs"]
+mod positioning;
+pub(super) use geometry::InlineFragment;
+pub(super) use positioning::ElementPositioningContext;
 
 #[derive(Clone, Copy)]
 pub(super) struct ElementRenderContext<'a> {
@@ -97,66 +103,73 @@ pub(super) struct ElementBox {
     pub(super) width: f32,
     pub(super) height: f32,
     pub(super) transformed_corners: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
+    pub(super) positioning_context: ElementPositioningContext,
+    /// element root の外へ出る配置文脈を開始した要素。
+    pub(super) positioning_origin_node_id: Option<u64>,
+    /// 自身が通常フローのレイアウトへ寄与するか。root 所有権とは分離する。
+    pub(super) participates_in_flow: bool,
+    /// 開始時点のDOM祖先。絶対配置要素へ適用する overflow clip を判定する。
+    pub(super) ancestor_node_ids: Vec<u64>,
+    pub(super) overflow_clips: Vec<OverflowClip>,
+    /// 自身が overflow clip を持つか。element root の基準矩形に使う。
+    pub(super) clips_overflow: bool,
+    /// overflow clip を持つ IntersectionObserver の element root は padding edge を基準にする。
+    pub(super) padding_edge: OverflowClip,
+    pub(super) inline_fragments: Vec<InlineFragment>,
 }
 
-pub(super) fn rectangle_corners(
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-) -> [(f32, f32); ELEMENT_BOX_CORNER_COUNT] {
-    [
-        (x, y),
-        (x + width, y),
-        (x + width, y + height),
-        (x, y + height),
-    ]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct OverflowClip {
+    pub(super) owner_node_id: u64,
+    pub(super) x: f32,
+    pub(super) y: f32,
+    pub(super) width: f32,
+    pub(super) height: f32,
+    /// 回転後も clip の実形状を保つための四隅。x/y/width/height は AABB を保持する。
+    pub(super) transformed_corners: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
+    pub(super) radius_x: f32,
+    pub(super) radius_y: f32,
+    /// 内側の角丸半径を左上、右上、右下、左下の順で保持する。
+    pub(super) corner_radii: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
 }
 
-pub(super) fn element_box_center_after(
-    boxes: &[ElementBox],
-    element_box_start: usize,
-    node_id: u64,
-) -> Option<(f32, f32)> {
-    boxes
-        .iter()
-        .skip(element_box_start)
-        .find(|element_box| element_box.node_id == node_id)
-        .map(|element_box| {
-            (
-                element_box.x + element_box.width / 2.0,
-                element_box.y + element_box.height / 2.0,
-            )
-        })
-}
-
-impl ElementBox {
-    pub(super) fn rotate_about(&mut self, degrees: f32, center_x: f32, center_y: f32) {
-        let (mut sin, mut cos) = degrees.to_radians().sin_cos();
-        if sin.abs() < TRIGONOMETRIC_ZERO_EPSILON {
-            sin = 0.0;
-        }
-        if cos.abs() < TRIGONOMETRIC_ZERO_EPSILON {
-            cos = 0.0;
-        }
-        for (x, y) in &mut self.transformed_corners {
-            let relative_x = *x - center_x;
-            let relative_y = *y - center_y;
-            *x = center_x + relative_x * cos - relative_y * sin;
-            *y = center_y + relative_x * sin + relative_y * cos;
+impl OverflowClip {
+    pub(super) fn new(
+        owner_node_id: u64,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        radius_x: f32,
+        radius_y: f32,
+    ) -> Self {
+        Self {
+            owner_node_id,
+            x,
+            y,
+            width,
+            height,
+            transformed_corners: ElementBox::rectangle_corners(x, y, width, height),
+            radius_x,
+            radius_y,
+            corner_radii: [(radius_x, radius_y); ELEMENT_BOX_CORNER_COUNT],
         }
     }
 
-    pub(super) fn transformed_axis_aligned(&self) -> (f32, f32, f32, f32) {
-        let (mut left, mut top) = self.transformed_corners[0];
-        let (mut right, mut bottom) = (left, top);
-        for (x, y) in self.transformed_corners.iter().skip(1) {
-            left = left.min(*x);
-            top = top.min(*y);
-            right = right.max(*x);
-            bottom = bottom.max(*y);
-        }
-        (left, top, right - left, bottom - top)
+    pub(super) fn with_corner_radii(
+        mut self,
+        corner_radii: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
+    ) -> Self {
+        self.corner_radii = corner_radii;
+        self.radius_x = corner_radii
+            .iter()
+            .map(|(radius_x, _)| *radius_x)
+            .fold(0.0, f32::max);
+        self.radius_y = corner_radii
+            .iter()
+            .map(|(_, radius_y)| *radius_y)
+            .fold(0.0, f32::max);
+        self
     }
 }
 

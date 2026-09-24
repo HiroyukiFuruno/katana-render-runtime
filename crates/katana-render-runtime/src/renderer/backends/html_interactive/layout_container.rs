@@ -1,7 +1,8 @@
 use super::super::html_browser::HtmlBrowserViewport;
+use super::constants::BORDER_RADIUS_CORNER_COUNT;
 use super::layout::{ContainingBlock, HtmlLayoutRenderer};
 use super::style::{CssPosition, CssStyle};
-use super::types::{DetailsContext, LayoutContext};
+use super::types::{DetailsContext, LayoutContext, OverflowClip};
 use std::rc::Rc;
 
 #[path = "layout_container_helpers.rs"]
@@ -34,6 +35,7 @@ impl HtmlLayoutRenderer {
         let geometry = container_geometry(x, y, width, style);
         let box_start = self.svg.len();
         let content_start = self.svg.len();
+        let descendant_box_start = self.element_boxes.len();
         let containing_block =
             self.resolve_container_containing_block(children, &geometry, style, details);
         if let Some(block) = containing_block {
@@ -44,6 +46,7 @@ impl HtmlLayoutRenderer {
             self.pop_containing_block();
         }
         let height = container_height(bottom, geometry.start, style);
+        self.record_overflow_clip(descendant_box_start, &geometry, height, style);
         self.paint_container_box(box_start, content_start, &geometry, height, style);
         geometry.start + height + style.margin_bottom
     }
@@ -55,7 +58,7 @@ impl HtmlLayoutRenderer {
         style: &CssStyle,
         details: DetailsContext,
     ) -> Option<ContainingBlock> {
-        if style.position == CssPosition::Static {
+        if style.position == CssPosition::Static && !style.has_transform {
             return None;
         }
         let height = style
@@ -67,11 +70,37 @@ impl HtmlLayoutRenderer {
                 self.accept_auto_container_height(measured, style)
             });
         Some(ContainingBlock {
+            owner_node_id: self.current_element_owner(),
             x: geometry.box_x,
             y: geometry.start,
             width: geometry.box_width,
             height,
+            establishes_fixed_containing_block: style.has_transform,
         })
+    }
+
+    fn record_overflow_clip(
+        &mut self,
+        descendant_box_start: usize,
+        geometry: &ContainerGeometry,
+        height: f32,
+        style: &CssStyle,
+    ) {
+        if !style.clips_overflow() {
+            return;
+        }
+        let Some(owner_node_id) = self.current_element_owner() else {
+            return;
+        };
+        let (x, y, width, height) = overflow_clip_geometry(geometry, height, style);
+        let corner_radii = overflow_clip_radius(geometry, height, style);
+        let clip = OverflowClip::new(owner_node_id, x, y, width, height, 0.0, 0.0)
+            .with_corner_radii(corner_radii);
+        for element_box in &mut self.element_boxes[descendant_box_start..] {
+            if overflow_clip_applies_to(element_box, owner_node_id) {
+                element_box.overflow_clips.push(clip);
+            }
+        }
     }
 
     fn accept_auto_container_height(
@@ -148,15 +177,9 @@ impl HtmlLayoutRenderer {
         style: &CssStyle,
     ) {
         if style.clips_overflow() {
-            let radius = style.resolved_border_radius(geometry.box_width, height);
-            self.clip_painted_range(
-                content_start,
-                geometry.box_x,
-                geometry.start,
-                geometry.box_width,
-                height,
-                radius,
-            );
+            let (x, y, width, height) = overflow_clip_geometry(geometry, height, style);
+            let corner_radii = overflow_clip_radius(geometry, height, style);
+            self.clip_painted_range(content_start, x, y, width, height, corner_radii);
         }
         self.insert_box(
             box_start,
@@ -193,6 +216,55 @@ impl HtmlLayoutRenderer {
     }
 }
 
+fn overflow_clip_geometry(
+    geometry: &ContainerGeometry,
+    height: f32,
+    style: &CssStyle,
+) -> (f32, f32, f32, f32) {
+    let left = style.border_left_width();
+    let top = style.border_top_width();
+    let width = (geometry.box_width - left - style.border_right_width()).max(0.0);
+    let height = (height - top - style.border_bottom_width()).max(0.0);
+    (geometry.box_x + left, geometry.start + top, width, height)
+}
+
+fn overflow_clip_radius(
+    geometry: &ContainerGeometry,
+    height: f32,
+    style: &CssStyle,
+) -> [(f32, f32); BORDER_RADIUS_CORNER_COUNT] {
+    style.resolved_inner_border_radii(geometry.box_width, height)
+}
+
+fn overflow_clip_applies_to(element_box: &super::types::ElementBox, owner_node_id: u64) -> bool {
+    let context = element_box.positioning_context;
+    if context.escapes_element_root() {
+        return false;
+    }
+    if element_box.participates_in_flow {
+        return true;
+    }
+    context
+        .containing_block_owner()
+        .is_some_and(|containing_block_owner| {
+            contains_overflow_clip_owner(element_box, owner_node_id, containing_block_owner)
+        })
+}
+
+fn contains_overflow_clip_owner(
+    element_box: &super::types::ElementBox,
+    owner_node_id: u64,
+    containing_block_owner: u64,
+) -> bool {
+    element_box
+        .ancestor_node_ids
+        .iter()
+        .position(|ancestor| *ancestor == containing_block_owner)
+        .is_some_and(|containing_block_index| {
+            element_box.ancestor_node_ids[..=containing_block_index].contains(&owner_node_id)
+        })
+}
+
 #[cfg(test)]
 mod container_contract_tests {
     use super::super::style::CssStyle;
@@ -203,6 +275,9 @@ mod container_contract_tests {
     };
     use crate::renderer::backends::html_browser::HtmlBrowserViewport;
     use crate::renderer::backends::html_document::HtmlDocumentNode;
+    use crate::renderer::backends::html_interactive::types::{
+        ElementBox, ElementPositioningContext, OverflowClip,
+    };
     use std::collections::HashMap;
 
     fn geometry(width: f32, style: &CssStyle) -> ContainerGeometry {
@@ -268,6 +343,44 @@ mod container_contract_tests {
 
         assert_eq!(height, style.minimum_outer_height());
         assert_eq!(renderer.layout_error.as_deref(), Some("measurement failed"));
+    }
+
+    #[test]
+    fn overflow_clip_and_positioning_helpers_fail_closed_without_an_owner() {
+        let viewport = HtmlBrowserViewport {
+            width: 320,
+            height: 240,
+            device_scale_factor: 1.0,
+        };
+        let mut renderer = HtmlLayoutRenderer::new(viewport, 0.0, &HashMap::new(), None);
+        let mut style = CssStyle::browser_default();
+        style.overflow = super::super::style::CssOverflow::Clip;
+        let geometry = geometry(300.0, &style);
+        renderer.record_overflow_clip(0, &geometry, 20.0, &style);
+        let element_box = absolute_box_without_owner();
+        assert!(!super::overflow_clip_applies_to(&element_box, 1));
+    }
+
+    fn absolute_box_without_owner() -> ElementBox {
+        ElementBox {
+            node_id: 1,
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            transformed_corners: [(0.0, 0.0); 4],
+            positioning_context: ElementPositioningContext::AbsoluteContainingBlock {
+                owner_node_id: None,
+                viewport_escape: false,
+            },
+            positioning_origin_node_id: None,
+            participates_in_flow: false,
+            ancestor_node_ids: Vec::new(),
+            overflow_clips: Vec::new(),
+            clips_overflow: false,
+            padding_edge: OverflowClip::new(1, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
+            inline_fragments: Vec::new(),
+        }
     }
 
     #[test]

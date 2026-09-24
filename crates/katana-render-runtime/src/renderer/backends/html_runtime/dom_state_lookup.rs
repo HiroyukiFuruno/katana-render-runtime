@@ -40,6 +40,7 @@ impl HtmlDomBridgeState {
             | "getAttribute"
             | "boundingClientRect"
             | "layoutBoxPresent"
+            | "intersectionMetadata"
             | "layoutMetrics"
             | "eventPath"
             | "closest" => Some(self.lookup(operation, arguments)),

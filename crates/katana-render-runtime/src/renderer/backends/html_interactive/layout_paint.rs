@@ -76,29 +76,6 @@ impl HtmlLayoutRenderer {
             escape_xml(&transformed),
         ));
     }
-
-    pub(super) fn clip_painted_range(
-        &mut self,
-        index: usize,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-        radius: (f32, f32),
-    ) {
-        let clip_id = self.next_clip_id;
-        self.next_clip_id += 1;
-        self.svg.push_str("</g>");
-        self.svg.insert_str(
-            index,
-            &format!(
-                r#"<defs><clipPath id="krr-clip-{clip_id}"><rect x="{x}" y="{}" width="{width}" height="{height}" rx="{}" ry="{}"/></clipPath></defs><g clip-path="url(#krr-clip-{clip_id})">"#,
-                y - self.scroll_y,
-                radius.0,
-                radius.1
-            ),
-        );
-    }
 }
 
 fn aligned_text_x(line: &str, x: f32, width: f32, style: &CssStyle) -> f32 {

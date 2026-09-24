@@ -44,10 +44,11 @@ const MONOSPACE_FAMILIES: &[&str] = &[
 const CURSIVE_FAMILIES: &[&str] = &[
     "Comic Sans MS",
     "Apple Chancery",
+    "Z003",
     "URW Chancery L",
     "Noto Sans",
 ];
-const FANTASY_FAMILIES: &[&str] = &["Impact", "Papyrus", "Noto Sans"];
+const FANTASY_FAMILIES: &[&str] = &["Impact", "Papyrus", "D050000L", "Noto Sans"];
 
 pub(super) fn rasterizer_options() -> usvg::Options<'static> {
     rasterizer_options_with_font_db(bundled_font_db())
@@ -101,7 +102,10 @@ fn font_family_is_available(database: &usvg::fontdb::Database, family: &str) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{BUNDLED_SANS_SERIF_FONT, configure_generic_families, first_available_family};
+    use super::{
+        BUNDLED_SANS_SERIF_FONT, CURSIVE_FAMILIES, FANTASY_FAMILIES, configure_generic_families,
+        first_available_family,
+    };
     use resvg::usvg;
 
     #[test]
@@ -155,5 +159,15 @@ mod tests {
         let database = usvg::fontdb::Database::new();
 
         assert_eq!(first_available_family(&database, &["Missing"]), "Noto Sans");
+    }
+
+    #[test]
+    fn fantasy_generic_candidates_include_the_linux_urw_source_family() {
+        assert!(FANTASY_FAMILIES.contains(&"D050000L"));
+    }
+
+    #[test]
+    fn cursive_generic_candidates_include_the_linux_z003_source_family() {
+        assert!(CURSIVE_FAMILIES.contains(&"Z003"));
     }
 }

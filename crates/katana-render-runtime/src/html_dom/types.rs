@@ -153,7 +153,7 @@ impl Drop for Node {
     fn drop(&mut self) {
         let mut nodes = mem::take(&mut *self.children.borrow_mut());
         while let Some(node) = nodes.pop() {
-            let Ok(node) = Rc::try_unwrap(node) else {
+            let Ok(node) = Rc::try_unwrap(node).map_err(|retained| retained.parent.take()) else {
                 continue;
             };
             nodes.extend(mem::take(&mut *node.children.borrow_mut()));

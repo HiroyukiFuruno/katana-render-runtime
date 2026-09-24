@@ -10,6 +10,7 @@ use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 type LayoutMetric = (u64, f32, f32, f32, f32, f32);
 
 impl StaticHtmlRuntimeSession {
+    #[cfg(test)]
     pub(in crate::renderer::backends) fn update_layout_metrics(
         &mut self,
         viewport_width: f32,
@@ -17,11 +18,29 @@ impl StaticHtmlRuntimeSession {
         scroll_y: f32,
         boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
     ) -> Result<bool, HtmlRuntimeError> {
+        self.update_layout_metrics_with_intersection_metadata(
+            viewport_width,
+            viewport_height,
+            scroll_y,
+            boxes,
+            [],
+        )
+    }
+
+    pub(in crate::renderer::backends) fn update_layout_metrics_with_intersection_metadata(
+        &mut self,
+        viewport_width: f32,
+        viewport_height: f32,
+        scroll_y: f32,
+        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
+        metadata: impl IntoIterator<Item = (u64, String)>,
+    ) -> Result<bool, HtmlRuntimeError> {
         self.update_layout_metrics_from_boxes(
             viewport_width,
             viewport_height,
             scroll_y,
             boxes.into_iter().collect(),
+            metadata.into_iter().collect(),
         )
     }
 
@@ -31,8 +50,9 @@ impl StaticHtmlRuntimeSession {
         viewport_height: f32,
         scroll_y: f32,
         boxes: Vec<LayoutMetric>,
+        metadata: Vec<(u64, String)>,
     ) -> Result<bool, HtmlRuntimeError> {
-        self.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes)?;
+        self.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes, metadata)?;
         let observer_work = self.has_intersection_observer_work();
         if matches!(observer_work, Err(HtmlRuntimeError::ExecutionTimeout)) {
             self.discard();
@@ -72,12 +92,14 @@ impl StaticHtmlRuntimeSession {
         viewport_height: f32,
         scroll_y: f32,
         boxes: Vec<LayoutMetric>,
+        metadata: Vec<(u64, String)>,
     ) -> Result<(), HtmlRuntimeError> {
         let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
         let state = isolate
             .get_slot::<HtmlDomBridgeState>()
             .ok_or_else(dom_state_unavailable_error)?;
         state.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes);
+        state.set_intersection_metadata(metadata);
         Ok(())
     }
 
@@ -215,6 +237,61 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    #[test]
+    fn intersection_observer_keeps_edge_contact_inside_an_element_root_clip()
+    -> Result<(), HtmlRuntimeError> {
+        let mut session = start(root_clip_edge_contact_source());
+        let root = node_id(&mut session, "root")?;
+        let clip = node_id(&mut session, "clip")?;
+        let target = node_id(&mut session, "target")?;
+        apply_root_clip_edge_contact_metrics(&mut session, root, clip, target);
+
+        assert!(
+            session
+                .snapshot()?
+                .contains(r#"id="target" data-intersection="true:0""#),
+            "edge contact with a root clipping ancestor must remain intersecting"
+        );
+        Ok(())
+    }
+
+    fn apply_root_clip_edge_contact_metrics(
+        session: &mut super::StaticHtmlRuntimeSession,
+        root: u64,
+        clip: u64,
+        target: u64,
+    ) {
+        assert!(
+            session
+                .update_layout_metrics_with_intersection_metadata(
+                    100.0,
+                    100.0,
+                    0.0,
+                    [
+                        (root, 0.0, 0.0, 100.0, 100.0, 0.0),
+                        (clip, 0.0, 0.0, 10.0, 10.0, 0.0),
+                        (target, 10.0, 0.0, 10.0, 10.0, 0.0),
+                    ],
+                    [(target, root_clip_edge_contact_metadata(clip))],
+                )
+                .is_ok(),
+            "layout metrics must accept root clip metadata"
+        );
+    }
+
+    fn root_clip_edge_contact_metadata(clip: u64) -> String {
+        format!(
+            r#"{{"positioning":"in-flow","viewportEscape":false,"clips":[{{"owner":{clip},"x":0,"y":0,"width":10,"height":10}}],"fragments":[]}}"#
+        )
+    }
+
+    fn root_clip_edge_contact_source() -> &'static str {
+        r#"<div id="root"><div id="clip"><div id="target">target</div></div></div><script>
+            const root = document.getElementById("root"); const target = document.getElementById("target");
+            new IntersectionObserver((entries) => { entries[0].target.setAttribute("data-intersection", `${entries[0].isIntersecting}:${entries[0].intersectionRatio}`); }, { root }).observe(target);
+        </script>"#
     }
 
     fn observer_geometry_boxes(

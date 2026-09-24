@@ -4,9 +4,11 @@ use super::layout::HtmlLayoutRenderer;
 use super::layout_container::horizontal_box_geometry;
 use super::style::{CssPosition, CssStyle};
 use super::types::{
-    DetailsContext, ELEMENT_BOX_CORNER_COUNT, ElementBox, ElementRenderContext, HitTarget,
-    HitTargetKind, LayoutContext, element_box_center_after, rectangle_corners,
+    DetailsContext, ElementBox, ElementRenderContext, HitTarget, HitTargetKind, LayoutContext,
 };
+
+#[path = "layout_element_box.rs"]
+mod element_box;
 
 impl HtmlLayoutRenderer {
     pub(super) fn render_node(
@@ -45,7 +47,22 @@ impl HtmlLayoutRenderer {
         let mut style = CssStyle::from_element(element.tag, element.attributes, layout.style);
         let paint_start = self.svg.len();
         let element_box_start = self.element_boxes.len();
+        let records_inline_fragments = style.inline_block && !style.inline_atomic;
+        self.ownership.rendering_elements.push(element.node_id);
+        if records_inline_fragments {
+            self.ownership.inline_fragment_owners.push(element.node_id);
+        }
         let bottom = self.render_positioned_or_flow_element(element, layout, &mut style);
+        if records_inline_fragments {
+            debug_assert_eq!(
+                self.ownership.inline_fragment_owners.pop(),
+                Some(element.node_id)
+            );
+        }
+        debug_assert_eq!(
+            self.ownership.rendering_elements.pop(),
+            Some(element.node_id)
+        );
         self.finish_element_paint(paint_start, element_box_start, element.node_id, &style);
         bottom
     }
@@ -84,7 +101,7 @@ impl HtmlLayoutRenderer {
             return;
         }
         let Some((center_x, center_y)) =
-            element_box_center_after(&self.element_boxes, element_box_start, node_id)
+            ElementBox::center_after(&self.element_boxes, element_box_start, node_id)
         else {
             return;
         };
@@ -106,7 +123,16 @@ impl HtmlLayoutRenderer {
         if layout.style.display == taffy::style::Display::None {
             return layout.y;
         }
-        let element_box_index = self.start_element_box(element.node_id);
+        let positioning_context = self.element_positioning_context(layout.style.position);
+        let positioning_origin_node_id =
+            self.positioning_origin_node_id(element.node_id, layout.style.position);
+        let element_box_index = self.start_element_box(
+            element.node_id,
+            positioning_context,
+            layout.style.position != CssPosition::Absolute
+                && layout.style.position != CssPosition::Fixed,
+            positioning_origin_node_id,
+        );
         let target_index = self.start_click_target(element);
         self.record_anchor(element, layout.y);
         let bottom = self.render_tag(element, layout);
@@ -115,39 +141,6 @@ impl HtmlLayoutRenderer {
             self.finish_click_target(index, element.node_id, layout, bottom);
         }
         bottom
-    }
-
-    fn start_element_box(&mut self, node_id: u64) -> usize {
-        let index = self.element_boxes.len();
-        self.element_boxes.push(ElementBox {
-            node_id,
-            x: 0.0,
-            y: 0.0,
-            width: 0.0,
-            height: 0.0,
-            transformed_corners: [(0.0, 0.0); ELEMENT_BOX_CORNER_COUNT],
-        });
-        index
-    }
-
-    fn finish_element_box(
-        &mut self,
-        index: usize,
-        node_id: u64,
-        layout: LayoutContext<'_>,
-        bottom: f32,
-    ) {
-        let (x, width) = horizontal_box_geometry(layout.x, layout.width, layout.style);
-        let y = layout.y + layout.style.margin_top;
-        let height = (bottom - y - layout.style.margin_bottom).max(0.0);
-        self.element_boxes[index] = ElementBox {
-            node_id,
-            x,
-            y,
-            width,
-            height,
-            transformed_corners: rectangle_corners(x, y, width, height),
-        };
     }
 
     fn start_click_target(&mut self, element: ElementRenderContext<'_>) -> Option<usize> {
@@ -203,8 +196,10 @@ mod tests {
     use super::HtmlLayoutRenderer;
     use crate::renderer::backends::html_browser::HtmlBrowserViewport;
     use crate::renderer::backends::html_document::HtmlDocumentNode;
+    use crate::renderer::backends::html_interactive::style::CssStyle;
     use crate::renderer::backends::html_interactive::types::{
-        ElementBox, LayoutResult, rectangle_corners,
+        DetailsContext, ElementBox, ElementPositioningContext, ElementRenderContext, LayoutContext,
+        LayoutResult,
     };
     use std::collections::HashMap;
 
@@ -221,6 +216,115 @@ mod tests {
                 .as_ref()
                 .map(descendant_axis_aligned),
             Ok(Some((60.0, -30.0, 10.0, 20.0)))
+        );
+    }
+
+    #[test]
+    fn element_boxes_keep_positioning_owner_and_overflow_clip_metadata() {
+        assert!(
+            render_test_layout(&positioned_overflow_nodes())
+                .is_ok_and(|layout| positioned_overflow_target_matches(&layout))
+        );
+        assert!(
+            render_test_layout(&[])
+                .is_ok_and(|layout| !positioned_overflow_target_matches(&layout))
+        );
+    }
+
+    fn positioned_overflow_target_matches(layout: &LayoutResult) -> bool {
+        let Some(target) = element_box_for(layout, 2) else {
+            return false;
+        };
+
+        target.positioning_context
+            == ElementPositioningContext::AbsoluteContainingBlock {
+                owner_node_id: Some(1),
+                viewport_escape: false,
+            }
+            && target.overflow_clips.len() == 1
+            && target.overflow_clips[0].owner_node_id == 1
+            && target.overflow_clips[0].height == 38.0
+            && target.overflow_clips[0].x == 2.0
+            && target.overflow_clips[0].y == 2.0
+            && target.overflow_clips[0].width == 108.0
+    }
+
+    #[test]
+    fn styled_element_records_click_targets_and_anchors() {
+        let mut renderer = test_renderer();
+        let index = record_interactive_metadata(&mut renderer);
+
+        assert_eq!(renderer.anchor_positions.get("section-link"), Some(&12.0));
+        assert_eq!(renderer.hit_targets[index].node_id, 9);
+        assert_eq!(renderer.hit_targets[index].y, 12.0);
+        assert_eq!(renderer.hit_targets[index].height, 24.0);
+    }
+
+    fn record_interactive_metadata(renderer: &mut HtmlLayoutRenderer) -> usize {
+        let attributes = vec![
+            ("id".to_string(), "section-link".to_string()),
+            ("onclick".to_string(), "activate()".to_string()),
+        ];
+        let children = vec![HtmlDocumentNode::Text("Open".to_string())];
+        let element = ElementRenderContext {
+            node_id: 9,
+            tag: "div",
+            attributes: &attributes,
+            children: &children,
+        };
+        let style = CssStyle::from_element("div", &attributes, &CssStyle::browser_default());
+        let index = renderer.hit_targets.len();
+        renderer.start_click_target(element);
+        assert_eq!(renderer.hit_targets.len(), index + 1);
+        renderer.record_anchor(element, 12.0);
+        renderer.finish_click_target(
+            index,
+            9,
+            LayoutContext::new(4.0, 12.0, 80.0, &style, DetailsContext::NONE),
+            36.0,
+        );
+        index
+    }
+
+    #[test]
+    fn absolute_target_ignores_overflow_clip_outside_its_containing_block() {
+        assert!(
+            render_test_layout(&absolute_target_with_unrelated_overflow_clip_nodes()).is_ok_and(
+                |layout| {
+                    element_box_for(&layout, 3).is_some_and(|target| {
+                        target.positioning_context
+                            == ElementPositioningContext::AbsoluteContainingBlock {
+                                owner_node_id: Some(1),
+                                viewport_escape: false,
+                            }
+                            && target.overflow_clips.is_empty()
+                    })
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn absolute_target_keeps_containing_block_and_outer_ancestor_overflow_clips() {
+        assert!(
+            render_test_layout(&absolute_target_with_containing_block_ancestor_overflow_clips())
+                .is_ok_and(|layout| absolute_target_clip_owners_match(&layout, 4, 2, &[2, 1]))
+        );
+        assert!(
+            render_test_layout(&absolute_target_with_containing_block_ancestor_overflow_clips())
+                .is_ok_and(|layout| !absolute_target_clip_owners_match(&layout, 4, 2, &[1]))
+        );
+        assert!(
+            render_test_layout(&absolute_target_with_containing_block_ancestor_overflow_clips())
+                .is_ok_and(|layout| !absolute_target_clip_owners_match(&layout, 4, 2, &[99, 1]))
+        );
+        assert!(
+            render_test_layout(&[]).is_ok_and(|layout| !absolute_target_clip_owners_match(
+                &layout,
+                4,
+                2,
+                &[2, 1]
+            ))
         );
     }
 
@@ -260,6 +364,39 @@ mod tests {
         )
     }
 
+    fn render_test_layout(nodes: &[HtmlDocumentNode]) -> Result<LayoutResult, String> {
+        HtmlLayoutRenderer::render(
+            nodes,
+            HtmlBrowserViewport {
+                width: 320,
+                height: 240,
+                device_scale_factor: 1.0,
+            },
+            0.0,
+            &HashMap::new(),
+            None,
+        )
+    }
+
+    fn element_box_for(layout: &LayoutResult, node_id: u64) -> Option<&ElementBox> {
+        layout
+            .element_boxes
+            .iter()
+            .find(|element_box| element_box.node_id == node_id)
+    }
+
+    fn test_box_padding_edge() -> super::super::types::OverflowClip {
+        super::super::types::OverflowClip::new(
+            1,
+            0.0,
+            0.0,
+            TEST_BOX_WIDTH,
+            TEST_BOX_HEIGHT,
+            0.0,
+            0.0,
+        )
+    }
+
     fn test_element_box() -> ElementBox {
         ElementBox {
             node_id: 1,
@@ -267,7 +404,20 @@ mod tests {
             y: 0.0,
             width: TEST_BOX_WIDTH,
             height: TEST_BOX_HEIGHT,
-            transformed_corners: rectangle_corners(0.0, 0.0, TEST_BOX_WIDTH, TEST_BOX_HEIGHT),
+            transformed_corners: ElementBox::rectangle_corners(
+                0.0,
+                0.0,
+                TEST_BOX_WIDTH,
+                TEST_BOX_HEIGHT,
+            ),
+            positioning_context: ElementPositioningContext::InFlow,
+            positioning_origin_node_id: None,
+            participates_in_flow: true,
+            ancestor_node_ids: Vec::new(),
+            overflow_clips: Vec::new(),
+            clips_overflow: false,
+            padding_edge: test_box_padding_edge(),
+            inline_fragments: Vec::new(),
         }
     }
 
@@ -300,6 +450,120 @@ mod tests {
                 children: Vec::new(),
             }],
         }]
+    }
+
+    fn positioned_overflow_nodes() -> Vec<HtmlDocumentNode> {
+        vec![HtmlDocumentNode::Element {
+            node_id: 1,
+            tag: "div".to_string(),
+            attributes: vec![(
+                "style".to_string(),
+                "position: relative; width: 100px; height: 30px; border: 2px solid #000; padding: 4px; overflow: hidden".to_string(),
+            )],
+            children: vec![HtmlDocumentNode::Element {
+                node_id: 2,
+                tag: "div".to_string(),
+                attributes: vec![(
+                    "style".to_string(),
+                    "position: absolute; top: 0; width: 20px; height: 50px".to_string(),
+                )],
+                children: Vec::new(),
+            }],
+        }]
+    }
+
+    fn absolute_target_with_unrelated_overflow_clip_nodes() -> Vec<HtmlDocumentNode> {
+        vec![HtmlDocumentNode::Element {
+            node_id: 1,
+            tag: "div".to_string(),
+            attributes: vec![(
+                "style".to_string(),
+                "position: relative; width: 100px; height: 100px".to_string(),
+            )],
+            children: vec![HtmlDocumentNode::Element {
+                node_id: 2,
+                tag: "div".to_string(),
+                attributes: vec![(
+                    "style".to_string(),
+                    "width: 20px; height: 20px; overflow: hidden".to_string(),
+                )],
+                children: vec![HtmlDocumentNode::Element {
+                    node_id: 3,
+                    tag: "div".to_string(),
+                    attributes: vec![(
+                        "style".to_string(),
+                        "position: absolute; width: 50px; height: 50px".to_string(),
+                    )],
+                    children: Vec::new(),
+                }],
+            }],
+        }]
+    }
+
+    fn absolute_target_with_containing_block_ancestor_overflow_clips() -> Vec<HtmlDocumentNode> {
+        vec![styled_element(
+            1,
+            "width: 100px; height: 100px; overflow: hidden",
+            vec![styled_element(
+                2,
+                "position: relative; width: 80px; height: 80px; overflow: hidden",
+                vec![styled_element(
+                    3,
+                    "width: 40px; height: 40px; overflow: hidden",
+                    vec![styled_element(
+                        4,
+                        "position: absolute; width: 120px; height: 120px",
+                        Vec::new(),
+                    )],
+                )],
+            )],
+        )]
+    }
+
+    fn styled_element(
+        node_id: u64,
+        style: &str,
+        children: Vec<HtmlDocumentNode>,
+    ) -> HtmlDocumentNode {
+        HtmlDocumentNode::Element {
+            node_id,
+            tag: "div".to_string(),
+            attributes: vec![("style".to_string(), style.to_string())],
+            children,
+        }
+    }
+
+    fn absolute_target_clip_owners_match(
+        layout: &LayoutResult,
+        target_node_id: u64,
+        containing_block_node_id: u64,
+        owner_node_ids: &[u64],
+    ) -> bool {
+        let Some(target) = element_box_for(layout, target_node_id) else {
+            return false;
+        };
+
+        target.positioning_context
+            == ElementPositioningContext::AbsoluteContainingBlock {
+                owner_node_id: Some(containing_block_node_id),
+                viewport_escape: false,
+            }
+            && overflow_clip_owner_ids_match(&target.overflow_clips, owner_node_ids)
+    }
+
+    fn overflow_clip_owner_ids_match(
+        clips: &[crate::renderer::backends::html_interactive::types::OverflowClip],
+        owner_node_ids: &[u64],
+    ) -> bool {
+        if clips.len() != owner_node_ids.len() {
+            return false;
+        }
+        for (clip, owner_node_id) in clips.iter().zip(owner_node_ids) {
+            if clip.owner_node_id != *owner_node_id {
+                return false;
+            }
+        }
+        true
     }
 
     fn descendant_axis_aligned(layout: &LayoutResult) -> Option<(f32, f32, f32, f32)> {

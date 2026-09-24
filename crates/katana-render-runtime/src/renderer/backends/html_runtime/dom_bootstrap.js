@@ -295,6 +295,7 @@ const __krrClassToken = (token) => {
   return token;
 };
 const __krrElements = new Map();
+const __krrElementInstances = new WeakSet();
 const __krrElement = (nodeId) => {
   if (nodeId === null || nodeId === undefined || nodeId === "") return null;
   const normalizedId = String(nodeId);
@@ -303,6 +304,7 @@ const __krrElement = (nodeId) => {
   const element = __krrInstallEventTarget(Object.create(__krrElementPrototype));
   Object.defineProperty(element, "__krrNodeId", { value: normalizedId });
   __krrElements.set(normalizedId, element);
+  __krrElementInstances.add(element);
   return element;
 };
 const __krrElementPrototype = {
@@ -583,22 +585,467 @@ const __krrEmptyIntersectionRect = () => ({
   bottom: 0,
   left: 0,
 });
+const __krrBoundingIntersectionRect = (rects) => {
+  if (rects.length === 0) return __krrEmptyIntersectionRect();
+  const left = Math.min(...rects.map((rect) => rect.left));
+  const top = Math.min(...rects.map((rect) => rect.top));
+  const right = Math.max(...rects.map((rect) => rect.right));
+  const bottom = Math.max(...rects.map((rect) => rect.bottom));
+  return { x: left, y: top, width: right - left, height: bottom - top, top, right, bottom, left };
+};
+const __krrRectHasCrossedEdges = (rect) => rect.left > rect.right || rect.top > rect.bottom;
 const __krrRectsIntersectOrAreEdgeAdjacent = (first, second) =>
   first.left <= second.right &&
   second.left <= first.right &&
   first.top <= second.bottom &&
   second.top <= first.bottom;
+const __krrClippedRootBounds = (rootBounds, clips) => {
+  if (__krrRectHasCrossedEdges(rootBounds)) {
+    return { rect: rootBounds, separated: true };
+  }
+  return clips.reduce(
+    (state, clip) => {
+      const clipRect = __krrClipRect(clip);
+      return {
+        rect: __krrIntersectionRect(state.rect, clipRect),
+        separated: state.separated || !__krrRectsIntersectOrAreEdgeAdjacent(state.rect, clipRect),
+      };
+    },
+    { rect: rootBounds, separated: false },
+  );
+};
 const __krrObservedElementBox = (element) => ({
   boundingClientRect: element.getBoundingClientRect(),
   isPresent: __krrNativeDom("layoutBoxPresent", element.__krrNodeId) === "1",
+  metadata: JSON.parse(__krrNativeDom("intersectionMetadata", element.__krrNodeId)),
 });
+const __krrPathNodeIndex = (path, nodeId) =>
+  Array.isArray(path) ? path.findIndex((value) => String(value) === String(nodeId)) : -1;
 const __krrTargetIsDescendantOfRoot = (target, root) => {
   const path = __krrNativeDom("eventPath", target.__krrNodeId);
-  return Array.isArray(path) && path.slice(1).includes(root.__krrNodeId);
+  return __krrPathNodeIndex(path.slice(1), root.__krrNodeId) >= 0;
+};
+const __krrMetadataBelongsToRoot = (metadata, target, root) => {
+  if (metadata === null || typeof metadata !== "object") return false;
+  const hasValidGeometry =
+    Array.isArray(metadata.clips) &&
+    metadata.clips.every(
+      (clip) =>
+        Number.isSafeInteger(clip.owner) &&
+        [clip.x, clip.y, clip.width, clip.height].every(Number.isFinite) &&
+        clip.width >= 0 &&
+        clip.height >= 0,
+    ) &&
+    Array.isArray(metadata.fragments) &&
+    metadata.fragments.every(
+      (fragment) =>
+        [fragment.x, fragment.y, fragment.width, fragment.height].every(Number.isFinite) &&
+        fragment.width >= 0 &&
+        fragment.height >= 0,
+    );
+  if (!hasValidGeometry || typeof metadata.viewportEscape !== "boolean") return false;
+  if (String(metadata.positioningOrigin) === String(root.__krrNodeId)) return true;
+  if (metadata.viewportEscape) return false;
+  if (metadata.positioning === "in-flow") return true;
+  const path = __krrNativeDom("eventPath", target.__krrNodeId);
+  if (__krrPathNodeIndex(path, root.__krrNodeId) < 0) return false;
+  if (metadata.positioning === "fixed") return false;
+  if (
+    (metadata.positioning !== "absolute" && metadata.positioning !== "fixed-containing-block") ||
+    !Number.isSafeInteger(metadata.containingBlock)
+  ) {
+    return false;
+  }
+  const containingBlockIndex = __krrPathNodeIndex(path, metadata.containingBlock);
+  const rootIndex = __krrPathNodeIndex(path, root.__krrNodeId);
+  return containingBlockIndex >= 0 && rootIndex >= 0 && containingBlockIndex <= rootIndex;
+};
+const __krrClipsWithinRoot = (metadata, target, root) => {
+  if (!metadata || !Array.isArray(metadata.clips)) return [];
+  const path = __krrNativeDom("eventPath", target.__krrNodeId);
+  const rootIndex = __krrPathNodeIndex(path, root.__krrNodeId);
+  if (rootIndex < 0) return null;
+  const clipIndexes = metadata.clips.map((clip) => __krrPathNodeIndex(path, clip.owner));
+  if (clipIndexes.some((clipIndex) => clipIndex < 0)) return null;
+  const rootClipIndex = clipIndexes.indexOf(rootIndex);
+  return {
+    rootClip: rootClipIndex >= 0 ? metadata.clips[rootClipIndex] : null,
+    ancestorClips: metadata.clips.filter((_, index) => clipIndexes[index] < rootIndex),
+  };
+};
+const __krrTargetWithinRoot = (target, root, metadata, clipsAreConsistent) =>
+  __krrTargetIsDescendantOfRoot(target, root) &&
+  clipsAreConsistent &&
+  __krrMetadataBelongsToRoot(metadata, target, root);
+const __krrClipRect = (clip) => {
+  const scrollY = __krrLayoutMetrics().scrollY;
+  const top = clip.y - scrollY;
+  return {
+    x: clip.x,
+    y: top,
+    width: clip.width,
+    height: clip.height,
+    top,
+    right: clip.x + clip.width,
+    bottom: top + clip.height,
+    left: clip.x,
+  };
+};
+const __krrRectPolygon = (rect) =>
+  __krrRectHasCrossedEdges(rect)
+    ? []
+    : [
+        { x: rect.left, y: rect.top },
+        { x: rect.right, y: rect.top },
+        { x: rect.right, y: rect.bottom },
+        { x: rect.left, y: rect.bottom },
+      ];
+const __krrPolygonRect = (polygon) => {
+  if (polygon.length === 0) return __krrEmptyIntersectionRect();
+  const left = Math.min(...polygon.map((point) => point.x));
+  const top = Math.min(...polygon.map((point) => point.y));
+  const right = Math.max(...polygon.map((point) => point.x));
+  const bottom = Math.max(...polygon.map((point) => point.y));
+  return { x: left, y: top, width: right - left, height: bottom - top, top, right, bottom, left };
+};
+const __krrCross = (first, second, point) =>
+  (second.x - first.x) * (point.y - first.y) - (second.y - first.y) * (point.x - first.x);
+const __krrPolygonIsPoint = (polygon) =>
+  polygon.length > 0 &&
+  polygon.every((point) => point.x === polygon[0].x && point.y === polygon[0].y);
+const __krrPointInPolygon = (point, polygon) => {
+  if (polygon.length === 0) return false;
+  let inside = false;
+  for (let index = 0; index < polygon.length; index += 1) {
+    const first = polygon[index];
+    const second = polygon[(index + 1) % polygon.length];
+    const cross = __krrCross(first, second, point);
+    const withinSegment =
+      cross === 0 &&
+      point.x >= Math.min(first.x, second.x) &&
+      point.x <= Math.max(first.x, second.x) &&
+      point.y >= Math.min(first.y, second.y) &&
+      point.y <= Math.max(first.y, second.y);
+    if (withinSegment) return true;
+    if (first.y > point.y !== second.y > point.y) {
+      const intersectionX =
+        first.x + ((second.x - first.x) * (point.y - first.y)) / (second.y - first.y);
+      if (point.x < intersectionX) inside = !inside;
+    }
+  }
+  return inside;
+};
+const __krrPolygonIntersection = (subject, clip) => {
+  if (subject.length === 0 || clip.length === 0) return [];
+  if (__krrPolygonIsPoint(clip)) {
+    return __krrPointInPolygon(clip[0], subject) ? [clip[0]] : [];
+  }
+  let output = subject;
+  for (let index = 0; index < clip.length && output.length > 0; index += 1) {
+    const first = clip[index];
+    const second = clip[(index + 1) % clip.length];
+    const input = output;
+    output = [];
+    for (let pointIndex = 0; pointIndex < input.length; pointIndex += 1) {
+      const previous = input[(pointIndex + input.length - 1) % input.length];
+      const current = input[pointIndex];
+      const previousInside = __krrCross(first, second, previous) >= 0;
+      const currentInside = __krrCross(first, second, current) >= 0;
+      if (currentInside !== previousInside) {
+        const previousSide = __krrCross(first, second, previous);
+        const currentSide = __krrCross(first, second, current);
+        const ratio = previousSide / (previousSide - currentSide);
+        output.push({
+          x: previous.x + (current.x - previous.x) * ratio,
+          y: previous.y + (current.y - previous.y) * ratio,
+        });
+      }
+      if (currentInside) output.push(current);
+    }
+  }
+  return output;
+};
+const __krrClipCorners = (clip) => {
+  const scrollY = __krrLayoutMetrics().scrollY;
+  if (
+    Array.isArray(clip.corners) &&
+    clip.corners.length === 4 &&
+    clip.corners.every(
+      (corner) => Array.isArray(corner) && corner.length === 2 && corner.every(Number.isFinite),
+    )
+  ) {
+    return clip.corners.map(([x, y]) => ({ x, y: y - scrollY }));
+  }
+  return __krrRectPolygon(__krrClipRect(clip));
+};
+const __krrRoundedClipPolygon = (clip) => {
+  const corners = __krrClipCorners(clip);
+  const width = Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y);
+  const height = Math.hypot(corners[2].x - corners[1].x, corners[2].y - corners[1].y);
+  const fallbackRadius = [
+    [Number(clip.radiusX) || 0, Number(clip.radiusY) || 0],
+    [Number(clip.radiusX) || 0, Number(clip.radiusY) || 0],
+    [Number(clip.radiusX) || 0, Number(clip.radiusY) || 0],
+    [Number(clip.radiusX) || 0, Number(clip.radiusY) || 0],
+  ];
+  const radii =
+    Array.isArray(clip.radii) &&
+    clip.radii.length === 4 &&
+    clip.radii.every(
+      (radius) =>
+        Array.isArray(radius) &&
+        radius.length === 2 &&
+        radius.every((value) => Number.isFinite(value)),
+    )
+      ? clip.radii
+      : fallbackRadius;
+  if (width === 0 || height === 0) return corners;
+  const normalizedRadii = radii.map(([radiusX, radiusY]) => [
+    Math.max(0, radiusX),
+    Math.max(0, radiusY),
+  ]);
+  const horizontalScale = Math.min(
+    1,
+    width /
+      Math.max(
+        normalizedRadii[0][0] + normalizedRadii[1][0],
+        normalizedRadii[2][0] + normalizedRadii[3][0],
+        width,
+      ),
+  );
+  const verticalScale = Math.min(
+    1,
+    height /
+      Math.max(
+        normalizedRadii[0][1] + normalizedRadii[3][1],
+        normalizedRadii[1][1] + normalizedRadii[2][1],
+        height,
+      ),
+  );
+  const scaledRadii = normalizedRadii.map(([radiusX, radiusY]) => [
+    radiusX * horizontalScale,
+    radiusY * verticalScale,
+  ]);
+  if (scaledRadii.every(([radiusX, radiusY]) => radiusX === 0 || radiusY === 0)) {
+    return corners;
+  }
+  const origin = corners[0];
+  const horizontal = {
+    x: (corners[1].x - origin.x) / width,
+    y: (corners[1].y - origin.y) / width,
+  };
+  const vertical = {
+    x: (corners[3].x - origin.x) / height,
+    y: (corners[3].y - origin.y) / height,
+  };
+  const pointAt = (x, y) => ({
+    x: origin.x + horizontal.x * x + vertical.x * y,
+    y: origin.y + horizontal.y * x + vertical.y * y,
+  });
+  const arcs = [
+    [width - scaledRadii[1][0], scaledRadii[1][1], -Math.PI / 2, 0],
+    [width - scaledRadii[2][0], height - scaledRadii[2][1], 0, Math.PI / 2],
+    [scaledRadii[3][0], height - scaledRadii[3][1], Math.PI / 2, Math.PI],
+    [scaledRadii[0][0], scaledRadii[0][1], Math.PI, Math.PI * 1.5],
+  ];
+  return arcs.flatMap(([centerX, centerY, start, end], arcIndex) =>
+    Array.from({ length: 9 }, (_, index) => {
+      const angle = start + ((end - start) * index) / 8;
+      const [radiusX, radiusY] = scaledRadii[(arcIndex + 1) % 4];
+      return pointAt(centerX + radiusX * Math.cos(angle), centerY + radiusY * Math.sin(angle));
+    }),
+  );
+};
+const __krrClipFragment = (fragment, boundary, clips) => {
+  let polygon = __krrPolygonIntersection(__krrRectPolygon(fragment), __krrRectPolygon(boundary));
+  for (const clip of clips)
+    polygon = __krrPolygonIntersection(polygon, __krrRoundedClipPolygon(clip));
+  return { polygon, rect: __krrPolygonRect(polygon) };
 };
 const __krrViewportRect = () => {
   const { width, height } = __krrLayoutMetrics();
   return { x: 0, y: 0, width, height, top: 0, right: width, bottom: height, left: 0 };
+};
+const __krrElementRootBaseBounds = (elementRoot, rootMetadata, rootHasOverflowClip) => {
+  if (!elementRoot) return __krrViewportRect();
+  if (rootHasOverflowClip && rootMetadata?.paddingEdge) {
+    return __krrClipRect(rootMetadata.paddingEdge);
+  }
+  return elementRoot.getBoundingClientRect();
+};
+const __krrRootOverflowClip = (metadata) =>
+  metadata?.clipsOverflow === true ? metadata.paddingEdge : null;
+const __krrRootMarginIsZero = (margin) => margin.every((part) => part.amount === 0);
+const __krrRootMarginOffsets = (root, margins) => {
+  const [top, right, bottom, left] = margins;
+  const resolve = (margin) =>
+    margin.unit === "%" ? (root.width * margin.amount) / 100 : margin.amount;
+  return [resolve(top), resolve(right), resolve(bottom), resolve(left)];
+};
+const __krrRootClipCorners = (clip) =>
+  Array.isArray(clip.corners) &&
+  clip.corners.length === 4 &&
+  clip.corners.every(
+    (corner) => Array.isArray(corner) && corner.length === 2 && corner.every(Number.isFinite),
+  )
+    ? clip.corners.map(([x, y]) => ({ x, y }))
+    : [
+        { x: clip.x, y: clip.y },
+        { x: clip.x + clip.width, y: clip.y },
+        { x: clip.x + clip.width, y: clip.y + clip.height },
+        { x: clip.x, y: clip.y + clip.height },
+      ];
+const __krrExpandedRootClip = (clip, rootBounds, margins) => {
+  if (!clip || __krrRootMarginIsZero(margins)) return clip;
+  const rawCorners = __krrRootClipCorners(clip);
+  const width = Math.hypot(rawCorners[1].x - rawCorners[0].x, rawCorners[1].y - rawCorners[0].y);
+  const height = Math.hypot(rawCorners[3].x - rawCorners[0].x, rawCorners[3].y - rawCorners[0].y);
+  const [top, right, bottom, left] = __krrRootMarginOffsets(rootBounds, margins);
+  if (width === 0 || height === 0) {
+    const origin = rawCorners[0];
+    const horizontal =
+      width > 0
+        ? { x: (rawCorners[1].x - origin.x) / width, y: (rawCorners[1].y - origin.y) / width }
+        : height > 0
+          ? { x: (rawCorners[3].y - origin.y) / height, y: (origin.x - rawCorners[3].x) / height }
+          : { x: 1, y: 0 };
+    const vertical =
+      height > 0
+        ? { x: (rawCorners[3].x - origin.x) / height, y: (rawCorners[3].y - origin.y) / height }
+        : { x: -horizontal.y, y: horizontal.x };
+    const offset = (horizontalOffset, verticalOffset) => [
+      origin.x + horizontal.x * horizontalOffset + vertical.x * verticalOffset,
+      origin.y + horizontal.y * horizontalOffset + vertical.y * verticalOffset,
+    ];
+    return {
+      ...clip,
+      corners: [
+        offset(-left, -top),
+        offset(right, -top),
+        offset(right, bottom),
+        offset(-left, bottom),
+      ],
+      radii: [
+        [0, 0],
+        [0, 0],
+        [0, 0],
+        [0, 0],
+      ],
+      radiusX: 0,
+      radiusY: 0,
+    };
+  }
+  const horizontal = {
+    x: (rawCorners[1].x - rawCorners[0].x) / width,
+    y: (rawCorners[1].y - rawCorners[0].y) / width,
+  };
+  const vertical = {
+    x: (rawCorners[3].x - rawCorners[0].x) / height,
+    y: (rawCorners[3].y - rawCorners[0].y) / height,
+  };
+  const offset = (corner, horizontalOffset, verticalOffset) => ({
+    x: corner.x + horizontal.x * horizontalOffset + vertical.x * verticalOffset,
+    y: corner.y + horizontal.y * horizontalOffset + vertical.y * verticalOffset,
+  });
+  const radii =
+    Array.isArray(clip.radii) &&
+    clip.radii.length === 4 &&
+    clip.radii.every(
+      (radius) =>
+        Array.isArray(radius) &&
+        radius.length === 2 &&
+        radius.every((value) => Number.isFinite(value)),
+    )
+      ? clip.radii
+      : [[Number(clip.radiusX) || 0, Number(clip.radiusY) || 0]].concat(
+          Array.from({ length: 3 }, () => [Number(clip.radiusX) || 0, Number(clip.radiusY) || 0]),
+        );
+  const expandedRadii = radii.map(([radiusX, radiusY], index) => {
+    const horizontalOffset = index === 0 || index === 3 ? left : right;
+    const verticalOffset = index === 0 || index === 1 ? top : bottom;
+    return [Math.max(0, radiusX + horizontalOffset), Math.max(0, radiusY + verticalOffset)];
+  });
+  return {
+    ...clip,
+    corners: [
+      offset(rawCorners[0], -left, -top),
+      offset(rawCorners[1], right, -top),
+      offset(rawCorners[2], right, bottom),
+      offset(rawCorners[3], -left, bottom),
+    ].map(({ x, y }) => [x, y]),
+    radii: expandedRadii,
+    radiusX: Math.max(...expandedRadii.map(([radiusX]) => radiusX)),
+    radiusY: Math.max(...expandedRadii.map(([, radiusY]) => radiusY)),
+  };
+};
+const __krrIntersectionEntry = (observer, target) => {
+  const elementRoot = observer.root && observer.root !== document ? observer.root : null;
+  const targetBox = __krrObservedElementBox(target);
+  const boundingClientRect = targetBox.boundingClientRect;
+  const requestedRootClipData = elementRoot
+    ? __krrClipsWithinRoot(targetBox.metadata, target, elementRoot)
+    : { rootClip: null, ancestorClips: [] };
+  const rootClips = requestedRootClipData?.ancestorClips ?? [];
+  const rootBox = elementRoot ? __krrObservedElementBox(elementRoot) : null;
+  const rootOverflowClip = __krrRootOverflowClip(rootBox?.metadata);
+  const targetWithinRoot =
+    !elementRoot ||
+    __krrTargetWithinRoot(target, elementRoot, targetBox.metadata, requestedRootClipData !== null);
+  const rootBaseBounds = __krrElementRootBaseBounds(
+    elementRoot,
+    rootBox?.metadata,
+    Boolean(rootOverflowClip),
+  );
+  const rootBounds = __krrExpandRootBounds(rootBaseBounds, observer.__krrRootMargin);
+  const targetFragments = [boundingClientRect];
+  const clippedRoot = __krrClippedRootBounds(rootBounds, rootClips);
+  const clippedRootBounds = clippedRoot.rect;
+  const rootShape = __krrExpandedRootClip(
+    rootOverflowClip,
+    rootBaseBounds,
+    observer.__krrRootMargin,
+  );
+  const clipShapes = rootShape ? [...rootClips, rootShape] : rootClips;
+  const clippedFragments = targetWithinRoot
+    ? targetFragments.map((fragment) => __krrClipFragment(fragment, clippedRootBounds, clipShapes))
+    : [];
+  const intersectionFragments = clippedFragments.map((fragment) => fragment.rect);
+  const positiveIntersectionFragments = intersectionFragments.filter(
+    (rect) => rect.width > 0 && rect.height > 0,
+  );
+  const edgeAdjacentIntersectionFragments = intersectionFragments.filter(
+    (_, index) => !clippedRoot.separated && clippedFragments[index].polygon.length > 0,
+  );
+  const intersectionRect = __krrBoundingIntersectionRect(
+    positiveIntersectionFragments.length > 0
+      ? positiveIntersectionFragments
+      : edgeAdjacentIntersectionFragments,
+  );
+  const targetArea = boundingClientRect.width * boundingClientRect.height;
+  const intersectionArea = intersectionRect.width * intersectionRect.height;
+  const isIntersecting =
+    targetWithinRoot &&
+    targetBox.isPresent &&
+    intersectionFragments.some(
+      (rect, index) =>
+        (rect.width > 0 && rect.height > 0) ||
+        (!clippedRoot.separated && clippedFragments[index].polygon.length > 0),
+    );
+  const intersectionRatio =
+    targetWithinRoot && targetBox.isPresent && targetArea > 0
+      ? intersectionArea / targetArea
+      : isIntersecting
+        ? 1
+        : 0;
+  return {
+    target,
+    isIntersecting,
+    intersectionRatio,
+    boundingClientRect,
+    intersectionRect,
+    rootBounds,
+    time: Date.now(),
+  };
 };
 const __krrParseRootMargin = (value) => {
   const parts = String(value).trim().split(/\s+/).filter(Boolean);
@@ -614,8 +1061,19 @@ const __krrParseRootMargin = (value) => {
   const [top, right = top, bottom = top, left = right] = parsed;
   return [top, right, bottom, left];
 };
+const __krrThresholdValues = (value) => {
+  if (value === null || (typeof value !== "object" && typeof value !== "function")) {
+    return [value];
+  }
+  const iterator = value[Symbol.iterator];
+  if (iterator === null || iterator === undefined) return [value];
+  if (typeof iterator !== "function") {
+    throw new TypeError("IntersectionObserver threshold iterator must be callable");
+  }
+  return Array.from({ [Symbol.iterator]: () => iterator.call(value) });
+};
 const __krrNormalizeThresholds = (value) => {
-  const values = Array.isArray(value) ? Array.from(value) : [value];
+  const values = __krrThresholdValues(value);
   const thresholds = values.map((threshold) => {
     const number = +threshold;
     if (!Number.isFinite(number)) {
@@ -632,13 +1090,7 @@ const __krrNormalizeThresholds = (value) => {
 const __krrSerializeRootMargin = (margins) =>
   margins.map((margin) => `${margin.amount}${margin.unit}`).join(" ");
 const __krrExpandRootBounds = (root, margins) => {
-  const [top, right, bottom, left] = margins;
-  const resolve = (margin) =>
-    margin.unit === "%" ? (root.width * margin.amount) / 100 : margin.amount;
-  const topOffset = resolve(top);
-  const rightOffset = resolve(right);
-  const bottomOffset = resolve(bottom);
-  const leftOffset = resolve(left);
+  const [topOffset, rightOffset, bottomOffset, leftOffset] = __krrRootMarginOffsets(root, margins);
   return {
     x: root.left - leftOffset,
     y: root.top - topOffset,
@@ -656,7 +1108,12 @@ globalThis.IntersectionObserver = class IntersectionObserver {
       throw new TypeError("IntersectionObserver callback must be a function");
     }
     this.callback = callback;
-    this.root = options.root || null;
+    const suppliedRoot = options.root;
+    const root = suppliedRoot === undefined ? null : suppliedRoot;
+    if (root !== null && root !== document && !__krrElementInstances.has(root)) {
+      throw new TypeError("IntersectionObserver root must be null, document, or an element");
+    }
+    this.root = root;
     const rootMargin = String(options.rootMargin === undefined ? "0px" : options.rootMargin);
     this.__krrRootMargin = __krrParseRootMargin(rootMargin);
     if (this.__krrRootMargin === null) {
@@ -694,40 +1151,7 @@ globalThis.IntersectionObserver = class IntersectionObserver {
     return [];
   }
   __krrNotify(targets) {
-    const entries = targets.map((target) => {
-      const elementRoot = this.root && this.root !== document ? this.root : null;
-      const rootBounds = __krrExpandRootBounds(
-        elementRoot ? elementRoot.getBoundingClientRect() : __krrViewportRect(),
-        this.__krrRootMargin,
-      );
-      const targetBox = __krrObservedElementBox(target);
-      const boundingClientRect = targetBox.boundingClientRect;
-      const targetWithinRoot = !elementRoot || __krrTargetIsDescendantOfRoot(target, elementRoot);
-      const intersectionRect = targetWithinRoot
-        ? __krrIntersectionRect(rootBounds, boundingClientRect)
-        : __krrEmptyIntersectionRect();
-      const targetArea = boundingClientRect.width * boundingClientRect.height;
-      const intersectionArea = intersectionRect.width * intersectionRect.height;
-      const isIntersecting =
-        targetWithinRoot &&
-        targetBox.isPresent &&
-        __krrRectsIntersectOrAreEdgeAdjacent(rootBounds, boundingClientRect);
-      const intersectionRatio =
-        targetWithinRoot && targetBox.isPresent && targetArea > 0
-          ? intersectionArea / targetArea
-          : isIntersecting
-            ? 1
-            : 0;
-      return {
-        target,
-        isIntersecting,
-        intersectionRatio,
-        boundingClientRect,
-        intersectionRect,
-        rootBounds,
-        time: Date.now(),
-      };
-    });
+    const entries = targets.map((target) => __krrIntersectionEntry(this, target));
     const changed = entries.filter((entry) => {
       const previous = this.intersections.get(entry.target);
       this.intersections.set(entry.target, entry);

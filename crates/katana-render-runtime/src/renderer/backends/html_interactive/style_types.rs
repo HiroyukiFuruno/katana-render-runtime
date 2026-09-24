@@ -155,6 +155,7 @@ pub(in crate::renderer::backends::html_interactive) struct CssStyle {
     pub(in crate::renderer::backends::html_interactive) float: CssFloat,
     pub(in crate::renderer::backends::html_interactive) appearance_none: bool,
     pub(in crate::renderer::backends::html_interactive) rotation_degrees: f32,
+    pub(in crate::renderer::backends::html_interactive) has_transform: bool,
     pub(in crate::renderer::backends::html_interactive) z_index: Option<i32>,
     pub(in crate::renderer::backends::html_interactive) inset_top: Option<f32>,
     pub(in crate::renderer::backends::html_interactive) inset_right: Option<f32>,

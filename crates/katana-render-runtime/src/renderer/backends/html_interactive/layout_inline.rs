@@ -1,7 +1,11 @@
 #[path = "layout_inline_fragment.rs"]
 mod fragment;
+#[path = "layout_inline_fragments.rs"]
+mod fragments;
 #[path = "layout_inline_measure.rs"]
 mod measure;
+#[path = "layout_inline_paint.rs"]
+mod paint;
 
 #[path = "layout_inline_floats.rs"]
 mod floats;

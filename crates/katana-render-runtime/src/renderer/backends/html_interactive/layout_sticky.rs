@@ -33,7 +33,7 @@ impl HtmlLayoutRenderer {
         if let Some(bottom) = style.inset_bottom {
             y = y.min(self.scroll_y + self.viewport_height - bottom - height);
         }
-        if let Some(containing) = self.containing_blocks.last() {
+        if let Some(containing) = self.ownership.containing_blocks.last() {
             let minimum = containing.y;
             let maximum = (containing.y + containing.height - height).max(minimum);
             y = y.clamp(minimum, maximum);
@@ -80,10 +80,12 @@ mod tests {
     fn sticky_top_stops_at_the_containing_block_bottom() {
         let mut renderer = renderer(500.0);
         renderer.push_containing_block(ContainingBlock {
+            owner_node_id: None,
             x: 0.0,
             y: 0.0,
             width: 320.0,
             height: 500.0,
+            establishes_fixed_containing_block: false,
         });
         let mut style = sticky_style();
         style.inset_top = Some(0.0);

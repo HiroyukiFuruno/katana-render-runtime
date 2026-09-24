@@ -31,6 +31,9 @@ impl HtmlDomBridgeState {
                 }
                 .to_string(),
             ))),
+            "intersectionMetadata" => Ok(Some(DomValue::String(
+                self.intersection_metadata_json(node_id(argument(arguments, 0)?)?),
+            ))),
             "layoutMetrics" => Ok(Some(DomValue::String(self.layout_metrics_json()))),
             _ => Ok(None),
         }

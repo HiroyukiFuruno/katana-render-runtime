@@ -4,6 +4,7 @@ mod document;
 mod input;
 mod input_focus;
 mod layout;
+mod layout_clip;
 mod layout_container;
 mod layout_control_paint;
 mod layout_controls;
