@@ -193,7 +193,10 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 git("branch", "-f", "base", VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE)
                 squash = git(
                     "commit-tree",
-                    "release^{tree}",
+                    # The candidate may contain later governance work.  Model
+                    # the documented squash exception with the immutable
+                    # required release terminal tree itself.
+                    "terminal^{tree}",
                     "-p",
                     "base",
                     "-m",
