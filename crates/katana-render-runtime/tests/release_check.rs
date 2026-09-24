@@ -35,24 +35,24 @@ fn release_verify_tests_the_packaged_library_sources() -> Result<(), Box<dyn std
 }
 
 #[test]
-fn release_target_check_requires_v0_4_20_intent() -> Result<(), Box<dyn std::error::Error>> {
+fn release_target_check_requires_v0_4_21_intent() -> Result<(), Box<dyn std::error::Error>> {
     let root = workspace_root()?;
-    assert!(release_target_check(root, "0.4.20", "0.4.19", "HEAD")?);
-    assert!(release_target_check(root, "0.4.20", "0.4.20", "HEAD")?);
+    assert!(release_target_check(root, "0.4.21", "0.4.20", "HEAD")?);
+    assert!(release_target_check(root, "0.4.21", "0.4.21", "HEAD")?);
     assert!(!release_target_check(
         root,
+        "0.4.21",
         "0.4.20",
-        "0.4.19",
         "missing-release-head",
     )?);
-    assert!(!release_target_check(root, "0.4.20", "0.4.18", "HEAD")?);
     assert!(!release_target_check(root, "0.4.21", "0.4.19", "HEAD")?);
+    assert!(!release_target_check(root, "0.4.22", "0.4.20", "HEAD")?);
     for version in [
         "0.3.9", "0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.4.4", "0.4.5", "0.4.6", "0.4.7", "0.4.8",
         "0.4.9", "0.4.10", "0.4.11", "0.4.12", "0.4.13", "0.4.14", "0.4.15", "0.4.16", "0.4.17",
-        "0.4.18", "0.4.19", "0.5.0", "1.0.0", "2.0.0",
+        "0.4.18", "0.4.19", "0.4.20", "0.5.0", "1.0.0", "2.0.0",
     ] {
-        assert!(!release_target_check(root, version, "0.4.19", "HEAD",)?);
+        assert!(!release_target_check(root, version, "0.4.20", "HEAD",)?);
     }
     Ok(())
 }
@@ -107,6 +107,7 @@ fn coverage_gate_remains_strict_and_includes_integration_targets()
     assert!(recipe.contains("--all-targets"));
     assert!(recipe.contains("--fail-under-lines {{COVERAGE_MIN_LINES}}"));
     assert!(recipe.contains("--fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}"));
+    assert!(recipe.contains("rm -rf target/llvm-cov-target target/debug/deps"));
     assert!(
         justfile
             .contains("COVERAGE_MIN_LINES := env_var_or_default(\"COVERAGE_MIN_LINES\", \"100\")")

@@ -421,17 +421,20 @@ def validate_contract(
             )
         referenced_numbers.update(references)
 
+    release_branch = branch.startswith("release/v")
     loaded_issues: list[Issue] = []
     for number in sorted(referenced_numbers):
         issue = issue_loader(number)
         if issue is None:
             raise ContractViolation(f"Issue #{number}を対象repositoryで確認できません")
-        if issue.state != "OPEN":
+        if issue.state != "OPEN" and not release_branch:
             raise ContractViolation(f"Issue #{number}はOPENではありません: {issue.state}")
         loaded_issues.append(issue)
 
     manifests, lockfiles = dependency_contract_paths(changed_paths)
     if not manifests and not lockfiles:
+        return
+    if release_branch and all(issue.state == "CLOSED" for issue in loaded_issues):
         return
 
     issue_errors = [

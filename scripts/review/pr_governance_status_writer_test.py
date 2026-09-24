@@ -33,6 +33,7 @@ class StatusWriterUnitTest(unittest.TestCase):
                 "GOVERNANCE_PRESERVED_TARGET_NUMBERS": "[]", "GOVERNANCE_PRESERVED_WRITER_RUN_ID": "0", "GOVERNANCE_CHECK_MANIFEST": "[]",
                 "GOVERNANCE_TERMINAL_ORDER_NUMBERS": "[]", "GOVERNANCE_TERMINAL_BATCH_NUMBERS": "[]",
                 "GOVERNANCE_CONTINUATION_INDEX": "0", "GOVERNANCE_COMPLETED_WRITER_RUN_IDS": "[]",
+                "GITHUB_ACTIONS": "", "GITHUB_SHA": "", "GITHUB_TOKEN": "", "GH_TOKEN": "",
             },
         )
         self.dispatch_boundary.start()

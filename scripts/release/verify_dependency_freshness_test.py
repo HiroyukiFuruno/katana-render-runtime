@@ -75,7 +75,13 @@ class DependencyFreshnessTest(unittest.TestCase):
             "resolve": {"nodes": [{"id": member_id, "deps": [{"name": "serde", "pkg": serde_id}]}]},
         }
 
-    def run_check(self, responses: dict[str, object], metadata: dict[str, object] | None = None) -> tuple[int, str, str]:
+    def run_check(
+        self,
+        responses: dict[str, object],
+        metadata: dict[str, object] | None = None,
+        rust_fresh: bool = True,
+        javascript_fresh: bool = True,
+    ) -> tuple[int, str, str]:
         def fake_fetch(url: str) -> bytes:
             response = responses[url]
             if isinstance(response, Exception):
@@ -86,6 +92,8 @@ class DependencyFreshnessTest(unittest.TestCase):
         with (
             patch.object(freshness, "fetch", fake_fetch),
             patch.object(freshness, "cargo_metadata", return_value=metadata or self.metadata_for_direct_serde()),
+            patch.object(freshness, "rust_lock_is_latest_compatible", return_value=rust_fresh),
+            patch.object(freshness, "js_lock_is_latest_compatible", return_value=javascript_fresh),
             contextlib.redirect_stdout(stdout),
             contextlib.redirect_stderr(stderr),
         ):
@@ -105,17 +113,13 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertEqual(result, 0, stderr)
         self.assertIn("passed (3 resolved dependencies and pinned runtime assets)", stdout)
 
-    def test_stale_rust_dependency_rejects_release_with_repair_command(self) -> None:
-        responses = self.clean_responses()
-        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.1.0"}}
-        result, _, stderr = self.run_check(responses)
+    def test_stale_rust_lock_rejects_release_with_repair_command(self) -> None:
+        result, _, stderr = self.run_check(self.clean_responses(), rust_fresh=False)
         self.assertEqual(result, 1)
-        self.assertIn("Rust serde: 1.0.0 -> 1.1.0", stderr)
+        self.assertIn("Rust Cargo.lock is not at the latest compatible resolution", stderr)
         self.assertIn("just depends-update-all", stderr)
 
-    def test_direct_rust_edge_is_not_masked_by_newer_transitive_same_name(self) -> None:
-        responses = self.clean_responses()
-        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.1.0"}}
+    def test_rust_metadata_retains_direct_and_transitive_resolution(self) -> None:
         metadata = self.metadata_for_direct_serde()
         metadata["resolve"]["nodes"][0]["deps"][0]["name"] = "renamed-serde"
         metadata["packages"].append(
@@ -126,11 +130,10 @@ class DependencyFreshnessTest(unittest.TestCase):
                 "source": "registry+https://github.com/rust-lang/crates.io-index",
             }
         )
-        result, _, stderr = self.run_check(responses, metadata)
-        self.assertEqual(result, 1)
-        self.assertIn("Rust serde: 1.0.0 -> 1.1.0", stderr)
+        result, _, stderr = self.run_check(self.clean_responses(), metadata)
+        self.assertEqual(result, 0, stderr)
 
-    def test_stale_transitive_rust_dependency_rejects_release(self) -> None:
+    def test_transitive_rust_metadata_is_accepted_when_cargo_resolution_is_fresh(self) -> None:
         metadata = self.metadata_for_direct_serde()
         transitive_id = "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.0"
         metadata["packages"].append(
@@ -140,15 +143,10 @@ class DependencyFreshnessTest(unittest.TestCase):
         metadata["resolve"]["nodes"].extend(
             [{"id": serde_id, "deps": [{"name": "itoa", "pkg": transitive_id}]}, {"id": transitive_id, "deps": []}]
         )
-        responses = self.clean_responses()
-        responses["https://crates.io/api/v1/crates/itoa"] = {"crate": {"newest_version": "1.1.0"}}
-        result, _, stderr = self.run_check(responses, metadata)
-        self.assertEqual(result, 1)
-        self.assertIn("Rust itoa: 1.0.0 -> 1.1.0", stderr)
+        result, _, stderr = self.run_check(self.clean_responses(), metadata)
+        self.assertEqual(result, 0, stderr)
 
     def test_direct_rust_dependency_uses_resolved_package_id_not_dependency_name(self) -> None:
-        responses = self.clean_responses()
-        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.1.0"}}
         metadata = self.metadata_for_direct_serde()
         dependency = metadata["resolve"]["nodes"][0]["deps"][0]
         dependency["name"] = "serde_legacy"
@@ -160,9 +158,8 @@ class DependencyFreshnessTest(unittest.TestCase):
                 "source": "registry+https://github.com/rust-lang/crates.io-index",
             }
         )
-        result, _, stderr = self.run_check(responses, metadata)
-        self.assertEqual(result, 1)
-        self.assertIn("Rust serde: 1.0.0 -> 1.1.0", stderr)
+        result, _, stderr = self.run_check(self.clean_responses(), metadata)
+        self.assertEqual(result, 0, stderr)
 
     def test_missing_direct_package_metadata_fails_closed(self) -> None:
         metadata = self.metadata_for_direct_serde()
@@ -171,31 +168,33 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("direct Rust package missing from cargo metadata", stderr)
 
-    def test_stale_javascript_dependency_rejects_release(self) -> None:
-        responses = self.clean_responses()
-        responses["https://registry.npmjs.org/example/latest"] = {"version": "2.0.0"}
-        result, _, stderr = self.run_check(responses)
+    def test_stale_javascript_lock_rejects_release(self) -> None:
+        result, _, stderr = self.run_check(self.clean_responses(), javascript_fresh=False)
         self.assertEqual(result, 1)
-        self.assertIn("JavaScript example: 1.0.0 -> 2.0.0", stderr)
+        self.assertIn("JavaScript bun.lock is not at the latest compatible resolution", stderr)
 
-    def test_stale_transitive_javascript_dependency_rejects_release(self) -> None:
+    def test_transitive_javascript_dependency_is_accepted_when_bun_resolution_is_fresh(self) -> None:
         (self.root / "bun.lock").write_text(
             json.dumps({"packages": {"example": ["example@1.0.0", "", {}], "transitive": ["transitive@1.0.0", "", {}]}}),
             encoding="utf-8",
         )
-        responses = self.clean_responses()
-        responses["https://registry.npmjs.org/transitive/latest"] = {"version": "1.1.0"}
-        result, _, stderr = self.run_check(responses)
-        self.assertEqual(result, 1)
-        self.assertIn("JavaScript transitive: 1.0.0 -> 1.1.0", stderr)
+        result, _, stderr = self.run_check(self.clean_responses())
+        self.assertEqual(result, 0, stderr)
 
-    def test_numeric_prerelease_update_rejects_release(self) -> None:
-        (self.root / "bun.lock").write_text(json.dumps({"packages": {"example": ["example@1.0.0-beta.2", "", {}]}}), encoding="utf-8")
+    def test_bun_lock_dependency_path_uses_the_resolved_package_name(self) -> None:
+        (self.root / "bun.lock").write_text(
+            json.dumps({"packages": {"parent/commander": ["commander@1.0.0", "", {}]}}),
+            encoding="utf-8",
+        )
         responses = self.clean_responses()
-        responses["https://registry.npmjs.org/example/latest"] = {"version": "1.0.0-beta.11"}
+        responses["https://registry.npmjs.org/commander/latest"] = {"version": "1.0.0"}
         result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 0, stderr)
+
+    def test_stale_javascript_prerelease_lock_rejects_release(self) -> None:
+        result, _, stderr = self.run_check(self.clean_responses(), javascript_fresh=False)
         self.assertEqual(result, 1)
-        self.assertIn("JavaScript example: 1.0.0-beta.2 -> 1.0.0-beta.11", stderr)
+        self.assertIn("JavaScript bun.lock is not at the latest compatible resolution", stderr)
 
     def test_stale_runtime_asset_rejects_release(self) -> None:
         responses = self.clean_responses()
@@ -222,7 +221,7 @@ class DependencyFreshnessTest(unittest.TestCase):
 
     def test_invalid_latest_version_is_fail_closed(self) -> None:
         responses = self.clean_responses()
-        responses["https://registry.npmjs.org/example/latest"] = {"version": "newest"}
+        responses["https://example.test/runtime"] = {"version": "newest"}
         result, _, stderr = self.run_check(responses)
         self.assertEqual(result, 1)
         self.assertIn("failed closed", stderr)
@@ -230,7 +229,7 @@ class DependencyFreshnessTest(unittest.TestCase):
 
     def test_non_object_latest_response_is_fail_closed_without_traceback(self) -> None:
         responses = self.clean_responses()
-        responses["https://registry.npmjs.org/example/latest"] = ["2.0.0"]
+        responses["https://example.test/runtime"] = ["2.0.0"]
         result, _, stderr = self.run_check(responses)
         self.assertEqual(result, 1)
         self.assertIn("failed closed", stderr)

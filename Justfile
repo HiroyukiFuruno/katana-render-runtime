@@ -19,7 +19,7 @@ COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
 MERMAID_JS_VERSION := "12.0.0"
 MERMAID_ZENUML_JS_VERSION := "1.0.1"
-DRAWIO_JS_VERSION := "31.4.6"
+DRAWIO_JS_VERSION := "31.5.2"
 MATHJAX_JS_VERSION := "4.1.3"
 ZENUML_CORE_JS_VERSION := "4.3.0"
 PLANTUML_JAR_VERSION := "1.2026.8"
@@ -73,6 +73,7 @@ unit-test: plantuml-install
 # Run coverage as a required full-check gate
 coverage: plantuml-install
     {{CARGO}} llvm-cov clean --workspace
+    rm -rf target/llvm-cov-target target/debug/deps target/debug/incremental target/debug/build target/debug/examples target/debug/.fingerprint target/package
     {{CARGO}} llvm-cov --workspace --all-targets --all-features --locked --summary-only --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}{{TEST_THREAD_ARGS}}
 
 # Verify pinned runtime asset checksums

@@ -6,8 +6,10 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import total_ordering
@@ -176,6 +178,31 @@ def rust_packages(root: Path) -> list[Package]:
     return sorted(resolved.values(), key=lambda package: (package.name, Version.parse(package.current)))
 
 
+def rust_lock_is_latest_compatible(root: Path) -> bool:
+    """Use Cargo's resolver to validate direct and transitive lock freshness.
+
+    Registry ``newest_version`` can be a prerelease or a major version outside
+    the workspace's semver requirements.  Cargo is the authority for the
+    highest compatible resolution, including transitive dependencies.
+    """
+    completed = subprocess.run(
+        ["cargo", "update", "--dry-run", "--manifest-path", str(root / "Cargo.toml")],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise ValueError(f"cargo update dry-run failed: {completed.stderr.strip()}")
+    output = f"{completed.stdout}\n{completed.stderr}"
+    match = re.search(
+        r"Locking ([0-9]+) packages to latest(?: Rust [0-9.]+)? compatible versions",
+        output,
+    )
+    if match is None:
+        raise ValueError("cargo update dry-run did not report lockfile resolution")
+    return match.group(1) == "0"
+
+
 def js_packages(root: Path) -> list[Package]:
     lock = load_bun_lock(root / "bun.lock")
     entries = lock.get("packages", {})
@@ -188,11 +215,31 @@ def js_packages(root: Path) -> list[Package]:
         entry = entries.get(name)
         if not isinstance(entry, list) or not entry or not isinstance(entry[0], str):
             raise ValueError(f"resolved JavaScript package missing from bun.lock: {name}")
-        prefix = f"{name}@"
-        if not entry[0].startswith(prefix):
+        resolved_name, separator, resolved_version = entry[0].rpartition("@")
+        if not separator or not resolved_name or not resolved_version:
             raise ValueError(f"invalid bun.lock package entry: {name}")
-        packages.append(Package("JavaScript", name, entry[0][len(prefix) :]))
+        packages.append(Package("JavaScript", resolved_name, resolved_version))
     return packages
+
+
+def js_lock_is_latest_compatible(root: Path) -> bool:
+    """Use Bun's resolver for direct and transitive JavaScript freshness."""
+    package = root / "package.json"
+    lock = root / "bun.lock"
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        candidate = Path(temporary_directory)
+        for source in (package, lock):
+            shutil.copy2(source, candidate / source.name)
+        completed = subprocess.run(
+            ["bun", "update", "--latest"], cwd=candidate, check=False,
+            capture_output=True, text=True,
+        )
+        if completed.returncode != 0:
+            raise ValueError(f"bun update failed: {completed.stderr.strip()}")
+        return all(
+            source.read_bytes() == (candidate / source.name).read_bytes()
+            for source in (package, lock)
+        )
 
 
 def runtime_assets(root: Path) -> list[Package]:
@@ -295,7 +342,19 @@ def display_name(package: Package) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args() if argv is None else argparse.Namespace(root=Path(argv[0]))
     try:
-        packages = rust_packages(args.root) + js_packages(args.root) + runtime_assets(args.root)
+        rust = rust_packages(args.root)
+        if not rust_lock_is_latest_compatible(args.root):
+            print("Dependency freshness check rejected this release:", file=sys.stderr)
+            print("Rust Cargo.lock is not at the latest compatible resolution.", file=sys.stderr)
+            print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
+            return 1
+        javascript = js_packages(args.root)
+        if not js_lock_is_latest_compatible(args.root):
+            print("Dependency freshness check rejected this release:", file=sys.stderr)
+            print("JavaScript bun.lock is not at the latest compatible resolution.", file=sys.stderr)
+            print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
+            return 1
+        packages = runtime_assets(args.root)
         with ThreadPoolExecutor(max_workers=8) as executor:
             resolved = list(zip(packages, executor.map(latest, packages, timeout=TIMEOUT_SECONDS * len(packages))))
     except (ValueError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -307,7 +366,7 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(stale), file=sys.stderr)
         print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
         return 1
-    print(f"Dependency freshness check passed ({len(packages)} resolved dependencies and pinned runtime assets).")
+    print(f"Dependency freshness check passed ({len(rust) + len(javascript) + len(packages)} resolved dependencies and pinned runtime assets).")
     return 0
 
 

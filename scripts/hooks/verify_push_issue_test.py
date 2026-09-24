@@ -764,6 +764,13 @@ class VerifyPushIssueTest(unittest.TestCase):
         with self.assertRaisesRegex(subject.ContractViolation, "OPEN"):
             self.validate(issue=self.issue(state="CLOSED"))
 
+    def test_release_branch_accepts_closed_release_evidence(self) -> None:
+        self.validate(
+            branch="release/v0.4.21",
+            changed_paths=["Cargo.lock"],
+            issue=self.issue(state="CLOSED"),
+        )
+
     def test_lockfile_only_transitive_update_still_requires_dependency_evidence(self) -> None:
         with self.assertRaisesRegex(subject.ContractViolation, "依存更新証跡"):
             self.validate(changed_paths=["Cargo.lock"])
