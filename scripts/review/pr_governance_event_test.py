@@ -4917,6 +4917,7 @@ raise SystemExit(91)
                 "PATH": f"{directory}{os.pathsep}{os.environ['PATH']}",
             }
             environment = self._with_history_manifest(environment)
+            environment["HISTORY_CARRY_MANIFEST"] = json.dumps([[head, 1]])
             result = subprocess.run([sys.executable, "-c", program], env=environment, capture_output=True, text=True, check=False)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(len(log.read_text(encoding="utf-8").splitlines()), 1)
