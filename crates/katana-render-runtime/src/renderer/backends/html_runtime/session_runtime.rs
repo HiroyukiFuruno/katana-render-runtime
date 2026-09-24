@@ -18,6 +18,13 @@ type ScriptEvaluator<'a> = dyn FnMut(&str, &str) -> Result<(), HtmlRuntimeError>
 
 impl StaticHtmlRuntime {
     pub(crate) fn render(&self, source: &str) -> Result<String, HtmlRuntimeError> {
+        let document = HtmlDocument::parse(source);
+        let scripts = document
+            .inline_scripts()
+            .map_err(HtmlRuntimeError::ExternalScript)?;
+        if scripts.is_empty() {
+            return Ok(document.render());
+        }
         self.start(source)?.snapshot()
     }
 
