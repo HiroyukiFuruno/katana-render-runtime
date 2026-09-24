@@ -240,6 +240,7 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
         check=False,
         capture_output=True,
         text=True,
+        timeout=120,
     )
     if completed.returncode != 0:
         raise ValueError(f"cargo update dry-run failed: {completed.stderr.strip()}")
@@ -283,6 +284,7 @@ def js_lock_is_latest_compatible(root: Path) -> bool:
         completed = subprocess.run(
             ["bun", "update", "--latest"], cwd=candidate, check=False,
             capture_output=True, text=True,
+            timeout=120,
         )
         if completed.returncode != 0:
             raise ValueError(f"bun update failed: {completed.stderr.strip()}")
@@ -414,7 +416,7 @@ def main(argv: list[str] | None = None) -> int:
         freshness_packages = [*rust_manifest, *packages]
         with ThreadPoolExecutor(max_workers=8) as executor:
             resolved = list(zip(freshness_packages, executor.map(latest, freshness_packages, timeout=TIMEOUT_SECONDS * len(freshness_packages))))
-    except (ValueError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (ValueError, TimeoutError, subprocess.TimeoutExpired, json.JSONDecodeError, UnicodeDecodeError) as exc:
         print(f"Dependency freshness check failed closed: {exc}", file=sys.stderr)
         return 1
     stale = [f"{package.ecosystem} {display_name(package)}: {package.current} -> {resolved_version}" for package, resolved_version in resolved if Version.parse(resolved_version) > Version.parse(package.current)]
