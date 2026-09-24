@@ -147,6 +147,8 @@ mod tests {
             height: 20.0,
             transformed_corners: ElementBox::rectangle_corners(0.0, 0.0, 10.0, 20.0),
             positioning_context: ElementPositioningContext::InFlow,
+            positioning_origin_node_id: None,
+            participates_in_flow: true,
             ancestor_node_ids: Vec::new(),
             overflow_clips: vec![OverflowClip::new(2, 10.0, 0.0, 20.0, 10.0, 0.0, 0.0)],
             clips_overflow: false,

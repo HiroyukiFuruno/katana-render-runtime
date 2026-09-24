@@ -227,6 +227,18 @@ fn empty_inline_parent_ignores_out_of_flow_child_fragments() -> TestResult {
 }
 
 #[test]
+fn static_child_of_positioned_overflow_clip_is_clipped_in_real_host() -> TestResult {
+    let session = start_with_viewport(positioned_overflow_static_child_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-positioned-overflow-child="false:0""##),
+        "a static child must inherit its positioned ancestor's overflow clip: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn clipped_wrapped_inline_uses_its_full_bounding_rect_in_real_host() -> TestResult {
     let session = start_with_viewport(clipped_wrapped_inline_document(), 80, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -415,6 +427,30 @@ fn explicit_root_rejects_absolute_target_inside_fixed_ancestor() -> TestResult {
 }
 
 #[test]
+fn explicit_fixed_root_accepts_its_static_descendant() -> TestResult {
+    let session = start_with_viewport(fixed_root_static_descendant_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-fixed-root-child="true:1""##),
+        "a static descendant of a fixed element root must remain inside that root: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
+fn explicit_absolute_root_accepts_its_static_descendant() -> TestResult {
+    let session = start_with_viewport(absolute_root_static_descendant_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-absolute-root-child="true:1""##),
+        "a static descendant of an absolute element root must remain inside that root: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn element_root_margin_is_not_clipped_by_the_root_overflow() -> TestResult {
     let session = start_with_viewport(root_margin_with_overflow_document(), 160, 100)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -422,6 +458,18 @@ fn element_root_margin_is_not_clipped_by_the_root_overflow() -> TestResult {
     assert!(
         snapshot.contains(r##"data-margin-target="true:1""##),
         "the element root's own overflow clip must not trim its expanded root margin: {snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
+fn root_margin_expands_a_degenerate_overflow_root() -> TestResult {
+    let session = start_with_viewport(degenerate_overflow_root_margin_document(), 160, 100)?;
+    let snapshot = session.runtime.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r##"data-degenerate-margin-target="true:1""##),
+        "positive root margins must expand a zero-width overflow root into an intersectable area: {snapshot}"
     );
     Ok(())
 }
@@ -1014,6 +1062,22 @@ for (const target of [document.getElementById("fixed-inline"), document.getEleme
 </script>"##
 }
 
+fn positioned_overflow_static_child_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 160px; height: 80px; }
+#positioned-clip { position: absolute; left: 0; top: 0; width: 80px; height: 20px; overflow: hidden; }
+#positioned-overflow-child { width: 20px; height: 20px; margin-left: 100px; }
+</style>
+<div id=root><div id=positioned-clip><div id=positioned-overflow-child>Clipped child</div></div></div><p id=observed></p>
+<script>
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-positioned-overflow-child", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root: document.getElementById("root") }).observe(document.getElementById("positioned-overflow-child"));
+</script>"##
+}
+
 fn transformed_containing_block_fixed_target_document() -> &'static str {
     r##"<style>
 html, body { margin: 0; }
@@ -1052,6 +1116,40 @@ new IntersectionObserver((entries) => {
 </script>"##
 }
 
+fn fixed_root_static_descendant_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: fixed; top: 0; left: 0; width: 120px; height: 20px; }
+#child { width: 120px; height: 20px; }
+</style>
+<div id=root><div id=child>Fixed root child</div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+const observed = document.getElementById("observed");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  observed.setAttribute("data-fixed-root-child", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root }).observe(document.getElementById("child"));
+</script>"##
+}
+
+fn absolute_root_static_descendant_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#outer { position: relative; width: 120px; height: 20px; }
+#root { position: absolute; top: 0; left: 0; width: 120px; height: 20px; }
+#child { width: 120px; height: 20px; }
+</style>
+<div id=outer><div id=root><div id=child>Absolute root child</div></div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-absolute-root-child", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root }).observe(document.getElementById("child"));
+</script>"##
+}
+
 fn root_margin_with_overflow_document() -> &'static str {
     r##"<style>
 html, body { margin: 0; }
@@ -1065,6 +1163,22 @@ new IntersectionObserver((entries) => {
   const entry = entries[0];
   document.getElementById("observed").setAttribute("data-margin-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
 }, { root, rootMargin: "10px" }).observe(document.getElementById("margin-target"));
+</script>"##
+}
+
+fn degenerate_overflow_root_margin_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+#root { position: relative; width: 0; height: 20px; overflow: hidden; }
+#target { position: absolute; top: 0; left: -5px; width: 5px; height: 20px; }
+</style>
+<div id=root><div id=target>Margin target</div></div><p id=observed></p>
+<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-degenerate-margin-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, { root, rootMargin: "0px 10px" }).observe(document.getElementById("target"));
 </script>"##
 }
 

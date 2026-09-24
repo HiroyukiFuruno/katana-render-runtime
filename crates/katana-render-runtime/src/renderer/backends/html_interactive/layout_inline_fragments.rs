@@ -1,5 +1,5 @@
 use super::super::layout::HtmlLayoutRenderer;
-use super::super::types::{ElementBox, ElementPositioningContext, InlineFragment};
+use super::super::types::{ElementBox, InlineFragment};
 
 impl HtmlLayoutRenderer {
     pub(in crate::renderer::backends::html_interactive) fn finish_inline_fragment_box(
@@ -52,11 +52,7 @@ impl HtmlLayoutRenderer {
 }
 
 fn is_in_flow_fragment(element_box: &ElementBox) -> bool {
-    matches!(
-        element_box.positioning_context,
-        ElementPositioningContext::InFlow
-    ) && element_box.width > 0.0
-        && element_box.height > 0.0
+    element_box.participates_in_flow && element_box.width > 0.0 && element_box.height > 0.0
 }
 
 fn set_inline_fragment_bounds(element_box: &mut ElementBox, insertion_x: f32, insertion_y: f32) {
@@ -103,7 +99,7 @@ mod tests {
             device_scale_factor: 1.0,
         };
         let mut renderer = HtmlLayoutRenderer::new(viewport, 0.0, &HashMap::new(), None);
-        renderer.start_element_box(7, ElementPositioningContext::InFlow);
+        renderer.start_element_box(7, ElementPositioningContext::InFlow, true, None);
         renderer.ownership.inline_fragment_owners.push(7);
 
         renderer.record_inline_fragment(1.0, 2.0, -1.0, 3.0);

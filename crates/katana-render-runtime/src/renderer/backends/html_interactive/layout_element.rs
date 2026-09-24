@@ -124,7 +124,15 @@ impl HtmlLayoutRenderer {
             return layout.y;
         }
         let positioning_context = self.element_positioning_context(layout.style.position);
-        let element_box_index = self.start_element_box(element.node_id, positioning_context);
+        let positioning_origin_node_id =
+            self.positioning_origin_node_id(element.node_id, layout.style.position);
+        let element_box_index = self.start_element_box(
+            element.node_id,
+            positioning_context,
+            layout.style.position != CssPosition::Absolute
+                && layout.style.position != CssPosition::Fixed,
+            positioning_origin_node_id,
+        );
         let target_index = self.start_click_target(element);
         self.record_anchor(element, layout.y);
         let bottom = self.render_tag(element, layout);
@@ -377,6 +385,18 @@ mod tests {
             .find(|element_box| element_box.node_id == node_id)
     }
 
+    fn test_box_padding_edge() -> super::super::types::OverflowClip {
+        super::super::types::OverflowClip::new(
+            1,
+            0.0,
+            0.0,
+            TEST_BOX_WIDTH,
+            TEST_BOX_HEIGHT,
+            0.0,
+            0.0,
+        )
+    }
+
     fn test_element_box() -> ElementBox {
         ElementBox {
             node_id: 1,
@@ -391,18 +411,12 @@ mod tests {
                 TEST_BOX_HEIGHT,
             ),
             positioning_context: ElementPositioningContext::InFlow,
+            positioning_origin_node_id: None,
+            participates_in_flow: true,
             ancestor_node_ids: Vec::new(),
             overflow_clips: Vec::new(),
             clips_overflow: false,
-            padding_edge: super::super::types::OverflowClip::new(
-                1,
-                0.0,
-                0.0,
-                TEST_BOX_WIDTH,
-                TEST_BOX_HEIGHT,
-                0.0,
-                0.0,
-            ),
+            padding_edge: test_box_padding_edge(),
             inline_fragments: Vec::new(),
         }
     }

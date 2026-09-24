@@ -644,6 +644,7 @@ const __krrMetadataBelongsToRoot = (metadata, target, root) => {
         fragment.height >= 0,
     );
   if (!hasValidGeometry || typeof metadata.viewportEscape !== "boolean") return false;
+  if (String(metadata.positioningOrigin) === String(root.__krrNodeId)) return true;
   if (metadata.viewportEscape) return false;
   if (metadata.positioning === "in-flow") return true;
   const path = __krrNativeDom("eventPath", target.__krrNodeId);
@@ -881,24 +882,59 @@ const __krrRootMarginOffsets = (root, margins) => {
     margin.unit === "%" ? (root.width * margin.amount) / 100 : margin.amount;
   return [resolve(top), resolve(right), resolve(bottom), resolve(left)];
 };
+const __krrRootClipCorners = (clip) =>
+  Array.isArray(clip.corners) &&
+  clip.corners.length === 4 &&
+  clip.corners.every(
+    (corner) => Array.isArray(corner) && corner.length === 2 && corner.every(Number.isFinite),
+  )
+    ? clip.corners.map(([x, y]) => ({ x, y }))
+    : [
+        { x: clip.x, y: clip.y },
+        { x: clip.x + clip.width, y: clip.y },
+        { x: clip.x + clip.width, y: clip.y + clip.height },
+        { x: clip.x, y: clip.y + clip.height },
+      ];
 const __krrExpandedRootClip = (clip, rootBounds, margins) => {
   if (!clip || __krrRootMarginIsZero(margins)) return clip;
-  const rawCorners =
-    Array.isArray(clip.corners) &&
-    clip.corners.length === 4 &&
-    clip.corners.every(
-      (corner) => Array.isArray(corner) && corner.length === 2 && corner.every(Number.isFinite),
-    )
-      ? clip.corners.map(([x, y]) => ({ x, y }))
-      : [
-          { x: clip.x, y: clip.y },
-          { x: clip.x + clip.width, y: clip.y },
-          { x: clip.x + clip.width, y: clip.y + clip.height },
-          { x: clip.x, y: clip.y + clip.height },
-        ];
+  const rawCorners = __krrRootClipCorners(clip);
   const width = Math.hypot(rawCorners[1].x - rawCorners[0].x, rawCorners[1].y - rawCorners[0].y);
   const height = Math.hypot(rawCorners[3].x - rawCorners[0].x, rawCorners[3].y - rawCorners[0].y);
-  if (width === 0 || height === 0) return clip;
+  const [top, right, bottom, left] = __krrRootMarginOffsets(rootBounds, margins);
+  if (width === 0 || height === 0) {
+    const origin = rawCorners[0];
+    const horizontal =
+      width > 0
+        ? { x: (rawCorners[1].x - origin.x) / width, y: (rawCorners[1].y - origin.y) / width }
+        : height > 0
+          ? { x: (rawCorners[3].y - origin.y) / height, y: (origin.x - rawCorners[3].x) / height }
+          : { x: 1, y: 0 };
+    const vertical =
+      height > 0
+        ? { x: (rawCorners[3].x - origin.x) / height, y: (rawCorners[3].y - origin.y) / height }
+        : { x: -horizontal.y, y: horizontal.x };
+    const offset = (horizontalOffset, verticalOffset) => [
+      origin.x + horizontal.x * horizontalOffset + vertical.x * verticalOffset,
+      origin.y + horizontal.y * horizontalOffset + vertical.y * verticalOffset,
+    ];
+    return {
+      ...clip,
+      corners: [
+        offset(-left, -top),
+        offset(right, -top),
+        offset(right, bottom),
+        offset(-left, bottom),
+      ],
+      radii: [
+        [0, 0],
+        [0, 0],
+        [0, 0],
+        [0, 0],
+      ],
+      radiusX: 0,
+      radiusY: 0,
+    };
+  }
   const horizontal = {
     x: (rawCorners[1].x - rawCorners[0].x) / width,
     y: (rawCorners[1].y - rawCorners[0].y) / width,
@@ -907,7 +943,6 @@ const __krrExpandedRootClip = (clip, rootBounds, margins) => {
     x: (rawCorners[3].x - rawCorners[0].x) / height,
     y: (rawCorners[3].y - rawCorners[0].y) / height,
   };
-  const [top, right, bottom, left] = __krrRootMarginOffsets(rootBounds, margins);
   const offset = (corner, horizontalOffset, verticalOffset) => ({
     x: corner.x + horizontal.x * horizontalOffset + vertical.x * verticalOffset,
     y: corner.y + horizontal.y * horizontalOffset + vertical.y * verticalOffset,

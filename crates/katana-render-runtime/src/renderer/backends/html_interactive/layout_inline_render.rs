@@ -2,8 +2,8 @@ use super::super::super::html_document::HtmlDocumentNode;
 use super::super::constants::LAYOUT_FLOAT_EPSILON;
 use super::super::document::wrap_text_with_initial_width;
 use super::super::layout::HtmlLayoutRenderer;
-use super::super::style::CssStyle;
-use super::super::types::{DetailsContext, ElementPositioningContext};
+use super::super::style::{CssPosition, CssStyle};
+use super::super::types::DetailsContext;
 use super::InlineMeasurement;
 use super::floats::InlineFloat;
 use super::state::InlineFlowState;
@@ -84,8 +84,12 @@ impl HtmlLayoutRenderer {
         else {
             return;
         };
-        let element_box_index =
-            self.start_element_box(*node_id, self.in_flow_positioning_context());
+        let element_box_index = self.start_element_box(
+            *node_id,
+            self.in_flow_positioning_context(),
+            true,
+            self.positioning_origin_node_id(*node_id, CssPosition::Static),
+        );
         let (insertion_x, insertion_y) = (inline.cursor_x, inline.y);
         self.ownership.inline_fragment_owners.push(*node_id);
         for index in 0..children.len() {
@@ -128,7 +132,7 @@ impl HtmlLayoutRenderer {
         let Some(element_box) = self.element_boxes.get(element_box_start) else {
             return;
         };
-        if element_box.positioning_context != ElementPositioningContext::InFlow {
+        if !element_box.participates_in_flow {
             return;
         }
         if !element_box.inline_fragments.is_empty() {

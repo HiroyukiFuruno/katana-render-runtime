@@ -70,6 +70,9 @@ impl HtmlInteractiveSession {
 fn intersection_metadata(element: &ElementBox) -> (u64, String) {
     let (positioning, containing_block, viewport_escape) =
         positioning::intersection_positioning(element);
+    let positioning_origin = element
+        .positioning_origin_node_id
+        .map_or_else(|| "null".to_string(), |node_id| node_id.to_string());
     let clips = intersection_clips(element);
     let clips_overflow = element.clips_overflow;
     let padding_edge = intersection_clip(&element.padding_edge);
@@ -77,7 +80,7 @@ fn intersection_metadata(element: &ElementBox) -> (u64, String) {
     (
         element.node_id,
         format!(
-            "{{\"positioning\":\"{positioning}\",\"containingBlock\":{containing_block},\"viewportEscape\":{viewport_escape},\"paddingEdge\":{padding_edge},\"clipsOverflow\":{clips_overflow},\"clips\":[{clips}],\"fragments\":[{fragments}]}}"
+            "{{\"positioning\":\"{positioning}\",\"containingBlock\":{containing_block},\"positioningOrigin\":{positioning_origin},\"viewportEscape\":{viewport_escape},\"paddingEdge\":{padding_edge},\"clipsOverflow\":{clips_overflow},\"clips\":[{clips}],\"fragments\":[{fragments}]}}"
         ),
     )
 }

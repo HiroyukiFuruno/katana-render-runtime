@@ -104,6 +104,10 @@ pub(super) struct ElementBox {
     pub(super) height: f32,
     pub(super) transformed_corners: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
     pub(super) positioning_context: ElementPositioningContext,
+    /// element root の外へ出る配置文脈を開始した要素。
+    pub(super) positioning_origin_node_id: Option<u64>,
+    /// 自身が通常フローのレイアウトへ寄与するか。root 所有権とは分離する。
+    pub(super) participates_in_flow: bool,
     /// 開始時点のDOM祖先。絶対配置要素へ適用する overflow clip を判定する。
     pub(super) ancestor_node_ids: Vec<u64>,
     pub(super) overflow_clips: Vec<OverflowClip>,

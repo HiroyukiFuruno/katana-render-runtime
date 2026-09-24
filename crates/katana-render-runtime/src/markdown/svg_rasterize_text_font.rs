@@ -65,7 +65,7 @@ pub(super) fn matching_fallback_face(
     requested_weight: u16,
     requested_italic: bool,
 ) -> Option<usvg::fontdb::ID> {
-    let base_face = database.face(base_face_id)?;
+    database.face(base_face_id)?;
     let requested_style = if requested_italic {
         usvg::fontdb::Style::Italic
     } else {
@@ -83,7 +83,7 @@ pub(super) fn matching_fallback_face(
                 face.stretch,
                 requested_style,
                 requested_weight,
-                base_face.stretch,
+                usvg::fontdb::Stretch::Normal,
             )
         })
         .map(|face| face.id)
@@ -96,18 +96,68 @@ fn fallback_attribute_score(
     requested_weight: usvg::fontdb::Weight,
     requested_stretch: usvg::fontdb::Stretch,
 ) -> (u8, u8, u8, u16) {
-    let stretch_mismatch = u8::from(candidate_stretch != requested_stretch);
-    let style_mismatch = u8::from(candidate_style != requested_style);
+    let stretch_rank = css_stretch_match_rank(candidate_stretch, requested_stretch);
+    let style_rank = css_style_match_rank(candidate_style, requested_style);
     let (weight_phase, weight_distance) =
         css_weight_match_distance(candidate_weight, requested_weight);
     /* WHY: CSS fallback matching compares stretch, style, then weight. 重みの距離は
     属性一致の判定後に比較し、近い weight が stretch/style の一致を越えないようにする。 */
-    (
-        stretch_mismatch,
-        style_mismatch,
-        weight_phase,
-        weight_distance,
-    )
+    (stretch_rank, style_rank, weight_phase, weight_distance)
+}
+
+const CSS_STRETCH_MIN: u8 = 1;
+const CSS_STRETCH_EXTRA_CONDENSED: u8 = 2;
+const CSS_STRETCH_CONDENSED: u8 = 3;
+const CSS_STRETCH_SEMI_CONDENSED: u8 = 4;
+const CSS_STRETCH_NORMAL: u8 = 5;
+const CSS_STRETCH_SEMI_EXPANDED: u8 = 6;
+const CSS_STRETCH_EXPANDED: u8 = 7;
+const CSS_STRETCH_EXTRA_EXPANDED: u8 = 8;
+const CSS_STRETCH_MAX: u8 = 9;
+const CSS_STYLE_FALLBACK_RANK: u8 = 3;
+
+fn css_stretch_match_rank(
+    candidate: usvg::fontdb::Stretch,
+    requested: usvg::fontdb::Stretch,
+) -> u8 {
+    let candidate = css_stretch_value(candidate);
+    let requested = css_stretch_value(requested);
+    if candidate == requested {
+        return 0;
+    }
+
+    let candidate_is_preferred_direction =
+        if requested <= css_stretch_value(usvg::fontdb::Stretch::Normal) {
+            candidate < requested
+        } else {
+            candidate > requested
+        };
+    let distance = candidate.abs_diff(requested);
+    u8::from(!candidate_is_preferred_direction) * CSS_STRETCH_MAX + distance
+}
+
+fn css_stretch_value(stretch: usvg::fontdb::Stretch) -> u8 {
+    match stretch {
+        usvg::fontdb::Stretch::UltraCondensed => CSS_STRETCH_MIN,
+        usvg::fontdb::Stretch::ExtraCondensed => CSS_STRETCH_EXTRA_CONDENSED,
+        usvg::fontdb::Stretch::Condensed => CSS_STRETCH_CONDENSED,
+        usvg::fontdb::Stretch::SemiCondensed => CSS_STRETCH_SEMI_CONDENSED,
+        usvg::fontdb::Stretch::Normal => CSS_STRETCH_NORMAL,
+        usvg::fontdb::Stretch::SemiExpanded => CSS_STRETCH_SEMI_EXPANDED,
+        usvg::fontdb::Stretch::Expanded => CSS_STRETCH_EXPANDED,
+        usvg::fontdb::Stretch::ExtraExpanded => CSS_STRETCH_EXTRA_EXPANDED,
+        usvg::fontdb::Stretch::UltraExpanded => CSS_STRETCH_MAX,
+    }
+}
+
+fn css_style_match_rank(candidate: usvg::fontdb::Style, requested: usvg::fontdb::Style) -> u8 {
+    use usvg::fontdb::Style;
+    match (requested, candidate) {
+        (requested, candidate) if requested == candidate => 0,
+        (Style::Italic, Style::Oblique) | (Style::Oblique, Style::Italic) => 1,
+        (_, Style::Normal) => 2,
+        (_, _) => CSS_STYLE_FALLBACK_RANK,
+    }
 }
 pub(super) fn font_has_char(
     database: &usvg::fontdb::Database,
@@ -142,7 +192,7 @@ pub(super) fn fontdb_family(name: &str) -> usvg::fontdb::Family<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::fallback_attribute_score;
+    use super::{css_stretch_match_rank, css_style_match_rank, fallback_attribute_score};
     use resvg::usvg::fontdb::{Stretch, Style, Weight};
 
     #[test]
@@ -209,6 +259,26 @@ mod tests {
         );
 
         assert!(regular < bold);
+    }
+
+    #[test]
+    fn non_exact_stretch_uses_css_directional_matching() {
+        assert!(
+            css_stretch_match_rank(Stretch::SemiCondensed, Stretch::Normal)
+                < css_stretch_match_rank(Stretch::SemiExpanded, Stretch::Normal)
+        );
+        assert!(
+            css_stretch_match_rank(Stretch::Expanded, Stretch::SemiExpanded)
+                < css_stretch_match_rank(Stretch::Normal, Stretch::SemiExpanded)
+        );
+    }
+
+    #[test]
+    fn italic_request_prefers_oblique_before_normal() {
+        assert!(
+            css_style_match_rank(Style::Oblique, Style::Italic)
+                < css_style_match_rank(Style::Normal, Style::Italic)
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@ use super::super::html_browser::HtmlBrowserViewport;
 use super::constants::BORDER_RADIUS_CORNER_COUNT;
 use super::layout::{ContainingBlock, HtmlLayoutRenderer};
 use super::style::{CssPosition, CssStyle};
-use super::types::{DetailsContext, ElementPositioningContext, LayoutContext, OverflowClip};
+use super::types::{DetailsContext, LayoutContext, OverflowClip};
 use std::rc::Rc;
 
 #[path = "layout_container_helpers.rs"]
@@ -241,7 +241,7 @@ fn overflow_clip_applies_to(element_box: &super::types::ElementBox, owner_node_i
     if context.escapes_element_root() {
         return false;
     }
-    if context == ElementPositioningContext::InFlow {
+    if element_box.participates_in_flow {
         return true;
     }
     context
@@ -357,7 +357,12 @@ mod container_contract_tests {
         style.overflow = super::super::style::CssOverflow::Clip;
         let geometry = geometry(300.0, &style);
         renderer.record_overflow_clip(0, &geometry, 20.0, &style);
-        let element_box = ElementBox {
+        let element_box = absolute_box_without_owner();
+        assert!(!super::overflow_clip_applies_to(&element_box, 1));
+    }
+
+    fn absolute_box_without_owner() -> ElementBox {
+        ElementBox {
             node_id: 1,
             x: 0.0,
             y: 0.0,
@@ -368,13 +373,14 @@ mod container_contract_tests {
                 owner_node_id: None,
                 viewport_escape: false,
             },
+            positioning_origin_node_id: None,
+            participates_in_flow: false,
             ancestor_node_ids: Vec::new(),
             overflow_clips: Vec::new(),
             clips_overflow: false,
             padding_edge: OverflowClip::new(1, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
             inline_fragments: Vec::new(),
-        };
-        assert!(!super::overflow_clip_applies_to(&element_box, 1));
+        }
     }
 
     #[test]

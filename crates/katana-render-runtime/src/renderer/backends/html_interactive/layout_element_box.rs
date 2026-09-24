@@ -10,6 +10,8 @@ impl HtmlLayoutRenderer {
         &mut self,
         node_id: u64,
         positioning_context: ElementPositioningContext,
+        participates_in_flow: bool,
+        positioning_origin_node_id: Option<u64>,
     ) -> usize {
         let index = self.element_boxes.len();
         self.element_boxes.push(ElementBox {
@@ -20,6 +22,8 @@ impl HtmlLayoutRenderer {
             height: 0.0,
             transformed_corners: [(0.0, 0.0); ELEMENT_BOX_CORNER_COUNT],
             positioning_context,
+            positioning_origin_node_id,
+            participates_in_flow,
             ancestor_node_ids: self.ancestor_node_ids(positioning_context),
             overflow_clips: Vec::new(),
             clips_overflow: false,
