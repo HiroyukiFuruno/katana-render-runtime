@@ -6,6 +6,7 @@ use crate::renderer::backends::html_debug_trace::HtmlDebugTrace;
 use crate::renderer::backends::html_document::HtmlDocument;
 use crate::renderer::backends::html_runtime::dom_state::HtmlDomBridgeState;
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
+use markup5ever_rcdom::{Handle, NodeData};
 use std::collections::HashMap;
 
 use super::super::script::{
@@ -22,10 +23,14 @@ impl StaticHtmlRuntime {
         let scripts = document
             .inline_scripts()
             .map_err(HtmlRuntimeError::ExternalScript)?;
-        if scripts.is_empty() {
+        if !Self::requires_runtime(&document, &scripts) {
             return Ok(document.render());
         }
         self.start(source)?.snapshot()
+    }
+
+    fn requires_runtime(document: &HtmlDocument, scripts: &[String]) -> bool {
+        !scripts.is_empty() || contains_lifecycle_handler(&document.document)
     }
 
     pub(crate) fn start(&self, source: &str) -> Result<StaticHtmlRuntimeSession, HtmlRuntimeError> {
@@ -171,9 +176,24 @@ impl StaticHtmlRuntime {
     }
 }
 
+fn contains_lifecycle_handler(node: &Handle) -> bool {
+    if let NodeData::Element { attrs, .. } = &node.data
+        && attrs.borrow().iter().any(|attribute| {
+            let name = attribute.name.local.as_str();
+            name.eq_ignore_ascii_case("onload") || name.eq_ignore_ascii_case("onreadystatechange")
+        })
+    {
+        return true;
+    }
+    node.children
+        .borrow()
+        .iter()
+        .any(contains_lifecycle_handler)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{DiagramV8Runtime, StaticHtmlRuntime};
+    use super::{DiagramV8Runtime, HtmlDocument, StaticHtmlRuntime};
     use crate::renderer::backends::HtmlBrowserSource;
     use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 
@@ -195,6 +215,26 @@ mod tests {
         let session = must_result(StaticHtmlRuntime.start_interactive(&source));
         let snapshot = must_result(session.snapshot());
         assert!(snapshot.contains("<p id=\"marker\">docload</p>"));
+    }
+
+    #[test]
+    fn scriptless_local_iframe_onload_uses_the_runtime_lifecycle_dispatch() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<p id=status>Waiting</p><iframe data-krr-local-frame onload="document.getElementById('status').textContent = 'Ready'"></iframe>"#,
+        ));
+
+        assert!(
+            snapshot.contains(r#"<p id="status">Ready</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn scriptless_document_without_lifecycle_handlers_skips_the_runtime() {
+        let document = HtmlDocument::parse("<p>Static</p>");
+        let scripts = must_result(document.inline_scripts());
+
+        assert!(!StaticHtmlRuntime::requires_runtime(&document, &scripts));
     }
 
     #[test]
