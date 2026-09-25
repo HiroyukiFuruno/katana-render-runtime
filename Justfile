@@ -285,9 +285,17 @@ plantuml-install version=PLANTUML_JAR_VERSION output=PLANTUML_CACHE_JAR:
     @set -euo pipefail; \
     url="https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/{{version}}/plantuml-lgpl-{{version}}.jar"; \
     target="{{output}}"; \
+    max_attempts=3; \
+    retry_delay="${KRR_PLANTUML_DOWNLOAD_RETRY_DELAY_SECONDS:-1}"; \
+    case "$retry_delay" in ''|*[!0-9]*) echo "PlantUML retry delay must be a non-negative integer: $retry_delay" >&2; exit 1;; esac; \
     mkdir -p "$(dirname "$target")"; \
     tmp="$target.tmp"; \
-    curl -fsSL "$url" -o "$tmp"; \
+    downloaded=false; \
+    for attempt in $(seq 1 "$max_attempts"); do \
+      if curl --fail --silent --show-error --location "$url" --output "$tmp"; then downloaded=true; break; fi; \
+      if [ "$attempt" -lt "$max_attempts" ]; then echo "PlantUML download failed (attempt $attempt/$max_attempts); retrying" >&2; sleep "$retry_delay"; fi; \
+    done; \
+    if [ "$downloaded" != true ]; then echo "PlantUML download failed after $max_attempts attempts" >&2; exit 1; fi; \
     expected="{{PLANTUML_JAR_CHECKSUM}}"; \
     actual="$(bash scripts/plantuml/sha256-file.sh "$tmp")"; \
     if [ "$actual" != "$expected" ]; then \
