@@ -24,7 +24,8 @@ REQUIRED_RELEASE_COMMITS = (
 # 再構成した squash と比較する v0.4.21 の最終 non-gate release 状態である。
 # 最終treeとの比較により、release準備で確定した修正と依存更新を保持する。
 REQUIRED_RELEASE_BASE = "fc340a40598e1d14fec9182064da3e7f78a2a5a8"
-REQUIRED_RELEASE_TERMINAL = "aa76ab0538beb70c5960077e30296340368869d9"
+# force-push 後も release branch から到達できる immutable terminal。
+REQUIRED_RELEASE_TERMINAL = "97a1bd506b8b6f7c5b042a037790eb4a75ec57c7"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
