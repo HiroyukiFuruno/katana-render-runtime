@@ -89,7 +89,7 @@ jobs:
         if: matrix.os != 'ubuntu-latest'
         uses: Swatinem/rust-cache@v2.9.2
         with:
-          shared-key: ci-${{ matrix.os }}-stable-default
+          shared-key: ci-v2-${{ matrix.os }}-stable-default
 
       - name: Install Bun
         if: matrix.os != 'windows-latest'
