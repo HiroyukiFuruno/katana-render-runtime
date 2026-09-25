@@ -189,6 +189,20 @@ class DependencyFreshnessTest(unittest.TestCase):
             ):
                 self.assertEqual(freshness.rust_lock_is_latest_compatible(self.root), expected)
 
+    def test_cargo_update_dry_run_forces_plain_output_when_workflow_enables_color(self) -> None:
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout="Locking 1 package to latest compatible version\n",
+            stderr="",
+        )
+        with patch.dict("os.environ", {"CARGO_TERM_COLOR": "always"}), patch.object(
+            freshness.subprocess, "run", return_value=completed
+        ) as run:
+            self.assertFalse(freshness.rust_lock_is_latest_compatible(self.root))
+
+        command = run.call_args.args[0]
+        self.assertIn("--color=never", command)
+
     def test_rust_metadata_retains_direct_and_transitive_resolution(self) -> None:
         metadata = self.metadata_for_direct_serde()
         metadata["resolve"]["nodes"][0]["deps"][0]["name"] = "renamed-serde"

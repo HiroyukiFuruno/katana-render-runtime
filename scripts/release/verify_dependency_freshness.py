@@ -236,7 +236,9 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
     highest compatible resolution, including transitive dependencies.
     """
     completed = subprocess.run(
-        ["cargo", "update", "--dry-run", "--manifest-path", str(root / "Cargo.toml")],
+        # リリース workflow は CARGO_TERM_COLOR=always を設定するため、Locking 件数を
+        # 安定して判定できるよう Cargo 出力を明示的に無色化する。
+        ["cargo", "update", "--dry-run", "--color=never", "--manifest-path", str(root / "Cargo.toml")],
         check=False,
         capture_output=True,
         text=True,
