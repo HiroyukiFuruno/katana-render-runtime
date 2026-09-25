@@ -25,7 +25,7 @@ REQUIRED_RELEASE_COMMITS = (
 # 最終treeとの比較により、release準備で確定した修正と依存更新を保持する。
 REQUIRED_RELEASE_BASE = "fc340a40598e1d14fec9182064da3e7f78a2a5a8"
 # force-push 後も release branch から到達できる immutable terminal。
-REQUIRED_RELEASE_TERMINAL = "97a1bd506b8b6f7c5b042a037790eb4a75ec57c7"
+REQUIRED_RELEASE_TERMINAL = "887c0308b55fe5d518dbca51f552984b323c3679"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
