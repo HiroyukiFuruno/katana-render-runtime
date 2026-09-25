@@ -177,6 +177,15 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 git("config", "user.email", "release-test@example.invalid")
                 git("config", "user.name", "Release Target Test")
                 git("fetch", "-q", str(source_repository), "HEAD:refs/heads/release")
+                # 終端 commit は不変の release fixture であり、呼出元 branch
+                # から到達可能とは限らない。明示的に取得して、隔離 repository
+                # の作成時に checkout されていた branch へ依存させない。
+                git(
+                    "fetch",
+                    "-q",
+                    str(source_repository),
+                    f"{FINAL_RELEASE_TREE}:refs/heads/final-release-fixture",
+                )
                 git("branch", "-f", "final-release", FINAL_RELEASE_TREE)
                 git("branch", "-f", "base", VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE)
                 squash = git(
