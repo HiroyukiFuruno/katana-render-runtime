@@ -21,7 +21,7 @@
     "@rollup/plugin-swc": "^0.4.1",
     "@swc/core": "^1.16.2",
     "@types/bun": "1.4.2",
-    "@types/node": "26.6.2",
+    "@types/node": "26.6.3",
     "acorn": "^8.18.0",
     "acorn-loose": "^8.5.2",
     "acorn-walk": "^8.3.5",
