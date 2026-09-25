@@ -764,12 +764,13 @@ class VerifyPushIssueTest(unittest.TestCase):
         with self.assertRaisesRegex(subject.ContractViolation, "OPEN"):
             self.validate(issue=self.issue(state="CLOSED"))
 
-    def test_release_branch_accepts_closed_release_evidence(self) -> None:
-        self.validate(
-            branch="release/v0.4.21",
-            changed_paths=["Cargo.lock"],
-            issue=self.issue(state="CLOSED"),
-        )
+    def test_release_branch_rejects_closed_issue(self) -> None:
+        with self.assertRaisesRegex(subject.ContractViolation, "OPEN"):
+            self.validate(
+                branch="release/v0.4.21",
+                changed_paths=["Cargo.lock"],
+                issue=self.issue(state="CLOSED"),
+            )
 
     def test_lockfile_only_transitive_update_still_requires_dependency_evidence(self) -> None:
         with self.assertRaisesRegex(subject.ContractViolation, "依存更新証跡"):
@@ -1199,7 +1200,7 @@ class VerifyPushIssueTest(unittest.TestCase):
                     issue_loader=lambda number: self.issue(number),
                 )
 
-    def test_pr_range_accepts_all_closed_release_issue_evidence(self) -> None:
+    def test_pr_range_rejects_closed_release_issue(self) -> None:
         base_sha = "a" * 40
         head_sha = "b" * 40
         compare = {
@@ -1212,27 +1213,21 @@ class VerifyPushIssueTest(unittest.TestCase):
             "commits": [
                 {
                     "sha": head_sha,
-                    "commit": {"message": "release: v0.4.21\n\nRefs #64 #78 #80"},
+                    "commit": {"message": "release: v0.4.21\n\nRefs #64"},
                 }
             ],
             "files": [{"filename": "Cargo.lock"}],
         }
-        issues = {
-            number: self.issue(number, state="CLOSED")
-            for number in (64, 78, 80)
-        }
         with patch.object(subject, "_gh_json", return_value=compare):
-            self.assertEqual(
+            with self.assertRaisesRegex(subject.ContractViolation, "OPEN"):
                 subject.validate_pr_range(
                     repository="HiroyukiFuruno/katana-render-runtime",
                     pr_number=87,
                     base_sha=base_sha,
                     head_sha=head_sha,
                     branch="release/v0.4.21",
-                    issue_loader=issues.get,
-                ),
-                {64, 78, 80},
-            )
+                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
+                )
 
     def test_pr_range_rejects_closed_issue_outside_release_branch(self) -> None:
         base_sha = "a" * 40
