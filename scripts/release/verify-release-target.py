@@ -27,7 +27,7 @@ REQUIRED_RELEASE_COMMITS = (
 REQUIRED_RELEASE_BASE = "fc340a40598e1d14fec9182064da3e7f78a2a5a8"
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "f8bd042c226a51cdaca76a340e33bec14f7261f20da281245867e11f3a07bf4b"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "502e50724406d63680a538bc30ff21401df73cec8b775ee8afe48a91353adad2"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
