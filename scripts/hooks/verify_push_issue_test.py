@@ -1639,14 +1639,72 @@ class VerifyPushIssueTest(unittest.TestCase):
                     issue_loader=lambda number: self.issue(number),
                 )
 
-    def test_pr_changed_paths_fails_closed_at_github_compare_files_limit(self) -> None:
+    def test_pr_changed_paths_uses_complete_commit_trees_at_github_compare_files_limit(self) -> None:
         base_sha, head_sha = "a" * 40, "b" * 40
         compare = {
             "base_commit": {"sha": base_sha},
             "files": [{"filename": f"fixtures/{entry}.txt"} for entry in range(300)],
         }
-        with patch.object(subject, "_gh_json", return_value=compare):
-            with self.assertRaisesRegex(subject.ContractViolation, "300件上限"):
+        base_tree_sha, head_tree_sha = "c" * 40, "d" * 40
+        base_entries = [
+            {"path": f"fixtures/{entry}.txt", "mode": "100644", "type": "blob", "sha": "e" * 40}
+            for entry in range(301)
+        ]
+        head_entries = [*base_entries]
+        head_entries[0] = {**head_entries[0], "sha": "f" * 40}
+        head_entries.append(
+            {
+                "path": ".github/workflows/new.yml",
+                "mode": "100644",
+                "type": "blob",
+                "sha": "1" * 40,
+            }
+        )
+
+        def gh_json(*arguments: str) -> object:
+            endpoint = arguments[0]
+            if "/compare/" in endpoint:
+                return compare
+            if f"/git/commits/{base_sha}" in endpoint:
+                return {"sha": base_sha, "tree": {"sha": base_tree_sha}}
+            if f"/git/commits/{head_sha}" in endpoint:
+                return {"sha": head_sha, "tree": {"sha": head_tree_sha}}
+            if f"/git/trees/{base_tree_sha}?recursive=1" in endpoint:
+                return {"truncated": False, "tree": base_entries}
+            if f"/git/trees/{head_tree_sha}?recursive=1" in endpoint:
+                return {"truncated": False, "tree": head_entries}
+            raise AssertionError(endpoint)
+
+        with patch.object(subject, "_gh_json", side_effect=gh_json):
+            self.assertEqual(
+                subject._pr_changed_paths(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                ),
+                [".github/workflows/new.yml", "fixtures/0.txt"],
+            )
+
+    def test_pr_changed_paths_fails_closed_when_fallback_tree_is_truncated(self) -> None:
+        base_sha, head_sha = "a" * 40, "b" * 40
+        base_tree_sha = "c" * 40
+        compare = {
+            "base_commit": {"sha": base_sha},
+            "files": [{"filename": f"fixtures/{entry}.txt"} for entry in range(300)],
+        }
+
+        def gh_json(*arguments: str) -> object:
+            endpoint = arguments[0]
+            if "/compare/" in endpoint:
+                return compare
+            if f"/git/commits/{base_sha}" in endpoint:
+                return {"sha": base_sha, "tree": {"sha": base_tree_sha}}
+            if f"/git/trees/{base_tree_sha}?recursive=1" in endpoint:
+                return {"truncated": True, "tree": []}
+            raise AssertionError(endpoint)
+
+        with patch.object(subject, "_gh_json", side_effect=gh_json):
+            with self.assertRaisesRegex(subject.ContractViolation, "打ち切られた"):
                 subject._pr_changed_paths(
                     repository="HiroyukiFuruno/katana-render-runtime",
                     base_sha=base_sha,
