@@ -1013,7 +1013,8 @@ def ensure_writer_run_is_active() -> None:
     repository = value.get("repository") if isinstance(value, dict) else None
     if not (
         isinstance(value, dict) and value.get("id") == int(WRITER_RUN_ID)
-        and value.get("name") == "PR governance status writer"
+        and value.get("name") == value.get("display_title")
+        and isinstance(value.get("display_title"), str)
         and workflow_path_matches(value.get("path"), WRITER_WORKFLOW_PATH)
         and value.get("event") == "workflow_dispatch" and value.get("head_sha") == expected_head
         and repository_rest_identity(repository, REPOSITORY) is not _INVALID_REPOSITORY_IDENTITY
@@ -1198,7 +1199,7 @@ def trusted_completed_terminal_writers(
         triggering_actor = value.get("triggering_actor") if isinstance(value, dict) else None
         if not (
             isinstance(value, dict) and value.get("id") == identifier
-            and value.get("name") == "PR governance status writer"
+            and value.get("name") == value.get("display_title")
             and workflow_path_is_default(value.get("path"), WRITER_WORKFLOW_PATH)
             and value.get("event") == "workflow_dispatch"
             and value.get("display_title") == f"source={source.identifier} scope=all segment={segment}"
