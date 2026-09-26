@@ -70,7 +70,7 @@ class Package:
     ecosystem: str
     name: str
     current: str
-    incompatible_major_only: bool = False
+    incompatible_prefix_length: int | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -219,17 +219,25 @@ def rust_manifest_dependencies(root: Path) -> list[Package]:
                 match = re.fullmatch(r"(?:=|\^|~)?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", version)
                 if match is None:
                     raise ValueError(f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}")
-                broad_requirement = match.group(2) is None or match.group(3) is None
+                major = int(match.group(1))
+                minor = match.group(2)
+                patch = match.group(3)
+                incompatible_prefix_length: int | None = None
+                if minor is None:
+                    incompatible_prefix_length = 1
+                elif patch is None:
+                    incompatible_prefix_length = 1 if major > 0 else 2
                 # ``depends-update-all`` permits incompatible upgrades, so
                 # broad requirements such as `1` must observe a new major
-                # that Cargo's compatible lockfile resolver cannot see.
+                # that Cargo's compatible lockfile resolver cannot see. Cargo
+                # treats pre-1.0 `0.1` as compatible only within that minor.
                 # Compatible updates remain Cargo's lockfile responsibility.
                 declared = ".".join(
-                    (match.group(1), match.group(2) or "0", match.group(3) or "0")
+                    (match.group(1), minor or "0", patch or "0")
                 )
                 Version.parse(declared)
                 dependencies_by_version[(package_name, declared)] = Package(
-                    "Rust manifest dependency", package_name, declared, broad_requirement
+                    "Rust manifest dependency", package_name, declared, incompatible_prefix_length
                 )
     return sorted(dependencies_by_version.values(), key=lambda package: (package.name, Version.parse(package.current)))
 
@@ -408,8 +416,9 @@ def display_name(package: Package) -> str:
 def is_stale(package: Package, resolved_version: str) -> bool:
     current = Version.parse(package.current)
     resolved = Version.parse(resolved_version)
-    if package.incompatible_major_only:
-        return resolved.parts[0] > current.parts[0]
+    if package.incompatible_prefix_length is not None:
+        length = package.incompatible_prefix_length
+        return resolved.parts[:length] > current.parts[:length]
     return resolved > current
 
 
