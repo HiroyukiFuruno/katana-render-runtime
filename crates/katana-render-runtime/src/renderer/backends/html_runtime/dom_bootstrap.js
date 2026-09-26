@@ -119,6 +119,7 @@ const __krrListenerOptions = (options) => ({
 });
 const __krrEventTargetListeners = new WeakMap();
 const __krrEventHandlers = new WeakMap();
+const __krrLifecycleEventTypes = new Set(["load", "readystatechange", "DOMContentLoaded"]);
 const __krrSyncEventTarget = (target, type, entries) => {
   if (!target.__krrNodeId) return;
   const handler = __krrEventHandlers.get(target)?.get(String(type));
@@ -128,6 +129,22 @@ const __krrSyncEventTarget = (target, type, entries) => {
     String(type),
     String(entries.length > 0 || typeof handler === "function"),
   );
+};
+const __krrInstallInlineHandler = (target, type, source) => {
+  if (!__krrLifecycleEventTypes.has(String(type))) return;
+  let handlers = __krrEventHandlers.get(target);
+  if (!handlers) {
+    handlers = new Map();
+    __krrEventHandlers.set(target, handlers);
+  }
+  const eventType = String(type);
+  if (source === null || source === undefined || source === "") {
+    handlers.delete(eventType);
+  } else {
+    handlers.set(eventType, Function("event", String(source)));
+  }
+  const listeners = __krrEventTargetListeners.get(target) || new Map();
+  __krrSyncEventTarget(target, eventType, listeners.get(eventType) || []);
 };
 const __krrDispatchListeners = (listeners, target, event, capture) => {
   const entries = listeners.get(String(event.type)) || [];
@@ -303,6 +320,19 @@ const __krrElement = (nodeId) => {
   if (cached) return cached;
   const element = __krrInstallEventTarget(Object.create(__krrElementPrototype));
   Object.defineProperty(element, "__krrNodeId", { value: normalizedId });
+  for (const eventType of __krrLifecycleEventTypes) {
+    Object.defineProperty(element, `on${eventType}`, {
+      configurable: true,
+      get() {
+        return __krrEventHandlers.get(this)?.get(eventType) ?? null;
+      },
+      set(value) {
+        __krrInstallInlineHandler(this, eventType, value);
+      },
+    });
+    const source = __krrNativeDom("getAttribute", normalizedId, `on${eventType}`);
+    if (source !== null) __krrInstallInlineHandler(element, eventType, source);
+  }
   __krrElements.set(normalizedId, element);
   __krrElementInstances.add(element);
   return element;
@@ -455,10 +485,18 @@ const __krrElementPrototype = {
     return __krrNativeDom("getAttribute", this.__krrNodeId, String(name));
   },
   setAttribute(name, value) {
-    __krrNativeDom("setAttribute", this.__krrNodeId, String(name), String(value));
+    const attributeName = String(name);
+    __krrNativeDom("setAttribute", this.__krrNodeId, attributeName, String(value));
+    if (attributeName.toLowerCase().startsWith("on")) {
+      __krrInstallInlineHandler(this, attributeName.slice(2), value);
+    }
   },
   removeAttribute(name) {
-    __krrNativeDom("removeAttribute", this.__krrNodeId, String(name));
+    const attributeName = String(name);
+    __krrNativeDom("removeAttribute", this.__krrNodeId, attributeName);
+    if (attributeName.toLowerCase().startsWith("on")) {
+      __krrInstallInlineHandler(this, attributeName.slice(2), null);
+    }
   },
   querySelector(selector) {
     return __krrElement(__krrNativeDom("elementQuerySelector", this.__krrNodeId, String(selector)));
