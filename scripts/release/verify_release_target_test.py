@@ -253,10 +253,13 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 git_in_fresh("config", "user.email", "release-test@example.invalid")
                 git_in_fresh("config", "user.name", "Release Target Test")
                 git_in_fresh("config", "core.abbrev", "12")
+                changed_path = "crates/katana-render-runtime/src/markdown/svg_rasterize_text_fallback.rs"
+                order_file = fresh_repository / "diff-order"
+                order_file.write_text(f"{changed_path}\n", encoding="utf-8")
+                git_in_fresh("config", "diff.orderFile", str(order_file))
                 abbreviated = self.run_check("v0.4.21", "v0.4.20", "HEAD", fresh_repository)
                 self.assertEqual(abbreviated.returncode, 0, abbreviated.stderr)
                 git_in_fresh("switch", "-q", "-c", "changed-required-path")
-                changed_path = "crates/katana-render-runtime/src/markdown/svg_rasterize_text_fallback.rs"
                 self.assertIn(
                     changed_path,
                     subprocess.run(

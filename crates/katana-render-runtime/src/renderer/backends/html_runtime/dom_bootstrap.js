@@ -151,13 +151,15 @@ const __krrStoreEventHandler = (target, type, handler) => {
 const __krrInstallInlineHandler = (target, type, source) => {
   const eventType = __krrNormalizeLifecycleEventType(type);
   if (eventType === null) return;
-  __krrStoreEventHandler(
-    target,
-    eventType,
-    source === null || source === undefined || source === ""
-      ? null
-      : Function("event", String(source)),
-  );
+  if (source === null || source === undefined || source === "") {
+    __krrStoreEventHandler(target, eventType, null);
+    return;
+  }
+  try {
+    __krrStoreEventHandler(target, eventType, Function("event", String(source)));
+  } catch (_error) {
+    __krrStoreEventHandler(target, eventType, null);
+  }
 };
 const __krrInstallLifecycleProperty = (target, type, value) => {
   const eventType = __krrNormalizeLifecycleEventType(type);
@@ -553,7 +555,13 @@ const __krrInlineHandler = (target, event) => {
   }
   const source = target.getAttribute?.(`on${event.type}`);
   if (!source) return;
-  const result = Function("event", source).call(target, event);
+  let handler;
+  try {
+    handler = Function("event", source);
+  } catch (_error) {
+    return;
+  }
+  const result = handler.call(target, event);
   if (result === false && event.cancelable) event.preventDefault();
 };
 const __krrDispatchElementPhase = (target, event, capture, phase) => {

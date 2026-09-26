@@ -164,19 +164,21 @@ def release_tree_matches(
     if records[-1] or len(records) % 2 != 1:
         return False
     gate_paths = {path.encode("utf-8") for path in RELEASE_GATE_PATHS}
-    manifest = hashlib.sha256()
-    entry_count = 0
+    entries: list[tuple[bytes, bytes]] = []
     for raw_record, path in zip(records[:-1:2], records[1:-1:2]):
         if not raw_record.startswith(b":") or not path:
             return False
-        if path in gate_paths:
-            continue
+        if path not in gate_paths:
+            entries.append((path, raw_record))
+    if not entries:
+        return False
+    manifest = hashlib.sha256()
+    for path, raw_record in sorted(entries):
         manifest.update(raw_record)
         manifest.update(b"\0")
         manifest.update(path)
         manifest.update(b"\0")
-        entry_count += 1
-    return entry_count > 0 and manifest.hexdigest() == required_manifest_sha256
+    return manifest.hexdigest() == required_manifest_sha256
 
 
 def main() -> int:
