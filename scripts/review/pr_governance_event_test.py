@@ -6591,7 +6591,8 @@ raise SystemExit(91)
                     return response({**dispatcher_source_active, "status": "completed", "conclusion": "success"})
                 if isinstance(endpoint, str) and endpoint.endswith("/actions/runs/77"):
                     return response({
-                        "id": 77, "name": "PR governance status writer",
+                        "id": 77, "name": "source=9 scope=all segment=1",
+                        "display_title": "source=9 scope=all segment=1",
                         "path": ".github/workflows/pr-governance-status-writer.yml@master",
                         "event": "workflow_dispatch", "head_sha": "a" * 40,
                         "repository": rest_repository, "status": "in_progress", "run_attempt": 1,
