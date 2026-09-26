@@ -266,7 +266,7 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
 
         writer = {
             "id": 91,
-            "name": "source=17 scope=early segment=0",
+            "name": "PR governance status writer",
             "display_title": "source=17 scope=early segment=0",
             "event": "workflow_dispatch",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
@@ -684,7 +684,7 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
             if endpoint == f"repos/{repository}/actions/runs/92":
                 return response(arguments, {
                     "id": 92,
-                    "name": "source=93 scope=all segment=1",
+                    "name": "PR governance status writer",
                     "event": "workflow_dispatch",
                     "path": ".github/workflows/pr-governance-status-writer.yml@master",
                     "repository": repository_identity,

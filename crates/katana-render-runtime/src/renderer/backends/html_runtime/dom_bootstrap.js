@@ -120,6 +120,12 @@ const __krrListenerOptions = (options) => ({
 const __krrEventTargetListeners = new WeakMap();
 const __krrEventHandlers = new WeakMap();
 const __krrLifecycleEventTypes = new Set(["load", "readystatechange", "DOMContentLoaded"]);
+const __krrNormalizeLifecycleEventType = (type) => {
+  const normalized = String(type).toLowerCase();
+  if (normalized === "load" || normalized === "readystatechange") return normalized;
+  if (normalized === "domcontentloaded") return "DOMContentLoaded";
+  return null;
+};
 const __krrSyncEventTarget = (target, type, entries) => {
   if (!target.__krrNodeId) return;
   const handler = __krrEventHandlers.get(target)?.get(String(type));
@@ -143,18 +149,20 @@ const __krrStoreEventHandler = (target, type, handler) => {
   __krrSyncEventTarget(target, eventType, listeners.get(eventType) || []);
 };
 const __krrInstallInlineHandler = (target, type, source) => {
-  if (!__krrLifecycleEventTypes.has(String(type))) return;
+  const eventType = __krrNormalizeLifecycleEventType(type);
+  if (eventType === null) return;
   __krrStoreEventHandler(
     target,
-    type,
+    eventType,
     source === null || source === undefined || source === ""
       ? null
       : Function("event", String(source)),
   );
 };
 const __krrInstallLifecycleProperty = (target, type, value) => {
-  if (!__krrLifecycleEventTypes.has(String(type))) return;
-  __krrStoreEventHandler(target, type, typeof value === "function" ? value : null);
+  const eventType = __krrNormalizeLifecycleEventType(type);
+  if (eventType === null) return;
+  __krrStoreEventHandler(target, eventType, typeof value === "function" ? value : null);
 };
 const __krrDispatchListeners = (listeners, target, event, capture) => {
   const entries = listeners.get(String(event.type)) || [];
