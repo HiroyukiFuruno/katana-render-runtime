@@ -433,7 +433,6 @@ def validate_contract(
     manifests, lockfiles = dependency_contract_paths(changed_paths)
     if not manifests and not lockfiles:
         return
-
     issue_errors = [
         dependency_evidence_errors(issue.body, manifests, lockfiles)
         for issue in loaded_issues
@@ -601,12 +600,6 @@ def _pr_changed_paths(
     files = comparison.get("files")
     if not isinstance(files, list):
         raise ContractViolation("GitHub compare filesの形式が不正です")
-    # GitHub returns at most 300 paths for a comparison.  A full page is
-    # ambiguous, so never let partial dependency or workflow evidence pass.
-    if len(files) >= 300:
-        raise ContractViolation(
-            "GitHub compare filesが300件上限で打ち切られた可能性があります"
-        )
     paths: list[str] = []
     for changed_file in files:
         if not isinstance(changed_file, dict):
@@ -622,7 +615,75 @@ def _pr_changed_paths(
                     "GitHub compare files entryのprevious_filenameが不正です"
                 )
             paths.append(previous_filename)
+    # GitHub returns at most 300 paths for a comparison.  When the response
+    # reaches that limit, compare the immutable commit trees instead of
+    # trusting a partial file list.  The tree endpoint is also fail-closed on
+    # truncation and malformed entries.
+    if len(files) >= 300:
+        return _pr_changed_paths_from_trees(
+            repository=repository, base_sha=base_sha, head_sha=head_sha
+        )
     return paths
+
+
+def _git_tree_entries(
+    *, repository: str, commit_sha: str, label: str
+) -> dict[str, tuple[str, str, str]]:
+    commit = _gh_json(f"repos/{repository}/git/commits/{commit_sha}")
+    if not isinstance(commit, dict):
+        raise ContractViolation(f"{label} commit responseの形式が不正です")
+    if _require_sha(commit.get("sha"), f"{label} commit SHA") != commit_sha:
+        raise ContractViolation(f"{label} commit SHAが一致しません")
+    tree = commit.get("tree")
+    if not isinstance(tree, dict):
+        raise ContractViolation(f"{label} commit responseにtreeがありません")
+    tree_sha = _require_sha(tree.get("sha"), f"{label} tree SHA")
+    payload = _gh_json(f"repos/{repository}/git/trees/{tree_sha}?recursive=1")
+    if not isinstance(payload, dict) or payload.get("truncated") is not False:
+        raise ContractViolation(f"{label} tree responseが打ち切られたか形式不正です")
+    entries = payload.get("tree")
+    if not isinstance(entries, list):
+        raise ContractViolation(f"{label} tree entriesの形式が不正です")
+    result: dict[str, tuple[str, str, str]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ContractViolation(f"{label} tree entryの形式が不正です")
+        path = entry.get("path")
+        entry_type = entry.get("type")
+        mode = entry.get("mode")
+        entry_sha = entry.get("sha")
+        if (
+            not isinstance(path, str)
+            or not path
+            or "\x00" in path
+            or path.startswith("/")
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+        ):
+            raise ContractViolation(f"{label} tree entry pathの形式が不正です")
+        if not isinstance(entry_type, str) or not entry_type:
+            raise ContractViolation(f"{label} tree entry typeの形式が不正です")
+        if not isinstance(mode, str) or not mode:
+            raise ContractViolation(f"{label} tree entry modeの形式が不正です")
+        normalized_sha = _require_sha(entry_sha, f"{label} tree entry SHA")
+        if path in result:
+            raise ContractViolation(f"{label} tree entry pathが重複しています")
+        result[path] = (entry_type, mode, normalized_sha)
+    return result
+
+
+def _pr_changed_paths_from_trees(
+    *, repository: str, base_sha: str, head_sha: str
+) -> list[str]:
+    base_entries = _git_tree_entries(
+        repository=repository, commit_sha=base_sha, label="compare base"
+    )
+    head_entries = _git_tree_entries(
+        repository=repository, commit_sha=head_sha, label="compare head"
+    )
+    paths = sorted(set(base_entries) | set(head_entries))
+    return [
+        path for path in paths if base_entries.get(path) != head_entries.get(path)
+    ]
 
 
 def _trusted_workflow_path_errors(changed_paths: Sequence[str]) -> list[str]:

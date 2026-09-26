@@ -764,6 +764,14 @@ class VerifyPushIssueTest(unittest.TestCase):
         with self.assertRaisesRegex(subject.ContractViolation, "OPEN"):
             self.validate(issue=self.issue(state="CLOSED"))
 
+    def test_release_branch_rejects_closed_issue(self) -> None:
+        with self.assertRaisesRegex(subject.ContractViolation, "OPEN"):
+            self.validate(
+                branch="release/v0.4.21",
+                changed_paths=["Cargo.lock"],
+                issue=self.issue(state="CLOSED"),
+            )
+
     def test_lockfile_only_transitive_update_still_requires_dependency_evidence(self) -> None:
         with self.assertRaisesRegex(subject.ContractViolation, "依存更新証跡"):
             self.validate(changed_paths=["Cargo.lock"])
@@ -1192,6 +1200,61 @@ class VerifyPushIssueTest(unittest.TestCase):
                     issue_loader=lambda number: self.issue(number),
                 )
 
+    def test_pr_range_rejects_closed_release_issue(self) -> None:
+        base_sha = "a" * 40
+        head_sha = "b" * 40
+        compare = {
+            "base_commit": {"sha": base_sha},
+            "merge_base_commit": {"sha": base_sha},
+            "status": "ahead",
+            "ahead_by": 1,
+            "behind_by": 0,
+            "total_commits": 1,
+            "commits": [
+                {
+                    "sha": head_sha,
+                    "commit": {"message": "release: v0.4.21\n\nRefs #64"},
+                }
+            ],
+            "files": [{"filename": "Cargo.lock"}],
+        }
+        with patch.object(subject, "_gh_json", return_value=compare):
+            with self.assertRaisesRegex(subject.ContractViolation, "OPEN"):
+                subject.validate_pr_range(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    pr_number=87,
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                    branch="release/v0.4.21",
+                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
+                )
+
+    def test_pr_range_rejects_closed_issue_outside_release_branch(self) -> None:
+        base_sha = "a" * 40
+        head_sha = "b" * 40
+        compare = {
+            "base_commit": {"sha": base_sha},
+            "merge_base_commit": {"sha": base_sha},
+            "status": "ahead",
+            "ahead_by": 1,
+            "behind_by": 0,
+            "total_commits": 1,
+            "commits": [
+                {"sha": head_sha, "commit": {"message": "fix: linked\n\nRefs #64"}}
+            ],
+            "files": [{"filename": "scripts/hooks/pre-push.sh"}],
+        }
+        with patch.object(subject, "_gh_json", return_value=compare):
+            with self.assertRaisesRegex(subject.ContractViolation, "OPEN"):
+                subject.validate_pr_range(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    pr_number=87,
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                    branch="fix/issue-contract",
+                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
+                )
+
     def test_pr_range_rejects_noncanonical_issue_url(self) -> None:
         base_sha = "a" * 40
         head_sha = "b" * 40
@@ -1576,14 +1639,72 @@ class VerifyPushIssueTest(unittest.TestCase):
                     issue_loader=lambda number: self.issue(number),
                 )
 
-    def test_pr_changed_paths_fails_closed_at_github_compare_files_limit(self) -> None:
+    def test_pr_changed_paths_uses_complete_commit_trees_at_github_compare_files_limit(self) -> None:
         base_sha, head_sha = "a" * 40, "b" * 40
         compare = {
             "base_commit": {"sha": base_sha},
             "files": [{"filename": f"fixtures/{entry}.txt"} for entry in range(300)],
         }
-        with patch.object(subject, "_gh_json", return_value=compare):
-            with self.assertRaisesRegex(subject.ContractViolation, "300件上限"):
+        base_tree_sha, head_tree_sha = "c" * 40, "d" * 40
+        base_entries = [
+            {"path": f"fixtures/{entry}.txt", "mode": "100644", "type": "blob", "sha": "e" * 40}
+            for entry in range(301)
+        ]
+        head_entries = [*base_entries]
+        head_entries[0] = {**head_entries[0], "sha": "f" * 40}
+        head_entries.append(
+            {
+                "path": ".github/workflows/new.yml",
+                "mode": "100644",
+                "type": "blob",
+                "sha": "1" * 40,
+            }
+        )
+
+        def gh_json(*arguments: str) -> object:
+            endpoint = arguments[0]
+            if "/compare/" in endpoint:
+                return compare
+            if f"/git/commits/{base_sha}" in endpoint:
+                return {"sha": base_sha, "tree": {"sha": base_tree_sha}}
+            if f"/git/commits/{head_sha}" in endpoint:
+                return {"sha": head_sha, "tree": {"sha": head_tree_sha}}
+            if f"/git/trees/{base_tree_sha}?recursive=1" in endpoint:
+                return {"truncated": False, "tree": base_entries}
+            if f"/git/trees/{head_tree_sha}?recursive=1" in endpoint:
+                return {"truncated": False, "tree": head_entries}
+            raise AssertionError(endpoint)
+
+        with patch.object(subject, "_gh_json", side_effect=gh_json):
+            self.assertEqual(
+                subject._pr_changed_paths(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                ),
+                [".github/workflows/new.yml", "fixtures/0.txt"],
+            )
+
+    def test_pr_changed_paths_fails_closed_when_fallback_tree_is_truncated(self) -> None:
+        base_sha, head_sha = "a" * 40, "b" * 40
+        base_tree_sha = "c" * 40
+        compare = {
+            "base_commit": {"sha": base_sha},
+            "files": [{"filename": f"fixtures/{entry}.txt"} for entry in range(300)],
+        }
+
+        def gh_json(*arguments: str) -> object:
+            endpoint = arguments[0]
+            if "/compare/" in endpoint:
+                return compare
+            if f"/git/commits/{base_sha}" in endpoint:
+                return {"sha": base_sha, "tree": {"sha": base_tree_sha}}
+            if f"/git/trees/{base_tree_sha}?recursive=1" in endpoint:
+                return {"truncated": True, "tree": []}
+            raise AssertionError(endpoint)
+
+        with patch.object(subject, "_gh_json", side_effect=gh_json):
+            with self.assertRaisesRegex(subject.ContractViolation, "打ち切られた"):
                 subject._pr_changed_paths(
                     repository="HiroyukiFuruno/katana-render-runtime",
                     base_sha=base_sha,

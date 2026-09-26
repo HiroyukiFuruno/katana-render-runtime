@@ -47,6 +47,14 @@ jobs:
       - name: Install just
         uses: taiki-e/install-action@just
 
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile
+
       - name: Resolve version
         id: version
         shell: bash
@@ -88,6 +96,14 @@ jobs:
 
       - name: Install just
         uses: taiki-e/install-action@just
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile
 
       - name: Verify release package
         run: just VERSION="${{ needs.release-context.outputs.version }}" release-verify

@@ -19,7 +19,7 @@ COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
 MERMAID_JS_VERSION := "12.0.0"
 MERMAID_ZENUML_JS_VERSION := "1.0.1"
-DRAWIO_JS_VERSION := "31.4.6"
+DRAWIO_JS_VERSION := "31.5.3"
 MATHJAX_JS_VERSION := "4.1.3"
 ZENUML_CORE_JS_VERSION := "4.3.0"
 PLANTUML_JAR_VERSION := "1.2026.8"
@@ -73,6 +73,7 @@ unit-test: plantuml-install
 # Run coverage as a required full-check gate
 coverage: plantuml-install
     {{CARGO}} llvm-cov clean --workspace
+    rm -rf target/llvm-cov-target target/debug/deps target/debug/incremental target/debug/build target/debug/examples target/debug/.fingerprint target/package
     {{CARGO}} llvm-cov --workspace --all-targets --all-features --locked --summary-only --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}{{TEST_THREAD_ARGS}}
 
 # Verify pinned runtime asset checksums
@@ -202,7 +203,7 @@ release-verify: release-target-check
     bash scripts/release/verify-version.sh "{{VERSION}}"
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
     {{CARGO}} package -p katana-render-runtime --locked --allow-dirty
-    {{CARGO}} test --manifest-path "target/package/katana-render-runtime-{{VERSION_BARE}}/Cargo.toml" --lib --locked
+    {{CARGO}} test --manifest-path "target/package/katana-render-runtime-{{VERSION_BARE}}/Cargo.toml" --lib --locked{{TEST_THREAD_ARGS}}
     {{CARGO}} package -p katana-render-runtime-cli --locked --allow-dirty --list >/dev/null
     bash scripts/release/verify-crate-size.sh katana-render-runtime "{{VERSION}}"
     {{CARGO}} publish -p katana-render-runtime --dry-run --locked --allow-dirty
@@ -212,8 +213,14 @@ release-openspec-archive:
     bash scripts/release/check-openspec-release-archive.sh --self-test
     bash scripts/release/check-openspec-release-archive.sh "{{VERSION}}"
 
+# Run the complete quality gate before release-specific verification.
+release-quality: check coverage
+
+# Verify the concrete release version and packaged artifact.
+release-specific: release-openspec-archive release-verify
+
 # Verify release branch readiness before merging
-release-check: release-openspec-archive check coverage release-verify
+release-check: release-quality release-specific
 
 # Verify pull request readiness before merging
 pr-ready-check pr:
@@ -278,9 +285,17 @@ plantuml-install version=PLANTUML_JAR_VERSION output=PLANTUML_CACHE_JAR:
     @set -euo pipefail; \
     url="https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/{{version}}/plantuml-lgpl-{{version}}.jar"; \
     target="{{output}}"; \
+    max_attempts=3; \
+    retry_delay="${KRR_PLANTUML_DOWNLOAD_RETRY_DELAY_SECONDS:-1}"; \
+    case "$retry_delay" in ''|*[!0-9]*) echo "PlantUML retry delay must be a non-negative integer: $retry_delay" >&2; exit 1;; esac; \
     mkdir -p "$(dirname "$target")"; \
     tmp="$target.tmp"; \
-    curl -fsSL "$url" -o "$tmp"; \
+    downloaded=false; \
+    for attempt in $(seq 1 "$max_attempts"); do \
+      if curl --fail --silent --show-error --location "$url" --output "$tmp"; then downloaded=true; break; fi; \
+      if [ "$attempt" -lt "$max_attempts" ]; then echo "PlantUML download failed (attempt $attempt/$max_attempts); retrying" >&2; sleep "$retry_delay"; fi; \
+    done; \
+    if [ "$downloaded" != true ]; then echo "PlantUML download failed after $max_attempts attempts" >&2; exit 1; fi; \
     expected="{{PLANTUML_JAR_CHECKSUM}}"; \
     actual="$(bash scripts/plantuml/sha256-file.sh "$tmp")"; \
     if [ "$actual" != "$expected" ]; then \

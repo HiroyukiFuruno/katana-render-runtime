@@ -6,6 +6,7 @@ use crate::renderer::backends::html_debug_trace::HtmlDebugTrace;
 use crate::renderer::backends::html_document::HtmlDocument;
 use crate::renderer::backends::html_runtime::dom_state::HtmlDomBridgeState;
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
+use markup5ever_rcdom::{Handle, NodeData};
 use std::collections::HashMap;
 
 use super::super::script::{
@@ -18,7 +19,18 @@ type ScriptEvaluator<'a> = dyn FnMut(&str, &str) -> Result<(), HtmlRuntimeError>
 
 impl StaticHtmlRuntime {
     pub(crate) fn render(&self, source: &str) -> Result<String, HtmlRuntimeError> {
+        let document = HtmlDocument::parse(source);
+        let scripts = document
+            .inline_scripts()
+            .map_err(HtmlRuntimeError::ExternalScript)?;
+        if !Self::requires_runtime(&document, &scripts) {
+            return Ok(document.render());
+        }
         self.start(source)?.snapshot()
+    }
+
+    fn requires_runtime(document: &HtmlDocument, scripts: &[String]) -> bool {
+        !scripts.is_empty() || contains_lifecycle_handler(&document.document)
     }
 
     pub(crate) fn start(&self, source: &str) -> Result<StaticHtmlRuntimeSession, HtmlRuntimeError> {
@@ -164,9 +176,24 @@ impl StaticHtmlRuntime {
     }
 }
 
+fn contains_lifecycle_handler(node: &Handle) -> bool {
+    if let NodeData::Element { attrs, .. } = &node.data
+        && attrs.borrow().iter().any(|attribute| {
+            let name = attribute.name.local.as_str();
+            name.eq_ignore_ascii_case("onload") || name.eq_ignore_ascii_case("onreadystatechange")
+        })
+    {
+        return true;
+    }
+    node.children
+        .borrow()
+        .iter()
+        .any(contains_lifecycle_handler)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{DiagramV8Runtime, StaticHtmlRuntime};
+    use super::{DiagramV8Runtime, HtmlDocument, StaticHtmlRuntime};
     use crate::renderer::backends::HtmlBrowserSource;
     use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 
@@ -188,6 +215,61 @@ mod tests {
         let session = must_result(StaticHtmlRuntime.start_interactive(&source));
         let snapshot = must_result(session.snapshot());
         assert!(snapshot.contains("<p id=\"marker\">docload</p>"));
+    }
+
+    #[test]
+    fn scriptless_local_iframe_onload_uses_the_runtime_lifecycle_dispatch() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<p id=status>Waiting</p><iframe data-krr-local-frame onload="document.getElementById('status').textContent = 'Ready'"></iframe>"#,
+        ));
+
+        assert!(
+            snapshot.contains(r#"<p id="status">Ready</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn null_lifecycle_property_does_not_fall_back_to_content_attribute() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<p id=status>Waiting</p><iframe id=frame data-krr-local-frame onload="document.getElementById('status').textContent = 'Unexpected'"></iframe><script>document.getElementById('frame').onload = null;</script>"#,
+        ));
+
+        assert!(
+            snapshot.contains(r#"<p id="status">Waiting</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn lifecycle_attribute_stringifies_stateful_values_once_for_storage_and_handler() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<p id=status>Waiting</p><iframe id=frame data-krr-local-frame></iframe><script>
+                const frame = document.getElementById('frame');
+                const status = document.getElementById('status');
+                const values = ["status.textContent = 'first'", "status.textContent = 'second'"];
+                let reads = 0;
+                const source = { toString() { return values[reads++]; } };
+                frame.setAttribute('onload', source);
+                status.setAttribute('data-reads', reads);
+                status.setAttribute('data-source', frame.getAttribute('onload'));
+            </script>"#,
+        ));
+
+        assert!(
+            snapshot.contains(
+                r#"<p id="status" data-reads="1" data-source="status.textContent = 'first'">first</p>"#
+            ),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn scriptless_document_without_lifecycle_handlers_skips_the_runtime() {
+        let document = HtmlDocument::parse("<p>Static</p>");
+        let scripts = must_result(document.inline_scripts());
+
+        assert!(!StaticHtmlRuntime::requires_runtime(&document, &scripts));
     }
 
     #[test]

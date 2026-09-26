@@ -1,6 +1,7 @@
 name: PR governance status writer
 
 run-name: source=${{ inputs.dispatcher_run_id }} scope=${{ inputs.scope }} segment=${{ inputs.continuation_index }}
+# GitHub REST exposes this dispatch title as both name and display_title; dispatcher validation binds both.
 
 on:
   workflow_dispatch:

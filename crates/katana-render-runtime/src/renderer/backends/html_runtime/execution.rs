@@ -5,7 +5,9 @@ use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-const EXECUTION_TIMEOUT: Duration = Duration::from_millis(100);
+/* WHY: Host scheduling on slower supported CPUs must not turn ordinary layout
+ * work into a false execution timeout; the budget still bounds untrusted scripts. */
+const EXECUTION_TIMEOUT: Duration = Duration::from_millis(250);
 
 pub(super) struct ExecutionBudget {
     completion: mpsc::Sender<()>,

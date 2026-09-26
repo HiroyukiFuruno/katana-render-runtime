@@ -119,6 +119,14 @@ const __krrListenerOptions = (options) => ({
 });
 const __krrEventTargetListeners = new WeakMap();
 const __krrEventHandlers = new WeakMap();
+const __krrLifecyclePropertyOverrides = new WeakMap();
+const __krrLifecycleEventTypes = new Set(["load", "readystatechange", "DOMContentLoaded"]);
+const __krrNormalizeLifecycleEventType = (type) => {
+  const normalized = String(type).toLowerCase();
+  if (normalized === "load" || normalized === "readystatechange") return normalized;
+  if (normalized === "domcontentloaded") return "DOMContentLoaded";
+  return null;
+};
 const __krrSyncEventTarget = (target, type, entries) => {
   if (!target.__krrNodeId) return;
   const handler = __krrEventHandlers.get(target)?.get(String(type));
@@ -128,6 +136,43 @@ const __krrSyncEventTarget = (target, type, entries) => {
     String(type),
     String(entries.length > 0 || typeof handler === "function"),
   );
+};
+const __krrStoreEventHandler = (target, type, handler) => {
+  let handlers = __krrEventHandlers.get(target);
+  if (!handlers) {
+    handlers = new Map();
+    __krrEventHandlers.set(target, handlers);
+  }
+  const eventType = String(type);
+  if (handler === null || handler === undefined) handlers.delete(eventType);
+  else handlers.set(eventType, handler);
+  const listeners = __krrEventTargetListeners.get(target) || new Map();
+  __krrSyncEventTarget(target, eventType, listeners.get(eventType) || []);
+};
+const __krrInstallInlineHandler = (target, type, source) => {
+  const eventType = __krrNormalizeLifecycleEventType(type);
+  if (eventType === null) return;
+  __krrLifecyclePropertyOverrides.get(target)?.delete(eventType);
+  if (source === null || source === undefined || source === "") {
+    __krrStoreEventHandler(target, eventType, null);
+    return;
+  }
+  try {
+    __krrStoreEventHandler(target, eventType, Function("event", String(source)));
+  } catch (_error) {
+    __krrStoreEventHandler(target, eventType, null);
+  }
+};
+const __krrInstallLifecycleProperty = (target, type, value) => {
+  const eventType = __krrNormalizeLifecycleEventType(type);
+  if (eventType === null) return;
+  let overrides = __krrLifecyclePropertyOverrides.get(target);
+  if (!overrides) {
+    overrides = new Set();
+    __krrLifecyclePropertyOverrides.set(target, overrides);
+  }
+  overrides.add(eventType);
+  __krrStoreEventHandler(target, eventType, typeof value === "function" ? value : null);
 };
 const __krrDispatchListeners = (listeners, target, event, capture) => {
   const entries = listeners.get(String(event.type)) || [];
@@ -303,6 +348,19 @@ const __krrElement = (nodeId) => {
   if (cached) return cached;
   const element = __krrInstallEventTarget(Object.create(__krrElementPrototype));
   Object.defineProperty(element, "__krrNodeId", { value: normalizedId });
+  for (const eventType of __krrLifecycleEventTypes) {
+    Object.defineProperty(element, `on${eventType}`, {
+      configurable: true,
+      get() {
+        return __krrEventHandlers.get(this)?.get(eventType) ?? null;
+      },
+      set(value) {
+        __krrInstallLifecycleProperty(this, eventType, value);
+      },
+    });
+    const source = __krrNativeDom("getAttribute", normalizedId, `on${eventType}`);
+    if (source !== null) __krrInstallInlineHandler(element, eventType, source);
+  }
   __krrElements.set(normalizedId, element);
   __krrElementInstances.add(element);
   return element;
@@ -455,10 +513,19 @@ const __krrElementPrototype = {
     return __krrNativeDom("getAttribute", this.__krrNodeId, String(name));
   },
   setAttribute(name, value) {
-    __krrNativeDom("setAttribute", this.__krrNodeId, String(name), String(value));
+    const attributeName = String(name);
+    const attributeValue = String(value);
+    __krrNativeDom("setAttribute", this.__krrNodeId, attributeName, attributeValue);
+    if (attributeName.toLowerCase().startsWith("on")) {
+      __krrInstallInlineHandler(this, attributeName.slice(2), attributeValue);
+    }
   },
   removeAttribute(name) {
-    __krrNativeDom("removeAttribute", this.__krrNodeId, String(name));
+    const attributeName = String(name);
+    __krrNativeDom("removeAttribute", this.__krrNodeId, attributeName);
+    if (attributeName.toLowerCase().startsWith("on")) {
+      __krrInstallInlineHandler(this, attributeName.slice(2), null);
+    }
   },
   querySelector(selector) {
     return __krrElement(__krrNativeDom("elementQuerySelector", this.__krrNodeId, String(selector)));
@@ -489,9 +556,22 @@ const __krrElementPrototype = {
   },
 };
 const __krrInlineHandler = (target, event) => {
+  if (
+    __krrLifecycleEventTypes.has(String(event.type)) &&
+    (typeof target[`on${event.type}`] === "function" ||
+      __krrLifecyclePropertyOverrides.get(target)?.has(String(event.type)))
+  ) {
+    return;
+  }
   const source = target.getAttribute?.(`on${event.type}`);
   if (!source) return;
-  const result = Function("event", source).call(target, event);
+  let handler;
+  try {
+    handler = Function("event", source);
+  } catch (_error) {
+    return;
+  }
+  const result = handler.call(target, event);
   if (result === false && event.cancelable) event.preventDefault();
 };
 const __krrDispatchElementPhase = (target, event, capture, phase) => {

@@ -11,7 +11,7 @@ struct TempFixture {
 impl TempFixture {
     fn new() -> std::io::Result<Self> {
         let id = NEXT_FIXTURE_ID.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!("krr-cli-render-{id}"));
+        let root = std::env::temp_dir().join(format!("krr-cli-render-{}-{id}", std::process::id()));
         std::fs::create_dir_all(&root)?;
         Ok(Self { root })
     }

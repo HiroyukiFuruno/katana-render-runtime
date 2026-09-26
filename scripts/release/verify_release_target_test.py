@@ -20,6 +20,9 @@ VERIFY_RELEASE_TARGET = util.module_from_spec(MODULE_SPEC)
 sys.modules[MODULE_SPEC.name] = VERIFY_RELEASE_TARGET
 MODULE_SPEC.loader.exec_module(VERIFY_RELEASE_TARGET)
 REQUIRED_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_COMMITS
+REQUIRED_RELEASE_MANIFEST_SHA256 = (
+    "c0ff552209293c63819266ac2e636716e8a0fc169b933be05c2dc2710e26575b"
+)
 
 
 def isolated_git_environment() -> dict[str, str]:
@@ -67,70 +70,62 @@ class VerifyReleaseTargetTests(unittest.TestCase):
             env=isolated_git_environment(),
         ).stdout.strip()
 
-    def test_accepts_v0420_after_published_v0419(self) -> None:
-        result = self.run_check("v0.4.20", "v0.4.19")
+    def test_accepts_v0421_after_published_v0420(self) -> None:
+        result = self.run_check("v0.4.21", "v0.4.20")
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_allows_idempotent_retry_after_v0420(self) -> None:
-        result = self.run_check("v0.4.20", "v0.4.20")
+    def test_allows_idempotent_retry_after_v0421(self) -> None:
+        result = self.run_check("v0.4.21", "v0.4.21")
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_rejects_v0420_before_v0419_is_published(self) -> None:
-        result = self.run_check("v0.4.20", "v0.4.18")
-        self.assertNotEqual(result.returncode, 0)
-
-    def test_rejects_skipped_target(self) -> None:
+    def test_rejects_v0421_before_v0420_is_published(self) -> None:
         result = self.run_check("v0.4.21", "v0.4.19")
         self.assertNotEqual(result.returncode, 0)
 
-    def test_rejects_old_target(self) -> None:
-        result = self.run_check("v0.4.19", "v0.4.19")
+    def test_rejects_skipped_target(self) -> None:
+        result = self.run_check("v0.4.22", "v0.4.20")
         self.assertNotEqual(result.returncode, 0)
 
-    def test_accepts_head_containing_every_v0420_issue_commit(self) -> None:
-        result = self.run_check("v0.4.20", "v0.4.19")
+    def test_rejects_old_target(self) -> None:
+        result = self.run_check("v0.4.20", "v0.4.20")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_accepts_head_containing_every_v0421_issue_commit(self) -> None:
+        result = self.run_check("v0.4.21", "v0.4.20")
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_rejects_head_missing_a_v0420_issue_commit(self) -> None:
+    def test_rejects_head_missing_a_v0421_issue_commit(self) -> None:
         for commit in REQUIRED_COMMITS[1:]:
             parent = self.source_git("rev-parse", f"{commit}^")
-            result = self.run_check("v0.4.20", "v0.4.19", parent)
+            result = self.run_check("v0.4.21", "v0.4.20", parent)
             self.assertNotEqual(result.returncode, 0, commit)
-
-    def test_rejects_the_pre_terminal_repair_head(self) -> None:
-        result = self.run_check(
-            "v0.4.20", "v0.4.19", "91f07699b26567658f76021050ca7ec7b5c10df1"
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("88d77e45b7b22d7886e2c09cb0ed1432bf237772", result.stderr)
 
     def test_accepts_the_complete_intended_release_head(self) -> None:
         result = self.run_check(
-            "v0.4.20", "v0.4.19", "53ba13ab629ec13486d575e47656030435b3d7e7"
+            "v0.4.21", "v0.4.20", "459eef383cf953f4c97ae5b063f4b72931e4a5ee"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_rejects_head_missing_current_release_required_p2(self) -> None:
+    def test_rejects_head_missing_current_release_terminal(self) -> None:
         parent = self.source_git(
-            "rev-parse", "53ba13ab629ec13486d575e47656030435b3d7e7^"
+            "rev-parse", "459eef383cf953f4c97ae5b063f4b72931e4a5ee^"
         )
-        result = self.run_check("v0.4.20", "v0.4.19", parent)
+        result = self.run_check("v0.4.21", "v0.4.20", parent)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("53ba13ab629ec13486d575e47656030435b3d7e7", result.stderr)
-
-    def test_rejects_the_previous_release_terminal(self) -> None:
-        result = self.run_check(
-            "v0.4.20", "v0.4.19", "96a231c7f8aff499c8efd89a8ab0eca6a547cd33"
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("53ba13ab629ec13486d575e47656030435b3d7e7", result.stderr)
+        self.assertIn("459eef383cf953f4c97ae5b063f4b72931e4a5ee", result.stderr)
 
     def test_accepts_actual_head_equivalent_squash_but_rejects_changed_required_path(
         self,
     ) -> None:
+        self.assertEqual(
+            VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_MANIFEST_SHA256,
+            REQUIRED_RELEASE_MANIFEST_SHA256,
+        )
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_root = Path(temporary_directory)
             repository = temporary_root / "candidate"
+            fresh_origin = temporary_root / "fresh-origin.git"
+            fresh_repository = temporary_root / "fresh-candidate"
             isolation_parent = temporary_root / "pre-push-parent.git"
             inherited_work_tree = temporary_root / "inherited-work-tree"
 
@@ -189,25 +184,82 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 git("config", "user.email", "release-test@example.invalid")
                 git("config", "user.name", "Release Target Test")
                 git("fetch", "-q", str(source_repository), "HEAD:refs/heads/release")
-                git("branch", "-f", "terminal", VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_TERMINAL)
                 git("branch", "-f", "base", VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE)
                 squash = git(
                     "commit-tree",
-                    # The candidate may contain later governance work.  Model
-                    # the documented squash exception with the immutable
-                    # required release terminal tree itself.
-                    "terminal^{tree}",
+                    # Model the documented squash exception from the reviewed
+                    # release head. The release comparison itself must not
+                    # retain that source commit after the squash.
+                    "release^{tree}",
                     "-p",
                     "base",
-                    "-m",
-                    "actual release tree as a squash",
+                    "-m", "actual release tree as a squash",
+                )
+                git("branch", "-f", "candidate", squash)
+                source_head = self.source_git("rev-parse", "HEAD")
+                subprocess.run(
+                    ["git", "init", "--bare", "-q", str(fresh_origin)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=isolated_git_environment(),
+                )
+                git("push", "-q", str(fresh_origin), "candidate:refs/heads/candidate")
+                subprocess.run(
+                    [
+                        "git",
+                        "clone",
+                        "-q",
+                        "--no-local",
+                        "--branch",
+                        "candidate",
+                        str(fresh_origin),
+                        str(fresh_repository),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=isolated_git_environment(),
                 )
 
-                accepted = self.run_check("v0.4.20", "v0.4.19", squash, repository)
+                def fresh_git(*args: str) -> subprocess.CompletedProcess[str]:
+                    return subprocess.run(
+                        ["git", *args],
+                        cwd=fresh_repository,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env=isolated_git_environment(),
+                    )
+
+                self.assertNotEqual(
+                    fresh_git("cat-file", "-e", f"{source_head}^{{commit}}").returncode,
+                    0,
+                )
+
+                accepted = self.run_check("v0.4.21", "v0.4.20", "HEAD", fresh_repository)
                 self.assertEqual(accepted.returncode, 0, accepted.stderr)
 
-                git("switch", "-q", "-c", "changed-required-path", squash)
-                changed_path = "Cargo.toml"
+                def git_in_fresh(*args: str) -> str:
+                    return subprocess.run(
+                        ["git", *args],
+                        cwd=fresh_repository,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env=isolated_git_environment(),
+                    ).stdout.strip()
+
+                git_in_fresh("config", "user.email", "release-test@example.invalid")
+                git_in_fresh("config", "user.name", "Release Target Test")
+                git_in_fresh("config", "core.abbrev", "12")
+                changed_path = "crates/katana-render-runtime/src/markdown/svg_rasterize_text_fallback.rs"
+                order_file = fresh_repository / "diff-order"
+                order_file.write_text(f"{changed_path}\n", encoding="utf-8")
+                git_in_fresh("config", "diff.orderFile", str(order_file))
+                abbreviated = self.run_check("v0.4.21", "v0.4.20", "HEAD", fresh_repository)
+                self.assertEqual(abbreviated.returncode, 0, abbreviated.stderr)
+                git_in_fresh("switch", "-q", "-c", "changed-required-path")
                 self.assertIn(
                     changed_path,
                     subprocess.run(
@@ -216,20 +268,20 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                             "diff",
                             "--name-only",
                             VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE,
-                            VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_TERMINAL,
+                            "HEAD",
                         ],
-                        cwd=repository,
+                        cwd=fresh_repository,
                         check=True,
                         capture_output=True,
                         text=True,
                         env=isolated_git_environment(),
                     ).stdout.splitlines(),
                 )
-                with (repository / changed_path).open("a", encoding="utf-8") as manifest:
+                with (fresh_repository / changed_path).open("a", encoding="utf-8") as manifest:
                     manifest.write("\n# 必須release pathの変更\n")
-                git("add", changed_path)
-                git("commit", "-q", "-m", "change required release path")
-                rejected = self.run_check("v0.4.20", "v0.4.19", "HEAD", repository)
+                git_in_fresh("add", changed_path)
+                git_in_fresh("commit", "-q", "-m", "change required release path")
+                rejected = self.run_check("v0.4.21", "v0.4.20", "HEAD", fresh_repository)
                 self.assertNotEqual(rejected.returncode, 0)
 
             self.assertEqual(
@@ -261,12 +313,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 parent_refs_before,
             )
 
-    def test_preflight_runs_the_release_target_gate_once_through_release_check(self) -> None:
+    def test_preflight_runs_the_release_target_gate_once_through_release_specific(self) -> None:
         workflow = (SCRIPT.parents[2] / ".github/workflows/release-preflight.yml").read_text(
             encoding="utf-8"
         )
         self.assertNotIn("- name: Release target check", workflow)
-        start = workflow.index("- name: Release check")
+        start = workflow.index("- name: Release-specific verification")
         end = workflow.find("\n      - name:", start + 1)
         body = workflow[start:] if end == -1 else workflow[start:end]
         self.assertIn("GH_TOKEN: ${{ github.token }}", body)

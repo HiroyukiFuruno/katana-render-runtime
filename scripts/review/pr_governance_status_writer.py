@@ -64,6 +64,7 @@ TERMINAL_WRITER_STARTUP_RESERVE_SECONDS = 120.0
 TERMINAL_AWAIT_STARTUP_AND_EVIDENCE_RESERVE_SECONDS = 330.0
 DISPATCHER_NAME = "PR governance dispatcher"
 DISPATCHER_PATH = ".github/workflows/pr-governance.yml"
+WRITER_WORKFLOW_NAME = "PR governance status writer"
 WRITER_WORKFLOW_PATH = ".github/workflows/pr-governance-status-writer.yml"
 PREFLIGHT_WORKFLOW_RUN_SOURCE_NAME = "Preflight workflow_run governance source"
 RESOLVER_FAILURE_BARRIER_NAME = "Establish resolver-failure merge barrier"
@@ -1013,7 +1014,8 @@ def ensure_writer_run_is_active() -> None:
     repository = value.get("repository") if isinstance(value, dict) else None
     if not (
         isinstance(value, dict) and value.get("id") == int(WRITER_RUN_ID)
-        and value.get("name") == "PR governance status writer"
+        and value.get("name") == WRITER_WORKFLOW_NAME
+        and isinstance(value.get("display_title"), str)
         and workflow_path_matches(value.get("path"), WRITER_WORKFLOW_PATH)
         and value.get("event") == "workflow_dispatch" and value.get("head_sha") == expected_head
         and repository_rest_identity(repository, REPOSITORY) is not _INVALID_REPOSITORY_IDENTITY
@@ -1198,7 +1200,7 @@ def trusted_completed_terminal_writers(
         triggering_actor = value.get("triggering_actor") if isinstance(value, dict) else None
         if not (
             isinstance(value, dict) and value.get("id") == identifier
-            and value.get("name") == "PR governance status writer"
+            and value.get("name") == WRITER_WORKFLOW_NAME
             and workflow_path_is_default(value.get("path"), WRITER_WORKFLOW_PATH)
             and value.get("event") == "workflow_dispatch"
             and value.get("display_title") == f"source={source.identifier} scope=all segment={segment}"

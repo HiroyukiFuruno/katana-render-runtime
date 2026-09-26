@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 MODULE_PATH = Path(__file__).with_name("verify_dependency_freshness.py")
@@ -34,6 +35,34 @@ class DependencyFreshnessTest(unittest.TestCase):
         for value in ["01.0.0", "1.0.0-01", "1.0.0-alpha..1", "1.0.0+build..1", "١.0.0"]:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 freshness.Version.parse(value)
+
+    def test_latest_parses_each_supported_dependency_ecosystem(self) -> None:
+        responses = {
+            "https://crates.io/api/v1/crates/serde": json.dumps(
+                {"crate": {"newest_version": "1.2.0"}}
+            ).encode("utf-8"),
+            "https://registry.npmjs.org/@scope%2Fexample/latest": json.dumps(
+                {"version": "2.3.0"}
+            ).encode("utf-8"),
+            "https://example.test/drawio": json.dumps({"tag_name": "v3.4.0"}).encode("utf-8"),
+            "https://example.test/plantuml": b"<metadata><version>1.0.0</version><version>1.1.0</version></metadata>",
+            "https://example.test/mermaid": json.dumps({"version": "4.5.0"}).encode("utf-8"),
+        }
+
+        def fake_fetch(url: str) -> bytes:
+            return responses[url]
+
+        packages = [
+            freshness.Package("Rust", "serde", "1.0.0"),
+            freshness.Package("JavaScript", "@scope/example", "2.0.0"),
+            freshness.Package("Runtime asset", "drawio|https://example.test/drawio", "3.0.0"),
+            freshness.Package("Runtime asset", "plantuml|https://example.test/plantuml", "1.0.0"),
+            freshness.Package("Runtime asset", "mermaid|https://example.test/mermaid", "4.0.0"),
+        ]
+        with patch.object(freshness, "fetch", fake_fetch):
+            self.assertEqual([freshness.latest(package) for package in packages], [
+                "1.2.0", "2.3.0", "3.4.0", "1.1.0", "4.5.0"
+            ])
 
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -75,7 +104,13 @@ class DependencyFreshnessTest(unittest.TestCase):
             "resolve": {"nodes": [{"id": member_id, "deps": [{"name": "serde", "pkg": serde_id}]}]},
         }
 
-    def run_check(self, responses: dict[str, object], metadata: dict[str, object] | None = None) -> tuple[int, str, str]:
+    def run_check(
+        self,
+        responses: dict[str, object],
+        metadata: dict[str, object] | None = None,
+        rust_fresh: bool = True,
+        javascript_fresh: bool = True,
+    ) -> tuple[int, str, str]:
         def fake_fetch(url: str) -> bytes:
             response = responses[url]
             if isinstance(response, Exception):
@@ -86,6 +121,8 @@ class DependencyFreshnessTest(unittest.TestCase):
         with (
             patch.object(freshness, "fetch", fake_fetch),
             patch.object(freshness, "cargo_metadata", return_value=metadata or self.metadata_for_direct_serde()),
+            patch.object(freshness, "rust_lock_is_latest_compatible", return_value=rust_fresh),
+            patch.object(freshness, "js_lock_is_latest_compatible", return_value=javascript_fresh),
             contextlib.redirect_stdout(stdout),
             contextlib.redirect_stderr(stderr),
         ):
@@ -105,17 +142,249 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertEqual(result, 0, stderr)
         self.assertIn("passed (3 resolved dependencies and pinned runtime assets)", stdout)
 
-    def test_stale_rust_dependency_rejects_release_with_repair_command(self) -> None:
+    def test_stale_direct_rust_manifest_dependency_rejects_release(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"=1.0.0\"\n",
+            encoding="utf-8",
+        )
         responses = self.clean_responses()
         responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.1.0"}}
         result, _, stderr = self.run_check(responses)
         self.assertEqual(result, 1)
-        self.assertIn("Rust serde: 1.0.0 -> 1.1.0", stderr)
+        self.assertIn("Rust manifest dependency serde: 1.0.0 -> 1.1.0", stderr)
         self.assertIn("just depends-update-all", stderr)
 
-    def test_direct_rust_edge_is_not_masked_by_newer_transitive_same_name(self) -> None:
+    def test_target_specific_rust_manifest_dependencies_are_collected(self) -> None:
+        (self.root / "crates/renderer/Cargo.toml").write_text(
+            """[package]
+name = "renderer"
+version = "0.1.0"
+
+[target.'cfg(unix)'.dependencies]
+target-runtime = "=1.0.0"
+
+[target.'cfg(unix)'.dev-dependencies]
+target-test = "=2.0.0"
+
+[target.'cfg(unix)'.build-dependencies]
+target-build = "=3.0.0"
+""",
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_manifest_dependencies(self.root)
+        self.assertEqual(
+            [(dependency.name, dependency.current) for dependency in dependencies],
+            [
+                ("serde", "1.0.0"),
+                ("target-build", "3.0.0"),
+                ("target-runtime", "1.0.0"),
+                ("target-test", "2.0.0"),
+            ],
+        )
+
+    def test_alternate_registry_dependency_is_deferred_to_cargo_resolution(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n"
+            "[workspace.dependencies]\nserde = { version = \"1\", registry = \"private\" }\n",
+            encoding="utf-8",
+        )
+        (self.root / "crates/renderer/Cargo.toml").write_text(
+            "[package]\nname = \"renderer\"\nversion = \"0.1.0\"\n"
+            "[dependencies]\nserde = { workspace = true }\n",
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_manifest_dependencies(self.root)
+        self.assertEqual(dependencies, [])
+
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = AssertionError(
+            "alternate registry dependency queried crates.io"
+        )
+        with patch.object(freshness, "cargo_registry_latest", return_value="1.0.0"):
+            result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 0, stderr)
+
+    def test_alternate_registry_dependency_is_collected_for_breaking_update_check(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n"
+            "[workspace.dependencies]\nrenamed = { package = \"private-serde\", version = \"1\", registry = \"private\" }\n",
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_alternate_registry_dependencies(self.root)
+        self.assertEqual(len(dependencies), 1)
+        self.assertEqual(dependencies[0].registry, "private")
+        self.assertEqual(dependencies[0].package.name, "private-serde")
+        self.assertEqual(dependencies[0].package.current, "1.0.0")
+        self.assertEqual(dependencies[0].package.incompatible_prefix_length, 1)
+
+    def test_alternate_registry_breaking_update_rejects_release(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n"
+            "[workspace.dependencies]\nserde = { version = \"1\", registry = \"private\" }\n",
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_alternate_registry_dependencies(self.root)
+        with patch.object(freshness, "cargo_registry_latest", return_value="2.0.0"):
+            self.assertFalse(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
+        with patch.object(freshness, "cargo_registry_latest", return_value="1.9.0"):
+            self.assertTrue(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
+
+    def test_alternate_registry_query_is_registry_aware_and_does_not_expose_error_output(self) -> None:
+        dependency = freshness.AlternateRegistryDependency(
+            freshness.Package("Rust manifest dependency", "private-serde", "1.0.0", 1),
+            "private",
+        )
+        completed = SimpleNamespace(returncode=0, stdout='private-serde = "2.0.0" # private\n', stderr="token=secret")
+        with patch.object(freshness.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(freshness.cargo_registry_latest(self.root, dependency), "2.0.0")
+        command = run.call_args.args[0]
+        self.assertIn("--registry", command)
+        self.assertIn("private", command)
+        self.assertNotIn("secret", command)
+
+        failed = SimpleNamespace(returncode=1, stdout="", stderr="token=secret")
+        with patch.object(freshness.subprocess, "run", return_value=failed):
+            with self.assertRaisesRegex(ValueError, "Cargo registry query failed") as raised:
+                freshness.cargo_registry_latest(self.root, dependency)
+        self.assertNotIn("secret", str(raised.exception))
+
+    def test_stale_non_exact_rust_manifest_dependency_rejects_release(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"1.0.0\"\n",
+            encoding="utf-8",
+        )
         responses = self.clean_responses()
         responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.1.0"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency serde: 1.0.0 -> 1.1.0", stderr)
+        self.assertIn("just depends-update-all", stderr)
+
+    def test_tilde_requirement_preserves_operator_and_rejects_next_minor(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"~1.2\"\n",
+            encoding="utf-8",
+        )
+        dependency = freshness.rust_manifest_dependencies(self.root)[0]
+        self.assertEqual(dependency.requirement_operator, "~")
+        self.assertEqual(dependency.current, "1.2.0")
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.3.0"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency serde: 1.2.0 -> 1.3.0", stderr)
+
+    def test_tilde_requirement_with_patch_defers_same_minor_patch_update(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"~1.2.3\"\n",
+            encoding="utf-8",
+        )
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.2.4"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 0, stderr)
+
+    def test_same_normalized_version_retains_distinct_cargo_requirement_boundaries(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"~1.2\"\n",
+            encoding="utf-8",
+        )
+        (self.root / "crates/renderer/Cargo.toml").write_text(
+            "[package]\nname = \"renderer\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"^1.2\"\n",
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_manifest_dependencies(self.root)
+        self.assertEqual(
+            [(dependency.current, dependency.requirement_operator) for dependency in dependencies],
+            [("1.2.0", "~"), ("1.2.0", "^")],
+        )
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.3.0"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency serde: 1.2.0 -> 1.3.0", stderr)
+
+    def test_stale_broad_rust_manifest_dependency_with_new_major_rejects_release(self) -> None:
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {
+            "crate": {"newest_version": "2.0.0"}
+        }
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency serde: 1.0.0 -> 2.0.0", stderr)
+        self.assertIn("just depends-update-all", stderr)
+
+    def test_broad_rust_manifest_dependency_defers_compatible_updates_to_cargo_lock(self) -> None:
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {
+            "crate": {"newest_version": "1.1.0"}
+        }
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 0, stderr)
+
+    def test_broad_pre_one_rust_manifest_dependency_rejects_new_minor(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"0.1\"\n",
+            encoding="utf-8",
+        )
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {
+            "crate": {"newest_version": "0.2.0"}
+        }
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency serde: 0.1.0 -> 0.2.0", stderr)
+
+    def test_broad_pre_one_rust_manifest_dependency_defers_patch_updates_to_cargo_lock(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"0.1\"\n",
+            encoding="utf-8",
+        )
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {
+            "crate": {"newest_version": "0.1.9"}
+        }
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 0, stderr)
+
+    def test_stale_rust_lock_rejects_release_with_repair_command(self) -> None:
+        result, _, stderr = self.run_check(self.clean_responses(), rust_fresh=False)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust Cargo.lock is not at the latest compatible resolution", stderr)
+        self.assertIn("just depends-update-all", stderr)
+
+    def test_cargo_update_dry_run_distinguishes_zero_singular_and_plural_updates(self) -> None:
+        cases = {
+            "": True,
+            "Locking 0 packages to latest compatible versions": True,
+            "Locking 1 package to latest compatible versions": False,
+            "Locking 1 package to latest compatible version": False,
+            "Locking 2 packages to latest compatible versions": False,
+            "Locking 0 packages (Rust 1.95.0) to latest compatible version": True,
+        }
+        for cargo_output, expected in cases.items():
+            with self.subTest(cargo_output=cargo_output), patch.object(
+                freshness.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=0, stdout=cargo_output, stderr=""),
+            ):
+                self.assertEqual(freshness.rust_lock_is_latest_compatible(self.root), expected)
+
+    def test_cargo_update_dry_run_forces_plain_output_when_workflow_enables_color(self) -> None:
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout="Locking 1 package to latest compatible version\n",
+            stderr="",
+        )
+        with patch.dict("os.environ", {"CARGO_TERM_COLOR": "always"}), patch.object(
+            freshness.subprocess, "run", return_value=completed
+        ) as run:
+            self.assertFalse(freshness.rust_lock_is_latest_compatible(self.root))
+
+        command = run.call_args.args[0]
+        self.assertIn("--color=never", command)
+
+    def test_rust_metadata_retains_direct_and_transitive_resolution(self) -> None:
         metadata = self.metadata_for_direct_serde()
         metadata["resolve"]["nodes"][0]["deps"][0]["name"] = "renamed-serde"
         metadata["packages"].append(
@@ -126,11 +395,10 @@ class DependencyFreshnessTest(unittest.TestCase):
                 "source": "registry+https://github.com/rust-lang/crates.io-index",
             }
         )
-        result, _, stderr = self.run_check(responses, metadata)
-        self.assertEqual(result, 1)
-        self.assertIn("Rust serde: 1.0.0 -> 1.1.0", stderr)
+        result, _, stderr = self.run_check(self.clean_responses(), metadata)
+        self.assertEqual(result, 0, stderr)
 
-    def test_stale_transitive_rust_dependency_rejects_release(self) -> None:
+    def test_transitive_rust_metadata_is_accepted_when_cargo_resolution_is_fresh(self) -> None:
         metadata = self.metadata_for_direct_serde()
         transitive_id = "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.0"
         metadata["packages"].append(
@@ -140,15 +408,10 @@ class DependencyFreshnessTest(unittest.TestCase):
         metadata["resolve"]["nodes"].extend(
             [{"id": serde_id, "deps": [{"name": "itoa", "pkg": transitive_id}]}, {"id": transitive_id, "deps": []}]
         )
-        responses = self.clean_responses()
-        responses["https://crates.io/api/v1/crates/itoa"] = {"crate": {"newest_version": "1.1.0"}}
-        result, _, stderr = self.run_check(responses, metadata)
-        self.assertEqual(result, 1)
-        self.assertIn("Rust itoa: 1.0.0 -> 1.1.0", stderr)
+        result, _, stderr = self.run_check(self.clean_responses(), metadata)
+        self.assertEqual(result, 0, stderr)
 
     def test_direct_rust_dependency_uses_resolved_package_id_not_dependency_name(self) -> None:
-        responses = self.clean_responses()
-        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.1.0"}}
         metadata = self.metadata_for_direct_serde()
         dependency = metadata["resolve"]["nodes"][0]["deps"][0]
         dependency["name"] = "serde_legacy"
@@ -160,9 +423,8 @@ class DependencyFreshnessTest(unittest.TestCase):
                 "source": "registry+https://github.com/rust-lang/crates.io-index",
             }
         )
-        result, _, stderr = self.run_check(responses, metadata)
-        self.assertEqual(result, 1)
-        self.assertIn("Rust serde: 1.0.0 -> 1.1.0", stderr)
+        result, _, stderr = self.run_check(self.clean_responses(), metadata)
+        self.assertEqual(result, 0, stderr)
 
     def test_missing_direct_package_metadata_fails_closed(self) -> None:
         metadata = self.metadata_for_direct_serde()
@@ -171,31 +433,33 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("direct Rust package missing from cargo metadata", stderr)
 
-    def test_stale_javascript_dependency_rejects_release(self) -> None:
-        responses = self.clean_responses()
-        responses["https://registry.npmjs.org/example/latest"] = {"version": "2.0.0"}
-        result, _, stderr = self.run_check(responses)
+    def test_stale_javascript_lock_rejects_release(self) -> None:
+        result, _, stderr = self.run_check(self.clean_responses(), javascript_fresh=False)
         self.assertEqual(result, 1)
-        self.assertIn("JavaScript example: 1.0.0 -> 2.0.0", stderr)
+        self.assertIn("JavaScript bun.lock is not at the latest compatible resolution", stderr)
 
-    def test_stale_transitive_javascript_dependency_rejects_release(self) -> None:
+    def test_transitive_javascript_dependency_is_accepted_when_bun_resolution_is_fresh(self) -> None:
         (self.root / "bun.lock").write_text(
             json.dumps({"packages": {"example": ["example@1.0.0", "", {}], "transitive": ["transitive@1.0.0", "", {}]}}),
             encoding="utf-8",
         )
-        responses = self.clean_responses()
-        responses["https://registry.npmjs.org/transitive/latest"] = {"version": "1.1.0"}
-        result, _, stderr = self.run_check(responses)
-        self.assertEqual(result, 1)
-        self.assertIn("JavaScript transitive: 1.0.0 -> 1.1.0", stderr)
+        result, _, stderr = self.run_check(self.clean_responses())
+        self.assertEqual(result, 0, stderr)
 
-    def test_numeric_prerelease_update_rejects_release(self) -> None:
-        (self.root / "bun.lock").write_text(json.dumps({"packages": {"example": ["example@1.0.0-beta.2", "", {}]}}), encoding="utf-8")
+    def test_bun_lock_dependency_path_uses_the_resolved_package_name(self) -> None:
+        (self.root / "bun.lock").write_text(
+            json.dumps({"packages": {"parent/commander": ["commander@1.0.0", "", {}]}}),
+            encoding="utf-8",
+        )
         responses = self.clean_responses()
-        responses["https://registry.npmjs.org/example/latest"] = {"version": "1.0.0-beta.11"}
+        responses["https://registry.npmjs.org/commander/latest"] = {"version": "1.0.0"}
         result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 0, stderr)
+
+    def test_stale_javascript_prerelease_lock_rejects_release(self) -> None:
+        result, _, stderr = self.run_check(self.clean_responses(), javascript_fresh=False)
         self.assertEqual(result, 1)
-        self.assertIn("JavaScript example: 1.0.0-beta.2 -> 1.0.0-beta.11", stderr)
+        self.assertIn("JavaScript bun.lock is not at the latest compatible resolution", stderr)
 
     def test_stale_runtime_asset_rejects_release(self) -> None:
         responses = self.clean_responses()
@@ -222,7 +486,7 @@ class DependencyFreshnessTest(unittest.TestCase):
 
     def test_invalid_latest_version_is_fail_closed(self) -> None:
         responses = self.clean_responses()
-        responses["https://registry.npmjs.org/example/latest"] = {"version": "newest"}
+        responses["https://example.test/runtime"] = {"version": "newest"}
         result, _, stderr = self.run_check(responses)
         self.assertEqual(result, 1)
         self.assertIn("failed closed", stderr)
@@ -230,7 +494,7 @@ class DependencyFreshnessTest(unittest.TestCase):
 
     def test_non_object_latest_response_is_fail_closed_without_traceback(self) -> None:
         responses = self.clean_responses()
-        responses["https://registry.npmjs.org/example/latest"] = ["2.0.0"]
+        responses["https://example.test/runtime"] = ["2.0.0"]
         result, _, stderr = self.run_check(responses)
         self.assertEqual(result, 1)
         self.assertIn("failed closed", stderr)
