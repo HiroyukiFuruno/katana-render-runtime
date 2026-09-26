@@ -21,7 +21,7 @@ MODULE_SPEC.loader.exec_module(freshness)
 
 
 class DependencyFreshnessTest(unittest.TestCase):
-    def test_python310_fallback_reads_cargo_manifest_without_tomllib(self) -> None:
+    def test_python310_fallback_reads_single_quoted_alternate_registry_dependency(self) -> None:
         fallback_name = "verify_dependency_freshness_py310_fallback"
         fallback_spec = importlib.util.spec_from_file_location(fallback_name, MODULE_PATH)
         assert fallback_spec is not None and fallback_spec.loader is not None
@@ -36,28 +36,18 @@ class DependencyFreshnessTest(unittest.TestCase):
 
         with patch.object(builtins, "__import__", reject_toml):
             fallback_spec.loader.exec_module(fallback)
-        metadata = {
-            "packages": [{
-                "manifest_path": str(self.root / "Cargo.toml"),
-                "dependencies": [{
-                    "name": "private-serde",
-                    "rename": "renamed",
-                    "req": "^1",
-                    "registry": "private",
-                    "kind": None,
-                    "target": None,
-                }],
-            }],
-        }
-        completed = SimpleNamespace(stdout=json.dumps(metadata))
-        with patch.object(fallback.subprocess, "run", return_value=completed) as run:
-            dependencies = fallback.rust_alternate_registry_dependencies(self.root)
-        run.assert_called_once()
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n"
+            "[workspace.dependencies]\n"
+            "renamed = { package = 'private-serde', version = '1', registry = 'private' }\n",
+            encoding="utf-8",
+        )
+        dependencies = fallback.rust_alternate_registry_dependencies(self.root)
         self.assertEqual(dependencies[0].registry, "private")
         self.assertEqual(dependencies[0].package.name, "private-serde")
         self.assertEqual(dependencies[0].package.current, "1.0.0")
 
-    def test_python310_fallback_reads_virtual_workspace_dependencies(self) -> None:
+    def test_python310_fallback_reads_multiline_virtual_workspace_dependencies(self) -> None:
         fallback_name = "verify_dependency_freshness_virtual_workspace_fallback"
         fallback_spec = importlib.util.spec_from_file_location(fallback_name, MODULE_PATH)
         assert fallback_spec is not None and fallback_spec.loader is not None
@@ -73,13 +63,21 @@ class DependencyFreshnessTest(unittest.TestCase):
         with patch.object(builtins, "__import__", reject_toml):
             fallback_spec.loader.exec_module(fallback)
         (self.root / "Cargo.toml").write_text(
-            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"=1.0.0\"\n",
+            "[workspace]\nmembers = [\"crates/renderer\"]\n"
+            "[workspace.dependencies]\n"
+            "serde = { version = \"\"\"\\\n"
+            "1.0.0\\\n"
+            "\"\"\", features = ['derive'] }\n"
+            "[workspace.dependencies.renamed]\n"
+            "package = 'serde_json'\n"
+            "version = '2.0.0'\n",
             encoding="utf-8",
         )
-        completed = SimpleNamespace(stdout=json.dumps({"packages": []}))
-        with patch.object(fallback.subprocess, "run", return_value=completed):
-            dependencies = fallback.rust_manifest_dependencies(self.root)
-        self.assertEqual([(dependency.name, dependency.current) for dependency in dependencies], [("serde", "1.0.0")])
+        dependencies = fallback.rust_manifest_dependencies(self.root)
+        self.assertEqual(
+            [(dependency.name, dependency.current) for dependency in dependencies],
+            [("serde", "1.0.0"), ("serde_json", "2.0.0")],
+        )
 
     def test_semver_prerelease_precedence(self) -> None:
         versions = ["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"]
@@ -290,6 +288,19 @@ target-build = "=3.0.0"
         with patch.object(freshness, "cargo_registry_latest", return_value="1.9.0"):
             self.assertTrue(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
 
+    def test_alternate_registry_compound_requirement_uses_its_upper_bound(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\n"
+            "serde = { version = \">=1, <2\", registry = \"private\" }\n",
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_alternate_registry_dependencies(self.root)
+        self.assertEqual(dependencies[0].package.cargo_requirement, ">=1, <2")
+        with patch.object(freshness, "cargo_registry_latest", return_value="1.9.0"):
+            self.assertTrue(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
+        with patch.object(freshness, "cargo_registry_latest", return_value="2.0.0"):
+            self.assertFalse(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
+
     def test_alternate_registry_query_is_registry_aware_and_does_not_expose_error_output(self) -> None:
         dependency = freshness.AlternateRegistryDependency(
             freshness.Package("Rust manifest dependency", "private-serde", "1.0.0", 1),
@@ -358,6 +369,46 @@ target-build = "=3.0.0"
         responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.2.4"}}
         result, _, stderr = self.run_check(responses)
         self.assertEqual(result, 0, stderr)
+
+    def test_partial_exact_requirement_rejects_a_new_minor(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"=1.2\"\n",
+            encoding="utf-8",
+        )
+        dependency = freshness.rust_manifest_dependencies(self.root)[0]
+        self.assertEqual(dependency.incompatible_prefix_length, 2)
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.3.0"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency serde: 1.2.0 -> 1.3.0", stderr)
+
+    def test_partial_exact_requirement_defers_same_minor_patch_update(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"=1.2\"\n",
+            encoding="utf-8",
+        )
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.2.9"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 0, stderr)
+
+    def test_compound_and_wildcard_cargo_requirements_are_checked_without_rejection(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\n"
+            "serde = \">=1, <2\"\nitoa = \"1.*\"\n",
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_manifest_dependencies(self.root)
+        self.assertEqual({dependency.name for dependency in dependencies}, {"serde", "itoa"})
+        self.assertTrue(all(dependency.cargo_requirement is not None for dependency in dependencies))
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.9.0"}}
+        responses["https://crates.io/api/v1/crates/itoa"] = {"crate": {"newest_version": "2.0.0"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency itoa: 1.0.0 -> 2.0.0", stderr)
+        self.assertNotIn("unsupported Cargo version requirement", stderr)
 
     def test_same_normalized_version_retains_distinct_cargo_requirement_boundaries(self) -> None:
         (self.root / "Cargo.toml").write_text(

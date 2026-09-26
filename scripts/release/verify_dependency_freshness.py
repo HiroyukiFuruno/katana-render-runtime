@@ -22,12 +22,17 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
     try:
         import tomli as tomllib  # type: ignore[no-redef]
     except ModuleNotFoundError:
-        tomllib = None  # type: ignore[assignment]
+        # Python 3.10 does not ship ``tomllib``.  Keep the release check
+        # independent of its host environment by using the vendored, complete
+        # TOML 1.0 parser rather than attempting to parse Cargo manifests.
+        parser_root = str(Path(__file__).resolve().parent)
+        if parser_root not in sys.path:
+            sys.path.insert(0, parser_root)
+        from _tomli import _parser as tomllib  # type: ignore[no-redef]
 
 TIMEOUT_SECONDS = 15
 MAX_RESPONSE_BYTES = 1_000_000
 RUNTIME_CATALOG = Path("scripts/runtime-assets/runtime-asset-common.ts")
-_CARGO_METADATA_CACHE: dict[Path, dict[str, object]] = {}
 
 
 @total_ordering
@@ -80,12 +85,148 @@ class Package:
     current: str
     incompatible_prefix_length: int | None = None
     requirement_operator: str | None = None
+    cargo_requirement: str | None = None
 
 
 @dataclass(frozen=True)
 class AlternateRegistryDependency:
     package: Package
     registry: str
+
+
+_CARGO_REQUIREMENT_TERM = re.compile(
+    r"\s*(?P<operator>\^|~|>=|<=|>|<|=)?\s*"
+    r"(?P<version>(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*|[xX*])){0,2}|[xX*])\s*"
+)
+
+
+def _cargo_requirement_parts(value: str) -> tuple[int, ...] | None:
+    """Return the numeric prefix of a Cargo requirement term.
+
+    Wildcards are valid only as a trailing suffix.  The caller retains the
+    original term so that matching can preserve Cargo's partial-version
+    semantics.
+    """
+    if value in {"*", "x", "X"}:
+        return ()
+    parts = value.split(".")
+    numeric: list[int] = []
+    wildcard_seen = False
+    for part in parts:
+        if part in {"*", "x", "X"}:
+            wildcard_seen = True
+            continue
+        if wildcard_seen:
+            raise ValueError(f"unsupported Cargo version requirement: {value!r}")
+        numeric.append(int(part))
+    return tuple(numeric)
+
+
+def _parse_cargo_requirement(requirement: str) -> list[tuple[str, tuple[int, ...]]]:
+    """Parse Cargo's comma-conjoined numeric requirement syntax.
+
+    Cargo accepts comparison clauses and wildcard prefixes in addition to the
+    short forms handled by the release policy's historical compatibility
+    model.  Parse those clauses here rather than rejecting a valid manifest.
+    """
+    terms: list[tuple[str, tuple[int, ...]]] = []
+    for raw_term in requirement.split(","):
+        match = _CARGO_REQUIREMENT_TERM.fullmatch(raw_term)
+        if match is None:
+            raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
+        operator = match.group("operator") or ""
+        parts = _cargo_requirement_parts(match.group("version"))
+        assert parts is not None
+        if operator and not parts:
+            raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
+        terms.append((operator, parts))
+    if not terms:
+        raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
+    return terms
+
+
+def cargo_requirement_matches(requirement: str, version: Version) -> bool:
+    """Return whether ``version`` satisfies a supported Cargo requirement."""
+    for operator, parts in _parse_cargo_requirement(requirement):
+        if not parts:
+            continue
+        candidate = Version(tuple((*parts, *(0 for _ in range(3 - len(parts))))), True, ())
+        prefix_matches = version.parts[:len(parts)] == parts
+        if operator == "=":
+            allowed = prefix_matches
+        elif operator == "^" or operator == "":
+            if version < candidate:
+                allowed = False
+            elif parts[0] > 0:
+                allowed = version.parts[0] == parts[0]
+            elif len(parts) == 1:
+                allowed = version.parts[0] == 0
+            elif parts[1] > 0:
+                allowed = version.parts[:2] == parts[:2]
+            elif len(parts) == 2:
+                allowed = version.parts[:2] == parts[:2]
+            else:
+                allowed = prefix_matches
+        elif operator == "~":
+            allowed = version >= candidate and (len(parts) == 1 or version.parts[:2] == parts[:2])
+        elif operator == ">=":
+            allowed = version >= candidate
+        elif operator == ">":
+            allowed = version > candidate
+        elif operator == "<=":
+            allowed = version <= candidate
+        elif operator == "<":
+            allowed = version < candidate
+        else:  # pragma: no cover - _CARGO_REQUIREMENT_TERM constrains this.
+            raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
+        if not allowed:
+            return False
+    return True
+
+
+def cargo_requirement_anchor(requirement: str) -> str:
+    """Choose a stable display anchor for a compound Cargo requirement."""
+    lower_bounds = [
+        parts for operator, parts in _parse_cargo_requirement(requirement)
+        if parts and operator in {"", "^", "~", "=", ">", ">="}
+    ]
+    parts = max(lower_bounds, default=(), key=lambda value: (*value, *(0 for _ in range(3 - len(value)))))
+    return ".".join(str(part) for part in (*parts, *(0 for _ in range(3 - len(parts)))))
+
+
+def cargo_requirement_package(name: str, requirement: str) -> Package:
+    """Translate a Cargo requirement into the release freshness model."""
+    match = re.fullmatch(r"(=|\^|~)?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", requirement)
+    if match is None:
+        current = cargo_requirement_anchor(requirement)
+        Version.parse(current)
+        return Package("Rust manifest dependency", name, current, requirement_operator="compound", cargo_requirement=requirement)
+
+    operator = match.group(1)
+    major = int(match.group(2))
+    minor = match.group(3)
+    patch = match.group(4)
+    incompatible_prefix_length: int | None = None
+    if operator == "~":
+        incompatible_prefix_length = 1 if minor is None else 2
+    elif operator == "^":
+        if major > 0 or minor is None:
+            incompatible_prefix_length = 1
+        elif int(minor) > 0 or patch is None:
+            incompatible_prefix_length = 2
+        else:
+            incompatible_prefix_length = 3
+    elif operator == "=":
+        # Cargo treats partial exact requirements as a prefix: `=1.2`
+        # accepts 1.2.x but must reject a newly available 1.3.
+        incompatible_prefix_length = len([part for part in (match.group(2), minor, patch) if part is not None])
+    elif minor is None:
+        incompatible_prefix_length = 1
+    elif patch is None:
+        incompatible_prefix_length = 1 if major > 0 else 2
+    current = ".".join((match.group(2), minor or "0", patch or "0"))
+    Version.parse(current)
+    return Package("Rust manifest dependency", name, current, incompatible_prefix_length, operator)
 
 
 def parse_args() -> argparse.Namespace:
@@ -195,134 +336,6 @@ def rust_packages(root: Path) -> list[Package]:
     return sorted(resolved.values(), key=lambda package: (package.name, Version.parse(package.current)))
 
 
-def _cargo_manifest_payload(root: Path, manifest: Path) -> dict[str, object]:
-    """Reconstruct dependency tables from Cargo's own manifest metadata."""
-    command = [
-        "cargo", "metadata", "--no-deps", "--format-version=1",
-        "--manifest-path", str(root / "Cargo.toml"),
-    ]
-    metadata = _CARGO_METADATA_CACHE.get(root)
-    if metadata is None:
-        try:
-            completed = subprocess.run(command, check=True, capture_output=True, text=True)
-            metadata = json.loads(completed.stdout)
-        except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
-            raise ValueError(f"cargo metadata failed while reading {manifest}: {exc}") from exc
-        if isinstance(metadata, dict):
-            _CARGO_METADATA_CACHE[root] = metadata
-    if not isinstance(metadata, dict) or not isinstance(metadata.get("packages"), list):
-        raise ValueError(f"cargo metadata response is missing package data for {manifest}")
-    manifest_path = manifest.resolve()
-    for package in metadata["packages"]:
-        if not isinstance(package, dict) or Path(str(package.get("manifest_path", ""))).resolve() != manifest_path:
-            continue
-        payload: dict[str, object] = {}
-        for dependency in package.get("dependencies", []):
-            if not isinstance(dependency, dict):
-                continue
-            requirement = dependency.get("req")
-            name = dependency.get("rename") or dependency.get("name")
-            if not isinstance(name, str) or not isinstance(requirement, str):
-                continue
-            declaration: dict[str, object] = {"version": requirement}
-            package_name = dependency.get("name")
-            if isinstance(package_name, str) and package_name != name:
-                declaration["package"] = package_name
-            registry = dependency.get("registry")
-            if isinstance(registry, str) and registry:
-                declaration["registry"] = registry
-            kind = dependency.get("kind") or "dependencies"
-            target = dependency.get("target")
-            table_name = kind if kind in {"dependencies", "dev-dependencies", "build-dependencies"} else "dependencies"
-            target_table: dict[str, object] = payload
-            if isinstance(target, str) and target:
-                target_table = payload.setdefault("target", {}).setdefault(target, {})  # type: ignore[assignment]
-            target_table.setdefault(table_name, {})[name] = declaration  # type: ignore[index]
-        return payload
-    # A virtual workspace root has no package entry in ``cargo metadata``.
-    # Keep the Python 3.10 fallback complete by reading the dependency tables
-    # from that manifest directly when Cargo cannot represent them as a package.
-    return _fallback_manifest_payload(manifest)
-
-
-def _strip_toml_comment(line: str) -> str:
-    quoted = False
-    escaped = False
-    for index, character in enumerate(line):
-        if quoted:
-            if escaped:
-                escaped = False
-            elif character == "\\":
-                escaped = True
-            elif character == '"':
-                quoted = False
-        elif character == '"':
-            quoted = True
-        elif character == "#":
-            return line[:index].rstrip()
-    return line.rstrip()
-
-
-def _fallback_manifest_payload(manifest: Path) -> dict[str, object]:
-    """Parse dependency tables when Python has neither TOML implementation.
-
-    Cargo manifests use a small, regular subset here: dependency tables and
-    string or inline-table declarations.  This parser intentionally ignores
-    every other TOML value and is only the Python 3.10 emergency fallback.
-    """
-    payload: dict[str, object] = {}
-    table: list[str] = []
-    try:
-        lines = manifest.read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
-        raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
-
-    def dependency_table(name: str) -> bool:
-        return name == "dependencies" or name.endswith(".dependencies") or name.endswith(".dev-dependencies") or name.endswith(".build-dependencies")
-
-    def destination(name: str) -> dict[str, object] | None:
-        parts = name.split(".")
-        if parts == ["workspace", "dependencies"]:
-            workspace = payload.setdefault("workspace", {})
-            return workspace.setdefault("dependencies", {})  # type: ignore[return-value]
-        if not dependency_table(name):
-            return None
-        if parts[-1] not in {"dependencies", "dev-dependencies", "build-dependencies"}:
-            return None
-        target: dict[str, object] = payload
-        if parts[0] == "target":
-            target_table = target.setdefault("target", {})
-            target = target_table.setdefault(".".join(parts[1:-1]), {})  # type: ignore[assignment]
-        return target.setdefault(parts[-1], {})  # type: ignore[return-value]
-
-    for raw_line in lines:
-        line = _strip_toml_comment(raw_line).strip()
-        if not line:
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            table = line[1:-1].strip().split(".")
-            continue
-        if "=" not in line:
-            continue
-        key, value = (part.strip() for part in line.split("=", 1))
-        name = ".".join(table)
-        target = destination(name)
-        if target is None or not key:
-            continue
-        if value.startswith("{") and value.endswith("}"):
-            declaration: dict[str, object] = {}
-            for item in value[1:-1].split(","):
-                if "=" not in item:
-                    continue
-                item_key, item_value = (part.strip() for part in item.split("=", 1))
-                if item_value.startswith('"') and item_value.endswith('"'):
-                    declaration[item_key] = item_value[1:-1]
-            target[key] = declaration
-        elif value.startswith('"') and value.endswith('"'):
-            target[key] = value[1:-1]
-    return payload
-
-
 def _load_manifest_payload(root: Path, manifest: Path) -> dict[str, object]:
     if tomllib is not None:
         try:
@@ -332,12 +345,18 @@ def _load_manifest_payload(root: Path, manifest: Path) -> dict[str, object]:
         if not isinstance(payload, dict):
             raise ValueError(f"Rust manifest must be a table: {manifest}")
         return payload
-    return _cargo_manifest_payload(root, manifest)
+    try:
+        payload = tomllib.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Rust manifest must be a table: {manifest}")
+    return payload
 
 
 def rust_manifest_dependencies(root: Path) -> list[Package]:
     """Return direct registry requirements updated by ``cargo upgrade``."""
-    dependencies_by_version: dict[tuple[str, str, int | None, str | None], Package] = {}
+    dependencies_by_version: dict[tuple[str, str, int | None, str | None, str | None], Package] = {}
 
     def dependency_tables(payload: dict[str, object]) -> list[object]:
         sections = ("dependencies", "dev-dependencies", "build-dependencies")
@@ -385,55 +404,24 @@ def rust_manifest_dependencies(root: Path) -> list[Package]:
                         package_name = package
                 if not isinstance(version, str):
                     continue
-                match = re.fullmatch(r"(=|\^|~)?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", version)
-                if match is None:
-                    raise ValueError(f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}")
-                operator = match.group(1)
-                major = int(match.group(2))
-                minor = match.group(3)
-                patch = match.group(4)
-                incompatible_prefix_length: int | None = None
-                if operator == "~":
-                    # Tilde requirements are limited to the specified
-                    # minor; a requirement containing only a major advances
-                    # at the next major.
-                    incompatible_prefix_length = 1 if minor is None else 2
-                elif operator == "^":
-                    # Keep Cargo's caret compatibility for explicit caret
-                    # requirements. Bare requirements retain their existing
-                    # release freshness contract below.
-                    if major > 0:
-                        incompatible_prefix_length = 1
-                    elif minor is None:
-                        incompatible_prefix_length = 1
-                    elif int(minor) > 0:
-                        incompatible_prefix_length = 2
-                    elif patch is not None:
-                        incompatible_prefix_length = 3
-                    else:
-                        incompatible_prefix_length = 2
-                elif minor is None:
-                    incompatible_prefix_length = 1
-                elif patch is None:
-                    incompatible_prefix_length = 1 if major > 0 else 2
-                # ``depends-update-all`` permits incompatible upgrades, so
-                # broad requirements such as `1` must observe a new major
-                # that Cargo's compatible lockfile resolver cannot see. Cargo
-                # treats pre-1.0 `0.1` as compatible only within that minor.
-                # Compatible updates remain Cargo's lockfile responsibility.
-                declared = ".".join(
-                    (match.group(2), minor or "0", patch or "0")
-                )
-                Version.parse(declared)
-                dependencies_by_version[(package_name, declared, incompatible_prefix_length, operator)] = Package(
-                    "Rust manifest dependency", package_name, declared, incompatible_prefix_length, operator
-                )
+                try:
+                    package = cargo_requirement_package(package_name, version)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}"
+                    ) from exc
+                dependencies_by_version[
+                    (
+                        package.name, package.current, package.incompatible_prefix_length,
+                        package.requirement_operator, package.cargo_requirement,
+                    )
+                ] = package
     return sorted(dependencies_by_version.values(), key=lambda package: (package.name, Version.parse(package.current)))
 
 
 def rust_alternate_registry_dependencies(root: Path) -> list[AlternateRegistryDependency]:
     """Return direct requirements resolved through named Cargo registries."""
-    dependencies: dict[tuple[str, str, str, int | None, str | None], AlternateRegistryDependency] = {}
+    dependencies: dict[tuple[str, str, str, int | None, str | None, str | None], AlternateRegistryDependency] = {}
     for manifest in sorted(root.glob("**/Cargo.toml")):
         if any(part in {"target", "vendor", ".git", ".worktrees"} for part in manifest.relative_to(root).parts):
             continue
@@ -465,25 +453,16 @@ def rust_alternate_registry_dependencies(root: Path) -> list[AlternateRegistryDe
                 package_name = declaration.get("package", declared_name)
                 if not isinstance(package_name, str):
                     raise ValueError(f"invalid Rust dependency package name in {manifest}: {declared_name}")
-                match = re.fullmatch(r"(=|\^|~)?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", version)
-                if match is None:
-                    raise ValueError(f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}")
-                operator, major_text, minor, patch = match.groups()
-                major = int(major_text)
-                if operator == "~":
-                    prefix_length = 1 if minor is None else 2
-                elif operator == "^":
-                    prefix_length = 1 if major > 0 or minor is None else (2 if int(minor) > 0 or patch is None else 3)
-                elif minor is None:
-                    prefix_length = 1
-                elif patch is None:
-                    prefix_length = 1 if major > 0 else 2
-                else:
-                    prefix_length = None
-                current = ".".join((major_text, minor or "0", patch or "0"))
-                Version.parse(current)
-                package = Package("Rust manifest dependency", package_name, current, prefix_length, operator)
-                key = (registry, package.name, package.current, package.incompatible_prefix_length, package.requirement_operator)
+                try:
+                    package = cargo_requirement_package(package_name, version)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}"
+                    ) from exc
+                key = (
+                    registry, package.name, package.current, package.incompatible_prefix_length,
+                    package.requirement_operator, package.cargo_requirement,
+                )
                 dependencies[key] = AlternateRegistryDependency(package, registry)
     return sorted(dependencies.values(), key=lambda dependency: (dependency.registry, dependency.package.name, Version.parse(dependency.package.current)))
 
@@ -694,6 +673,8 @@ def display_name(package: Package) -> str:
 def is_stale(package: Package, resolved_version: str) -> bool:
     current = Version.parse(package.current)
     resolved = Version.parse(resolved_version)
+    if package.cargo_requirement is not None:
+        return not cargo_requirement_matches(package.cargo_requirement, resolved)
     if package.incompatible_prefix_length is not None:
         length = package.incompatible_prefix_length
         return resolved.parts[:length] > current.parts[:length]
