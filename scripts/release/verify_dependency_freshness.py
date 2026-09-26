@@ -10,16 +10,24 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import tomllib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import total_ordering
 from pathlib import Path
 from urllib import error, parse, request
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
+
 TIMEOUT_SECONDS = 15
 MAX_RESPONSE_BYTES = 1_000_000
 RUNTIME_CATALOG = Path("scripts/runtime-assets/runtime-asset-common.ts")
+_CARGO_METADATA_CACHE: dict[Path, dict[str, object]] = {}
 
 
 @total_ordering
@@ -187,6 +195,65 @@ def rust_packages(root: Path) -> list[Package]:
     return sorted(resolved.values(), key=lambda package: (package.name, Version.parse(package.current)))
 
 
+def _cargo_manifest_payload(root: Path, manifest: Path) -> dict[str, object]:
+    """Reconstruct dependency tables from Cargo's own manifest metadata."""
+    command = [
+        "cargo", "metadata", "--no-deps", "--format-version=1",
+        "--manifest-path", str(root / "Cargo.toml"),
+    ]
+    metadata = _CARGO_METADATA_CACHE.get(root)
+    if metadata is None:
+        try:
+            completed = subprocess.run(command, check=True, capture_output=True, text=True)
+            metadata = json.loads(completed.stdout)
+        except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+            raise ValueError(f"cargo metadata failed while reading {manifest}: {exc}") from exc
+        if isinstance(metadata, dict):
+            _CARGO_METADATA_CACHE[root] = metadata
+    if not isinstance(metadata, dict) or not isinstance(metadata.get("packages"), list):
+        raise ValueError(f"cargo metadata response is missing package data for {manifest}")
+    manifest_path = manifest.resolve()
+    for package in metadata["packages"]:
+        if not isinstance(package, dict) or Path(str(package.get("manifest_path", ""))).resolve() != manifest_path:
+            continue
+        payload: dict[str, object] = {}
+        for dependency in package.get("dependencies", []):
+            if not isinstance(dependency, dict):
+                continue
+            requirement = dependency.get("req")
+            name = dependency.get("rename") or dependency.get("name")
+            if not isinstance(name, str) or not isinstance(requirement, str):
+                continue
+            declaration: dict[str, object] = {"version": requirement}
+            package_name = dependency.get("name")
+            if isinstance(package_name, str) and package_name != name:
+                declaration["package"] = package_name
+            registry = dependency.get("registry")
+            if isinstance(registry, str) and registry:
+                declaration["registry"] = registry
+            kind = dependency.get("kind") or "dependencies"
+            target = dependency.get("target")
+            table_name = kind if kind in {"dependencies", "dev-dependencies", "build-dependencies"} else "dependencies"
+            target_table: dict[str, object] = payload
+            if isinstance(target, str) and target:
+                target_table = payload.setdefault("target", {}).setdefault(target, {})  # type: ignore[assignment]
+            target_table.setdefault(table_name, {})[name] = declaration  # type: ignore[index]
+        return payload
+    return {}
+
+
+def _load_manifest_payload(root: Path, manifest: Path) -> dict[str, object]:
+    if tomllib is not None:
+        try:
+            payload = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"Rust manifest must be a table: {manifest}")
+        return payload
+    return _cargo_manifest_payload(root, manifest)
+
+
 def rust_manifest_dependencies(root: Path) -> list[Package]:
     """Return direct registry requirements updated by ``cargo upgrade``."""
     dependencies_by_version: dict[tuple[str, str, int | None, str | None], Package] = {}
@@ -208,12 +275,7 @@ def rust_manifest_dependencies(root: Path) -> list[Package]:
     for manifest in sorted(root.glob("**/Cargo.toml")):
         if any(part in {"target", "vendor", ".git", ".worktrees"} for part in manifest.relative_to(root).parts):
             continue
-        try:
-            payload = tomllib.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, tomllib.TOMLDecodeError) as exc:
-            raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise ValueError(f"Rust manifest must be a table: {manifest}")
+        payload = _load_manifest_payload(root, manifest)
         for dependencies in dependency_tables(payload):
             if not isinstance(dependencies, dict):
                 continue
@@ -294,12 +356,7 @@ def rust_alternate_registry_dependencies(root: Path) -> list[AlternateRegistryDe
     for manifest in sorted(root.glob("**/Cargo.toml")):
         if any(part in {"target", "vendor", ".git", ".worktrees"} for part in manifest.relative_to(root).parts):
             continue
-        try:
-            payload = tomllib.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, tomllib.TOMLDecodeError) as exc:
-            raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise ValueError(f"Rust manifest must be a table: {manifest}")
+        payload = _load_manifest_payload(root, manifest)
         sections = ("dependencies", "dev-dependencies", "build-dependencies")
         tables: list[object] = [payload.get(section) for section in sections]
         target = payload.get("target")

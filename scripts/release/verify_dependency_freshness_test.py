@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import builtins
 import importlib.util
 import io
 import json
@@ -20,6 +21,42 @@ MODULE_SPEC.loader.exec_module(freshness)
 
 
 class DependencyFreshnessTest(unittest.TestCase):
+    def test_python310_fallback_reads_cargo_manifest_without_tomllib(self) -> None:
+        fallback_name = "verify_dependency_freshness_py310_fallback"
+        fallback_spec = importlib.util.spec_from_file_location(fallback_name, MODULE_PATH)
+        assert fallback_spec is not None and fallback_spec.loader is not None
+        fallback = importlib.util.module_from_spec(fallback_spec)
+        sys.modules[fallback_name] = fallback
+        original_import = builtins.__import__
+
+        def reject_toml(name: str, *args: object, **kwargs: object) -> object:
+            if name in {"tomllib", "tomli"}:
+                raise ModuleNotFoundError(name)
+            return original_import(name, *args, **kwargs)
+
+        with patch.object(builtins, "__import__", reject_toml):
+            fallback_spec.loader.exec_module(fallback)
+        metadata = {
+            "packages": [{
+                "manifest_path": str(self.root / "Cargo.toml"),
+                "dependencies": [{
+                    "name": "private-serde",
+                    "rename": "renamed",
+                    "req": "^1",
+                    "registry": "private",
+                    "kind": None,
+                    "target": None,
+                }],
+            }],
+        }
+        completed = SimpleNamespace(stdout=json.dumps(metadata))
+        with patch.object(fallback.subprocess, "run", return_value=completed) as run:
+            dependencies = fallback.rust_alternate_registry_dependencies(self.root)
+        run.assert_called_once()
+        self.assertEqual(dependencies[0].registry, "private")
+        self.assertEqual(dependencies[0].package.name, "private-serde")
+        self.assertEqual(dependencies[0].package.current, "1.0.0")
+
     def test_semver_prerelease_precedence(self) -> None:
         versions = ["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"]
         for older, newer in zip(versions, versions[1:]):
