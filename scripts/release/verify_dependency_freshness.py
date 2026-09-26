@@ -219,6 +219,15 @@ def rust_manifest_dependencies(root: Path) -> list[Package]:
                 if isinstance(declaration, dict):
                     if "path" in declaration or "git" in declaration or declaration.get("workspace") is True:
                         continue
+                    # Cargo resolves named alternate registries through their
+                    # configured index.  crates.io's API cannot establish
+                    # freshness for the same package name there, so leave
+                    # this requirement to the Cargo lockfile resolver below.
+                    if "registry" in declaration:
+                        registry = declaration.get("registry")
+                        if not isinstance(registry, str) or not registry:
+                            raise ValueError(f"invalid Rust dependency registry in {manifest}: {declared_name}")
+                        continue
                     version = declaration.get("version")
                     package = declaration.get("package")
                     if package is not None:

@@ -182,6 +182,27 @@ target-build = "=3.0.0"
             ],
         )
 
+    def test_alternate_registry_dependency_is_deferred_to_cargo_resolution(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n"
+            "[workspace.dependencies]\nserde = { version = \"1\", registry = \"private\" }\n",
+            encoding="utf-8",
+        )
+        (self.root / "crates/renderer/Cargo.toml").write_text(
+            "[package]\nname = \"renderer\"\nversion = \"0.1.0\"\n"
+            "[dependencies]\nserde = { workspace = true }\n",
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_manifest_dependencies(self.root)
+        self.assertEqual(dependencies, [])
+
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = AssertionError(
+            "alternate registry dependency queried crates.io"
+        )
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 0, stderr)
+
     def test_stale_non_exact_rust_manifest_dependency_rejects_release(self) -> None:
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"1.0.0\"\n",
