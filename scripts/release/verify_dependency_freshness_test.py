@@ -166,6 +166,30 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertIn("Rust manifest dependency serde: 1.0.0 -> 1.1.0", stderr)
         self.assertIn("just depends-update-all", stderr)
 
+    def test_tilde_requirement_preserves_operator_and_rejects_next_minor(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"~1.2\"\n",
+            encoding="utf-8",
+        )
+        dependency = freshness.rust_manifest_dependencies(self.root)[0]
+        self.assertEqual(dependency.requirement_operator, "~")
+        self.assertEqual(dependency.current, "1.2.0")
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.3.0"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency serde: 1.2.0 -> 1.3.0", stderr)
+
+    def test_tilde_requirement_with_patch_defers_same_minor_patch_update(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"~1.2.3\"\n",
+            encoding="utf-8",
+        )
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.2.4"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 0, stderr)
+
     def test_stale_broad_rust_manifest_dependency_with_new_major_rejects_release(self) -> None:
         responses = self.clean_responses()
         responses["https://crates.io/api/v1/crates/serde"] = {

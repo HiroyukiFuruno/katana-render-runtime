@@ -71,6 +71,7 @@ class Package:
     name: str
     current: str
     incompatible_prefix_length: int | None = None
+    requirement_operator: str | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -216,14 +217,34 @@ def rust_manifest_dependencies(root: Path) -> list[Package]:
                         package_name = package
                 if not isinstance(version, str):
                     continue
-                match = re.fullmatch(r"(?:=|\^|~)?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", version)
+                match = re.fullmatch(r"(=|\^|~)?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", version)
                 if match is None:
                     raise ValueError(f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}")
-                major = int(match.group(1))
-                minor = match.group(2)
-                patch = match.group(3)
+                operator = match.group(1)
+                major = int(match.group(2))
+                minor = match.group(3)
+                patch = match.group(4)
                 incompatible_prefix_length: int | None = None
-                if minor is None:
+                if operator == "~":
+                    # Tilde requirements are limited to the specified
+                    # minor; a requirement containing only a major advances
+                    # at the next major.
+                    incompatible_prefix_length = 1 if minor is None else 2
+                elif operator == "^":
+                    # Keep Cargo's caret compatibility for explicit caret
+                    # requirements. Bare requirements retain their existing
+                    # release freshness contract below.
+                    if major > 0:
+                        incompatible_prefix_length = 1
+                    elif minor is None:
+                        incompatible_prefix_length = 1
+                    elif int(minor) > 0:
+                        incompatible_prefix_length = 2
+                    elif patch is not None:
+                        incompatible_prefix_length = 3
+                    else:
+                        incompatible_prefix_length = 2
+                elif minor is None:
                     incompatible_prefix_length = 1
                 elif patch is None:
                     incompatible_prefix_length = 1 if major > 0 else 2
@@ -233,11 +254,11 @@ def rust_manifest_dependencies(root: Path) -> list[Package]:
                 # treats pre-1.0 `0.1` as compatible only within that minor.
                 # Compatible updates remain Cargo's lockfile responsibility.
                 declared = ".".join(
-                    (match.group(1), minor or "0", patch or "0")
+                    (match.group(2), minor or "0", patch or "0")
                 )
                 Version.parse(declared)
                 dependencies_by_version[(package_name, declared)] = Package(
-                    "Rust manifest dependency", package_name, declared, incompatible_prefix_length
+                    "Rust manifest dependency", package_name, declared, incompatible_prefix_length, operator
                 )
     return sorted(dependencies_by_version.values(), key=lambda package: (package.name, Version.parse(package.current)))
 

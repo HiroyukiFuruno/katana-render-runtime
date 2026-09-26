@@ -119,6 +119,7 @@ const __krrListenerOptions = (options) => ({
 });
 const __krrEventTargetListeners = new WeakMap();
 const __krrEventHandlers = new WeakMap();
+const __krrLifecyclePropertyOverrides = new WeakMap();
 const __krrLifecycleEventTypes = new Set(["load", "readystatechange", "DOMContentLoaded"]);
 const __krrNormalizeLifecycleEventType = (type) => {
   const normalized = String(type).toLowerCase();
@@ -151,6 +152,7 @@ const __krrStoreEventHandler = (target, type, handler) => {
 const __krrInstallInlineHandler = (target, type, source) => {
   const eventType = __krrNormalizeLifecycleEventType(type);
   if (eventType === null) return;
+  __krrLifecyclePropertyOverrides.get(target)?.delete(eventType);
   if (source === null || source === undefined || source === "") {
     __krrStoreEventHandler(target, eventType, null);
     return;
@@ -164,6 +166,12 @@ const __krrInstallInlineHandler = (target, type, source) => {
 const __krrInstallLifecycleProperty = (target, type, value) => {
   const eventType = __krrNormalizeLifecycleEventType(type);
   if (eventType === null) return;
+  let overrides = __krrLifecyclePropertyOverrides.get(target);
+  if (!overrides) {
+    overrides = new Set();
+    __krrLifecyclePropertyOverrides.set(target, overrides);
+  }
+  overrides.add(eventType);
   __krrStoreEventHandler(target, eventType, typeof value === "function" ? value : null);
 };
 const __krrDispatchListeners = (listeners, target, event, capture) => {
@@ -549,7 +557,8 @@ const __krrElementPrototype = {
 const __krrInlineHandler = (target, event) => {
   if (
     __krrLifecycleEventTypes.has(String(event.type)) &&
-    typeof target[`on${event.type}`] === "function"
+    (typeof target[`on${event.type}`] === "function" ||
+      __krrLifecyclePropertyOverrides.get(target)?.has(String(event.type)))
   ) {
     return;
   }

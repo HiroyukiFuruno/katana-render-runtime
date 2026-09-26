@@ -230,6 +230,18 @@ mod tests {
     }
 
     #[test]
+    fn null_lifecycle_property_does_not_fall_back_to_content_attribute() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<p id=status>Waiting</p><iframe id=frame data-krr-local-frame onload="document.getElementById('status').textContent = 'Unexpected'"></iframe><script>document.getElementById('frame').onload = null;</script>"#,
+        ));
+
+        assert!(
+            snapshot.contains(r#"<p id="status">Waiting</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
     fn scriptless_document_without_lifecycle_handlers_skips_the_runtime() {
         let document = HtmlDocument::parse("<p>Static</p>");
         let scripts = must_result(document.inline_scripts());
