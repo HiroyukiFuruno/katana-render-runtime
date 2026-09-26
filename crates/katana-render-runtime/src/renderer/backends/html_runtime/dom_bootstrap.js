@@ -522,9 +522,18 @@ const __krrElementPrototype = {
   },
   removeAttribute(name) {
     const attributeName = String(name);
+    const lifecycleEventType = attributeName.toLowerCase().startsWith("on")
+      ? __krrNormalizeLifecycleEventType(attributeName.slice(2))
+      : null;
+    const hadAttribute =
+      __krrNativeDom("getAttribute", this.__krrNodeId, attributeName) !== null;
     __krrNativeDom("removeAttribute", this.__krrNodeId, attributeName);
-    if (attributeName.toLowerCase().startsWith("on")) {
-      __krrInstallInlineHandler(this, attributeName.slice(2), null);
+    if (
+      hadAttribute &&
+      lifecycleEventType !== null &&
+      !__krrLifecyclePropertyOverrides.get(this)?.has(lifecycleEventType)
+    ) {
+      __krrInstallInlineHandler(this, lifecycleEventType, null);
     }
   },
   querySelector(selector) {

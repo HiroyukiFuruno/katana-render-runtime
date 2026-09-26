@@ -1640,17 +1640,18 @@ class VerifyPushIssueTest(unittest.TestCase):
                 )
 
     def test_pr_changed_paths_uses_complete_commit_trees_at_github_compare_files_limit(self) -> None:
-        base_sha, head_sha = "a" * 40, "b" * 40
+        base_sha, merge_base_sha, head_sha = "a" * 40, "b" * 40, "c" * 40
         compare = {
             "base_commit": {"sha": base_sha},
+            "merge_base_commit": {"sha": merge_base_sha},
             "files": [{"filename": f"fixtures/{entry}.txt"} for entry in range(300)],
         }
-        base_tree_sha, head_tree_sha = "c" * 40, "d" * 40
-        base_entries = [
+        merge_base_tree_sha, head_tree_sha = "d" * 40, "e" * 40
+        merge_base_entries = [
             {"path": f"fixtures/{entry}.txt", "mode": "100644", "type": "blob", "sha": "e" * 40}
             for entry in range(301)
         ]
-        head_entries = [*base_entries]
+        head_entries = [*merge_base_entries]
         head_entries[0] = {**head_entries[0], "sha": "f" * 40}
         head_entries.append(
             {
@@ -1665,12 +1666,12 @@ class VerifyPushIssueTest(unittest.TestCase):
             endpoint = arguments[0]
             if "/compare/" in endpoint:
                 return compare
-            if f"/git/commits/{base_sha}" in endpoint:
-                return {"sha": base_sha, "tree": {"sha": base_tree_sha}}
+            if f"/git/commits/{merge_base_sha}" in endpoint:
+                return {"sha": merge_base_sha, "tree": {"sha": merge_base_tree_sha}}
             if f"/git/commits/{head_sha}" in endpoint:
                 return {"sha": head_sha, "tree": {"sha": head_tree_sha}}
-            if f"/git/trees/{base_tree_sha}?recursive=1" in endpoint:
-                return {"truncated": False, "tree": base_entries}
+            if f"/git/trees/{merge_base_tree_sha}?recursive=1" in endpoint:
+                return {"truncated": False, "tree": merge_base_entries}
             if f"/git/trees/{head_tree_sha}?recursive=1" in endpoint:
                 return {"truncated": False, "tree": head_entries}
             raise AssertionError(endpoint)
@@ -1690,6 +1691,7 @@ class VerifyPushIssueTest(unittest.TestCase):
         base_tree_sha = "c" * 40
         compare = {
             "base_commit": {"sha": base_sha},
+            "merge_base_commit": {"sha": base_sha},
             "files": [{"filename": f"fixtures/{entry}.txt"} for entry in range(300)],
         }
 

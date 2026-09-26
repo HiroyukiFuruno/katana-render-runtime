@@ -616,12 +616,22 @@ def _pr_changed_paths(
                 )
             paths.append(previous_filename)
     # GitHub returns at most 300 paths for a comparison.  When the response
-    # reaches that limit, compare the immutable commit trees instead of
-    # trusting a partial file list.  The tree endpoint is also fail-closed on
-    # truncation and malformed entries.
+    # reaches that limit, compare the immutable merge-base and head commit
+    # trees instead of trusting a partial file list.  Comparing the current
+    # base tip would incorrectly classify changes made only on the default
+    # branch after the PR diverged as PR changes.  The tree endpoint is also
+    # fail-closed on truncation and malformed entries.
     if len(files) >= 300:
+        merge_base_commit = comparison.get("merge_base_commit")
+        if not isinstance(merge_base_commit, dict):
+            raise ContractViolation("GitHub compare responseにmerge-base commitがありません")
+        merge_base_sha = _require_sha(
+            merge_base_commit.get("sha"), "compare merge-base SHA"
+        )
         return _pr_changed_paths_from_trees(
-            repository=repository, base_sha=base_sha, head_sha=head_sha
+            repository=repository,
+            baseline_sha=merge_base_sha,
+            head_sha=head_sha,
         )
     return paths
 
@@ -672,10 +682,10 @@ def _git_tree_entries(
 
 
 def _pr_changed_paths_from_trees(
-    *, repository: str, base_sha: str, head_sha: str
+    *, repository: str, baseline_sha: str, head_sha: str
 ) -> list[str]:
     base_entries = _git_tree_entries(
-        repository=repository, commit_sha=base_sha, label="compare base"
+        repository=repository, commit_sha=baseline_sha, label="compare merge-base"
     )
     head_entries = _git_tree_entries(
         repository=repository, commit_sha=head_sha, label="compare head"

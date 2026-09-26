@@ -135,10 +135,13 @@ def _parse_cargo_requirement(requirement: str) -> list[tuple[str, tuple[int, ...
         if match is None:
             raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
         operator = match.group("operator") or ""
-        parts = _cargo_requirement_parts(match.group("version"))
+        raw_version = match.group("version")
+        parts = _cargo_requirement_parts(raw_version)
         assert parts is not None
         if operator and not parts:
             raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
+        if any(part in {"*", "x", "X"} for part in raw_version.split(".")):
+            operator = "*"
         terms.append((operator, parts))
     if not terms:
         raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
@@ -152,7 +155,11 @@ def cargo_requirement_matches(requirement: str, version: Version) -> bool:
             continue
         candidate = Version(tuple((*parts, *(0 for _ in range(3 - len(parts))))), True, ())
         prefix_matches = version.parts[:len(parts)] == parts
-        if operator == "=":
+        if operator == "*":
+            # A Cargo wildcard is an exact prefix range: `1.2.*` accepts
+            # 1.2.x but must reject 1.3.0.
+            allowed = prefix_matches
+        elif operator == "=":
             allowed = prefix_matches
         elif operator == "^" or operator == "":
             if version < candidate:
@@ -188,7 +195,7 @@ def cargo_requirement_anchor(requirement: str) -> str:
     """Choose a stable display anchor for a compound Cargo requirement."""
     lower_bounds = [
         parts for operator, parts in _parse_cargo_requirement(requirement)
-        if parts and operator in {"", "^", "~", "=", ">", ">="}
+        if parts and operator in {"", "*", "^", "~", "=", ">", ">="}
     ]
     parts = max(lower_bounds, default=(), key=lambda value: (*value, *(0 for _ in range(3 - len(value)))))
     return ".".join(str(part) for part in (*parts, *(0 for _ in range(3 - len(parts)))))

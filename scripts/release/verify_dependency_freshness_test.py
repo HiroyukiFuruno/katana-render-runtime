@@ -423,6 +423,24 @@ target-build = "=3.0.0"
         self.assertIn("Rust manifest dependency itoa: 1.0.0 -> 2.0.0", stderr)
         self.assertNotIn("unsupported Cargo version requirement", stderr)
 
+    def test_minor_wildcard_cargo_requirement_rejects_a_new_minor(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\n"
+            "serde = \"1.2.*\"\n",
+            encoding="utf-8",
+        )
+        dependency = freshness.rust_manifest_dependencies(self.root)[0]
+        self.assertEqual(dependency.current, "1.2.0")
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.3.0"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency serde: 1.2.0 -> 1.3.0", stderr)
+
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.2.9"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 0, stderr)
+
     def test_same_normalized_version_retains_distinct_cargo_requirement_boundaries(self) -> None:
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"~1.2\"\n",
