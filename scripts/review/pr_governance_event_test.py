@@ -3539,7 +3539,7 @@ raise SystemExit(91)
         self.assertIsNotNone(match); assert match is not None
         base_program = self._workflow_program(match).replace("time.sleep(2)", "None")
         valid = {
-            "id": 71, "name": "PR governance status writer", "display_title": "source=99 scope=early segment=0",
+            "id": 71, "name": "source=99 scope=early segment=0", "display_title": "source=99 scope=early segment=0",
             "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch",
             "repository": {"full_name": "owner/repository"}, "head_branch": "master", "head_sha": "a" * 40,
             "status": "queued", "run_number": 1, "run_attempt": 1,
@@ -3593,7 +3593,7 @@ raise SystemExit(91)
         self.assertIsNotNone(match); assert match is not None
         base_program = self._workflow_program(match).replace("time.sleep(2)", "None")
         valid = {
-            "id": 71, "name": "PR governance status writer", "display_title": "source=99 scope=early segment=0",
+            "id": 71, "name": "source=99 scope=early segment=0", "display_title": "source=99 scope=early segment=0",
             "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch",
             "repository": {"full_name": "owner/repository"}, "head_branch": "master", "head_sha": "a" * 40,
             "status": "completed", "conclusion": "success", "run_number": 1, "run_attempt": 1,
