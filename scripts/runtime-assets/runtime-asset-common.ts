@@ -73,8 +73,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "drawio",
     displayName: "Draw.io",
-    version: "31.5.2",
-    checksum: "24a2e82e367ba9a6401c01778fdd8f70c0341b8b07a1a61d96f7127956a72e1d",
+    version: "31.5.3",
+    checksum: "f2593147a978f978fc1fe4d8192f407dbf59c239e091adc84519738b95766f39",
     fileName: "drawio.min.js",
     rustVersionConst: "DRAWIO_JS_VERSION",
     rustChecksumConst: "DRAWIO_JS_CHECKSUM",
