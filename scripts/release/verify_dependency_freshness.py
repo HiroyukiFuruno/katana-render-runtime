@@ -183,7 +183,7 @@ def rust_packages(root: Path) -> list[Package]:
 
 def rust_manifest_dependencies(root: Path) -> list[Package]:
     """Return direct registry requirements updated by ``cargo upgrade``."""
-    dependencies_by_version: dict[tuple[str, str], Package] = {}
+    dependencies_by_version: dict[tuple[str, str, int | None, str | None], Package] = {}
 
     def dependency_tables(payload: dict[str, object]) -> list[object]:
         sections = ("dependencies", "dev-dependencies", "build-dependencies")
@@ -267,7 +267,7 @@ def rust_manifest_dependencies(root: Path) -> list[Package]:
                     (match.group(2), minor or "0", patch or "0")
                 )
                 Version.parse(declared)
-                dependencies_by_version[(package_name, declared)] = Package(
+                dependencies_by_version[(package_name, declared, incompatible_prefix_length, operator)] = Package(
                     "Rust manifest dependency", package_name, declared, incompatible_prefix_length, operator
                 )
     return sorted(dependencies_by_version.values(), key=lambda package: (package.name, Version.parse(package.current)))
