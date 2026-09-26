@@ -301,6 +301,19 @@ target-build = "=3.0.0"
         with patch.object(freshness, "cargo_registry_latest", return_value="2.0.0"):
             self.assertFalse(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
 
+    def test_alternate_registry_partial_exact_requirement_rejects_a_new_minor(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\n"
+            "serde = { version = \"=1.2\", registry = \"private\" }\n",
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_alternate_registry_dependencies(self.root)
+        self.assertEqual(dependencies[0].package.incompatible_prefix_length, 2)
+        with patch.object(freshness, "cargo_registry_latest", return_value="1.2.9"):
+            self.assertTrue(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
+        with patch.object(freshness, "cargo_registry_latest", return_value="1.3.0"):
+            self.assertFalse(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
+
     def test_alternate_registry_query_is_registry_aware_and_does_not_expose_error_output(self) -> None:
         dependency = freshness.AlternateRegistryDependency(
             freshness.Package("Rust manifest dependency", "private-serde", "1.0.0", 1),
