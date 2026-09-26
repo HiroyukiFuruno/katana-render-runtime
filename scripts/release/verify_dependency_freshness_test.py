@@ -166,6 +166,24 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertIn("Rust manifest dependency serde: 1.0.0 -> 1.1.0", stderr)
         self.assertIn("just depends-update-all", stderr)
 
+    def test_stale_broad_rust_manifest_dependency_with_new_major_rejects_release(self) -> None:
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {
+            "crate": {"newest_version": "2.0.0"}
+        }
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency serde: 1.0.0 -> 2.0.0", stderr)
+        self.assertIn("just depends-update-all", stderr)
+
+    def test_broad_rust_manifest_dependency_defers_compatible_updates_to_cargo_lock(self) -> None:
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {
+            "crate": {"newest_version": "1.1.0"}
+        }
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 0, stderr)
+
     def test_stale_rust_lock_rejects_release_with_repair_command(self) -> None:
         result, _, stderr = self.run_check(self.clean_responses(), rust_fresh=False)
         self.assertEqual(result, 1)

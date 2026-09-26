@@ -70,6 +70,7 @@ class Package:
     ecosystem: str
     name: str
     current: str
+    incompatible_major_only: bool = False
 
 
 def parse_args() -> argparse.Namespace:
@@ -218,13 +219,18 @@ def rust_manifest_dependencies(root: Path) -> list[Package]:
                 match = re.fullmatch(r"(?:=|\^|~)?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", version)
                 if match is None:
                     raise ValueError(f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}")
-                # cargo upgrade leaves broad requirements such as `1` and `1.0`
-                # unchanged; three-component requirements are its update target.
-                if match.group(2) is None or match.group(3) is None:
-                    continue
-                declared = ".".join((match.group(1), match.group(2), match.group(3)))
+                broad_requirement = match.group(2) is None or match.group(3) is None
+                # ``depends-update-all`` permits incompatible upgrades, so
+                # broad requirements such as `1` must observe a new major
+                # that Cargo's compatible lockfile resolver cannot see.
+                # Compatible updates remain Cargo's lockfile responsibility.
+                declared = ".".join(
+                    (match.group(1), match.group(2) or "0", match.group(3) or "0")
+                )
                 Version.parse(declared)
-                dependencies_by_version[(package_name, declared)] = Package("Rust manifest dependency", package_name, declared)
+                dependencies_by_version[(package_name, declared)] = Package(
+                    "Rust manifest dependency", package_name, declared, broad_requirement
+                )
     return sorted(dependencies_by_version.values(), key=lambda package: (package.name, Version.parse(package.current)))
 
 
@@ -399,6 +405,14 @@ def display_name(package: Package) -> str:
     return package.name.split("|", maxsplit=1)[0]
 
 
+def is_stale(package: Package, resolved_version: str) -> bool:
+    current = Version.parse(package.current)
+    resolved = Version.parse(resolved_version)
+    if package.incompatible_major_only:
+        return resolved.parts[0] > current.parts[0]
+    return resolved > current
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args() if argv is None else argparse.Namespace(root=Path(argv[0]))
     try:
@@ -422,7 +436,7 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, TimeoutError, subprocess.TimeoutExpired, json.JSONDecodeError, UnicodeDecodeError) as exc:
         print(f"Dependency freshness check failed closed: {exc}", file=sys.stderr)
         return 1
-    stale = [f"{package.ecosystem} {display_name(package)}: {package.current} -> {resolved_version}" for package, resolved_version in resolved if Version.parse(resolved_version) > Version.parse(package.current)]
+    stale = [f"{package.ecosystem} {display_name(package)}: {package.current} -> {resolved_version}" for package, resolved_version in resolved if is_stale(package, resolved_version)]
     if stale:
         print("Dependency freshness check rejected this release:", file=sys.stderr)
         print("\n".join(stale), file=sys.stderr)
