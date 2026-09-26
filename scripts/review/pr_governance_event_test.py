@@ -187,7 +187,8 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
         assert callable(matches)
         writer = {
             "id": 91,
-            "name": "PR governance status writer",
+            "name": "source=17 scope=early segment=0",
+            "display_title": "source=17 scope=early segment=0",
             "event": "workflow_dispatch",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "repository": {"id": 101, "name": "repository", "url": self.repository_identity[2]},
@@ -200,6 +201,9 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
             {**writer, "repository": {**writer["repository"], "id": 202}},
             {**writer, "repository": {**writer["repository"], "name": "other"}},
             {**writer, "repository": {**writer["repository"], "url": "https://api.github.com/repos/other/repository"}},
+            {**writer, "name": "PR governance status writer"},
+            {**writer, "name": "source=18 scope=early segment=0"},
+            {**writer, "display_title": "source=17 scope=early segment=1"},
         ):
             with self.subTest(repository=changed["repository"]):
                 self.assertFalse(matches(changed, "91", self.repository_identity))
@@ -226,7 +230,7 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
         }
         writer = {
             "id": 92,
-            "name": "PR governance status writer",
+            "name": "source=91 scope=all segment=1",
             "display_title": "source=91 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch",
@@ -2164,7 +2168,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                     return response({"total_count": len(writer_runs), "workflow_runs": writer_runs})
                 if "--method" in arguments and "POST" in arguments and any(isinstance(item, str) and "/dispatches" in item for item in arguments):
                     writer_dispatches.append(arguments)
-                    writer_runs.append({"id": 901, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1", "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch", "repository": {"full_name": "owner/repository"}, "head_branch": "master", "head_sha": "a" * 40, "status": "queued", "run_number": 1, "run_attempt": 1})
+                    writer_runs.append({"id": 901, "name": "source=9 scope=all segment=1", "display_title": "source=9 scope=all segment=1", "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch", "repository": {"full_name": "owner/repository"}, "head_branch": "master", "head_sha": "a" * 40, "status": "queued", "run_number": 1, "run_attempt": 1})
                     return response({})
                 raise AssertionError(arguments)
             environment = os.environ | {"GITHUB_REPOSITORY": "owner/repository", "GITHUB_SERVER_URL": "https://github.com", "GITHUB_RUN_ID": "9", "GH_TOKEN": "read", "CHECK_WRITE_TOKEN": "write", "CHECK_APP_ID": "42", "DUPLICATE_GOVERNED_HEADS": selected["duplicate_governed_heads"], "AFFECTED": selected["all_invalidation_targets"], "KNOWN_TARGET_SNAPSHOTS": selected["all_invalidation_target_snapshots"], "EVENT_TARGETS": selected["event_targets"], "GITHUB_OUTPUT": str(output), "PATH": os.environ["PATH"]}
@@ -3325,18 +3329,18 @@ if "/actions/runs/" in joined:
     if identifier == 9:
         emit(source)
     if identifier == 71:
-        emit({"id": 71, "name": "PR governance status writer", "display_title": "source=9 scope=early segment=0", "path": ".github/workflows/pr-governance-status-writer.yml@" + branch, "event": "workflow_dispatch", "repository": {"full_name": repository}, "head_branch": branch, "head_sha": head, "status": "completed", "conclusion": "success", "run_number": 1, "run_attempt": 1, "actor": {"login": bot, "type": "Bot"}, "triggering_actor": {"login": bot, "type": "Bot"}})
+        emit({"id": 71, "name": "source=9 scope=early segment=0", "display_title": "source=9 scope=early segment=0", "path": ".github/workflows/pr-governance-status-writer.yml@" + branch, "event": "workflow_dispatch", "repository": {"full_name": repository}, "head_branch": branch, "head_sha": head, "status": "completed", "conclusion": "success", "run_number": 1, "run_attempt": 1, "actor": {"login": bot, "type": "Bot"}, "triggering_actor": {"login": bot, "type": "Bot"}})
     index = identifier - 90_000
-    emit({"id": identifier, "name": "PR governance status writer", "display_title": f"source=9 scope=all segment={index}", "path": ".github/workflows/pr-governance-status-writer.yml@" + branch, "event": "workflow_dispatch", "repository": {"full_name": repository}, "head_branch": branch, "head_sha": head, "status": "completed", "conclusion": "success", "run_number": index, "run_attempt": 1, "actor": {"login": bot, "type": "Bot"}, "triggering_actor": {"login": bot, "type": "Bot"}})
+    emit({"id": identifier, "name": f"source=9 scope=all segment={index}", "display_title": f"source=9 scope=all segment={index}", "path": ".github/workflows/pr-governance-status-writer.yml@" + branch, "event": "workflow_dispatch", "repository": {"full_name": repository}, "head_branch": branch, "head_sha": head, "status": "completed", "conclusion": "success", "run_number": index, "run_attempt": 1, "actor": {"login": bot, "type": "Bot"}, "triggering_actor": {"login": bot, "type": "Bot"}})
 if "/actions/workflows/pr-governance.yml/runs?" in joined:
     emit([{"workflow_runs": [source]}])
 if "/actions/workflows/pr-governance-status-writer.yml/runs?" in joined:
     value = load_state()
     completed = json.loads(os.environ.get("COMPLETED_WRITER_RUN_IDS", fixture["completed"]))
-    runs = [{"id": identifier, "name": "PR governance status writer", "display_title": f"source=9 scope=all segment={identifier - 90_000}", "path": ".github/workflows/pr-governance-status-writer.yml@" + branch, "event": "workflow_dispatch", "repository": {"full_name": repository}, "head_branch": branch, "head_sha": head, "status": "completed", "conclusion": "success", "run_number": identifier - 90_000, "run_attempt": 1, "actor": {"login": bot, "type": "Bot"}, "triggering_actor": {"login": bot, "type": "Bot"}} for identifier in completed]
+    runs = [{"id": identifier, "name": f"source=9 scope=all segment={identifier - 90_000}", "display_title": f"source=9 scope=all segment={identifier - 90_000}", "path": ".github/workflows/pr-governance-status-writer.yml@" + branch, "event": "workflow_dispatch", "repository": {"full_name": repository}, "head_branch": branch, "head_sha": head, "status": "completed", "conclusion": "success", "run_number": identifier - 90_000, "run_attempt": 1, "actor": {"login": bot, "type": "Bot"}, "triggering_actor": {"login": bot, "type": "Bot"}} for identifier in completed]
     if value["dispatched"]:
         index = int(os.environ.get("CONTINUATION_INDEX", fixture["continuation_index"]))
-        runs.append({"id": 90_000 + index, "name": "PR governance status writer", "display_title": f"source=9 scope=all segment={index}", "path": ".github/workflows/pr-governance-status-writer.yml@" + branch, "event": "workflow_dispatch", "repository": {"full_name": repository}, "head_branch": branch, "head_sha": head, "status": "queued", "run_number": index, "run_attempt": 1})
+        runs.append({"id": 90_000 + index, "name": f"source=9 scope=all segment={index}", "display_title": f"source=9 scope=all segment={index}", "path": ".github/workflows/pr-governance-status-writer.yml@" + branch, "event": "workflow_dispatch", "repository": {"full_name": repository}, "head_branch": branch, "head_sha": head, "status": "queued", "run_number": index, "run_attempt": 1})
     emit({"total_count": len(runs), "workflow_runs": runs})
 if "/dispatches" in joined and "--method POST" in joined:
     record("dispatch")
@@ -3535,7 +3539,7 @@ raise SystemExit(91)
         self.assertIsNotNone(match); assert match is not None
         base_program = self._workflow_program(match).replace("time.sleep(2)", "None")
         valid = {
-            "id": 71, "name": "PR governance status writer", "display_title": "source=99 scope=early segment=0",
+            "id": 71, "name": "source=99 scope=early segment=0", "display_title": "source=99 scope=early segment=0",
             "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch",
             "repository": {"full_name": "owner/repository"}, "head_branch": "master", "head_sha": "a" * 40,
             "status": "queued", "run_number": 1, "run_attempt": 1,
@@ -3589,7 +3593,7 @@ raise SystemExit(91)
         self.assertIsNotNone(match); assert match is not None
         base_program = self._workflow_program(match).replace("time.sleep(2)", "None")
         valid = {
-            "id": 71, "name": "PR governance status writer", "display_title": "source=99 scope=early segment=0",
+            "id": 71, "name": "source=99 scope=early segment=0", "display_title": "source=99 scope=early segment=0",
             "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch",
             "repository": {"full_name": "owner/repository"}, "head_branch": "master", "head_sha": "a" * 40,
             "status": "completed", "conclusion": "success", "run_number": 1, "run_attempt": 1,
@@ -5145,7 +5149,8 @@ raise SystemExit(91)
         program = self._workflow_program(match).replace("time.sleep(2)", "None")
         head = "a" * 40
         valid = {
-            "id": 7, "name": "PR governance status writer",
+            "id": 7, "name": "source=9 scope=all segment=1",
+            "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": head,
             "workflow_id": 44, "repository": {"full_name": "owner/repository"},
@@ -5193,7 +5198,8 @@ raise SystemExit(91)
         program = self._workflow_program(match)
         head = "a" * 40
         template: dict[str, object] = {
-            "name": "PR governance status writer",
+            "name": "source=9 scope=all segment=1",
+            "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "workflow_id": 44,
             "repository": {"full_name": "owner/repository"},
@@ -5270,7 +5276,8 @@ raise SystemExit(91)
         program = self._workflow_program(match)
         head = "a" * 40
         template: dict[str, object] = {
-            "id": 7, "name": "PR governance status writer",
+            "id": 7, "name": "source=9 scope=all segment=1",
+            "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": head, "workflow_id": 44,
             "repository": {"full_name": "owner/repository"},
@@ -5340,7 +5347,7 @@ raise SystemExit(91)
         self.assertIsNotNone(match); assert match is not None
         base_program = self._workflow_program(match).replace('subprocess.run(["sleep", "2"], check=False)', "None")
         valid = {
-            "id": 71, "name": "PR governance status writer", "display_title": "source=99 scope=all segment=1",
+            "id": 71, "name": "source=99 scope=all segment=1", "display_title": "source=99 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch",
             "repository": {"full_name": "owner/repository"}, "head_branch": "master", "head_sha": "a" * 40,
             "status": "queued", "run_number": 1, "run_attempt": 1,
@@ -6407,7 +6414,7 @@ raise SystemExit(91)
                     completed = json.loads(fields["inputs[completed_writer_run_ids]"])
                     self.assertEqual(order, all_targets[100:])
                     self.assertEqual(completed, [70_000 + prior for prior in range(1, len(dispatches))])
-                    candidate = {"id": 70_000 + len(dispatches), "name": "PR governance status writer", "display_title": f"source=9 scope=all segment={index}", "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch", "repository": rest_repository, "head_branch": "master", "head_sha": "a" * 40, "status": "completed", "conclusion": "success", "run_number": len(dispatches), "run_attempt": 1, "actor": {"login": "katana-rust-pr-governance-hf[bot]", "type": "Bot"}, "triggering_actor": {"login": "katana-rust-pr-governance-hf[bot]", "type": "Bot"}}
+                    candidate = {"id": 70_000 + len(dispatches), "name": f"source=9 scope=all segment={index}", "display_title": f"source=9 scope=all segment={index}", "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch", "repository": rest_repository, "head_branch": "master", "head_sha": "a" * 40, "status": "completed", "conclusion": "success", "run_number": len(dispatches), "run_attempt": 1, "actor": {"login": "katana-rust-pr-governance-hf[bot]", "type": "Bot"}, "triggering_actor": {"login": "katana-rust-pr-governance-hf[bot]", "type": "Bot"}}
                     candidates.append(candidate)
                     return response({})
                 raise AssertionError(arguments)
@@ -6511,7 +6518,7 @@ raise SystemExit(91)
             if "--method" in arguments and "POST" in arguments and any(isinstance(item, str) and "/dispatches" in item for item in arguments):
                 carried_dispatches.append(arguments)
                 registered.append({
-                    "id": 77, "name": "PR governance status writer",
+                    "id": 77, "name": "source=9 scope=all segment=1",
                     "display_title": "source=9 scope=all segment=1",
                     "path": ".github/workflows/pr-governance-status-writer.yml@master",
                     "event": "workflow_dispatch", "repository": rest_repository,
