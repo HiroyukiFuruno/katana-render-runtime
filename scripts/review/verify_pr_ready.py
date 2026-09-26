@@ -39,7 +39,7 @@ _SELF_CHECK_NAMES = frozenset(
 )
 _CODEX_REVIEW_TRIGGER = re.compile(r"(?m)^\s*@codex\s+review\s*$")
 _CODEX_NO_ISSUES_COMMENT = re.compile(
-    r"\ACodex Review: Didn't find any major issues(?:\.\.\.|\. [^.!?\r\n]+[.!?])\r?\n\r?\n"
+    r"\ACodex Review: Didn't find any major issues(?:\.\.\.|\. :rocket:|\. [^.!?\r\n]+[.!?])\r?\n\r?\n"
     r"\*\*Reviewed commit:\*\* `(?P<commit>[0-9a-f]{10,40})`"
     r"(?:\Z|\r?\n\Z|\r?\n\r?\n"
     r"<details>(?: <summary>|\r?\n<summary>)ℹ️ About Codex in GitHub</summary>\r?\n"
