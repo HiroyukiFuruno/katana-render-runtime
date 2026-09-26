@@ -74,6 +74,12 @@ class Package:
     requirement_operator: str | None = None
 
 
+@dataclass(frozen=True)
+class AlternateRegistryDependency:
+    package: Package
+    registry: str
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd())
@@ -282,6 +288,99 @@ def rust_manifest_dependencies(root: Path) -> list[Package]:
     return sorted(dependencies_by_version.values(), key=lambda package: (package.name, Version.parse(package.current)))
 
 
+def rust_alternate_registry_dependencies(root: Path) -> list[AlternateRegistryDependency]:
+    """Return direct requirements resolved through named Cargo registries."""
+    dependencies: dict[tuple[str, str, str, int | None, str | None], AlternateRegistryDependency] = {}
+    for manifest in sorted(root.glob("**/Cargo.toml")):
+        if any(part in {"target", "vendor", ".git", ".worktrees"} for part in manifest.relative_to(root).parts):
+            continue
+        try:
+            payload = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"Rust manifest must be a table: {manifest}")
+        sections = ("dependencies", "dev-dependencies", "build-dependencies")
+        tables: list[object] = [payload.get(section) for section in sections]
+        target = payload.get("target")
+        if isinstance(target, dict):
+            for target_config in target.values():
+                if isinstance(target_config, dict):
+                    tables.extend(target_config.get(section) for section in sections)
+        workspace = payload.get("workspace")
+        if isinstance(workspace, dict):
+            tables.append(workspace.get("dependencies"))
+        for declarations in tables:
+            if not isinstance(declarations, dict):
+                continue
+            for declared_name, declaration in declarations.items():
+                if not isinstance(declared_name, str) or not isinstance(declaration, dict):
+                    continue
+                registry = declaration.get("registry")
+                if registry is None:
+                    continue
+                if not isinstance(registry, str) or not registry:
+                    raise ValueError(f"invalid Rust dependency registry in {manifest}: {declared_name}")
+                version = declaration.get("version")
+                if not isinstance(version, str):
+                    continue
+                package_name = declaration.get("package", declared_name)
+                if not isinstance(package_name, str):
+                    raise ValueError(f"invalid Rust dependency package name in {manifest}: {declared_name}")
+                match = re.fullmatch(r"(=|\^|~)?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", version)
+                if match is None:
+                    raise ValueError(f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}")
+                operator, major_text, minor, patch = match.groups()
+                major = int(major_text)
+                if operator == "~":
+                    prefix_length = 1 if minor is None else 2
+                elif operator == "^":
+                    prefix_length = 1 if major > 0 or minor is None else (2 if int(minor) > 0 or patch is None else 3)
+                elif minor is None:
+                    prefix_length = 1
+                elif patch is None:
+                    prefix_length = 1 if major > 0 else 2
+                else:
+                    prefix_length = None
+                current = ".".join((major_text, minor or "0", patch or "0"))
+                Version.parse(current)
+                package = Package("Rust manifest dependency", package_name, current, prefix_length, operator)
+                key = (registry, package.name, package.current, package.incompatible_prefix_length, package.requirement_operator)
+                dependencies[key] = AlternateRegistryDependency(package, registry)
+    return sorted(dependencies.values(), key=lambda dependency: (dependency.registry, dependency.package.name, Version.parse(dependency.package.current)))
+
+
+def cargo_registry_latest(root: Path, dependency: AlternateRegistryDependency) -> str:
+    """Query a named Cargo registry without exposing its response or credentials."""
+    completed = subprocess.run(
+        [
+            "cargo", "search", "--registry", dependency.registry,
+            "--limit", "1", "--color", "never", dependency.package.name,
+        ],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if completed.returncode != 0:
+        raise ValueError(f"Cargo registry query failed for {dependency.registry}:{dependency.package.name}")
+    pattern = rf"(?m)^{re.escape(dependency.package.name)}\s*=\s*\"([^\"]+)\"(?:\s|$)"
+    match = re.search(pattern, completed.stdout)
+    if match is None:
+        raise ValueError(f"Cargo registry query returned no exact package for {dependency.registry}:{dependency.package.name}")
+    try:
+        Version.parse(match.group(1))
+    except ValueError as exc:
+        raise ValueError(f"Cargo registry query returned an invalid version for {dependency.registry}:{dependency.package.name}") from exc
+    return match.group(1)
+
+
+def rust_alternate_registries_are_fresh(root: Path, dependencies: list[AlternateRegistryDependency]) -> bool:
+    """Apply ``cargo upgrade --incompatible allow`` semantics per named registry."""
+    return all(not is_stale(dependency.package, cargo_registry_latest(root, dependency)) for dependency in dependencies)
+
+
 def rust_lock_is_latest_compatible(root: Path) -> bool:
     """Use Cargo's resolver to validate direct and transitive lock freshness.
 
@@ -469,6 +568,11 @@ def main(argv: list[str] | None = None) -> int:
         if not rust_lock_is_latest_compatible(args.root):
             print("Dependency freshness check rejected this release:", file=sys.stderr)
             print("Rust Cargo.lock is not at the latest compatible resolution.", file=sys.stderr)
+            print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
+            return 1
+        if not rust_alternate_registries_are_fresh(args.root, rust_alternate_registry_dependencies(args.root)):
+            print("Dependency freshness check rejected this release:", file=sys.stderr)
+            print("A Cargo alternate-registry dependency has an incompatible update available.", file=sys.stderr)
             print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
             return 1
         rust_manifest = rust_manifest_dependencies(args.root)

@@ -200,8 +200,53 @@ target-build = "=3.0.0"
         responses["https://crates.io/api/v1/crates/serde"] = AssertionError(
             "alternate registry dependency queried crates.io"
         )
-        result, _, stderr = self.run_check(responses)
+        with patch.object(freshness, "cargo_registry_latest", return_value="1.0.0"):
+            result, _, stderr = self.run_check(responses)
         self.assertEqual(result, 0, stderr)
+
+    def test_alternate_registry_dependency_is_collected_for_breaking_update_check(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n"
+            "[workspace.dependencies]\nrenamed = { package = \"private-serde\", version = \"1\", registry = \"private\" }\n",
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_alternate_registry_dependencies(self.root)
+        self.assertEqual(len(dependencies), 1)
+        self.assertEqual(dependencies[0].registry, "private")
+        self.assertEqual(dependencies[0].package.name, "private-serde")
+        self.assertEqual(dependencies[0].package.current, "1.0.0")
+        self.assertEqual(dependencies[0].package.incompatible_prefix_length, 1)
+
+    def test_alternate_registry_breaking_update_rejects_release(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n"
+            "[workspace.dependencies]\nserde = { version = \"1\", registry = \"private\" }\n",
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_alternate_registry_dependencies(self.root)
+        with patch.object(freshness, "cargo_registry_latest", return_value="2.0.0"):
+            self.assertFalse(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
+        with patch.object(freshness, "cargo_registry_latest", return_value="1.9.0"):
+            self.assertTrue(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
+
+    def test_alternate_registry_query_is_registry_aware_and_does_not_expose_error_output(self) -> None:
+        dependency = freshness.AlternateRegistryDependency(
+            freshness.Package("Rust manifest dependency", "private-serde", "1.0.0", 1),
+            "private",
+        )
+        completed = SimpleNamespace(returncode=0, stdout='private-serde = "2.0.0" # private\n', stderr="token=secret")
+        with patch.object(freshness.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(freshness.cargo_registry_latest(self.root, dependency), "2.0.0")
+        command = run.call_args.args[0]
+        self.assertIn("--registry", command)
+        self.assertIn("private", command)
+        self.assertNotIn("secret", command)
+
+        failed = SimpleNamespace(returncode=1, stdout="", stderr="token=secret")
+        with patch.object(freshness.subprocess, "run", return_value=failed):
+            with self.assertRaisesRegex(ValueError, "Cargo registry query failed") as raised:
+                freshness.cargo_registry_latest(self.root, dependency)
+        self.assertNotIn("secret", str(raised.exception))
 
     def test_stale_non_exact_rust_manifest_dependency_rejects_release(self) -> None:
         (self.root / "Cargo.toml").write_text(
