@@ -20,7 +20,9 @@ VERIFY_RELEASE_TARGET = util.module_from_spec(MODULE_SPEC)
 sys.modules[MODULE_SPEC.name] = VERIFY_RELEASE_TARGET
 MODULE_SPEC.loader.exec_module(VERIFY_RELEASE_TARGET)
 REQUIRED_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_COMMITS
-FINAL_RELEASE_TREE = "48f6d619dbc1899adeadec033e15dbc16f9b2ef5"
+REQUIRED_RELEASE_MANIFEST_SHA256 = (
+    "c87b74178f5bbbf415cf449ac935b4f982a6f25c094f3642de6243d5b17468df"
+)
 
 
 def isolated_git_environment() -> dict[str, str]:
@@ -115,10 +117,15 @@ class VerifyReleaseTargetTests(unittest.TestCase):
     def test_accepts_actual_head_equivalent_squash_but_rejects_changed_required_path(
         self,
     ) -> None:
-        self.assertEqual(VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_TERMINAL, FINAL_RELEASE_TREE)
+        self.assertEqual(
+            VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_MANIFEST_SHA256,
+            REQUIRED_RELEASE_MANIFEST_SHA256,
+        )
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_root = Path(temporary_directory)
             repository = temporary_root / "candidate"
+            fresh_origin = temporary_root / "fresh-origin.git"
+            fresh_repository = temporary_root / "fresh-candidate"
             isolation_parent = temporary_root / "pre-push-parent.git"
             inherited_work_tree = temporary_root / "inherited-work-tree"
 
@@ -177,33 +184,75 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 git("config", "user.email", "release-test@example.invalid")
                 git("config", "user.name", "Release Target Test")
                 git("fetch", "-q", str(source_repository), "HEAD:refs/heads/release")
-                # 終端 commit は不変の release fixture であり、呼出元 branch
-                # から到達可能とは限らない。明示的に取得して、隔離 repository
-                # の作成時に checkout されていた branch へ依存させない。
-                git(
-                    "fetch",
-                    "-q",
-                    str(source_repository),
-                    f"{FINAL_RELEASE_TREE}:refs/heads/final-release-fixture",
-                )
-                git("branch", "-f", "final-release", FINAL_RELEASE_TREE)
                 git("branch", "-f", "base", VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE)
                 squash = git(
                     "commit-tree",
-                    # Model the documented squash exception with the actual
-                    # final non-gate v0.4.21 release tree, rather than the
-                    # terminal constant under test.
-                    "final-release^{tree}",
+                    # Model the documented squash exception from the reviewed
+                    # release head. The release comparison itself must not
+                    # retain that source commit after the squash.
+                    "release^{tree}",
                     "-p",
                     "base",
-                    "-m",
-                    "actual release tree as a squash",
+                    "-m", "actual release tree as a squash",
+                )
+                git("branch", "-f", "candidate", squash)
+                source_head = self.source_git("rev-parse", "HEAD")
+                subprocess.run(
+                    ["git", "init", "--bare", "-q", str(fresh_origin)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=isolated_git_environment(),
+                )
+                git("push", "-q", str(fresh_origin), "candidate:refs/heads/candidate")
+                subprocess.run(
+                    [
+                        "git",
+                        "clone",
+                        "-q",
+                        "--no-local",
+                        "--branch",
+                        "candidate",
+                        str(fresh_origin),
+                        str(fresh_repository),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=isolated_git_environment(),
                 )
 
-                accepted = self.run_check("v0.4.21", "v0.4.20", squash, repository)
+                def fresh_git(*args: str) -> subprocess.CompletedProcess[str]:
+                    return subprocess.run(
+                        ["git", *args],
+                        cwd=fresh_repository,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env=isolated_git_environment(),
+                    )
+
+                self.assertNotEqual(
+                    fresh_git("cat-file", "-e", f"{source_head}^{{commit}}").returncode,
+                    0,
+                )
+
+                accepted = self.run_check("v0.4.21", "v0.4.20", "HEAD", fresh_repository)
                 self.assertEqual(accepted.returncode, 0, accepted.stderr)
 
-                git("switch", "-q", "-c", "changed-required-path", squash)
+                def git_in_fresh(*args: str) -> str:
+                    return subprocess.run(
+                        ["git", *args],
+                        cwd=fresh_repository,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env=isolated_git_environment(),
+                    ).stdout.strip()
+
+                git_in_fresh("config", "user.email", "release-test@example.invalid")
+                git_in_fresh("config", "user.name", "Release Target Test")
+                git_in_fresh("switch", "-q", "-c", "changed-required-path")
                 changed_path = "crates/katana-render-runtime/src/markdown/svg_rasterize_text_fallback.rs"
                 self.assertIn(
                     changed_path,
@@ -213,20 +262,20 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                             "diff",
                             "--name-only",
                             VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE,
-                            VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_TERMINAL,
+                            "HEAD",
                         ],
-                        cwd=repository,
+                        cwd=fresh_repository,
                         check=True,
                         capture_output=True,
                         text=True,
                         env=isolated_git_environment(),
                     ).stdout.splitlines(),
                 )
-                with (repository / changed_path).open("a", encoding="utf-8") as manifest:
+                with (fresh_repository / changed_path).open("a", encoding="utf-8") as manifest:
                     manifest.write("\n# 必須release pathの変更\n")
-                git("add", changed_path)
-                git("commit", "-q", "-m", "change required release path")
-                rejected = self.run_check("v0.4.21", "v0.4.20", "HEAD", repository)
+                git_in_fresh("add", changed_path)
+                git_in_fresh("commit", "-q", "-m", "change required release path")
+                rejected = self.run_check("v0.4.21", "v0.4.20", "HEAD", fresh_repository)
                 self.assertNotEqual(rejected.returncode, 0)
 
             self.assertEqual(

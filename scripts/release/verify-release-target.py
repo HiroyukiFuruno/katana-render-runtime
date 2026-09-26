@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -20,12 +21,13 @@ REQUIRED_RELEASE_COMMITS = (
     "574b9405a6087ecb94d321cb610b65500c270b29",  # #64 governance
     "459eef383cf953f4c97ae5b063f4b72931e4a5ee",  # #78/#80 fixes
 )
-# squash merge は commit の祖先関係を意図的に書き換える。この不変refは、
-# 再構成した squash と比較する v0.4.21 の最終 non-gate release 状態である。
-# 最終treeとの比較により、release準備で確定した修正と依存更新を保持する。
+# squash merge 後も default history に残る v0.4.20 の merge commit を、
+# 変更集合の起点として使う。期待値そのものは commit/tree object ではなく、
+# base からの non-gate 差分を表す不変な内容 manifest に固定する。
 REQUIRED_RELEASE_BASE = "fc340a40598e1d14fec9182064da3e7f78a2a5a8"
-# force-push 後も release branch から到達できる immutable terminal。
-REQUIRED_RELEASE_TERMINAL = "48f6d619dbc1899adeadec033e15dbc16f9b2ef5"
+# Gate 修正はこの digest から除外するため、squash 後の gate repair によって
+# 自己参照しない。raw diff は path、file mode、base/target blob を含む。
+REQUIRED_RELEASE_MANIFEST_SHA256 = "c87b74178f5bbbf415cf449ac935b4f982a6f25c094f3642de6243d5b17468df"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
@@ -133,45 +135,47 @@ def missing_required_commits(
 def release_tree_matches(
     head_ref: str,
     release_base: str = REQUIRED_RELEASE_BASE,
-    release_tree: str = REQUIRED_RELEASE_TERMINAL,
+    required_manifest_sha256: str = REQUIRED_RELEASE_MANIFEST_SHA256,
 ) -> bool:
-    """Return whether a squash candidate preserves the required release tree.
+    """Return whether a squash candidate preserves the required release content.
 
-    Gate implementation changes are excluded so a later gate repair is not
-    self-referential. Every other path changed from base to terminal must be
-    byte-identical in a candidate whose required commits were squash-rewritten.
+    The expected value is a content manifest, not an unreachable release-branch
+    commit. Gate implementation changes are excluded so a later gate repair is
+    not self-referential.
     """
     changed_paths = subprocess.run(
         [
             "git",
             "diff",
-            "--name-only",
+            "--raw",
             "-z",
             "--no-renames",
             release_base,
-            release_tree,
+            head_ref,
         ],
         check=False,
-        text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
     if changed_paths.returncode != 0:
         return False
-    paths = tuple(
-        path
-        for path in changed_paths.stdout.split("\0")
-        if path and path not in RELEASE_GATE_PATHS
-    )
-    if not paths:
+    records = changed_paths.stdout.split(b"\0")
+    if records[-1] or len(records) % 2 != 1:
         return False
-    result = subprocess.run(
-        ["git", "diff", "--quiet", "--no-ext-diff", release_tree, head_ref, "--", *paths],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return result.returncode == 0
+    gate_paths = {path.encode("utf-8") for path in RELEASE_GATE_PATHS}
+    manifest = hashlib.sha256()
+    entry_count = 0
+    for raw_record, path in zip(records[:-1:2], records[1:-1:2], strict=True):
+        if not raw_record.startswith(b":") or not path:
+            return False
+        if path in gate_paths:
+            continue
+        manifest.update(raw_record)
+        manifest.update(b"\0")
+        manifest.update(path)
+        manifest.update(b"\0")
+        entry_count += 1
+    return entry_count > 0 and manifest.hexdigest() == required_manifest_sha256
 
 
 def main() -> int:
