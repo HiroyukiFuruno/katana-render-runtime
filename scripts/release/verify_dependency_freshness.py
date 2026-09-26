@@ -184,6 +184,21 @@ def rust_packages(root: Path) -> list[Package]:
 def rust_manifest_dependencies(root: Path) -> list[Package]:
     """Return direct registry requirements updated by ``cargo upgrade``."""
     dependencies_by_version: dict[tuple[str, str], Package] = {}
+
+    def dependency_tables(payload: dict[str, object]) -> list[object]:
+        sections = ("dependencies", "dev-dependencies", "build-dependencies")
+        tables = [payload.get(section) for section in sections]
+        target = payload.get("target")
+        if isinstance(target, dict):
+            for target_config in target.values():
+                if not isinstance(target_config, dict):
+                    continue
+                tables.extend(target_config.get(section) for section in sections)
+        workspace = payload.get("workspace")
+        if isinstance(workspace, dict):
+            tables.append(workspace.get("dependencies"))
+        return tables
+
     for manifest in sorted(root.glob("**/Cargo.toml")):
         if any(part in {"target", "vendor", ".git", ".worktrees"} for part in manifest.relative_to(root).parts):
             continue
@@ -193,12 +208,7 @@ def rust_manifest_dependencies(root: Path) -> list[Package]:
             raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
         if not isinstance(payload, dict):
             raise ValueError(f"Rust manifest must be a table: {manifest}")
-        sections = ("dependencies", "dev-dependencies", "build-dependencies")
-        tables = [payload.get(section) for section in sections]
-        workspace = payload.get("workspace")
-        if isinstance(workspace, dict):
-            tables.append(workspace.get("dependencies"))
-        for dependencies in tables:
+        for dependencies in dependency_tables(payload):
             if not isinstance(dependencies, dict):
                 continue
             for declared_name, declaration in dependencies.items():

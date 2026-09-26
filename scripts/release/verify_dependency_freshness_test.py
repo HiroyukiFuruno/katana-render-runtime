@@ -154,6 +154,34 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertIn("Rust manifest dependency serde: 1.0.0 -> 1.1.0", stderr)
         self.assertIn("just depends-update-all", stderr)
 
+    def test_target_specific_rust_manifest_dependencies_are_collected(self) -> None:
+        (self.root / "crates/renderer/Cargo.toml").write_text(
+            """[package]
+name = "renderer"
+version = "0.1.0"
+
+[target.'cfg(unix)'.dependencies]
+target-runtime = "=1.0.0"
+
+[target.'cfg(unix)'.dev-dependencies]
+target-test = "=2.0.0"
+
+[target.'cfg(unix)'.build-dependencies]
+target-build = "=3.0.0"
+""",
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_manifest_dependencies(self.root)
+        self.assertEqual(
+            [(dependency.name, dependency.current) for dependency in dependencies],
+            [
+                ("serde", "1.0.0"),
+                ("target-build", "3.0.0"),
+                ("target-runtime", "1.0.0"),
+                ("target-test", "2.0.0"),
+            ],
+        )
+
     def test_stale_non_exact_rust_manifest_dependency_rejects_release(self) -> None:
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"1.0.0\"\n",
