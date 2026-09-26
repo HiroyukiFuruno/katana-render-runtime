@@ -21,7 +21,7 @@ sys.modules[MODULE_SPEC.name] = VERIFY_RELEASE_TARGET
 MODULE_SPEC.loader.exec_module(VERIFY_RELEASE_TARGET)
 REQUIRED_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_COMMITS
 REQUIRED_RELEASE_MANIFEST_SHA256 = (
-    "3b69bf1ae020b7fbab7064173a9891634dd51d043f825f3591c87ba7ff6bd9e1"
+    "2fe2aaa544b17bfd74278b531f456f14ddd4ece2c9030cb4174d58947d375233"
 )
 
 
@@ -252,6 +252,9 @@ class VerifyReleaseTargetTests(unittest.TestCase):
 
                 git_in_fresh("config", "user.email", "release-test@example.invalid")
                 git_in_fresh("config", "user.name", "Release Target Test")
+                git_in_fresh("config", "core.abbrev", "12")
+                abbreviated = self.run_check("v0.4.21", "v0.4.20", "HEAD", fresh_repository)
+                self.assertEqual(abbreviated.returncode, 0, abbreviated.stderr)
                 git_in_fresh("switch", "-q", "-c", "changed-required-path")
                 changed_path = "crates/katana-render-runtime/src/markdown/svg_rasterize_text_fallback.rs"
                 self.assertIn(

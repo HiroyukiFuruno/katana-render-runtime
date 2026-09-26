@@ -130,21 +130,31 @@ const __krrSyncEventTarget = (target, type, entries) => {
     String(entries.length > 0 || typeof handler === "function"),
   );
 };
-const __krrInstallInlineHandler = (target, type, source) => {
-  if (!__krrLifecycleEventTypes.has(String(type))) return;
+const __krrStoreEventHandler = (target, type, handler) => {
   let handlers = __krrEventHandlers.get(target);
   if (!handlers) {
     handlers = new Map();
     __krrEventHandlers.set(target, handlers);
   }
   const eventType = String(type);
-  if (source === null || source === undefined || source === "") {
-    handlers.delete(eventType);
-  } else {
-    handlers.set(eventType, Function("event", String(source)));
-  }
+  if (handler === null || handler === undefined) handlers.delete(eventType);
+  else handlers.set(eventType, handler);
   const listeners = __krrEventTargetListeners.get(target) || new Map();
   __krrSyncEventTarget(target, eventType, listeners.get(eventType) || []);
+};
+const __krrInstallInlineHandler = (target, type, source) => {
+  if (!__krrLifecycleEventTypes.has(String(type))) return;
+  __krrStoreEventHandler(
+    target,
+    type,
+    source === null || source === undefined || source === ""
+      ? null
+      : Function("event", String(source)),
+  );
+};
+const __krrInstallLifecycleProperty = (target, type, value) => {
+  if (!__krrLifecycleEventTypes.has(String(type))) return;
+  __krrStoreEventHandler(target, type, typeof value === "function" ? value : null);
 };
 const __krrDispatchListeners = (listeners, target, event, capture) => {
   const entries = listeners.get(String(event.type)) || [];
@@ -327,7 +337,7 @@ const __krrElement = (nodeId) => {
         return __krrEventHandlers.get(this)?.get(eventType) ?? null;
       },
       set(value) {
-        __krrInstallInlineHandler(this, eventType, value);
+        __krrInstallLifecycleProperty(this, eventType, value);
       },
     });
     const source = __krrNativeDom("getAttribute", normalizedId, `on${eventType}`);
@@ -527,6 +537,12 @@ const __krrElementPrototype = {
   },
 };
 const __krrInlineHandler = (target, event) => {
+  if (
+    __krrLifecycleEventTypes.has(String(event.type)) &&
+    typeof target[`on${event.type}`] === "function"
+  ) {
+    return;
+  }
   const source = target.getAttribute?.(`on${event.type}`);
   if (!source) return;
   const result = Function("event", source).call(target, event);

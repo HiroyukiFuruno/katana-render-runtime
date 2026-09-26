@@ -5,8 +5,14 @@ repository_root="$(git rev-parse --show-toplevel)"
 cd "${repository_root}"
 
 # macOS Git hooks can inherit /usr/bin ahead of Homebrew; the release gates require tomllib.
-if [[ "$(command -v python3)" == "/usr/bin/python3" && -x /opt/homebrew/bin/python3 ]]; then
-  export PATH="/opt/homebrew/bin:${PATH}"
+python3_path="$(command -v python3 || true)"
+if [[ "${python3_path}" == "/usr/bin/python3" ]]; then
+  for homebrew_bin in /opt/homebrew/bin /usr/local/bin; do
+    if [[ -x "${homebrew_bin}/python3" ]]; then
+      export PATH="${homebrew_bin}:${PATH}"
+      break
+    fi
+  done
 fi
 
 # Hooks inherit the caller's repository environment.  The quality gate creates
