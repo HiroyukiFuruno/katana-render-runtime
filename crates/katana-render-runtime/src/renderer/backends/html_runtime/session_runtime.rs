@@ -242,6 +242,29 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_attribute_stringifies_stateful_values_once_for_storage_and_handler() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<p id=status>Waiting</p><iframe id=frame data-krr-local-frame></iframe><script>
+                const frame = document.getElementById('frame');
+                const status = document.getElementById('status');
+                const values = ["status.textContent = 'first'", "status.textContent = 'second'"];
+                let reads = 0;
+                const source = { toString() { return values[reads++]; } };
+                frame.setAttribute('onload', source);
+                status.setAttribute('data-reads', reads);
+                status.setAttribute('data-source', frame.getAttribute('onload'));
+            </script>"#,
+        ));
+
+        assert!(
+            snapshot.contains(
+                r#"<p id="status" data-reads="1" data-source="status.textContent = 'first'">first</p>"#
+            ),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
     fn scriptless_document_without_lifecycle_handlers_skips_the_runtime() {
         let document = HtmlDocument::parse("<p>Static</p>");
         let scripts = must_result(document.inline_scripts());

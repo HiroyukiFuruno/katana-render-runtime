@@ -514,9 +514,10 @@ const __krrElementPrototype = {
   },
   setAttribute(name, value) {
     const attributeName = String(name);
-    __krrNativeDom("setAttribute", this.__krrNodeId, attributeName, String(value));
+    const attributeValue = String(value);
+    __krrNativeDom("setAttribute", this.__krrNodeId, attributeName, attributeValue);
     if (attributeName.toLowerCase().startsWith("on")) {
-      __krrInstallInlineHandler(this, attributeName.slice(2), value);
+      __krrInstallInlineHandler(this, attributeName.slice(2), attributeValue);
     }
   },
   removeAttribute(name) {
