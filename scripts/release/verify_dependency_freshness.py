@@ -408,10 +408,11 @@ def rust_alternate_registry_dependencies(root: Path) -> list[AlternateRegistryDe
 
 
 def cargo_registry_latest(root: Path, dependency: AlternateRegistryDependency) -> str:
-    """Query a named Cargo registry without exposing its response or credentials."""
+    """Query a Cargo registry without exposing its response or credentials."""
+    registry_option = "--index" if "://" in dependency.registry else "--registry"
     completed = subprocess.run(
         [
-            "cargo", "search", "--registry", dependency.registry,
+            "cargo", "search", registry_option, dependency.registry,
             "--limit", "1", "--color", "never", dependency.package.name,
         ],
         cwd=root,

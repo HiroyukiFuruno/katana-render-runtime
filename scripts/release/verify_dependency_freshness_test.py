@@ -285,6 +285,20 @@ target-build = "=3.0.0"
                 freshness.cargo_registry_latest(self.root, dependency)
         self.assertNotIn("secret", str(raised.exception))
 
+    def test_alternate_registry_index_url_uses_index_option(self) -> None:
+        index_url = "sparse+https://registry.example.test/index/"
+        dependency = freshness.AlternateRegistryDependency(
+            freshness.Package("Rust manifest dependency", "private-serde", "1.0.0", 1),
+            index_url,
+        )
+        completed = SimpleNamespace(returncode=0, stdout='private-serde = "2.0.0"\n', stderr="")
+        with patch.object(freshness.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(freshness.cargo_registry_latest(self.root, dependency), "2.0.0")
+        command = run.call_args.args[0]
+        self.assertIn("--index", command)
+        self.assertIn(index_url, command)
+        self.assertNotIn("--registry", command)
+
     def test_stale_non_exact_rust_manifest_dependency_rejects_release(self) -> None:
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"1.0.0\"\n",
