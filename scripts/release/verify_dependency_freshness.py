@@ -239,7 +239,88 @@ def _cargo_manifest_payload(root: Path, manifest: Path) -> dict[str, object]:
                 target_table = payload.setdefault("target", {}).setdefault(target, {})  # type: ignore[assignment]
             target_table.setdefault(table_name, {})[name] = declaration  # type: ignore[index]
         return payload
-    return {}
+    # A virtual workspace root has no package entry in ``cargo metadata``.
+    # Keep the Python 3.10 fallback complete by reading the dependency tables
+    # from that manifest directly when Cargo cannot represent them as a package.
+    return _fallback_manifest_payload(manifest)
+
+
+def _strip_toml_comment(line: str) -> str:
+    quoted = False
+    escaped = False
+    for index, character in enumerate(line):
+        if quoted:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                quoted = False
+        elif character == '"':
+            quoted = True
+        elif character == "#":
+            return line[:index].rstrip()
+    return line.rstrip()
+
+
+def _fallback_manifest_payload(manifest: Path) -> dict[str, object]:
+    """Parse dependency tables when Python has neither TOML implementation.
+
+    Cargo manifests use a small, regular subset here: dependency tables and
+    string or inline-table declarations.  This parser intentionally ignores
+    every other TOML value and is only the Python 3.10 emergency fallback.
+    """
+    payload: dict[str, object] = {}
+    table: list[str] = []
+    try:
+        lines = manifest.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
+
+    def dependency_table(name: str) -> bool:
+        return name == "dependencies" or name.endswith(".dependencies") or name.endswith(".dev-dependencies") or name.endswith(".build-dependencies")
+
+    def destination(name: str) -> dict[str, object] | None:
+        parts = name.split(".")
+        if parts == ["workspace", "dependencies"]:
+            workspace = payload.setdefault("workspace", {})
+            return workspace.setdefault("dependencies", {})  # type: ignore[return-value]
+        if not dependency_table(name):
+            return None
+        if parts[-1] not in {"dependencies", "dev-dependencies", "build-dependencies"}:
+            return None
+        target: dict[str, object] = payload
+        if parts[0] == "target":
+            target_table = target.setdefault("target", {})
+            target = target_table.setdefault(".".join(parts[1:-1]), {})  # type: ignore[assignment]
+        return target.setdefault(parts[-1], {})  # type: ignore[return-value]
+
+    for raw_line in lines:
+        line = _strip_toml_comment(raw_line).strip()
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            table = line[1:-1].strip().split(".")
+            continue
+        if "=" not in line:
+            continue
+        key, value = (part.strip() for part in line.split("=", 1))
+        name = ".".join(table)
+        target = destination(name)
+        if target is None or not key:
+            continue
+        if value.startswith("{") and value.endswith("}"):
+            declaration: dict[str, object] = {}
+            for item in value[1:-1].split(","):
+                if "=" not in item:
+                    continue
+                item_key, item_value = (part.strip() for part in item.split("=", 1))
+                if item_value.startswith('"') and item_value.endswith('"'):
+                    declaration[item_key] = item_value[1:-1]
+            target[key] = declaration
+        elif value.startswith('"') and value.endswith('"'):
+            target[key] = value[1:-1]
+    return payload
 
 
 def _load_manifest_payload(root: Path, manifest: Path) -> dict[str, object]:

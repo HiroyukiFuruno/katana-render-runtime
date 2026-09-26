@@ -57,6 +57,30 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertEqual(dependencies[0].package.name, "private-serde")
         self.assertEqual(dependencies[0].package.current, "1.0.0")
 
+    def test_python310_fallback_reads_virtual_workspace_dependencies(self) -> None:
+        fallback_name = "verify_dependency_freshness_virtual_workspace_fallback"
+        fallback_spec = importlib.util.spec_from_file_location(fallback_name, MODULE_PATH)
+        assert fallback_spec is not None and fallback_spec.loader is not None
+        fallback = importlib.util.module_from_spec(fallback_spec)
+        sys.modules[fallback_name] = fallback
+        original_import = builtins.__import__
+
+        def reject_toml(name: str, *args: object, **kwargs: object) -> object:
+            if name in {"tomllib", "tomli"}:
+                raise ModuleNotFoundError(name)
+            return original_import(name, *args, **kwargs)
+
+        with patch.object(builtins, "__import__", reject_toml):
+            fallback_spec.loader.exec_module(fallback)
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"=1.0.0\"\n",
+            encoding="utf-8",
+        )
+        completed = SimpleNamespace(stdout=json.dumps({"packages": []}))
+        with patch.object(fallback.subprocess, "run", return_value=completed):
+            dependencies = fallback.rust_manifest_dependencies(self.root)
+        self.assertEqual([(dependency.name, dependency.current) for dependency in dependencies], [("serde", "1.0.0")])
+
     def test_semver_prerelease_precedence(self) -> None:
         versions = ["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"]
         for older, newer in zip(versions, versions[1:]):
