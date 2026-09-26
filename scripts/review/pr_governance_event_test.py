@@ -201,7 +201,7 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
             {**writer, "repository": {**writer["repository"], "id": 202}},
             {**writer, "repository": {**writer["repository"], "name": "other"}},
             {**writer, "repository": {**writer["repository"], "url": "https://api.github.com/repos/other/repository"}},
-            {**writer, "name": "PR governance status writer"},
+            {**writer, "name": "source=17 scope=early segment=0"},
             {**writer, "name": "source=18 scope=early segment=0"},
             {**writer, "display_title": "source=17 scope=early segment=1"},
         ):

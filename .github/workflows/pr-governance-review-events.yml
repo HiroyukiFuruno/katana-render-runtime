@@ -281,10 +281,9 @@ jobs:
                   return False
               run_repository = value.get("repository")
               title = value.get("display_title")
-              # workflow_dispatch with this workflow's run-name reports the
-              # dispatch title as both name and display_title in Actions REST.
-              # Bind both fields so an unrelated workflow or title cannot
-              # impersonate a writer generation.
+              # Actions REST keeps the workflow name and dynamic dispatch
+              # title in separate fields. Bind both so an unrelated workflow
+              # or title cannot impersonate a writer generation.
               writer_title = re.fullmatch(
                   r"source=[1-9][0-9]* scope=(?:early segment=0|all segment=[1-4])",
                   title,
@@ -292,7 +291,7 @@ jobs:
               return bool(
                   value.get("id") == int(writer_run_id)
                   and isinstance(title, str)
-                  and value.get("name") == title
+                  and value.get("name") == "PR governance status writer"
                   and writer_title is not None
                   and value.get("event") == "workflow_dispatch"
                   and workflow_path_matches(value.get("path"), writer_workflow)
