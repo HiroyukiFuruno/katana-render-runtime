@@ -525,8 +525,7 @@ const __krrElementPrototype = {
     const lifecycleEventType = attributeName.toLowerCase().startsWith("on")
       ? __krrNormalizeLifecycleEventType(attributeName.slice(2))
       : null;
-    const hadAttribute =
-      __krrNativeDom("getAttribute", this.__krrNodeId, attributeName) !== null;
+    const hadAttribute = __krrNativeDom("getAttribute", this.__krrNodeId, attributeName) !== null;
     __krrNativeDom("removeAttribute", this.__krrNodeId, attributeName);
     if (
       hadAttribute &&
