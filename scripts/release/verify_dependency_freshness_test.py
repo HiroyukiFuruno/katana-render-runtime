@@ -454,6 +454,40 @@ target-build = "=3.0.0"
         self.assertEqual(result, 1)
         self.assertIn("Rust manifest dependency serde: 1.0.0-alpha -> 1.0.1-alpha", stderr)
 
+    def test_cargo_build_metadata_requirements_preserve_semver_precedence(self) -> None:
+        for requirement, accepted, rejected in [
+            ("=1.0.0+manifest", "1.0.0+registry", "1.0.1+registry"),
+            ("1.0.0+manifest", "1.9.0+registry", "2.0.0+registry"),
+            (">=1.0.0+lower, <2.0.0+upper", "1.5.0+registry", "2.0.0+registry"),
+            ("=1.0.0-alpha+manifest", "1.0.0-alpha+registry", "1.0.0-beta+registry"),
+        ]:
+            with self.subTest(requirement=requirement):
+                self.assertTrue(
+                    freshness.cargo_requirement_matches(
+                        requirement, freshness.Version.parse(accepted)
+                    )
+                )
+                self.assertFalse(
+                    freshness.cargo_requirement_matches(
+                        requirement, freshness.Version.parse(rejected)
+                    )
+                )
+
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\n"
+            'serde = "=1.0.0+manifest"\n',
+            encoding="utf-8",
+        )
+        dependency = freshness.rust_manifest_dependencies(self.root)[0]
+        self.assertEqual(dependency.current, "1.0.0")
+        self.assertEqual(dependency.cargo_requirement, "=1.0.0+manifest")
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {
+            "crate": {"newest_version": "1.0.0+registry"}
+        }
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 0, stderr)
+
     def test_compound_and_wildcard_cargo_requirements_are_checked_without_rejection(self) -> None:
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\n"

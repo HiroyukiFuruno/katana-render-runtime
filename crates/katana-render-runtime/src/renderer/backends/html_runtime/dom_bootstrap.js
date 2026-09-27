@@ -527,11 +527,7 @@ const __krrElementPrototype = {
       : null;
     const hadAttribute = __krrNativeDom("getAttribute", this.__krrNodeId, attributeName) !== null;
     __krrNativeDom("removeAttribute", this.__krrNodeId, attributeName);
-    if (
-      hadAttribute &&
-      lifecycleEventType !== null &&
-      !__krrLifecyclePropertyOverrides.get(this)?.has(lifecycleEventType)
-    ) {
+    if (hadAttribute && lifecycleEventType !== null) {
       __krrInstallInlineHandler(this, lifecycleEventType, null);
     }
   },

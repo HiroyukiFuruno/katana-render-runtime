@@ -258,6 +258,22 @@ mod tests {
     }
 
     #[test]
+    fn removing_present_lifecycle_attribute_clears_property_handler() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<p id=status>Waiting</p><iframe id=frame data-krr-local-frame onload="document.getElementById('status').textContent = 'Unexpected'"></iframe><script>
+                const frame = document.getElementById('frame');
+                frame.onload = () => document.getElementById('status').textContent = 'Ready';
+                frame.removeAttribute('onload');
+            </script>"#,
+        ));
+
+        assert!(
+            snapshot.contains(r#"<p id="status">Waiting</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
     fn lifecycle_attribute_stringifies_stateful_values_once_for_storage_and_handler() {
         let snapshot = must_result(StaticHtmlRuntime.render(
             r#"<p id=status>Waiting</p><iframe id=frame data-krr-local-frame></iframe><script>

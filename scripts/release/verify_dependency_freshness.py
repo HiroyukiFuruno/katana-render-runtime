@@ -94,13 +94,19 @@ class AlternateRegistryDependency:
     registry: str
 
 
+_CARGO_FULL_VERSION = (
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"(?:\+(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+)
 _CARGO_PRERELEASE_VERSION = (
     r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
     r"-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)"
+    r"(?:\+(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
 )
 _CARGO_REQUIREMENT_TERM = re.compile(
     r"\s*(?P<operator>\^|~|>=|<=|>|<|=)?\s*"
-    rf"(?P<version>{_CARGO_PRERELEASE_VERSION}|(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*|[xX*])){{0,2}}|[xX*])\s*"
+    rf"(?P<version>{_CARGO_FULL_VERSION}|(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*|[xX*])){{0,2}}|[xX*])\s*"
 )
 _CARGO_PRERELEASE_REQUIREMENT = re.compile(
     r"(?P<operator>\^|~|>=|<=|>|<|=)?"
@@ -151,12 +157,24 @@ def _parse_cargo_requirement(requirement: str) -> list[CargoRequirementTerm]:
             raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
         operator = match.group("operator") or ""
         raw_version = match.group("version")
-        prerelease = Version.parse(raw_version) if "-" in raw_version else None
-        parts = prerelease.parts if prerelease is not None else _cargo_requirement_parts(raw_version)
+        # Cargo accepts SemVer build metadata in requirements, but SemVer
+        # precedence ignores it.  Remove it only for requirement matching;
+        # retain the original requirement on Package for Cargo resolution.
+        version_without_build = raw_version.split("+", 1)[0]
+        prerelease = (
+            Version.parse(raw_version)
+            if "-" in version_without_build
+            else None
+        )
+        parts = (
+            prerelease.parts
+            if prerelease is not None
+            else _cargo_requirement_parts(version_without_build)
+        )
         assert parts is not None
         if operator and not parts:
             raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
-        if any(part in {"*", "x", "X"} for part in raw_version.split(".")):
+        if any(part in {"*", "x", "X"} for part in version_without_build.split(".")):
             operator = "*"
         terms.append(CargoRequirementTerm(operator, parts, prerelease))
     if not terms:
