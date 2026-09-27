@@ -94,15 +94,25 @@ class AlternateRegistryDependency:
     registry: str
 
 
+_CARGO_PRERELEASE_VERSION = (
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)"
+)
 _CARGO_REQUIREMENT_TERM = re.compile(
     r"\s*(?P<operator>\^|~|>=|<=|>|<|=)?\s*"
-    r"(?P<version>(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*|[xX*])){0,2}|[xX*])\s*"
+    rf"(?P<version>{_CARGO_PRERELEASE_VERSION}|(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*|[xX*])){{0,2}}|[xX*])\s*"
 )
 _CARGO_PRERELEASE_REQUIREMENT = re.compile(
     r"(?P<operator>\^|~|>=|<=|>|<|=)?"
-    r"(?P<version>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
-    r"-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))"
+    rf"(?P<version>{_CARGO_PRERELEASE_VERSION})"
 )
+
+
+@dataclass(frozen=True)
+class CargoRequirementTerm:
+    operator: str
+    parts: tuple[int, ...]
+    prerelease: Version | None = None
 
 
 def _cargo_requirement_parts(value: str) -> tuple[int, ...] | None:
@@ -127,27 +137,28 @@ def _cargo_requirement_parts(value: str) -> tuple[int, ...] | None:
     return tuple(numeric)
 
 
-def _parse_cargo_requirement(requirement: str) -> list[tuple[str, tuple[int, ...]]]:
+def _parse_cargo_requirement(requirement: str) -> list[CargoRequirementTerm]:
     """Parse Cargo's comma-conjoined numeric requirement syntax.
 
     Cargo accepts comparison clauses and wildcard prefixes in addition to the
     short forms handled by the release policy's historical compatibility
     model.  Parse those clauses here rather than rejecting a valid manifest.
     """
-    terms: list[tuple[str, tuple[int, ...]]] = []
+    terms: list[CargoRequirementTerm] = []
     for raw_term in requirement.split(","):
         match = _CARGO_REQUIREMENT_TERM.fullmatch(raw_term)
         if match is None:
             raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
         operator = match.group("operator") or ""
         raw_version = match.group("version")
-        parts = _cargo_requirement_parts(raw_version)
+        prerelease = Version.parse(raw_version) if "-" in raw_version else None
+        parts = prerelease.parts if prerelease is not None else _cargo_requirement_parts(raw_version)
         assert parts is not None
         if operator and not parts:
             raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
         if any(part in {"*", "x", "X"} for part in raw_version.split(".")):
             operator = "*"
-        terms.append((operator, parts))
+        terms.append(CargoRequirementTerm(operator, parts, prerelease))
     if not terms:
         raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
     return terms
@@ -155,39 +166,28 @@ def _parse_cargo_requirement(requirement: str) -> list[tuple[str, tuple[int, ...
 
 def cargo_requirement_matches(requirement: str, version: Version) -> bool:
     """Return whether ``version`` satisfies a supported Cargo requirement."""
-    prerelease_match = _CARGO_PRERELEASE_REQUIREMENT.fullmatch(requirement)
-    if prerelease_match is not None:
-        operator = prerelease_match.group("operator") or ""
-        candidate = Version.parse(prerelease_match.group("version"))
-        if operator == ">=":
-            return version >= candidate
-        if operator == ">":
-            return version > candidate
-        if operator == "<=":
-            return version <= candidate
-        if operator == "<":
-            return version < candidate
-        if version.stable:
-            # A prerelease requirement admits semver-compatible stable
-            # releases, except for an explicit exact requirement.
-            if operator == "=":
-                return version == candidate
-            return cargo_requirement_matches(f"{operator}{'.'.join(map(str, candidate.parts))}", version)
-        # Cargo accepts newer prereleases only for the same release tuple.
-        if version.parts != candidate.parts or version < candidate:
-            return False
-        return operator != "=" or version == candidate
-    for operator, parts in _parse_cargo_requirement(requirement):
-        if not parts:
-            continue
-        candidate = Version(tuple((*parts, *(0 for _ in range(3 - len(parts))))), True, ())
+    terms = _parse_cargo_requirement(requirement)
+    # Cargo prereleases only match when the requirement explicitly names a
+    # prerelease for the identical release tuple.  Enforce this before each
+    # comparator: a broad upper/lower bound must not admit a different tuple.
+    if not version.stable and not any(
+        term.prerelease is not None and term.prerelease.parts == version.parts
+        for term in terms
+    ):
+        return False
+    for term in terms:
+        operator = term.operator
+        parts = term.parts
+        candidate = term.prerelease or Version(
+            tuple((*parts, *(0 for _ in range(3 - len(parts))))), True, ()
+        )
         prefix_matches = version.parts[:len(parts)] == parts
         if operator == "*":
             # A Cargo wildcard is an exact prefix range: `1.2.*` accepts
             # 1.2.x but must reject 1.3.0.
             allowed = prefix_matches
         elif operator == "=":
-            allowed = prefix_matches
+            allowed = version == candidate if term.prerelease is not None else prefix_matches
         elif operator == "^" or operator == "":
             if version < candidate:
                 allowed = False
@@ -228,8 +228,8 @@ def cargo_requirement_matches(requirement: str, version: Version) -> bool:
 def cargo_requirement_anchor(requirement: str) -> str:
     """Choose a stable display anchor for a compound Cargo requirement."""
     lower_bounds = [
-        parts for operator, parts in _parse_cargo_requirement(requirement)
-        if parts and operator in {"", "*", "^", "~", "=", ">", ">="}
+        term.parts for term in _parse_cargo_requirement(requirement)
+        if term.parts and term.operator in {"", "*", "^", "~", "=", ">", ">="}
     ]
     parts = max(lower_bounds, default=(), key=lambda value: (*value, *(0 for _ in range(3 - len(value)))))
     return ".".join(str(part) for part in (*parts, *(0 for _ in range(3 - len(parts)))))

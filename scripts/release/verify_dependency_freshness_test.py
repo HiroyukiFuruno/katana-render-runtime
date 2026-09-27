@@ -301,6 +301,19 @@ target-build = "=3.0.0"
         with patch.object(freshness, "cargo_registry_latest", return_value="2.0.0"):
             self.assertFalse(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
 
+    def test_alternate_registry_compound_prerelease_rejects_different_release_tuple(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\n"
+            'private-serde = { version = ">=1.0.0-alpha, <2", registry = "private" }\n',
+            encoding="utf-8",
+        )
+        dependencies = freshness.rust_alternate_registry_dependencies(self.root)
+        self.assertEqual(dependencies[0].package.cargo_requirement, ">=1.0.0-alpha, <2")
+        with patch.object(freshness, "cargo_registry_latest", return_value="1.0.0-beta"):
+            self.assertTrue(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
+        with patch.object(freshness, "cargo_registry_latest", return_value="1.0.1-alpha"):
+            self.assertFalse(freshness.rust_alternate_registries_are_fresh(self.root, dependencies))
+
     def test_alternate_registry_partial_exact_requirement_rejects_a_new_minor(self) -> None:
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\n"
@@ -420,6 +433,21 @@ target-build = "=3.0.0"
         self.assertTrue(freshness.cargo_requirement_matches("1.0.0-alpha", freshness.Version.parse("1.2.0")))
         self.assertFalse(freshness.cargo_requirement_matches("=1.0.0-alpha", freshness.Version.parse("1.0.0")))
         self.assertTrue(freshness.cargo_requirement_matches(">=1.0.0-alpha", freshness.Version.parse("1.0.0")))
+        self.assertTrue(
+            freshness.cargo_requirement_matches(
+                ">=1.0.0-alpha, <2", freshness.Version.parse("1.0.0-beta")
+            )
+        )
+        self.assertFalse(
+            freshness.cargo_requirement_matches(
+                ">=1.0.0-alpha, <2", freshness.Version.parse("1.0.1-alpha")
+            )
+        )
+        self.assertTrue(
+            freshness.cargo_requirement_matches(
+                ">=1.0.0-alpha, <2", freshness.Version.parse("1.1.0")
+            )
+        )
         responses = self.clean_responses()
         responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.0.1-alpha"}}
         result, _, stderr = self.run_check(responses)
