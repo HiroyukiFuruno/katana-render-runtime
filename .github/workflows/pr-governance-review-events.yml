@@ -291,7 +291,7 @@ jobs:
               return bool(
                   value.get("id") == int(writer_run_id)
                   and isinstance(title, str)
-                  and value.get("name") == "PR governance status writer"
+                  and value.get("name") == title
                   and writer_title is not None
                   and value.get("event") == "workflow_dispatch"
                   and workflow_path_matches(value.get("path"), writer_workflow)
