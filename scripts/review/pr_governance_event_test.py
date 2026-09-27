@@ -188,6 +188,7 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
         writer = {
             "id": 91,
             "name": "PR governance status writer",
+            "display_title": "source=17 scope=early segment=0",
             "event": "workflow_dispatch",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "repository": {"id": 101, "name": "repository", "url": self.repository_identity[2]},
