@@ -114,7 +114,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("459eef383cf953f4c97ae5b063f4b72931e4a5ee", result.stderr)
 
-    def test_accepts_actual_head_equivalent_squash_but_rejects_changed_required_path(
+    def test_rejects_actual_head_equivalent_squash_without_required_ancestry(
         self,
     ) -> None:
         self.assertEqual(
@@ -237,8 +237,8 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     0,
                 )
 
-                accepted = self.run_check("v0.4.21", "v0.4.20", "HEAD", fresh_repository)
-                self.assertEqual(accepted.returncode, 0, accepted.stderr)
+                rejected = self.run_check("v0.4.21", "v0.4.20", "HEAD", fresh_repository)
+                self.assertNotEqual(rejected.returncode, 0)
 
                 def git_in_fresh(*args: str) -> str:
                     return subprocess.run(
@@ -258,7 +258,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 order_file.write_text(f"{changed_path}\n", encoding="utf-8")
                 git_in_fresh("config", "diff.orderFile", str(order_file))
                 abbreviated = self.run_check("v0.4.21", "v0.4.20", "HEAD", fresh_repository)
-                self.assertEqual(abbreviated.returncode, 0, abbreviated.stderr)
+                self.assertNotEqual(abbreviated.returncode, 0)
                 git_in_fresh("switch", "-q", "-c", "changed-required-path")
                 self.assertIn(
                     changed_path,

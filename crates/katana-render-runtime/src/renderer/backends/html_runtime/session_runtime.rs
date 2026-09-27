@@ -242,6 +242,24 @@ mod tests {
     }
 
     #[test]
+    fn empty_lifecycle_attribute_exposes_a_callable_noop_property() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<p id=status>Waiting</p><iframe id=frame data-krr-local-frame onload=""></iframe><script>
+                const frame = document.getElementById('frame');
+                const status = document.getElementById('status');
+                status.setAttribute('data-handler-type', typeof frame.onload);
+                frame.onload(new Event('load'));
+                status.textContent = 'Ready';
+            </script>"#,
+        ));
+
+        assert!(
+            snapshot.contains(r#"<p id="status" data-handler-type="function">Ready</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
     fn removing_absent_lifecycle_attribute_preserves_property_handler() {
         let snapshot = must_result(StaticHtmlRuntime.render(
             r#"<p id=status>Waiting</p><iframe id=frame data-krr-local-frame></iframe><script>

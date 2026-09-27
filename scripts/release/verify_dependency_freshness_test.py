@@ -360,16 +360,16 @@ target-build = "=3.0.0"
         self.assertIn(index_url, command)
         self.assertNotIn("--registry", command)
 
-    def test_stale_non_exact_rust_manifest_dependency_rejects_release(self) -> None:
+    def test_stale_incompatible_rust_manifest_dependency_rejects_release(self) -> None:
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"1.0.0\"\n",
             encoding="utf-8",
         )
         responses = self.clean_responses()
-        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.1.0"}}
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "2.0.0"}}
         result, _, stderr = self.run_check(responses)
         self.assertEqual(result, 1)
-        self.assertIn("Rust manifest dependency serde: 1.0.0 -> 1.1.0", stderr)
+        self.assertIn("Rust manifest dependency serde: 1.0.0 -> 2.0.0", stderr)
         self.assertIn("just depends-update-all", stderr)
 
     def test_tilde_requirement_preserves_operator_and_rejects_next_minor(self) -> None:
@@ -395,6 +395,41 @@ target-build = "=3.0.0"
         responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.2.4"}}
         result, _, stderr = self.run_check(responses)
         self.assertEqual(result, 0, stderr)
+
+    def test_tilde_major_requirement_rejects_the_next_major(self) -> None:
+        self.assertTrue(
+            freshness.cargo_requirement_matches("~1", freshness.Version.parse("1.9.9"))
+        )
+        self.assertFalse(
+            freshness.cargo_requirement_matches("~1", freshness.Version.parse("2.0.0"))
+        )
+
+    def test_partial_strict_greater_requirement_uses_its_declared_precision(self) -> None:
+        for requirement, rejected, accepted in [
+            (">1", "1.99.99", "2.0.0"),
+            (">1.2", "1.2.99", "1.3.0"),
+        ]:
+            with self.subTest(requirement=requirement):
+                self.assertFalse(
+                    freshness.cargo_requirement_matches(requirement, freshness.Version.parse(rejected))
+                )
+                self.assertTrue(
+                    freshness.cargo_requirement_matches(requirement, freshness.Version.parse(accepted))
+                )
+
+    def test_wildcard_comparator_preserves_its_lower_bound_operator(self) -> None:
+        self.assertTrue(
+            freshness.cargo_requirement_matches(">=1.2.*", freshness.Version.parse("1.3.0"))
+        )
+        self.assertFalse(
+            freshness.cargo_requirement_matches(">=1.2.*", freshness.Version.parse("1.1.9"))
+        )
+
+    def test_full_version_without_operator_uses_an_implicit_caret(self) -> None:
+        dependency = freshness.cargo_requirement_package("serde", "1.2.3")
+        self.assertEqual(dependency.incompatible_prefix_length, 1)
+        self.assertFalse(freshness.is_stale(dependency, "1.9.0"))
+        self.assertTrue(freshness.is_stale(dependency, "2.0.0"))
 
     def test_partial_exact_requirement_rejects_a_new_minor(self) -> None:
         (self.root / "Cargo.toml").write_text(

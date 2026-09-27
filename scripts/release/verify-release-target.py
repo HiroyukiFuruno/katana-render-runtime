@@ -203,10 +203,10 @@ def main() -> int:
         )
         return 1
     missing_commits = missing_required_commits(args.head_ref)
-    if missing_commits and not release_tree_matches(args.head_ref):
+    if missing_commits:
         print(
             "Release target sanity check failed: release branch is missing required "
-            "commit(s) and does not reproduce their required release tree: "
+            "commit(s): "
             f"{', '.join(missing_commits)}.",
             file=sys.stderr,
         )

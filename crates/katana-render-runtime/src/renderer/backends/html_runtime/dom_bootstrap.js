@@ -153,7 +153,7 @@ const __krrInstallInlineHandler = (target, type, source) => {
   const eventType = __krrNormalizeLifecycleEventType(type);
   if (eventType === null) return;
   __krrLifecyclePropertyOverrides.get(target)?.delete(eventType);
-  if (source === null || source === undefined || source === "") {
+  if (source === null || source === undefined) {
     __krrStoreEventHandler(target, eventType, null);
     return;
   }

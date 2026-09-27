@@ -174,7 +174,10 @@ def _parse_cargo_requirement(requirement: str) -> list[CargoRequirementTerm]:
         assert parts is not None
         if operator and not parts:
             raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
-        if any(part in {"*", "x", "X"} for part in version_without_build.split(".")):
+        if (
+            not operator
+            and any(part in {"*", "x", "X"} for part in version_without_build.split("."))
+        ):
             operator = "*"
         terms.append(CargoRequirementTerm(operator, parts, prerelease))
     if not terms:
@@ -220,11 +223,22 @@ def cargo_requirement_matches(requirement: str, version: Version) -> bool:
             else:
                 allowed = prefix_matches
         elif operator == "~":
-            allowed = version >= candidate and (len(parts) == 1 or version.parts[:2] == parts[:2])
+            # `~1` is bounded by the major tuple, while `~1.2` and
+            # `~1.2.3` are bounded by the major/minor tuple.
+            allowed = version >= candidate and (
+                version.parts[0] == parts[0]
+                and (len(parts) == 1 or version.parts[1] == parts[1])
+            )
         elif operator == ">=":
             allowed = version >= candidate
         elif operator == ">":
-            allowed = version > candidate
+            # Cargo compares a partial strict lower bound at its supplied
+            # precision: `>1.2` starts at 1.3.0 and `>1` starts at 2.0.0.
+            allowed = (
+                version.parts[:len(parts)] > parts
+                if len(parts) < 3
+                else version > candidate
+            )
         elif operator == "<=":
             # Cargo treats a partial inclusive upper bound as applying to the
             # supplied precision: `<=1` includes 1.x and `<=1.2` includes
@@ -281,7 +295,7 @@ def cargo_requirement_package(name: str, requirement: str) -> Package:
     incompatible_prefix_length: int | None = None
     if operator == "~":
         incompatible_prefix_length = 1 if minor is None else 2
-    elif operator == "^":
+    elif operator == "^" or operator is None:
         if major > 0 or minor is None:
             incompatible_prefix_length = 1
         elif int(minor) > 0 or patch is None:
