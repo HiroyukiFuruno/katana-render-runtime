@@ -406,6 +406,26 @@ target-build = "=3.0.0"
         result, _, stderr = self.run_check(responses)
         self.assertEqual(result, 0, stderr)
 
+    def test_prerelease_cargo_requirement_uses_cargo_prerelease_rules(self) -> None:
+        (self.root / "Cargo.toml").write_text(
+            "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\n"
+            "serde = \"1.0.0-alpha\"\n",
+            encoding="utf-8",
+        )
+        dependency = freshness.rust_manifest_dependencies(self.root)[0]
+        self.assertEqual(dependency.current, "1.0.0-alpha")
+        self.assertEqual(dependency.cargo_requirement, "1.0.0-alpha")
+        self.assertTrue(freshness.cargo_requirement_matches("1.0.0-alpha", freshness.Version.parse("1.0.0-beta")))
+        self.assertFalse(freshness.cargo_requirement_matches("1.0.0-alpha", freshness.Version.parse("1.0.1-alpha")))
+        self.assertTrue(freshness.cargo_requirement_matches("1.0.0-alpha", freshness.Version.parse("1.2.0")))
+        self.assertFalse(freshness.cargo_requirement_matches("=1.0.0-alpha", freshness.Version.parse("1.0.0")))
+        self.assertTrue(freshness.cargo_requirement_matches(">=1.0.0-alpha", freshness.Version.parse("1.0.0")))
+        responses = self.clean_responses()
+        responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.0.1-alpha"}}
+        result, _, stderr = self.run_check(responses)
+        self.assertEqual(result, 1)
+        self.assertIn("Rust manifest dependency serde: 1.0.0-alpha -> 1.0.1-alpha", stderr)
+
     def test_compound_and_wildcard_cargo_requirements_are_checked_without_rejection(self) -> None:
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\n"
@@ -440,6 +460,23 @@ target-build = "=3.0.0"
         responses["https://crates.io/api/v1/crates/serde"] = {"crate": {"newest_version": "1.2.9"}}
         result, _, stderr = self.run_check(responses)
         self.assertEqual(result, 0, stderr)
+
+    def test_partial_inclusive_upper_bound_preserves_cargo_precision(self) -> None:
+        for requirement, accepted, rejected in [
+            ("<=1", "1.99.99", "2.0.0"),
+            ("<=1.2", "1.2.99", "1.3.0"),
+        ]:
+            with self.subTest(requirement=requirement):
+                self.assertTrue(
+                    freshness.cargo_requirement_matches(
+                        requirement, freshness.Version.parse(accepted)
+                    )
+                )
+                self.assertFalse(
+                    freshness.cargo_requirement_matches(
+                        requirement, freshness.Version.parse(rejected)
+                    )
+                )
 
     def test_same_normalized_version_retains_distinct_cargo_requirement_boundaries(self) -> None:
         (self.root / "Cargo.toml").write_text(

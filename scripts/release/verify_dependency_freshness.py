@@ -98,6 +98,11 @@ _CARGO_REQUIREMENT_TERM = re.compile(
     r"\s*(?P<operator>\^|~|>=|<=|>|<|=)?\s*"
     r"(?P<version>(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*|[xX*])){0,2}|[xX*])\s*"
 )
+_CARGO_PRERELEASE_REQUIREMENT = re.compile(
+    r"(?P<operator>\^|~|>=|<=|>|<|=)?"
+    r"(?P<version>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))"
+)
 
 
 def _cargo_requirement_parts(value: str) -> tuple[int, ...] | None:
@@ -150,6 +155,28 @@ def _parse_cargo_requirement(requirement: str) -> list[tuple[str, tuple[int, ...
 
 def cargo_requirement_matches(requirement: str, version: Version) -> bool:
     """Return whether ``version`` satisfies a supported Cargo requirement."""
+    prerelease_match = _CARGO_PRERELEASE_REQUIREMENT.fullmatch(requirement)
+    if prerelease_match is not None:
+        operator = prerelease_match.group("operator") or ""
+        candidate = Version.parse(prerelease_match.group("version"))
+        if operator == ">=":
+            return version >= candidate
+        if operator == ">":
+            return version > candidate
+        if operator == "<=":
+            return version <= candidate
+        if operator == "<":
+            return version < candidate
+        if version.stable:
+            # A prerelease requirement admits semver-compatible stable
+            # releases, except for an explicit exact requirement.
+            if operator == "=":
+                return version == candidate
+            return cargo_requirement_matches(f"{operator}{'.'.join(map(str, candidate.parts))}", version)
+        # Cargo accepts newer prereleases only for the same release tuple.
+        if version.parts != candidate.parts or version < candidate:
+            return False
+        return operator != "=" or version == candidate
     for operator, parts in _parse_cargo_requirement(requirement):
         if not parts:
             continue
@@ -181,7 +208,14 @@ def cargo_requirement_matches(requirement: str, version: Version) -> bool:
         elif operator == ">":
             allowed = version > candidate
         elif operator == "<=":
-            allowed = version <= candidate
+            # Cargo treats a partial inclusive upper bound as applying to the
+            # supplied precision: `<=1` includes 1.x and `<=1.2` includes
+            # 1.2.x.  A fully specified bound retains normal semver ordering.
+            allowed = (
+                version.parts[:len(parts)] <= parts
+                if len(parts) < 3
+                else version <= candidate
+            )
         elif operator == "<":
             allowed = version < candidate
         else:  # pragma: no cover - _CARGO_REQUIREMENT_TERM constrains this.
@@ -203,6 +237,19 @@ def cargo_requirement_anchor(requirement: str) -> str:
 
 def cargo_requirement_package(name: str, requirement: str) -> Package:
     """Translate a Cargo requirement into the release freshness model."""
+    prerelease_match = _CARGO_PRERELEASE_REQUIREMENT.fullmatch(requirement)
+    if prerelease_match is not None:
+        # Preserve the prerelease so Cargo's special prerelease matching rules
+        # are evaluated instead of treating it as a stable numeric anchor.
+        current = prerelease_match.group("version")
+        Version.parse(current)
+        return Package(
+            "Rust manifest dependency",
+            name,
+            current,
+            requirement_operator=prerelease_match.group("operator") or "",
+            cargo_requirement=requirement,
+        )
     match = re.fullmatch(r"(=|\^|~)?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", requirement)
     if match is None:
         current = cargo_requirement_anchor(requirement)
