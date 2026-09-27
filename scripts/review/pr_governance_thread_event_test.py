@@ -266,7 +266,7 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
 
         writer = {
             "id": 91,
-            "name": "source=17 scope=early segment=0",
+            "name": "PR governance status writer",
             "display_title": "source=17 scope=early segment=0",
             "event": "workflow_dispatch",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
@@ -276,7 +276,7 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
         }
         self.assertTrue(writer_matches(writer, "91", repository_identity))
         self.assertFalse(writer_matches({**writer, "id": 92}, "91", repository_identity))
-        self.assertFalse(writer_matches({**writer, "name": "PR governance status writer"}, "91", repository_identity))
+        self.assertFalse(writer_matches({**writer, "name": "source=17 scope=early segment=0"}, "91", repository_identity))
         self.assertFalse(writer_matches({**writer, "repository": {"id": 101, "name": "repo", "url": repository_identity[2], "full_name": "other/repo"}}, "91", repository_identity))
         self.assertFalse(writer_matches({**writer, "status": "completed", "conclusion": "failure"}, "91", repository_identity))
 
@@ -684,7 +684,7 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
             if endpoint == f"repos/{repository}/actions/runs/92":
                 return response(arguments, {
                     "id": 92,
-                    "name": "source=93 scope=all segment=1",
+                    "name": "PR governance status writer",
                     "event": "workflow_dispatch",
                     "path": ".github/workflows/pr-governance-status-writer.yml@master",
                     "repository": repository_identity,
