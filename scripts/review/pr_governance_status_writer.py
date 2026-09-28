@@ -107,6 +107,20 @@ MAX_DEFAULT_INITIAL_SENSOR_PAGE_2_HEADS = 50
 SHA = re.compile(r"[0-9a-fA-F]{40}")
 BODY_SHA256 = re.compile(r"[0-9a-f]{64}")
 NUMBER = re.compile(r"[1-9][0-9]*")
+
+
+def writer_run_title(dispatcher_run_id: str, scope: str, continuation_index: str) -> str:
+    """Return the exact dynamic Actions title for one writer generation."""
+    if (
+        NUMBER.fullmatch(dispatcher_run_id) is None
+        or scope not in {"early", "all"}
+        or (scope == "early" and continuation_index != "0")
+        or (scope == "all" and continuation_index not in {"1", "2", "3", "4"})
+    ):
+        raise GovernanceError("Writer run title boundary is invalid.")
+    return f"source={dispatcher_run_id} scope={scope} segment={continuation_index}"
+
+
 _last_check_write_at: float | None = None
 _bound_check_runs: dict[tuple[str, str], int] = {}
 _bound_check_ids_by_number: dict[int, int] = {}
@@ -711,6 +725,9 @@ def trusted_dispatcher_source(identifier: int) -> DispatcherSource:
     if type(identifier) is not int or identifier < 1:
         raise GovernanceError("Dispatcher run ID is invalid.")
     value = api_json(f"repos/{REPOSITORY}/actions/runs/{identifier}", default_token=True)
+    # writer は実行中の dispatcher から起動されるため実行中のsourceは許可し、
+    # 完了済みsourceだけは成功を要求する。repository、default branch、
+    # immutable SHA、初回試行、許可イベントも引き続き固定する。
     generation = dispatcher_generation(value, expected_identifier=identifier, require_success=True)
     attempt = value.get("run_attempt") if isinstance(value, dict) else None
     if type(attempt) is not int:
@@ -1010,12 +1027,20 @@ def ensure_writer_run_is_active() -> None:
     expected_head = os.environ.get("GITHUB_SHA", "")
     if not NUMBER.fullmatch(WRITER_RUN_ID) or not SHA.fullmatch(expected_head):
         raise NoPostGovernanceError("Writer generation identity is invalid.")
+    try:
+        expected_title = writer_run_title(
+            os.environ.get("GOVERNANCE_DISPATCHER_RUN_ID", ""),
+            os.environ.get("GOVERNANCE_SCOPE", ""),
+            os.environ.get("GOVERNANCE_CONTINUATION_INDEX", ""),
+        )
+    except GovernanceError as error:
+        raise NoPostGovernanceError("Writer generation identity is invalid.") from error
     value = api_json(f"repos/{REPOSITORY}/actions/runs/{WRITER_RUN_ID}")
     repository = value.get("repository") if isinstance(value, dict) else None
     if not (
         isinstance(value, dict) and value.get("id") == int(WRITER_RUN_ID)
-        and value.get("name") == WRITER_WORKFLOW_NAME
-        and isinstance(value.get("display_title"), str)
+        and value.get("name") in {WRITER_WORKFLOW_NAME, expected_title}
+        and value.get("display_title") == expected_title
         and workflow_path_matches(value.get("path"), WRITER_WORKFLOW_PATH)
         and value.get("event") == "workflow_dispatch" and value.get("head_sha") == expected_head
         and repository_rest_identity(repository, REPOSITORY) is not _INVALID_REPOSITORY_IDENTITY
@@ -1200,10 +1225,10 @@ def trusted_completed_terminal_writers(
         triggering_actor = value.get("triggering_actor") if isinstance(value, dict) else None
         if not (
             isinstance(value, dict) and value.get("id") == identifier
-            and value.get("name") == WRITER_WORKFLOW_NAME
+            and value.get("name") in {WRITER_WORKFLOW_NAME, writer_run_title(str(source.identifier), "all", str(segment))}
             and workflow_path_is_default(value.get("path"), WRITER_WORKFLOW_PATH)
             and value.get("event") == "workflow_dispatch"
-            and value.get("display_title") == f"source={source.identifier} scope=all segment={segment}"
+            and value.get("display_title") == writer_run_title(str(source.identifier), "all", str(segment))
             and value.get("head_branch") == expected_branch and value.get("head_sha") == expected_head
             and repository_rest_identity(repository, REPOSITORY) is not _INVALID_REPOSITORY_IDENTITY
             and type(value.get("run_attempt")) is int and value["run_attempt"] == 1

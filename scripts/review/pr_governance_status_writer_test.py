@@ -798,6 +798,38 @@ class StatusWriterUnitTest(unittest.TestCase):
                 WRITER.write_check(head, state="success", description="success", details_url=existing["details_url"], existing=existing)
         command.assert_not_called()
 
+    def test_terminal_patch_rejects_failed_current_dispatcher_before_mutation(self) -> None:
+        head = "a" * 40
+        existing = {
+            "id": 202, "name": WRITER.CHECK_NAME, "head_sha": head,
+            "external_id": f"krr-governance/v1/{head}/dispatcher-88", "updated_at": "now",
+            "app": {"id": 42}, "status": "in_progress", "conclusion": None,
+            "details_url": "https://github.com/owner/repository/actions/runs/88",
+        }
+        environment = {
+            "GITHUB_ACTIONS": "true", "GOVERNANCE_SCOPE": "all",
+            "GOVERNANCE_DISPATCHER_RUN_ID": "88", "KRR_GOVERNANCE_CHECK_APP_ID": "42",
+            "GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master",
+        }
+        for conclusion in ("failure", "cancelled", "timed_out"):
+            current_dispatcher = self.dispatcher_run(
+                88, status="completed", conclusion=conclusion,
+            )
+            with self.subTest(conclusion=conclusion), self.identity(), patch.dict(os.environ, environment), \
+                 patch.object(WRITER, "ensure_writer_run_is_active"), \
+                 patch.object(WRITER, "pace_check_write"), \
+                 patch.object(WRITER, "api_json", return_value=current_dispatcher), \
+                 patch.object(WRITER, "command") as command:
+                with self.assertRaises(WRITER.NoPostGovernanceError):
+                    WRITER.write_check(
+                        head,
+                        state="success",
+                        description="success",
+                        details_url=existing["details_url"],
+                        existing=existing,
+                    )
+                command.assert_not_called()
+
     def test_dispatcher_input_is_bound_to_one_default_branch_run(self) -> None:
         run = self.dispatcher_run()
         with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
@@ -816,6 +848,40 @@ class StatusWriterUnitTest(unittest.TestCase):
         with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
              patch.object(WRITER, "api_json", return_value=run):
             self.assertEqual(WRITER.trusted_dispatcher_source(88), WRITER.DispatcherSource(88, "issues", 1))
+
+    def test_dispatcher_run_accepts_only_default_branch_issue_comment_source(self) -> None:
+        run = self.dispatcher_run(event="issue_comment")
+        with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
+             patch.object(WRITER, "api_json", return_value=run):
+            self.assertEqual(WRITER.trusted_dispatcher_source(88), WRITER.DispatcherSource(88, "issue_comment", 1))
+        for field, value in (("head_branch", "feature/untrusted"), ("head_sha", "e" * 40)):
+            with self.subTest(field=field), self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
+                 patch.object(WRITER, "api_json", return_value=run | {field: value}):
+                with self.assertRaises(WRITER.GovernanceError):
+                    WRITER.trusted_dispatcher_source(88)
+
+    def test_dispatcher_run_accepts_in_progress_default_branch_source(self) -> None:
+        run = self.dispatcher_run(event="issue_comment") | {
+            "status": "in_progress", "conclusion": None,
+        }
+        with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
+             patch.object(WRITER, "api_json", return_value=run):
+            self.assertEqual(WRITER.trusted_dispatcher_source(88), WRITER.DispatcherSource(88, "issue_comment", 1))
+
+    def test_dispatcher_source_rejects_terminal_failure_and_cancellation(self) -> None:
+        for conclusion in ("failure", "cancelled"):
+            run = self.dispatcher_run(event="issue_comment", status="completed", conclusion=conclusion)
+            with self.subTest(conclusion=conclusion), self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
+                 patch.object(WRITER, "api_json", return_value=run):
+                with self.assertRaises(WRITER.GovernanceError):
+                    WRITER.trusted_dispatcher_source(88)
+
+    def test_dispatcher_source_rejects_terminal_timeout(self) -> None:
+        run = self.dispatcher_run(event="issue_comment", status="completed", conclusion="timed_out")
+        with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
+             patch.object(WRITER, "api_json", return_value=run):
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.trusted_dispatcher_source(88)
 
     def test_dispatcher_run_accepts_trusted_manual_recovery_dispatch(self) -> None:
         run = self.dispatcher_run(event="workflow_dispatch")
@@ -856,18 +922,23 @@ class StatusWriterUnitTest(unittest.TestCase):
     def test_writer_and_sensor_attempt_boundaries_reject_bool_zero_string_and_retry(self) -> None:
         head = "a" * 40
         writer_run = {
-            "id": 99, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1",
+            "id": 99, "name": "source=9 scope=all segment=1", "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": head,
             "repository": self.rest_repository(), "status": "in_progress", "run_attempt": 1,
         }
-        with self.identity(), patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_SHA": head}), \
+        with self.identity(), patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_SHA": head, "GOVERNANCE_DISPATCHER_RUN_ID": "9", "GOVERNANCE_SCOPE": "all", "GOVERNANCE_CONTINUATION_INDEX": "1"}), \
              patch.object(WRITER, "api_json", return_value=writer_run) as api:
             WRITER.ensure_writer_run_is_active()
         self.assertFalse(api.call_args.kwargs.get("default_token", False))
         for attempt in (0, True, "1", 2):
-            with self.subTest(writer_attempt=attempt), self.identity(), patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_SHA": head}), \
+            with self.subTest(writer_attempt=attempt), self.identity(), patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_SHA": head, "GOVERNANCE_DISPATCHER_RUN_ID": "9", "GOVERNANCE_SCOPE": "all", "GOVERNANCE_CONTINUATION_INDEX": "1"}), \
                  patch.object(WRITER, "api_json", return_value=writer_run | {"run_attempt": attempt}):
+                with self.assertRaises(WRITER.NoPostGovernanceError):
+                    WRITER.ensure_writer_run_is_active()
+        for field, value in (("name", "source=9 scope=all segment=0"), ("display_title", "source=9 scope=all segment=2")):
+            with self.subTest(writer_title_field=field), self.identity(), patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_SHA": head, "GOVERNANCE_DISPATCHER_RUN_ID": "9", "GOVERNANCE_SCOPE": "all", "GOVERNANCE_CONTINUATION_INDEX": "1"}), \
+                 patch.object(WRITER, "api_json", return_value=writer_run | {field: value}):
                 with self.assertRaises(WRITER.NoPostGovernanceError):
                     WRITER.ensure_writer_run_is_active()
 
@@ -905,7 +976,7 @@ class StatusWriterUnitTest(unittest.TestCase):
 
     def test_dispatcher_and_writer_reject_full_name_only_repository_identity(self) -> None:
         writer = {
-            "id": 99, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1",
+            "id": 99, "name": "source=9 scope=all segment=1", "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": "d" * 40,
             "repository": self.rest_repository(), "run_attempt": 1,
@@ -913,6 +984,7 @@ class StatusWriterUnitTest(unittest.TestCase):
         }
         with self.identity(), patch.dict(os.environ, {
             "GITHUB_ACTIONS": "true", "GITHUB_REF_NAME": "master", "GITHUB_SHA": "d" * 40,
+            "GOVERNANCE_DISPATCHER_RUN_ID": "9", "GOVERNANCE_SCOPE": "all", "GOVERNANCE_CONTINUATION_INDEX": "1",
         }):
             WRITER.dispatcher_generation(self.dispatcher_run())
             with patch.object(WRITER, "api_json", return_value=writer):
@@ -1173,7 +1245,7 @@ class StatusWriterUnitTest(unittest.TestCase):
 
         def writer_run(identifier: int, segment: int, status: str = "in_progress") -> dict[str, object]:
             return {
-                "id": identifier, "name": "PR governance status writer",
+                "id": identifier, "name": f"source=88 scope=all segment={segment}",
                 "path": ".github/workflows/pr-governance-status-writer.yml@master",
                 "event": "workflow_dispatch", "display_title": f"source=88 scope=all segment={segment}",
                 "head_sha": default_head, "head_branch": "master",
@@ -1658,7 +1730,7 @@ class StatusWriterUnitTest(unittest.TestCase):
             703: {"id": 703, "name": WRITER.CHECK_NAME, "head_sha": heads[1], "external_id": f"krr-governance/v1/{heads[1]}/dispatcher-88", "updated_at": "2026-08-30T00:00:00Z", "app": {"id": 42}, "status": "in_progress", "conclusion": None, "details_url": f"https://github.com/owner/repository/actions/runs/88?dispatcher_run_id=88&carry_pending=0"},
         }
         dispatcher = {"id": 88, "name": WRITER.DISPATCHER_NAME, "path": ".github/workflows/pr-governance.yml@master", "event": "issues", "head_sha": "d" * 40, "head_branch": "master", "workflow_id": 66, "repository": self.rest_repository(), "run_number": 1, "run_attempt": 1, "status": "in_progress", "conclusion": None, "created_at": "2026-08-30T00:00:00Z"}
-        writer = {"id": 99, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1", "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch", "head_sha": "d" * 40, "repository": self.rest_repository(), "run_attempt": 1, "status": "in_progress"}
+        writer = {"id": 99, "name": "source=88 scope=all segment=1", "display_title": "source=88 scope=all segment=1", "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch", "head_sha": "d" * 40, "repository": self.rest_repository(), "run_attempt": 1, "status": "in_progress"}
         reads: list[int] = []; terminal_ids: list[int] = []
         def api(endpoint: str, *, default_token: bool = False) -> object:
             if endpoint.endswith("/actions/runs/88"):
@@ -2258,7 +2330,7 @@ class StatusWriterUnitTest(unittest.TestCase):
             }
         dispatcher = self.dispatcher_run(88, status="completed", conclusion="success")
         writer = {
-            "id": 99, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1",
+            "id": 99, "name": "source=88 scope=all segment=1", "display_title": "source=88 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": "d" * 40,
             "repository": self.rest_repository(), "run_attempt": 1, "status": "in_progress",
@@ -2313,7 +2385,7 @@ class StatusWriterUnitTest(unittest.TestCase):
 
         environment = {
             "GITHUB_ACTIONS": "true", "GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master",
-            "GOVERNANCE_SCOPE": "all", "GOVERNANCE_DISPATCHER_RUN_ID": "88",
+            "GOVERNANCE_SCOPE": "all", "GOVERNANCE_DISPATCHER_RUN_ID": "88", "GOVERNANCE_CONTINUATION_INDEX": "1",
             "GH_TOKEN": "app-read", "DEFAULT_READ_TOKEN": "default-read", "CHECK_WRITE_TOKEN": "check-write",
             "KRR_GOVERNANCE_CHECK_APP_ID": "42",
         }
@@ -2384,7 +2456,7 @@ class StatusWriterUnitTest(unittest.TestCase):
             )
         dispatcher = self.dispatcher_run(88, status="completed", conclusion="success")
         writer = {
-            "id": 99, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1",
+            "id": 99, "name": "source=88 scope=all segment=1", "display_title": "source=88 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": default_head,
             "repository": self.rest_repository(), "run_attempt": 1, "status": "in_progress",
@@ -2450,7 +2522,7 @@ class StatusWriterUnitTest(unittest.TestCase):
 
         environment = {
             "GITHUB_ACTIONS": "true", "GITHUB_SHA": default_head, "GITHUB_REF_NAME": "master",
-            "GOVERNANCE_SCOPE": "all", "GOVERNANCE_DISPATCHER_RUN_ID": "88",
+            "GOVERNANCE_SCOPE": "all", "GOVERNANCE_DISPATCHER_RUN_ID": "88", "GOVERNANCE_CONTINUATION_INDEX": "1",
             "GH_TOKEN": "app-read", "DEFAULT_READ_TOKEN": "default-read", "CHECK_WRITE_TOKEN": "check-write",
             "KRR_GOVERNANCE_CHECK_APP_ID": "42",
         }
@@ -3602,7 +3674,7 @@ class StatusWriterUnitTest(unittest.TestCase):
         )
         dispatcher = self.dispatcher_run(88, status="completed", conclusion="success")
         writer = {
-            "id": 99, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1",
+            "id": 99, "name": "source=9 scope=all segment=1", "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": default_head,
             "repository": self.rest_repository(), "run_attempt": 1, "status": "in_progress",

@@ -288,10 +288,13 @@ jobs:
                   r"source=[1-9][0-9]* scope=(?:early segment=0|all segment=[1-4])",
                   title,
               ) if isinstance(title, str) else None
+              writer_name = value.get("name")
               return bool(
                   value.get("id") == int(writer_run_id)
                   and isinstance(title, str)
-                  and value.get("name") == "PR governance status writer"
+                  # GitHub Actions は固定workflow名または動的titleを返す。
+                  # 動的titleは display_title と完全一致させ、対象writer世代へ固定する。
+                  and writer_name in {"PR governance status writer", title}
                   and writer_title is not None
                   and value.get("event") == "workflow_dispatch"
                   and workflow_path_matches(value.get("path"), writer_workflow)
