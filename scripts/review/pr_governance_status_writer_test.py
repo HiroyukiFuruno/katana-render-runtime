@@ -844,6 +844,13 @@ class StatusWriterUnitTest(unittest.TestCase):
                 with self.assertRaises(WRITER.GovernanceError):
                     WRITER.trusted_dispatcher_source(88)
 
+    def test_dispatcher_source_rejects_terminal_timeout(self) -> None:
+        run = self.dispatcher_run(event="issue_comment", status="completed", conclusion="timed_out")
+        with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
+             patch.object(WRITER, "api_json", return_value=run):
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.trusted_dispatcher_source(88)
+
     def test_dispatcher_run_accepts_trusted_manual_recovery_dispatch(self) -> None:
         run = self.dispatcher_run(event="workflow_dispatch")
         with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
