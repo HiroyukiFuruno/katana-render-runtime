@@ -725,11 +725,10 @@ def trusted_dispatcher_source(identifier: int) -> DispatcherSource:
     if type(identifier) is not int or identifier < 1:
         raise GovernanceError("Dispatcher run ID is invalid.")
     value = api_json(f"repos/{REPOSITORY}/actions/runs/{identifier}", default_token=True)
-    # writer は実行中の dispatcher から起動される。ここで dispatcher の
-    # 成功完了を要求すると、writer の Check Run 完了を待つ dispatcher と
-    # 循環する。dispatcher_generation は repository、default branch、
-    # immutable SHA、初回試行、許可イベントを引き続き固定する。
-    generation = dispatcher_generation(value, expected_identifier=identifier)
+    # writer は実行中の dispatcher から起動されるため実行中のsourceは許可し、
+    # 完了済みsourceだけは成功を要求する。repository、default branch、
+    # immutable SHA、初回試行、許可イベントも引き続き固定する。
+    generation = dispatcher_generation(value, expected_identifier=identifier, require_success=True)
     attempt = value.get("run_attempt") if isinstance(value, dict) else None
     if type(attempt) is not int:
         raise GovernanceError("Dispatcher source attempt is invalid.")
