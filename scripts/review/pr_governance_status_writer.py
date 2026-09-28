@@ -864,6 +864,7 @@ def reject_newer_dispatcher_barrier(head: str) -> None:
         current_generation = dispatcher_generation(
             current_value_response,
             expected_identifier=int(current_value),
+            require_success=True,
         )
         generations = dispatcher_generations(
             current_generation.workflow_id, current_generation.created_at,

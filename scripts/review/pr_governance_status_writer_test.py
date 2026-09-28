@@ -798,6 +798,38 @@ class StatusWriterUnitTest(unittest.TestCase):
                 WRITER.write_check(head, state="success", description="success", details_url=existing["details_url"], existing=existing)
         command.assert_not_called()
 
+    def test_terminal_patch_rejects_failed_current_dispatcher_before_mutation(self) -> None:
+        head = "a" * 40
+        existing = {
+            "id": 202, "name": WRITER.CHECK_NAME, "head_sha": head,
+            "external_id": f"krr-governance/v1/{head}/dispatcher-88", "updated_at": "now",
+            "app": {"id": 42}, "status": "in_progress", "conclusion": None,
+            "details_url": "https://github.com/owner/repository/actions/runs/88",
+        }
+        environment = {
+            "GITHUB_ACTIONS": "true", "GOVERNANCE_SCOPE": "all",
+            "GOVERNANCE_DISPATCHER_RUN_ID": "88", "KRR_GOVERNANCE_CHECK_APP_ID": "42",
+            "GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master",
+        }
+        for conclusion in ("failure", "cancelled", "timed_out"):
+            current_dispatcher = self.dispatcher_run(
+                88, status="completed", conclusion=conclusion,
+            )
+            with self.subTest(conclusion=conclusion), self.identity(), patch.dict(os.environ, environment), \
+                 patch.object(WRITER, "ensure_writer_run_is_active"), \
+                 patch.object(WRITER, "pace_check_write"), \
+                 patch.object(WRITER, "api_json", return_value=current_dispatcher), \
+                 patch.object(WRITER, "command") as command:
+                with self.assertRaises(WRITER.NoPostGovernanceError):
+                    WRITER.write_check(
+                        head,
+                        state="success",
+                        description="success",
+                        details_url=existing["details_url"],
+                        existing=existing,
+                    )
+                command.assert_not_called()
+
     def test_dispatcher_input_is_bound_to_one_default_branch_run(self) -> None:
         run = self.dispatcher_run()
         with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
