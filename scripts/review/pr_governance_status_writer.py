@@ -729,7 +729,7 @@ def trusted_dispatcher_source(identifier: int) -> DispatcherSource:
     # 成功完了を要求すると、writer の Check Run 完了を待つ dispatcher と
     # 循環する。dispatcher_generation は repository、default branch、
     # immutable SHA、初回試行、許可イベントを引き続き固定する。
-    generation = dispatcher_generation(value, expected_identifier=identifier, require_success=True)
+    generation = dispatcher_generation(value, expected_identifier=identifier)
     attempt = value.get("run_attempt") if isinstance(value, dict) else None
     if type(attempt) is not int:
         raise GovernanceError("Dispatcher source attempt is invalid.")
@@ -865,7 +865,6 @@ def reject_newer_dispatcher_barrier(head: str) -> None:
         current_generation = dispatcher_generation(
             current_value_response,
             expected_identifier=int(current_value),
-            require_success=True,
         )
         generations = dispatcher_generations(
             current_generation.workflow_id, current_generation.created_at,

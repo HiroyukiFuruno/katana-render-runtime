@@ -363,6 +363,18 @@ class StatusWriterUnitTest(unittest.TestCase):
             with self.assertRaises(WRITER.NoPostGovernanceError):
                 WRITER.reject_newer_dispatcher_barrier(head)
 
+    def test_failed_current_dispatcher_does_not_block_its_writer_without_a_newer_generation(self) -> None:
+        head = "a" * 40
+        current = self.dispatcher_run(88, status="completed", conclusion="failure")
+        environment = {
+            "GITHUB_ACTIONS": "true", "GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master",
+            "GOVERNANCE_DISPATCHER_RUN_ID": "88", "KRR_GOVERNANCE_CHECK_APP_ID": "42",
+        }
+        with self.identity(), patch.dict(os.environ, environment), \
+             patch.object(WRITER, "api_json", return_value=current), \
+             patch.object(WRITER, "object_page", return_value=self.dispatcher_page(current)):
+            WRITER.reject_newer_dispatcher_barrier(head)
+
     def test_dispatcher_generation_order_uses_created_at_then_id_in_one_bounded_page(self) -> None:
         head = "a" * 40
         current = self.dispatcher_run(88, created_at="2026-08-30T00:00:00Z")
@@ -836,13 +848,15 @@ class StatusWriterUnitTest(unittest.TestCase):
              patch.object(WRITER, "api_json", return_value=run):
             self.assertEqual(WRITER.trusted_dispatcher_source(88), WRITER.DispatcherSource(88, "issue_comment", 1))
 
-    def test_dispatcher_source_rejects_terminal_failure_and_cancellation(self) -> None:
+    def test_dispatcher_source_accepts_terminal_failure_and_cancellation_after_identity_binding(self) -> None:
         for conclusion in ("failure", "cancelled"):
             run = self.dispatcher_run(event="issue_comment", status="completed", conclusion=conclusion)
             with self.subTest(conclusion=conclusion), self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
                  patch.object(WRITER, "api_json", return_value=run):
-                with self.assertRaises(WRITER.GovernanceError):
-                    WRITER.trusted_dispatcher_source(88)
+                self.assertEqual(
+                    WRITER.trusted_dispatcher_source(88),
+                    WRITER.DispatcherSource(88, "issue_comment", 1),
+                )
 
     def test_dispatcher_run_accepts_trusted_manual_recovery_dispatch(self) -> None:
         run = self.dispatcher_run(event="workflow_dispatch")
