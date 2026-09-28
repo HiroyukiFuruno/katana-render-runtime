@@ -133,3 +133,76 @@ fn resource_groups_and_prefix_handle_known_values() {
     assert!(extract_resource_groups("shape=mxgraph.rackGeneral.server").contains("rack"));
     assert_eq!(drawio_prefix(";"), None);
 }
+
+#[test]
+fn selector_covers_stencil_and_shape_variants() {
+    let selector =
+        DrawioResourceSelector::new("shape=mxgraph.arrows2.arrow;shape=mxgraph.custom.group/item");
+
+    assert!(selector.includes("stencils/basic.xml"));
+    assert!(selector.includes("stencils/arrows.xml"));
+    assert!(selector.includes("stencils/custom/group/item.xml"));
+    assert!(!selector.includes("stencils/custom.xml.js"));
+    assert!(!selector.includes("images/custom.svg"));
+    assert!(selector.includes("shapes/custom.js"));
+}
+
+#[test]
+fn selector_covers_image_reference_variants() {
+    let selector = DrawioResourceSelector::new(
+        "image=img/icon.svg;image=/img/photo.png;image=img/photo.jpg;image=img/photo.jpeg;image=img/photo.gif",
+    );
+
+    assert!(selector.includes("img/icon.svg"));
+    assert!(selector.includes("img/photo.png"));
+    assert!(selector.includes("img/photo.jpg"));
+    assert!(selector.includes("img/photo.jpeg"));
+    assert!(selector.includes("img/photo.gif"));
+    assert!(!selector.includes("img/missing.webp"));
+}
+
+#[test]
+fn selector_rejects_unrelated_paths_without_drawio_shape() {
+    let selector = DrawioResourceSelector::new("image=photo.svg");
+
+    assert!(!selector.includes("stencils/custom.xml"));
+    assert!(!selector.includes("shapes/custom.js"));
+    assert!(selector.includes("photo.svg"));
+    assert!(!selector.includes("img/other.svg"));
+    assert!(!selector.includes("img/photo.svg.map"));
+    assert!(!selector.includes("assets/photo.png"));
+}
+
+#[test]
+fn resource_group_aliases_and_prefix_delimiters_are_normalized() {
+    for (prefix, expected) in [
+        ("arrows2", "arrows"),
+        ("ios", "ios7"),
+        ("ios7", "ios7"),
+        ("ios7ui", "ios7"),
+        ("pid2misc", "pid2"),
+        ("pid2valves", "pid2"),
+        ("rackGeneral", "rack"),
+        ("veeam2", "veeam"),
+    ] {
+        assert_eq!(resource_groups(prefix), vec![expected.to_string()]);
+    }
+
+    for suffix in [".rest", ";rest", "\"rest", "'rest", "&rest", " rest"] {
+        assert_eq!(drawio_prefix(&format!("prefix{suffix}")), Some("prefix"));
+    }
+    assert_eq!(drawio_prefix(""), None);
+    assert_eq!(drawio_prefix(".rest"), None);
+}
+
+#[test]
+fn extract_resource_groups_scans_all_shape_references_and_ignores_empty_prefixes() {
+    let groups = extract_resource_groups(
+        "shape=mxgraph.ios7ui.button shape=mxgraph..invalid shape=mxgraph.veeam2.server",
+    );
+
+    assert!(groups.contains("ios7"));
+    assert!(groups.contains("veeam"));
+    assert!(!groups.contains("invalid"));
+    assert_eq!(groups.len(), 2);
+}

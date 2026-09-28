@@ -312,6 +312,69 @@
           "login": "chatgpt-codex-connector[bot]"
         }
       }
+    },
+    {
+      "name": "valid-observed-rocket-suffix",
+      "head": "c3f36a0d5b000000000000000000000000000000",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": true,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues. :rocket:\n\n**Reviewed commit:** `c3f36a0d5b`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]",
+          "id": 199175422,
+          "node_id": "BOT_kgDOC98s_g",
+          "type": "Bot"
+        }
+      }
+    },
+    {
+      "name": "reject-arbitrary-emoji-suffix",
+      "head": "c3f36a0d5b000000000000000000000000000000",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues. :sparkles:\n\n**Reviewed commit:** `c3f36a0d5b`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-rocket-suffix-appended-text",
+      "head": "c3f36a0d5b000000000000000000000000000000",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues. :rocket: verified\n\n**Reviewed commit:** `c3f36a0d5b`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
+    },
+    {
+      "name": "reject-rocket-suffix-wrong-sha",
+      "head": "c3f36a0d5b000000000000000000000000000000",
+      "after": "2026-08-29T09:30:00Z",
+      "before": "2026-08-29T11:00:00Z",
+      "accepted": false,
+      "comment": {
+        "body": "Codex Review: Didn't find any major issues. :rocket:\n\n**Reviewed commit:** `aaaaaaaaaa`",
+        "created_at": "2026-08-29T10:00:00Z",
+        "updated_at": "2026-08-29T10:00:00Z",
+        "user": {
+          "login": "chatgpt-codex-connector[bot]"
+        }
+      }
     }
   ]
 }

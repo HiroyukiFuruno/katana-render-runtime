@@ -81,6 +81,15 @@ class PrePushDispatcherTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), ["check:unset:unset", "issue"])
 
+    def test_python_selection_supports_both_homebrew_macos_prefixes(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("for homebrew_bin in /opt/homebrew/bin /usr/local/bin;", source)
+
+    def test_test_python_override_is_preserved(self) -> None:
+        result = self.run_dispatcher()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), ["check:unset:unset", "issue"])
+
     def test_repository_check_scrubs_the_calling_hook_git_state(self) -> None:
         with mock.patch.dict(
             os.environ,

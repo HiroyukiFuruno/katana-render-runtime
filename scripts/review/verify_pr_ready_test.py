@@ -270,6 +270,8 @@ def successful_state() -> tuple[
         "baseRefOid": "c" * 40,
         "baseRefName": "master",
         "headRefOid": HEAD,
+        "headRefName": "feature/pr-ready",
+        "headRepository": {"nameWithOwner": "owner/repo"},
         "body": BODY,
         "author": {"login": "HiroyukiFuruno"},
         "updatedAt": "2026-08-29T03:03:00Z",
@@ -4192,6 +4194,25 @@ class VerifyPrReadyTest(unittest.TestCase):
                 ),
                 0,
             )
+
+    def test_closed_release_issue_is_rejected_before_readiness_fence(self) -> None:
+        pull_request, threads, comments = successful_state()
+        pull_request["headRefName"] = "release/v0.4.21"
+        closed_issue = subject.issue_contract.Issue(
+            number=64,
+            state="CLOSED",
+            body="Release evidence",
+            url="https://github.com/owner/repo/issues/64",
+            updated_at="2026-08-29T03:00:00Z",
+        )
+        with patch.object(subject, "_gh_json", return_value=pull_request), patch.object(
+            subject, "_paginated_api_array", return_value=comments
+        ), patch.object(subject, "_review_threads", return_value=threads), patch.object(
+            subject.issue_contract,
+            "referenced_issue_snapshot",
+            return_value=(closed_issue,),
+        ):
+            self.assertEqual(subject.main(["--pr", "72", "--repository", "owner/repo"]), 1)
 
     def test_rejects_trusted_marker_added_before_the_final_fence(self) -> None:
         pull_request, threads, comments = successful_state()

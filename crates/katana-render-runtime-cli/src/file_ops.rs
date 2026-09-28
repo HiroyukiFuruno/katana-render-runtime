@@ -34,7 +34,18 @@ mod tests {
             .join(format!("krr-file-missing-dir-{}", std::process::id()))
             .join("out.txt");
 
-        assert!(FileOps::read_to_string(&missing).is_err());
-        assert!(FileOps::write(&unwritable, b"ok").is_err());
+        let read_result = FileOps::read_to_string(&missing);
+        assert!(
+            read_result
+                .as_ref()
+                .is_err_and(|read_error| read_error.to_string().contains("failed to read"))
+        );
+
+        let write_result = FileOps::write(&unwritable, b"ok");
+        assert!(
+            write_result
+                .as_ref()
+                .is_err_and(|write_error| write_error.to_string().contains("failed to write"))
+        );
     }
 }

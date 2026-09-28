@@ -267,6 +267,7 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
         writer = {
             "id": 91,
             "name": "PR governance status writer",
+            "display_title": "source=17 scope=early segment=0",
             "event": "workflow_dispatch",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "repository": {"id": 101, "name": "repo", "url": repository_identity[2]},
@@ -275,6 +276,7 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
         }
         self.assertTrue(writer_matches(writer, "91", repository_identity))
         self.assertFalse(writer_matches({**writer, "id": 92}, "91", repository_identity))
+        self.assertFalse(writer_matches({**writer, "name": "source=17 scope=early segment=0"}, "91", repository_identity))
         self.assertFalse(writer_matches({**writer, "repository": {"id": 101, "name": "repo", "url": repository_identity[2], "full_name": "other/repo"}}, "91", repository_identity))
         self.assertFalse(writer_matches({**writer, "status": "completed", "conclusion": "failure"}, "91", repository_identity))
 

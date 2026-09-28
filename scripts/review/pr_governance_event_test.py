@@ -188,6 +188,7 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
         writer = {
             "id": 91,
             "name": "PR governance status writer",
+            "display_title": "source=17 scope=early segment=0",
             "event": "workflow_dispatch",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "repository": {"id": 101, "name": "repository", "url": self.repository_identity[2]},
@@ -200,6 +201,9 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
             {**writer, "repository": {**writer["repository"], "id": 202}},
             {**writer, "repository": {**writer["repository"], "name": "other"}},
             {**writer, "repository": {**writer["repository"], "url": "https://api.github.com/repos/other/repository"}},
+            {**writer, "name": "source=17 scope=early segment=0"},
+            {**writer, "display_title": "source=18 scope=early segment=1"},
+            {**writer, "display_title": "source=17 scope=early segment=1"},
         ):
             with self.subTest(repository=changed["repository"]):
                 self.assertFalse(matches(changed, "91", self.repository_identity))
@@ -4917,6 +4921,7 @@ raise SystemExit(91)
                 "PATH": f"{directory}{os.pathsep}{os.environ['PATH']}",
             }
             environment = self._with_history_manifest(environment)
+            environment["HISTORY_CARRY_MANIFEST"] = json.dumps([[head, 1]])
             result = subprocess.run([sys.executable, "-c", program], env=environment, capture_output=True, text=True, check=False)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(len(log.read_text(encoding="utf-8").splitlines()), 1)
@@ -5145,6 +5150,7 @@ raise SystemExit(91)
         head = "a" * 40
         valid = {
             "id": 7, "name": "PR governance status writer",
+            "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": head,
             "workflow_id": 44, "repository": {"full_name": "owner/repository"},
@@ -5193,6 +5199,7 @@ raise SystemExit(91)
         head = "a" * 40
         template: dict[str, object] = {
             "name": "PR governance status writer",
+            "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "workflow_id": 44,
             "repository": {"full_name": "owner/repository"},
@@ -5270,6 +5277,7 @@ raise SystemExit(91)
         head = "a" * 40
         template: dict[str, object] = {
             "id": 7, "name": "PR governance status writer",
+            "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": head, "workflow_id": 44,
             "repository": {"full_name": "owner/repository"},
@@ -6584,6 +6592,7 @@ raise SystemExit(91)
                 if isinstance(endpoint, str) and endpoint.endswith("/actions/runs/77"):
                     return response({
                         "id": 77, "name": "PR governance status writer",
+                        "display_title": "source=9 scope=all segment=1",
                         "path": ".github/workflows/pr-governance-status-writer.yml@master",
                         "event": "workflow_dispatch", "head_sha": "a" * 40,
                         "repository": rest_repository, "status": "in_progress", "run_attempt": 1,

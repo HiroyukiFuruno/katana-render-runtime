@@ -33,6 +33,7 @@ class StatusWriterUnitTest(unittest.TestCase):
                 "GOVERNANCE_PRESERVED_TARGET_NUMBERS": "[]", "GOVERNANCE_PRESERVED_WRITER_RUN_ID": "0", "GOVERNANCE_CHECK_MANIFEST": "[]",
                 "GOVERNANCE_TERMINAL_ORDER_NUMBERS": "[]", "GOVERNANCE_TERMINAL_BATCH_NUMBERS": "[]",
                 "GOVERNANCE_CONTINUATION_INDEX": "0", "GOVERNANCE_COMPLETED_WRITER_RUN_IDS": "[]",
+                "GITHUB_ACTIONS": "", "GITHUB_SHA": "", "GITHUB_TOKEN": "", "GH_TOKEN": "",
             },
         )
         self.dispatch_boundary.start()
@@ -855,7 +856,7 @@ class StatusWriterUnitTest(unittest.TestCase):
     def test_writer_and_sensor_attempt_boundaries_reject_bool_zero_string_and_retry(self) -> None:
         head = "a" * 40
         writer_run = {
-            "id": 99, "name": "PR governance status writer",
+            "id": 99, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": head,
             "repository": self.rest_repository(), "status": "in_progress", "run_attempt": 1,
@@ -904,7 +905,7 @@ class StatusWriterUnitTest(unittest.TestCase):
 
     def test_dispatcher_and_writer_reject_full_name_only_repository_identity(self) -> None:
         writer = {
-            "id": 99, "name": "PR governance status writer",
+            "id": 99, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": "d" * 40,
             "repository": self.rest_repository(), "run_attempt": 1,
@@ -1657,7 +1658,7 @@ class StatusWriterUnitTest(unittest.TestCase):
             703: {"id": 703, "name": WRITER.CHECK_NAME, "head_sha": heads[1], "external_id": f"krr-governance/v1/{heads[1]}/dispatcher-88", "updated_at": "2026-08-30T00:00:00Z", "app": {"id": 42}, "status": "in_progress", "conclusion": None, "details_url": f"https://github.com/owner/repository/actions/runs/88?dispatcher_run_id=88&carry_pending=0"},
         }
         dispatcher = {"id": 88, "name": WRITER.DISPATCHER_NAME, "path": ".github/workflows/pr-governance.yml@master", "event": "issues", "head_sha": "d" * 40, "head_branch": "master", "workflow_id": 66, "repository": self.rest_repository(), "run_number": 1, "run_attempt": 1, "status": "in_progress", "conclusion": None, "created_at": "2026-08-30T00:00:00Z"}
-        writer = {"id": 99, "name": "PR governance status writer", "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch", "head_sha": "d" * 40, "repository": self.rest_repository(), "run_attempt": 1, "status": "in_progress"}
+        writer = {"id": 99, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1", "path": ".github/workflows/pr-governance-status-writer.yml@master", "event": "workflow_dispatch", "head_sha": "d" * 40, "repository": self.rest_repository(), "run_attempt": 1, "status": "in_progress"}
         reads: list[int] = []; terminal_ids: list[int] = []
         def api(endpoint: str, *, default_token: bool = False) -> object:
             if endpoint.endswith("/actions/runs/88"):
@@ -2257,7 +2258,7 @@ class StatusWriterUnitTest(unittest.TestCase):
             }
         dispatcher = self.dispatcher_run(88, status="completed", conclusion="success")
         writer = {
-            "id": 99, "name": "PR governance status writer",
+            "id": 99, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": "d" * 40,
             "repository": self.rest_repository(), "run_attempt": 1, "status": "in_progress",
@@ -2383,7 +2384,7 @@ class StatusWriterUnitTest(unittest.TestCase):
             )
         dispatcher = self.dispatcher_run(88, status="completed", conclusion="success")
         writer = {
-            "id": 99, "name": "PR governance status writer",
+            "id": 99, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": default_head,
             "repository": self.rest_repository(), "run_attempt": 1, "status": "in_progress",
@@ -3601,7 +3602,7 @@ class StatusWriterUnitTest(unittest.TestCase):
         )
         dispatcher = self.dispatcher_run(88, status="completed", conclusion="success")
         writer = {
-            "id": 99, "name": "PR governance status writer",
+            "id": 99, "name": "PR governance status writer", "display_title": "source=9 scope=all segment=1",
             "path": ".github/workflows/pr-governance-status-writer.yml@master",
             "event": "workflow_dispatch", "head_sha": default_head,
             "repository": self.rest_repository(), "run_attempt": 1, "status": "in_progress",

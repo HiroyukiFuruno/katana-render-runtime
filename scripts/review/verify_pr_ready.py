@@ -39,7 +39,7 @@ _SELF_CHECK_NAMES = frozenset(
 )
 _CODEX_REVIEW_TRIGGER = re.compile(r"(?m)^\s*@codex\s+review\s*$")
 _CODEX_NO_ISSUES_COMMENT = re.compile(
-    r"\ACodex Review: Didn't find any major issues(?:\.\.\.|\. [^.!?\r\n]+[.!?])\r?\n\r?\n"
+    r"\ACodex Review: Didn't find any major issues(?:\.\.\.|\. :rocket:|\. [^.!?\r\n]+[.!?])\r?\n\r?\n"
     r"\*\*Reviewed commit:\*\* `(?P<commit>[0-9a-f]{10,40})`"
     r"(?:\Z|\r?\n\Z|\r?\n\r?\n"
     r"<details>(?: <summary>|\r?\n<summary>)ℹ️ About Codex in GitHub</summary>\r?\n"
@@ -861,7 +861,7 @@ def closing_reference_errors(
     body: object,
     referenced_issues: Sequence[issue_contract.Issue],
 ) -> list[str]:
-    """Require one canonical open Issue in both commits and the PR body."""
+    """Validate canonical OPEN Issue evidence for a pull request."""
 
     if not isinstance(body, str):
         raise TypeError("pull request body must be a string")
@@ -3005,7 +3005,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--repo",
         repository,
         "--json",
-        "isDraft,baseRefOid,headRefOid,baseRefName,body,updatedAt,statusCheckRollup,reviews,author",
+        "isDraft,baseRefOid,headRefOid,baseRefName,headRefName,headRepository,body,updatedAt,statusCheckRollup,reviews,author",
     )
     if not isinstance(pull_request, dict):
         raise TypeError("pull request response must be an object")
@@ -3076,6 +3076,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     initial_issue_identity: tuple[tuple[int, str, str, str, str], ...] = ()
     initial_closers: frozenset[int] = frozenset()
     if referenced_issues and not errors:
+        initial_issue_identity = _canonical_issue_identity(
+            repository=repository,
+            referenced_issues=referenced_issues,
+        )
         open_pull_requests = (
             _open_pull_request_snapshot(arguments.open_pull_snapshot)
             if arguments.open_pull_snapshot is not None
@@ -3090,10 +3094,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         if not errors:
-            initial_issue_identity = _canonical_issue_identity(
-                repository=repository,
-                referenced_issues=referenced_issues,
-            )
             initial_closers = frozenset(
                 _open_pull_request_closers(
                     repository=repository,
@@ -3131,7 +3131,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         initial_closers=initial_closers,
         open_pull_requests=(
             open_pull_requests
-            if arguments.open_pull_snapshot is not None and referenced_issues and not errors
+            if (
+                arguments.open_pull_snapshot is not None
+                and referenced_issues
+                and not errors
+            )
             else None
         ),
         expected_is_draft=arguments.require_draft,
@@ -3169,7 +3173,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         initial_closers=initial_closers,
         open_pull_requests=(
             open_pull_requests
-            if arguments.open_pull_snapshot is not None and referenced_issues
+            if (
+                arguments.open_pull_snapshot is not None
+                and referenced_issues
+            )
             else None
         ),
         expected_is_draft=arguments.require_draft,

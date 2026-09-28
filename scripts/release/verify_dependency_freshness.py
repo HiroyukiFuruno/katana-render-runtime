@@ -6,13 +6,29 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import total_ordering
 from pathlib import Path
 from urllib import error, parse, request
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        # Python 3.10 does not ship ``tomllib``.  Keep the release check
+        # independent of its host environment by using the vendored, complete
+        # TOML 1.0 parser rather than attempting to parse Cargo manifests.
+        parser_root = str(Path(__file__).resolve().parent)
+        if parser_root not in sys.path:
+            sys.path.insert(0, parser_root)
+        from _tomli import _parser as tomllib  # type: ignore[no-redef]
 
 TIMEOUT_SECONDS = 15
 MAX_RESPONSE_BYTES = 1_000_000
@@ -67,6 +83,236 @@ class Package:
     ecosystem: str
     name: str
     current: str
+    incompatible_prefix_length: int | None = None
+    requirement_operator: str | None = None
+    cargo_requirement: str | None = None
+
+
+@dataclass(frozen=True)
+class AlternateRegistryDependency:
+    package: Package
+    registry: str
+
+
+_CARGO_FULL_VERSION = (
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"(?:\+(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+)
+_CARGO_PRERELEASE_VERSION = (
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)"
+    r"(?:\+(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+)
+_CARGO_REQUIREMENT_TERM = re.compile(
+    r"\s*(?P<operator>\^|~|>=|<=|>|<|=)?\s*"
+    rf"(?P<version>{_CARGO_FULL_VERSION}|(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*|[xX*])){{0,2}}|[xX*])\s*"
+)
+_CARGO_PRERELEASE_REQUIREMENT = re.compile(
+    r"(?P<operator>\^|~|>=|<=|>|<|=)?"
+    rf"(?P<version>{_CARGO_PRERELEASE_VERSION})"
+)
+
+
+@dataclass(frozen=True)
+class CargoRequirementTerm:
+    operator: str
+    parts: tuple[int, ...]
+    prerelease: Version | None = None
+
+
+def _cargo_requirement_parts(value: str) -> tuple[int, ...] | None:
+    """Return the numeric prefix of a Cargo requirement term.
+
+    Wildcards are valid only as a trailing suffix.  The caller retains the
+    original term so that matching can preserve Cargo's partial-version
+    semantics.
+    """
+    if value in {"*", "x", "X"}:
+        return ()
+    parts = value.split(".")
+    numeric: list[int] = []
+    wildcard_seen = False
+    for part in parts:
+        if part in {"*", "x", "X"}:
+            wildcard_seen = True
+            continue
+        if wildcard_seen:
+            raise ValueError(f"unsupported Cargo version requirement: {value!r}")
+        numeric.append(int(part))
+    return tuple(numeric)
+
+
+def _parse_cargo_requirement(requirement: str) -> list[CargoRequirementTerm]:
+    """Parse Cargo's comma-conjoined numeric requirement syntax.
+
+    Cargo accepts comparison clauses and wildcard prefixes in addition to the
+    short forms handled by the release policy's historical compatibility
+    model.  Parse those clauses here rather than rejecting a valid manifest.
+    """
+    terms: list[CargoRequirementTerm] = []
+    for raw_term in requirement.split(","):
+        match = _CARGO_REQUIREMENT_TERM.fullmatch(raw_term)
+        if match is None:
+            raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
+        operator = match.group("operator") or ""
+        raw_version = match.group("version")
+        # Cargo accepts SemVer build metadata in requirements, but SemVer
+        # precedence ignores it.  Remove it only for requirement matching;
+        # retain the original requirement on Package for Cargo resolution.
+        version_without_build = raw_version.split("+", 1)[0]
+        prerelease = (
+            Version.parse(raw_version)
+            if "-" in version_without_build
+            else None
+        )
+        parts = (
+            prerelease.parts
+            if prerelease is not None
+            else _cargo_requirement_parts(version_without_build)
+        )
+        assert parts is not None
+        if operator and not parts:
+            raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
+        if (
+            not operator
+            and any(part in {"*", "x", "X"} for part in version_without_build.split("."))
+        ):
+            operator = "*"
+        terms.append(CargoRequirementTerm(operator, parts, prerelease))
+    if not terms:
+        raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
+    return terms
+
+
+def cargo_requirement_matches(requirement: str, version: Version) -> bool:
+    """Return whether ``version`` satisfies a supported Cargo requirement."""
+    terms = _parse_cargo_requirement(requirement)
+    # Cargo prereleases only match when the requirement explicitly names a
+    # prerelease for the identical release tuple.  Enforce this before each
+    # comparator: a broad upper/lower bound must not admit a different tuple.
+    if not version.stable and not any(
+        term.prerelease is not None and term.prerelease.parts == version.parts
+        for term in terms
+    ):
+        return False
+    for term in terms:
+        operator = term.operator
+        parts = term.parts
+        candidate = term.prerelease or Version(
+            tuple((*parts, *(0 for _ in range(3 - len(parts))))), True, ()
+        )
+        prefix_matches = version.parts[:len(parts)] == parts
+        if operator == "*":
+            # A Cargo wildcard is an exact prefix range: `1.2.*` accepts
+            # 1.2.x but must reject 1.3.0.
+            allowed = prefix_matches
+        elif operator == "=":
+            allowed = version == candidate if term.prerelease is not None else prefix_matches
+        elif operator == "^" or operator == "":
+            if version < candidate:
+                allowed = False
+            elif parts[0] > 0:
+                allowed = version.parts[0] == parts[0]
+            elif len(parts) == 1:
+                allowed = version.parts[0] == 0
+            elif parts[1] > 0:
+                allowed = version.parts[:2] == parts[:2]
+            elif len(parts) == 2:
+                allowed = version.parts[:2] == parts[:2]
+            else:
+                allowed = prefix_matches
+        elif operator == "~":
+            # `~1` is bounded by the major tuple, while `~1.2` and
+            # `~1.2.3` are bounded by the major/minor tuple.
+            allowed = version >= candidate and (
+                version.parts[0] == parts[0]
+                and (len(parts) == 1 or version.parts[1] == parts[1])
+            )
+        elif operator == ">=":
+            allowed = version >= candidate
+        elif operator == ">":
+            # Cargo compares a partial strict lower bound at its supplied
+            # precision: `>1.2` starts at 1.3.0 and `>1` starts at 2.0.0.
+            allowed = (
+                version.parts[:len(parts)] > parts
+                if len(parts) < 3
+                else version > candidate
+            )
+        elif operator == "<=":
+            # Cargo treats a partial inclusive upper bound as applying to the
+            # supplied precision: `<=1` includes 1.x and `<=1.2` includes
+            # 1.2.x.  A fully specified bound retains normal semver ordering.
+            allowed = (
+                version.parts[:len(parts)] <= parts
+                if len(parts) < 3
+                else version <= candidate
+            )
+        elif operator == "<":
+            allowed = version < candidate
+        else:  # pragma: no cover - _CARGO_REQUIREMENT_TERM constrains this.
+            raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
+        if not allowed:
+            return False
+    return True
+
+
+def cargo_requirement_anchor(requirement: str) -> str:
+    """Choose a stable display anchor for a compound Cargo requirement."""
+    lower_bounds = [
+        term.parts for term in _parse_cargo_requirement(requirement)
+        if term.parts and term.operator in {"", "*", "^", "~", "=", ">", ">="}
+    ]
+    parts = max(lower_bounds, default=(), key=lambda value: (*value, *(0 for _ in range(3 - len(value)))))
+    return ".".join(str(part) for part in (*parts, *(0 for _ in range(3 - len(parts)))))
+
+
+def cargo_requirement_package(name: str, requirement: str) -> Package:
+    """Translate a Cargo requirement into the release freshness model."""
+    prerelease_match = _CARGO_PRERELEASE_REQUIREMENT.fullmatch(requirement)
+    if prerelease_match is not None:
+        # Preserve the prerelease so Cargo's special prerelease matching rules
+        # are evaluated instead of treating it as a stable numeric anchor.
+        current = prerelease_match.group("version")
+        Version.parse(current)
+        return Package(
+            "Rust manifest dependency",
+            name,
+            current,
+            requirement_operator=prerelease_match.group("operator") or "",
+            cargo_requirement=requirement,
+        )
+    match = re.fullmatch(r"(=|\^|~)?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", requirement)
+    if match is None:
+        current = cargo_requirement_anchor(requirement)
+        Version.parse(current)
+        return Package("Rust manifest dependency", name, current, requirement_operator="compound", cargo_requirement=requirement)
+
+    operator = match.group(1)
+    major = int(match.group(2))
+    minor = match.group(3)
+    patch = match.group(4)
+    incompatible_prefix_length: int | None = None
+    if operator == "~":
+        incompatible_prefix_length = 1 if minor is None else 2
+    elif operator == "^" or operator is None:
+        if major > 0 or minor is None:
+            incompatible_prefix_length = 1
+        elif int(minor) > 0 or patch is None:
+            incompatible_prefix_length = 2
+        else:
+            incompatible_prefix_length = 3
+    elif operator == "=":
+        # Cargo treats partial exact requirements as a prefix: `=1.2`
+        # accepts 1.2.x but must reject a newly available 1.3.
+        incompatible_prefix_length = len([part for part in (match.group(2), minor, patch) if part is not None])
+    elif minor is None:
+        incompatible_prefix_length = 1
+    elif patch is None:
+        incompatible_prefix_length = 1 if major > 0 else 2
+    current = ".".join((match.group(2), minor or "0", patch or "0"))
+    Version.parse(current)
+    return Package("Rust manifest dependency", name, current, incompatible_prefix_length, operator)
 
 
 def parse_args() -> argparse.Namespace:
@@ -176,6 +422,198 @@ def rust_packages(root: Path) -> list[Package]:
     return sorted(resolved.values(), key=lambda package: (package.name, Version.parse(package.current)))
 
 
+def _load_manifest_payload(root: Path, manifest: Path) -> dict[str, object]:
+    if tomllib is not None:
+        try:
+            payload = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"Rust manifest must be a table: {manifest}")
+        return payload
+    try:
+        payload = tomllib.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Rust manifest must be a table: {manifest}")
+    return payload
+
+
+def rust_manifest_dependencies(root: Path) -> list[Package]:
+    """Return direct registry requirements updated by ``cargo upgrade``."""
+    dependencies_by_version: dict[tuple[str, str, int | None, str | None, str | None], Package] = {}
+
+    def dependency_tables(payload: dict[str, object]) -> list[object]:
+        sections = ("dependencies", "dev-dependencies", "build-dependencies")
+        tables = [payload.get(section) for section in sections]
+        target = payload.get("target")
+        if isinstance(target, dict):
+            for target_config in target.values():
+                if not isinstance(target_config, dict):
+                    continue
+                tables.extend(target_config.get(section) for section in sections)
+        workspace = payload.get("workspace")
+        if isinstance(workspace, dict):
+            tables.append(workspace.get("dependencies"))
+        return tables
+
+    for manifest in sorted(root.glob("**/Cargo.toml")):
+        if any(part in {"target", "vendor", ".git", ".worktrees"} for part in manifest.relative_to(root).parts):
+            continue
+        payload = _load_manifest_payload(root, manifest)
+        for dependencies in dependency_tables(payload):
+            if not isinstance(dependencies, dict):
+                continue
+            for declared_name, declaration in dependencies.items():
+                if not isinstance(declared_name, str):
+                    raise ValueError(f"invalid Rust dependency name in {manifest}")
+                version: object | None = declaration
+                package_name = declared_name
+                if isinstance(declaration, dict):
+                    if "path" in declaration or "git" in declaration or declaration.get("workspace") is True:
+                        continue
+                    # Cargo resolves named alternate registries through their
+                    # configured index.  crates.io's API cannot establish
+                    # freshness for the same package name there, so leave
+                    # this requirement to the Cargo lockfile resolver below.
+                    if "registry" in declaration:
+                        registry = declaration.get("registry")
+                        if not isinstance(registry, str) or not registry:
+                            raise ValueError(f"invalid Rust dependency registry in {manifest}: {declared_name}")
+                        continue
+                    version = declaration.get("version")
+                    package = declaration.get("package")
+                    if package is not None:
+                        if not isinstance(package, str):
+                            raise ValueError(f"invalid Rust dependency package name in {manifest}: {declared_name}")
+                        package_name = package
+                if not isinstance(version, str):
+                    continue
+                try:
+                    package = cargo_requirement_package(package_name, version)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}"
+                    ) from exc
+                dependencies_by_version[
+                    (
+                        package.name, package.current, package.incompatible_prefix_length,
+                        package.requirement_operator, package.cargo_requirement,
+                    )
+                ] = package
+    return sorted(dependencies_by_version.values(), key=lambda package: (package.name, Version.parse(package.current)))
+
+
+def rust_alternate_registry_dependencies(root: Path) -> list[AlternateRegistryDependency]:
+    """Return direct requirements resolved through named Cargo registries."""
+    dependencies: dict[tuple[str, str, str, int | None, str | None, str | None], AlternateRegistryDependency] = {}
+    for manifest in sorted(root.glob("**/Cargo.toml")):
+        if any(part in {"target", "vendor", ".git", ".worktrees"} for part in manifest.relative_to(root).parts):
+            continue
+        payload = _load_manifest_payload(root, manifest)
+        sections = ("dependencies", "dev-dependencies", "build-dependencies")
+        tables: list[object] = [payload.get(section) for section in sections]
+        target = payload.get("target")
+        if isinstance(target, dict):
+            for target_config in target.values():
+                if isinstance(target_config, dict):
+                    tables.extend(target_config.get(section) for section in sections)
+        workspace = payload.get("workspace")
+        if isinstance(workspace, dict):
+            tables.append(workspace.get("dependencies"))
+        for declarations in tables:
+            if not isinstance(declarations, dict):
+                continue
+            for declared_name, declaration in declarations.items():
+                if not isinstance(declared_name, str) or not isinstance(declaration, dict):
+                    continue
+                registry = declaration.get("registry")
+                if registry is None:
+                    continue
+                if not isinstance(registry, str) or not registry:
+                    raise ValueError(f"invalid Rust dependency registry in {manifest}: {declared_name}")
+                version = declaration.get("version")
+                if not isinstance(version, str):
+                    continue
+                package_name = declaration.get("package", declared_name)
+                if not isinstance(package_name, str):
+                    raise ValueError(f"invalid Rust dependency package name in {manifest}: {declared_name}")
+                try:
+                    package = cargo_requirement_package(package_name, version)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}"
+                    ) from exc
+                key = (
+                    registry, package.name, package.current, package.incompatible_prefix_length,
+                    package.requirement_operator, package.cargo_requirement,
+                )
+                dependencies[key] = AlternateRegistryDependency(package, registry)
+    return sorted(dependencies.values(), key=lambda dependency: (dependency.registry, dependency.package.name, Version.parse(dependency.package.current)))
+
+
+def cargo_registry_latest(root: Path, dependency: AlternateRegistryDependency) -> str:
+    """Query a Cargo registry without exposing its response or credentials."""
+    registry_option = "--index" if "://" in dependency.registry else "--registry"
+    completed = subprocess.run(
+        [
+            "cargo", "search", registry_option, dependency.registry,
+            "--limit", "1", "--color", "never", dependency.package.name,
+        ],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if completed.returncode != 0:
+        raise ValueError(f"Cargo registry query failed for {dependency.registry}:{dependency.package.name}")
+    pattern = rf"(?m)^{re.escape(dependency.package.name)}\s*=\s*\"([^\"]+)\"(?:\s|$)"
+    match = re.search(pattern, completed.stdout)
+    if match is None:
+        raise ValueError(f"Cargo registry query returned no exact package for {dependency.registry}:{dependency.package.name}")
+    try:
+        Version.parse(match.group(1))
+    except ValueError as exc:
+        raise ValueError(f"Cargo registry query returned an invalid version for {dependency.registry}:{dependency.package.name}") from exc
+    return match.group(1)
+
+
+def rust_alternate_registries_are_fresh(root: Path, dependencies: list[AlternateRegistryDependency]) -> bool:
+    """Apply ``cargo upgrade --incompatible allow`` semantics per named registry."""
+    return all(not is_stale(dependency.package, cargo_registry_latest(root, dependency)) for dependency in dependencies)
+
+
+def rust_lock_is_latest_compatible(root: Path) -> bool:
+    """Use Cargo's resolver to validate direct and transitive lock freshness.
+
+    Registry ``newest_version`` can be a prerelease or a major version outside
+    the workspace's semver requirements.  Cargo is the authority for the
+    highest compatible resolution, including transitive dependencies.
+    """
+    completed = subprocess.run(
+        # リリース workflow は CARGO_TERM_COLOR=always を設定するため、Locking 件数を
+        # 安定して判定できるよう Cargo 出力を明示的に無色化する。
+        ["cargo", "update", "--dry-run", "--color=never", "--manifest-path", str(root / "Cargo.toml")],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if completed.returncode != 0:
+        raise ValueError(f"cargo update dry-run failed: {completed.stderr.strip()}")
+    output = f"{completed.stdout}\n{completed.stderr}"
+    # Cargo has changed the human-readable suffix over time (for example,
+    # ``version`` versus ``versions`` and an optional Rust version).  The
+    # resolver's only stable signal here is the number after ``Locking``;
+    # keep the rest of the line out of the freshness contract.
+    match = re.search(r"\bLocking\s+([0-9]+)\s+packages?\b", output)
+    # Cargo omits the Locking line when the existing lockfile already resolves
+    # every compatible dependency; a successful dry-run is then the no-update result.
+    return match is None or match.group(1) == "0"
+
+
 def js_packages(root: Path) -> list[Package]:
     lock = load_bun_lock(root / "bun.lock")
     entries = lock.get("packages", {})
@@ -188,11 +626,32 @@ def js_packages(root: Path) -> list[Package]:
         entry = entries.get(name)
         if not isinstance(entry, list) or not entry or not isinstance(entry[0], str):
             raise ValueError(f"resolved JavaScript package missing from bun.lock: {name}")
-        prefix = f"{name}@"
-        if not entry[0].startswith(prefix):
+        resolved_name, separator, resolved_version = entry[0].rpartition("@")
+        if not separator or not resolved_name or not resolved_version:
             raise ValueError(f"invalid bun.lock package entry: {name}")
-        packages.append(Package("JavaScript", name, entry[0][len(prefix) :]))
+        packages.append(Package("JavaScript", resolved_name, resolved_version))
     return packages
+
+
+def js_lock_is_latest_compatible(root: Path) -> bool:
+    """Use Bun's resolver for direct and transitive JavaScript freshness."""
+    package = root / "package.json"
+    lock = root / "bun.lock"
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        candidate = Path(temporary_directory)
+        for source in (package, lock):
+            shutil.copy2(source, candidate / source.name)
+        completed = subprocess.run(
+            ["bun", "update", "--latest"], cwd=candidate, check=False,
+            capture_output=True, text=True,
+            timeout=120,
+        )
+        if completed.returncode != 0:
+            raise ValueError(f"bun update failed: {completed.stderr.strip()}")
+        return all(
+            source.read_bytes() == (candidate / source.name).read_bytes()
+            for source in (package, lock)
+        )
 
 
 def runtime_assets(root: Path) -> list[Package]:
@@ -266,6 +725,11 @@ def latest(package: Package) -> str:
         if not isinstance(payload, dict):
             raise ValueError(f"latest version response must be a JSON object: {package.name}")
         value = payload.get("version")
+    elif package.ecosystem == "Rust manifest dependency":
+        payload = json.loads(fetch(f"https://crates.io/api/v1/crates/{parse.quote(package.name, safe='')}").decode("utf-8"))
+        if not isinstance(payload, dict) or not isinstance(payload.get("crate"), dict):
+            raise ValueError(f"latest version response must be a JSON object: {package.name}")
+        value = payload["crate"].get("newest_version")
     else:
         kind, url = package.name.split("|", maxsplit=1)
         body = fetch(url).decode("utf-8")
@@ -292,22 +756,52 @@ def display_name(package: Package) -> str:
     return package.name.split("|", maxsplit=1)[0]
 
 
+def is_stale(package: Package, resolved_version: str) -> bool:
+    current = Version.parse(package.current)
+    resolved = Version.parse(resolved_version)
+    if package.cargo_requirement is not None:
+        return not cargo_requirement_matches(package.cargo_requirement, resolved)
+    if package.incompatible_prefix_length is not None:
+        length = package.incompatible_prefix_length
+        return resolved.parts[:length] > current.parts[:length]
+    return resolved > current
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args() if argv is None else argparse.Namespace(root=Path(argv[0]))
     try:
-        packages = rust_packages(args.root) + js_packages(args.root) + runtime_assets(args.root)
+        rust = rust_packages(args.root)
+        if not rust_lock_is_latest_compatible(args.root):
+            print("Dependency freshness check rejected this release:", file=sys.stderr)
+            print("Rust Cargo.lock is not at the latest compatible resolution.", file=sys.stderr)
+            print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
+            return 1
+        if not rust_alternate_registries_are_fresh(args.root, rust_alternate_registry_dependencies(args.root)):
+            print("Dependency freshness check rejected this release:", file=sys.stderr)
+            print("A Cargo alternate-registry dependency has an incompatible update available.", file=sys.stderr)
+            print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
+            return 1
+        rust_manifest = rust_manifest_dependencies(args.root)
+        javascript = js_packages(args.root)
+        if not js_lock_is_latest_compatible(args.root):
+            print("Dependency freshness check rejected this release:", file=sys.stderr)
+            print("JavaScript bun.lock is not at the latest compatible resolution.", file=sys.stderr)
+            print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
+            return 1
+        packages = runtime_assets(args.root)
+        freshness_packages = [*rust_manifest, *packages]
         with ThreadPoolExecutor(max_workers=8) as executor:
-            resolved = list(zip(packages, executor.map(latest, packages, timeout=TIMEOUT_SECONDS * len(packages))))
-    except (ValueError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            resolved = list(zip(freshness_packages, executor.map(latest, freshness_packages, timeout=TIMEOUT_SECONDS * len(freshness_packages))))
+    except (ValueError, TimeoutError, subprocess.TimeoutExpired, json.JSONDecodeError, UnicodeDecodeError) as exc:
         print(f"Dependency freshness check failed closed: {exc}", file=sys.stderr)
         return 1
-    stale = [f"{package.ecosystem} {display_name(package)}: {package.current} -> {resolved_version}" for package, resolved_version in resolved if Version.parse(resolved_version) > Version.parse(package.current)]
+    stale = [f"{package.ecosystem} {display_name(package)}: {package.current} -> {resolved_version}" for package, resolved_version in resolved if is_stale(package, resolved_version)]
     if stale:
         print("Dependency freshness check rejected this release:", file=sys.stderr)
         print("\n".join(stale), file=sys.stderr)
         print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
         return 1
-    print(f"Dependency freshness check passed ({len(packages)} resolved dependencies and pinned runtime assets).")
+    print(f"Dependency freshness check passed ({len(rust) + len(javascript) + len(packages)} resolved dependencies and pinned runtime assets).")
     return 0
 
 

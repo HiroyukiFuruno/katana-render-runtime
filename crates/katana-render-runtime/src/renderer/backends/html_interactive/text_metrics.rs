@@ -4,10 +4,7 @@ use crate::markdown::svg_rasterize::SvgRasterizeOps;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-#[cfg(not(test))]
 const MAX_CACHED_MEASUREMENTS: usize = 4096;
-#[cfg(test)]
-const MAX_CACHED_MEASUREMENTS: usize = 16;
 
 thread_local! {
     static TEXT_WIDTH_CACHE: RefCell<HashMap<TextMeasurementKey, f32>> = RefCell::new(HashMap::new());
@@ -49,13 +46,23 @@ pub(super) fn text_width(text: &str, style: &CssStyle) -> f32 {
             return *width;
         }
         let width = measured_text_width(&transformed, style);
-        let mut cache = cache.borrow_mut();
-        if cache.len() >= MAX_CACHED_MEASUREMENTS {
-            cache.clear();
-        }
-        cache.insert(key, width);
+        insert_bounded_measurement(&mut cache.borrow_mut(), key, width, MAX_CACHED_MEASUREMENTS);
         width
     })
+}
+
+fn insert_bounded_measurement(
+    cache: &mut HashMap<TextMeasurementKey, f32>,
+    key: TextMeasurementKey,
+    width: f32,
+    maximum_entries: usize,
+) {
+    if cache.len() >= maximum_entries
+        && let Some(evicted_key) = cache.keys().next().cloned()
+    {
+        cache.remove(&evicted_key);
+    }
+    cache.insert(key, width);
 }
 
 fn measured_text_width(text: &str, style: &CssStyle) -> f32 {
@@ -80,10 +87,11 @@ fn heuristic_text_width(text: &str, style: &CssStyle) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_CACHED_MEASUREMENTS, TEXT_WIDTH_CACHE, heuristic_text_width, measured_text_width,
-        text_width,
+        MAX_CACHED_MEASUREMENTS, TEXT_WIDTH_CACHE, TextMeasurementKey, heuristic_text_width,
+        insert_bounded_measurement, measured_text_width, text_width,
     };
     use crate::renderer::backends::html_interactive::style::CssStyle;
+    use std::collections::HashMap;
 
     #[test]
     fn text_measurement_handles_empty_cached_and_bounded_paths() {
@@ -92,12 +100,28 @@ mod tests {
         let first = text_width("cached", &style);
         assert_eq!(text_width("cached", &style), first);
 
-        for index in 0..=MAX_CACHED_MEASUREMENTS {
+        for index in 0..8 {
             assert!(text_width(&format!("entry-{index}"), &style) > 0.0);
         }
         TEXT_WIDTH_CACHE.with(|cache| {
             assert!(cache.borrow().len() <= MAX_CACHED_MEASUREMENTS);
         });
+    }
+
+    #[test]
+    fn bounded_cache_eviction_preserves_capacity_instead_of_clearing() {
+        let style = CssStyle::browser_default();
+        let mut cache = HashMap::new();
+        insert_bounded_measurement(&mut cache, TextMeasurementKey::new("first", &style), 1.0, 2);
+        insert_bounded_measurement(
+            &mut cache,
+            TextMeasurementKey::new("second", &style),
+            2.0,
+            2,
+        );
+        insert_bounded_measurement(&mut cache, TextMeasurementKey::new("third", &style), 3.0, 2);
+
+        assert_eq!(cache.len(), 2);
     }
 
     #[test]

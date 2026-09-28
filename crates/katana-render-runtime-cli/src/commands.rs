@@ -113,6 +113,63 @@ mod tests {
     }
 
     #[test]
+    fn parses_reference_update_command() -> Result<(), Box<dyn std::error::Error>> {
+        let cli = Cli::try_parse_from([
+            "krr",
+            "mermaid",
+            "reference-update",
+            "--fixtures",
+            "tests/fixtures/mermaid",
+        ])?;
+
+        assert!(matches!(
+            cli.command,
+            Commands::Mermaid {
+                action: DiagramAction::ReferenceUpdate { .. }
+            }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn parses_bench_command() -> Result<(), Box<dyn std::error::Error>> {
+        let cli = Cli::try_parse_from([
+            "krr",
+            "plantuml",
+            "bench",
+            "--fixtures",
+            "tests/fixtures/plantuml",
+        ])?;
+
+        assert!(matches!(
+            cli.command,
+            Commands::Plantuml {
+                action: DiagramAction::Bench { .. }
+            }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn compare_command_uses_default_minimum_score() -> Result<(), Box<dyn std::error::Error>> {
+        let cli = Cli::try_parse_from([
+            "krr",
+            "drawio",
+            "compare",
+            "--fixtures",
+            "tests/fixtures/drawio",
+        ])?;
+
+        assert!(matches!(
+            cli.command,
+            Commands::Drawio {
+                action: DiagramAction::Compare { min_score, .. }
+            } if (min_score - 99.0).abs() < f32::EPSILON
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn parses_plantuml_render_command() -> Result<(), Box<dyn std::error::Error>> {
         let args = "krr plantuml render --input in.puml --theme cyborg --theme-mode light";
         let cli = Cli::try_parse_from(args.split_whitespace())?;

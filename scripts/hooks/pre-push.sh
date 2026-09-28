@@ -4,6 +4,17 @@ set -euo pipefail
 repository_root="$(git rev-parse --show-toplevel)"
 cd "${repository_root}"
 
+# macOS Git hooks can inherit /usr/bin ahead of Homebrew; the release gates require tomllib.
+python3_path="$(command -v python3 || true)"
+if [[ "${python3_path}" == "/usr/bin/python3" ]]; then
+  for homebrew_bin in /opt/homebrew/bin /usr/local/bin; do
+    if [[ -x "${homebrew_bin}/python3" ]]; then
+      export PATH="${homebrew_bin}:${PATH}"
+      break
+    fi
+  done
+fi
+
 # Hooks inherit the caller's repository environment.  The quality gate creates
 # temporary Git repositories, so keeping it would redirect their fixtures into
 # the branch that is being pushed.

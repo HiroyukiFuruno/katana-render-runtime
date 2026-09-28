@@ -274,6 +274,27 @@ mod tests {
     }
 
     #[test]
+    fn css_font_matching_covers_stretch_extremes_and_style_fallback() {
+        for stretch in [
+            Stretch::UltraCondensed,
+            Stretch::ExtraCondensed,
+            Stretch::Condensed,
+            Stretch::SemiCondensed,
+            Stretch::Normal,
+            Stretch::SemiExpanded,
+            Stretch::Expanded,
+            Stretch::ExtraExpanded,
+            Stretch::UltraExpanded,
+        ] {
+            let _ = css_stretch_match_rank(stretch, Stretch::Normal);
+        }
+        assert_eq!(css_style_match_rank(Style::Oblique, Style::Oblique), 0);
+        assert_eq!(css_style_match_rank(Style::Italic, Style::Oblique), 1);
+        assert_eq!(css_style_match_rank(Style::Oblique, Style::Normal), 3);
+        assert_eq!(css_style_match_rank(Style::Normal, Style::Oblique), 2);
+    }
+
+    #[test]
     fn italic_request_prefers_oblique_before_normal() {
         assert!(
             css_style_match_rank(Style::Oblique, Style::Italic)
