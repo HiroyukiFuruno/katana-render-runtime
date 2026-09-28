@@ -836,6 +836,14 @@ class StatusWriterUnitTest(unittest.TestCase):
              patch.object(WRITER, "api_json", return_value=run):
             self.assertEqual(WRITER.trusted_dispatcher_source(88), WRITER.DispatcherSource(88, "issue_comment", 1))
 
+    def test_dispatcher_source_rejects_terminal_failure_and_cancellation(self) -> None:
+        for conclusion in ("failure", "cancelled"):
+            run = self.dispatcher_run(event="issue_comment", status="completed", conclusion=conclusion)
+            with self.subTest(conclusion=conclusion), self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
+                 patch.object(WRITER, "api_json", return_value=run):
+                with self.assertRaises(WRITER.GovernanceError):
+                    WRITER.trusted_dispatcher_source(88)
+
     def test_dispatcher_run_accepts_trusted_manual_recovery_dispatch(self) -> None:
         run = self.dispatcher_run(event="workflow_dispatch")
         with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \

@@ -196,12 +196,16 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
             "status": "in_progress",
         }
         self.assertTrue(matches(writer, "91", self.repository_identity))
+        self.assertTrue(matches(
+            {**writer, "name": "source=17 scope=early segment=0"},
+            "91", self.repository_identity,
+        ))
         for changed in (
             {**writer, "repository": {**writer["repository"], "full_name": "other/repository"}},
             {**writer, "repository": {**writer["repository"], "id": 202}},
             {**writer, "repository": {**writer["repository"], "name": "other"}},
             {**writer, "repository": {**writer["repository"], "url": "https://api.github.com/repos/other/repository"}},
-            {**writer, "name": "source=17 scope=early segment=0"},
+            {**writer, "name": "source=17 scope=early segment=1"},
             {**writer, "display_title": "source=18 scope=early segment=1"},
             {**writer, "display_title": "source=17 scope=early segment=1"},
         ):
