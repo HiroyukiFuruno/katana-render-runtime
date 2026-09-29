@@ -1,7 +1,8 @@
 use super::{
-    MAX_SUBRESOURCE_BYTES, check_data_url_size, decode_data_url, decode_forgiving_base64,
-    load_image_data_url, load_text,
+    MAX_BASE64_DATA_URL_BYTES, MAX_SUBRESOURCE_BYTES, check_data_url_size, decode_data_url,
+    decode_forgiving_base64, load_image_data_url, load_text,
 };
+use base64::Engine as _;
 use url::Url;
 
 #[test]
@@ -132,7 +133,7 @@ fn malformed_text_data_urls_are_rejected() {
 
 #[test]
 fn oversized_data_url_payloads_are_rejected_before_decoding() {
-    let oversized_payload = "A".repeat(MAX_SUBRESOURCE_BYTES as usize + 1);
+    let oversized_payload = "A".repeat(MAX_BASE64_DATA_URL_BYTES as usize + 1);
     let source = format!("data:image/png;base64,{oversized_payload}");
     with_url(&source, |url| {
         assert!(matches!(
@@ -145,10 +146,50 @@ fn oversized_data_url_payloads_are_rejected_before_decoding() {
 #[test]
 fn decoded_data_url_size_uses_the_subresource_limit() {
     assert!(matches!(
-        check_data_url_size(MAX_SUBRESOURCE_BYTES as usize + 1, "decoded"),
+        check_data_url_size(MAX_SUBRESOURCE_BYTES as usize + 1, MAX_SUBRESOURCE_BYTES, "decoded"),
         Err(error) if error.contains("decoded payload exceeds")
     ));
-    assert!(check_data_url_size(MAX_SUBRESOURCE_BYTES as usize, "decoded").is_ok());
+    assert!(
+        check_data_url_size(
+            MAX_SUBRESOURCE_BYTES as usize,
+            MAX_SUBRESOURCE_BYTES,
+            "decoded"
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn encoded_data_url_size_allows_base64_expansion_at_the_decoded_limit() {
+    assert!(
+        check_data_url_size(
+            MAX_BASE64_DATA_URL_BYTES as usize,
+            MAX_BASE64_DATA_URL_BYTES,
+            "encoded"
+        )
+        .is_ok()
+    );
+    assert!(matches!(
+        check_data_url_size(
+            MAX_BASE64_DATA_URL_BYTES as usize + 1,
+            MAX_BASE64_DATA_URL_BYTES,
+            "encoded"
+        ),
+        Err(error) if error.contains("encoded payload exceeds")
+    ));
+}
+
+#[test]
+fn base64_data_url_at_the_decoded_limit_is_accepted() {
+    let bytes = vec![0_u8; MAX_SUBRESOURCE_BYTES as usize];
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let source = format!("data:application/octet-stream;base64,{encoded}");
+    with_url(&source, |url| {
+        assert_eq!(
+            decode_data_url(url).ok().as_deref().map(<[u8]>::len),
+            Some(MAX_SUBRESOURCE_BYTES as usize)
+        );
+    });
 }
 
 fn with_url(source: &str, assertion: impl FnMut(&Url)) {
