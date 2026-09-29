@@ -59,6 +59,26 @@ window.addEventListener('load', () => { document.getElementById('status').textCo
 }
 
 #[test]
+fn dispatches_load_for_local_iframes_added_by_a_lifecycle_handler() -> TestResult {
+    let output = render(
+        r#"<p id=status></p><iframe id=seed data-krr-local-frame></iframe><script>
+const status = document.getElementById('status');
+document.getElementById('seed').addEventListener('load', () => {
+  status.textContent += 'seed|';
+  const frame = document.createElement('iframe');
+  frame.setAttribute('data-krr-local-frame', '');
+  frame.addEventListener('load', () => { status.textContent += 'dynamic|'; });
+  document.body.appendChild(frame);
+});
+window.addEventListener('load', () => { status.textContent += 'window|'; });
+</script>"#,
+    )?;
+
+    assert!(output.contains(">seed|dynamic|window|</p>"), "{output}");
+    Ok(())
+}
+
+#[test]
 fn document_event_target_honors_once_remove_and_handle_event() -> TestResult {
     let output = render(
         r#"<p id=status></p><script>

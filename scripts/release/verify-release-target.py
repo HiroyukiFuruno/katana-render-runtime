@@ -16,11 +16,12 @@ from urllib import error, request
 
 REQUIRED_LATEST_RELEASE = "v0.4.21"
 REQUIRED_TARGET_RELEASE = "v0.4.22"
-# 実レビュー対象のsquash merge後もdefault historyに残るPR baseを固定する。
-# リリース内容そのものは不変manifestで別途検証するため、squashで消える
-# release branch上の個別commitを祖先性の要件にしてはならない。
+# 実レビュー対象のdefault baseと、v0.4.22で指定された修正commitを固定する。
+# リリース内容そのものは不変manifestでも別途検証するが、manifest一致だけで
+# 必須修正commitの祖先性を代替してはならない。
 REQUIRED_RELEASE_COMMITS = (
     "9ad18a07358cf28b742cc00c12c0c9f85956d20a",  # PR #99のdefault base
+    "1bc497bdfd3b8c4318e9ee1609d147b6925b43e5",  # v0.4.22指定修正
 )
 # squash merge 後も default history に残る v0.4.21 の merge commit を、
 # 変更集合の起点として使う。期待値そのものは commit/tree object ではなく、

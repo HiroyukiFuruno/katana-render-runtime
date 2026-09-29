@@ -1918,8 +1918,9 @@ const __krrDispatchPendingImages = async (document) => {
       const source = image.getAttribute("src");
       if (dispatchedImageSources.get(image) === source) continue;
       foundImage = true;
-      dispatchedImageSources.set(image, source);
       __krrDispatchImageLoad(image);
+      // handler が同期的に src を置換した場合は、dispatch 後の最終値を記録する。
+      dispatchedImageSources.set(image, image.getAttribute("src"));
       imageDispatches += 1;
       if (imageDispatches >= maxImageDispatches) {
         await Promise.resolve();
@@ -1936,11 +1937,29 @@ globalThis.__krrDispatchWindowLoad = async () => {
   if (body !== null) __krrRouteWindowLoadElement(body);
   else
     __krrRouteWindowLoadElement(__krrElement(__krrNativeDom("querySelector", "html > frameset")));
-  for (const frame of document.querySelectorAll("iframe")) {
-    if (!frame.contentDocument) continue;
-    try {
-      frame.dispatchEvent(new Event("load"));
-    } catch (_error) {}
+  const dispatchedFrames = new Set();
+  const maxFrameDispatches = 1024;
+  const maxFrameRescans = 8;
+  let emptyFrameRescanCount = 0;
+  let frameDispatches = 0;
+  for (
+    let rescan = 0;
+    rescan < maxFrameRescans && emptyFrameRescanCount < 2;
+    rescan += 1
+  ) {
+    let foundFrame = false;
+    for (const frame of document.querySelectorAll("iframe")) {
+      if (!frame.contentDocument || dispatchedFrames.has(frame)) continue;
+      foundFrame = true;
+      dispatchedFrames.add(frame);
+      try {
+        frame.dispatchEvent(new Event("load"));
+      } catch (_error) {}
+      frameDispatches += 1;
+      if (frameDispatches >= maxFrameDispatches) break;
+    }
+    await Promise.resolve();
+    emptyFrameRescanCount = foundFrame ? 0 : emptyFrameRescanCount + 1;
   }
   await __krrDispatchPendingImages(document);
   __krrDocumentReadyState = "complete";

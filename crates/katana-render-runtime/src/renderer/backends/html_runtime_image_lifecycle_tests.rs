@@ -185,6 +185,18 @@ fn image_lifecycle_listener_failures_do_not_stop_later_images_or_window_load() -
     Ok(())
 }
 
+#[test]
+fn records_the_final_source_after_an_image_handler_replaces_it() -> TestResult {
+    let first = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+    let replacement = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    let output = render(&format!(
+        r#"<p id=status></p><img id=image src="{first}" onload="this.dataset.count = String(Number(this.dataset.count || 0) + 1); if (!this.dataset.swapped) {{ this.dataset.swapped = '1'; this.src = '{replacement}'; }}"><script>window.onload = () => {{ document.getElementById('status').textContent = document.getElementById('image').dataset.count; }};</script>"#,
+    ))?;
+
+    assert!(output.contains(">2</p>"), "{output}");
+    Ok(())
+}
+
 fn percent_encoded_data_url(media_type: &str, base64_payload: &str) -> TestResult<String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(base64_payload)

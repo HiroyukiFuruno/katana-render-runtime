@@ -129,6 +129,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 "-q",
                 source_repository,
                 REQUIRED_COMMITS[0],
+                REQUIRED_COMMITS[1],
                 VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE,
             )
             manifest_mismatch = git(
@@ -139,7 +140,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 "commit-tree",
                 f"{VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE}^{{tree}}",
                 "-p",
-                REQUIRED_COMMITS[0],
+                REQUIRED_COMMITS[1],
                 "-m",
                 "release descendant with a mismatched manifest",
             )
@@ -301,11 +302,11 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 squash = git(
                     "commit-tree",
                     # Model the documented squash exception from the reviewed
-                    # release head. The release comparison itself must not
-                    # retain that source commit after the squash.
+                    # release head while retaining the explicitly required fix
+                    # commit as an ancestry proof.
                     "release^{tree}",
                     "-p",
-                    "base",
+                    REQUIRED_COMMITS[1],
                     "-m", "actual release tree as a squash",
                 )
                 git("branch", "-f", "candidate", squash)
@@ -357,20 +358,20 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     "commit-tree",
                     "release^{tree}",
                     "-p",
-                    self.source_git("rev-parse", f"{REQUIRED_COMMITS[0]}^"),
+                    REQUIRED_COMMITS[0],
                     "-m",
-                    "release tree without the required default base",
+                    "release tree without the required v0.4.22 fix",
                 )
                 git("branch", "-f", "invalid", invalid_squash)
                 rejected = self.run_check("v0.4.22", "v0.4.21", "invalid", repository)
                 self.assertNotEqual(rejected.returncode, 0)
-                self.assertIn(REQUIRED_COMMITS[0], rejected.stderr)
+                self.assertIn(REQUIRED_COMMITS[1], rejected.stderr)
 
                 arbitrary_tree_with_required_base = git(
                     "commit-tree",
                     f"{VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE}^{{tree}}",
                     "-p",
-                    "base",
+                    REQUIRED_COMMITS[1],
                     "-m",
                     "arbitrary tree with the required default base",
                 )
