@@ -1932,35 +1932,39 @@ const __krrDispatchPendingImages = async (document) => {
   }
 };
 
-globalThis.__krrDispatchWindowLoad = async () => {
-  const body = document.body;
-  if (body !== null) __krrRouteWindowLoadElement(body);
-  else
-    __krrRouteWindowLoadElement(__krrElement(__krrNativeDom("querySelector", "html > frameset")));
+const __krrDispatchLocalFrame = (frame) => {
+  try {
+    frame.dispatchEvent(new Event("load"));
+  } catch (_error) {}
+};
+
+const __krrDispatchPendingLocalFrames = async (document) => {
   const dispatchedFrames = new Set();
   const maxFrameDispatches = 1024;
   const maxFrameRescans = 8;
   let emptyFrameRescanCount = 0;
   let frameDispatches = 0;
-  for (
-    let rescan = 0;
-    rescan < maxFrameRescans && emptyFrameRescanCount < 2;
-    rescan += 1
-  ) {
+  for (let rescan = 0; rescan < maxFrameRescans && emptyFrameRescanCount < 2; rescan += 1) {
     let foundFrame = false;
     for (const frame of document.querySelectorAll("iframe")) {
       if (!frame.contentDocument || dispatchedFrames.has(frame)) continue;
       foundFrame = true;
       dispatchedFrames.add(frame);
-      try {
-        frame.dispatchEvent(new Event("load"));
-      } catch (_error) {}
+      __krrDispatchLocalFrame(frame);
       frameDispatches += 1;
       if (frameDispatches >= maxFrameDispatches) break;
     }
     await Promise.resolve();
     emptyFrameRescanCount = foundFrame ? 0 : emptyFrameRescanCount + 1;
   }
+};
+
+globalThis.__krrDispatchWindowLoad = async () => {
+  const body = document.body;
+  if (body !== null) __krrRouteWindowLoadElement(body);
+  else
+    __krrRouteWindowLoadElement(__krrElement(__krrNativeDom("querySelector", "html > frameset")));
+  await __krrDispatchPendingLocalFrames(document);
   await __krrDispatchPendingImages(document);
   __krrDocumentReadyState = "complete";
   __krrDispatchDocumentReadyStateChange();
