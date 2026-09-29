@@ -19,6 +19,7 @@ pub(super) struct SourceOrderSink {
     window_load_handler_observer: RefCell<WindowLoadHandlerObserver>,
     body_onload_script_index: Cell<Option<usize>>,
     body_onload_source_order_index: Cell<Option<usize>>,
+    select_depth: Cell<usize>,
     source_order: RefCell<Vec<SourceOrderEntry>>,
 }
 
@@ -31,6 +32,7 @@ impl SourceOrderSink {
             window_load_handler_observer: RefCell::new(WindowLoadHandlerObserver::default()),
             body_onload_script_index: Cell::new(None),
             body_onload_source_order_index: Cell::new(None),
+            select_depth: Cell::new(0),
             source_order: RefCell::new(Vec::new()),
         }
     }
@@ -62,20 +64,23 @@ impl SourceOrderSink {
     }
 
     fn observe_source_order(&self, tag: &Tag) {
+        if tag.name.to_string().eq_ignore_ascii_case("select") {
+            match tag.kind {
+                TagKind::StartTag => self.select_depth.set(self.select_depth.get() + 1),
+                TagKind::EndTag => self
+                    .select_depth
+                    .set(self.select_depth.get().saturating_sub(1)),
+            }
+        }
         if tag.kind != TagKind::StartTag {
             return;
         }
-        self.observe_iframe(tag);
-        self.observe_window_load_handler(tag);
-    }
-
-    fn observe_iframe(&self, tag: &Tag) {
-        if !tag.name.to_string().eq_ignore_ascii_case("iframe") {
-            return;
+        if tag.name.to_string().eq_ignore_ascii_case("iframe") && self.select_depth.get() == 0 {
+            self.source_order
+                .borrow_mut()
+                .push(SourceOrderEntry::Iframe);
         }
-        self.source_order
-            .borrow_mut()
-            .push(SourceOrderEntry::Iframe);
+        self.observe_window_load_handler(tag);
     }
 
     fn observe_window_load_handler(&self, tag: &Tag) {
