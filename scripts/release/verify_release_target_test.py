@@ -132,6 +132,10 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE,
             )
             manifest_mismatch = git(
+                "-c",
+                "user.name=release-target-test",
+                "-c",
+                "user.email=release-target-test@example.invalid",
                 "commit-tree",
                 f"{VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE}^{{tree}}",
                 "-p",
