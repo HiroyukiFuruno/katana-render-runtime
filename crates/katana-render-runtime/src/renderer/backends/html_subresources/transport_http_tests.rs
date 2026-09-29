@@ -1,5 +1,5 @@
 use super::super::HtmlSubresourceLoader;
-use super::{load_bytes, load_image_data_url};
+use super::{image_data_url_is_decodable, load_bytes, load_image_data_url};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::Path;
@@ -12,11 +12,15 @@ fn unsupported_schemes_and_image_media_types_are_explicit() {
     with_url("ftp://example.test/image.png", |ftp| {
         assert!(load_bytes(ftp).is_err());
     });
+    assert!(!image_data_url_is_decodable("not a URL"));
     assert!(!HtmlSubresourceLoader::image_data_url_is_decodable(
         "not a URL",
     ));
     with_http_response(None, b"not an image", |url| {
-        assert!(load_image_data_url(url).is_err());
+        assert_eq!(
+            load_image_data_url(url),
+            Err("subresource is not a supported image".to_string())
+        );
     });
 }
 

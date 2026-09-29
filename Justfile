@@ -302,8 +302,8 @@ krr-build:
 
 # Force-update all Rust and JavaScript dependencies plus pinned runtime assets, then run required checks
 depends-update-all:
+    {{CARGO}} upgrade -i allow --pinned allow
     python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"
-    {{CARGO}} upgrade -i allow --pinned allow --exclude html5ever --exclude markup5ever --exclude markup5ever_rcdom
     {{CARGO}} update
     bun update --latest
     bun run scripts/runtime-assets/depends-update-all.ts

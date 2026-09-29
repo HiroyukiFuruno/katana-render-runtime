@@ -34,8 +34,7 @@ class UpdateHtml5everPairTest(unittest.TestCase):
                     "rtk",
                     "cargo",
                     "upgrade",
-                    "--incompatible",
-                    "allow",
+                    "--incompatible=allow",
                     "--package",
                     "html5ever",
                     "--package",
@@ -62,16 +61,22 @@ class UpdateHtml5everPairTest(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("/opt/homebrew/bin/rtk cargo upgrade --incompatible", result.stdout)
-        self.assertIn("--incompatible allow", result.stdout)
-        self.assertIn("--package html5ever --package markup5ever", result.stdout)
+        self.assertIn("/opt/homebrew/bin/rtk cargo upgrade --incompatible=allow", result.stdout)
+        self.assertNotIn("--incompatible allow", result.stdout)
+        self.assertIn("--incompatible=allow --package html5ever --package markup5ever", result.stdout)
 
-    def test_depends_update_all_supplies_incompatible_policy_value(self) -> None:
+    def test_depends_update_all_runs_pair_update_after_broad_upgrade(self) -> None:
         justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
-        self.assertIn(
-            "{{CARGO}} upgrade -i allow --pinned allow --exclude html5ever",
-            justfile,
-        )
+        recipe = justfile.split("depends-update-all:\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
+        commands = [line.strip() for line in recipe.splitlines() if line.strip()]
+        broad_upgrade_index = next(index for index, line in enumerate(commands) if "{{CARGO}} upgrade " in line)
+        pair_update_index = next(index for index, line in enumerate(commands) if "update_html5ever_pair.py" in line)
+        lock_update_index = next(index for index, line in enumerate(commands) if line == "{{CARGO}} update")
+        self.assertEqual(commands[broad_upgrade_index], "{{CARGO}} upgrade -i allow --pinned allow")
+        self.assertLess(broad_upgrade_index, pair_update_index)
+        self.assertLess(pair_update_index, lock_update_index)
+        self.assertNotIn("--exclude", commands[broad_upgrade_index])
+        self.assertNotIn("markup5ever_rcdom", commands[broad_upgrade_index])
 
 
 if __name__ == "__main__":

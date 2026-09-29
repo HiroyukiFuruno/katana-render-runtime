@@ -39,7 +39,7 @@ def update_commands(cargo: Sequence[str]) -> tuple[list[str], list[str]]:
     compatibility boundary.
     """
 
-    upgrade = [*cargo, "upgrade", "--incompatible", "allow"]
+    upgrade = [*cargo, "upgrade", "--incompatible=allow"]
     for package in PACKAGE_NAMES:
         upgrade.extend(("--package", package))
     resolve = [*cargo, "update", "--recursive", *PACKAGE_NAMES]

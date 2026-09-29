@@ -46,9 +46,7 @@ test("一括更新はRustのmajorとpinned依存を含め、TypeScriptを旧版�
   const recipe = justfile.slice(recipeStart, justfile.indexOf("\n\n", recipeStart));
 
   expect(recipe).toContain('python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"');
-  expect(recipe).toContain(
-    "{{CARGO}} upgrade -i allow --pinned allow --exclude html5ever --exclude markup5ever --exclude markup5ever_rcdom",
-  );
+  expect(recipe).toContain("{{CARGO}} upgrade -i allow --pinned allow");
   expect(recipe).toContain("bun update --latest");
   expect(recipe).not.toMatch(/bun add -d typescript@/);
 });
@@ -68,8 +66,8 @@ async function dependsUpdateRecipeLines(): Promise<string[]> {
 test("depends-update-all は既存の更新・品質・比較ステップを各1回保持する", async () => {
   const lines = await dependsUpdateRecipeLines();
   const requiredSteps = [
+    "{{CARGO}} upgrade -i allow --pinned allow",
     'python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"',
-    "{{CARGO}} upgrade -i allow --pinned allow --exclude html5ever --exclude markup5ever --exclude markup5ever_rcdom",
     "{{CARGO}} update",
     "bun update --latest",
     "bun run scripts/runtime-assets/depends-update-all.ts",
@@ -90,6 +88,12 @@ test("depends-update-all は既存の更新・品質・比較ステップを各1
   for (const step of requiredSteps) {
     expect(lines.filter((line) => line === step)).toHaveLength(1);
   }
+  const rustUpdateStages = [
+    "{{CARGO}} upgrade -i allow --pinned allow",
+    'python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"',
+    "{{CARGO}} update",
+  ];
+  expect(rustUpdateStages.map((step) => lines.indexOf(step))).toEqual([0, 1, 2]);
   expect(lines.some((line) => /^bun add -d typescript@/.test(line))).toBe(false);
 });
 

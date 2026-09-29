@@ -241,10 +241,53 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
 -> Result<(), Box<dyn std::error::Error>> {
     let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
     let recipe = recipe_body(&justfile, "depends-update-all")?;
+    let commands = recipe
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let positions = dependency_update_command_positions(&commands)?;
 
+    assert_dependency_update_command_order(&commands, positions);
+    assert_dependency_update_quality_gates(recipe);
+    Ok(())
+}
+
+fn dependency_update_command_positions(
+    commands: &[&str],
+) -> Result<(usize, usize, usize), std::io::Error> {
+    let broad_upgrade = commands
+        .iter()
+        .position(|line| line.starts_with("{{CARGO}} upgrade "))
+        .ok_or_else(|| std::io::Error::other("broad Cargo upgrade command is missing"))?;
+    let html_pair_update = commands
+        .iter()
+        .position(|line| line.contains("scripts/release/update_html5ever_pair.py"))
+        .ok_or_else(|| std::io::Error::other("html5ever pair update command is missing"))?;
+    let lockfile_update = commands
+        .iter()
+        .position(|line| *line == "{{CARGO}} update")
+        .ok_or_else(|| std::io::Error::other("Cargo lockfile update command is missing"))?;
+
+    Ok((broad_upgrade, html_pair_update, lockfile_update))
+}
+
+fn assert_dependency_update_command_order(commands: &[&str], positions: (usize, usize, usize)) {
+    let (broad_upgrade, html_pair_update, lockfile_update) = positions;
+    assert_eq!(
+        commands[broad_upgrade],
+        "{{CARGO}} upgrade -i allow --pinned allow"
+    );
+    assert_eq!(
+        commands[html_pair_update],
+        "python3 scripts/release/update_html5ever_pair.py --cargo \"{{CARGO}}\""
+    );
+    assert!(broad_upgrade < html_pair_update && html_pair_update < lockfile_update);
+    assert!(!commands[broad_upgrade].contains("--exclude"));
+}
+
+fn assert_dependency_update_quality_gates(recipe: &str) {
     for required in [
-        "scripts/release/update_html5ever_pair.py --cargo \"{{CARGO}}\"",
-        "{{CARGO}} upgrade -i allow --pinned allow --exclude html5ever --exclude markup5ever --exclude markup5ever_rcdom",
         "{{CARGO}} update",
         "bun update --latest",
         "runtime-assets/depends-update-all.ts",
@@ -258,7 +301,6 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
             "depends-update-all must require {required}"
         );
     }
-    Ok(())
 }
 
 #[test]

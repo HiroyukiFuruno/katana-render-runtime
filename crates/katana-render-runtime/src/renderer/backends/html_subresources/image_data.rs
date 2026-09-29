@@ -18,7 +18,10 @@ pub(super) fn resolve_media_type(
         }
     }
 
-    sniff_media_type(bytes).ok_or_else(|| "subresource is not a supported image".to_string())
+    let media_type = sniff_media_type(bytes)
+        .ok_or_else(|| "subresource is not a supported image".to_string())?;
+    validate_bytes(media_type, bytes)?;
+    Ok(media_type)
 }
 
 pub(super) fn validate_data_url(url: &Url, bytes: &[u8]) -> Result<(), String> {
@@ -71,13 +74,11 @@ fn valid_raster(bytes: &[u8], format: image::ImageFormat, media_type: &str) -> R
 }
 
 fn supported_media_type(content_type: &str) -> Option<&'static str> {
-    match content_type
-        .split(';')
-        .next()?
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
+    let content_type = match content_type.split_once(';') {
+        Some((media_type, _)) => media_type,
+        None => content_type,
+    };
+    match content_type.trim().to_ascii_lowercase().as_str() {
         "image/gif" => Some("image/gif"),
         "image/jpeg" => Some("image/jpeg"),
         "image/png" => Some("image/png"),
@@ -134,10 +135,31 @@ mod tests {
     };
     use url::Url;
 
+    fn must_result<T, E>(result: Result<T, E>) -> T {
+        assert!(result.is_ok());
+        let mut values = result.into_iter().collect::<Vec<_>>();
+        values.remove(0)
+    }
+
+    fn must_option<T>(value: Option<T>) -> T {
+        assert!(value.is_some());
+        let mut values = value.into_iter().collect::<Vec<_>>();
+        values.remove(0)
+    }
+
     #[test]
     fn enormous_declared_png_dimensions_are_rejected_before_materialization() {
         let png = png_header_with_dimensions(MAX_IMAGE_DIMENSION + 1, 1);
         assert!(validate_bytes("image/png", &png).is_err());
+
+        let oversized_image = image::DynamicImage::new_luma8(8_193, 8_192);
+        let mut encoded_png = std::io::Cursor::new(Vec::new());
+        must_result(oversized_image.write_to(&mut encoded_png, image::ImageFormat::Png));
+        let error = must_option(validate_bytes("image/png", encoded_png.get_ref()).err());
+        assert!(
+            error.contains("decoded payload exceeds the 67108864-byte limit"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -157,38 +179,81 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_payloads_and_data_url_shapes_are_rejected() -> Result<(), url::ParseError> {
+    fn unsupported_payloads_and_data_url_shapes_are_rejected() {
         assert!(resolve_media_type(None, b"not an image").is_err());
+        assert!(validate_bytes("image/png", &png_header_with_dimensions(1, 1)).is_err());
         assert_eq!(
-            validate_data_url(&Url::parse("data:image/png")?, b""),
+            validate_data_url(&must_result(Url::parse("data:image/png")), b""),
             Err("data URL has no payload".to_string())
         );
         assert_eq!(
             validate_bytes("image/bmp", b""),
             Err("unsupported image media type: image/bmp".to_string())
         );
-        Ok(())
     }
 
     #[test]
-    fn image_signatures_are_sniffed_without_decoding_the_payload() {
+    fn supported_raster_payloads_and_image_data_urls_are_validated() {
+        for (format, media_type) in [
+            (image::ImageFormat::Gif, "image/gif"),
+            (image::ImageFormat::Jpeg, "image/jpeg"),
+            (image::ImageFormat::Png, "image/png"),
+            (image::ImageFormat::WebP, "image/webp"),
+        ] {
+            assert_valid_raster_media_type(format, media_type);
+        }
+
         assert_eq!(
-            resolve_media_type(None, b"\x89PNG\r\n\x1a\n"),
-            Ok("image/png")
+            validate_data_url(&must_result(Url::parse("data:text/plain,payload")), b"text"),
+            Err("data URL media type is not an image: text/plain".to_string())
         );
-        assert_eq!(resolve_media_type(None, &[0xff, 0xd8]), Ok("image/jpeg"));
+        assert!(
+            validate_data_url(
+                &must_result(Url::parse("data:image/png,payload")),
+                b"invalid"
+            )
+            .is_err()
+        );
+    }
+
+    fn assert_valid_raster_media_type(format: image::ImageFormat, media_type: &str) {
+        let image = image::DynamicImage::new_rgb8(1, 1);
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        must_result(image.write_to(&mut bytes, format));
+        let bytes = bytes.into_inner();
+        assert_eq!(resolve_media_type(None, &bytes), Ok(media_type));
+        assert_eq!(resolve_media_type(Some(media_type), &bytes), Ok(media_type));
         assert_eq!(
-            resolve_media_type(None, b"RIFF\0\0\0\0WEBP"),
-            Ok("image/webp")
+            validate_data_url(
+                &must_result(Url::parse(&format!(
+                    "data:{media_type};charset=binary,payload"
+                ))),
+                &bytes
+            ),
+            Ok(())
         );
     }
 
     #[test]
-    fn invalid_declared_type_falls_back_to_the_sniffed_image_type() {
+    fn sniffed_signatures_are_decoded_before_the_media_type_is_accepted() {
+        const GIF: &[u8] =
+            b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff,\0\0\0\0\x01\0\x01\0\0\x02\x01L\0;";
+
+        assert_eq!(resolve_media_type(None, GIF), Ok("image/gif"));
+        assert!(resolve_media_type(None, b"\x89PNG\r\n\x1a\n").is_err());
+        assert!(resolve_media_type(None, &[0xff, 0xd8]).is_err());
+        assert!(resolve_media_type(None, b"RIFF\0\0\0\0WEBP").is_err());
+    }
+
+    #[test]
+    fn invalid_declared_media_type_falls_back_to_a_fully_validated_sniffed_type() {
         const GIF: &[u8] =
             b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff,\0\0\0\0\x01\0\x01\0\0\x02\x01L\0;";
 
         assert_eq!(resolve_media_type(Some("image/png"), GIF), Ok("image/gif"));
+        assert!(resolve_media_type(Some("image/gif"), b"GIF89a").is_err());
+        let oversized_png = png_header_with_dimensions(MAX_IMAGE_DIMENSION + 1, 1);
+        assert!(resolve_media_type(Some("image/gif"), &oversized_png).is_err());
     }
 
     #[test]
@@ -220,6 +285,11 @@ mod tests {
     #[test]
     fn svg_root_must_use_the_svg_namespace() {
         assert!(validate_bytes("image/svg+xml", br#"<x:svg xmlns:x="urn:not-svg"/>"#).is_err());
+        assert!(validate_bytes("image/svg+xml", b"<svg").is_err());
+        assert_eq!(
+            resolve_media_type(None, br#"<svg xmlns="http://www.w3.org/2000/svg"/>"#),
+            Ok("image/svg+xml")
+        );
     }
 
     fn png_header_with_dimensions(width: u32, height: u32) -> Vec<u8> {

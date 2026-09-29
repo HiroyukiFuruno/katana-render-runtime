@@ -6,7 +6,6 @@ use std::rc::Rc;
 pub(super) struct WindowLoadHandlerObserver {
     html_element: Option<Handle>,
     body_element: Option<Handle>,
-    body_lookup_completed: bool,
     frameset_element: Option<Handle>,
 }
 
@@ -53,9 +52,8 @@ impl WindowLoadHandlerObserver {
     }
 
     fn body_element(&mut self, html_element: &Handle) -> Option<&Handle> {
-        if !self.body_lookup_completed {
+        if self.body_element.is_none() {
             self.body_element = find_direct_html_element(html_element, "body");
-            self.body_lookup_completed = true;
         }
         self.body_element.as_ref()
     }
@@ -127,6 +125,12 @@ mod tests {
     use html5ever::{parse_document, tendril::TendrilSink};
     use markup5ever_rcdom::RcDom;
 
+    fn must_option<T>(value: Option<T>) -> T {
+        assert!(value.is_some());
+        let mut values = value.into_iter().collect::<Vec<_>>();
+        values.remove(0)
+    }
+
     #[test]
     fn observer_returns_false_when_document_has_no_html_element() {
         let dom = RcDom::default();
@@ -151,6 +155,26 @@ mod tests {
 
         assert!(observer.token_created_or_updated_window_load_handler(&dom.document, "frameset"));
         assert!(observer.token_created_or_updated_window_load_handler(&dom.document, "frameset"));
+    }
+
+    #[test]
+    fn observer_retries_body_lookup_after_template_body_is_ignored() {
+        use std::rc::Rc;
+
+        let dom = parse_document(RcDom::default(), Default::default()).one(
+            "<head><template><body onload='ignored'></body></template></head><body onload='real'></body>",
+        );
+        let html = must_option(super::find_html_element(&dom.document));
+        let body = must_option(super::find_direct_html_element(&html, "body"));
+        let mut observer = WindowLoadHandlerObserver::default();
+
+        html.children
+            .borrow_mut()
+            .retain(|child| !Rc::ptr_eq(child, &body));
+        assert!(!observer.token_created_or_updated_window_load_handler(&dom.document, "body"));
+
+        html.children.borrow_mut().push(body);
+        assert!(observer.token_created_or_updated_window_load_handler(&dom.document, "body"));
     }
 
     #[test]

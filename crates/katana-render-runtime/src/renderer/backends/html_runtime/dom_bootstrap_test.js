@@ -50,7 +50,7 @@ const installStaticLoadHandler = (body, frameset) => {
   const document = {
     body,
     querySelector(selector) {
-      expect(selector).toBe("frameset");
+      expect(selector).toBe("html > frameset");
       return frameset;
     },
   };
@@ -161,13 +161,45 @@ test("document.bodyがある場合は従来どおりbodyのonloadをWindow load 
   expect(frameset.loaded).toBeUndefined();
 });
 
+test("bodyがある文書内のforeign framesetはWindow load handlerにならない", () => {
+  expect(bodyLoadHandler).toBeDefined();
+  expect(staticBodyLoadHandler).toBeDefined();
+
+  const foreignFrameset = { getAttribute: () => "this.loaded = true" };
+  const pageGlobal = {};
+  const window = {};
+  const document = {
+    body: { getAttribute: () => null },
+    querySelector(selector) {
+      throw new Error(`unexpected selector: ${selector}`);
+    },
+  };
+  const eventHandlers = [];
+  new Function(
+    "globalThis",
+    "window",
+    "document",
+    "__krrLifecyclePropertyOverrides",
+    "__krrStoreEventHandler",
+    `${bodyLoadHandler}\n${staticBodyLoadHandler}\nreturn globalThis.__krrInstallStaticBodyLoadHandler;`,
+  )(pageGlobal, window, document, new Map(), (...arguments_) => eventHandlers.push(arguments_))();
+
+  expect(foreignFrameset.getAttribute("onload")).toBe("this.loaded = true");
+  expect(eventHandlers).toHaveLength(1);
+  expect(eventHandlers[0][0]).toBe(window);
+  expect(eventHandlers[0][2]).toBeNull();
+});
+
 test("後からcurrent bodyまたはframesetになった要素のload handlerをWindowへ移す", () => {
   expect(windowLoadNodeCheck).toBeDefined();
   expect(routeWindowLoadElement).toBeDefined();
 
   for (const nodeName of ["body", "frameset"]) {
     const current = { body: null, frameset: null };
-    const pageGlobal = { __krr_dom: (_operation, selector) => current[selector] };
+    const pageGlobal = {
+      __krr_dom: (_operation, selector) =>
+        current[selector === "html > frameset" ? "frameset" : selector],
+    };
     const isWindowLoadNode = new Function(
       "globalThis",
       `${nativeDomCapture}\n${windowLoadNodeCheck}\nreturn __krrIsWindowLoadNode;`,
@@ -200,6 +232,25 @@ test("後からcurrent bodyまたはframesetになった要素のload handlerを
     expect(calledWith).toBe(element);
     expect(handlers.get(element).has("load")).toBe(false);
   }
+});
+
+test("bodyがない文書でもforeign framesetはWindow loadへroutingしない", () => {
+  expect(nativeDomCapture).toBeDefined();
+  expect(windowLoadNodeCheck).toBeDefined();
+
+  const selectors = [];
+  const nativeBridge = (_operation, selector) => {
+    selectors.push(selector);
+    if (selector === "frameset") return "foreign-frameset";
+    return null;
+  };
+  const isWindowLoadNode = new Function(
+    "globalThis",
+    `${nativeDomCapture}\n${windowLoadNodeCheck}\nreturn __krrIsWindowLoadNode;`,
+  )({ __krr_dom: nativeBridge });
+
+  expect(isWindowLoadNode("foreign-frameset")).toBe(false);
+  expect(selectors).toEqual(["body", "html > frameset"]);
 });
 
 test("readystatechange listener例外の後も後続listenerとproperty handlerを呼ぶ", () => {
@@ -244,6 +295,43 @@ test("readystatechange listener例外の後も後続listenerとproperty handler�
     "listener failure",
   );
 
+  expect(calls).toEqual(["throwing listener", "following listener", "property"]);
+});
+
+test("resource listener例外の後も後続listenerとproperty handlerを呼ぶ", () => {
+  const calls = [];
+  const target = {
+    onload() {
+      calls.push("property");
+    },
+  };
+  const entries = [
+    {
+      callback() {
+        calls.push("throwing listener");
+        throw new Error("listener failure");
+      },
+      capture: false,
+      once: false,
+      passive: false,
+    },
+    {
+      callback() {
+        calls.push("following listener");
+      },
+      capture: false,
+      once: false,
+      passive: false,
+    },
+  ];
+  const dispatch = new Function(
+    "target",
+    "__krrEventTargetListeners",
+    "__krrSyncEventTarget",
+    `${dispatchListenerEntry}\n${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\nreturn __krrDispatchTargetPhase;`,
+  )(target, new WeakMap([[target, new Map([["load", entries]])]]), () => {});
+
+  expect(() => dispatch(target, { type: "load" }, false, 2)).toThrow("listener failure");
   expect(calls).toEqual(["throwing listener", "following listener", "property"]);
 });
 
@@ -323,6 +411,40 @@ test("onerrorのsrc差替えはload/errorを再評価し最大8回で終了す�
   dispatch(image);
   expect(eventTypes).toHaveLength(8);
   expect(eventTypes.every((eventType) => eventType === "error")).toBe(true);
+});
+
+test("onloadのsrc差替え後も新しいsrcを検証してload/errorを再dispatchする", () => {
+  expect(dispatchImageLoad).toBeDefined();
+
+  const eventTypes = [];
+  const image = {
+    source: "valid",
+    getAttribute(name) {
+      expect(name).toBe("src");
+      return this.source;
+    },
+    dispatchEvent(event) {
+      eventTypes.push(event.type);
+      if (event.type === "load" && this.source === "valid") this.source = "broken";
+    },
+  };
+  const dispatch = new Function(
+    "image",
+    "Event",
+    "__krrImageLoadEventType",
+    `${dispatchImageLoad}\nreturn __krrDispatchImageLoad;`,
+  )(
+    image,
+    class Event {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    (source) => (source === "valid" ? "load" : "error"),
+  );
+
+  dispatch(image);
+  expect(eventTypes).toEqual(["load", "error"]);
 });
 
 test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatchする", async () => {

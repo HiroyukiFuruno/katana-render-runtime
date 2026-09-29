@@ -183,7 +183,7 @@ const __krrDispatchListenerEntry = (entries, entry, target, event, capture) => {
     if (typeof entry.callback === "function") entry.callback.call(target, event);
     else entry.callback.handleEvent.call(entry.callback, event);
   } catch (error) {
-    if (String(event.type) !== "readystatechange") throw error;
+    if (!["readystatechange", "load", "error"].includes(String(event.type))) throw error;
     if (!event.__krrHasListenerError) {
       event.__krrListenerError = error;
       event.__krrHasListenerError = true;
@@ -364,9 +364,11 @@ const __krrElements = new Map();
 const __krrElementInstances = new WeakSet();
 const __krrIsWindowLoadNode = (nodeId) => {
   const normalizedId = String(nodeId);
+  const bodyId = String(__krrNativeDom("querySelector", "body") ?? "");
   return (
-    String(__krrNativeDom("querySelector", "body") ?? "") === normalizedId ||
-    String(__krrNativeDom("querySelector", "frameset") ?? "") === normalizedId
+    bodyId === normalizedId ||
+    (bodyId === "" &&
+      String(__krrNativeDom("querySelector", "html > frameset") ?? "") === normalizedId)
   );
 };
 const __krrInstallBodyLoadHandler = (body, source) => {
@@ -740,7 +742,7 @@ globalThis.__krrInstallStaticBodyLoadHandler = () => {
     __krrInstallBodyLoadHandler(body, body.getAttribute("onload"));
     return;
   }
-  const frameset = document.querySelector("frameset");
+  const frameset = document.querySelector("html > frameset");
   if (frameset !== null) __krrInstallBodyLoadHandler(frameset, frameset.getAttribute("onload"));
 };
 const __krrLayoutMetrics = () => JSON.parse(__krrNativeDom("layoutMetrics"));
@@ -1891,13 +1893,12 @@ const __krrImageLoadEventType = (source) => {
 
 const __krrDispatchImageLoad = (image) => {
   let source = image.getAttribute("src");
-  // error handlerによるsrc差替えを再試行し、相互差替えでも有限回で打ち切る。
+  // load/error handlerによるsrc差替えを再試行し、相互差替えでも有限回で打ち切る。
   for (let attempt = 0; source !== null && attempt < 8; attempt += 1) {
     const eventType = __krrImageLoadEventType(source);
     try {
       image.dispatchEvent(new Event(eventType));
     } catch (_error) {}
-    if (eventType !== "error") return;
     const replacement = image.getAttribute("src");
     if (replacement === source) return;
     source = replacement;
@@ -1907,7 +1908,8 @@ const __krrDispatchImageLoad = (image) => {
 globalThis.__krrDispatchWindowLoad = async () => {
   const body = document.body;
   if (body !== null) __krrRouteWindowLoadElement(body);
-  else __krrRouteWindowLoadElement(__krrElement(__krrNativeDom("querySelector", "frameset")));
+  else
+    __krrRouteWindowLoadElement(__krrElement(__krrNativeDom("querySelector", "html > frameset")));
   for (const frame of document.querySelectorAll("iframe")) {
     if (!frame.contentDocument) continue;
     try {
