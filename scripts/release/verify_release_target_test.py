@@ -102,7 +102,65 @@ class VerifyReleaseTargetTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rejects_reviewed_release_head_missing_the_required_manifest(self) -> None:
-        result = self.run_check("v0.4.22", "v0.4.21", "c7a8755f")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = Path(temporary_directory)
+            subprocess.run(
+                ["git", "init", "-q"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=isolated_git_environment(),
+            )
+
+            def git(*args: str) -> str:
+                return subprocess.run(
+                    ["git", *args],
+                    cwd=repository,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=isolated_git_environment(),
+                ).stdout.strip()
+
+            source_repository = self.source_git("rev-parse", "--show-toplevel")
+            git(
+                "fetch",
+                "-q",
+                source_repository,
+                REQUIRED_COMMITS[0],
+                VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE,
+            )
+            manifest_mismatch = git(
+                "commit-tree",
+                f"{VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE}^{{tree}}",
+                "-p",
+                REQUIRED_COMMITS[0],
+                "-m",
+                "release descendant with a mismatched manifest",
+            )
+            git("update-ref", "refs/heads/manifest-mismatch", manifest_mismatch)
+            self.assertEqual(
+                subprocess.run(
+                    [
+                        "git",
+                        "merge-base",
+                        "--is-ancestor",
+                        REQUIRED_COMMITS[0],
+                        manifest_mismatch,
+                    ],
+                    cwd=repository,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=isolated_git_environment(),
+                ).returncode,
+                0,
+            )
+
+            result = self.run_check(
+                "v0.4.22", "v0.4.21", "manifest-mismatch", repository
+            )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("required release content manifest", result.stderr)
 

@@ -19,6 +19,27 @@ const bodyLoadHandler = source.match(
 const staticBodyLoadHandler = source.match(
   /^globalThis\.__krrInstallStaticBodyLoadHandler = \(\) => \{[\s\S]*?^\};/m,
 )?.[0];
+const windowLoadNodeCheck = source.match(
+  /^const __krrIsWindowLoadNode = \(nodeId\) => \{[\s\S]*?^\};/m,
+)?.[0];
+const routeWindowLoadElement = source.match(
+  /^const __krrRouteWindowLoadElement = \(element\) => \{[\s\S]*?^\};/m,
+)?.[0];
+const dispatchListeners = source.match(
+  /^const __krrDispatchListeners = \(listeners, target, event, capture\) => \{[\s\S]*?^\};/m,
+)?.[0];
+const dispatchHandler = source.match(
+  /^const __krrDispatchHandler = \(target, event\) => \{[\s\S]*?^\};/m,
+)?.[0];
+const dispatchTargetPhase = source.match(
+  /^const __krrDispatchTargetPhase = \(target, event, capture, phase(?:, deferListenerError = false)?\) => \{[\s\S]*?^\};/m,
+)?.[0];
+const dispatchImageLoad = source.match(
+  /^const __krrDispatchImageLoad = \(image\) => \{[\s\S]*?^\};/m,
+)?.[0];
+const dispatchWindowLoad = source.match(
+  /^globalThis\.__krrDispatchWindowLoad = async \(\) => \{[\s\S]*?^\};/m,
+)?.[0];
 
 const installStaticLoadHandler = (body, frameset) => {
   const pageGlobal = {};
@@ -91,7 +112,7 @@ test("image.src propertyとsetAttributeがnative src属性へ反映されload/er
     "globalThis",
     `const __krrNativeDom = globalThis.__krr_dom;
 const __krrNormalizeLifecycleEventType = () => null;
-const __krrIsBodyNode = () => false;
+const __krrIsWindowLoadNode = () => false;
 const __krrInstallBodyLoadHandler = () => {};
 const __krrInstallInlineHandler = () => {};
 return ({${imageSrcProperties}\n${getAttributeMethod}\n${setAttributeMethod}});`,
@@ -135,4 +156,224 @@ test("document.bodyがある場合は従来どおりbodyのonloadをWindow load 
   eventHandlers[0][2].call(window, new Event("load"));
   expect(body.loaded).toBe(true);
   expect(frameset.loaded).toBeUndefined();
+});
+
+test("後からcurrent bodyまたはframesetになった要素のload handlerをWindowへ移す", () => {
+  expect(windowLoadNodeCheck).toBeDefined();
+  expect(routeWindowLoadElement).toBeDefined();
+
+  for (const nodeName of ["body", "frameset"]) {
+    const current = { body: null, frameset: null };
+    const pageGlobal = { __krr_dom: (_operation, selector) => current[selector] };
+    const isWindowLoadNode = new Function(
+      "globalThis",
+      `${nativeDomCapture}\n${windowLoadNodeCheck}\nreturn __krrIsWindowLoadNode;`,
+    )(pageGlobal);
+    const handlers = new WeakMap();
+    const store = (target, type, handler) => {
+      const targetHandlers = handlers.get(target) ?? new Map();
+      if (handler === null) targetHandlers.delete(type);
+      else targetHandlers.set(type, handler);
+      handlers.set(target, targetHandlers);
+    };
+    const window = {};
+    const route = new Function(
+      "window",
+      "__krrIsWindowLoadNode",
+      "__krrEventHandlers",
+      "__krrStoreEventHandler",
+      `${routeWindowLoadElement}\nreturn __krrRouteWindowLoadElement;`,
+    )(window, isWindowLoadNode, handlers, store);
+    const element = { __krrNodeId: nodeName };
+    let calledWith;
+    store(element, "load", function handler() {
+      calledWith = this;
+    });
+
+    expect(route(element)).toBe(false);
+    current[nodeName] = nodeName;
+    expect(route(element)).toBe(true);
+    handlers.get(window).get("load")();
+    expect(calledWith).toBe(element);
+    expect(handlers.get(element).has("load")).toBe(false);
+  }
+});
+
+test("readystatechange listener例外の後も後続listenerとproperty handlerを呼ぶ", () => {
+  expect(dispatchListeners).toBeDefined();
+  expect(dispatchHandler).toBeDefined();
+  expect(dispatchTargetPhase).toBeDefined();
+
+  const calls = [];
+  const target = {
+    onreadystatechange() {
+      calls.push("property");
+    },
+  };
+  const entries = [
+    {
+      callback() {
+        calls.push("throwing listener");
+        throw new Error("listener failure");
+      },
+      capture: false,
+      once: false,
+      passive: false,
+    },
+    {
+      callback() {
+        calls.push("following listener");
+      },
+      capture: false,
+      once: false,
+      passive: false,
+    },
+  ];
+  const dispatch = new Function(
+    "target",
+    "__krrEventTargetListeners",
+    "__krrSyncEventTarget",
+    `${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\nreturn __krrDispatchTargetPhase;`,
+  )(target, new WeakMap([[target, new Map([["readystatechange", entries]])]]), () => {});
+
+  expect(() => dispatch(target, { type: "readystatechange" }, false, 2)).toThrow(
+    "listener failure",
+  );
+
+  expect(calls).toEqual(["throwing listener", "following listener", "property"]);
+});
+
+test("通常イベントのlistener例外はdispatchを中断して呼び出し元へ伝播する", () => {
+  const calls = [];
+  const target = {};
+  const entries = [
+    {
+      callback() {
+        calls.push("throwing listener");
+        throw new Error("listener failure");
+      },
+      capture: false,
+      once: false,
+      passive: false,
+    },
+    {
+      callback() {
+        calls.push("following listener");
+      },
+      capture: false,
+      once: false,
+      passive: false,
+    },
+  ];
+  const dispatch = new Function(
+    "target",
+    "__krrEventTargetListeners",
+    "__krrSyncEventTarget",
+    `${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\nreturn __krrDispatchTargetPhase;`,
+  )(target, new WeakMap([[target, new Map([["custom", entries]])]]), () => {});
+
+  expect(() => dispatch(target, { type: "custom" }, false, 2)).toThrow("listener failure");
+  expect(calls).toEqual(["throwing listener"]);
+});
+
+test("onerrorのsrc差替えはload/errorを再評価し最大8回で終了する", () => {
+  expect(dispatchImageLoad).toBeDefined();
+
+  const eventTypes = [];
+  const image = {
+    source: "broken",
+    getAttribute(name) {
+      expect(name).toBe("src");
+      return this.source;
+    },
+    dispatchEvent(event) {
+      eventTypes.push(event.type);
+      if (event.type === "error" && this.source === "broken") this.source = "valid";
+    },
+  };
+  const dispatch = new Function(
+    "image",
+    "Event",
+    "__krrImageLoadEventType",
+    `${dispatchImageLoad}\nreturn __krrDispatchImageLoad;`,
+  )(
+    image,
+    class Event {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    (source) => (source === "valid" ? "load" : "error"),
+  );
+
+  dispatch(image);
+  expect(eventTypes).toEqual(["error", "load"]);
+
+  image.source = "a";
+  image.dispatchEvent = (event) => {
+    eventTypes.push(event.type);
+    image.source = image.source === "a" ? "b" : "a";
+  };
+  eventTypes.length = 0;
+  dispatch(image);
+  expect(eventTypes).toHaveLength(8);
+  expect(eventTypes.every((eventType) => eventType === "error")).toBe(true);
+});
+
+test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatchする", async () => {
+  expect(dispatchWindowLoad).toBeDefined();
+
+  const calls = [];
+  const image = {
+    getAttribute: () => "valid",
+    dispatchEvent() {
+      calls.push("resource");
+      queueMicrotask(() => calls.push("microtask"));
+    },
+  };
+  const body = null;
+  const document = {
+    body,
+    querySelectorAll(selector) {
+      return selector === "img" ? [image] : [];
+    },
+  };
+  const pageGlobal = {};
+  const dispatch = new Function(
+    "globalThis",
+    "document",
+    "window",
+    "Event",
+    "__krrRouteWindowLoadElement",
+    "__krrElement",
+    "__krrNativeDom",
+    "__krrImageLoadEventType",
+    "__krrDispatchImageLoad",
+    "__krrDocumentReadyState",
+    "__krrDispatchDocumentReadyStateChange",
+    "__krrDispatchElementReadyStateChange",
+    "__krrThrowReadyStateListenerError",
+    `${dispatchWindowLoad}\nreturn globalThis.__krrDispatchWindowLoad;`,
+  )(
+    pageGlobal,
+    document,
+    { dispatchEvent: () => calls.push("window") },
+    class Event {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    () => false,
+    () => null,
+    () => null,
+    () => "load",
+    (target) => target.dispatchEvent(new Event("load")),
+    "interactive",
+    () => {},
+    () => {},
+    () => {},
+  );
+
+  await dispatch();
+  expect(calls).toEqual(["resource", "microtask", "window"]);
 });

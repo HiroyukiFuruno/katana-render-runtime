@@ -28,8 +28,8 @@ pub(super) fn dom_callback(
     args: v8::FunctionCallbackArguments,
     mut return_value: v8::ReturnValue<v8::Value>,
 ) {
-    /* WHY: V8 callback内の同期DOM処理はJavaScript実行時間へ含めない。低速CPUで
-     * 正当な大容量画像を無限JavaScriptと誤認してタイムアウトさせないためである。 */
+    /* WHY: 同期DOM処理はExecutionBudgetの別枠で計測する。低速CPUで画像検証を
+     * 誤検知しない余裕を持たせつつ、別枠の上限でページからの反復も止める。 */
     let host_operation = scope
         .get_slot::<HtmlDomBridgeState>()
         .map(HtmlDomBridgeState::host_io_active)

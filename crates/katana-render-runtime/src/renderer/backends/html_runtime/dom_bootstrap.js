@@ -185,6 +185,12 @@ const __krrDispatchListeners = (listeners, target, event, capture) => {
     try {
       if (typeof entry.callback === "function") entry.callback.call(target, event);
       else entry.callback.handleEvent.call(entry.callback, event);
+    } catch (error) {
+      if (String(event.type) !== "readystatechange") throw error;
+      if (!event.__krrHasListenerError) {
+        event.__krrListenerError = error;
+        event.__krrHasListenerError = true;
+      }
     } finally {
       event.__krrPassiveListener = false;
     }
@@ -214,12 +220,24 @@ const __krrEndDispatch = (event) => {
   event.eventPhase = 0;
   event.__krrDispatching = false;
 };
-const __krrDispatchTargetPhase = (target, event, capture, phase) => {
+const __krrDispatchTargetPhase = (target, event, capture, phase, deferListenerError = false) => {
   event.currentTarget = target;
   event.eventPhase = phase;
   const listeners = __krrEventTargetListeners.get(target) || new Map();
   __krrDispatchListeners(listeners, target, event, capture);
-  if (!capture) __krrDispatchHandler(target, event);
+  if (!capture) {
+    try {
+      __krrDispatchHandler(target, event);
+    } catch (error) {
+      if (!event.__krrHasListenerError) throw error;
+    }
+    if (event.__krrHasListenerError && !deferListenerError) {
+      const error = event.__krrListenerError;
+      delete event.__krrListenerError;
+      delete event.__krrHasListenerError;
+      throw error;
+    }
+  }
 };
 const __krrInstallEventTarget = (target) => {
   const listeners = new Map();
@@ -342,8 +360,13 @@ const __krrClassToken = (token) => {
 };
 const __krrElements = new Map();
 const __krrElementInstances = new WeakSet();
-const __krrIsBodyNode = (nodeId) =>
-  String(__krrNativeDom("querySelector", "body") ?? "") === String(nodeId);
+const __krrIsWindowLoadNode = (nodeId) => {
+  const normalizedId = String(nodeId);
+  return (
+    String(__krrNativeDom("querySelector", "body") ?? "") === normalizedId ||
+    String(__krrNativeDom("querySelector", "frameset") ?? "") === normalizedId
+  );
+};
 const __krrInstallBodyLoadHandler = (body, source) => {
   __krrLifecyclePropertyOverrides.get(globalThis)?.delete("load");
   if (source === null || source === undefined) {
@@ -357,6 +380,15 @@ const __krrInstallBodyLoadHandler = (body, source) => {
     __krrStoreEventHandler(window, "load", null);
   }
 };
+const __krrRouteWindowLoadElement = (element) => {
+  if (!element || !__krrIsWindowLoadNode(element.__krrNodeId)) return false;
+  const handler = __krrEventHandlers.get(element)?.get("load");
+  if (typeof handler === "function") {
+    __krrStoreEventHandler(window, "load", (event) => handler.call(element, event));
+    __krrStoreEventHandler(element, "load", null);
+  }
+  return true;
+};
 const __krrElement = (nodeId) => {
   if (nodeId === null || nodeId === undefined || nodeId === "") return null;
   const normalizedId = String(nodeId);
@@ -364,16 +396,15 @@ const __krrElement = (nodeId) => {
   if (cached) return cached;
   const element = __krrInstallEventTarget(Object.create(__krrElementPrototype));
   Object.defineProperty(element, "__krrNodeId", { value: normalizedId });
-  const isBody = __krrIsBodyNode(normalizedId);
   for (const eventType of __krrLifecycleEventTypes) {
     Object.defineProperty(element, `on${eventType}`, {
       configurable: true,
       get() {
-        if (isBody && eventType === "load") return window.onload;
+        if (eventType === "load" && __krrRouteWindowLoadElement(this)) return window.onload;
         return __krrEventHandlers.get(this)?.get(eventType) ?? null;
       },
       set(value) {
-        if (isBody && eventType === "load") {
+        if (eventType === "load" && __krrRouteWindowLoadElement(this)) {
           __krrInstallLifecycleProperty(window, eventType, value);
           return;
         }
@@ -384,7 +415,7 @@ const __krrElement = (nodeId) => {
     if (source !== null) {
       // body.onload は Window の load プロパティと共有する。静的文書では Rust 側が
       // body 開始タグのパーサ位置で導入するため、bootstrap 時には先取りしない。
-      if (isBody && eventType === "load") continue;
+      if (__krrIsWindowLoadNode(normalizedId) && eventType === "load") continue;
       else __krrInstallInlineHandler(element, eventType, source);
     }
   }
@@ -552,7 +583,7 @@ const __krrElementPrototype = {
     const lifecycleEventType = attributeName.toLowerCase().startsWith("on")
       ? __krrNormalizeLifecycleEventType(attributeName.slice(2))
       : null;
-    if (__krrIsBodyNode(this.__krrNodeId) && lifecycleEventType === "load")
+    if (__krrIsWindowLoadNode(this.__krrNodeId) && lifecycleEventType === "load")
       __krrInstallBodyLoadHandler(this, attributeValue);
     else if (lifecycleEventType !== null)
       __krrInstallInlineHandler(this, lifecycleEventType, attributeValue);
@@ -565,7 +596,7 @@ const __krrElementPrototype = {
     const hadAttribute = __krrNativeDom("getAttribute", this.__krrNodeId, attributeName) !== null;
     __krrNativeDom("removeAttribute", this.__krrNodeId, attributeName);
     if (hadAttribute && lifecycleEventType !== null) {
-      if (__krrIsBodyNode(this.__krrNodeId) && lifecycleEventType === "load")
+      if (__krrIsWindowLoadNode(this.__krrNodeId) && lifecycleEventType === "load")
         __krrInstallBodyLoadHandler(this, null);
       else __krrInstallInlineHandler(this, lifecycleEventType, null);
     }
@@ -618,8 +649,20 @@ const __krrInlineHandler = (target, event) => {
   if (result === false && event.cancelable) event.preventDefault();
 };
 const __krrDispatchElementPhase = (target, event, capture, phase) => {
-  __krrDispatchTargetPhase(target, event, capture, phase);
-  if (!capture && !event.__krrImmediatePropagationStopped) __krrInlineHandler(target, event);
+  __krrDispatchTargetPhase(target, event, capture, phase, true);
+  if (!capture && !event.__krrImmediatePropagationStopped) {
+    try {
+      __krrInlineHandler(target, event);
+    } catch (error) {
+      if (!event.__krrHasListenerError) throw error;
+    }
+    if (event.__krrHasListenerError) {
+      const error = event.__krrListenerError;
+      delete event.__krrListenerError;
+      delete event.__krrHasListenerError;
+      throw error;
+    }
+  }
 };
 const __krrDispatchElementEvent = (target, event) => {
   __krrBeginDispatch(target, event);
@@ -1844,7 +1887,25 @@ const __krrImageLoadEventType = (source) => {
   return "error";
 };
 
-globalThis.__krrDispatchWindowLoad = () => {
+const __krrDispatchImageLoad = (image) => {
+  let source = image.getAttribute("src");
+  // error handlerによるsrc差替えを再試行し、相互差替えでも有限回で打ち切る。
+  for (let attempt = 0; source !== null && attempt < 8; attempt += 1) {
+    const eventType = __krrImageLoadEventType(source);
+    try {
+      image.dispatchEvent(new Event(eventType));
+    } catch (_error) {}
+    if (eventType !== "error") return;
+    const replacement = image.getAttribute("src");
+    if (replacement === source) return;
+    source = replacement;
+  }
+};
+
+globalThis.__krrDispatchWindowLoad = async () => {
+  const body = document.body;
+  if (body !== null) __krrRouteWindowLoadElement(body);
+  else __krrRouteWindowLoadElement(__krrElement(__krrNativeDom("querySelector", "frameset")));
   for (const frame of document.querySelectorAll("iframe")) {
     if (!frame.contentDocument) continue;
     try {
@@ -1852,13 +1913,9 @@ globalThis.__krrDispatchWindowLoad = () => {
     } catch (_error) {}
   }
   for (const image of document.querySelectorAll("img")) {
-    const source = image.getAttribute("src");
-    if (source === null) continue;
-    // 個々の画像 handler の例外は、後続画像と window.load を中断させない。
-    try {
-      image.dispatchEvent(new Event(__krrImageLoadEventType(source)));
-    } catch (_error) {}
+    __krrDispatchImageLoad(image);
   }
+  await Promise.resolve();
   __krrDocumentReadyState = "complete";
   __krrDispatchDocumentReadyStateChange();
   __krrDispatchElementReadyStateChange();

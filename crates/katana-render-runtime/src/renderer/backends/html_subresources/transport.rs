@@ -41,7 +41,6 @@ pub(super) fn load_image_data_url(url: &Url) -> Result<String, String> {
     let payload = load_image_bytes(url)?;
     let media_type =
         image_data::resolve_media_type(payload.declared_media_type.as_deref(), &payload.bytes)?;
-    image_data::validate_bytes(media_type, &payload.bytes)?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(payload.bytes);
     Ok(format!("data:{media_type};base64,{encoded}"))
 }
@@ -135,6 +134,9 @@ fn decode_forgiving_base64(payload: &[u8]) -> Result<Vec<u8>, base64::DecodeErro
         .copied()
         .filter(|byte| !byte.is_ascii_whitespace())
         .collect::<Vec<_>>();
+    if payload.contains(&b'=') {
+        return FORGIVING_BASE64.decode(payload);
+    }
     let padding = match payload.len() % BASE64_BLOCK_SIZE {
         0 => 0,
         BASE64_REMAINDER_TWO => BASE64_REMAINDER_TWO,
@@ -146,6 +148,9 @@ fn decode_forgiving_base64(payload: &[u8]) -> Result<Vec<u8>, base64::DecodeErro
     FORGIVING_BASE64.decode(padded)
 }
 
+#[cfg(test)]
+#[path = "transport_http_tests.rs"]
+mod http_tests;
 #[cfg(test)]
 #[path = "transport_tests.rs"]
 mod tests;

@@ -138,6 +138,7 @@ def _verify_pull_request(
     base = _require_dict(pull.get("base"), "pull request base")
     head = _require_dict(pull.get("head"), "pull request head")
     base_repo = _require_dict(base.get("repo"), "pull request base repository")
+    head_repo = _require_dict(head.get("repo"), "pull request head repository")
     if (
         base.get("sha") != base_sha
         or base_repo.get("full_name") != repository
@@ -148,6 +149,8 @@ def _verify_pull_request(
         raise EvidenceError("release pull request head SHA does not match")
     if head.get("ref") != head_ref:
         raise EvidenceError("release pull request head ref does not match")
+    if head_repo.get("full_name") != repository:
+        raise EvidenceError("release pull request head repository does not match")
 
 
 def _pull_request_identity(pull: dict[str, JsonValue]) -> tuple[JsonValue, ...]:
@@ -155,6 +158,7 @@ def _pull_request_identity(pull: dict[str, JsonValue]) -> tuple[JsonValue, ...]:
     base = _require_dict(pull.get("base"), "pull request base")
     head = _require_dict(pull.get("head"), "pull request head")
     base_repo = _require_dict(base.get("repo"), "pull request base repository")
+    head_repo = _require_dict(head.get("repo"), "pull request head repository")
     return (
         pull.get("number"),
         base.get("sha"),
@@ -162,6 +166,7 @@ def _pull_request_identity(pull: dict[str, JsonValue]) -> tuple[JsonValue, ...]:
         base_repo.get("full_name"),
         head.get("sha"),
         head.get("ref"),
+        head_repo.get("full_name"),
     )
 
 

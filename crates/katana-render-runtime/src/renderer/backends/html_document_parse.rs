@@ -1,5 +1,7 @@
 use super::super::html_dom_helpers::collect_scripts;
 use super::HtmlDocument;
+#[path = "html_document_parse_tree.rs"]
+mod tree;
 use html5ever::{
     TokenizerResult,
     tokenizer::{
@@ -7,12 +9,13 @@ use html5ever::{
     },
     tree_builder::{TreeBuilder, TreeBuilderOpts, TreeSink},
 };
-use markup5ever_rcdom::{Handle, NodeData, RcDom};
+use markup5ever_rcdom::{Handle, RcDom};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
 };
+use tree::{document_window_load_handler_has_onload, visible_iframe_count};
 
 impl HtmlDocument {
     pub(crate) fn parse(source: &str) -> Self {
@@ -103,7 +106,7 @@ impl SourceOrderSink {
                     .to_string()
                     .eq_ignore_ascii_case("onload")
             })
-            && document_element_has_onload(&self.tree_builder.sink.document, &name)
+            && document_window_load_handler_has_onload(&self.tree_builder.sink.document)
         {
             self.body_onload_script_index.set(Some(self.scripts.get()));
             self.body_onload_iframe_index
@@ -133,39 +136,6 @@ impl SourceOrderSink {
         }
         visible
     }
-}
-
-fn document_element_has_onload(document: &Handle, element_name: &str) -> bool {
-    find_visible_element_onload(document, element_name).unwrap_or(false)
-}
-
-fn visible_iframe_count(node: &Handle) -> usize {
-    let is_iframe = matches!(&node.data, NodeData::Element { name, .. } if name.local.as_str().eq_ignore_ascii_case("iframe"));
-    usize::from(is_iframe)
-        + node
-            .children
-            .borrow()
-            .iter()
-            .map(visible_iframe_count)
-            .sum::<usize>()
-}
-
-fn find_visible_element_onload(node: &Handle, element_name: &str) -> Option<bool> {
-    if let NodeData::Element { name, attrs, .. } = &node.data
-        && name.local.as_str().eq_ignore_ascii_case(element_name)
-    {
-        return Some(attrs.borrow().iter().any(|attribute| {
-            attribute
-                .name
-                .local
-                .to_string()
-                .eq_ignore_ascii_case("onload")
-        }));
-    }
-    node.children
-        .borrow()
-        .iter()
-        .find_map(|child| find_visible_element_onload(child, element_name))
 }
 
 fn parse_with_source_order(source: &str) -> (RcDom, Option<usize>, Option<usize>) {
@@ -211,6 +181,15 @@ mod tests {
         );
 
         assert_eq!(document.body_onload_script_index(), Some(1));
+    }
+
+    #[test]
+    fn foreign_svg_frameset_onload_does_not_set_the_window_load_handler_position() {
+        let document = HtmlDocument::parse(
+            r#"<script>firstScript()</script><svg><frameset onload="foreignHandler"></frameset></svg><script>secondScript()</script><body onload="handler">"#,
+        );
+
+        assert_eq!(document.body_onload_script_index(), Some(2));
     }
 
     #[test]

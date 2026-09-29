@@ -33,7 +33,7 @@ def payloads() -> dict[str, object]:
         "number": 90,
         "state": "open",
         "base": {"sha": BASE, "ref": "master", "repo": {"full_name": REPOSITORY}},
-        "head": {"sha": HEAD, "ref": HEAD_REF},
+        "head": {"sha": HEAD, "ref": HEAD_REF, "repo": {"full_name": REPOSITORY}},
     }
     steps = [
         {"name": name, "status": "completed", "conclusion": "success"}
@@ -171,6 +171,33 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
         renamed["head"]["ref"] = "release/v0.4.23"  # type: ignore[index]
         responses[path] = [initial, initial, renamed, renamed]
         with self.assertRaisesRegex(MODULE.EvidenceError, "head ref does not match"):
+            self.verify(responses)
+
+    def test_rejects_fork_head_repository(self) -> None:
+        responses = payloads()
+        pull = responses["repos/owner/repository/pulls/90"]
+        pull["head"]["repo"]["full_name"] = "fork/repository"  # type: ignore[index]
+        with self.assertRaisesRegex(MODULE.EvidenceError, "head repository does not match"):
+            self.verify(responses)
+
+    def test_rejects_fork_head_repository_between_pull_snapshot_reads(self) -> None:
+        responses = payloads()
+        path = "repos/owner/repository/pulls/90"
+        initial = responses[path]
+        fork = copy.deepcopy(initial)
+        fork["head"]["repo"]["full_name"] = "fork/repository"  # type: ignore[index]
+        responses[path] = [initial, fork]
+        with self.assertRaisesRegex(MODULE.EvidenceError, "head repository does not match"):
+            self.verify(responses)
+
+    def test_rejects_fork_head_repository_after_ci_job_verification(self) -> None:
+        responses = payloads()
+        path = "repos/owner/repository/pulls/90"
+        initial = responses[path]
+        fork = copy.deepcopy(initial)
+        fork["head"]["repo"]["full_name"] = "fork/repository"  # type: ignore[index]
+        responses[path] = [initial, initial, fork, fork]
+        with self.assertRaisesRegex(MODULE.EvidenceError, "head repository does not match"):
             self.verify(responses)
 
     def test_rejects_replaced_pull_request_after_ci_job_verification(self) -> None:
@@ -563,7 +590,9 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertIn("timeout-minutes: 360", preflight_job)
         self.assertIn("release-preflight-check", preflight_job)
         self.assertIn('github.event_name == \'workflow_dispatch\'', preflight_job)
-        self.assertIn('github.event_name == \'pull_request\' && startsWith(github.head_ref, \'release/v\')', evidence_job)
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", evidence_job)
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", preflight_job)
+        self.assertIn('startsWith(github.head_ref, \'release/v\')', evidence_job)
 
     def test_local_release_check_keeps_full_quality_gate(self) -> None:
         justfile = (self.ROOT / "Justfile").read_text(encoding="utf-8")

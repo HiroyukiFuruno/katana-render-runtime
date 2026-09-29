@@ -347,6 +347,14 @@ mod tests {
     }
 
     #[test]
+    fn repeated_page_dom_callbacks_cannot_extend_the_execution_budget_indefinitely() {
+        let result = StaticHtmlRuntime
+            .start("<script>while (true) { __krr_dom('getElementById', 'missing'); }</script>");
+
+        assert_eq!(result.err(), Some(HtmlRuntimeError::ExecutionTimeout));
+    }
+
+    #[test]
     fn run_interactive_lifecycle_scripts_forwards_dom_content_loaded_error() {
         let result = StaticHtmlRuntime::run_interactive_lifecycle_scripts(
             "https://example.test/index.html",
