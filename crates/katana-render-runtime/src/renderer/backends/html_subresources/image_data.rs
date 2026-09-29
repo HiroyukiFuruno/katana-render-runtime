@@ -107,7 +107,11 @@ fn sniff_media_type(bytes: &[u8]) -> Option<&'static str> {
     if is_webp(bytes, RIFF_SIGNATURE, WEBP_SIGNATURE) {
         return Some("image/webp");
     }
-    valid_svg(bytes).is_ok().then_some("image/svg+xml")
+    looks_like_svg(bytes).then_some("image/svg+xml")
+}
+
+fn looks_like_svg(bytes: &[u8]) -> bool {
+    bytes.windows(b"<svg".len()).any(|window| window == b"<svg")
 }
 
 fn is_webp(bytes: &[u8], riff_signature: &[u8], webp_signature: &[u8]) -> bool {
@@ -288,6 +292,17 @@ mod tests {
         assert!(validate_bytes("image/svg+xml", b"<svg").is_err());
         assert_eq!(
             resolve_media_type(None, br#"<svg xmlns="http://www.w3.org/2000/svg"/>"#),
+            Ok("image/svg+xml")
+        );
+    }
+
+    #[test]
+    fn sniffed_svg_with_declaration_is_validated_after_candidate_scan() {
+        assert_eq!(
+            resolve_media_type(
+                None,
+                br#"<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>"#
+            ),
             Ok("image/svg+xml")
         );
     }

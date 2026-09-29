@@ -104,6 +104,18 @@ mod tests {
     }
 
     #[test]
+    fn static_window_load_rejection_is_forwarded_to_the_renderer() {
+        let result = StaticHtmlRuntime.start(
+            "<script>window.addEventListener('load', () => { throw new Error('load'); });</script>",
+        );
+
+        assert!(matches!(
+            result,
+            Err(HtmlRuntimeError::JavaScriptException(message)) if message.contains("load")
+        ));
+    }
+
+    #[test]
     fn interactive_browser_body_onload_follows_parser_order() {
         let source = must_result(HtmlBrowserSource::new(
             r#"<head><script>window.onload = () => { document.getElementById('status').textContent = 'head'; };</script></head><body onload="document.getElementById('status').textContent = 'body'"><p id=status></p><script>window.onload = () => { document.getElementById('status').textContent = 'body-script'; };</script></body>"#,

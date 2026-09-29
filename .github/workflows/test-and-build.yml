@@ -247,3 +247,38 @@ jobs:
         run: |
           cargo llvm-cov clean --workspace || true
           rm -rf target/llvm-cov-target target/debug/deps target/debug/incremental
+
+      - name: Record immutable PR base evidence
+        if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest' && success()
+        env:
+          CI_EVIDENCE_PATH: ${{ runner.temp }}/ci-quality-evidence.json
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = {
+              "schema": 1,
+              "run_id": int(os.environ["RUN_ID"]),
+              "run_attempt": int(os.environ["RUN_ATTEMPT"]),
+              "base_sha": os.environ["PR_BASE_SHA"],
+              "head_sha": os.environ["PR_HEAD_SHA"],
+          }
+          Path(os.environ["CI_EVIDENCE_PATH"]).write_text(
+              json.dumps(payload, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+          )
+          PY
+
+      - name: Upload immutable PR base evidence
+        if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-quality-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-quality-evidence.json
+          if-no-files-found: error
+          retention-days: 7

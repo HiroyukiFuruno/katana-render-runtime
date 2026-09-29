@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
 const MAX_CACHED_HTML_FALLBACK_DATABASES: usize = 8;
+const MAX_CACHED_HTML_FALLBACK_FACES: usize = 256;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 struct HtmlFallbackKey {
@@ -73,10 +74,7 @@ fn resolve_cached_html_face(
             .upgrade()
             .is_some_and(|cached| Arc::ptr_eq(&cached, database))
     }) {
-        return *entry
-            .faces
-            .entry(key)
-            .or_insert_with(|| resolve_html_fallback_face(database, key));
+        return resolve_existing_html_fallback_face(entry, database, key);
     }
     if entries.len() == MAX_CACHED_HTML_FALLBACK_DATABASES {
         entries.remove(0);
@@ -86,6 +84,24 @@ fn resolve_cached_html_face(
         database: Arc::downgrade(database),
         faces: HashMap::from([(key, face_id)]),
     });
+    face_id
+}
+
+fn resolve_existing_html_fallback_face(
+    entry: &mut HtmlFallbackCacheEntry,
+    database: &usvg::fontdb::Database,
+    key: HtmlFallbackKey,
+) -> usvg::fontdb::ID {
+    if let Some(face_id) = entry.faces.get(&key) {
+        return *face_id;
+    }
+    if entry.faces.len() >= MAX_CACHED_HTML_FALLBACK_FACES
+        && let Some(evicted_key) = entry.faces.keys().next().copied()
+    {
+        entry.faces.remove(&evicted_key);
+    }
+    let face_id = resolve_html_fallback_face(database, key);
+    entry.faces.insert(key, face_id);
     face_id
 }
 

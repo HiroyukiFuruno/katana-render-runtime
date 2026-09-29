@@ -1,6 +1,6 @@
 use crate::renderer::backends::html_runtime::script::{
     BODY_ONLOAD_INSTALL, DOM_CONTENT_LOADED_DISPATCH, WINDOW_LOAD_DISPATCH, check_bridge_error,
-    evaluate, install_dom_bridge, perform_microtask_checkpoint,
+    evaluate, evaluate_and_wait_for_promise, install_dom_bridge, perform_microtask_checkpoint,
 };
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 
@@ -21,9 +21,13 @@ impl StaticHtmlRuntime {
         v8::tc_scope!(let scope, &mut **context_scope);
         install_dom_bridge(scope, document_url)?;
         let mut execute_script = |name: &str, script: &str| -> Result<(), HtmlRuntimeError> {
-            evaluate(scope, name, script)
-                .and_then(|()| perform_microtask_checkpoint(scope))
-                .and_then(|()| check_bridge_error(scope))
+            if name == "krr-html-window-load" {
+                evaluate_and_wait_for_promise(scope, name, script)
+            } else {
+                evaluate(scope, name, script)
+            }
+            .and_then(|()| perform_microtask_checkpoint(scope))
+            .and_then(|()| check_bridge_error(scope))
         };
         Self::run_static_scripts(
             scripts,

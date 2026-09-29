@@ -5,7 +5,9 @@ import copy
 import http.client
 import importlib.util
 import io
+import json
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -28,6 +30,20 @@ WORKFLOW_RUNS_PATH = (
     "repos/owner/repository/actions/workflows/test-and-build.yml/"
     f"runs?event=pull_request&head_sha={HEAD}&per_page=100&page=1"
 )
+ARTIFACTS_PATH = "repos/owner/repository/actions/runs/123/artifacts?per_page=100&page=1"
+ARTIFACT_URL = "https://api.github.com/artifacts/789"
+
+def immutable_base_evidence_archive(
+    *, base_sha: str = BASE, head_sha: str = HEAD, run_id: int = RUN_ID, run_attempt: int = 1
+) -> bytes:
+    payload = json.dumps(
+        {"schema": 1, "run_id": run_id, "run_attempt": run_attempt, "base_sha": base_sha, "head_sha": head_sha},
+        sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as bundle:
+        bundle.writestr(MODULE.IMMUTABLE_BASE_EVIDENCE_FILE, payload)
+    return output.getvalue()
 
 def payloads() -> dict[str, object]:
     pull = {
@@ -65,6 +81,17 @@ def payloads() -> dict[str, object]:
             "total_count": 1,
             "workflow_runs": [run],
         },
+        ARTIFACTS_PATH: {
+            "total_count": 1,
+            "artifacts": [{
+                "id": 789,
+                "name": "ci-quality-evidence-123-1",
+                "expired": False,
+                "size_in_bytes": len(immutable_base_evidence_archive()),
+                "archive_download_url": ARTIFACT_URL,
+            }],
+        },
+        ARTIFACT_URL: immutable_base_evidence_archive(),
         "repos/owner/repository/actions/runs/123/jobs?per_page=100&page=1": {
             "total_count": 1,
             "jobs": [job],
@@ -89,9 +116,11 @@ class SequenceFetcher:
 
 class VerifyCiQualityEvidenceTest(unittest.TestCase):
     def verify(self, responses: dict[str, object] | None = None) -> dict[str, str]:
-        fetcher = SequenceFetcher(responses or payloads())
+        data = responses or payloads()
+        fetcher = SequenceFetcher(data)
         result = MODULE.verify_quality_evidence(
             fetcher,
+            SequenceFetcher(data),
             repository=REPOSITORY,
             pull_request=90,
             base_sha=BASE,
@@ -106,6 +135,7 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
         fetcher = SequenceFetcher(responses)
         result = MODULE.verify_quality_evidence(
             fetcher,
+            SequenceFetcher(responses),
             repository=REPOSITORY,
             pull_request=90,
             base_sha=BASE,
@@ -120,9 +150,11 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
         self.assertEqual(self.verify(), {"run_id": "123", "run_attempt": "1", "head_sha": HEAD})
 
     def test_rereads_pull_identity_after_ci_job_verification(self) -> None:
-        fetcher = SequenceFetcher(payloads())
+        responses = payloads()
+        fetcher = SequenceFetcher(responses)
         MODULE.verify_quality_evidence(
             fetcher,
+            SequenceFetcher(responses),
             repository=REPOSITORY,
             pull_request=90,
             base_sha=BASE,
@@ -292,6 +324,17 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
         job = copy.deepcopy(responses["repos/owner/repository/actions/runs/123/jobs?per_page=100&page=1"])
         job["jobs"][0]["run_id"] = 124  # type: ignore[index]
         responses["repos/owner/repository/actions/runs/124/jobs?per_page=100&page=1"] = job
+        artifact_path = "repos/owner/repository/actions/runs/124/artifacts?per_page=100&page=1"
+        artifact_url = "https://api.github.com/artifacts/790"
+        archive = immutable_base_evidence_archive(run_id=124)
+        responses[artifact_path] = {
+            "total_count": 1,
+            "artifacts": [{
+                "id": 790, "name": "ci-quality-evidence-124-1", "expired": False,
+                "size_in_bytes": len(archive), "archive_download_url": artifact_url,
+            }],
+        }
+        responses[artifact_url] = archive
         self.assertEqual(self.verify(responses), {"run_id": "124", "run_attempt": "1", "head_sha": HEAD})
 
     def test_newest_run_generation_cannot_be_masked_by_older_success(self) -> None:
@@ -384,6 +427,7 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
         )
         with (
             mock.patch.object(MODULE, "_api_fetch", SequenceFetcher(responses)),
+            mock.patch.object(MODULE, "_api_download", SequenceFetcher(responses)),
             mock.patch.object(MODULE, "parse_args", return_value=args),
         ):
             self.assertEqual(MODULE.main(), MODULE.PENDING_EVIDENCE_EXIT)
@@ -456,6 +500,16 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.EvidencePendingError, "current-base"):
             self.verify(responses)
 
+    def test_rejects_mutated_run_relation_without_matching_immutable_base_evidence(self) -> None:
+        responses = payloads()
+        artifact = responses[ARTIFACTS_PATH]["artifacts"][0]  # type: ignore[index]
+        responses[ARTIFACT_URL] = immutable_base_evidence_archive(base_sha="c" * 40)
+        artifact["size_in_bytes"] = len(responses[ARTIFACT_URL])
+        # GitHub may rewrite this relation after master advances.  The artifact
+        # was emitted by the CI generation and remains the binding authority.
+        with self.assertRaisesRegex(MODULE.EvidenceError, "immutable base evidence does not match"):
+            self.verify(responses)
+
     def test_rejects_paginated_or_incomplete_response(self) -> None:
         responses = payloads()
         responses[
@@ -511,6 +565,7 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
         )
         with (
             mock.patch.object(MODULE, "_api_fetch", SequenceFetcher(responses)),
+            mock.patch.object(MODULE, "_api_download", SequenceFetcher(responses)),
             mock.patch.object(MODULE, "parse_args", return_value=args),
         ):
             self.assertEqual(MODULE.main(), 1)
@@ -573,6 +628,11 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         coverage = workflow[workflow.index("- name: Run coverage") :]
         self.assertIn("timeout-minutes: 45", coverage)
         self.assertIn("- name: Diagnose coverage failure", coverage)
+        self.assertIn("- name: Record immutable PR base evidence", workflow)
+        self.assertIn("- name: Upload immutable PR base evidence", workflow)
+        self.assertIn("ci-quality-evidence-${{ github.run_id }}-${{ github.run_attempt }}", workflow)
+        self.assertIn("github.event.pull_request.base.sha", workflow)
+        self.assertIn("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", workflow)
 
     def test_macos_arm64_rebuilds_v8_before_linking(self) -> None:
         workflow = (self.ROOT / ".github/workflows/test-and-build.yml").read_text(encoding="utf-8")

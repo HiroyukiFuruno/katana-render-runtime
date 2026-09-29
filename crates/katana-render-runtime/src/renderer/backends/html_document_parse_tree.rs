@@ -108,17 +108,6 @@ fn has_parent(node: &Handle, expected_parent: &Handle) -> bool {
         .is_some_and(|parent| Rc::ptr_eq(&parent, expected_parent))
 }
 
-pub(super) fn visible_iframe_count(node: &Handle) -> usize {
-    let is_iframe = matches!(&node.data, NodeData::Element { name, .. } if name.local.as_str().eq_ignore_ascii_case("iframe"));
-    usize::from(is_iframe)
-        + node
-            .children
-            .borrow()
-            .iter()
-            .map(visible_iframe_count)
-            .sum::<usize>()
-}
-
 #[cfg(test)]
 mod tests {
     use super::{WindowLoadHandlerObserver, element_has_window_load_onload};
