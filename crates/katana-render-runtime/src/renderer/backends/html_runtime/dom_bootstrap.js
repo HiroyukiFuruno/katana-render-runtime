@@ -183,7 +183,8 @@ const __krrDispatchListenerEntry = (entries, entry, target, event, capture) => {
     if (typeof entry.callback === "function") entry.callback.call(target, event);
     else entry.callback.handleEvent.call(entry.callback, event);
   } catch (error) {
-    if (!["readystatechange", "load", "error"].includes(String(event.type))) throw error;
+    if (!["readystatechange", "load", "error", "DOMContentLoaded"].includes(String(event.type)))
+      throw error;
     if (!event.__krrHasListenerError) {
       event.__krrListenerError = error;
       event.__krrHasListenerError = true;

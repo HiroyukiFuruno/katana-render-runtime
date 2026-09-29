@@ -295,22 +295,22 @@ def _verify_runs(
                 # 同一headでbaseだけが古い履歴runは、現在の候補証跡に使わない。
                 continue
         verified.append(_verify_run_binding(run, repository, pull_request, base_sha, head_sha, workflow))
-    run_ids = [run["id"] for run in verified]
-    if len(set(run_ids)) != len(run_ids):
-        raise EvidenceError("current-head CI runs have duplicated run ids")
-
-    successful = [
-        run
-        for run in verified
-        if run.get("status") == "completed" and run.get("conclusion") == "success"
-    ]
-    if successful:
-        return max(successful, key=lambda run: run["id"])
     if not verified:
         raise EvidencePendingError("expected at least one current-base CI run")
-    if any(run.get("status") != "completed" for run in verified):
+
+    # run id と attempt は不変の workflow 世代を表す。GitHub は PR base 更新時に
+    # 古い run の埋め込み pull_requests 関係を書き換えることがあるため、古い成功
+    # 世代が新しい pending / failed 世代を隠せないよう、全候補の不変な結合を検証後に
+    # 最新世代だけを評価する。
+    generations = [(run["id"], run["run_attempt"]) for run in verified]
+    if len(set(generations)) != len(generations):
+        raise EvidenceError("current-head CI runs have duplicated run generations")
+    latest = max(verified, key=lambda run: (run["id"], run["run_attempt"]))
+    if latest.get("status") != "completed":
         raise EvidencePendingError("all current-head CI runs are still in progress or unsuccessful")
-    raise EvidenceError("all current-head CI runs completed unsuccessfully")
+    if latest.get("conclusion") != "success":
+        raise EvidenceError("all current-head CI runs completed unsuccessfully")
+    return latest
 
 
 def _verify_run_binding(

@@ -658,3 +658,52 @@ const createPendingImageDispatcher = (document, dispatchImage) =>
     "__krrDispatchImageLoad",
     `${dispatchPendingImages}\nreturn __krrDispatchPendingImages;`,
   )(document, dispatchImage);
+
+test("DOMContentLoaded listenerの例外後も後続listenerとproperty handlerを実行してから再送出する", () => {
+  expect(dispatchListenerEntry).toBeDefined();
+  expect(dispatchListeners).toBeDefined();
+  expect(dispatchHandler).toBeDefined();
+  expect(dispatchTargetPhase).toBeDefined();
+
+  const dispatchTargetPhaseForTest = new Function(
+    "__krrEventTargetListeners",
+    "__krrSyncEventTarget",
+    `${dispatchListenerEntry}\n${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\nreturn __krrDispatchTargetPhase;`,
+  );
+  const order = [];
+  const target = {
+    onDOMContentLoaded() {
+      order.push("property");
+    },
+  };
+  const listeners = new Map([
+    [
+      "DOMContentLoaded",
+      [
+        {
+          callback() {
+            order.push("first");
+            throw new Error("listener failure");
+          },
+          capture: false,
+          once: false,
+          passive: false,
+        },
+        {
+          callback() {
+            order.push("second");
+          },
+          capture: false,
+          once: false,
+          passive: false,
+        },
+      ],
+    ],
+  ]);
+  const eventTargetListeners = new WeakMap([[target, listeners]]);
+  const dispatch = dispatchTargetPhaseForTest(eventTargetListeners, () => {});
+  const event = { type: "DOMContentLoaded", __krrImmediatePropagationStopped: false };
+
+  expect(() => dispatch(target, event, false, 2)).toThrow("listener failure");
+  expect(order).toEqual(["first", "second", "property"]);
+});
