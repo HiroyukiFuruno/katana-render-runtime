@@ -6,12 +6,14 @@ from __future__ import annotations
 import argparse
 import errno
 import http.client
+import io
 import json
 import os
 import re
 import socket
 import subprocess
 import sys
+import zipfile
 from collections.abc import Callable
 from typing import Any
 from urllib import error, parse, request
@@ -27,6 +29,7 @@ class EvidencePendingError(EvidenceError):
 
 JsonValue = Any
 Fetcher = Callable[[str], JsonValue]
+ArtifactFetcher = Callable[[str], bytes]
 SnapshotValidator = Callable[[JsonValue], None]
 PENDING_EVIDENCE_EXIT = 75
 RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
@@ -46,6 +49,9 @@ REPOSITORY_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 SHA_RE = re.compile(r"[0-9a-fA-F]{40}\Z")
 RELEASE_HEAD_REF_RE = re.compile(r"release/v\d+\.\d+\.\d+\Z")
 WORKFLOW_PATH = ".github/workflows/test-and-build.yml"
+IMMUTABLE_BASE_EVIDENCE_FILE = "ci-quality-evidence.json"
+MAX_IMMUTABLE_BASE_EVIDENCE_ARCHIVE_BYTES = 64 * 1024
+MAX_IMMUTABLE_BASE_EVIDENCE_PAYLOAD_BYTES = 1024
 JOB_NAME = "Test and Build (ubuntu-latest, linux64)"
 REQUIRED_STEPS = (
     "Run runtime asset script tests",
@@ -53,6 +59,20 @@ REQUIRED_STEPS = (
     "Run runtime package asset check",
     "Run coverage",
 )
+
+
+class _ArtifactRedirectHandler(request.HTTPRedirectHandler):
+    """Prevent the GitHub API bearer token from crossing to artifact storage."""
+
+    def redirect_request(
+        self, request_value: request.Request, file_pointer: Any, status_code: int, reason: str, headers: Any, url: str
+    ) -> request.Request | None:
+        redirected = super().redirect_request(
+            request_value, file_pointer, status_code, reason, headers, url
+        )
+        if redirected is not None and parse.urlsplit(request_value.full_url).netloc != parse.urlsplit(url).netloc:
+            redirected.remove_header("Authorization")
+        return redirected
 
 
 def _canonical(value: JsonValue) -> str:
@@ -273,6 +293,95 @@ def _read_all_workflow_runs(
     return all_runs
 
 
+def _artifacts_path(repository: str, run_id: int) -> str:
+    return f"repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100&page=1"
+
+
+def _immutable_base_evidence_name(run_id: int, run_attempt: int) -> str:
+    return f"ci-quality-evidence-{run_id}-{run_attempt}"
+
+
+def _verify_immutable_base_evidence(
+    fetch: Fetcher,
+    artifact_fetch: ArtifactFetcher,
+    repository: str,
+    run: dict[str, JsonValue],
+    base_sha: str,
+    head_sha: str,
+) -> None:
+    """Require CI-produced, run-bound base evidence instead of mutable PR relations."""
+    run_id = run.get("id")
+    run_attempt = run.get("run_attempt")
+    if type(run_id) is not int or run_id < 1 or type(run_attempt) is not int or run_attempt < 1:
+        raise EvidenceError("CI workflow run generation is invalid")
+    expected_name = _immutable_base_evidence_name(run_id, run_attempt)
+    path = _artifacts_path(repository, run_id)
+
+    def validate(payload: JsonValue) -> None:
+        value = _require_dict(payload, "CI immutable base evidence")
+        total = value.get("total_count")
+        artifacts = value.get("artifacts")
+        if type(total) is not int or total < 0 or not isinstance(artifacts, list) or total != len(artifacts):
+            raise EvidenceError("CI immutable base evidence page is incomplete or paginated")
+        matches = [artifact for artifact in artifacts if isinstance(artifact, dict) and artifact.get("name") == expected_name]
+        if len(matches) != 1:
+            raise EvidencePendingError("CI immutable base evidence is absent or ambiguous")
+        artifact = matches[0]
+        if (
+            type(artifact.get("id")) is not int
+            or artifact["id"] < 1
+            or artifact.get("expired") is not False
+            or type(artifact.get("size_in_bytes")) is not int
+            or artifact["size_in_bytes"] < 1
+            or artifact["size_in_bytes"] > MAX_IMMUTABLE_BASE_EVIDENCE_ARCHIVE_BYTES
+            or not isinstance(artifact.get("archive_download_url"), str)
+            or not artifact["archive_download_url"]
+        ):
+            raise EvidenceError("CI immutable base evidence metadata is invalid")
+
+    payload = _require_dict(_read_ci_snapshot_twice(fetch, path, validate), "CI immutable base evidence")
+    artifacts = payload.get("artifacts")
+    assert isinstance(artifacts, list)
+    artifact = next(item for item in artifacts if isinstance(item, dict) and item.get("name") == expected_name)
+    archive_url = artifact.get("archive_download_url")
+    assert isinstance(archive_url, str)
+    archive = artifact_fetch(archive_url)
+    if not isinstance(archive, bytes) or not (0 < len(archive) <= MAX_IMMUTABLE_BASE_EVIDENCE_ARCHIVE_BYTES):
+        raise EvidenceError("CI immutable base evidence archive is invalid")
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            members = bundle.infolist()
+            if len(members) != 1:
+                raise EvidenceError("CI immutable base evidence archive members are invalid")
+            member = members[0]
+            if (
+                member.filename != IMMUTABLE_BASE_EVIDENCE_FILE
+                or member.is_dir()
+                or member.file_size < 1
+                or member.file_size > MAX_IMMUTABLE_BASE_EVIDENCE_PAYLOAD_BYTES
+            ):
+                raise EvidenceError("CI immutable base evidence archive members are invalid")
+            raw = bundle.read(member)
+            if len(raw) != member.file_size or len(raw) > MAX_IMMUTABLE_BASE_EVIDENCE_PAYLOAD_BYTES:
+                raise EvidenceError("CI immutable base evidence payload is invalid")
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
+        raise EvidenceError("CI immutable base evidence archive is malformed") from exc
+    try:
+        evidence = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise EvidenceError("CI immutable base evidence payload is malformed") from exc
+    if (
+        not isinstance(evidence, dict)
+        or set(evidence) != {"base_sha", "head_sha", "run_attempt", "run_id", "schema"}
+        or evidence.get("schema") != 1
+        or evidence.get("run_id") != run_id
+        or evidence.get("run_attempt") != run_attempt
+        or evidence.get("base_sha") != base_sha
+        or evidence.get("head_sha") != head_sha
+    ):
+        raise EvidenceError("CI immutable base evidence does not match the current generation")
+
+
 def _verify_runs(
     runs: list[JsonValue],
     repository: str,
@@ -400,6 +509,7 @@ def _validate_jobs_snapshot(payload: JsonValue, run_id: int, required_steps: tup
 
 def verify_quality_evidence(
     fetch: Fetcher,
+    artifact_fetch: ArtifactFetcher,
     *,
     repository: str,
     pull_request: int,
@@ -420,6 +530,9 @@ def verify_quality_evidence(
         base_sha,
         head_sha,
         workflow,
+    )
+    _verify_immutable_base_evidence(
+        fetch, artifact_fetch, repository, runs, base_sha, head_sha
     )
     run_id = runs["id"]
     jobs_path = f"repos/{repository}/actions/runs/{run_id}/jobs?per_page=100&page=1"
@@ -444,7 +557,7 @@ def _is_retryable_url_error(exc: error.URLError) -> bool:
     return isinstance(reason, OSError) and reason.errno in RETRYABLE_SOCKET_ERRNOS
 
 
-def _api_fetch(path: str) -> JsonValue:
+def _api_headers() -> dict[str, str]:
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
@@ -453,7 +566,11 @@ def _api_fetch(path: str) -> JsonValue:
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    api_request = request.Request(f"https://api.github.com/{path}", headers=headers)
+    return headers
+
+
+def _api_fetch(path: str) -> JsonValue:
+    api_request = request.Request(f"https://api.github.com/{path}", headers=_api_headers())
     try:
         with request.urlopen(api_request, timeout=20) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -475,6 +592,28 @@ def _api_fetch(path: str) -> JsonValue:
         raise EvidencePendingError("GitHub API transport was interrupted") from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise EvidenceError("GitHub API returned malformed JSON") from exc
+
+
+def _api_download(url: str) -> bytes:
+    if not isinstance(url, str) or not url.startswith("https://api.github.com/"):
+        raise EvidenceError("CI immutable base evidence download URL is invalid")
+    try:
+        opener = request.build_opener(_ArtifactRedirectHandler())
+        with opener.open(request.Request(url, headers=_api_headers()), timeout=20) as response:
+            data = response.read(MAX_IMMUTABLE_BASE_EVIDENCE_ARCHIVE_BYTES + 1)
+    except error.HTTPError as exc:
+        if exc.code in RETRYABLE_HTTP_STATUSES:
+            raise EvidencePendingError("CI immutable base evidence is temporarily unavailable") from exc
+        raise EvidenceError(f"CI immutable base evidence download failed with HTTP status {exc.code}") from exc
+    except error.URLError as exc:
+        if _is_retryable_url_error(exc):
+            raise EvidencePendingError("CI immutable base evidence transport is temporarily unavailable") from exc
+        raise EvidenceError("CI immutable base evidence transport failed") from exc
+    except (http.client.IncompleteRead, http.client.RemoteDisconnected, ConnectionError, socket.timeout, TimeoutError) as exc:
+        raise EvidencePendingError("CI immutable base evidence transport was interrupted") from exc
+    if len(data) > MAX_IMMUTABLE_BASE_EVIDENCE_ARCHIVE_BYTES:
+        raise EvidenceError("CI immutable base evidence archive is too large")
+    return data
 
 
 def parse_args() -> argparse.Namespace:
@@ -499,6 +638,7 @@ def main() -> int:
             raise EvidenceError("expected release head ref is required")
         evidence = verify_quality_evidence(
             _api_fetch,
+            _api_download,
             repository=args.repository,
             pull_request=args.pull_request,
             base_sha=args.base_sha,

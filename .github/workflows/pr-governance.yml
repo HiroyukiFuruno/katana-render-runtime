@@ -409,8 +409,15 @@ jobs:
               raise SystemExit("Resolver-failure barrier marker is not JSON.") from error
           if type(identifier) is not int or identifier<1 or posted.get("name")!=context or posted.get("head_sha")!=head or posted.get("external_id")!=external or posted.get("status")!="completed" or posted.get("conclusion")!="success" or posted.get("details_url")!=details or not isinstance(posted.get("app"),dict) or posted["app"].get("id")!=app_id:
               raise SystemExit("Resolver-failure barrier marker is invalid.")
-          reread=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
-          if reread.returncode!=0:
+          reread=None
+          for attempt in range(5):
+              candidate=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
+              if candidate.returncode==0:
+                  reread=candidate
+                  break
+              if attempt<4:
+                  time.sleep(1)
+          if reread is None:
               raise SystemExit("Unable to re-read resolver-failure barrier marker.")
           try:
               marker=json.loads(reread.stdout)
@@ -964,8 +971,14 @@ jobs:
           try: posted=json.loads(created.stdout); identifier=posted.get("id") if isinstance(posted,dict) else None
           except json.JSONDecodeError as error: raise SystemExit("Affected-head barrier marker is not JSON.") from error
           if type(identifier) is not int or identifier<1 or posted.get("name")!=context or posted.get("head_sha")!=head or posted.get("external_id")!=external or posted.get("status")!="completed" or posted.get("conclusion")!="success" or posted.get("details_url")!=details or not isinstance(posted.get("app"),dict) or posted["app"].get("id")!=app_id: raise SystemExit("Affected-head barrier marker is invalid.")
-          reread=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
-          if reread.returncode!=0: raise SystemExit("Unable to re-read affected-head barrier marker.")
+          reread=None
+          for attempt in range(5):
+              candidate=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
+              if candidate.returncode==0:
+                  reread=candidate
+                  break
+              if attempt<4: time.sleep(1)
+          if reread is None: raise SystemExit("Unable to re-read affected-head barrier marker.")
           try: marker=json.loads(reread.stdout)
           except json.JSONDecodeError as error: raise SystemExit("Affected-head barrier marker re-read is not JSON.") from error
           if not isinstance(marker,dict) or marker.get("id")!=identifier or marker.get("name")!=context or marker.get("head_sha")!=head or marker.get("external_id")!=external or marker.get("status")!="completed" or marker.get("conclusion")!="success" or marker.get("details_url")!=details or not isinstance(marker.get("app"),dict) or marker["app"].get("id")!=app_id: raise SystemExit("Affected-head barrier marker re-read is invalid.")

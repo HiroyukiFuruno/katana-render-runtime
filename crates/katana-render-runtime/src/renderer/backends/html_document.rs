@@ -27,7 +27,8 @@ pub(super) use svg::{
 pub(super) struct HtmlDocument {
     pub(super) document: Handle,
     pub(super) body_onload_script_index: Option<usize>,
-    pub(super) body_onload_iframe_index: Option<usize>,
+    pub(super) source_order: Vec<Handle>,
+    pub(super) body_onload_source_order_index: Option<usize>,
     nodes: HashMap<u64, Handle>,
     node_ids: HashMap<usize, u64>,
     next_node_id: u64,

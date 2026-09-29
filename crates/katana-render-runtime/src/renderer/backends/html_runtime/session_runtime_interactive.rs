@@ -1,6 +1,6 @@
 use crate::renderer::backends::html_runtime::script::{
     BODY_ONLOAD_INSTALL, DOM_CONTENT_LOADED_DISPATCH, WINDOW_LOAD_DISPATCH, check_bridge_error,
-    evaluate, install_dom_bridge, perform_microtask_checkpoint,
+    evaluate, evaluate_and_wait_for_promise, install_dom_bridge, perform_microtask_checkpoint,
 };
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 
@@ -23,10 +23,7 @@ impl StaticHtmlRuntime {
             install_dom_bridge(scope, document_url)?;
         }
         let mut evaluate = |name: &str, script: &str| -> Result<(), HtmlRuntimeError> {
-            v8::tc_scope!(let scope, &mut **context_scope);
-            evaluate(scope, name, script)
-                .and_then(|()| perform_microtask_checkpoint(scope))
-                .and_then(|()| check_bridge_error(scope))
+            Self::evaluate_interactive_script(context_scope, name, script)
         };
         Self::run_inline_interactive_scripts(
             document_url,
@@ -36,6 +33,21 @@ impl StaticHtmlRuntime {
         )?;
         Self::run_interactive_lifecycle_scripts(document_url, &mut evaluate)?;
         Ok(v8::Global::new(context_scope, context))
+    }
+
+    fn evaluate_interactive_script(
+        context_scope: &mut v8::ContextScope<'_, '_, v8::HandleScope<'_>>,
+        name: &str,
+        script: &str,
+    ) -> Result<(), HtmlRuntimeError> {
+        v8::tc_scope!(let scope, &mut **context_scope);
+        if name == "krr-html-window-load" {
+            evaluate_and_wait_for_promise(scope, name, script)
+        } else {
+            evaluate(scope, name, script)
+        }
+        .and_then(|()| perform_microtask_checkpoint(scope))
+        .and_then(|()| check_bridge_error(scope))
     }
 
     pub(super) fn run_inline_interactive_scripts(

@@ -1,30 +1,26 @@
 use super::super::html_dom_helpers::collect_scripts;
 use super::HtmlDocument;
+#[path = "html_document_parse_source_order.rs"]
+mod source_order;
 #[path = "html_document_parse_tree.rs"]
 mod tree;
 use html5ever::{
     TokenizerResult,
-    tokenizer::{
-        BufferQueue, Tag, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, TokenizerOpts,
-    },
-    tree_builder::{TreeBuilder, TreeBuilderOpts, TreeSink},
+    tokenizer::{BufferQueue, Tokenizer, TokenizerOpts},
 };
 use markup5ever_rcdom::{Handle, RcDom};
-use std::{
-    cell::{Cell, RefCell},
-    collections::HashMap,
-    rc::Rc,
-};
-use tree::{WindowLoadHandlerObserver, visible_iframe_count};
+use source_order::SourceOrderSink;
+use std::collections::HashMap;
 
 impl HtmlDocument {
     pub(crate) fn parse(source: &str) -> Self {
-        let (parsed, body_onload_script_index, body_onload_iframe_index) =
+        let (parsed, body_onload_script_index, body_onload_source_order_index, source_order) =
             parse_with_source_order(source);
         let mut document = Self {
             document: parsed.document,
             body_onload_script_index,
-            body_onload_iframe_index,
+            source_order,
+            body_onload_source_order_index,
             nodes: HashMap::new(),
             node_ids: HashMap::new(),
             next_node_id: 1,
@@ -50,110 +46,10 @@ impl HtmlDocument {
     pub(crate) fn body_onload_script_index(&self) -> Option<usize> {
         self.body_onload_script_index
     }
-
-    pub(crate) fn body_onload_iframe_index(&self) -> Option<usize> {
-        self.body_onload_iframe_index
-    }
 }
 
-struct SourceOrderSink {
-    tree_builder: TreeBuilder<Handle, RcDom>,
-    scripts: Cell<usize>,
-    node_visibility: RefCell<HashMap<usize, bool>>,
-    window_load_handler_observer: RefCell<WindowLoadHandlerObserver>,
-    body_onload_script_index: Cell<Option<usize>>,
-    body_onload_iframe_index: Cell<Option<usize>>,
-}
-
-impl TokenSink for SourceOrderSink {
-    type Handle = Handle;
-
-    fn process_token(&self, token: Token, line_number: u64) -> TokenSinkResult<Self::Handle> {
-        let tag = match &token {
-            Token::TagToken(tag) => Some(tag.clone()),
-            _ => None,
-        };
-        let result = self.tree_builder.process_token(token, line_number);
-        if let TokenSinkResult::Script(node) = &result {
-            self.observe_script(node);
-        }
-        if let Some(tag) = tag {
-            self.observe_source_order(&tag);
-        }
-        result
-    }
-}
-
-impl SourceOrderSink {
-    fn observe_script(&self, node: &Handle) {
-        if self.node_is_visible(node) {
-            self.scripts.set(self.scripts.get() + 1);
-        }
-    }
-
-    fn observe_source_order(&self, tag: &Tag) {
-        if tag.kind != TagKind::StartTag {
-            return;
-        }
-        let name = tag.name.to_string();
-        let load_handler_element =
-            name.eq_ignore_ascii_case("body") || name.eq_ignore_ascii_case("frameset");
-        if load_handler_element
-            && self.body_onload_script_index.get().is_none()
-            && tag.attrs.iter().any(|attribute| {
-                attribute
-                    .name
-                    .local
-                    .to_string()
-                    .eq_ignore_ascii_case("onload")
-            })
-            && self
-                .window_load_handler_observer
-                .borrow_mut()
-                .token_created_or_updated_window_load_handler(
-                    &self.tree_builder.sink.document,
-                    &name,
-                )
-        {
-            self.body_onload_script_index.set(Some(self.scripts.get()));
-            self.body_onload_iframe_index
-                .set(Some(visible_iframe_count(&self.tree_builder.sink.document)));
-        }
-    }
-
-    fn node_is_visible(&self, node: &Handle) -> bool {
-        let mut current = node.clone();
-        let mut unobserved = Vec::new();
-        let visible = loop {
-            let node_id = Rc::as_ptr(&current) as usize;
-            if let Some(visible) = self.node_visibility.borrow().get(&node_id) {
-                break *visible;
-            }
-            unobserved.push(node_id);
-            let parent = current.parent.take();
-            current.parent.set(parent.clone());
-            let Some(parent) = parent.and_then(|parent| parent.upgrade()) else {
-                break Rc::ptr_eq(&current, &self.tree_builder.sink.document);
-            };
-            current = parent;
-        };
-        let mut visibility = self.node_visibility.borrow_mut();
-        for node_id in unobserved {
-            visibility.insert(node_id, visible);
-        }
-        visible
-    }
-}
-
-fn parse_with_source_order(source: &str) -> (RcDom, Option<usize>, Option<usize>) {
-    let sink = SourceOrderSink {
-        tree_builder: TreeBuilder::new(RcDom::default(), TreeBuilderOpts::default()),
-        scripts: Cell::new(0),
-        node_visibility: RefCell::new(HashMap::new()),
-        window_load_handler_observer: RefCell::new(WindowLoadHandlerObserver::default()),
-        body_onload_script_index: Cell::new(None),
-        body_onload_iframe_index: Cell::new(None),
-    };
+fn parse_with_source_order(source: &str) -> (RcDom, Option<usize>, Option<usize>, Vec<Handle>) {
+    let sink = SourceOrderSink::new(RcDom::default());
     let tokenizer = Tokenizer::new(sink, TokenizerOpts::default());
     let input = BufferQueue::default();
     input.push_back(source.to_string().into());
@@ -163,10 +59,7 @@ fn parse_with_source_order(source: &str) -> (RcDom, Option<usize>, Option<usize>
         }
     }
     tokenizer.end();
-    let body_onload_script_index = tokenizer.sink.body_onload_script_index.get();
-    let body_onload_iframe_index = tokenizer.sink.body_onload_iframe_index.get();
-    let parsed = tokenizer.sink.tree_builder.sink.finish();
-    (parsed, body_onload_script_index, body_onload_iframe_index)
+    tokenizer.sink.finish()
 }
 
 #[cfg(test)]
@@ -224,14 +117,14 @@ mod tests {
             r#"<template><iframe></iframe></template><body onload="handler"><iframe></iframe>"#,
         );
 
-        assert_eq!(document.body_onload_iframe_index(), Some(0));
+        assert_eq!(document.body_onload_source_order_index, Some(0));
     }
 
     #[test]
     fn visible_iframe_before_body_onload_shifts_its_source_position() {
         let document = HtmlDocument::parse(r#"<iframe></iframe><body onload="handler">"#);
 
-        assert_eq!(document.body_onload_iframe_index(), Some(1));
+        assert_eq!(document.body_onload_source_order_index, Some(1));
     }
 
     #[test]
