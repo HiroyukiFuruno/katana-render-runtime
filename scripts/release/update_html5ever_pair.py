@@ -9,11 +9,14 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Union
 
 
 PACKAGE_NAMES = ("html5ever", "markup5ever")
 ROOT = Path(__file__).resolve().parents[2]
-CommandRunner = Callable[..., subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]]
+CommandRunner = Callable[
+    ..., Union[subprocess.CompletedProcess[bytes], subprocess.CompletedProcess[str]]
+]
 
 
 def parse_cargo_command(value: str) -> list[str]:

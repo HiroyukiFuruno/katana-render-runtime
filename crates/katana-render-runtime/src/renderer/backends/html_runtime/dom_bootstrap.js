@@ -1905,6 +1905,28 @@ const __krrDispatchImageLoad = (image) => {
   }
 };
 
+const __krrDispatchPendingImages = async (document) => {
+  const dispatchedImages = new Set();
+  const maxImageDispatches = 1024;
+  const maxImageRescans = 8;
+  let emptyRescanCount = 0;
+  for (let rescan = 0; rescan < maxImageRescans && emptyRescanCount < 2; rescan += 1) {
+    let foundImage = false;
+    for (const image of document.querySelectorAll("img")) {
+      if (dispatchedImages.has(image)) continue;
+      foundImage = true;
+      dispatchedImages.add(image);
+      __krrDispatchImageLoad(image);
+      if (dispatchedImages.size >= maxImageDispatches) {
+        await Promise.resolve();
+        return;
+      }
+    }
+    await Promise.resolve();
+    emptyRescanCount = foundImage ? 0 : emptyRescanCount + 1;
+  }
+};
+
 globalThis.__krrDispatchWindowLoad = async () => {
   const body = document.body;
   if (body !== null) __krrRouteWindowLoadElement(body);
@@ -1916,10 +1938,7 @@ globalThis.__krrDispatchWindowLoad = async () => {
       frame.dispatchEvent(new Event("load"));
     } catch (_error) {}
   }
-  for (const image of document.querySelectorAll("img")) {
-    __krrDispatchImageLoad(image);
-  }
-  await Promise.resolve();
+  await __krrDispatchPendingImages(document);
   __krrDocumentReadyState = "complete";
   __krrDispatchDocumentReadyStateChange();
   __krrDispatchElementReadyStateChange();

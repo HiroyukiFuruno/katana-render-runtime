@@ -3564,6 +3564,13 @@ class StatusWriterUnitTest(unittest.TestCase):
         self.assertIn("pr_head_sha=" + "a" * 40, url)
         self.assertIn("pr_body_sha256=" + "c" * 64, url)
 
+    def test_target_url_rejects_wrong_generation_count(self) -> None:
+        generation = WRITER.Generation("CI", "x", 44, 101, 8, 2, "completed", "success")
+        with self.identity(), self.assertRaisesRegex(
+            WRITER.GovernanceError, "Exactly two workflow generations are required"
+        ):
+            WRITER.target_url(generations=(generation,))
+
     def test_body_digest_rejects_non_text_nul_and_invalid_utf8_scalars(self) -> None:
         self.assertEqual(
             WRITER.pr_body_sha256("Fixes #64"),

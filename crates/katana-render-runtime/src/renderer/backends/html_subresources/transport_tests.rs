@@ -1,4 +1,7 @@
-use super::{decode_forgiving_base64, load_image_data_url, load_text};
+use super::{
+    MAX_SUBRESOURCE_BYTES, check_data_url_size, decode_data_url, decode_forgiving_base64,
+    load_image_data_url, load_text,
+};
 use url::Url;
 
 #[test]
@@ -125,6 +128,27 @@ fn malformed_text_data_urls_are_rejected() {
     with_url("data:application/octet-stream;base64,/w==", |url| {
         assert!(load_text(url).is_err());
     });
+}
+
+#[test]
+fn oversized_data_url_payloads_are_rejected_before_decoding() {
+    let oversized_payload = "A".repeat(MAX_SUBRESOURCE_BYTES as usize + 1);
+    let source = format!("data:image/png;base64,{oversized_payload}");
+    with_url(&source, |url| {
+        assert!(matches!(
+            decode_data_url(url),
+            Err(error) if error.contains("encoded payload exceeds")
+        ));
+    });
+}
+
+#[test]
+fn decoded_data_url_size_uses_the_subresource_limit() {
+    assert!(matches!(
+        check_data_url_size(MAX_SUBRESOURCE_BYTES as usize + 1, "decoded"),
+        Err(error) if error.contains("decoded payload exceeds")
+    ));
+    assert!(check_data_url_size(MAX_SUBRESOURCE_BYTES as usize, "decoded").is_ok());
 }
 
 fn with_url(source: &str, assertion: impl FnMut(&Url)) {

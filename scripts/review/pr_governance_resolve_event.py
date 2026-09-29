@@ -277,7 +277,7 @@ def closing_numbers(body: str) -> set[str]:
 def referenced(issue: int) -> set[int]:
     text = str(issue)
     return {number for number, body in bodies.items() if text in closing_numbers(body)}
-source_number_value: int | None = None
+source_number_value = None
 priority_event = False
 if event_name in {"schedule", "workflow_dispatch"}:
     affected = numbers
