@@ -28,6 +28,9 @@ const routeWindowLoadElement = source.match(
 const dispatchListeners = source.match(
   /^const __krrDispatchListeners = \(listeners, target, event, capture\) => \{[\s\S]*?^\};/m,
 )?.[0];
+const dispatchListenerEntry = source.match(
+  /^const __krrDispatchListenerEntry = \(entries, entry, target, event, capture\) => \{[\s\S]*?^\};/m,
+)?.[0];
 const dispatchHandler = source.match(
   /^const __krrDispatchHandler = \(target, event\) => \{[\s\S]*?^\};/m,
 )?.[0];
@@ -201,6 +204,7 @@ test("後からcurrent bodyまたはframesetになった要素のload handlerを
 
 test("readystatechange listener例外の後も後続listenerとproperty handlerを呼ぶ", () => {
   expect(dispatchListeners).toBeDefined();
+  expect(dispatchListenerEntry).toBeDefined();
   expect(dispatchHandler).toBeDefined();
   expect(dispatchTargetPhase).toBeDefined();
 
@@ -233,7 +237,7 @@ test("readystatechange listener例外の後も後続listenerとproperty handler�
     "target",
     "__krrEventTargetListeners",
     "__krrSyncEventTarget",
-    `${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\nreturn __krrDispatchTargetPhase;`,
+    `${dispatchListenerEntry}\n${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\nreturn __krrDispatchTargetPhase;`,
   )(target, new WeakMap([[target, new Map([["readystatechange", entries]])]]), () => {});
 
   expect(() => dispatch(target, { type: "readystatechange" }, false, 2)).toThrow(
@@ -244,6 +248,7 @@ test("readystatechange listener例外の後も後続listenerとproperty handler�
 });
 
 test("通常イベントのlistener例外はdispatchを中断して呼び出し元へ伝播する", () => {
+  expect(dispatchListenerEntry).toBeDefined();
   const calls = [];
   const target = {};
   const entries = [
@@ -269,7 +274,7 @@ test("通常イベントのlistener例外はdispatchを中断して呼び出し�
     "target",
     "__krrEventTargetListeners",
     "__krrSyncEventTarget",
-    `${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\nreturn __krrDispatchTargetPhase;`,
+    `${dispatchListenerEntry}\n${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\nreturn __krrDispatchTargetPhase;`,
   )(target, new WeakMap([[target, new Map([["custom", entries]])]]), () => {});
 
   expect(() => dispatch(target, { type: "custom" }, false, 2)).toThrow("listener failure");

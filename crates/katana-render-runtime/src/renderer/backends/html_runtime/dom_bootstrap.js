@@ -175,26 +175,28 @@ const __krrInstallLifecycleProperty = (target, type, value) => {
   overrides.add(eventType);
   __krrStoreEventHandler(target, eventType, typeof value === "function" ? value : null);
 };
+const __krrDispatchListenerEntry = (entries, entry, target, event, capture) => {
+  if (!entries.includes(entry) || entry.capture !== capture) return true;
+  if (entry.once) entries.splice(entries.indexOf(entry), 1);
+  event.__krrPassiveListener = entry.passive;
+  try {
+    if (typeof entry.callback === "function") entry.callback.call(target, event);
+    else entry.callback.handleEvent.call(entry.callback, event);
+  } catch (error) {
+    if (String(event.type) !== "readystatechange") throw error;
+    if (!event.__krrHasListenerError) {
+      event.__krrListenerError = error;
+      event.__krrHasListenerError = true;
+    }
+  } finally {
+    event.__krrPassiveListener = false;
+  }
+  return !event.__krrImmediatePropagationStopped;
+};
 const __krrDispatchListeners = (listeners, target, event, capture) => {
   const entries = listeners.get(String(event.type)) || [];
   for (const entry of [...entries]) {
-    if (!entries.includes(entry)) continue;
-    if (entry.capture !== capture) continue;
-    if (entry.once) entries.splice(entries.indexOf(entry), 1);
-    event.__krrPassiveListener = entry.passive;
-    try {
-      if (typeof entry.callback === "function") entry.callback.call(target, event);
-      else entry.callback.handleEvent.call(entry.callback, event);
-    } catch (error) {
-      if (String(event.type) !== "readystatechange") throw error;
-      if (!event.__krrHasListenerError) {
-        event.__krrListenerError = error;
-        event.__krrHasListenerError = true;
-      }
-    } finally {
-      event.__krrPassiveListener = false;
-    }
-    if (event.__krrImmediatePropagationStopped) break;
+    if (!__krrDispatchListenerEntry(entries, entry, target, event, capture)) break;
   }
   __krrSyncEventTarget(target, event.type, entries);
 };
