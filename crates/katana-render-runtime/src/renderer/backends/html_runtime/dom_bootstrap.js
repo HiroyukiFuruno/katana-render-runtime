@@ -1907,18 +1907,21 @@ const __krrDispatchImageLoad = (image) => {
 };
 
 const __krrDispatchPendingImages = async (document) => {
-  const dispatchedImages = new Set();
+  const dispatchedImageSources = new Map();
   const maxImageDispatches = 1024;
   const maxImageRescans = 8;
   let emptyRescanCount = 0;
+  let imageDispatches = 0;
   for (let rescan = 0; rescan < maxImageRescans && emptyRescanCount < 2; rescan += 1) {
     let foundImage = false;
     for (const image of document.querySelectorAll("img")) {
-      if (dispatchedImages.has(image)) continue;
+      const source = image.getAttribute("src");
+      if (dispatchedImageSources.get(image) === source) continue;
       foundImage = true;
-      dispatchedImages.add(image);
+      dispatchedImageSources.set(image, source);
       __krrDispatchImageLoad(image);
-      if (dispatchedImages.size >= maxImageDispatches) {
+      imageDispatches += 1;
+      if (imageDispatches >= maxImageDispatches) {
         await Promise.resolve();
         return;
       }
