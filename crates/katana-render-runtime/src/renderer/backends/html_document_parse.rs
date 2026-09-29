@@ -15,7 +15,7 @@ use std::{
     collections::HashMap,
     rc::Rc,
 };
-use tree::{document_window_load_handler_has_onload, visible_iframe_count};
+use tree::{WindowLoadHandlerObserver, visible_iframe_count};
 
 impl HtmlDocument {
     pub(crate) fn parse(source: &str) -> Self {
@@ -60,6 +60,7 @@ struct SourceOrderSink {
     tree_builder: TreeBuilder<Handle, RcDom>,
     scripts: Cell<usize>,
     node_visibility: RefCell<HashMap<usize, bool>>,
+    window_load_handler_observer: RefCell<WindowLoadHandlerObserver>,
     body_onload_script_index: Cell<Option<usize>>,
     body_onload_iframe_index: Cell<Option<usize>>,
 }
@@ -106,7 +107,13 @@ impl SourceOrderSink {
                     .to_string()
                     .eq_ignore_ascii_case("onload")
             })
-            && document_window_load_handler_has_onload(&self.tree_builder.sink.document)
+            && self
+                .window_load_handler_observer
+                .borrow_mut()
+                .token_created_or_updated_window_load_handler(
+                    &self.tree_builder.sink.document,
+                    &name,
+                )
         {
             self.body_onload_script_index.set(Some(self.scripts.get()));
             self.body_onload_iframe_index
@@ -143,6 +150,7 @@ fn parse_with_source_order(source: &str) -> (RcDom, Option<usize>, Option<usize>
         tree_builder: TreeBuilder::new(RcDom::default(), TreeBuilderOpts::default()),
         scripts: Cell::new(0),
         node_visibility: RefCell::new(HashMap::new()),
+        window_load_handler_observer: RefCell::new(WindowLoadHandlerObserver::default()),
         body_onload_script_index: Cell::new(None),
         body_onload_iframe_index: Cell::new(None),
     };
@@ -264,5 +272,21 @@ mod tests {
         let document = HtmlDocument::parse(&source);
 
         assert_eq!(document.body_onload_script_index(), Some(SCRIPT_COUNT));
+    }
+
+    #[test]
+    fn repeated_foreign_body_and_frameset_tokens_do_not_rescan_html_siblings() {
+        const TOKEN_COUNT: usize = 8_000;
+        let mut source = String::from("<html>");
+        source.push_str(&"<!-- sibling noise -->".repeat(TOKEN_COUNT));
+        source.push_str("<head></head><body><script>beforeHandler()</script><svg>");
+        for _ in 0..TOKEN_COUNT {
+            source.push_str(r#"<body onload="foreignBody"/><frameset onload="foreignFrameset"/>"#);
+        }
+        source.push_str(r#"</svg><body onload="handler">"#);
+
+        let document = HtmlDocument::parse(&source);
+
+        assert_eq!(document.body_onload_script_index(), Some(1));
     }
 }
