@@ -4,6 +4,7 @@ import argparse
 import copy
 import http.client
 import importlib.util
+import io
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -389,7 +390,11 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
 
     def test_rejects_non_retryable_api_response_without_retry(self) -> None:
         rejected = MODULE.error.HTTPError(
-            "https://api.github.com/repos/owner/repository/pulls/90", 401, "Unauthorized", {}, None
+            "https://api.github.com/repos/owner/repository/pulls/90",
+            401,
+            "Unauthorized",
+            {},
+            io.BytesIO(),
         )
         try:
             with mock.patch.object(MODULE.request, "urlopen", side_effect=rejected):
@@ -401,7 +406,11 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
 
     def test_marks_retryable_api_response_as_retryable(self) -> None:
         unavailable = MODULE.error.HTTPError(
-            "https://api.github.com/repos/owner/repository/pulls/90", 503, "Unavailable", {}, None
+            "https://api.github.com/repos/owner/repository/pulls/90",
+            503,
+            "Unavailable",
+            {},
+            io.BytesIO(),
         )
         try:
             with mock.patch.object(MODULE.request, "urlopen", side_effect=unavailable):

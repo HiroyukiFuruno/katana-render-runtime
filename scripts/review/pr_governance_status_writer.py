@@ -1838,7 +1838,9 @@ def target_url(
     if source_run_id is not None:
         query["source_run_id"] = str(source_run_id)
     if generations is not None:
-        for prefix, item in zip(("ci", "release"), generations, strict=True):
+        if len(generations) != 2:
+            raise GovernanceError("Exactly two workflow generations are required.")
+        for prefix, item in zip(("ci", "release"), generations):
             query[f"{prefix}_workflow_id"] = str(item.workflow_id)
             query[f"{prefix}_run_id"] = str(item.identifier)
             query[f"{prefix}_run_number"] = str(item.number)

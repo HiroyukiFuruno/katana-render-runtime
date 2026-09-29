@@ -116,16 +116,30 @@ fn decode_data_url(url: &Url) -> Result<Vec<u8>, String> {
         .map_or(url.as_str(), |(source, _)| source);
     let source = &without_fragment["data:".len()..];
     let (metadata, payload) = source.split_once(',').ok_or("data URL has no payload")?;
+    check_data_url_size(payload.len(), "encoded")?;
     if metadata
         .split(';')
         .next_back()
         .is_some_and(|part| part.eq_ignore_ascii_case("base64"))
     {
         let decoded_payload = percent_decode_str(payload).collect::<Vec<u8>>();
-        return decode_forgiving_base64(&decoded_payload)
-            .map_err(|error| format!("data URL base64 payload is invalid: {error}"));
+        let bytes = decode_forgiving_base64(&decoded_payload)
+            .map_err(|error| format!("data URL base64 payload is invalid: {error}"))?;
+        check_data_url_size(bytes.len(), "decoded")?;
+        return Ok(bytes);
     }
-    Ok(percent_decode_str(payload).collect())
+    let bytes = percent_decode_str(payload).collect::<Vec<_>>();
+    check_data_url_size(bytes.len(), "decoded")?;
+    Ok(bytes)
+}
+
+fn check_data_url_size(size: usize, representation: &str) -> Result<(), String> {
+    if size as u64 > MAX_SUBRESOURCE_BYTES {
+        return Err(format!(
+            "data URL {representation} payload exceeds the {MAX_SUBRESOURCE_BYTES}-byte limit"
+        ));
+    }
+    Ok(())
 }
 
 fn decode_forgiving_base64(payload: &[u8]) -> Result<Vec<u8>, base64::DecodeError> {

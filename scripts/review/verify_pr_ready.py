@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, quote, urlparse
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "hooks"))
 import verify_push_issue as issue_contract
@@ -106,7 +106,7 @@ _ACTIVE_SENSOR_OR_LATCH_STATUSES = frozenset(
 )
 _ReviewMarker = tuple[str, str, str, Mapping[str, object]]
 _ReviewMarkerIdentity = tuple[int, str, str, str, str, str, str, str]
-_RequiredStatusChecks = tuple[tuple[str, ...], tuple[tuple[str, int | None], ...]]
+_RequiredStatusChecks = tuple[tuple[str, ...], tuple[tuple[str, Optional[int]], ...]]
 _RepositoryRestIdentity = tuple[int, str, str]
 _IssueCloserSnapshot = tuple[tuple[int, frozenset[int]], ...]
 _INVALID_REPOSITORY_IDENTITY = object()

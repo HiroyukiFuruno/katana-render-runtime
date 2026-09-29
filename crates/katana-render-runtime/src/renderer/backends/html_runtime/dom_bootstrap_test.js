@@ -40,6 +40,9 @@ const dispatchTargetPhase = source.match(
 const dispatchImageLoad = source.match(
   /^const __krrDispatchImageLoad = \(image\) => \{[\s\S]*?^\};/m,
 )?.[0];
+const dispatchPendingImages = source.match(
+  /^const __krrDispatchPendingImages = async \(document\) => \{[\s\S]*?^\};/m,
+)?.[0];
 const dispatchWindowLoad = source.match(
   /^globalThis\.__krrDispatchWindowLoad = async \(\) => \{[\s\S]*?^\};/m,
 )?.[0];
@@ -465,6 +468,9 @@ test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatch
       return selector === "img" ? [image] : [];
     },
   };
+  const dispatchPending = createPendingImageDispatcher(document, (target) =>
+    target.dispatchEvent(new Event("load")),
+  );
   const pageGlobal = {};
   const dispatch = new Function(
     "globalThis",
@@ -476,6 +482,7 @@ test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatch
     "__krrNativeDom",
     "__krrImageLoadEventType",
     "__krrDispatchImageLoad",
+    "__krrDispatchPendingImages",
     "__krrDocumentReadyState",
     "__krrDispatchDocumentReadyStateChange",
     "__krrDispatchElementReadyStateChange",
@@ -495,6 +502,7 @@ test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatch
     () => null,
     () => "load",
     (target) => target.dispatchEvent(new Event("load")),
+    dispatchPending,
     "interactive",
     () => {},
     () => {},
@@ -504,3 +512,149 @@ test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatch
   await dispatch();
   expect(calls).toEqual(["resource", "microtask", "window"]);
 });
+
+test("image load handlerが同期的に追加したimgもWindow load前にdispatchする", async () => {
+  expect(dispatchWindowLoad).toBeDefined();
+
+  const calls = [];
+  const images = [];
+  const addedImage = {
+    getAttribute: () => "valid",
+    dispatchEvent: (event) => calls.push(`added:${event.type}`),
+  };
+  images.push({
+    getAttribute: () => "valid",
+    dispatchEvent(event) {
+      calls.push(`first:${event.type}`);
+      if (event.type === "load") images.push(addedImage);
+    },
+  });
+  const dispatch = createWindowLoadDispatcher(images, calls);
+
+  await dispatch();
+  expect(calls).toEqual(["first:load", "added:load", "window"]);
+});
+
+test("image error handlerが同期的に追加したimgもWindow load前にdispatchする", async () => {
+  expect(dispatchWindowLoad).toBeDefined();
+
+  const calls = [];
+  const images = [];
+  const addedImage = {
+    getAttribute: () => "valid",
+    dispatchEvent: (event) => calls.push(`added:${event.type}`),
+  };
+  images.push({
+    getAttribute: () => "broken",
+    dispatchEvent(event) {
+      calls.push(`first:${event.type}`);
+      if (event.type === "error") images.push(addedImage);
+    },
+  });
+  const dispatch = createWindowLoadDispatcher(images, calls);
+
+  await dispatch();
+  expect(calls).toEqual(["first:error", "added:load", "window"]);
+});
+
+test("image load handlerのPromise microtaskで追加したimgもWindow load前にdispatchする", async () => {
+  expect(dispatchWindowLoad).toBeDefined();
+
+  const calls = [];
+  const images = [];
+  const addedImage = {
+    getAttribute: () => "valid",
+    dispatchEvent: (event) => calls.push(`added:${event.type}`),
+  };
+  images.push({
+    getAttribute: () => "valid",
+    dispatchEvent(event) {
+      calls.push(`first:${event.type}`);
+      if (event.type === "load") Promise.resolve().then(() => images.push(addedImage));
+    },
+  });
+  const dispatch = createWindowLoadDispatcher(images, calls);
+
+  await dispatch();
+  expect(calls).toEqual(["first:load", "added:load", "window"]);
+});
+
+test("image handlerが無限にimgを追加してもdispatch数を1024件に制限する", async () => {
+  expect(dispatchWindowLoad).toBeDefined();
+
+  const calls = [];
+  const images = [];
+  const createImage = () => ({
+    getAttribute: () => "valid",
+    dispatchEvent(event) {
+      if (event.type === "load") {
+        calls.push("image");
+        images.push(createImage());
+      }
+    },
+  });
+  images.push(createImage());
+  const dispatch = createWindowLoadDispatcher(images, calls);
+
+  await dispatch();
+  expect(calls.filter((call) => call === "image")).toHaveLength(1024);
+  expect(calls.at(-1)).toBe("window");
+});
+
+const createWindowLoadDispatcher = (images, calls) => {
+  const document = {
+    body: null,
+    querySelectorAll(selector) {
+      return selector === "img" ? images : [];
+    },
+  };
+  const dispatchPending = createPendingImageDispatcher(document, (image) => {
+    const eventType = image.getAttribute("src") === "broken" ? "error" : "load";
+    image.dispatchEvent(new Event(eventType));
+  });
+  const pageGlobal = {};
+  const dispatch = new Function(
+    "globalThis",
+    "document",
+    "window",
+    "Event",
+    "__krrRouteWindowLoadElement",
+    "__krrElement",
+    "__krrNativeDom",
+    "__krrImageLoadEventType",
+    "__krrDispatchImageLoad",
+    "__krrDispatchPendingImages",
+    "__krrDocumentReadyState",
+    "__krrDispatchDocumentReadyStateChange",
+    "__krrDispatchElementReadyStateChange",
+    "__krrThrowReadyStateListenerError",
+    `${dispatchWindowLoad}\nreturn globalThis.__krrDispatchWindowLoad;`,
+  )(
+    pageGlobal,
+    document,
+    { dispatchEvent: () => calls.push("window") },
+    class Event {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    () => false,
+    () => null,
+    () => null,
+    () => "load",
+    (image) => image.dispatchEvent(new Event("load")),
+    dispatchPending,
+    "interactive",
+    () => {},
+    () => {},
+    () => {},
+  );
+  return dispatch;
+};
+
+const createPendingImageDispatcher = (document, dispatchImage) =>
+  new Function(
+    "document",
+    "__krrDispatchImageLoad",
+    `${dispatchPendingImages}\nreturn __krrDispatchPendingImages;`,
+  )(document, dispatchImage);
