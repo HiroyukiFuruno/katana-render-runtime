@@ -294,6 +294,18 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
         responses["repos/owner/repository/actions/runs/124/jobs?per_page=100&page=1"] = job
         self.assertEqual(self.verify(responses), {"run_id": "124", "run_attempt": "1", "head_sha": HEAD})
 
+    def test_newest_run_generation_cannot_be_masked_by_older_success(self) -> None:
+        responses = payloads()
+        runs = responses[WORKFLOW_RUNS_PATH]
+        pending = copy.deepcopy(runs["workflow_runs"][0])  # type: ignore[index]
+        pending["id"] = RUN_ID + 1
+        pending["status"] = "in_progress"
+        pending["conclusion"] = None
+        runs["total_count"] = 2  # type: ignore[index]
+        runs["workflow_runs"].append(pending)  # type: ignore[index]
+        with self.assertRaisesRegex(MODULE.EvidencePendingError, "still in progress"):
+            self.verify(responses)
+
     def test_rejects_malformed_binding_among_current_head_runs(self) -> None:
         responses = payloads()
         runs = responses[
