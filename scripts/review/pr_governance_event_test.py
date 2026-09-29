@@ -4306,18 +4306,18 @@ raise SystemExit(91)
             self.workflow.index("  reconcile-all-open:")
         ]
         reconciler_job = self.workflow[self.workflow.index("  reconcile-all-open:"):]
-        preflight_generation_lock = (
-            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n"
-            "      cancel-in-progress: ${{ needs.preflight-workflow-run-source.outputs.priority == 'true' }}"
+        barrier_generation_lock = (
+            "concurrency:\n      group: pr-governance-barrier-${{ github.repository_id }}\n"
+            "      cancel-in-progress: false"
         )
         resolver_generation_lock = (
             "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n"
             "      cancel-in-progress: ${{ needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}"
         )
-        # A priority event cancels both an older resolver and reconciler. A
-        # validated CI/release event has priority=false and remains serialized,
-        # so ordinary workflow traffic cannot cancel a paced all-open scan.
-        self.assertIn(preflight_generation_lock, job)
+        # The barrier remains serialized and uncancelled so a priority event
+        # cannot leave a red required context. Resolver/reconciler preemption
+        # remains available after the barrier has completed.
+        self.assertIn(barrier_generation_lock, job)
         self.assertIn(resolver_generation_lock, resolver_job)
         self.assertIn("group: pr-governance-dispatcher-${{ github.repository_id }}", reconciler_job)
         self.assertIn("cancel-in-progress: ${{ needs.resolve_event.outputs.priority_targets != '[]' }}", reconciler_job)
@@ -4835,13 +4835,13 @@ raise SystemExit(91)
 
     def test_invalidator_preempts_priority_dispatchers_and_paces_every_check_write(self) -> None:
         dispatcher_group = "group: pr-governance-dispatcher-${{ github.repository_id }}"
-        self.assertEqual(self.workflow.count(dispatcher_group), 3)
+        self.assertEqual(self.workflow.count(dispatcher_group), 2)
         establish = self.workflow[
             self.workflow.index("  establish-resolver-failure-barrier:"):
             self.workflow.index("  resolve_event:")
         ]
         self.assertIn(
-            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ needs.preflight-workflow-run-source.outputs.priority == 'true' }}",
+            "concurrency:\n      group: pr-governance-barrier-${{ github.repository_id }}\n      cancel-in-progress: false",
             establish,
         )
         resolver = self.workflow[
