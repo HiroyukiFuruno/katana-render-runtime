@@ -111,58 +111,82 @@ mod tests {
     use crate::renderer::backends::html_document::HtmlDocument;
     use crate::renderer::backends::html_subresources::HtmlSubresourceLoader;
 
+    fn must_result<T, E>(result: Result<T, E>) -> T {
+        assert!(result.is_ok());
+        let mut values = result.into_iter().collect::<Vec<_>>();
+        values.remove(0)
+    }
+
     #[test]
-    fn body_onload_after_an_inline_iframe_keeps_the_iframe_script_before_it() -> Result<(), String>
-    {
-        let source = HtmlBrowserSource::new(
+    fn body_onload_after_an_inline_iframe_keeps_the_iframe_script_before_it() {
+        let source = must_result(HtmlBrowserSource::new(
             r#"<iframe id=frame data-krr-local-frame></iframe><body></body><body onload="window.onload = parent">"#,
             "https://example.test/index.html",
-        )
-        .map_err(|error| error.to_string())?;
+        ));
         let loader = HtmlSubresourceLoader::new(&source);
         let mut document = HtmlDocument::parse(&source.raw_html);
-        let frame = document
-            .get_element_by_id("frame")
-            .ok_or_else(|| "frame must exist".to_string())?;
-        let frame = document.node(frame)?;
+        let frame = must_result(
+            document
+                .get_element_by_id("frame")
+                .ok_or("frame must exist"),
+        );
+        let frame = must_result(document.node(frame));
         let mut child = HtmlDocument::parse(r#"<script id=child>window.onload = child;</script>"#);
-        let child_script = child
-            .get_element_by_id("child")
-            .ok_or_else(|| "child script must exist".to_string())?;
-        let child_script = child.node(child_script)?;
+        let child_script = must_result(
+            child
+                .get_element_by_id("child")
+                .ok_or("child script must exist"),
+        );
+        let child_script = must_result(child.node(child_script));
         frame.children.borrow_mut().push(child_script);
 
         let (scripts, body_onload_script_index) = load_scripts(&loader, &document);
 
         assert_eq!(scripts, ["window.onload = child;"]);
         assert_eq!(body_onload_script_index, Some(1));
-        Ok(())
     }
 
     #[test]
-    fn body_onload_before_an_inline_iframe_runs_before_the_iframe_script() -> Result<(), String> {
-        let source = HtmlBrowserSource::new(
+    fn body_onload_before_an_inline_iframe_runs_before_the_iframe_script() {
+        let source = must_result(HtmlBrowserSource::new(
             r#"<body onload="window.onload = body"><iframe id=frame data-krr-local-frame></iframe>"#,
             "https://example.test/index.html",
-        )
-        .map_err(|error| error.to_string())?;
+        ));
         let loader = HtmlSubresourceLoader::new(&source);
         let mut document = HtmlDocument::parse(&source.raw_html);
-        let frame = document
-            .get_element_by_id("frame")
-            .ok_or_else(|| "frame must exist".to_string())?;
-        let frame = document.node(frame)?;
+        let frame = must_result(
+            document
+                .get_element_by_id("frame")
+                .ok_or("frame must exist"),
+        );
+        let frame = must_result(document.node(frame));
         let mut child = HtmlDocument::parse(r#"<script id=child>window.onload = child;</script>"#);
-        let child_script = child
-            .get_element_by_id("child")
-            .ok_or_else(|| "child script must exist".to_string())?;
-        let child_script = child.node(child_script)?;
+        let child_script = must_result(
+            child
+                .get_element_by_id("child")
+                .ok_or("child script must exist"),
+        );
+        let child_script = must_result(child.node(child_script));
         frame.children.borrow_mut().push(child_script);
 
         let (scripts, body_onload_script_index) = load_scripts(&loader, &document);
 
         assert_eq!(scripts, ["window.onload = child;"]);
         assert_eq!(body_onload_script_index, Some(0));
-        Ok(())
+    }
+
+    #[test]
+    fn body_onload_after_a_network_iframe_keeps_following_script_order() {
+        let source = must_result(HtmlBrowserSource::new(
+            r#"<script>before</script><iframe src="frame.html"></iframe><script>after</script><body onload="body">"#,
+            "https://example.test/index.html",
+        ));
+        let loader = HtmlSubresourceLoader::new(&source);
+        let document = HtmlDocument::parse(&source.raw_html);
+
+        let (scripts, body_onload_script_index) = load_scripts(&loader, &document);
+
+        assert_eq!(scripts, ["before", "after"]);
+        assert_eq!(body_onload_script_index, Some(2));
     }
 }

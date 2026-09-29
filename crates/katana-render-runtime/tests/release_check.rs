@@ -130,11 +130,13 @@ fn quality_gate_requires_the_html_runtime_in_the_crate_package()
 -> Result<(), Box<dyn std::error::Error>> {
     let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
     let package_check = recipe_body(&justfile, "html-runtime-package-check")?;
+    let rust_lane = recipe_body(&justfile, "check-rust")?;
 
     assert!(
-        justfile.contains("html-runtime-package-check plantuml-runtime-package-check"),
-        "check must require the HTML runtime package gate"
+        rust_lane.contains("just html-runtime-package-check"),
+        "the Cargo lane must require the HTML runtime package gate"
     );
+    assert!(rust_lane.contains("just plantuml-runtime-package-check"));
     assert!(package_check.contains("src/renderer/backends/html_runtime/dom_bootstrap.js"));
     Ok(())
 }
@@ -215,11 +217,16 @@ fn pre_push_uses_the_ordered_issue_contract_dispatcher() -> Result<(), Box<dyn s
 #[test]
 fn local_quality_gate_runs_repository_automation_contract_tests()
 -> Result<(), Box<dyn std::error::Error>> {
-    let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
+    let root = workspace_root()?;
+    let justfile = std::fs::read_to_string(root.join("Justfile"))?;
     let check = recipe_body(&justfile, "check")?;
+    let contracts_lane = recipe_body(&justfile, "check-contracts")?;
     let automation = recipe_body(&justfile, "automation-contract-test")?;
+    let scheduler = std::fs::read_to_string(root.join("scripts/hooks/run_parallel_checks.py"))?;
 
-    assert!(check.contains("automation-contract-test"));
+    assert!(check.contains("run_parallel_checks.py"));
+    assert!(scheduler.contains("Lane(\"contracts\", \"check-contracts\")"));
+    assert!(contracts_lane.contains("just automation-contract-test"));
     for script_dir in ["scripts/hooks", "scripts/release", "scripts/review"] {
         assert!(
             automation.contains(&format!("unittest discover -s {script_dir} -p '*_test.py'")),

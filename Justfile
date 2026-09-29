@@ -4,6 +4,7 @@ REPO_ROOT := justfile_directory()
 RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)
 RTK_CMD := if RTK == "" { "" } else { RTK + " " }
 JOBS := env_var_or_default("JOBS", "2")
+CHECK_JOBS := env_var_or_default("CHECK_JOBS", "3")
 FIXTURE_JOBS := env_var_or_default("FIXTURE_JOBS", JOBS)
 TEST_THREADS := env_var_or_default("TEST_THREADS", "1")
 TEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " -- --test-threads=" + TEST_THREADS }
@@ -178,9 +179,35 @@ automation-contract-test:
     python3 -m unittest discover -s scripts/release -p '*_test.py'
     python3 -m unittest discover -s scripts/review -p '*_test.py'
 
-# Run the local quality gate
-check: fmt-check lint runtime-bundle-check runtime-asset-script-test automation-contract-test unit-test ast-lint dependency-leak biome typecheck runtime-asset-check runtime-package-asset-check runtime-bundle-package-check html-runtime-package-check plantuml-runtime-package-check
+# Run independent local quality-gate lanes concurrently. Cargo and PlantUML
+# work stay in one lane because they share build/cache outputs.
+check:
+    python3 scripts/hooks/run_parallel_checks.py --jobs {{CHECK_JOBS}}
     @echo "checks passed"
+
+# Cargo operations share target/ and the PlantUML cache, so keep them ordered.
+check-rust:
+    just fmt-check
+    just lint
+    just unit-test
+    just ast-lint
+    just dependency-leak
+    just runtime-asset-check
+    just runtime-package-asset-check
+    just runtime-bundle-package-check
+    just html-runtime-package-check
+    just plantuml-runtime-package-check
+
+# These checks read source/generated assets and do not write the shared Cargo target.
+check-assets:
+    just runtime-bundle-check
+    just runtime-asset-script-test
+    just biome
+    just typecheck
+
+# Python contract suites use isolated temporary repositories.
+check-contracts:
+    just automation-contract-test
 
 # Sweep old build artifacts locally (older than 7 days)
 sweep:

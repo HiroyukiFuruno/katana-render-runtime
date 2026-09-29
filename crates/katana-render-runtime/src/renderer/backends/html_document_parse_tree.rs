@@ -120,3 +120,43 @@ pub(super) fn visible_iframe_count(node: &Handle) -> usize {
             .map(visible_iframe_count)
             .sum::<usize>()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{WindowLoadHandlerObserver, element_has_window_load_onload};
+    use html5ever::{parse_document, tendril::TendrilSink};
+    use markup5ever_rcdom::RcDom;
+
+    #[test]
+    fn observer_returns_false_when_document_has_no_html_element() {
+        let dom = RcDom::default();
+        let mut observer = WindowLoadHandlerObserver::default();
+
+        assert!(!observer.token_created_or_updated_window_load_handler(&dom.document, "body"));
+    }
+
+    #[test]
+    fn observer_ignores_tokens_that_cannot_set_window_load_handler() {
+        let dom = parse_document(RcDom::default(), Default::default()).one("<body onload='run()'>");
+        let mut observer = WindowLoadHandlerObserver::default();
+
+        assert!(!observer.token_created_or_updated_window_load_handler(&dom.document, "div"));
+    }
+
+    #[test]
+    fn observer_reuses_the_cached_frameset_for_repeated_tokens() {
+        let dom = parse_document(RcDom::default(), Default::default())
+            .one("<frameset onload='run()'></frameset>");
+        let mut observer = WindowLoadHandlerObserver::default();
+
+        assert!(observer.token_created_or_updated_window_load_handler(&dom.document, "frameset"));
+        assert!(observer.token_created_or_updated_window_load_handler(&dom.document, "frameset"));
+    }
+
+    #[test]
+    fn non_element_nodes_do_not_have_window_load_handlers() {
+        let dom = RcDom::default();
+
+        assert!(!element_has_window_load_onload(&dom.document));
+    }
+}
