@@ -1,12 +1,39 @@
 use super::dom_state::HtmlDomBridgeState;
 use super::types::DomValue;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 const MISSING_DOM_STATE_ERROR: &str = "HTML DOM state is unavailable";
+
+struct HostOperationGuard {
+    active: Arc<AtomicBool>,
+    was_active: bool,
+}
+
+impl HostOperationGuard {
+    fn enter(active: Arc<AtomicBool>) -> Self {
+        let was_active = active.swap(true, Ordering::SeqCst);
+        Self { active, was_active }
+    }
+}
+
+impl Drop for HostOperationGuard {
+    fn drop(&mut self) {
+        self.active.store(self.was_active, Ordering::SeqCst);
+    }
+}
 
 pub(super) fn dom_callback(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
     mut return_value: v8::ReturnValue<v8::Value>,
 ) {
+    /* WHY: V8 callback内の同期DOM処理はJavaScript実行時間へ含めない。低速CPUで
+     * 正当な大容量画像を無限JavaScriptと誤認してタイムアウトさせないためである。 */
+    let host_operation = scope
+        .get_slot::<HtmlDomBridgeState>()
+        .map(HtmlDomBridgeState::host_io_active)
+        .map(HostOperationGuard::enter);
     let operation = args.get(0).to_rust_string_lossy(scope);
     let arguments = (1..args.length())
         .map(|index| args.get(index).to_rust_string_lossy(scope))
@@ -19,6 +46,7 @@ pub(super) fn dom_callback(
         Ok(value) => return_value.set(dom_value(scope, value)),
         Err(error) => set_bridge_error(scope, &mut return_value, error),
     }
+    drop(host_operation);
 }
 
 fn set_bridge_error(
