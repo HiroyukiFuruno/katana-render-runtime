@@ -1,4 +1,7 @@
 use super::tree::WindowLoadHandlerObserver;
+#[path = "html_document_parse_source_order_events.rs"]
+mod events;
+use events::{SourceOrderEntry, finish_source_order, node_is_visible};
 use html5ever::{
     tokenizer::{Tag, TagKind, Token, TokenSink, TokenSinkResult},
     tree_builder::{TreeBuilder, TreeBuilderOpts, TreeSink},
@@ -6,8 +9,7 @@ use html5ever::{
 use markup5ever_rcdom::{Handle, RcDom};
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashMap, HashSet},
-    rc::Rc,
+    collections::HashMap,
 };
 
 pub(super) struct SourceOrderSink {
@@ -17,8 +19,7 @@ pub(super) struct SourceOrderSink {
     window_load_handler_observer: RefCell<WindowLoadHandlerObserver>,
     body_onload_script_index: Cell<Option<usize>>,
     body_onload_source_order_index: Cell<Option<usize>>,
-    source_order: RefCell<Vec<Handle>>,
-    source_iframes: RefCell<HashSet<usize>>,
+    source_order: RefCell<Vec<SourceOrderEntry>>,
 }
 
 impl SourceOrderSink {
@@ -31,18 +32,21 @@ impl SourceOrderSink {
             body_onload_script_index: Cell::new(None),
             body_onload_source_order_index: Cell::new(None),
             source_order: RefCell::new(Vec::new()),
-            source_iframes: RefCell::new(HashSet::new()),
         }
     }
 
     pub(super) fn finish(self) -> (RcDom, Option<usize>, Option<usize>, Vec<Handle>) {
-        let body_onload_script_index = self.body_onload_script_index.get();
-        let body_onload_source_order_index = self.body_onload_source_order_index.get();
-        let source_order = self.source_order.into_inner();
         let parsed = self.tree_builder.sink.finish();
+        let (body_onload_source_order_index, source_order) = finish_source_order(
+            &parsed,
+            self.source_order.into_inner(),
+            self.body_onload_source_order_index.get(),
+            self.body_onload_script_index.get(),
+            &self.node_visibility,
+        );
         (
             parsed,
-            body_onload_script_index,
+            self.body_onload_script_index.get(),
             body_onload_source_order_index,
             source_order,
         )
@@ -51,7 +55,9 @@ impl SourceOrderSink {
     fn observe_script(&self, node: &Handle) {
         if self.node_is_visible(node) {
             self.scripts.set(self.scripts.get() + 1);
-            self.source_order.borrow_mut().push(node.clone());
+            self.source_order
+                .borrow_mut()
+                .push(SourceOrderEntry::Script(node.clone()));
         }
     }
 
@@ -67,17 +73,9 @@ impl SourceOrderSink {
         if !tag.name.to_string().eq_ignore_ascii_case("iframe") {
             return;
         }
-        let mut iframes = Vec::new();
-        collect_iframes(&self.tree_builder.sink.document, &mut iframes);
-        let mut seen = self.source_iframes.borrow_mut();
-        let mut source_order = self.source_order.borrow_mut();
-        if let Some(iframe) = iframes.into_iter().find(|iframe| {
-            let id = Rc::as_ptr(iframe) as usize;
-            !seen.contains(&id) && self.node_is_visible(iframe)
-        }) {
-            seen.insert(Rc::as_ptr(&iframe) as usize);
-            source_order.push(iframe);
-        }
+        self.source_order
+            .borrow_mut()
+            .push(SourceOrderEntry::Iframe);
     }
 
     fn observe_window_load_handler(&self, tag: &Tag) {
@@ -109,26 +107,11 @@ impl SourceOrderSink {
     }
 
     fn node_is_visible(&self, node: &Handle) -> bool {
-        let mut current = node.clone();
-        let mut unobserved = Vec::new();
-        let visible = loop {
-            let node_id = Rc::as_ptr(&current) as usize;
-            if let Some(visible) = self.node_visibility.borrow().get(&node_id) {
-                break *visible;
-            }
-            unobserved.push(node_id);
-            let parent = current.parent.take();
-            current.parent.set(parent.clone());
-            let Some(parent) = parent.and_then(|parent| parent.upgrade()) else {
-                break Rc::ptr_eq(&current, &self.tree_builder.sink.document);
-            };
-            current = parent;
-        };
-        let mut visibility = self.node_visibility.borrow_mut();
-        for node_id in unobserved {
-            visibility.insert(node_id, visible);
-        }
-        visible
+        node_is_visible(
+            node,
+            &self.tree_builder.sink.document,
+            &self.node_visibility,
+        )
     }
 }
 
@@ -148,19 +131,5 @@ impl TokenSink for SourceOrderSink {
             self.observe_source_order(&tag);
         }
         result
-    }
-}
-
-fn collect_iframes(node: &Handle, iframes: &mut Vec<Handle>) {
-    if matches!(&node.data, markup5ever_rcdom::NodeData::Element { name, .. }
-        if name.local.as_str().eq_ignore_ascii_case("iframe"))
-    {
-        iframes.push(node.clone());
-    }
-    let Ok(children) = node.children.try_borrow() else {
-        return;
-    };
-    for child in children.iter() {
-        collect_iframes(child, iframes);
     }
 }
