@@ -1,31 +1,105 @@
 use super::font::{font_has_char, matching_fallback_face};
 use resvg::usvg;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{Arc, Weak};
+
+const MAX_CACHED_HTML_FALLBACK_DATABASES: usize = 8;
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct HtmlFallbackKey {
+    base_face_id: usvg::fontdb::ID,
+    character: char,
+    requested_weight: u16,
+    requested_italic: bool,
+}
+
+struct HtmlFallbackCacheEntry {
+    database: Weak<usvg::fontdb::Database>,
+    faces: HashMap<HtmlFallbackKey, usvg::fontdb::ID>,
+}
+
+thread_local! {
+    static HTML_FALLBACK_CACHE: RefCell<Vec<HtmlFallbackCacheEntry>> = const { RefCell::new(Vec::new()) };
+}
 
 pub(super) fn html_font_runs(
-    database: &usvg::fontdb::Database,
+    database: &Arc<usvg::fontdb::Database>,
     base_face_id: usvg::fontdb::ID,
     text: &str,
     requested_weight: u16,
     requested_italic: bool,
 ) -> Vec<(usvg::fontdb::ID, String)> {
     let mut runs: Vec<(usvg::fontdb::ID, String)> = Vec::new();
-    let mut resolved_faces = HashMap::new();
     for character in text.chars() {
-        let face_id = *resolved_faces
-            .entry((base_face_id, character))
-            .or_insert_with(|| {
-                resolved_html_face(
-                    database,
-                    base_face_id,
-                    character,
-                    requested_weight,
-                    requested_italic,
-                )
-            });
+        let face_id = cached_html_face(
+            database,
+            base_face_id,
+            character,
+            requested_weight,
+            requested_italic,
+        );
         append_font_run(&mut runs, face_id, character);
     }
     runs
+}
+
+fn cached_html_face(
+    database: &Arc<usvg::fontdb::Database>,
+    base_face_id: usvg::fontdb::ID,
+    character: char,
+    requested_weight: u16,
+    requested_italic: bool,
+) -> usvg::fontdb::ID {
+    let key = HtmlFallbackKey {
+        base_face_id,
+        character,
+        requested_weight,
+        requested_italic,
+    };
+    HTML_FALLBACK_CACHE
+        .with(|cache| resolve_cached_html_face(&mut cache.borrow_mut(), database, key))
+}
+
+fn resolve_cached_html_face(
+    entries: &mut Vec<HtmlFallbackCacheEntry>,
+    database: &Arc<usvg::fontdb::Database>,
+    key: HtmlFallbackKey,
+) -> usvg::fontdb::ID {
+    entries.retain(|entry| entry.database.upgrade().is_some());
+    if let Some(entry) = entries.iter_mut().find(|entry| {
+        entry
+            .database
+            .upgrade()
+            .is_some_and(|cached| Arc::ptr_eq(&cached, database))
+    }) {
+        return *entry
+            .faces
+            .entry(key)
+            .or_insert_with(|| resolve_html_fallback_face(database, key));
+    }
+    if entries.len() == MAX_CACHED_HTML_FALLBACK_DATABASES {
+        entries.remove(0);
+    }
+    let face_id = resolve_html_fallback_face(database, key);
+    entries.push(HtmlFallbackCacheEntry {
+        database: Arc::downgrade(database),
+        faces: HashMap::from([(key, face_id)]),
+    });
+    face_id
+}
+
+fn resolve_html_fallback_face(
+    database: &usvg::fontdb::Database,
+    key: HtmlFallbackKey,
+) -> usvg::fontdb::ID {
+    resolved_html_face(
+        database,
+        key.base_face_id,
+        key.character,
+        key.requested_weight,
+        key.requested_italic,
+    )
 }
 
 fn append_font_run(
