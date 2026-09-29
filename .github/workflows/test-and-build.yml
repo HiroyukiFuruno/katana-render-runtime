@@ -108,6 +108,21 @@ jobs:
       - name: Install just
         uses: taiki-e/install-action@just
 
+      # rust-cache は target を復元しても rusty_v8 の静的アーカイブを復元しない場合がある。
+      # macOS のリンク実行前に v8 を再構築して、公式アーカイブの取得とリンクを保証する。
+      - name: Rebuild V8 static archive on macOS arm64
+        if: startsWith(matrix.platform, 'mac-')
+        run: |
+          cargo clean -p v8
+          cargo build -p katana-render-runtime-cli --locked
+
+      - name: Rebuild V8 static archive on Windows
+        if: matrix.platform == 'win64'
+        shell: pwsh
+        run: |
+          cargo clean -p v8
+          cargo build -p katana-render-runtime-cli --locked
+
       - name: Check Rust types
         run: cargo check --workspace --locked
 
@@ -188,6 +203,21 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: just plantuml-runtime-package-check
 
+      - name: Run runtime asset script tests
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 15
+        run: just runtime-asset-script-test
+
+      - name: Run automation contract tests
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 15
+        run: just automation-contract-test
+
+      - name: Run runtime package asset check
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 15
+        run: just runtime-package-asset-check
+
       - name: Free Ubuntu build space before coverage
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -197,7 +227,20 @@ jobs:
 
       - name: Run coverage
         if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 45
         run: just coverage
+
+      - name: Diagnose coverage failure
+        if: matrix.os == 'ubuntu-latest' && (failure() || cancelled())
+        shell: bash
+        run: |
+          set +e
+          echo 'Coverage diagnostic: disk usage'
+          df -h
+          echo 'Coverage diagnostic: process table'
+          ps -eo pid,ppid,stat,etime,cmd --sort=-etime | head -80
+          echo 'Coverage diagnostic: llvm-cov summary'
+          cargo llvm-cov report --summary-only
 
       - name: Free Ubuntu build space after coverage
         if: matrix.os == 'ubuntu-latest' && always()

@@ -24,8 +24,8 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
         self.assertNotIn("pull_request_review_thread:", self.sensor)
         self.assertNotIn("pull_request_review_thread", self.writer)
 
-    def test_out_of_scope_prs_are_skipped_before_the_polling_job(self) -> None:
-        """The sensor scope must exactly match the dispatcher's local default-base domain."""
+    def test_out_of_scope_ready_prs_are_rejected_before_the_polling_job(self) -> None:
+        """最終ラッチの対象はReady化済みPRだけに限定する。"""
 
         self.assertNotRegex(
             self.sensor,
@@ -40,8 +40,8 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
         reject_condition = re.search(r"(?m)^        if: (?P<value>.+)$", reject.group("body"))
         self.assertIsNotNone(reject_condition)
         assert reject_condition is not None
+        self.assertIn("github.event.pull_request.draft == false &&", reject_condition.group("value"))
         for clause in (
-            "github.event.pull_request.draft == false",
             "github.event.pull_request.base.repo.full_name == github.repository",
             "github.event.pull_request.head.repo.full_name == github.repository",
             "github.event.pull_request.base.ref == github.event.repository.default_branch",
@@ -75,6 +75,30 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
             self.assertIn(clause, await_condition.group("value"))
         self.assertIn("DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}", self.sensor)
         self.assertIn("or pr_base_ref != default_branch", self.sensor)
+
+    def test_draft_prs_complete_without_entering_the_terminal_latch(self) -> None:
+        """Draftは成功終了し、Ready化イベントで再評価する。"""
+
+        reject = re.search(
+            r"(?ms)^      - name: Reject out-of-scope PR\n(?P<body>.*?)(?=^      - name: |\Z)",
+            self.sensor,
+        )
+        self.assertIsNotNone(reject)
+        assert reject is not None
+        reject_condition = re.search(r"(?m)^        if: (?P<value>.+)$", reject.group("body"))
+        self.assertIsNotNone(reject_condition)
+        assert reject_condition is not None
+        self.assertIn("github.event.pull_request.draft == false &&", reject_condition.group("value"))
+        await_step = re.search(
+            r"(?ms)^      - name: Await matching trusted governance Check Run\n(?P<body>.*?)(?=^      - name: |\Z)",
+            self.sensor,
+        )
+        self.assertIsNotNone(await_step)
+        assert await_step is not None
+        await_condition = re.search(r"(?m)^        if: (?P<value>.+)$", await_step.group("body"))
+        self.assertIsNotNone(await_condition)
+        assert await_condition is not None
+        self.assertIn("github.event.pull_request.draft == false", await_condition.group("value"))
 
     def test_all_supported_review_sensor_events_are_discovered_and_bound(self) -> None:
         for event in ("pull_request", "pull_request_review", "pull_request_review_comment"):

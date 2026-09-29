@@ -96,6 +96,12 @@ class GovernanceCiAndIssueContractTest(unittest.TestCase):
 
     def test_workflow_run_filter_is_job_level_and_allows_only_trusted_pr_events(self) -> None:
         """Classify the source before the shared barrier can be mutated."""
+        # review sensorはdispatcherが対応するCheck Runを公開するのを待つ。
+        # requested/in_progressでreconcileを開始し、completedだけによる
+        # latchの循環待機を防ぐ。
+        self.assertIn(
+            "types: [requested, in_progress, completed]", self.dispatcher
+        )
         job_bodies = {}
         for job in ("preflight-workflow-run-source", "establish-resolver-failure-barrier"):
             match = re.search(

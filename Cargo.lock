@@ -975,9 +975,14 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "color_quant",
+ "gif",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -1141,7 +1146,7 @@ dependencies = [
 
 [[package]]
 name = "katana-render-runtime"
-version = "0.4.21"
+version = "0.4.22"
 dependencies = [
  "anyhow",
  "base64",
@@ -1174,7 +1179,7 @@ dependencies = [
 
 [[package]]
 name = "katana-render-runtime-cli"
-version = "0.4.21"
+version = "0.4.22"
 dependencies = [
  "anyhow",
  "clap",
@@ -1185,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "kdr-linter"
-version = "0.4.21"
+version = "0.4.22"
 dependencies = [
  "ignore",
  "katana-ast-lint",

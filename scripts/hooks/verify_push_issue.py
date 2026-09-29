@@ -58,6 +58,7 @@ _CLOSING_ISSUE_REFERENCE_PATTERN = re.compile(
 _ZERO_SHA = "0" * 40
 _SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 _REPOSITORY_PATTERN = re.compile(r"^[^/\s]+/[^/\s]+$")
+_RELEASE_BRANCH_PATTERN = re.compile(r"^release/v[^/\s]+$")
 _NAME_STATUS_PATTERN = re.compile(r"^(?P<kind>[ACDMRTUXB])(?P<score>\d{1,3})?$")
 _WORKFLOW_DIRECTORY_PREFIX = ".github/workflows/"
 _MANIFEST_NAMES = {
@@ -408,18 +409,30 @@ def validate_contract(
     commit_messages: Sequence[str],
     changed_paths: Sequence[str],
     issue_loader: IssueLoader,
+    release_issue_numbers: set[int] | None = None,
 ) -> None:
     if branch == default_branch:
         return
 
     referenced_numbers: set[int] = set()
-    for index, message in enumerate(commit_messages, start=1):
-        references = issue_numbers(message, repository)
-        if not references:
-            raise ContractViolation(
-                f"非default branchのcommit {index}に対象repositoryのIssue参照がありません"
-            )
-        referenced_numbers.update(references)
+    release_branch = is_release_branch(branch)
+    if release_branch and release_issue_numbers is not None:
+        if any(type(number) is not int or number < 1 for number in release_issue_numbers):
+            raise ContractViolation("release Issue集合の形式が不正です")
+        referenced_numbers.update(release_issue_numbers)
+    else:
+        for index, message in enumerate(commit_messages, start=1):
+            references = issue_numbers(message, repository)
+            if not references and not release_branch:
+                raise ContractViolation(
+                    f"非default branchのcommit {index}に対象repositoryのIssue参照がありません"
+                )
+            referenced_numbers.update(references)
+
+    if not referenced_numbers:
+        raise ContractViolation(
+            "非default branchのcommit範囲に対象repositoryのIssue参照がありません"
+        )
 
     loaded_issues: list[Issue] = []
     for number in sorted(referenced_numbers):
@@ -449,6 +462,11 @@ def _require_sha(value: object, label: str) -> str:
     if not isinstance(value, str) or _SHA_PATTERN.fullmatch(value) is None:
         raise ContractViolation(f"{label}は40文字のSHAである必要があります")
     return value.lower()
+
+
+def is_release_branch(branch: str) -> bool:
+    """完全なリリースIssue集合を許可するbranchか判定する。"""
+    return _RELEASE_BRANCH_PATTERN.fullmatch(branch) is not None
 
 
 def _require_repository_name(value: str) -> str:
@@ -788,16 +806,19 @@ def validate_pr_range(
     references: set[int] = set()
     for message in commit_messages:
         references.update(issue_numbers(message, repository))
-    if len(references) != 1:
+    if not references or (not is_release_branch(branch) and len(references) != 1):
         raise ContractViolation(
-            "PR rangeの参照Issueは同一repositoryのcanonicalなOPEN Issue 1件である必要があります: "
+            "PR rangeの参照Issueは同一repositoryのcanonicalなOPEN Issue "
+            + ("1件" if not is_release_branch(branch) else "1件以上")
+            + "である必要があります: "
             f"件数={len(references)}"
         )
-    _validate_pr_canonical_issue(
-        repository=repository,
-        number=next(iter(references)),
-        issue_loader=issue_loader,
-    )
+    for number in sorted(references):
+        _validate_pr_canonical_issue(
+            repository=repository,
+            number=number,
+            issue_loader=issue_loader,
+        )
 
     changed_paths = _pr_changed_paths(
         repository=repository, base_sha=base_sha, head_sha=head_sha
@@ -840,6 +861,48 @@ def _run_git(repository: Path, *arguments: str) -> str:
         detail = result.stderr.strip() or result.stdout.strip()
         raise ContractViolation(f"git {' '.join(arguments)} failed: {detail}")
     return result.stdout.strip()
+
+
+def _is_ancestor(repository: Path, ancestor: str, descendant: str) -> bool:
+    """fast-forward関係を判定し、Git実行失敗は拒否する。"""
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise ContractViolation("push rangeのancestor判定に失敗しました")
+
+
+def push_validation_range_base(
+    repository: Path,
+    *,
+    remote_sha: str,
+    local_sha: str,
+    default_range_base: str,
+) -> str:
+    """通常のfast-forward pushではremote先端を起点にする。
+
+    feature branchがremote先端より後のlive defaultをmergeした場合は、
+    live defaultから到達可能なcommitをIssue検査へ含めない。non-fast-forward
+    更新は信頼できる増分範囲を持たないため、live default branchから検証する。
+    """
+    remote_sha = _require_sha(remote_sha, "push remote SHA")
+    local_sha = _require_sha(local_sha, "push local SHA")
+    if remote_sha == _ZERO_SHA:
+        return default_range_base
+    if _is_ancestor(repository, remote_sha, local_sha):
+        if _is_ancestor(repository, default_range_base, local_sha) and not _is_ancestor(
+            repository, default_range_base, remote_sha
+        ):
+            return default_range_base
+        return remote_sha
+    return default_range_base
 
 
 def _repository_name(remote_url: str) -> str:
@@ -1221,11 +1284,29 @@ def main() -> int:
         # substitute for the base of a feature range.
         default_range_base = default_ref
         push_updates = pushed_branch_updates(updates, default_branch=default_branch)
-        validation_targets = list(push_updates) if push_updates else []
+        pushed_remote_heads = {
+            (remote_ref.removeprefix("refs/heads/"), local_sha): remote_sha
+            for _local_ref, local_sha, remote_ref, remote_sha in updates
+            if local_sha != _ZERO_SHA
+            and remote_ref.startswith("refs/heads/")
+            and remote_ref.removeprefix("refs/heads/") != default_branch
+        }
+        validation_targets: list[tuple[str, str, str]] = []
+        for target_branch, target_revision in push_updates:
+            remote_sha = pushed_remote_heads[(target_branch, target_revision)]
+            range_base = default_range_base
+            if not is_release_branch(target_branch):
+                range_base = push_validation_range_base(
+                    repository,
+                    remote_sha=remote_sha,
+                    local_sha=target_revision,
+                    default_range_base=default_range_base,
+                )
+            validation_targets.append((target_branch, target_revision, range_base))
         if not validation_targets and not push_input.strip() and branch != default_branch:
             if not branch:
                 raise ContractViolation("空のpre-push入力ではcheckout branchが必要です")
-            validation_targets.append((branch, "HEAD"))
+            validation_targets.append((branch, "HEAD", default_range_base))
 
         if not validation_targets:
             if branch == default_branch:
@@ -1242,14 +1323,40 @@ def main() -> int:
             return cache[number]
 
         all_references: set[int] = set()
-        for target_branch, target_revision in validation_targets:
+        for target_branch, target_revision, range_base in validation_targets:
+            if not is_release_branch(target_branch):
+                # The incremental range is intentionally used only for commit
+                # message and dependency-evidence validation.  A fast-forward
+                # follow-up on a non-release branch must still reject workflows
+                # introduced anywhere in the complete default-to-feature range;
+                # otherwise an earlier workflow edit falls outside
+                # ``remote_sha..tip``.  Release branches retain their existing
+                # workflow contract.
+                workflow_output = _run_git(
+                    repository,
+                    "diff",
+                    "--name-status",
+                    "-z",
+                    "--find-renames",
+                    "--find-copies",
+                    "--find-copies-harder",
+                    f"{default_range_base}...{target_revision}",
+                )
+                workflow_paths = parse_name_status_paths(workflow_output)
+                protected_workflows = _trusted_workflow_path_errors(workflow_paths)
+                if protected_workflows:
+                    raise ContractViolation(
+                        "GitHub Actions workflowはfeature branchの全rangeから変更できません: "
+                        + ", ".join(protected_workflows)
+                    )
+
             commit_output = _run_git(
                 repository,
                 "log",
                 "--reverse",
                 "-z",
                 "--format=%B",
-                f"{default_range_base}..{target_revision}",
+                f"{range_base}..{target_revision}",
             )
             commit_messages = parse_commit_messages(commit_output)
             changed_output = _run_git(
@@ -1260,7 +1367,7 @@ def main() -> int:
                 "--find-renames",
                 "--find-copies",
                 "--find-copies-harder",
-                f"{default_range_base}...{target_revision}",
+                f"{range_base}...{target_revision}",
             )
             changed_paths = parse_name_status_paths(changed_output)
             for message in commit_messages:

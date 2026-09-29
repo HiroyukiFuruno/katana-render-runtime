@@ -10,13 +10,9 @@ impl HtmlLayoutRenderer {
             .rendering_elements
             .iter()
             .rev()
-            .filter_map(|owner| {
-                self.element_boxes
-                    .iter()
-                    .rev()
-                    .find(|element| element.node_id == *owner)
-                    .map(|element| element.positioning_context)
-            })
+            .filter_map(|owner| self.ownership.element_box_indices.get(owner))
+            .filter_map(|index| self.element_boxes.get(*index))
+            .map(|element| element.positioning_context)
             .find(|context| *context != ElementPositioningContext::InFlow)
             .unwrap_or(ElementPositioningContext::InFlow)
     }
@@ -33,12 +29,8 @@ impl HtmlLayoutRenderer {
             .rendering_elements
             .iter()
             .rev()
-            .find_map(|owner| {
-                self.element_boxes
-                    .iter()
-                    .rev()
-                    .find(|element| element.node_id == *owner)
-                    .and_then(|element| element.positioning_origin_node_id)
-            })
+            .filter_map(|owner| self.ownership.element_box_indices.get(owner))
+            .filter_map(|index| self.element_boxes.get(*index))
+            .find_map(|element| element.positioning_origin_node_id)
     }
 }

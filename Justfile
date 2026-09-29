@@ -198,6 +198,15 @@ release-target-check:
     bash scripts/release/assert-tag-safe.sh "{{TAG}}" origin
     bash scripts/release/assert-crates-not-published.sh "{{VERSION}}"
 
+# Show or explicitly synchronize the checked-in immutable release-content manifest.
+# The normal release target check continues to reject a mismatch until this source
+# change is reviewed and committed.
+release-target-manifest:
+    python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --head-ref HEAD --print-release-manifest
+
+release-target-manifest-update:
+    python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --head-ref HEAD --update-release-manifest
+
 # Verify package metadata and dry-run the first publishable crate
 release-verify: release-target-check
     bash scripts/release/verify-version.sh "{{VERSION}}"
@@ -221,6 +230,9 @@ release-specific: release-openspec-archive release-verify
 
 # Verify release branch readiness before merging
 release-check: release-quality release-specific
+
+# Verify release-only checks after PR CI quality evidence has been verified
+release-preflight-check: release-openspec-archive release-verify
 
 # Verify pull request readiness before merging
 pr-ready-check pr:
@@ -263,7 +275,8 @@ krr-build:
 
 # Force-update all Rust and JavaScript dependencies plus pinned runtime assets, then run required checks
 depends-update-all:
-    {{CARGO}} upgrade --incompatible allow --pinned allow --recursive true
+    python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"
+    {{CARGO}} upgrade -i allow --pinned allow --exclude html5ever --exclude markup5ever --exclude markup5ever_rcdom
     {{CARGO}} update
     bun update --latest
     bun run scripts/runtime-assets/depends-update-all.ts

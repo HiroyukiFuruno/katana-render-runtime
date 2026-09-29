@@ -11,7 +11,9 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
+  pull-requests: read
 
 env:
   CARGO_INCREMENTAL: 0
@@ -19,14 +21,56 @@ env:
   TEST_THREADS: "1"
 
 jobs:
+  evidence:
+    name: reusable Ubuntu CI evidence
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v')
+    runs-on: ubuntu-latest
+    # GitHub-hosted job の上限360分から、checkout/API照会の余地を30分残す。
+    # CI本体の135分・runner待機165分に、未制限のsetup/build/lint等を30分加える。
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Verify reusable Ubuntu CI quality evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # CI本体の最大135分・runner待機165分と、timeout未設定stepの30分を待機する。
+          # 後続のrelease checkは別jobに分離し、この360分jobを消費しない。
+          for attempt in {1..990}; do
+            if python3 scripts/release/verify_ci_quality_evidence.py \
+              --repository "${{ github.repository }}" \
+              --pull-request "${{ github.event.pull_request.number }}" \
+              --base-sha "${{ github.event.pull_request.base.sha }}" \
+              --head-sha "${{ github.event.pull_request.head.sha }}"; then
+              exit 0
+            else
+              ci_evidence_status=$?
+            fi
+            if [ "$ci_evidence_status" -ne 75 ]; then
+              exit "$ci_evidence_status"
+            fi
+            if [ "$attempt" -eq 990 ]; then
+              echo "Timed out waiting for reusable Ubuntu CI quality evidence after 330 minutes." >&2
+              exit 75
+            fi
+            sleep 20
+          done
+
   preflight:
     name: preflight
+    needs: evidence
+    if: >-
+      always() && (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') &&
+      needs.evidence.result == 'success'))
     runs-on: ubuntu-latest
+    # evidence job後に実行するため、setupとrelease checkにjob全体を使える。
+    timeout-minutes: 360
     steps:
-      - name: Skip non-release pull request
-        if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release/v')
-        run: echo "release-preflight is skipped for non-release pull requests."
-
       - name: Checkout
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,14 +131,18 @@ jobs:
             "${{ inputs.version }}" \
             "${{ github.head_ref }}"
 
-      - name: Release quality gate
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        timeout-minutes: 65
-        run: just release-quality
-
-      - name: Release-specific verification
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        timeout-minutes: 35
+      - name: Release check
+        if: github.event_name == 'workflow_dispatch'
+        # release-quality は最大65分、release-specific は最大35分を要するため、
+        # 手動リリース検証は両者を直列に完了できる100分を下限にする。
+        timeout-minutes: 100
         env:
           GH_TOKEN: ${{ github.token }}
-        run: just VERSION="${{ steps.version.outputs.version }}" release-specific
+        run: just VERSION="${{ steps.version.outputs.version }}" release-check
+
+      - name: Release preflight checks
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v')
+        timeout-minutes: 45
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: just VERSION="${{ steps.version.outputs.version }}" release-preflight-check

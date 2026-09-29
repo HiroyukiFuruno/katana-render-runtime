@@ -49,6 +49,7 @@ pub(super) struct LayoutOwnership {
     pub(super) containing_blocks: Vec<ContainingBlock>,
     pub(super) rendering_elements: Vec<u64>,
     pub(super) inline_fragment_owners: Vec<u64>,
+    pub(super) element_box_indices: HashMap<u64, usize>,
 }
 
 impl HtmlLayoutRenderer {

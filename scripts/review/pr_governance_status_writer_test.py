@@ -218,6 +218,14 @@ class StatusWriterUnitTest(unittest.TestCase):
         self.assertIsNone(WRITER.canonical_issue("Fixes #64; closes #65"))
         self.assertIsNone(WRITER.canonical_issue("No closer"))
 
+    def test_release_closer_key_accepts_the_complete_issue_set_only_on_release_branch(self) -> None:
+        body = "Closes #65\nCloses #64"
+        self.assertEqual(WRITER.canonical_closer_key(body, "release/v0.4.22"), "64,65")
+        self.assertEqual(WRITER.canonical_closer_key(body, "release/vnext"), "64,65")
+        self.assertIsNone(WRITER.canonical_closer_key(body, "feature/multi-issue"))
+        self.assertIsNone(WRITER.canonical_closer_key("No closer", "release/v0.4.22"))
+        self.assertFalse(WRITER.is_release_branch("release/v"))
+
     def test_canonical_issue_accepts_optional_colon_like_local_parser(self) -> None:
         with self.identity():
             self.assertEqual(WRITER.canonical_issue("Closes: #64"), "64")
@@ -3153,6 +3161,23 @@ class StatusWriterUnitTest(unittest.TestCase):
             with self.subTest(label=label), self.identity(), patch.dict(os.environ, {"GITHUB_REF_NAME": "master", "GITHUB_SHA": "d" * 40}), patch.object(WRITER, "pull", return_value=changed):
                 self.assertFalse(WRITER.final_closer_is_unique(72, "64", "d" * 40, "a" * 40, digest, {"64": frozenset({72})}))
 
+    def test_release_final_closer_requires_each_referenced_issue_to_be_uniquely_claimed(self) -> None:
+        current = self.pull(72, "Closes #65\nCloses #64")
+        current["base"]["sha"] = "d" * 40  # type: ignore[index]
+        current["base"]["repo"]["default_branch"] = "master"  # type: ignore[index]
+        current["head"]["ref"] = "release/v0.4.22"  # type: ignore[index]
+        digest = WRITER.pr_body_sha256("Closes #65\nCloses #64")
+        environment = {"GITHUB_REF_NAME": "master", "GITHUB_SHA": "d" * 40}
+        with self.identity(), patch.dict(os.environ, environment), patch.object(WRITER, "pull", return_value=current):
+            self.assertTrue(WRITER.final_closer_is_unique(
+                72, "64,65", "d" * 40, "a" * 40, digest,
+                {"64": frozenset({72}), "65": frozenset({72})}, branch="release/v0.4.22",
+            ))
+            self.assertFalse(WRITER.final_closer_is_unique(
+                72, "64,65", "d" * 40, "a" * 40, digest,
+                {"64": frozenset({72}), "65": frozenset({72, 73})}, branch="release/v0.4.22",
+            ))
+
     def test_final_head_pages_choose_the_101st_rerun_and_sensor(self) -> None:
         older_ci = self.generation(900, 1)
         newer_ci = self.generation(901, 2)
@@ -3220,6 +3245,24 @@ class StatusWriterUnitTest(unittest.TestCase):
         with self.identity(), patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}), patch.object(WRITER, "api_json", side_effect=page):
             self.assertEqual(WRITER.check_run("a" * 40), item)
         self.assertEqual(len(endpoints), 2)
+
+    def test_check_response_accepts_missing_or_null_updated_at_but_keeps_identity_checks(self) -> None:
+        head = "a" * 40
+        base = {
+            "id": 102,
+            "name": WRITER.CHECK_NAME,
+            "head_sha": head,
+            "external_id": WRITER.check_external_id(head),
+            "app": {"id": 42},
+        }
+        for response in ({**base}, {**base, "updated_at": None}):
+            with self.subTest(response=response), patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}):
+                self.assertIs(WRITER._valid_check(response, head), response)
+                self.assertEqual(WRITER.check_fingerprint(response)[:2], (102, response.get("updated_at")))
+        for field, value in (("id", "102"), ("name", "other"), ("head_sha", "b" * 40), ("external_id", "other"), ("app", {"id": 7})):
+            invalid = {**base, field: value}
+            with self.subTest(field=field), patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}), self.assertRaises(WRITER.GovernanceError):
+                WRITER._valid_check(invalid, head)
 
     def test_check_run_ignores_foreign_and_historical_generations(self) -> None:
         for mutate in (lambda value: value["app"].update(id=7), lambda value: value.update(external_id="wrong")):
@@ -3596,6 +3639,30 @@ class StatusWriterUnitTest(unittest.TestCase):
             decision.body_sha256 if decision is not None else None,
             WRITER.pr_body_sha256("Fixes #64"),
         )
+
+    def test_deferred_release_success_keeps_the_aggregated_closer_key(self) -> None:
+        body = "Closes #64\nCloses #65"
+        current = self.pull(72, body)
+        current["head"]["ref"] = "release/v0.4.22"  # type: ignore[index]
+        current["base"]["repo"]["default_branch"] = "master"  # type: ignore[index]
+        generations = (
+            WRITER.Generation("CI", "x", 44, 1, 1, 1, "completed", "success"),
+            WRITER.Generation("release-preflight", "y", 45, 2, 1, 1, "completed", "success"),
+        )
+        environment = {"GITHUB_REF_NAME": "master", "GITHUB_SHA": "b" * 40}
+        with self.identity(), patch.dict(os.environ, environment), \
+             patch.object(WRITER, "pull", side_effect=[current, current]), \
+             patch.object(WRITER, "check_baseline", return_value=(101,)), \
+             patch.object(WRITER, "contract", return_value="success"), \
+             patch.object(WRITER, "sensor", return_value=77), \
+             patch.object(WRITER, "generation", side_effect=[*generations, *generations]):
+            decision = WRITER.process(
+                72, {"64": frozenset({72}), "65": frozenset({72})},
+                "/tmp/snapshot.json", defer_terminal=True,
+            )
+        self.assertEqual(decision.state if decision is not None else None, "success")
+        self.assertEqual(decision.issue if decision is not None else None, "64,65")
+        self.assertEqual(decision.branch if decision is not None else None, "release/v0.4.22")
 
     def test_finalize_refuses_success_when_the_pr_body_changes_after_the_decision(self) -> None:
         generations = (

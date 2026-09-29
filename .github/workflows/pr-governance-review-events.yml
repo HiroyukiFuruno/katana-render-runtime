@@ -51,7 +51,9 @@ jobs:
           fi
 
       - name: Reject out-of-scope PR
-        if: ${{ github.event.pull_request.draft != false || github.event.pull_request.base.repo.full_name != github.repository || github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.base.ref != github.event.repository.default_branch }}
+        # Draft PRは最終ガバナンスラッチの対象外とする。
+        # Ready化時の再実行で、ローカルかつdefault branch向けの条件を評価する。
+        if: ${{ github.event.pull_request.draft == false && (github.event.pull_request.base.repo.full_name != github.repository || github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.base.ref != github.event.repository.default_branch) }}
         run: |
           echo 'Only non-Draft local PRs targeting the default branch can satisfy the governance review latch.' >&2
           exit 1

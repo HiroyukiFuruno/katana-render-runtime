@@ -445,6 +445,33 @@ def canonical_issue(body: object) -> str | None:
     return next(iter(issues))
 
 
+def is_release_branch(branch: object) -> bool:
+    """Issue 契約と同じ公開候補 branch 判定を使う。"""
+    return isinstance(branch, str) and issue_contract.is_release_branch(branch)
+
+
+def canonical_closer_key(body: object, branch: object) -> str | None:
+    """PR branch ごとの正規 closer 集合を、比較可能なキーへ固定する。"""
+    if not isinstance(body, str):
+        raise GovernanceError("Pull request body is invalid.")
+    issues = closing_issues(body)
+    if is_release_branch(branch):
+        return ",".join(sorted(issues, key=int)) if issues else None
+    if len(issues) != 1:
+        return None
+    return next(iter(issues))
+
+
+def closer_key_issues(key: object) -> tuple[str, ...] | None:
+    """比較済み closer キーを重複なしの Issue 集合へ復元する。"""
+    if not isinstance(key, str) or re.fullmatch(r"[1-9][0-9]*(?:,[1-9][0-9]*)*", key) is None:
+        return None
+    issues = tuple(key.split(","))
+    if tuple(sorted(issues, key=int)) != issues or len(set(issues)) != len(issues):
+        return None
+    return issues
+
+
 def pr_body_sha256(body: object) -> str:
     """Bind a decision to the exact valid UTF-8 PR description bytes."""
     if not isinstance(body, str) or "\0" in body:
@@ -806,7 +833,6 @@ def _valid_check(value: object, head: str, *, external_id: str | None = None) ->
         type(value.get("id")) is not int or value.get("name") != CHECK_NAME
         or value.get("head_sha") != head or value.get("external_id") != (external_id if external_id is not None else check_external_id(head))
         or not isinstance(app, dict) or app.get("id") != check_app_id()
-        or not isinstance(value.get("updated_at"), str)
     ):
         raise GovernanceError("Check Run identity is invalid.")
     return value
@@ -1074,7 +1100,7 @@ def check_fingerprint(value: dict[str, Any] | None) -> tuple[object, ...]:
     if value is None:
         return ()
     checked = _valid_check(value, value.get("head_sha", ""))
-    return (checked["id"], checked["updated_at"], checked.get("status"), checked.get("conclusion"), checked.get("details_url"), checked["external_id"])
+    return (checked["id"], checked.get("updated_at"), checked.get("status"), checked.get("conclusion"), checked.get("details_url"), checked["external_id"])
 
 
 def write_governance_check(
@@ -1461,6 +1487,7 @@ class PendingDecision:
     generations: tuple[Generation, Generation] | None
     issue: str | None
     body_sha256: str
+    branch: str = ""
 
 
 def _page_endpoint(endpoint: str, page: int) -> str:
@@ -1768,7 +1795,7 @@ def contract(number: int, base: str, head: str, branch: str, draft: bool, snapsh
 
 def final_closer_is_unique(
     number: int, issue: str, base: str, head: str, body_sha256: str,
-    claimants: dict[str, frozenset[int]],
+    claimants: dict[str, frozenset[int]], *, branch: str | None = None,
 ) -> bool:
     current = pull(number)
     expected_branch = default_branch_name()
@@ -1777,13 +1804,15 @@ def final_closer_is_unique(
     current_head = current.get("head") if isinstance(current, dict) else None
     base_repository = current_base.get("repo") if isinstance(current_base, dict) else None
     head_repository = current_head.get("repo") if isinstance(current_head, dict) else None
-    actual_issue = canonical_issue(current.get("body"))
+    actual_issue = canonical_closer_key(current.get("body"), branch) if branch is not None else canonical_issue(current.get("body"))
+    issues = closer_key_issues(issue)
     if (
         not isinstance(current, dict) or BODY_SHA256.fullmatch(body_sha256) is None
         or SHA.fullmatch(expected_default_head) is None
         or pr_body_sha256(current.get("body")) != body_sha256
-        or actual_issue != issue or not isinstance(current_base, dict) or not isinstance(current_head, dict)
+        or issues is None or actual_issue != issue or not isinstance(current_base, dict) or not isinstance(current_head, dict)
         or current_base.get("sha") != base or current_head.get("sha") != head
+        or (branch is not None and current_head.get("ref") != branch)
         or current_base.get("ref") != expected_branch or current_base.get("sha") != expected_default_head
         or not isinstance(base_repository, dict) or not isinstance(head_repository, dict)
         or base_repository.get("full_name") != REPOSITORY or head_repository.get("full_name") != REPOSITORY
@@ -1792,7 +1821,7 @@ def final_closer_is_unique(
         return False
     # A malformed multi-Issue closer is a claimant for every Issue it names;
     # the one complete snapshot prevents O(N^2) GETs for a 300+ PR run.
-    return claimants.get(issue) == frozenset({number})
+    return all(claimants.get(candidate) == frozenset({number}) for candidate in issues)
 
 
 def target_url(
@@ -1837,7 +1866,7 @@ def process(number: int, claimants: dict[str, frozenset[int]], snapshot_path: st
     body_sha256 = ""
     try:
         body_sha256 = pr_body_sha256(initial.get("body"))
-        issue = canonical_issue(initial.get("body"))
+        issue = canonical_closer_key(initial.get("body"), branch)
         result = contract(number, base, head, branch, draft, snapshot_path)
         # A Draft is deliberately non-terminal. It must not require a final
         # review sensor or release-preflight run merely to stay pending.
@@ -1857,7 +1886,7 @@ def process(number: int, claimants: dict[str, frozenset[int]], snapshot_path: st
         # reads for the same immutable workflow paths.
         if result != "success":
             if defer_terminal:
-                return PendingDecision(number, head, base, pending, "failure", "Trusted PR governance failed.", None, None, issue, body_sha256)
+                return PendingDecision(number, head, base, pending, "failure", "Trusted PR governance failed.", None, None, issue, body_sha256, branch)
             if not check_changed_since(head, pending):
                 write_governance_check(
                     head, "failure", "Trusted PR governance failed.", target_url(),
@@ -1874,7 +1903,7 @@ def process(number: int, claimants: dict[str, frozenset[int]], snapshot_path: st
             state, description = "pending", "Trusted governance revalidation is pending."
         elif result != "success" or ci != "success" or issue is None:
             state, description = "failure", "Trusted PR governance failed."
-        elif not final_closer_is_unique(number, issue, base, head, body_sha256, claimants):
+        elif not final_closer_is_unique(number, issue, base, head, body_sha256, claimants, branch=branch):
             state, description = "failure", "Canonical Issue closer set changed."
         else:
             # A second read immediately before success rejects same-head reruns and attempts.
@@ -1889,7 +1918,7 @@ def process(number: int, claimants: dict[str, frozenset[int]], snapshot_path: st
             else:
                 state, description = "success", "Trusted PR governance passed."
         if defer_terminal:
-            return PendingDecision(number, head, base, pending, state, description, sensor_id, current_generations, issue, body_sha256)
+            return PendingDecision(number, head, base, pending, state, description, sensor_id, current_generations, issue, body_sha256, branch)
         terminal_count = 0
         if state == "success" and not defer_terminal:
             terminal_count = sensor_terminal_check_count(head, sensor_id)
@@ -1900,7 +1929,7 @@ def process(number: int, claimants: dict[str, frozenset[int]], snapshot_path: st
             # unambiguous.
         if check_changed_since(head, pending):
             return
-        if state == "success" and not defer_terminal and not final_closer_is_unique(number, issue, base, head, body_sha256, claimants):
+        if state == "success" and not defer_terminal and not final_closer_is_unique(number, issue, base, head, body_sha256, claimants, branch=branch):
             state, description = "failure", "Pull request body changed during governance revalidation."
         if os.environ.get("GITHUB_ACTIONS") == "true":
             rebind_trusted_default_writer()
@@ -1920,7 +1949,7 @@ def process(number: int, claimants: dict[str, frozenset[int]], snapshot_path: st
             # segment単位のterminal write予算を迂回してrate-limit burstを起こす。
             return PendingDecision(
                 number, head, base, pending, "failure",
-                "Trusted PR governance failed closed.", None, None, None, body_sha256,
+                "Trusted PR governance failed closed.", None, None, None, body_sha256, branch,
             )
         if not check_changed_since(head, pending):
             write_governance_check(
@@ -1978,7 +2007,7 @@ def finalize_decision(decision: PendingDecision, claimants: dict[str, frozenset[
         # review/CI fences and before honoring an existing or new success.
         if state == "success" and not final_closer_is_unique(
             decision.number, decision.issue, decision.base, decision.head,
-            decision.body_sha256, claimants,
+            decision.body_sha256, claimants, branch=decision.branch or None,
         ):
             state, description, exact_current = (
                 "failure", "Pull request body changed during governance revalidation.", False,

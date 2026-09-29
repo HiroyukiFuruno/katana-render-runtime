@@ -1,6 +1,7 @@
 use super::{HtmlDomBridgeState, argument, node_id};
 use crate::renderer::backends::html_document::HtmlDocument;
 use crate::renderer::backends::html_runtime::types::DomValue;
+use crate::renderer::backends::html_subresources::HtmlSubresourceLoader;
 
 impl HtmlDomBridgeState {
     pub(crate) fn dispatch(
@@ -72,8 +73,18 @@ impl HtmlDomBridgeState {
         match operation {
             "setEventTarget" => Some(self.set_event_target(arguments)),
             "requestText" => Some(self.request_text(arguments)),
+            "validateImageDataUrl" => Some(self.validate_image_data_url(arguments)),
             _ => None,
         }
+    }
+
+    fn validate_image_data_url(&self, arguments: &[String]) -> Result<DomValue, String> {
+        let event = if HtmlSubresourceLoader::image_data_url_is_decodable(argument(arguments, 0)?) {
+            "load"
+        } else {
+            "error"
+        };
+        Ok(DomValue::String(event.to_string()))
     }
 
     pub(super) fn lookup(&self, operation: &str, arguments: &[String]) -> Result<DomValue, String> {

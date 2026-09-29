@@ -15,6 +15,9 @@ on:
   workflow_dispatch:
   workflow_run:
     workflows: [PR governance review sensor, CI, release-preflight]
+    # reviewイベントsensorはdispatcherが書くCheck Runを待つ。
+    # 循環待機を避けるため完了前にreconcileを開始し、preflightで不変の
+    # runを再検証する。古いsourceはno-opとして扱う。
     types: [requested, in_progress, completed]
 
 permissions:

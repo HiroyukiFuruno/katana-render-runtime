@@ -624,6 +624,97 @@ class VerifyPushIssueTest(unittest.TestCase):
         )
         self.assertEqual(updates, (("feature-a", "a" * 40), ("feature-b", "b" * 40)))
 
+    def test_fast_forward_push_checks_only_the_new_remote_to_local_range(self) -> None:
+        repository = Path("/tmp/verify-push-range")
+        remote_sha = "a" * 40
+        local_sha = "b" * 40
+        with patch.object(subject, "_is_ancestor", side_effect=(True, False)) as ancestor:
+            self.assertEqual(
+                subject.push_validation_range_base(
+                    repository,
+                    remote_sha=remote_sha,
+                    local_sha=local_sha,
+                    default_range_base="origin/master",
+                ),
+                remote_sha,
+            )
+        self.assertEqual(
+            ancestor.call_args_list,
+            [
+                ((repository, remote_sha, local_sha), {}),
+                ((repository, "origin/master", local_sha), {}),
+            ],
+        )
+
+    def test_fast_forward_push_after_merging_live_default_excludes_default_commits(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+
+            def git(*arguments: str) -> str:
+                return subprocess.run(
+                    ["git", *arguments],
+                    cwd=repository,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+
+            git("init", "--initial-branch=master")
+            git("config", "user.name", "Issue Contract Test")
+            git("config", "user.email", "issue@example.com")
+            (repository / "base.txt").write_text("base\n", encoding="utf-8")
+            git("add", "base.txt")
+            git("commit", "-m", "initial")
+            git("switch", "-c", "feature/default-merge")
+            (repository / "feature.txt").write_text("feature\n", encoding="utf-8")
+            git("add", "feature.txt")
+            git("commit", "-m", "feat: feature", "-m", "Refs #64")
+            remote_sha = git("rev-parse", "HEAD")
+            git("switch", "master")
+            (repository / "default.txt").write_text("default\n", encoding="utf-8")
+            git("add", "default.txt")
+            git("commit", "-m", "chore: live default advance")
+            default_sha = git("rev-parse", "HEAD")
+            git("switch", "feature/default-merge")
+            git("merge", "--no-ff", "master", "-m", "merge live default\n\nRefs #64")
+            local_sha = git("rev-parse", "HEAD")
+
+            range_base = subject.push_validation_range_base(
+                repository,
+                remote_sha=remote_sha,
+                local_sha=local_sha,
+                default_range_base=default_sha,
+            )
+            self.assertEqual(range_base, default_sha)
+            messages = subject.parse_commit_messages(
+                subject._run_git(
+                    repository, "log", "--reverse", "-z", "--format=%B", f"{range_base}..{local_sha}"
+                )
+            )
+            self.assertNotIn("chore: live default advance", messages)
+            subject.validate_contract(
+                branch="feature/default-merge",
+                default_branch="master",
+                repository="HiroyukiFuruno/katana-render-runtime",
+                commit_messages=messages,
+                changed_paths=["feature.txt"],
+                issue_loader=lambda number: self.issue(number) if number == 64 else None,
+            )
+
+    def test_non_fast_forward_push_falls_back_to_live_default_range(self) -> None:
+        with patch.object(subject, "_is_ancestor", return_value=False):
+            self.assertEqual(
+                subject.push_validation_range_base(
+                    Path("/tmp/verify-push-range"),
+                    remote_sha="a" * 40,
+                    local_sha="b" * 40,
+                    default_range_base="origin/master",
+                ),
+                "origin/master",
+            )
+
     def test_nonatomic_combined_push_uses_remote_default_as_feature_base(self) -> None:
         """A rejected default update must not hide unreferenced local commits."""
         with tempfile.TemporaryDirectory() as directory:
@@ -682,6 +773,73 @@ class VerifyPushIssueTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 1)
             self.assertIn("commit 1に対象repositoryのIssue参照がありません", result.stderr)
+
+    def fast_forward_followup_with_prior_workflow(self, branch: str) -> subprocess.CompletedProcess[str]:
+        """Run a fast-forward follow-up after an earlier workflow edit."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            binary_directory = root / "bin"
+            repository.mkdir()
+            binary_directory.mkdir()
+            for command in (
+                ["git", "init", "--initial-branch=master"],
+                ["git", "config", "user.name", "Issue Contract Test"],
+                ["git", "config", "user.email", "issue@example.com"],
+            ):
+                subprocess.run(command, cwd=repository, check=True, capture_output=True, text=True)
+            (repository / "base.txt").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "add", "base.txt"], cwd=repository, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "initial"], cwd=repository, check=True, capture_output=True, text=True)
+            remote_url = "https://github.com/HiroyukiFuruno/katana-render-runtime.git"
+            self.configure_live_fetch_remote(repository, remote="origin", push_url=remote_url)
+            subprocess.run(["git", "switch", "-c", branch], cwd=repository, check=True, capture_output=True, text=True)
+            workflow_path = repository / ".github/workflows/forged.yml"
+            workflow_path.parent.mkdir(parents=True)
+            workflow_path.write_text("name: forged\n", encoding="utf-8")
+            subprocess.run(["git", "add", ".github/workflows/forged.yml"], cwd=repository, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "chore: add workflow"], cwd=repository, check=True, capture_output=True, text=True)
+            remote_feature_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repository, check=True, capture_output=True, text=True).stdout.strip()
+            (repository / "followup.txt").write_text("follow-up\n", encoding="utf-8")
+            subprocess.run(["git", "add", "followup.txt"], cwd=repository, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "fix: follow-up", "-m", "Refs #64"], cwd=repository, check=True, capture_output=True, text=True)
+            local_feature_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repository, check=True, capture_output=True, text=True).stdout.strip()
+            fake_gh = binary_directory / "gh"
+            fake_gh.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' '{\"number\":64,\"state\":\"OPEN\",\"body\":\"Issue body\",\"url\":\"https://github.com/HiroyukiFuruno/katana-render-runtime/issues/64\"}'\n",
+                encoding="utf-8",
+            )
+            fake_gh.chmod(fake_gh.stat().st_mode | stat.S_IXUSR)
+            self.install_fake_push_remote_git(binary_directory)
+            environment = os.environ.copy()
+            environment["PATH"] = f"{binary_directory}:{environment['PATH']}"
+            environment["KRR_TEST_REAL_GIT"] = str(shutil.which("git"))
+            environment["KRR_TEST_PUSH_REMOTE_REF"] = "refs/remotes/origin/master"
+            return subprocess.run(
+                [sys.executable, str(Path(subject.__file__))],
+                cwd=repository,
+                env=environment,
+                input=(
+                    f"refs/heads/{branch} {local_feature_sha} "
+                    f"refs/heads/{branch} {remote_feature_sha}\n"
+                ),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+    def test_fast_forward_followup_rechecks_workflows_across_full_nonrelease_range(self) -> None:
+        """A prior workflow edit must not fall outside a non-release follow-up."""
+        result = self.fast_forward_followup_with_prior_workflow("feature/workflow-range")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("GitHub Actions workflowはfeature branchの全rangeから変更できません", result.stderr)
+        self.assertIn(".github/workflows/forged.yml", result.stderr)
+
+    def test_fast_forward_followup_keeps_release_workflow_contract(self) -> None:
+        result = self.fast_forward_followup_with_prior_workflow("release/v0.4.22")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Issue contract passed", result.stdout)
 
     def issue(
         self,
@@ -750,6 +908,27 @@ class VerifyPushIssueTest(unittest.TestCase):
             changed_paths=["scripts/hooks/pre-push.sh"],
             issue_loader=issues.get,
         )
+
+    def test_release_branch_accepts_the_complete_issue_set_without_per_commit_refs(self) -> None:
+        issues = {64: self.issue(64), 65: self.issue(65)}
+        subject.validate_contract(
+            branch="release/v0.4.22",
+            default_branch="master",
+            repository="HiroyukiFuruno/katana-render-runtime",
+            commit_messages=[
+                "release: prepare v0.4.22\n\nRefs #64 #65",
+                "fix: apply release review feedback",
+            ],
+            changed_paths=["scripts/hooks/pre-push.sh"],
+            issue_loader=issues.get,
+        )
+
+    def test_release_branch_requires_an_issue_somewhere_in_its_range(self) -> None:
+        with self.assertRaisesRegex(subject.ContractViolation, "commit範囲"):
+            self.validate(
+                branch="release/v0.4.22",
+                messages=["release: v0.4.22", "fix: review feedback"],
+            )
 
     def test_foreign_repository_issue_does_not_satisfy_the_contract(self) -> None:
         with self.assertRaisesRegex(subject.ContractViolation, "Issue参照"):
@@ -1199,6 +1378,36 @@ class VerifyPushIssueTest(unittest.TestCase):
                     branch="fix/issue-contract",
                     issue_loader=lambda number: self.issue(number),
                 )
+
+    def test_release_pr_range_accepts_multiple_open_canonical_issues(self) -> None:
+        base_sha = "a" * 40
+        head_sha = "b" * 40
+        compare = {
+            "base_commit": {"sha": base_sha},
+            "merge_base_commit": {"sha": base_sha},
+            "status": "ahead",
+            "ahead_by": 2,
+            "behind_by": 0,
+            "total_commits": 2,
+            "commits": [
+                {"sha": "c" * 40, "commit": {"message": "release: v0.4.22\n\nRefs #64 #65"}},
+                {"sha": head_sha, "commit": {"message": "fix: review feedback"}},
+            ],
+            "files": [{"filename": "scripts/hooks/pre-push.sh"}],
+        }
+        issues = {64: self.issue(64), 65: self.issue(65)}
+        with patch.object(subject, "_gh_json", return_value=compare):
+            self.assertEqual(
+                subject.validate_pr_range(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    pr_number=99,
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                    branch="release/v0.4.22",
+                    issue_loader=issues.get,
+                ),
+                {64, 65},
+            )
 
     def test_pr_range_rejects_closed_release_issue(self) -> None:
         base_sha = "a" * 40

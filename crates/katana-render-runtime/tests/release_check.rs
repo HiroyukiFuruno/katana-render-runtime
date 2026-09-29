@@ -44,24 +44,24 @@ fn release_verify_tests_the_packaged_library_sources() -> Result<(), Box<dyn std
 }
 
 #[test]
-fn release_target_check_requires_v0_4_21_intent() -> Result<(), Box<dyn std::error::Error>> {
+fn release_target_check_requires_v0_4_22_intent() -> Result<(), Box<dyn std::error::Error>> {
     let root = workspace_root()?;
-    assert!(release_target_check(root, "0.4.21", "0.4.20", "HEAD")?);
-    assert!(release_target_check(root, "0.4.21", "0.4.21", "HEAD")?);
+    assert!(release_target_check(root, "0.4.22", "0.4.21", "HEAD")?);
+    assert!(release_target_check(root, "0.4.22", "0.4.22", "HEAD")?);
     assert!(!release_target_check(
         root,
+        "0.4.22",
         "0.4.21",
-        "0.4.20",
         "missing-release-head",
     )?);
-    assert!(!release_target_check(root, "0.4.21", "0.4.19", "HEAD")?);
     assert!(!release_target_check(root, "0.4.22", "0.4.20", "HEAD")?);
+    assert!(!release_target_check(root, "0.4.23", "0.4.21", "HEAD")?);
     for version in [
         "0.3.9", "0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.4.4", "0.4.5", "0.4.6", "0.4.7", "0.4.8",
         "0.4.9", "0.4.10", "0.4.11", "0.4.12", "0.4.13", "0.4.14", "0.4.15", "0.4.16", "0.4.17",
-        "0.4.18", "0.4.19", "0.4.20", "0.5.0", "1.0.0", "2.0.0",
+        "0.4.18", "0.4.19", "0.4.20", "0.4.21", "0.5.0", "1.0.0", "2.0.0",
     ] {
-        assert!(!release_target_check(root, version, "0.4.20", "HEAD",)?);
+        assert!(!release_target_check(root, version, "0.4.21", "HEAD",)?);
     }
     Ok(())
 }
@@ -236,7 +236,8 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
     let recipe = recipe_body(&justfile, "depends-update-all")?;
 
     for required in [
-        "{{CARGO}} upgrade --incompatible allow --pinned allow --recursive true",
+        "scripts/release/update_html5ever_pair.py --cargo \"{{CARGO}}\"",
+        "{{CARGO}} upgrade -i allow --pinned allow --exclude html5ever --exclude markup5ever --exclude markup5ever_rcdom",
         "{{CARGO}} update",
         "bun update --latest",
         "runtime-assets/depends-update-all.ts",

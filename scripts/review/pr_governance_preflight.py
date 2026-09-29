@@ -427,6 +427,7 @@ elif event_name == "workflow_run":
         valid = False
     else:
         repo = request(f"repos/{repository}")
+        initial_repository = repository_identity(repo)
         default_branch = repo.get("default_branch") if isinstance(repo, dict) else None
         run = request(f"repos/{repository}/actions/runs/{run_id}")
         pulls = run.get("pull_requests") if isinstance(run, dict) else None
@@ -459,7 +460,8 @@ elif event_name == "workflow_run":
             or re.fullmatch(r"[0-9a-fA-F]{40}", source_base["sha"]) is None
             or not isinstance(source_head.get("sha"), str)
             or re.fullmatch(r"[0-9a-fA-F]{40}", source_head["sha"]) is None
-            or run.get("head_sha") != source_head["sha"]
+            or not isinstance(run.get("head_sha"), str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", run["head_sha"]) is None
             or source_head_repo is missing
         ):
             valid = False
@@ -480,6 +482,76 @@ elif event_name == "workflow_run":
                 or pull_head_repo is missing
             ):
                 valid = False
+            elif run["head_sha"] != source_head["sha"]:
+                # CI/release完了イベントはPRの同期後に届くことがある。runの
+                # head SHAは不変だが、埋込みPR関連は現在HEADへ追随するため、
+                # これは不正なsourceではなく旧世代の作業である。repository、
+                # run、PRを二重読取して変動しない時だけbarrierを省略する。
+                pull_head_name = pull_head_repo.get("full_name") if isinstance(pull_head_repo, dict) else None
+                if (
+                    pull.get("state") != "open"
+                    or not isinstance(source_head_repo, dict)
+                    or not source_repository_matches(source_head_repo, repository_id, repository_name, repository_url)
+                    or not isinstance(pull_head_repo, dict)
+                    or pull_head_name != repository
+                    or type(pull_head_repo.get("id")) is not int or pull_head_repo.get("id") != repository_id
+                    or pull_head.get("sha") != source_head["sha"]
+                    or pull_base.get("sha") != source_base["sha"]
+                ):
+                    valid = False
+                else:
+                    final_run = request(f"repos/{repository}/actions/runs/{run_id}")
+                    final_pull = request(f"repos/{repository}/pulls/{number}")
+                    final_repository = request(f"repos/{repository}")
+                    final_pulls = final_run.get("pull_requests") if isinstance(final_run, dict) else None
+                    final_source = final_pulls[0] if isinstance(final_pulls, list) and len(final_pulls) == 1 and isinstance(final_pulls[0], dict) else None
+                    final_source_base = final_source.get("base") if isinstance(final_source, dict) else None
+                    final_source_head = final_source.get("head") if isinstance(final_source, dict) else None
+                    final_source_base_repo = final_source_base.get("repo") if isinstance(final_source_base, dict) else None
+                    final_source_head_repo = final_source_head.get("repo") if isinstance(final_source_head, dict) and "repo" in final_source_head else missing
+                    final_run_repository = final_run.get("repository") if isinstance(final_run, dict) else None
+                    final_pull_base = final_pull.get("base") if isinstance(final_pull, dict) else None
+                    final_pull_head = final_pull.get("head") if isinstance(final_pull, dict) else None
+                    final_pull_base_repo = final_pull_base.get("repo") if isinstance(final_pull_base, dict) else None
+                    final_pull_head_repo = final_pull_head.get("repo") if isinstance(final_pull_head, dict) and "repo" in final_pull_head else missing
+                    if (
+                        initial_repository is None
+                        or repository_identity(final_repository) != initial_repository
+                        or not isinstance(final_run, dict) or final_run.get("name") != name
+                        or not workflow_path_matches(final_run.get("path"), expected[name][0])
+                        or final_run.get("path") != run.get("path")
+                        or final_run.get("event") != run.get("event")
+                        or final_run.get("status") not in lifecycle
+                        or type(final_run.get("id")) is not int or final_run.get("id") != int(run_id)
+                        or type(final_run.get("run_number")) is not int or final_run.get("run_number") != run.get("run_number")
+                        or type(final_run.get("run_attempt")) is not int or final_run.get("run_attempt") != int(source_attempt)
+                        or final_run.get("head_sha") != run["head_sha"]
+                        or not isinstance(final_run_repository, dict)
+                        or final_run_repository.get("full_name") != repository
+                        or type(final_run_repository.get("id")) is not int or final_run_repository.get("id") != repository_id
+                        or not isinstance(final_source, dict)
+                        or type(final_source.get("number")) is not int or final_source.get("number") != number
+                        or not isinstance(final_source_base, dict)
+                        or final_source_base.get("ref") != default_branch or final_source_base.get("sha") != source_base["sha"]
+                        or not source_repository_matches(final_source_base_repo, repository_id, repository_name, repository_url)
+                        or not isinstance(final_source_head, dict) or final_source_head.get("sha") != source_head["sha"]
+                        or not isinstance(final_source_head_repo, dict)
+                        or not source_repository_matches(final_source_head_repo, repository_id, repository_name, repository_url)
+                        or final_run.get("head_sha") == final_source_head.get("sha")
+                        or not isinstance(final_pull, dict)
+                        or type(final_pull.get("number")) is not int or final_pull.get("number") != number
+                        or final_pull.get("state") != "open"
+                        or not isinstance(final_pull_base, dict)
+                        or final_pull_base.get("ref") != default_branch or final_pull_base.get("sha") != source_base["sha"]
+                        or not isinstance(final_pull_base_repo, dict) or final_pull_base_repo.get("full_name") != repository
+                        or type(final_pull_base_repo.get("id")) is not int or final_pull_base_repo.get("id") != repository_id
+                        or not isinstance(final_pull_head, dict) or final_pull_head.get("sha") != source_head["sha"]
+                        or not isinstance(final_pull_head_repo, dict) or final_pull_head_repo.get("full_name") != repository
+                        or type(final_pull_head_repo.get("id")) is not int or final_pull_head_repo.get("id") != repository_id
+                    ):
+                        valid = False
+                    else:
+                        reconcile = False
             elif pull.get("state") == "closed":
                 # A delayed source from a local PR closed after the
                 # run started has no open target to reconcile.  It is

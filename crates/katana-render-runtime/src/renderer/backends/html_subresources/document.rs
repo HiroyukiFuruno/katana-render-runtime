@@ -1,3 +1,4 @@
+use super::document_scripts::load_scripts;
 use super::{HtmlDocumentResources, HtmlSubresourceLoader};
 use crate::renderer::backends::html_document::HtmlDocument;
 use markup5ever_rcdom::{Handle, NodeData};
@@ -9,11 +10,12 @@ pub(super) fn load_document_resources(
 ) -> HtmlDocumentResources {
     super::iframe::inline_iframes(loader, document);
     let stylesheets = load_stylesheets(loader, &document.document);
-    let scripts = load_scripts(loader, &document.document);
+    let (scripts, body_onload_script_index) = load_scripts(loader, document);
     inline_images(loader, &document.document);
     HtmlDocumentResources {
         stylesheets,
         scripts,
+        body_onload_script_index,
     }
 }
 
@@ -24,12 +26,6 @@ fn load_stylesheets(loader: &HtmlSubresourceLoader, document: &Handle) -> HashMa
         .into_iter()
         .filter_map(|reference| load_text(loader, "stylesheet", reference))
         .collect()
-}
-
-fn load_scripts(loader: &HtmlSubresourceLoader, document: &Handle) -> Vec<String> {
-    let mut scripts = Vec::new();
-    collect_scripts(loader, document, &mut scripts);
-    scripts
 }
 
 fn collect_stylesheet_references(node: &Handle, references: &mut Vec<String>) {
@@ -43,31 +39,15 @@ fn collect_stylesheet_references(node: &Handle, references: &mut Vec<String>) {
     }
 }
 
-fn collect_scripts(loader: &HtmlSubresourceLoader, node: &Handle, scripts: &mut Vec<String>) {
-    if is_tag(node, "script") {
-        if let Some(script) = load_script(loader, node) {
-            scripts.push(script);
-        }
-        return;
-    }
-    for child in node.children.borrow().iter() {
-        collect_scripts(loader, child, scripts);
-    }
-}
-
-fn load_script(loader: &HtmlSubresourceLoader, node: &Handle) -> Option<String> {
-    attribute(node, "src")
-        .map(|reference| load_text(loader, "script", reference).map(|(_, source)| source))
-        .unwrap_or_else(|| Some(text_content(node)))
-}
-
 fn inline_images(loader: &HtmlSubresourceLoader, node: &Handle) {
     if is_tag(node, "img")
         && let Some(source) = attribute(node, "src")
     {
         match loader.load_image_data_url(&source) {
             Ok(data_url) => set_attribute(node, "src", &data_url),
-            Err(error) => log_subresource_failure(loader, "image", &source, &error),
+            Err(error) => {
+                log_subresource_failure(loader, "image", &source, &error);
+            }
         }
     }
     let children = node.children.borrow().clone();
@@ -76,7 +56,7 @@ fn inline_images(loader: &HtmlSubresourceLoader, node: &Handle) {
     }
 }
 
-fn load_text(
+pub(super) fn load_text(
     loader: &HtmlSubresourceLoader,
     resource_kind: &'static str,
     reference: String,
@@ -116,11 +96,11 @@ fn is_stylesheet(node: &Handle) -> bool {
         })
 }
 
-fn is_tag(node: &Handle, expected: &str) -> bool {
+pub(super) fn is_tag(node: &Handle, expected: &str) -> bool {
     matches!(&node.data, NodeData::Element { name, .. } if name.local.as_str().eq_ignore_ascii_case(expected))
 }
 
-fn attribute(node: &Handle, expected: &str) -> Option<String> {
+pub(super) fn attribute(node: &Handle, expected: &str) -> Option<String> {
     let NodeData::Element { attrs, .. } = &node.data else {
         return None;
     };
@@ -144,7 +124,7 @@ fn set_attribute(node: &Handle, expected: &str, value: &str) {
     }
 }
 
-fn text_content(node: &Handle) -> String {
+pub(super) fn text_content(node: &Handle) -> String {
     match &node.data {
         NodeData::Text { contents } => contents.borrow().to_string(),
         _ => node.children.borrow().iter().map(text_content).collect(),
@@ -153,8 +133,62 @@ fn text_content(node: &Handle) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{attribute, set_attribute};
+    use super::{attribute, load_document_resources, set_attribute};
+    use crate::renderer::backends::html_browser::HtmlBrowserSource;
     use crate::renderer::backends::html_document::HtmlDocument;
+    use crate::renderer::backends::html_runtime::StaticHtmlRuntime;
+    use crate::renderer::backends::html_subresources::HtmlSubresourceLoader;
+
+    fn must_result<T, E: std::fmt::Display>(result: Result<T, E>) -> T {
+        assert!(result.is_ok());
+        let mut values = result.into_iter().collect::<Vec<_>>();
+        values.remove(0)
+    }
+
+    #[test]
+    fn loaded_script_index_tracks_body_onload_parser_position() {
+        let source = must_result(HtmlBrowserSource::new(
+            r#"<head><script>head</script></head><body onload="body"><script>body</script></body>"#,
+            "https://example.test/index.html",
+        ));
+        let loader = HtmlSubresourceLoader::new(&source);
+        let mut document = HtmlDocument::parse(&source.raw_html);
+
+        let resources = load_document_resources(&loader, &mut document);
+
+        assert_eq!(resources.scripts, ["head", "body"]);
+        assert_eq!(resources.body_onload_script_index, Some(1));
+    }
+
+    #[test]
+    fn later_duplicate_body_onload_token_overwrites_prior_script_handler() {
+        let source = must_result(HtmlBrowserSource::new(
+            r#"<body><script>window.onload = () => { document.getElementById('status').textContent = 'first'; };</script><body onload="document.getElementById('status').textContent = 'second'"><p id=status></p>"#,
+            "https://example.test/index.html",
+        ));
+
+        let snapshot =
+            must_result(must_result(StaticHtmlRuntime.start_interactive(&source)).snapshot());
+        assert!(
+            snapshot.contains(r#"<p id="status">second</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn failed_external_script_before_body_does_not_override_later_inline_onload() {
+        let source = must_result(HtmlBrowserSource::new(
+            r#"<script src="data:text/javascript,%FF"></script><body onload="document.getElementById('status').textContent = 'second'"><script>window.onload = () => { document.getElementById('status').textContent = 'first'; };</script><p id=status></p>"#,
+            "https://example.test/index.html",
+        ));
+
+        let snapshot =
+            must_result(must_result(StaticHtmlRuntime.start_interactive(&source)).snapshot());
+        assert!(
+            snapshot.contains(r#"<p id="status">first</p>"#),
+            "{snapshot}"
+        );
+    }
 
     #[test]
     fn non_element_attribute_helpers_do_not_create_or_read_values() {

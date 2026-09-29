@@ -1137,6 +1137,32 @@ class VerifyPrReadyTest(unittest.TestCase):
         )
         self.assertIn("ちょうど1件", " ".join(errors))
 
+    def test_release_closing_contract_accepts_every_referenced_open_issue(self) -> None:
+        errors = subject.closing_reference_errors(
+            repository="owner/repo",
+            body="Closes #64\nFixes https://github.com/owner/repo/issues/65",
+            referenced_issues=(
+                self.issue(64, "2026-08-29T03:03:00Z"),
+                self.issue(65, "2026-08-29T03:03:00Z"),
+            ),
+            branch="release/v0.4.22",
+        )
+        self.assertEqual(errors, [])
+
+    def test_release_closing_contract_rejects_missing_or_extra_issue(self) -> None:
+        errors = subject.closing_reference_errors(
+            repository="owner/repo",
+            body="Closes #64\nFixes #66",
+            referenced_issues=(
+                self.issue(64, "2026-08-29T03:03:00Z"),
+                self.issue(65, "2026-08-29T03:03:00Z"),
+            ),
+            branch="release/v0.4.22",
+        )
+        rendered = " ".join(errors)
+        self.assertIn("不足=#65", rendered)
+        self.assertIn("余分=#66", rendered)
+
     def test_closing_contract_rejects_multiple_keyword_variants_and_same_repo_url(self) -> None:
         referenced_issues = (
             self.issue(64, "2026-08-29T03:03:00Z"),
@@ -2535,6 +2561,7 @@ class VerifyPrReadyTest(unittest.TestCase):
             "isDraft": True,
             "baseRefOid": "c" * 40,
             "baseRefName": "master",
+            "headRefName": "release/v0.4.22",
             "headRefOid": HEAD,
             "body": "Closes #64",
             "author": {"login": "HiroyukiFuruno"},
@@ -4195,6 +4222,94 @@ class VerifyPrReadyTest(unittest.TestCase):
                 0,
             )
 
+    def test_release_readiness_fences_every_referenced_issue(self) -> None:
+        pull_request, threads, comments = successful_state()
+        pull_request["headRefName"] = "release/v0.4.22"
+        pull_request["body"] = "Closes #64\nFixes #65"
+        comments = [
+            marker(1, "initial", HEAD, body=pull_request["body"]),
+            marker(2, "final", HEAD, body=pull_request["body"]),
+        ]
+        issues = (
+            self.issue(64, "2026-08-29T03:00:00Z"),
+            self.issue(65, "2026-08-29T03:01:00Z"),
+        )
+        open_pull_requests = [
+            {"number": 72, "isDraft": True, "body": pull_request["body"]}
+        ]
+        with patch.object(subject, "_gh_json", return_value=pull_request), patch.object(
+            subject, "_paginated_api_array", return_value=comments
+        ), patch.object(subject, "_review_threads", return_value=threads), patch.object(
+            subject.issue_contract, "referenced_issue_snapshot", return_value=issues
+        ), patch.object(
+            subject, "_open_pull_requests", return_value=open_pull_requests
+        ):
+            self.assertEqual(
+                subject.main(["--pr", "72", "--repository", "owner/repo"]), 0
+            )
+
+    def test_release_readiness_rejects_any_referenced_issue_change(self) -> None:
+        pull_request, threads, comments = successful_state()
+        pull_request["headRefName"] = "release/v0.4.22"
+        pull_request["body"] = "Closes #64\nFixes #65"
+        comments = [
+            marker(1, "initial", HEAD, body=pull_request["body"]),
+            marker(2, "final", HEAD, body=pull_request["body"]),
+        ]
+        initial_issues = (
+            self.issue(64, "2026-08-29T03:00:00Z"),
+            self.issue(65, "2026-08-29T03:01:00Z"),
+        )
+        changed_issues = (
+            initial_issues[0],
+            self.issue(65, "2026-08-29T03:02:00Z"),
+        )
+        open_pull_requests = [
+            {"number": 72, "isDraft": True, "body": pull_request["body"]}
+        ]
+        with patch.object(subject, "_gh_json", return_value=pull_request), patch.object(
+            subject, "_paginated_api_array", return_value=comments
+        ), patch.object(subject, "_review_threads", return_value=threads), patch.object(
+            subject.issue_contract,
+            "referenced_issue_snapshot",
+            side_effect=[initial_issues, changed_issues],
+        ), patch.object(
+            subject, "_open_pull_requests", return_value=open_pull_requests
+        ):
+            with self.assertRaisesRegex(ValueError, "canonical Issue snapshot changed"):
+                subject.main(["--pr", "72", "--repository", "owner/repo"])
+
+    def test_release_readiness_rejects_new_closer_for_any_referenced_issue(self) -> None:
+        pull_request, threads, comments = successful_state()
+        pull_request["headRefName"] = "release/v0.4.22"
+        pull_request["body"] = "Closes #64\nFixes #65"
+        comments = [
+            marker(1, "initial", HEAD, body=pull_request["body"]),
+            marker(2, "final", HEAD, body=pull_request["body"]),
+        ]
+        issues = (
+            self.issue(64, "2026-08-29T03:00:00Z"),
+            self.issue(65, "2026-08-29T03:01:00Z"),
+        )
+        initial_open_pull_requests = [
+            {"number": 72, "isDraft": True, "body": pull_request["body"]}
+        ]
+        changed_open_pull_requests = [
+            *initial_open_pull_requests,
+            {"number": 73, "isDraft": True, "body": "Fixes #65"},
+        ]
+        with patch.object(subject, "_gh_json", return_value=pull_request), patch.object(
+            subject, "_paginated_api_array", return_value=comments
+        ), patch.object(subject, "_review_threads", return_value=threads), patch.object(
+            subject.issue_contract, "referenced_issue_snapshot", return_value=issues
+        ), patch.object(
+            subject,
+            "_open_pull_requests",
+            side_effect=[initial_open_pull_requests, changed_open_pull_requests],
+        ):
+            with self.assertRaisesRegex(ValueError, "open PR closer set changed"):
+                subject.main(["--pr", "72", "--repository", "owner/repo"])
+
     def test_closed_release_issue_is_rejected_before_readiness_fence(self) -> None:
         pull_request, threads, comments = successful_state()
         pull_request["headRefName"] = "release/v0.4.21"
@@ -5685,6 +5800,31 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
                 post_review_readiness_error=ValueError(
                     "pull request base/head changed during readiness check"
                 ),
+            )
+
+
+class FinalPullRequestIdentityFenceTest(unittest.TestCase):
+    def test_rejects_head_branch_change(self) -> None:
+        payload = {
+            "isDraft": True,
+            "baseRefOid": "a" * 40,
+            "headRefOid": "b" * 40,
+            "baseRefName": "master",
+            "headRefName": "ordinary-branch",
+            "body": BODY,
+        }
+        with patch.object(subject, "_gh_json", return_value=payload), self.assertRaisesRegex(
+            ValueError, "head branch changed"
+        ):
+            subject._verify_final_pull_request_identity_unchanged(
+                repository="owner/repository",
+                pull_request=1,
+                initial_base="a" * 40,
+                initial_head="b" * 40,
+                initial_base_branch="master",
+                initial_head_branch="release/v0.4.22",
+                initial_body=BODY,
+                expected_is_draft=True,
             )
 
 

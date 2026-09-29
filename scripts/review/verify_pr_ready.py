@@ -108,6 +108,7 @@ _ReviewMarker = tuple[str, str, str, Mapping[str, object]]
 _ReviewMarkerIdentity = tuple[int, str, str, str, str, str, str, str]
 _RequiredStatusChecks = tuple[tuple[str, ...], tuple[tuple[str, int | None], ...]]
 _RepositoryRestIdentity = tuple[int, str, str]
+_IssueCloserSnapshot = tuple[tuple[int, frozenset[int]], ...]
 _INVALID_REPOSITORY_IDENTITY = object()
 _ACTIVE_REST_BUDGET: _RestBudget | None = None
 _ACTIVE_GRAPHQL_BUDGET: _GraphQLBudget | None = None
@@ -860,19 +861,22 @@ def closing_reference_errors(
     repository: str,
     body: object,
     referenced_issues: Sequence[issue_contract.Issue],
+    branch: str = "",
 ) -> list[str]:
     """Validate canonical OPEN Issue evidence for a pull request."""
 
     if not isinstance(body, str):
         raise TypeError("pull request body must be a string")
     errors: list[str] = []
-    if len(referenced_issues) != 1:
+    release_branch = issue_contract.is_release_branch(branch)
+    if not referenced_issues or (not release_branch and len(referenced_issues) != 1):
         errors.append(
-            "commit範囲の参照Issueはちょうど1件のOPEN Issueである必要があります: "
+            "commit範囲の参照Issueは"
+            + ("1件以上" if release_branch else "ちょうど1件")
+            + "のOPEN Issueである必要があります: "
             f"{len(referenced_issues)}件"
         )
-    else:
-        issue = referenced_issues[0]
+    for issue in referenced_issues:
         if type(issue.number) is not int or issue.number < 1:
             errors.append("commit範囲のcanonical Issue番号が不正です")
         elif issue.state != "OPEN":
@@ -1899,7 +1903,8 @@ def _verify_final_readiness_snapshot_unchanged(
     initial_updated_at: str,
     initial_required_checks: _RequiredStatusChecks,
     initial_issue_identity: tuple[tuple[int, str, str, str, str], ...],
-    initial_closers: frozenset[int],
+    initial_closers: _IssueCloserSnapshot,
+    initial_head_branch: str | None = None,
     open_pull_requests: Sequence[Mapping[str, object]] | None = None,
     expected_is_draft: bool | None = None,
 ) -> None:
@@ -1912,13 +1917,14 @@ def _verify_final_readiness_snapshot_unchanged(
         "--repo",
         repository,
         "--json",
-        "isDraft,baseRefOid,headRefOid,baseRefName,body,updatedAt,statusCheckRollup",
+        "isDraft,baseRefOid,headRefOid,baseRefName,headRefName,body,updatedAt,statusCheckRollup",
     )
     if not isinstance(payload, dict):
         raise TypeError("pull request final snapshot response must be an object")
     current_base = payload.get("baseRefOid")
     current_head = payload.get("headRefOid")
     current_base_branch = payload.get("baseRefName")
+    current_head_branch = payload.get("headRefName")
     current_is_draft = payload.get("isDraft")
     current_body = payload.get("body")
     current_updated_at = _required_timestamp_text(
@@ -1945,6 +1951,11 @@ def _verify_final_readiness_snapshot_unchanged(
         raise ValueError("pull request updatedAt changed during readiness check")
     if current_base_branch != initial_base_branch:
         raise ValueError("pull request base branch changed during readiness check")
+    if initial_head_branch is not None:
+        if not _safe_branch_name(current_head_branch):
+            raise TypeError("pull request headRefName must be a safe branch name")
+        if current_head_branch != initial_head_branch:
+            raise ValueError("pull request head branch changed during readiness check")
     final_required_checks = _required_status_check_snapshot(
         repository, initial_base_branch
     )
@@ -1980,20 +1991,19 @@ def _verify_final_readiness_snapshot_unchanged(
     )
     if current_issue_identity != initial_issue_identity:
         raise ValueError("canonical Issue snapshot changed during readiness check")
-    if len(current_issues) != 1:
-        raise ValueError("canonical Issue snapshot is no longer exactly one Issue")
+    release_branch = issue_contract.is_release_branch(initial_head_branch or "")
+    if not current_issues or (not release_branch and len(current_issues) != 1):
+        expected = "1件以上" if release_branch else "ちょうど1件"
+        raise ValueError(f"canonical Issue snapshot is no longer {expected}")
 
-    current_closers = frozenset(
-        number
-        for number in _open_pull_request_closers(
-            repository=repository,
-            issue_number=current_issues[0].number,
-            open_pull_requests=(
-                list(open_pull_requests)
-                if open_pull_requests is not None
-                else _open_pull_requests(repository)
-            ),
-        )
+    current_closers = _issue_closer_snapshot(
+        repository=repository,
+        referenced_issues=current_issues,
+        open_pull_requests=(
+            list(open_pull_requests)
+            if open_pull_requests is not None
+            else _open_pull_requests(repository)
+        ),
     )
     if current_closers != initial_closers:
         raise ValueError("open PR closer set changed during readiness check")
@@ -2006,6 +2016,7 @@ def _verify_final_pull_request_identity_unchanged(
     initial_base: str,
     initial_head: str,
     initial_base_branch: str,
+    initial_head_branch: str,
     initial_body: str,
     expected_is_draft: bool,
 ) -> None:
@@ -2018,19 +2029,21 @@ def _verify_final_pull_request_identity_unchanged(
         "--repo",
         repository,
         "--json",
-        "isDraft,baseRefOid,headRefOid,baseRefName,body",
+        "isDraft,baseRefOid,headRefOid,baseRefName,headRefName,body",
     )
     if not isinstance(payload, dict):
         raise TypeError("pull request final identity response must be an object")
     current_base = payload.get("baseRefOid")
     current_head = payload.get("headRefOid")
     current_base_branch = payload.get("baseRefName")
+    current_head_branch = payload.get("headRefName")
     current_body = payload.get("body")
     current_is_draft = payload.get("isDraft")
     if (
         not isinstance(current_base, str)
         or not isinstance(current_head, str)
         or not isinstance(current_base_branch, str)
+        or not _safe_branch_name(current_head_branch)
         or not isinstance(current_body, str)
         or not isinstance(current_is_draft, bool)
     ):
@@ -2042,6 +2055,8 @@ def _verify_final_pull_request_identity_unchanged(
         raise ValueError("pull request base/head changed during readiness check")
     if current_base_branch != initial_base_branch:
         raise ValueError("pull request base branch changed during readiness check")
+    if current_head_branch != initial_head_branch:
+        raise ValueError("pull request head branch changed during readiness check")
     if current_body != initial_body:
         raise ValueError("pull request body changed during readiness check")
 
@@ -2068,6 +2083,29 @@ def _open_pull_request_closers(
         if issue_number in issue_contract.closing_issue_numbers(body, repository):
             closers.add(number)
     return closers
+
+
+def _issue_closer_snapshot(
+    *,
+    repository: str,
+    referenced_issues: Sequence[issue_contract.Issue],
+    open_pull_requests: Sequence[Mapping[str, object]],
+) -> _IssueCloserSnapshot:
+    """Return every canonical Issue and its immutable set of open closers."""
+
+    return tuple(
+        (
+            issue.number,
+            frozenset(
+                _open_pull_request_closers(
+                    repository=repository,
+                    issue_number=issue.number,
+                    open_pull_requests=open_pull_requests,
+                )
+            ),
+        )
+        for issue in referenced_issues
+    )
 
 
 def _expected_boundary(
@@ -3046,6 +3084,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         repository=repository,
         body=initial_body,
         referenced_issues=referenced_issues,
+        branch=pull_request.get("headRefName")
+        if isinstance(pull_request.get("headRefName"), str)
+        else "",
     )
     binding_error = _governance_app_binding_error(initial_required_checks)
     if binding_error is not None:
@@ -3074,7 +3115,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if governance_error is not None:
             errors.append(governance_error)
     initial_issue_identity: tuple[tuple[int, str, str, str, str], ...] = ()
-    initial_closers: frozenset[int] = frozenset()
+    initial_closers: _IssueCloserSnapshot = ()
     if referenced_issues and not errors:
         initial_issue_identity = _canonical_issue_identity(
             repository=repository,
@@ -3094,12 +3135,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         if not errors:
-            initial_closers = frozenset(
-                _open_pull_request_closers(
-                    repository=repository,
-                    issue_number=referenced_issues[0].number,
-                    open_pull_requests=open_pull_requests,
-                )
+            initial_closers = _issue_closer_snapshot(
+                repository=repository,
+                referenced_issues=referenced_issues,
+                open_pull_requests=open_pull_requests,
             )
     errors.extend(
         readiness_errors(
@@ -3129,6 +3168,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         initial_required_checks=initial_required_checks,
         initial_issue_identity=initial_issue_identity,
         initial_closers=initial_closers,
+        initial_head_branch=(
+            pull_request["headRefName"]
+            if isinstance(pull_request.get("headRefName"), str)
+            else None
+        ),
         open_pull_requests=(
             open_pull_requests
             if (
@@ -3171,6 +3215,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         initial_required_checks=initial_required_checks,
         initial_issue_identity=initial_issue_identity,
         initial_closers=initial_closers,
+        initial_head_branch=(
+            pull_request["headRefName"]
+            if isinstance(pull_request.get("headRefName"), str)
+            else None
+        ),
         open_pull_requests=(
             open_pull_requests
             if (
@@ -3243,6 +3292,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         initial_base=base,
         initial_head=head,
         initial_base_branch=base_branch,
+        initial_head_branch=(
+            pull_request["headRefName"]
+            if isinstance(pull_request.get("headRefName"), str)
+            else ""
+        ),
         initial_body=initial_body,
         expected_is_draft=arguments.require_draft,
     )

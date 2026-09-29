@@ -2800,7 +2800,6 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             ("repository", {**normal, "repository": {"full_name": "fork/repository"}}, local_pull, {}),
             ("run-id", {**normal, "id": 10}, local_pull, {}),
             ("run-attempt", {**normal, "run_attempt": 2}, local_pull, {}),
-            ("head", {**normal, "head_sha": "d" * 40}, local_pull, {}),
             ("workflow-blob", normal, local_pull, {"head_blob": json.dumps({"sha": "d" * 40})}),
             ("current-default-blob", normal, advanced_base_pull, {"default_tip": "d" * 40, "tip_blob": json.dumps({"sha": "e" * 40})}),
             ("current-pr-base-not-tip", normal, local_pull, {"default_tip": "d" * 40}),

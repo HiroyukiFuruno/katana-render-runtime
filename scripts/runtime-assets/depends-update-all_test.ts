@@ -45,8 +45,9 @@ test("一括更新はRustのmajorとpinned依存を含め、TypeScriptを旧版�
   const recipeStart = justfile.indexOf("depends-update-all:");
   const recipe = justfile.slice(recipeStart, justfile.indexOf("\n\n", recipeStart));
 
+  expect(recipe).toContain('python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"');
   expect(recipe).toContain(
-    "{{CARGO}} upgrade --incompatible allow --pinned allow --recursive true",
+    "{{CARGO}} upgrade -i allow --pinned allow --exclude html5ever --exclude markup5ever --exclude markup5ever_rcdom",
   );
   expect(recipe).toContain("bun update --latest");
   expect(recipe).not.toMatch(/bun add -d typescript@/);
@@ -67,7 +68,8 @@ async function dependsUpdateRecipeLines(): Promise<string[]> {
 test("depends-update-all は既存の更新・品質・比較ステップを各1回保持する", async () => {
   const lines = await dependsUpdateRecipeLines();
   const requiredSteps = [
-    "{{CARGO}} upgrade --incompatible allow --pinned allow --recursive true",
+    'python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"',
+    "{{CARGO}} upgrade -i allow --pinned allow --exclude html5ever --exclude markup5ever --exclude markup5ever_rcdom",
     "{{CARGO}} update",
     "bun update --latest",
     "bun run scripts/runtime-assets/depends-update-all.ts",

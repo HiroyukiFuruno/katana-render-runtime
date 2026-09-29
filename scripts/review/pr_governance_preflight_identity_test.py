@@ -69,6 +69,9 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         url: object = PR_URL,
         responses: dict[str, list[object]] | None = None,
         event_name: str = "issue_comment",
+        event_action: str = "deleted",
+        workflow_run_id: str = "",
+        workflow_run_attempt: str = "",
         loader_failure: str | None = None,
         timeout_endpoint: str | None = None,
         timeout_call: int = 1,
@@ -121,7 +124,9 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
                 "GITHUB_REPOSITORY": REPOSITORY,
                 "GITHUB_OUTPUT": str(output),
                 "EVENT_NAME": event_name,
-                "EVENT_ACTION": "deleted",
+                "EVENT_ACTION": event_action,
+                "WORKFLOW_RUN_ID": workflow_run_id,
+                "WORKFLOW_RUN_ATTEMPT": workflow_run_attempt,
                 "DEFAULT_BRANCH": "master",
                 "WORKFLOW_REF": (
                     f"{REPOSITORY}/.github/workflows/pr-governance.yml@refs/heads/master"
@@ -239,6 +244,88 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
                 result = self.execute(responses={PR_ENDPOINT: [initial, final]})
                 self.assertEqual(result["reconcile"], "true")
                 self.assertEqual(result["issue_event_noop"], "false")
+
+    def test_stale_local_workflow_run_is_a_verified_noop_after_double_read(self) -> None:
+        """固定されたrunのHEADが現在PRより古い場合は旧世代として無害に扱う。"""
+        source_head = "d" * 40
+        source_repository = {
+            "id": REPOSITORY_ID,
+            "name": "repository",
+            "url": f"https://api.github.com/repos/{REPOSITORY}",
+        }
+        run = {
+            "id": 17,
+            "name": "CI",
+            "path": ".github/workflows/test-and-build.yml@master",
+            "event": "pull_request",
+            "status": "completed",
+            "run_number": 7,
+            "run_attempt": 1,
+            "head_sha": HEAD,
+            "repository": {"id": REPOSITORY_ID, "full_name": REPOSITORY},
+            "pull_requests": [{
+                "number": NUMBER,
+                "base": {"ref": "master", "sha": BASE, "repo": source_repository},
+                "head": {"sha": source_head, "repo": source_repository},
+            }],
+        }
+        current = self.pull(head_sha=source_head)
+        result = self.execute(
+            event_name="workflow_run",
+            event_action="completed",
+            workflow_run_id="17",
+            workflow_run_attempt="1",
+            responses={
+                f"repos/{REPOSITORY}": [self.repository(), self.repository()],
+                f"repos/{REPOSITORY}/actions/runs/17": [run, run],
+                PR_ENDPOINT: [current, current],
+            },
+        )
+        self.assertEqual(result["valid"], "true")
+        self.assertEqual(result["reconcile"], "false")
+        self.assertEqual(result["priority"], "true")
+
+    def test_stale_workflow_run_binding_drift_stays_fail_closed(self) -> None:
+        """旧世代例外はrun、PR、repositoryの結合が不変な場合だけ受理する。"""
+        source_head = "d" * 40
+        source_repository = {
+            "id": REPOSITORY_ID,
+            "name": "repository",
+            "url": f"https://api.github.com/repos/{REPOSITORY}",
+        }
+        run = {
+            "id": 17,
+            "name": "CI",
+            "path": ".github/workflows/test-and-build.yml@master",
+            "event": "pull_request",
+            "status": "completed",
+            "run_number": 7,
+            "run_attempt": 1,
+            "head_sha": HEAD,
+            "repository": {"id": REPOSITORY_ID, "full_name": REPOSITORY},
+            "pull_requests": [{
+                "number": NUMBER,
+                "base": {"ref": "master", "sha": BASE, "repo": source_repository},
+                "head": {"sha": source_head, "repo": source_repository},
+            }],
+        }
+        current = self.pull(head_sha=source_head)
+        changed = {**run, "pull_requests": [{
+            **run["pull_requests"][0],
+            "head": {"sha": "e" * 40, "repo": source_repository},
+        }]}
+        result = self.execute(
+            event_name="workflow_run",
+            event_action="completed",
+            workflow_run_id="17",
+            workflow_run_attempt="1",
+            responses={
+                f"repos/{REPOSITORY}": [self.repository(), self.repository()],
+                f"repos/{REPOSITORY}/actions/runs/17": [run, changed],
+                PR_ENDPOINT: [current, current],
+            },
+        )
+        self.assert_fail_closed(result)
 
     def test_malformed_pr_fields_cannot_be_mistaken_for_a_noop(self) -> None:
         malformed = (

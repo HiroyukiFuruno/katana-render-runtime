@@ -5,6 +5,7 @@ use super::types::HtmlRuntimeError;
 
 pub(super) const DOM_BOOTSTRAP: &str = include_str!("dom_bootstrap.js");
 
+pub(super) const BODY_ONLOAD_INSTALL: &str = "__krrInstallStaticBodyLoadHandler();";
 pub(super) const DOM_CONTENT_LOADED_DISPATCH: &str = "__krrDispatchDocumentContentLoaded();";
 pub(super) const WINDOW_LOAD_DISPATCH: &str = "__krrDispatchWindowLoad();";
 

@@ -17,6 +17,10 @@ mod session_layout_metrics_intersection_registry_tests;
 mod session_layout_metrics_intersection_tests;
 #[path = "session_runtime.rs"]
 mod session_runtime;
+#[path = "session_runtime_interactive.rs"]
+mod session_runtime_interactive;
+#[path = "session_runtime_static.rs"]
+mod session_runtime_static;
 #[path = "session_snapshot.rs"]
 mod session_snapshot;
 
