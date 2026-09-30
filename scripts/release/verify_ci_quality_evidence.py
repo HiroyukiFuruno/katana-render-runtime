@@ -547,6 +547,18 @@ def verify_quality_evidence(
     )
     if _pull_request_identity(pull) != _pull_request_identity(final_pull):
         raise EvidenceError("release pull request identity changed during CI verification")
+    # artifact/job の検証中に新しい run や rerun が登録された場合は、旧世代の
+    # 成功を流用せず、最新世代の証跡を最初から検証し直す。
+    final_run = _verify_runs(
+        _read_all_workflow_runs(fetch, repository, pull_request, base_sha, head_sha, workflow),
+        repository,
+        pull_request,
+        base_sha,
+        head_sha,
+        workflow,
+    )
+    if (final_run["id"], final_run["run_attempt"]) != (run_id, runs["run_attempt"]):
+        raise EvidencePendingError("latest CI workflow generation changed during verification")
     return {"run_id": str(run_id), "run_attempt": str(runs["run_attempt"]), "head_sha": head_sha}
 
 
