@@ -138,3 +138,24 @@ impl TokenSink for SourceOrderSink {
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use html5ever::{local_name, tokenizer::TagKind};
+
+    #[test]
+    fn iframe_start_without_a_tree_node_does_not_emit_source_order_entry() {
+        let sink = SourceOrderSink::new(RcDom::default());
+        sink.observe_source_order(&Tag {
+            kind: TagKind::StartTag,
+            name: local_name!(iframe),
+            self_closing: false,
+            attrs: Vec::new(),
+            had_duplicate_attributes: false,
+        });
+
+        let (_, _, _, source_order) = sink.finish();
+        assert!(source_order.is_empty());
+    }
+}
