@@ -428,10 +428,12 @@ jobs:
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # 検証済みのCI/release signalは、実行中のpaced scanを止めずに直列レーンへ加える。
-    # completed workflow_runを直列化し、直接PR/Issue mutationだけをpreemptする。
+    # 入場判定と長時間の全件走査は別レーンにする。review sensor の
+    # requested callback はここを通過して、290分の走査待ちにならない。
+    # 直接イベントだけが短い入場処理をpreemptし、sensor callback同士は
+    # 同じgenerationを取消さない。
     concurrency:
-      group: pr-governance-dispatcher-${{ github.repository_id }}
+      group: pr-governance-admission-${{ github.repository_id }}
       cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true' }}
     permissions:
       contents: read
@@ -701,10 +703,10 @@ jobs:
     if: ${{ needs.establish-resolver-failure-barrier.outputs.reconcile == 'true' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Direct PR/Issue mutations preempt the shared dispatcher lock; workflow_run
-    # events remain serialized to avoid cancelling their parent generation.
+    # 入場判定は全件走査とは別レーンで直列化する。workflow_runは親の
+    # generationを取消さず、direct mutationだけが短い解決処理をpreemptする。
     concurrency:
-      group: pr-governance-dispatcher-${{ github.repository_id }}
+      group: pr-governance-admission-${{ github.repository_id }}
       cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}
     permissions:
       actions: read
@@ -823,13 +825,14 @@ jobs:
     # App-bound barrier required for the next reconciliation instead of
     # timing out after it has left every head pending.
     timeout-minutes: 290
-    # 通常の全件走査は直列化する。一方、PR / Issue contract mutation は
-    # この走査を中断して先に fail-closed barrier を作る。すべての
-    # workflow_run は先行 generation から派生するため、直列実行する。
-    # 中断された走査の terminal PATCH は Check Run fingerprint fence で
-    # 拒否され、次の全件走査が current snapshot から収束させる。
+    # 通常の全件走査は直列化する。review sensorはsource run IDごとの
+    # admission laneへ入り、既存の290分走査にも他sensor callbackにも
+    # 待たされない。writer側のsingletonとgeneration fingerprintが全Check
+    # Runの書込みを直列化し、Check Run fingerprint fence が旧generationの
+    # terminal PATCHを拒否する。direct mutationはsensor reservation完了後に
+    # 通常laneへ入り、そこでのみ通常走査をpreemptする。
     concurrency:
-      group: pr-governance-dispatcher-${{ github.repository_id }}
+      group: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && format('pr-governance-review-sensor-{0}-{1}', github.repository_id, github.event.workflow_run.id) || format('pr-governance-reconcile-{0}', github.repository_id) }}
       cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]' }}
     permissions:
       actions: read

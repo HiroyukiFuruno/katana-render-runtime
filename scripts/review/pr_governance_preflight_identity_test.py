@@ -246,9 +246,16 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
                 self.assertEqual(result["priority"], "true")
                 self.assertEqual(result["issue_event_noop"], "false")
 
-    def test_stable_local_default_comment_reconciles_without_priority_or_reservation(self) -> None:
+    def test_stable_local_default_comment_reserves_no_sensor_before_dispatch(self) -> None:
+        sensor_prefix = (
+            f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+        )
         result = self.execute(
-            responses={PR_ENDPOINT: [self.pull(), self.pull()]},
+            responses={
+                PR_ENDPOINT: [self.pull(), self.pull()],
+                sensor_prefix + "status=queued&per_page=100&page=1": [{"total_count": 0, "workflow_runs": []}],
+                sensor_prefix + "status=in_progress&per_page=100&page=1": [{"total_count": 0, "workflow_runs": []}],
+            },
             direct_priority_fence=True,
         )
         self.assertEqual(result["valid"], "true")
@@ -256,6 +263,42 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         self.assertEqual(result["priority"], "false")
         self.assertEqual(result["sensor_reservation"], "false")
         self.assertEqual(result["sensor_run_ids"], "[]")
+
+    def test_active_sensor_reserves_a_stable_local_default_comment(self) -> None:
+        """A non-priority PR comment must not replace a queued sensor slot."""
+        sensor_prefix = (
+            f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+        )
+        active_sensor = {
+            "total_count": 1,
+            "workflow_runs": [{
+                "name": "PR governance review sensor",
+                "event": "pull_request_review_comment",
+                "status": "queued",
+                "id": 17,
+                "run_attempt": 1,
+                "path": ".github/workflows/pr-governance-review-events.yml",
+                "repository": self.repository(),
+                "head_repository": self.repository(),
+                "pull_requests": [{
+                    "number": NUMBER,
+                    "base": {"ref": "master", "repo": self.repository()},
+                    "head": {"sha": HEAD, "repo": self.repository()},
+                }],
+            }],
+        }
+        result = self.execute(
+            responses={
+                PR_ENDPOINT: [self.pull(), self.pull()],
+                sensor_prefix + "status=queued&per_page=100&page=1": [active_sensor],
+                sensor_prefix + "status=in_progress&per_page=100&page=1": [{"total_count": 0, "workflow_runs": []}],
+            },
+            direct_priority_fence=True,
+        )
+        self.assertEqual(result["valid"], "true")
+        self.assertEqual(result["priority"], "false")
+        self.assertEqual(result["sensor_reservation"], "true")
+        self.assertEqual(result["sensor_run_ids"], "[17]")
 
     def test_active_sensor_serializes_a_relevant_direct_event(self) -> None:
         sensor_endpoint = (

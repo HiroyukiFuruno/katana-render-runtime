@@ -727,7 +727,7 @@ def active_local_review_sensors() -> list[int] | None:
 # latch.
 if (
     os.environ.get("DIRECT_PRIORITY_FENCE") == "1"
-    and valid and reconcile and priority
+    and valid and reconcile
     and event_name in {"pull_request_target", "issues", "issue_comment"}
 ):
     active_sensors = active_local_review_sensors()
