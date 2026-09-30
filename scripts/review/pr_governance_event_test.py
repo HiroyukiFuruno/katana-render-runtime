@@ -2636,6 +2636,58 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                     self.assertEqual(values["writer_head"], "a" * 40)
                     self.assertEqual(values["default_branch"], "master")
 
+    def _assert_waiter_sensor_identity_contract(self, wait: str) -> None:
+        match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", wait, re.S)
+        self.assertIsNotNone(match); assert match is not None
+        tree = ast.parse(textwrap.dedent(match.group(1)))
+        names = {"workflow_path_matches", "ref_valid", "canonical_repository_binding", "repository_identity", "validate_sensor"}
+        functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
+        self.assertEqual({node.name for node in functions}, names)
+        repository = "owner/repository"
+        repo = {"id": 7, "name": "repository", "url": f"https://api.github.com/repos/{repository}", "full_name": repository, "default_branch": "master"}
+        summary = {key: repo[key] for key in ("id", "name", "url")}
+        current = {"number": 99, "state": "open", "draft": False,
+                   "base": {"ref": "master", "repo": repo}, "head": {"sha": "a" * 40, "repo": repo}}
+        sensor = {"id": 17, "name": "PR governance review sensor", "event": "pull_request_review", "run_attempt": 1,
+                  "path": ".github/workflows/pr-governance-review-events.yml", "status": "queued", "conclusion": None,
+                  "repository": repo, "head_repository": repo, "head_sha": "a" * 40,
+                  "pull_requests": [{"number": 99, "base": {"ref": "master", "repo": summary}, "head": {"sha": "a" * 40, "repo": summary}}]}
+        reads = []
+        def api(endpoint, failure):
+            reads.append(endpoint)
+            if endpoint == f"repos/{repository}":
+                return repo
+            self.assertEqual(endpoint, f"repos/{repository}/pulls/99")
+            return current
+        namespace = {"re": re, "repository": repository, "api": api,
+                     "expected_path": sensor["path"], "allowed_events": {"pull_request", "pull_request_review", "pull_request_review_comment"},
+                     "sha_pattern": re.compile(r"[0-9a-fA-F]{40}")}
+        exec(compile(ast.Module(body=functions, type_ignores=[]), "waiter-identity-contract", "exec"), namespace)
+        validate = namespace["validate_sensor"]
+        for path in (sensor["path"], sensor["path"] + "@refs/heads/master"):
+            with self.subTest(canonical_path=path):
+                candidate = json.loads(json.dumps(sensor)); candidate["path"] = path
+                reads.clear()
+                self.assertTrue(validate(candidate, 17))
+                self.assertEqual(reads, [f"repos/{repository}", f"repos/{repository}/pulls/99"])
+        for field, bad in (("path", sensor["path"] + "@master?x=1"), ("path", sensor["path"] + "/other@master"),
+                           ("event", "push"), ("status", "waiting"), ("conclusion", "success"), ("run_attempt", True), ("id", True)):
+            with self.subTest(field=field, bad=bad), self.assertRaises(SystemExit):
+                candidate = json.loads(json.dumps(sensor)); candidate[field] = bad
+                validate(candidate, 17)
+        for field, bad in (("id", 8), ("url", "https://api.github.com.evil/repos/owner/repository"), ("full_name", "other/repository")):
+            with self.subTest(repository_field=field), self.assertRaises(SystemExit):
+                candidate = json.loads(json.dumps(sensor)); candidate["pull_requests"][0]["base"]["repo"][field] = bad
+                validate(candidate, 17)
+        foreign = {"id": 8, "name": "repository", "url": "https://api.github.com/repos/fork/repository", "full_name": "fork/repository"}
+        candidate = json.loads(json.dumps(sensor))
+        candidate["head_repository"] = foreign
+        candidate["pull_requests"][0]["head"]["repo"] = foreign
+        current["head"]["repo"] = foreign
+        self.assertFalse(validate(candidate, 17, allow_out_of_scope=True))
+        with self.assertRaises(SystemExit):
+            validate(candidate, 17)
+
     def test_workflow_run_fork_scope_is_resolved_before_barrier_mutation(self) -> None:
         """Fork workflow_run sources must be a pre-barrier no-op, not a late failure."""
         scope_match = re.search(
@@ -2674,10 +2726,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         ]
         self.assertIn("needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier]", wait)
         self.assertNotIn("concurrency:", wait)
-        self.assertIn('value.get("path") != expected_path', wait)
-        self.assertIn('value.get("event") not in allowed_events', wait)
-        self.assertIn('status not in {"queued", "in_progress", "completed"}', wait)
-        self.assertIn('status in {"queued", "in_progress"} and conclusion is not None', wait)
+        self._assert_waiter_sensor_identity_contract(wait)
         self.assertIn('run.get("conclusion") == "success"', wait)
         self.assertIn('run.get("conclusion") != "cancelled"', wait)
         self.assertIn("decoded_run_ids = json.loads(raw_run_ids)", wait)
