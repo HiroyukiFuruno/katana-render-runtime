@@ -158,12 +158,12 @@ jobs:
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # A fully validated local CI/release signal joins the serialized lane
-    # without canceling a paced scan. Other signals still preempt before
-    # creating marker credentials, so contract mutations remain fail-closed.
+    # 検証済みのCI/release signalは、実行中のpaced scanを止めずに直列レーンへ加える。
+    # review sensorを含むworkflow_runは採用済み世代から派生するため、ここでpreemptすると
+    # resolve_event前にその発生元をcancelしてしまう。直接PR/Issue mutationだけをpreemptする。
     concurrency:
       group: pr-governance-dispatcher-${{ github.repository_id }}
-      cancel-in-progress: ${{ needs.preflight-workflow-run-source.outputs.priority == 'true' }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true' }}
     permissions:
       contents: read
     outputs:

@@ -4309,7 +4309,7 @@ raise SystemExit(91)
         reconciler_job = self.workflow[self.workflow.index("  reconcile-all-open:"):]
         preflight_generation_lock = (
             "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n"
-            "      cancel-in-progress: ${{ needs.preflight-workflow-run-source.outputs.priority == 'true' }}"
+            "      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true' }}"
         )
         resolver_generation_lock = (
             "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n"
@@ -4842,7 +4842,7 @@ raise SystemExit(91)
             self.workflow.index("  resolve_event:")
         ]
         self.assertIn(
-            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ needs.preflight-workflow-run-source.outputs.priority == 'true' }}",
+            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true' }}",
             establish,
         )
         resolver = self.workflow[
