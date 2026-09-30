@@ -433,21 +433,7 @@ jobs:
       reconcile: ${{ steps.targets.outputs.reconcile }}
       event_targets: ${{ steps.targets.outputs.event_targets }}
       priority_targets: ${{ steps.targets.outputs.priority_targets }}
-      root_deadline_epoch: ${{ steps.admission.outputs.root_deadline_epoch }}
     steps:
-      - name: Start dispatcher deadline after serialized admission
-        # This job owns the shared dispatcher lane.  Mint the wall-clock
-        # budget only after GitHub has admitted it, so pending generations do
-        # not consume the reconciliation terminal window.
-        id: admission
-        run: |
-          python3 - <<'PY'
-          import os
-          import time
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
-          PY
       - name: Resolve current open pull requests from the trusted default branch
         id: targets
         env:
@@ -568,6 +554,19 @@ jobs:
       contents: read
       pull-requests: read
     steps:
+      - name: Start reconciliation deadline after serialized admission
+        # This job re-enters the shared dispatcher lane after resolve_event.
+        # Mint the wall-clock budget only after GitHub has admitted this
+        # all-open reconciliation, so its terminal windows retain 3,750s.
+        id: admission
+        run: |
+          python3 - <<'PY'
+          import os
+          import time
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+          PY
       - name: Re-enumerate every current local governance pull request
         id: current-targets
         env:
@@ -1680,7 +1679,7 @@ jobs:
           GH_TOKEN: ${{ steps.retained-history-read.outputs.token }}
           CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           HEADS: ${{ steps.current-targets.outputs.all_invalidation_heads }}
-          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
+          ROOT_DEADLINE_EPOCH: ${{ steps.admission.outputs.root_deadline_epoch }}
           POST_SCAN_SECONDS: ${{ steps.current-targets.outputs.history_post_scan_seconds }}
         run: |
           python3 - <<'PY'
@@ -2283,7 +2282,7 @@ jobs:
         if: steps.current-targets.outputs.has_targets == 'true' && steps.current-targets.outputs.has_duplicate_governed_heads != 'true'
         id: terminal-window-1
         env:
-          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
+          ROOT_DEADLINE_EPOCH: ${{ steps.admission.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import math, os, re, time
@@ -2724,7 +2723,7 @@ jobs:
         if: steps.dispatch-all-1.outputs.has_terminal_batch_2 == 'true' && steps.await-all-1.outcome == 'success' && steps.await-all-1.outputs.success == 'true'
         id: terminal-window-2
         env:
-          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
+          ROOT_DEADLINE_EPOCH: ${{ steps.admission.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import math, os, re, time
@@ -2995,7 +2994,7 @@ jobs:
         if: steps.dispatch-all-1.outputs.has_terminal_batch_3 == 'true' && steps.await-all-2.outcome == 'success' && steps.await-all-2.outputs.success == 'true'
         id: terminal-window-3
         env:
-          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
+          ROOT_DEADLINE_EPOCH: ${{ steps.admission.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import math, os, re, time
@@ -3223,7 +3222,7 @@ jobs:
         if: steps.dispatch-all-1.outputs.has_terminal_batch_4 == 'true' && steps.await-all-3.outcome == 'success' && steps.await-all-3.outputs.success == 'true'
         id: terminal-window-4
         env:
-          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
+          ROOT_DEADLINE_EPOCH: ${{ steps.admission.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import math, os, re, time

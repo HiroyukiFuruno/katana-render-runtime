@@ -1,8 +1,11 @@
 use super::document_scripts::load_scripts;
 use super::{HtmlDocumentResources, HtmlSubresourceLoader};
 use crate::renderer::backends::html_document::HtmlDocument;
+use html5ever::{Attribute, QualName};
 use markup5ever_rcdom::{Handle, NodeData};
 use std::collections::HashMap;
+
+const PREVALIDATED_IMAGE_EVENT_ATTRIBUTE: &str = "data-krr-prevalidated-image-event";
 
 pub(super) fn load_document_resources(
     loader: &HtmlSubresourceLoader,
@@ -40,13 +43,17 @@ fn collect_stylesheet_references(node: &Handle, references: &mut Vec<String>) {
 }
 
 fn inline_images(loader: &HtmlSubresourceLoader, node: &Handle) {
-    if is_tag(node, "img")
-        && let Some(source) = attribute(node, "src")
-    {
-        match loader.load_image_data_url(&source) {
-            Ok(data_url) => set_attribute(node, "src", &data_url),
-            Err(error) => {
-                log_subresource_failure(loader, "image", &source, &error);
+    if is_tag(node, "img") {
+        remove_attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE);
+        if let Some(source) = attribute(node, "src") {
+            match loader.load_image_data_url(&source) {
+                Ok(data_url) => {
+                    set_attribute(node, "src", &data_url);
+                    set_or_append_attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE, "load");
+                }
+                Err(error) => {
+                    log_subresource_failure(loader, "image", &source, &error);
+                }
             }
         }
     }
@@ -124,6 +131,33 @@ fn set_attribute(node: &Handle, expected: &str, value: &str) {
     }
 }
 
+fn set_or_append_attribute(node: &Handle, expected: &str, value: &str) {
+    let NodeData::Element { attrs, .. } = &node.data else {
+        return;
+    };
+    let mut attrs = attrs.borrow_mut();
+    if let Some(attribute) = attrs
+        .iter_mut()
+        .find(|attribute| attribute.name.local.as_str().eq_ignore_ascii_case(expected))
+    {
+        attribute.value = value.into();
+        return;
+    }
+    attrs.push(Attribute {
+        name: QualName::new(None, Default::default(), expected.into()),
+        value: value.into(),
+    });
+}
+
+fn remove_attribute(node: &Handle, expected: &str) {
+    let NodeData::Element { attrs, .. } = &node.data else {
+        return;
+    };
+    attrs
+        .borrow_mut()
+        .retain(|attribute| !attribute.name.local.as_str().eq_ignore_ascii_case(expected));
+}
+
 pub(super) fn text_content(node: &Handle) -> String {
     match &node.data {
         NodeData::Text { contents } => contents.borrow().to_string(),
@@ -133,7 +167,9 @@ pub(super) fn text_content(node: &Handle) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{attribute, load_document_resources, set_attribute};
+    use super::{
+        PREVALIDATED_IMAGE_EVENT_ATTRIBUTE, attribute, load_document_resources, set_attribute,
+    };
     use crate::renderer::backends::html_browser::HtmlBrowserSource;
     use crate::renderer::backends::html_document::HtmlDocument;
     use crate::renderer::backends::html_runtime::StaticHtmlRuntime;
@@ -211,6 +247,31 @@ mod tests {
             node.iter().for_each(|node| {
                 set_attribute(node, "src", "data:image/png;base64,AA==");
                 assert_eq!(attribute(node, "src"), None);
+            });
+        });
+    }
+
+    #[test]
+    fn successful_image_inlining_marks_the_prevalidated_load_result() {
+        let source = must_result(HtmlBrowserSource::new(
+            r#"<img id=image src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==">"#,
+            "https://example.test/index.html",
+        ));
+        let loader = HtmlSubresourceLoader::new(&source);
+        let mut document = HtmlDocument::parse(&source.raw_html);
+
+        load_document_resources(&loader, &mut document);
+
+        let image = document.get_element_by_id("image");
+        assert!(image.is_some());
+        image.iter().for_each(|image| {
+            let node = document.node(*image);
+            assert!(node.is_ok());
+            node.iter().for_each(|node| {
+                assert_eq!(
+                    attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE).as_deref(),
+                    Some("load")
+                );
             });
         });
     }

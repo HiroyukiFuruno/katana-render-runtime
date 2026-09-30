@@ -14,7 +14,7 @@ pub(super) fn finish_source_order(
     node_visibility: &RefCell<HashMap<usize, bool>>,
 ) -> (Option<usize>, Vec<Handle>) {
     let mut iframes = Vec::new();
-    collect_iframes(&parsed.document, &mut iframes, false);
+    collect_iframes(&parsed.document, &mut iframes, false, false);
     let (mut body_onload_source_order_index, source_order) = replay_source_order(
         entries,
         &iframes,
@@ -28,37 +28,9 @@ pub(super) fn finish_source_order(
     (body_onload_source_order_index, source_order)
 }
 
-pub(super) fn iframe_count(document: &Handle) -> usize {
-    let mut iframes = Vec::new();
-    collect_iframes(document, &mut iframes, false);
-    iframes.len()
-}
-
-pub(super) fn last_iframe_is_in_select(document: &Handle) -> bool {
-    let mut iframes = Vec::new();
-    collect_iframes(document, &mut iframes, false);
-    let Some((iframe, _)) = iframes.last() else {
-        return false;
-    };
-    let mut current = iframe.clone();
-    loop {
-        let parent = current.parent.take();
-        current.parent.set(parent.clone());
-        let Some(parent) = parent.and_then(|parent| parent.upgrade()) else {
-            return false;
-        };
-        if matches!(&parent.data, markup5ever_rcdom::NodeData::Element { name, .. }
-            if name.local.as_str().eq_ignore_ascii_case("select"))
-        {
-            return true;
-        }
-        current = parent;
-    }
-}
-
 fn replay_source_order(
     entries: Vec<SourceOrderEntry>,
-    iframes: &[(Handle, bool)],
+    iframes: &[(Handle, bool, bool)],
     body_onload_event_index: Option<usize>,
     document: &Handle,
     node_visibility: &RefCell<HashMap<usize, bool>>,
@@ -86,16 +58,16 @@ fn replay_source_order(
 
 fn append_iframe(
     source_order: &mut Vec<Handle>,
-    iframes: &[(Handle, bool)],
+    iframes: &[(Handle, bool, bool)],
     iframe_index: &mut usize,
     document: &Handle,
     node_visibility: &RefCell<HashMap<usize, bool>>,
 ) {
-    let Some((iframe, in_template)) = iframes.get(*iframe_index) else {
+    let Some((iframe, in_template, in_select)) = iframes.get(*iframe_index) else {
         return;
     };
     *iframe_index += 1;
-    if *in_template || !node_is_visible(iframe, document, node_visibility) {
+    if *in_template || *in_select || !node_is_visible(iframe, document, node_visibility) {
         return;
     }
     source_order.push(iframe.clone());
@@ -128,28 +100,50 @@ pub(super) fn node_is_visible(
     visible
 }
 
-fn collect_iframes(node: &Handle, iframes: &mut Vec<(Handle, bool)>, in_template: bool) {
-    let in_template = in_template
-        || matches!(&node.data, markup5ever_rcdom::NodeData::Element { name, .. }
-            if name.local.as_str().eq_ignore_ascii_case("template"));
-    if matches!(&node.data, markup5ever_rcdom::NodeData::Element { name, .. }
-        if name.local.as_str().eq_ignore_ascii_case("iframe"))
-    {
-        iframes.push((node.clone(), in_template));
+fn collect_iframes(
+    node: &Handle,
+    iframes: &mut Vec<(Handle, bool, bool)>,
+    in_template: bool,
+    in_select: bool,
+) {
+    let (in_template, in_select) = iframe_context(node, in_template, in_select);
+    collect_iframe_node(node, iframes, in_template, in_select);
+}
+
+fn iframe_context(node: &Handle, in_template: bool, in_select: bool) -> (bool, bool) {
+    (
+        in_template || is_element_named(node, "template"),
+        in_select || is_element_named(node, "select"),
+    )
+}
+
+fn collect_iframe_node(
+    node: &Handle,
+    iframes: &mut Vec<(Handle, bool, bool)>,
+    in_template: bool,
+    in_select: bool,
+) {
+    if is_element_named(node, "iframe") {
+        iframes.push((node.clone(), in_template, in_select));
     }
     let Ok(children) = node.children.try_borrow() else {
         return;
     };
     for child in children.iter() {
-        collect_iframes(child, iframes, in_template);
+        collect_iframes(child, iframes, in_template, in_select);
     }
     if let markup5ever_rcdom::NodeData::Element {
         template_contents, ..
     } = &node.data
         && let Some(template_contents) = template_contents.borrow().as_ref()
     {
-        collect_iframes(template_contents, iframes, true);
+        collect_iframes(template_contents, iframes, true, in_select);
     }
+}
+
+fn is_element_named(node: &Handle, expected_name: &str) -> bool {
+    matches!(&node.data, markup5ever_rcdom::NodeData::Element { name, .. }
+        if name.local.as_str().eq_ignore_ascii_case(expected_name))
 }
 
 #[cfg(test)]
@@ -157,10 +151,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_iframe_document_is_not_inside_select() {
+    fn no_iframe_document_has_no_collected_iframes() {
         let document = RcDom::default();
+        let mut iframes = Vec::new();
 
-        assert!(!last_iframe_is_in_select(&document.document));
+        collect_iframes(&document.document, &mut iframes, false, false);
+        assert!(iframes.is_empty());
     }
 
     #[test]
@@ -185,7 +181,7 @@ mod tests {
         let _children = document.document.children.borrow_mut();
         let mut iframes = Vec::new();
 
-        collect_iframes(&document.document, &mut iframes, false);
+        collect_iframes(&document.document, &mut iframes, false, false);
 
         assert!(iframes.is_empty());
     }

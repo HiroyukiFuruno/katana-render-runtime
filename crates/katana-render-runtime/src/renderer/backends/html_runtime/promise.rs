@@ -1,4 +1,5 @@
 use super::evaluation::{evaluate_value, perform_microtask_checkpoint};
+use super::execution::ExecutionBudget;
 use super::script::HtmlTryCatchScope;
 use super::types::HtmlRuntimeError;
 
@@ -21,9 +22,14 @@ pub(super) fn evaluate_and_wait_for_promise(
     }
     match promise.state() {
         v8::PromiseState::Fulfilled => Ok(()),
-        v8::PromiseState::Rejected => Err(HtmlRuntimeError::JavaScriptException(
-            promise.result(scope).to_rust_string_lossy(scope),
-        )),
+        v8::PromiseState::Rejected => {
+            /* WHY: rejection value conversion can invoke page-defined hooks, so it
+             * must remain within the execution watchdog. */
+            let budget = ExecutionBudget::start(scope);
+            let message = promise.result(scope).to_rust_string_lossy(scope);
+            budget.finish()?;
+            Err(HtmlRuntimeError::JavaScriptException(message))
+        }
         v8::PromiseState::Pending => Err(HtmlRuntimeError::JavaScriptException(
             "HTML lifecycle Promise did not settle".to_string(),
         )),

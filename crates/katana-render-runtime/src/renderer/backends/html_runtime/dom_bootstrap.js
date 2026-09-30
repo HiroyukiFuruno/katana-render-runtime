@@ -120,6 +120,8 @@ const __krrListenerOptions = (options) => ({
 const __krrEventTargetListeners = new WeakMap();
 const __krrEventHandlers = new WeakMap();
 const __krrLifecyclePropertyOverrides = new WeakMap();
+const __krrPrevalidatedImageEvents = new WeakMap();
+const __krrPrevalidatedImageEventAttribute = "data-krr-prevalidated-image-event";
 const __krrLifecycleEventTypes = new Set(["load", "error", "readystatechange", "DOMContentLoaded"]);
 const __krrNormalizeLifecycleEventType = (type) => {
   const normalized = String(type).toLowerCase();
@@ -299,6 +301,7 @@ const __krrInstallEventTarget = (target) => {
           __krrDispatchTargetPhase(target, event, true, Event.AT_TARGET);
           if (!event.__krrImmediatePropagationStopped)
             __krrDispatchTargetPhase(target, event, false, Event.AT_TARGET);
+          __krrThrowDeferredListenerError(event);
           return !event.defaultPrevented;
         } finally {
           __krrEndDispatch(event);
@@ -585,6 +588,7 @@ const __krrElementPrototype = {
     const attributeName = String(name);
     const attributeValue = String(value);
     __krrNativeDom("setAttribute", this.__krrNodeId, attributeName, attributeValue);
+    if (attributeName.toLowerCase() === "src") __krrPrevalidatedImageEvents.delete(this);
     const lifecycleEventType = attributeName.toLowerCase().startsWith("on")
       ? __krrNormalizeLifecycleEventType(attributeName.slice(2))
       : null;
@@ -600,6 +604,7 @@ const __krrElementPrototype = {
       : null;
     const hadAttribute = __krrNativeDom("getAttribute", this.__krrNodeId, attributeName) !== null;
     __krrNativeDom("removeAttribute", this.__krrNodeId, attributeName);
+    if (attributeName.toLowerCase() === "src") __krrPrevalidatedImageEvents.delete(this);
     if (hadAttribute && lifecycleEventType !== null) {
       if (__krrIsWindowLoadNode(this.__krrNodeId) && lifecycleEventType === "load")
         __krrInstallBodyLoadHandler(this, null);
@@ -754,6 +759,22 @@ globalThis.__krrInstallStaticBodyLoadHandler = () => {
   const frameset = document.querySelector("html > frameset");
   if (frameset !== null) __krrInstallBodyLoadHandler(frameset, frameset.getAttribute("onload"));
 };
+const __krrSeedPrevalidatedImageEvents = () => {
+  let images;
+  try {
+    images = document.querySelectorAll("img");
+  } catch (_error) {
+    return;
+  }
+  for (const image of images) {
+    const source = image.getAttribute("src");
+    const eventType = image.getAttribute(__krrPrevalidatedImageEventAttribute);
+    image.removeAttribute(__krrPrevalidatedImageEventAttribute);
+    if (source !== null && eventType === "load")
+      __krrPrevalidatedImageEvents.set(image, { source, eventType });
+  }
+};
+__krrSeedPrevalidatedImageEvents();
 const __krrLayoutMetrics = () => JSON.parse(__krrNativeDom("layoutMetrics"));
 Object.defineProperties(globalThis, {
   innerWidth: { get: () => __krrLayoutMetrics().width },
@@ -1885,7 +1906,9 @@ const __krrPercentEncodedImageBytes = (payload) => {
   }
   return bytes;
 };
-const __krrImageLoadEventType = (source) => {
+const __krrImageLoadEventType = (image, source) => {
+  const prevalidated = __krrPrevalidatedImageEvents.get(image);
+  if (prevalidated?.source === source) return prevalidated.eventType;
   if (typeof source !== "string" || source.slice(0, "data:".length).toLowerCase() !== "data:")
     return "error";
   const separator = source.indexOf(",");
@@ -1904,7 +1927,7 @@ const __krrDispatchImageLoad = (image) => {
   let source = image.getAttribute("src");
   // load/error handlerによるsrc差替えを再試行し、相互差替えでも有限回で打ち切る。
   for (let attempt = 0; source !== null && attempt < 8; attempt += 1) {
-    const eventType = __krrImageLoadEventType(source);
+    const eventType = __krrImageLoadEventType(image, source);
     try {
       image.dispatchEvent(new Event(eventType));
     } catch (_error) {}
@@ -1914,30 +1937,39 @@ const __krrDispatchImageLoad = (image) => {
   }
 };
 
-const __krrDispatchPendingImages = async (document) => {
-  const dispatchedImageSources = new Map();
+const __krrDispatchPendingImages = async (document, state = {}) => {
+  const dispatchedImageSources = state.dispatchedImageSources || new Map();
+  state.dispatchedImageSources = dispatchedImageSources;
   const maxImageDispatches = 1024;
   const maxImageRescans = 8;
   let emptyRescanCount = 0;
-  let imageDispatches = 0;
-  for (let rescan = 0; rescan < maxImageRescans && emptyRescanCount < 2; rescan += 1) {
+  let imageDispatches = state.imageDispatches || 0;
+  let dispatched = false;
+  for (
+    let rescan = 0;
+    rescan < maxImageRescans && emptyRescanCount < 2 && imageDispatches < maxImageDispatches;
+    rescan += 1
+  ) {
     let foundImage = false;
     for (const image of document.querySelectorAll("img")) {
       const source = image.getAttribute("src");
       if (dispatchedImageSources.get(image) === source) continue;
       foundImage = true;
+      dispatched = true;
       __krrDispatchImageLoad(image);
       // handler が同期的に src を置換した場合は、dispatch 後の最終値を記録する。
       dispatchedImageSources.set(image, image.getAttribute("src"));
       imageDispatches += 1;
+      state.imageDispatches = imageDispatches;
       if (imageDispatches >= maxImageDispatches) {
         await Promise.resolve();
-        return;
+        return dispatched;
       }
     }
     await Promise.resolve();
     emptyRescanCount = foundImage ? 0 : emptyRescanCount + 1;
   }
+  return dispatched;
 };
 
 const __krrDispatchLocalFrame = (frame) => {
@@ -1946,25 +1978,34 @@ const __krrDispatchLocalFrame = (frame) => {
   } catch (_error) {}
 };
 
-const __krrDispatchPendingLocalFrames = async (document) => {
-  const dispatchedFrames = new Set();
+const __krrDispatchPendingLocalFrames = async (document, state = {}) => {
+  const dispatchedFrames = state.dispatchedFrames || new Set();
+  state.dispatchedFrames = dispatchedFrames;
   const maxFrameDispatches = 1024;
   const maxFrameRescans = 8;
   let emptyFrameRescanCount = 0;
-  let frameDispatches = 0;
-  for (let rescan = 0; rescan < maxFrameRescans && emptyFrameRescanCount < 2; rescan += 1) {
+  let frameDispatches = state.frameDispatches || 0;
+  let dispatched = false;
+  for (
+    let rescan = 0;
+    rescan < maxFrameRescans && emptyFrameRescanCount < 2 && frameDispatches < maxFrameDispatches;
+    rescan += 1
+  ) {
     let foundFrame = false;
     for (const frame of document.querySelectorAll("iframe")) {
       if (!frame.contentDocument || dispatchedFrames.has(frame)) continue;
       foundFrame = true;
+      dispatched = true;
       dispatchedFrames.add(frame);
       __krrDispatchLocalFrame(frame);
       frameDispatches += 1;
+      state.frameDispatches = frameDispatches;
       if (frameDispatches >= maxFrameDispatches) break;
     }
     await Promise.resolve();
     emptyFrameRescanCount = foundFrame ? 0 : emptyFrameRescanCount + 1;
   }
+  return dispatched;
 };
 
 globalThis.__krrDispatchWindowLoad = async () => {
@@ -1972,8 +2013,13 @@ globalThis.__krrDispatchWindowLoad = async () => {
   if (body !== null) __krrRouteWindowLoadElement(body);
   else
     __krrRouteWindowLoadElement(__krrElement(__krrNativeDom("querySelector", "html > frameset")));
-  await __krrDispatchPendingLocalFrames(document);
-  await __krrDispatchPendingImages(document);
+  const resourceDispatchState = {};
+  for (let pass = 0; pass < 8; pass += 1) {
+    const framesDispatched = await __krrDispatchPendingLocalFrames(document, resourceDispatchState);
+    const imagesDispatched = await __krrDispatchPendingImages(document, resourceDispatchState);
+    if (!framesDispatched && !imagesDispatched) break;
+    await Promise.resolve();
+  }
   __krrDocumentReadyState = "complete";
   __krrDispatchDocumentReadyStateChange();
   __krrDispatchElementReadyStateChange();
