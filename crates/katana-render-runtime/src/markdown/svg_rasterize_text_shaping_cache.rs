@@ -8,6 +8,7 @@ use std::{
 
 const MAX_CACHED_SHAPED_RUN_DATABASES: usize = 8;
 const MAX_CACHED_SHAPED_RUNS: usize = 4096;
+const MAX_CACHED_SHAPED_RUN_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct ShapedRunKey {
@@ -20,6 +21,7 @@ struct ShapedRunKey {
 struct ShapedRunCacheEntry {
     database: Weak<usvg::fontdb::Database>,
     values: HashMap<ShapedRunKey, f32>,
+    retained_bytes: usize,
 }
 
 thread_local! {
@@ -71,13 +73,36 @@ fn cache_shaped_run_width(database: &Arc<usvg::fontdb::Database>, key: ShapedRun
         let mut entries = cache.borrow_mut();
         entries.retain(|entry| entry.database.upgrade().is_some());
         let entry = shaped_run_cache_entry(&mut entries, database);
+        let key_bytes = key.retained_bytes();
+        if key_bytes > MAX_CACHED_SHAPED_RUN_BYTES || entry.values.contains_key(&key) {
+            return;
+        }
+        while entry.retained_bytes + key_bytes > MAX_CACHED_SHAPED_RUN_BYTES {
+            let Some(evicted_key) = entry.values.keys().next().cloned() else {
+                break;
+            };
+            entry.values.remove(&evicted_key);
+            entry.retained_bytes = entry
+                .retained_bytes
+                .saturating_sub(evicted_key.retained_bytes());
+        }
         if entry.values.len() >= MAX_CACHED_SHAPED_RUNS
             && let Some(evicted_key) = entry.values.keys().next().cloned()
         {
             entry.values.remove(&evicted_key);
+            entry.retained_bytes = entry
+                .retained_bytes
+                .saturating_sub(evicted_key.retained_bytes());
         }
+        entry.retained_bytes += key_bytes;
         entry.values.insert(key, width);
     });
+}
+
+impl ShapedRunKey {
+    fn retained_bytes(&self) -> usize {
+        self.text.len() + self.font_feature_settings.as_ref().map_or(0, String::len)
+    }
 }
 
 fn shaped_run_cache_entry<'a>(
@@ -98,6 +123,7 @@ fn shaped_run_cache_entry<'a>(
     entries.push(ShapedRunCacheEntry {
         database: Arc::downgrade(database),
         values: HashMap::new(),
+        retained_bytes: 0,
     });
     let inserted_index = entries.len() - 1;
     &mut entries[inserted_index]
@@ -107,8 +133,9 @@ fn shaped_run_cache_entry<'a>(
 mod tests {
     use super::super::font::matching_font_face;
     use super::{
-        MAX_CACHED_SHAPED_RUN_DATABASES, MAX_CACHED_SHAPED_RUNS, SHAPED_RUN_CACHE, ShapedRunKey,
-        cache_shaped_run_width, cached_shaped_run, shaped_run_cache_entry,
+        MAX_CACHED_SHAPED_RUN_BYTES, MAX_CACHED_SHAPED_RUN_DATABASES, MAX_CACHED_SHAPED_RUNS,
+        SHAPED_RUN_CACHE, ShapedRunKey, cache_shaped_run_width, cached_shaped_run,
+        shaped_run_cache_entry,
     };
     use crate::markdown::svg_rasterize::font::bundled_font_db;
     use resvg::usvg;
@@ -180,6 +207,31 @@ mod tests {
         assert_eq!(cached_width_count, MAX_CACHED_SHAPED_RUNS);
         assert!(contains_inserted_key);
         Ok(())
+    }
+
+    #[test]
+    fn shaped_run_cache_skips_a_run_larger_than_the_byte_budget() {
+        let database = Arc::new(usvg::fontdb::Database::new());
+        SHAPED_RUN_CACHE.with(|cache| cache.borrow_mut().clear());
+        let key = ShapedRunKey {
+            face_id: usvg::fontdb::ID::default(),
+            text: "x".repeat(MAX_CACHED_SHAPED_RUN_BYTES + 1),
+            font_size_bits: 16.0_f32.to_bits(),
+            font_feature_settings: None,
+        };
+
+        cache_shaped_run_width(&database, key, 1.0);
+
+        let cache_state = SHAPED_RUN_CACHE.with(|cache| {
+            cache.borrow().iter().any(|entry| {
+                entry
+                    .database
+                    .upgrade()
+                    .is_some_and(|cached| Arc::ptr_eq(&cached, &database))
+                    && !entry.values.is_empty()
+            })
+        });
+        assert!(!cache_state);
     }
 
     fn shaped_run_key(index: usize) -> ShapedRunKey {
