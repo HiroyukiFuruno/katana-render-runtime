@@ -181,6 +181,26 @@ mod tests {
     }
 
     #[test]
+    fn multiple_ignored_select_iframes_keep_following_iframe_order() {
+        let document = HtmlDocument::parse(
+            r#"<select><iframe></iframe><iframe></iframe></select><script>afterSelect()</script><body onload="handler"><iframe id=real>"#,
+        );
+
+        let real_index = document.source_order.iter().position(|node| {
+            matches!(
+                &node.data,
+                markup5ever_rcdom::NodeData::Element { attrs, .. }
+                    if attrs.borrow().iter().any(|attribute| {
+                        attribute.name.local.as_str() == "id"
+                            && attribute.value.as_ref() == "real"
+                    })
+            )
+        });
+        assert_eq!(document.body_onload_source_order_index, Some(1));
+        assert_eq!(real_index, Some(1));
+    }
+
+    #[test]
     fn self_closing_foreign_template_does_not_hide_body_onload() {
         let document = HtmlDocument::parse(
             r#"<svg><template/></svg><body onload="handler"><script>bodyScript()</script>"#,

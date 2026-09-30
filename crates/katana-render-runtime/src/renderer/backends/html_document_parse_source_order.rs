@@ -73,7 +73,9 @@ impl SourceOrderSink {
             self.source_order
                 .borrow_mut()
                 .push(SourceOrderEntry::Iframe { in_select });
-            self.select_depth.set(0);
+            if !in_select {
+                self.select_depth.set(0);
+            }
         }
         self.observe_window_load_handler(tag);
     }
