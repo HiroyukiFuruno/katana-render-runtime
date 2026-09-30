@@ -35,3 +35,35 @@ pub(super) fn evaluate_and_wait_for_promise(
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
+
+    fn evaluate(code: &str) -> Result<(), HtmlRuntimeError> {
+        DiagramV8Runtime::ensure_initialized();
+        let mut isolate = v8::Isolate::new(Default::default());
+        v8::scope!(let handle_scope, &mut isolate);
+        let context = v8::Context::new(handle_scope, Default::default());
+        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
+        v8::tc_scope!(let scope, &mut **context_scope);
+
+        evaluate_and_wait_for_promise(scope, "promise-test", code)
+    }
+
+    #[test]
+    fn covers_non_promise_settled_and_pending_lifecycle_values() {
+        assert!(evaluate("42").is_ok());
+        assert!(evaluate("Promise.resolve('fulfilled')").is_ok());
+        assert!(matches!(
+            evaluate("Promise.reject({ toString() { return 'rejected'; } })"),
+            Err(HtmlRuntimeError::JavaScriptException(message)) if message == "rejected"
+        ));
+        assert!(matches!(
+            evaluate("new Promise(() => {})"),
+            Err(HtmlRuntimeError::JavaScriptException(message))
+                if message == "HTML lifecycle Promise did not settle"
+        ));
+    }
+}

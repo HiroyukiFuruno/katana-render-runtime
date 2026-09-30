@@ -156,7 +156,7 @@ impl TokenSink for SourceOrderSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use html5ever::{local_name, tokenizer::TagKind};
+    use html5ever::{local_name, parse_document, tendril::TendrilSink, tokenizer::TagKind};
 
     #[test]
     fn iframe_start_without_a_tree_node_does_not_emit_source_order_entry() {
@@ -170,6 +170,23 @@ mod tests {
         });
 
         let (_, _, _, source_order) = sink.finish();
+        assert!(source_order.is_empty());
+    }
+
+    #[test]
+    fn iframe_token_in_select_is_skipped_when_collected_iframe_is_outside_select() {
+        let document =
+            parse_document(RcDom::default(), Default::default()).one("<iframe></iframe>");
+        let visibility = RefCell::new(HashMap::new());
+
+        let (_, source_order) = events::finish_source_order(
+            &document,
+            vec![events::SourceOrderEntry::Iframe { in_select: true }],
+            None,
+            None,
+            &visibility,
+        );
+
         assert!(source_order.is_empty());
     }
 }
