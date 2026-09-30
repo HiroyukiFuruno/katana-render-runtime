@@ -802,11 +802,23 @@ def _valid_check(value: object, head: str, *, external_id: str | None = None) ->
     if not isinstance(value, dict):
         raise GovernanceError("Check Run response is invalid.")
     app = value.get("app")
+    updated_at = value.get("updated_at")
+    # GitHub は作成直後の in-progress Check Run に ``updated_at: null`` を返す。
+    # この場合は ``started_at`` だけが世代を固定するため、その対が欠ける形は受理しない。
+    has_valid_timestamp = (
+        isinstance(updated_at, str)
+        or (
+            updated_at is None
+            and value.get("status") == "in_progress"
+            and value.get("conclusion") is None
+            and isinstance(value.get("started_at"), str)
+        )
+    )
     if (
         type(value.get("id")) is not int or value.get("name") != CHECK_NAME
         or value.get("head_sha") != head or value.get("external_id") != (external_id if external_id is not None else check_external_id(head))
         or not isinstance(app, dict) or app.get("id") != check_app_id()
-        or not isinstance(value.get("updated_at"), str)
+        or not has_valid_timestamp
     ):
         raise GovernanceError("Check Run identity is invalid.")
     return value

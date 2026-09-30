@@ -3206,6 +3206,35 @@ class StatusWriterUnitTest(unittest.TestCase):
                 with self.assertRaises(WRITER.GovernanceError):
                     WRITER.pages("ignored")
 
+    def test_check_identity_accepts_fresh_github_pending_shape(self) -> None:
+        head = "a" * 40
+        value = {
+            "id": 102, "name": WRITER.CHECK_NAME, "head_sha": head,
+            "external_id": WRITER.check_external_id(head), "updated_at": None,
+            "started_at": "2026-09-30T07:38:54Z", "app": {"id": 42},
+            "status": "in_progress", "conclusion": None,
+        }
+        with patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}):
+            self.assertEqual(WRITER._valid_check(value, head), value)
+            self.assertEqual(WRITER.check_fingerprint(value)[1], None)
+
+    def test_check_identity_rejects_invalid_null_updated_at_shapes(self) -> None:
+        head = "a" * 40
+        baseline = {
+            "id": 102, "name": WRITER.CHECK_NAME, "head_sha": head,
+            "external_id": WRITER.check_external_id(head), "updated_at": None,
+            "app": {"id": 42},
+        }
+        invalid = (
+            baseline,
+            baseline | {"started_at": "2026-09-30T07:38:54Z", "status": "completed", "conclusion": "success"},
+            baseline | {"started_at": "2026-09-30T07:38:54Z", "status": "in_progress", "conclusion": "success"},
+        )
+        with patch.dict(os.environ, {"KRR_GOVERNANCE_CHECK_APP_ID": "42"}):
+            for value in invalid:
+                with self.subTest(value=value), self.assertRaises(WRITER.GovernanceError):
+                    WRITER._valid_check(value, head)
+
     def test_current_check_snapshot_never_pages_retained_history(self) -> None:
         item = {"id": 102, "name": WRITER.CHECK_NAME, "head_sha": "a" * 40, "external_id": WRITER.check_external_id("a" * 40), "updated_at": "now", "app": {"id": 42}}
         endpoints: list[str] = []
