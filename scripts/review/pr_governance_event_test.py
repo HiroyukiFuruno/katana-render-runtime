@@ -1389,6 +1389,22 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                     "WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}",
                     self.workflow[self.workflow.index("Dispatch and bind the early event writer"):],
                 )
+                schedule_output = directory / "schedule-selection-output"
+                scheduled = subprocess.run(
+                    [sys.executable, "-c", self._workflow_program(current)],
+                    env=environment | {
+                        "GITHUB_OUTPUT": str(schedule_output),
+                        "EVENT_NAME": "schedule",
+                        "EVENT_TARGETS": "[]",
+                        "EVENT_PRIORITY_TARGETS": "[]",
+                    }, capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(scheduled.returncode, 0, scheduled.stderr)
+                scheduled_selection = dict(
+                    line.split("=", 1) for line in schedule_output.read_text(encoding="utf-8").splitlines()
+                )
+                self.assertEqual(scheduled_selection["priority_targets"], "[]")
+                self.assertEqual(scheduled_selection["all_invalidation_targets"], "[72]")
                 if selection["all_invalidation_targets"] == "[]":
                     continue
 

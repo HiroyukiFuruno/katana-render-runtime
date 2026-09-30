@@ -570,6 +570,7 @@ jobs:
         id: current-targets
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
           EVENT_TARGETS: ${{ needs.resolve_event.outputs.event_targets }}
           EVENT_PRIORITY_TARGETS: ${{ needs.resolve_event.outputs.priority_targets }}
         run: |
@@ -580,6 +581,7 @@ jobs:
           import subprocess
 
           repository = os.environ["GITHUB_REPOSITORY"]
+          event_name = os.environ.get("EVENT_NAME", "")
           try:
               event_targets = json.loads(os.environ.get("EVENT_TARGETS", ""))
               event_priority_targets = json.loads(os.environ.get("EVENT_PRIORITY_TARGETS", ""))
@@ -718,7 +720,11 @@ jobs:
           RECONCILIATION_JOB_TIMEOUT_SECONDS = 290 * 60
           RECONCILIATION_CONTROL_PLANE_RESERVE_SECONDS = 60 * 60
           priority_seed = set(preinvalidate_targets)
-          priority_targets = [] if duplicate_governed_heads else (
+          # Periodic and manual reconciliation has no event-bound early writer;
+          # it must hand every open target to the all-open terminal writer.
+          priority_targets = [] if (
+              duplicate_governed_heads or event_name in {"schedule", "workflow_dispatch"}
+          ) else (
               preinvalidate_targets
               + [number for number in targets if number not in priority_seed]
           )[:EARLY_WRITER_TARGET_CAP]
