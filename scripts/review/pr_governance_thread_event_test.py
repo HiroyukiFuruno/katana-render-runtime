@@ -40,8 +40,9 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
         reject_condition = re.search(r"(?m)^        if: (?P<value>.+)$", reject.group("body"))
         self.assertIsNotNone(reject_condition)
         assert reject_condition is not None
+        self.assertIn("github.event.pull_request.draft == false", reject_condition.group("value"))
+        self.assertNotIn("github.event.pull_request.draft != false", reject_condition.group("value"))
         for clause in (
-            "github.event.pull_request.draft == false",
             "github.event.pull_request.base.repo.full_name == github.repository",
             "github.event.pull_request.head.repo.full_name == github.repository",
             "github.event.pull_request.base.ref == github.event.repository.default_branch",
