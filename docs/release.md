@@ -109,6 +109,20 @@ python3 scripts/release/cleanup_release_state.py \
 
 Issue起点と依存更新証跡の書式は [Issue起点の変更契約](issue-driven-workflow.md) を参照する。
 
+## 実HTMLの初期描画と終了の確認
+
+HTMLの性能修正では、対象原本のSHA-256を固定して次を実行する。
+
+```bash
+rtk proxy just html-first-frame-check '/path/to/input.html' '<input-sha256>' 'tmp/html-first-frame.json'
+```
+
+ビルド時間を除き、1280×900・scale 1の初期フレームと実際のsession closeを
+プロセス全体の60秒上限で検証する。終了コード、フレームの寸法・バッファ、
+入力・実行ファイルのハッシュ、CPU時間、残存プロセスの有無をJSONへ記録する。
+タイムアウト、close失敗、実行中の入力・バイナリ変更は失敗となる。
+この検証は、公開レジストリ版を使うホストの受入やfragment・sticky動作の確認とは別に行う。
+
 ## 必要な秘匿値
 
 自動実行基盤（GitHub Actions）には `CARGO_REGISTRY_TOKEN` が必要。
