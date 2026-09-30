@@ -566,6 +566,35 @@ test("別画像のload handlerによるsrc差替え後に既読画像を再評�
   expect(calls).toEqual(["first:load", "second:load", "first:error"]);
 });
 
+test("画像load handlerのmicrotaskによるsrc差替えを保留して再評価する", async () => {
+  expect(dispatchPendingImages).toBeDefined();
+
+  const calls = [];
+  const image = {
+    source: "valid",
+    getAttribute(name) {
+      expect(name).toBe("src");
+      return this.source;
+    },
+    dispatchEvent(event) {
+      calls.push(event.type);
+      if (event.type === "load") queueMicrotask(() => (this.source = "broken"));
+    },
+  };
+  const document = {
+    querySelectorAll(selector) {
+      expect(selector).toBe("img");
+      return [image];
+    },
+  };
+  const dispatch = createPendingImageDispatcher(document, (target) =>
+    target.dispatchEvent(new Event(target.getAttribute("src") === "valid" ? "load" : "error")),
+  );
+
+  await dispatch(document);
+  expect(calls).toEqual(["load", "error"]);
+});
+
 test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatchする", async () => {
   expect(dispatchWindowLoad).toBeDefined();
 

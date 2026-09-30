@@ -1957,9 +1957,11 @@ const __krrDispatchPendingImages = async (document, state = {}) => {
       foundImage = true;
       dispatched = true;
       __krrDispatchImageLoad(image);
+      // dispatch中の同期的な差替えは__krrDispatchImageLoad内で処理済みとして記録する。
+      const dispatchedSource = image.getAttribute("src");
+      dispatchedImageSources.set(image, dispatchedSource);
       await Promise.resolve();
-      // handler が同期的に src を置換した場合は、dispatch 後の最終値を記録する。
-      dispatchedImageSources.set(image, image.getAttribute("src"));
+      // microtaskでsrcが差し替えられた場合は、次のscanで新しい値を再評価する。
       imageDispatches += 1;
       state.imageDispatches = imageDispatches;
       if (imageDispatches >= maxImageDispatches) {
