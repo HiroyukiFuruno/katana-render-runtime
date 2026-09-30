@@ -241,7 +241,19 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
             with self.subTest(initial=initial, final=final):
                 result = self.execute(responses={PR_ENDPOINT: [initial, final]})
                 self.assertEqual(result["reconcile"], "true")
+                self.assertEqual(result["priority"], "true")
                 self.assertEqual(result["issue_event_noop"], "false")
+
+    def test_stable_local_default_comment_reconciles_without_priority_or_reservation(self) -> None:
+        result = self.execute(
+            responses={PR_ENDPOINT: [self.pull(), self.pull()]},
+            direct_priority_fence=True,
+        )
+        self.assertEqual(result["valid"], "true")
+        self.assertEqual(result["reconcile"], "true")
+        self.assertEqual(result["priority"], "false")
+        self.assertEqual(result["sensor_reservation"], "false")
+        self.assertEqual(result["sensor_run_id"], "0")
 
     def test_active_sensor_serializes_a_relevant_direct_event(self) -> None:
         sensor_endpoint = (

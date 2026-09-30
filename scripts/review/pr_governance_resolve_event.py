@@ -474,7 +474,9 @@ else:
     if event_name == "issue_comment" and os.environ.get("ISSUE_PULL_REQUEST_URL", "") and issue in numbers:
         affected.add(issue)
         source_number_value = issue
-    priority_event = True
+    # PR comments still retain their exact event targets for reconciliation,
+    # but do not preempt an admitted all-open writer.
+    priority_event = event_name != "issue_comment"
 ordered_targets = (
     ([source_number_value] if source_number_value in affected else [])
     + sorted(affected - ({source_number_value} if source_number_value in affected else set()))

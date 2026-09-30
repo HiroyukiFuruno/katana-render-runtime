@@ -17,7 +17,7 @@ reconcile = True
 valid = True
 pull_request_target_noop = False
 issue_event_noop = False
-# Only a fully re-read, local CI/release source may join the normal
+# Only a fully re-read, local/default source may join the normal
 # serialized lane. Every other event keeps the historical preemptive
 # behavior until the resolver has established its own target set.
 priority = True
@@ -408,6 +408,10 @@ elif event_name in {"issues", "issue_comment"}:
                 or initial_source[5] != (initial_identity[0], repository)
             ):
                 reconcile = False
+            elif initial_source == final_source:
+                # A stable local/default PR comment changes no contract by
+                # itself. Reconcile it without replacing an admitted writer.
+                priority = False
 elif event_name == "workflow_run":
     run_id = os.environ.get("WORKFLOW_RUN_ID", "")
     source_attempt = os.environ.get("WORKFLOW_RUN_ATTEMPT", "")
@@ -709,12 +713,14 @@ def active_local_review_sensor() -> int | None:
     return 0
 
 
-# A direct event retains its low-latency preemption when no sensor is active.
-# If one is admitted, serialize behind it: cancelling the source would make a
-# late-numbered PR miss the 50-target early writer and exceed its review latch.
+# A priority direct event retains its low-latency preemption when no sensor is
+# active. If one is admitted, serialize behind it: cancelling the source would
+# make a late-numbered PR miss the 50-target early writer and exceed its review
+# latch.
 if (
     os.environ.get("DIRECT_PRIORITY_FENCE") == "1"
-    and valid and reconcile and event_name in {"pull_request_target", "issues", "issue_comment"}
+    and valid and reconcile and priority
+    and event_name in {"pull_request_target", "issues", "issue_comment"}
 ):
     sensor_active = active_local_review_sensor()
     if sensor_active is None:

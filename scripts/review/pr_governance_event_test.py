@@ -1199,10 +1199,12 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         mismatched = execute([pr(number=72), pr(number=72)], f"https://api.github.com/repos/{repository}/pulls/72",)
         self.assertEqual(mismatched["reconcile"], "true")
         self.assertEqual(mismatched["valid"], "false")
+        self.assertEqual(mismatched["priority"], "true")
         for label, source, expected in (("closed", pr(state="closed"), "false"), ("fork", pr(head_repo={"id": 202, "full_name": "fork/repository"}), "false"), ("non-default", pr(base_ref="release/v1"), "false"), ("local-default-open", pr(), "true")):
             with self.subTest(label=label):
                 result = execute([source, source], url)
                 self.assertEqual(result["reconcile"], expected)
+                self.assertEqual(result["priority"], "false" if expected == "true" else "true")
                 if expected == "false":
                     self.assertEqual(result["valid"], "true")
                     self.assertEqual(result["issue_event_noop"], "true")
@@ -1581,7 +1583,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             with self.subTest(source=label):
                 self.assertNotEqual(execute(label, pull, **options).returncode, 0)
 
-    def test_issue_and_issue_comment_priority_all_closers_of_the_changed_issue(self) -> None:
+    def test_issue_comment_keeps_all_closers_without_priority(self) -> None:
         match = re.search(r"- name: Resolve current open pull requests from the trusted default branch.*?python3 - <<'PY'\n(.*?)\n          PY", self.workflow, re.DOTALL)
         self.assertIsNotNone(match); assert match is not None
         pulls = [[
@@ -1591,7 +1593,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         for event_name, issue, expected in (
             ("issues", "999", {"reconcile": "true", "event_targets": "[]", "priority_targets": "[]"}),
             ("issues", "64", {"reconcile": "true", "event_targets": "[72,73]", "priority_targets": "[72,73]"}),
-            ("issue_comment", "64", {"reconcile": "true", "event_targets": "[72,73]", "priority_targets": "[72,73]"}),
+            ("issue_comment", "64", {"reconcile": "true", "event_targets": "[72,73]", "priority_targets": "[]"}),
         ):
             with self.subTest(event_name=event_name, issue=issue), tempfile.TemporaryDirectory() as temporary:
                 directory = Path(temporary); fake = directory / "gh"; output = directory / "output"
@@ -3208,9 +3210,9 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                     log = (directory / "gh.log").read_text(encoding="utf-8") if (directory / "gh.log").exists() else ""
                     self.assertNotIn("mutation", log)
 
-    def test_priority_event_preempts_the_current_reconciler_and_preserves_affected_order(self) -> None:
-        # sourceを持つeventだけが全件走査を中断する。通常の全件走査は
-        # current snapshotを取り直すが、event由来のcloser集合はwriterへ順序を渡す。
+    def test_only_priority_targets_preempt_the_current_reconciler(self) -> None:
+        # issue_comment は affected set を解決へ渡すが、全件走査を中断せず
+        # admitted writer の early targets を維持する。
         self.assertIn("needs: resolve_event", self.workflow)
         self.assertIn("if: needs.resolve_event.outputs.reconcile == 'true'", self.workflow)
         self.assertIn("Re-enumerate every current local governance pull request", self.workflow)
