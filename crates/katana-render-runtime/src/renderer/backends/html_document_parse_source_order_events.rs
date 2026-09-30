@@ -118,8 +118,14 @@ fn collect_iframes(
 fn iframe_context(node: &Handle, in_template: bool, in_select: bool) -> (bool, bool) {
     (
         in_template || is_element_named(node, "template"),
-        in_select || is_element_named(node, "select"),
+        in_select || node_is_html_select(node),
     )
+}
+
+pub(super) fn node_is_html_select(node: &Handle) -> bool {
+    matches!(&node.data, markup5ever_rcdom::NodeData::Element { name, .. }
+        if name.ns.as_str() == "http://www.w3.org/1999/xhtml"
+            && name.local.as_str() == "select")
 }
 
 fn collect_iframe_node(

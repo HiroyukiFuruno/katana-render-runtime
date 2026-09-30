@@ -1,10 +1,10 @@
 use super::tree::WindowLoadHandlerObserver;
 #[path = "html_document_parse_source_order_events.rs"]
 mod events;
-use events::{SourceOrderEntry, finish_source_order, node_is_visible};
+use events::{SourceOrderEntry, finish_source_order, node_is_html_select, node_is_visible};
 use html5ever::{
     tokenizer::{Tag, TagKind, Token, TokenSink, TokenSinkResult},
-    tree_builder::{TreeBuilder, TreeBuilderOpts, TreeSink},
+    tree_builder::{Tracer, TreeBuilder, TreeBuilderOpts, TreeSink},
 };
 use markup5ever_rcdom::{Handle, RcDom};
 use std::{
@@ -19,8 +19,21 @@ pub(super) struct SourceOrderSink {
     window_load_handler_observer: RefCell<WindowLoadHandlerObserver>,
     body_onload_script_index: Cell<Option<usize>>,
     body_onload_source_order_index: Cell<Option<usize>>,
-    select_depth: Cell<usize>,
     source_order: RefCell<Vec<SourceOrderEntry>>,
+}
+
+struct OpenSelectObserver {
+    present: Cell<bool>,
+}
+
+impl Tracer for OpenSelectObserver {
+    type Handle = Handle;
+
+    fn trace_handle(&self, node: &Handle) {
+        if node_is_html_select(node) {
+            self.present.set(true);
+        }
+    }
 }
 
 impl SourceOrderSink {
@@ -32,7 +45,6 @@ impl SourceOrderSink {
             window_load_handler_observer: RefCell::new(WindowLoadHandlerObserver::default()),
             body_onload_script_index: Cell::new(None),
             body_onload_source_order_index: Cell::new(None),
-            select_depth: Cell::new(0),
             source_order: RefCell::new(Vec::new()),
         }
     }
@@ -64,38 +76,22 @@ impl SourceOrderSink {
     }
 
     fn observe_source_order(&self, tag: &Tag) {
-        self.observe_select_state(tag);
         if tag.kind != TagKind::StartTag {
             return;
         }
         if tag.name.to_string().eq_ignore_ascii_case("iframe") {
-            let in_select = self.select_depth.get() == 1;
+            /* WHY: 文書全体のparserではselect handleをopen stackにだけ保持するため、
+             * token処理後のtraceで暗黙の閉鎖を反映し、DOM全体の再走査を避ける。 */
+            let observer = OpenSelectObserver {
+                present: Cell::new(false),
+            };
+            self.tree_builder.trace_handles(&observer);
+            let in_select = observer.present.get();
             self.source_order
                 .borrow_mut()
                 .push(SourceOrderEntry::Iframe { in_select });
-            if !in_select {
-                self.select_depth.set(0);
-            }
         }
         self.observe_window_load_handler(tag);
-    }
-
-    fn observe_select_state(&self, tag: &Tag) {
-        let name = tag.name.to_string();
-        if tag.kind == TagKind::StartTag && name.eq_ignore_ascii_case("select") {
-            /* WHY: HTML parserは入れ子のselect開始時に先行selectを暗黙に閉じる。 */
-            self.select_depth.set(1);
-        } else if tag.kind == TagKind::EndTag && name.eq_ignore_ascii_case("select") {
-            self.select_depth
-                .set(self.select_depth.get().saturating_sub(1));
-        } else if tag.kind == TagKind::StartTag
-            && matches!(
-                name.to_ascii_lowercase().as_str(),
-                "input" | "textarea" | "button"
-            )
-        {
-            self.select_depth.set(0);
-        }
     }
 
     fn observe_window_load_handler(&self, tag: &Tag) {

@@ -99,6 +99,38 @@ fn iframe_scripts_do_not_shift_parent_body_onload_parser_position() -> TestResul
 }
 
 #[test]
+fn iframe_after_table_select_transition_executes_before_parent_script_and_load() -> TestResult {
+    let fixture = LocalFixture::new()?;
+    std::fs::write(
+        fixture.root.join("frame.html"),
+        r#"<script>document.getElementById('status').textContent += 'frame|';</script>"#,
+    )
+    .map_err(to_string)?;
+    let source = fixture.source(
+        r#"<p id=status></p><table><select><tr><td><iframe id=real src=frame.html></iframe></td></tr></table><script>document.getElementById('status').textContent += 'after|';</script><body onload="document.getElementById('status').textContent += 'load|'">"#,
+    )?;
+    let mut document = HtmlDocument::parse(&source.raw_html);
+    assert!(document.get_element_by_id("real").is_some());
+    let resources = HtmlSubresourceLoader::new(&source).load(&mut document);
+    assert!(
+        resources
+            .scripts
+            .iter()
+            .any(|script| script.contains("'frame|'"))
+    );
+    let session = StaticHtmlRuntime
+        .start_interactive(&source)
+        .map_err(to_string)?;
+    let snapshot = session.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r#"<p id="status">frame|after|load|</p>"#),
+        "{snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn local_iframe_escape_is_blocked_without_replacing_the_main_document() -> TestResult {
     let fixture = LocalFixture::new()?;
     let (outside, source) = escaped_iframe_source(&fixture)?;
