@@ -1926,16 +1926,19 @@ const __krrImageLoadEventType = (image, source) => {
 
 const __krrDispatchImageLoad = (image) => {
   let source = image.getAttribute("src");
+  let lastDispatchedSource = null;
   // load/error handlerによるsrc差替えを再試行し、相互差替えでも有限回で打ち切る。
   for (let attempt = 0; source !== null && attempt < 8; attempt += 1) {
     const eventType = __krrImageLoadEventType(image, source);
+    lastDispatchedSource = source;
     try {
       image.dispatchEvent(new Event(eventType));
     } catch (_error) {}
     const replacement = image.getAttribute("src");
-    if (replacement === source) return;
+    if (replacement === source) return lastDispatchedSource;
     source = replacement;
   }
+  return lastDispatchedSource;
 };
 
 const __krrDispatchPendingImages = async (document, state = {}) => {
@@ -1957,20 +1960,19 @@ const __krrDispatchPendingImages = async (document, state = {}) => {
       if (dispatchedImageSources.get(image) === source) continue;
       foundImage = true;
       dispatched = true;
-      __krrDispatchImageLoad(image);
-      // dispatch中の同期的な差替えは__krrDispatchImageLoad内で処理済みとして記録する。
-      const dispatchedSource = image.getAttribute("src");
+      const dispatchedSource = __krrDispatchImageLoad(image);
+      // 実dispatch済みsourceだけを記録し、上限時の差替え先は次のscanで評価する。
       dispatchedImageSources.set(image, dispatchedSource);
-      await Promise.resolve();
+      await __krrLifecycleCheckpoint();
       // microtaskでsrcが差し替えられた場合は、次のscanで新しい値を再評価する。
       imageDispatches += 1;
       state.imageDispatches = imageDispatches;
       if (imageDispatches >= maxImageDispatches) {
-        await Promise.resolve();
+        await __krrLifecycleCheckpoint();
         return dispatched;
       }
     }
-    await Promise.resolve();
+    await __krrLifecycleCheckpoint();
     emptyRescanCount = foundImage ? 0 : emptyRescanCount + 1;
   }
   return dispatched;
@@ -2002,7 +2004,7 @@ const __krrDispatchPendingLocalFrames = async (document, state = {}) => {
       dispatched = true;
       dispatchedFrames.add(frame);
       __krrDispatchLocalFrame(frame);
-      await Promise.resolve();
+      await __krrLifecycleCheckpoint();
       frameDispatches += 1;
       state.frameDispatches = frameDispatches;
       if (frameDispatches >= maxFrameDispatches) break;
@@ -2023,7 +2025,7 @@ globalThis.__krrDispatchWindowLoad = async () => {
     const framesDispatched = await __krrDispatchPendingLocalFrames(document, resourceDispatchState);
     const imagesDispatched = await __krrDispatchPendingImages(document, resourceDispatchState);
     if (!framesDispatched && !imagesDispatched) break;
-    await Promise.resolve();
+    await __krrLifecycleCheckpoint();
   }
   __krrDocumentReadyState = "complete";
   __krrDispatchDocumentReadyStateChange();

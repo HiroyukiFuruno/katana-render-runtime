@@ -197,6 +197,31 @@ fn records_the_final_source_after_an_image_handler_replaces_it() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn dispatches_the_eighth_synchronous_image_replacement_before_window_load() -> TestResult {
+    let image = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+    let output = render(&format!(
+        r#"<p id=status></p><img id=image src="{image}" onload="this.dataset.count = String(Number(this.dataset.count || 0) + 1); if (Number(this.dataset.count) < 9) this.src = '{image}#' + this.dataset.count; else document.getElementById('status').textContent = 'source8';"><script>window.addEventListener('load', () => {{ document.getElementById('status').textContent += '|window'; }});</script>"#,
+    ))?;
+
+    assert!(output.contains(">source8|window</p>"), "{output}");
+    Ok(())
+}
+
+#[test]
+fn lifecycle_scheduler_uses_intrinsic_checkpoint_after_page_promise_patch() -> TestResult {
+    let image = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+    let output = render(&format!(
+        r#"<p id=status></p><iframe data-krr-local-frame onload="document.getElementById('status').textContent += 'frame|' "></iframe><img src="{image}" onload="document.getElementById('status').textContent += 'image|' "><script>Promise.resolve = () => {{ throw new Error('patched'); }}; document.addEventListener('readystatechange', () => {{ if (document.readyState === 'complete') document.getElementById('status').textContent += 'complete|'; }}); window.addEventListener('load', () => {{ document.getElementById('status').textContent += 'window|'; }});</script>"#,
+    ))?;
+
+    assert!(
+        output.contains(">frame|image|complete|window|</p>"),
+        "{output}"
+    );
+    Ok(())
+}
+
 fn percent_encoded_data_url(media_type: &str, base64_payload: &str) -> TestResult<String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(base64_payload)
