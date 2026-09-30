@@ -544,10 +544,13 @@ jobs:
     # barrier の activation と release は同じ非キャンセルレーンで直列化する。
     # 新世代は待機中でも workflow run として旧世代の release fence に観測される
     # ため、旧世代が新世代の pending 化より先に required context を外せない。
-    # CI / release workflow_run は通常走査のままにする。
+    # CI / release workflow_run は通常走査のままにする。PR review
+    # sensor の workflow_run も同じPR mutationから派生するため、ここで
+    # preemptすると先行する pull_request_target generation を約30秒で
+    # 自己cancelする。sensorは先行generationの完走後に直列実行する。
     concurrency:
       group: pr-governance-barrier-${{ github.repository_id }}
-      cancel-in-progress: ${{ needs.resolve_event.outputs.priority_targets != '[]' }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]' }}
     permissions:
       actions: read
       contents: read
