@@ -2806,6 +2806,15 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                             workflow_run(name, "pull_request", status), local_pull,
                             "true", "true", expected_priority="false", trigger_action=trigger_action,
                         )
+        # GitHub omits head_commit for an identical comparison. The trusted
+        # base/merge pair still proves the source base equals the default tip.
+        run_scope(
+            workflow_run("CI", "pull_request"), local_pull,
+            "true", "true", expected_priority="false", comparison=json.dumps({
+                "status": "identical", "base_commit": {"sha": "b" * 40},
+                "merge_base_commit": {"sha": "b" * 40}, "head_commit": None,
+            }),
+        )
         advanced_base_pull = {
             **local_pull,
             "base": {**local_pull["base"], "sha": "d" * 40},
@@ -2824,6 +2833,27 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             workflow_run("CI", "pull_request", "completed"), local_pull,
             "true", "false", expected_priority="true", trigger_action="unknown",
         )
+
+        # A source workflow modified only in the local PR is not trusted
+        # evidence. After the stable local source is read twice, its ordinary
+        # lifecycle notifications must not preempt the direct governance pass.
+        changed_source = workflow_run("CI", "pull_request")
+        for trigger_action, status, conclusion, expected_valid in (
+            ("requested", "requested", None, "true"),
+            ("in_progress", "in_progress", None, "true"),
+            ("completed", "completed", "success", "true"),
+            ("completed", "completed", "cancelled", "true"),
+            ("completed", "completed", "failure", "false"),
+            ("completed", "completed", "timed_out", "false"),
+            ("completed", "completed", "action_required", "false"),
+            ("completed", "completed", None, "false"),
+        ):
+            with self.subTest(trigger_action=trigger_action, conclusion=conclusion):
+                run_scope(
+                    {**changed_source, "status": status, "conclusion": conclusion}, local_pull,
+                    "false" if expected_valid == "true" else "true", expected_valid,
+                    head_blob=json.dumps({"sha": "d" * 40}), trigger_action=trigger_action,
+                )
 
         # A normal-lane classification is safe only after the same source
         # binding as the resolver. Each drift must arm the failure barrier and
