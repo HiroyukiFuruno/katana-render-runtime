@@ -19,7 +19,10 @@ assert MODULE_SPEC is not None and MODULE_SPEC.loader is not None
 VERIFY_RELEASE_TARGET = util.module_from_spec(MODULE_SPEC)
 sys.modules[MODULE_SPEC.name] = VERIFY_RELEASE_TARGET
 MODULE_SPEC.loader.exec_module(VERIFY_RELEASE_TARGET)
-REQUIRED_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_COMMITS
+REQUIRED_SOURCE_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_SOURCE_COMMITS
+REQUIRED_CANDIDATE_ANCESTORS = (
+    VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_CANDIDATE_ANCESTORS
+)
 
 
 def isolated_git_environment() -> dict[str, str]:
@@ -87,12 +90,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
         result = self.run_check("v0.4.21", "v0.4.21")
         self.assertNotEqual(result.returncode, 0)
 
-    def test_accepts_head_containing_the_v0422_paired_updater_candidate(self) -> None:
+    def test_accepts_head_containing_the_v0422_release_source(self) -> None:
         result = self.run_check("v0.4.22", "v0.4.21")
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_rejects_head_missing_the_v0422_paired_updater_candidate(self) -> None:
-        for commit in REQUIRED_COMMITS:
+    def test_rejects_head_missing_the_v0422_candidate_ancestor(self) -> None:
+        for commit in REQUIRED_CANDIDATE_ANCESTORS:
             parent = self.source_git("rev-parse", f"{commit}^")
             result = self.run_check("v0.4.22", "v0.4.21", parent)
             self.assertNotEqual(result.returncode, 0, commit)
@@ -128,8 +131,8 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 "fetch",
                 "-q",
                 source_repository,
-                REQUIRED_COMMITS[0],
-                REQUIRED_COMMITS[1],
+                REQUIRED_CANDIDATE_ANCESTORS[0],
+                REQUIRED_SOURCE_COMMITS[0],
                 VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE,
             )
             manifest_mismatch = git(
@@ -140,7 +143,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 "commit-tree",
                 f"{VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE}^{{tree}}",
                 "-p",
-                REQUIRED_COMMITS[1],
+                REQUIRED_SOURCE_COMMITS[0],
                 "-m",
                 "release descendant with a mismatched manifest",
             )
@@ -151,7 +154,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                         "git",
                         "merge-base",
                         "--is-ancestor",
-                        REQUIRED_COMMITS[0],
+                REQUIRED_CANDIDATE_ANCESTORS[0],
                         manifest_mismatch,
                     ],
                     cwd=repository,
@@ -198,8 +201,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             VERIFY_RELEASE_TARGET.rewrite_required_release_manifest(source, "F" * 64)
 
-    def test_manifest_update_rejects_a_head_without_the_required_base_commit(self) -> None:
-        parent = self.source_git("rev-parse", f"{REQUIRED_COMMITS[0]}^")
+    def test_manifest_update_rejects_a_head_without_the_required_source_commit(self) -> None:
+        parent = self.source_git("rev-parse", f"{REQUIRED_SOURCE_COMMITS[0]}^")
+        self.assertEqual(
+            self.source_git("merge-base", "--is-ancestor", REQUIRED_CANDIDATE_ANCESTORS[0], parent),
+            "",
+        )
         result = subprocess.run(
             [
                 sys.executable,
@@ -220,13 +227,13 @@ class VerifyReleaseTargetTests(unittest.TestCase):
         self.assertIn("manifest update failed", result.stderr)
 
     def test_rejects_release_candidate_before_the_pr_default_base(self) -> None:
-        parent = self.source_git("rev-parse", f"{REQUIRED_COMMITS[0]}^")
+        parent = self.source_git("rev-parse", f"{REQUIRED_CANDIDATE_ANCESTORS[0]}^")
         result = self.run_check("v0.4.22", "v0.4.21", parent)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn(REQUIRED_COMMITS[0], result.stderr)
+        self.assertIn(REQUIRED_CANDIDATE_ANCESTORS[0], result.stderr)
 
-    def test_rejects_head_missing_current_release_paired_updater_candidate(self) -> None:
-        required_commit = REQUIRED_COMMITS[0]
+    def test_rejects_head_missing_current_release_candidate_ancestor(self) -> None:
+        required_commit = REQUIRED_CANDIDATE_ANCESTORS[0]
         parent = self.source_git("rev-parse", f"{required_commit}^")
         result = self.run_check("v0.4.22", "v0.4.21", parent)
         self.assertNotEqual(result.returncode, 0)
@@ -298,15 +305,13 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 git("config", "user.email", "release-test@example.invalid")
                 git("config", "user.name", "Release Target Test")
                 git("fetch", "-q", str(source_repository), "HEAD:refs/heads/release")
-                git("branch", "-f", "base", REQUIRED_COMMITS[0])
                 squash = git(
                     "commit-tree",
-                    # Model the documented squash exception from the reviewed
-                    # release head while retaining the explicitly required fix
-                    # commit as an ancestry proof.
+                    # Model GitHub's squash merge: the candidate retains the
+                    # reviewed default base but not the PR source commit.
                     "release^{tree}",
                     "-p",
-                    REQUIRED_COMMITS[1],
+                    REQUIRED_CANDIDATE_ANCESTORS[0],
                     "-m", "actual release tree as a squash",
                 )
                 git("branch", "-f", "candidate", squash)
@@ -350,6 +355,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     fresh_git("cat-file", "-e", f"{source_head}^{{commit}}").returncode,
                     0,
                 )
+                self.assertNotEqual(
+                    fresh_git(
+                        "cat-file", "-e", f"{REQUIRED_SOURCE_COMMITS[0]}^{{commit}}"
+                    ).returncode,
+                    0,
+                )
 
                 accepted = self.run_check("v0.4.22", "v0.4.21", "HEAD", fresh_repository)
                 self.assertEqual(accepted.returncode, 0, accepted.stderr)
@@ -358,20 +369,20 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     "commit-tree",
                     "release^{tree}",
                     "-p",
-                    REQUIRED_COMMITS[0],
+                    VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE,
                     "-m",
-                    "release tree without the required v0.4.22 fix",
+                    "release tree without the reviewed default base",
                 )
                 git("branch", "-f", "invalid", invalid_squash)
                 rejected = self.run_check("v0.4.22", "v0.4.21", "invalid", repository)
                 self.assertNotEqual(rejected.returncode, 0)
-                self.assertIn(REQUIRED_COMMITS[1], rejected.stderr)
+                self.assertIn(REQUIRED_CANDIDATE_ANCESTORS[0], rejected.stderr)
 
                 arbitrary_tree_with_required_base = git(
                     "commit-tree",
                     f"{VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE}^{{tree}}",
                     "-p",
-                    REQUIRED_COMMITS[1],
+                    REQUIRED_CANDIDATE_ANCESTORS[0],
                     "-m",
                     "arbitrary tree with the required default base",
                 )

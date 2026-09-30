@@ -16,12 +16,16 @@ from urllib import error, request
 
 REQUIRED_LATEST_RELEASE = "v0.4.21"
 REQUIRED_TARGET_RELEASE = "v0.4.22"
-# 実レビュー対象のdefault baseと、v0.4.22で指定された修正commitを固定する。
-# リリース内容そのものは不変manifestでも別途検証するが、manifest一致だけで
-# 必須修正commitの祖先性を代替してはならない。
-REQUIRED_RELEASE_COMMITS = (
-    "9ad18a07358cf28b742cc00c12c0c9f85956d20a",  # PR #99のdefault base
+# manifest更新は、v0.4.22で指定された修正を含むレビュー済みsource headからだけ
+# 行える。squash merge候補にこのcommitの祖先性を要求するとGitHub上で正当な
+# candidateを拒否するため、通常のrelease candidate検証とは分離する。
+REQUIRED_RELEASE_SOURCE_COMMITS = (
     "1bc497bdfd3b8c4318e9ee1609d147b6925b43e5",  # v0.4.22指定修正
+)
+# 通常のrelease candidateは、実レビュー対象のPR #99 default baseを祖先に持ち、
+# 不変manifestでリリース内容を保存しなければならない。
+REQUIRED_RELEASE_CANDIDATE_ANCESTORS = (
+    "9ad18a07358cf28b742cc00c12c0c9f85956d20a",  # PR #99のdefault base
 )
 # squash merge 後も default history に残る v0.4.21 の merge commit を、
 # 変更集合の起点として使う。期待値そのものは commit/tree object ではなく、
@@ -132,7 +136,8 @@ def latest_remote_tag(remote: str) -> StableVersion | None:
 
 
 def missing_required_commits(
-    head_ref: str, required_commits: tuple[str, ...] = REQUIRED_RELEASE_COMMITS
+    head_ref: str,
+    required_commits: tuple[str, ...] = REQUIRED_RELEASE_CANDIDATE_ANCESTORS,
 ) -> list[str]:
     missing: list[str] = []
     for commit in required_commits:
@@ -243,11 +248,13 @@ def main() -> int:
         print(manifest_sha256)
         return 0
     if args.update_release_manifest:
-        missing_commits = missing_required_commits(args.head_ref)
-        if target != required_target or missing_commits:
+        missing_source_commits = missing_required_commits(
+            args.head_ref, REQUIRED_RELEASE_SOURCE_COMMITS
+        )
+        if target != required_target or missing_source_commits:
             print(
                 "Release target manifest update failed: target must be "
-                f"{required_target.tag()} and head must contain the required release commit(s).",
+                f"{required_target.tag()} and head must contain the required release source commit(s).",
                 file=sys.stderr,
             )
             return 1
@@ -275,12 +282,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    missing_commits = missing_required_commits(args.head_ref)
-    if missing_commits:
+    missing_candidate_ancestors = missing_required_commits(args.head_ref)
+    if missing_candidate_ancestors:
         print(
             "Release target sanity check failed: release branch does not contain "
-            "the required release commit(s): "
-            f"{', '.join(missing_commits)}.",
+            "the required release candidate ancestor(s): "
+            f"{', '.join(missing_candidate_ancestors)}.",
             file=sys.stderr,
         )
         return 1
