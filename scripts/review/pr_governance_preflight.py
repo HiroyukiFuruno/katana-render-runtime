@@ -739,6 +739,11 @@ if (
         sensor_reservation = True
         sensor_run_ids = active_sensors
 
+# 分類不能な直接イベントはbarrierを要求するが、予約できなかったsensorの
+# 実行を取り消してはならない。予約走査自体の失敗もこの境界で扱う。
+if not valid:
+    priority = False
+
 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
     output.write("reconcile=" + ("true" if reconcile else "false") + "\n")
     output.write("valid=" + ("true" if valid else "false") + "\n")

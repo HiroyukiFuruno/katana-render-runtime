@@ -102,7 +102,7 @@ jobs:
               with open(output_path, "a", encoding="utf-8") as output:
                   output.write("reconcile=true\n")
                   output.write("valid=false\n")
-                  output.write("priority=true\n")
+                  output.write("priority=false\n")
                   output.write("sensor_reservation=false\n")
                   output.write("sensor_run_ids=[]\n")
                   output.write("pull_request_target_noop=false\n")
@@ -167,6 +167,14 @@ jobs:
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # reservationと通常barrierのchecks配列PATCHを短く直列化する。sensorの
+    # 長時間待機は次jobで行うため、このadmin laneがlatch期限を消費しない。
+    # queue:maxは公式対応済みでcancel:falseと併用する。
+    # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
+    concurrency:
+      group: pr-governance-barrier-admin-${{ github.repository_id }}
+      queue: max
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
@@ -449,13 +457,13 @@ jobs:
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # 入場判定と長時間の全件走査は別レーンにする。review sensor の
-    # requested callback はここを通過して、290分の走査待ちにならない。
-    # 直接イベントだけが短い入場処理をpreemptし、sensor callback同士は
-    # 同じgenerationを取消さない。
+    # barrierのchecks配列PATCHはreservation armと同じ短いadmin laneへ
+    # 限定する。direct priorityのpreemptionは後続resolve_eventが担い、
+    # ここで待機中sensorのsource-bound admissionを取消さない。
     concurrency:
-      group: pr-governance-admission-${{ github.repository_id }}
-      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true' }}
+      group: pr-governance-barrier-admin-${{ github.repository_id }}
+      queue: max
+      cancel-in-progress: false
     permissions:
       contents: read
     outputs:
@@ -572,18 +580,18 @@ jobs:
               return value if isinstance(value,dict) else None
           before=request([protection_endpoint]); _before_required,before_records=records(before); matches=[record for record in before_records if record[0]==context]
           if matches==[(context,app_id)]:
-              raise SystemExit(0)
-          if matches:
+              pass
+          elif matches:
               raise SystemExit("Resolver-failure barrier has an unexpected App source.")
-          expected=copy.deepcopy(before); expected_required=expected["required_status_checks"]
-          expected_required["checks"]=[{"context":context,"app_id":app_id} if name==context else {"context":name,"app_id":owner} for name,owner in before_records]
-          if not matches:
+          else:
+              expected=copy.deepcopy(before); expected_required=expected["required_status_checks"]
+              expected_required["checks"]=[{"context":context,"app_id":app_id} if name==context else {"context":name,"app_id":owner} for name,owner in before_records]
               expected_required["checks"].append({"context":context,"app_id":app_id})
               expected_required["contexts"]=[*expected_required["contexts"],context]
-          _expected_required,expected_records=records(expected)
-          response=mutate("PATCH"); after=request([protection_endpoint]); _after_required,after_records=records(after)
-          if response is None or canonical(response)!=canonical(expected_required) or after_records!=expected_records or canonical(after)!=canonical(expected):
-              raise SystemExit("Resolver-failure barrier atomic activation failed; manual recovery is required.")
+              _expected_required,expected_records=records(expected)
+              response=mutate("PATCH"); after=request([protection_endpoint]); _after_required,after_records=records(after)
+              if response is None or canonical(response)!=canonical(expected_required) or after_records!=expected_records or canonical(after)!=canonical(expected):
+                  raise SystemExit("Resolver-failure barrier atomic activation failed; manual recovery is required.")
           PY
 
       - name: Verify resolver-failure barrier source after activation
@@ -727,7 +735,7 @@ jobs:
     # 入場判定は全件走査とは別レーンで直列化する。workflow_runは親の
     # generationを取消さず、direct mutationだけが短い解決処理をpreemptする。
     concurrency:
-      group: pr-governance-admission-${{ github.repository_id }}
+      group: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && format('pr-governance-admission-sensor-{0}-{1}', github.repository_id, github.event.workflow_run.id) || format('pr-governance-admission-{0}', github.repository_id) }}
       cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}
     permissions:
       actions: read
@@ -859,6 +867,25 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
+    outputs:
+      affected_barrier_active: ${{ steps.affected-barrier.outputs.active }}
+      default_branch: ${{ steps.current-targets.outputs.default_branch }}
+      writer_head: ${{ steps.current-targets.outputs.writer_head }}
+      targets: ${{ steps.current-targets.outputs.targets }}
+      target_snapshots: ${{ steps.current-targets.outputs.target_snapshots }}
+      priority_targets: ${{ steps.current-targets.outputs.priority_targets }}
+      preserved_check_manifest: ${{ steps.await-early.outputs.preserved_check_manifest || '[]' }}
+      preserved_writer_run_id: ${{ steps.dispatch-early.outputs.writer_run_id || '0' }}
+      pre_manifest_1: ${{ steps.preinvalidate-1.outputs.check_manifest || '[]' }}
+      pre_manifest_2: ${{ steps.preinvalidate-2.outputs.check_manifest || '[]' }}
+      tail_manifest_1: ${{ steps.invalidate-all-1.outputs.check_manifest || '[]' }}
+      tail_manifest_2: ${{ steps.invalidate-all-2.outputs.check_manifest || '[]' }}
+      tail_carry_1: ${{ steps.invalidate-all-1.outputs.carry_target_numbers || '[]' }}
+      tail_carry_2: ${{ steps.invalidate-all-2.outputs.carry_target_numbers || '[]' }}
+      has_targets: ${{ steps.current-targets.outputs.has_targets }}
+      has_duplicate_governed_heads: ${{ steps.current-targets.outputs.has_duplicate_governed_heads }}
+      duplicate_governed_heads: ${{ steps.current-targets.outputs.duplicate_governed_heads }}
+      preinvalidate_targets: ${{ steps.current-targets.outputs.preinvalidate_targets }}
     steps:
       - name: Re-enumerate every current local governance pull request
         id: current-targets
@@ -1272,8 +1299,8 @@ jobs:
       - name: Create affected-head barrier branch-protection token
         # marker障害をdeferしても、このtoken生成とactivationの後でpriority
         # pending化へ進める。実際の成功条件はchunk後の明示fenceで判定する。
-        if: always() && steps.barrier-source.outcome == 'success'
         id: barrier-protection-activate
+        if: always() && steps.barrier-source.outcome == 'success'
         continue-on-error: true
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -1281,68 +1308,35 @@ jobs:
           private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          permission-administration: write
+          permission-administration: read
 
-      - name: Activate complete affected-head merge barrier
+      - name: Verify established affected-head merge barrier for reconciliation
+        # establish-resolver-failure-barrier is a required predecessor and
+        # owns the only activation PATCH. Reconcile must not race it with a
+        # second checks-array replacement.
         id: affected-barrier
-        if: always() && steps.barrier-source.outcome == 'success'
-        continue-on-error: true
         env:
-          ADMIN_TOKEN: ${{ steps.barrier-protection-activate.outputs.token }}
+          GH_TOKEN: ${{ steps.barrier-protection-activate.outputs.token }}
           DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
           CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          # A schedule recovery has no event-priority target, but an oversized
-          # complete snapshot must still install the App-bound global barrier
-          # before its operational cap can stop reconciliation.
-          PRIORITY: ${{ steps.current-targets.outputs.has_preinvalidate_targets == 'true' || steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true' }}
+          REQUIRED: ${{ steps.current-targets.outputs.has_preinvalidate_targets == 'true' || steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true' }}
         run: |
           python3 - <<'PY'
-          import copy, json, os, re, subprocess
-
-          repository=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); configured_app=os.environ.get("CHECK_APP_ID", ""); priority=os.environ.get("PRIORITY", "")
-          app_id=4_766_933; context="KRR / PR governance affected-head barrier"
-          if configured_app!=str(app_id) or re.fullmatch(r"[A-Za-z0-9._/-]+",branch) is None or priority not in {"true","false"}: raise SystemExit("Affected-head barrier identity is invalid.")
-          token=os.environ.get("ADMIN_TOKEN", "")
-          if not token: raise SystemExit("Affected-head barrier token is invalid.")
-          admin_env={"GH_TOKEN":token,"PATH":os.environ["PATH"]}; protection_endpoint=f"repos/{repository}/branches/{branch}/protection"; status_checks_endpoint=protection_endpoint+"/required_status_checks"; status_checks_url=f"https://api.github.com/{status_checks_endpoint}"; contexts_url=status_checks_url+"/contexts"
-          def request(arguments):
-              result=subprocess.run(["gh","api","--hostname","github.com",*arguments],capture_output=True,text=True,check=False,env=admin_env, timeout=20)
-              if result.returncode!=0: raise SystemExit("Affected-head barrier API request failed.")
-              try: return json.loads(result.stdout)
-              except json.JSONDecodeError as error: raise SystemExit("Affected-head barrier API response is not JSON.") from error
-          def canonical(value): return json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=True)
-          def records(protection):
-              required=protection.get("required_status_checks") if isinstance(protection,dict) else None; checks=required.get("checks") if isinstance(required,dict) else None; contexts=required.get("contexts") if isinstance(required,dict) else None; strict=required.get("strict") if isinstance(required,dict) else None
-              if not isinstance(required,dict) or set(required)!={"url","contexts_url","strict","contexts","checks"} or required["url"]!=status_checks_url or required["contexts_url"]!=contexts_url or not isinstance(checks,list) or not isinstance(contexts,list) or type(strict) is not bool: raise SystemExit("Affected-head barrier branch protection is invalid.")
-              result=[]
-              for item in checks:
-                  if not isinstance(item,dict) or set(item)!={"context","app_id"} or not isinstance(item["context"],str) or not item["context"] or "\x00" in item["context"] or (item["app_id"] is not None and type(item["app_id"]) is not int): raise SystemExit("Affected-head barrier branch protection is invalid.")
-                  result.append((item["context"],item["app_id"]))
-              if len(set(result))!=len(result) or len({name for name,_ in result})!=len(result) or [name for name,_ in result]!=contexts: raise SystemExit("Affected-head barrier branch protection is invalid.")
-              return required,result
-          def mutate(method):
-              if method!="PATCH": raise SystemExit("Affected-head barrier activation method is invalid.")
-              body={"strict":expected_required["strict"],"checks":expected_required["checks"]}
-              result=subprocess.run(["gh","api","--hostname","github.com","--method","PATCH",status_checks_endpoint,"--input","-"],input=json.dumps(body,separators=(",",":")),capture_output=True,text=True,check=False,env=admin_env, timeout=20)
-              if result.returncode!=0: return None
-              try: value=json.loads(result.stdout)
-              except json.JSONDecodeError: return None
-              return value if isinstance(value,dict) else None
-          before=request([protection_endpoint]); _before_required,before_records=records(before); matches=[record for record in before_records if record[0]==context]
-          if matches==[(context,app_id)]: active=True
-          elif matches: raise SystemExit("Affected-head barrier has an unexpected App source.")
-          elif priority=="false": active=False
-          else:
-              expected=copy.deepcopy(before); expected_required=expected["required_status_checks"]
-              expected_required["checks"]=[{"context":context,"app_id":app_id} if name==context else {"context":name,"app_id":owner} for name,owner in before_records]
-              if not matches:
-                  expected_required["checks"].append({"context":context,"app_id":app_id})
-                  expected_required["contexts"]=[*expected_required["contexts"],context]
-              _expected_required,expected_records=records(expected)
-              response=mutate("PATCH"); after=request([protection_endpoint]); _after_required,after_records=records(after)
-              if response is None or canonical(response)!=canonical(expected_required) or after_records!=expected_records or canonical(after)!=canonical(expected): raise SystemExit("Affected-head barrier atomic activation failed; manual recovery is required.")
-              active=True
-          with open(os.environ["GITHUB_OUTPUT"],"a",encoding="utf-8") as output: output.write("active="+("true" if active else "false")+"\n")
+          import json, os, re, subprocess
+          repository=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); token=os.environ.get("GH_TOKEN", ""); configured=os.environ.get("CHECK_APP_ID", ""); required=os.environ.get("REQUIRED", "")
+          if not token or configured!="4766933" or required not in {"true","false"} or re.fullmatch(r"[A-Za-z0-9._/-]+",branch) is None:
+              raise SystemExit("Affected-head barrier verification identity is invalid.")
+          result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/branches/{branch}/protection"],capture_output=True,text=True,check=False,env={"GH_TOKEN":token,"PATH":os.environ["PATH"]},timeout=20)
+          if result.returncode!=0: raise SystemExit("Affected-head barrier verification read failed.")
+          try: checks=json.loads(result.stdout).get("required_status_checks",{}).get("checks")
+          except json.JSONDecodeError as error: raise SystemExit("Affected-head barrier verification response is invalid.") from error
+          if not isinstance(checks,list): raise SystemExit("Affected-head barrier verification response is invalid.")
+          matches=[entry for entry in checks if isinstance(entry,dict) and entry.get("context")=="KRR / PR governance affected-head barrier"]
+          if matches and matches != [{"context":"KRR / PR governance affected-head barrier","app_id":4_766_933}]: raise SystemExit("Affected-head barrier verification App binding is invalid.")
+          active=bool(matches)
+          if required=="true" and not active: raise SystemExit("Affected-head barrier is missing after establish.")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("active="+("true" if active else "false")+"\n")
           PY
 
       - name: Create first priority invalidator write token
@@ -2389,9 +2383,46 @@ jobs:
               output.write("carry_target_numbers="+json.dumps(carry_targets,separators=(",",":"))+"\n")
           PY
 
-      - name: Create fresh affected-head barrier read token
-        if: steps.affected-barrier.outputs.active == 'true'
-        id: barrier-read-release
+  release-complete-affected-head-barrier:
+    name: Release complete affected-head merge barrier
+    needs: reconcile-all-open
+    if: ${{ needs.reconcile-all-open.result == 'success' && needs.reconcile-all-open.outputs.affected_barrier_active == 'true' }}
+    environment: pr-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # checks配列PATCH/DELETEをreservation armと同じ短いadmin laneで直列化する。
+    concurrency:
+      group: pr-governance-barrier-admin-${{ github.repository_id }}
+      queue: max
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - name: Bind release to the trusted default workflow source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
+          DEFAULT_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          repository=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); head=os.environ.get("DEFAULT_HEAD", ""); workflow_ref=os.environ.get("WORKFLOW_REF", ""); workflow_sha=os.environ.get("WORKFLOW_SHA", "")
+          prefix=f"{repository}/.github/workflows/pr-governance.yml@refs/heads/"
+          if not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or workflow_ref!=prefix+branch or workflow_sha.lower()!=head.lower():
+              raise SystemExit("Affected-head barrier release workflow source is invalid.")
+          source_env={"GH_TOKEN":os.environ.get("GH_TOKEN", ""),"PATH":os.environ["PATH"]}
+          if not source_env["GH_TOKEN"]: raise SystemExit("Affected-head barrier release source token is invalid.")
+          repo=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}"],capture_output=True,text=True,check=False,env=source_env,timeout=20)
+          ref=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/git/ref/heads/{branch}"],capture_output=True,text=True,check=False,env=source_env,timeout=20)
+          if repo.returncode!=0 or ref.returncode!=0: raise SystemExit("Unable to verify affected-head barrier release source.")
+          try: current_branch=json.loads(repo.stdout).get("default_branch"); current_head=json.loads(ref.stdout).get("object",{}).get("sha")
+          except json.JSONDecodeError as error: raise SystemExit("Affected-head barrier release source is not JSON.") from error
+          if current_branch!=branch or not isinstance(current_head,str) or current_head.lower()!=head.lower(): raise SystemExit("Affected-head barrier release source changed.")
+          PY
+      - name: Create affected-head barrier release read token
+        id: read-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
@@ -2402,10 +2433,8 @@ jobs:
           permission-checks: read
           permission-contents: read
           permission-pull-requests: read
-
-      - name: Create fresh affected-head barrier branch-protection token
-        if: steps.affected-barrier.outputs.active == 'true'
-        id: barrier-protection-release
+      - name: Create affected-head barrier release branch-protection token
+        id: protection-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
           app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
@@ -2413,28 +2442,26 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-administration: write
-
       - name: Release complete affected-head merge barrier only after full pending coverage
-        if: steps.affected-barrier.outputs.active == 'true'
         env:
-          READ_TOKEN: ${{ steps.barrier-read-release.outputs.token }}
-          ADMIN_TOKEN: ${{ steps.barrier-protection-release.outputs.token }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          DEFAULT_HEAD: ${{ steps.current-targets.outputs.writer_head }}
+          READ_TOKEN: ${{ steps.read-token.outputs.token }}
+          ADMIN_TOKEN: ${{ steps.protection-token.outputs.token }}
+          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
+          DEFAULT_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
-          TARGETS: ${{ steps.current-targets.outputs.targets }}
-          TARGET_SNAPSHOTS: ${{ steps.current-targets.outputs.target_snapshots }}
-          PRESERVED_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
-          PRESERVED_CHECK_MANIFEST: ${{ steps.await-early.outputs.preserved_check_manifest || '[]' }}
-          PRESERVED_WRITER_RUN_ID: ${{ steps.dispatch-early.outputs.writer_run_id || '0' }}
-          PRE_MANIFEST_1: ${{ steps.preinvalidate-1.outputs.check_manifest || '[]' }}
-          PRE_MANIFEST_2: ${{ steps.preinvalidate-2.outputs.check_manifest || '[]' }}
-          TAIL_MANIFEST_1: ${{ steps.invalidate-all-1.outputs.check_manifest || '[]' }}
-          TAIL_MANIFEST_2: ${{ steps.invalidate-all-2.outputs.check_manifest || '[]' }}
-          DUPLICATE_GOVERNED_HEADS: ${{ steps.current-targets.outputs.duplicate_governed_heads }}
+          TARGETS: ${{ needs.reconcile-all-open.outputs.targets }}
+          TARGET_SNAPSHOTS: ${{ needs.reconcile-all-open.outputs.target_snapshots }}
+          PRESERVED_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          PRESERVED_CHECK_MANIFEST: ${{ needs.reconcile-all-open.outputs.preserved_check_manifest }}
+          PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
+          PRE_MANIFEST_1: ${{ needs.reconcile-all-open.outputs.pre_manifest_1 }}
+          PRE_MANIFEST_2: ${{ needs.reconcile-all-open.outputs.pre_manifest_2 }}
+          TAIL_MANIFEST_1: ${{ needs.reconcile-all-open.outputs.tail_manifest_1 }}
+          TAIL_MANIFEST_2: ${{ needs.reconcile-all-open.outputs.tail_manifest_2 }}
+          DUPLICATE_GOVERNED_HEADS: ${{ needs.reconcile-all-open.outputs.duplicate_governed_heads }}
         run: |
           python3 - <<'PY'
           import copy, json, os, re, subprocess
@@ -2618,8 +2645,21 @@ jobs:
           if context in response or any(name==context for name,_owner in after_records) or canonical(after)!=canonical(expected): raise SystemExit("Affected-head barrier branch protection drifted during release.")
           PY
 
+
+  terminal-all-open-writer:
+    name: Complete terminal repository-wide governance writers
+    needs: [resolve_event, reconcile-all-open, release-complete-affected-head-barrier]
+    if: ${{ needs.reconcile-all-open.result == 'success' && needs.release-complete-affected-head-barrier.result == 'success' }}
+    environment: pr-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 290
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
       - name: Create fresh all-writer dispatcher token
-        if: steps.current-targets.outputs.has_targets == 'true'
+        if: needs.reconcile-all-open.outputs.has_targets == 'true'
         id: all-dispatcher-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -2633,7 +2673,7 @@ jobs:
           permission-pull-requests: read
 
       - name: Record first terminal segment dispatch start
-        if: steps.current-targets.outputs.has_targets == 'true' && steps.current-targets.outputs.has_duplicate_governed_heads != 'true'
+        if: needs.reconcile-all-open.outputs.has_targets == 'true' && needs.reconcile-all-open.outputs.has_duplicate_governed_heads != 'true'
         id: terminal-window-1
         env:
           ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
@@ -2654,27 +2694,27 @@ jobs:
           PY
 
       - name: Dispatch one repository-wide governance arbiter segment
-        if: steps.current-targets.outputs.has_targets == 'true' && steps.current-targets.outputs.has_duplicate_governed_heads != 'true'
+        if: needs.reconcile-all-open.outputs.has_targets == 'true' && needs.reconcile-all-open.outputs.has_duplicate_governed_heads != 'true'
         id: dispatch-all-1
         env:
           GH_TOKEN: ${{ steps.all-dispatcher-token.outputs.token }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           WRITER_SCOPE: all
-          WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
-          WRITER_ALL_OPEN_TARGETS: ${{ steps.current-targets.outputs.targets }}
-          WRITER_ALL_OPEN_SNAPSHOTS: ${{ steps.current-targets.outputs.target_snapshots }}
-          WRITER_PRESERVED_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
-          PRESERVED_WRITER_RUN_ID: ${{ steps.dispatch-early.outputs.writer_run_id || '0' }}
-          WRITER_CARRY_TARGET_NUMBERS_1: ${{ steps.invalidate-all-1.outputs.carry_target_numbers || '[]' }}
-          WRITER_CARRY_TARGET_NUMBERS_2: ${{ steps.invalidate-all-2.outputs.carry_target_numbers || '[]' }}
-          WRITER_PREINVALIDATE_TARGETS: ${{ steps.current-targets.outputs.preinvalidate_targets }}
-          WRITER_PRE_CHECK_MANIFEST_1: ${{ steps.preinvalidate-1.outputs.check_manifest || '[]' }}
-          WRITER_PRE_CHECK_MANIFEST_2: ${{ steps.preinvalidate-2.outputs.check_manifest || '[]' }}
-          WRITER_TAIL_CHECK_MANIFEST_1: ${{ steps.invalidate-all-1.outputs.check_manifest || '[]' }}
-          WRITER_TAIL_CHECK_MANIFEST_2: ${{ steps.invalidate-all-2.outputs.check_manifest || '[]' }}
-          WRITER_PRESERVED_CHECK_MANIFEST: ${{ steps.await-early.outputs.preserved_check_manifest || '[]' }}
+          WRITER_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          WRITER_ALL_OPEN_TARGETS: ${{ needs.reconcile-all-open.outputs.targets }}
+          WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.reconcile-all-open.outputs.target_snapshots }}
+          WRITER_PRESERVED_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
+          WRITER_CARRY_TARGET_NUMBERS_1: ${{ needs.reconcile-all-open.outputs.tail_carry_1 }}
+          WRITER_CARRY_TARGET_NUMBERS_2: ${{ needs.reconcile-all-open.outputs.tail_carry_2 }}
+          WRITER_PREINVALIDATE_TARGETS: ${{ needs.reconcile-all-open.outputs.preinvalidate_targets }}
+          WRITER_PRE_CHECK_MANIFEST_1: ${{ needs.reconcile-all-open.outputs.pre_manifest_1 }}
+          WRITER_PRE_CHECK_MANIFEST_2: ${{ needs.reconcile-all-open.outputs.pre_manifest_2 }}
+          WRITER_TAIL_CHECK_MANIFEST_1: ${{ needs.reconcile-all-open.outputs.tail_manifest_1 }}
+          WRITER_TAIL_CHECK_MANIFEST_2: ${{ needs.reconcile-all-open.outputs.tail_manifest_2 }}
+          WRITER_PRESERVED_CHECK_MANIFEST: ${{ needs.reconcile-all-open.outputs.preserved_check_manifest }}
           TERMINAL_SEGMENT_STARTED_AT: ${{ steps.terminal-window-1.outputs.started_at }}
         run: |
           python3 - <<'PY'
@@ -2988,8 +3028,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.terminal-read-1.outputs.token }}
           WRITER_RUN_ID: ${{ steps.dispatch-all-1.outputs.writer_run_id }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           CONTINUATION_INDEX: '1'
           APP_BOT_LOGIN: ${{ vars.KRR_GOVERNANCE_APP_BOT_LOGIN }}
@@ -3110,13 +3150,13 @@ jobs:
         id: dispatch-all-2
         env:
           GH_TOKEN: ${{ steps.terminal-dispatch-2.outputs.token }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
-          WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
-          WRITER_ALL_OPEN_SNAPSHOTS: ${{ steps.current-targets.outputs.target_snapshots }}
-          WRITER_PRESERVED_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
-          PRESERVED_WRITER_RUN_ID: ${{ steps.dispatch-early.outputs.writer_run_id || '0' }}
+          WRITER_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.reconcile-all-open.outputs.target_snapshots }}
+          WRITER_PRESERVED_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
           WRITER_CHECK_MANIFEST: ${{ steps.dispatch-all-1.outputs.check_manifest }}
           WRITER_TERMINAL_ORDER: ${{ steps.dispatch-all-1.outputs.terminal_order_numbers }}
           COMPLETED_WRITER_RUN_IDS: ${{ format('[{0}]', steps.dispatch-all-1.outputs.writer_run_id) }}
@@ -3288,8 +3328,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.terminal-read-2.outputs.token }}
           WRITER_RUN_ID: ${{ steps.dispatch-all-2.outputs.writer_run_id }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           CONTINUATION_INDEX: '2'
           APP_BOT_LOGIN: ${{ vars.KRR_GOVERNANCE_APP_BOT_LOGIN }}
@@ -3381,13 +3421,13 @@ jobs:
         id: dispatch-all-3
         env:
           GH_TOKEN: ${{ steps.terminal-dispatch-3.outputs.token }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
-          WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
-          WRITER_ALL_OPEN_SNAPSHOTS: ${{ steps.current-targets.outputs.target_snapshots }}
-          WRITER_PRESERVED_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
-          PRESERVED_WRITER_RUN_ID: ${{ steps.dispatch-early.outputs.writer_run_id || '0' }}
+          WRITER_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.reconcile-all-open.outputs.target_snapshots }}
+          WRITER_PRESERVED_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
           WRITER_CHECK_MANIFEST: ${{ steps.dispatch-all-1.outputs.check_manifest }}
           WRITER_TERMINAL_ORDER: ${{ steps.dispatch-all-1.outputs.terminal_order_numbers }}
           COMPLETED_WRITER_RUN_IDS: ${{ format('[{0},{1}]', steps.dispatch-all-1.outputs.writer_run_id, steps.dispatch-all-2.outputs.writer_run_id) }}
@@ -3518,8 +3558,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.terminal-read-3.outputs.token }}
           WRITER_RUN_ID: ${{ steps.dispatch-all-3.outputs.writer_run_id }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           CONTINUATION_INDEX: '3'
           APP_BOT_LOGIN: ${{ vars.KRR_GOVERNANCE_APP_BOT_LOGIN }}
@@ -3609,13 +3649,13 @@ jobs:
         id: dispatch-all-4
         env:
           GH_TOKEN: ${{ steps.terminal-dispatch-4.outputs.token }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
-          WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
-          WRITER_ALL_OPEN_SNAPSHOTS: ${{ steps.current-targets.outputs.target_snapshots }}
-          WRITER_PRESERVED_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
-          PRESERVED_WRITER_RUN_ID: ${{ steps.dispatch-early.outputs.writer_run_id || '0' }}
+          WRITER_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.reconcile-all-open.outputs.target_snapshots }}
+          WRITER_PRESERVED_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
           WRITER_CHECK_MANIFEST: ${{ steps.dispatch-all-1.outputs.check_manifest }}
           WRITER_TERMINAL_ORDER: ${{ steps.dispatch-all-1.outputs.terminal_order_numbers }}
           COMPLETED_WRITER_RUN_IDS: ${{ format('[{0},{1},{2}]', steps.dispatch-all-1.outputs.writer_run_id, steps.dispatch-all-2.outputs.writer_run_id, steps.dispatch-all-3.outputs.writer_run_id) }}
@@ -3746,8 +3786,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.terminal-read-4.outputs.token }}
           WRITER_RUN_ID: ${{ steps.dispatch-all-4.outputs.writer_run_id }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           CONTINUATION_INDEX: '4'
           APP_BOT_LOGIN: ${{ vars.KRR_GOVERNANCE_APP_BOT_LOGIN }}

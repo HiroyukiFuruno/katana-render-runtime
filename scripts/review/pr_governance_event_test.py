@@ -737,7 +737,8 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
     def _github_if(expression: str, values: dict[str, str]) -> bool:
         """Evaluate the workflow condition using a strict, non-Python subset."""
         token_pattern = re.compile(
-            r"(?P<space>\s+)|(?P<operand>steps\.[A-Za-z0-9_-]+\.(?:outputs\.[A-Za-z0-9_-]+|outcome))|"
+            r"(?P<space>\s+)|(?P<operand>(?:steps\.[A-Za-z0-9_-]+\.(?:outputs\.[A-Za-z0-9_-]+|outcome)|"
+            r"needs\.[A-Za-z0-9_-]+\.outputs\.[A-Za-z0-9_-]+))|"
             r"(?P<string>'[^'\\]*')|(?P<operator>==|!=|&&|\|\||[!()])"
         )
         tokens: list[tuple[str, str]] = []
@@ -850,9 +851,11 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         values = {
             "steps.check.outputs.ready": "true",
             "steps.check.outcome": "success",
+            "needs.reconcile-all-open.outputs.has_targets": "true",
         }
         self.assertTrue(self._github_if("(steps.check.outputs.ready == 'true') && ! (steps.check.outcome != 'success')", values))
         self.assertFalse(self._github_if("steps.check.outputs.ready != 'true' || steps.check.outcome != 'success'", values))
+        self.assertTrue(self._github_if("needs.reconcile-all-open.outputs.has_targets == 'true'", values))
 
     def test_one_event_runs_one_arbiter_after_synchronous_invalidation(self) -> None:
         self.assertIn(
@@ -1004,7 +1007,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                     )
                     self.assertEqual(values["reconcile"], "true")
                     self.assertEqual(values["valid"], "false")
-                    self.assertEqual(values["priority"], "true")
+                    self.assertEqual(values["priority"], "false")
                     self.assertEqual(values["pull_request_target_noop"], "false")
                     self.assertEqual(values["issue_event_noop"], "false")
                     self.assertRegex(values["root_deadline_epoch"], r"[1-9][0-9]*")
@@ -1200,7 +1203,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         mismatched = execute([pr(number=72), pr(number=72)], f"https://api.github.com/repos/{repository}/pulls/72",)
         self.assertEqual(mismatched["reconcile"], "true")
         self.assertEqual(mismatched["valid"], "false")
-        self.assertEqual(mismatched["priority"], "true")
+        self.assertEqual(mismatched["priority"], "false")
         for label, source, expected in (("closed", pr(state="closed"), "false"), ("fork", pr(head_repo={"id": 202, "full_name": "fork/repository"}), "false"), ("non-default", pr(base_ref="release/v1"), "false"), ("local-default-open", pr(), "true")):
             with self.subTest(label=label):
                 result = execute([source, source], url)
@@ -1371,7 +1374,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                 # the reserved early lane; there is no terminal batch for a
                 # one-target snapshot.
                 self.assertIn(
-                    "WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}",
+                    "WRITER_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}",
                     self.workflow[self.workflow.index("Dispatch and bind the early event writer"):],
                 )
                 if selection["all_invalidation_targets"] == "[]":
@@ -2192,6 +2195,8 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             eligibility = self._github_if(dispatch_if, {
                 "steps.current-targets.outputs.has_targets": "true",
                 "steps.current-targets.outputs.has_duplicate_governed_heads": "true" if expected_returncode else "false",
+                "needs.reconcile-all-open.outputs.has_targets": "true",
+                "needs.reconcile-all-open.outputs.has_duplicate_governed_heads": "true" if expected_returncode else "false",
             })
             if expected_returncode:
                 self.assertFalse(eligibility)
@@ -2493,7 +2498,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             self.workflow.index("  reconcile-all-open:")
         ]
         self.assertIn(
-            "concurrency:\n      group: pr-governance-admission-${{ github.repository_id }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}",
+            "concurrency:\n      group: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && format('pr-governance-admission-sensor-{0}-{1}', github.repository_id, github.event.workflow_run.id) || format('pr-governance-admission-{0}', github.repository_id) }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}",
             resolver,
         )
         self.assertIn("reconcile: ${{ steps.targets.outputs.reconcile }}", resolver)
@@ -2627,7 +2632,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         def run_scope(
             run: dict[str, object], pull: dict[str, object] | None,
             expected_reconcile: str, expected_valid: str, mode: str = "",
-            expected_priority: str = "true", trigger_action: str = "completed",
+            expected_priority: str | None = None, trigger_action: str = "completed",
             source_attempt: str = "1", base_blob: str | None = None, head_blob: str | None = None,
             tip_blob: str | None = None, default_tip: str | None = None,
             final_tip: str | None = None, comparison: str | None = None,
@@ -2695,7 +2700,8 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                 values = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
                 self.assertEqual(values["reconcile"], expected_reconcile)
                 self.assertEqual(values["valid"], expected_valid)
-                self.assertEqual(values["priority"], expected_priority)
+                expected_priority_value = expected_priority or ("true" if expected_valid == "true" else "false")
+                self.assertEqual(values["priority"], expected_priority_value)
                 self.assertNotIn("\\n", output.read_text(encoding="utf-8"))
 
         def workflow_run(
@@ -2768,6 +2774,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             local_pull,
             "true",
             "false",
+            expected_priority="false",
             source_attempt="2",
         )
         for name in ("CI", "release-preflight"):
@@ -2803,15 +2810,14 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             workflow_run("CI", "pull_request"), advanced_base_pull,
             "true", "true", expected_priority="false", trigger_action="completed",
         )
-        # Unknown lifecycle metadata must retain preemption instead of silently
-        # joining the normal lane on an unverified source classification.
+        # Invalid source classifications fail closed without granting priority.
         run_scope(
             workflow_run("CI", "pull_request", "unknown"), local_pull,
-            "true", "false", expected_priority="true", trigger_action="completed",
+            "true", "false", expected_priority="false", trigger_action="completed",
         )
         run_scope(
             workflow_run("CI", "pull_request", "completed"), local_pull,
-            "true", "false", expected_priority="true", trigger_action="unknown",
+            "true", "false", expected_priority="false", trigger_action="unknown",
         )
 
         # A normal-lane classification is safe only after the same source
@@ -2835,7 +2841,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         )
         for label, run, pull, options in drift_cases:
             with self.subTest(source=label):
-                run_scope(run, pull, "true", "false", expected_priority="true", **options)
+                run_scope(run, pull, "true", "false", expected_priority="false", **options)
 
         # Ambiguous or malformed metadata arms the barrier but marks the
         # source invalid; the later fence must fail closed before resolution.
@@ -2941,7 +2947,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                 values = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
                 self.assertEqual(values["reconcile"], expected_reconcile)
                 self.assertEqual(values["valid"], expected_valid)
-                self.assertEqual(values["priority"], "true")
+                self.assertEqual(values["priority"], "true" if expected_valid == "true" else "false")
                 self.assertEqual(values["pull_request_target_noop"], "false")
                 self.assertEqual(run_reads, 2)
                 self.assertEqual(pull_reads, 2)
@@ -3041,7 +3047,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                 values = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
                 self.assertEqual(values["reconcile"], expected_reconcile)
                 self.assertEqual(values["valid"], expected_valid)
-                self.assertEqual(values["priority"], "true")
+                self.assertEqual(values["priority"], "true" if expected_valid == "true" else "false")
                 self.assertEqual(values["pull_request_target_noop"], "false")
                 expected_reads = 1 if label == "foreign-target-id-collision" else 2
                 self.assertEqual(run_reads, expected_reads)
@@ -3058,7 +3064,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         self.assertIsNotNone(scope_match); assert scope_match is not None
         preflight = self.workflow[
             self.workflow.index("  preflight-workflow-run-source:"):
-            self.workflow.index("  establish-resolver-failure-barrier:")
+            self.workflow.index("  arm-reserved-sensor-barrier:")
         ]
         self.assertIn("github.event_name != 'workflow_run'", preflight)
         self.assertIn("PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}", preflight)
@@ -3110,7 +3116,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                 values = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
                 self.assertEqual(values["reconcile"], expected_reconcile)
                 self.assertEqual(values["valid"], expected_valid)
-                self.assertEqual(values["priority"], "true")
+                self.assertEqual(values["priority"], "true" if expected_valid == "true" else "false")
                 self.assertEqual(values["pull_request_target_noop"], expected_pull_request_target_noop)
 
         run_scope("foreign-unchanged", {"full_name": "fork/repository", "name": "repository", "id": 202}, source_base, "false", "true", "true")
@@ -3222,7 +3228,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         self.assertNotIn("steps.targets.outputs.affected", self.workflow)
         self.assertIn("AFFECTED: ${{ steps.current-targets.outputs.all_invalidation_chunk_1 }}", self.workflow)
         self.assertIn("cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]' }}", self.workflow)
-        self.assertIn("WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}", self.workflow)
+        self.assertIn("WRITER_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}", self.workflow)
 
     def test_every_governance_snapshot_has_explicit_nullable_fork_boundary(self) -> None:
         """Every embedded snapshot program executes null-fork and malformed-shape cases."""
@@ -3849,11 +3855,11 @@ raise SystemExit(91)
             return self._workflow_program(match)
 
         source = program("Verify default-branch governance source before barrier credentials")
-        activate = program("Activate complete affected-head merge barrier")
+        activate = program("Activate resolver-failure merge barrier")
         release = program("Release complete affected-head merge barrier only after full pending coverage")
         marker = program("Publish periodic static affected-head barrier App marker")
         barrier = "KRR / PR governance affected-head barrier"; head, other = "a" * 40, "b" * 40
-        self.assertLess(self.workflow.index("Activate complete affected-head merge barrier"), self.workflow.index("Pre-invalidate priority event heads"))
+        self.assertLess(self.workflow.index("Activate resolver-failure merge barrier"), self.workflow.index("Pre-invalidate priority event heads"))
         self.assertLess(self.workflow.index("Release complete affected-head merge barrier only after full pending coverage"), self.workflow.index("Dispatch one repository-wide governance arbiter segment"))
         self.assertNotIn("required_status_checks\",\"--input\",\"-\"", self.workflow)
         self.assertIn("required_status_checks", activate)
@@ -3997,16 +4003,15 @@ raise SystemExit(91)
             common = {"GITHUB_REPOSITORY": "owner/repository", "GITHUB_SERVER_URL": "https://github.com", "PATH": os.environ["PATH"], "DEFAULT_BRANCH": "master", "DEFAULT_HEAD": head, "DISPATCHER_RUN_ID": "99", "CHECK_APP_ID": "4766933", "WORKFLOW_REF": "owner/repository/.github/workflows/pr-governance.yml@refs/heads/master", "WORKFLOW_SHA": head}
             self.assertEqual(execute(source, common | {"GH_TOKEN": "source"}), 0)
             self.assertEqual(execute(marker, common | {"CHECK_WRITE_TOKEN": "marker-write", "CHECK_READ_TOKEN": "marker-read"}), 0)
+            # establish is now the sole PATCH owner; reconcile only re-reads
+            # this App-bound context before invalidation.
             activate_env = common | {"ADMIN_TOKEN": "admin", "GITHUB_OUTPUT": str(output)}
-            self.assertEqual(execute(activate, activate_env | {"PRIORITY": "false"}), 0)
-            self.assertEqual(outputs(output)["active"], "false"); self.assertEqual(state["mutations"], [])
-            self.assertEqual(execute(activate, activate_env | {"PRIORITY": "true"}), 0)
+            self.assertEqual(execute(activate, activate_env), 0)
             self.assertEqual(state["mutations"], ["ACTIVATE"])
             old_success = {"CI / test"}
             self.assertNotEqual({item["context"] for item in protection_records()}, old_success, "atomic POST blocks old success before paced writes")
-            recovery = directory / "recovery"
-            self.assertEqual(execute(activate, activate_env | {"PRIORITY": "false", "GITHUB_OUTPUT": str(recovery)}), 0)
-            self.assertEqual(outputs(recovery)["active"], "true")
+            self.assertEqual(execute(activate, activate_env), 0)
+            self.assertEqual(state["mutations"], ["ACTIVATE"])
 
             def release_env(targets: str, snapshots: str, manifest_1: str, manifest_2: str = "[]", *, preserved_targets: str = "[]", preserved_manifest: str = "[]", preserved_writer_run_id: str = "0") -> dict[str, str]:
                 return common | {"READ_TOKEN": "read", "ADMIN_TOKEN": "admin", "TARGETS": targets, "TARGET_SNAPSHOTS": snapshots, "PRESERVED_TARGETS": preserved_targets, "PRESERVED_CHECK_MANIFEST": preserved_manifest, "PRESERVED_WRITER_RUN_ID": preserved_writer_run_id, "PRE_MANIFEST_1": manifest_1, "PRE_MANIFEST_2": manifest_2, "TAIL_MANIFEST_1": "[]", "TAIL_MANIFEST_2": "[]", "DUPLICATE_GOVERNED_HEADS": "[]"}
@@ -4035,7 +4040,7 @@ raise SystemExit(91)
             self.assertEqual(state["mutations"], ["ACTIVATE", "DELETE"])
             state["protection"] = json.loads(json.dumps(baseline)); state["mutations"] = []
             del early_manifest_checks[901]
-            self.assertEqual(execute(activate, activate_env | {"PRIORITY": "true"}), 0)
+            self.assertEqual(execute(activate, activate_env), 0)
             self.assertEqual(state["mutations"], ["ACTIVATE"])
 
             self.assertEqual(execute(release, release_env("[72,73]", f'[[72,"{head}",false],[73,"{other}",false]]', "[[72,801]]")), 1)
@@ -4149,7 +4154,7 @@ raise SystemExit(91)
         self.assertIn("posted[\"app\"].get(\"id\")!=app_id", marker_step)
 
         activate_match = re.search(
-            r"^      - name: Activate complete affected-head merge barrier\n(?P<body>.*?)(?=^      - name: )",
+            r"^      - name: Activate resolver-failure merge barrier\n(?P<body>.*?)(?=^      - name: )",
             self.workflow,
             re.MULTILINE | re.DOTALL,
         )
@@ -4159,22 +4164,33 @@ raise SystemExit(91)
         self.assertNotIn("required_status_checks/contexts", activate_step)
         self.assertRegex(activate_step, r'mutate\("(?:PUT|PATCH)"\)')
         self.assertIn('if matches==[(context,app_id)]', activate_step)
-        self.assertIn(
-            "steps.current-targets.outputs.has_preinvalidate_targets == 'true' || steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true'",
-            activate_step,
-        )
+        self.assertNotIn("PRIORITY:", activate_step)
 
         # Zero-target reconciliation must not manufacture a fresh marker or
         # mutate branch protection; priority is the only additional trigger.
         self.assertNotIn("steps.current-targets.outputs.has_preinvalidate_targets == 'false'", condition.group("value"))
-        self.assertLess(self.workflow.index("Publish periodic static affected-head barrier App marker"), self.workflow.index("Activate complete affected-head merge barrier"))
+        establish_start = self.workflow.index("  establish-resolver-failure-barrier:")
+        reconcile_start = self.workflow.index("  reconcile-all-open:")
+        release_start = self.workflow.index("  release-complete-affected-head-barrier:")
+        terminal_start = self.workflow.index("  terminal-all-open-writer:")
+        self.assertLess(establish_start, reconcile_start)
+        self.assertLess(reconcile_start, release_start)
+        self.assertLess(release_start, terminal_start)
+        establish_job = self.workflow[establish_start:reconcile_start]
+        reconcile_job = self.workflow[reconcile_start:release_start]
+        self.assertLess(
+            establish_job.index("- name: Activate resolver-failure merge barrier"),
+            establish_job.index("- name: Verify resolver-failure barrier source after activation"),
+        )
+        self.assertIn("- name: Verify established affected-head merge barrier for reconciliation", reconcile_job)
+        self.assertEqual(self.workflow.count("- name: Activate resolver-failure merge barrier"), 1)
 
     def test_app_bound_barrier_activation_updates_required_status_checks_fail_closed(self) -> None:
-        """Both activation paths must preserve the complete check binding atomically."""
+        """The sole activation path must preserve the complete check binding atomically."""
         barrier = "KRR / PR governance affected-head barrier"
         protection_endpoint = "repos/owner/repository/branches/master/protection"
         update_endpoint = protection_endpoint + "/required_status_checks"
-        activation_names = ("Activate resolver-failure merge barrier", "Activate complete affected-head merge barrier")
+        activation_names = ("Activate resolver-failure merge barrier",)
 
         def program(name: str) -> str:
             match = re.search(rf"- name: {re.escape(name)}.*?python3 - <<'PY'\n(.*?)\n          PY", self.workflow, re.DOTALL)
@@ -4355,11 +4371,11 @@ raise SystemExit(91)
         ]
         reconciler_job = self.workflow[self.workflow.index("  reconcile-all-open:"):]
         preflight_generation_lock = (
-            "concurrency:\n      group: pr-governance-admission-${{ github.repository_id }}\n"
-            "      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true' }}"
+            "concurrency:\n      group: pr-governance-barrier-admin-${{ github.repository_id }}\n"
+            "      queue: max\n      cancel-in-progress: false"
         )
         resolver_generation_lock = (
-            "concurrency:\n      group: pr-governance-admission-${{ github.repository_id }}\n"
+            "concurrency:\n      group: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && format('pr-governance-admission-sensor-{0}-{1}', github.repository_id, github.event.workflow_run.id) || format('pr-governance-admission-{0}', github.repository_id) }}\n"
             "      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}"
         )
         # Direct priority events only preempt their own admission or normal
@@ -4632,17 +4648,21 @@ raise SystemExit(91)
             return self._workflow_program(match)
 
         marker_name = "Publish periodic static affected-head barrier App marker"
-        activate_name = "Activate complete affected-head merge barrier"
+        activate_name = "Activate resolver-failure merge barrier"
         pre_names = (
             "Pre-invalidate priority event heads (first TTL-safe chunk)",
             "Pre-invalidate priority event heads (second TTL-safe chunk)",
         )
-        marker_position = self.workflow.index(f"- name: {marker_name}")
-        activate_position = self.workflow.index(f"- name: {activate_name}")
         pre_positions = [self.workflow.index(f"- name: {name}") for name in pre_names]
         drain_position = self.workflow.index("- name: Drain authoritative writer before the next governance hand-off")
-        self.assertLess(marker_position, activate_position)
-        self.assertLess(activate_position, pre_positions[0])
+        establish_start = self.workflow.index("  establish-resolver-failure-barrier:")
+        reconcile_start = self.workflow.index("  reconcile-all-open:")
+        establish_job = self.workflow[establish_start:reconcile_start]
+        reconcile_job = self.workflow[reconcile_start:self.workflow.index("  release-complete-affected-head-barrier:")]
+        self.assertIn(f"- name: {activate_name}", establish_job)
+        verify_position = self.workflow.index("- name: Verify established affected-head merge barrier for reconciliation")
+        self.assertIn("- name: Verify established affected-head merge barrier for reconciliation", reconcile_job)
+        self.assertLess(verify_position, pre_positions[0])
         self.assertLess(pre_positions[0], pre_positions[1])
         self.assertLess(pre_positions[1], drain_position)
 
@@ -4652,9 +4672,9 @@ raise SystemExit(91)
             "Create periodic affected-head barrier marker read token",
             marker_name,
             "Create affected-head barrier branch-protection token",
-            activate_name,
         ):
             self.assertIn("continue-on-error: true", step(name), name)
+        self.assertNotIn("continue-on-error: true", step(activate_name))
         fence_matches = list(re.finditer(
             r"^      - name: (?P<name>[^\n]*(?:fail|abort|fence)[^\n]*)\n(?P<body>.*?)(?=^      - name: |\Z)",
             self.workflow, re.MULTILINE | re.DOTALL | re.IGNORECASE,
@@ -4883,8 +4903,8 @@ raise SystemExit(91)
             sys.modules.pop(module_name, None)
 
     def test_invalidator_preempts_priority_dispatchers_and_paces_every_check_write(self) -> None:
-        admission_group = "group: pr-governance-admission-${{ github.repository_id }}"
-        self.assertEqual(self.workflow.count(admission_group), 2)
+        admission_group = "format('pr-governance-admission-sensor-{0}-{1}', github.repository_id, github.event.workflow_run.id)"
+        self.assertEqual(self.workflow.count(admission_group), 1)
         self.assertIn("pr-governance-review-sensor-{0}-{1}", self.workflow)
         self.assertIn("pr-governance-reconcile-{0}", self.workflow)
         establish = self.workflow[
@@ -4892,7 +4912,7 @@ raise SystemExit(91)
             self.workflow.index("  resolve_event:")
         ]
         self.assertIn(
-            "concurrency:\n      group: pr-governance-admission-${{ github.repository_id }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true' }}",
+            "concurrency:\n      group: pr-governance-barrier-admin-${{ github.repository_id }}\n      queue: max\n      cancel-in-progress: false",
             establish,
         )
         resolver = self.workflow[
@@ -4900,7 +4920,7 @@ raise SystemExit(91)
             self.workflow.index("  reconcile-all-open:")
         ]
         self.assertIn(
-            "concurrency:\n      group: pr-governance-admission-${{ github.repository_id }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}",
+            "concurrency:\n      group: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && format('pr-governance-admission-sensor-{0}-{1}', github.repository_id, github.event.workflow_run.id) || format('pr-governance-admission-{0}', github.repository_id) }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}",
             resolver,
         )
         self.assertIn(
@@ -4937,7 +4957,9 @@ raise SystemExit(91)
             self.workflow,
         )
         dispatcher_locks = [expression for expression in lock_expressions if "needs." in expression]
-        self.assertEqual(len(dispatcher_locks), 3)
+        # establish is now a non-preemptible short admin transaction; only
+        # resolve_event and reconcile retain direct-event cancellation.
+        self.assertEqual(len(dispatcher_locks), 2)
         for expression in dispatcher_locks:
             with self.subTest(expression=expression):
                 self.assertEqual(expression.count("github.event_name != 'workflow_run'"), 1)
@@ -4958,8 +4980,8 @@ raise SystemExit(91)
             self.workflow.index("  reconcile-all-open:")
         ]
         reconciler = self.workflow[self.workflow.index("  reconcile-all-open:"):]
-        self.assertIn("group: pr-governance-admission-${{ github.repository_id }}", establish)
-        self.assertIn("group: pr-governance-admission-${{ github.repository_id }}", resolver)
+        self.assertIn("group: pr-governance-barrier-admin-${{ github.repository_id }}", establish)
+        self.assertIn("format('pr-governance-admission-sensor-{0}-{1}', github.repository_id, github.event.workflow_run.id)", resolver)
         self.assertIn(
             "github.event.workflow_run.name == 'PR governance review sensor'",
             reconciler,
@@ -6004,7 +6026,7 @@ raise SystemExit(91)
             re.DOTALL,
         )
         self.assertIsNotNone(hold); assert hold is not None
-        activation = self.workflow.index("- name: Activate complete affected-head merge barrier")
+        activation = self.workflow.index("- name: Activate resolver-failure merge barrier")
         hold_position = self.workflow.index("- name: Hold global merge barrier for an oversized governed snapshot")
         dispatcher = self.workflow.index("- name: Create dispatcher App token after priority preinvalidation")
         self.assertLess(activation, hold_position)
@@ -6209,15 +6231,12 @@ raise SystemExit(91)
         marker_condition = "(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.current-targets.outputs.has_preinvalidate_targets == 'true' || steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true') && steps.barrier-source.outcome == 'success'"
         self.assertEqual(self.workflow.count(marker_condition), 3)
         activation_match = re.search(
-            r"^      - name: Activate complete affected-head merge barrier\n(?P<body>.*?)(?=^      - name: )",
+            r"^      - name: Activate resolver-failure merge barrier\n(?P<body>.*?)(?=^      - name: )",
             self.workflow,
             re.MULTILINE | re.DOTALL,
         )
         self.assertIsNotNone(activation_match); assert activation_match is not None
-        self.assertIn(
-            "PRIORITY: ${{ steps.current-targets.outputs.has_preinvalidate_targets == 'true' || steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true' }}",
-            activation_match.group("body"),
-        )
+        self.assertNotIn("PRIORITY:", activation_match.group("body"))
 
         total = 600
         heads = {number: f"{number:040x}" for number in range(1, total + 1)}

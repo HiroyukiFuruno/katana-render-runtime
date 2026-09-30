@@ -793,7 +793,7 @@ class GovernanceDispatcherFailClosedContractTest(unittest.TestCase):
             values = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
             self.assertEqual(values["reconcile"], "true")
             self.assertEqual(values["valid"], "false")
-            self.assertEqual(values["priority"], "true")
+            self.assertEqual(values["priority"], "false")
             self.assertEqual(values["pull_request_target_noop"], "false")
             self.assertEqual(values["issue_event_noop"], "false")
             self.assertRegex(values["root_deadline_epoch"], r"^[1-9][0-9]*$")

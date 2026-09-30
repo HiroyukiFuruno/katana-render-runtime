@@ -146,7 +146,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
     def assert_fail_closed(self, result: dict[str, str]) -> None:
         self.assertEqual(result["valid"], "false")
         self.assertEqual(result["reconcile"], "true")
-        self.assertEqual(result["priority"], "true")
+        self.assertEqual(result["priority"], "false")
         self.assertEqual(result["issue_event_noop"], "false")
 
     def test_issue_source_loader_failures_arm_the_resolver_barrier(self) -> None:
@@ -403,6 +403,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
             ]}],
         }, direct_priority_fence=True)
         self.assertEqual(result["valid"], "false")
+        self.assertEqual(result["priority"], "false")
 
     def test_absent_sensor_keeps_direct_event_preemption(self) -> None:
         sensor_endpoint = (
@@ -419,6 +420,18 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         self.assertEqual(result["priority"], "true")
         self.assertEqual(result["sensor_reservation"], "false")
         self.assertEqual(result["sensor_run_ids"], "[]")
+
+    def test_invalid_direct_source_never_preempts_active_sensors(self) -> None:
+        for event_name in ("issues", "issue_comment"):
+            with self.subTest(event_name=event_name):
+                result = self.execute(
+                    event_name=event_name,
+                    responses={f"repos/{REPOSITORY}": [False]},
+                    direct_priority_fence=True,
+                )
+                self.assertEqual(result["valid"], "false")
+                self.assertEqual(result["reconcile"], "true")
+                self.assertEqual(result["priority"], "false")
 
     def test_malformed_pr_fields_cannot_be_mistaken_for_a_noop(self) -> None:
         malformed = (
