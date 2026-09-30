@@ -83,7 +83,8 @@ impl SourceOrderSink {
     fn observe_select_state(&self, tag: &Tag) {
         let name = tag.name.to_string();
         if tag.kind == TagKind::StartTag && name.eq_ignore_ascii_case("select") {
-            self.select_depth.set(self.select_depth.get() + 1);
+            /* WHY: HTML parserは入れ子のselect開始時に先行selectを暗黙に閉じる。 */
+            self.select_depth.set(1);
         } else if tag.kind == TagKind::EndTag && name.eq_ignore_ascii_case("select") {
             self.select_depth
                 .set(self.select_depth.get().saturating_sub(1));

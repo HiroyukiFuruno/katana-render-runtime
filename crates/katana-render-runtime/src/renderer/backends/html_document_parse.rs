@@ -161,6 +161,17 @@ mod tests {
     }
 
     #[test]
+    fn iframe_after_closed_nested_select_keeps_source_order() {
+        let document = HtmlDocument::parse(
+            r#"<select><select></select><iframe></iframe><script>afterSelect()</script><body onload="handler"><iframe></iframe>"#,
+        );
+
+        assert_eq!(document.body_onload_script_index(), Some(1));
+        assert_eq!(document.body_onload_source_order_index, Some(2));
+        assert_eq!(document.source_order.len(), 3);
+    }
+
+    #[test]
     fn iframe_after_ignored_select_iframe_keeps_parser_order() {
         let document = HtmlDocument::parse(
             r#"<select><iframe></iframe></select><script>afterSelect()</script><body onload="handler"><iframe id=real>"#,
