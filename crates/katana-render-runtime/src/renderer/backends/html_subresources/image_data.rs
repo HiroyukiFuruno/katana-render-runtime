@@ -111,7 +111,19 @@ fn sniff_media_type(bytes: &[u8]) -> Option<&'static str> {
 }
 
 fn looks_like_svg(bytes: &[u8]) -> bool {
-    bytes.windows(b"<svg".len()).any(|window| window == b"<svg")
+    bytes
+        .windows(1)
+        .enumerate()
+        .filter_map(|(index, pair)| (pair == b"<").then_some(&bytes[index + 1..]))
+        .any(|remaining| {
+            let name_end = remaining
+                .iter()
+                .position(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n' | b'/' | b'>'))
+                .unwrap_or(remaining.len());
+            let qualified_name = &remaining[..name_end];
+            qualified_name == b"svg"
+                || qualified_name.split(|byte| *byte == b':').next_back() == Some(&b"svg"[..])
+        })
 }
 
 fn is_webp(bytes: &[u8], riff_signature: &[u8], webp_signature: &[u8]) -> bool {
@@ -305,6 +317,18 @@ mod tests {
             ),
             Ok("image/svg+xml")
         );
+    }
+
+    #[test]
+    fn sniffed_namespace_prefixed_svg_root_is_fully_validated() {
+        assert_eq!(
+            resolve_media_type(
+                None,
+                br#"<?xml version="1.0"?><x:svg xmlns:x="http://www.w3.org/2000/svg"/>"#
+            ),
+            Ok("image/svg+xml")
+        );
+        assert!(resolve_media_type(None, br#"<x:svg xmlns:x="urn:not-svg"/>"#).is_err());
     }
 
     fn png_header_with_dimensions(width: u32, height: u32) -> Vec<u8> {

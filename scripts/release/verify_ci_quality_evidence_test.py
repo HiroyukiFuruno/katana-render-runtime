@@ -143,7 +143,7 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
             head_ref=HEAD_REF,
         )
         self.assertEqual(result["run_id"], str(RUN_ID))
-        self.assertEqual(fetcher.calls.count(WORKFLOW_RUNS_PATH), 2)
+        self.assertEqual(fetcher.calls.count(WORKFLOW_RUNS_PATH), 4)
         self.assertFalse(any("actions/workflows" in path and "page=2" in path for path in fetcher.calls))
 
     def test_accepts_exact_same_head_quality_evidence(self) -> None:
@@ -162,10 +162,48 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
             head_ref=HEAD_REF,
         )
         pull_path = "repos/owner/repository/pulls/90"
-        self.assertEqual(fetcher.calls[-2:], [pull_path, pull_path])
+        self.assertEqual(fetcher.calls[-4:-2], [pull_path, pull_path])
         self.assertLess(
             fetcher.calls.index("repos/owner/repository/actions/runs/123/jobs?per_page=100&page=1"),
             len(fetcher.calls) - 2,
+        )
+
+    def test_final_fence_rejects_new_generation_after_job_verification(self) -> None:
+        for rerun in (False, True):
+            for status, conclusion, error_type, message in (
+                ("in_progress", None, MODULE.EvidencePendingError, "still in progress"),
+                ("completed", "failure", MODULE.EvidenceError, "completed unsuccessfully"),
+                ("completed", "success", MODULE.EvidencePendingError, "generation changed"),
+            ):
+                with self.subTest(rerun=rerun, status=status, conclusion=conclusion):
+                    responses = payloads()
+                    initial = responses[WORKFLOW_RUNS_PATH]
+                    final = copy.deepcopy(initial)
+                    newer = copy.deepcopy(final["workflow_runs"][0])
+                    newer.update(status=status, conclusion=conclusion)
+                    if rerun:
+                        newer["run_attempt"] += 1
+                        final["workflow_runs"] = [newer]
+                    else:
+                        newer["id"] += 1
+                        final["workflow_runs"].append(newer)
+                        final["total_count"] += 1
+                    responses[WORKFLOW_RUNS_PATH] = [initial, initial, final, final]
+                    with self.assertRaisesRegex(error_type, message):
+                        self.verify(responses)
+
+    def test_final_fence_reads_generation_after_artifact_and_jobs(self) -> None:
+        responses = payloads()
+        fetcher = SequenceFetcher(responses)
+        MODULE.verify_quality_evidence(
+            fetcher, fetcher, repository=REPOSITORY, pull_request=90,
+            base_sha=BASE, head_sha=HEAD, head_ref=HEAD_REF,
+        )
+        self.assertEqual(fetcher.calls[-2:], [WORKFLOW_RUNS_PATH, WORKFLOW_RUNS_PATH])
+        self.assertLess(fetcher.calls.index(ARTIFACT_URL), len(fetcher.calls) - 4)
+        self.assertLess(
+            max(index for index, path in enumerate(fetcher.calls) if "/jobs?" in path),
+            len(fetcher.calls) - 4,
         )
 
     def test_rejects_changed_second_read(self) -> None:
