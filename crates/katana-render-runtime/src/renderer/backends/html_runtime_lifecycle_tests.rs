@@ -151,6 +151,16 @@ window.onload = () => { document.getElementById('status').textContent = `${docum
 }
 
 #[test]
+fn dispatches_scriptless_body_onload() -> TestResult {
+    let output = render(
+        r#"<body onload="document.getElementById('status').textContent = 'body-load'"><p id=status>waiting</p></body>"#,
+    )?;
+
+    assert!(output.contains(">body-load</p>"), "{output}");
+    Ok(())
+}
+
+#[test]
 fn body_onload_overrides_a_head_script_in_parser_order() -> TestResult {
     let output = render(
         r#"<head><script>window.onload = () => { document.getElementById('status').textContent = 'head'; };</script></head><body onload="document.getElementById('status').textContent = 'body'"><p id=status></p></body>"#,
