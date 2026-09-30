@@ -25,6 +25,8 @@ SPEC.loader.exec_module(WRITER)
 class StatusWriterUnitTest(unittest.TestCase):
     def setUp(self) -> None:
         WRITER._nonreconciling_dispatcher_generations.clear()
+        WRITER._verified_sensor_sources.clear()
+        self.addCleanup(WRITER._verified_sensor_sources.clear)
         self.addCleanup(WRITER._nonreconciling_dispatcher_generations.clear)
         self.dispatch_boundary = patch.dict(
             os.environ,
@@ -706,6 +708,162 @@ class StatusWriterUnitTest(unittest.TestCase):
             jobs["jobs"][-1]["steps"][0].update({"status": "completed", "conclusion": "failure"})
             with self.assertRaises(WRITER.NoPostGovernanceError):
                 WRITER.reject_newer_dispatcher_barrier("a" * 40)
+
+    def reserved_sensor_fence(self):
+        current = self.dispatcher_run(event="workflow_run")
+        newer = self.dispatcher_run(89, event="issues", created_at="2026-08-30T00:00:01Z")
+        own_jobs = self.dispatcher_jobs()
+        own_jobs["jobs"][0]["steps"] = [{
+            "number": 1, "name": "Record verified review sensor source run 900",
+            "status": "completed", "conclusion": "success",
+        }]
+        newer_jobs = self.dispatcher_jobs(barrier_status="queued", barrier_conclusion=None)
+        newer_jobs["jobs"][0]["steps"] = [{
+            "number": 1, "name": "Record verified review sensor reservation IDs [900]",
+            "status": "completed", "conclusion": "success",
+        }]
+        newer_jobs["jobs"].extend([
+            {"id": 3, "name": "Arm barrier before reserved review sensors", "status": "completed", "conclusion": "success", "steps": []},
+            {"id": 4, "name": "Preserve pending review sensor before direct dispatch", "status": "in_progress", "conclusion": None, "steps": []},
+        ])
+        newer_jobs["total_count"] = len(newer_jobs["jobs"])
+        source = self.generation()
+        source.update({"name": "PR governance review sensor", "path": ".github/workflows/pr-governance-review-events.yml@master", "status": "in_progress", "conclusion": None})
+        pull = self.pull(72)
+        pull["base"]["repo"] = self.rest_repository()
+        pull["head"]["repo"] = self.rest_repository()
+
+        def api(endpoint, **_kwargs):
+            return {"repos/owner/repository/actions/runs/88": current,
+                    "repos/owner/repository/actions/runs/900": source,
+                    "repos/owner/repository/pulls/72": pull}[endpoint]
+
+        def page(endpoint, **_kwargs):
+            if "/actions/workflows/" in endpoint:
+                return self.dispatcher_page(current, newer)
+            return own_jobs if "/runs/88/jobs?" in endpoint else newer_jobs
+        return api, page, newer_jobs, own_jobs, source, pull
+
+    def test_reserved_sensor_early_writer_can_finish_before_newer_direct_wait(self) -> None:
+        api, page, *_ = self.reserved_sensor_fence()
+        with self.identity(), patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master", "GOVERNANCE_SCOPE": "early"}), \
+             patch.object(WRITER, "api_json", side_effect=api), patch.object(WRITER, "object_page", side_effect=page):
+            WRITER.reject_newer_dispatcher_barrier("a" * 40)
+
+    def test_reserved_sensor_exception_rejects_changed_or_untrusted_boundaries(self) -> None:
+        cases = ("all", "unreserved", "duplicate IDs", "noncanonical IDs", "bool ID", "huge ID", "too many IDs", "truncated IDs", "oversize marker", "duplicate marker", "arm failure", "arm cancelled", "wait success", "wait failure", "wait cancelled", "resolver started", "resolver succeeded", "resolve started", "reconcile started", "preflight failed", "source marker failed", "duplicate source marker", "source rerun", "source foreign", "source failed", "source wrong head", "current Draft", "current wrong head", "incomplete jobs", "bool step number", "source skipped", "source missing", "reservation skipped", "reservation missing", "source API failure", "source head repository conflict")
+        for case in cases:
+            WRITER._verified_sensor_sources.clear()
+            api, page, jobs, own, source, pull = self.reserved_sensor_fence()
+            environment = {"GITHUB_ACTIONS": "true", "GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master", "GOVERNANCE_SCOPE": "early"}
+            marker = jobs["jobs"][0]["steps"][0]
+            if case == "all": environment["GOVERNANCE_SCOPE"] = "all"
+            wires = {"unreserved": "[901]", "duplicate IDs": "[900,900]", "noncanonical IDs": "[900, 901]", "bool ID": "[true]", "huge ID": "[9223372036854775808]", "too many IDs": json.dumps(list(range(201)), separators=(",", ":")), "truncated IDs": "[900", "oversize marker": "[900]" + " " * 8192}
+            if case in wires: marker["name"] = "Record verified review sensor reservation IDs " + wires[case]
+            if case == "duplicate marker": jobs["jobs"][0]["steps"].append(dict(marker, number=2))
+            if case.startswith("arm "): jobs["jobs"][2].update(status="completed", conclusion=case.split()[1])
+            if case.startswith("wait "): jobs["jobs"][3].update(status="completed", conclusion=case.split()[1])
+            if case.startswith("resolver "): jobs["jobs"][1].update(status="in_progress" if case.endswith("started") else "completed", conclusion=None if case.endswith("started") else "success")
+            if case in {"resolve started", "reconcile started"}:
+                jobs["jobs"].append({"id": 5, "name": WRITER.RESOLVE_EVENT_NAME if case.startswith("resolve") else WRITER.RECONCILE_ALL_OPEN_NAME, "status": "in_progress", "conclusion": None, "steps": []})
+                jobs["total_count"] += 1
+            if case == "preflight failed": jobs["jobs"][0]["conclusion"] = "failure"
+            if case == "source marker failed": own["jobs"][0]["steps"][0]["conclusion"] = "failure"
+            if case == "duplicate source marker": own["jobs"][0]["steps"].append(dict(own["jobs"][0]["steps"][0], number=2))
+            if case == "source rerun": source["run_attempt"] = 2
+            if case == "source foreign": source["repository"]["id"] = 102
+            if case == "source head repository conflict": source["head_repository"] = self.rest_repository(102)
+            if case == "source failed": source.update(status="completed", conclusion="failure")
+            if case == "source wrong head": source["head_sha"] = "f" * 40
+            if case == "current Draft": pull["draft"] = True
+            if case == "current wrong head": pull["head"]["sha"] = "f" * 40
+            if case == "incomplete jobs": jobs["total_count"] += 1
+            if case == "bool step number": marker["number"] = True
+            if case == "source skipped": own["jobs"][0]["steps"][0]["conclusion"] = "skipped"
+            if case == "source missing": own["jobs"][0]["steps"] = []
+            if case == "reservation skipped": marker["conclusion"] = "skipped"
+            if case == "reservation missing": jobs["jobs"][0]["steps"] = []
+            if case == "source API failure":
+                source_api = api
+                def api(endpoint, **kwargs):
+                    if endpoint.endswith("/900"):
+                        raise WRITER.GovernanceError("Source API unavailable")
+                    return source_api(endpoint, **kwargs)
+            with self.subTest(case=case), self.identity(), patch.dict(os.environ, environment), \
+                 patch.object(WRITER, "api_json", side_effect=api), patch.object(WRITER, "object_page", side_effect=page):
+                with self.assertRaises(WRITER.NoPostGovernanceError):
+                    WRITER.reject_newer_dispatcher_barrier("a" * 40)
+
+    def test_reserved_sensor_identity_cache_retains_mutable_wait_fence(self) -> None:
+        api, page, jobs, *_ = self.reserved_sensor_fence()
+        with self.identity(), patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master", "GOVERNANCE_SCOPE": "early"}), \
+             patch.object(WRITER, "api_json", side_effect=api) as reads, patch.object(WRITER, "object_page", side_effect=page) as pages:
+            WRITER.reject_newer_dispatcher_barrier("a" * 40)
+            WRITER.reject_newer_dispatcher_barrier("a" * 40)
+            self.assertEqual(sum(call.args[0].endswith("/900") for call in reads.call_args_list), 1)
+            self.assertEqual(sum("/pulls/72" in call.args[0] for call in reads.call_args_list), 1)
+            self.assertEqual(sum("/runs/88/jobs?" in call.args[0] for call in pages.call_args_list), 1)
+            jobs["jobs"][3].update(status="completed", conclusion="success")
+            with self.assertRaises(WRITER.NoPostGovernanceError):
+                WRITER.reject_newer_dispatcher_barrier("a" * 40)
+
+    def test_all_and_direct_scopes_do_not_read_source_or_active_issue_jobs(self) -> None:
+        for scope, event in (("all", "workflow_run"), ("early", "issues"), ("early", "issue_comment"), ("early", "pull_request_target")):
+            api, page, *_ = self.reserved_sensor_fence()
+            def direct_api(endpoint, **kwargs):
+                value = api(endpoint, **kwargs)
+                return dict(value, event=event) if endpoint.endswith("/88") else value
+            with self.subTest(scope=scope, event=event), self.identity(), patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master", "GOVERNANCE_SCOPE": scope}), \
+                 patch.object(WRITER, "api_json", side_effect=direct_api) as reads, patch.object(WRITER, "object_page", side_effect=page) as pages:
+                with self.assertRaises(WRITER.NoPostGovernanceError):
+                    WRITER.reject_newer_dispatcher_barrier("a" * 40)
+                self.assertEqual(len(reads.call_args_list), 1)
+                self.assertFalse(any("/jobs?" in call.args[0] for call in pages.call_args_list))
+
+    def test_direct_reservation_materialization_uses_one_shared_sixty_second_budget(self) -> None:
+        api, page, jobs, *_ = self.reserved_sensor_fence()
+        jobs["jobs"][0].update(status="in_progress", conclusion=None)
+        clock = [0.0]
+        def sleep(seconds):
+            clock[0] += seconds
+        with self.identity(), patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master", "GOVERNANCE_SCOPE": "early"}), \
+             patch.object(WRITER, "api_json", side_effect=api), patch.object(WRITER, "object_page", side_effect=page), \
+             patch.object(WRITER, "_dispatcher_admission_evidence_wait_remaining", None), \
+             patch.object(WRITER, "_terminal_deadline_monotonic", None), \
+             patch.object(WRITER.time, "monotonic", side_effect=lambda: clock[0]), \
+             patch.object(WRITER.time, "sleep", side_effect=sleep) as sleeps:
+            with self.assertRaises(WRITER.NoPostGovernanceError):
+                WRITER.reject_newer_dispatcher_barrier("a" * 40)
+            self.assertEqual(clock[0], 60)
+            self.assertEqual(sleeps.call_count, 12)
+            with self.assertRaises(WRITER.NoPostGovernanceError):
+                WRITER.reject_newer_dispatcher_barrier("a" * 40)
+            self.assertEqual(sleeps.call_count, 12)
+
+    def test_direct_reservation_arm_wait_materialization_and_failure_boundaries(self) -> None:
+        generation = WRITER.DispatcherGeneration(89, WRITER.dispatcher_created_at("2026-08-30T00:00:01Z"), "issues", 66, "in_progress", None)
+        for case in ("arm absent", "arm queued", "wait absent", "wait queued"):
+            _, _, jobs, *_ = self.reserved_sensor_fence()
+            if case.endswith("absent"):
+                jobs["jobs"].pop(2 if case.startswith("arm") else 3)
+                jobs["total_count"] -= 1
+            else:
+                jobs["jobs"][2 if case.startswith("arm") else 3].update(status="queued", conclusion=None)
+            with self.subTest(case=case), self.identity(), patch.object(WRITER, "object_page", return_value=jobs):
+                if case == "wait queued":
+                    self.assertFalse(WRITER.dispatcher_generation_reconciles(generation, early_source_run_id=900))
+                else:
+                    with self.assertRaises(WRITER.DispatcherAdmissionPending):
+                        WRITER.dispatcher_generation_reconciles(generation, early_source_run_id=900)
+
+    def test_reservation_marker_accepts_existing_two_hundred_int64_ids(self) -> None:
+        api, page, jobs, *_ = self.reserved_sensor_fence()
+        ids = [900] + list(range(WRITER.MAX_ACTIONS_RUN_ID - 198, WRITER.MAX_ACTIONS_RUN_ID + 1))
+        jobs["jobs"][0]["steps"][0]["name"] = "Record verified review sensor reservation IDs " + json.dumps(ids, separators=(",", ":"))
+        self.assertEqual(len(ids), 200)
+        with self.identity(), patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master", "GOVERNANCE_SCOPE": "early"}), \
+             patch.object(WRITER, "api_json", side_effect=api), patch.object(WRITER, "object_page", side_effect=page):
+            WRITER.reject_newer_dispatcher_barrier("a" * 40)
 
     def test_dispatcher_fence_rejects_malformed_paginated_or_api_evidence(self) -> None:
         head = "a" * 40

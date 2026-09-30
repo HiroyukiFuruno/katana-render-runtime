@@ -42,7 +42,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
 
     @staticmethod
     def repository(default_branch: object = "master", identifier: object = REPOSITORY_ID) -> dict[str, object]:
-        return {"id": identifier, "full_name": REPOSITORY, "default_branch": default_branch}
+        return {"id": identifier, "name": REPOSITORY.split("/", 1)[1], "url": f"https://api.github.com/repos/{REPOSITORY}", "full_name": REPOSITORY, "default_branch": default_branch}
 
     @staticmethod
     def pull(
@@ -57,12 +57,12 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         draft: object = False,
     ) -> dict[str, object]:
         if head_repo is None:
-            head_repo = {"id": REPOSITORY_ID, "full_name": REPOSITORY}
+            head_repo = GovernancePreflightIdentityTest.repository()
         return {
             "number": number,
             "state": state,
             "draft": draft,
-            "base": {"ref": base_ref, "sha": base_sha, "repo": base_repo or {"id": REPOSITORY_ID, "full_name": REPOSITORY}},
+            "base": {"ref": base_ref, "sha": base_sha, "repo": base_repo or GovernancePreflightIdentityTest.repository()},
             "head": {"sha": head_sha, "repo": head_repo},
         }
 
@@ -449,6 +449,47 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         self.assertEqual(result["sensor_reservation"], "true")
         self.assertEqual(result["sensor_run_ids"], "[17]")
 
+    def test_active_sensor_accepts_canonical_rest_summary(self) -> None:
+        for path in (".github/workflows/pr-governance-review-events.yml", ".github/workflows/pr-governance-review-events.yml@refs/heads/master"):
+            with self.subTest(path=path):
+                summary = {"id": REPOSITORY_ID, "name": REPOSITORY.split("/", 1)[1], "url": f"https://api.github.com/repos/{REPOSITORY}"}
+                sensor = {"id": 17, "name": "PR governance review sensor", "event": "pull_request_review", "status": "queued", "run_attempt": 1,
+                          "path": path, "repository": self.repository(), "head_repository": self.repository(),
+                          "pull_requests": [{"number": NUMBER, "base": {"ref": "master", "repo": summary}, "head": {"sha": HEAD, "repo": summary}}]}
+                prefix = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+                result = self.execute(responses={
+                    PR_ENDPOINT: [self.pull(), self.pull()],
+                    prefix + "status=queued&per_page=100&page=1": [{"total_count": 1, "workflow_runs": [sensor]}],
+                    prefix + "status=in_progress&per_page=100&page=1": [{"total_count": 0, "workflow_runs": []}],
+                }, direct_priority_fence=True)
+                self.assertEqual(result["valid"], "true")
+                self.assertEqual(result["sensor_reservation"], "true")
+                self.assertEqual(result["sensor_run_ids"], "[17]")
+
+    def test_active_sensor_rejects_noncanonical_rest_and_typed_attempt(self) -> None:
+        prefix = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+        for bad in ("host", "query", "trailing", "name", "full_name", "owner", "html_url", "id", "attempt", "cross_id", "run_id", "path"):
+            with self.subTest(bad=bad):
+                summary = {"id": REPOSITORY_ID, "name": REPOSITORY.split("/", 1)[1], "url": f"https://api.github.com/repos/{REPOSITORY}"}
+                sensor = {"id": 17, "name": "PR governance review sensor", "event": "pull_request_review", "status": "queued", "run_attempt": 1,
+                          "path": ".github/workflows/pr-governance-review-events.yml@refs/heads/master",
+                          "repository": self.repository(), "head_repository": self.repository(),
+                          "pull_requests": [{"number": NUMBER, "base": {"ref": "master", "repo": summary}, "head": {"sha": HEAD, "repo": summary}}]}
+                mutations = {"host": (summary, "url", f"https://api.github.com.evil/repos/{REPOSITORY}"),
+                             "query": (summary, "url", summary["url"] + "?x=1"), "trailing": (summary, "url", summary["url"] + "/"),
+                             "name": (summary, "name", "other"), "full_name": (summary, "full_name", "other/repository"),
+                             "owner": (summary, "owner", {"login": "other"}), "html_url": (summary, "html_url", "https://github.com/other/repository"),
+                             "id": (summary, "id", True), "attempt": (sensor, "run_attempt", True),
+                             "cross_id": (summary, "id", REPOSITORY_ID + 1), "run_id": (sensor, "id", 2**63), "path": (sensor, "path", ".github/workflows/pr-governance-review-events.yml@refs/heads/master?x=1")}
+                value, key, replacement = mutations[bad]
+                value[key] = replacement
+                result = self.execute(responses={PR_ENDPOINT: [self.pull(), self.pull()],
+                    prefix + "status=queued&per_page=100&page=1": [{"total_count": 1, "workflow_runs": [sensor]}],
+                    prefix + "status=in_progress&per_page=100&page=1": [{"total_count": 0, "workflow_runs": []}],
+                }, direct_priority_fence=True)
+                self.assertEqual(result["valid"], "false")
+                self.assertEqual(result["priority"], "false")
+
     def test_all_in_scope_sensors_are_reserved(self) -> None:
         sensor_endpoint = (
             f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
@@ -485,7 +526,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
             f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
             "status=queued&per_page=100&page=1"
         )
-        foreign = {"id": 202, "full_name": "fork/repository"}
+        foreign = {"id": 202, "name": "repository", "url": "https://api.github.com/repos/fork/repository", "full_name": "fork/repository"}
         sensor = {
             "total_count": 1,
             "workflow_runs": [{

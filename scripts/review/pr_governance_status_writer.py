@@ -71,6 +71,14 @@ RESOLVER_FAILURE_BARRIER_NAME = "Establish resolver-failure merge barrier"
 PREFLIGHT_PULL_REQUEST_TARGET_NOOP_STEP_NAME = "Record verified pull_request_target preflight no-op"
 PREFLIGHT_ISSUE_NOOP_STEP_NAME = "Record verified Issue preflight no-op"
 REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME = "Record review sensor staged early admission"
+REVIEW_SENSOR_SOURCE_STEP_PREFIX = "Record verified review sensor source run "
+REVIEW_SENSOR_RESERVATION_STEP_PREFIX = "Record verified review sensor reservation IDs "
+RESERVED_SENSOR_ARM_NAME = "Arm barrier before reserved review sensors"
+RESERVED_SENSOR_WAIT_NAME = "Preserve pending review sensor before direct dispatch"
+RESOLVE_EVENT_NAME = "Resolve relevant governance event"
+MAX_RESERVED_SENSOR_IDS = 200
+MAX_SENSOR_MARKER_BYTES = 8192
+MAX_ACTIONS_RUN_ID = (1 << 63) - 1
 RECONCILE_ALL_OPEN_NAME = "Reconcile all current governance pull requests"
 AWAIT_EARLY_WRITER_STEP_NAME = "Await the bound early event writer before all-open invalidation"
 ADMISSION_EVIDENCE_WAIT_SECONDS = 60
@@ -133,6 +141,7 @@ _bound_check_ids_by_number: dict[int, int] = {}
 # all-open writer.  Retain only the fully validated immutable identity; active
 # or otherwise untrusted observations never enter this cache.
 _nonreconciling_dispatcher_generations: dict[int, DispatcherGeneration] = {}
+_verified_sensor_sources: dict[tuple[int, str], int | None] = {}
 _INVALID_REPOSITORY_IDENTITY = object()
 _active_initial_evidence_deadline: float | None = None
 _terminal_deadline_monotonic: float | None = None
@@ -645,7 +654,90 @@ def dispatcher_generation_is_newer(
     )
 
 
-def dispatcher_generation_reconciles(generation: DispatcherGeneration) -> bool:
+def dispatcher_jobs(generation: DispatcherGeneration) -> list[dict[str, Any]]:
+    page = object_page(f"repos/{REPOSITORY}/actions/runs/{generation.identifier}/jobs?per_page=100")
+    jobs, count = page.get("jobs"), page.get("total_count")
+    if (not isinstance(jobs, list) or not all(isinstance(job, dict) for job in jobs)
+        or type(count) is not int or count != len(jobs) or count >= MAX_DISPATCHER_FENCE_RUNS
+        or any(type(job.get("id")) is not int or job["id"] < 1 for job in jobs)
+        or len({job["id"] for job in jobs}) != len(jobs)):
+        raise GovernanceError("Dispatcher reconciliation evidence is invalid.")
+    return jobs
+
+
+def sensor_identity_marker(job: dict[str, Any], prefix: str) -> dict[str, Any] | None:
+    steps = job.get("steps")
+    if not isinstance(steps, list) or not all(isinstance(step, dict) for step in steps):
+        raise GovernanceError("Dispatcher sensor identity steps are invalid.")
+    matches = [step for step in steps if isinstance(step.get("name"), str) and step["name"].startswith(prefix)]
+    if len(matches) > 1:
+        raise GovernanceError("Dispatcher sensor identity marker is ambiguous.")
+    if not matches:
+        return None
+    marker = matches[0]
+    try:
+        valid_wire = len(marker["name"].encode("utf-8", "strict")) <= MAX_SENSOR_MARKER_BYTES
+    except UnicodeError as error:
+        raise GovernanceError("Dispatcher sensor identity marker is invalid.") from error
+    if (not valid_wire or type(marker.get("number")) is not int or marker["number"] < 1
+        or marker.get("status") != "completed" or marker.get("conclusion") not in {"success", "skipped"}):
+        raise GovernanceError("Dispatcher sensor identity marker is not successful.")
+    return marker if marker["conclusion"] == "success" else None
+
+
+def verified_early_sensor_source(generation: DispatcherGeneration, head: str) -> int | None:
+    key = (generation.identifier, head)
+    if key in _verified_sensor_sources:
+        return _verified_sensor_sources[key]
+    jobs = dispatcher_jobs(generation)
+    preflights = [job for job in jobs if job.get("name") == PREFLIGHT_WORKFLOW_RUN_SOURCE_NAME]
+    if len(preflights) != 1 or preflights[0].get("status") != "completed" or preflights[0].get("conclusion") != "success":
+        raise GovernanceError("Sensor dispatcher preflight proof is invalid.")
+    marker = sensor_identity_marker(preflights[0], REVIEW_SENSOR_SOURCE_STEP_PREFIX)
+    if marker is None:
+        _verified_sensor_sources[key] = None
+        return None
+    wire = marker["name"][len(REVIEW_SENSOR_SOURCE_STEP_PREFIX):]
+    if NUMBER.fullmatch(wire) is None or len(wire) > 19 or int(wire) > MAX_ACTIONS_RUN_ID:
+        raise GovernanceError("Sensor dispatcher source ID is invalid.")
+    identifier = int(wire)
+    source = api_json(f"repos/{REPOSITORY}/actions/runs/{identifier}")
+    pulls = source.get("pull_requests") if isinstance(source, dict) else None
+    if not isinstance(pulls, list) or len(pulls) != 1 or not isinstance(pulls[0], dict):
+        raise GovernanceError("Reserved sensor PR identity is invalid.")
+    pull = pulls[0]
+    base, source_head = pull.get("base"), pull.get("head")
+    if (not isinstance(base, dict) or not isinstance(source_head, dict)
+        or type(pull.get("number")) is not int or pull["number"] < 1
+        or type(source.get("id")) is not int or source["id"] != identifier
+        or type(source.get("workflow_id")) is not int or source["workflow_id"] < 1
+        or type(source.get("run_number")) is not int or source["run_number"] < 1
+        or type(source.get("run_attempt")) is not int or source["run_attempt"] != 1
+        or source.get("name") != "PR governance review sensor"
+        or not workflow_path_matches(source.get("path"), ".github/workflows/pr-governance-review-events.yml")
+        or source.get("event") not in {"pull_request", "pull_request_review", "pull_request_review_comment"}
+        or source.get("head_sha") != head or source_head.get("sha") != head
+        or base.get("ref") != default_branch_name() or not isinstance(base.get("sha"), str) or SHA.fullmatch(base["sha"]) is None
+        or not repository_boundary_matches(source.get("repository"), (base.get("repo"), source_head.get("repo")) + ((source["head_repository"],) if "head_repository" in source else ()), REPOSITORY)
+        or not (source.get("status") in DISPATCHER_ACTIVE_STATUSES and source.get("conclusion") is None
+                or source.get("status") == "completed" and source.get("conclusion") == "success")):
+        raise GovernanceError("Reserved sensor source is not trusted.")
+    current = api_json(f"repos/{REPOSITORY}/pulls/{pull['number']}")
+    current_base, current_head = (current.get("base"), current.get("head")) if isinstance(current, dict) else (None, None)
+    if (not isinstance(current, dict) or type(current.get("number")) is not int or current["number"] != pull["number"]
+        or current.get("state") != "open" or current.get("draft") is not False
+        or not isinstance(current_base, dict) or not isinstance(current_head, dict)
+        or current_base.get("ref") != base["ref"] or current_base.get("sha") != base["sha"]
+        or current_head.get("sha") != head
+        or not repository_boundary_matches(source["repository"], (current_base.get("repo"), current_head.get("repo")), REPOSITORY)):
+        raise GovernanceError("Reserved sensor current PR binding is invalid.")
+    # default preflightとexact APIで束縛したimmutable IDだけ再利用する。
+    # 予約側のwait phaseは変わり得るため、このcacheへ入れない。
+    _verified_sensor_sources[key] = identifier
+    return identifier
+
+
+def dispatcher_generation_reconciles(generation: DispatcherGeneration, *, early_source_run_id: int | None = None) -> bool:
     """Return whether a trusted generation can preempt writer ordering.
 
     A ``workflow_run`` fork no-op、明示的に記録された
@@ -661,6 +753,7 @@ def dispatcher_generation_reconciles(generation: DispatcherGeneration) -> bool:
     if (
         generation.event in {"issues", "issue_comment"}
         and (generation.status != "completed" or generation.conclusion != "success")
+        and early_source_run_id is None
     ):
         return True
     cached = _nonreconciling_dispatcher_generations.get(generation.identifier)
@@ -668,17 +761,7 @@ def dispatcher_generation_reconciles(generation: DispatcherGeneration) -> bool:
         if cached != generation:
             raise GovernanceError("Cached dispatcher no-op generation changed.")
         return False
-    page = object_page(
-        f"repos/{REPOSITORY}/actions/runs/{generation.identifier}/jobs?per_page=100",
-    )
-    jobs = page.get("jobs")
-    total_count = page.get("total_count")
-    if (
-        not isinstance(jobs, list) or not all(isinstance(job, dict) for job in jobs)
-        or type(total_count) is not int or total_count != len(jobs)
-        or total_count >= MAX_DISPATCHER_FENCE_RUNS
-    ):
-        raise GovernanceError("Dispatcher reconciliation evidence is invalid.")
+    jobs = dispatcher_jobs(generation)
 
     def named_job(name: str, *, allow_absent_active: bool = False) -> dict[str, Any] | None:
         matches = [job for job in jobs if job.get("name") == name]
@@ -723,7 +806,7 @@ def dispatcher_generation_reconciles(generation: DispatcherGeneration) -> bool:
 
     preflight = named_job(
         PREFLIGHT_WORKFLOW_RUN_SOURCE_NAME,
-        allow_absent_active=generation.event == "workflow_run",
+        allow_absent_active=generation.event == "workflow_run" or early_source_run_id is not None,
     )
     if preflight is None:
         raise GovernanceError("Dispatcher preflight job is unavailable.")
@@ -733,6 +816,43 @@ def dispatcher_generation_reconciles(generation: DispatcherGeneration) -> bool:
                 "Newer dispatcher preflight has not recorded its source yet."
             )
         return True
+    if (early_source_run_id is not None and generation.status in DISPATCHER_ACTIVE_STATUSES
+        and generation.event in {"pull_request_target", "issues", "issue_comment"}):
+        if preflight["status"] != "completed":
+            raise DispatcherAdmissionPending("Direct reservation preflight has not materialized.")
+        if preflight["conclusion"] != "success":
+            return True
+        reservation = sensor_identity_marker(preflight, REVIEW_SENSOR_RESERVATION_STEP_PREFIX)
+        if reservation is not None:
+            wire = reservation["name"][len(REVIEW_SENSOR_RESERVATION_STEP_PREFIX):]
+            try:
+                identifiers = json.loads(wire)
+            except (ValueError, RecursionError) as error:
+                raise GovernanceError("Sensor reservation IDs are invalid.") from error
+            if (not isinstance(identifiers, list) or not 1 <= len(identifiers) <= MAX_RESERVED_SENSOR_IDS
+                or any(type(identifier) is not int or not 1 <= identifier <= MAX_ACTIONS_RUN_ID for identifier in identifiers)
+                or identifiers != sorted(set(identifiers))
+                or json.dumps(identifiers, separators=(",", ":")) != wire):
+                raise GovernanceError("Sensor reservation IDs are not canonical.")
+            if early_source_run_id not in identifiers:
+                return True
+            arm = named_job(RESERVED_SENSOR_ARM_NAME, allow_absent_active=True)
+            if arm["status"] != "completed":
+                raise DispatcherAdmissionPending("Reserved sensor barrier is not established yet.")
+            if arm["conclusion"] != "success":
+                return True
+            waiter = named_job(RESERVED_SENSOR_WAIT_NAME, allow_absent_active=True)
+            if waiter["status"] == "completed":
+                return True
+            # default workflowのwait前だけ許可する。queuedは未開始だが、
+            # 成功/失敗/取消しやdownstream開始後は元のgeneration fenceを戻す。
+            for name in (RESOLVER_FAILURE_BARRIER_NAME, RESOLVE_EVENT_NAME, RECONCILE_ALL_OPEN_NAME):
+                matches = [job for job in jobs if job.get("name") == name]
+                if matches:
+                    downstream = named_job(name)
+                    if downstream["status"] != "queued":
+                        return True
+            return False
     sensor_marker = (
         named_step(preflight, REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME)
         if generation.event == "workflow_run" else None
@@ -969,10 +1089,16 @@ def reject_newer_dispatcher_barrier(head: str) -> None:
             snapshot_current = generations.get(current_generation.identifier)
             if snapshot_current != current_generation:
                 raise GovernanceError("Current dispatcher generation is absent or changed in the paginated snapshot.")
+            early_source = None
+            if (os.environ.get("GOVERNANCE_SCOPE") == "early" and current_generation.event == "workflow_run"
+                and any(dispatcher_generation_is_newer(candidate, current_generation)
+                        and candidate.event in {"pull_request_target", "issues", "issue_comment"}
+                        for candidate in generations.values())):
+                early_source = verified_early_sensor_source(current_generation, head)
             for candidate_generation in generations.values():
                 if (
                     dispatcher_generation_is_newer(candidate_generation, current_generation)
-                    and dispatcher_generation_reconciles(candidate_generation)
+                    and dispatcher_generation_reconciles(candidate_generation, early_source_run_id=early_source)
                 ):
                     raise NoPostGovernanceError("A newer dispatcher generation owns this Check Run head.")
             return
@@ -2296,6 +2422,7 @@ def main() -> int:
     _bound_check_runs.clear()
     _bound_check_ids_by_number.clear()
     _nonreconciling_dispatcher_generations.clear()
+    _verified_sensor_sources.clear()
     if not NUMBER.fullmatch(dispatcher_run_id) or scope not in {"early", "all"} or re.fullmatch(r"0|[1-9][0-9]*", preserved_writer_run_id) is None:
         print("Writer dispatch boundary is invalid.", file=sys.stderr)
         return 1

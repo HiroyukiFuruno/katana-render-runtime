@@ -649,86 +649,93 @@ pull_request_target_noop = event_name == "pull_request_target" and valid and not
 issue_event_noop = event_name in {"issues", "issue_comment"} and valid and not reconcile
 
 
-def active_local_review_sensors() -> list[int] | None:
-    """Return every current latch-bearing local review sensor.
+def canonical_repository_binding(value):
+    if not isinstance(value, dict) or type(value.get("id")) is not int or value["id"] < 1:
+        return None
+    full_name = value.get("full_name")
+    if "name" in value or "url" in value:
+        url = value.get("url")
+        match = re.fullmatch(r"https://api\.github\.com/repos/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", url) if isinstance(url, str) else None
+        if match is None or value.get("name") != match[2]:
+            return None
+        derived = match[1] + "/" + match[2]
+        if "full_name" in value and full_name != derived:
+            return None
+        full_name = derived
+    if not isinstance(full_name, str) or re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", full_name) is None:
+        return None
+    owner_name = full_name.split("/", 1)[0]
+    if "html_url" in value and value["html_url"] != "https://github.com/" + full_name:
+        return None
+    if "owner" in value:
+        owner_value = value["owner"]
+        if (not isinstance(owner_value, dict) or owner_value.get("login") != owner_name
+            or ("id" in owner_value and (type(owner_value["id"]) is not int or owner_value["id"] < 1))
+            or ("url" in owner_value and owner_value["url"] != "https://api.github.com/users/" + owner_name)
+            or ("html_url" in owner_value and owner_value["html_url"] != "https://github.com/" + owner_name)):
+            return None
+    return value["id"], full_name
 
-    A direct mutation may otherwise cancel an admitted sensor before its
-    bounded writer publishes the Check Run required by the 95 minute latch.
-    Unknown API state is deliberately fail-closed at the caller.
-    """
+def active_local_review_sensors() -> list[int] | None:
+    """現在のAPIと結合したlocal/default・非Draftのsensorを取得する。"""
     expected_path = ".github/workflows/pr-governance-review-events.yml"
     current_repository = repository_identity(request(f"repos/{repository}"))
     if current_repository is None:
         return None
+    local_binding = current_repository[:2]
     default_branch = current_repository[2]
     allowed_events = {"pull_request", "pull_request_review", "pull_request_review_comment"}
     identifiers = []
     seen_identifiers = set()
     for status in ("queued", "in_progress"):
-        listed = request(
-            f"repos/{repository}/actions/workflows/pr-governance-review-events.yml/runs?"
-            f"status={status}&per_page=100&page=1"
-        )
+        listed = request(f"repos/{repository}/actions/workflows/pr-governance-review-events.yml/runs?status={status}&per_page=100&page=1")
         runs = listed.get("workflow_runs") if isinstance(listed, dict) else None
         total = listed.get("total_count") if isinstance(listed, dict) else None
         if type(total) is not int or total < 0 or total > 100 or not isinstance(runs, list) or len(runs) != total:
             return None
         for run in runs:
-            pulls = run.get("pull_requests") if isinstance(run, dict) else None
-            run_id = run.get("id") if isinstance(run, dict) else None
-            run_repository = run.get("repository") if isinstance(run, dict) else None
-            if (
-                not isinstance(run, dict)
-                or type(run_id) is not int or run_id < 1
-                or run_id in seen_identifiers
-                or run.get("name") != "PR governance review sensor"
-                or run.get("event") not in allowed_events
-                or run.get("status") != status
-                or run.get("run_attempt") != 1
-                or run.get("path") != expected_path
-                or not isinstance(run_repository, dict)
-                or run_repository.get("full_name") != repository
-                or not isinstance(pulls, list)
-                or len(pulls) != 1
-            ):
+            if not isinstance(run, dict):
                 return None
+            run_id = run.get("id")
+            pulls = run.get("pull_requests")
+            run_head_binding = canonical_repository_binding(run.get("head_repository"))
+            if (type(run_id) is not int or not 1 <= run_id <= 2**63 - 1 or run_id in seen_identifiers
+                or run.get("name") != "PR governance review sensor" or run.get("event") not in allowed_events
+                or run.get("status") != status or type(run.get("run_attempt")) is not int or run["run_attempt"] != 1
+                or not workflow_path_matches(run.get("path"), expected_path)
+                or canonical_repository_binding(run.get("repository")) != local_binding
+                or run_head_binding is None or not isinstance(pulls, list) or len(pulls) != 1):
+                return None
+            seen_identifiers.add(run_id)
             pull = pulls[0]
             base = pull.get("base") if isinstance(pull, dict) else None
             head = pull.get("head") if isinstance(pull, dict) else None
-            base_repository = base.get("repo") if isinstance(base, dict) else None
-            head_pull_repository = head.get("repo") if isinstance(head, dict) else None
             number = pull.get("number") if isinstance(pull, dict) else None
-            head_sha = head.get("sha") if isinstance(head, dict) else None
-            if (
-                type(number) is not int or number < 1
-                or not isinstance(base, dict) or not isinstance(head, dict)
-                or not isinstance(base_repository, dict) or not isinstance(head_pull_repository, dict)
-                or not isinstance(head_sha, str) or re.fullmatch(r"[0-9a-fA-F]{40}", head_sha) is None
-            ):
+            if (type(number) is not int or number < 1 or not isinstance(base, dict) or not isinstance(head, dict)
+                or not ref_valid(base.get("ref"))
+                or canonical_repository_binding(base.get("repo")) != local_binding
+                or canonical_repository_binding(head.get("repo")) != run_head_binding
+                or not isinstance(head.get("sha"), str) or re.fullmatch(r"[0-9a-fA-F]{40}", head["sha"]) is None):
                 return None
             current = request(f"repos/{repository}/pulls/{number}")
             current_base = current.get("base") if isinstance(current, dict) else None
             current_head = current.get("head") if isinstance(current, dict) else None
-            current_base_repository = current_base.get("repo") if isinstance(current_base, dict) else None
-            current_head_repository = current_head.get("repo") if isinstance(current_head, dict) else None
-            if not isinstance(current, dict) or current.get("number") != number or not isinstance(current_base, dict) or not isinstance(current_head, dict) or not isinstance(current_base_repository, dict) or not isinstance(current_head_repository, dict):
+            current_head_binding = canonical_repository_binding(current_head.get("repo")) if isinstance(current_head, dict) else None
+            if (not isinstance(current, dict) or type(current.get("number")) is not int or current["number"] != number
+                or current.get("state") not in {"open", "closed"} or type(current.get("draft")) is not bool
+                or not isinstance(current_base, dict) or not ref_valid(current_base.get("ref"))
+                or canonical_repository_binding(current_base.get("repo")) != local_binding
+                or not isinstance(current_head, dict) or current_head_binding is None
+                or not isinstance(current_head.get("sha"), str) or re.fullmatch(r"[0-9a-fA-F]{40}", current_head["sha"]) is None):
                 return None
-            # Sensor workflows start before their own scope gate.  A verified
-            # fork, non-default, Draft, closed, or superseded source has no
-            # latch to preserve and must not poison an unrelated mutation.
-            if (
-                current.get("state") != "open"
-                or current.get("draft") is not False
-                or base.get("ref") != current_base.get("ref")
-                or head.get("sha") != current_head.get("sha")
-                or current_base.get("ref") != default_branch
-                or base_repository.get("full_name") != repository
-                or current_base_repository.get("full_name") != repository
-                or head_pull_repository.get("full_name") != current_head_repository.get("full_name")
-                or current_head_repository.get("full_name") != repository
-            ):
+            if ((run_head_binding[0] == local_binding[0]) != (run_head_binding[1] == local_binding[1])
+                or (current_head_binding[0] == local_binding[0]) != (current_head_binding[1] == local_binding[1])):
+                return None
+            if (current.get("state") != "open" or current["draft"]
+                or base["ref"] != current_base["ref"] or head["sha"] != current_head["sha"]
+                or current_base["ref"] != default_branch or run_head_binding != current_head_binding
+                or current_head_binding != local_binding):
                 continue
-            seen_identifiers.add(run_id)
             identifiers.append(run_id)
     return sorted(identifiers)
 

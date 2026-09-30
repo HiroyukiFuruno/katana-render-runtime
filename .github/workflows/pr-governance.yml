@@ -157,6 +157,14 @@ jobs:
         # early hand-offがall-openより先にあることを判定する証跡にする。
         if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && steps.scope.outputs.valid == 'true' && steps.scope.outputs.reconcile == 'true' }}
         run: 'true'
+      - name: Record verified review sensor source run ${{ github.event.workflow_run.id }}
+        # source IDはscopeで検証済みのdefault workflow証跡としてのみ公開する。
+        if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && steps.scope.outputs.valid == 'true' && steps.scope.outputs.reconcile == 'true' }}
+        run: 'true'
+      - name: Record verified review sensor reservation IDs ${{ steps.scope.outputs.sensor_run_ids }}
+        # arm/waitのAPI phaseと合わせ、自身sourceだけgeneration fenceを通す。
+        if: ${{ steps.scope.outputs.valid == 'true' && steps.scope.outputs.reconcile == 'true' && steps.scope.outputs.sensor_reservation == 'true' }}
+        run: 'true'
   arm-reserved-sensor-barrier:
     # This App-bound required context must be active before a direct mutation
     # waits outside the dispatcher lane.  Taking that lane here would cancel
@@ -314,88 +322,101 @@ jobs:
                   raise SystemExit("Captured review sensor repository identity is invalid.")
               return identifier, default_branch
 
+          def workflow_path_matches(value, expected):
+              if value == expected:
+                  return True
+              if not isinstance(value, str) or not value.startswith(expected + "@"):
+                  return False
+              ref = value[len(expected) + 1:]
+              return (
+                  re.fullmatch(r"[A-Za-z0-9._/-]+", ref) is not None
+                  and ref not in {".", ".."} and not ref.startswith("/")
+                  and "//" not in ref and all(part not in {"", ".", ".."} for part in ref.split("/"))
+              )
+
+          def ref_valid(value):
+              return (
+                  isinstance(value, str)
+                  and re.fullmatch(r"[A-Za-z0-9._/-]+", value) is not None
+                  and value not in {".", ".."}
+                  and not value.startswith("/")
+                  and "//" not in value
+                  and all(part not in {"", ".", ".."} for part in value.split("/"))
+              )
+
+          def canonical_repository_binding(value):
+              if not isinstance(value, dict) or type(value.get("id")) is not int or value["id"] < 1:
+                  return None
+              full_name = value.get("full_name")
+              if "name" in value or "url" in value:
+                  url = value.get("url")
+                  match = re.fullmatch(r"https://api\.github\.com/repos/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", url) if isinstance(url, str) else None
+                  if match is None or value.get("name") != match[2]:
+                      return None
+                  derived = match[1] + "/" + match[2]
+                  if "full_name" in value and full_name != derived:
+                      return None
+                  full_name = derived
+              if not isinstance(full_name, str) or re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", full_name) is None:
+                  return None
+              owner_name = full_name.split("/", 1)[0]
+              if "html_url" in value and value["html_url"] != "https://github.com/" + full_name:
+                  return None
+              if "owner" in value:
+                  owner_value = value["owner"]
+                  if (not isinstance(owner_value, dict) or owner_value.get("login") != owner_name
+                      or ("id" in owner_value and (type(owner_value["id"]) is not int or owner_value["id"] < 1))
+                      or ("url" in owner_value and owner_value["url"] != "https://api.github.com/users/" + owner_name)
+                      or ("html_url" in owner_value and owner_value["html_url"] != "https://github.com/" + owner_name)):
+                      return None
+              return value["id"], full_name
+
           def validate_sensor(value, expected_identifier, *, allow_out_of_scope=False):
               repository_id, default_branch = repository_identity()
-              identifier = value.get("id") if isinstance(value, dict) else None
-              run_repository = value.get("repository") if isinstance(value, dict) else None
-              head_repository = value.get("head_repository") if isinstance(value, dict) else None
-              pulls = value.get("pull_requests") if isinstance(value, dict) else None
-              head_sha = value.get("head_sha") if isinstance(value, dict) else None
-              status = value.get("status") if isinstance(value, dict) else None
-              conclusion = value.get("conclusion") if isinstance(value, dict) else None
-              if (
-                  type(identifier) is not int
-                  or identifier != expected_identifier
-                  or value.get("name") != "PR governance review sensor"
-                  or value.get("event") not in allowed_events
-                  or value.get("run_attempt") != 1
-                  or value.get("path") != expected_path
+              local_binding = (repository_id, repository)
+              if not isinstance(value, dict):
+                  raise SystemExit("Captured review sensor changed identity.")
+              identifier = value.get("id")
+              head_binding = canonical_repository_binding(value.get("head_repository"))
+              pulls = value.get("pull_requests")
+              head_sha = value.get("head_sha")
+              status = value.get("status")
+              if (type(identifier) is not int or not 1 <= identifier <= 2**63 - 1 or identifier != expected_identifier
+                  or value.get("name") != "PR governance review sensor" or value.get("event") not in allowed_events
+                  or type(value.get("run_attempt")) is not int or value["run_attempt"] != 1
+                  or not workflow_path_matches(value.get("path"), expected_path)
                   or status not in {"queued", "in_progress", "completed"}
-                  or (status in {"queued", "in_progress"} and conclusion is not None)
-                  or not isinstance(run_repository, dict)
-                  or run_repository.get("id") != repository_id
-                  or run_repository.get("full_name") != repository
-                  or not isinstance(head_repository, dict)
-                  or type(head_repository.get("id")) is not int
-                  or head_repository.get("id") < 1
-                  or not isinstance(head_repository.get("full_name"), str)
-                  or repository_pattern.fullmatch(head_repository["full_name"]) is None
-                  or not isinstance(pulls, list)
-                  or len(pulls) != 1
-                  or not isinstance(head_sha, str)
-                  or sha_pattern.fullmatch(head_sha) is None
-              ):
+                  or (status in {"queued", "in_progress"} and value.get("conclusion") is not None)
+                  or canonical_repository_binding(value.get("repository")) != local_binding or head_binding is None
+                  or not isinstance(pulls, list) or len(pulls) != 1
+                  or not isinstance(head_sha, str) or sha_pattern.fullmatch(head_sha) is None):
                   raise SystemExit("Captured review sensor changed identity.")
               pull = pulls[0]
               number = pull.get("number") if isinstance(pull, dict) else None
               base = pull.get("base") if isinstance(pull, dict) else None
               head = pull.get("head") if isinstance(pull, dict) else None
-              base_repository = base.get("repo") if isinstance(base, dict) else None
-              head_pull_repository = head.get("repo") if isinstance(head, dict) else None
-              pull_head_sha = head.get("sha") if isinstance(head, dict) else None
-              if (
-                  type(number) is not int
-                  or number < 1
-                  or not isinstance(base, dict)
-                  or not isinstance(base.get("ref"), str)
-                  or not base.get("ref")
-                  or not isinstance(head, dict)
-                  or pull_head_sha != head_sha
-                  or not isinstance(base_repository, dict)
-                  or base_repository.get("id") != repository_id
-                  or base_repository.get("full_name") != repository
-                  or not isinstance(head_pull_repository, dict)
-                  or head_pull_repository.get("id") != head_repository["id"]
-                  or head_pull_repository.get("full_name") != head_repository["full_name"]
-              ):
+              if (type(number) is not int or number < 1 or not isinstance(base, dict) or not ref_valid(base.get("ref"))
+                  or not isinstance(head, dict) or head.get("sha") != head_sha
+                  or canonical_repository_binding(base.get("repo")) != local_binding
+                  or canonical_repository_binding(head.get("repo")) != head_binding):
                   raise SystemExit("Captured review sensor changed identity.")
               current = api(f"repos/{repository}/pulls/{number}", "Unable to re-read the captured review sensor pull request.")
               current_base = current.get("base") if isinstance(current, dict) else None
               current_head = current.get("head") if isinstance(current, dict) else None
-              current_base_repository = current_base.get("repo") if isinstance(current_base, dict) else None
-              current_head_repository = current_head.get("repo") if isinstance(current_head, dict) else None
-              if (
-                  not isinstance(current, dict)
-                  or current.get("number") != number
-                  or current.get("state") != "open"
-                  or not isinstance(current_base, dict)
-                  or current_base.get("ref") != base["ref"]
-                  or not isinstance(current_head, dict)
-                  or current_head.get("sha") != head_sha
-                  or not isinstance(current_base_repository, dict)
-                  or current_base_repository.get("id") != repository_id
-                  or current_base_repository.get("full_name") != repository
-                  or not isinstance(current_head_repository, dict)
-                  or current_head_repository.get("id") != head_repository["id"]
-                  or current_head_repository.get("full_name") != head_repository["full_name"]
-              ):
+              current_head_binding = canonical_repository_binding(current_head.get("repo")) if isinstance(current_head, dict) else None
+              if (not isinstance(current, dict) or type(current.get("number")) is not int or current["number"] != number
+                  or current.get("state") not in {"open", "closed"} or type(current.get("draft")) is not bool
+                  or not isinstance(current_base, dict) or not ref_valid(current_base.get("ref"))
+                  or canonical_repository_binding(current_base.get("repo")) != local_binding
+                  or not isinstance(current_head, dict) or current_head_binding is None
+                  or not isinstance(current_head.get("sha"), str) or sha_pattern.fullmatch(current_head["sha"]) is None):
                   raise SystemExit("Captured review sensor changed identity.")
-
-              local_id = head_repository["id"] == repository_id
-              local_name = head_repository["full_name"] == repository
-              if local_id != local_name:
+              if ((head_binding[0] == local_binding[0]) != (head_binding[1] == local_binding[1])
+                  or (current_head_binding[0] == local_binding[0]) != (current_head_binding[1] == local_binding[1])):
                   raise SystemExit("Captured review sensor repository identity is invalid.")
-              if not local_id or base["ref"] != default_branch:
+              if (current["state"] != "open" or current["draft"] or base["ref"] != default_branch
+                  or current_base["ref"] != base["ref"] or current_head["sha"] != head_sha
+                  or current_head_binding != head_binding or head_binding != local_binding):
                   if allow_out_of_scope:
                       return False
                   raise SystemExit("Captured review sensor changed identity.")

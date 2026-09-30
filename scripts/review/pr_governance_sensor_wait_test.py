@@ -1,4 +1,5 @@
 """Execute the workflow waiter against deterministic GitHub response sequences."""
+import ast
 import copy
 import json
 import os
@@ -10,11 +11,11 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-REPO = {"id": 7, "full_name": "owner/repo", "default_branch": "master"}
+REPO = {"id": 7, "name": "repo", "url": "https://api.github.com/repos/owner/repo", "full_name": "owner/repo", "default_branch": "master"}
 
 
 def sensor(identifier, *, branch="master", fork=False, status="completed", conclusion="success"):
-    head_repo = {"id": 8, "full_name": "fork/repo"} if fork else REPO
+    head_repo = {"id": 8, "name": "repo", "url": "https://api.github.com/repos/fork/repo", "full_name": "fork/repo"} if fork else REPO
     pull = {"number": identifier, "state": "open", "draft": False,
             "base": {"ref": branch, "repo": REPO},
             "head": {"sha": "a" * 40, "repo": head_repo}}
@@ -62,6 +63,65 @@ class SensorWaitExecutionTest(unittest.TestCase):
             exec(compile(program, "sensor-wait-workflow", "exec"), {"__name__": "__main__"})
             self.assertLess(sleep.call_count, 5)
         return reads
+
+    def test_waiter_accepts_canonical_path_and_rest_summary(self):
+        for path in (".github/workflows/pr-governance-review-events.yml", ".github/workflows/pr-governance-review-events.yml@refs/heads/master"):
+            with self.subTest(path=path):
+                run = copy.deepcopy(sensor(1))
+                run["path"] = path
+                summary = {"id": 7, "name": "repo", "url": "https://api.github.com/repos/owner/repo"}
+                run["pull_requests"][0]["base"]["repo"] = summary
+                run["pull_requests"][0]["head"]["repo"] = summary
+                self.execute_waiter({1: run}, [[]])
+
+    def test_scanner_and_waiter_share_the_canonical_identity_contract(self):
+        preflight = ast.parse((ROOT / "scripts/review/pr_governance_preflight.py").read_text())
+        workflow = (ROOT / ".github/workflows/pr-governance.yml").read_text()
+        job = workflow.split("  wait-for-active-review-sensor:", 1)[1].split("  establish-resolver-failure-barrier:", 1)[0]
+        program = textwrap.dedent(re.search(r"python3 - <<'PY'\n(.*?)\n          PY", job, re.S).group(1))
+        waiter = ast.parse(program)
+        for name in ("canonical_repository_binding", "workflow_path_matches"):
+            first = next(node for node in preflight.body if isinstance(node, ast.FunctionDef) and node.name == name)
+            second = next(node for node in waiter.body if isinstance(node, ast.FunctionDef) and node.name == name)
+            self.assertEqual(ast.dump(first, include_attributes=False), ast.dump(second, include_attributes=False))
+        helper = next(node for node in preflight.body if isinstance(node, ast.FunctionDef) and node.name == "canonical_repository_binding")
+        namespace = {"re": re}
+        matcher = next(node for node in preflight.body if isinstance(node, ast.FunctionDef) and node.name == "workflow_path_matches")
+        exec(compile(ast.Module(body=[helper, matcher], type_ignores=[]), "canonical-identity-contract", "exec"), namespace)
+        binding = namespace["canonical_repository_binding"]
+        path_matches = namespace["workflow_path_matches"]
+        expected = ".github/workflows/pr-governance-review-events.yml"
+        for path in (expected, expected + "@main", expected + "@refs/heads/master"):
+            self.assertTrue(path_matches(path, expected))
+        for path in (expected + "@", expected + "@../master", expected + "@main/", expected + "@main?x=1", expected + "/other@main"):
+            self.assertFalse(path_matches(path, expected))
+        summary = {"id": 7, "name": "repo", "url": "https://api.github.com/repos/owner/repo"}
+        self.assertEqual(binding(summary), (7, "owner/repo"))
+        self.assertEqual(binding(REPO), (7, "owner/repo"))
+        self.assertEqual(binding({"id": 7, "full_name": "owner/repo"}), (7, "owner/repo"))
+        invalid = [dict(summary, id=True), dict(summary, id=8, full_name="other/repo"),
+                   dict(summary, name="other"), dict(summary, full_name=None),
+                   dict(summary, owner={"login": "other"}), dict(summary, html_url="https://github.com/other/repo")]
+        invalid.extend(dict(summary, url=url) for url in (
+            "https://api.github.com.evil/repos/owner/repo", "http://api.github.com/repos/owner/repo",
+            "https://api.github.com/repos/owner/repo?x=1", "https://api.github.com/repos/owner/repo/"))
+        invalid.extend({key: value for key, value in summary.items() if key != missing} for missing in ("id", "name", "url"))
+        for value in invalid:
+            with self.subTest(value=value):
+                self.assertIsNone(binding(value))
+
+    def test_waiter_rejects_typed_identity_and_provided_field_conflicts(self):
+        changes = [lambda run: run.update(run_attempt=True), lambda run: run.update(id=True), lambda run: run.update(id=2**63),
+                   lambda run: run["pull_requests"][0].update(number=True),
+                   lambda run: run["pull_requests"][0].update(draft="false"),
+                   lambda run: run["pull_requests"][0]["base"]["repo"].update(full_name="other/repo"),
+                   lambda run: run["pull_requests"][0]["head"]["repo"].update(url="https://api.github.com.evil/repos/owner/repo"),
+                   lambda run: run["pull_requests"][0]["head"]["repo"].update(id=8)]
+        for change in changes:
+            run = copy.deepcopy(sensor(1))
+            change(run)
+            with self.subTest(change=change), self.assertRaises(SystemExit):
+                self.execute_waiter({1: run}, [[]])
 
     def test_success_rescans_and_waits_for_new_sensor(self):
         runs = {1: sensor(1), 2: sensor(2)}
