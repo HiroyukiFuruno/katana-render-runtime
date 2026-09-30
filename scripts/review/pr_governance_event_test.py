@@ -7397,6 +7397,74 @@ class WriteReconciliationConcurrencyTest(unittest.TestCase):
                 self.assertEqual(len(cancellations), 1 if scenario in accepted else 0)
                 self.assertEqual(writer_reads, [])
 
+    def test_obsolete_preemption_stabilizes_cross_status_inventory_before_cancellation(self) -> None:
+        program = self.program("Stop only acknowledged obsolete heavy reconciliation")
+        accepted = {"queued-to-in-progress", "in-progress-to-completed", "between-snapshots"}
+        scenarios = tuple(sorted(accepted)) + (
+            "same-page-duplicate", "cross-status-identity-drift", "retry-identity-drift",
+            "unknown-status", "foreign", "malformed-page", "continuous-churn", "expired",
+        )
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario):
+                def run(identifier, created):
+                    return {"id": identifier, "name": "PR governance dispatcher", "path": ".github/workflows/pr-governance.yml@master", "head_sha": "a" * 40, "head_branch": "master", "run_attempt": 1, "event": "schedule", "repository": self.repository(), "workflow_id": 1, "run_number": identifier, "created_at": created, "status": "in_progress", "conclusion": None}
+                old = run(100, "2026-10-01T00:00:00Z")
+                current = run(500, "2026-10-01T00:01:00Z")
+                newer = run(600, "2026-10-01T00:02:00Z")
+                def step(name, number, conclusion="skipped"):
+                    return {"name": name, "number": number, "status": "completed", "conclusion": conclusion}
+                jobs = [
+                    {"id": 1, "name": "Write complete pending reconciliation Check Runs", "status": "in_progress", "conclusion": None},
+                    {"id": 2, "name": "Preflight workflow_run governance source", "status": "completed", "conclusion": "success", "steps": [step("Record verified review sensor source run ", 1)]},
+                    {"id": 3, "name": "Reconcile all current governance pull requests", "status": "completed", "conclusion": "success", "steps": [step("Dispatch and bind the early event writer", 1), step("Await the bound early event writer before all-open invalidation", 2), step("Record bound successful early writer run ", 3), step("Record verified no-priority early writer admission 100", 4, "success")]},
+                    {"id": 4, "name": "Preserve pending review sensor before direct dispatch", "status": "completed", "conclusion": "skipped"},
+                    {"id": 6, "name": "Prepare immutable governance target partitions", "status": "completed", "conclusion": "success"},
+                ]
+                cancellations = []
+                inventory_reads = []
+                calls = []
+                def request(arguments, **keywords):
+                    endpoint = arguments[4]
+                    calls.append(endpoint)
+                    self.assertGreater(keywords["timeout"], 0)
+                    self.assertLessEqual(keywords["timeout"], 20)
+                    if endpoint.endswith("/cancel"):
+                        cancellations.append(endpoint); old.update(status="completed", conclusion="cancelled"); value = None
+                    elif endpoint == "repos/owner/repository": value = self.repository()
+                    elif "/git/ref/" in endpoint: value = {"object": {"sha": "a" * 40}}
+                    elif endpoint.endswith("/runs/500"): value = current
+                    elif "/jobs?" in endpoint: value = {"total_count": len(jobs), "jobs": jobs}
+                    else:
+                        status = parse_qs(urlparse(endpoint).query).get("status", [None])[0]
+                        values = [old, current] if status is None else ([] if status == "queued" else [dict(old), current])
+                        if status is not None:
+                            index = len(inventory_reads)
+                            inventory_reads.append(endpoint)
+                            if scenario == "queued-to-in-progress" and index == 0: values = [dict(old, status="queued")]
+                            if scenario == "in-progress-to-completed":
+                                values = [] if status == "queued" else [current]
+                                if index == 1: values.insert(0, dict(old, status="completed", conclusion="success"))
+                            if scenario == "between-snapshots" and index < 2:
+                                values = [dict(old, status="queued")] if status == "queued" else [current]
+                            if scenario == "same-page-duplicate" and status == "in_progress": values.append(dict(old))
+                            if scenario in {"cross-status-identity-drift", "retry-identity-drift"}:
+                                if index == 0: values = [dict(old, status="queued")]
+                                elif status == "in_progress" and (scenario == "cross-status-identity-drift" or index > 1): values[0]["run_number"] = 101
+                            if scenario == "unknown-status" and status == "in_progress": values[0]["status"] = "unknown"
+                            if scenario == "foreign" and status == "in_progress": values[0]["repository"] = dict(self.repository(), id=2)
+                            if scenario == "continuous-churn" and status == "in_progress" and (index // 2) % 2: values.append(newer)
+                        value = {"total_count": len(values) + (1 if scenario == "malformed-page" else 0), "workflow_runs": values}
+                    return subprocess.CompletedProcess(arguments, 0, json.dumps(value) if value is not None else "", "")
+                environment = {"GITHUB_REPOSITORY": "owner/repository", "DEFAULT_HEAD": "a" * 40, "DEFAULT_BRANCH": "master", "GITHUB_RUN_ID": "500", "ROOT_DEADLINE_EPOCH": "1000" if scenario == "expired" else "3000"}
+                with patch.dict(os.environ, environment), patch("time.time", return_value=1000), patch("subprocess.run", side_effect=request), patch("time.sleep"):
+                    if scenario in accepted: exec(program, {})
+                    else:
+                        with self.assertRaises(SystemExit): exec(program, {})
+                self.assertEqual(len(cancellations), 1 if scenario in {"queued-to-in-progress", "between-snapshots"} else 0)
+                self.assertLessEqual(len(inventory_reads), 16)
+                self.assertLessEqual(len(calls), 850)
+                if scenario == "expired": self.assertEqual(calls, [])
+
     def test_no_priority_admission_marker_is_bound_to_successful_prepare_and_empty_priority(self) -> None:
         admission = self.job("reconcile-all-open")
         marker = re.search(r"- name: Record verified no-priority early writer admission \$\{\{ github.run_id \}\}\n(.*?)(?=\n      - name:|\Z)", admission, re.DOTALL)

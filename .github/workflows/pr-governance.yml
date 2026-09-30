@@ -823,19 +823,63 @@ jobs:
                   or matches[0].get("status") != "completed" or matches[0].get("conclusion") != "skipped"):
                   fail("Obsolete heavy-phase no-priority dispatch or await is unverified.")
 
-          listed = []
-          for status in ("queued", "in_progress"):
-              query = urlencode({"status": status, "branch": branch, "head_sha": head, "per_page": 100})
-              page = api(f"repos/{repository}/actions/workflows/{current['workflow_id']}/runs?{query}")
-              values = page.get("workflow_runs") if isinstance(page, dict) else None
-              count = page.get("total_count") if isinstance(page, dict) else None
-              if type(count) is not int or count < 0 or count > 100 or not isinstance(values, list) or count != len(values):
-                  fail("Obsolete heavy-phase run page is incomplete.")
-              if any(not isinstance(value, dict) or value.get("status") != status or value.get("conclusion") is not None for value in values):
-                  fail("Obsolete heavy-phase run status changed during enumeration.")
-              listed.extend(values)
-          if len(listed) > 100 or any(not dispatcher(value) for value in listed) or len({value["id"] for value in listed}) != len(listed):
-              fail("Obsolete heavy-phase run inventory is invalid.")
+          class DispatcherSnapshotChanged(Exception):
+              pass
+
+          observed_bindings = {}
+          def run_binding(run):
+              immutable = ("id", "workflow_id", "run_number", "created_at", "event", "head_sha", "head_branch", "run_attempt", "name", "path")
+              return tuple(run.get(key) for key in immutable) + (repo(run.get("repository")),)
+
+          def dispatcher_snapshot():
+              listed = []
+              identifiers = set()
+              for status in ("queued", "in_progress"):
+                  query = urlencode({"status": status, "branch": branch, "head_sha": head, "per_page": 100})
+                  page = api(f"repos/{repository}/actions/workflows/{current['workflow_id']}/runs?{query}")
+                  values = page.get("workflow_runs") if isinstance(page, dict) else None
+                  count = page.get("total_count") if isinstance(page, dict) else None
+                  if type(count) is not int or count < 0 or count > 100 or not isinstance(values, list) or count != len(values):
+                      fail("Obsolete heavy-phase run page is incomplete.")
+                  page_identifiers = set()
+                  changed = False
+                  for value in values:
+                      if not dispatcher(value) or value["workflow_id"] != current["workflow_id"] or value["id"] in page_identifiers:
+                          fail("Obsolete heavy-phase run inventory is invalid.")
+                      identifier = value["id"]
+                      page_identifiers.add(identifier)
+                      binding = run_binding(value)
+                      if identifier in observed_bindings and observed_bindings[identifier] != binding:
+                          fail("Obsolete heavy-phase run identity changed during enumeration.")
+                      observed_bindings[identifier] = binding
+                      # 状態遷移によるpartition間の重複だけを再読取し、page内重複やidentity driftは拒否する。
+                      if value["status"] != status or identifier in identifiers:
+                          changed = True
+                          continue
+                      identifiers.add(identifier)
+                      listed.append(value)
+                  if changed:
+                      raise DispatcherSnapshotChanged
+              if len(listed) > 100:
+                  fail("Obsolete heavy-phase run inventory is invalid.")
+              return sorted(listed, key=lambda value: value["id"])
+
+          listed = None
+          for attempt in range(4):
+              try:
+                  first_snapshot = dispatcher_snapshot()
+                  second_snapshot = dispatcher_snapshot()
+              except DispatcherSnapshotChanged:
+                  first_snapshot = second_snapshot = None
+              if first_snapshot is not None and [(*run_binding(value), value["status"], value["conclusion"]) for value in first_snapshot] == [(*run_binding(value), value["status"], value["conclusion"]) for value in second_snapshot]:
+                  listed = second_snapshot
+                  break
+              if attempt == 3:
+                  fail("Obsolete heavy-phase run inventory did not stabilize.")
+              remaining = deadline - time.time()
+              if remaining <= 0:
+                  fail("Obsolete heavy-phase admission evidence budget is exhausted.")
+              time.sleep(min(1, remaining))
 
           def source_acknowledged(source_id):
               value = api(f"repos/{repository}/actions/runs/{source_id}")
