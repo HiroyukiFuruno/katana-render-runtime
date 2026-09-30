@@ -528,6 +528,68 @@ test("onloadのsrc差替え後も新しいsrcを検証してload/errorを再disp
   expect(eventTypes).toEqual(["load", "error"]);
 });
 
+test("8回目の同期src差替えは未dispatchとして次のscanで評価する", async () => {
+  expect(dispatchImageLoad).toBeDefined();
+
+  const dispatchedSources = [];
+  const image = {
+    source: "source0",
+    getAttribute(name) {
+      expect(name).toBe("src");
+      return this.source;
+    },
+    dispatchEvent() {
+      dispatchedSources.push(this.source);
+      const index = Number(this.source.slice("source".length));
+      if (index < 8) this.source = `source${index + 1}`;
+    },
+  };
+  const dispatchImage = new Function(
+    "Event",
+    "__krrImageLoadEventType",
+    `${dispatchImageLoad}\nreturn __krrDispatchImageLoad;`,
+  )(class Event {}, () => "load");
+  const document = { querySelectorAll: () => [image] };
+  const dispatchPending = createPendingImageDispatcher(document, dispatchImage);
+
+  await dispatchPending(document);
+
+  expect(dispatchedSources).toEqual(Array.from({ length: 9 }, (_, index) => `source${index}`));
+  expect(image.source).toBe("source8");
+});
+
+test("Window load schedulerはページ側Promise変更後もcompleteまで進む", async () => {
+  const noResourceCalls = [];
+  const pagePromise = {
+    resolve: () => {
+      throw new Error("page Promise.resolve patched");
+    },
+  };
+  await createWindowLoadDispatcher([], noResourceCalls, [], pagePromise)();
+  expect(noResourceCalls).toEqual(["window"]);
+
+  const calls = [];
+  const replacementPromise = {
+    resolve: () => {
+      throw new Error("replacement Promise.resolve patched");
+    },
+  };
+  const images = [
+    {
+      getAttribute: () => "valid",
+      dispatchEvent: (event) => calls.push(`image:${event.type}`),
+    },
+  ];
+  const frames = [
+    {
+      contentDocument: {},
+      dispatchEvent: (event) => calls.push(`frame:${event.type}`),
+    },
+  ];
+  await createWindowLoadDispatcher(images, calls, frames, replacementPromise)();
+  expect(calls).toEqual(["frame:load", "image:load", "window"]);
+});
+
 test("別画像のload handlerによるsrc差替え後に既読画像を再評価する", async () => {
   expect(dispatchPendingImages).toBeDefined();
 
@@ -562,7 +624,9 @@ test("別画像のload handlerによるsrc差替え後に既読画像を再評�
     },
   };
   const dispatch = createPendingImageDispatcher(document, (image) => {
-    image.dispatchEvent(new Event(image.getAttribute("src") === "valid" ? "load" : "error"));
+    const source = image.getAttribute("src");
+    image.dispatchEvent(new Event(source === "valid" ? "load" : "error"));
+    return source;
   });
 
   await dispatch(document);
@@ -590,9 +654,11 @@ test("画像load handlerのmicrotaskによるsrc差替えを保留して再評�
       return [image];
     },
   };
-  const dispatch = createPendingImageDispatcher(document, (target) =>
-    target.dispatchEvent(new Event(target.getAttribute("src") === "valid" ? "load" : "error")),
-  );
+  const dispatch = createPendingImageDispatcher(document, (target) => {
+    const source = target.getAttribute("src");
+    target.dispatchEvent(new Event(source === "valid" ? "load" : "error"));
+    return source;
+  });
 
   await dispatch(document);
   expect(calls).toEqual(["load", "error"]);
@@ -616,9 +682,11 @@ test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatch
       return selector === "img" ? [image] : [];
     },
   };
-  const dispatchPending = createPendingImageDispatcher(document, (target) =>
-    target.dispatchEvent(new Event("load")),
-  );
+  const dispatchPending = createPendingImageDispatcher(document, (target) => {
+    const source = target.getAttribute("src");
+    target.dispatchEvent(new Event("load"));
+    return source;
+  });
   const dispatchFrames = createPendingLocalFrameDispatcher(document);
   const pageGlobal = {};
   const dispatch = new Function(
@@ -626,6 +694,8 @@ test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatch
     "document",
     "window",
     "Event",
+    "Promise",
+    "__krrLifecycleCheckpoint",
     "__krrRouteWindowLoadElement",
     "__krrElement",
     "__krrNativeDom",
@@ -647,6 +717,8 @@ test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatch
         this.type = type;
       }
     },
+    Promise,
+    Promise.resolve.bind(Promise),
     () => false,
     () => null,
     () => null,
@@ -824,7 +896,13 @@ test("local iframe dispatch間でmicrotaskを実行してから次のiframeをdi
   expect(calls).toEqual(["first:load", "microtask", "second:load", "window"]);
 });
 
-const createWindowLoadDispatcher = (images, calls, frames = []) => {
+const createWindowLoadDispatcher = (
+  images,
+  calls,
+  frames = [],
+  pagePromise = Promise,
+  checkpoint = Promise.resolve.bind(Promise),
+) => {
   const document = {
     body: null,
     querySelectorAll(selector) {
@@ -833,17 +911,26 @@ const createWindowLoadDispatcher = (images, calls, frames = []) => {
       return [];
     },
   };
-  const dispatchPending = createPendingImageDispatcher(document, (image) => {
-    const eventType = image.getAttribute("src") === "broken" ? "error" : "load";
-    image.dispatchEvent(new Event(eventType));
-  });
-  const dispatchFrames = createPendingLocalFrameDispatcher(document);
+  const dispatchPending = createPendingImageDispatcher(
+    document,
+    (image) => {
+      const source = image.getAttribute("src");
+      const eventType = source === "broken" ? "error" : "load";
+      image.dispatchEvent(new Event(eventType));
+      return source;
+    },
+    pagePromise,
+    checkpoint,
+  );
+  const dispatchFrames = createPendingLocalFrameDispatcher(document, pagePromise, checkpoint);
   const pageGlobal = {};
   const dispatch = new Function(
     "globalThis",
     "document",
     "window",
     "Event",
+    "Promise",
+    "__krrLifecycleCheckpoint",
     "__krrRouteWindowLoadElement",
     "__krrElement",
     "__krrNativeDom",
@@ -865,11 +952,17 @@ const createWindowLoadDispatcher = (images, calls, frames = []) => {
         this.type = type;
       }
     },
+    pagePromise,
+    checkpoint,
     () => false,
     () => null,
     () => null,
     () => "load",
-    (image) => image.dispatchEvent(new Event("load")),
+    (image) => {
+      const source = image.getAttribute("src");
+      image.dispatchEvent(new Event("load"));
+      return source;
+    },
     dispatchPending,
     dispatchFrames,
     "interactive",
@@ -880,12 +973,19 @@ const createWindowLoadDispatcher = (images, calls, frames = []) => {
   return dispatch;
 };
 
-const createPendingImageDispatcher = (document, dispatchImage) =>
+const createPendingImageDispatcher = (
+  document,
+  dispatchImage,
+  pagePromise = Promise,
+  checkpoint = Promise.resolve.bind(Promise),
+) =>
   new Function(
     "document",
+    "Promise",
+    "__krrLifecycleCheckpoint",
     "__krrDispatchImageLoad",
     `${dispatchPendingImages}\nreturn __krrDispatchPendingImages;`,
-  )(document, dispatchImage);
+  )(document, pagePromise, checkpoint, dispatchImage);
 
 const createPendingLocalFrameDispatcher = (
   document,
