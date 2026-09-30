@@ -159,11 +159,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # 検証済みのCI/release signalは、実行中のpaced scanを止めずに直列レーンへ加える。
-    # review sensorのrequestedだけはlatchの期限内にtrusted Check Runを得るため先行させる。
-    # その後のworkflow_run lifecycleは発生元をcancelしないよう直列化し、直接PR/Issue mutationもpreemptする。
+    # review sensorのrequested/in_progressはlatchの期限内にtrusted Check Runを得るため先行させる。
+    # completedだけを直列化し、直接PR/Issue mutationもpreemptする。
     concurrency:
       group: pr-governance-dispatcher-${{ github.repository_id }}
-      cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && github.event.action == 'requested') }}
+      cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}
     permissions:
       contents: read
     outputs:
@@ -421,13 +421,12 @@ jobs:
     if: needs.establish-resolver-failure-barrier.outputs.reconcile == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Keep target resolution in the same generation as its barrier. Every
-    # workflow_run is derived from an already-admitted generation, including
-    # priority review-sensor signals, so it must serialize rather than cancel
-    # that generation. Direct PR/issue mutations retain priority preemption.
+    # A sensor requested generation can be displaced by a later direct
+    # mutation. Its in_progress recovery must therefore preempt all three
+    # dispatcher locks; completed remains serialized to avoid self-cancel.
     concurrency:
       group: pr-governance-dispatcher-${{ github.repository_id }}
-      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}
+      cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}
     permissions:
       actions: read
       contents: read
@@ -552,7 +551,7 @@ jobs:
     # 拒否され、次の全件走査が current snapshot から収束させる。
     concurrency:
       group: pr-governance-dispatcher-${{ github.repository_id }}
-      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]' }}
+      cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}
     permissions:
       actions: read
       contents: read
