@@ -874,7 +874,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
 
     def test_one_event_runs_one_arbiter_after_synchronous_invalidation(self) -> None:
         self.assertIn(
-            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ needs.resolve_event.outputs.priority_targets != '[]' }}",
+            "concurrency:\n      group: pr-governance-barrier-${{ github.repository_id }}\n      cancel-in-progress: ${{ needs.resolve_event.outputs.priority_targets != '[]' }}",
             self.workflow,
         )
         writer = (ROOT / ".github/workflows/pr-governance-status-writer.yml").read_text(encoding="utf-8")
@@ -890,13 +890,13 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         self.assertIn("KRR_GOVERNANCE_APP_BOT_LOGIN", writer)
         self.assertIn("github.triggering_actor == vars.KRR_GOVERNANCE_APP_BOT_LOGIN", writer)
 
-    def test_priority_event_preempts_a_long_reconciliation_and_writer_rebinds_before_secrets(self) -> None:
+    def test_priority_event_serializes_barrier_release_and_writer_rebinds_before_secrets(self) -> None:
         self.assertIn(
             "cancel-in-progress: ${{ needs.resolve_event.outputs.priority_targets != '[]' }}",
             self.workflow,
         )
         self.assertIn("PRs may edit a workflow file", self.workflow)
-        self.assertIn("Check Run fingerprint fence", self.workflow)
+        self.assertIn("group: pr-governance-barrier-${{ github.repository_id }}", self.workflow)
         writer = (ROOT / ".github/workflows/pr-governance-status-writer.yml").read_text(encoding="utf-8")
         writer_program = (ROOT / "scripts/review/pr_governance_status_writer.py").read_text(encoding="utf-8")
         # A queued dispatcher is a generation fence even before its pending
@@ -4332,12 +4332,16 @@ raise SystemExit(91)
             "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n"
             "      cancel-in-progress: ${{ needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}"
         )
-        # The barrier remains serialized and uncancelled so a priority event
-        # cannot leave a red required context. Resolver/reconciler preemption
-        # remains available after the barrier has completed.
+        # Barrier activation and release share the serialized, uncancelled
+        # lane. A new generation is therefore visible to an older release
+        # fence before that release can remove the required context.
         self.assertIn(barrier_generation_lock, job)
+        self.assertIn(
+            "concurrency:\n      group: pr-governance-barrier-${{ github.repository_id }}\n"
+            "      cancel-in-progress: ${{ needs.resolve_event.outputs.priority_targets != '[]' }}",
+            reconciler_job,
+        )
         self.assertIn(resolver_generation_lock, resolver_job)
-        self.assertIn("group: pr-governance-dispatcher-${{ github.repository_id }}", reconciler_job)
         self.assertIn("cancel-in-progress: ${{ needs.resolve_event.outputs.priority_targets != '[]' }}", reconciler_job)
         self.assertNotIn("actions/checkout", job)
         self.assertNotIn("github.event.pull_request", job)
@@ -4853,7 +4857,9 @@ raise SystemExit(91)
 
     def test_invalidator_preempts_priority_dispatchers_and_paces_every_check_write(self) -> None:
         dispatcher_group = "group: pr-governance-dispatcher-${{ github.repository_id }}"
-        self.assertEqual(self.workflow.count(dispatcher_group), 2)
+        barrier_group = "group: pr-governance-barrier-${{ github.repository_id }}"
+        self.assertEqual(self.workflow.count(dispatcher_group), 1)
+        self.assertEqual(self.workflow.count(barrier_group), 2)
         establish = self.workflow[
             self.workflow.index("  establish-resolver-failure-barrier:"):
             self.workflow.index("  resolve_event:")
@@ -4871,7 +4877,7 @@ raise SystemExit(91)
             resolver,
         )
         self.assertIn(
-            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ needs.resolve_event.outputs.priority_targets != '[]' }}",
+            "concurrency:\n      group: pr-governance-barrier-${{ github.repository_id }}\n      cancel-in-progress: ${{ needs.resolve_event.outputs.priority_targets != '[]' }}",
             self.workflow,
         )
         match = re.search(
