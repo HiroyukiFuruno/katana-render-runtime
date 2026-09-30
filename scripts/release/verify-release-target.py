@@ -16,22 +16,22 @@ from urllib import error, request
 
 REQUIRED_LATEST_RELEASE = "v0.4.21"
 REQUIRED_TARGET_RELEASE = "v0.4.22"
-# manifest更新は、v0.4.22で指定された修正を含むレビュー済みsource headからだけ
-# 行える。squash merge候補にこのcommitの祖先性を要求するとGitHub上で正当な
-# candidateを拒否するため、通常のrelease candidate検証とは分離する。
-REQUIRED_RELEASE_SOURCE_COMMITS = (
+# v0.4.22指定修正は、manifest更新元と公開candidateの両方で祖先性を要求する。
+REQUIRED_RELEASE_COMMITS = (
     "1bc497bdfd3b8c4318e9ee1609d147b6925b43e5",  # v0.4.22指定修正
 )
+REQUIRED_RELEASE_SOURCE_COMMITS = REQUIRED_RELEASE_COMMITS
 # 通常のrelease candidateは、実レビュー対象のPR #99 default baseを祖先に持ち、
 # 不変manifestでリリース内容を保存しなければならない。
 REQUIRED_RELEASE_CANDIDATE_ANCESTORS = (
     "9ad18a07358cf28b742cc00c12c0c9f85956d20a",  # PR #99のdefault base
+    *REQUIRED_RELEASE_COMMITS,
 )
-# squash merge 後も default history に残る v0.4.21 の merge commit を、
-# 変更集合の起点として使う。期待値そのものは commit/tree object ではなく、
+# default history の v0.4.21 merge commit を変更集合の起点として使う。
+# 祖先性とは別に、期待値そのものは commit/tree object ではなく、
 # base からの non-gate 差分を表す不変な内容 manifest に固定する。
 REQUIRED_RELEASE_BASE = "7f984d16400fe3e097a3380dd7641d78c5852352"
-# Gate 修正はこの digest から除外するため、squash 後の gate repair によって
+# Gate 修正はこの digest から除外するため、後続の gate repair によって
 # 自己参照しない。raw diff は path、file mode、base/target blob を含む。
 REQUIRED_RELEASE_MANIFEST_SHA256 = "582864d812c12472c81eb1676d883407b722c54c072f5caf913c552e34d06be5"
 RELEASE_GATE_PATHS = frozenset(
@@ -205,7 +205,7 @@ def release_tree_matches(
     release_base: str = REQUIRED_RELEASE_BASE,
     required_manifest_sha256: str = REQUIRED_RELEASE_MANIFEST_SHA256,
 ) -> bool:
-    """Return whether a squash candidate preserves the required release content."""
+    """Return whether a candidate preserves the required release content."""
     return release_manifest_sha256(head_ref, release_base) == required_manifest_sha256
 
 

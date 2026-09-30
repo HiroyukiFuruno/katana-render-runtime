@@ -239,7 +239,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(required_commit, result.stderr)
 
-    def test_accepts_actual_head_equivalent_squash_with_required_base_ancestry(
+    def test_rejects_unknown_head_ref(self) -> None:
+        result = self.run_check("v0.4.22", "v0.4.21", "refs/heads/nonexistent-release-fixture")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(REQUIRED_SOURCE_COMMITS[0], result.stderr)
+
+    def test_rejects_head_equivalent_sibling_without_pinned_fix(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -307,14 +312,21 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 git("fetch", "-q", str(source_repository), "HEAD:refs/heads/release")
                 squash = git(
                     "commit-tree",
-                    # Model GitHub's squash merge: the candidate retains the
-                    # reviewed default base but not the PR source commit.
+                    # 同tree/default baseでも指定修正commitを失うsiblingは拒否する。
                     "release^{tree}",
                     "-p",
                     REQUIRED_CANDIDATE_ANCESTORS[0],
                     "-m", "actual release tree as a squash",
                 )
                 git("branch", "-f", "candidate", squash)
+                self.assertEqual(
+                    subprocess.run(
+                        ["git", "merge-base", "--is-ancestor", REQUIRED_SOURCE_COMMITS[0], squash],
+                        cwd=repository, check=False, capture_output=True, text=True,
+                        env=isolated_git_environment(),
+                    ).returncode,
+                    1,
+                )
                 source_head = self.source_git("rev-parse", "HEAD")
                 subprocess.run(
                     ["git", "init", "--bare", "-q", str(fresh_origin)],
@@ -361,9 +373,26 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     ).returncode,
                     0,
                 )
+                self.assertEqual(git("rev-parse", "candidate^{tree}"), git("rev-parse", "release^{tree}"))
+                self.assertEqual(fresh_git("merge-base", "--is-ancestor", REQUIRED_CANDIDATE_ANCESTORS[0], "HEAD").returncode, 0)
+                manifest = subprocess.run(
+                    [sys.executable, str(SCRIPT), "--target-version", "v0.4.22", "--print-release-manifest"],
+                    cwd=fresh_repository, check=False, capture_output=True, text=True,
+                    env=isolated_git_environment(),
+                )
+                self.assertEqual(manifest.returncode, 0, manifest.stderr)
+                self.assertEqual(manifest.stdout.strip(), VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_MANIFEST_SHA256)
+                rejected_sibling = self.run_check("v0.4.22", "v0.4.21", "HEAD", fresh_repository)
+                self.assertNotEqual(rejected_sibling.returncode, 0)
+                self.assertIn(REQUIRED_SOURCE_COMMITS[0], rejected_sibling.stderr)
 
-                accepted = self.run_check("v0.4.22", "v0.4.21", "HEAD", fresh_repository)
-                self.assertEqual(accepted.returncode, 0, accepted.stderr)
+                merge_candidate = git(
+                    "commit-tree", "release^{tree}",
+                    "-p", REQUIRED_CANDIDATE_ANCESTORS[0], "-p", source_head,
+                    "-m", "release merge retains the pinned fix",
+                )
+                accepted_merge = self.run_check("v0.4.22", "v0.4.21", merge_candidate, repository)
+                self.assertEqual(accepted_merge.returncode, 0, accepted_merge.stderr)
 
                 invalid_squash = git(
                     "commit-tree",
@@ -382,11 +411,13 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     "commit-tree",
                     f"{VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE}^{{tree}}",
                     "-p",
-                    REQUIRED_CANDIDATE_ANCESTORS[0],
+                    REQUIRED_SOURCE_COMMITS[0],
                     "-m",
                     "arbitrary tree with the required default base",
                 )
                 git("branch", "-f", "arbitrary-tree", arbitrary_tree_with_required_base)
+                for required in (*REQUIRED_CANDIDATE_ANCESTORS, *REQUIRED_SOURCE_COMMITS):
+                    self.assertEqual(git("merge-base", "--is-ancestor", required, "arbitrary-tree"), "")
                 rejected_manifest = self.run_check(
                     "v0.4.22", "v0.4.21", "arbitrary-tree", repository
                 )
