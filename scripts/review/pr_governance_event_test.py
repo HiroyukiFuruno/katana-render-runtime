@@ -504,10 +504,10 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         else:
             self.addCleanup(os.environ.__setitem__, "TERMINAL_SEGMENT_STARTED_AT", prior_started_at)
 
-    def test_serialized_admission_mints_the_reconciliation_deadline(self) -> None:
-        """A queued non-priority workflow_run must not inherit preflight time."""
+    def test_dispatcher_admission_mints_the_reconciliation_deadline(self) -> None:
+        """A queued dispatcher must not inherit pre-admission wall time."""
         job = re.search(
-            r"^  establish-resolver-failure-barrier:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:|\Z)",
+            r"^  resolve_event:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:|\Z)",
             self.actual_workflow,
             re.MULTILINE | re.DOTALL,
         )
@@ -518,11 +518,11 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             body,
         )
         self.assertNotIn(
-            "root_deadline_epoch: ${{ needs.preflight-workflow-run-source.outputs.root_deadline_epoch }}",
+            "root_deadline_epoch: ${{ needs.establish-resolver-failure-barrier.outputs.root_deadline_epoch }}",
             body,
         )
         admission = re.search(
-            r"- name: Start serialized reconciliation deadline after admission.*?python3 - <<'PY'\n(.*?)\n          PY",
+            r"- name: Start dispatcher deadline after serialized admission.*?python3 - <<'PY'\n(.*?)\n          PY",
             body,
             re.DOTALL,
         )
