@@ -21,6 +21,8 @@ issue_event_noop = False
 # serialized lane. Every other event keeps the historical preemptive
 # behavior until the resolver has established its own target set.
 priority = True
+sensor_reservation = False
+sensor_run_id = 0
 
 def request(path):
     try:
@@ -631,7 +633,7 @@ pull_request_target_noop = event_name == "pull_request_target" and valid and not
 issue_event_noop = event_name in {"issues", "issue_comment"} and valid and not reconcile
 
 
-def active_local_review_sensor() -> bool | None:
+def active_local_review_sensor() -> int | None:
     """Return whether a current local review sensor must retain its lane.
 
     A direct mutation may otherwise cancel an admitted sensor before its
@@ -644,7 +646,7 @@ def active_local_review_sensor() -> bool | None:
         return None
     default_branch = current_repository[2]
     allowed_events = {"pull_request", "pull_request_review", "pull_request_review_comment"}
-    for status in ("in_progress",):
+    for status in ("queued", "in_progress"):
         listed = request(
             f"repos/{repository}/actions/workflows/pr-governance-review-events.yml/runs?"
             f"status={status}&per_page=100&page=1"
@@ -655,10 +657,12 @@ def active_local_review_sensor() -> bool | None:
             return None
         for run in runs:
             pulls = run.get("pull_requests") if isinstance(run, dict) else None
+            run_id = run.get("id") if isinstance(run, dict) else None
             run_repository = run.get("repository") if isinstance(run, dict) else None
             head_repository = run.get("head_repository") if isinstance(run, dict) else None
             if (
                 not isinstance(run, dict)
+                or type(run_id) is not int or run_id < 1
                 or run.get("name") != "PR governance review sensor"
                 or run.get("event") not in allowed_events
                 or run.get("status") != status
@@ -701,8 +705,8 @@ def active_local_review_sensor() -> bool | None:
                 or not isinstance(current_head_repository, dict) or current_head_repository.get("full_name") != repository
             ):
                 return None
-            return True
-    return False
+            return run_id
+    return 0
 
 
 # A direct event retains its low-latency preemption when no sensor is active.
@@ -713,13 +717,20 @@ if (
     and valid and reconcile and event_name in {"pull_request_target", "issues", "issue_comment"}
 ):
     sensor_active = active_local_review_sensor()
-    if sensor_active is not False:
-        priority = False
+    if sensor_active is None:
+        valid = False
+    elif sensor_active:
+        # Preserve the sensor's pending dispatcher before this direct event
+        # reaches the shared group; GitHub otherwise replaces that slot.
+        sensor_reservation = True
+        sensor_run_id = sensor_active
 
 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
     output.write("reconcile=" + ("true" if reconcile else "false") + "\n")
     output.write("valid=" + ("true" if valid else "false") + "\n")
     output.write("priority=" + ("true" if priority else "false") + "\n")
+    output.write("sensor_reservation=" + ("true" if sensor_reservation else "false") + "\n")
+    output.write(f"sensor_run_id={sensor_run_id}\n")
     output.write("pull_request_target_noop=" + ("true" if pull_request_target_noop else "false") + "\n")
     output.write("issue_event_noop=" + ("true" if issue_event_noop else "false") + "\n")
     output.write(f"root_deadline_epoch={root_deadline_epoch}\n")

@@ -132,7 +132,7 @@ class GovernanceCiAndIssueContractTest(unittest.TestCase):
                 expression,
                 expected
                 if label == "preflight"
-                else "${{ needs.preflight-workflow-run-source.outputs.reconcile == 'true' && "
+                else "${{ always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') && "
                 + allowlist
                 + " }}",
             )

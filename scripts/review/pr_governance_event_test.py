@@ -2582,7 +2582,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             self.workflow.index("  establish-resolver-failure-barrier:"):
             self.workflow.index("  resolve_event:")
         ]
-        self.assertIn("needs: preflight-workflow-run-source", establish)
+        self.assertIn("needs: [preflight-workflow-run-source, wait-for-active-review-sensor]", establish)
         self.assertIn("needs.preflight-workflow-run-source.outputs.reconcile == 'true'", establish)
         self.assertIn("needs.preflight-workflow-run-source.outputs.valid", establish)
         self.assertLess(establish.index("concurrency:"), establish.index("Create resolver-failure barrier marker write token"))
@@ -4522,7 +4522,7 @@ raise SystemExit(91)
         self.assertIsNotNone(condition); assert condition is not None
         self.assertEqual(
             condition.group("value"),
-            "${{ needs.preflight-workflow-run-source.outputs.reconcile == 'true' && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ("
+            "${{ always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ("
             "(github.event.workflow_run.name == 'PR governance review sensor' && "
             "(github.event.workflow_run.event == 'pull_request' || "
             "github.event.workflow_run.event == 'pull_request_review' || "

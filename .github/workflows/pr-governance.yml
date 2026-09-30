@@ -42,6 +42,8 @@ jobs:
       reconcile: ${{ steps.scope.outputs.reconcile }}
       valid: ${{ steps.scope.outputs.valid }}
       priority: ${{ steps.scope.outputs.priority }}
+      sensor_reservation: ${{ steps.scope.outputs.sensor_reservation }}
+      sensor_run_id: ${{ steps.scope.outputs.sensor_run_id }}
       pull_request_target_noop: ${{ steps.scope.outputs.pull_request_target_noop }}
       issue_event_noop: ${{ steps.scope.outputs.issue_event_noop }}
       root_deadline_epoch: ${{ steps.scope.outputs.root_deadline_epoch }}
@@ -147,6 +149,51 @@ jobs:
               arm_issue_source_failure("Trusted governance source is invalid.")
           exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
           PY
+  wait-for-active-review-sensor:
+    # A direct event must not replace the pending requested/in-progress
+    # sensor dispatcher. The sensor itself waits for its bounded writer, so a
+    # terminal source run proves that reservation has been released.
+    name: Preserve pending review sensor before direct dispatch
+    needs: preflight-workflow-run-source
+    if: ${{ needs.preflight-workflow-run-source.outputs.sensor_reservation == 'true' && needs.preflight-workflow-run-source.outputs.valid == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 94
+    permissions:
+      actions: read
+    steps:
+      - name: Await the captured review sensor terminal state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SENSOR_RUN_ID: ${{ needs.preflight-workflow-run-source.outputs.sensor_run_id }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import time
+
+          repository = os.environ.get("GITHUB_REPOSITORY", "")
+          run_id = os.environ.get("SENSOR_RUN_ID", "")
+          if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None or re.fullmatch(r"[1-9][0-9]*", run_id) is None:
+              raise SystemExit("Captured review sensor identity is invalid.")
+          while True:
+              result = subprocess.run(["gh", "api", "--hostname", "github.com", f"repos/{repository}/actions/runs/{run_id}"], capture_output=True, text=True, check=False, timeout=20)
+              if result.returncode != 0:
+                  raise SystemExit("Unable to re-read the captured review sensor.")
+              try:
+                  run = json.loads(result.stdout)
+              except json.JSONDecodeError as error:
+                  raise SystemExit("Captured review sensor is not JSON.") from error
+              if not isinstance(run, dict) or run.get("id") != int(run_id) or run.get("name") != "PR governance review sensor" or run.get("run_attempt") != 1:
+                  raise SystemExit("Captured review sensor changed identity.")
+              status = run.get("status")
+              if status == "completed":
+                  raise SystemExit(0)
+              if status not in {"queued", "in_progress"}:
+                  raise SystemExit("Captured review sensor state is invalid.")
+              time.sleep(5)
+          PY
   establish-resolver-failure-barrier:
     # `resolve_event` has to inspect the mutable open-PR snapshot before it
     # can choose a targeted invalidation.  Put the App-bound repository-wide
@@ -154,8 +201,8 @@ jobs:
     # cancellation can then only leave this context required, never expose a
     # former trusted success.
     name: Establish resolver-failure merge barrier
-    needs: preflight-workflow-run-source
-    if: ${{ needs.preflight-workflow-run-source.outputs.reconcile == 'true' && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ((github.event.workflow_run.name == 'PR governance review sensor' && (github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'pull_request_review' || github.event.workflow_run.event == 'pull_request_review_comment')) || ((github.event.workflow_run.name == 'CI' || github.event.workflow_run.name == 'release-preflight') && github.event.workflow_run.event == 'pull_request'))) }}
+    needs: [preflight-workflow-run-source, wait-for-active-review-sensor]
+    if: ${{ always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ((github.event.workflow_run.name == 'PR governance review sensor' && (github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'pull_request_review' || github.event.workflow_run.event == 'pull_request_review_comment')) || ((github.event.workflow_run.name == 'CI' || github.event.workflow_run.name == 'release-preflight') && github.event.workflow_run.event == 'pull_request'))) }}
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15

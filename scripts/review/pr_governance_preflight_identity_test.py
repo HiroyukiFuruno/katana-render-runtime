@@ -246,14 +246,15 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
     def test_active_sensor_serializes_a_relevant_direct_event(self) -> None:
         sensor_endpoint = (
             f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
-            "status=in_progress&per_page=100&page=1"
+            "status=queued&per_page=100&page=1"
         )
         active_sensor = {
             "total_count": 1,
             "workflow_runs": [{
                 "name": "PR governance review sensor",
                 "event": "pull_request_review",
-                "status": "in_progress",
+                "status": "queued",
+                "id": 17,
                 "run_attempt": 1,
                 "path": ".github/workflows/pr-governance-review-events.yml",
                 "repository": self.repository(),
@@ -271,7 +272,9 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         }, direct_priority_fence=True)
         self.assertEqual(result["valid"], "true")
         self.assertEqual(result["reconcile"], "true")
-        self.assertEqual(result["priority"], "false")
+        self.assertEqual(result["priority"], "true")
+        self.assertEqual(result["sensor_reservation"], "true")
+        self.assertEqual(result["sensor_run_id"], "17")
 
     def test_absent_sensor_keeps_direct_event_preemption(self) -> None:
         sensor_endpoint = (
@@ -280,11 +283,14 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         )
         result = self.execute(responses={
             PR_ENDPOINT: [self.pull(state="closed"), self.pull(state="open")],
+            f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?status=queued&per_page=100&page=1": [{"total_count": 0, "workflow_runs": []}],
             sensor_endpoint: [{"total_count": 0, "workflow_runs": []}],
         }, direct_priority_fence=True)
         self.assertEqual(result["valid"], "true")
         self.assertEqual(result["reconcile"], "true")
         self.assertEqual(result["priority"], "true")
+        self.assertEqual(result["sensor_reservation"], "false")
+        self.assertEqual(result["sensor_run_id"], "0")
 
     def test_malformed_pr_fields_cannot_be_mistaken_for_a_noop(self) -> None:
         malformed = (
