@@ -541,13 +541,12 @@ jobs:
     # App-bound barrier required for the next reconciliation instead of
     # timing out after it has left every head pending.
     timeout-minutes: 290
-    # 通常の全件走査は直列化する。一方、PR / Issue contract mutation と
-    # review-sensor workflow_run はこの走査を中断して先に fail-closed
-    # barrier を作る。CI / release workflow_run は通常走査のままにする。
-    # 中断された走査の terminal PATCH は Check Run fingerprint fence で
-    # 拒否され、次の全件走査が current snapshot から収束させる。
+    # barrier の activation と release は同じ非キャンセルレーンで直列化する。
+    # 新世代は待機中でも workflow run として旧世代の release fence に観測される
+    # ため、旧世代が新世代の pending 化より先に required context を外せない。
+    # CI / release workflow_run は通常走査のままにする。
     concurrency:
-      group: pr-governance-dispatcher-${{ github.repository_id }}
+      group: pr-governance-barrier-${{ github.repository_id }}
       cancel-in-progress: ${{ needs.resolve_event.outputs.priority_targets != '[]' }}
     permissions:
       actions: read
