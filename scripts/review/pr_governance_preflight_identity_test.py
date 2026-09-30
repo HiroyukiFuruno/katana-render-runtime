@@ -269,6 +269,24 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         self.assertEqual(result["valid"], "true")
         self.assertEqual(result["reconcile"], "false")
         self.assertEqual(result["issue_event_noop"], "true")
+        self.assertEqual(result["priority"], "false")
+
+    def test_closed_and_nondefault_pr_comments_are_not_priority(self) -> None:
+        for pull in (self.pull(state="closed"), self.pull(base_ref="release/v1")):
+            with self.subTest(pull=pull):
+                result = self.execute(responses={PR_ENDPOINT: [pull, pull]})
+                self.assertEqual(result["valid"], "true")
+                self.assertEqual(result["reconcile"], "false")
+                self.assertEqual(result["priority"], "false")
+
+    def test_ordinary_issue_comment_stays_nonpriority(self) -> None:
+        pages_endpoint = f"repos/{REPOSITORY}/pulls?state=open&per_page=100&page=1"
+        result = self.execute(
+            url="",
+            responses={pages_endpoint: [[]]},
+        )
+        self.assertEqual(result["valid"], "true")
+        self.assertEqual(result["priority"], "false")
 
     def test_issue_comment_url_identity_rejects_noncanonical_paths(self) -> None:
         for url in (
@@ -340,7 +358,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
             with self.subTest(initial=initial, final=final):
                 result = self.execute(responses={PR_ENDPOINT: [initial, final]})
                 self.assertEqual(result["reconcile"], "true")
-                self.assertEqual(result["priority"], "true")
+                self.assertEqual(result["priority"], "false")
                 self.assertEqual(result["issue_event_noop"], "false")
 
     def test_stable_local_default_comment_reserves_no_sensor_before_dispatch(self) -> None:
@@ -357,12 +375,12 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         )
         self.assertEqual(result["valid"], "true")
         self.assertEqual(result["reconcile"], "true")
-        self.assertEqual(result["priority"], "false")
+        self.assertEqual(result["priority"], "true")
         self.assertEqual(result["sensor_reservation"], "false")
         self.assertEqual(result["sensor_run_ids"], "[]")
 
     def test_active_sensor_reserves_a_stable_local_default_comment(self) -> None:
-        """A non-priority PR comment must not replace a queued sensor slot."""
+        """A valid priority PR comment still reserves the active sensor slot."""
         sensor_prefix = (
             f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
         )
@@ -393,7 +411,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
             direct_priority_fence=True,
         )
         self.assertEqual(result["valid"], "true")
-        self.assertEqual(result["priority"], "false")
+        self.assertEqual(result["priority"], "true")
         self.assertEqual(result["sensor_reservation"], "true")
         self.assertEqual(result["sensor_run_ids"], "[17]")
 
@@ -427,7 +445,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         }, direct_priority_fence=True)
         self.assertEqual(result["valid"], "true")
         self.assertEqual(result["reconcile"], "true")
-        self.assertEqual(result["priority"], "true")
+        self.assertEqual(result["priority"], "false")
         self.assertEqual(result["sensor_reservation"], "true")
         self.assertEqual(result["sensor_run_ids"], "[17]")
 
@@ -514,7 +532,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         }, direct_priority_fence=True)
         self.assertEqual(result["valid"], "true")
         self.assertEqual(result["reconcile"], "true")
-        self.assertEqual(result["priority"], "true")
+        self.assertEqual(result["priority"], "false")
         self.assertEqual(result["sensor_reservation"], "false")
         self.assertEqual(result["sensor_run_ids"], "[]")
 

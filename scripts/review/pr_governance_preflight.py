@@ -356,6 +356,8 @@ if event_name == "pull_request_target":
 elif event_name in {"issues", "issue_comment"}:
     issue_number = os.environ.get("ISSUE_NUMBER", "")
     issue_pull_request_url = os.environ.get("ISSUE_PULL_REQUEST_URL", "")
+    if event_name == "issue_comment":
+        priority = False
     if re.fullmatch(r"[1-9][0-9]*", issue_number) is None or not isinstance(issue_pull_request_url, str):
         valid = False
     elif issue_pull_request_url == "":
@@ -409,9 +411,12 @@ elif event_name in {"issues", "issue_comment"}:
             ):
                 reconcile = False
             elif initial_source == final_source:
-                # A stable local/default PR comment changes no contract by
-                # itself. Reconcile it without replacing an admitted writer.
-                priority = False
+                # 同じAPI上の現行PRがopen・local・defaultなら直接priorityへ送る。
+                priority = (
+                    initial_source[1] == "open"
+                    and initial_source[2] == initial_identity[2]
+                    and initial_source[5] == (initial_identity[0], repository)
+                )
 elif event_name == "workflow_run":
     run_id = os.environ.get("WORKFLOW_RUN_ID", "")
     source_attempt = os.environ.get("WORKFLOW_RUN_ATTEMPT", "")

@@ -662,6 +662,51 @@ class StatusWriterUnitTest(unittest.TestCase):
         with self.identity(), patch.object(WRITER, "object_page", return_value=jobs):
             self.assertTrue(WRITER.dispatcher_generation_reconciles(generation))
 
+    def test_eight_staged_sensor_generations_do_not_preempt_the_early_writer(self) -> None:
+        runs = [
+            self.dispatcher_run(
+                88 + index, event="workflow_run",
+                created_at=f"2026-08-30T00:00:{index:02d}Z",
+            )
+            for index in range(8)
+        ]
+        jobs = self.dispatcher_jobs()
+        jobs["jobs"][0]["steps"] = [{
+            "number": 1, "name": WRITER.REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME,
+            "status": "completed", "conclusion": "success",
+        }]
+        jobs["jobs"].append({
+            "id": 3, "name": WRITER.RECONCILE_ALL_OPEN_NAME,
+            "status": "in_progress", "conclusion": None,
+            "steps": [{
+                "number": 1, "name": WRITER.AWAIT_EARLY_WRITER_STEP_NAME,
+                "status": "in_progress", "conclusion": None,
+            }],
+        })
+        jobs["total_count"] = len(jobs["jobs"])
+
+        def page(endpoint: str, **_kwargs: object) -> dict[str, object]:
+            if "/actions/workflows/" in endpoint:
+                return self.dispatcher_page(*runs)
+            if "/jobs?" in endpoint:
+                return jobs
+            raise AssertionError(endpoint)
+
+        environment = {
+            "GITHUB_ACTIONS": "true", "GITHUB_SHA": "d" * 40,
+            "GITHUB_REF_NAME": "master", "GOVERNANCE_SCOPE": "early",
+        }
+        with self.identity(), patch.dict(os.environ, environment), \
+             patch.object(WRITER, "api_json", return_value=runs[0]), \
+             patch.object(WRITER, "object_page", side_effect=page):
+            WRITER.reject_newer_dispatcher_barrier("a" * 40)
+            with patch.dict(os.environ, {"GOVERNANCE_SCOPE": "all"}):
+                with self.assertRaises(WRITER.NoPostGovernanceError):
+                    WRITER.reject_newer_dispatcher_barrier("a" * 40)
+            jobs["jobs"][-1]["steps"][0].update({"status": "completed", "conclusion": "failure"})
+            with self.assertRaises(WRITER.NoPostGovernanceError):
+                WRITER.reject_newer_dispatcher_barrier("a" * 40)
+
     def test_dispatcher_fence_rejects_malformed_paginated_or_api_evidence(self) -> None:
         head = "a" * 40
         current = self.dispatcher_run()

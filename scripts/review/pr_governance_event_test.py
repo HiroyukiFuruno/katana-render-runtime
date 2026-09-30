@@ -1208,7 +1208,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             with self.subTest(label=label):
                 result = execute([source, source], url)
                 self.assertEqual(result["reconcile"], expected)
-                self.assertEqual(result["priority"], "false" if expected == "true" else "true")
+                self.assertEqual(result["priority"], expected)
                 if expected == "false":
                     self.assertEqual(result["valid"], "true")
                     self.assertEqual(result["issue_event_noop"], "true")
@@ -1891,6 +1891,75 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         full = self.workflow.index("Invalidate every current pull request for the all-open writer")
         self.assertNotIn("AFFECTED: ${{ steps.current-targets.outputs.priority_targets }}", self.workflow[early:full])
         self.assertIn("AFFECTED: ${{ steps.current-targets.outputs.all_invalidation_chunk_1 }}", self.workflow[full:])
+
+    def test_review_sensor_early_writer_keeps_only_its_source_before_the_all_open_tail(self) -> None:
+        current = re.search(
+            r"- name: Re-enumerate every current local governance pull request.*?python3 - <<'PY'\n(.*?)\n          PY",
+            self.workflow, re.DOTALL,
+        )
+        self.assertIsNotNone(current); assert current is not None
+        pulls = [
+            {
+                "number": number, "state": "open", "draft": False,
+                "base": {"ref": "master", "repo": {"full_name": "owner/repository"}},
+                "head": {"sha": f"{number:040x}", "repo": {"full_name": "owner/repository"}},
+            }
+            for number in range(72, 122)
+        ]
+
+        def select(source: int, *, sensor: bool = True) -> dict[str, str]:
+            with tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "output"
+                environment = {
+                    "GITHUB_REPOSITORY": "owner/repository", "GITHUB_OUTPUT": str(output),
+                    "EVENT_TARGETS": json.dumps([source, 80]),
+                    "EVENT_PRIORITY_TARGETS": json.dumps([source, 80]),
+                    "REVIEW_SENSOR_EVENT": "true" if sensor else "false",
+                }
+
+                def fake_run(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+                    endpoint = arguments[-1]
+                    if endpoint == "repos/owner/repository":
+                        value: object = {"default_branch": "master"}
+                    elif endpoint == "repos/owner/repository/git/ref/heads/master":
+                        value = {"object": {"sha": "a" * 40}}
+                    elif endpoint == "repos/owner/repository/pulls?state=open&per_page=100&page=1":
+                        value = pulls
+                    else:
+                        raise AssertionError(arguments)
+                    return subprocess.CompletedProcess(arguments, 0, json.dumps(value), "")
+
+                with patch.dict(os.environ, environment), patch("subprocess.run", side_effect=fake_run):
+                    exec(self._workflow_program(current), {"__name__": "__main__"})
+                return dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
+
+        paced_writes = 0
+        for source in range(72, 80):
+            with self.subTest(source=source):
+                selected = select(source)
+                self.assertEqual(json.loads(selected["priority_targets"]), [source])
+                self.assertEqual(json.loads(selected["preinvalidate_targets"]), [source, 80])
+                self.assertEqual(json.loads(selected["targets"]), list(range(72, 122)))
+                tail = set(json.loads(selected["all_invalidation_targets"]))
+                self.assertEqual(tail | {source, 80}, set(range(72, 122)))
+                self.assertNotIn(source, tail)
+                paced_writes += 2 * len(json.loads(selected["priority_targets"]))
+        self.assertEqual(paced_writes, 16)
+        self.assertLess(paced_writes * 8.1, 1200)
+        self.assertLess(paced_writes * 8.1, 5400)
+        self.assertEqual(len(json.loads(select(72, sensor=False)["priority_targets"])), 50)
+        disappeared = select(999)
+        self.assertEqual(json.loads(disappeared["priority_targets"]), [])
+        self.assertEqual(json.loads(disappeared["preinvalidate_targets"]), [80])
+        self.assertEqual(set(json.loads(disappeared["all_invalidation_targets"])) | {80}, set(range(72, 122)))
+        pulls[-1]["head"]["sha"] = pulls[0]["head"]["sha"]
+        duplicate = select(72)
+        self.assertEqual(json.loads(duplicate["priority_targets"]), [])
+        self.assertEqual(duplicate["has_duplicate_governed_heads"], "true")
+        self.assertIn(
+            "REVIEW_SENSOR_EVENT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' }}",
+            self.actual_workflow,
+        )
 
     def test_priority_duplicate_head_skips_early_writer_and_invalidates_every_known_head(self) -> None:
         current = re.search(

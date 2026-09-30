@@ -893,6 +893,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT_TARGETS: ${{ needs.resolve_event.outputs.event_targets }}
           EVENT_PRIORITY_TARGETS: ${{ needs.resolve_event.outputs.priority_targets }}
+          REVIEW_SENSOR_EVENT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' }}
         run: |
           python3 - <<'PY'
           import json
@@ -910,6 +911,12 @@ jobs:
               raise SystemExit("Event target boundary is invalid.")
           if not isinstance(event_priority_targets, list) or any(type(number) is not int or number < 1 for number in event_priority_targets) or len(set(event_priority_targets)) != len(event_priority_targets) or any(number not in event_targets for number in event_priority_targets):
               raise SystemExit("Event priority target boundary is invalid.")
+          review_sensor_event = os.environ.get("REVIEW_SENSOR_EVENT", "false")
+          if review_sensor_event not in {"true", "false"}:
+              raise SystemExit("Review sensor event boundary is invalid.")
+          # trusted resolverはsourceを先頭へ置く。再列挙でsourceが消えても、
+          # 後続claimantを別sensorのsourceとして繰り上げない。
+          review_sensor_source = event_priority_targets[:1] if review_sensor_event == "true" else None
           repo_result = subprocess.run(["gh", "api", f"repos/{repository}"], capture_output=True, text=True, check=False, timeout=20)
           if repo_result.returncode != 0:
               raise SystemExit("Unable to load repository default branch.")
@@ -1039,10 +1046,17 @@ jobs:
           RECONCILIATION_JOB_TIMEOUT_SECONDS = 290 * 60
           RECONCILIATION_CONTROL_PLANE_RESERVE_SECONDS = 60 * 60
           priority_seed = set(preinvalidate_targets)
-          priority_targets = [] if duplicate_governed_heads else (
-              preinvalidate_targets
-              + [number for number in targets if number not in priority_seed]
-          )[:EARLY_WRITER_TARGET_CAP]
+          if duplicate_governed_heads:
+              priority_targets = []
+          elif review_sensor_source is not None:
+              # sensorのsource-bound hand-offに無関係PRのpaced writesを足すと、
+              # 他sensorのFIFO待機を消費する。全PRのterminal処理は後段へ残す。
+              priority_targets = [number for number in review_sensor_source if number in current_targets]
+          else:
+              priority_targets = (
+                  preinvalidate_targets
+                  + [number for number in targets if number not in priority_seed]
+              )[:EARLY_WRITER_TARGET_CAP]
           # Preserve the resolver's source/claimant ordering.  Pagination can
           # place unrelated PRs first, but affected siblings must be
           # invalidated before that unrelated tail.  The early source itself

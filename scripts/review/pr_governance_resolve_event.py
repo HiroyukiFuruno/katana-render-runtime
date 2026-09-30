@@ -471,12 +471,15 @@ else:
         raise SystemExit("Issue event number is invalid.")
     issue = int(issue_number)
     affected = referenced(issue)
-    if event_name == "issue_comment" and os.environ.get("ISSUE_PULL_REQUEST_URL", "") and issue in numbers:
-        affected.add(issue)
-        source_number_value = issue
-    # PR comments still retain their exact event targets for reconciliation,
-    # but do not preempt an admitted all-open writer.
-    priority_event = event_name != "issue_comment"
+    if event_name == "issue_comment":
+        issue_pull_request_url = os.environ.get("ISSUE_PULL_REQUEST_URL", "")
+        expected_pull_request_url = f"https://api.github.com/repos/{repository}/pulls/{issue}"
+        if issue_pull_request_url == expected_pull_request_url and issue in numbers:
+            affected.add(issue)
+            source_number_value = issue
+            priority_event = True
+    else:
+        priority_event = True
 ordered_targets = (
     ([source_number_value] if source_number_value in affected else [])
     + sorted(affected - ({source_number_value} if source_number_value in affected else set()))
