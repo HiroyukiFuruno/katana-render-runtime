@@ -53,6 +53,7 @@ fn inline_images(loader: &HtmlSubresourceLoader, node: &Handle) {
                 }
                 Err(error) => {
                     log_subresource_failure(loader, "image", &source, &error);
+                    set_or_append_attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE, "error");
                 }
             }
         }
@@ -300,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_image_inlining_removes_stale_prevalidated_marker() {
+    fn failed_image_inlining_caches_the_prevalidated_error() {
         let source = must_result(HtmlBrowserSource::new(
             r#"<img id=image src="data:image/gif;base64,not-valid" data-krr-prevalidated-image-event="load">"#,
             "https://example.test/index.html",
@@ -316,7 +317,10 @@ mod tests {
             let node = document.node(*image);
             assert!(node.is_ok());
             node.iter().for_each(|node| {
-                assert_eq!(attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE), None);
+                assert_eq!(
+                    attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE).as_deref(),
+                    Some("error")
+                );
             });
         });
     }

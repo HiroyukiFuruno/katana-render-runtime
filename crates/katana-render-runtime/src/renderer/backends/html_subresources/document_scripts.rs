@@ -1,7 +1,8 @@
 use super::HtmlSubresourceLoader;
 use super::document::{attribute, is_tag, load_text, text_content};
 use crate::renderer::backends::html_document::HtmlDocument;
-use markup5ever_rcdom::Handle;
+use html5ever::ns;
+use markup5ever_rcdom::{Handle, NodeData};
 
 pub(super) fn load_scripts(
     loader: &HtmlSubresourceLoader,
@@ -36,7 +37,7 @@ impl<'a> ScriptCollector<'a> {
         for node in source_order {
             if is_tag(node, "script") {
                 self.collect_script(node, false);
-            } else if is_tag(node, "iframe") {
+            } else if is_html_tag(node, "iframe") {
                 self.collect_iframe(node);
             }
             self.source_order_index += 1;
@@ -51,7 +52,7 @@ impl<'a> ScriptCollector<'a> {
     }
 
     fn collect_inline_frame_node(&mut self, node: &Handle) {
-        if is_tag(node, "script") {
+        if is_html_tag(node, "script") {
             if let Some(script) = load_script(self.loader, node) {
                 self.scripts.push(script);
             }
@@ -79,6 +80,11 @@ impl<'a> ScriptCollector<'a> {
     fn finish(self) -> (Vec<String>, Option<usize>) {
         (self.scripts, self.body_onload_script_index)
     }
+}
+
+fn is_html_tag(node: &Handle, expected: &str) -> bool {
+    matches!(&node.data, NodeData::Element { name, .. }
+        if name.ns == ns!(html) && is_tag(node, expected))
 }
 
 fn load_script(loader: &HtmlSubresourceLoader, node: &Handle) -> Option<String> {
@@ -227,5 +233,30 @@ mod tests {
 
         assert_eq!(scripts, ["a", "parent", "b"]);
         assert_eq!(body_onload_script_index, Some(2));
+    }
+
+    #[test]
+    fn scripts_inside_foreign_svg_iframes_are_not_collected() {
+        let source = must_result(HtmlBrowserSource::new(
+            r#"<iframe id=frame data-krr-local-frame></iframe>"#,
+            "https://example.test/index.html",
+        ));
+        let loader = HtmlSubresourceLoader::new(&source);
+        let mut document = HtmlDocument::parse(&source.raw_html);
+        let frame = must_result(
+            document
+                .get_element_by_id("frame")
+                .ok_or("frame must exist"),
+        );
+        let frame = must_result(document.node(frame));
+        let child = HtmlDocument::parse(
+            r#"<svg><iframe><script>foreign</script></iframe></svg><script>html</script>"#,
+        );
+        let child_nodes = child.document.children.borrow().clone();
+        frame.children.borrow_mut().extend(child_nodes);
+
+        let (scripts, _) = load_scripts(&loader, &document);
+
+        assert_eq!(scripts, ["html"]);
     }
 }
