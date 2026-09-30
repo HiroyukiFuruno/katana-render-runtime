@@ -164,9 +164,8 @@ class GovernanceOverflowContractTest(unittest.TestCase):
     def test_every_governance_workflow_api_subprocess_has_a_twenty_second_timeout(self) -> None:
         """Keep the complete API-call inventory bounded as the three workflows grow."""
         workflows = (
-            # The split removes two activation calls and adds three bounded
-            # verification/release source calls.
-            ("dispatcher", self.dispatcher, 85),
+            # 新しい予約/ACK証跡のAPI wrapper2件も、既存の全API inventoryへ含める。
+            ("dispatcher", self.dispatcher, 87),
             ("status writer", self.workflow, 2),
             ("review events", self.review_events, 1),
         )
@@ -224,6 +223,25 @@ class GovernanceOverflowContractTest(unittest.TestCase):
                             assert isinstance(timeout, ast.Call)
                             self.assertIsInstance(timeout.func, ast.Name)
                             assert isinstance(timeout.func, ast.Name)
+                            if timeout.func.id == "bounded_root_timeout":
+                                helpers = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "bounded_root_timeout"]
+                                self.assertEqual(len(helpers), 1)
+                                helper = helpers[0]
+                                self.assertEqual(timeout.args, [])
+                                self.assertEqual(timeout.keywords, [])
+                                self.assertEqual(helper.args.args, [])
+                                remaining = [node for node in helper.body if isinstance(node, ast.Assign)]
+                                self.assertEqual(len(remaining), 1)
+                                self.assertEqual(ast.unparse(remaining[0]), "remaining = absolute_root_deadline - time.time()")
+                                guards = [node for node in helper.body if isinstance(node, ast.If)]
+                                self.assertEqual(len(guards), 1)
+                                self.assertEqual(ast.unparse(guards[0].test), "remaining <= 0")
+                                self.assertIsInstance(guards[0].body[0], ast.Raise)
+                                returns = [node for node in helper.body if isinstance(node, ast.Return)]
+                                self.assertEqual(len(returns), 1)
+                                self.assertEqual(ast.unparse(returns[0].value), "min(20, remaining)")
+                                self.assertIn('"ROOT_DEADLINE_EPOCH"', source)
+                                continue
                             self.assertEqual(timeout.func.id, "min")
                             self.assertIn("remaining", ast.unparse(timeout))
                             self.assertRegex(
@@ -267,10 +285,11 @@ class GovernanceOverflowContractTest(unittest.TestCase):
             )
 
     def test_phase_deadlines_bound_the_complete_300_head_schedule_inside_the_job_deadline(self) -> None:
-        phase_seconds = (15 + 15 + 30 + 290) * 60
+        # job分割後も全phaseは元の絶対root期限を消費し、期限を再発行しない。
+        phase_seconds = 350 * 60
         self.assertLess(phase_seconds, 6 * 60 * 60)
         self.assertIn("root_deadline_epoch = int(time.time()) + 21_000", self.dispatcher)
-        self.assertEqual(self.dispatcher.count("timeout-minutes: 15"), 4)
+        self.assertEqual(self.dispatcher.count("timeout-minutes: 15"), 6)
         self.assertIn("timeout-minutes: 30", self.dispatcher)
         self.assertIn("timeout-minutes: 290", self.dispatcher)
         self.assertIn("The operational cap includes the whole job", self.dispatcher)
@@ -297,7 +316,8 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         self.assertEqual(cap, 300)
         self.assertLessEqual(complete_seconds(cap), 290 * 60 - 60 * 60)
         self.assertGreater(complete_seconds(cap + 1), 290 * 60 - 60 * 60)
-        self.assertEqual(self.dispatcher.count("ROOT_DEADLINE_EPOCH:"), 5)
+        self.assertEqual(self.dispatcher.count("ROOT_DEADLINE_EPOCH:"), 23)
+        self.assertEqual(self.dispatcher.count("root_deadline_epoch = int(time.time()) + 21_000"), 1)
         self.assertEqual(
             self.dispatcher.count("Terminal dispatch cannot complete before the root deadline."), 4
         )
@@ -437,6 +457,7 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         source = textwrap.dedent(self.dispatcher_workflow[start:end])
         preinvalidate_targets = list(range(1, 51))
         all_invalidation_targets = list(range(51, 551))
+        priority_targets = list(range(551, 601))
         namespace = {
             "EARLY_WRITER_TARGET_CAP": 50,
             "CHECK_RUN_WRITE_PACE_SECONDS": 8.1,
@@ -449,11 +470,12 @@ class GovernanceOverflowContractTest(unittest.TestCase):
             "RECONCILIATION_CONTROL_PLANE_RESERVE_SECONDS": 60 * 60,
             "target_snapshots": {
                 number: (f"{number:040x}", False)
-                for number in preinvalidate_targets + all_invalidation_targets
+                for number in preinvalidate_targets + all_invalidation_targets + priority_targets
             },
-            "targets": preinvalidate_targets + all_invalidation_targets,
-            "priority_targets": preinvalidate_targets,
+            "targets": preinvalidate_targets + all_invalidation_targets + priority_targets,
+            "priority_targets": priority_targets,
             "preinvalidate_targets": preinvalidate_targets,
+            "preinvalidated_heads": {f"{number:040x}" for number in preinvalidate_targets},
             "all_invalidation_targets": all_invalidation_targets,
             "all_invalidation_heads": {
                 f"{number:040x}" for number in all_invalidation_targets
@@ -475,8 +497,8 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         source = textwrap.dedent(self.dispatcher_workflow[start:end])
         targets = list(range(1, 350))
         priority_targets = list(range(1, 51))
-        preinvalidate_targets = [1]
-        all_invalidation_targets = list(range(51, 350))
+        preinvalidate_targets = [51]
+        all_invalidation_targets = list(range(52, 350))
         namespace = {
             "EARLY_WRITER_TARGET_CAP": 50,
             "CHECK_RUN_WRITE_PACE_SECONDS": 8.1,
@@ -491,6 +513,7 @@ class GovernanceOverflowContractTest(unittest.TestCase):
             "targets": targets,
             "priority_targets": priority_targets,
             "preinvalidate_targets": preinvalidate_targets,
+            "preinvalidated_heads": {f"{number:040x}" for number in preinvalidate_targets},
             "all_invalidation_targets": all_invalidation_targets,
             "all_invalidation_heads": {
                 f"{number:040x}" for number in all_invalidation_targets
@@ -499,7 +522,7 @@ class GovernanceOverflowContractTest(unittest.TestCase):
 
         exec(source, namespace)
 
-        self.assertEqual(len(namespace["invalidation_governed_heads"]), 300)
+        self.assertEqual(len(namespace["invalidation_governed_heads"]), 299)
         self.assertEqual(len(namespace["governed_heads"]), 349)
         self.assertEqual(len(namespace["preserved_governed_heads"]), 50)
         self.assertEqual(namespace["max_governed_heads"], 300)

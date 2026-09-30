@@ -808,7 +808,8 @@ class GovernanceDispatcherFailClosedContractTest(unittest.TestCase):
         self.assertIn(")[:EARLY_WRITER_TARGET_CAP]", resolver)
         self.assertIn("len(targets)>50", dispatch)
         self.assertIn("len(targets)>50", await_writer)
-        self.assertIn("deadline=time.time()+1200", await_writer)
+        self.assertIn('deadline=min(time.time()+1200, float(os.environ["ROOT_DEADLINE_EPOCH"]))', await_writer)
+        self.assertIn('output.write("early_deadline_epoch="+str(int(deadline))', await_writer)
         self.assertIn("for _ in range(40):", await_writer)
 
         pace_seconds = 8.1

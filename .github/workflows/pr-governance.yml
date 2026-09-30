@@ -467,20 +467,12 @@ jobs:
                   time.sleep(5)
           PY
   establish-resolver-failure-barrier:
-    # `resolve_event` has to inspect the mutable open-PR snapshot before it
-    # can choose a targeted invalidation.  Put the App-bound repository-wide
-    # context in front of that fallible read: a bad page, API outage, or
-    # cancellation can then only leave this context required, never expose a
-    # former trusted success.
     name: Establish resolver-failure merge barrier
     needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier, wait-for-active-review-sensor]
     if: ${{ always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ((github.event.workflow_run.name == 'PR governance review sensor' && (github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'pull_request_review' || github.event.workflow_run.event == 'pull_request_review_comment')) || ((github.event.workflow_run.name == 'CI' || github.event.workflow_run.name == 'release-preflight') && github.event.workflow_run.event == 'pull_request'))) }}
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # barrierのchecks配列PATCHはreservation armと同じ短いadmin laneへ
-    # 限定する。direct priorityのpreemptionは後続resolve_eventが担い、
-    # ここで待機中sensorのsource-bound admissionを取消さない。
     concurrency:
       group: pr-governance-barrier-admin-${{ github.repository_id }}
       queue: max
@@ -495,10 +487,6 @@ jobs:
       root_deadline_epoch: ${{ steps.admission.outputs.root_deadline_epoch }}
     steps:
       - name: Start serialized reconciliation deadline after admission
-        # This job is the first holder of the shared dispatcher lane.  Do not
-        # carry a wall-clock budget minted by the unlocked preflight: a
-        # non-priority CI/release event may have waited behind a complete
-        # reconciliation before reaching this step.
         id: admission
         run: |
           python3 - <<'PY'
@@ -538,7 +526,6 @@ jobs:
               output.write(f"default_branch={branch}\n")
               output.write(f"default_head={workflow_sha.lower()}\n")
           PY
-
       - name: Create resolver-failure barrier branch-protection token
         id: protection-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
@@ -548,7 +535,6 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-administration: write
-
       - name: Activate resolver-failure merge barrier
         env:
           ADMIN_TOKEN: ${{ steps.protection-token.outputs.token }}
@@ -614,7 +600,6 @@ jobs:
               if response is None or canonical(response)!=canonical(expected_required) or after_records!=expected_records or canonical(after)!=canonical(expected):
                   raise SystemExit("Resolver-failure barrier atomic activation failed; manual recovery is required.")
           PY
-
       - name: Verify resolver-failure barrier source after activation
         env:
           GH_TOKEN: ${{ github.token }}
@@ -656,7 +641,6 @@ jobs:
           if not isinstance(blob,str) or re.fullmatch(r"[0-9a-fA-F]{40}",blob) is None:
               raise SystemExit("Resolver-failure barrier workflow blob is invalid.")
           PY
-
       - name: Fail closed after classification barrier activation
         env:
           EVENT_SOURCE_VALID: ${{ needs.preflight-workflow-run-source.outputs.valid }}
@@ -679,10 +663,446 @@ jobs:
               raise SystemExit("Reserved review sensor did not reach a safe terminal state; barrier remains active.")
           PY
 
-      # The required App context is made merge-blocking before any marker
-      # token or Check Run request.  A failed Issue/comment mutation or marker
-      # publication therefore leaves the missing required context in place
-      # instead of exposing a prior trusted success.
+  safe-obsolete-heavy-preemption:
+    name: Preserve admitted sources before obsolete heavy preemption
+    needs: [preflight-workflow-run-source, establish-resolver-failure-barrier, wait-for-active-review-sensor]
+    environment: pr-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    if: ${{ !cancelled() && needs.preflight-workflow-run-source.outputs.valid == 'true' && needs.establish-resolver-failure-barrier.result == 'success' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') }}
+    steps:
+      - name: Create safe obsolete heavy cancellation token
+        id: preemption-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: write
+          permission-checks: read
+          permission-contents: read
+          permission-pull-requests: read
+      - name: Stop only acknowledged obsolete heavy reconciliation
+        env:
+          GH_TOKEN: ${{ steps.preemption-token.outputs.token }}
+          DEFAULT_HEAD: ${{ needs.establish-resolver-failure-barrier.outputs.default_head }}
+          DEFAULT_BRANCH: ${{ needs.establish-resolver-failure-barrier.outputs.default_branch }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.establish-resolver-failure-barrier.outputs.root_deadline_epoch }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import time
+          from datetime import datetime
+          from urllib.parse import urlencode
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          head = os.environ["DEFAULT_HEAD"]
+          branch = os.environ["DEFAULT_BRANCH"]
+          own = int(os.environ["GITHUB_RUN_ID"])
+          deadline = int(os.environ["ROOT_DEADLINE_EPOCH"])
+          source_prefix = "Record verified review sensor source run "
+          writer_prefix = "Record bound successful early writer run "
+          ack_prefix = "Record successful bound review sensor acknowledgement "
+          reads = 0
+
+          def fail(message):
+              raise SystemExit(message)
+
+          def api(endpoint, method="GET", cancellation_run=None):
+              global reads
+              reads += 1
+              remaining = deadline - time.time()
+              if reads > 850 or remaining <= 0:
+                  fail("Obsolete heavy-phase admission evidence budget is exhausted.")
+              result = subprocess.run(["gh", "api", "--method", method, endpoint], capture_output=True, text=True, timeout=min(20, remaining))
+              if result.returncode:
+                  if cancellation_run is not None:
+                      observed=api(f"repos/{repository}/actions/runs/{cancellation_run['id']}")
+                      immutable=("id","workflow_id","run_number","created_at","event","head_sha","head_branch","run_attempt")
+                      if (dispatcher(observed) and all(observed.get(key)==cancellation_run.get(key) for key in immutable)
+                          and observed["status"]=="completed" and observed["conclusion"] in {"success","cancelled"}):
+                          return None
+                  fail("Unable to bind obsolete heavy-phase evidence.")
+              try:
+                  return json.loads(result.stdout) if result.stdout else None
+              except ValueError:
+                  fail("Obsolete heavy-phase evidence is not JSON.")
+
+          def repo(value):
+              if not isinstance(value, dict) or type(value.get("id")) is not int or value["id"] < 1:
+                  return None
+              if value.get("name") != repository.split("/", 1)[1] or value.get("url") != "https://api.github.com/repos/" + repository:
+                  return None
+              if "full_name" in value and value["full_name"] != repository:
+                  return None
+              return value["id"]
+
+          repository_value = api("repos/" + repository)
+          repository_id = repo(repository_value)
+          if repository_id is None or repository_value.get("default_branch") != branch:
+              fail("Obsolete heavy-phase repository is not trusted.")
+          reference = api(f"repos/{repository}/git/ref/heads/{branch}")
+          if not isinstance(reference, dict) or not isinstance(reference.get("object"), dict) or reference["object"].get("sha") != head:
+              fail("Obsolete heavy-phase default branch advanced.")
+
+          def dispatcher(run):
+              if not isinstance(run, dict):
+                  return False
+              try:
+                  datetime.strptime(run.get("created_at", ""), "%Y-%m-%dT%H:%M:%SZ")
+              except (TypeError, ValueError):
+                  return False
+              return (type(run.get("id")) is int and run["id"] > 0
+                      and run.get("name") == "PR governance dispatcher"
+                      and run.get("path") in {".github/workflows/pr-governance.yml", ".github/workflows/pr-governance.yml@" + branch, ".github/workflows/pr-governance.yml@refs/heads/" + branch}
+                      and run.get("head_sha") == head and run.get("head_branch") == branch
+                      and type(run.get("run_attempt")) is int and run["run_attempt"] == 1
+                      and run.get("event") in {"workflow_run", "pull_request_target", "issues", "issue_comment", "schedule", "workflow_dispatch"}
+                      and repo(run.get("repository")) == repository_id
+                      and type(run.get("workflow_id")) is int and run["workflow_id"] > 0
+                      and type(run.get("run_number")) is int and run["run_number"] > 0
+                      and isinstance(run.get("created_at"), str)
+                      and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", run["created_at"]) is not None
+                      and run.get("status") in {"requested", "queued", "in_progress", "completed"}
+                      and (run["status"] == "completed" and run.get("conclusion") in {"success", "failure", "cancelled", "timed_out", "skipped"}
+                           or run["status"] != "completed" and run.get("conclusion") is None))
+
+          current = api(f"repos/{repository}/actions/runs/{own}")
+          if not dispatcher(current):
+              fail("Current heavy-phase preemption dispatcher is invalid.")
+
+          def job(jobs, name):
+              matches = [value for value in jobs if value.get("name") == name]
+              if len(matches) > 1:
+                  fail("Obsolete heavy-phase job evidence is duplicated.")
+              if not matches:
+                  return None
+              value = matches[0]
+              if (type(value.get("id")) is not int or value["id"] < 1
+                  or value.get("status") not in {"queued", "in_progress", "completed"}
+                  or value.get("status") != "completed" and value.get("conclusion") is not None
+                  or value.get("status") == "completed" and value.get("conclusion") not in {"success", "failure", "cancelled", "skipped", "timed_out", "action_required", "neutral", "stale", "startup_failure"}):
+                  fail("Obsolete heavy-phase job is malformed.")
+              return value
+
+          def successful(value):
+              return value is not None and value.get("status") == "completed" and value.get("conclusion") == "success"
+
+          def marker(value, prefix):
+              steps = value.get("steps") if value is not None else None
+              if not isinstance(steps, list) or not all(isinstance(step, dict) for step in steps):
+                  fail("Obsolete heavy-phase marker steps are unavailable.")
+              matches = [step for step in steps if isinstance(step.get("name"), str) and step["name"].startswith(prefix)]
+              if len(matches) != 1:
+                  fail("Obsolete heavy-phase marker is missing or duplicated.")
+              step = matches[0]
+              if type(step.get("number")) is not int or step["number"] < 1 or step.get("status") != "completed":
+                  fail("Obsolete heavy-phase marker is malformed.")
+              if step.get("conclusion") == "skipped":
+                  return None
+              wire = step["name"][len(prefix):]
+              if step.get("conclusion") != "success" or re.fullmatch(r"[1-9][0-9]{0,18}", wire) is None or int(wire) > 2**63 - 1:
+                  fail("Obsolete heavy-phase marker is unverified.")
+              return int(wire)
+
+          listed = []
+          for status in ("queued", "in_progress"):
+              query = urlencode({"status": status, "branch": branch, "head_sha": head, "per_page": 100})
+              page = api(f"repos/{repository}/actions/workflows/{current['workflow_id']}/runs?{query}")
+              values = page.get("workflow_runs") if isinstance(page, dict) else None
+              count = page.get("total_count") if isinstance(page, dict) else None
+              if type(count) is not int or count < 0 or count > 100 or not isinstance(values, list) or count != len(values):
+                  fail("Obsolete heavy-phase run page is incomplete.")
+              if any(not isinstance(value, dict) or value.get("status") != status or value.get("conclusion") is not None for value in values):
+                  fail("Obsolete heavy-phase run status changed during enumeration.")
+              listed.extend(values)
+          if len(listed) > 100 or any(not dispatcher(value) for value in listed) or len({value["id"] for value in listed}) != len(listed):
+              fail("Obsolete heavy-phase run inventory is invalid.")
+
+          def source_acknowledged(source_id):
+              value = api(f"repos/{repository}/actions/runs/{source_id}")
+              pulls = value.get("pull_requests") if isinstance(value, dict) else None
+              if (not isinstance(value, dict) or type(value.get("id")) is not int or value["id"] != source_id
+                  or value.get("name") != "PR governance review sensor"
+                  or value.get("path") not in {".github/workflows/pr-governance-review-events.yml", ".github/workflows/pr-governance-review-events.yml@" + branch, ".github/workflows/pr-governance-review-events.yml@refs/heads/" + branch}
+                  or value.get("event") not in {"pull_request", "pull_request_review", "pull_request_review_comment"}
+                  or type(value.get("run_attempt")) is not int or value["run_attempt"] != 1
+                  or value.get("status") != "completed" or value.get("conclusion") != "success"
+                  or repo(value.get("repository")) != repository_id or repo(value.get("head_repository")) != repository_id
+                  or not isinstance(pulls, list) or len(pulls) != 1 or not isinstance(pulls[0], dict)):
+                  fail("Obsolete heavy-phase source acknowledgement is invalid.")
+              pull = pulls[0]
+              base, source_head = pull.get("base"), pull.get("head")
+              if (type(pull.get("number")) is not int or pull["number"] < 1 or not isinstance(base, dict) or not isinstance(source_head, dict)
+                  or base.get("ref") != branch or repo(base.get("repo")) != repository_id or repo(source_head.get("repo")) != repository_id
+                  or not isinstance(source_head.get("sha"), str) or re.fullmatch(r"[0-9a-f]{40}", source_head["sha"]) is None
+                  or value.get("head_sha") != source_head["sha"]):
+                  fail("Obsolete heavy-phase source PR binding is invalid.")
+
+          candidates = []
+          for run in listed:
+              if run["id"] == own or (run["created_at"], run["id"]) >= (current["created_at"], own):
+                  continue
+              page = api(f"repos/{repository}/actions/runs/{run['id']}/jobs?per_page=100")
+              jobs = page.get("jobs") if isinstance(page, dict) else None
+              count = page.get("total_count") if isinstance(page, dict) else None
+              if (not isinstance(jobs, list) or not all(isinstance(value, dict) for value in jobs)
+                  or type(count) is not int or count != len(jobs) or count >= 100
+                  or any(type(value.get("id")) is not int or value["id"] < 1 for value in jobs)
+                  or len({value["id"] for value in jobs}) != len(jobs)):
+                  fail("Obsolete heavy-phase job inventory is incomplete.")
+              heavy = job(jobs, "Write complete pending reconciliation Check Runs")
+              if heavy is None or heavy["status"] == "completed":
+                  continue
+              preflight = job(jobs, "Preflight workflow_run governance source")
+              admission = job(jobs, "Reconcile all current governance pull requests")
+              reservation_wait = job(jobs, "Preserve pending review sensor before direct dispatch")
+              if not successful(preflight) or not successful(admission):
+                  fail("Obsolete heavy-phase hand-off is not successful.")
+              if reservation_wait is not None and not (successful(reservation_wait) or reservation_wait["status"] == "completed" and reservation_wait["conclusion"] == "skipped"):
+                  fail("Obsolete heavy-phase reservation is not finished.")
+              writer_id = marker(admission, writer_prefix)
+              if writer_id is None:
+                  fail("Obsolete heavy-phase early writer is unverified.")
+              writer = api(f"repos/{repository}/actions/runs/{writer_id}")
+              if (not isinstance(writer, dict) or type(writer.get("id")) is not int or writer["id"] != writer_id
+                  or writer.get("name") not in {"PR governance status writer", f"source={run['id']} scope=early segment=0"} or writer.get("event") != "workflow_dispatch"
+                  or writer.get("path") not in {".github/workflows/pr-governance-status-writer.yml", ".github/workflows/pr-governance-status-writer.yml@" + branch, ".github/workflows/pr-governance-status-writer.yml@refs/heads/" + branch}
+                  or writer.get("head_sha") != head or writer.get("head_branch") != branch
+                  or type(writer.get("run_attempt")) is not int or writer["run_attempt"] != 1
+                  or writer.get("display_title") != f"source={run['id']} scope=early segment=0"
+                  or writer.get("status") != "completed" or writer.get("conclusion") != "success" or repo(writer.get("repository")) != repository_id):
+                  fail("Obsolete heavy-phase writer API binding is invalid.")
+              source_id = marker(preflight, source_prefix)
+              if source_id is not None:
+                  acknowledgement = job(jobs, "Acknowledge bound early review sensor")
+                  if not successful(acknowledgement) or marker(acknowledgement, ack_prefix) != source_id:
+                      fail("Obsolete heavy-phase sensor has not acknowledged hand-off.")
+                  source_acknowledged(source_id)
+              candidates.append(run["id"])
+          for identifier in candidates:
+              api(f"repos/{repository}/actions/runs/{identifier}/cancel", "POST", next(run for run in listed if run["id"]==identifier))
+          for _ in range(150):
+              if not candidates:
+                  break
+              query = urlencode({"branch": branch, "head_sha": head, "per_page": 100, "created": ">=" + min(run["created_at"] for run in listed if run["id"] in candidates)})
+              page = api(f"repos/{repository}/actions/workflows/{current['workflow_id']}/runs?{query}")
+              values = page.get("workflow_runs") if isinstance(page, dict) else None
+              if (not isinstance(values, list) or type(page.get("total_count")) is not int or page["total_count"] != len(values) or len(values) > 100
+                  or not all(dispatcher(value) for value in values) or len({value["id"] for value in values}) != len(values)):
+                  fail("Obsolete heavy-phase cancellation snapshot is invalid.")
+              states = {value["id"]: value for value in values}
+              if any(identifier not in states for identifier in candidates):
+                  fail("Obsolete heavy-phase cancellation identity disappeared.")
+              candidates = [identifier for identifier in candidates if states[identifier].get("status") != "completed"]
+              if candidates:
+                  time.sleep(2)
+          if candidates:
+              fail("Obsolete heavy-phase cancellation did not reach terminal state.")
+          PY
+      - name: Drain authoritative writer before the next governance hand-off
+        env:
+          GH_TOKEN: ${{ steps.preemption-token.outputs.token }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.establish-resolver-failure-barrier.outputs.root_deadline_epoch }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess, sys, time
+          from urllib.parse import urlencode
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          writer_path = ".github/workflows/pr-governance-status-writer.yml"
+          # workflow-runsは保持済みwriter全体を新しい順に返す。全履歴を
+          # 走査すると固定snapshot上限の後ろに現行writerが隠れるため、
+          # active状態ごとに明示照会する。各応答は独立に有界とし、
+          # state snapshotが変化した場合はhand-off前に拒否する。
+          active = ("requested", "queued", "pending", "waiting", "in_progress")
+
+          def request(arguments):
+              result = subprocess.run(["gh", "api", *arguments], capture_output=True, text=True, check=False, timeout=bounded_root_timeout())
+              if result.returncode != 0:
+                  raise SystemExit("Unable to drain a prior governance writer.")
+              return result.stdout
+
+          def payload(arguments):
+              try:
+                  return json.loads(request(arguments))
+              except json.JSONDecodeError as error:
+                  raise SystemExit("Governance writer API response is not JSON.") from error
+
+          def path_matches(value):
+              if value == writer_path:
+                  return True
+              if not isinstance(value, str) or not value.startswith(writer_path + "@"):
+                  return False
+              ref = value[len(writer_path) + 1:]
+              return re.fullmatch(r"[A-Za-z0-9._/-]+", ref) is not None and ref not in {".", ".."} and not ref.startswith("/") and "//" not in ref and all(part not in {"", ".", ".."} for part in ref.split("/"))
+
+          repository_value = payload([f"repos/{repository}"])
+          branch = repository_value.get("default_branch") if isinstance(repository_value, dict) else None
+          if not isinstance(branch, str) or re.fullmatch(r"[A-Za-z0-9._/-]+", branch) is None:
+              raise SystemExit("Repository default branch is invalid.")
+          reference = payload([f"repos/{repository}/git/ref/heads/{branch}"])
+          default_head = reference.get("object", {}).get("sha") if isinstance(reference, dict) and isinstance(reference.get("object"), dict) else None
+          if not isinstance(default_head, str) or re.fullmatch(r"[0-9a-fA-F]{40}", default_head) is None:
+              raise SystemExit("Repository default head is invalid.")
+          workflow = payload([f"repos/{repository}/actions/workflows/{writer_path.rsplit('/', 1)[-1]}"])
+          workflow_id = workflow.get("id") if isinstance(workflow, dict) else None
+          if type(workflow_id) is not int or workflow_id < 1:
+              raise SystemExit("Governance writer workflow ID is invalid.")
+          class ActiveWriterSnapshotChanged(Exception):
+              pass
+
+          def active_writer_runs(status):
+              if status not in active:
+                  raise SystemExit("Governance writer run status is invalid.")
+              # head SHAや作成時刻で絞ると古いdefault-branch writerを
+              # 見落とす。activeである限り次のhand-off前にcancelする。
+              query = urlencode({"event": "workflow_dispatch", "branch": branch, "status": status, "per_page": "100"})
+              arguments = ["gh", "api", f"repos/{repository}/actions/workflows/{workflow_id}/runs?{query}"]
+              try:
+                  result = subprocess.run(arguments, capture_output=True, text=True, check=False, timeout=bounded_root_timeout())
+              except subprocess.TimeoutExpired as error:
+                  raise SystemExit("Governance writer run list timed out.") from error
+              if result.returncode != 0:
+                  raise SystemExit("Unable to enumerate governance writer runs.")
+              try:
+                  page = json.loads(result.stdout)
+              except json.JSONDecodeError as error:
+                  raise SystemExit("Governance writer run list is not JSON.") from error
+              entries = page.get("workflow_runs") if isinstance(page, dict) else None
+              total = page.get("total_count") if isinstance(page, dict) else None
+              if not isinstance(page, dict) or not isinstance(entries, list) or len(entries) > 100 or not all(isinstance(run, dict) for run in entries) or type(total) is not int or total < 0 or total > 100 or len(entries) != total:
+                  raise SystemExit("Governance writer run list is invalid.")
+              identifiers = set()
+              for run in entries:
+                  identifier = run.get("id")
+                  observed_status = run.get("status")
+                  if type(identifier) is not int or identifier < 1 or identifier in identifiers:
+                      raise SystemExit("Governance writer run list is invalid.")
+                  identifiers.add(identifier)
+                  # A run can move requested→queued→in_progress while the
+                  # five state partitions are being read. Retry the whole
+                  # snapshot rather than treating that ordinary transition as
+                  # a terminal hand-off failure; unknown states remain invalid.
+                  if observed_status != status:
+                      if observed_status in active or observed_status == "completed":
+                          raise ActiveWriterSnapshotChanged
+                      raise SystemExit("Governance writer run status is invalid.")
+              return entries
+
+          def active_writer_snapshot():
+              snapshot = {status: active_writer_runs(status) for status in active}
+              identifiers = [run["id"] for runs in snapshot.values() for run in runs]
+              if len(set(identifiers)) != len(identifiers):
+                  # A transition can make one run visible in two partitions
+                  # during a single enumeration. It is not safe to cancel
+                  # until a complete snapshot is stable.
+                  raise ActiveWriterSnapshotChanged
+              return snapshot
+
+          listed = None
+          active_snapshot_attempts = 4
+          for attempt in range(active_snapshot_attempts):
+              try:
+                  first_snapshot = active_writer_snapshot()
+                  second_snapshot = active_writer_snapshot()
+              except ActiveWriterSnapshotChanged:
+                  if attempt + 1 == active_snapshot_attempts:
+                      raise SystemExit("Governance writer active run list did not stabilize.")
+                  time.sleep(1)
+                  continue
+              if first_snapshot == second_snapshot:
+                  listed = second_snapshot
+                  break
+              if attempt + 1 == active_snapshot_attempts:
+                  raise SystemExit("Governance writer active run list did not stabilize.")
+              time.sleep(1)
+          if not isinstance(listed, dict):
+              raise SystemExit("Governance writer active run list did not stabilize.")
+
+          def validate(run):
+              run_repository = run.get("repository") if isinstance(run, dict) else None
+              if not (
+                  isinstance(run, dict) and type(run.get("id")) is int and run["id"] > 0
+                  and isinstance(run.get("display_title"), str)
+                  and re.fullmatch(r"source=[1-9][0-9]* scope=(?:early segment=0|all segment=[1-4])", run["display_title"]) is not None
+                  and (run.get("name") == "PR governance status writer" or run.get("name") == run.get("display_title")) and path_matches(run.get("path"))
+                  and run.get("event") == "workflow_dispatch" and isinstance(run.get("head_sha"), str)
+                  and re.fullmatch(r"[0-9a-fA-F]{40}", run["head_sha"]) is not None
+                  and run.get("workflow_id") == workflow_id and isinstance(run_repository, dict)
+                  and run_repository.get("full_name") == repository
+                  and type(run.get("run_number")) is int and run["run_number"] > 0
+                  and type(run.get("run_attempt")) is int and run["run_attempt"] == 1
+                  and isinstance(run.get("status"), str)
+              ):
+                  raise SystemExit("Governance writer run identity is invalid.")
+
+          targets = []
+          for status in active:
+              for run in listed[status]:
+                  validate(run)
+                  # admission済みearly writerは95分review latchのsource-bound
+                  # hand-offである。後続sensorはstaleなall-openだけを停止し、
+                  # 他sensorのearly writer（FIFO待機中を含む）は取消さない。
+                  if " scope=all segment=" in run["display_title"]:
+                      targets.append(run["id"])
+          if len(set(targets)) != len(targets):
+              raise SystemExit("Governance writer run list is duplicated.")
+          for identifier in targets:
+              cancel = subprocess.run(["gh", "api", "--method", "POST", f"repos/{repository}/actions/runs/{identifier}/cancel"], capture_output=True, text=True, check=False, timeout=bounded_root_timeout())
+              if cancel.returncode == 0:
+                  continue
+              # 一覧取得からcancelの間に完了した競合は、再読でterminalを
+              # 確認できた場合だけ受理する。
+              run = payload([f"repos/{repository}/actions/runs/{identifier}"])
+              validate(run)
+              if run.get("status") != "completed":
+                  raise SystemExit("Unable to cancel a prior governance writer.")
+          for _ in range(150):
+              pending = []
+              for identifier in targets:
+                  run = payload([f"repos/{repository}/actions/runs/{identifier}"])
+                  validate(run)
+                  if run.get("status") != "completed":
+                      pending.append(identifier)
+              if not pending:
+                  raise SystemExit(0)
+              time.sleep(2)
+          raise SystemExit("Prior governance writer did not reach a terminal state.")
+          PY
+
+  publish-resolver-barrier-marker:
+    name: Publish serialized resolver-failure barrier marker
+    needs: [establish-resolver-failure-barrier, safe-obsolete-heavy-preemption]
+    environment: pr-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    concurrency:
+      group: pr-governance-status-${{ github.repository_id }}
+      queue: max
+      cancel-in-progress: false
+    steps:
       - name: Create resolver-failure barrier marker write token
         id: marker-write
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
@@ -692,7 +1112,6 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-checks: write
-
       - name: Create resolver-failure barrier marker read token
         id: marker-read
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
@@ -702,18 +1121,27 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-checks: read
-
       - name: Publish resolver-failure barrier App marker
         env:
           CHECK_WRITE_TOKEN: ${{ steps.marker-write.outputs.token }}
           CHECK_READ_TOKEN: ${{ steps.marker-read.outputs.token }}
-          DEFAULT_HEAD: ${{ steps.source.outputs.default_head }}
+          DEFAULT_HEAD: ${{ needs.establish-resolver-failure-barrier.outputs.default_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.establish-resolver-failure-barrier.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import json, os, re, subprocess, time
           from urllib.parse import urlencode
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
 
           repository=os.environ["GITHUB_REPOSITORY"]; head=os.environ.get("DEFAULT_HEAD", ""); dispatcher=os.environ.get("DISPATCHER_RUN_ID", ""); configured_app=os.environ.get("CHECK_APP_ID", "")
           write_token=os.environ.get("CHECK_WRITE_TOKEN", ""); read_token=os.environ.get("CHECK_READ_TOKEN", "")
@@ -727,7 +1155,7 @@ jobs:
           # invalidator/writer. Pace the marker Check Run as part of that
           # single App write budget rather than creating an uncounted burst.
           time.sleep(8.1)
-          created=subprocess.run(["gh","api","--hostname","github.com","--method","POST",f"repos/{repository}/check-runs","-f",f"name={context}","-f",f"head_sha={head}","-f",f"external_id={external}","-f","status=completed","-f","conclusion=success","-f",f"details_url={details}"],capture_output=True,text=True,check=False,env=write_env, timeout=20)
+          created=subprocess.run(["gh","api","--hostname","github.com","--method","POST",f"repos/{repository}/check-runs","-f",f"name={context}","-f",f"head_sha={head}","-f",f"external_id={external}","-f","status=completed","-f","conclusion=success","-f",f"details_url={details}"],capture_output=True,text=True,check=False,env=write_env, timeout=bounded_root_timeout())
           if created.returncode!=0:
               raise SystemExit("Unable to publish resolver-failure barrier marker.")
           try:
@@ -736,7 +1164,7 @@ jobs:
               raise SystemExit("Resolver-failure barrier marker is not JSON.") from error
           if type(identifier) is not int or identifier<1 or posted.get("name")!=context or posted.get("head_sha")!=head or posted.get("external_id")!=external or posted.get("status")!="completed" or posted.get("conclusion")!="success" or posted.get("details_url")!=details or not isinstance(posted.get("app"),dict) or posted["app"].get("id")!=app_id:
               raise SystemExit("Resolver-failure barrier marker is invalid.")
-          reread=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
+          reread=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=bounded_root_timeout())
           if reread.returncode!=0:
               raise SystemExit("Unable to re-read resolver-failure barrier marker.")
           try:
@@ -749,8 +1177,8 @@ jobs:
 
   resolve_event:
     name: Resolve relevant governance event
-    needs: [establish-resolver-failure-barrier, wait-for-active-review-sensor]
-    if: ${{ needs.establish-resolver-failure-barrier.outputs.reconcile == 'true' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') }}
+    needs: [establish-resolver-failure-barrier, publish-resolver-barrier-marker, wait-for-active-review-sensor]
+    if: ${{ !cancelled() && needs.establish-resolver-failure-barrier.result == 'success' && needs.establish-resolver-failure-barrier.outputs.reconcile == 'true' && needs.publish-resolver-barrier-marker.result == 'success' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # 入場判定は全件走査とは別レーンで直列化する。workflow_runは親の
@@ -861,52 +1289,56 @@ jobs:
           exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path, "zip": resolver_zip})
           PY
 
-  reconcile-all-open:
-    name: Reconcile all current governance pull requests
-    needs: resolve_event
-    if: needs.resolve_event.outputs.reconcile == 'true' && github.run_attempt == 1
+  prepare-current-targets:
+    name: Prepare immutable governance target partitions
+    needs: [resolve_event]
     environment: pr-governance
     runs-on: ubuntu-latest
-    # A complete generation has at most 600 targets. The deterministic early
-    # writer preserves up to 100, leaving at most four 125-head terminal
-    # segments. This keeps the shared App REST rolling window below its 4,500
-    # request ceiling without extending the existing 290-minute job or the
-    # 350-minute root generation deadline. A larger snapshot keeps the
-    # App-bound barrier required for the next reconciliation instead of
-    # timing out after it has left every head pending.
-    timeout-minutes: 290
-    # 通常の全件走査は直列化する。review sensorはsource run IDごとの
-    # admission laneへ入り、既存の290分走査にも他sensor callbackにも
-    # 待たされない。writer側のsingletonとgeneration fingerprintが全Check
-    # Runの書込みを直列化し、Check Run fingerprint fence が旧generationの
-    # terminal PATCHを拒否する。direct mutationはsensor reservation完了後に
-    # 通常laneへ入り、そこでのみ通常走査をpreemptする。
-    concurrency:
-      group: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && format('pr-governance-review-sensor-{0}-{1}', github.repository_id, github.event.workflow_run.id) || format('pr-governance-reconcile-{0}', github.repository_id) }}
-      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]' }}
+    timeout-minutes: 30
     permissions:
       actions: read
       contents: read
       pull-requests: read
+    if: ${{ needs.resolve_event.outputs.reconcile == 'true' && github.run_attempt == 1 }}
     outputs:
-      affected_barrier_active: ${{ steps.affected-barrier.outputs.active }}
-      default_branch: ${{ steps.current-targets.outputs.default_branch }}
-      writer_head: ${{ steps.current-targets.outputs.writer_head }}
+      has_targets: ${{ steps.current-targets.outputs.has_targets }}
       targets: ${{ steps.current-targets.outputs.targets }}
       target_snapshots: ${{ steps.current-targets.outputs.target_snapshots }}
+      event_targets: ${{ steps.current-targets.outputs.event_targets }}
+      has_event_targets: ${{ steps.current-targets.outputs.has_event_targets }}
+      has_priority_targets: ${{ steps.current-targets.outputs.has_priority_targets }}
       priority_targets: ${{ steps.current-targets.outputs.priority_targets }}
-      preserved_check_manifest: ${{ steps.await-early.outputs.preserved_check_manifest || '[]' }}
-      preserved_writer_run_id: ${{ steps.dispatch-early.outputs.writer_run_id || '0' }}
-      pre_manifest_1: ${{ steps.preinvalidate-1.outputs.check_manifest || '[]' }}
-      pre_manifest_2: ${{ steps.preinvalidate-2.outputs.check_manifest || '[]' }}
-      tail_manifest_1: ${{ steps.invalidate-all-1.outputs.check_manifest || '[]' }}
-      tail_manifest_2: ${{ steps.invalidate-all-2.outputs.check_manifest || '[]' }}
-      tail_carry_1: ${{ steps.invalidate-all-1.outputs.carry_target_numbers || '[]' }}
-      tail_carry_2: ${{ steps.invalidate-all-2.outputs.carry_target_numbers || '[]' }}
-      has_targets: ${{ steps.current-targets.outputs.has_targets }}
-      has_duplicate_governed_heads: ${{ steps.current-targets.outputs.has_duplicate_governed_heads }}
-      duplicate_governed_heads: ${{ steps.current-targets.outputs.duplicate_governed_heads }}
       preinvalidate_targets: ${{ steps.current-targets.outputs.preinvalidate_targets }}
+      has_preinvalidate_targets: ${{ steps.current-targets.outputs.has_preinvalidate_targets }}
+      invalidation_head_cap_exceeded: ${{ steps.current-targets.outputs.invalidation_head_cap_exceeded }}
+      has_preinvalidate_chunk_1: ${{ steps.current-targets.outputs.has_preinvalidate_chunk_1 }}
+      preinvalidate_chunk_1: ${{ steps.current-targets.outputs.preinvalidate_chunk_1 }}
+      preinvalidate_chunk_1_snapshots: ${{ steps.current-targets.outputs.preinvalidate_chunk_1_snapshots }}
+      has_preinvalidate_chunk_2: ${{ steps.current-targets.outputs.has_preinvalidate_chunk_2 }}
+      preinvalidate_chunk_2: ${{ steps.current-targets.outputs.preinvalidate_chunk_2 }}
+      preinvalidate_chunk_2_snapshots: ${{ steps.current-targets.outputs.preinvalidate_chunk_2_snapshots }}
+      preinvalidated_heads: ${{ steps.current-targets.outputs.preinvalidated_heads }}
+      preinvalidate_target_snapshots: ${{ steps.current-targets.outputs.preinvalidate_target_snapshots }}
+      duplicate_governed_heads: ${{ steps.current-targets.outputs.duplicate_governed_heads }}
+      has_duplicate_governed_heads: ${{ steps.current-targets.outputs.has_duplicate_governed_heads }}
+      has_all_invalidation_targets: ${{ steps.current-targets.outputs.has_all_invalidation_targets }}
+      all_invalidation_targets: ${{ steps.current-targets.outputs.all_invalidation_targets }}
+      all_invalidation_target_snapshots: ${{ steps.current-targets.outputs.all_invalidation_target_snapshots }}
+      all_invalidation_heads: ${{ steps.current-targets.outputs.all_invalidation_heads }}
+      history_post_scan_seconds: ${{ steps.current-targets.outputs.history_post_scan_seconds }}
+      has_all_invalidation_chunk_1: ${{ steps.current-targets.outputs.has_all_invalidation_chunk_1 }}
+      all_invalidation_chunk_1: ${{ steps.current-targets.outputs.all_invalidation_chunk_1 }}
+      all_invalidation_chunk_1_snapshots: ${{ steps.current-targets.outputs.all_invalidation_chunk_1_snapshots }}
+      has_all_invalidation_chunk_2: ${{ steps.current-targets.outputs.has_all_invalidation_chunk_2 }}
+      all_invalidation_chunk_2: ${{ steps.current-targets.outputs.all_invalidation_chunk_2 }}
+      all_invalidation_chunk_2_snapshots: ${{ steps.current-targets.outputs.all_invalidation_chunk_2_snapshots }}
+      priority_target_snapshots: ${{ steps.current-targets.outputs.priority_target_snapshots }}
+      writer_head: ${{ steps.current-targets.outputs.writer_head }}
+      default_branch: ${{ steps.current-targets.outputs.default_branch }}
+      affected_barrier_active: ${{ steps.affected-barrier.outputs.active }}
+      barrier_source_outcome: ${{ steps.barrier-source.outcome }}
+      barrier_token_outcome: ${{ steps.barrier-protection-activate.outcome }}
+      barrier_verify_outcome: ${{ steps.affected-barrier.outcome }}
     steps:
       - name: Re-enumerate every current local governance pull request
         id: current-targets
@@ -915,12 +1347,23 @@ jobs:
           EVENT_TARGETS: ${{ needs.resolve_event.outputs.event_targets }}
           EVENT_PRIORITY_TARGETS: ${{ needs.resolve_event.outputs.priority_targets }}
           REVIEW_SENSOR_EVENT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import json
           import os
           import re
           import subprocess
+          import time
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
 
           repository = os.environ["GITHUB_REPOSITORY"]
           try:
@@ -938,7 +1381,7 @@ jobs:
           # trusted resolverはsourceを先頭へ置く。再列挙でsourceが消えても、
           # 後続claimantを別sensorのsourceとして繰り上げない。
           review_sensor_source = event_priority_targets[:1] if review_sensor_event == "true" else None
-          repo_result = subprocess.run(["gh", "api", f"repos/{repository}"], capture_output=True, text=True, check=False, timeout=20)
+          repo_result = subprocess.run(["gh", "api", f"repos/{repository}"], capture_output=True, text=True, check=False, timeout=bounded_root_timeout())
           if repo_result.returncode != 0:
               raise SystemExit("Unable to load repository default branch.")
           try:
@@ -948,7 +1391,7 @@ jobs:
               raise SystemExit("Repository response is not JSON.") from error
           if not isinstance(branch, str) or re.fullmatch(r"[A-Za-z0-9._/-]+", branch) is None:
               raise SystemExit("Repository default branch is invalid.")
-          head_result = subprocess.run(["gh", "api", f"repos/{repository}/git/ref/heads/{branch}"], capture_output=True, text=True, check=False, timeout=20)
+          head_result = subprocess.run(["gh", "api", f"repos/{repository}/git/ref/heads/{branch}"], capture_output=True, text=True, check=False, timeout=bounded_root_timeout())
           if head_result.returncode != 0:
               raise SystemExit("Unable to load repository default head.")
           try:
@@ -962,7 +1405,7 @@ jobs:
               if page_number == 6:
                   arguments.insert(2, "--include")
               try:
-                  result = subprocess.run(arguments, capture_output=True, text=True, check=False, timeout=20)
+                  result = subprocess.run(arguments, capture_output=True, text=True, check=False, timeout=bounded_root_timeout())
               except subprocess.TimeoutExpired as error:
                   raise SystemExit("Current open pull request response timed out.") from error
               if result.returncode != 0:
@@ -1084,6 +1527,8 @@ jobs:
           # is owned by the singleton early writer and is intentionally kept
           # out of this all-open invalidation list.
           preserved = set(priority_targets)
+          preinvalidate_targets = [number for number in preinvalidate_targets if number not in preserved]
+          preinvalidated_heads = {target_snapshots[number][0] for number in preinvalidate_targets}
           event_tail = [
               number for number in event_targets
               if number not in preserved and target_snapshots[number][0] not in preinvalidated_heads
@@ -1174,7 +1619,7 @@ jobs:
               )
           )
           history_post_scan_seconds = (
-              len(all_invalidation_heads) * CHECK_RUN_WRITE_PACE_SECONDS
+              (len(all_invalidation_heads) + len(preinvalidated_heads)) * CHECK_RUN_WRITE_PACE_SECONDS
               + history_terminal_schedule
               + RECONCILIATION_CONTROL_PLANE_RESERVE_SECONDS
           )
@@ -1242,7 +1687,6 @@ jobs:
               output.write("writer_head=" + writer_head + "\n")
               output.write("default_branch=" + branch + "\n")
           PY
-
       - name: Verify default-branch governance source before barrier credentials
         id: barrier-source
         if: github.run_attempt == 1
@@ -1252,88 +1696,35 @@ jobs:
           DEFAULT_HEAD: ${{ steps.current-targets.outputs.writer_head }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import json, os, re, subprocess, time
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
           repository=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); head=os.environ.get("DEFAULT_HEAD", ""); workflow_ref=os.environ.get("WORKFLOW_REF", ""); workflow_sha=os.environ.get("WORKFLOW_SHA", "")
           if not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or workflow_ref!=f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{branch}" or workflow_sha.lower()!=head.lower(): raise SystemExit("Governance barrier workflow source is not the trusted default branch.")
           source_env={"GH_TOKEN":os.environ["GH_TOKEN"],"PATH":os.environ["PATH"]}
-          repository_result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}"],capture_output=True,text=True,check=False,env=source_env, timeout=20)
-          reference_result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/git/ref/heads/{branch}"],capture_output=True,text=True,check=False,env=source_env, timeout=20)
+          repository_result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}"],capture_output=True,text=True,check=False,env=source_env, timeout=bounded_root_timeout())
+          reference_result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/git/ref/heads/{branch}"],capture_output=True,text=True,check=False,env=source_env, timeout=bounded_root_timeout())
           if repository_result.returncode!=0 or reference_result.returncode!=0: raise SystemExit("Unable to bind governance barrier default branch source.")
           try: current_branch=json.loads(repository_result.stdout).get("default_branch"); current_head=json.loads(reference_result.stdout).get("object",{}).get("sha")
           except json.JSONDecodeError as error: raise SystemExit("Governance barrier default branch source is not JSON.") from error
           if current_branch!=branch or not isinstance(current_head,str) or current_head.lower()!=head.lower(): raise SystemExit("Governance barrier default branch source changed.")
-          result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/contents/.github/workflows/pr-governance.yml?ref={head}"],capture_output=True,text=True,check=False,env=source_env, timeout=20)
+          result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/contents/.github/workflows/pr-governance.yml?ref={head}"],capture_output=True,text=True,check=False,env=source_env, timeout=bounded_root_timeout())
           if result.returncode!=0: raise SystemExit("Unable to bind governance barrier workflow blob.")
           try: payload=json.loads(result.stdout); blob=payload.get("sha") if isinstance(payload,dict) else None
           except json.JSONDecodeError as error: raise SystemExit("Governance barrier workflow blob is not JSON.") from error
           if not isinstance(blob,str) or re.fullmatch(r"[0-9a-fA-F]{40}",blob) is None: raise SystemExit("Governance barrier workflow blob is invalid.")
           PY
-
-      - name: Create periodic affected-head barrier marker write token
-        # 初回priorityでは、context-onlyのbranch protection変更より前に
-        # 固定AppのmarkerをseedしてGitHubへApp identityを束縛する。
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.current-targets.outputs.has_preinvalidate_targets == 'true' || steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true') && steps.barrier-source.outcome == 'success'
-        id: barrier-marker-write
-        continue-on-error: true
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
-        with:
-          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-checks: write
-
-      - name: Create periodic affected-head barrier marker read token
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.current-targets.outputs.has_preinvalidate_targets == 'true' || steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true') && steps.barrier-source.outcome == 'success'
-        id: barrier-marker-read
-        continue-on-error: true
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
-        with:
-          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-checks: read
-
-      - name: Publish periodic static affected-head barrier App marker
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.current-targets.outputs.has_preinvalidate_targets == 'true' || steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true') && steps.barrier-source.outcome == 'success'
-        id: barrier-marker-publish
-        continue-on-error: true
-        env:
-          CHECK_WRITE_TOKEN: ${{ steps.barrier-marker-write.outputs.token }}
-          CHECK_READ_TOKEN: ${{ steps.barrier-marker-read.outputs.token }}
-          DEFAULT_HEAD: ${{ steps.current-targets.outputs.writer_head }}
-          DISPATCHER_RUN_ID: ${{ github.run_id }}
-          CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-        run: |
-          python3 - <<'PY'
-          import json, os, re, subprocess, time
-          from urllib.parse import urlencode
-          repository=os.environ["GITHUB_REPOSITORY"]; head=os.environ.get("DEFAULT_HEAD", ""); dispatcher=os.environ.get("DISPATCHER_RUN_ID", ""); configured_app=os.environ.get("CHECK_APP_ID", ""); context="KRR / PR governance affected-head barrier"; app_id=4_766_933
-          write_token=os.environ.get("CHECK_WRITE_TOKEN", ""); read_token=os.environ.get("CHECK_READ_TOKEN", "")
-          if configured_app!=str(app_id) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or re.fullmatch(r"[1-9][0-9]*",dispatcher) is None or not write_token or not read_token or write_token==read_token: raise SystemExit("Affected-head barrier marker identity is invalid.")
-          write_env={"GH_TOKEN":write_token,"PATH":os.environ["PATH"]}; read_env={"GH_TOKEN":read_token,"PATH":os.environ["PATH"]}; external=f"krr-governance-affected-head-barrier/v1/{head.lower()}/scheduler-{dispatcher}"; details=f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/{dispatcher}?"+urlencode({"barrier_marker":"periodic"})
-          # This marker is also a Check Run write in the globally serialized
-          # dispatcher generation, so it uses the same rate budget as every
-          # synchronous invalidation and terminal writer mutation.
-          time.sleep(8.1)
-          created=subprocess.run(["gh","api","--hostname","github.com","--method","POST",f"repos/{repository}/check-runs","-f",f"name={context}","-f",f"head_sha={head}","-f",f"external_id={external}","-f","status=completed","-f","conclusion=success","-f",f"details_url={details}"],capture_output=True,text=True,check=False,env=write_env, timeout=20)
-          if created.returncode!=0: raise SystemExit("Unable to publish affected-head barrier marker.")
-          try: posted=json.loads(created.stdout); identifier=posted.get("id") if isinstance(posted,dict) else None
-          except json.JSONDecodeError as error: raise SystemExit("Affected-head barrier marker is not JSON.") from error
-          if type(identifier) is not int or identifier<1 or posted.get("name")!=context or posted.get("head_sha")!=head or posted.get("external_id")!=external or posted.get("status")!="completed" or posted.get("conclusion")!="success" or posted.get("details_url")!=details or not isinstance(posted.get("app"),dict) or posted["app"].get("id")!=app_id: raise SystemExit("Affected-head barrier marker is invalid.")
-          reread=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
-          if reread.returncode!=0: raise SystemExit("Unable to re-read affected-head barrier marker.")
-          try: marker=json.loads(reread.stdout)
-          except json.JSONDecodeError as error: raise SystemExit("Affected-head barrier marker re-read is not JSON.") from error
-          if not isinstance(marker,dict) or marker.get("id")!=identifier or marker.get("name")!=context or marker.get("head_sha")!=head or marker.get("external_id")!=external or marker.get("status")!="completed" or marker.get("conclusion")!="success" or marker.get("details_url")!=details or not isinstance(marker.get("app"),dict) or marker["app"].get("id")!=app_id: raise SystemExit("Affected-head barrier marker re-read is invalid.")
-          PY
-
       - name: Create affected-head barrier branch-protection token
-        # marker障害をdeferしても、このtoken生成とactivationの後でpriority
-        # pending化へ進める。実際の成功条件はchunk後の明示fenceで判定する。
         id: barrier-protection-activate
         if: always() && steps.barrier-source.outcome == 'success'
         continue-on-error: true
@@ -1344,24 +1735,31 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-administration: read
-
       - name: Verify established affected-head merge barrier for reconciliation
-        # establish-resolver-failure-barrier is a required predecessor and
-        # owns the only activation PATCH. Reconcile must not race it with a
-        # second checks-array replacement.
         id: affected-barrier
         env:
           GH_TOKEN: ${{ steps.barrier-protection-activate.outputs.token }}
           DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
           CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          REQUIRED: ${{ steps.current-targets.outputs.has_preinvalidate_targets == 'true' || steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true' }}
+          REQUIRED: ${{ steps.current-targets.outputs.has_targets == 'true' || steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true' }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import json, os, re, subprocess
+          import time
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
           repository=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); token=os.environ.get("GH_TOKEN", ""); configured=os.environ.get("CHECK_APP_ID", ""); required=os.environ.get("REQUIRED", "")
           if not token or configured!="4766933" or required not in {"true","false"} or re.fullmatch(r"[A-Za-z0-9._/-]+",branch) is None:
               raise SystemExit("Affected-head barrier verification identity is invalid.")
-          result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/branches/{branch}/protection"],capture_output=True,text=True,check=False,env={"GH_TOKEN":token,"PATH":os.environ["PATH"]},timeout=20)
+          result=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/branches/{branch}/protection"],capture_output=True,text=True,check=False,env={"GH_TOKEN":token,"PATH":os.environ["PATH"]},timeout=bounded_root_timeout())
           if result.returncode!=0: raise SystemExit("Affected-head barrier verification read failed.")
           try: checks=json.loads(result.stdout).get("required_status_checks",{}).get("checks")
           except json.JSONDecodeError as error: raise SystemExit("Affected-head barrier verification response is invalid.") from error
@@ -1373,244 +1771,55 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("active="+("true" if active else "false")+"\n")
           PY
-
-      - name: Create first priority invalidator write token
-        if: always() && steps.barrier-source.outcome == 'success' && steps.current-targets.outputs.has_preinvalidate_chunk_1 == 'true'
-        id: pre-invalidator-write-1
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
-        with:
-          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-checks: write
-
-      - name: Create first priority invalidator read token
-        if: always() && steps.barrier-source.outcome == 'success' && steps.current-targets.outputs.has_preinvalidate_chunk_1 == 'true'
-        id: pre-invalidator-read-1
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
-        with:
-          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-checks: read
-          permission-pull-requests: read
-
-      - name: Pre-invalidate priority event heads (first TTL-safe chunk)
-        id: preinvalidate-1
-        if: always() && steps.barrier-source.outcome == 'success' && steps.current-targets.outputs.has_preinvalidate_chunk_1 == 'true'
-        env:
-          GH_TOKEN: ${{ steps.pre-invalidator-read-1.outputs.token }}
-          CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          TARGETS: ${{ steps.current-targets.outputs.preinvalidate_chunk_1 }}
-          TARGET_SNAPSHOTS: ${{ steps.current-targets.outputs.preinvalidate_chunk_1_snapshots }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          DISPATCHER_RUN_ID: ${{ github.run_id }}
-          CHECK_WRITE_TOKEN: ${{ steps.pre-invalidator-write-1.outputs.token }}
-        run: |
-          python3 - <<'PY'
-          import json, os, re, subprocess, time
-          from urllib.parse import urlencode
-          repository=os.environ["GITHUB_REPOSITORY"]; read_token=os.environ.get("GH_TOKEN", ""); write_token=os.environ.get("CHECK_WRITE_TOKEN", ""); app_id=os.environ.get("CHECK_APP_ID", ""); dispatcher=os.environ.get("DISPATCHER_RUN_ID", "")
-          if not read_token or not write_token or re.fullmatch(r"[1-9][0-9]*", app_id) is None or re.fullmatch(r"[1-9][0-9]*", dispatcher) is None: raise SystemExit("Priority invalidator credentials are invalid.")
-          try: targets=json.loads(os.environ.get("TARGETS", "")); snapshots=json.loads(os.environ.get("TARGET_SNAPSHOTS", ""))
-          except json.JSONDecodeError as error: raise SystemExit("Priority target set is invalid.") from error
-          if not isinstance(targets,list) or not targets or any(type(number) is not int or number<1 for number in targets) or len(set(targets))!=len(targets) or not isinstance(snapshots,list) or len(snapshots)!=len(targets): raise SystemExit("Priority target set is invalid.")
-          branch=os.environ.get("DEFAULT_BRANCH", "")
-          if not isinstance(branch,str) or re.fullmatch(r"[A-Za-z0-9._/-]+",branch) is None: raise SystemExit("Priority default branch is invalid.")
-          heads={}
-          for entry,number in zip(snapshots,targets,strict=True):
-              if not isinstance(entry,list) or len(entry)!=6 or entry[0]!=number or not isinstance(entry[1],str) or re.fullmatch(r"[0-9a-fA-F]{40}",entry[1]) is None or type(entry[2]) is not bool or entry[3]!=branch or entry[4]!=repository or entry[5]!=repository: raise SystemExit("Priority target snapshot is invalid.")
-              heads.setdefault(entry[1].lower(),[]).append(number)
-          if len(heads)>300: raise SystemExit("Priority invalidation chunk exceeds the App-token TTL cap.")
-          base_url=f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/{dispatcher}"
-          read_env={"GH_TOKEN":read_token,"PATH":os.environ["PATH"]}
-          failures=[]; posted={}; write_clock=[time.monotonic()]
-          for head in heads:
-              external=f"krr-governance/v1/{head}/dispatcher-{dispatcher}"
-              details=base_url+"?"+urlencode({"dispatcher_run_id":dispatcher,"carry_pending":"0"})
-              delay=write_clock[0]-time.monotonic()
-              if delay>0: time.sleep(delay)
-              write_clock[0]=time.monotonic()+8.1
-              write_env={"GH_TOKEN":write_token,"PATH":os.environ["PATH"]}
-              result=subprocess.run(["gh","api","--method","POST",f"repos/{repository}/check-runs","-f","name=KRR / PR governance (trusted check)","-f",f"head_sha={head}","-f",f"external_id={external}","-f","status=in_progress","-f",f"details_url={details}"],capture_output=True,text=True,check=False,env=write_env, timeout=20)
-              if result.returncode!=0: failures.extend(heads[head]); continue
-              try: check=json.loads(result.stdout)
-              except json.JSONDecodeError:
-                  failures.extend(heads[head]); continue
-              identifier=check.get("id") if isinstance(check,dict) else None
-              if type(identifier) is not int or identifier<1 or check.get("name")!="KRR / PR governance (trusted check)" or check.get("head_sha")!=head or check.get("external_id")!=external or check.get("status")!="in_progress" or check.get("conclusion") is not None or check.get("details_url")!=details or not isinstance(check.get("app"),dict) or str(check["app"].get("id"))!=app_id: failures.extend(heads[head]); continue
-              reread=subprocess.run(["gh","api",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
-              if reread.returncode!=0: failures.extend(heads[head]); continue
-              try: current=json.loads(reread.stdout)
-              except json.JSONDecodeError:
-                  failures.extend(heads[head]); continue
-              if not isinstance(current,dict) or current.get("id")!=identifier or current.get("name")!="KRR / PR governance (trusted check)" or current.get("head_sha")!=head or current.get("external_id")!=external or current.get("status")!="in_progress" or current.get("conclusion") is not None or current.get("details_url")!=details or not isinstance(current.get("app"),dict) or str(current["app"].get("id"))!=app_id: failures.extend(heads[head]); continue
-              posted[head]=identifier
-          for entry,number in zip(snapshots,targets,strict=True):
-              result=subprocess.run(["gh","api",f"repos/{repository}/pulls/{number}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
-              if result.returncode!=0: failures.append(number); continue
-              try: pull=json.loads(result.stdout)
-              except json.JSONDecodeError: failures.append(number); continue
-              current_number=pull.get("number") if isinstance(pull,dict) else None
-              current_head=pull.get("head",{}).get("sha") if isinstance(pull,dict) and isinstance(pull.get("head"),dict) else None
-              current_draft=pull.get("draft") if isinstance(pull,dict) else None
-              current_base_ref=pull.get("base",{}).get("ref") if isinstance(pull,dict) and isinstance(pull.get("base"),dict) else None
-              current_base_repo=pull.get("base",{}).get("repo",{}).get("full_name") if isinstance(pull,dict) and isinstance(pull.get("base"),dict) and isinstance(pull.get("base",{}).get("repo"),dict) else None
-              current_head_repo=pull.get("head",{}).get("repo",{}).get("full_name") if isinstance(pull,dict) and isinstance(pull.get("head"),dict) and isinstance(pull.get("head",{}).get("repo"),dict) else None
-              head_matches=isinstance(current_head,str) and current_head.lower()==entry[1].lower()
-              if current_number!=number or pull.get("state")!="open" or not head_matches or type(current_draft) is not bool or current_draft != entry[2] or current_base_ref!=entry[3] or current_base_repo!=entry[4] or current_head_repo!=entry[5]: failures.append(number)
-          if failures: raise SystemExit("Priority invalidation failed or target drifted: " + ",".join(str(number) for number in sorted(set(failures))))
-          manifest=[]
-          for entry,number in zip(snapshots,targets,strict=True):
-              identifier=posted.get(entry[1].lower())
-              if type(identifier) is not int or identifier < 1: raise SystemExit("Priority invalidation manifest is incomplete.")
-              manifest.append([number,identifier])
-          with open(os.environ["GITHUB_OUTPUT"],"a",encoding="utf-8") as output: output.write("check_manifest="+json.dumps(manifest,separators=(",",":"))+"\n")
-          PY
-
-      - name: Create second priority invalidator write token
-        if: always() && steps.barrier-source.outcome == 'success' && steps.current-targets.outputs.has_preinvalidate_chunk_2 == 'true'
-        id: pre-invalidator-write-2
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
-        with:
-          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-checks: write
-
-      - name: Create second priority invalidator read token
-        if: always() && steps.barrier-source.outcome == 'success' && steps.current-targets.outputs.has_preinvalidate_chunk_2 == 'true'
-        id: pre-invalidator-read-2
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
-        with:
-          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-checks: read
-          permission-pull-requests: read
-
-      - name: Pre-invalidate priority event heads (second TTL-safe chunk)
-        id: preinvalidate-2
-        if: always() && steps.barrier-source.outcome == 'success' && steps.current-targets.outputs.has_preinvalidate_chunk_2 == 'true'
-        env:
-          GH_TOKEN: ${{ steps.pre-invalidator-read-2.outputs.token }}
-          CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          TARGETS: ${{ steps.current-targets.outputs.preinvalidate_chunk_2 }}
-          TARGET_SNAPSHOTS: ${{ steps.current-targets.outputs.preinvalidate_chunk_2_snapshots }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          DISPATCHER_RUN_ID: ${{ github.run_id }}
-          CHECK_WRITE_TOKEN: ${{ steps.pre-invalidator-write-2.outputs.token }}
-        run: |
-          python3 - <<'PY'
-          import json, os, re, subprocess, time
-          from urllib.parse import urlencode
-          repository=os.environ["GITHUB_REPOSITORY"]; read_token=os.environ.get("GH_TOKEN", ""); write_token=os.environ.get("CHECK_WRITE_TOKEN", ""); app_id=os.environ.get("CHECK_APP_ID", ""); dispatcher=os.environ.get("DISPATCHER_RUN_ID", "")
-          if not read_token or not write_token or re.fullmatch(r"[1-9][0-9]*",app_id) is None or re.fullmatch(r"[1-9][0-9]*",dispatcher) is None: raise SystemExit("Priority invalidator credentials are invalid.")
-          try: targets=json.loads(os.environ.get("TARGETS", "")); snapshots=json.loads(os.environ.get("TARGET_SNAPSHOTS", ""))
-          except json.JSONDecodeError as error: raise SystemExit("Priority target set is invalid.") from error
-          branch=os.environ.get("DEFAULT_BRANCH", "")
-          if not isinstance(targets,list) or not targets or any(type(number) is not int or number<1 for number in targets) or len(set(targets))!=len(targets) or not isinstance(snapshots,list) or len(snapshots)!=len(targets) or not isinstance(branch,str) or re.fullmatch(r"[A-Za-z0-9._/-]+",branch) is None: raise SystemExit("Priority target set is invalid.")
-          heads={}
-          for entry,number in zip(snapshots,targets,strict=True):
-              if not isinstance(entry,list) or len(entry)!=6 or entry[0]!=number or not isinstance(entry[1],str) or re.fullmatch(r"[0-9a-fA-F]{40}",entry[1]) is None or type(entry[2]) is not bool or entry[3]!=branch or entry[4]!=repository or entry[5]!=repository: raise SystemExit("Priority target snapshot is invalid.")
-              heads.setdefault(entry[1].lower(),[]).append(number)
-          if len(heads)>300: raise SystemExit("Priority invalidation chunk exceeds the App-token TTL cap.")
-          base_url=f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/{dispatcher}"; read_env={"GH_TOKEN":read_token,"PATH":os.environ["PATH"]}; write_env={"GH_TOKEN":write_token,"PATH":os.environ["PATH"]}
-          failures=[]; posted={}; write_clock=[time.monotonic()]
-          for head,members in heads.items():
-              details=base_url+"?"+urlencode({"dispatcher_run_id":dispatcher,"carry_pending":"0"}); external=f"krr-governance/v1/{head}/dispatcher-{dispatcher}"
-              delay=write_clock[0]-time.monotonic()
-              if delay>0: time.sleep(delay)
-              write_clock[0]=time.monotonic()+8.1
-              response=subprocess.run(["gh","api","--method","POST",f"repos/{repository}/check-runs","-f","name=KRR / PR governance (trusted check)","-f",f"head_sha={head}","-f",f"external_id={external}","-f","status=in_progress","-f",f"details_url={details}"],capture_output=True,text=True,check=False,env=write_env, timeout=20)
-              if response.returncode!=0: failures.extend(members); continue
-              try: check=json.loads(response.stdout); identifier=check.get("id") if isinstance(check,dict) else None
-              except json.JSONDecodeError: failures.extend(members); continue
-              if type(identifier) is not int or identifier<1 or check.get("name")!="KRR / PR governance (trusted check)" or check.get("head_sha")!=head or check.get("external_id")!=external or check.get("status")!="in_progress" or check.get("conclusion") is not None or check.get("details_url")!=details or not isinstance(check.get("app"),dict) or str(check["app"].get("id"))!=app_id: failures.extend(members); continue
-              reread=subprocess.run(["gh","api",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
-              if reread.returncode!=0: failures.extend(members); continue
-              try: current=json.loads(reread.stdout)
-              except json.JSONDecodeError: failures.extend(members); continue
-              if not isinstance(current,dict) or current.get("id")!=identifier or current.get("name")!="KRR / PR governance (trusted check)" or current.get("head_sha")!=head or current.get("external_id")!=external or current.get("status")!="in_progress" or current.get("conclusion") is not None or current.get("details_url")!=details or not isinstance(current.get("app"),dict) or str(current["app"].get("id"))!=app_id: failures.extend(members); continue
-              posted[head]=identifier
-          for entry,number in zip(snapshots,targets,strict=True):
-              result=subprocess.run(["gh","api",f"repos/{repository}/pulls/{number}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
-              if result.returncode!=0: failures.append(number); continue
-              try: pull=json.loads(result.stdout)
-              except json.JSONDecodeError: failures.append(number); continue
-              base=pull.get("base") if isinstance(pull,dict) else None; head=pull.get("head") if isinstance(pull,dict) else None
-              if not isinstance(pull,dict) or pull.get("number")!=number or pull.get("state")!="open" or not isinstance(base,dict) or not isinstance(head,dict) or not isinstance(head.get("sha"),str) or head["sha"].lower()!=entry[1].lower() or pull.get("draft")!=entry[2] or base.get("ref")!=entry[3] or not isinstance(base.get("repo"),dict) or base["repo"].get("full_name")!=entry[4] or not isinstance(head.get("repo"),dict) or head["repo"].get("full_name")!=entry[5]: failures.append(number)
-          if failures: raise SystemExit("Priority invalidation failed or target drifted: "+",".join(str(number) for number in sorted(set(failures))))
-          manifest=[]
-          for entry,number in zip(snapshots,targets,strict=True):
-              identifier=posted.get(entry[1].lower())
-              if type(identifier) is not int or identifier<1: raise SystemExit("Priority invalidation manifest is incomplete.")
-              manifest.append([number,identifier])
-          with open(os.environ["GITHUB_OUTPUT"],"a",encoding="utf-8") as output: output.write("check_manifest="+json.dumps(manifest,separators=(",",":"))+"\n")
-          PY
-
-      - name: Fail closed after deferred priority barrier setup
-        # setup失敗はcontinue-on-errorでここまでdeferする。priority対象を
-        # pendingへ置換した後、marker/App束縛/barrierが完全成功した場合だけ
-        # writerへhand-offする。
-        if: always() && steps.current-targets.outputs.has_preinvalidate_targets == 'true'
-        env:
-          MARKER_WRITE_OUTCOME: ${{ steps.barrier-marker-write.outcome }}
-          MARKER_READ_OUTCOME: ${{ steps.barrier-marker-read.outcome }}
-          MARKER_PUBLISH_OUTCOME: ${{ steps.barrier-marker-publish.outcome }}
-          BARRIER_TOKEN_OUTCOME: ${{ steps.barrier-protection-activate.outcome }}
-          BARRIER_ACTIVATE_OUTCOME: ${{ steps.affected-barrier.outcome }}
-          BARRIER_ACTIVE: ${{ steps.affected-barrier.outputs.active }}
-          PREINVALIDATE_CHUNK_1_REQUIRED: ${{ steps.current-targets.outputs.has_preinvalidate_chunk_1 }}
-          PREINVALIDATE_CHUNK_1_OUTCOME: ${{ steps.preinvalidate-1.outcome }}
-          PREINVALIDATE_CHUNK_2_REQUIRED: ${{ steps.current-targets.outputs.has_preinvalidate_chunk_2 }}
-          PREINVALIDATE_CHUNK_2_OUTCOME: ${{ steps.preinvalidate-2.outcome }}
-        run: |
-          python3 - <<'PY'
-          import os
-
-          required = (
-              "MARKER_WRITE_OUTCOME",
-              "MARKER_READ_OUTCOME",
-              "MARKER_PUBLISH_OUTCOME",
-              "BARRIER_TOKEN_OUTCOME",
-              "BARRIER_ACTIVATE_OUTCOME",
-          )
-          if any(os.environ.get(name) != "success" for name in required):
-              raise SystemExit("Priority barrier setup did not complete successfully.")
-          if os.environ.get("BARRIER_ACTIVE") != "true":
-              raise SystemExit("Priority affected-head barrier is not active.")
-          for index in ("1", "2"):
-              if os.environ.get(f"PREINVALIDATE_CHUNK_{index}_REQUIRED") == "true" and os.environ.get(f"PREINVALIDATE_CHUNK_{index}_OUTCOME") != "success":
-                  raise SystemExit("Priority invalidation did not complete successfully.")
-          PY
-
       - name: Hold global merge barrier for an oversized governed snapshot
-        # Never abort current-target discovery before the default-branch source
-        # can install this global required context.  A partial 600-head
-        # invalidation would leave an unmarked head with an older success, so
-        # leave the barrier active and require a later complete reconciliation.
         if: always() && steps.current-targets.outputs.invalidation_head_cap_exceeded == 'true'
         env:
           BARRIER_SOURCE_OUTCOME: ${{ steps.barrier-source.outcome }}
           BARRIER_TOKEN_OUTCOME: ${{ steps.barrier-protection-activate.outcome }}
           BARRIER_ACTIVATE_OUTCOME: ${{ steps.affected-barrier.outcome }}
           BARRIER_ACTIVE: ${{ steps.affected-barrier.outputs.active }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import os
+          import re, time
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
 
           if os.environ.get("BARRIER_SOURCE_OUTCOME") != "success" or os.environ.get("BARRIER_TOKEN_OUTCOME") != "success" or os.environ.get("BARRIER_ACTIVATE_OUTCOME") != "success" or os.environ.get("BARRIER_ACTIVE") != "true":
               raise SystemExit("Governance invalidation bound exceeded before the affected-head barrier was active.")
           raise SystemExit("Governance invalidation head cap exceeded; affected-head barrier remains active until complete reconciliation.")
           PY
 
-      - name: Create dispatcher App token after priority preinvalidation
-        if: steps.current-targets.outputs.has_targets == 'true'
+  reconcile-all-open:
+    name: Reconcile all current governance pull requests
+    needs: [resolve_event, prepare-current-targets]
+    environment: pr-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 290
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    if: ${{ needs.prepare-current-targets.result == 'success' }}
+    outputs:
+      preserved_check_manifest: ${{ steps.await-early.outputs.preserved_check_manifest || '[]' }}
+      preserved_writer_run_id: ${{ steps.dispatch-early.outputs.writer_run_id || '0' }}
+      early_deadline_epoch: ${{ steps.await-early.outputs.early_deadline_epoch }}
+    concurrency:
+      group: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && format('pr-governance-review-sensor-{0}-{1}', github.repository_id, github.event.workflow_run.id) || format('pr-governance-reconcile-{0}', github.repository_id) }}
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - name: Create dispatcher App token after verified barrier preparation
+        if: needs.prepare-current-targets.outputs.has_targets == 'true'
         id: dispatcher-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -1622,195 +1831,30 @@ jobs:
           permission-checks: read
           permission-contents: read
           permission-pull-requests: read
-
-      - name: Drain authoritative writer before the next governance hand-off
-        # Priority pre-invalidation creates the fail-closed barrier first;
-        # drain then proves a former writer cannot terminally publish before
-        # the bound early writer acquires the singleton.
-        if: steps.current-targets.outputs.has_targets == 'true'
-        env:
-          GH_TOKEN: ${{ steps.dispatcher-token.outputs.token }}
-        run: |
-          python3 - <<'PY'
-          import json, os, re, subprocess, sys, time
-          from urllib.parse import urlencode
-
-          repository = os.environ["GITHUB_REPOSITORY"]
-          writer_path = ".github/workflows/pr-governance-status-writer.yml"
-          # workflow-runsは保持済みwriter全体を新しい順に返す。全履歴を
-          # 走査すると固定snapshot上限の後ろに現行writerが隠れるため、
-          # active状態ごとに明示照会する。各応答は独立に有界とし、
-          # state snapshotが変化した場合はhand-off前に拒否する。
-          active = ("requested", "queued", "pending", "waiting", "in_progress")
-
-          def request(arguments):
-              result = subprocess.run(["gh", "api", *arguments], capture_output=True, text=True, check=False, timeout=20)
-              if result.returncode != 0:
-                  raise SystemExit("Unable to drain a prior governance writer.")
-              return result.stdout
-
-          def payload(arguments):
-              try:
-                  return json.loads(request(arguments))
-              except json.JSONDecodeError as error:
-                  raise SystemExit("Governance writer API response is not JSON.") from error
-
-          def path_matches(value):
-              if value == writer_path:
-                  return True
-              if not isinstance(value, str) or not value.startswith(writer_path + "@"):
-                  return False
-              ref = value[len(writer_path) + 1:]
-              return re.fullmatch(r"[A-Za-z0-9._/-]+", ref) is not None and ref not in {".", ".."} and not ref.startswith("/") and "//" not in ref and all(part not in {"", ".", ".."} for part in ref.split("/"))
-
-          repository_value = payload([f"repos/{repository}"])
-          branch = repository_value.get("default_branch") if isinstance(repository_value, dict) else None
-          if not isinstance(branch, str) or re.fullmatch(r"[A-Za-z0-9._/-]+", branch) is None:
-              raise SystemExit("Repository default branch is invalid.")
-          reference = payload([f"repos/{repository}/git/ref/heads/{branch}"])
-          default_head = reference.get("object", {}).get("sha") if isinstance(reference, dict) and isinstance(reference.get("object"), dict) else None
-          if not isinstance(default_head, str) or re.fullmatch(r"[0-9a-fA-F]{40}", default_head) is None:
-              raise SystemExit("Repository default head is invalid.")
-          workflow = payload([f"repos/{repository}/actions/workflows/{writer_path.rsplit('/', 1)[-1]}"])
-          workflow_id = workflow.get("id") if isinstance(workflow, dict) else None
-          if type(workflow_id) is not int or workflow_id < 1:
-              raise SystemExit("Governance writer workflow ID is invalid.")
-          class ActiveWriterSnapshotChanged(Exception):
-              pass
-
-          def active_writer_runs(status):
-              if status not in active:
-                  raise SystemExit("Governance writer run status is invalid.")
-              # head SHAや作成時刻で絞ると古いdefault-branch writerを
-              # 見落とす。activeである限り次のhand-off前にcancelする。
-              query = urlencode({"event": "workflow_dispatch", "branch": branch, "status": status, "per_page": "100"})
-              arguments = ["gh", "api", f"repos/{repository}/actions/workflows/{workflow_id}/runs?{query}"]
-              try:
-                  result = subprocess.run(arguments, capture_output=True, text=True, check=False, timeout=20)
-              except subprocess.TimeoutExpired as error:
-                  raise SystemExit("Governance writer run list timed out.") from error
-              if result.returncode != 0:
-                  raise SystemExit("Unable to enumerate governance writer runs.")
-              try:
-                  page = json.loads(result.stdout)
-              except json.JSONDecodeError as error:
-                  raise SystemExit("Governance writer run list is not JSON.") from error
-              entries = page.get("workflow_runs") if isinstance(page, dict) else None
-              total = page.get("total_count") if isinstance(page, dict) else None
-              if not isinstance(page, dict) or not isinstance(entries, list) or len(entries) > 100 or not all(isinstance(run, dict) for run in entries) or type(total) is not int or total < 0 or total > 100 or len(entries) != total:
-                  raise SystemExit("Governance writer run list is invalid.")
-              identifiers = set()
-              for run in entries:
-                  identifier = run.get("id")
-                  observed_status = run.get("status")
-                  if type(identifier) is not int or identifier < 1 or identifier in identifiers:
-                      raise SystemExit("Governance writer run list is invalid.")
-                  identifiers.add(identifier)
-                  # A run can move requested→queued→in_progress while the
-                  # five state partitions are being read. Retry the whole
-                  # snapshot rather than treating that ordinary transition as
-                  # a terminal hand-off failure; unknown states remain invalid.
-                  if observed_status != status:
-                      if observed_status in active or observed_status == "completed":
-                          raise ActiveWriterSnapshotChanged
-                      raise SystemExit("Governance writer run status is invalid.")
-              return entries
-
-          def active_writer_snapshot():
-              snapshot = {status: active_writer_runs(status) for status in active}
-              identifiers = [run["id"] for runs in snapshot.values() for run in runs]
-              if len(set(identifiers)) != len(identifiers):
-                  # A transition can make one run visible in two partitions
-                  # during a single enumeration. It is not safe to cancel
-                  # until a complete snapshot is stable.
-                  raise ActiveWriterSnapshotChanged
-              return snapshot
-
-          listed = None
-          active_snapshot_attempts = 4
-          for attempt in range(active_snapshot_attempts):
-              try:
-                  first_snapshot = active_writer_snapshot()
-                  second_snapshot = active_writer_snapshot()
-              except ActiveWriterSnapshotChanged:
-                  if attempt + 1 == active_snapshot_attempts:
-                      raise SystemExit("Governance writer active run list did not stabilize.")
-                  time.sleep(1)
-                  continue
-              if first_snapshot == second_snapshot:
-                  listed = second_snapshot
-                  break
-              if attempt + 1 == active_snapshot_attempts:
-                  raise SystemExit("Governance writer active run list did not stabilize.")
-              time.sleep(1)
-          if not isinstance(listed, dict):
-              raise SystemExit("Governance writer active run list did not stabilize.")
-
-          def validate(run):
-              run_repository = run.get("repository") if isinstance(run, dict) else None
-              if not (
-                  isinstance(run, dict) and type(run.get("id")) is int and run["id"] > 0
-                  and isinstance(run.get("display_title"), str)
-                  and re.fullmatch(r"source=[1-9][0-9]* scope=(?:early segment=0|all segment=[1-4])", run["display_title"]) is not None
-                  and (run.get("name") == "PR governance status writer" or run.get("name") == run.get("display_title")) and path_matches(run.get("path"))
-                  and run.get("event") == "workflow_dispatch" and isinstance(run.get("head_sha"), str)
-                  and re.fullmatch(r"[0-9a-fA-F]{40}", run["head_sha"]) is not None
-                  and run.get("workflow_id") == workflow_id and isinstance(run_repository, dict)
-                  and run_repository.get("full_name") == repository
-                  and type(run.get("run_number")) is int and run["run_number"] > 0
-                  and type(run.get("run_attempt")) is int and run["run_attempt"] == 1
-                  and isinstance(run.get("status"), str)
-              ):
-                  raise SystemExit("Governance writer run identity is invalid.")
-
-          targets = []
-          for status in active:
-              for run in listed[status]:
-                  validate(run)
-                  # admission済みearly writerは95分review latchのsource-bound
-                  # hand-offである。後続sensorはstaleなall-openだけを停止し、
-                  # 他sensorのearly writer（FIFO待機中を含む）は取消さない。
-                  if " scope=all segment=" in run["display_title"]:
-                      targets.append(run["id"])
-          if len(set(targets)) != len(targets):
-              raise SystemExit("Governance writer run list is duplicated.")
-          for identifier in targets:
-              cancel = subprocess.run(["gh", "api", "--method", "POST", f"repos/{repository}/actions/runs/{identifier}/cancel"], capture_output=True, text=True, check=False, timeout=20)
-              if cancel.returncode == 0:
-                  continue
-              # 一覧取得からcancelの間に完了した競合は、再読でterminalを
-              # 確認できた場合だけ受理する。
-              run = payload([f"repos/{repository}/actions/runs/{identifier}"])
-              validate(run)
-              if run.get("status") != "completed":
-                  raise SystemExit("Unable to cancel a prior governance writer.")
-          for _ in range(150):
-              pending = []
-              for identifier in targets:
-                  run = payload([f"repos/{repository}/actions/runs/{identifier}"])
-                  validate(run)
-                  if run.get("status") != "completed":
-                      pending.append(identifier)
-              if not pending:
-                  raise SystemExit(0)
-              time.sleep(2)
-          raise SystemExit("Prior governance writer did not reach a terminal state.")
-          PY
-
       - name: Dispatch and bind the early event writer
-        if: steps.current-targets.outputs.has_priority_targets == 'true'
+        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true'
         id: dispatch-early
         env:
           GH_TOKEN: ${{ steps.dispatcher-token.outputs.token }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
-          TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
+          TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import json, os, re, subprocess, time
           from datetime import datetime
           from urllib.parse import urlencode
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
           repository=os.environ["GITHUB_REPOSITORY"]
           branch=os.environ.get("DEFAULT_BRANCH", "")
           head=os.environ.get("WRITER_HEAD", "")
@@ -1826,7 +1870,7 @@ jobs:
               ref=value[len(workflow_path)+1:]
               return re.fullmatch(r"[A-Za-z0-9._/-]+",ref) is not None and ref not in {".",".."} and not ref.startswith("/") and "//" not in ref and all(part not in {"",".",".."} for part in ref.split("/"))
           def source_created_at():
-              response=subprocess.run(["gh","api",f"repos/{repository}/actions/runs/{source}"],capture_output=True,text=True,check=False,timeout=20)
+              response=subprocess.run(["gh","api",f"repos/{repository}/actions/runs/{source}"],capture_output=True,text=True,check=False,timeout=bounded_root_timeout())
               if response.returncode != 0: raise SystemExit("Unable to read early writer dispatcher generation.")
               try: run=json.loads(response.stdout)
               except json.JSONDecodeError as error: raise SystemExit("Early writer dispatcher generation is not JSON.") from error
@@ -1840,7 +1884,7 @@ jobs:
           def runs_page():
               query=urlencode({"branch":branch,"head_sha":head,"created":f">={generation_created_at}","per_page":"100"})
               arguments=["gh","api",f"repos/{repository}/actions/workflows/pr-governance-status-writer.yml/runs?{query}"]
-              try: result=subprocess.run(arguments,capture_output=True,text=True,check=False,timeout=20)
+              try: result=subprocess.run(arguments,capture_output=True,text=True,check=False,timeout=bounded_root_timeout())
               except subprocess.TimeoutExpired as error: raise SystemExit("Governance writer runs timed out.") from error
               if result.returncode != 0: raise SystemExit("Unable to enumerate governance writer runs.")
               try:
@@ -1852,7 +1896,7 @@ jobs:
           def runs():
               return runs_page()
           before={run.get("id") for run in runs() if type(run.get("id")) is int}
-          result=subprocess.run(["gh","api","--method","POST",f"repos/{repository}/actions/workflows/pr-governance-status-writer.yml/dispatches","-f",f"ref={branch}","-f",f"inputs[dispatcher_run_id]={source}","-f","inputs[scope]=early","-f",f"inputs[target_numbers]={json.dumps(targets,separators=(',', ':'))}","-f","inputs[preserved_target_numbers]=[]","-f","inputs[preserved_writer_run_id]=0","-f","inputs[check_manifest]=[]","-f","inputs[terminal_batch_numbers]=[]","-f","inputs[continuation_index]=0","-f","inputs[terminal_order_numbers]=[]","-f","inputs[completed_writer_run_ids]=[]"],capture_output=True,text=True,check=False, timeout=20)
+          result=subprocess.run(["gh","api","--method","POST",f"repos/{repository}/actions/workflows/pr-governance-status-writer.yml/dispatches","-f",f"ref={branch}","-f",f"inputs[dispatcher_run_id]={source}","-f","inputs[scope]=early","-f",f"inputs[target_numbers]={json.dumps(targets,separators=(',', ':'))}","-f","inputs[preserved_target_numbers]=[]","-f","inputs[preserved_writer_run_id]=0","-f","inputs[check_manifest]=[]","-f","inputs[terminal_batch_numbers]=[]","-f","inputs[continuation_index]=0","-f","inputs[terminal_order_numbers]=[]","-f","inputs[completed_writer_run_ids]=[]"],capture_output=True,text=True,check=False, timeout=bounded_root_timeout())
           if result.returncode != 0: raise SystemExit("Unable to dispatch early governance writer.")
           # Registration is asynchronous; 5s polling avoids needless
           # installation REST pressure while retaining a five-minute bound.
@@ -1870,9 +1914,8 @@ jobs:
               time.sleep(5)
           raise SystemExit("Early governance writer registration timed out.")
           PY
-
       - name: Create fresh early Check Run read token
-        if: steps.current-targets.outputs.has_priority_targets == 'true'
+        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true'
         id: early-check-read-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -1882,26 +1925,37 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-checks: read
           permission-pull-requests: read
-
       - name: Await the bound early event writer before all-open invalidation
-        if: steps.current-targets.outputs.has_priority_targets == 'true'
+        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true'
         id: await-early
         env:
           GH_TOKEN: ${{ steps.dispatcher-token.outputs.token }}
           WRITER_RUN_ID: ${{ steps.dispatch-early.outputs.writer_run_id }}
-          DEFAULT_BRANCH: ${{ steps.current-targets.outputs.default_branch }}
-          WRITER_HEAD: ${{ steps.current-targets.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           CHECK_READ_TOKEN: ${{ steps.early-check-read-token.outputs.token }}
-          TARGETS: ${{ steps.current-targets.outputs.priority_targets }}
+          TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import json, os, re, subprocess, time
           from urllib.parse import urlparse
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
           repository=os.environ["GITHUB_REPOSITORY"]; identifier=os.environ.get("WRITER_RUN_ID", ""); branch=os.environ.get("DEFAULT_BRANCH", ""); head=os.environ.get("WRITER_HEAD", ""); source=os.environ.get("DISPATCHER_RUN_ID", "")
           if not re.fullmatch(r"[1-9][0-9]*",identifier) or not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or not re.fullmatch(r"[0-9a-fA-F]{40}",head) or not re.fullmatch(r"[1-9][0-9]*",source): raise SystemExit("Early governance writer ID is invalid.")
-          deadline=time.time()+1200
+          deadline=min(time.time()+1200, float(os.environ["ROOT_DEADLINE_EPOCH"]))
+          with open(os.environ["GITHUB_OUTPUT"],"a") as output:
+              output.write("early_deadline_epoch="+str(int(deadline))+"\n")
           workflow_path=".github/workflows/pr-governance-status-writer.yml"; title=f"source={source} scope=early segment=0"
           def path_matches(value):
               if value == workflow_path: return True
@@ -1997,7 +2051,7 @@ jobs:
                   if not isinstance(targets,list) or not targets or len(targets)>50 or any(type(number) is not int or number<1 for number in targets) or len(set(targets)) != len(targets): raise SystemExit("Early governance targets are invalid.")
                   manifest=[]
                   for number in targets:
-                      pull=subprocess.run(["gh","api",f"repos/{repository}/pulls/{number}"],capture_output=True,text=True,check=False,env={"GH_TOKEN":check_token,"PATH":os.environ["PATH"]}, timeout=20)
+                      pull=subprocess.run(["gh","api",f"repos/{repository}/pulls/{number}"],capture_output=True,text=True,check=False,env={"GH_TOKEN":check_token,"PATH":os.environ["PATH"]}, timeout=bounded_root_timeout())
                       if pull.returncode!=0: raise SystemExit("Unable to load early governance target.")
                       try: pull_json=json.loads(pull.stdout)
                       except json.JSONDecodeError as error: raise SystemExit("Early governance target is not JSON.") from error
@@ -2007,7 +2061,7 @@ jobs:
                       def check_page(page_number):
                           arguments=["gh","api",f"repos/{repository}/commits/{target_head}/check-runs?{query}&page={page_number}"]
                           if page_number == 6: arguments.insert(2,"--include")
-                          try: checks=subprocess.run(arguments,capture_output=True,text=True,check=False,env={"GH_TOKEN":check_token,"PATH":os.environ["PATH"]},timeout=20)
+                          try: checks=subprocess.run(arguments,capture_output=True,text=True,check=False,env={"GH_TOKEN":check_token,"PATH":os.environ["PATH"]},timeout=bounded_root_timeout())
                           except subprocess.TimeoutExpired as error: raise SystemExit("Early governance Check Run timed out.") from error
                           if checks.returncode!=0: raise SystemExit("Unable to load early governance Check Run.")
                           try:
@@ -2043,9 +2097,133 @@ jobs:
               time.sleep(30)
           raise SystemExit("Early governance writer did not reach a terminal state.")
           PY
+      - name: Record bound successful early writer run ${{ steps.dispatch-early.outputs.writer_run_id }}
+        if: ${{ steps.await-early.outcome == 'success' && needs.prepare-current-targets.outputs.has_priority_targets == 'true' }}
+        run: 'true'
 
+  acknowledge-early-sensor:
+    name: Acknowledge bound early review sensor
+    needs: [resolve_event, prepare-current-targets, reconcile-all-open]
+    environment: pr-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && needs.prepare-current-targets.outputs.has_priority_targets == 'true' }}
+    steps:
+      - name: Require exact bound sensor acknowledgement
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
+          EARLY_DEADLINE_EPOCH: ${{ needs.reconcile-all-open.outputs.early_deadline_epoch }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import time
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          source_id = os.environ["SOURCE_RUN_ID"]
+          branch = os.environ["DEFAULT_BRANCH"]
+          root_deadline = os.environ["ROOT_DEADLINE_EPOCH"]
+          early_deadline = os.environ["EARLY_DEADLINE_EPOCH"]
+          if (re.fullmatch(r"[1-9][0-9]{0,18}", source_id) is None or int(source_id) > 2**63 - 1
+              or re.fullmatch(r"[1-9][0-9]*", root_deadline) is None or re.fullmatch(r"[1-9][0-9]*", early_deadline) is None):
+              raise SystemExit("Bound sensor acknowledgement input is invalid.")
+          deadline = min(int(root_deadline), int(early_deadline))
+          reads = 0
+
+          def api(endpoint):
+              global reads
+              reads += 1
+              remaining = deadline - time.time()
+              if reads > 300 or remaining <= 0:
+                  raise SystemExit("Bound sensor acknowledgement deadline or request budget elapsed.")
+              result = subprocess.run(["gh", "api", endpoint], capture_output=True, text=True, timeout=min(20, remaining))
+              if result.returncode:
+                  raise SystemExit("Unable to bind sensor acknowledgement.")
+              try:
+                  value = json.loads(result.stdout)
+              except ValueError as error:
+                  raise SystemExit("Sensor acknowledgement is not JSON.") from error
+              if not isinstance(value, dict):
+                  raise SystemExit("Sensor acknowledgement API shape is invalid.")
+              return value
+
+          def repo(value):
+              if (not isinstance(value, dict) or type(value.get("id")) is not int or value["id"] < 1
+                  or value.get("name") != repository.split("/", 1)[1]
+                  or value.get("url") != "https://api.github.com/repos/" + repository
+                  or "full_name" in value and value["full_name"] != repository):
+                  return None
+              return value["id"]
+
+          repository_value = api("repos/" + repository)
+          repository_id = repo(repository_value)
+          if repository_id is None or repository_value.get("default_branch") != branch:
+              raise SystemExit("Sensor acknowledgement repository identity is invalid.")
+          while True:
+              source = api(f"repos/{repository}/actions/runs/{source_id}")
+              pulls = source.get("pull_requests")
+              if (type(source.get("id")) is not int or source["id"] != int(source_id)
+                  or source.get("name") != "PR governance review sensor"
+                  or source.get("path") not in {".github/workflows/pr-governance-review-events.yml", ".github/workflows/pr-governance-review-events.yml@" + branch, ".github/workflows/pr-governance-review-events.yml@refs/heads/" + branch}
+                  or source.get("event") not in {"pull_request", "pull_request_review", "pull_request_review_comment"}
+                  or type(source.get("run_attempt")) is not int or source["run_attempt"] != 1
+                  or repo(source.get("repository")) != repository_id or repo(source.get("head_repository")) != repository_id
+                  or not isinstance(pulls, list) or len(pulls) != 1 or not isinstance(pulls[0], dict)):
+                  raise SystemExit("Sensor acknowledgement source identity is invalid.")
+              pull = pulls[0]
+              base, head = pull.get("base"), pull.get("head")
+              if (type(pull.get("number")) is not int or pull["number"] < 1 or not isinstance(base, dict) or not isinstance(head, dict)
+                  or base.get("ref") != branch or repo(base.get("repo")) != repository_id or repo(head.get("repo")) != repository_id
+                  or not isinstance(head.get("sha"), str) or re.fullmatch(r"[0-9a-f]{40}", head["sha"]) is None
+                  or source.get("head_sha") != head["sha"]):
+                  raise SystemExit("Sensor acknowledgement PR binding is invalid.")
+              if source.get("status") == "completed":
+                  if source.get("conclusion") != "success":
+                      raise SystemExit("Bound early sensor did not succeed.")
+                  current = api(f"repos/{repository}/pulls/{pull['number']}")
+                  current_base, current_head = current.get("base"), current.get("head")
+                  if (type(current.get("number")) is not int or current["number"] != pull["number"]
+                      or current.get("state") != "open" or current.get("draft") is not False
+                      or not isinstance(current_base, dict) or not isinstance(current_head, dict)
+                      or current_base.get("ref") != branch or repo(current_base.get("repo")) != repository_id
+                      or repo(current_head.get("repo")) != repository_id or current_head.get("sha") != head["sha"]):
+                      raise SystemExit("Bound early sensor current PR changed.")
+                  break
+              if source.get("status") not in {"queued", "in_progress"} or source.get("conclusion") is not None:
+                  raise SystemExit("Bound early sensor terminal state is unknown.")
+              remaining = deadline - time.time()
+              if remaining <= 0:
+                  raise SystemExit("Bound early sensor acknowledgement deadline elapsed.")
+              time.sleep(min(5, remaining))
+          PY
+      - name: Record successful bound review sensor acknowledgement ${{ github.event.workflow_run.id }}
+        run: 'true'
+
+  audit-reconciliation-history:
+    name: Audit complete pending Check Run histories
+    needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor]
+    environment: pr-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 290
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    if: ${{ !cancelled() && needs.reconcile-all-open.result == 'success' && (needs.acknowledge-early-sensor.result == 'success' || needs.acknowledge-early-sensor.result == 'skipped') }}
+    outputs:
+      carry_manifest: ${{ steps.retained-history-audit.outputs.carry_manifest }}
+    steps:
       - name: Create retained-history audit read token
-        if: steps.current-targets.outputs.has_all_invalidation_chunk_1 == 'true' || steps.current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
+        if: needs.prepare-current-targets.outputs.has_all_invalidation_chunk_1 == 'true' || needs.prepare-current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
         id: retained-history-read
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -2054,16 +2232,15 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-checks: read
-
       - name: Audit and fence retained Check Run histories before invalidation
         id: retained-history-audit
-        if: steps.current-targets.outputs.has_all_invalidation_chunk_1 == 'true' || steps.current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
+        if: needs.prepare-current-targets.outputs.has_all_invalidation_chunk_1 == 'true' || needs.prepare-current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
         env:
           GH_TOKEN: ${{ steps.retained-history-read.outputs.token }}
           CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          HEADS: ${{ steps.current-targets.outputs.all_invalidation_heads }}
+          HEADS: ${{ needs.prepare-current-targets.outputs.all_invalidation_heads }}
           ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
-          POST_SCAN_SECONDS: ${{ steps.current-targets.outputs.history_post_scan_seconds }}
+          POST_SCAN_SECONDS: ${{ needs.prepare-current-targets.outputs.history_post_scan_seconds }}
         run: |
           python3 - <<'PY'
           import concurrent.futures, json, math, os, re, subprocess, time
@@ -2173,8 +2350,332 @@ jobs:
               output.write("carry_manifest="+json.dumps(carry,separators=(",",":"))+"\n")
           PY
 
+  write-reconciliation-pending:
+    name: Write complete pending reconciliation Check Runs
+    needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history]
+    environment: pr-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 290
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    if: ${{ !cancelled() && needs.audit-reconciliation-history.result == 'success' && needs.reconcile-all-open.result == 'success' && (needs.acknowledge-early-sensor.result == 'success' || needs.acknowledge-early-sensor.result == 'skipped') }}
+    concurrency:
+      group: pr-governance-status-${{ github.repository_id }}
+      queue: max
+      cancel-in-progress: false
+    outputs:
+      pre_manifest_1: ${{ steps.preinvalidate-1.outputs.check_manifest || '[]' }}
+      pre_manifest_2: ${{ steps.preinvalidate-2.outputs.check_manifest || '[]' }}
+      tail_manifest_1: ${{ steps.invalidate-all-1.outputs.check_manifest || '[]' }}
+      tail_manifest_2: ${{ steps.invalidate-all-2.outputs.check_manifest || '[]' }}
+      tail_carry_1: ${{ steps.invalidate-all-1.outputs.carry_target_numbers || '[]' }}
+      tail_carry_2: ${{ steps.invalidate-all-2.outputs.carry_target_numbers || '[]' }}
+    steps:
+      - name: Create periodic affected-head barrier marker write token
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.prepare-current-targets.outputs.has_preinvalidate_targets == 'true' || needs.prepare-current-targets.outputs.invalidation_head_cap_exceeded == 'true') && needs.prepare-current-targets.outputs.barrier_source_outcome == 'success'
+        id: barrier-marker-write
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: write
+      - name: Create periodic affected-head barrier marker read token
+        if: '!cancelled() && (github.event_name == ''schedule'' || github.event_name == ''workflow_dispatch'' || needs.prepare-current-targets.outputs.has_preinvalidate_targets == ''true'' || needs.prepare-current-targets.outputs.invalidation_head_cap_exceeded == ''true'') && needs.prepare-current-targets.outputs.barrier_source_outcome == ''success'''
+        id: barrier-marker-read
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: read
+      - name: Publish periodic static affected-head barrier App marker
+        if: '!cancelled() && (github.event_name == ''schedule'' || github.event_name == ''workflow_dispatch'' || needs.prepare-current-targets.outputs.has_preinvalidate_targets == ''true'' || needs.prepare-current-targets.outputs.invalidation_head_cap_exceeded == ''true'') && needs.prepare-current-targets.outputs.barrier_source_outcome == ''success'''
+        id: barrier-marker-publish
+        continue-on-error: true
+        env:
+          CHECK_WRITE_TOKEN: ${{ steps.barrier-marker-write.outputs.token }}
+          CHECK_READ_TOKEN: ${{ steps.barrier-marker-read.outputs.token }}
+          DEFAULT_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
+          DISPATCHER_RUN_ID: ${{ github.run_id }}
+          CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess, time
+          from urllib.parse import urlencode
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
+          repository=os.environ["GITHUB_REPOSITORY"]; head=os.environ.get("DEFAULT_HEAD", ""); dispatcher=os.environ.get("DISPATCHER_RUN_ID", ""); configured_app=os.environ.get("CHECK_APP_ID", ""); context="KRR / PR governance affected-head barrier"; app_id=4_766_933
+          write_token=os.environ.get("CHECK_WRITE_TOKEN", ""); read_token=os.environ.get("CHECK_READ_TOKEN", "")
+          if configured_app!=str(app_id) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or re.fullmatch(r"[1-9][0-9]*",dispatcher) is None or not write_token or not read_token or write_token==read_token: raise SystemExit("Affected-head barrier marker identity is invalid.")
+          write_env={"GH_TOKEN":write_token,"PATH":os.environ["PATH"]}; read_env={"GH_TOKEN":read_token,"PATH":os.environ["PATH"]}; external=f"krr-governance-affected-head-barrier/v1/{head.lower()}/scheduler-{dispatcher}"; details=f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/{dispatcher}?"+urlencode({"barrier_marker":"periodic"})
+          # This marker is also a Check Run write in the globally serialized
+          # dispatcher generation, so it uses the same rate budget as every
+          # synchronous invalidation and terminal writer mutation.
+          time.sleep(8.1)
+          created=subprocess.run(["gh","api","--hostname","github.com","--method","POST",f"repos/{repository}/check-runs","-f",f"name={context}","-f",f"head_sha={head}","-f",f"external_id={external}","-f","status=completed","-f","conclusion=success","-f",f"details_url={details}"],capture_output=True,text=True,check=False,env=write_env, timeout=bounded_root_timeout())
+          if created.returncode!=0: raise SystemExit("Unable to publish affected-head barrier marker.")
+          try: posted=json.loads(created.stdout); identifier=posted.get("id") if isinstance(posted,dict) else None
+          except json.JSONDecodeError as error: raise SystemExit("Affected-head barrier marker is not JSON.") from error
+          if type(identifier) is not int or identifier<1 or posted.get("name")!=context or posted.get("head_sha")!=head or posted.get("external_id")!=external or posted.get("status")!="completed" or posted.get("conclusion")!="success" or posted.get("details_url")!=details or not isinstance(posted.get("app"),dict) or posted["app"].get("id")!=app_id: raise SystemExit("Affected-head barrier marker is invalid.")
+          reread=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=bounded_root_timeout())
+          if reread.returncode!=0: raise SystemExit("Unable to re-read affected-head barrier marker.")
+          try: marker=json.loads(reread.stdout)
+          except json.JSONDecodeError as error: raise SystemExit("Affected-head barrier marker re-read is not JSON.") from error
+          if not isinstance(marker,dict) or marker.get("id")!=identifier or marker.get("name")!=context or marker.get("head_sha")!=head or marker.get("external_id")!=external or marker.get("status")!="completed" or marker.get("conclusion")!="success" or marker.get("details_url")!=details or not isinstance(marker.get("app"),dict) or marker["app"].get("id")!=app_id: raise SystemExit("Affected-head barrier marker re-read is invalid.")
+          PY
+      - name: Create first priority invalidator write token
+        if: '!cancelled() && needs.prepare-current-targets.outputs.barrier_source_outcome == ''success'' && needs.prepare-current-targets.outputs.has_preinvalidate_chunk_1 == ''true'''
+        id: pre-invalidator-write-1
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: write
+      - name: Create first priority invalidator read token
+        if: '!cancelled() && needs.prepare-current-targets.outputs.barrier_source_outcome == ''success'' && needs.prepare-current-targets.outputs.has_preinvalidate_chunk_1 == ''true'''
+        id: pre-invalidator-read-1
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: read
+          permission-pull-requests: read
+      - name: Pre-invalidate priority event heads (first TTL-safe chunk)
+        id: preinvalidate-1
+        if: '!cancelled() && needs.prepare-current-targets.outputs.barrier_source_outcome == ''success'' && needs.prepare-current-targets.outputs.has_preinvalidate_chunk_1 == ''true'''
+        env:
+          GH_TOKEN: ${{ steps.pre-invalidator-read-1.outputs.token }}
+          CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          TARGETS: ${{ needs.prepare-current-targets.outputs.preinvalidate_chunk_1 }}
+          TARGET_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.preinvalidate_chunk_1_snapshots }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          DISPATCHER_RUN_ID: ${{ github.run_id }}
+          CHECK_WRITE_TOKEN: ${{ steps.pre-invalidator-write-1.outputs.token }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess, time
+          from urllib.parse import urlencode
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
+          repository=os.environ["GITHUB_REPOSITORY"]; read_token=os.environ.get("GH_TOKEN", ""); write_token=os.environ.get("CHECK_WRITE_TOKEN", ""); app_id=os.environ.get("CHECK_APP_ID", ""); dispatcher=os.environ.get("DISPATCHER_RUN_ID", "")
+          if not read_token or not write_token or re.fullmatch(r"[1-9][0-9]*", app_id) is None or re.fullmatch(r"[1-9][0-9]*", dispatcher) is None: raise SystemExit("Priority invalidator credentials are invalid.")
+          try: targets=json.loads(os.environ.get("TARGETS", "")); snapshots=json.loads(os.environ.get("TARGET_SNAPSHOTS", ""))
+          except json.JSONDecodeError as error: raise SystemExit("Priority target set is invalid.") from error
+          if not isinstance(targets,list) or not targets or any(type(number) is not int or number<1 for number in targets) or len(set(targets))!=len(targets) or not isinstance(snapshots,list) or len(snapshots)!=len(targets): raise SystemExit("Priority target set is invalid.")
+          branch=os.environ.get("DEFAULT_BRANCH", "")
+          if not isinstance(branch,str) or re.fullmatch(r"[A-Za-z0-9._/-]+",branch) is None: raise SystemExit("Priority default branch is invalid.")
+          heads={}
+          for entry,number in zip(snapshots,targets,strict=True):
+              if not isinstance(entry,list) or len(entry)!=6 or entry[0]!=number or not isinstance(entry[1],str) or re.fullmatch(r"[0-9a-fA-F]{40}",entry[1]) is None or type(entry[2]) is not bool or entry[3]!=branch or entry[4]!=repository or entry[5]!=repository: raise SystemExit("Priority target snapshot is invalid.")
+              heads.setdefault(entry[1].lower(),[]).append(number)
+          if len(heads)>300: raise SystemExit("Priority invalidation chunk exceeds the App-token TTL cap.")
+          base_url=f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/{dispatcher}"
+          read_env={"GH_TOKEN":read_token,"PATH":os.environ["PATH"]}
+          failures=[]; posted={}; write_clock=[time.monotonic()+8.1]
+          for head in heads:
+              external=f"krr-governance/v1/{head}/dispatcher-{dispatcher}"
+              details=base_url+"?"+urlencode({"dispatcher_run_id":dispatcher,"carry_pending":"0"})
+              delay=write_clock[0]-time.monotonic()
+              if delay>0: time.sleep(delay)
+              write_clock[0]=time.monotonic()+8.1
+              write_env={"GH_TOKEN":write_token,"PATH":os.environ["PATH"]}
+              result=subprocess.run(["gh","api","--method","POST",f"repos/{repository}/check-runs","-f","name=KRR / PR governance (trusted check)","-f",f"head_sha={head}","-f",f"external_id={external}","-f","status=in_progress","-f",f"details_url={details}"],capture_output=True,text=True,check=False,env=write_env, timeout=bounded_root_timeout())
+              if result.returncode!=0: failures.extend(heads[head]); continue
+              try: check=json.loads(result.stdout)
+              except json.JSONDecodeError:
+                  failures.extend(heads[head]); continue
+              identifier=check.get("id") if isinstance(check,dict) else None
+              if type(identifier) is not int or identifier<1 or check.get("name")!="KRR / PR governance (trusted check)" or check.get("head_sha")!=head or check.get("external_id")!=external or check.get("status")!="in_progress" or check.get("conclusion") is not None or check.get("details_url")!=details or not isinstance(check.get("app"),dict) or str(check["app"].get("id"))!=app_id: failures.extend(heads[head]); continue
+              reread=subprocess.run(["gh","api",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=bounded_root_timeout())
+              if reread.returncode!=0: failures.extend(heads[head]); continue
+              try: current=json.loads(reread.stdout)
+              except json.JSONDecodeError:
+                  failures.extend(heads[head]); continue
+              if not isinstance(current,dict) or current.get("id")!=identifier or current.get("name")!="KRR / PR governance (trusted check)" or current.get("head_sha")!=head or current.get("external_id")!=external or current.get("status")!="in_progress" or current.get("conclusion") is not None or current.get("details_url")!=details or not isinstance(current.get("app"),dict) or str(current["app"].get("id"))!=app_id: failures.extend(heads[head]); continue
+              posted[head]=identifier
+          for entry,number in zip(snapshots,targets,strict=True):
+              result=subprocess.run(["gh","api",f"repos/{repository}/pulls/{number}"],capture_output=True,text=True,check=False,env=read_env, timeout=bounded_root_timeout())
+              if result.returncode!=0: failures.append(number); continue
+              try: pull=json.loads(result.stdout)
+              except json.JSONDecodeError: failures.append(number); continue
+              current_number=pull.get("number") if isinstance(pull,dict) else None
+              current_head=pull.get("head",{}).get("sha") if isinstance(pull,dict) and isinstance(pull.get("head"),dict) else None
+              current_draft=pull.get("draft") if isinstance(pull,dict) else None
+              current_base_ref=pull.get("base",{}).get("ref") if isinstance(pull,dict) and isinstance(pull.get("base"),dict) else None
+              current_base_repo=pull.get("base",{}).get("repo",{}).get("full_name") if isinstance(pull,dict) and isinstance(pull.get("base"),dict) and isinstance(pull.get("base",{}).get("repo"),dict) else None
+              current_head_repo=pull.get("head",{}).get("repo",{}).get("full_name") if isinstance(pull,dict) and isinstance(pull.get("head"),dict) and isinstance(pull.get("head",{}).get("repo"),dict) else None
+              head_matches=isinstance(current_head,str) and current_head.lower()==entry[1].lower()
+              if current_number!=number or pull.get("state")!="open" or not head_matches or type(current_draft) is not bool or current_draft != entry[2] or current_base_ref!=entry[3] or current_base_repo!=entry[4] or current_head_repo!=entry[5]: failures.append(number)
+          if failures: raise SystemExit("Priority invalidation failed or target drifted: " + ",".join(str(number) for number in sorted(set(failures))))
+          manifest=[]
+          for entry,number in zip(snapshots,targets,strict=True):
+              identifier=posted.get(entry[1].lower())
+              if type(identifier) is not int or identifier < 1: raise SystemExit("Priority invalidation manifest is incomplete.")
+              manifest.append([number,identifier])
+          with open(os.environ["GITHUB_OUTPUT"],"a",encoding="utf-8") as output: output.write("check_manifest="+json.dumps(manifest,separators=(",",":"))+"\n")
+          PY
+      - name: Create second priority invalidator write token
+        if: '!cancelled() && needs.prepare-current-targets.outputs.barrier_source_outcome == ''success'' && needs.prepare-current-targets.outputs.has_preinvalidate_chunk_2 == ''true'''
+        id: pre-invalidator-write-2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: write
+      - name: Create second priority invalidator read token
+        if: '!cancelled() && needs.prepare-current-targets.outputs.barrier_source_outcome == ''success'' && needs.prepare-current-targets.outputs.has_preinvalidate_chunk_2 == ''true'''
+        id: pre-invalidator-read-2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: read
+          permission-pull-requests: read
+      - name: Pre-invalidate priority event heads (second TTL-safe chunk)
+        id: preinvalidate-2
+        if: '!cancelled() && needs.prepare-current-targets.outputs.barrier_source_outcome == ''success'' && needs.prepare-current-targets.outputs.has_preinvalidate_chunk_2 == ''true'''
+        env:
+          GH_TOKEN: ${{ steps.pre-invalidator-read-2.outputs.token }}
+          CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          TARGETS: ${{ needs.prepare-current-targets.outputs.preinvalidate_chunk_2 }}
+          TARGET_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.preinvalidate_chunk_2_snapshots }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          DISPATCHER_RUN_ID: ${{ github.run_id }}
+          CHECK_WRITE_TOKEN: ${{ steps.pre-invalidator-write-2.outputs.token }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess, time
+          from urllib.parse import urlencode
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
+          repository=os.environ["GITHUB_REPOSITORY"]; read_token=os.environ.get("GH_TOKEN", ""); write_token=os.environ.get("CHECK_WRITE_TOKEN", ""); app_id=os.environ.get("CHECK_APP_ID", ""); dispatcher=os.environ.get("DISPATCHER_RUN_ID", "")
+          if not read_token or not write_token or re.fullmatch(r"[1-9][0-9]*",app_id) is None or re.fullmatch(r"[1-9][0-9]*",dispatcher) is None: raise SystemExit("Priority invalidator credentials are invalid.")
+          try: targets=json.loads(os.environ.get("TARGETS", "")); snapshots=json.loads(os.environ.get("TARGET_SNAPSHOTS", ""))
+          except json.JSONDecodeError as error: raise SystemExit("Priority target set is invalid.") from error
+          branch=os.environ.get("DEFAULT_BRANCH", "")
+          if not isinstance(targets,list) or not targets or any(type(number) is not int or number<1 for number in targets) or len(set(targets))!=len(targets) or not isinstance(snapshots,list) or len(snapshots)!=len(targets) or not isinstance(branch,str) or re.fullmatch(r"[A-Za-z0-9._/-]+",branch) is None: raise SystemExit("Priority target set is invalid.")
+          heads={}
+          for entry,number in zip(snapshots,targets,strict=True):
+              if not isinstance(entry,list) or len(entry)!=6 or entry[0]!=number or not isinstance(entry[1],str) or re.fullmatch(r"[0-9a-fA-F]{40}",entry[1]) is None or type(entry[2]) is not bool or entry[3]!=branch or entry[4]!=repository or entry[5]!=repository: raise SystemExit("Priority target snapshot is invalid.")
+              heads.setdefault(entry[1].lower(),[]).append(number)
+          if len(heads)>300: raise SystemExit("Priority invalidation chunk exceeds the App-token TTL cap.")
+          base_url=f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/{dispatcher}"; read_env={"GH_TOKEN":read_token,"PATH":os.environ["PATH"]}; write_env={"GH_TOKEN":write_token,"PATH":os.environ["PATH"]}
+          failures=[]; posted={}; write_clock=[time.monotonic()+8.1]
+          for head,members in heads.items():
+              details=base_url+"?"+urlencode({"dispatcher_run_id":dispatcher,"carry_pending":"0"}); external=f"krr-governance/v1/{head}/dispatcher-{dispatcher}"
+              delay=write_clock[0]-time.monotonic()
+              if delay>0: time.sleep(delay)
+              write_clock[0]=time.monotonic()+8.1
+              response=subprocess.run(["gh","api","--method","POST",f"repos/{repository}/check-runs","-f","name=KRR / PR governance (trusted check)","-f",f"head_sha={head}","-f",f"external_id={external}","-f","status=in_progress","-f",f"details_url={details}"],capture_output=True,text=True,check=False,env=write_env, timeout=bounded_root_timeout())
+              if response.returncode!=0: failures.extend(members); continue
+              try: check=json.loads(response.stdout); identifier=check.get("id") if isinstance(check,dict) else None
+              except json.JSONDecodeError: failures.extend(members); continue
+              if type(identifier) is not int or identifier<1 or check.get("name")!="KRR / PR governance (trusted check)" or check.get("head_sha")!=head or check.get("external_id")!=external or check.get("status")!="in_progress" or check.get("conclusion") is not None or check.get("details_url")!=details or not isinstance(check.get("app"),dict) or str(check["app"].get("id"))!=app_id: failures.extend(members); continue
+              reread=subprocess.run(["gh","api",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=bounded_root_timeout())
+              if reread.returncode!=0: failures.extend(members); continue
+              try: current=json.loads(reread.stdout)
+              except json.JSONDecodeError: failures.extend(members); continue
+              if not isinstance(current,dict) or current.get("id")!=identifier or current.get("name")!="KRR / PR governance (trusted check)" or current.get("head_sha")!=head or current.get("external_id")!=external or current.get("status")!="in_progress" or current.get("conclusion") is not None or current.get("details_url")!=details or not isinstance(current.get("app"),dict) or str(current["app"].get("id"))!=app_id: failures.extend(members); continue
+              posted[head]=identifier
+          for entry,number in zip(snapshots,targets,strict=True):
+              result=subprocess.run(["gh","api",f"repos/{repository}/pulls/{number}"],capture_output=True,text=True,check=False,env=read_env, timeout=bounded_root_timeout())
+              if result.returncode!=0: failures.append(number); continue
+              try: pull=json.loads(result.stdout)
+              except json.JSONDecodeError: failures.append(number); continue
+              base=pull.get("base") if isinstance(pull,dict) else None; head=pull.get("head") if isinstance(pull,dict) else None
+              if not isinstance(pull,dict) or pull.get("number")!=number or pull.get("state")!="open" or not isinstance(base,dict) or not isinstance(head,dict) or not isinstance(head.get("sha"),str) or head["sha"].lower()!=entry[1].lower() or pull.get("draft")!=entry[2] or base.get("ref")!=entry[3] or not isinstance(base.get("repo"),dict) or base["repo"].get("full_name")!=entry[4] or not isinstance(head.get("repo"),dict) or head["repo"].get("full_name")!=entry[5]: failures.append(number)
+          if failures: raise SystemExit("Priority invalidation failed or target drifted: "+",".join(str(number) for number in sorted(set(failures))))
+          manifest=[]
+          for entry,number in zip(snapshots,targets,strict=True):
+              identifier=posted.get(entry[1].lower())
+              if type(identifier) is not int or identifier<1: raise SystemExit("Priority invalidation manifest is incomplete.")
+              manifest.append([number,identifier])
+          with open(os.environ["GITHUB_OUTPUT"],"a",encoding="utf-8") as output: output.write("check_manifest="+json.dumps(manifest,separators=(",",":"))+"\n")
+          PY
+      - name: Fail closed after deferred priority barrier setup
+        if: '!cancelled() && needs.prepare-current-targets.outputs.has_preinvalidate_targets == ''true'''
+        env:
+          MARKER_WRITE_OUTCOME: ${{ steps.barrier-marker-write.outcome }}
+          MARKER_READ_OUTCOME: ${{ steps.barrier-marker-read.outcome }}
+          MARKER_PUBLISH_OUTCOME: ${{ steps.barrier-marker-publish.outcome }}
+          BARRIER_TOKEN_OUTCOME: ${{ needs.prepare-current-targets.outputs.barrier_token_outcome }}
+          BARRIER_ACTIVATE_OUTCOME: ${{ needs.prepare-current-targets.outputs.barrier_verify_outcome }}
+          BARRIER_ACTIVE: ${{ needs.prepare-current-targets.outputs.affected_barrier_active }}
+          PREINVALIDATE_CHUNK_1_REQUIRED: ${{ needs.prepare-current-targets.outputs.has_preinvalidate_chunk_1 }}
+          PREINVALIDATE_CHUNK_1_OUTCOME: ${{ steps.preinvalidate-1.outcome }}
+          PREINVALIDATE_CHUNK_2_REQUIRED: ${{ needs.prepare-current-targets.outputs.has_preinvalidate_chunk_2 }}
+          PREINVALIDATE_CHUNK_2_OUTCOME: ${{ steps.preinvalidate-2.outcome }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re, time
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
+
+          required = (
+              "MARKER_WRITE_OUTCOME",
+              "MARKER_READ_OUTCOME",
+              "MARKER_PUBLISH_OUTCOME",
+              "BARRIER_TOKEN_OUTCOME",
+              "BARRIER_ACTIVATE_OUTCOME",
+          )
+          if any(os.environ.get(name) != "success" for name in required):
+              raise SystemExit("Priority barrier setup did not complete successfully.")
+          if os.environ.get("BARRIER_ACTIVE") != "true":
+              raise SystemExit("Priority affected-head barrier is not active.")
+          for index in ("1", "2"):
+              if os.environ.get(f"PREINVALIDATE_CHUNK_{index}_REQUIRED") == "true" and os.environ.get(f"PREINVALIDATE_CHUNK_{index}_OUTCOME") != "success":
+                  raise SystemExit("Priority invalidation did not complete successfully.")
+          PY
       - name: Create first all-open invalidator write token
-        if: steps.current-targets.outputs.has_all_invalidation_chunk_1 == 'true'
+        if: needs.prepare-current-targets.outputs.has_all_invalidation_chunk_1 == 'true'
         id: all-invalidator-write-1
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -2183,9 +2684,8 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-checks: write
-
       - name: Create first all-open invalidator read token
-        if: steps.current-targets.outputs.has_all_invalidation_chunk_1 == 'true'
+        if: needs.prepare-current-targets.outputs.has_all_invalidation_chunk_1 == 'true'
         id: all-invalidator-read-1
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -2195,26 +2695,32 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-checks: read
           permission-pull-requests: read
-
       - name: Invalidate every current pull request for the all-open writer (first TTL-safe chunk)
         id: invalidate-all-1
-        # A duplicate may be wholly preinvalidated, leaving no tail targets.
-        # Still enter this step so it fails closed before an all-open writer
-        # could consume a partial manifest.
-        if: steps.current-targets.outputs.has_all_invalidation_chunk_1 == 'true'
+        if: needs.prepare-current-targets.outputs.has_all_invalidation_chunk_1 == 'true'
         env:
           GH_TOKEN: ${{ steps.all-invalidator-read-1.outputs.token }}
           CHECK_WRITE_TOKEN: ${{ steps.all-invalidator-write-1.outputs.token }}
           CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          AFFECTED: ${{ steps.current-targets.outputs.all_invalidation_chunk_1 }}
-          KNOWN_TARGET_SNAPSHOTS: ${{ steps.current-targets.outputs.all_invalidation_chunk_1_snapshots }}
-          EVENT_TARGETS: ${{ steps.current-targets.outputs.event_targets }}
-          DUPLICATE_GOVERNED_HEADS: ${{ steps.current-targets.outputs.duplicate_governed_heads }}
-          HISTORY_CARRY_MANIFEST: ${{ steps.retained-history-audit.outputs.carry_manifest }}
+          AFFECTED: ${{ needs.prepare-current-targets.outputs.all_invalidation_chunk_1 }}
+          KNOWN_TARGET_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.all_invalidation_chunk_1_snapshots }}
+          EVENT_TARGETS: ${{ needs.prepare-current-targets.outputs.event_targets }}
+          DUPLICATE_GOVERNED_HEADS: ${{ needs.prepare-current-targets.outputs.duplicate_governed_heads }}
+          HISTORY_CARRY_MANIFEST: ${{ needs.audit-reconciliation-history.outputs.carry_manifest }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import json, os, re, subprocess, time
           from urllib.parse import urlencode, urlparse
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
           repository=os.environ["GITHUB_REPOSITORY"]; read_token=os.environ.get("GH_TOKEN", ""); write_token=os.environ.get("CHECK_WRITE_TOKEN", ""); app_id=os.environ.get("CHECK_APP_ID", "")
           if not read_token or not write_token or re.fullmatch(r"[1-9][0-9]*",app_id) is None: raise SystemExit("Governance invalidator credentials are invalid.")
           read_env={"GH_TOKEN":read_token,"PATH":os.environ["PATH"]}
@@ -2259,12 +2765,12 @@ jobs:
               delay=write_clock[0]-time.monotonic()
               if delay>0: time.sleep(delay)
               write_clock[0]=time.monotonic()+8.1
-              result=subprocess.run(command,capture_output=True,text=True,check=False,env={"GH_TOKEN":write_token,"PATH":os.environ["PATH"]}, timeout=20)
+              result=subprocess.run(command,capture_output=True,text=True,check=False,env={"GH_TOKEN":write_token,"PATH":os.environ["PATH"]}, timeout=bounded_root_timeout())
               if result.returncode!=0: return None
               try: response=json.loads(result.stdout); identifier=response.get("id") if isinstance(response,dict) else None; posted=response.get("app",{}).get("id") if isinstance(response,dict) and isinstance(response.get("app"),dict) else None
               except json.JSONDecodeError: return None
               if type(identifier) is not int or identifier<1 or str(posted)!=app_id or response.get("name")!="KRR / PR governance (trusted check)" or response.get("head_sha")!=head or response.get("external_id")!=external_id or response.get("status")!="in_progress" or response.get("conclusion") is not None or response.get("details_url")!=details: return None
-              reread=subprocess.run(["gh","api",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
+              reread=subprocess.run(["gh","api",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=bounded_root_timeout())
               if reread.returncode!=0: return None
               try: check=json.loads(reread.stdout)
               except json.JSONDecodeError: return None
@@ -2295,7 +2801,7 @@ jobs:
           # snapshot did not move while those immutable generations were made.
           for number in numbers:
               expected_head,expected_draft=known[number]
-              current=subprocess.run(["gh","api",f"repos/{repository}/pulls/{number}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
+              current=subprocess.run(["gh","api",f"repos/{repository}/pulls/{number}"],capture_output=True,text=True,check=False,env=read_env, timeout=bounded_root_timeout())
               if current.returncode!=0:
                   failures.append(number); continue
               try:
@@ -2312,15 +2818,13 @@ jobs:
               output.write("check_manifest="+json.dumps(manifest,separators=(",", ":"))+"\n")
               output.write("carry_target_numbers="+json.dumps(carry_targets,separators=(",", ":"))+"\n")
           PY
-
       - name: Reject duplicate governed heads before manifest hand-off
-        if: steps.current-targets.outputs.has_duplicate_governed_heads == 'true'
+        if: needs.prepare-current-targets.outputs.has_duplicate_governed_heads == 'true'
         run: |
           echo "Duplicate governed pull request head SHA." >&2
           exit 1
-
       - name: Create second all-open invalidator write token
-        if: steps.current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
+        if: needs.prepare-current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
         id: all-invalidator-write-2
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -2329,9 +2833,8 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-checks: write
-
       - name: Create second all-open invalidator read token
-        if: steps.current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
+        if: needs.prepare-current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
         id: all-invalidator-read-2
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -2341,24 +2844,33 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-checks: read
           permission-pull-requests: read
-
       - name: Invalidate current pull requests for the all-open writer (second TTL-safe chunk)
         id: invalidate-all-2
-        if: steps.current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
+        if: needs.prepare-current-targets.outputs.has_all_invalidation_chunk_2 == 'true'
         env:
           GH_TOKEN: ${{ steps.all-invalidator-read-2.outputs.token }}
           CHECK_WRITE_TOKEN: ${{ steps.all-invalidator-write-2.outputs.token }}
           CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          AFFECTED: ${{ steps.current-targets.outputs.all_invalidation_chunk_2 }}
-          KNOWN_TARGET_SNAPSHOTS: ${{ steps.current-targets.outputs.all_invalidation_chunk_2_snapshots }}
-          EVENT_TARGETS: ${{ steps.current-targets.outputs.event_targets }}
+          AFFECTED: ${{ needs.prepare-current-targets.outputs.all_invalidation_chunk_2 }}
+          KNOWN_TARGET_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.all_invalidation_chunk_2_snapshots }}
+          EVENT_TARGETS: ${{ needs.prepare-current-targets.outputs.event_targets }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
-          HISTORY_CARRY_MANIFEST: ${{ steps.retained-history-audit.outputs.carry_manifest }}
+          HISTORY_CARRY_MANIFEST: ${{ needs.audit-reconciliation-history.outputs.carry_manifest }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import json, os, re, subprocess, time
           from datetime import datetime
           from urllib.parse import parse_qs, urlencode, urlparse
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
           repository=os.environ["GITHUB_REPOSITORY"]; read_token=os.environ.get("GH_TOKEN", ""); write_token=os.environ.get("CHECK_WRITE_TOKEN", ""); app_id=os.environ.get("CHECK_APP_ID", ""); dispatcher=os.environ.get("DISPATCHER_RUN_ID", "")
           if not read_token or not write_token or re.fullmatch(r"[1-9][0-9]*",app_id) is None or re.fullmatch(r"[1-9][0-9]*",dispatcher) is None: raise SystemExit("Governance invalidator credentials are invalid.")
           try: numbers=json.loads(os.environ.get("AFFECTED", "")); snapshots=json.loads(os.environ.get("KNOWN_TARGET_SNAPSHOTS", ""))
@@ -2393,12 +2905,12 @@ jobs:
               delay=write_clock[0]-time.monotonic()
               if delay>0: time.sleep(delay)
               write_clock[0]=time.monotonic()+8.1
-              response=subprocess.run(["gh","api","--method","POST",f"repos/{repository}/check-runs","-f","name=KRR / PR governance (trusted check)","-f",f"head_sha={head}","-f",f"external_id={external}","-f","status=in_progress","-f",f"details_url={details}"],capture_output=True,text=True,check=False,env=write_env, timeout=20)
+              response=subprocess.run(["gh","api","--method","POST",f"repos/{repository}/check-runs","-f","name=KRR / PR governance (trusted check)","-f",f"head_sha={head}","-f",f"external_id={external}","-f","status=in_progress","-f",f"details_url={details}"],capture_output=True,text=True,check=False,env=write_env, timeout=bounded_root_timeout())
               if response.returncode!=0: failures.extend(members); continue
               try: check=json.loads(response.stdout); identifier=check.get("id") if isinstance(check,dict) else None
               except json.JSONDecodeError: failures.extend(members); continue
               if type(identifier) is not int or identifier<1 or check.get("name")!="KRR / PR governance (trusted check)" or check.get("head_sha")!=head or check.get("external_id")!=external or check.get("status")!="in_progress" or check.get("conclusion") is not None or check.get("details_url")!=details or not isinstance(check.get("app"),dict) or str(check["app"].get("id"))!=app_id: failures.extend(members); continue
-              reread=subprocess.run(["gh","api",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
+              reread=subprocess.run(["gh","api",f"repos/{repository}/check-runs/{identifier}"],capture_output=True,text=True,check=False,env=read_env, timeout=bounded_root_timeout())
               if reread.returncode!=0: failures.extend(members); continue
               try: current=json.loads(reread.stdout)
               except json.JSONDecodeError: failures.extend(members); continue
@@ -2406,7 +2918,7 @@ jobs:
               posted[head]=identifier
               if carry_pending: carry_targets.extend(number for number in members if number not in event_target_set)
           for number,(head,draft) in known.items():
-              result=subprocess.run(["gh","api",f"repos/{repository}/pulls/{number}"],capture_output=True,text=True,check=False,env=read_env, timeout=20)
+              result=subprocess.run(["gh","api",f"repos/{repository}/pulls/{number}"],capture_output=True,text=True,check=False,env=read_env, timeout=bounded_root_timeout())
               if result.returncode!=0: failures.append(number); continue
               try: pull=json.loads(result.stdout); current_head=pull.get("head",{}).get("sha") if isinstance(pull,dict) and isinstance(pull.get("head"),dict) else None; current_draft=pull.get("draft") if isinstance(pull,dict) else None
               except json.JSONDecodeError: current_head=current_draft=None
@@ -2420,12 +2932,11 @@ jobs:
 
   release-complete-affected-head-barrier:
     name: Release complete affected-head merge barrier
-    needs: reconcile-all-open
-    if: ${{ needs.reconcile-all-open.result == 'success' && needs.reconcile-all-open.outputs.affected_barrier_active == 'true' }}
+    needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, write-reconciliation-pending]
+    if: ${{ !cancelled() && needs.reconcile-all-open.result == 'success' && needs.write-reconciliation-pending.result == 'success' && (needs.acknowledge-early-sensor.result == 'success' || needs.acknowledge-early-sensor.result == 'skipped') && needs.prepare-current-targets.outputs.affected_barrier_active == 'true' }}
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # checks配列PATCH/DELETEをreservation armと同じ短いadmin laneで直列化する。
     concurrency:
       group: pr-governance-barrier-admin-${{ github.repository_id }}
       queue: max
@@ -2436,21 +2947,32 @@ jobs:
       - name: Bind release to the trusted default workflow source
         env:
           GH_TOKEN: ${{ github.token }}
-          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
-          DEFAULT_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          DEFAULT_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import json, os, re, subprocess
+          import time
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
           repository=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); head=os.environ.get("DEFAULT_HEAD", ""); workflow_ref=os.environ.get("WORKFLOW_REF", ""); workflow_sha=os.environ.get("WORKFLOW_SHA", "")
           prefix=f"{repository}/.github/workflows/pr-governance.yml@refs/heads/"
           if not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or workflow_ref!=prefix+branch or workflow_sha.lower()!=head.lower():
               raise SystemExit("Affected-head barrier release workflow source is invalid.")
           source_env={"GH_TOKEN":os.environ.get("GH_TOKEN", ""),"PATH":os.environ["PATH"]}
           if not source_env["GH_TOKEN"]: raise SystemExit("Affected-head barrier release source token is invalid.")
-          repo=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}"],capture_output=True,text=True,check=False,env=source_env,timeout=20)
-          ref=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/git/ref/heads/{branch}"],capture_output=True,text=True,check=False,env=source_env,timeout=20)
+          repo=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}"],capture_output=True,text=True,check=False,env=source_env,timeout=bounded_root_timeout())
+          ref=subprocess.run(["gh","api","--hostname","github.com",f"repos/{repository}/git/ref/heads/{branch}"],capture_output=True,text=True,check=False,env=source_env,timeout=bounded_root_timeout())
           if repo.returncode!=0 or ref.returncode!=0: raise SystemExit("Unable to verify affected-head barrier release source.")
           try: current_branch=json.loads(repo.stdout).get("default_branch"); current_head=json.loads(ref.stdout).get("object",{}).get("sha")
           except json.JSONDecodeError as error: raise SystemExit("Affected-head barrier release source is not JSON.") from error
@@ -2481,27 +3003,38 @@ jobs:
         env:
           READ_TOKEN: ${{ steps.read-token.outputs.token }}
           ADMIN_TOKEN: ${{ steps.protection-token.outputs.token }}
-          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
-          DEFAULT_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          DEFAULT_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
-          TARGETS: ${{ needs.reconcile-all-open.outputs.targets }}
-          TARGET_SNAPSHOTS: ${{ needs.reconcile-all-open.outputs.target_snapshots }}
-          PRESERVED_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          TARGETS: ${{ needs.prepare-current-targets.outputs.targets }}
+          TARGET_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
+          PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_CHECK_MANIFEST: ${{ needs.reconcile-all-open.outputs.preserved_check_manifest }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
-          PRE_MANIFEST_1: ${{ needs.reconcile-all-open.outputs.pre_manifest_1 }}
-          PRE_MANIFEST_2: ${{ needs.reconcile-all-open.outputs.pre_manifest_2 }}
-          TAIL_MANIFEST_1: ${{ needs.reconcile-all-open.outputs.tail_manifest_1 }}
-          TAIL_MANIFEST_2: ${{ needs.reconcile-all-open.outputs.tail_manifest_2 }}
-          DUPLICATE_GOVERNED_HEADS: ${{ needs.reconcile-all-open.outputs.duplicate_governed_heads }}
+          PRE_MANIFEST_1: ${{ needs.write-reconciliation-pending.outputs.pre_manifest_1 }}
+          PRE_MANIFEST_2: ${{ needs.write-reconciliation-pending.outputs.pre_manifest_2 }}
+          TAIL_MANIFEST_1: ${{ needs.write-reconciliation-pending.outputs.tail_manifest_1 }}
+          TAIL_MANIFEST_2: ${{ needs.write-reconciliation-pending.outputs.tail_manifest_2 }}
+          DUPLICATE_GOVERNED_HEADS: ${{ needs.prepare-current-targets.outputs.duplicate_governed_heads }}
+          ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
           import copy, json, os, re, subprocess
           from datetime import datetime
           from urllib.parse import parse_qs, urlencode, urlparse
+          import time
+          raw_root=os.environ.get("ROOT_DEADLINE_EPOCH","")
+          if re.fullmatch(r"[1-9][0-9]*",raw_root) is None: raise SystemExit("Invalid root deadline.")
+          absolute_root_deadline=int(raw_root)
+          def bounded_root_timeout():
+              remaining=absolute_root_deadline-time.time()
+              if remaining<=0: raise SystemExit("Root deadline elapsed.")
+              return min(20,remaining)
+          bounded_root_timeout()
+
 
           E=SystemExit
 
@@ -2512,7 +3045,7 @@ jobs:
           if not read_token or not admin_token or read_token==admin_token: raise E("Affected-head barrier release token boundary is invalid.")
           read_env={"GH_TOKEN":read_token,"PATH":os.environ["PATH"]}; admin_env={"GH_TOKEN":admin_token,"PATH":os.environ["PATH"]}; r=read_env; a=admin_env; protection_endpoint=f"repos/{repository}/branches/{branch}/protection"; status_checks_endpoint=protection_endpoint+"/required_status_checks"; contexts_endpoint=protection_endpoint+"/required_status_checks/contexts"; status_checks_url=f"https://api.github.com/{status_checks_endpoint}"; contexts_url=status_checks_url+"/contexts"
           def request(arguments, *, env, body=None):
-              result=subprocess.run(["gh","api","--hostname","github.com",*arguments],input=body,capture_output=True,text=True,check=False,env=env, timeout=20)
+              result=subprocess.run(["gh","api","--hostname","github.com",*arguments],input=body,capture_output=True,text=True,check=False,env=env, timeout=bounded_root_timeout())
               if result.returncode!=0: raise E("Affected-head barrier release API request failed.")
               try: return json.loads(result.stdout)
               except json.JSONDecodeError as error: raise E("Affected-head barrier release API response is not JSON.") from error
@@ -2528,14 +3061,14 @@ jobs:
               if len(set(result))!=len(result) or len({name for name,_ in result})!=len(result) or [name for name,_ in result]!=contexts: raise E("Affected-head barrier branch protection is invalid.")
               return required,result
           def mutate(method):
-              result=subprocess.run(["gh","api","--hostname","github.com","--method",method,contexts_endpoint,"--input","-"],input=json.dumps({"contexts":[context]},separators=(",",":")),capture_output=True,text=True,check=False,env=a, timeout=20)
+              result=subprocess.run(["gh","api","--hostname","github.com","--method",method,contexts_endpoint,"--input","-"],input=json.dumps({"contexts":[context]},separators=(",",":")),capture_output=True,text=True,check=False,env=a, timeout=bounded_root_timeout())
               if result.returncode!=0: return None
               try: value=json.loads(result.stdout)
               except json.JSONDecodeError: return None
               return value if isinstance(value,list) and all(isinstance(name,str) and name for name in value) and len(set(value))==len(value) else None
           def restore(expected_required):
               body={"strict":expected_required["strict"],"checks":expected_required["checks"]}
-              result=subprocess.run(["gh","api","--hostname","github.com","--method","PATCH",status_checks_endpoint,"--input","-"],input=json.dumps(body,separators=(",",":")),capture_output=True,text=True,check=False,env=a, timeout=20)
+              result=subprocess.run(["gh","api","--hostname","github.com","--method","PATCH",status_checks_endpoint,"--input","-"],input=json.dumps(body,separators=(",",":")),capture_output=True,text=True,check=False,env=a, timeout=bounded_root_timeout())
               if result.returncode!=0: return None
               try: value=json.loads(result.stdout)
               except json.JSONDecodeError: return None
@@ -2570,7 +3103,7 @@ jobs:
           if not isinstance(repo,dict) or repo.get("default_branch")!=branch or not isinstance(ref_head,str) or ref_head.lower()!=head.lower() or not isinstance(blob_sha,str) or re.fullmatch(r"[0-9a-fA-F]{40}",blob_sha) is None: raise E("Affected-head barrier source changed before release.")
           def api_page(arguments,page_number,message,include=False):
               if include and page_number==6: arguments.insert(4,"--include")
-              try: response=subprocess.run(arguments,capture_output=True,text=True,check=False,env=r,timeout=20)
+              try: response=subprocess.run(arguments,capture_output=True,text=True,check=False,env=r,timeout=bounded_root_timeout())
               except subprocess.TimeoutExpired as error: raise E(message+" timed out.") from error
               if response.returncode!=0: raise E(message+" is unavailable.")
               raw=response.stdout
@@ -2680,11 +3213,10 @@ jobs:
           if context in response or any(name==context for name,_owner in after_records) or canonical(after)!=canonical(expected): raise SystemExit("Affected-head barrier branch protection drifted during release.")
           PY
 
-
   terminal-all-open-writer:
     name: Complete terminal repository-wide governance writers
-    needs: [resolve_event, reconcile-all-open, release-complete-affected-head-barrier]
-    if: ${{ needs.reconcile-all-open.result == 'success' && needs.release-complete-affected-head-barrier.result == 'success' }}
+    needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, write-reconciliation-pending, release-complete-affected-head-barrier]
+    if: ${{ !cancelled() && needs.reconcile-all-open.result == 'success' && needs.write-reconciliation-pending.result == 'success' && (needs.acknowledge-early-sensor.result == 'success' || needs.acknowledge-early-sensor.result == 'skipped') && needs.release-complete-affected-head-barrier.result == 'success' }}
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 290
@@ -2694,7 +3226,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Create fresh all-writer dispatcher token
-        if: needs.reconcile-all-open.outputs.has_targets == 'true'
+        if: needs.prepare-current-targets.outputs.has_targets == 'true'
         id: all-dispatcher-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -2708,7 +3240,7 @@ jobs:
           permission-pull-requests: read
 
       - name: Record first terminal segment dispatch start
-        if: needs.reconcile-all-open.outputs.has_targets == 'true' && needs.reconcile-all-open.outputs.has_duplicate_governed_heads != 'true'
+        if: needs.prepare-current-targets.outputs.has_targets == 'true' && needs.prepare-current-targets.outputs.has_duplicate_governed_heads != 'true'
         id: terminal-window-1
         env:
           ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
@@ -2729,26 +3261,26 @@ jobs:
           PY
 
       - name: Dispatch one repository-wide governance arbiter segment
-        if: needs.reconcile-all-open.outputs.has_targets == 'true' && needs.reconcile-all-open.outputs.has_duplicate_governed_heads != 'true'
+        if: needs.prepare-current-targets.outputs.has_targets == 'true' && needs.prepare-current-targets.outputs.has_duplicate_governed_heads != 'true'
         id: dispatch-all-1
         env:
           GH_TOKEN: ${{ steps.all-dispatcher-token.outputs.token }}
-          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
-          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           WRITER_SCOPE: all
-          WRITER_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
-          WRITER_ALL_OPEN_TARGETS: ${{ needs.reconcile-all-open.outputs.targets }}
-          WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.reconcile-all-open.outputs.target_snapshots }}
-          WRITER_PRESERVED_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          WRITER_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
+          WRITER_ALL_OPEN_TARGETS: ${{ needs.prepare-current-targets.outputs.targets }}
+          WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
+          WRITER_PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
-          WRITER_CARRY_TARGET_NUMBERS_1: ${{ needs.reconcile-all-open.outputs.tail_carry_1 }}
-          WRITER_CARRY_TARGET_NUMBERS_2: ${{ needs.reconcile-all-open.outputs.tail_carry_2 }}
-          WRITER_PREINVALIDATE_TARGETS: ${{ needs.reconcile-all-open.outputs.preinvalidate_targets }}
-          WRITER_PRE_CHECK_MANIFEST_1: ${{ needs.reconcile-all-open.outputs.pre_manifest_1 }}
-          WRITER_PRE_CHECK_MANIFEST_2: ${{ needs.reconcile-all-open.outputs.pre_manifest_2 }}
-          WRITER_TAIL_CHECK_MANIFEST_1: ${{ needs.reconcile-all-open.outputs.tail_manifest_1 }}
-          WRITER_TAIL_CHECK_MANIFEST_2: ${{ needs.reconcile-all-open.outputs.tail_manifest_2 }}
+          WRITER_CARRY_TARGET_NUMBERS_1: ${{ needs.write-reconciliation-pending.outputs.tail_carry_1 }}
+          WRITER_CARRY_TARGET_NUMBERS_2: ${{ needs.write-reconciliation-pending.outputs.tail_carry_2 }}
+          WRITER_PREINVALIDATE_TARGETS: ${{ needs.prepare-current-targets.outputs.preinvalidate_targets }}
+          WRITER_PRE_CHECK_MANIFEST_1: ${{ needs.write-reconciliation-pending.outputs.pre_manifest_1 }}
+          WRITER_PRE_CHECK_MANIFEST_2: ${{ needs.write-reconciliation-pending.outputs.pre_manifest_2 }}
+          WRITER_TAIL_CHECK_MANIFEST_1: ${{ needs.write-reconciliation-pending.outputs.tail_manifest_1 }}
+          WRITER_TAIL_CHECK_MANIFEST_2: ${{ needs.write-reconciliation-pending.outputs.tail_manifest_2 }}
           WRITER_PRESERVED_CHECK_MANIFEST: ${{ needs.reconcile-all-open.outputs.preserved_check_manifest }}
           TERMINAL_SEGMENT_STARTED_AT: ${{ steps.terminal-window-1.outputs.started_at }}
         run: |
@@ -3063,8 +3595,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.terminal-read-1.outputs.token }}
           WRITER_RUN_ID: ${{ steps.dispatch-all-1.outputs.writer_run_id }}
-          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
-          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           CONTINUATION_INDEX: '1'
           APP_BOT_LOGIN: ${{ vars.KRR_GOVERNANCE_APP_BOT_LOGIN }}
@@ -3185,12 +3717,12 @@ jobs:
         id: dispatch-all-2
         env:
           GH_TOKEN: ${{ steps.terminal-dispatch-2.outputs.token }}
-          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
-          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
-          WRITER_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
-          WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.reconcile-all-open.outputs.target_snapshots }}
-          WRITER_PRESERVED_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          WRITER_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
+          WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
+          WRITER_PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
           WRITER_CHECK_MANIFEST: ${{ steps.dispatch-all-1.outputs.check_manifest }}
           WRITER_TERMINAL_ORDER: ${{ steps.dispatch-all-1.outputs.terminal_order_numbers }}
@@ -3363,8 +3895,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.terminal-read-2.outputs.token }}
           WRITER_RUN_ID: ${{ steps.dispatch-all-2.outputs.writer_run_id }}
-          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
-          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           CONTINUATION_INDEX: '2'
           APP_BOT_LOGIN: ${{ vars.KRR_GOVERNANCE_APP_BOT_LOGIN }}
@@ -3456,12 +3988,12 @@ jobs:
         id: dispatch-all-3
         env:
           GH_TOKEN: ${{ steps.terminal-dispatch-3.outputs.token }}
-          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
-          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
-          WRITER_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
-          WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.reconcile-all-open.outputs.target_snapshots }}
-          WRITER_PRESERVED_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          WRITER_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
+          WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
+          WRITER_PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
           WRITER_CHECK_MANIFEST: ${{ steps.dispatch-all-1.outputs.check_manifest }}
           WRITER_TERMINAL_ORDER: ${{ steps.dispatch-all-1.outputs.terminal_order_numbers }}
@@ -3593,8 +4125,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.terminal-read-3.outputs.token }}
           WRITER_RUN_ID: ${{ steps.dispatch-all-3.outputs.writer_run_id }}
-          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
-          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           CONTINUATION_INDEX: '3'
           APP_BOT_LOGIN: ${{ vars.KRR_GOVERNANCE_APP_BOT_LOGIN }}
@@ -3684,12 +4216,12 @@ jobs:
         id: dispatch-all-4
         env:
           GH_TOKEN: ${{ steps.terminal-dispatch-4.outputs.token }}
-          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
-          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
-          WRITER_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
-          WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.reconcile-all-open.outputs.target_snapshots }}
-          WRITER_PRESERVED_TARGETS: ${{ needs.reconcile-all-open.outputs.priority_targets }}
+          WRITER_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
+          WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
+          WRITER_PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
           WRITER_CHECK_MANIFEST: ${{ steps.dispatch-all-1.outputs.check_manifest }}
           WRITER_TERMINAL_ORDER: ${{ steps.dispatch-all-1.outputs.terminal_order_numbers }}
@@ -3821,8 +4353,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.terminal-read-4.outputs.token }}
           WRITER_RUN_ID: ${{ steps.dispatch-all-4.outputs.writer_run_id }}
-          DEFAULT_BRANCH: ${{ needs.reconcile-all-open.outputs.default_branch }}
-          WRITER_HEAD: ${{ needs.reconcile-all-open.outputs.writer_head }}
+          DEFAULT_BRANCH: ${{ needs.prepare-current-targets.outputs.default_branch }}
+          WRITER_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           DISPATCHER_RUN_ID: ${{ github.run_id }}
           CONTINUATION_INDEX: '4'
           APP_BOT_LOGIN: ${{ vars.KRR_GOVERNANCE_APP_BOT_LOGIN }}
