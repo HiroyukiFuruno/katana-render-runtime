@@ -151,6 +151,12 @@ jobs:
               arm_issue_source_failure("Trusted governance source is invalid.")
           exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
           PY
+      - name: Record review sensor staged early admission
+        # writerのgeneration fenceはActions run本体から元のworkflow名を
+        # 復元できない。このdefault-branch上の一意なstepだけを、sensorの
+        # early hand-offがall-openより先にあることを判定する証跡にする。
+        if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && steps.scope.outputs.valid == 'true' && steps.scope.outputs.reconcile == 'true' }}
+        run: 'true'
   arm-reserved-sensor-barrier:
     # This App-bound required context must be active before a direct mutation
     # waits outside the dispatcher lane.  Taking that lane here would cancel
@@ -1732,7 +1738,11 @@ jobs:
           for status in active:
               for run in listed[status]:
                   validate(run)
-                  targets.append(run["id"])
+                  # admission済みearly writerは95分review latchのsource-bound
+                  # hand-offである。後続sensorはstaleなall-openだけを停止し、
+                  # 他sensorのearly writer（FIFO待機中を含む）は取消さない。
+                  if " scope=all segment=" in run["display_title"]:
+                      targets.append(run["id"])
           if len(set(targets)) != len(targets):
               raise SystemExit("Governance writer run list is duplicated.")
           for identifier in targets:
@@ -1869,11 +1879,74 @@ jobs:
               if not isinstance(value,str) or not value.startswith(workflow_path+"@"): return False
               ref=value[len(workflow_path)+1:]
               return re.fullmatch(r"[A-Za-z0-9._/-]+",ref) is not None and ref not in {".",".."} and not ref.startswith("/") and "//" not in ref and all(part not in {"",".",".."} for part in ref.split("/"))
+          # all writerはearly hand-off待機中にも繰り返しdrainする。初回drain
+          # の直後に登録されたall scopeがFIFOでearlyを塞ぎ続けないようにする。
+          active_statuses=("requested","queued","pending","waiting","in_progress")
+          class ActiveWriterSnapshotChanged(Exception):
+              pass
+          writer_workflow_id=None
+          def drain_request(arguments):
+              remaining=deadline-time.time()
+              if remaining<=0: raise SystemExit("Early governance writer deadline elapsed.")
+              try: result=subprocess.run(["gh","api",*arguments],capture_output=True,text=True,check=False,timeout=min(20,remaining))
+              except subprocess.TimeoutExpired as error: raise SystemExit("Early governance writer drain timed out.") from error
+              if time.time()>deadline: raise SystemExit("Early governance writer deadline elapsed.")
+              return result
+          def drain_snapshot():
+              values=[]
+              for status in active_statuses:
+                  result=drain_request([f"repos/{repository}/actions/workflows/{writer_workflow_id}/runs?event=workflow_dispatch&branch={branch}&status={status}&per_page=100"])
+                  if result.returncode!=0: raise SystemExit("Unable to read active governance writers.")
+                  try: page=json.loads(result.stdout)
+                  except json.JSONDecodeError as error: raise SystemExit("Active governance writer response is not JSON.") from error
+                  runs=page.get("workflow_runs") if isinstance(page,dict) else None; total=page.get("total_count") if isinstance(page,dict) else None
+                  if not isinstance(runs,list) or len(runs)>100 or not all(isinstance(run,dict) for run in runs) or type(total) is not int or total<0 or total>100 or len(runs)!=total: raise SystemExit("Active governance writer response is invalid.")
+                  for run in runs:
+                      run_repository=run.get("repository")
+                      observed_status=run.get("status")
+                      if observed_status!=status:
+                          if observed_status in {*active_statuses,"completed"}: raise ActiveWriterSnapshotChanged
+                          raise SystemExit("Active governance writer status is invalid.")
+                      if not (type(run.get("id")) is int and run["id"]>0 and isinstance(run.get("display_title"),str) and re.fullmatch(r"source=[1-9][0-9]* scope=(?:early segment=0|all segment=[1-4])",run["display_title"]) is not None and run.get("name") in {"PR governance status writer",run["display_title"]} and path_matches(run.get("path")) and run.get("event")=="workflow_dispatch" and run.get("head_branch")==branch and isinstance(run.get("head_sha"),str) and re.fullmatch(r"[0-9a-fA-F]{40}",run["head_sha"]) is not None and run.get("workflow_id")==writer_workflow_id and isinstance(run_repository,dict) and run_repository.get("full_name")==repository and type(run.get("run_number")) is int and run["run_number"]>0 and type(run.get("run_attempt")) is int and run["run_attempt"]==1): raise SystemExit("Active governance writer identity is invalid.")
+                      values.append(run)
+              if len({run["id"] for run in values})!=len(values): raise ActiveWriterSnapshotChanged
+              return values
+          def drain_late_all_writers():
+              global writer_workflow_id
+              if writer_workflow_id is None:
+                  result=drain_request([f"repos/{repository}/actions/workflows/pr-governance-status-writer.yml"])
+                  if result.returncode!=0: raise SystemExit("Unable to read governance writer workflow.")
+                  try: writer_workflow_id=json.loads(result.stdout).get("id")
+                  except json.JSONDecodeError as error: raise SystemExit("Governance writer workflow response is not JSON.") from error
+                  if type(writer_workflow_id) is not int or writer_workflow_id<1: raise SystemExit("Governance writer workflow ID is invalid.")
+              listed=None
+              for attempt in range(4):
+                  try: first=drain_snapshot(); second=drain_snapshot()
+                  except ActiveWriterSnapshotChanged:
+                      if attempt==3: return False
+                      time.sleep(min(1,max(0,deadline-time.time())))
+                      continue
+                  if first==second:
+                      listed=second; break
+                  if attempt<3: time.sleep(min(1,max(0,deadline-time.time())))
+              if listed is None: return False
+              targets=[run["id"] for run in listed if " scope=all segment=" in run["display_title"]]
+              for run_id in targets:
+                  result=drain_request(["--method","POST",f"repos/{repository}/actions/runs/{run_id}/cancel"])
+                  if result.returncode!=0: return False
+              return True
           # The early writer has at most 50 targets and two paced writes per
           # target. Its 810-second write budget plus 120 seconds of startup
           # and 180 seconds of initial evidence fits within this 20-minute
           # wait, leaving 90 seconds for polling and control-plane reads.
           for _ in range(40):
+              remaining=deadline-time.time()
+              if remaining<=0: break
+              if not drain_late_all_writers():
+                  remaining=deadline-time.time()
+                  if remaining<=0: break
+                  time.sleep(min(30,remaining))
+                  continue
               remaining=deadline-time.time()
               if remaining<=0: break
               try: result=subprocess.run(["gh","api",f"repos/{repository}/actions/runs/{identifier}"],capture_output=True,text=True,check=False,timeout=min(20,remaining))

@@ -125,10 +125,11 @@ jobs:
     runs-on: ubuntu-latest
     concurrency:
       group: pr-governance-status-${{ github.repository_id }}
-      # A review/Ready source must acquire the singleton before it mutates
-      # its Check Run.  This stops the old all-open generation first, so the
-      # early writer owns pending -> revalidation -> terminal atomically.
-      cancel-in-progress: ${{ inputs.scope == 'early' }}
+      # sensorのearly writerは、別sensorのadmissionで置換しない。dispatcherは
+      # all scopeだけを取消し、FIFOは単一のCheck Run writerを保ったまま
+      # admission済みearly generationを順に実行する。
+      queue: max
+      cancel-in-progress: false
     steps:
       - name: Rebind trusted default branch before token creation
         env:

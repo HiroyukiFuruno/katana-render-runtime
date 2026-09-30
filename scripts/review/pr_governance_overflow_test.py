@@ -166,7 +166,7 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         workflows = (
             # The two removed per-chunk history scans are replaced by the
             # single aggregate retained-history audit before invalidators.
-            ("dispatcher", self.dispatcher, 83),
+            ("dispatcher", self.dispatcher, 84),
             ("status writer", self.workflow, 2),
             ("review events", self.review_events, 1),
         )

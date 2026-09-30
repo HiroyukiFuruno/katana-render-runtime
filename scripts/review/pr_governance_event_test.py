@@ -862,7 +862,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         writer = (ROOT / ".github/workflows/pr-governance-status-writer.yml").read_text(encoding="utf-8")
         self.assertIn("group: pr-governance-status-${{ github.repository_id }}", writer)
         self.assertNotIn("group: pr-governance-status-${{ github.repository_id }}", self.workflow)
-        self.assertIn("cancel-in-progress: ${{ inputs.scope == 'early' }}", writer)
+        self.assertIn("queue: max\n      cancel-in-progress: false", writer)
         self.assertNotIn("Legacy dispatcher early invalidator", self.workflow)
         self.assertIn("Invalidate every current pull request for the all-open writer", self.workflow)
         self.assertIn("status=in_progress", self.workflow)
@@ -885,13 +885,14 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         # Check Run is visible. The writer must inspect the immutable
         # dispatcher-run snapshot before every terminal mutation.
         self.assertIn("def reject_newer_dispatcher_barrier", writer_program)
-        self.assertIn("dispatcher_generations(\n            current_generation.workflow_id, current_generation.created_at,", writer_program)
+        self.assertIn("ADMISSION_EVIDENCE_WAIT_SECONDS = 60", writer_program)
+        self.assertIn("DispatcherAdmissionPending", writer_program)
         self.assertIn("Read bounded, exact-workflow generations no older than the source.", writer_program)
         self.assertIn("per_page=100", writer_program)
         self.assertIn("A newer dispatcher generation owns this Check Run head.", writer_program)
         self.assertGreaterEqual(writer_program.count("reject_newer_dispatcher_barrier(head)"), 2)
         self.assertIn("group: pr-governance-status-${{ github.repository_id }}", writer)
-        self.assertIn("cancel-in-progress: ${{ inputs.scope == 'early' }}", writer)
+        self.assertIn("queue: max\n      cancel-in-progress: false", writer)
         rebind = writer.index("Rebind trusted default branch before token creation")
         check_write_token = writer.index("Create Check Run writer App token")
         self.assertLess(rebind, check_write_token)
@@ -3638,8 +3639,25 @@ raise SystemExit(91)
                     "details_url": "https://github.com/owner/repository/actions/runs/71?source_run_id=99",
                 }
                 token_log = directory / "check-read-token"
+                cancel_marker = directory / "late-all-cancelled"
+                early_cancel_marker = directory / "early-cancelled"
+                early = {
+                    **valid, "id": 70, "display_title": "source=88 scope=early segment=0",
+                    "status": "queued", "workflow_id": 44,
+                }
+                late_all = {
+                    **valid, "id": 72, "display_title": "source=77 scope=all segment=1",
+                    "status": "in_progress", "workflow_id": 44,
+                }
                 fake.write_text(
                     "#!/bin/sh\ncase \"${GH_TOKEN}:$*\" in\n"
+                    "  actions-write:*'actions/workflows/pr-governance-status-writer.yml'*) printf '%s' '{\"id\":44}' ;;\n"
+                    "  actions-write:*'actions/workflows/44/runs?'*'status=queued'*) printf '%s' \"${EARLY_RUN}\" ;;\n"
+                    "  actions-write:*'actions/workflows/44/runs?'*'status=in_progress'*) printf '%s' \"${ALL_RUN}\" ;;\n"
+                    "  actions-write:*'/actions/runs/70/cancel'*) touch \"${EARLY_CANCEL_MARKER}\"; exit 73 ;;\n"
+                    "  actions-write:*'/actions/runs/72/cancel'*) touch \"${CANCEL_MARKER}\" ;;\n"
+                    "  actions-write:*'actions/workflows/44/runs?'*) printf '%s' '{\"total_count\":0,\"workflow_runs\":[]}' ;;\n"
+                    "  actions-write:*'/actions/runs/71'*) if [ -e \"${CANCEL_MARKER}\" ]; then printf '%s' \"${RUN}\"; else printf '%s' \"${QUEUED_BOUND_RUN}\"; fi ;;\n"
                     f"  checks-read:*'/pulls/72'*) printf '%s' '{{\"head\":{{\"sha\":\"{'a' * 40}\"}}}}' ;;\n"
                     f"  checks-read:*) printf '%s' \"${{GH_TOKEN}}\" > '{token_log}'; printf '%s' '{json.dumps([{'check_runs': [check]}])}' ;;\n"
                     "  *) printf '%s' \"${RUN}\" ;;\nesac\n",
@@ -3653,13 +3671,20 @@ raise SystemExit(91)
                     "CHECK_READ_TOKEN": "checks-read", "GH_TOKEN": "actions-write", "TARGETS": "[72]",
                     "APP_BOT_LOGIN": "katana-rust-pr-governance-hf[bot]",
                     "GITHUB_SERVER_URL": "https://github.com", "GITHUB_OUTPUT": str(directory / "output"),
+                    "EARLY_RUN": json.dumps({"total_count": 1, "workflow_runs": [early]}),
+                    "ALL_RUN": json.dumps({"total_count": 1, "workflow_runs": [late_all]}),
+                    "CANCEL_MARKER": str(cancel_marker),
+                    "EARLY_CANCEL_MARKER": str(early_cancel_marker),
+                    "QUEUED_BOUND_RUN": json.dumps({**valid, "status": "queued"}),
                     "PATH": f"{directory}{os.pathsep}{os.environ['PATH']}",
                 }
                 environment = self._with_history_manifest(environment)
-                result = subprocess.run([sys.executable, "-c", base_program], env=environment, capture_output=True, text=True, check=False)
+                result = subprocess.run([sys.executable, "-c", base_program], env=environment, capture_output=True, text=True, check=False, timeout=5)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 if expected == 0:
                     self.assertEqual(token_log.read_text(encoding="utf-8"), "checks-read")
+                    self.assertTrue(cancel_marker.exists())
+                    self.assertFalse(early_cancel_marker.exists())
 
     def test_priority_preinvalidation_is_synchronous_unique_and_fail_closed(self) -> None:
         """Priority heads receive a newer pending generation before any writer can finish."""
@@ -4903,7 +4928,7 @@ raise SystemExit(91)
         self.assertIn("time = _krr_clock", program)
         self.assertIn("_krr_sleep(delay)", program)
         writer = (ROOT / ".github/workflows/pr-governance-status-writer.yml").read_text(encoding="utf-8")
-        self.assertIn("cancel-in-progress: ${{ inputs.scope == 'early' }}", writer)
+        self.assertIn("queue: max\n      cancel-in-progress: false", writer)
 
     def test_same_push_sensor_requested_and_in_progress_do_not_cancel_parent_locks(self) -> None:
         """A sensor workflow_run child never preempts its pull_request_target parent."""
@@ -5290,6 +5315,11 @@ raise SystemExit(91)
             **template, "id": 1002, "head_sha": head,
             "run_number": 1002, "status": "in_progress",
         }
+        early = {
+            **template, "id": 1003, "head_sha": head,
+            "display_title": "source=10 scope=early segment=0",
+            "run_number": 1003, "status": "queued",
+        }
         queried_statuses: list[str] = []
         cancelled: list[int] = []
 
@@ -5313,7 +5343,10 @@ raise SystemExit(91)
                 status = query["status"][0]
                 self.assertIn(status, {"requested", "queued", "pending", "waiting", "in_progress"})
                 queried_statuses.append(status)
-                matching = [run for run in [*historical, active] if run["status"] == status]
+                matching = [
+                    run for run in [*historical, active, early]
+                    if run["status"] == status
+                ]
                 return response({"total_count": len(matching), "workflow_runs": matching})
             if endpoint == "repos/owner/repository/actions/runs/1002/cancel":
                 cancelled.append(1002)
@@ -5334,6 +5367,7 @@ raise SystemExit(91)
         self.assertEqual(exited.exception.code, 0)
         self.assertEqual(len(historical), 601)
         self.assertEqual(cancelled, [1002])
+        self.assertEqual(early["status"], "queued")
         self.assertEqual(
             queried_statuses,
             ["requested", "queued", "pending", "waiting", "in_progress"] * 2,

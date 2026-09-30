@@ -70,6 +70,11 @@ PREFLIGHT_WORKFLOW_RUN_SOURCE_NAME = "Preflight workflow_run governance source"
 RESOLVER_FAILURE_BARRIER_NAME = "Establish resolver-failure merge barrier"
 PREFLIGHT_PULL_REQUEST_TARGET_NOOP_STEP_NAME = "Record verified pull_request_target preflight no-op"
 PREFLIGHT_ISSUE_NOOP_STEP_NAME = "Record verified Issue preflight no-op"
+REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME = "Record review sensor staged early admission"
+RECONCILE_ALL_OPEN_NAME = "Reconcile all current governance pull requests"
+AWAIT_EARLY_WRITER_STEP_NAME = "Await the bound early event writer before all-open invalidation"
+ADMISSION_EVIDENCE_WAIT_SECONDS = 60
+ADMISSION_EVIDENCE_RETRY_SECONDS = 5
 # Manual recovery dispatches are a trusted dispatcher generation too.  The
 # workflow and its default-branch binding are still validated below; this is
 # only the event-kind allowlist, not permission to accept an arbitrary replay.
@@ -131,6 +136,7 @@ _nonreconciling_dispatcher_generations: dict[int, DispatcherGeneration] = {}
 _INVALID_REPOSITORY_IDENTITY = object()
 _active_initial_evidence_deadline: float | None = None
 _terminal_deadline_monotonic: float | None = None
+_dispatcher_admission_evidence_wait_remaining: float | None = None
 
 
 def _cleanup_snapshot_ledger(snapshot_path: str) -> None:
@@ -197,6 +203,10 @@ class GovernanceError(RuntimeError):
 
 class NoPostGovernanceError(GovernanceError):
     """Fail a PR without adding another terminal status to an ambiguous latch."""
+
+
+class DispatcherAdmissionPending(RuntimeError):
+    """A newer dispatcher exists but has not exposed its trusted phase yet."""
 
 
 @dataclass(frozen=True)
@@ -670,8 +680,12 @@ def dispatcher_generation_reconciles(generation: DispatcherGeneration) -> bool:
     ):
         raise GovernanceError("Dispatcher reconciliation evidence is invalid.")
 
-    def named_job(name: str) -> dict[str, Any]:
+    def named_job(name: str, *, allow_absent_active: bool = False) -> dict[str, Any] | None:
         matches = [job for job in jobs if job.get("name") == name]
+        if not matches and allow_absent_active and generation.status in DISPATCHER_ACTIVE_STATUSES:
+            raise DispatcherAdmissionPending(
+                "Newer dispatcher admission evidence is not available yet."
+            )
         if len(matches) != 1:
             raise GovernanceError("Dispatcher reconciliation evidence is ambiguous.")
         job = matches[0]
@@ -686,8 +700,76 @@ def dispatcher_generation_reconciles(generation: DispatcherGeneration) -> bool:
             raise GovernanceError("Dispatcher reconciliation job is invalid.")
         return job
 
-    preflight = named_job(PREFLIGHT_WORKFLOW_RUN_SOURCE_NAME)
+    def named_step(job: dict[str, Any], name: str) -> dict[str, Any] | None:
+        steps = job.get("steps")
+        if not isinstance(steps, list) or not all(isinstance(step, dict) for step in steps):
+            return None
+        matches = [step for step in steps if step.get("name") == name]
+        if len(matches) > 1:
+            raise GovernanceError("Dispatcher reconciliation evidence is ambiguous.")
+        if not matches:
+            return None
+        step = matches[0]
+        status = step.get("status")
+        conclusion = step.get("conclusion")
+        if not (
+            type(step.get("number")) is int and step["number"] > 0
+            and isinstance(status, str) and status in {"queued", "in_progress", "completed"}
+            and (status != "completed" or conclusion in DISPATCHER_TERMINAL_CONCLUSIONS)
+            and (status == "completed" or conclusion is None)
+        ):
+            raise GovernanceError("Dispatcher reconciliation step is invalid.")
+        return step
+
+    preflight = named_job(
+        PREFLIGHT_WORKFLOW_RUN_SOURCE_NAME,
+        allow_absent_active=generation.event == "workflow_run",
+    )
+    if preflight is None:
+        raise GovernanceError("Dispatcher preflight job is unavailable.")
+    if generation.event == "workflow_run" and preflight["status"] != "completed":
+        if generation.status in DISPATCHER_ACTIVE_STATUSES:
+            raise DispatcherAdmissionPending(
+                "Newer dispatcher preflight has not recorded its source yet."
+            )
+        return True
+    sensor_marker = (
+        named_step(preflight, REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME)
+        if generation.event == "workflow_run" else None
+    )
+    if sensor_marker is not None and sensor_marker["status"] == "completed":
+        if sensor_marker["conclusion"] != "success":
+            return True
+        if (
+            generation.status == "completed"
+            and generation.conclusion != "success"
+        ):
+            return True
+        reconcile = named_job(
+            RECONCILE_ALL_OPEN_NAME,
+            allow_absent_active=True,
+        )
+        if reconcile is None:
+            raise GovernanceError("Dispatcher reconciliation job is unavailable.")
+        await_early = named_step(reconcile, AWAIT_EARLY_WRITER_STEP_NAME)
+        if await_early is None:
+            if generation.status in DISPATCHER_ACTIVE_STATUSES:
+                # default branch上のsensor markerにより、このgenerationは
+                # early hand-off前と証明済みである。all-open invalidatorは
+                # default workflowでこのstepの後にだけ配置されている。
+                return os.environ.get("GOVERNANCE_SCOPE") == "all"
+            return True
+        if await_early["status"] != "completed":
+            if generation.status in DISPATCHER_ACTIVE_STATUSES:
+                return os.environ.get("GOVERNANCE_SCOPE") == "all"
+            return True
+        # terminal awaitがhand-off境界である。successなら次のdefault stepが
+        # 全PRをinvalidatingでき、failure/cancelなら安全なadmission証明を
+        # 失った。どちらも旧writerはterminal publish前に停止する。
+        return True
     barrier = named_job(RESOLVER_FAILURE_BARRIER_NAME)
+    if barrier is None:
+        raise GovernanceError("Dispatcher resolver barrier is unavailable.")
     if barrier["status"] != "completed" or barrier["conclusion"] != "skipped":
         # The resolver barrier is enabled only for reconcile=true.  A queued,
         # running, failed, or cancelled barrier is still a newer generation
@@ -857,9 +939,9 @@ def reject_newer_dispatcher_barrier(head: str) -> None:
     """Stop an older writer before a later dispatcher generation can be lost.
 
     The Actions run is the immutable generation order.  Check Runs are merely
-    its visible fence and have no compare-and-swap update, so a newly queued
-    dispatcher must block an older writer even before its pending Check Run is
-    created.
+    its visible fence and have no compare-and-swap update.  A newly queued
+    dispatcher blocks an older writer unless its exact review-sensor phase
+    proves that it is still before the bound early hand-off.
     """
 
     if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -869,29 +951,58 @@ def reject_newer_dispatcher_barrier(head: str) -> None:
     current_value = os.environ.get("GOVERNANCE_DISPATCHER_RUN_ID", "")
     if not NUMBER.fullmatch(current_value):
         raise NoPostGovernanceError("Writer dispatcher source is invalid for dispatcher fence.")
-    try:
-        current_value_response = api_json(
-            f"repos/{REPOSITORY}/actions/runs/{current_value}",
-        )
-        current_generation = dispatcher_generation(
-            current_value_response,
-            expected_identifier=int(current_value),
-            require_success=True,
-        )
-        generations = dispatcher_generations(
-            current_generation.workflow_id, current_generation.created_at,
-        )
-        snapshot_current = generations.get(current_generation.identifier)
-        if snapshot_current != current_generation:
-            raise GovernanceError("Current dispatcher generation is absent or changed in the paginated snapshot.")
-        for candidate_generation in generations.values():
-            if (
-                dispatcher_generation_is_newer(candidate_generation, current_generation)
-                and dispatcher_generation_reconciles(candidate_generation)
-            ):
-                raise NoPostGovernanceError("A newer dispatcher generation owns this Check Run head.")
-    except GovernanceError as error:
-        raise NoPostGovernanceError("Dispatcher barrier evidence is invalid.") from error
+    global _dispatcher_admission_evidence_wait_remaining
+    while True:
+        try:
+            current_value_response = api_json(
+                f"repos/{REPOSITORY}/actions/runs/{current_value}",
+            )
+            current_generation = dispatcher_generation(
+                current_value_response,
+                expected_identifier=int(current_value),
+                require_success=True,
+            )
+            generations = dispatcher_generations(
+                current_generation.workflow_id, current_generation.created_at,
+            )
+            snapshot_current = generations.get(current_generation.identifier)
+            if snapshot_current != current_generation:
+                raise GovernanceError("Current dispatcher generation is absent or changed in the paginated snapshot.")
+            for candidate_generation in generations.values():
+                if (
+                    dispatcher_generation_is_newer(candidate_generation, current_generation)
+                    and dispatcher_generation_reconciles(candidate_generation)
+                ):
+                    raise NoPostGovernanceError("A newer dispatcher generation owns this Check Run head.")
+            return
+        except DispatcherAdmissionPending as error:
+            # GitHubはpreflight jobをmaterializeする前にdispatcher runを作る。
+            # これは成功仮定ではない有界観測待機であり、実際にsleepした時間
+            # だけをwriter generation共有budgetから消費する。未分類candidate
+            # はbudgetまたはterminal deadlineの尽きた時点でfail-closed。
+            if _dispatcher_admission_evidence_wait_remaining is None:
+                _dispatcher_admission_evidence_wait_remaining = (
+                    ADMISSION_EVIDENCE_WAIT_SECONDS
+                )
+            terminal_remaining = (
+                _terminal_deadline_monotonic - time.monotonic()
+                if _terminal_deadline_monotonic is not None else float("inf")
+            )
+            remaining = min(
+                _dispatcher_admission_evidence_wait_remaining,
+                terminal_remaining,
+            )
+            if remaining <= 0:
+                raise NoPostGovernanceError(
+                    "Newer dispatcher admission evidence did not materialize."
+                ) from error
+            before_sleep = time.monotonic()
+            time.sleep(min(ADMISSION_EVIDENCE_RETRY_SECONDS, remaining))
+            _dispatcher_admission_evidence_wait_remaining -= max(
+                0.0, time.monotonic() - before_sleep,
+            )
+        except GovernanceError as error:
+            raise NoPostGovernanceError("Dispatcher barrier evidence is invalid.") from error
 
 
 def check_run_for_external_id(head: str, external_id: str) -> dict[str, Any] | None:
@@ -2164,7 +2275,7 @@ def terminalize_initial_evidence_failure(
 
 
 def main() -> int:
-    global _terminal_deadline_monotonic
+    global _dispatcher_admission_evidence_wait_remaining, _terminal_deadline_monotonic
     if not REPOSITORY or not SERVER_URL or not NUMBER.fullmatch(WRITER_RUN_ID):
         print("Writer runtime identity is invalid.", file=sys.stderr)
         return 1
@@ -2180,6 +2291,7 @@ def main() -> int:
     raw_completed_writer_run_ids = os.environ.get("GOVERNANCE_COMPLETED_WRITER_RUN_IDS", "")
     raw_terminal_deadline = os.environ.get("GOVERNANCE_TERMINAL_DEADLINE_EPOCH", "0")
     _terminal_deadline_monotonic = None
+    _dispatcher_admission_evidence_wait_remaining = None
     _bound_check_runs.clear()
     _bound_check_ids_by_number.clear()
     _nonreconciling_dispatcher_generations.clear()
