@@ -629,6 +629,93 @@ elif event_name == "workflow_run":
                 priority = False
 pull_request_target_noop = event_name == "pull_request_target" and valid and not reconcile
 issue_event_noop = event_name in {"issues", "issue_comment"} and valid and not reconcile
+
+
+def active_local_review_sensor() -> bool | None:
+    """Return whether a current local review sensor must retain its lane.
+
+    A direct mutation may otherwise cancel an admitted sensor before its
+    bounded writer publishes the Check Run required by the 95 minute latch.
+    Unknown API state is deliberately fail-closed at the caller.
+    """
+    expected_path = ".github/workflows/pr-governance-review-events.yml"
+    current_repository = repository_identity(request(f"repos/{repository}"))
+    if current_repository is None:
+        return None
+    default_branch = current_repository[2]
+    allowed_events = {"pull_request", "pull_request_review", "pull_request_review_comment"}
+    for status in ("in_progress",):
+        listed = request(
+            f"repos/{repository}/actions/workflows/pr-governance-review-events.yml/runs?"
+            f"status={status}&per_page=100&page=1"
+        )
+        runs = listed.get("workflow_runs") if isinstance(listed, dict) else None
+        total = listed.get("total_count") if isinstance(listed, dict) else None
+        if type(total) is not int or total < 0 or total > 100 or not isinstance(runs, list) or len(runs) != total:
+            return None
+        for run in runs:
+            pulls = run.get("pull_requests") if isinstance(run, dict) else None
+            run_repository = run.get("repository") if isinstance(run, dict) else None
+            head_repository = run.get("head_repository") if isinstance(run, dict) else None
+            if (
+                not isinstance(run, dict)
+                or run.get("name") != "PR governance review sensor"
+                or run.get("event") not in allowed_events
+                or run.get("status") != status
+                or run.get("run_attempt") != 1
+                or run.get("path") != expected_path
+                or not isinstance(run_repository, dict)
+                or run_repository.get("full_name") != repository
+                or not isinstance(head_repository, dict)
+                or head_repository.get("full_name") != repository
+                or not isinstance(pulls, list)
+                or len(pulls) != 1
+            ):
+                return None
+            pull = pulls[0]
+            base = pull.get("base") if isinstance(pull, dict) else None
+            head = pull.get("head") if isinstance(pull, dict) else None
+            base_repository = base.get("repo") if isinstance(base, dict) else None
+            head_pull_repository = head.get("repo") if isinstance(head, dict) else None
+            number = pull.get("number") if isinstance(pull, dict) else None
+            head_sha = head.get("sha") if isinstance(head, dict) else None
+            if (
+                type(number) is not int or number < 1
+                or not isinstance(base, dict) or base.get("ref") != default_branch
+                or not isinstance(head, dict) or not isinstance(head_sha, str)
+                or re.fullmatch(r"[0-9a-fA-F]{40}", head_sha) is None
+                or not isinstance(base_repository, dict) or base_repository.get("full_name") != repository
+                or not isinstance(head_pull_repository, dict) or head_pull_repository.get("full_name") != repository
+            ):
+                return None
+            current = request(f"repos/{repository}/pulls/{number}")
+            current_base = current.get("base") if isinstance(current, dict) else None
+            current_head = current.get("head") if isinstance(current, dict) else None
+            current_base_repository = current_base.get("repo") if isinstance(current_base, dict) else None
+            current_head_repository = current_head.get("repo") if isinstance(current_head, dict) else None
+            if (
+                not isinstance(current, dict) or current.get("number") != number or current.get("state") != "open"
+                or not isinstance(current_base, dict) or current_base.get("ref") != default_branch
+                or not isinstance(current_head, dict) or current_head.get("sha") != head_sha
+                or not isinstance(current_base_repository, dict) or current_base_repository.get("full_name") != repository
+                or not isinstance(current_head_repository, dict) or current_head_repository.get("full_name") != repository
+            ):
+                return None
+            return True
+    return False
+
+
+# A direct event retains its low-latency preemption when no sensor is active.
+# If one is admitted, serialize behind it: cancelling the source would make a
+# late-numbered PR miss the 50-target early writer and exceed its review latch.
+if (
+    os.environ.get("DIRECT_PRIORITY_FENCE") == "1"
+    and valid and reconcile and event_name in {"pull_request_target", "issues", "issue_comment"}
+):
+    sensor_active = active_local_review_sensor()
+    if sensor_active is not False:
+        priority = False
+
 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
     output.write("reconcile=" + ("true" if reconcile else "false") + "\n")
     output.write("valid=" + ("true" if valid else "false") + "\n")

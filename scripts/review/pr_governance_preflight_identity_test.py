@@ -34,6 +34,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
             re.DOTALL,
         )
         self.assertIsNotNone(match)
+        self.assertIn('DIRECT_PRIORITY_FENCE: "1"', workflow)
         assert match is not None
         self.scope = textwrap.dedent(match.group(1))
         self.preflight_program = (ROOT / "scripts/review/pr_governance_preflight.py").read_bytes()
@@ -72,6 +73,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         loader_failure: str | None = None,
         timeout_endpoint: str | None = None,
         timeout_call: int = 1,
+        direct_priority_fence: bool = False,
     ) -> dict[str, str]:
         """Return scope outputs while each endpoint may provide a read sequence.
 
@@ -129,6 +131,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
                 "WORKFLOW_SHA": self.workflow_sha,
                 "ISSUE_NUMBER": str(NUMBER),
                 "ISSUE_PULL_REQUEST_URL": url,
+                "DIRECT_PRIORITY_FENCE": "1" if direct_priority_fence else "",
             }
             with patch.dict(os.environ, environment, clear=True), patch("subprocess.run", side_effect=fake_run):
                 try:
@@ -239,6 +242,49 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
                 result = self.execute(responses={PR_ENDPOINT: [initial, final]})
                 self.assertEqual(result["reconcile"], "true")
                 self.assertEqual(result["issue_event_noop"], "false")
+
+    def test_active_sensor_serializes_a_relevant_direct_event(self) -> None:
+        sensor_endpoint = (
+            f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+            "status=in_progress&per_page=100&page=1"
+        )
+        active_sensor = {
+            "total_count": 1,
+            "workflow_runs": [{
+                "name": "PR governance review sensor",
+                "event": "pull_request_review",
+                "status": "in_progress",
+                "run_attempt": 1,
+                "path": ".github/workflows/pr-governance-review-events.yml",
+                "repository": self.repository(),
+                "head_repository": self.repository(),
+                "pull_requests": [{
+                    "number": NUMBER,
+                    "base": {"ref": "master", "repo": self.repository()},
+                    "head": {"sha": HEAD, "repo": self.repository()},
+                }],
+            }],
+        }
+        result = self.execute(responses={
+            PR_ENDPOINT: [self.pull(state="closed"), self.pull(state="open")],
+            sensor_endpoint: [active_sensor],
+        }, direct_priority_fence=True)
+        self.assertEqual(result["valid"], "true")
+        self.assertEqual(result["reconcile"], "true")
+        self.assertEqual(result["priority"], "false")
+
+    def test_absent_sensor_keeps_direct_event_preemption(self) -> None:
+        sensor_endpoint = (
+            f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+            "status=in_progress&per_page=100&page=1"
+        )
+        result = self.execute(responses={
+            PR_ENDPOINT: [self.pull(state="closed"), self.pull(state="open")],
+            sensor_endpoint: [{"total_count": 0, "workflow_runs": []}],
+        }, direct_priority_fence=True)
+        self.assertEqual(result["valid"], "true")
+        self.assertEqual(result["reconcile"], "true")
+        self.assertEqual(result["priority"], "true")
 
     def test_malformed_pr_fields_cannot_be_mistaken_for_a_noop(self) -> None:
         malformed = (
