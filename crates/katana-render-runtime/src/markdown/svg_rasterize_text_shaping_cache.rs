@@ -77,10 +77,9 @@ fn cache_shaped_run_width(database: &Arc<usvg::fontdb::Database>, key: ShapedRun
         if key_bytes > MAX_CACHED_SHAPED_RUN_BYTES || entry.values.contains_key(&key) {
             return;
         }
-        while entry.retained_bytes + key_bytes > MAX_CACHED_SHAPED_RUN_BYTES {
-            let Some(evicted_key) = entry.values.keys().next().cloned() else {
-                break;
-            };
+        while entry.retained_bytes + key_bytes > MAX_CACHED_SHAPED_RUN_BYTES
+            && let Some(evicted_key) = entry.values.keys().next().cloned()
+        {
             entry.values.remove(&evicted_key);
             entry.retained_bytes = entry
                 .retained_bytes
@@ -232,6 +231,47 @@ mod tests {
             })
         });
         assert!(!cache_state);
+    }
+
+    #[test]
+    fn shaped_run_cache_evicts_entries_to_fit_the_byte_budget() -> Result<(), String> {
+        let database = Arc::new(usvg::fontdb::Database::new());
+        SHAPED_RUN_CACHE.with(|cache| cache.borrow_mut().clear());
+        let retained_text_length = MAX_CACHED_SHAPED_RUN_BYTES / 2 + 1;
+        let first_key = shaped_run_key_with_text('a', retained_text_length);
+        let second_key = shaped_run_key_with_text('b', retained_text_length);
+
+        cache_shaped_run_width(&database, first_key, 1.0);
+        cache_shaped_run_width(&database, second_key.clone(), 2.0);
+
+        let cache_state = SHAPED_RUN_CACHE.with(|cache| {
+            cache.borrow().iter().find_map(|entry| {
+                entry
+                    .database
+                    .upgrade()
+                    .is_some_and(|cached| Arc::ptr_eq(&cached, &database))
+                    .then_some((
+                        entry.values.len(),
+                        entry.values.contains_key(&second_key),
+                        entry.retained_bytes,
+                    ))
+            })
+        });
+        let (cached_width_count, contains_second_key, retained_bytes) =
+            cache_state.ok_or("shaped run cache entry was not created")?;
+        assert_eq!(cached_width_count, 1);
+        assert!(contains_second_key);
+        assert!(retained_bytes <= MAX_CACHED_SHAPED_RUN_BYTES);
+        Ok(())
+    }
+
+    fn shaped_run_key_with_text(fill: char, length: usize) -> ShapedRunKey {
+        ShapedRunKey {
+            face_id: usvg::fontdb::ID::default(),
+            text: fill.to_string().repeat(length),
+            font_size_bits: 16.0_f32.to_bits(),
+            font_feature_settings: None,
+        }
     }
 
     fn shaped_run_key(index: usize) -> ShapedRunKey {
