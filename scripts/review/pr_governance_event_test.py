@@ -2743,6 +2743,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         local_pull = {
             "number": 72,
             "state": "open",
+            "draft": False,
             "base": {"ref": "master", "sha": "b" * 40, "repo": {"full_name": "owner/repository", "id": 101}},
             "head": {"sha": "a" * 40, "repo": {"full_name": "owner/repository", "id": 101}},
         }
@@ -2988,6 +2989,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         def make_pull(head_repository: object) -> dict[str, object]:
             return {
                 "number": 72, "state": "closed",
+                "draft": False,
                 "base": {"ref": "master", "sha": base, "repo": {"id": 101, "full_name": repository}},
                 "head": {"sha": head, "repo": head_repository},
             }

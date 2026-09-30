@@ -477,6 +477,7 @@ elif event_name == "workflow_run":
             pull_head_repo = pull_head.get("repo") if isinstance(pull_head, dict) and "repo" in pull_head else missing
             if (
                 not isinstance(pull, dict) or type(pull.get("number")) is not int or pull.get("number") != number or pull.get("state") not in {"open", "closed"}
+                or (name == "PR governance review sensor" and type(pull.get("draft")) is not bool)
                 or not isinstance(pull_base, dict) or not isinstance(pull_head, dict)
                 or not isinstance(pull_base_repo, dict) or pull_base_repo.get("full_name") != repository
                 or type(pull_base_repo.get("id")) is not int or pull_base_repo.get("id") != repository_id
@@ -611,6 +612,8 @@ elif event_name == "workflow_run":
                     valid = False
                 elif head_name != repository:
                     reconcile = False
+                elif pull_head_repo["id"] != repository_id:
+                    valid = False
                 else:
                     tip = default_tip(default_branch)
                     base_digest = workflow_blob(expected[name][0], source_base["sha"])
@@ -628,6 +631,10 @@ elif event_name == "workflow_run":
                         or final_tip != tip
                     ):
                         valid = False
+                    elif name == "PR governance review sensor" and pull["draft"]:
+                        # Draft sensor は成功しても latch を待たないため、検証済みの callback が共有 writer を占有しないようにする。
+                        reconcile = False
+                        priority = False
             if (
                 valid and reconcile and name in {"CI", "release-preflight"}
                 and run.get("event") == "pull_request"

@@ -135,6 +135,12 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
                 "ISSUE_PULL_REQUEST_URL": url,
                 "DIRECT_PRIORITY_FENCE": "1" if direct_priority_fence else "",
             }
+            if event_name == "workflow_run":
+                environment.update({
+                    "EVENT_ACTION": "completed",
+                    "WORKFLOW_RUN_ID": "17",
+                    "WORKFLOW_RUN_ATTEMPT": "1",
+                })
             with patch.dict(os.environ, environment, clear=True), patch("subprocess.run", side_effect=fake_run):
                 try:
                     exec(self.scope, {"__name__": "__main__"})
@@ -148,6 +154,97 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         self.assertEqual(result["reconcile"], "true")
         self.assertEqual(result["priority"], "false")
         self.assertEqual(result["issue_event_noop"], "false")
+
+    def sensor_responses(self, pull: object) -> dict[str, list[object]]:
+        source_repository = {
+            "id": REPOSITORY_ID,
+            "name": "repository",
+            "url": f"https://api.github.com/repos/{REPOSITORY}",
+        }
+        path = ".github/workflows/pr-governance-review-events.yml"
+        run = {
+            "id": 17, "run_number": 4, "run_attempt": 1,
+            "name": "PR governance review sensor", "event": "pull_request_review",
+            "path": path + "@master", "head_sha": HEAD,
+            "status": "completed", "conclusion": "success",
+            "repository": self.repository(),
+            "pull_requests": [{
+                "number": NUMBER,
+                "base": {"ref": "master", "sha": BASE, "repo": source_repository},
+                "head": {"sha": HEAD, "repo": source_repository},
+            }],
+        }
+        return {
+            f"repos/{REPOSITORY}/actions/runs/17": [run],
+            PR_ENDPOINT: [pull],
+            f"repos/{REPOSITORY}/git/ref/heads/master": [{"object": {"sha": BASE}}],
+            f"repos/{REPOSITORY}/compare/{BASE}...{BASE}": [{
+                "status": "identical", "base_commit": {"sha": BASE},
+                "merge_base_commit": {"sha": BASE}, "head_commit": {"sha": BASE},
+            }],
+            f"repos/{REPOSITORY}/contents/{path}?ref={BASE}": [{"sha": "e" * 40}],
+            f"repos/{REPOSITORY}/contents/{path}?ref={HEAD}": [{"sha": "e" * 40}],
+        }
+
+    def test_verified_draft_sensor_callback_is_a_noop_and_ready_still_reconciles(self) -> None:
+        for draft in (True, False):
+            for status in ("requested", "queued", "waiting", "pending", "in_progress", "completed"):
+                with self.subTest(draft=draft, status=status):
+                    responses = self.sensor_responses(self.pull(draft=draft))
+                    responses[f"repos/{REPOSITORY}/actions/runs/17"][0]["status"] = status
+                    responses[f"repos/{REPOSITORY}/actions/runs/17"][0]["conclusion"] = "success" if status == "completed" else None
+                    result = self.execute(event_name="workflow_run", responses=responses)
+                    self.assertEqual(result["valid"], "true")
+                    self.assertEqual(result["reconcile"], "false" if draft else "true")
+                    self.assertEqual(result["priority"], "false" if draft else "true")
+                    self.assertEqual(result["sensor_reservation"], "false")
+
+    def test_draft_sensor_callback_requires_current_api_and_trusted_source(self) -> None:
+        missing_draft = self.pull()
+        del missing_draft["draft"]
+        for pull in (False, None, [], missing_draft, *[
+            self.pull(draft=value) for value in (None, "true", "false", 0, 1, {})
+        ]):
+            with self.subTest(pull=pull):
+                self.assert_fail_closed(self.execute(
+                    event_name="workflow_run", responses=self.sensor_responses(pull),
+                ))
+        for endpoint in (
+            f"repos/{REPOSITORY}/actions/runs/17",
+            f"repos/{REPOSITORY}/contents/.github/workflows/pr-governance-review-events.yml?ref={HEAD}",
+        ):
+            with self.subTest(endpoint=endpoint):
+                responses = self.sensor_responses(self.pull(draft=True))
+                responses[endpoint] = [False]
+                self.assert_fail_closed(self.execute(event_name="workflow_run", responses=responses))
+        self.assert_fail_closed(self.execute(
+            event_name="workflow_run", responses=self.sensor_responses(self.pull(draft=True)),
+            timeout_endpoint=PR_ENDPOINT,
+        ))
+        for run_change in (
+            {"path": ".github/workflows/pr-governance-review-events.yml.evil@master"},
+            {"run_attempt": 2}, {"head_sha": "f" * 40},
+        ):
+            with self.subTest(run_change=run_change):
+                responses = self.sensor_responses(self.pull(draft=True))
+                responses[f"repos/{REPOSITORY}/actions/runs/17"][0].update(run_change)
+                self.assert_fail_closed(self.execute(event_name="workflow_run", responses=responses))
+        responses = self.sensor_responses(self.pull(draft=True))
+        responses[f"repos/{REPOSITORY}/contents/.github/workflows/pr-governance-review-events.yml?ref={HEAD}"] = [{"sha": "f" * 40}]
+        self.assert_fail_closed(self.execute(event_name="workflow_run", responses=responses))
+        for draft in (True, False):
+            with self.subTest(draft=draft, head_repository_id=202):
+                responses = self.sensor_responses(self.pull(
+                    draft=draft, head_repo={"id": 202, "full_name": REPOSITORY},
+                ))
+                source = responses[f"repos/{REPOSITORY}/actions/runs/17"][0]["pull_requests"][0]
+                source["head"]["repo"] = {**source["head"]["repo"], "id": 202}
+                self.assert_fail_closed(self.execute(event_name="workflow_run", responses=responses))
+        responses = self.sensor_responses(self.pull(draft=False))
+        responses[f"repos/{REPOSITORY}/actions/runs/17"][0]["draft"] = True
+        result = self.execute(event_name="workflow_run", responses=responses)
+        self.assertEqual(result["reconcile"], "true")
+        self.assertEqual(result["valid"], "true")
 
     def test_issue_source_loader_failures_arm_the_resolver_barrier(self) -> None:
         script_endpoint = (
