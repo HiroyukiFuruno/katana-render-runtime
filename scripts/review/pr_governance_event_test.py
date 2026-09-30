@@ -856,7 +856,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
 
     def test_one_event_runs_one_arbiter_after_synchronous_invalidation(self) -> None:
         self.assertIn(
-            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}",
+            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]' }}",
             self.workflow,
         )
         writer = (ROOT / ".github/workflows/pr-governance-status-writer.yml").read_text(encoding="utf-8")
@@ -874,7 +874,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
 
     def test_priority_event_preempts_a_long_reconciliation_and_writer_rebinds_before_secrets(self) -> None:
         self.assertIn(
-            "cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}",
+            "cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]' }}",
             self.workflow,
         )
         self.assertIn("PRs may edit a workflow file", self.workflow)
@@ -2490,7 +2490,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             self.workflow.index("  reconcile-all-open:")
         ]
         self.assertIn(
-            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}",
+            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}",
             resolver,
         )
         self.assertIn("reconcile: ${{ steps.targets.outputs.reconcile }}", resolver)
@@ -3216,7 +3216,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         self.assertIn("Re-enumerate every current local governance pull request", self.workflow)
         self.assertNotIn("steps.targets.outputs.affected", self.workflow)
         self.assertIn("AFFECTED: ${{ steps.current-targets.outputs.all_invalidation_chunk_1 }}", self.workflow)
-        self.assertIn("cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}", self.workflow)
+        self.assertIn("cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]' }}", self.workflow)
         self.assertIn("WRITER_TARGETS: ${{ steps.current-targets.outputs.priority_targets }}", self.workflow)
 
     def test_every_governance_snapshot_has_explicit_nullable_fork_boundary(self) -> None:
@@ -4327,18 +4327,18 @@ raise SystemExit(91)
         reconciler_job = self.workflow[self.workflow.index("  reconcile-all-open:"):]
         preflight_generation_lock = (
             "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n"
-            "      cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}"
+            "      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true' }}"
         )
         resolver_generation_lock = (
             "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n"
-            "      cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}"
+            "      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}"
         )
-        # A direct priority event and an admitted sensor recovery preempt all
-        # three locks. A completed workflow_run remains serialized.
+        # A direct priority event preempts all three locks. Every workflow_run
+        # state remains serialized so a sensor child cannot cancel its parent.
         self.assertIn(preflight_generation_lock, job)
         self.assertIn(resolver_generation_lock, resolver_job)
         self.assertIn("group: pr-governance-dispatcher-${{ github.repository_id }}", reconciler_job)
-        self.assertIn("cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}", reconciler_job)
+        self.assertIn("cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]' }}", reconciler_job)
         self.assertNotIn("actions/checkout", job)
         self.assertNotIn("github.event.pull_request", job)
         self.assertIn("repos/{repository}/git/ref/heads/{branch}", job)
@@ -4859,7 +4859,7 @@ raise SystemExit(91)
             self.workflow.index("  resolve_event:")
         ]
         self.assertIn(
-            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}",
+            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true' }}",
             establish,
         )
         resolver = self.workflow[
@@ -4867,11 +4867,11 @@ raise SystemExit(91)
             self.workflow.index("  reconcile-all-open:")
         ]
         self.assertIn(
-            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}",
+            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}",
             resolver,
         )
         self.assertIn(
-            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && (github.event.action == 'requested' || github.event.action == 'in_progress')) }}",
+            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.resolve_event.outputs.priority_targets != '[]' }}",
             self.workflow,
         )
         match = re.search(
@@ -4896,6 +4896,23 @@ raise SystemExit(91)
         self.assertIn("_krr_sleep(delay)", program)
         writer = (ROOT / ".github/workflows/pr-governance-status-writer.yml").read_text(encoding="utf-8")
         self.assertIn("cancel-in-progress: ${{ inputs.scope == 'early' }}", writer)
+
+    def test_same_push_sensor_requested_and_in_progress_do_not_cancel_parent_locks(self) -> None:
+        """A sensor workflow_run child never preempts its pull_request_target parent."""
+        lock_expressions = re.findall(
+            r"cancel-in-progress: \$\{\{ ([^\n]+) \}\}",
+            self.workflow,
+        )
+        dispatcher_locks = [expression for expression in lock_expressions if "needs." in expression]
+        self.assertEqual(len(dispatcher_locks), 3)
+        for expression in dispatcher_locks:
+            with self.subTest(expression=expression):
+                self.assertEqual(expression.count("github.event_name != 'workflow_run'"), 1)
+                self.assertNotIn("github.event.workflow_run.name", expression)
+                self.assertNotIn("github.event.action", expression)
+                # requested/in_progress sensor callbacks are workflow_run events,
+                # so the direct-event predicate is false and the parent remains.
+                self.assertTrue(expression.startswith("github.event_name != 'workflow_run' &&"))
 
     def test_invalidator_reopens_terminal_trusted_checks_but_marks_carry_only_for_pending_dispatcher_state(self) -> None:
         match = re.search(
