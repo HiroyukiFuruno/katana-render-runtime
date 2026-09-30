@@ -1,5 +1,9 @@
-use super::weight::css_weight_match_distance;
+#[path = "svg_rasterize_text_font_score.rs"]
+mod score;
 use resvg::usvg;
+use score::fallback_face_attribute_score;
+#[cfg(test)]
+use score::{css_stretch_match_rank, css_style_match_rank, fallback_attribute_score};
 pub(super) fn matching_font_face(
     database: &usvg::fontdb::Database,
     font_family: &str,
@@ -66,97 +70,30 @@ pub(super) fn matching_fallback_face(
     requested_italic: bool,
 ) -> Option<usvg::fontdb::ID> {
     database.face(base_face_id)?;
-    let requested_style = if requested_italic {
+    let requested_style = requested_font_style(requested_italic);
+    let requested_weight = usvg::fontdb::Weight(requested_weight);
+    let mut best = None;
+    for face in database.faces().filter(|face| face.id != base_face_id) {
+        let score = fallback_face_attribute_score(face, requested_style, requested_weight);
+        /* WHY: 同点では先のfaceを保ち、選択結果を改善しないfontのfile解析を省く。 */
+        if best.is_some_and(|(best_score, _)| score >= best_score) {
+            continue;
+        }
+        if font_has_char(database, face.id, character) {
+            /* WHY: 全属性一致の最小scoreより良い候補はないため、後続faceの走査を省く。 */
+            if score == (0, 0, 0, 0) {
+                return Some(face.id);
+            }
+            best = Some((score, face.id));
+        }
+    }
+    best.map(|(_, face_id)| face_id)
+}
+fn requested_font_style(italic: bool) -> usvg::fontdb::Style {
+    if italic {
         usvg::fontdb::Style::Italic
     } else {
         usvg::fontdb::Style::Normal
-    };
-    let requested_weight = usvg::fontdb::Weight(requested_weight);
-    database
-        .faces()
-        .filter(|face| face.id != base_face_id)
-        .filter(|face| font_has_char(database, face.id, character))
-        .min_by_key(|face| {
-            fallback_attribute_score(
-                face.style,
-                face.weight,
-                face.stretch,
-                requested_style,
-                requested_weight,
-                usvg::fontdb::Stretch::Normal,
-            )
-        })
-        .map(|face| face.id)
-}
-fn fallback_attribute_score(
-    candidate_style: usvg::fontdb::Style,
-    candidate_weight: usvg::fontdb::Weight,
-    candidate_stretch: usvg::fontdb::Stretch,
-    requested_style: usvg::fontdb::Style,
-    requested_weight: usvg::fontdb::Weight,
-    requested_stretch: usvg::fontdb::Stretch,
-) -> (u8, u8, u8, u16) {
-    let stretch_rank = css_stretch_match_rank(candidate_stretch, requested_stretch);
-    let style_rank = css_style_match_rank(candidate_style, requested_style);
-    let (weight_phase, weight_distance) =
-        css_weight_match_distance(candidate_weight, requested_weight);
-    /* WHY: CSS fallback matching compares stretch, style, then weight. 重みの距離は
-    属性一致の判定後に比較し、近い weight が stretch/style の一致を越えないようにする。 */
-    (stretch_rank, style_rank, weight_phase, weight_distance)
-}
-
-const CSS_STRETCH_MIN: u8 = 1;
-const CSS_STRETCH_EXTRA_CONDENSED: u8 = 2;
-const CSS_STRETCH_CONDENSED: u8 = 3;
-const CSS_STRETCH_SEMI_CONDENSED: u8 = 4;
-const CSS_STRETCH_NORMAL: u8 = 5;
-const CSS_STRETCH_SEMI_EXPANDED: u8 = 6;
-const CSS_STRETCH_EXPANDED: u8 = 7;
-const CSS_STRETCH_EXTRA_EXPANDED: u8 = 8;
-const CSS_STRETCH_MAX: u8 = 9;
-const CSS_STYLE_FALLBACK_RANK: u8 = 3;
-
-fn css_stretch_match_rank(
-    candidate: usvg::fontdb::Stretch,
-    requested: usvg::fontdb::Stretch,
-) -> u8 {
-    let candidate = css_stretch_value(candidate);
-    let requested = css_stretch_value(requested);
-    if candidate == requested {
-        return 0;
-    }
-
-    let candidate_is_preferred_direction =
-        if requested <= css_stretch_value(usvg::fontdb::Stretch::Normal) {
-            candidate < requested
-        } else {
-            candidate > requested
-        };
-    let distance = candidate.abs_diff(requested);
-    u8::from(!candidate_is_preferred_direction) * CSS_STRETCH_MAX + distance
-}
-
-fn css_stretch_value(stretch: usvg::fontdb::Stretch) -> u8 {
-    match stretch {
-        usvg::fontdb::Stretch::UltraCondensed => CSS_STRETCH_MIN,
-        usvg::fontdb::Stretch::ExtraCondensed => CSS_STRETCH_EXTRA_CONDENSED,
-        usvg::fontdb::Stretch::Condensed => CSS_STRETCH_CONDENSED,
-        usvg::fontdb::Stretch::SemiCondensed => CSS_STRETCH_SEMI_CONDENSED,
-        usvg::fontdb::Stretch::Normal => CSS_STRETCH_NORMAL,
-        usvg::fontdb::Stretch::SemiExpanded => CSS_STRETCH_SEMI_EXPANDED,
-        usvg::fontdb::Stretch::Expanded => CSS_STRETCH_EXPANDED,
-        usvg::fontdb::Stretch::ExtraExpanded => CSS_STRETCH_EXTRA_EXPANDED,
-        usvg::fontdb::Stretch::UltraExpanded => CSS_STRETCH_MAX,
-    }
-}
-
-fn css_style_match_rank(candidate: usvg::fontdb::Style, requested: usvg::fontdb::Style) -> u8 {
-    use usvg::fontdb::Style;
-    match (requested, candidate) {
-        (requested, candidate) if requested == candidate => 0,
-        (Style::Italic, Style::Oblique) | (Style::Oblique, Style::Italic) => 1,
-        (_, Style::Normal) => 2,
-        (_, _) => CSS_STYLE_FALLBACK_RANK,
     }
 }
 pub(super) fn font_has_char(
@@ -166,7 +103,9 @@ pub(super) fn font_has_char(
 ) -> bool {
     database
         .with_face_data(face_id, |data, face_index| {
-            rustybuzz::Face::from_slice(data, face_index)
+            /* WHY: glyphの有無だけを調べるため、不要なGSUB/GPOS coverage構築を省く。 */
+            rustybuzz::ttf_parser::Face::parse(data, face_index)
+                .ok()
                 .is_some_and(|face| face.glyph_index(character).is_some())
         })
         .unwrap_or(false)
@@ -192,8 +131,249 @@ pub(super) fn fontdb_family(name: &str) -> usvg::fontdb::Family<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{css_stretch_match_rank, css_style_match_rank, fallback_attribute_score};
-    use resvg::usvg::fontdb::{Stretch, Style, Weight};
+    use super::{
+        css_stretch_match_rank, css_style_match_rank, fallback_attribute_score, font_has_char,
+        matching_fallback_face, matching_font_face,
+    };
+    use crate::markdown::svg_rasterize::font::{bundled_font_db, html_font_db_for_text};
+    use resvg::usvg;
+    use resvg::usvg::fontdb::{Database, ID, Source, Stretch, Style, Weight};
+    use std::sync::Arc;
+
+    fn shaping_face_has_char(database: &Database, face_id: ID, character: char) -> bool {
+        database
+            .with_face_data(face_id, |data, face_index| {
+                rustybuzz::Face::from_slice(data, face_index)
+                    .is_some_and(|face| face.glyph_index(character).is_some())
+            })
+            .unwrap_or(false)
+    }
+
+    fn full_scan_shaping_fallback(
+        database: &Database,
+        base_face_id: ID,
+        character: char,
+        requested_weight: u16,
+        requested_italic: bool,
+    ) -> Option<ID> {
+        database.face(base_face_id)?;
+        let requested_style = if requested_italic {
+            Style::Italic
+        } else {
+            Style::Normal
+        };
+        database
+            .faces()
+            .filter(|face| face.id != base_face_id)
+            .filter(|face| shaping_face_has_char(database, face.id, character))
+            .min_by_key(|face| {
+                fallback_attribute_score(
+                    face.style,
+                    face.weight,
+                    face.stretch,
+                    requested_style,
+                    Weight(requested_weight),
+                    Stretch::Normal,
+                )
+            })
+            .map(|face| face.id)
+    }
+
+    struct FallbackFixture {
+        database: Database,
+        base: ID,
+        regular_first: ID,
+        italic_first: ID,
+        bold: ID,
+    }
+
+    fn bundled_latin_face() -> Result<usvg::fontdb::FaceInfo, String> {
+        let database = bundled_font_db();
+        let face_id = matching_font_face(&database, "Noto Sans", 400, false)
+            .ok_or("bundled Latin face must exist")?;
+        database
+            .face(face_id)
+            .cloned()
+            .ok_or_else(|| "bundled face must exist".to_string())
+    }
+
+    fn add_fallback_fixture_face(
+        database: &mut Database,
+        face: &usvg::fontdb::FaceInfo,
+        weight: u16,
+        style: Style,
+        stretch: Stretch,
+        corrupt: bool,
+    ) -> ID {
+        let mut candidate = face.clone();
+        candidate.weight = Weight(weight);
+        candidate.style = style;
+        candidate.stretch = stretch;
+        if corrupt {
+            candidate.source = Source::Binary(Arc::new(vec![0, 1, 2, 3]));
+        }
+        database.push_face_info(candidate)
+    }
+
+    fn fallback_fixture() -> Result<FallbackFixture, String> {
+        let face = bundled_latin_face()?;
+        let mut database = Database::new();
+        let mut add = |weight, style, stretch, corrupt| {
+            add_fallback_fixture_face(&mut database, &face, weight, style, stretch, corrupt)
+        };
+        let base = add(400, Style::Normal, Stretch::Normal, false);
+        let _unsupported_regular = add(400, Style::Normal, Stretch::Normal, true);
+        let regular_first = add(400, Style::Normal, Stretch::Normal, false);
+        let _regular_tie = add(400, Style::Normal, Stretch::Normal, false);
+        let _condensed_italic = add(700, Style::Italic, Stretch::Condensed, false);
+        let _unsupported_italic = add(700, Style::Italic, Stretch::Normal, true);
+        let italic_first = add(700, Style::Italic, Stretch::Normal, false);
+        let _italic_tie = add(700, Style::Italic, Stretch::Normal, false);
+        let bold = add(700, Style::Normal, Stretch::Normal, false);
+        Ok(FallbackFixture {
+            database,
+            base,
+            regular_first,
+            italic_first,
+            bold,
+        })
+    }
+
+    fn assert_fallback_expected_ids(fixture: &FallbackFixture) {
+        for (weight, italic, expected) in [
+            (400, false, fixture.regular_first),
+            (700, false, fixture.bold),
+            (700, true, fixture.italic_first),
+            (400, true, fixture.italic_first),
+        ] {
+            assert_eq!(
+                matching_fallback_face(&fixture.database, fixture.base, 'A', weight, italic),
+                Some(expected)
+            );
+        }
+    }
+
+    fn assert_fallback_matches_old_scan(database: &Database, base: ID) {
+        for (weight, italic) in [(400, false), (700, false), (400, true), (700, true)] {
+            for character in ['A', 'é', '日', '😀', '\u{10ffff}'] {
+                assert_eq!(
+                    matching_fallback_face(database, base, character, weight, italic),
+                    full_scan_shaping_fallback(database, base, character, weight, italic)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn score_pruned_fallback_preserves_full_scan_order_and_unsupported_candidates()
+    -> Result<(), String> {
+        let fixture = fallback_fixture()?;
+        assert_fallback_expected_ids(&fixture);
+        assert_fallback_matches_old_scan(&fixture.database, fixture.base);
+        assert_eq!(
+            matching_fallback_face(&fixture.database, fixture.base, '\u{10ffff}', 400, false),
+            None
+        );
+        assert_eq!(
+            matching_fallback_face(&fixture.database, ID::dummy(), 'A', 400, false),
+            None
+        );
+        Ok(())
+    }
+
+    fn assert_latin_glyph_predicate(database: &Database, base: ID) {
+        assert!(font_has_char(database, base, 'A'));
+        assert!(!font_has_char(database, base, '日'));
+        assert!(!font_has_char(database, base, '\u{10ffff}'));
+        for character in ['A', 'é', '日', '😀', '\u{10ffff}'] {
+            assert_eq!(
+                font_has_char(database, base, character),
+                shaping_face_has_char(database, base, character)
+            );
+        }
+    }
+
+    fn assert_cjk_fallback_selection(database: &Database, base: ID) -> Result<(), String> {
+        for (weight, italic) in [(400, false), (700, false), (700, true)] {
+            let fallback = matching_fallback_face(database, base, '日', weight, italic)
+                .ok_or("HTML Japanese fallback face must exist")?;
+            assert_ne!(fallback, base);
+            assert!(font_has_char(database, fallback, '日'));
+            assert_eq!(
+                Some(fallback),
+                full_scan_shaping_fallback(database, base, '日', weight, italic)
+            );
+            for character in ['A', '日', '😀', '\u{10ffff}'] {
+                assert_eq!(
+                    font_has_char(database, fallback, character),
+                    shaping_face_has_char(database, fallback, character)
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn assert_collection_glyph_predicate(database: &Database) {
+        for face in database.faces().filter(|face| face.index > 0) {
+            let is_collection = database
+                .with_face_data(face.id, |data, _| data.starts_with(b"ttcf"))
+                .unwrap_or(false);
+            if is_collection {
+                for character in ['A', '日', '\u{10ffff}'] {
+                    assert_eq!(
+                        font_has_char(database, face.id, character),
+                        shaping_face_has_char(database, face.id, character)
+                    );
+                }
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn glyph_probe_preserves_latin_cjk_and_styled_fallback_selection() -> Result<(), String> {
+        let bundled = bundled_font_db();
+        let base = matching_font_face(&bundled, "Noto Sans", 400, false)
+            .ok_or("bundled Latin face must exist")?;
+        assert_latin_glyph_predicate(&bundled, base);
+        let html = html_font_db_for_text("Noto Sans", "日本😀");
+        let base = matching_font_face(&html, "Noto Sans", 400, false)
+            .ok_or("HTML Latin face must exist")?;
+        assert_cjk_fallback_selection(&html, base)?;
+        assert_collection_glyph_predicate(&html);
+        Ok(())
+    }
+
+    #[test]
+    fn glyph_probe_rejects_missing_face_corrupt_data_and_invalid_collection_index()
+    -> Result<(), String> {
+        let bundled = bundled_font_db();
+        let base = matching_font_face(&bundled, "Noto Sans", 400, false)
+            .ok_or("bundled Latin face must exist")?;
+        let face = bundled
+            .face(base)
+            .cloned()
+            .ok_or("bundled face must exist")?;
+        let mut database = Database::new();
+        assert!(!font_has_char(&database, ID::dummy(), 'A'));
+
+        let mut corrupt = face.clone();
+        corrupt.source = Source::Binary(Arc::new(vec![0, 1, 2, 3]));
+        let corrupt_id = database.push_face_info(corrupt);
+        assert!(!font_has_char(&database, corrupt_id, 'A'));
+
+        let mut invalid_index = face;
+        invalid_index.index = u32::MAX;
+        let invalid_id = database.push_face_info(invalid_index);
+        assert!(!font_has_char(&database, invalid_id, 'A'));
+        for identifier in [ID::dummy(), corrupt_id, invalid_id] {
+            assert_eq!(
+                font_has_char(&database, identifier, 'A'),
+                shaping_face_has_char(&database, identifier, 'A')
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn styled_cjk_fallback_prefers_the_exact_style_and_weight_face() {
