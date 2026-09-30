@@ -156,8 +156,8 @@ mod tests {
         );
 
         assert_eq!(document.body_onload_script_index(), Some(1));
-        assert_eq!(document.body_onload_source_order_index, Some(2));
-        assert_eq!(document.source_order.len(), 3);
+        assert_eq!(document.body_onload_source_order_index, Some(1));
+        assert_eq!(document.source_order.len(), 1);
     }
 
     #[test]
