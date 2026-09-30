@@ -50,6 +50,11 @@ fmt:
 fmt-check:
     {{CARGO}} fmt --all -- --check
 
+# 実入力の遅延再発を捕捉するため、初期描画とcloseを60秒上限で検証する。
+html-first-frame-check input expected_sha256 report="tmp/html-first-frame.json":
+    {{CARGO}} build --locked -p katana-render-runtime --example html_initial_frame_probe
+    python3 scripts/release/verify_html_first_frame.py --input "{{input}}" --expected-sha256 "{{expected_sha256}}" --binary "{{env_var_or_default('CARGO_TARGET_DIR', 'target')}}/debug/examples/html_initial_frame_probe" --report "{{report}}"
+
 # Run strict Clippy checks
 lint:
     RUSTFLAGS="-D warnings" {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity
