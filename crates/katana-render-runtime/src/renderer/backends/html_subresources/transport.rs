@@ -139,12 +139,13 @@ fn decode_base64_data_url_payload(payload: &str) -> Result<Vec<u8>, String> {
         "encoded",
     )?;
     let decoded_payload = percent_decode_str(payload).collect::<Vec<u8>>();
+    let normalized_payload = normalize_forgiving_base64(&decoded_payload);
     check_data_url_size(
-        decoded_payload.len(),
+        normalized_payload.len(),
         MAX_BASE64_DATA_URL_BYTES,
         "base64 encoded",
     )?;
-    let bytes = decode_forgiving_base64(&decoded_payload)
+    let bytes = decode_forgiving_base64(&normalized_payload)
         .map_err(|error| format!("data URL base64 payload is invalid: {error}"))?;
     check_data_url_size(bytes.len(), MAX_SUBRESOURCE_BYTES, "decoded")?;
     Ok(bytes)
@@ -167,11 +168,7 @@ fn check_data_url_size(size: usize, limit: u64, representation: &str) -> Result<
 }
 
 fn decode_forgiving_base64(payload: &[u8]) -> Result<Vec<u8>, base64::DecodeError> {
-    let payload = payload
-        .iter()
-        .copied()
-        .filter(|byte| !byte.is_ascii_whitespace())
-        .collect::<Vec<_>>();
+    let payload = normalize_forgiving_base64(payload);
     if payload.contains(&b'=') {
         return FORGIVING_BASE64.decode(payload);
     }
@@ -184,6 +181,14 @@ fn decode_forgiving_base64(payload: &[u8]) -> Result<Vec<u8>, base64::DecodeErro
     let mut padded = payload;
     padded.extend(std::iter::repeat_n(b'=', padding));
     FORGIVING_BASE64.decode(padded)
+}
+
+fn normalize_forgiving_base64(payload: &[u8]) -> Vec<u8> {
+    payload
+        .iter()
+        .copied()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect()
 }
 
 #[cfg(test)]

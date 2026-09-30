@@ -1,6 +1,7 @@
 use super::{
     MAX_BASE64_DATA_URL_BYTES, MAX_PERCENT_ENCODED_BASE64_DATA_URL_BYTES, MAX_SUBRESOURCE_BYTES,
     check_data_url_size, decode_data_url, decode_forgiving_base64, load_image_data_url, load_text,
+    normalize_forgiving_base64,
 };
 use base64::Engine as _;
 use url::Url;
@@ -67,6 +68,13 @@ fn base64_padding_is_supplemented_only_when_the_payload_is_unpadded() {
     assert_eq!(decode_forgiving_base64(b"AA=="), Ok(vec![0]));
     assert!(decode_forgiving_base64(b"AA=").is_err());
     assert!(decode_forgiving_base64(b"AAAA=").is_err());
+}
+
+#[test]
+fn forgiving_base64_size_is_measured_after_ascii_whitespace_is_removed() {
+    let payload = b" A\tA\nA\r";
+    assert_eq!(normalize_forgiving_base64(payload), b"AAA");
+    assert_eq!(decode_forgiving_base64(payload), Ok(vec![0, 0]));
 }
 
 #[test]
