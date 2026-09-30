@@ -2078,8 +2078,8 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             writes = posts.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(writes), 1)
             self.assertIn(f"head_sha={unique_head}", writes[0])
-        early = self.workflow.index("Dispatch and bind the early event writer")
-        await_early = self.workflow.index("Await the bound early event writer before all-open invalidation")
+        early = self.workflow.index("      - name: Dispatch and bind the early event writer\n")
+        await_early = self.workflow.index("      - name: Await the bound early event writer before all-open invalidation\n")
         self.assertIn("if: needs.prepare-current-targets.outputs.has_priority_targets == 'true'", self.workflow[early:await_early])
 
     def test_unrelated_duplicate_head_also_suppresses_the_priority_writer(self) -> None:
@@ -7285,12 +7285,13 @@ class WriteReconciliationConcurrencyTest(unittest.TestCase):
             return {"id":identifier,"name":"PR governance dispatcher","path":".github/workflows/pr-governance.yml@master","head_sha":"a"*40,"head_branch":"master","run_attempt":1,"event":"workflow_run","repository":self.repository(),"workflow_id":1,"run_number":identifier,"created_at":created,"status":"in_progress","conclusion":None}
         def step(prefix,identifier,conclusion="success"):
             return {"name":prefix+str(identifier),"number":1,"status":"completed","conclusion":conclusion}
-        scenarios=("sensor","static-writer-name","direct","cancel-race","writer-failure","source-failure","wait-active","ack-failure","marker-duplicate","bad-date","foreign","failed-preflight","before-handoff")
+        scenarios=("sensor","static-writer-name","direct","cancel-race","writer-failure","source-failure","wait-active","ack-failure","marker-duplicate","bad-date","foreign","failed-preflight","before-handoff","skipped-priority-writer","missing-priority-writer","missing-no-priority-marker")
         for scenario in scenarios:
             with self.subTest(scenario=scenario):
                 current=run(500,"2026-10-01T00:01:00Z");old=run(100,"2026-10-01T00:00:00Z");source=self.source()
                 writer={"id":700,"name":"source=100 scope=early segment=0","display_title":"source=100 scope=early segment=0","event":"workflow_dispatch","path":".github/workflows/pr-governance-status-writer.yml@master","head_sha":"a"*40,"head_branch":"master","run_attempt":1,"status":"completed","conclusion":"success","repository":self.repository()}
                 jobs=[{"id":1,"name":"Write complete pending reconciliation Check Runs","status":"in_progress","conclusion":None}, {"id":2,"name":"Preflight workflow_run governance source","status":"completed","conclusion":"success","steps":[step("Record verified review sensor source run ",200)]}, {"id":3,"name":"Reconcile all current governance pull requests","status":"completed","conclusion":"success","steps":[step("Record bound successful early writer run ",700)]}, {"id":4,"name":"Preserve pending review sensor before direct dispatch","status":"completed","conclusion":"skipped"}, {"id":5,"name":"Acknowledge bound early review sensor","status":"completed","conclusion":"success","steps":[step("Record successful bound review sensor acknowledgement ",200)]}]
+                jobs[2]["steps"].append(step("Record verified no-priority early writer admission ",100,"skipped"))
                 if scenario=="static-writer-name": writer["name"]="PR governance status writer"
                 if scenario=="direct": jobs[1]["steps"][0]["conclusion"]="skipped";old["event"]="issue_comment"
                 if scenario=="writer-failure": writer["conclusion"]="failure"
@@ -7302,6 +7303,9 @@ class WriteReconciliationConcurrencyTest(unittest.TestCase):
                 if scenario=="foreign": source["head_repository"]={**self.repository(),"id":2}
                 if scenario=="failed-preflight": jobs[1]["conclusion"]="failure"
                 if scenario=="before-handoff": jobs[2]["status"]="in_progress";jobs[2]["conclusion"]=None
+                if scenario=="skipped-priority-writer": jobs[2]["steps"][0]["conclusion"]="skipped"
+                if scenario=="missing-priority-writer": jobs[2]["steps"].pop(0)
+                if scenario=="missing-no-priority-marker": jobs[2]["steps"].pop()
                 cancellations=[]
                 def request(arguments, **keywords):
                     method,endpoint=arguments[3],arguments[4]
@@ -7325,6 +7329,82 @@ class WriteReconciliationConcurrencyTest(unittest.TestCase):
                     else:
                         with self.assertRaises(SystemExit):exec(program,{})
                 self.assertEqual(len(cancellations),1 if scenario in {"sensor","static-writer-name","direct","cancel-race"} else 0)
+
+    def test_obsolete_no_priority_heavy_cancel_requires_explicit_completed_admission(self) -> None:
+        program = self.program("Stop only acknowledged obsolete heavy reconciliation")
+        scenarios = ("schedule", "workflow_dispatch", "ci-callback", "release-callback", "missing-marker", "skipped-marker", "duplicate-marker", "wrong-run", "malformed-marker", "failed-marker", "missing-prepare", "failed-prepare", "duplicate-prepare", "failed-admission", "missing-writer-marker", "successful-writer-marker", "dispatch-success", "await-success", "missing-dispatch", "duplicate-await", "source-missing", "source-failed", "sensor-source", "wait-active")
+        accepted = {"schedule", "workflow_dispatch", "ci-callback", "release-callback"}
+        def step(name, number, conclusion="skipped"):
+            return {"name": name, "number": number, "status": "completed", "conclusion": conclusion}
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario):
+                def run(identifier, created, event):
+                    return {"id": identifier, "name": "PR governance dispatcher", "path": ".github/workflows/pr-governance.yml@master", "head_sha": "a" * 40, "head_branch": "master", "run_attempt": 1, "event": event, "repository": self.repository(), "workflow_id": 1, "run_number": identifier, "created_at": created, "status": "in_progress", "conclusion": None}
+                current = run(500, "2026-10-01T00:01:00Z", "issue_comment")
+                old = run(100, "2026-10-01T00:00:00Z", scenario if scenario in {"schedule", "workflow_dispatch"} else "workflow_run")
+                source_step = step("Record verified review sensor source run ", 1)
+                writer_step = step("Record bound successful early writer run ", 3)
+                no_priority_step = step("Record verified no-priority early writer admission 100", 4, "success")
+                dispatch_step = step("Dispatch and bind the early event writer", 1)
+                await_step = step("Await the bound early event writer before all-open invalidation", 2)
+                prepare = {"id": 6, "name": "Prepare immutable governance target partitions", "status": "completed", "conclusion": "success"}
+                admission = {"id": 3, "name": "Reconcile all current governance pull requests", "status": "completed", "conclusion": "success", "steps": [dispatch_step, await_step, writer_step, no_priority_step]}
+                preflight = {"id": 2, "name": "Preflight workflow_run governance source", "status": "completed", "conclusion": "success", "steps": [source_step]}
+                reservation = {"id": 4, "name": "Preserve pending review sensor before direct dispatch", "status": "completed", "conclusion": "skipped"}
+                jobs = [{"id": 1, "name": "Write complete pending reconciliation Check Runs", "status": "in_progress", "conclusion": None}, preflight, admission, reservation, prepare]
+                if scenario == "missing-marker": admission["steps"].remove(no_priority_step)
+                if scenario == "skipped-marker": no_priority_step["conclusion"] = "skipped"
+                if scenario == "duplicate-marker": admission["steps"].append(dict(no_priority_step, number=5))
+                if scenario == "wrong-run": no_priority_step["name"] = "Record verified no-priority early writer admission 101"
+                if scenario == "malformed-marker": no_priority_step["number"] = True
+                if scenario == "failed-marker": no_priority_step["conclusion"] = "failure"
+                if scenario == "missing-prepare": jobs.remove(prepare)
+                if scenario == "failed-prepare": prepare["conclusion"] = "failure"
+                if scenario == "duplicate-prepare": jobs.append(dict(prepare, id=7))
+                if scenario == "failed-admission": admission["conclusion"] = "failure"
+                if scenario == "missing-writer-marker": admission["steps"].remove(writer_step)
+                if scenario == "successful-writer-marker": writer_step.update(name="Record bound successful early writer run 700", conclusion="success")
+                if scenario == "dispatch-success": dispatch_step["conclusion"] = "success"
+                if scenario == "await-success": await_step["conclusion"] = "success"
+                if scenario == "missing-dispatch": admission["steps"].remove(dispatch_step)
+                if scenario == "duplicate-await": admission["steps"].append(dict(await_step, number=5))
+                if scenario == "source-missing": preflight["steps"].clear()
+                if scenario == "source-failed": source_step["conclusion"] = "failure"
+                if scenario == "sensor-source": source_step.update(name="Record verified review sensor source run 200", conclusion="success")
+                if scenario == "wait-active": reservation.update(status="in_progress", conclusion=None)
+                cancellations = []
+                writer_reads = []
+                def request(arguments, **keywords):
+                    endpoint = arguments[4]
+                    if endpoint.endswith("/cancel"):
+                        cancellations.append(endpoint); old.update(status="completed", conclusion="cancelled"); value = None
+                    elif endpoint == "repos/owner/repository": value = self.repository()
+                    elif "/git/ref/" in endpoint: value = {"object": {"sha": "a" * 40}}
+                    elif endpoint.endswith("/runs/500"): value = current
+                    elif endpoint.endswith("/runs/700"):
+                        writer_reads.append(endpoint); value = {}
+                    elif "/jobs?" in endpoint: value = {"total_count": len(jobs), "jobs": jobs}
+                    else:
+                        status = parse_qs(urlparse(endpoint).query).get("status", [None])[0]
+                        values = [value for value in [old, current] if status is None or value["status"] == status]
+                        value = {"total_count": len(values), "workflow_runs": values}
+                    return subprocess.CompletedProcess(arguments, 0, json.dumps(value) if value is not None else "", "")
+                environment = {"GITHUB_REPOSITORY": "owner/repository", "DEFAULT_HEAD": "a" * 40, "DEFAULT_BRANCH": "master", "GITHUB_RUN_ID": "500", "ROOT_DEADLINE_EPOCH": "3000"}
+                with patch.dict(os.environ, environment), patch("time.time", return_value=1000), patch("subprocess.run", side_effect=request), patch("time.sleep"):
+                    if scenario in accepted: exec(program, {})
+                    else:
+                        with self.assertRaises(SystemExit): exec(program, {})
+                self.assertEqual(len(cancellations), 1 if scenario in accepted else 0)
+                self.assertEqual(writer_reads, [])
+
+    def test_no_priority_admission_marker_is_bound_to_successful_prepare_and_empty_priority(self) -> None:
+        admission = self.job("reconcile-all-open")
+        marker = re.search(r"- name: Record verified no-priority early writer admission \$\{\{ github.run_id \}\}\n(.*?)(?=\n      - name:|\Z)", admission, re.DOTALL)
+        self.assertIsNotNone(marker)
+        assert marker is not None
+        self.assertIn("if: ${{ needs.prepare-current-targets.result == 'success' && needs.prepare-current-targets.outputs.has_priority_targets == 'false' }}", marker.group(1))
+        self.assertIn("run: 'true'", marker.group(1))
+        self.assertNotIn("always()", marker.group(1))
 
 
 if __name__ == "__main__":

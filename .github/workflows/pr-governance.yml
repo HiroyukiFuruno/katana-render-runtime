@@ -710,6 +710,7 @@ jobs:
           deadline = int(os.environ["ROOT_DEADLINE_EPOCH"])
           source_prefix = "Record verified review sensor source run "
           writer_prefix = "Record bound successful early writer run "
+          no_priority_prefix = "Record verified no-priority early writer admission "
           ack_prefix = "Record successful bound review sensor acknowledgement "
           reads = 0
 
@@ -813,6 +814,15 @@ jobs:
                   fail("Obsolete heavy-phase marker is unverified.")
               return int(wire)
 
+          def skipped_step(value, name):
+              steps = value.get("steps") if value is not None else None
+              if not isinstance(steps, list) or not all(isinstance(step, dict) for step in steps):
+                  fail("Obsolete heavy-phase skipped step evidence is unavailable.")
+              matches = [step for step in steps if step.get("name") == name]
+              if (len(matches) != 1 or type(matches[0].get("number")) is not int or matches[0]["number"] < 1
+                  or matches[0].get("status") != "completed" or matches[0].get("conclusion") != "skipped"):
+                  fail("Obsolete heavy-phase no-priority dispatch or await is unverified.")
+
           listed = []
           for status in ("queued", "in_progress"):
               query = urlencode({"status": status, "branch": branch, "head_sha": head, "per_page": 100})
@@ -870,18 +880,26 @@ jobs:
               if reservation_wait is not None and not (successful(reservation_wait) or reservation_wait["status"] == "completed" and reservation_wait["conclusion"] == "skipped"):
                   fail("Obsolete heavy-phase reservation is not finished.")
               writer_id = marker(admission, writer_prefix)
-              if writer_id is None:
-                  fail("Obsolete heavy-phase early writer is unverified.")
-              writer = api(f"repos/{repository}/actions/runs/{writer_id}")
-              if (not isinstance(writer, dict) or type(writer.get("id")) is not int or writer["id"] != writer_id
-                  or writer.get("name") not in {"PR governance status writer", f"source={run['id']} scope=early segment=0"} or writer.get("event") != "workflow_dispatch"
-                  or writer.get("path") not in {".github/workflows/pr-governance-status-writer.yml", ".github/workflows/pr-governance-status-writer.yml@" + branch, ".github/workflows/pr-governance-status-writer.yml@refs/heads/" + branch}
-                  or writer.get("head_sha") != head or writer.get("head_branch") != branch
-                  or type(writer.get("run_attempt")) is not int or writer["run_attempt"] != 1
-                  or writer.get("display_title") != f"source={run['id']} scope=early segment=0"
-                  or writer.get("status") != "completed" or writer.get("conclusion") != "success" or repo(writer.get("repository")) != repository_id):
-                  fail("Obsolete heavy-phase writer API binding is invalid.")
+              no_priority_id = marker(admission, no_priority_prefix)
               source_id = marker(preflight, source_prefix)
+              if writer_id is None:
+                  if (no_priority_id != run["id"] or source_id is not None
+                      or not successful(job(jobs, "Prepare immutable governance target partitions"))):
+                      fail("Obsolete heavy-phase no-priority admission is unverified.")
+                  skipped_step(admission, "Dispatch and bind the early event writer")
+                  skipped_step(admission, "Await the bound early event writer before all-open invalidation")
+              else:
+                  if no_priority_id is not None:
+                      fail("Obsolete heavy-phase admission routes are inconsistent.")
+                  writer = api(f"repos/{repository}/actions/runs/{writer_id}")
+                  if (not isinstance(writer, dict) or type(writer.get("id")) is not int or writer["id"] != writer_id
+                      or writer.get("name") not in {"PR governance status writer", f"source={run['id']} scope=early segment=0"} or writer.get("event") != "workflow_dispatch"
+                      or writer.get("path") not in {".github/workflows/pr-governance-status-writer.yml", ".github/workflows/pr-governance-status-writer.yml@" + branch, ".github/workflows/pr-governance-status-writer.yml@refs/heads/" + branch}
+                      or writer.get("head_sha") != head or writer.get("head_branch") != branch
+                      or type(writer.get("run_attempt")) is not int or writer["run_attempt"] != 1
+                      or writer.get("display_title") != f"source={run['id']} scope=early segment=0"
+                      or writer.get("status") != "completed" or writer.get("conclusion") != "success" or repo(writer.get("repository")) != repository_id):
+                      fail("Obsolete heavy-phase writer API binding is invalid.")
               if source_id is not None:
                   acknowledgement = job(jobs, "Acknowledge bound early review sensor")
                   if not successful(acknowledgement) or marker(acknowledgement, ack_prefix) != source_id:
@@ -2099,6 +2117,9 @@ jobs:
           PY
       - name: Record bound successful early writer run ${{ steps.dispatch-early.outputs.writer_run_id }}
         if: ${{ steps.await-early.outcome == 'success' && needs.prepare-current-targets.outputs.has_priority_targets == 'true' }}
+        run: 'true'
+      - name: Record verified no-priority early writer admission ${{ github.run_id }}
+        if: ${{ needs.prepare-current-targets.result == 'success' && needs.prepare-current-targets.outputs.has_priority_targets == 'false' }}
         run: 'true'
 
   acknowledge-early-sensor:
