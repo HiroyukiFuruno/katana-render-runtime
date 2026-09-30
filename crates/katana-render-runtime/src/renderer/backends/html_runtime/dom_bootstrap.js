@@ -1957,6 +1957,7 @@ const __krrDispatchPendingImages = async (document, state = {}) => {
       foundImage = true;
       dispatched = true;
       __krrDispatchImageLoad(image);
+      await Promise.resolve();
       // handler が同期的に src を置換した場合は、dispatch 後の最終値を記録する。
       dispatchedImageSources.set(image, image.getAttribute("src"));
       imageDispatches += 1;
@@ -1998,6 +1999,7 @@ const __krrDispatchPendingLocalFrames = async (document, state = {}) => {
       dispatched = true;
       dispatchedFrames.add(frame);
       __krrDispatchLocalFrame(frame);
+      await Promise.resolve();
       frameDispatches += 1;
       state.frameDispatches = frameDispatches;
       if (frameDispatches >= maxFrameDispatches) break;
