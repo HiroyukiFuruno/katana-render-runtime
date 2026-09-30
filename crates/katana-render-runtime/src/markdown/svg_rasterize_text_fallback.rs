@@ -156,8 +156,15 @@ fn resolved_html_face(
 #[cfg(test)]
 mod tests {
     use super::super::font::{font_has_char, matching_font_face};
-    use super::html_font_runs;
+    use super::{
+        HtmlFallbackCacheEntry, HtmlFallbackKey, MAX_CACHED_HTML_FALLBACK_DATABASES,
+        MAX_CACHED_HTML_FALLBACK_FACES, html_font_runs, resolve_cached_html_face,
+        resolve_existing_html_fallback_face,
+    };
     use crate::markdown::svg_rasterize::font::{bundled_font_db, html_font_db_for_text};
+    use resvg::usvg;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::{Arc, Weak};
 
     #[test]
     fn html_font_fallback_is_scoped_to_the_current_database() {
@@ -195,5 +202,98 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(requested_faces, [true, true]);
+    }
+
+    #[test]
+    fn expired_html_fallback_database_entries_are_swept() {
+        let expired_database = Arc::new(usvg::fontdb::Database::new());
+        let expired_entry = HtmlFallbackCacheEntry {
+            database: Arc::downgrade(&expired_database),
+            faces: HashMap::new(),
+        };
+        drop(expired_database);
+
+        let database = Arc::new(usvg::fontdb::Database::new());
+        let key = HtmlFallbackKey {
+            base_face_id: usvg::fontdb::ID::default(),
+            character: 'x',
+            requested_weight: 400,
+            requested_italic: false,
+        };
+        let mut entries = vec![expired_entry];
+
+        resolve_cached_html_face(&mut entries, &database, key);
+
+        assert_eq!(entries.len(), 1);
+        assert!(
+            entries[0]
+                .database
+                .upgrade()
+                .is_some_and(|cached| { Arc::ptr_eq(&cached, &database) })
+        );
+    }
+
+    #[test]
+    fn html_fallback_database_cache_evicts_oldest_entry_at_capacity() {
+        let databases = (0..=MAX_CACHED_HTML_FALLBACK_DATABASES)
+            .map(|_| Arc::new(usvg::fontdb::Database::new()))
+            .collect::<Vec<_>>();
+        let key = HtmlFallbackKey {
+            base_face_id: usvg::fontdb::ID::default(),
+            character: 'x',
+            requested_weight: 400,
+            requested_italic: false,
+        };
+        let mut entries = Vec::new();
+
+        for database in &databases {
+            resolve_cached_html_face(&mut entries, database, key);
+        }
+
+        assert_eq!(entries.len(), MAX_CACHED_HTML_FALLBACK_DATABASES);
+        assert!(
+            entries[0]
+                .database
+                .upgrade()
+                .is_some_and(|cached| { Arc::ptr_eq(&cached, &databases[1]) })
+        );
+    }
+
+    fn full_face_cache() -> HtmlFallbackCacheEntry {
+        HtmlFallbackCacheEntry {
+            database: Weak::new(),
+            faces: (0..MAX_CACHED_HTML_FALLBACK_FACES)
+                .map(|weight| {
+                    (
+                        HtmlFallbackKey {
+                            base_face_id: usvg::fontdb::ID::default(),
+                            character: 'x',
+                            requested_weight: weight as u16,
+                            requested_italic: false,
+                        },
+                        usvg::fontdb::ID::default(),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn html_fallback_face_cache_evicts_an_entry_at_capacity() {
+        let database = usvg::fontdb::Database::new();
+        let mut entry = full_face_cache();
+        let original_keys = entry.faces.keys().copied().collect::<HashSet<_>>();
+        let new_key = HtmlFallbackKey {
+            base_face_id: usvg::fontdb::ID::default(),
+            character: 'x',
+            requested_weight: MAX_CACHED_HTML_FALLBACK_FACES as u16,
+            requested_italic: false,
+        };
+
+        resolve_existing_html_fallback_face(&mut entry, &database, new_key);
+
+        assert_eq!(entry.faces.len(), MAX_CACHED_HTML_FALLBACK_FACES);
+        assert!(entry.faces.contains_key(&new_key));
+        assert!(entry.faces.keys().any(|key| !original_keys.contains(key)));
     }
 }

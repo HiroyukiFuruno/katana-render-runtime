@@ -63,6 +63,7 @@ fn unpadded_base64_image_data_urls_are_decoded_and_validated() {
 #[test]
 fn base64_padding_is_supplemented_only_when_the_payload_is_unpadded() {
     assert_eq!(decode_forgiving_base64(b"AA"), Ok(vec![0]));
+    assert_eq!(decode_forgiving_base64(b"AAA"), Ok(vec![0, 0]));
     assert_eq!(decode_forgiving_base64(b"AA=="), Ok(vec![0]));
     assert!(decode_forgiving_base64(b"AA=").is_err());
     assert!(decode_forgiving_base64(b"AAAA=").is_err());
@@ -139,6 +140,18 @@ fn oversized_data_url_payloads_are_rejected_before_decoding() {
         assert!(matches!(
             decode_data_url(url),
             Err(error) if error.contains("encoded payload exceeds")
+        ));
+    });
+}
+
+#[test]
+fn percent_decoded_base64_payloads_are_limited_before_base64_decoding() {
+    let oversized_payload = "A".repeat(MAX_BASE64_DATA_URL_BYTES as usize + 1);
+    let source = format!("data:text/plain;base64,{oversized_payload}");
+    with_url(&source, |url| {
+        assert!(matches!(
+            decode_data_url(url),
+            Err(error) if error.contains("base64 encoded payload exceeds")
         ));
     });
 }

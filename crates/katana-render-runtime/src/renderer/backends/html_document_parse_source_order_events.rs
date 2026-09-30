@@ -181,6 +181,18 @@ mod tests {
     }
 
     #[test]
+    fn body_onload_script_without_an_event_uses_source_order_fallback_index() {
+        let document = RcDom::default();
+        let visibility = RefCell::new(HashMap::new());
+
+        let (body_onload_index, source_order) =
+            finish_source_order(&document, Vec::new(), None, Some(0), &visibility);
+
+        assert_eq!(body_onload_index, Some(0));
+        assert!(source_order.is_empty());
+    }
+
+    #[test]
     fn iframe_collection_stops_when_children_are_already_borrowed() {
         let document = RcDom::default();
         let _children = document.document.children.borrow_mut();

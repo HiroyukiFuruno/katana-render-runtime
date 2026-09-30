@@ -168,7 +168,8 @@ pub(super) fn text_content(node: &Handle) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        PREVALIDATED_IMAGE_EVENT_ATTRIBUTE, attribute, load_document_resources, set_attribute,
+        PREVALIDATED_IMAGE_EVENT_ATTRIBUTE, attribute, load_document_resources, remove_attribute,
+        set_attribute, set_or_append_attribute,
     };
     use crate::renderer::backends::html_browser::HtmlBrowserSource;
     use crate::renderer::backends::html_document::HtmlDocument;
@@ -232,6 +233,8 @@ mod tests {
 
         assert_eq!(attribute(&document.document, "src"), None);
         set_attribute(&document.document, "src", "data:image/png;base64,AA==");
+        set_or_append_attribute(&document.document, "src", "data:image/png;base64,AA==");
+        remove_attribute(&document.document, "src");
         assert_eq!(attribute(&document.document, "src"), None);
     }
 
@@ -272,6 +275,70 @@ mod tests {
                     attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE).as_deref(),
                     Some("load")
                 );
+            });
+        });
+    }
+
+    #[test]
+    fn existing_prevalidated_marker_is_updated_by_attribute_helper() {
+        let mut document =
+            HtmlDocument::parse(r#"<img id=image data-krr-prevalidated-image-event="error">"#);
+        let image = document.get_element_by_id("image");
+
+        assert!(image.is_some());
+        image.iter().for_each(|image| {
+            let node = document.node(*image);
+            assert!(node.is_ok());
+            node.iter().for_each(|node| {
+                set_or_append_attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE, "load");
+                assert_eq!(
+                    attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE).as_deref(),
+                    Some("load")
+                );
+            });
+        });
+    }
+
+    #[test]
+    fn failed_image_inlining_removes_stale_prevalidated_marker() {
+        let source = must_result(HtmlBrowserSource::new(
+            r#"<img id=image src="data:image/gif;base64,not-valid" data-krr-prevalidated-image-event="load">"#,
+            "https://example.test/index.html",
+        ));
+        let loader = HtmlSubresourceLoader::new(&source);
+        let mut document = HtmlDocument::parse(&source.raw_html);
+
+        load_document_resources(&loader, &mut document);
+
+        let image = document.get_element_by_id("image");
+        assert!(image.is_some());
+        image.iter().for_each(|image| {
+            let node = document.node(*image);
+            assert!(node.is_ok());
+            node.iter().for_each(|node| {
+                assert_eq!(attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE), None);
+            });
+        });
+    }
+
+    #[test]
+    fn missing_image_source_removes_stale_prevalidated_marker() {
+        let source = must_result(HtmlBrowserSource::new(
+            r#"<img id=image data-krr-prevalidated-image-event="load">"#,
+            "https://example.test/index.html",
+        ));
+        let loader = HtmlSubresourceLoader::new(&source);
+        let mut document = HtmlDocument::parse(&source.raw_html);
+
+        load_document_resources(&loader, &mut document);
+
+        let image = document.get_element_by_id("image");
+        assert!(image.is_some());
+        image.iter().for_each(|image| {
+            let node = document.node(*image);
+            assert!(node.is_ok());
+            node.iter().for_each(|node| {
+                assert_eq!(attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE), None);
             });
         });
     }
