@@ -576,6 +576,92 @@ class StatusWriterUnitTest(unittest.TestCase):
             with self.assertRaises(WRITER.NoPostGovernanceError):
                 WRITER.reject_newer_dispatcher_barrier(head)
 
+    def test_verified_skipped_sensor_admission_marker_is_a_workflow_run_noop(self) -> None:
+        generation = WRITER.DispatcherGeneration(
+            7, WRITER.dispatcher_created_at("2026-08-30T00:01:00Z"),
+            "workflow_run", 66, "completed", "success",
+        )
+        jobs = self.dispatcher_jobs()
+        jobs["jobs"][0]["steps"] = [{
+            "number": 1,
+            "name": WRITER.REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME,
+            "status": "completed",
+            "conclusion": "skipped",
+        }]
+        with self.identity(), patch.object(WRITER, "object_page", return_value=jobs):
+            self.assertFalse(WRITER.dispatcher_generation_reconciles(generation))
+
+        WRITER._nonreconciling_dispatcher_generations.clear()
+        jobs_without_marker = self.dispatcher_jobs()
+        with self.identity(), patch.object(WRITER, "object_page", return_value=jobs_without_marker):
+            self.assertFalse(WRITER.dispatcher_generation_reconciles(generation))
+
+    def test_skipped_sensor_admission_marker_still_rejects_invalid_evidence(self) -> None:
+        generation = WRITER.DispatcherGeneration(
+            7, WRITER.dispatcher_created_at("2026-08-30T00:01:00Z"),
+            "workflow_run", 66, "completed", "success",
+        )
+        for label, jobs in (
+            ("invalid preflight", self.dispatcher_jobs(preflight_conclusion="failure")),
+            ("active barrier", self.dispatcher_jobs(barrier_status="in_progress", barrier_conclusion=None)),
+        ):
+            jobs["jobs"][0]["steps"] = [{
+                "number": 1,
+                "name": WRITER.REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME,
+                "status": "completed",
+                "conclusion": "skipped",
+            }]
+            with self.subTest(evidence=label), self.identity(), patch.object(WRITER, "object_page", return_value=jobs):
+                if label == "invalid preflight":
+                    with self.assertRaises(WRITER.GovernanceError):
+                        WRITER.dispatcher_generation_reconciles(generation)
+                else:
+                    self.assertTrue(WRITER.dispatcher_generation_reconciles(generation))
+
+    def test_failed_sensor_admission_markers_remain_fail_closed(self) -> None:
+        generation = WRITER.DispatcherGeneration(
+            7, WRITER.dispatcher_created_at("2026-08-30T00:01:00Z"),
+            "workflow_run", 66, "completed", "success",
+        )
+        for conclusion in ("failure", "cancelled"):
+            jobs = self.dispatcher_jobs()
+            jobs["jobs"][0]["steps"] = [{
+                "number": 1,
+                "name": WRITER.REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME,
+                "status": "completed",
+                "conclusion": conclusion,
+            }]
+            with self.subTest(conclusion=conclusion), self.identity(), patch.object(WRITER, "object_page", return_value=jobs):
+                self.assertTrue(WRITER.dispatcher_generation_reconciles(generation))
+
+    def test_successful_sensor_marker_keeps_the_early_writer_await_boundary(self) -> None:
+        generation = WRITER.DispatcherGeneration(
+            7, WRITER.dispatcher_created_at("2026-08-30T00:01:00Z"),
+            "workflow_run", 66, "completed", "success",
+        )
+        jobs = self.dispatcher_jobs()
+        jobs["jobs"][0]["steps"] = [{
+            "number": 1,
+            "name": WRITER.REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME,
+            "status": "completed",
+            "conclusion": "success",
+        }]
+        jobs["jobs"].append({
+            "id": 3,
+            "name": WRITER.RECONCILE_ALL_OPEN_NAME,
+            "status": "completed",
+            "conclusion": "success",
+            "steps": [{
+                "number": 1,
+                "name": WRITER.AWAIT_EARLY_WRITER_STEP_NAME,
+                "status": "completed",
+                "conclusion": "success",
+            }],
+        })
+        jobs["total_count"] = len(jobs["jobs"])
+        with self.identity(), patch.object(WRITER, "object_page", return_value=jobs):
+            self.assertTrue(WRITER.dispatcher_generation_reconciles(generation))
+
     def test_dispatcher_fence_rejects_malformed_paginated_or_api_evidence(self) -> None:
         head = "a" * 40
         current = self.dispatcher_run()

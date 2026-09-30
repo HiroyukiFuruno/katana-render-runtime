@@ -737,13 +737,14 @@ def dispatcher_generation_reconciles(generation: DispatcherGeneration) -> bool:
         named_step(preflight, REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME)
         if generation.event == "workflow_run" else None
     )
-    if sensor_marker is not None and sensor_marker["status"] == "completed":
+    if (
+        sensor_marker is not None
+        and sensor_marker["status"] == "completed"
+        and sensor_marker["conclusion"] != "skipped"
+    ):
         if sensor_marker["conclusion"] != "success":
             return True
-        if (
-            generation.status == "completed"
-            and generation.conclusion != "success"
-        ):
+        if generation.status == "completed" and generation.conclusion != "success":
             return True
         reconcile = named_job(
             RECONCILE_ALL_OPEN_NAME,
