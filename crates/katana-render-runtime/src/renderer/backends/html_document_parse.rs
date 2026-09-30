@@ -65,6 +65,32 @@ fn parse_with_source_order(source: &str) -> (RcDom, Option<usize>, Option<usize>
 #[cfg(test)]
 mod tests {
     use super::HtmlDocument;
+    use markup5ever_rcdom::{Handle, NodeData};
+    use std::rc::Rc;
+
+    const SELECT_TRANSITION_CASES: [(&str, &str); 6] = [
+        (
+            "table row",
+            "<table><select><tr><td><iframe id=real></iframe></td></tr></table>",
+        ),
+        (
+            "table section",
+            "<table><select><tbody><tr><td><iframe id=real></iframe></td></tr></tbody></table>",
+        ),
+        (
+            "table end",
+            "<table><select></table><iframe id=real></iframe>",
+        ),
+        ("nested select", "<select><select><iframe id=real></iframe>"),
+        (
+            "closed nested select",
+            "<select><select></select><iframe id=real></iframe>",
+        ),
+        (
+            "foreign select",
+            "<svg><select><foreignObject><iframe id=real></iframe></foreignObject></select></svg>",
+        ),
+    ];
 
     #[test]
     fn body_onload_uses_later_duplicate_body_token_position() {
@@ -156,8 +182,8 @@ mod tests {
         );
 
         assert_eq!(document.body_onload_script_index(), Some(1));
-        assert_eq!(document.body_onload_source_order_index, Some(1));
-        assert_eq!(document.source_order.len(), 1);
+        assert_eq!(document.body_onload_source_order_index, Some(2));
+        assert_eq!(document.source_order.len(), 3);
     }
 
     #[test]
@@ -172,43 +198,121 @@ mod tests {
     }
 
     #[test]
-    fn iframe_after_ignored_select_iframe_keeps_parser_order() {
-        let document = HtmlDocument::parse(
-            r#"<select><iframe></iframe></select><script>afterSelect()</script><body onload="handler"><iframe id=real>"#,
-        );
+    fn actual_select_parser_state_preserves_iframe_source_order() -> Result<(), String> {
+        for (case, prefix) in SELECT_TRANSITION_CASES {
+            let mut document = HtmlDocument::parse(&format!(
+                "{prefix}<script id=after>afterSelect()</script><body onload=handler><iframe id=tail></iframe>"
+            ));
+            let real = actual_element(&mut document, "real")?;
+            assert_html_iframe(&real, case);
+            assert!(!has_html_select_ancestor(&real), "{case}");
+            let after = actual_element(&mut document, "after")?;
+            let tail = actual_element(&mut document, "tail")?;
+            assert_eq!(document.source_order.len(), 3, "{case}");
+            for (index, node) in [real, after, tail].iter().enumerate() {
+                assert!(
+                    Rc::ptr_eq(&document.source_order[index], node),
+                    "{case}: {index}"
+                );
+            }
+            assert_eq!(document.body_onload_source_order_index, Some(2), "{case}");
+        }
+        Ok(())
+    }
 
-        let real_index = document.source_order.iter().position(|node| {
+    fn actual_element(document: &mut HtmlDocument, id: &str) -> Result<Handle, String> {
+        let node_id = document
+            .get_element_by_id(id)
+            .ok_or_else(|| format!("actual DOM element #{id} is missing"))?;
+        document.node(node_id)
+    }
+
+    fn assert_html_iframe(node: &Handle, case: &str) {
+        assert!(
             matches!(
                 &node.data,
-                markup5ever_rcdom::NodeData::Element { attrs, .. }
-                    if attrs.borrow().iter().any(|attribute| {
-                        attribute.name.local.as_str() == "id"
-                            && attribute.value.as_ref() == "real"
-                    })
-            )
-        });
-        assert_eq!(document.body_onload_source_order_index, Some(1));
-        assert_eq!(real_index, Some(1));
+                NodeData::Element { name, .. }
+                    if name.ns.as_str() == "http://www.w3.org/1999/xhtml"
+                        && name.local.as_str() == "iframe"
+            ),
+            "actual DOM iframe must be HTML: {case}"
+        );
+    }
+
+    fn has_html_select_ancestor(node: &Handle) -> bool {
+        let mut current = node.clone();
+        loop {
+            let parent = current.parent.take();
+            current.parent.set(parent.clone());
+            let Some(parent) = parent.and_then(|parent| parent.upgrade()) else {
+                return false;
+            };
+            if matches!(
+                &parent.data,
+                NodeData::Element { name, .. }
+                    if name.ns.as_str() == "http://www.w3.org/1999/xhtml"
+                        && name.local.as_str() == "select"
+            ) {
+                return true;
+            }
+            current = parent;
+        }
     }
 
     #[test]
-    fn multiple_ignored_select_iframes_keep_following_iframe_order() {
-        let document = HtmlDocument::parse(
-            r#"<select><iframe></iframe><iframe></iframe></select><script>afterSelect()</script><body onload="handler"><iframe id=real>"#,
+    fn iframe_after_ignored_select_iframe_keeps_parser_order() -> Result<(), String> {
+        let mut document = HtmlDocument::parse(
+            r#"<select><iframe id=hidden></iframe></select><script>afterSelect()</script><body onload="handler"><iframe id=real>"#,
         );
 
-        let real_index = document.source_order.iter().position(|node| {
-            matches!(
-                &node.data,
-                markup5ever_rcdom::NodeData::Element { attrs, .. }
-                    if attrs.borrow().iter().any(|attribute| {
-                        attribute.name.local.as_str() == "id"
-                            && attribute.value.as_ref() == "real"
-                    })
-            )
-        });
+        let hidden = actual_element(&mut document, "hidden")?;
+        assert_html_iframe(&hidden, "select child");
+        assert!(has_html_select_ancestor(&hidden));
+        assert!(
+            !document
+                .source_order
+                .iter()
+                .any(|node| Rc::ptr_eq(node, &hidden))
+        );
+        let real = actual_element(&mut document, "real")?;
+        assert_html_iframe(&real, "after select");
+        assert!(!has_html_select_ancestor(&real));
+        let real_index = document
+            .source_order
+            .iter()
+            .position(|node| Rc::ptr_eq(node, &real));
         assert_eq!(document.body_onload_source_order_index, Some(1));
         assert_eq!(real_index, Some(1));
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_ignored_select_iframes_keep_following_iframe_order() -> Result<(), String> {
+        let mut document = HtmlDocument::parse(
+            r#"<select><iframe id=hidden1></iframe><iframe id=hidden2></iframe></select><script>afterSelect()</script><body onload="handler"><iframe id=real>"#,
+        );
+
+        for id in ["hidden1", "hidden2"] {
+            let hidden = actual_element(&mut document, id)?;
+            assert_html_iframe(&hidden, id);
+            assert!(has_html_select_ancestor(&hidden));
+            assert!(
+                !document
+                    .source_order
+                    .iter()
+                    .any(|node| Rc::ptr_eq(node, &hidden))
+            );
+        }
+        let real = actual_element(&mut document, "real")?;
+        assert_html_iframe(&real, "after select");
+        assert!(!has_html_select_ancestor(&real));
+        let real_index = document
+            .source_order
+            .iter()
+            .position(|node| Rc::ptr_eq(node, &real));
+        assert_eq!(document.body_onload_source_order_index, Some(1));
+        assert_eq!(real_index, Some(1));
+        Ok(())
     }
 
     #[test]
