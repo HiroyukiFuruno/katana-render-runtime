@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 pub(super) enum SourceOrderEntry {
     Script(Handle),
-    Iframe,
+    Iframe { in_select: bool },
 }
 
 pub(super) fn finish_source_order(
@@ -44,10 +44,11 @@ fn replay_source_order(
         }
         match entry {
             SourceOrderEntry::Script(script) => source_order.push(script),
-            SourceOrderEntry::Iframe => append_iframe(
+            SourceOrderEntry::Iframe { in_select } => append_iframe(
                 &mut source_order,
                 iframes,
                 &mut iframe_index,
+                in_select,
                 document,
                 node_visibility,
             ),
@@ -60,12 +61,16 @@ fn append_iframe(
     source_order: &mut Vec<Handle>,
     iframes: &[(Handle, bool, bool)],
     iframe_index: &mut usize,
+    token_in_select: bool,
     document: &Handle,
     node_visibility: &RefCell<HashMap<usize, bool>>,
 ) {
     let Some((iframe, in_template, in_select)) = iframes.get(*iframe_index) else {
         return;
     };
+    if token_in_select && !in_select {
+        return;
+    }
     *iframe_index += 1;
     if *in_template || *in_select || !node_is_visible(iframe, document, node_visibility) {
         return;
@@ -166,7 +171,7 @@ mod tests {
 
         let (_, source_order) = finish_source_order(
             &document,
-            vec![SourceOrderEntry::Iframe],
+            vec![SourceOrderEntry::Iframe { in_select: false }],
             None,
             None,
             &visibility,
