@@ -151,3 +151,42 @@ fn collect_iframes(node: &Handle, iframes: &mut Vec<(Handle, bool)>, in_template
         collect_iframes(template_contents, iframes, true);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_iframe_document_is_not_inside_select() {
+        let document = RcDom::default();
+
+        assert!(!last_iframe_is_in_select(&document.document));
+    }
+
+    #[test]
+    fn source_order_ignores_iframe_entries_without_matching_nodes() {
+        let document = RcDom::default();
+        let visibility = RefCell::new(HashMap::new());
+
+        let (_, source_order) = finish_source_order(
+            &document,
+            vec![SourceOrderEntry::Iframe],
+            None,
+            None,
+            &visibility,
+        );
+
+        assert!(source_order.is_empty());
+    }
+
+    #[test]
+    fn iframe_collection_stops_when_children_are_already_borrowed() {
+        let document = RcDom::default();
+        let _children = document.document.children.borrow_mut();
+        let mut iframes = Vec::new();
+
+        collect_iframes(&document.document, &mut iframes, false);
+
+        assert!(iframes.is_empty());
+    }
+}
