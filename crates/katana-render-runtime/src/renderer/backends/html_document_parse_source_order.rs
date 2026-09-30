@@ -19,6 +19,7 @@ pub(super) struct SourceOrderSink {
     window_load_handler_observer: RefCell<WindowLoadHandlerObserver>,
     body_onload_script_index: Cell<Option<usize>>,
     body_onload_source_order_index: Cell<Option<usize>>,
+    select_depth: Cell<usize>,
     source_order: RefCell<Vec<SourceOrderEntry>>,
 }
 
@@ -31,6 +32,7 @@ impl SourceOrderSink {
             window_load_handler_observer: RefCell::new(WindowLoadHandlerObserver::default()),
             body_onload_script_index: Cell::new(None),
             body_onload_source_order_index: Cell::new(None),
+            select_depth: Cell::new(0),
             source_order: RefCell::new(Vec::new()),
         }
     }
@@ -62,15 +64,35 @@ impl SourceOrderSink {
     }
 
     fn observe_source_order(&self, tag: &Tag) {
+        self.observe_select_state(tag);
         if tag.kind != TagKind::StartTag {
             return;
         }
         if tag.name.to_string().eq_ignore_ascii_case("iframe") {
+            let in_select = self.select_depth.get() == 1;
             self.source_order
                 .borrow_mut()
-                .push(SourceOrderEntry::Iframe);
+                .push(SourceOrderEntry::Iframe { in_select });
+            self.select_depth.set(0);
         }
         self.observe_window_load_handler(tag);
+    }
+
+    fn observe_select_state(&self, tag: &Tag) {
+        let name = tag.name.to_string();
+        if tag.kind == TagKind::StartTag && name.eq_ignore_ascii_case("select") {
+            self.select_depth.set(self.select_depth.get() + 1);
+        } else if tag.kind == TagKind::EndTag && name.eq_ignore_ascii_case("select") {
+            self.select_depth
+                .set(self.select_depth.get().saturating_sub(1));
+        } else if tag.kind == TagKind::StartTag
+            && matches!(
+                name.to_ascii_lowercase().as_str(),
+                "input" | "textarea" | "button"
+            )
+        {
+            self.select_depth.set(0);
+        }
     }
 
     fn observe_window_load_handler(&self, tag: &Tag) {
