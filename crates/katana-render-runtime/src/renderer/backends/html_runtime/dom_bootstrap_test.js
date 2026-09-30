@@ -698,6 +698,29 @@ test("image load handlerのPromise microtaskで追加したimgもWindow load前�
   expect(calls).toEqual(["first:load", "added:load", "window"]);
 });
 
+test("画像dispatch間でmicrotaskを実行してから次の画像をdispatchする", async () => {
+  expect(dispatchWindowLoad).toBeDefined();
+
+  const calls = [];
+  const images = [
+    {
+      getAttribute: () => "valid",
+      dispatchEvent(event) {
+        calls.push(`first:${event.type}`);
+        queueMicrotask(() => calls.push("microtask"));
+      },
+    },
+    {
+      getAttribute: () => "valid",
+      dispatchEvent: (event) => calls.push(`second:${event.type}`),
+    },
+  ];
+  const dispatch = createWindowLoadDispatcher(images, calls);
+
+  await dispatch();
+  expect(calls).toEqual(["first:load", "microtask", "second:load", "window"]);
+});
+
 test("image handlerが無限にimgを追加してもdispatch数を1024件に制限する", async () => {
   expect(dispatchWindowLoad).toBeDefined();
 
@@ -744,6 +767,29 @@ test("image handlerが追加したlocal iframeをbounded fixed-pointでWindow lo
 
   await dispatch();
   expect(calls).toEqual(["image:load", "frame:load", "window"]);
+});
+
+test("local iframe dispatch間でmicrotaskを実行してから次のiframeをdispatchする", async () => {
+  expect(dispatchWindowLoad).toBeDefined();
+
+  const calls = [];
+  const frames = [
+    {
+      contentDocument: {},
+      dispatchEvent(event) {
+        calls.push(`first:${event.type}`);
+        queueMicrotask(() => calls.push("microtask"));
+      },
+    },
+    {
+      contentDocument: {},
+      dispatchEvent: (event) => calls.push(`second:${event.type}`),
+    },
+  ];
+  const dispatch = createWindowLoadDispatcher([], calls, frames);
+
+  await dispatch();
+  expect(calls).toEqual(["first:load", "microtask", "second:load", "window"]);
 });
 
 const createWindowLoadDispatcher = (images, calls, frames = []) => {
