@@ -300,7 +300,7 @@ jobs:
                   raise SystemExit("Captured review sensor repository identity is invalid.")
               return identifier, default_branch
 
-          def validate_sensor(value, expected_identifier):
+          def validate_sensor(value, expected_identifier, *, allow_out_of_scope=False):
               repository_id, default_branch = repository_identity()
               identifier = value.get("id") if isinstance(value, dict) else None
               run_repository = value.get("repository") if isinstance(value, dict) else None
@@ -322,8 +322,10 @@ jobs:
                   or run_repository.get("id") != repository_id
                   or run_repository.get("full_name") != repository
                   or not isinstance(head_repository, dict)
-                  or head_repository.get("id") != repository_id
-                  or head_repository.get("full_name") != repository
+                  or type(head_repository.get("id")) is not int
+                  or head_repository.get("id") < 1
+                  or not isinstance(head_repository.get("full_name"), str)
+                  or repository_pattern.fullmatch(head_repository["full_name"]) is None
                   or not isinstance(pulls, list)
                   or len(pulls) != 1
                   or not isinstance(head_sha, str)
@@ -341,15 +343,16 @@ jobs:
                   type(number) is not int
                   or number < 1
                   or not isinstance(base, dict)
-                  or base.get("ref") != default_branch
+                  or not isinstance(base.get("ref"), str)
+                  or not base.get("ref")
                   or not isinstance(head, dict)
                   or pull_head_sha != head_sha
                   or not isinstance(base_repository, dict)
                   or base_repository.get("id") != repository_id
                   or base_repository.get("full_name") != repository
                   or not isinstance(head_pull_repository, dict)
-                  or head_pull_repository.get("id") != repository_id
-                  or head_pull_repository.get("full_name") != repository
+                  or head_pull_repository.get("id") != head_repository["id"]
+                  or head_pull_repository.get("full_name") != head_repository["full_name"]
               ):
                   raise SystemExit("Captured review sensor changed identity.")
               current = api(f"repos/{repository}/pulls/{number}", "Unable to re-read the captured review sensor pull request.")
@@ -362,17 +365,27 @@ jobs:
                   or current.get("number") != number
                   or current.get("state") != "open"
                   or not isinstance(current_base, dict)
-                  or current_base.get("ref") != default_branch
+                  or current_base.get("ref") != base["ref"]
                   or not isinstance(current_head, dict)
                   or current_head.get("sha") != head_sha
                   or not isinstance(current_base_repository, dict)
                   or current_base_repository.get("id") != repository_id
                   or current_base_repository.get("full_name") != repository
                   or not isinstance(current_head_repository, dict)
-                  or current_head_repository.get("id") != repository_id
-                  or current_head_repository.get("full_name") != repository
+                  or current_head_repository.get("id") != head_repository["id"]
+                  or current_head_repository.get("full_name") != head_repository["full_name"]
               ):
                   raise SystemExit("Captured review sensor changed identity.")
+
+              local_id = head_repository["id"] == repository_id
+              local_name = head_repository["full_name"] == repository
+              if local_id != local_name:
+                  raise SystemExit("Captured review sensor repository identity is invalid.")
+              if not local_id or base["ref"] != default_branch:
+                  if allow_out_of_scope:
+                      return False
+                  raise SystemExit("Captured review sensor changed identity.")
+              return True
 
           def active_successors(excluded_identifiers):
               successors = set()
@@ -391,8 +404,8 @@ jobs:
                           raise SystemExit("Active review sensor list is invalid.")
                       if identifier in excluded_identifiers:
                           continue
-                      validate_sensor(candidate, identifier)
-                      successors.add(identifier)
+                      if validate_sensor(candidate, identifier, allow_out_of_scope=True):
+                          successors.add(identifier)
               return successors
 
           while pending_ids:
@@ -413,6 +426,8 @@ jobs:
                       continue
                   if status not in {"queued", "in_progress"}:
                       raise SystemExit("Captured review sensor state is invalid.")
+              # 捕捉後に始まったsensorも保護し、成功時に予約を取り落とさない。
+              pending_ids.update(active_successors(pending_ids))
               if pending_ids:
                   time.sleep(5)
           PY
