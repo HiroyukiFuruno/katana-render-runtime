@@ -2524,7 +2524,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             self.workflow.index("  reconcile-all-open:")
         ]
         self.assertIn(
-            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}",
+            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}",
             resolver,
         )
         self.assertIn("reconcile: ${{ steps.targets.outputs.reconcile }}", resolver)
@@ -4376,7 +4376,7 @@ raise SystemExit(91)
         )
         resolver_generation_lock = (
             "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n"
-            "      cancel-in-progress: ${{ needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}"
+            "      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}"
         )
         # Barrier activation and release share the serialized, uncancelled
         # lane. A new generation is therefore visible to an older release
@@ -4919,7 +4919,7 @@ raise SystemExit(91)
             self.workflow.index("  reconcile-all-open:")
         ]
         self.assertIn(
-            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}",
+            "concurrency:\n      group: pr-governance-dispatcher-${{ github.repository_id }}\n      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}",
             resolver,
         )
         self.assertIn(
