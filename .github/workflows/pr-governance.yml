@@ -159,11 +159,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # 検証済みのCI/release signalは、実行中のpaced scanを止めずに直列レーンへ加える。
-    # review sensorを含むworkflow_runは採用済み世代から派生するため、ここでpreemptすると
-    # resolve_event前にその発生元をcancelしてしまう。直接PR/Issue mutationだけをpreemptする。
+    # review sensorのrequestedだけはlatchの期限内にtrusted Check Runを得るため先行させる。
+    # その後のworkflow_run lifecycleは発生元をcancelしないよう直列化し、直接PR/Issue mutationもpreemptする。
     concurrency:
       group: pr-governance-dispatcher-${{ github.repository_id }}
-      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true' }}
+      cancel-in-progress: ${{ (github.event_name != 'workflow_run' && needs.preflight-workflow-run-source.outputs.priority == 'true') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && github.event.action == 'requested') }}
     permissions:
       contents: read
     outputs:
