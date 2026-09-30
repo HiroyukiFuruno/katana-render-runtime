@@ -32,6 +32,7 @@ pub(super) fn html_font_runs(
     requested_italic: bool,
 ) -> Vec<(usvg::fontdb::ID, String)> {
     let mut runs: Vec<(usvg::fontdb::ID, String)> = Vec::new();
+    let mut render_faces = HashMap::new();
     for character in text.chars() {
         let face_id = cached_html_face(
             database,
@@ -39,6 +40,7 @@ pub(super) fn html_font_runs(
             character,
             requested_weight,
             requested_italic,
+            &mut render_faces,
         );
         append_font_run(&mut runs, face_id, character);
     }
@@ -51,6 +53,7 @@ fn cached_html_face(
     character: char,
     requested_weight: u16,
     requested_italic: bool,
+    render_faces: &mut HashMap<HtmlFallbackKey, usvg::fontdb::ID>,
 ) -> usvg::fontdb::ID {
     let key = HtmlFallbackKey {
         base_face_id,
@@ -58,8 +61,13 @@ fn cached_html_face(
         requested_weight,
         requested_italic,
     };
-    HTML_FALLBACK_CACHE
-        .with(|cache| resolve_cached_html_face(&mut cache.borrow_mut(), database, key))
+    if let Some(face_id) = render_faces.get(&key) {
+        return *face_id;
+    }
+    let face_id = HTML_FALLBACK_CACHE
+        .with(|cache| resolve_cached_html_face(&mut cache.borrow_mut(), database, key));
+    render_faces.insert(key, face_id);
+    face_id
 }
 
 fn resolve_cached_html_face(
@@ -158,7 +166,7 @@ mod tests {
     use super::super::font::{font_has_char, matching_font_face};
     use super::{
         HtmlFallbackCacheEntry, HtmlFallbackKey, MAX_CACHED_HTML_FALLBACK_DATABASES,
-        MAX_CACHED_HTML_FALLBACK_FACES, html_font_runs, resolve_cached_html_face,
+        MAX_CACHED_HTML_FALLBACK_FACES, cached_html_face, html_font_runs, resolve_cached_html_face,
         resolve_existing_html_fallback_face,
     };
     use crate::markdown::svg_rasterize::font::{bundled_font_db, html_font_db_for_text};
@@ -202,6 +210,21 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(requested_faces, [true, true]);
+    }
+
+    #[test]
+    fn html_font_fallback_is_memoized_within_a_render() -> Result<(), String> {
+        let database = html_font_db_for_text("Noto Sans", "日");
+        let base_face_id = matching_font_face(&database, "Noto Sans", 400, false)
+            .ok_or("HTML database must contain the requested base face")?;
+        let mut render_faces = HashMap::new();
+
+        let first = cached_html_face(&database, base_face_id, '日', 400, false, &mut render_faces);
+        let second = cached_html_face(&database, base_face_id, '日', 400, false, &mut render_faces);
+
+        assert_eq!(first, second);
+        assert_eq!(render_faces.len(), 1);
+        Ok(())
     }
 
     #[test]
