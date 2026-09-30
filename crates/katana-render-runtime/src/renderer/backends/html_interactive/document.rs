@@ -126,14 +126,15 @@ fn take_styled_line(text: &str, width: f32, style: &CssStyle) -> (String, usize)
     }
     let forced_end = text.find('\n').unwrap_or(text.len());
     let forced_line = &text[..forced_end];
+    let trimmed_line = forced_line.trim_end();
+    if text_width(trimmed_line, style) <= width + LAYOUT_FLOAT_EPSILON {
+        let consumed = forced_end + usize::from(forced_end < text.len());
+        return (trimmed_line.to_string(), consumed);
+    }
     let break_ends = linebreaks(forced_line)
         .map(|(segment_end, _)| segment_end)
         .collect::<Vec<_>>();
     let mut fitted_end = last_fitting_end(forced_line, &break_ends, width, style).unwrap_or(0);
-    if fitted_end == forced_line.len() {
-        let consumed = forced_end + usize::from(forced_end < text.len());
-        return (forced_line.trim_end().to_string(), consumed);
-    }
     if fitted_end == 0 {
         fitted_end = fitted_character_end(forced_line, width, style);
     }
@@ -302,6 +303,33 @@ mod tests {
         assert_eq!(
             wrap_text_with_style("first\n\nthird", 1230.0, &style),
             ["first", "", "third"]
+        );
+    }
+
+    #[test]
+    fn fitting_styled_line_keeps_its_complete_text() {
+        let style = CssStyle::browser_default();
+        let text = "性能回帰フィクスチャ 1744";
+        let measured = text_width(text, &style);
+
+        assert_eq!(wrap_text_with_style(text, measured + 1.0, &style), [text]);
+    }
+
+    #[test]
+    fn fitting_line_preserves_consumed_newline_and_geometry() {
+        let style = CssStyle::browser_default();
+        let first_line = "性能回帰フィクスチャ 1744";
+        let text = format!("{first_line}\n次の行");
+        let width = text_width(first_line, &style) + 1.0;
+
+        let (line, consumed) = take_styled_line(&text, width, &style);
+
+        assert_eq!(line, first_line);
+        assert_eq!(consumed, first_line.len() + "\n".len());
+        assert!(text_width(&line, &style) <= width);
+        assert_eq!(
+            wrap_text_with_style(&text, width, &style),
+            [first_line, "次の行"]
         );
     }
 

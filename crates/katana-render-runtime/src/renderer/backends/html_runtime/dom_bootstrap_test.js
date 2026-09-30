@@ -887,6 +887,54 @@ return ({${imageSrcProperties}\n${getAttributeMethod}\n${setAttributeMethod}});`
   expect(imageEventType(assignedImage, assignedImage.src)).toBe("error");
 });
 
+test("前処理済み画像のerror結果を再利用し、同じdata URLを再デコードしない", () => {
+  expect(seedPrevalidatedImageEvents).toBeDefined();
+  expect(imageLoadEventType).toBeDefined();
+
+  const sourceUrl = "data:image/png;base64,AA==";
+  const attributes = new Map([
+    ["src", sourceUrl],
+    ["data-krr-prevalidated-image-event", "error"],
+  ]);
+  const image = {
+    getAttribute(name) {
+      return attributes.get(name) ?? null;
+    },
+    removeAttribute(name) {
+      attributes.delete(name);
+    },
+  };
+  const prevalidated = new WeakMap();
+  new Function(
+    "document",
+    "__krrPrevalidatedImageEvents",
+    "__krrPrevalidatedImageEventAttribute",
+    `${seedPrevalidatedImageEvents}\nreturn __krrSeedPrevalidatedImageEvents;`,
+  )(
+    { querySelectorAll: (selector) => (selector === "img" ? [image] : []) },
+    prevalidated,
+    "data-krr-prevalidated-image-event",
+  )();
+
+  const calls = [];
+  const imageEventType = new Function(
+    "globalThis",
+    "__krrPrevalidatedImageEvents",
+    `${nativeDomCapture}\n${imageLoadEventType}\nreturn __krrImageLoadEventType;`,
+  )(
+    {
+      __krr_dom(...arguments_) {
+        calls.push(arguments_);
+        return "load";
+      },
+    },
+    prevalidated,
+  );
+
+  expect(imageEventType(image, sourceUrl)).toBe("error");
+  expect(calls).toEqual([]);
+});
+
 test("初期DOM列挙を提供しないminimal bridgeでは前処理済み画像seedをskipする", () => {
   expect(seedPrevalidatedImageEvents).toBeDefined();
 

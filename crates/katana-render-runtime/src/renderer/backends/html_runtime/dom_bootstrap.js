@@ -770,7 +770,7 @@ const __krrSeedPrevalidatedImageEvents = () => {
     const source = image.getAttribute("src");
     const eventType = image.getAttribute(__krrPrevalidatedImageEventAttribute);
     image.removeAttribute(__krrPrevalidatedImageEventAttribute);
-    if (source !== null && eventType === "load")
+    if (source !== null && (eventType === "load" || eventType === "error"))
       __krrPrevalidatedImageEvents.set(image, { source, eventType });
   }
 };

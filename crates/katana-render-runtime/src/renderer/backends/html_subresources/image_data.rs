@@ -111,19 +111,23 @@ fn sniff_media_type(bytes: &[u8]) -> Option<&'static str> {
 }
 
 fn looks_like_svg(bytes: &[u8]) -> bool {
-    bytes
-        .windows(1)
-        .enumerate()
-        .filter_map(|(index, pair)| (pair == b"<").then_some(&bytes[index + 1..]))
-        .any(|remaining| {
-            let name_end = remaining
-                .iter()
-                .position(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n' | b'/' | b'>'))
-                .unwrap_or(remaining.len());
-            let qualified_name = &remaining[..name_end];
-            qualified_name == b"svg"
-                || qualified_name.split(|byte| *byte == b':').next_back() == Some(&b"svg"[..])
-        })
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte != b'<' {
+            continue;
+        }
+        let name_start = index + 1;
+        let name_end = bytes[name_start..]
+            .iter()
+            .position(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n' | b'/' | b'>' | b'<'))
+            .map_or(bytes.len(), |offset| name_start + offset);
+        let qualified_name = &bytes[name_start..name_end];
+        if qualified_name == b"svg"
+            || qualified_name.split(|byte| *byte == b':').next_back() == Some(&b"svg"[..])
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn is_webp(bytes: &[u8], riff_signature: &[u8], webp_signature: &[u8]) -> bool {
@@ -329,6 +333,13 @@ mod tests {
             Ok("image/svg+xml")
         );
         assert!(resolve_media_type(None, br#"<x:svg xmlns:x="urn:not-svg"/>"#).is_err());
+    }
+
+    #[test]
+    fn svg_sniffing_many_less_than_bytes_does_not_rescan_the_payload() {
+        let payload = b"<".repeat(100_000);
+
+        assert!(resolve_media_type(None, &payload).is_err());
     }
 
     fn png_header_with_dimensions(width: u32, height: u32) -> Vec<u8> {
