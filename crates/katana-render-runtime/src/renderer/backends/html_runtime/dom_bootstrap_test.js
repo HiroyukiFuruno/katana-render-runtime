@@ -3,8 +3,11 @@ import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("./dom_bootstrap.js", import.meta.url), "utf8");
 const nativeDomCapture = source.match(/^const __krrNativeDom = globalThis\.__krr_dom;$/m)?.[0];
+const listenerOptions = source.match(
+  /^const __krrListenerOptions = \(options\) => \(\{[\s\S]*?^\}\);/m,
+)?.[0];
 const imageLoadEventType = source.match(
-  /const __krrImageLoadEventType = \(source\) => \{[\s\S]*?\n\};/,
+  /const __krrImageLoadEventType = \(image, source\) => \{[\s\S]*?\n\};/,
 )?.[0];
 const imageSrcProperties = source.match(
   /^ {2}get src\(\) \{[\s\S]*?^ {2}set src\(value\) \{[\s\S]*?^ {2}\},$/m,
@@ -50,14 +53,26 @@ const endDispatch = source.match(/^const __krrEndDispatch = \(event\) => \{[\s\S
 const throwDeferredListenerError = source.match(
   /^const __krrThrowDeferredListenerError = \(event\) => \{[\s\S]*?^\};/m,
 )?.[0];
+const installEventTarget = source.match(
+  /^const __krrInstallEventTarget = \(target\) => \{[\s\S]*?^\};/m,
+)?.[0];
 const dispatchImageLoad = source.match(
   /^const __krrDispatchImageLoad = \(image\) => \{[\s\S]*?^\};/m,
 )?.[0];
 const dispatchPendingImages = source.match(
-  /^const __krrDispatchPendingImages = async \(document\) => \{[\s\S]*?^\};/m,
+  /^const __krrDispatchPendingImages = async \(document, state = \{\}\) => \{[\s\S]*?^\};/m,
+)?.[0];
+const dispatchLocalFrame = source.match(
+  /^const __krrDispatchLocalFrame = \(frame\) => \{[\s\S]*?^\};/m,
+)?.[0];
+const dispatchPendingLocalFrames = source.match(
+  /^const __krrDispatchPendingLocalFrames = async \(document, state = \{\}\) => \{[\s\S]*?^\};/m,
 )?.[0];
 const dispatchWindowLoad = source.match(
   /^globalThis\.__krrDispatchWindowLoad = async \(\) => \{[\s\S]*?^\};/m,
+)?.[0];
+const seedPrevalidatedImageEvents = source.match(
+  /^const __krrSeedPrevalidatedImageEvents = \(\) => \{[\s\S]*?^\};/m,
 )?.[0];
 
 const installStaticLoadHandler = (body, frameset) => {
@@ -102,12 +117,13 @@ test("画像検証はページコードがglobalThis.__krr_domを置換しても
   const pageGlobal = { __krr_dom: nativeBridge };
   const getImageLoadEventType = new Function(
     "globalThis",
+    "__krrPrevalidatedImageEvents",
     `${nativeDomCapture}\n${imageLoadEventType}\nreturn __krrImageLoadEventType;`,
-  )(pageGlobal);
+  )(pageGlobal, new WeakMap());
 
   pageGlobal.__krr_dom = () => "error";
 
-  expect(getImageLoadEventType("data:image/png;base64,AA==")).toBe("load");
+  expect(getImageLoadEventType(null, "data:image/png;base64,AA==")).toBe("load");
   expect(calls).toEqual([["validateImageDataUrl", "data:image/png;base64,AA=="]]);
 });
 
@@ -129,26 +145,28 @@ test("image.src propertyとsetAttributeがnative src属性へ反映されload/er
   };
   const elementPrototype = new Function(
     "globalThis",
+    "__krrPrevalidatedImageEvents",
     `const __krrNativeDom = globalThis.__krr_dom;
 const __krrNormalizeLifecycleEventType = () => null;
 const __krrIsWindowLoadNode = () => false;
 const __krrInstallBodyLoadHandler = () => {};
 const __krrInstallInlineHandler = () => {};
 return ({${imageSrcProperties}\n${getAttributeMethod}\n${setAttributeMethod}});`,
-  )({ __krr_dom: bridge });
+  )({ __krr_dom: bridge }, new WeakMap());
   const image = Object.assign(Object.create(elementPrototype), { __krrNodeId: "image-1" });
   const getImageLoadEventType = new Function(
     "globalThis",
+    "__krrPrevalidatedImageEvents",
     `${nativeDomCapture}\n${imageLoadEventType}\nreturn __krrImageLoadEventType;`,
-  )({ __krr_dom: bridge });
+  )({ __krr_dom: bridge }, new WeakMap());
 
   image.src = "data:image/png;base64,AA==";
   expect(image.src).toBe("data:image/png;base64,AA==");
-  expect(getImageLoadEventType(image.getAttribute("src"))).toBe("load");
+  expect(getImageLoadEventType(image, image.getAttribute("src"))).toBe("load");
 
   image.setAttribute("src", "data:image/png;base64,invalid");
   expect(image.src).toBe("data:image/png;base64,invalid");
-  expect(getImageLoadEventType(image.getAttribute("src"))).toBe("error");
+  expect(getImageLoadEventType(image, image.getAttribute("src"))).toBe("error");
 });
 
 test("document.bodyがないframesetのonloadをWindow load handlerとして登録する", () => {
@@ -385,6 +403,50 @@ test("通常イベントのlistener例外はdispatchを中断して呼び出し�
   expect(calls).toEqual(["throwing listener"]);
 });
 
+test("generic dispatchEventでもcaptureのstopImmediatePropagation後にdeferred lifecycle例外を再送出する", () => {
+  expect(listenerOptions).toBeDefined();
+  expect(installEventTarget).toBeDefined();
+  expect(throwDeferredListenerError).toBeDefined();
+
+  class LifecycleEvent {
+    constructor(type) {
+      this.type = type;
+      this.cancelable = false;
+      this.defaultPrevented = false;
+      this.__krrDispatching = false;
+      this.__krrPropagationStopped = false;
+      this.__krrImmediatePropagationStopped = false;
+    }
+    stopImmediatePropagation() {
+      this.__krrPropagationStopped = true;
+      this.__krrImmediatePropagationStopped = true;
+    }
+  }
+  LifecycleEvent.AT_TARGET = 2;
+  const listeners = new WeakMap();
+  const target = new Function(
+    "Event",
+    "__krrEventTargetListeners",
+    "__krrEventHandlers",
+    "__krrSyncEventTarget",
+    `${listenerOptions}\n${dispatchListenerEntry}\n${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\n${beginDispatch}\n${endDispatch}\n${throwDeferredListenerError}\n${installEventTarget}\nreturn __krrInstallEventTarget({});`,
+  )(LifecycleEvent, listeners, new WeakMap(), () => {});
+  target.addEventListener(
+    "load",
+    (event) => {
+      event.stopImmediatePropagation();
+      throw new Error("capture failure");
+    },
+    { capture: true },
+  );
+
+  const event = new LifecycleEvent("load");
+  expect(() => target.dispatchEvent(event)).toThrow("capture failure");
+  expect(event.__krrDispatching).toBe(false);
+  expect(event.currentTarget).toBeNull();
+  expect(event.eventPhase).toBe(0);
+});
+
 test("onerrorのsrc差替えはload/errorを再評価し最大8回で終了する", () => {
   expect(dispatchImageLoad).toBeDefined();
 
@@ -412,7 +474,7 @@ test("onerrorのsrc差替えはload/errorを再評価し最大8回で終了す�
         this.type = type;
       }
     },
-    (source) => (source === "valid" ? "load" : "error"),
+    (_image, source) => (source === "valid" ? "load" : "error"),
   );
 
   dispatch(image);
@@ -456,7 +518,7 @@ test("onloadのsrc差替え後も新しいsrcを検証してload/errorを再disp
         this.type = type;
       }
     },
-    (source) => (source === "valid" ? "load" : "error"),
+    (_image, source) => (source === "valid" ? "load" : "error"),
   );
 
   dispatch(image);
@@ -525,6 +587,7 @@ test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatch
   const dispatchPending = createPendingImageDispatcher(document, (target) =>
     target.dispatchEvent(new Event("load")),
   );
+  const dispatchFrames = createPendingLocalFrameDispatcher(document);
   const pageGlobal = {};
   const dispatch = new Function(
     "globalThis",
@@ -537,6 +600,7 @@ test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatch
     "__krrImageLoadEventType",
     "__krrDispatchImageLoad",
     "__krrDispatchPendingImages",
+    "__krrDispatchPendingLocalFrames",
     "__krrDocumentReadyState",
     "__krrDispatchDocumentReadyStateChange",
     "__krrDispatchElementReadyStateChange",
@@ -557,6 +621,7 @@ test("resource eventがqueueMicrotaskを登録した後にWindow loadをdispatch
     () => "load",
     (target) => target.dispatchEvent(new Event("load")),
     dispatchPending,
+    dispatchFrames,
     "interactive",
     () => {},
     () => {},
@@ -655,17 +720,46 @@ test("image handlerが無限にimgを追加してもdispatch数を1024件に制�
   expect(calls.at(-1)).toBe("window");
 });
 
-const createWindowLoadDispatcher = (images, calls) => {
+test("image handlerが追加したlocal iframeをbounded fixed-pointでWindow load前にdispatchする", async () => {
+  expect(dispatchPendingLocalFrames).toBeDefined();
+
+  const calls = [];
+  const images = [];
+  const frames = [];
+  images.push({
+    getAttribute: () => "valid",
+    dispatchEvent(event) {
+      calls.push(`image:${event.type}`);
+      if (event.type === "load") {
+        frames.push({
+          contentDocument: {},
+          dispatchEvent(frameEvent) {
+            calls.push(`frame:${frameEvent.type}`);
+          },
+        });
+      }
+    },
+  });
+  const dispatch = createWindowLoadDispatcher(images, calls, frames);
+
+  await dispatch();
+  expect(calls).toEqual(["image:load", "frame:load", "window"]);
+});
+
+const createWindowLoadDispatcher = (images, calls, frames = []) => {
   const document = {
     body: null,
     querySelectorAll(selector) {
-      return selector === "img" ? images : [];
+      if (selector === "img") return images;
+      if (selector === "iframe") return frames;
+      return [];
     },
   };
   const dispatchPending = createPendingImageDispatcher(document, (image) => {
     const eventType = image.getAttribute("src") === "broken" ? "error" : "load";
     image.dispatchEvent(new Event(eventType));
   });
+  const dispatchFrames = createPendingLocalFrameDispatcher(document);
   const pageGlobal = {};
   const dispatch = new Function(
     "globalThis",
@@ -678,6 +772,7 @@ const createWindowLoadDispatcher = (images, calls) => {
     "__krrImageLoadEventType",
     "__krrDispatchImageLoad",
     "__krrDispatchPendingImages",
+    "__krrDispatchPendingLocalFrames",
     "__krrDocumentReadyState",
     "__krrDispatchDocumentReadyStateChange",
     "__krrDispatchElementReadyStateChange",
@@ -698,6 +793,7 @@ const createWindowLoadDispatcher = (images, calls) => {
     () => "load",
     (image) => image.dispatchEvent(new Event("load")),
     dispatchPending,
+    dispatchFrames,
     "interactive",
     () => {},
     () => {},
@@ -712,6 +808,105 @@ const createPendingImageDispatcher = (document, dispatchImage) =>
     "__krrDispatchImageLoad",
     `${dispatchPendingImages}\nreturn __krrDispatchPendingImages;`,
   )(document, dispatchImage);
+
+const createPendingLocalFrameDispatcher = (document) =>
+  new Function(
+    "document",
+    `${dispatchLocalFrame}\n${dispatchPendingLocalFrames}\nreturn __krrDispatchPendingLocalFrames;`,
+  )(document);
+
+test("前処理済み画像のload結果を再利用し、srcをscript-assignedした後は再検証する", () => {
+  expect(seedPrevalidatedImageEvents).toBeDefined();
+
+  const sourceUrl = "data:image/png;base64,AA==";
+  const attributes = new Map([
+    ["src", sourceUrl],
+    ["data-krr-prevalidated-image-event", "load"],
+  ]);
+  const image = {
+    getAttribute(name) {
+      return attributes.get(name) ?? null;
+    },
+    removeAttribute(name) {
+      attributes.delete(name);
+    },
+  };
+  const prevalidated = new WeakMap();
+  new Function(
+    "document",
+    "__krrPrevalidatedImageEvents",
+    "__krrPrevalidatedImageEventAttribute",
+    `${seedPrevalidatedImageEvents}\nreturn __krrSeedPrevalidatedImageEvents;`,
+  )(
+    { querySelectorAll: (selector) => (selector === "img" ? [image] : []) },
+    prevalidated,
+    "data-krr-prevalidated-image-event",
+  )();
+
+  expect(attributes.has("data-krr-prevalidated-image-event")).toBe(false);
+  const calls = [];
+  const imageEventType = new Function(
+    "globalThis",
+    "__krrPrevalidatedImageEvents",
+    `${nativeDomCapture}\n${imageLoadEventType}\nreturn __krrImageLoadEventType;`,
+  )(
+    {
+      __krr_dom(...arguments_) {
+        calls.push(arguments_);
+        return "error";
+      },
+    },
+    prevalidated,
+  );
+  expect(imageEventType(image, sourceUrl)).toBe("load");
+  expect(calls).toEqual([]);
+
+  const bridgeAttributes = new Map([["src", sourceUrl]]);
+  const bridge = (operation, _nodeId, name, value) => {
+    if (operation === "setAttribute") {
+      bridgeAttributes.set(name, value);
+      return null;
+    }
+    if (operation === "getAttribute") return bridgeAttributes.get(name) ?? null;
+    if (operation === "validateImageDataUrl") return "error";
+    throw new Error(`unexpected native operation: ${operation}`);
+  };
+  const elementPrototype = new Function(
+    "globalThis",
+    "__krrPrevalidatedImageEvents",
+    `const __krrNativeDom = globalThis.__krr_dom;
+const __krrNormalizeLifecycleEventType = () => null;
+const __krrIsWindowLoadNode = () => false;
+const __krrInstallBodyLoadHandler = () => {};
+const __krrInstallInlineHandler = () => {};
+return ({${imageSrcProperties}\n${getAttributeMethod}\n${setAttributeMethod}});`,
+  )({ __krr_dom: bridge }, prevalidated);
+  const assignedImage = Object.assign(Object.create(elementPrototype), { __krrNodeId: "image-1" });
+  prevalidated.set(assignedImage, { source: sourceUrl, eventType: "load" });
+  assignedImage.src = sourceUrl;
+  expect(imageEventType(assignedImage, assignedImage.src)).toBe("error");
+});
+
+test("初期DOM列挙を提供しないminimal bridgeでは前処理済み画像seedをskipする", () => {
+  expect(seedPrevalidatedImageEvents).toBeDefined();
+
+  const seed = new Function(
+    "document",
+    "__krrPrevalidatedImageEvents",
+    "__krrPrevalidatedImageEventAttribute",
+    `${seedPrevalidatedImageEvents}\nreturn __krrSeedPrevalidatedImageEvents;`,
+  )(
+    {
+      querySelectorAll() {
+        throw new Error("DOM state is unavailable");
+      },
+    },
+    new WeakMap(),
+    "data-krr-prevalidated-image-event",
+  );
+
+  expect(() => seed()).not.toThrow();
+});
 
 test("DOMContentLoaded listenerの例外後も後続listenerとproperty handlerを実行してから再送出する", () => {
   expect(dispatchListenerEntry).toBeDefined();

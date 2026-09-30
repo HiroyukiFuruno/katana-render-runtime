@@ -1,6 +1,6 @@
 use super::{
-    MAX_BASE64_DATA_URL_BYTES, MAX_SUBRESOURCE_BYTES, check_data_url_size, decode_data_url,
-    decode_forgiving_base64, load_image_data_url, load_text,
+    MAX_BASE64_DATA_URL_BYTES, MAX_PERCENT_ENCODED_BASE64_DATA_URL_BYTES, MAX_SUBRESOURCE_BYTES,
+    check_data_url_size, decode_data_url, decode_forgiving_base64, load_image_data_url, load_text,
 };
 use base64::Engine as _;
 use url::Url;
@@ -133,13 +133,25 @@ fn malformed_text_data_urls_are_rejected() {
 
 #[test]
 fn oversized_data_url_payloads_are_rejected_before_decoding() {
-    let oversized_payload = "A".repeat(MAX_BASE64_DATA_URL_BYTES as usize + 1);
+    let oversized_payload = "A".repeat(MAX_PERCENT_ENCODED_BASE64_DATA_URL_BYTES as usize + 1);
     let source = format!("data:image/png;base64,{oversized_payload}");
     with_url(&source, |url| {
         assert!(matches!(
             decode_data_url(url),
             Err(error) if error.contains("encoded payload exceeds")
         ));
+    });
+}
+
+#[test]
+fn percent_encoded_payloads_are_limited_after_decoding() {
+    let payload = "%41".repeat(MAX_SUBRESOURCE_BYTES as usize);
+    let source = format!("data:text/plain,{payload}");
+    with_url(&source, |url| {
+        assert_eq!(
+            decode_data_url(url).ok().as_deref().map(<[u8]>::len),
+            Some(MAX_SUBRESOURCE_BYTES as usize)
+        );
     });
 }
 

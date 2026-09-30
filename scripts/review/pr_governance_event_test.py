@@ -504,25 +504,43 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         else:
             self.addCleanup(os.environ.__setitem__, "TERMINAL_SEGMENT_STARTED_AT", prior_started_at)
 
-    def test_dispatcher_admission_mints_the_reconciliation_deadline(self) -> None:
-        """A queued dispatcher must not inherit pre-admission wall time."""
+    def test_reconciliation_admission_refreshes_the_terminal_deadline(self) -> None:
+        """The all-open lane admission preserves every 3,750-second terminal window."""
         job = re.search(
-            r"^  resolve_event:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:|\Z)",
+            r"^  reconcile-all-open:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:|\Z)",
             self.actual_workflow,
             re.MULTILINE | re.DOTALL,
         )
         self.assertIsNotNone(job); assert job is not None
         body = job.group("body")
+        self.assertLess(
+            body.index("concurrency:"),
+            body.index("- name: Start reconciliation deadline after serialized admission"),
+        )
+        self.assertLess(
+            body.index("- name: Start reconciliation deadline after serialized admission"),
+            body.index("- name: Re-enumerate every current local governance pull request"),
+        )
+        resolver = self.actual_workflow[
+            self.actual_workflow.index("  resolve_event:"):
+            self.actual_workflow.index("  reconcile-all-open:")
+        ]
+        self.assertNotIn("root_deadline_epoch", resolver)
         self.assertIn(
-            "root_deadline_epoch: ${{ steps.admission.outputs.root_deadline_epoch }}",
+            "ROOT_DEADLINE_EPOCH: ${{ steps.admission.outputs.root_deadline_epoch }}",
             body,
         )
+        self.assertEqual(
+            body.count("ROOT_DEADLINE_EPOCH: ${{ steps.admission.outputs.root_deadline_epoch }}"),
+            5,
+        )
+        self.assertEqual(body.count("terminal_segment_seconds = 3_750"), 4)
         self.assertNotIn(
-            "root_deadline_epoch: ${{ needs.establish-resolver-failure-barrier.outputs.root_deadline_epoch }}",
+            "ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}",
             body,
         )
         admission = re.search(
-            r"- name: Start dispatcher deadline after serialized admission.*?python3 - <<'PY'\n(.*?)\n          PY",
+            r"- name: Start reconciliation deadline after serialized admission.*?python3 - <<'PY'\n(.*?)\n          PY",
             body,
             re.DOTALL,
         )
