@@ -1,4 +1,5 @@
 const __krrNativeDom = globalThis.__krr_dom;
+const __krrLifecycleCheckpoint = Promise.resolve.bind(Promise);
 class __KrrEvent {
   constructor(...args) {
     if (args.length === 0) throw new TypeError("Event type must be provided");
@@ -2006,7 +2007,7 @@ const __krrDispatchPendingLocalFrames = async (document, state = {}) => {
       state.frameDispatches = frameDispatches;
       if (frameDispatches >= maxFrameDispatches) break;
     }
-    await Promise.resolve();
+    await __krrLifecycleCheckpoint();
     emptyFrameRescanCount = foundFrame ? 0 : emptyFrameRescanCount + 1;
   }
   return dispatched;

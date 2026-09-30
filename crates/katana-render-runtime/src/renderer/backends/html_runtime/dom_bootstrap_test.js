@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("./dom_bootstrap.js", import.meta.url), "utf8");
 const nativeDomCapture = source.match(/^const __krrNativeDom = globalThis\.__krr_dom;$/m)?.[0];
+const lifecycleCheckpoint = source.match(
+  /^const __krrLifecycleCheckpoint = Promise\.resolve\.bind\(Promise\);$/m,
+)?.[0];
 const listenerOptions = source.match(
   /^const __krrListenerOptions = \(options\) => \(\{[\s\S]*?^\}\);/m,
 )?.[0];
@@ -884,11 +887,37 @@ const createPendingImageDispatcher = (document, dispatchImage) =>
     `${dispatchPendingImages}\nreturn __krrDispatchPendingImages;`,
   )(document, dispatchImage);
 
-const createPendingLocalFrameDispatcher = (document) =>
+const createPendingLocalFrameDispatcher = (
+  document,
+  pagePromise = Promise,
+  checkpoint = Promise.resolve.bind(Promise),
+) =>
   new Function(
     "document",
+    "Promise",
+    "__krrLifecycleCheckpoint",
     `${dispatchLocalFrame}\n${dispatchPendingLocalFrames}\nreturn __krrDispatchPendingLocalFrames;`,
-  )(document);
+  )(document, pagePromise, checkpoint);
+
+test("空iframe再走査はページ側Promise置換に依存しない", async () => {
+  expect(lifecycleCheckpoint).toBeDefined();
+
+  const calls = [];
+  const pagePromise = {
+    resolve() {
+      calls.push("page-promise");
+      return Promise.resolve();
+    },
+  };
+  const document = { querySelectorAll: () => [] };
+  const dispatch = createPendingLocalFrameDispatcher(document, pagePromise, () => {
+    calls.push("lifecycle-checkpoint");
+    return Promise.resolve();
+  });
+
+  await dispatch(document);
+  expect(calls).toEqual(["lifecycle-checkpoint", "lifecycle-checkpoint"]);
+});
 
 test("前処理済み画像のload結果を再利用し、srcをscript-assignedした後は再検証する", () => {
   expect(seedPrevalidatedImageEvents).toBeDefined();
