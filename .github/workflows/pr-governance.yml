@@ -47,7 +47,6 @@ jobs:
       priority: ${{ steps.scope.outputs.priority }}
       pull_request_target_noop: ${{ steps.scope.outputs.pull_request_target_noop }}
       issue_event_noop: ${{ steps.scope.outputs.issue_event_noop }}
-      root_deadline_epoch: ${{ steps.scope.outputs.root_deadline_epoch }}
     steps:
       - name: Exclude unavailable fork sources before dispatcher lock
         id: scope
@@ -105,6 +104,8 @@ jobs:
                   output.write("priority=true\n")
                   output.write("pull_request_target_noop=false\n")
                   output.write("issue_event_noop=false\n")
+                  # Preserve the failure fixture's complete output contract;
+                  # the dispatcher refreshes this value after admission.
                   output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
               raise SystemExit(0)
 
@@ -176,22 +177,7 @@ jobs:
       default_head: ${{ steps.source.outputs.default_head }}
       reconcile: ${{ needs.preflight-workflow-run-source.outputs.reconcile }}
       priority: ${{ needs.preflight-workflow-run-source.outputs.priority }}
-      root_deadline_epoch: ${{ steps.admission.outputs.root_deadline_epoch }}
     steps:
-      - name: Start serialized reconciliation deadline after admission
-        # This job is the first holder of the shared dispatcher lane.  Do not
-        # carry a wall-clock budget minted by the unlocked preflight: a
-        # non-priority CI/release event may have waited behind a complete
-        # reconciliation before reaching this step.
-        id: admission
-        run: |
-          python3 - <<'PY'
-          import os
-          import time
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
-          PY
       - name: Bind resolver-failure barrier to trusted default workflow source
         id: source
         env:
@@ -447,8 +433,21 @@ jobs:
       reconcile: ${{ steps.targets.outputs.reconcile }}
       event_targets: ${{ steps.targets.outputs.event_targets }}
       priority_targets: ${{ steps.targets.outputs.priority_targets }}
-      root_deadline_epoch: ${{ needs.establish-resolver-failure-barrier.outputs.root_deadline_epoch }}
+      root_deadline_epoch: ${{ steps.admission.outputs.root_deadline_epoch }}
     steps:
+      - name: Start dispatcher deadline after serialized admission
+        # This job owns the shared dispatcher lane.  Mint the wall-clock
+        # budget only after GitHub has admitted it, so pending generations do
+        # not consume the reconciliation terminal window.
+        id: admission
+        run: |
+          python3 - <<'PY'
+          import os
+          import time
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+          PY
       - name: Resolve current open pull requests from the trusted default branch
         id: targets
         env:

@@ -139,6 +139,28 @@ mod tests {
     }
 
     #[test]
+    fn iframe_after_implicitly_closed_select_keeps_source_order() {
+        let document = HtmlDocument::parse(
+            r#"<select><input><iframe></iframe><script>afterSelect()</script><body onload="handler"><iframe></iframe>"#,
+        );
+
+        assert_eq!(document.body_onload_script_index(), Some(1));
+        assert_eq!(document.body_onload_source_order_index, Some(2));
+        assert_eq!(document.source_order.len(), 3);
+    }
+
+    #[test]
+    fn iframe_after_nested_select_keeps_source_order() {
+        let document = HtmlDocument::parse(
+            r#"<select><select><iframe></iframe><script>afterSelect()</script><body onload="handler"><iframe></iframe>"#,
+        );
+
+        assert_eq!(document.body_onload_script_index(), Some(1));
+        assert_eq!(document.body_onload_source_order_index, Some(2));
+        assert_eq!(document.source_order.len(), 3);
+    }
+
+    #[test]
     fn self_closing_foreign_template_does_not_hide_body_onload() {
         let document = HtmlDocument::parse(
             r#"<svg><template/></svg><body onload="handler"><script>bodyScript()</script>"#,

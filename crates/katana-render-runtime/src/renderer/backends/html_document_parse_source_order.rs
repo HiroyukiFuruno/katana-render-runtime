@@ -1,7 +1,9 @@
 use super::tree::WindowLoadHandlerObserver;
 #[path = "html_document_parse_source_order_events.rs"]
 mod events;
-use events::{SourceOrderEntry, finish_source_order, node_is_visible};
+use events::{
+    SourceOrderEntry, finish_source_order, iframe_count, last_iframe_is_in_select, node_is_visible,
+};
 use html5ever::{
     tokenizer::{Tag, TagKind, Token, TokenSink, TokenSinkResult},
     tree_builder::{TreeBuilder, TreeBuilderOpts, TreeSink},
@@ -19,7 +21,7 @@ pub(super) struct SourceOrderSink {
     window_load_handler_observer: RefCell<WindowLoadHandlerObserver>,
     body_onload_script_index: Cell<Option<usize>>,
     body_onload_source_order_index: Cell<Option<usize>>,
-    select_depth: Cell<usize>,
+    iframe_count: Cell<usize>,
     source_order: RefCell<Vec<SourceOrderEntry>>,
 }
 
@@ -32,7 +34,7 @@ impl SourceOrderSink {
             window_load_handler_observer: RefCell::new(WindowLoadHandlerObserver::default()),
             body_onload_script_index: Cell::new(None),
             body_onload_source_order_index: Cell::new(None),
-            select_depth: Cell::new(0),
+            iframe_count: Cell::new(0),
             source_order: RefCell::new(Vec::new()),
         }
     }
@@ -64,21 +66,19 @@ impl SourceOrderSink {
     }
 
     fn observe_source_order(&self, tag: &Tag) {
-        if tag.name.to_string().eq_ignore_ascii_case("select") {
-            match tag.kind {
-                TagKind::StartTag => self.select_depth.set(self.select_depth.get() + 1),
-                TagKind::EndTag => self
-                    .select_depth
-                    .set(self.select_depth.get().saturating_sub(1)),
-            }
-        }
         if tag.kind != TagKind::StartTag {
             return;
         }
-        if tag.name.to_string().eq_ignore_ascii_case("iframe") && self.select_depth.get() == 0 {
-            self.source_order
-                .borrow_mut()
-                .push(SourceOrderEntry::Iframe);
+        if tag.name.to_string().eq_ignore_ascii_case("iframe") {
+            let iframe_count = iframe_count(&self.tree_builder.sink.document);
+            if iframe_count > self.iframe_count.get() {
+                self.iframe_count.set(iframe_count);
+                if !last_iframe_is_in_select(&self.tree_builder.sink.document) {
+                    self.source_order
+                        .borrow_mut()
+                        .push(SourceOrderEntry::Iframe);
+                }
+            }
         }
         self.observe_window_load_handler(tag);
     }

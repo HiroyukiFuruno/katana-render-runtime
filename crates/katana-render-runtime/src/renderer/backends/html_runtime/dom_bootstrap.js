@@ -669,6 +669,13 @@ const __krrDispatchElementPhase = (target, event, capture, phase) => {
     }
   }
 };
+const __krrThrowDeferredListenerError = (event) => {
+  if (!event.__krrHasListenerError) return;
+  const error = event.__krrListenerError;
+  delete event.__krrListenerError;
+  delete event.__krrHasListenerError;
+  throw error;
+};
 const __krrDispatchElementEvent = (target, event) => {
   __krrBeginDispatch(target, event);
   try {
@@ -692,6 +699,7 @@ const __krrDispatchElementEvent = (target, event) => {
         if (event.__krrPropagationStopped) break;
       }
     }
+    __krrThrowDeferredListenerError(event);
     return event;
   } finally {
     __krrEndDispatch(event);

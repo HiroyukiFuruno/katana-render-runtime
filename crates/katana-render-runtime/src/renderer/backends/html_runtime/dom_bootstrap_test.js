@@ -37,6 +37,19 @@ const dispatchHandler = source.match(
 const dispatchTargetPhase = source.match(
   /^const __krrDispatchTargetPhase = \(target, event, capture, phase(?:, deferListenerError = false)?\) => \{[\s\S]*?^\};/m,
 )?.[0];
+const dispatchElementPhase = source.match(
+  /^const __krrDispatchElementPhase = \(target, event, capture, phase\) => \{[\s\S]*?^\};/m,
+)?.[0];
+const dispatchElementEvent = source.match(
+  /^const __krrDispatchElementEvent = \(target, event\) => \{[\s\S]*?^\};/m,
+)?.[0];
+const beginDispatch = source.match(
+  /^const __krrBeginDispatch = \(target, event\) => \{[\s\S]*?^\};/m,
+)?.[0];
+const endDispatch = source.match(/^const __krrEndDispatch = \(event\) => \{[\s\S]*?^\};/m)?.[0];
+const throwDeferredListenerError = source.match(
+  /^const __krrThrowDeferredListenerError = \(event\) => \{[\s\S]*?^\};/m,
+)?.[0];
 const dispatchImageLoad = source.match(
   /^const __krrDispatchImageLoad = \(image\) => \{[\s\S]*?^\};/m,
 )?.[0];
@@ -748,3 +761,72 @@ test("DOMContentLoaded listenerの例外後も後続listenerとproperty handler�
   expect(() => dispatch(target, event, false, 2)).toThrow("listener failure");
   expect(order).toEqual(["first", "second", "property"]);
 });
+
+test.each(["DOMContentLoaded", "load"])(
+  "%sのcapture listenerがstopImmediatePropagationしてもdeferred exceptionを再送出する",
+  (type) => {
+    expect(dispatchElementPhase).toBeDefined();
+    expect(dispatchElementEvent).toBeDefined();
+    expect(beginDispatch).toBeDefined();
+    expect(endDispatch).toBeDefined();
+
+    const pageGlobal = { __krrNodeId: "window" };
+    const pageDocument = { __krrNodeId: "document" };
+    const target = type === "load" ? pageGlobal : pageDocument;
+    const listeners = new WeakMap([
+      [
+        pageGlobal,
+        new Map([
+          [
+            type,
+            [
+              {
+                callback(event) {
+                  event.stopImmediatePropagation();
+                  throw new Error(`${type} capture failure`);
+                },
+                capture: true,
+                once: false,
+                passive: false,
+              },
+            ],
+          ],
+        ]),
+      ],
+    ]);
+    class LifecycleEvent {
+      constructor(eventType) {
+        this.type = eventType;
+        this.bubbles = false;
+        this.cancelable = false;
+        this.__krrImmediatePropagationStopped = false;
+        this.__krrPropagationStopped = false;
+      }
+      stopImmediatePropagation() {
+        this.__krrImmediatePropagationStopped = true;
+        this.__krrPropagationStopped = true;
+      }
+    }
+    Object.assign(LifecycleEvent, { CAPTURING_PHASE: 1, AT_TARGET: 2, BUBBLING_PHASE: 3 });
+    const dispatch = new Function(
+      "window",
+      "document",
+      "Event",
+      "__krrNativeDom",
+      "__krrElement",
+      "__krrEventTargetListeners",
+      "__krrSyncEventTarget",
+      `${dispatchListenerEntry}\n${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\n${dispatchElementPhase}\n${beginDispatch}\n${endDispatch}\n${throwDeferredListenerError}\n${dispatchElementEvent}\nreturn __krrDispatchElementEvent;`,
+    )(
+      pageGlobal,
+      pageDocument,
+      LifecycleEvent,
+      (operation, nodeId) => (operation === "eventPath" ? [nodeId] : null),
+      (nodeId) => ({ window: pageGlobal, document: pageDocument })[nodeId],
+      listeners,
+      () => {},
+    );
+
+    expect(() => dispatch(target, new LifecycleEvent(type))).toThrow(`${type} capture failure`);
+  },
+);
