@@ -54,12 +54,14 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         head_sha: object = HEAD,
         head_repo: object = None,
         base_repo: object | None = None,
+        draft: object = False,
     ) -> dict[str, object]:
         if head_repo is None:
             head_repo = {"id": REPOSITORY_ID, "full_name": REPOSITORY}
         return {
             "number": number,
             "state": state,
+            "draft": draft,
             "base": {"ref": base_ref, "sha": base_sha, "repo": base_repo or {"id": REPOSITORY_ID, "full_name": REPOSITORY}},
             "head": {"sha": head_sha, "repo": head_repo},
         }
@@ -253,7 +255,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         self.assertEqual(result["reconcile"], "true")
         self.assertEqual(result["priority"], "false")
         self.assertEqual(result["sensor_reservation"], "false")
-        self.assertEqual(result["sensor_run_id"], "0")
+        self.assertEqual(result["sensor_run_ids"], "[]")
 
     def test_active_sensor_serializes_a_relevant_direct_event(self) -> None:
         sensor_endpoint = (
@@ -281,12 +283,83 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         result = self.execute(responses={
             PR_ENDPOINT: [self.pull(state="closed"), self.pull(state="open")],
             sensor_endpoint: [active_sensor],
+            f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?status=in_progress&per_page=100&page=1": [{"total_count": 0, "workflow_runs": []}],
         }, direct_priority_fence=True)
         self.assertEqual(result["valid"], "true")
         self.assertEqual(result["reconcile"], "true")
         self.assertEqual(result["priority"], "true")
         self.assertEqual(result["sensor_reservation"], "true")
-        self.assertEqual(result["sensor_run_id"], "17")
+        self.assertEqual(result["sensor_run_ids"], "[17]")
+
+    def test_all_in_scope_sensors_are_reserved(self) -> None:
+        sensor_endpoint = (
+            f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+            "status=queued&per_page=100&page=1"
+        )
+        active = {
+            "total_count": 2,
+            "workflow_runs": [{
+                "name": "PR governance review sensor", "event": "pull_request_review",
+                "status": "queued", "id": 17, "run_attempt": 1,
+                "path": ".github/workflows/pr-governance-review-events.yml",
+                "repository": self.repository(), "head_repository": self.repository(),
+                "pull_requests": [{"number": NUMBER, "base": {"ref": "master", "repo": self.repository()}, "head": {"sha": HEAD, "repo": self.repository()}}],
+            }, {
+                "name": "PR governance review sensor", "event": "pull_request_review",
+                "status": "queued", "id": 18, "run_attempt": 1,
+                "path": ".github/workflows/pr-governance-review-events.yml",
+                "repository": self.repository(), "head_repository": self.repository(),
+                "pull_requests": [{"number": 1000, "base": {"ref": "master", "repo": self.repository()}, "head": {"sha": HEAD, "repo": self.repository()}}],
+            }],
+        }
+        result = self.execute(responses={
+            PR_ENDPOINT: [self.pull(state="closed"), self.pull(state="open")],
+            sensor_endpoint: [active],
+            f"repos/{REPOSITORY}/pulls/1000": [self.pull(number=1000)],
+            f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?status=in_progress&per_page=100&page=1": [{"total_count": 0, "workflow_runs": []}],
+        }, direct_priority_fence=True)
+        self.assertEqual(result["valid"], "true")
+        self.assertEqual(result["sensor_reservation"], "true")
+        self.assertEqual(result["sensor_run_ids"], "[17,18]")
+
+    def test_verified_out_of_scope_sensor_is_skipped(self) -> None:
+        sensor_endpoint = (
+            f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+            "status=queued&per_page=100&page=1"
+        )
+        foreign = {"id": 202, "full_name": "fork/repository"}
+        sensor = {
+            "total_count": 1,
+            "workflow_runs": [{
+                "name": "PR governance review sensor", "event": "pull_request_review",
+                "status": "queued", "id": 17, "run_attempt": 1,
+                "path": ".github/workflows/pr-governance-review-events.yml",
+                "repository": self.repository(), "head_repository": foreign,
+                "pull_requests": [{"number": NUMBER, "base": {"ref": "master", "repo": self.repository()}, "head": {"sha": HEAD, "repo": foreign}}],
+            }],
+        }
+        result = self.execute(responses={
+            PR_ENDPOINT: [self.pull(state="closed"), self.pull(state="open", head_repo=foreign)],
+            sensor_endpoint: [sensor],
+            f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?status=in_progress&per_page=100&page=1": [{"total_count": 0, "workflow_runs": []}],
+        }, direct_priority_fence=True)
+        self.assertEqual(result["valid"], "true")
+        self.assertEqual(result["sensor_reservation"], "false")
+        self.assertEqual(result["sensor_run_ids"], "[]")
+
+    def test_malformed_second_sensor_fails_closed(self) -> None:
+        sensor_endpoint = (
+            f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+            "status=queued&per_page=100&page=1"
+        )
+        result = self.execute(responses={
+            PR_ENDPOINT: [self.pull(state="closed"), self.pull(state="open")],
+            sensor_endpoint: [{"total_count": 2, "workflow_runs": [
+                {"id": 17, "name": "PR governance review sensor", "event": "pull_request_review", "status": "queued", "run_attempt": 1, "path": ".github/workflows/pr-governance-review-events.yml", "repository": self.repository(), "pull_requests": []},
+                {"id": "bad"},
+            ]}],
+        }, direct_priority_fence=True)
+        self.assertEqual(result["valid"], "false")
 
     def test_absent_sensor_keeps_direct_event_preemption(self) -> None:
         sensor_endpoint = (
@@ -302,7 +375,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         self.assertEqual(result["reconcile"], "true")
         self.assertEqual(result["priority"], "true")
         self.assertEqual(result["sensor_reservation"], "false")
-        self.assertEqual(result["sensor_run_id"], "0")
+        self.assertEqual(result["sensor_run_ids"], "[]")
 
     def test_malformed_pr_fields_cannot_be_mistaken_for_a_noop(self) -> None:
         malformed = (

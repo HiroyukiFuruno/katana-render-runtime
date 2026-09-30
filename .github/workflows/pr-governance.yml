@@ -43,7 +43,7 @@ jobs:
       valid: ${{ steps.scope.outputs.valid }}
       priority: ${{ steps.scope.outputs.priority }}
       sensor_reservation: ${{ steps.scope.outputs.sensor_reservation }}
-      sensor_run_id: ${{ steps.scope.outputs.sensor_run_id }}
+      sensor_run_ids: ${{ steps.scope.outputs.sensor_run_ids }}
       pull_request_target_noop: ${{ steps.scope.outputs.pull_request_target_noop }}
       issue_event_noop: ${{ steps.scope.outputs.issue_event_noop }}
       root_deadline_epoch: ${{ steps.scope.outputs.root_deadline_epoch }}
@@ -103,6 +103,8 @@ jobs:
                   output.write("reconcile=true\n")
                   output.write("valid=false\n")
                   output.write("priority=true\n")
+                  output.write("sensor_reservation=false\n")
+                  output.write("sensor_run_ids=[]\n")
                   output.write("pull_request_target_noop=false\n")
                   output.write("issue_event_noop=false\n")
                   output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
@@ -149,13 +151,86 @@ jobs:
               arm_issue_source_failure("Trusted governance source is invalid.")
           exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
           PY
+  arm-reserved-sensor-barrier:
+    # This App-bound required context must be active before a direct mutation
+    # waits outside the dispatcher lane.  Taking that lane here would cancel
+    # the sensor whose latch the reservation is preserving.
+    name: Arm barrier before reserved review sensors
+    needs: preflight-workflow-run-source
+    if: ${{ needs.preflight-workflow-run-source.outputs.sensor_reservation == 'true' && needs.preflight-workflow-run-source.outputs.valid == 'true' && needs.preflight-workflow-run-source.outputs.reconcile == 'true' }}
+    environment: pr-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Create reserved barrier branch-protection token
+        id: protection-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: write
+      - name: Activate reserved sensor barrier from trusted source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADMIN_TOKEN: ${{ steps.protection-token.outputs.token }}
+          CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          import subprocess
+
+          repository = os.environ.get("GITHUB_REPOSITORY", "")
+          workflow_ref = os.environ.get("WORKFLOW_REF", "")
+          workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+          prefix = f"{repository}/.github/workflows/pr-governance.yml@refs/heads/"
+          if (
+              re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+              or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+              or not workflow_ref.startswith(prefix)
+          ):
+              raise SystemExit("Reserved barrier workflow source is invalid.")
+          branch = workflow_ref[len(prefix):]
+          if (
+              re.fullmatch(r"[A-Za-z0-9._/-]+", branch) is None
+              or branch in {".", ".."}
+              or branch.startswith("/")
+              or "//" in branch
+              or any(part in {"", ".", ".."} for part in branch.split("/"))
+          ):
+              raise SystemExit("Reserved barrier workflow source is invalid.")
+          result = subprocess.run(
+              ["gh", "api", "--hostname", "github.com", f"repos/{repository}/contents/scripts/review/pr_governance_resolver_barrier.py?ref={workflow_sha}"],
+              capture_output=True, text=True, check=False, timeout=20,
+          )
+          if result.returncode != 0:
+              raise SystemExit("Unable to read reserved barrier source.")
+          try:
+              content = json.loads(result.stdout)
+              encoded = content.get("content") if isinstance(content, dict) else None
+              program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict") if isinstance(encoded, str) else ""
+          except (ValueError, UnicodeError, json.JSONDecodeError) as error:
+              raise SystemExit("Reserved barrier source is invalid.") from error
+          if not program or "\x00" in program:
+              raise SystemExit("Reserved barrier source is invalid.")
+          os.environ["DEFAULT_BRANCH"] = branch
+          exec(compile(program, f"reserved-barrier@{workflow_sha}", "exec"), {"__name__": "__main__"})
+          PY
   wait-for-active-review-sensor:
     # A direct event must not replace the pending requested/in-progress
     # sensor dispatcher. The sensor itself waits for its bounded writer, so a
     # terminal source run proves that reservation has been released.
     name: Preserve pending review sensor before direct dispatch
-    needs: preflight-workflow-run-source
-    if: ${{ needs.preflight-workflow-run-source.outputs.sensor_reservation == 'true' && needs.preflight-workflow-run-source.outputs.valid == 'true' }}
+    needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier]
+    if: ${{ needs.preflight-workflow-run-source.outputs.sensor_reservation == 'true' && needs.preflight-workflow-run-source.outputs.valid == 'true' && needs.arm-reserved-sensor-barrier.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 94
     permissions:
@@ -164,7 +239,7 @@ jobs:
       - name: Await the captured review sensor terminal state
         env:
           GH_TOKEN: ${{ github.token }}
-          SENSOR_RUN_ID: ${{ needs.preflight-workflow-run-source.outputs.sensor_run_id }}
+          SENSOR_RUN_IDS: ${{ needs.preflight-workflow-run-source.outputs.sensor_run_ids }}
         run: |
           python3 - <<'PY'
           import json
@@ -174,11 +249,24 @@ jobs:
           import time
 
           repository = os.environ.get("GITHUB_REPOSITORY", "")
-          run_id = os.environ.get("SENSOR_RUN_ID", "")
+          raw_run_ids = os.environ.get("SENSOR_RUN_IDS", "")
           repository_pattern = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
           sha_pattern = re.compile(r"[0-9a-fA-F]{40}")
-          if repository_pattern.fullmatch(repository) is None or re.fullmatch(r"[1-9][0-9]*", run_id) is None:
+          if repository_pattern.fullmatch(repository) is None:
               raise SystemExit("Captured review sensor identity is invalid.")
+          try:
+              decoded_run_ids = json.loads(raw_run_ids)
+          except json.JSONDecodeError as error:
+              raise SystemExit("Captured review sensor identity is invalid.") from error
+          if (
+              not isinstance(decoded_run_ids, list)
+              or not decoded_run_ids
+              or len(decoded_run_ids) > 200
+              or any(type(identifier) is not int or identifier < 1 for identifier in decoded_run_ids)
+              or decoded_run_ids != sorted(set(decoded_run_ids))
+          ):
+              raise SystemExit("Captured review sensor identity is invalid.")
+          pending_ids = set(decoded_run_ids)
           expected_path = ".github/workflows/pr-governance-review-events.yml"
           allowed_events = {"pull_request", "pull_request_review", "pull_request_review_comment"}
 
@@ -286,7 +374,8 @@ jobs:
               ):
                   raise SystemExit("Captured review sensor changed identity.")
 
-          def active_successor(excluded_identifier):
+          def active_successors(excluded_identifiers):
+              successors = set()
               for status in ("queued", "in_progress"):
                   value = api(
                       f"repos/{repository}/actions/workflows/pr-governance-review-events.yml/runs?status={status}&per_page=100&page=1",
@@ -300,26 +389,32 @@ jobs:
                       identifier = candidate.get("id") if isinstance(candidate, dict) else None
                       if type(identifier) is not int or identifier < 1:
                           raise SystemExit("Active review sensor list is invalid.")
-                      if identifier == excluded_identifier:
+                      if identifier in excluded_identifiers:
                           continue
                       validate_sensor(candidate, identifier)
-                      return identifier
-              raise SystemExit("Cancelled review sensor has no active local successor.")
+                      successors.add(identifier)
+              return successors
 
-          while True:
-              run = api(f"repos/{repository}/actions/runs/{run_id}", "Unable to re-read the captured review sensor.")
-              validate_sensor(run, int(run_id))
-              status = run.get("status")
-              if status == "completed":
-                  if run.get("conclusion") == "success":
-                      raise SystemExit(0)
-                  if run.get("conclusion") != "cancelled":
-                      raise SystemExit("Captured review sensor did not complete successfully.")
-                  run_id = str(active_successor(int(run_id)))
-                  continue
-              if status not in {"queued", "in_progress"}:
-                  raise SystemExit("Captured review sensor state is invalid.")
-              time.sleep(5)
+          while pending_ids:
+              for run_id in tuple(sorted(pending_ids)):
+                  run = api(f"repos/{repository}/actions/runs/{run_id}", "Unable to re-read the captured review sensor.")
+                  validate_sensor(run, run_id)
+                  status = run.get("status")
+                  if status == "completed":
+                      if run.get("conclusion") == "success":
+                          pending_ids.remove(run_id)
+                          continue
+                      if run.get("conclusion") != "cancelled":
+                          raise SystemExit("Captured review sensor did not complete successfully.")
+                      pending_ids.remove(run_id)
+                      pending_ids.update(active_successors(pending_ids))
+                      if not pending_ids:
+                          raise SystemExit("Cancelled review sensor has no active local successor.")
+                      continue
+                  if status not in {"queued", "in_progress"}:
+                      raise SystemExit("Captured review sensor state is invalid.")
+              if pending_ids:
+                  time.sleep(5)
           PY
   establish-resolver-failure-barrier:
     # `resolve_event` has to inspect the mutable open-PR snapshot before it
@@ -328,8 +423,8 @@ jobs:
     # cancellation can then only leave this context required, never expose a
     # former trusted success.
     name: Establish resolver-failure merge barrier
-    needs: [preflight-workflow-run-source, wait-for-active-review-sensor]
-    if: ${{ always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ((github.event.workflow_run.name == 'PR governance review sensor' && (github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'pull_request_review' || github.event.workflow_run.event == 'pull_request_review_comment')) || ((github.event.workflow_run.name == 'CI' || github.event.workflow_run.name == 'release-preflight') && github.event.workflow_run.event == 'pull_request'))) }}
+    needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier, wait-for-active-review-sensor]
+    if: ${{ always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ((github.event.workflow_run.name == 'PR governance review sensor' && (github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'pull_request_review' || github.event.workflow_run.event == 'pull_request_review_comment')) || ((github.event.workflow_run.name == 'CI' || github.event.workflow_run.name == 'release-preflight') && github.event.workflow_run.event == 'pull_request'))) }}
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -513,12 +608,23 @@ jobs:
       - name: Fail closed after classification barrier activation
         env:
           EVENT_SOURCE_VALID: ${{ needs.preflight-workflow-run-source.outputs.valid }}
+          SENSOR_RESERVATION: ${{ needs.preflight-workflow-run-source.outputs.sensor_reservation }}
+          RESERVED_BARRIER_RESULT: ${{ needs.arm-reserved-sensor-barrier.result }}
+          SENSOR_WAIT_RESULT: ${{ needs.wait-for-active-review-sensor.result }}
         run: |
           python3 - <<'PY'
           import os
 
           if os.environ.get("EVENT_SOURCE_VALID") != "true":
               raise SystemExit("Workflow_run governance source classification is invalid; barrier remains active.")
+          if (
+              os.environ.get("SENSOR_RESERVATION") == "true"
+              and (
+                  os.environ.get("RESERVED_BARRIER_RESULT") != "success"
+                  or os.environ.get("SENSOR_WAIT_RESULT") != "success"
+              )
+          ):
+              raise SystemExit("Reserved review sensor did not reach a safe terminal state; barrier remains active.")
           PY
 
       # The required App context is made merge-blocking before any marker
@@ -591,8 +697,8 @@ jobs:
 
   resolve_event:
     name: Resolve relevant governance event
-    needs: establish-resolver-failure-barrier
-    if: needs.establish-resolver-failure-barrier.outputs.reconcile == 'true'
+    needs: [establish-resolver-failure-barrier, wait-for-active-review-sensor]
+    if: ${{ needs.establish-resolver-failure-barrier.outputs.reconcile == 'true' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Direct PR/Issue mutations preempt the shared dispatcher lock; workflow_run

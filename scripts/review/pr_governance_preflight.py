@@ -22,7 +22,7 @@ issue_event_noop = False
 # behavior until the resolver has established its own target set.
 priority = True
 sensor_reservation = False
-sensor_run_id = 0
+sensor_run_ids = []
 
 def request(path):
     try:
@@ -637,8 +637,8 @@ pull_request_target_noop = event_name == "pull_request_target" and valid and not
 issue_event_noop = event_name in {"issues", "issue_comment"} and valid and not reconcile
 
 
-def active_local_review_sensor() -> int | None:
-    """Return whether a current local review sensor must retain its lane.
+def active_local_review_sensors() -> list[int] | None:
+    """Return every current latch-bearing local review sensor.
 
     A direct mutation may otherwise cancel an admitted sensor before its
     bounded writer publishes the Check Run required by the 95 minute latch.
@@ -650,6 +650,8 @@ def active_local_review_sensor() -> int | None:
         return None
     default_branch = current_repository[2]
     allowed_events = {"pull_request", "pull_request_review", "pull_request_review_comment"}
+    identifiers = []
+    seen_identifiers = set()
     for status in ("queued", "in_progress"):
         listed = request(
             f"repos/{repository}/actions/workflows/pr-governance-review-events.yml/runs?"
@@ -663,10 +665,10 @@ def active_local_review_sensor() -> int | None:
             pulls = run.get("pull_requests") if isinstance(run, dict) else None
             run_id = run.get("id") if isinstance(run, dict) else None
             run_repository = run.get("repository") if isinstance(run, dict) else None
-            head_repository = run.get("head_repository") if isinstance(run, dict) else None
             if (
                 not isinstance(run, dict)
                 or type(run_id) is not int or run_id < 1
+                or run_id in seen_identifiers
                 or run.get("name") != "PR governance review sensor"
                 or run.get("event") not in allowed_events
                 or run.get("status") != status
@@ -674,8 +676,6 @@ def active_local_review_sensor() -> int | None:
                 or run.get("path") != expected_path
                 or not isinstance(run_repository, dict)
                 or run_repository.get("full_name") != repository
-                or not isinstance(head_repository, dict)
-                or head_repository.get("full_name") != repository
                 or not isinstance(pulls, list)
                 or len(pulls) != 1
             ):
@@ -689,11 +689,9 @@ def active_local_review_sensor() -> int | None:
             head_sha = head.get("sha") if isinstance(head, dict) else None
             if (
                 type(number) is not int or number < 1
-                or not isinstance(base, dict) or base.get("ref") != default_branch
-                or not isinstance(head, dict) or not isinstance(head_sha, str)
-                or re.fullmatch(r"[0-9a-fA-F]{40}", head_sha) is None
-                or not isinstance(base_repository, dict) or base_repository.get("full_name") != repository
-                or not isinstance(head_pull_repository, dict) or head_pull_repository.get("full_name") != repository
+                or not isinstance(base, dict) or not isinstance(head, dict)
+                or not isinstance(base_repository, dict) or not isinstance(head_pull_repository, dict)
+                or not isinstance(head_sha, str) or re.fullmatch(r"[0-9a-fA-F]{40}", head_sha) is None
             ):
                 return None
             current = request(f"repos/{repository}/pulls/{number}")
@@ -701,16 +699,26 @@ def active_local_review_sensor() -> int | None:
             current_head = current.get("head") if isinstance(current, dict) else None
             current_base_repository = current_base.get("repo") if isinstance(current_base, dict) else None
             current_head_repository = current_head.get("repo") if isinstance(current_head, dict) else None
-            if (
-                not isinstance(current, dict) or current.get("number") != number or current.get("state") != "open"
-                or not isinstance(current_base, dict) or current_base.get("ref") != default_branch
-                or not isinstance(current_head, dict) or current_head.get("sha") != head_sha
-                or not isinstance(current_base_repository, dict) or current_base_repository.get("full_name") != repository
-                or not isinstance(current_head_repository, dict) or current_head_repository.get("full_name") != repository
-            ):
+            if not isinstance(current, dict) or current.get("number") != number or not isinstance(current_base, dict) or not isinstance(current_head, dict) or not isinstance(current_base_repository, dict) or not isinstance(current_head_repository, dict):
                 return None
-            return run_id
-    return 0
+            # Sensor workflows start before their own scope gate.  A verified
+            # fork, non-default, Draft, closed, or superseded source has no
+            # latch to preserve and must not poison an unrelated mutation.
+            if (
+                current.get("state") != "open"
+                or current.get("draft") is not False
+                or base.get("ref") != current_base.get("ref")
+                or head.get("sha") != current_head.get("sha")
+                or current_base.get("ref") != default_branch
+                or base_repository.get("full_name") != repository
+                or current_base_repository.get("full_name") != repository
+                or head_pull_repository.get("full_name") != current_head_repository.get("full_name")
+                or current_head_repository.get("full_name") != repository
+            ):
+                continue
+            seen_identifiers.add(run_id)
+            identifiers.append(run_id)
+    return sorted(identifiers)
 
 
 # A priority direct event retains its low-latency preemption when no sensor is
@@ -722,21 +730,21 @@ if (
     and valid and reconcile and priority
     and event_name in {"pull_request_target", "issues", "issue_comment"}
 ):
-    sensor_active = active_local_review_sensor()
-    if sensor_active is None:
+    active_sensors = active_local_review_sensors()
+    if active_sensors is None:
         valid = False
-    elif sensor_active:
+    elif active_sensors:
         # Preserve the sensor's pending dispatcher before this direct event
         # reaches the shared group; GitHub otherwise replaces that slot.
         sensor_reservation = True
-        sensor_run_id = sensor_active
+        sensor_run_ids = active_sensors
 
 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
     output.write("reconcile=" + ("true" if reconcile else "false") + "\n")
     output.write("valid=" + ("true" if valid else "false") + "\n")
     output.write("priority=" + ("true" if priority else "false") + "\n")
     output.write("sensor_reservation=" + ("true" if sensor_reservation else "false") + "\n")
-    output.write(f"sensor_run_id={sensor_run_id}\n")
+    output.write("sensor_run_ids=" + json.dumps(sensor_run_ids, separators=(",", ":")) + "\n")
     output.write("pull_request_target_noop=" + ("true" if pull_request_target_noop else "false") + "\n")
     output.write("issue_event_noop=" + ("true" if issue_event_noop else "false") + "\n")
     output.write(f"root_deadline_epoch={root_deadline_epoch}\n")

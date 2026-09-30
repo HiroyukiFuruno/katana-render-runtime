@@ -924,7 +924,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
 
         preflight = self.workflow[
             self.workflow.index("  preflight-workflow-run-source:"):
-            self.workflow.index("  establish-resolver-failure-barrier:")
+            self.workflow.index("  arm-reserved-sensor-barrier:")
         ]
         self.assertIn("name: Preflight workflow_run governance source", preflight)
         self.assertIn("pull_request_target_noop: ${{ steps.scope.outputs.pull_request_target_noop }}", preflight)
@@ -2571,7 +2571,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         self.assertIsNotNone(scope_match); assert scope_match is not None
         preflight = self.workflow[
             self.workflow.index("  preflight-workflow-run-source:"):
-            self.workflow.index("  establish-resolver-failure-barrier:")
+            self.workflow.index("  arm-reserved-sensor-barrier:")
         ]
         self.assertNotIn("environment:", preflight)
         self.assertNotIn("secrets.", preflight)
@@ -2584,20 +2584,20 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             self.workflow.index("  establish-resolver-failure-barrier:"):
             self.workflow.index("  resolve_event:")
         ]
-        self.assertIn("needs: [preflight-workflow-run-source, wait-for-active-review-sensor]", establish)
+        self.assertIn("needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier, wait-for-active-review-sensor]", establish)
         self.assertIn("needs.preflight-workflow-run-source.outputs.reconcile == 'true'", establish)
         self.assertIn("needs.preflight-workflow-run-source.outputs.valid", establish)
         self.assertLess(establish.index("concurrency:"), establish.index("Create resolver-failure barrier marker write token"))
         self.assertLess(establish.index("Activate resolver-failure merge barrier"), establish.index("Fail closed after classification barrier activation"))
         self.assertIn("EVENT_SOURCE_VALID: ${{ needs.preflight-workflow-run-source.outputs.valid }}", establish)
         self.assertEqual(preflight.count("WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}"), 1)
-        self.assertIn("needs: establish-resolver-failure-barrier", self.workflow[self.workflow.index("  resolve_event:"):])
+        self.assertIn("needs: [establish-resolver-failure-barrier, wait-for-active-review-sensor]", self.workflow[self.workflow.index("  resolve_event:"):])
         self.assertIn("needs: resolve_event", self.workflow[self.workflow.index("  reconcile-all-open:"):])
         wait = self.workflow[
             self.workflow.index("  wait-for-active-review-sensor:"):
             self.workflow.index("  establish-resolver-failure-barrier:")
         ]
-        self.assertIn("needs: preflight-workflow-run-source", wait)
+        self.assertIn("needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier]", wait)
         self.assertNotIn("concurrency:", wait)
         self.assertIn('value.get("path") != expected_path', wait)
         self.assertIn('value.get("event") not in allowed_events', wait)
@@ -2605,8 +2605,10 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         self.assertIn('status in {"queued", "in_progress"} and conclusion is not None', wait)
         self.assertIn('run.get("conclusion") == "success"', wait)
         self.assertIn('run.get("conclusion") != "cancelled"', wait)
-        self.assertIn("def active_successor(excluded_identifier):", wait)
-        self.assertIn("run_id = str(active_successor(int(run_id)))", wait)
+        self.assertIn("decoded_run_ids = json.loads(raw_run_ids)", wait)
+        self.assertIn("pending_ids = set(decoded_run_ids)", wait)
+        self.assertIn("def active_successors(excluded_identifiers):", wait)
+        self.assertIn("pending_ids.update(active_successors(pending_ids))", wait)
         self.assertIn("Cancelled review sensor has no active local successor.", wait)
         self.assertIn("Captured review sensor did not complete successfully.", wait)
         self.assertIn("Unable to re-read an active review sensor.", wait)
@@ -4320,8 +4322,8 @@ raise SystemExit(91)
         )
         self.assertIsNotNone(resolver); self.assertIsNotNone(activate); self.assertIsNotNone(source); self.assertIsNotNone(verify_source); self.assertIsNotNone(marker)
         assert resolver is not None and activate is not None and source is not None and verify_source is not None and marker is not None
-        self.assertIn("needs: establish-resolver-failure-barrier", self.workflow)
-        self.assertIn("if: needs.resolve_event.outputs.reconcile == 'true'", self.workflow)
+        self.assertIn("needs: [establish-resolver-failure-barrier, wait-for-active-review-sensor]", self.workflow)
+        self.assertIn("if: ${{ needs.establish-resolver-failure-barrier.outputs.reconcile == 'true' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') }}", self.workflow)
         resolver_job = self.workflow[
             self.workflow.index("  resolve_event:"):
             self.workflow.index("  reconcile-all-open:")
@@ -4542,7 +4544,7 @@ raise SystemExit(91)
         self.assertIsNotNone(condition); assert condition is not None
         self.assertEqual(
             condition.group("value"),
-            "${{ always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ("
+            "${{ always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ("
             "(github.event.workflow_run.name == 'PR governance review sensor' && "
             "(github.event.workflow_run.event == 'pull_request' || "
             "github.event.workflow_run.event == 'pull_request_review' || "

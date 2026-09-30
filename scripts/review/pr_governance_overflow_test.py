@@ -166,7 +166,7 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         workflows = (
             # The two removed per-chunk history scans are replaced by the
             # single aggregate retained-history audit before invalidators.
-            ("dispatcher", self.dispatcher, 82),
+            ("dispatcher", self.dispatcher, 83),
             ("status writer", self.workflow, 2),
             ("review events", self.review_events, 1),
         )
@@ -270,7 +270,7 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         phase_seconds = (15 + 15 + 30 + 290) * 60
         self.assertLess(phase_seconds, 6 * 60 * 60)
         self.assertIn("root_deadline_epoch = int(time.time()) + 21_000", self.dispatcher)
-        self.assertEqual(self.dispatcher.count("timeout-minutes: 15"), 2)
+        self.assertEqual(self.dispatcher.count("timeout-minutes: 15"), 3)
         self.assertIn("timeout-minutes: 30", self.dispatcher)
         self.assertIn("timeout-minutes: 290", self.dispatcher)
         self.assertIn("The operational cap includes the whole job", self.dispatcher)
