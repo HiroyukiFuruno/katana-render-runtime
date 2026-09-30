@@ -419,12 +419,13 @@ jobs:
     if: needs.establish-resolver-failure-barrier.outputs.reconcile == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Keep target resolution in the same generation as its barrier. A
-    # non-priority CI/release source remains serialized without canceling a
-    # paced reconciliation; priority sources retain preemption.
+    # Keep target resolution in the same generation as its barrier. Every
+    # workflow_run is derived from an already-admitted generation, including
+    # priority review-sensor signals, so it must serialize rather than cancel
+    # that generation. Direct PR/issue mutations retain priority preemption.
     concurrency:
       group: pr-governance-dispatcher-${{ github.repository_id }}
-      cancel-in-progress: ${{ needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_run' && needs.establish-resolver-failure-barrier.outputs.priority == 'true' }}
     permissions:
       actions: read
       contents: read
