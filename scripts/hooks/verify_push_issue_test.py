@@ -883,6 +883,109 @@ class VerifyPushIssueTest(unittest.TestCase):
                 issue=self.issue(state="CLOSED"),
             )
 
+    def test_closed_release_reference_is_rejected_when_its_commit_is_active(self) -> None:
+        closed = self.issue(64, state="CLOSED")
+        with self.assertRaisesRegex(subject.ContractViolation, "重複"):
+            subject._effective_release_issue_numbers(
+                repository="HiroyukiFuruno/katana-render-runtime",
+                references_by_commit=[("a" * 40, {64})],
+                net_paths=["src/active.rs"],
+                issue_loader=lambda _number: closed,
+                commit_paths=lambda _sha: ["src/active.rs"],
+            )
+
+    def test_genuinely_obsolete_closed_release_reference_is_accepted(self) -> None:
+        closed = self.issue(64, state="CLOSED")
+        result = subject._effective_release_issue_numbers(
+            repository="HiroyukiFuruno/katana-render-runtime",
+            references_by_commit=[("a" * 40, {64})],
+            net_paths=["src/current.rs"],
+            issue_loader=lambda _number: closed,
+            commit_paths=lambda _sha: ["old/removed-workflow.yml"],
+        )
+        self.assertEqual(result, set())
+
+    def test_local_commit_path_proof_uses_real_git_history(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
+            old_path = repository / "old" / "obsolete.yml"
+            old_path.parent.mkdir()
+            old_path.write_text("baseline\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
+            old_path.write_text("obsolete change\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "old governance\n\nRefs #64"], cwd=repository, check=True)
+            commit = subject._run_git(repository, "rev-parse", "HEAD")
+            self.assertEqual(subject._local_commit_paths(repository, commit), ["old/obsolete.yml"])
+            (repository / "src").mkdir()
+            (repository / "src" / "active.rs").write_text("active\n", encoding="utf-8")
+            old_path.write_text("baseline\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "active change\n\nRefs #65"], cwd=repository, check=True)
+            net_paths = subject.parse_name_status_paths(
+                subject._run_git(repository, "diff", "--name-status", "-z", "--find-renames", "HEAD~2...HEAD")
+            )
+            active_commit = subject._run_git(repository, "rev-parse", "HEAD")
+            result = subject._effective_release_issue_numbers(
+                repository="HiroyukiFuruno/katana-render-runtime",
+                references_by_commit=[(commit, {64}), (active_commit, {65})],
+                net_paths=net_paths,
+                issue_loader=lambda number: self.issue(number, state="CLOSED" if number == 64 else "OPEN"),
+                commit_paths=lambda sha: subject._local_commit_paths(repository, sha),
+            )
+            self.assertEqual(result, {65})
+
+    def test_closed_release_reference_fails_closed_on_missing_or_truncated_provenance(self) -> None:
+        closed = self.issue(64, state="CLOSED")
+        for paths in ([],):
+            with self.subTest(paths=paths), self.assertRaisesRegex(subject.ContractViolation, "証跡不足"):
+                subject._effective_release_issue_numbers(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    references_by_commit=[("a" * 40, {64})],
+                    net_paths=["src/current.rs"],
+                    issue_loader=lambda _number: closed,
+                    commit_paths=lambda _sha: paths,
+                )
+        with self.assertRaisesRegex(subject.ContractViolation, "provenance incomplete"):
+            subject._effective_release_issue_numbers(
+                repository="HiroyukiFuruno/katana-render-runtime",
+                references_by_commit=[("a" * 40, {64})],
+                net_paths=["src/current.rs"],
+                issue_loader=lambda _number: closed,
+                commit_paths=lambda _sha: (_ for _ in ()).throw(
+                    subject.ContractViolation("provenance incomplete")
+                ),
+            )
+
+    def test_closed_release_reference_intersects_renamed_source_path(self) -> None:
+        closed = self.issue(64, state="CLOSED")
+        renamed = subject.parse_name_status_paths("R100\0old/name.rs\0new/name.rs\0")
+        with self.assertRaisesRegex(subject.ContractViolation, "重複"):
+            subject._effective_release_issue_numbers(
+                repository="HiroyukiFuruno/katana-render-runtime",
+                references_by_commit=[("a" * 40, {64})],
+                net_paths=renamed,
+                issue_loader=lambda _number: closed,
+                commit_paths=lambda _sha: ["old/name.rs"],
+            )
+
+    def test_merge_commit_closed_reference_fails_conservatively(self) -> None:
+        closed = self.issue(64, state="CLOSED")
+        with self.assertRaisesRegex(subject.ContractViolation, "merge"):
+            subject._effective_release_issue_numbers(
+                repository="HiroyukiFuruno/katana-render-runtime",
+                references_by_commit=[("a" * 40, {64})],
+                net_paths=["src/current.rs"],
+                issue_loader=lambda _number: closed,
+                commit_paths=lambda _sha: (_ for _ in ()).throw(
+                    subject.ContractViolation("merge commitのprovenanceを判定できません")
+                ),
+            )
+
     def test_lockfile_only_transitive_update_still_requires_dependency_evidence(self) -> None:
         with self.assertRaisesRegex(subject.ContractViolation, "依存更新証跡"):
             self.validate(changed_paths=["Cargo.lock"])
@@ -1258,6 +1361,51 @@ class VerifyPushIssueTest(unittest.TestCase):
             )
         self.assertEqual(len(calls), 2)
 
+    def test_release_pr_range_accepts_obsolete_closed_reference_with_open_issue(self) -> None:
+        repository = "HiroyukiFuruno/katana-render-runtime"
+        base_sha, obsolete_sha, head_sha = "a" * 40, "c" * 40, "b" * 40
+        main_compare = {
+            "base_commit": {"sha": base_sha},
+            "merge_base_commit": {"sha": base_sha},
+            "status": "ahead",
+            "ahead_by": 2,
+            "behind_by": 0,
+            "total_commits": 2,
+            "commits": [
+                {"sha": obsolete_sha, "commit": {"message": "old change\n\nRefs #64"}},
+                {"sha": head_sha, "commit": {"message": "current change\n\nRefs #65"}},
+            ],
+            "files": [{"filename": "src/active.rs"}],
+        }
+        historical_compare = {
+            "base_commit": {"sha": base_sha},
+            "files": [{"filename": "old/obsolete.yml"}],
+        }
+
+        def gh_json(*arguments: str) -> object:
+            endpoint = arguments[0]
+            if endpoint == f"repos/{repository}/compare/{base_sha}...{head_sha}":
+                return main_compare
+            if endpoint == f"repos/{repository}/git/commits/{obsolete_sha}":
+                return {"sha": obsolete_sha, "parents": [{"sha": base_sha}]}
+            if endpoint == f"repos/{repository}/compare/{base_sha}...{obsolete_sha}":
+                return historical_compare
+            raise AssertionError(f"unexpected GitHub API request: {arguments}")
+
+        def issue_loader(number: int) -> subject.Issue:
+            return self.issue(number, state="CLOSED" if number == 64 else "OPEN")
+
+        with patch.object(subject, "_gh_json", side_effect=gh_json):
+            references = subject.validate_pr_range(
+                repository=repository,
+                pr_number=99,
+                base_sha=base_sha,
+                head_sha=head_sha,
+                branch="release/v0.4.22",
+                issue_loader=issue_loader,
+            )
+        self.assertEqual(references, {65})
+
     def test_pr_range_rejects_zero_referenced_issues(self) -> None:
         base_sha = "a" * 40
         head_sha = "b" * 40
@@ -1360,7 +1508,7 @@ class VerifyPushIssueTest(unittest.TestCase):
             "files": [{"filename": "Cargo.lock"}],
         }
         with patch.object(subject, "_gh_json", return_value=compare):
-            with self.assertRaisesRegex(subject.ContractViolation, "OPEN"):
+            with self.assertRaisesRegex(subject.ContractViolation, "provenance commit SHA"):
                 subject.validate_pr_range(
                     repository="HiroyukiFuruno/katana-render-runtime",
                     pr_number=87,

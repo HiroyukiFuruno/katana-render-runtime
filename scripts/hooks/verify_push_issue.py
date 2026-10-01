@@ -457,6 +457,45 @@ def validate_contract(
     )
 
 
+def _effective_release_issue_numbers(
+    *,
+    repository: str,
+    references_by_commit: Sequence[tuple[str, set[int]]],
+    net_paths: Sequence[str],
+    issue_loader: IssueLoader,
+    commit_paths: Callable[[str], Sequence[str]],
+) -> set[int]:
+    """Allow closed refs only when every referencing commit is obsolete in this diff."""
+    net_path_set = set(net_paths)
+    by_issue: dict[int, list[str]] = {}
+    for commit, references in references_by_commit:
+        for number in references:
+            by_issue.setdefault(number, []).append(commit)
+    effective: set[int] = set()
+    for number, commits in by_issue.items():
+        issue = issue_loader(number)
+        if issue is None:
+            raise ContractViolation(f"Issue #{number}を対象repositoryで確認できません")
+        canonical_url = f"https://github.com/{repository}/issues/{number}"
+        if (
+            type(issue.number) is not int
+            or issue.number != number
+            or not isinstance(issue.url, str)
+            or issue.url.casefold() != canonical_url.casefold()
+        ):
+            raise ContractViolation(f"Issue #{number}は対象repositoryのcanonical Issueではありません")
+        if issue.state == "OPEN":
+            effective.add(number)
+            continue
+        if issue.state != "CLOSED" or not commits:
+            raise ContractViolation(f"Issue #{number}はOPENではありません: {issue.state}")
+        for commit in commits:
+            paths = tuple(commit_paths(commit))
+            if not paths or net_path_set.intersection(paths):
+                raise ContractViolation(f"closed Issue #{number}の参照commitが現行差分と重複するか証跡不足です")
+    return effective
+
+
 def _require_sha(value: object, label: str) -> str:
     if not isinstance(value, str) or _SHA_PATTERN.fullmatch(value) is None:
         raise ContractViolation(f"{label}は40文字のSHAである必要があります")
@@ -490,12 +529,12 @@ def _gh_json(*arguments: str) -> object:
         raise ContractViolation("GitHub API responseがJSONではありません") from error
 
 
-def _pr_commit_messages(
+def _pr_commit_records(
     *,
     repository: str,
     base_sha: str,
     head_sha: str,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     comparison = _gh_json(
         f"repos/{repository}/compare/{base_sha}...{head_sha}"
     )
@@ -531,21 +570,24 @@ def _pr_commit_messages(
         )
     if ahead_by == 0:
         raise ContractViolation("PR base..headに検証対象commitがありません")
-    messages: list[str] = []
-    commit_shas: list[str] = []
+    records: list[tuple[str, str]] = []
     for commit in commits:
         if not isinstance(commit, dict):
             raise ContractViolation("GitHub compare responseのcommitが不正です")
-        commit_shas.append(_require_sha(commit.get("sha"), "compare commit SHA"))
+        commit_sha = _require_sha(commit.get("sha"), "compare commit SHA")
         payload = commit.get("commit")
         if not isinstance(payload, dict) or not isinstance(payload.get("message"), str):
             raise ContractViolation("GitHub compare responseのcommit messageが不正です")
-        messages.append(payload["message"])
+        records.append((commit_sha, payload["message"]))
     # GitHub's compare response does not expose head_commit.  The final item
     # is the head tip only after the full base..head range above was verified.
-    if commit_shas[-1] != head_sha:
+    if records[-1][0] != head_sha:
         raise ContractViolation("GitHub compare responseの最終commitがhead SHAと一致しません")
-    return messages
+    return records
+
+
+def _pr_commit_messages(*, repository: str, base_sha: str, head_sha: str) -> list[str]:
+    return [message for _, message in _pr_commit_records(repository=repository, base_sha=base_sha, head_sha=head_sha)]
 
 
 def referenced_issue_snapshot(
@@ -751,14 +793,16 @@ def validate_pr_range(
     if not _is_remote_ref(f"refs/heads/{branch}"):
         raise ContractViolation(f"PR head branchの形式が不正です: {branch!r}")
 
-    commit_messages = _pr_commit_messages(
+    commit_records = _pr_commit_records(
         repository=repository,
         base_sha=base_sha,
         head_sha=head_sha,
     )
-    references: set[int] = set()
-    for message in commit_messages:
-        references.update(issue_numbers(message, repository))
+    commit_messages = [message for _, message in commit_records]
+    references_by_commit: list[tuple[str, set[int]]] = []
+    for sha, message in commit_records:
+        references_by_commit.append((sha, issue_numbers(message, repository)))
+    references = {number for _, numbers in references_by_commit for number in numbers}
     if not references or (not is_release_branch(branch) and len(references) != 1):
         raise ContractViolation(
             "PR rangeの参照Issueは同一repositoryのcanonicalなOPEN Issue "
@@ -766,16 +810,22 @@ def validate_pr_range(
             + "である必要があります: "
             f"件数={len(references)}"
         )
-    for number in sorted(references):
-        _validate_pr_canonical_issue(
+    if not is_release_branch(branch):
+        for number in sorted(references):
+            _validate_pr_canonical_issue(repository=repository, number=number, issue_loader=issue_loader)
+    changed_paths = _pr_changed_paths(repository=repository, base_sha=base_sha, head_sha=head_sha)
+    if is_release_branch(branch):
+        effective = _effective_release_issue_numbers(
             repository=repository,
-            number=number,
+            references_by_commit=references_by_commit,
+            net_paths=changed_paths,
             issue_loader=issue_loader,
+            commit_paths=lambda sha: _pr_commit_paths(repository, sha),
         )
-
-    changed_paths = _pr_changed_paths(
-        repository=repository, base_sha=base_sha, head_sha=head_sha
-    )
+        if not effective:
+            raise ContractViolation("release PRにOPEN Issue参照がありません")
+    else:
+        effective = references
     validate_contract(
         branch=branch,
         default_branch=None,
@@ -783,8 +833,21 @@ def validate_pr_range(
         commit_messages=commit_messages,
         changed_paths=changed_paths,
         issue_loader=issue_loader,
+        release_issue_numbers=effective if is_release_branch(branch) else None,
     )
-    return references
+    return effective
+
+
+def _pr_commit_paths(repository: str, sha: str) -> list[str]:
+    """Fetch complete immutable paths for one non-merge commit; truncation fails closed."""
+    payload = _gh_json(f"repos/{repository}/git/commits/{sha}")
+    if not isinstance(payload, dict) or _require_sha(payload.get("sha"), "provenance commit SHA") != sha:
+        raise ContractViolation("closed Issue参照commitのprovenanceが不正です")
+    parents = payload.get("parents")
+    if not isinstance(parents, list) or len(parents) != 1 or not isinstance(parents[0], dict):
+        raise ContractViolation("merge commitのclosed Issue provenanceは判定できません")
+    parent_sha = _require_sha(parents[0].get("sha"), "provenance parent SHA")
+    return _pr_changed_paths(repository=repository, base_sha=parent_sha, head_sha=sha)
 
 
 def _run_git(repository: Path, *arguments: str) -> str:
@@ -1119,6 +1182,15 @@ def _load_issue(repository_name: str, number: int) -> Issue | None:
     )
 
 
+def _local_commit_paths(repository: Path, sha: str) -> list[str]:
+    parents = _run_git(repository, "rev-list", "--parents", "-n", "1", sha).split()
+    if len(parents) != 2 or parents[0] != sha:
+        raise ContractViolation("merge commitまたは不完全なclosed Issue provenanceです")
+    return parse_name_status_paths(
+        _run_git(repository, "diff", "--name-status", "-z", "--find-renames", parents[1], sha)
+    )
+
+
 def main() -> int:
     try:
         parser = argparse.ArgumentParser(description="Validate Issue references on push")
@@ -1265,6 +1337,18 @@ def main() -> int:
                 f"{range_base}..{target_revision}",
             )
             commit_messages = parse_commit_messages(commit_output)
+            if is_release_branch(target_branch):
+                commit_shas = _run_git(
+                    repository,
+                    "log",
+                    "--reverse",
+                    "--format=%H",
+                    f"{range_base}..{target_revision}",
+                ).splitlines()
+                if len(commit_shas) != len(commit_messages):
+                    raise ContractViolation("release commit provenanceが不完全です")
+            else:
+                commit_shas = []
             changed_output = _run_git(
                 repository,
                 "diff",
@@ -1276,8 +1360,24 @@ def main() -> int:
                 f"{range_base}...{target_revision}",
             )
             changed_paths = parse_name_status_paths(changed_output)
-            for message in commit_messages:
-                all_references.update(issue_numbers(message, repository_name))
+            if is_release_branch(target_branch):
+                refs_by_commit = [
+                    (sha, issue_numbers(message, repository_name))
+                    for sha, message in zip(commit_shas, commit_messages)
+                ]
+                effective = _effective_release_issue_numbers(
+                    repository=repository_name,
+                    references_by_commit=refs_by_commit,
+                    net_paths=changed_paths,
+                    issue_loader=load_issue,
+                    commit_paths=lambda sha: _local_commit_paths(repository, sha),
+                )
+                if not effective:
+                    raise ContractViolation("release範囲にOPEN Issue参照がありません")
+                all_references.update(effective)
+            else:
+                for message in commit_messages:
+                    all_references.update(issue_numbers(message, repository_name))
 
             validate_contract(
                 branch=target_branch,
@@ -1286,6 +1386,7 @@ def main() -> int:
                 commit_messages=commit_messages,
                 changed_paths=changed_paths,
                 issue_loader=load_issue,
+                release_issue_numbers=effective if is_release_branch(target_branch) else None,
             )
 
         references = sorted(all_references)
