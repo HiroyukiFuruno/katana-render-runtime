@@ -50,22 +50,9 @@ query($owner:String!, $repo:String!, $number:Int!, $reviewsCursor:String, $threa
 
 取得結果を thread 単位に重複排除し、未resolve・outdated・返信済みを明示する。
 
-## 1.5 review marker の本文束縛
+## 1.5 最新 HEAD のレビュー確認
 
-marker の投稿と cloud review 依頼の直前に、GitHub API から対象 PR を再取得する。`head.sha` と `body` をその時点の値で固定する。`body` は JSON string であること、NUL を含まないこと、UTF-8 strict で符号化できることを確認し、次の **本文バイト列そのもの** の SHA-256 小文字16進表現を使う。
-
-```python
-body_sha256 = hashlib.sha256(body.encode("utf-8", "strict")).hexdigest()
-```
-
-marker は次の完全一致の文法だけを使う。属性順序・空白・phase 名を変えない。`^<!-- krr-review phase=(?:initial|final) head=[0-9a-f]{40} body-sha256=[0-9a-f]{64} -->$` に一致しなければならない。
-
-```text
-<!-- krr-review phase=initial head=<40-lowerhex> body-sha256=<64-lowerhex> -->
-<!-- krr-review phase=final head=<40-lowerhex> body-sha256=<64-lowerhex> -->
-```
-
-marker の投稿と review 依頼の間に HEAD または本文が変わった可能性があれば、再取得して marker を作り直す。本文は HEAD を変えずに編集できるため、同一 HEAD でも digest が異なる既存 marker・review・trusted success は無効である。本文が変わった場合は Draft を維持したまま新しい `initial` marker を投稿し、初回 review からやり直す。本文や marker の不正・取得不能は fail-closed とし、Ready 化しない。
+レビュー依頼・再依頼の直前にGitHub APIでcurrent HEADとPR本文を再取得する。GitHub標準のレビュー結果と全ページ取得したthreadだけを確認する。
 
 ## 2. 内容評価と担当分解
 
@@ -80,14 +67,12 @@ P0/P1 は必ず内容を精査し、正当なら必須修正とする。不当�
 
 ## 3. 修正と検証
 
-- PR は `pr-ready-check` 成功まで Draft のまま保持する。成功後は section 6 の手順に従って `gh pr ready` で Ready for review へ遷移し、merge は別の governance gate に委ねる。
 - subagent には対象ファイル、変更可否、DoD、検証条件、禁止事項を短く明示する。
 - 修正後、各担当の focused check に加え、main が差分・依存関係・回帰を確認し、repo の完全な品質ゲートを実行する。
 - 不要な差分は早期に戻し、テスト都合で商用コードや品質基準を変更しない。
 
 ## 4. push、返信、スレッド解決
 
-検証が通った修正を commit・push した後、各 thread に具体的な返信を行う。修正時は変更内容と検証、見送り時は技術的根拠、質問時は回答を簡潔に記す。**修正の push は旧 marker・review・trusted success を無効化するため、reply / resolve の完了後に 1.5 の current HEAD/body strict `initial` marker と cloud review を完了させてから final review へ進む。** 同一 HEAD の PR本文編集も同じく initial review から反復する。REST API は返信に使えるが、thread の resolve には GraphQL を使う。
 
 返信後は `pull_request_review_id` の `state` と `submitted_at` を確認する。`PENDING` なら、自分が今回の修正に対して作成した返信だけであることを確認してから review event `COMMENT` として submit し、approval と混同しない。他人の返信や未知の draft を無断で公開しない。submit 後は独立した read で公開状態を確認する。App の read で返信が見えないだけでは権限を増やさず、既に `COMMENTED` なのに見えない場合も対象 comment、pagination、取得 scope を先に調査する。
 
@@ -107,29 +92,15 @@ mutation($threadId:ID!) {
 
 返信対象と resolve 対象を thread ごとに記録し、各指摘が返信済み・resolve 済み（見送りも根拠返信済み）であることを確認する。
 
-reply / resolve が完了しても trusted success を自動的に有効とは扱わない。最終反復へ進む前に、trusted Check Run evidence の query を重複を保持して読み、`pr_body_sha256` が **ちょうど1個** だけ存在し、current PR本文から1.5で再計算した digest と完全一致することを確認する。missing、duplicate、old digest、異なるdigestは fail-closed とし、修正の push または本文編集後は新しい initial marker の cloud review 完了前に final marker を投稿しない。
 
-## 5. 最新 HEAD・本文の最終レビュー反復
+## 5. 最新 HEAD のレビュー反復
 
-**push 後に final cloud review へ直行しない。** まず 1.5 の current HEAD/body strict `initial` marker と cloud review を完了させる。同一 HEAD の PR本文編集でも同じ initial review の再開が必要である。initial review、全指摘の reply / resolve、検証の完了後に限り、最終 cloud review を依頼する直前にPRの current HEAD と本文を再取得し、latest initial marker と完全一致することを確認したうえで、1.5 の厳密な検証と UTF-8 SHA-256 を行う。次の形式で最終 cloud review を依頼する。
+pushまたはPR本文変更後は、最新 HEAD に対して `@codex review` と自己レビューを再実施する。Issueコメント、formal reviews、review threadsを全ページ取得し、新しい指摘を個別に修正・reply・resolveする。
 
-```text
-<!-- krr-review phase=final head=<40-lowerhex> body-sha256=<64-lowerhex> -->
-@codex review
-```
 
-旧 HEAD の review、または同一 HEAD でも旧本文 digest の review は無効として扱う。新規指摘があれば 2〜5 を繰り返し、修正、検証、push、返信、resolve、current HEAD・本文の strict initial review 完了、最新 HEAD・本文に束縛した最終 review の順に完了する。
-
-## no-issues の Issue comment 証跡
-
-`Reviewed commit` の prefix は current HEAD に一致させます。
-
-review botの「no issues」はformal reviewではなく、trusted botがPR Issueへ投稿したcanonical commentだけを完了証跡として受理します。本文は `Codex Review: Didn't find any major issues...` または同じcanonical prefixの短文に続き、`**Reviewed commit:** \`<10〜40桁の小文字SHA prefix>\`` を含み、current HEADがそのprefixで始まらなければなりません。`created_at == updated_at` を必須とし、phase marker間のcanonical候補は高々1件、duplicateはfail-closedで拒否します。任意のdetailsは省略またはcanonicalな1つだけ（summary `ℹ️ About Codex in GitHub`、本文8192文字以内）を許可し、nested details、details外のclosing/sentinel文字列、重複canonical行は拒否します。reactionや任意のbot commentは証跡にしません。finalのno-issues証跡は参照Issueの最終`updated_at`より後でなければなりません。Codexが同一HEADの同一結果をduplicate suppressionした場合だけ、initial/final markerが同じHEAD・本文digestで、unresolved threadが0、かつIssue更新後かつfinal marker前に記録されたcanonical commentをinitial-to-final evidenceとして再利用できます。通常のformal reviewまたは指摘対応経路では、final marker後に別のreview完了証跡を取得します。
 
 ## 6. 完了判定
 
-最後に `just pr-ready-check "{pr_number}"` を実行し、最新 HEAD・本文 digest の post-marker bot review、未resolve thread 0、CI、DoD を機械確認する。この local gate は参照Issueが OPEN であること、依存更新証跡が揃っていること、PR range の Issue contract が完全一致すること（不足・余分を含む）も先に検証する。writer/trusted Check Run の success evidence は、query中の current `pr_body_sha256` が **ちょうど1個** で完全一致する場合だけ有効である。欠落、duplicate、old digest、差異はいずれも fail-closed であり success と見なさない。CI green のみ、レビュー依頼済みのみ、または局所テスト通過のみでは完了としない。`pr-ready-check` 成功後は、PRがDraftであることを確認してから `gh pr ready "{pr_number}"` でReady for reviewへ遷移する。Ready化後にrequired checksが最新HEADで成功していることを確認し、ユーザーから**freshなmerge承認**を得た直前に、同じ `just pr-ready-check "{pr_number}"` を再実行してReady PRを再検証する。Ready化、required checks確認、merge直前の再ゲートのいずれかが失敗した場合はmergeへ進まない。成功時のmergeはPR外のglobal skill `/Users/hiroyuki_furuno/.codex/skills/krr-pr-governance-bootstrap/SKILL.md` が定める専用Appの `merge --apply` だけを使い、人間、UI、通常のGitHub CLI merge、admin bypassは禁止する。`prepare --apply` は保存済みの人間用`gh auth`だけを使う例外であり、activate/merge/finalize/verifyのlive operationはfresh JWTとscript自身がmint・検証するApp IATを必要とする。`merge` の`--apply`なしdry-runだけは、人間用authによるpublic readに限定する。
+未解決thread 0、P0/P1対応済み、Issue/DoD、native required CI checksを確認してReady化する。merge直前にexpected HEAD SHAとrequired checksを再取得し、protected PR mergeを実行する。
 
 ## 継続実行と停止条件
-
-レビュー指摘の戻し、CI、registry、cloud review の待機、進捗報告は停止理由にしない。待機中も、競合しない調査・検証・Issue/PR証跡・cleanup準備を進め、結果を取得したら同じDraft→全件取得/分類→並列委譲→修正/検証/push→reply/resolve→最新HEADのinitial/final review→pr-ready-check→Ready→承認後mergeのループへ直ちに戻る。正当な指摘は受領後に止まらず修正へ進める。停止を許容するのは、不可逆操作の対象未確定、実際の権限または秘密情報不足、または仕様変更の判断が必要な場合だけである。

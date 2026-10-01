@@ -9,7 +9,6 @@ description: katana-diagram-renderer で指定バージョンの実装、品質�
 この repository は `release/vX.Y.Z` から `master` へ取り込み依頼（Pull Request）を作り、merge 後に自動リリースします。
 初回公開版は `v0.1.0` から開始します。
 
-governance bootstrap と保護mergeは、PR外の絶対path `/Users/hiroyuki_furuno/.codex/skills/krr-pr-governance-bootstrap/scripts/bootstrap_pr_governance.py` の `prepare` / `activate` / `merge` / `finalize` / `verify` に限定する。`prepare --apply` は保存済みの人間用 `gh auth` でexpected default branchを確認してApp-only rulesetを先行作成するためJWT不要、非mutating `merge` dry-runも保存済み認証によるpublic readだけを使う。`activate --apply` はそのrulesetと固定証跡のverify-only、`merge --apply` はApp-only merge、`finalize --apply` はmerge後の再読、`verify` はsmoke確認とする。activate/merge/finalize/verifyの各実行直前にfreshな `KRR_GOVERNANCE_APP_JWT` だけを環境へ設定し、script自身がexact KRR repository・operation-specific least-privilegeで短期IATをmintする。IAT responseのidentity・expiry・scope・permissionsをstrict検証し、JWT/private key/IATをCLI引数・出力へ出さない。`--expected-base --expected-head --expected-app-id --expected-diff-sha256`、expected default branch、完全な `--allowed-workflow`、current body digest/review/thread/Issue/CI/trusted/latch、ruleset exact App bindingを固定し、merge APIにはexpected head SHAを渡して成功後にmerge commit/rulesetを再読する。人間/admin/UI/通常のGitHub CLI merge（`gh pr merge`を含む）は禁止し、PR checkoutのコードをevidenceとして実行しない。通常の `pr-ready-check` は緩和しない。
 
 ## 実行ルール
 
@@ -64,110 +63,24 @@ git push -u origin release/vX.Y.Z
 
 ## Phase 4: Draft PR 作成と cloud review
 
-`release/vX.Y.Z` から `master` へ Draft PR を作成します。対象 version 以前の完了済み OpenSpec change が archive 済みであることを確認してから、PR 前の gate と Draft PR 作成へ進みます。
-
-```bash
-lefthook run pre-pr
-pr_url="$(gh pr create --draft --base master --head release/vX.Y.Z --title "Prepare vX.Y.Z release" --body-file <pr-body-file>)"
-gh pr view "${pr_url}" --json isDraft --jq '.isDraft'
-pr_number="$(gh pr view "${pr_url}" --json number --jq '.number')"
-pr_json="$(gh api "repos/<owner>/<repo>/pulls/${pr_number}")"
-head_sha="$(jq -r '.head.sha' <<<"$pr_json" | tr '[:upper:]' '[:lower:]')"
-body_sha256="$(printf '%s' "$pr_json" | python3 -c 'import hashlib, json, sys
-payload = json.load(sys.stdin)
-body = payload.get("body")
-if not isinstance(body, str) or "\x00" in body or any(0xD800 <= ord(char) <= 0xDFFF for char in body):
-    raise SystemExit("PR body must be a valid string without NUL or surrogate characters")
-print(hashlib.sha256(body.encode("utf-8", "strict")).hexdigest())')"
-review_body="<!-- krr-review phase=initial head=${head_sha} body-sha256=${body_sha256} -->"$'\n@codex review'
-gh pr comment "${pr_url}" --body "${review_body}"
-```
-
-Draft が `true` であることを確認してから初回 review を依頼します。cloud review を正とし、全 review thread を取得して指摘を分類します。各指摘は責務単位で subagent に委譲し、修正・検証・push 後に該当 thread へ reply して resolve します。
-
-Codex の no-issues 応答は formal review ではなく trusted bot の Issue comment とする。canonical body 全体一致、`Reviewed commit` の10〜40桁hex prefixとcurrent HEADの一致、未編集（`created_at == updated_at`）、各phase windowの候補一意（重複はfail-closed）を確認する。optional details footerはlive canonical summary/structure一致、nested/sentinel拒否、8192文字以下の場合だけ許可する。同一current HEAD・同一PR body digest・unresolved thread 0・Issue freshness（Issue更新後）が揃う場合に限り、initial marker後かつfinal marker前のno-issues証跡をfinalに再利用する。reactionは証跡にせず、formal review/指摘経路はfinal marker後の別evidenceを必須とする。strict marker、App-only merge、initial→final順序を維持する。
-
-レビュー証跡の有効性は current HEAD と current PR body digest に固定する。push 後は旧 HEAD の marker・bot review・trusted success を無効化し、GitHub API で current HEAD/body を再取得して新しい initial marker と cloud review を取得してから final review へ進む。PR本文を編集した場合も、同じ HEAD であって旧 body digest の証跡を無効化し、同じ手順をやり直す。push と本文編集のどちらも無い場合に限り、上記の同一HEAD・同一body digest・Issue freshness・未resolve 0 の条件を満たす既存証跡を再利用できる。
+Draft PRを作成し、最新 HEAD に対して `@codex review` と自己レビューを実施する。GitHub APIで Issueコメント、formal reviews、review threadsを全ページ取得し、指摘を個別に分類する。
 
 ## Phase 5: PR gate
 
-current HEAD・本文 digest に紐づく initial marker と cloud review が成立していることを前提に、初回指摘への対応後、または指摘が無い場合でも、merge 前に同じ current HEAD・本文へ最終 review を依頼します。
-
-```bash
-pr_json="$(gh api "repos/<owner>/<repo>/pulls/${pr_number}")"
-head_sha="$(jq -r '.head.sha' <<<"$pr_json" | tr '[:upper:]' '[:lower:]')"
-body_sha256="$(printf '%s' "$pr_json" | python3 -c 'import hashlib, json, sys
-payload = json.load(sys.stdin)
-body = payload.get("body")
-if not isinstance(body, str) or "\x00" in body or any(0xD800 <= ord(char) <= 0xDFFF for char in body):
-    raise SystemExit("PR body must be a valid string without NUL or surrogate characters")
-print(hashlib.sha256(body.encode("utf-8", "strict")).hexdigest())')"
-review_body="<!-- krr-review phase=final head=${head_sha} body-sha256=${body_sha256} -->"$'\n@codex review'
-gh pr comment "${pr_url}" --body "${review_body}"
-```
-
-別の push 後は旧HEADのreviewを無効とし、current PRのhead/bodyを再取得してbody digest付きmarkerで再レビューします。PR bodyを編集した場合は同じHEADでも旧markerと旧reviewを無効とし、initial marker→bot review→final marker→bot reviewをやり直します。最低2回のreview、最新HEADのbot review完了、全threadのreply/resolve、未resolve 0を満たすまでReadyに進みません。
-
-次を確認します。
-
-- `Test and Build (macos-latest)` / `ubuntu-latest` / `windows-latest`
-- `preflight`
-- `just VERSION=vX.Y.Z release-target-check`
-- OpenSpec の tasks / DoD
-- 最新 cloud review の未対応指摘 0、未 resolve thread 0
-
-```bash
-gh pr checks --watch "${pr_url}"
-just VERSION=vX.Y.Z release-target-check
-```
-
-CI green だけでは Ready 条件を満たしません。指摘が出た場合は修正→通常の commit/push→reply/resolve後、pushまたは本文変更で旧証跡を無効化し、GitHub APIでcurrent HEAD・本文を再取得してinitial marker→cloud review→final marker→cloud reviewを再実施します。push・本文変更がない場合は、既存のcurrent initial証跡を維持したままfinal reviewを実施します。
+各指摘を個別に修正・検証・pushし、該当threadへreplyしてresolveする。P0/P1は必須対応、P2/P3は要件・互換性・DoDへの影響を根拠付きで判断する。HEADが変わった場合は最新 HEADでレビューをやり直す。
 
 ## Phase 6: Ready 化と merge 承認
 
-全 gate とレビューを確認した後、Draft のまま専用ゲートを実行し、成功後だけ Ready 化します。
-
-```bash
-just pr-ready-check "<number>" && gh pr ready "${pr_url}"
-```
-
-`pr-ready-check` は参照Issueが OPEN であること、依存更新証跡が揃っていること、PR range の Issue contract が完全一致すること（不足・余分を含む）を先に検証します。Ready 化前とglobal bootstrap skillの `merge --apply` 直前の両方で、review markerのHEAD/body digestとtrusted Check Run evidenceのHEAD/external_idを同一境界に一致させる。trusted evidence の query にある `pr_body_sha256` は **ちょうど1個** の64桁小文字hexで、GitHub APIから再取得した current PR本文の strict UTF-8 SHA-256 と完全一致しなければならない。missing、duplicate、old digest、または異なるdigestは fail-closed である。Ready 化前に merge 承認を求めず、Ready 化後にユーザーの merge 承認を得ます。承認後、同じ `just pr-ready-check "<number>"` をmergeの直前に再実行し、Ready PRの最新Issue/marker/thread/CI/base/headとこの一意なtrusted digest bindingを再検証してから、PR checkout外のApp-only `merge --apply`を実行します。承認前に merge してはいけません。
-
-### governance workflow の初回 bootstrap
-
-PR が `.github/workflows/` の governance workflow 自体を追加・変更する初回 bootstrap に限り、専用skill scriptをPR checkout外で次の順序に固定します。通常PRへ例外を拡張せず、PR内のworkflow、branch名、Issue、Check Runを自己承認の根拠にしません。
-
-1. `prepare --apply`: 保存済みの人間用 `gh auth` でexpected default branchを確認し、App-only active rulesetを先行作成する。fresh JWTは不要です。
-2. `activate --apply`: fresh JWTを環境変数に設定し、scriptがexact repository・operation-specific least-privilegeでmintした短期IATのresponse identity/expiry/scope/permissionsをstrict検証したうえで、一時Check Runと固定base/head/diff/allowlistをverify-only確認する。
-3. Ready化後、ユーザーのfresh merge承認を取得し、同じ`pr-ready-check`を直前に再実行してから`merge --apply`を実行する。mergeはactive rulesetのexact Integration App bypassとclassic branch protectionのrequired conversation resolution、phase-exact trusted/latch、最新body digest/review/thread/Issue/CIを再検証し、Contents writeを含む短期IATとmerge API expected SHAを検証してから行う。
-4. `finalize --apply`: merge後にmerge commit、ruleset、classic protectionを再取得し、永続required contextsを確認する。
-5. 同じApp-only merge routeで使い捨てsmoke PRをmergeし、別のfresh JWTからread-only IATをmintして`verify`でsmoke結果を確認する。
-
-active rulesetは更新操作専用であり、exact Integration Appのbypass actor（`bypass_mode=pull_request`）だけを許可し、人間/admin/UI/通常のGitHub CLIによるprotected default branchの更新・mergeとAppによる直接ref更新を拒否します。required checkとconversationの実施主体はclassic branch protectionに置きます。classic branch protectionは`enforce_admins=true`、`required_conversation_resolution=true`、`strict=true`を維持し、required contextsをフェーズごとにApp bindingします。bootstrap中は`KRR / PR governance bootstrap`を専用App ID、finalize後は`KRR / PR governance (trusted check)`を専用App ID、`KRR / PR governance review latch`をGitHub Actions App ID `15368`に固定します。dry-runはmutation 0を証明します。人間/admin/UI/通常のGitHub CLI merge（`gh pr merge`を含む）は禁止し、dynamic barrierはdefense-in-depthであってcold-stateのmerge authorityではありません。各`--apply`の直前にfresh confirmationを取得し、prepare以外の各コマンドではfresh JWTのみを環境へ設定します。JWT/private key/IATをargv・出力へ出さず、rollbackでもrulesetを外しません。
+未解決thread 0、Issue契約、DoD、required CI checksを確認してReady化する。Ready化後、merge直前にcurrent PRのexpected HEAD SHAとrequired checksを再取得し、protected PR mergeを実行する。人間による直接master更新やadmin bypassは使わない。
 
 ## Phase 7: merge と自動リリース
 
-承認後は、直前の `just pr-ready-check "<number>"` が成功した場合だけ、PR checkout外のglobal bootstrap skillによるApp-only `merge --apply`を実行し、release 前に archive 済みの OpenSpec change と Release workflow の結果を確認します。merge APIにはcurrent expected head SHAを渡し、merge commitとactive rulesetを再取得します。
 
-```bash
-SCRIPT=/Users/hiroyuki_furuno/.codex/skills/krr-pr-governance-bootstrap/scripts/bootstrap_pr_governance.py
-python3 "$SCRIPT" merge \
-  --repository <owner>/<repo> --pr "<number>" \
-  --expected-base <base-sha> --expected-head <head-sha> \
-  --expected-app-id <governance-app-id> \
-  --allowed-workflow <every-changed-workflow-path> \
-  --expected-diff-sha256 <binary-full-index-diff-digest> --apply
-gh run list --workflow Release --limit 5
-```
+
 
 ## 完了条件
 
-- [ ] Draft PR 作成と初回 marker 付き review
 - [ ] 指摘の修正、検証、thread reply / resolve
-- [ ] 最新 HEAD/body digest の final marker bot review と未 resolve 0
-- [ ] CI / DoD / `release-target-check` / `pr-ready-check` PASS
-- [ ] `just pr-ready-check "<number>"`（Issue OPEN / 依存更新証跡 / PR range Issue contract / current `pr_body_sha256` exactly one を含む）後に Ready 化
-- [ ] Ready 化後に merge 承認を得て、global bootstrap skillの `merge --apply` 直前の `just pr-ready-check "<number>"` 成功後にApp-only merge
 - [ ] release-check / pre-pr の前に対象 version 以前の完了済み OpenSpec change を archive し、Release workflow を確認
 
 - [ ] Rust/JS の依存を最新互換版まで確認・更新し、完全品質ゲートを通している
@@ -176,4 +89,4 @@ gh run list --workflow Release --limit 5
 
 ## 継続実行と停止条件
 
-レビュー指摘の戻し、CI、registry、cloud review の待機、進捗報告は停止理由にしない。待機中も競合しない調査・検証・Issue証跡・cleanup準備を進め、結果取得後はDraft→全件取得/分類→責務単位の並列委譲→修正/検証/push→reply/resolve→最新HEADのinitial/final review→pr-ready-check→Ready→承認後mergeを完走する。停止は不可逆操作の対象未確定、実際の権限/秘密情報不足、仕様変更の判断に限定する。
+レビュー指摘、CI、registry、cloud review の待機中も競合しない調査・検証・Issue証跡・cleanup準備を進める。結果取得後は Draft → 全件取得/分類 → 修正/検証/push → reply/resolve → 最新HEADレビュー → Ready → protected PR merge → release確認を完了する。

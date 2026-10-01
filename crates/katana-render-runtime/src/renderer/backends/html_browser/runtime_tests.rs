@@ -80,10 +80,14 @@ fn concurrent_open_worker(start: Arc<Barrier>) -> Result<(), String> {
 fn html_runtime_traits_are_value_like() {
     let runtime = HtmlRuntime;
     let copied = runtime;
-    let cloned = <HtmlRuntime as Clone>::clone(&copied);
+    let cloned = clone_value(&copied);
 
     assert_eq!(format!("{runtime:?}"), "HtmlRuntime");
     assert_eq!(format!("{cloned:?}"), format!("{copied:?}"));
+}
+
+fn clone_value<T: Clone>(value: &T) -> T {
+    value.clone()
 }
 
 #[test]
