@@ -814,7 +814,8 @@ jobs:
       run: 'true'
     concurrency:
       group: pr-governance-cohort-election-${{ github.repository_id }}
-      queue: single
+      # 最大600sourceを分割した後も、元journalを保持した後継ownerを待機させる。
+      queue: max
       cancel-in-progress: false
   admit-cohort-backend:
     name: Admit verified governance cohort backend

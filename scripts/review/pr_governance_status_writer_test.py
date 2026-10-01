@@ -1361,6 +1361,326 @@ class StatusWriterUnitTest(unittest.TestCase):
                 WRITER.reject_newer_dispatcher_barrier("a"*40)
         covered.assert_not_called()
 
+    def native_inventory_fixture(self, count):
+        import copy
+        helper = WRITER.cohort_helper()
+        current = self.dispatcher_run(event="workflow_run")
+        current["head_repository"] = copy.deepcopy(current["repository"])
+        header = {"owner_dispatcher_run_id": 88, "owner_run_attempt": 1,
+                  "workflow_sha": "d"*40, "workflow_blob_sha": "e"*40,
+                  "repository": "owner/repository", "repository_id": 101,
+                  "root_deadline_epoch": int(__import__("time").time())+300,
+                  "member_ids": list(range(9000,9020))}
+        context = {"header": header, "artifact_id": 7, "artifact_digest": "sha256:"+"a"*64,
+                   "cohort_digest": "f"*64, "members_by_id": {}, "registered_writers": {}}
+        runs = [current]
+        for index in range(count-101):
+            run = self.dispatcher_run(identifier=1000+index, event="workflow_run", status="completed", conclusion="cancelled")
+            run.update(name=f"sensor={20000+index} action=in_progress", display_title=f"sensor={20000+index} action=in_progress",
+                       head_repository=copy.deepcopy(run["repository"]))
+            runs.append(run)
+        runs.extend(self.dispatcher_run(identifier=3000+index, event="workflow_run", status="queued") for index in range(100))
+        jobs = {}
+        for run in runs[1:-100]:
+            names = sorted(helper.MUTATING_JOBS | {helper.PRODUCER_JOB, helper.ELECTION_JOB,
+                           helper.ADMISSION_JOB, "Preflight workflow_run governance source"})
+            entries = [{"id": run["id"]*100+index+1, "run_id": run["id"], "run_attempt": 1,
+                        "head_sha": "d"*40, "name": name, "status": "completed", "conclusion": "skipped", "steps": []}
+                       for index,name in enumerate(names)]
+            by_name = {entry["name"]:entry for entry in entries}
+            by_name["Preflight workflow_run governance source"]["conclusion"] = "success"
+            by_name[helper.PRODUCER_JOB].update(conclusion="success", steps=[
+                {"name": helper.PAYLOAD_PREFIX+"source sha256="+"b"*64,"number":1,"status":"completed","conclusion":"success"},
+                {"name": "Upload immutable krr-governance-source-"+run["display_title"].split(" ")[0][7:]+"-attempt-1",
+                 "number":2,"status":"completed","conclusion":"success"}])
+            by_name[helper.ELECTION_JOB]["conclusion"] = "cancelled"
+            by_name[helper.ADMISSION_JOB]["conclusion"] = "failure"
+            jobs[run["id"]] = {"total_count":len(entries), "jobs":entries}
+        return helper, context, runs, jobs
+
+    @staticmethod
+    def cohort_fence_mock_helper(current, **proofs):
+        from types import SimpleNamespace
+        def reader(read_json,*a,**kw):
+            def producer(repository,identifier,*a):
+                read_json(f"repos/{repository}/actions/runs/{identifier}",timeout=20)
+                return read_json(f"repos/{repository}/actions/runs/{identifier}",timeout=20)
+            return SimpleNamespace(producer=producer)
+        return SimpleNamespace(_Reader=reader,
+                               terminal_inventory_is_nonmutating=lambda *a,**kw:False, **proofs)
+
+    def test_native_fifo_inventory_401_and_600_uses_only_native_terminal_proof(self):
+        import copy
+        for count in (401,600):
+            helper, context, runs, jobs = self.native_inventory_fixture(count)
+            calls = []
+            def read(endpoint, **kwargs):
+                calls.append(endpoint)
+                if "/actions/workflows/" in endpoint:
+                    number=int(endpoint.rsplit("page=",1)[1]);return {"total_count":count,"workflow_runs":copy.deepcopy(runs[(number-1)*100:number*100])}
+                if endpoint == "repos/owner/repository": return {"default_branch":"master"}
+                if endpoint == "repos/owner/repository/actions/runs/88": return copy.deepcopy(runs[0])
+                if "/attempts/1/jobs?" in endpoint:
+                    return copy.deepcopy(jobs[int(endpoint.split("/runs/")[1].split("/")[0])])
+                raise AssertionError("Inventory proof accessed source/artifact authority: "+endpoint)
+            def native_api(command, **options):
+                self.assertEqual(command[:2],["gh","api"])
+                self.assertEqual(set(options["env"]),{"GH_TOKEN","PATH"})
+                self.assertEqual(options["env"]["GH_TOKEN"],"native-read-fixture")
+                self.assertLessEqual(options["timeout"],20)
+                return subprocess.CompletedProcess(command,0,json.dumps(read(command[2])),"")
+            env={"GITHUB_SHA":"d"*40,"GITHUB_REF_NAME":"master","GITHUB_REPOSITORY":"owner/repository",
+                 "GH_TOKEN":"native-read-fixture","GOVERNANCE_COHORT_ARTIFACT_ID":"7","GOVERNANCE_COHORT_ARTIFACT_DIGEST":"sha256:"+"a"*64}
+            with self.subTest(count=count),self.identity(),patch.dict(os.environ,env), \
+                 patch.object(WRITER,"_cohort_context",context),patch.object(WRITER,"_cohort_alias_index",{}), \
+                 patch.object(WRITER,"cohort_helper",return_value=helper),patch.object(WRITER,"_cohort_inventory_noop_generations",{}), \
+                 patch.object(WRITER,"_cohort_covered_generations",{}),patch.object(WRITER,"_cohort_generation_identities",{}), \
+                 patch.object(WRITER,"_terminal_deadline_monotonic",__import__("time").monotonic()+60), \
+                 patch.object(WRITER,"_cohort_api_counts",{"default":0,"app":0}), \
+                 patch.object(WRITER.subprocess,"run",side_effect=native_api), \
+                 patch.object(helper,"consumer_is_covered",side_effect=AssertionError("Old artifact proof used")), \
+                 patch.object(helper,"consumer_is_deferred",side_effect=AssertionError("Old deferred proof used")), \
+                 patch.object(WRITER,"cohort_read_archive",side_effect=AssertionError("Inventory archive read")):
+                generations, covered=WRITER.cohort_dispatcher_generations(WRITER.dispatcher_generation(runs[0]))
+                self.assertEqual(set(generations),{88,*range(3000,3100)})
+                self.assertFalse(covered)
+                self.assertFalse(WRITER._cohort_covered_generations)
+                self.assertEqual(len([call for call in calls if "/attempts/1/jobs?" in call]),count-101)
+                self.assertEqual(len([call for call in calls if "/actions/workflows/" in call]),2*((count+99)//100))
+                self.assertEqual(WRITER._cohort_api_counts,{"default":0,"app":count-101+3+2*((count+99)//100)})
+                self.assertEqual(context["header"]["member_ids"],list(range(9000,9020)))
+                self.assertFalse(context["registered_writers"])
+                first_reads=WRITER._cohort_api_counts["app"]
+                repeated, repeated_covered=WRITER.cohort_dispatcher_generations(WRITER.dispatcher_generation(runs[0]))
+                self.assertEqual((repeated,repeated_covered),(generations,covered))
+                self.assertEqual(len([call for call in calls if "/attempts/1/jobs?" in call]),count-101)
+                self.assertEqual(WRITER._cohort_api_counts["app"]-first_reads,3+2*((count+99)//100))
+                self.assertFalse(WRITER._cohort_covered_generations)
+
+    def test_native_inventory_preserves_capacity_actor_identity_and_full_page_fences(self):
+        import copy
+        for change in ("unknown101","raw601","page2_same_count","page2_numeric_type","owner_identity","owner_before_float",
+                       "selected_cancelled","mutation_started","recovery_predecessor","cached_lifecycle"):
+            helper, context, runs, jobs = self.native_inventory_fixture(600 if change=="raw601" else 401)
+            if change in {"unknown101","raw601"}:
+                runs.append(self.dispatcher_run(identifier=4000,event="workflow_run",status="queued"))
+            if change=="recovery_predecessor":context["recovered_predecessor_ids"]=[1000]
+            if change=="selected_cancelled":
+                election=next(job for job in jobs[1000]["jobs"] if job["name"]==helper.ELECTION_JOB)
+                election["steps"]=[{"name":helper.SELECTED_PREFIX+"owner=1000 artifact=42 digest=sha256:"+"b"*64,
+                                    "number":1,"status":"completed","conclusion":"success"}]
+            if change=="mutation_started":
+                mutation=next(job for job in jobs[1000]["jobs"] if job["name"]=="Service bound cohort review sources")
+                mutation.update(status="in_progress",conclusion=None)
+            page_calls={}
+            owner_calls=[]
+            def native_api(command, **options):
+                endpoint=command[2]
+                if "/actions/workflows/" in endpoint:
+                    number=int(endpoint.rsplit("page=",1)[1]);page_calls[number]=page_calls.get(number,0)+1
+                    page={"total_count":len(runs),"workflow_runs":copy.deepcopy(runs[(number-1)*100:number*100])}
+                    if number==2 and page_calls[number]==2:
+                        if change=="page2_same_count":page["workflow_runs"][0]["id"]=22222
+                        if change=="page2_numeric_type":page["total_count"]=float(len(runs))
+                elif endpoint=="repos/owner/repository":page={"default_branch":"master"}
+                elif endpoint=="repos/owner/repository/actions/runs/88":
+                    page=copy.deepcopy(runs[0])
+                    if change=="owner_identity":page["run_number"]=2
+                    owner_calls.append(endpoint)
+                    if change=="owner_before_float" and len(owner_calls)==1:
+                        page["run_number"]=float(page["run_number"])
+                        page["workflow_id"]=float(page["workflow_id"])
+                elif "/attempts/1/jobs?" in endpoint:
+                    page=copy.deepcopy(jobs[int(endpoint.split("/runs/")[1].split("/")[0])])
+                else:raise AssertionError("Unexpected inventory authority read: "+endpoint)
+                return subprocess.CompletedProcess(command,0,json.dumps(page),"")
+            env={"GITHUB_SHA":"d"*40,"GITHUB_REF_NAME":"master","GITHUB_REPOSITORY":"owner/repository",
+                 "GH_TOKEN":"native-read-fixture","GOVERNANCE_COHORT_ARTIFACT_ID":"7","GOVERNANCE_COHORT_ARTIFACT_DIGEST":"sha256:"+"a"*64}
+            with self.subTest(change=change),self.identity(),patch.dict(os.environ,env), \
+                 patch.object(WRITER,"cohort_helper",return_value=helper),patch.object(WRITER,"_cohort_context",context), \
+                 patch.object(WRITER,"_cohort_alias_index",{}),patch.object(WRITER,"_cohort_covered_generations",{}), \
+                 patch.object(WRITER,"_cohort_generation_identities",{}),patch.object(WRITER,"_cohort_inventory_noop_generations",{}), \
+                 patch.object(WRITER,"_terminal_deadline_monotonic",__import__("time").monotonic()+60), \
+                 patch.object(WRITER,"_cohort_api_counts",{"default":0,"app":0}),patch.object(WRITER.subprocess,"run",side_effect=native_api), \
+                 patch.object(helper,"consumer_is_covered",return_value=False),patch.object(helper,"consumer_is_deferred",return_value=False):
+                current=WRITER.dispatcher_generation(runs[0])
+                if change=="cached_lifecycle":
+                    WRITER.cohort_dispatcher_generations(current)
+                    self.assertEqual(len(WRITER._cohort_inventory_noop_generations),300)
+                    runs[1].update(status="in_progress",conclusion=None)
+                with self.assertRaises(WRITER.GovernanceError):WRITER.cohort_dispatcher_generations(current)
+                self.assertFalse(WRITER._cohort_covered_generations)
+                if change!="cached_lifecycle":
+                    self.assertFalse(WRITER._cohort_inventory_noop_generations)
+                    self.assertFalse(WRITER._cohort_generation_identities)
+
+    def test_native_completed_callback_inventory_does_not_require_source_ack_authority(self):
+        import copy
+        helper, context, runs, jobs=self.native_inventory_fixture(401)
+        completed=runs[1]
+        completed.update(status="completed",conclusion="success",name="sensor=20000 action=completed",display_title="sensor=20000 action=completed")
+        for job in jobs[1000]["jobs"]:
+            job.update(conclusion="skipped",steps=[])
+            if job["name"]=="Preflight workflow_run governance source":
+                job.update(conclusion="success",steps=[{"name":helper.COMPLETED_NOOP_PREFIX+"20000",
+                           "number":1,"status":"completed","conclusion":"success"}])
+        def native_api(command, **options):
+            endpoint=command[2]
+            if "/actions/workflows/" in endpoint:
+                number=int(endpoint.rsplit("page=",1)[1]);page={"total_count":401,"workflow_runs":runs[(number-1)*100:number*100]}
+            elif endpoint=="repos/owner/repository":page={"default_branch":"master"}
+            elif endpoint=="repos/owner/repository/actions/runs/88":page=runs[0]
+            elif "/attempts/1/jobs?" in endpoint:page=jobs[int(endpoint.split("/runs/")[1].split("/")[0])]
+            else:raise AssertionError("Completed inventory callback gained source authority: "+endpoint)
+            return subprocess.CompletedProcess(command,0,json.dumps(copy.deepcopy(page)),"")
+        env={"GITHUB_SHA":"d"*40,"GITHUB_REF_NAME":"master","GITHUB_REPOSITORY":"owner/repository",
+             "GH_TOKEN":"native-read-fixture","GOVERNANCE_COHORT_ARTIFACT_ID":"7","GOVERNANCE_COHORT_ARTIFACT_DIGEST":"sha256:"+"a"*64}
+        with self.identity(),patch.dict(os.environ,env),patch.object(WRITER,"cohort_helper",return_value=helper), \
+             patch.object(WRITER,"_cohort_context",context),patch.object(WRITER,"_cohort_alias_index",{}), \
+             patch.object(WRITER,"_cohort_covered_generations",{}),patch.object(WRITER,"_cohort_inventory_noop_generations",{}), \
+             patch.object(WRITER,"_cohort_generation_identities",{}),patch.object(WRITER,"_cohort_api_counts",{"default":0,"app":0}), \
+             patch.object(WRITER,"_terminal_deadline_monotonic",__import__("time").monotonic()+60), \
+             patch.object(WRITER.subprocess,"run",side_effect=native_api), \
+             patch.object(helper,"consumer_is_covered",side_effect=AssertionError("Completed source coverage read")), \
+             patch.object(helper,"consumer_is_deferred",side_effect=AssertionError("Completed source deferral read")):
+            generations,covered=WRITER.cohort_dispatcher_generations(WRITER.dispatcher_generation(runs[0]))
+            self.assertEqual(set(generations),{88,*range(3000,3100)})
+            self.assertFalse(covered)
+            self.assertFalse(WRITER._cohort_covered_generations)
+
+    def native_pending_mutex_fixture(self):
+        import copy
+        helper,context,runs,_=self.native_inventory_fixture(101)
+        context["header"]["workflow_blob_sha"]=WRITER.COHORT_EARLY_MUTEX_WORKFLOW_BLOB
+        jobs={}
+        names=sorted(helper.MUTATING_JOBS|{helper.PRODUCER_JOB,helper.ELECTION_JOB,helper.ADMISSION_JOB,WRITER.PREFLIGHT_WORKFLOW_RUN_SOURCE_NAME})
+        for index,run in enumerate(runs):
+            source=20000+index
+            run.update(head_repository=copy.deepcopy(run["repository"]))
+            if index:run.update(name=f"sensor={source} action=in_progress",display_title=f"sensor={source} action=in_progress")
+            entries=[{"id":run["id"]*100+offset+1,"run_id":run["id"],"run_attempt":1,"head_sha":"d"*40,
+                      "name":name,"status":"queued","conclusion":None,"steps":[]} for offset,name in enumerate(names)]
+            by_name={job["name"]:job for job in entries}
+            by_name[WRITER.PREFLIGHT_WORKFLOW_RUN_SOURCE_NAME].update(status="completed",conclusion="success",steps=[
+                {"name":WRITER.REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME,"number":1,"status":"completed","conclusion":"success"}])
+            by_name[helper.PRODUCER_JOB].update(status="completed",conclusion="success",steps=[
+                {"name":helper.PAYLOAD_PREFIX+"source sha256="+"b"*64,"number":1,"status":"completed","conclusion":"success"},
+                {"name":f"Upload immutable krr-governance-source-{source}-attempt-1","number":2,"status":"completed","conclusion":"success"}])
+            by_name[helper.ADMISSION_JOB].update(status="in_progress")
+            if not index:
+                by_name[helper.ELECTION_JOB].update(status="in_progress",steps=[
+                    {"name":helper.SELECTED_PREFIX+"owner=88 artifact=7 digest="+context["artifact_digest"],"number":1,"status":"completed","conclusion":"success"},
+                    {"name":helper.HANDOFF_PREFIX+"owner=88 artifact=7 digest="+context["artifact_digest"],"number":2,"status":"queued","conclusion":None}])
+                by_name[helper.ADMISSION_JOB].update(status="completed",conclusion="success",steps=[
+                    {"name":helper.ADMITTED_PREFIX+"owner=88 artifact=7 digest="+context["artifact_digest"],"number":1,"status":"completed","conclusion":"success"}])
+            jobs[run["id"]]={"total_count":len(entries),"jobs":entries}
+        return helper,context,runs,jobs
+
+    def test_native_pending_early_mutex_budget_and_all_preemption(self):
+        import copy
+        helper,context,runs,jobs=self.native_pending_mutex_fixture()
+        calls=[]
+        def native_api(command,**options):
+            endpoint=command[2];calls.append(endpoint)
+            if "/actions/workflows/" in endpoint:
+                number=int(endpoint.rsplit("page=",1)[1]);page={"total_count":len(runs),"workflow_runs":runs[(number-1)*100:number*100]}
+            elif endpoint=="repos/owner/repository":page={"default_branch":"master"}
+            elif "/git/ref/heads/master" in endpoint:page={"object":{"sha":"d"*40}}
+            elif "/jobs?" in endpoint:page=jobs[int(endpoint.split("/runs/")[1].split("/")[0])]
+            elif "/actions/runs/" in endpoint:page=next(run for run in runs if run["id"]==int(endpoint.rsplit("/",1)[1]))
+            else:raise AssertionError("Pending mutex used unrelated authority: "+endpoint)
+            return subprocess.CompletedProcess(command,0,json.dumps(copy.deepcopy(page)),"")
+        env={"GITHUB_ACTIONS":"true","GITHUB_SHA":"d"*40,"GITHUB_REF_NAME":"master","GITHUB_REPOSITORY":"owner/repository",
+             "GH_TOKEN":"native-read-fixture","GOVERNANCE_DISPATCHER_RUN_ID":"88","GOVERNANCE_SCOPE":"early",
+             "GOVERNANCE_COHORT_ARTIFACT_ID":"7","GOVERNANCE_COHORT_ARTIFACT_DIGEST":"sha256:"+"a"*64}
+        with self.identity(),patch.dict(os.environ,env),patch.object(WRITER,"cohort_helper",return_value=helper), \
+             patch.object(WRITER,"_cohort_context",context),patch.object(WRITER,"_cohort_alias_index",{}), \
+             patch.object(WRITER,"_cohort_covered_generations",{}),patch.object(WRITER,"_cohort_inventory_noop_generations",{}), \
+             patch.object(WRITER,"_cohort_pending_generations",{}),patch.object(WRITER,"_cohort_pending_exemptions",frozenset()), \
+             patch.object(WRITER,"_cohort_generation_identities",{}),patch.object(WRITER,"_cohort_api_counts",{"default":0,"app":0}), \
+             patch.object(WRITER,"_terminal_deadline_monotonic",__import__("time").monotonic()+60), \
+             patch.object(WRITER.subprocess,"run",side_effect=native_api):
+            for _ in range(150):WRITER.reject_newer_dispatcher_barrier("a"*40)
+            self.assertEqual(WRITER._cohort_api_counts["app"],2350)
+            self.assertEqual(len([call for call in calls if "/attempts/1/jobs?" in call and "/runs/88/" not in call]),100)
+            self.assertEqual(len(WRITER._cohort_pending_generations),100)
+            self.assertEqual(WRITER._cohort_pending_exemptions,frozenset(range(3000,3100)))
+            self.assertFalse(WRITER._cohort_covered_generations)
+            os.environ["GOVERNANCE_SCOPE"]="all"
+            election=next(job for job in jobs[88]["jobs"] if job["name"]==helper.ELECTION_JOB)
+            election.update(status="completed",conclusion="success")
+            election["steps"][1].update(status="completed",conclusion="success")
+            with self.assertRaises(WRITER.NoPostGovernanceError):WRITER.reject_newer_dispatcher_barrier("a"*40)
+            self.assertFalse(WRITER._cohort_pending_generations)
+            self.assertFalse(WRITER._cohort_pending_exemptions)
+
+    def test_native_pending_mutex_invalidates_on_native_lease_clock_and_default_changes(self):
+        import copy
+        for change in ("handoff","completed","cancelled","job_identity","job_run_id_type","selected_digest",
+                       "default_ref","root_expired","source_clock","candidate_identity","unknown_blob"):
+            helper,context,runs,jobs=self.native_pending_mutex_fixture()
+            armed=[False];owner_job_calls=[0];ref_calls=[0]
+            def native_api(command,**options):
+                endpoint=command[2]
+                if "/actions/workflows/" in endpoint:
+                    number=int(endpoint.rsplit("page=",1)[1]);page={"total_count":len(runs),"workflow_runs":copy.deepcopy(runs[(number-1)*100:number*100])}
+                elif endpoint=="repos/owner/repository":page={"default_branch":"master"}
+                elif "/git/ref/heads/master" in endpoint:
+                    ref_calls[0]+=1;page={"object":{"sha":"e"*40 if armed[0] and change=="default_ref" and ref_calls[0]>=2 else "d"*40}}
+                elif "/jobs?" in endpoint:
+                    identifier=int(endpoint.split("/runs/")[1].split("/")[0]);page=copy.deepcopy(jobs[identifier])
+                    if identifier==88:
+                        owner_job_calls[0]+=1
+                        if armed[0] and owner_job_calls[0]>=3:
+                            election=next(job for job in page["jobs"] if job["name"]==helper.ELECTION_JOB)
+                            if change=="handoff":election["steps"][1].update(status="completed",conclusion="success")
+                            if change=="completed":election.update(status="completed",conclusion="success")
+                            if change=="cancelled":election.update(status="completed",conclusion="cancelled")
+                            if change=="job_identity":election["id"]+=1
+                            if change=="job_run_id_type":election["run_id"]=float(election["run_id"])
+                            if change=="selected_digest":election["steps"][0]["name"]=election["steps"][0]["name"].replace("a"*64,"b"*64)
+                elif "/actions/runs/" in endpoint:page=copy.deepcopy(next(run for run in runs if run["id"]==int(endpoint.rsplit("/",1)[1])))
+                else:raise AssertionError("Pending proof unexpected authority read: "+endpoint)
+                return subprocess.CompletedProcess(command,0,json.dumps(page),"")
+            env={"GITHUB_ACTIONS":"true","GITHUB_SHA":"d"*40,"GITHUB_REF_NAME":"master","GITHUB_REPOSITORY":"owner/repository",
+                 "GH_TOKEN":"native-read-fixture","GOVERNANCE_DISPATCHER_RUN_ID":"88","GOVERNANCE_SCOPE":"early",
+                 "GOVERNANCE_COHORT_ARTIFACT_ID":"7","GOVERNANCE_COHORT_ARTIFACT_DIGEST":"sha256:"+"a"*64}
+            with self.subTest(change=change),self.identity(),patch.dict(os.environ,env),patch.object(WRITER,"cohort_helper",return_value=helper), \
+                 patch.object(WRITER,"_cohort_context",context),patch.object(WRITER,"_cohort_alias_index",{}), \
+                 patch.object(WRITER,"_cohort_covered_generations",{}),patch.object(WRITER,"_cohort_inventory_noop_generations",{}), \
+                 patch.object(WRITER,"_cohort_pending_generations",{}),patch.object(WRITER,"_cohort_pending_exemptions",frozenset()), \
+                 patch.object(WRITER,"_cohort_generation_identities",{}),patch.object(WRITER,"_cohort_api_counts",{"default":0,"app":0}), \
+                 patch.object(WRITER,"_terminal_deadline_monotonic",__import__("time").monotonic()+60), \
+                 patch.object(WRITER.subprocess,"run",side_effect=native_api):
+                WRITER.reject_newer_dispatcher_barrier("a"*40)
+                self.assertEqual(len(WRITER._cohort_pending_generations),100)
+                armed[0]=True;owner_job_calls[0]=0;ref_calls[0]=0
+                if change=="root_expired":context["header"]["root_deadline_epoch"]=0
+                if change=="source_clock":context["members_by_id"][9000]={"source_deadline_epoch":__import__("time").time()+30}
+                if change=="candidate_identity":runs[1]["run_number"]+=1
+                if change=="unknown_blob":context["header"]["workflow_blob_sha"]="e"*40
+                if change=="unknown_blob":
+                    with patch.object(WRITER,"dispatcher_generation_reconciles",wraps=WRITER.dispatcher_generation_reconciles) as legacy:
+                        WRITER.reject_newer_dispatcher_barrier("a"*40)
+                    self.assertEqual(legacy.call_count,100)
+                else:
+                    with self.assertRaises(WRITER.NoPostGovernanceError):WRITER.reject_newer_dispatcher_barrier("a"*40)
+                self.assertFalse(WRITER._cohort_pending_generations)
+                self.assertFalse(WRITER._cohort_pending_exemptions)
+                self.assertFalse(WRITER._cohort_covered_generations)
+
+    def test_native_pending_mutex_pin_matches_complete_dispatcher_workflow(self):
+        source=(ROOT/".github/workflows/pr-governance.yml").read_bytes()
+        digest=__import__("hashlib").sha1(b"blob "+str(len(source)).encode()+b"\0"+source).hexdigest()
+        self.assertEqual(digest,WRITER.COHORT_EARLY_MUTEX_WORKFLOW_BLOB)
+        workflow=source.decode()
+        election=workflow.split("\n  elect-cohort-owner:\n",1)[1].split("\n  admit-cohort-backend:\n",1)[0]
+        self.assertEqual(election.count("\n    concurrency:"),1)
+        self.assertIn("      group: pr-governance-cohort-election-${{ github.repository_id }}\n",election)
+        self.assertTrue("      queue: max\n      cancel-in-progress: false" in election)
+        self.assertIn("    - name: Run trusted cohort await-handoff\n",election)
+        self.assertIn("    - name: Record closed cohort handoff owner=",election)
+
     def test_cohort_dispatcher_fence_classifies_proven_callbacks_before_original_unknown_cap(self):
         from types import SimpleNamespace
         import copy
@@ -1376,14 +1696,14 @@ class StatusWriterUnitTest(unittest.TestCase):
         def proof(_context, run, **kwargs):
             proof_calls.append(run["id"])
             return run["id"] >= 100
-        helper = SimpleNamespace(cohort_known_producer_ids=lambda *a, **kw: {v["id"]: 900 for v in callbacks}, consumer_is_covered=proof)
+        helper = self.cohort_fence_mock_helper(current_run,cohort_known_producer_ids=lambda *a, **kw: {v["id"]: 900 for v in callbacks}, consumer_is_covered=proof)
         runs = [current_run, *callbacks]
         def page(endpoint):
             number = int(endpoint.rsplit("page=",1)[1]);return {"total_count": len(runs), "workflow_runs": copy.deepcopy(runs[(number-1)*100:number*100])}
         with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d"*40, "GITHUB_REF_NAME": "master", "GOVERNANCE_COHORT_ARTIFACT_ID": "7", "GOVERNANCE_COHORT_ARTIFACT_DIGEST": "sha256:"+"a"*64}), \
              patch.object(WRITER, "_cohort_context", context), patch.object(WRITER, "_cohort_alias_index", None), \
              patch.object(WRITER, "_cohort_covered_generations", {}), patch.object(WRITER, "_cohort_generation_identities", {}), patch.object(WRITER, "_terminal_deadline_monotonic", clock+30), \
-             patch.object(WRITER, "cohort_helper", return_value=helper), patch.object(WRITER, "object_page", side_effect=page):
+             patch.object(WRITER, "cohort_helper", return_value=helper), patch.object(WRITER, "cohort_read_json",return_value=current_run), patch.object(WRITER, "object_page", side_effect=page):
             current = WRITER.dispatcher_generation(current_run)
             generations, covered = WRITER.cohort_dispatcher_generations(current)
             self.assertEqual((len(generations),len(covered),len(proof_calls)), (201,200,200))
@@ -1400,7 +1720,7 @@ class StatusWriterUnitTest(unittest.TestCase):
             runs[2] = callbacks[1]
             _, covered = WRITER.cohort_dispatcher_generations(current)
             self.assertNotIn(101, covered)
-            runs.extend(self.dispatcher_run(identifier=1000+i) for i in range(99))
+            runs.extend(self.dispatcher_run(identifier=1000+i) for i in range(100))
             with self.assertRaises(WRITER.GovernanceError):
                 WRITER.cohort_dispatcher_generations(current)
             runs = [current_run, callbacks[0], callbacks[0]]
@@ -1414,7 +1734,7 @@ class StatusWriterUnitTest(unittest.TestCase):
                    "workflow_blob_sha": "e"*40, "member_ids": [900]},
                    "artifact_id": 7, "artifact_digest": "sha256:"+"a"*64, "cohort_digest": "f"*64}
         current_run = self.dispatcher_run()
-        helper = SimpleNamespace(cohort_known_producer_ids=lambda *a, **kw: {}, consumer_is_covered=lambda *a, **kw: False)
+        helper = self.cohort_fence_mock_helper(current_run,cohort_known_producer_ids=lambda *a, **kw: {}, consumer_is_covered=lambda *a, **kw: False)
         for change in ("boolean_count", "float_count", "boolean_attempt"):
             calls = []
             def page(endpoint):
@@ -1430,7 +1750,7 @@ class StatusWriterUnitTest(unittest.TestCase):
                  patch.object(WRITER, "_cohort_context", context), patch.object(WRITER, "_cohort_alias_index", None), \
                  patch.object(WRITER, "_cohort_covered_generations", {}), patch.object(WRITER, "_cohort_generation_identities", {}), \
                  patch.object(WRITER, "_terminal_deadline_monotonic", __import__("time").monotonic()+30), \
-                 patch.object(WRITER, "cohort_helper", return_value=helper), patch.object(WRITER, "object_page", side_effect=page):
+                 patch.object(WRITER, "cohort_helper", return_value=helper), patch.object(WRITER, "cohort_read_json",return_value=current_run), patch.object(WRITER, "object_page", side_effect=page):
                 with self.assertRaises(WRITER.GovernanceError):
                     WRITER.cohort_dispatcher_generations(WRITER.dispatcher_generation(current_run))
                 self.assertEqual(len(calls), 2)
@@ -1449,7 +1769,7 @@ class StatusWriterUnitTest(unittest.TestCase):
         def deferred(_context, run, **kwargs):
             calls.append(run["id"])
             return run["id"] >= 100
-        helper = SimpleNamespace(cohort_known_producer_ids=lambda *a, **kw: {},
+        helper = self.cohort_fence_mock_helper(current_run,cohort_known_producer_ids=lambda *a, **kw: {},
                                  consumer_is_covered=lambda *a, **kw: False, consumer_is_deferred=deferred)
         runs = [current_run, *callbacks]
         def page(endpoint):
@@ -1459,7 +1779,7 @@ class StatusWriterUnitTest(unittest.TestCase):
              patch.object(WRITER,"_cohort_context",context),patch.object(WRITER,"_cohort_alias_index",None), \
              patch.object(WRITER,"_cohort_covered_generations",{}),patch.object(WRITER,"_cohort_generation_identities",{}), \
              patch.object(WRITER,"_terminal_deadline_monotonic",__import__("time").monotonic()+30), \
-             patch.object(WRITER,"cohort_helper",return_value=helper),patch.object(WRITER,"object_page",side_effect=page):
+             patch.object(WRITER,"cohort_helper",return_value=helper),patch.object(WRITER,"cohort_read_json",return_value=current_run),patch.object(WRITER,"object_page",side_effect=page):
             current = WRITER.dispatcher_generation(current_run)
             generations, covered = WRITER.cohort_dispatcher_generations(current)
             self.assertEqual((len(generations),len(covered),len(calls)),(202,201,201))
@@ -1470,7 +1790,7 @@ class StatusWriterUnitTest(unittest.TestCase):
             helper.consumer_is_deferred = lambda *a, **kw: False
             with self.assertRaises(WRITER.GovernanceError):
                 WRITER.cohort_dispatcher_generations(current)
-            runs = [current_run, *[self.dispatcher_run(identifier=1000+i) for i in range(99)]]
+            runs = [current_run, *[self.dispatcher_run(identifier=1000+i) for i in range(101)]]
             calls.clear()
             with self.assertRaises(WRITER.GovernanceError):
                 WRITER.cohort_dispatcher_generations(current)
@@ -1570,11 +1890,11 @@ class StatusWriterUnitTest(unittest.TestCase):
         def proof(_context, run, **kwargs):
             calls.append(run["id"])
             return run["id"] == 89
-        helper = SimpleNamespace(cohort_known_producer_ids=lambda *a, **kw: {88: None, 89: None}, consumer_is_covered=proof)
+        helper = self.cohort_fence_mock_helper(current_run,cohort_known_producer_ids=lambda *a, **kw: {88: None, 89: None}, consumer_is_covered=proof)
         with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d"*40, "GITHUB_REF_NAME": "master", "GOVERNANCE_COHORT_ARTIFACT_ID": "7", "GOVERNANCE_COHORT_ARTIFACT_DIGEST": "sha256:"+"a"*64}), \
              patch.object(WRITER, "_cohort_context", context), patch.object(WRITER, "_cohort_alias_index", None), \
              patch.object(WRITER, "_cohort_covered_generations", {}), patch.object(WRITER, "_cohort_generation_identities", {}), patch.object(WRITER, "_terminal_deadline_monotonic", clock+30), \
-             patch.object(WRITER, "cohort_helper", return_value=helper), patch.object(WRITER, "object_page", return_value=page):
+             patch.object(WRITER, "cohort_helper", return_value=helper), patch.object(WRITER, "cohort_read_json",return_value=current_run), patch.object(WRITER, "object_page", return_value=page):
             current = WRITER.dispatcher_generation(current_run)
             _, covered = WRITER.cohort_dispatcher_generations(current)
             self.assertEqual(covered, frozenset({89}))

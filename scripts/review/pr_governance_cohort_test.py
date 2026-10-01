@@ -7,6 +7,208 @@ import zipfile
 import pr_governance_cohort as cohort
 
 
+class TerminalInventoryNonmutationTests(unittest.TestCase):
+    def fixture(self):
+        import copy
+        repo = {"id": 101, "full_name": "owner/repository"}
+        header = {"repository": "owner/repository", "repository_id": 101, "owner_dispatcher_run_id": 100,
+                  "workflow_sha": "a" * 40, "workflow_blob_sha": "b" * 40, "root_deadline_epoch": 5500}
+        owner = {"id": 100, "workflow_id": 2, "head_branch": "master", "head_sha": "a" * 40,
+                 "repository": repo}
+        generation = dict(owner, id=99, run_number=89, run_attempt=1, name="sensor=11 action=in_progress",
+                          display_title="sensor=11 action=in_progress", head_repository=repo,
+                          path=".github/workflows/pr-governance.yml@refs/heads/master", event="workflow_run",
+                          status="completed", conclusion="cancelled")
+        def step(name, number):
+            return {"name": name, "number": number, "status": "completed", "conclusion": "success"}
+        names = ["Preflight workflow_run governance source", cohort.PRODUCER_JOB, cohort.ELECTION_JOB,
+                 cohort.ADMISSION_JOB] + sorted(cohort.MUTATING_JOBS)
+        jobs = [{"id": 990 + index, "run_id": 99, "run_attempt": 1, "head_sha": header["workflow_sha"],
+                 "name": name, "status": "completed", "conclusion": "success" if index < 2 else
+                 "cancelled" if index == 2 else "failure" if index == 3 else "skipped", "steps": []}
+                for index, name in enumerate(names)]
+        jobs[0]["steps"] = [step("Exclude unavailable fork sources before dispatcher lock", 1)]
+        jobs[1]["steps"] = [step(cohort.PAYLOAD_PREFIX + "source sha256=" + "c" * 64, 1),
+                             step("Upload immutable krr-governance-source-11-attempt-1", 2)]
+        calls, budget = [], Budget(900)
+        def read(endpoint, *, timeout):
+            calls.append(endpoint)
+            self.assertEqual(endpoint, "repos/owner/repository/actions/runs/99/attempts/1/jobs?per_page=100&page=1")
+            return {"total_count": len(jobs), "jobs": copy.deepcopy(jobs)}
+        def archive(endpoint, *, timeout):
+            self.fail("Inventory classification must not read source journal archives")
+        reader = cohort._Reader(read, archive, budget, 5500)
+        reader.cache[("producer", header["repository"], 100)] = owner
+        reader.cache[("workflow", header["repository"], header["workflow_sha"], header["workflow_blob_sha"])] = b"trusted"
+        return {"header": header}, generation, jobs, reader, calls, budget
+
+    def proof(self, fixture):
+        from unittest.mock import patch
+        context, generation, _, reader, _, _ = fixture
+        with patch.object(cohort.time, "time", return_value=200):
+            return cohort.terminal_inventory_is_nonmutating(context, generation, reader=reader)
+
+    def test_native_positive_uses_one_job_read_without_authority_or_clock_changes(self):
+        import copy
+        fixture = self.fixture()
+        before = copy.deepcopy(fixture[0])
+        self.assertTrue(self.proof(fixture))
+        self.assertEqual(fixture[5].used, 1)
+        self.assertEqual(len(fixture[4]), 1)
+        self.assertEqual(fixture[0], before)
+
+    def completed_fixture(self):
+        fixture = self.fixture()
+        fixture[1].update(name="sensor=11 action=completed", display_title="sensor=11 action=completed", conclusion="success")
+        for job in fixture[2][1:4]:
+            job.update(conclusion="skipped", steps=[])
+        fixture[2][0]["steps"].append({"name": cohort.COMPLETED_NOOP_PREFIX + "11", "number": 2,
+                                     "status": "completed", "conclusion": "success"})
+        return fixture
+
+    def test_completed_callback_inventory_has_no_member_or_ack_authority(self):
+        import copy
+        fixture = self.completed_fixture(); before = copy.deepcopy(fixture[0])
+        self.assertTrue(self.proof(fixture))
+        self.assertEqual(fixture[5].used, 1)
+        self.assertEqual(fixture[0], before)
+
+    def test_completed_callback_requires_exact_unique_native_noop_stage(self):
+        import copy
+        for mutation in ("missing", "foreign", "malformed", "duplicate", "failed", "boolnumber", "active-title",
+                         "published", "selected", "admitted", "mutated", "recovery"):
+            with self.subTest(mutation=mutation):
+                fixture = self.completed_fixture(); stages = fixture[2][0]["steps"]
+                if mutation == "missing": stages.pop()
+                elif mutation == "foreign": stages[-1]["name"] = cohort.COMPLETED_NOOP_PREFIX + "12"
+                elif mutation == "malformed": stages[-1]["name"] += "extra"
+                elif mutation == "duplicate":
+                    duplicate = copy.deepcopy(stages[-1]); duplicate["number"] = 3; stages.append(duplicate)
+                elif mutation == "failed": stages[-1]["conclusion"] = "failure"
+                elif mutation == "boolnumber": stages[-1]["number"] = True
+                elif mutation == "active-title": fixture[1].update(name="sensor=11 action=in_progress", display_title="sensor=11 action=in_progress")
+                elif mutation in {"published", "selected", "admitted"}: fixture[2][{"published": 1, "selected": 2, "admitted": 3}[mutation]]["conclusion"] = "success"
+                elif mutation == "mutated": fixture[2][4]["conclusion"] = "cancelled"
+                else: stages.append({"name": cohort.RECOVERY_PREFIX + "malformed", "number": 3, "status": "completed", "conclusion": "success"})
+                self.assertFalse(self.proof(fixture))
+
+    def test_terminal_and_workflow_identity_types_are_strict(self):
+        for field, value in (("id", 99.0), ("id", True), ("run_attempt", True), ("run_number", 89.0),
+                             ("workflow_id", 2.0), ("head_sha", "c" * 40), ("head_branch", "foreign"),
+                             ("path", ".github/workflows/unknown.yml"), ("event", "workflow_dispatch"),
+                             ("status", "in_progress"), ("conclusion", "success"), ("display_title", "unknown")):
+            with self.subTest(field=field, value=value):
+                fixture = self.fixture(); fixture[1][field] = value
+                self.assertFalse(self.proof(fixture))
+                self.assertEqual(fixture[5].used, 0)
+        for field in ("repository", "head_repository"):
+            fixture = self.fixture(); fixture[1][field] = {"id": 101.0, "full_name": "owner/repository"}
+            self.assertFalse(self.proof(fixture))
+
+    def test_native_job_and_step_identity_types_are_strict(self):
+        for field, value in (("id", 990.0), ("run_id", 99.0), ("run_id", True), ("run_attempt", True),
+                             ("head_sha", "c" * 40), ("name", None), ("status", "in_progress")):
+            with self.subTest(field=field, value=value):
+                fixture = self.fixture(); fixture[2][0][field] = value
+                self.assertFalse(self.proof(fixture))
+        for field, value in (("number", True), ("number", 1.0), ("name", None), ("status", "in_progress")):
+            fixture = self.fixture(); fixture[2][0]["steps"][0][field] = value
+            self.assertFalse(self.proof(fixture))
+
+    def test_missing_duplicate_jobs_or_steps_and_untrusted_reader_rejected(self):
+        import copy
+        for mutation in ("missing", "duplicate-name", "duplicate-step", "unknown-job", "missing-owner", "missing-workflow"):
+            with self.subTest(mutation=mutation):
+                fixture = self.fixture()
+                if mutation == "missing": fixture[2].pop()
+                elif mutation == "duplicate-name":
+                    extra = copy.deepcopy(fixture[2][0]); extra["id"] += 1000; fixture[2].append(extra)
+                elif mutation == "duplicate-step": fixture[2][1]["steps"].append(copy.deepcopy(fixture[2][1]["steps"][0]))
+                elif mutation == "unknown-job": fixture[2][0]["name"] = "Unknown governance writer"
+                elif mutation == "missing-owner": fixture[3].cache.pop(("producer", "owner/repository", 100))
+                else: fixture[3].cache.pop(("workflow", "owner/repository", "a" * 40, "b" * 40))
+                self.assertFalse(self.proof(fixture))
+
+    def test_every_mutation_and_selected_admitted_recovery_path_is_retained(self):
+        for name in cohort.MUTATING_JOBS:
+            for conclusion in ("success", "failure", "cancelled"):
+                fixture = self.fixture()
+                next(job for job in fixture[2] if job["name"] == name)["conclusion"] = conclusion
+                self.assertFalse(self.proof(fixture), (name, conclusion))
+        for prefix in (cohort.SELECTED_PREFIX, cohort.ADMITTED_PREFIX, cohort.RECOVERY_PREFIX):
+            for conclusion in ("success", "failure", "cancelled"):
+                fixture = self.fixture()
+                fixture[2][0]["steps"].append({"name": prefix + "malformed", "number": 2,
+                                              "status": "completed", "conclusion": conclusion})
+                self.assertFalse(self.proof(fixture))
+        fixture = self.fixture()
+        fixture[2][0]["steps"].append({"name": cohort.RECOVERY_PREFIX + "owner= journal= digest= root=",
+                                     "number": 2, "status": "completed", "conclusion": "skipped"})
+        self.assertTrue(self.proof(fixture))
+
+    def test_required_stages_and_exact_source_upload_positive_evidence(self):
+        for index in range(4):
+            fixture = self.fixture(); fixture[2][index]["conclusion"] = "success" if index >= 2 else "failure"
+            self.assertFalse(self.proof(fixture))
+        for index in range(2):
+            fixture = self.fixture(); fixture[2][1]["steps"][index]["conclusion"] = "skipped"
+            self.assertFalse(self.proof(fixture))
+        fixture = self.fixture(); fixture[2][1]["steps"][1]["name"] = "Upload immutable krr-governance-source-12-attempt-1"
+        self.assertFalse(self.proof(fixture))
+        fixture = self.fixture(); fixture[2][1]["steps"][0]["name"] = cohort.PAYLOAD_PREFIX + "source sha256=invalid"
+        self.assertFalse(self.proof(fixture))
+
+    def native_inventory_model(self, cancelled, completed, active):
+        import copy
+        import urllib.parse
+        from unittest.mock import patch
+        fixture = self.fixture()
+        generations, all_jobs, calls = [], {}, []
+        for index in range(cancelled + completed):
+            identifier, source = 1000 + index, 11 + index
+            generation = dict(fixture[1], id=identifier, run_number=identifier,
+                              name=f"sensor={source} action=in_progress", display_title=f"sensor={source} action=in_progress")
+            jobs = copy.deepcopy(fixture[2])
+            for offset, job in enumerate(jobs):
+                job.update(id=identifier * 100 + offset, run_id=identifier)
+            jobs[1]["steps"][1]["name"] = f"Upload immutable krr-governance-source-{source}-attempt-1"
+            if index >= cancelled:
+                generation.update(name=f"sensor={source} action=completed", display_title=f"sensor={source} action=completed", conclusion="success")
+                for job in jobs[1:4]:
+                    job.update(conclusion="skipped", steps=[])
+                jobs[0]["steps"].append({"name": cohort.COMPLETED_NOOP_PREFIX + str(source), "number": 2,
+                                         "status": "completed", "conclusion": "success"})
+            generations.append(generation); all_jobs[identifier] = jobs
+        inventory = generations + [dict(fixture[1], id=2000 + index, status="in_progress", conclusion=None) for index in range(active)]
+        self.assertEqual(len(inventory), 600)
+        def read(endpoint, *, timeout):
+            calls.append(endpoint)
+            if "/workflows/" in endpoint:
+                page = int(urllib.parse.parse_qs(urllib.parse.urlsplit(endpoint).query)["page"][0])
+                return {"total_count": 600, "workflow_runs": copy.deepcopy(inventory[(page - 1) * 100:page * 100])}
+            identifier = int(endpoint.split("/runs/")[1].split("/")[0])
+            self.assertEqual(endpoint, f"repos/owner/repository/actions/runs/{identifier}/attempts/1/jobs?per_page=100&page=1")
+            return {"total_count": len(all_jobs[identifier]), "jobs": copy.deepcopy(all_jobs[identifier])}
+        fixture[3].read_json = read
+        def pages():
+            return [fixture[3].request(f"repos/owner/repository/actions/workflows/2/runs?per_page=100&page={page}") for page in range(1, 7)]
+        with patch.object(cohort.time, "time", return_value=200):
+            before = pages()
+            for generation in generations:
+                self.assertTrue(cohort.terminal_inventory_is_nonmutating(fixture[0], generation, reader=fixture[3]))
+            self.assertEqual(json.dumps(before, sort_keys=True, allow_nan=False), json.dumps(pages(), sort_keys=True, allow_nan=False))
+        self.assertEqual(fixture[5].used, cancelled + completed + 12)
+        self.assertEqual(len(calls), cancelled + completed + 12)
+        self.assertEqual(len({endpoint for endpoint in calls if "/attempts/" in endpoint}), cancelled + completed)
+        self.assertFalse(any("/artifacts" in endpoint or "/pulls" in endpoint for endpoint in calls))
+
+    def test_499_native_jobs_and_complete_inventory_fit_existing_budget(self):
+        self.native_inventory_model(499, 0, 101)
+
+    def test_bound_600_inventory_with_completed_callbacks_needs_400_native_jobs(self):
+        self.native_inventory_model(200, 200, 200)
+
+
 class CohortWireTests(unittest.TestCase):
     def test_canonical_json_rejects_duplicate_extra_unicode_and_whitespace(self):
         self.assertEqual(cohort.decode_payload(b'{"v":1}', {"v"}), {"v": 1})
@@ -507,9 +709,18 @@ class NativeCohortPrepareTests(unittest.TestCase):
 
 class DispatcherInventoryBoundaryTests(unittest.TestCase):
     def fixture(self):
+        import copy
         fixture,context,run,jobs=CohortFollowerAndHandoffTests().follower()
+        fixture.steps[cohort.PRODUCER_JOB][:]=fixture.steps[cohort.PRODUCER_JOB][:2]
         fixture.run.update(status="in_progress",conclusion=None)
-        rows=[run,fixture.run]
+        binding="owner=100 artifact=1 digest="+fixture.header_ref["artifact_digest"]
+        fixture.steps[cohort.ELECTION_JOB].append({"name":cohort.SELECTED_PREFIX+binding,"status":"completed","conclusion":"success"})
+        fixture.jobs["jobs"].append({"id":999,"run_id":100,"head_sha":fixture.sha,"name":cohort.ADMISSION_JOB,
+            "status":"completed","conclusion":"success","steps":[{"name":cohort.ADMITTED_PREFIX+binding,
+            "status":"completed","conclusion":"success"}]})
+        fixture.jobs["total_count"]=len(fixture.jobs["jobs"])
+        unknown=dict(copy.deepcopy(fixture.run),id=1000,run_number=1000)
+        rows=[run,fixture.run,unknown]
         def read(endpoint,*,timeout):
             if "/actions/workflows/2/runs?" in endpoint:
                 import copy
@@ -519,17 +730,18 @@ class DispatcherInventoryBoundaryTests(unittest.TestCase):
         reader=cohort._Reader(read,fixture.read_archive,Budget(),300)
         adapter=cohort.DispatcherCohortFilter.__new__(cohort.DispatcherCohortFilter)
         adapter.reader,adapter.cohort,adapter.known=reader,context,{99:11}
-        adapter.owner,adapter.repository,adapter.covered=100,fixture.repository,{}
+        adapter.owner,adapter.repository,adapter.covered,adapter.phase=100,fixture.repository,{},"early"
+        adapter.nonmutating={}
         endpoint="repos/owner/repository/actions/workflows/2/runs?per_page=100&page=1"
         return fixture,adapter,rows,endpoint,read
 
-    def test_real_positive_follower_removed_and_unknown_owner_retained(self):
+    def test_real_positive_follower_and_context_owner_removed_and_unknown_generation_retained(self):
         from unittest.mock import patch
         fixture,adapter,rows,endpoint,read=self.fixture()
         with patch.dict("os.environ",{"GITHUB_REPOSITORY":fixture.repository}),patch.object(cohort.time,"time",return_value=200):
             page=adapter.page(endpoint,read(endpoint,timeout=20))
             self.assertEqual(page["total_count"],1)
-            self.assertEqual(page["workflow_runs"][0]["id"],100)
+            self.assertEqual(page["workflow_runs"][0]["id"],1000)
             self.assertEqual(set(adapter.covered),{99})
             rows[0]["run_number"]+=1
             with self.assertRaises(cohort.CohortError):adapter.page(endpoint,read(endpoint,timeout=20))
@@ -541,7 +753,7 @@ class DispatcherInventoryBoundaryTests(unittest.TestCase):
             if mutation=="duplicate": rows.append(rows[0])
             elif mutation=="unknown101": rows[:]=[{"id":1000+i,"event":"workflow_dispatch"} for i in range(101)]
             page=read(endpoint,timeout=20)
-            if mutation=="truncated": page["total_count"]=3
+            if mutation=="truncated": page["total_count"]=4
             with self.subTest(mutation=mutation),patch.dict("os.environ",{"GITHUB_REPOSITORY":fixture.repository}),patch.object(cohort.time,"time",return_value=200),self.assertRaises(cohort.CohortError):adapter.page(endpoint,page)
 
 if __name__ == "__main__":
@@ -748,9 +960,20 @@ class CohortCLIReplayTests(unittest.TestCase):
     def test_bodyless_started_and_unstarted_sources_do_not_block_valid_cli_cohort(self):
         self.replay_notifications(bodyless=True)
 
-    def replay_notifications(self, *, bodyless=False):
+    def test_six_hundred_started_sources_elect_with_native_transport_and_role_budget(self):
+        self.replay_notifications(count=600,started=600,native=True,api_latency=0.25)
+
+    def test_six_hundred_late_started_sources_resolve_original_clock_within_role_budget(self):
+        self.replay_notifications(count=600,started=600,native=True,late_clock=True,api_latency=0.25)
+
+    def test_unrelated_deleted_fork_does_not_block_native_valid_source_cohort(self):
+        self.replay_notifications(count=2,started=2,native=True,unrelated=True)
+
+    def replay_notifications(self, *, bodyless=False, count=200, started=2, native=False, late_clock=False, api_latency=0, unrelated=False):
         import base64, copy, os, tempfile, urllib.parse
+        from contextlib import nullcontext
         from pathlib import Path
+        from types import SimpleNamespace
         from unittest.mock import patch
         raw = RawArtifactFixture()
         prefix = "repos/" + raw.repository
@@ -784,14 +1007,16 @@ class CohortCLIReplayTests(unittest.TestCase):
                                     "status": "in_progress" if name == cohort.ELECTION_JOB else "completed", "conclusion": None if name == cohort.ELECTION_JOB else "success", "steps": []}
                                    for index, name in enumerate((cohort.PRODUCER_JOB, cohort.ELECTION_JOB, "Preflight workflow_run governance source"), 1)]
             raw_jobs[identifier][-1]["steps"] = copy.deepcopy(raw.steps["Preflight workflow_run governance source"])
-        for offset in range(200):
+        for offset in range(count):
             identifier, number = 1000+offset, offset+1
             member = dict(raw.member, source_run_id=identifier, source_run_number=offset+1, pr_number=number)
             pull = {"number": number, "state": "open", "draft": False, "body": "body", "base": {"ref": "master", "sha": "b"*40, "repo": repo}, "head": {"sha": "c"*40, "repo": repo}}
-            source = {"id": identifier, "run_attempt": 1, "workflow_id": 9, "run_number": offset+1, "name": "PR governance review sensor", "event": "pull_request_review", "head_sha": "c"*40, "path": ".github/workflows/pr-governance-review-events.yml", "repository": repo, "head_repository": repo, "status": "in_progress" if offset < 2 else "queued", "conclusion": None, "pull_requests": [pull]}
+            source = {"id": identifier, "run_attempt": 1, "workflow_id": 9, "run_number": offset+1, "name": "PR governance review sensor", "event": "pull_request_review", "head_sha": "c"*40, "path": ".github/workflows/pr-governance-review-events.yml", "repository": repo, "head_repository": repo, "status": "in_progress" if offset < started else "queued", "conclusion": None, "pull_requests": [pull]}
             sources[identifier], pulls[number] = source, pull
-            raw_jobs[identifier] = [{"id": identifier*100, "run_id": identifier, "head_sha": source["head_sha"], "name": "KRR / PR governance review latch", "status": "in_progress" if offset < 2 else "queued", "conclusion": None,
-                "steps": [{"number": 5, "name": "Await matching trusted governance Check Run", "started_at": "1970-01-01T00:01:40Z", "status": "in_progress", "conclusion": None}] if offset < 2 else []}]
+            raw_jobs[identifier] = [{"id": identifier*100, "run_id": identifier, "head_sha": source["head_sha"], "name": "KRR / PR governance review latch", "status": "in_progress" if offset < started else "queued", "conclusion": None,
+                "steps": [{"number": 5, "name": "Await matching trusted governance Check Run", "started_at": "1970-01-01T00:01:40Z", "status": "in_progress", "conclusion": None}] if offset < started and not late_clock else []}]
+            if native and not late_clock and offset < started:
+                raw_jobs[identifier][0]["steps"][0]["started_at"]=f"1970-01-01T00:01:40.{count-offset:06d}Z"
         def read(endpoint, *, timeout):
             requests.append(endpoint)
             self.assertGreater(timeout, 0); self.assertLessEqual(timeout, 20)
@@ -808,6 +1033,9 @@ class CohortCLIReplayTests(unittest.TestCase):
                 identifier=int(endpoint.split("/runs/")[1].split("/")[0]); jobs=raw_jobs[identifier]
                 return {"total_count": len(jobs), "jobs": copy.deepcopy(jobs)}
             if "/actions/runs/" in endpoint: return copy.deepcopy({**raw_runs, **sources}[int(endpoint.rsplit("/",1)[1])])
+            if "/pulls?" in endpoint:
+                page=int(urllib.parse.parse_qs(urllib.parse.urlsplit(endpoint).query)["page"][0])
+                return copy.deepcopy(list(pulls.values())[(page-1)*100:page*100])
             if "/pulls/" in endpoint: return copy.deepcopy(pulls[int(endpoint.rsplit("/",1)[1])])
             return raw.read_json(endpoint, timeout=timeout)
         class Transport:
@@ -819,11 +1047,25 @@ class CohortCLIReplayTests(unittest.TestCase):
         env = {"GITHUB_REPOSITORY": raw.repository, "GITHUB_RUN_ATTEMPT": "1", "WORKFLOW_SHA": raw.sha,
                "WORKFLOW_REF": raw.repository+"/.github/workflows/pr-governance.yml@refs/heads/master", "DEFAULT_BRANCH": "master", "GH_TOKEN": "fixture", "COHORT_ORIGINAL_ROOT_DEADLINE": "21200", "COHORT_VALID": "true", "COHORT_SENSOR_SOURCE": "true"}
         initial_directory = os.getcwd()
-        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, env), patch.object(cohort.time, "time", return_value=200), patch.object(cohort, "_Transport", Transport):
+        clock,selecting=[200.0],[False]
+        def native_json(args, **options):
+            value=read(args[5],timeout=options["timeout"])
+            if selecting[0]:clock[0]+=api_latency
+            return SimpleNamespace(returncode=0,stdout="HTTP/2.0 200 OK\n\n"+json.dumps(value))
+        def native_archive(endpoint,token,timeout):
+            if selecting[0]:clock[0]+=api_latency*2
+            return archives[int(endpoint.split("/")[-2])]
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, env), patch.object(cohort.time, "time", side_effect=lambda:clock[0]), \
+                (nullcontext() if native else patch.object(cohort, "_Transport", Transport)), \
+                patch("subprocess.run",side_effect=native_json), \
+                patch.object(cohort,"read_artifact_archive",side_effect=native_archive):
             def run(mode, owner, directory, extra=None):
                 directory.mkdir(exist_ok=True); os.chdir(directory)
                 output = directory/'outputs'; output.write_text('')
-                with patch.dict(os.environ, dict({"COHORT_MODE": mode, "GITHUB_RUN_ID": str(owner), "GITHUB_OUTPUT": str(output)}, **(extra or {}))): cohort.main()
+                selecting[0]=mode=="select"
+                try:
+                    with patch.dict(os.environ, dict({"COHORT_MODE": mode, "GITHUB_RUN_ID": str(owner), "GITHUB_OUTPUT": str(output)}, **(extra or {}))): cohort.main()
+                finally:selecting[0]=False
                 return dict(line.split('=',1) for line in output.read_text().splitlines())
             try:
                 for offset, source in enumerate(sources.values()):
@@ -833,8 +1075,17 @@ class CohortCLIReplayTests(unittest.TestCase):
                         directory = Path(temporary)/str(identifier)
                         run('producer', identifier, directory, {"COHORT_MEMBER_HINT": json.dumps(hint)})
                         payload=json.loads((directory/'cohort-journal/binding.json').read_text()); upload(payload, identifier)
-                self.assertEqual(len(native_outputs), 400)
+                self.assertEqual(len(native_outputs), count*2)
                 self.assertEqual({item['name'] for item in metadata.values()}, {f'krr-governance-source-{identifier}-attempt-1' for identifier in sources})
+                if late_clock:
+                    for jobs in raw_jobs.values():
+                        if jobs[0]["name"] == "KRR / PR governance review latch":
+                            jobs[0]["steps"]=[{"number":5,"name":"Await matching trusted governance Check Run",
+                                "started_at":"1970-01-01T00:03:20Z","status":"in_progress","conclusion":None}]
+                if unrelated:
+                    foreign=copy.deepcopy(pulls[1]);foreign.update(number=count+1,body=None)
+                    foreign["head"]["repo"]=None
+                    pulls[count+1]=foreign
                 if bodyless:
                     for offset, body in enumerate((None,"",None,"")):
                         identifier,number=2000+offset,201+offset
@@ -846,9 +1097,23 @@ class CohortCLIReplayTests(unittest.TestCase):
                 owner=90000; producer(owner); directory=Path(temporary)/str(owner)
                 run('producer', owner, directory, {"COHORT_MEMBER_HINT": "null", "COHORT_SENSOR_SOURCE": "false"})
                 own=upload(json.loads((directory/'cohort-journal/binding.json').read_text()), owner)
+                requests.clear()
                 outputs=run('select', owner, directory, {"COHORT_OWN_JOURNAL_ID": str(own['artifact_id']), "COHORT_OWN_JOURNAL_DIGEST": own['artifact_digest']})
                 state=json.loads((directory/'cohort-selection/state.json').read_text())
-                self.assertEqual(state['member_ids'], [1000,1001]); self.assertEqual(outputs['batch_count'], '1')
+                selected=sorted(sorted(sources,key=lambda identifier:(raw_jobs[identifier][0]["steps"][0]["started_at"],identifier))[:len(state['member_ids'])]) if native else [1000,1001]
+                self.assertEqual(state['member_ids'], selected); self.assertEqual(outputs['batch_count'], '1')
+                if native:
+                    self.assertGreater(len(selected),0);self.assertLessEqual(len(selected),200)
+                    self.assertLessEqual(int(outputs['cohort_read_attempts']),900)
+                    self.assertEqual(int(outputs['cohort_primary_reads']),len(requests))
+                    self.assertEqual(sum("/pulls/" in endpoint for endpoint in requests),len(selected))
+                    self.assertEqual(sum("/pulls?" in endpoint for endpoint in requests),2*((count+int(unrelated))//100+1))
+                    self.assertEqual(sum("/actions/artifacts?" in endpoint for endpoint in requests),len(selected))
+                    self.native_selection_stats={"selected":len(selected),"role":int(outputs['cohort_read_attempts']),
+                        "primary":int(outputs['cohort_primary_reads']),"jobs":sum("/jobs?" in endpoint for endpoint in requests),
+                        "elapsed":clock[0]-200}
+                    self.assertEqual(self.native_selection_stats["elapsed"],int(outputs['cohort_read_attempts'])*api_latency)
+                    self.assertLess(clock[0],min(member["source_deadline_epoch"] for member in state["members"].values()))
                 if bodyless:
                     self.assertFalse(any(f"krr-governance-source-{identifier}-attempt" in endpoint
                                          for identifier in range(2000,2004) for endpoint in requests))
@@ -862,17 +1127,20 @@ class CohortCLIReplayTests(unittest.TestCase):
                 header=upload(json.loads((directory/'cohort-header/binding.json').read_text()), owner)
                 raw_jobs[owner][1]['steps'].append({'name':cohort.SELECTED_PREFIX+f"owner={owner} artifact={header['artifact_id']} digest={header['artifact_digest']}", 'number':20,'status':'completed','conclusion':'success'})
                 admitted=run('admission', owner, directory)
-                self.assertEqual(admitted['source_ids'],'[1000,1001]'); self.assertEqual(admitted['root_deadline_epoch'],'21200')
+                self.assertEqual(admitted['source_ids'],json.dumps(selected,separators=(',',':'))); self.assertEqual(admitted['root_deadline_epoch'],'21200')
                 for name in ('Service bound cohort review sources','Preserve pending review sensor before direct dispatch','Preserve admitted sources before obsolete heavy preemption'):
                     raw_jobs[owner].append({'id':9000010+len(raw_jobs[owner]),'run_id':owner,'head_sha':raw.sha,'name':name,'status':'completed','conclusion':'success','steps':[]})
                 handoff=run('await-handoff', owner, directory, {'COHORT_ARTIFACT_ID':str(header['artifact_id']),'COHORT_ARTIFACT_DIGEST':header['artifact_digest']})
                 self.assertEqual(handoff['owner'],str(owner))
-                self.assertEqual(len([item for item in metadata.values() if item['name'].startswith('krr-governance-source-') and '-driver-' not in item['name']]),400)
+                self.assertEqual(len([item for item in metadata.values() if item['name'].startswith('krr-governance-source-') and '-driver-' not in item['name']]),count*2)
                 for item in metadata.values():
                     if item['name'].startswith('krr-governance-source-') and '-driver-' not in item['name']:
                         journal=json.loads(cohort.decode_archive(archives[item['id']]))
                         self.assertEqual(journal['root_deadline_epoch'],21200)
-                        if journal['member']['source_run_id']>=1002: self.assertIsNone(journal['member']['source_deadline_epoch'])
+                        if journal['member']['source_run_id']>=1000+started: self.assertIsNone(journal['member']['source_deadline_epoch'])
+                if late_clock:
+                    self.assertTrue(all(member["latch_started_at"] == "1970-01-01T00:03:20Z"
+                                        and member["source_deadline_epoch"] == 5600 for member in state["members"].values()))
             finally: os.chdir(initial_directory)
 
 
@@ -979,6 +1247,14 @@ class CohortEligibilityOverflowTests(unittest.TestCase):
             deadline = 21200
             def request(self, endpoint):
                 requests.append(endpoint)
+                if "/pulls?" in endpoint:
+                    import urllib.parse
+                    page=int(urllib.parse.parse_qs(urllib.parse.urlsplit(endpoint).query)["page"][0])
+                    rows=copy.deepcopy(list(pulls.values()))
+                    if current_change:
+                        for pull in rows:current_change(pull["number"],pull)
+                    rows=[pull for pull in rows if pull.get("state") != "closed"]
+                    return rows[(page-1)*100:page*100]
                 if "/pulls/" in endpoint:
                     identifier = int(endpoint.rsplit("/", 1)[1])
                     pull = copy.deepcopy(pulls[identifier])
@@ -1062,7 +1338,8 @@ class CohortEligibilityOverflowTests(unittest.TestCase):
                 self.assertFalse(any("krr-governance-source-1-attempt" in endpoint for endpoint in fixture[4]))
 
     def test_current_pr_malformed_and_observation_failure_are_not_ineligibility(self):
-        for change in ({"state":"unknown"},{"draft":None},{"number":True},{"head":None},{"body":"\0"}):
+        for change in ({"state":"unknown"},{"draft":None},{"number":True},{"head":None},
+                       {"head":{"sha":"c"*40,"repo":None}},{"body":"\0"}):
             fixture=self.fixture(1,current_change=lambda identifier,pull:pull.update(change))
             with self.subTest(change=change),self.assertRaises(cohort.CohortError): self.select(fixture)
         fixture=self.fixture(1)
@@ -1112,7 +1389,7 @@ class CohortEligibilityOverflowTests(unittest.TestCase):
                     with self.assertRaises(cohort.CohortError):cohort.active_source_snapshot(Reader(),"owner/repository",101,"master")
 
 
-    def test_existing_role_budget_exhaustion_preserves_all_overflow_and_never_acknowledges(self):
+    def test_existing_role_budget_elects_bounded_members_and_preserves_overflow_journals(self):
         import copy
         fixture=self.fixture(600)
         original=copy.deepcopy(fixture[3])
@@ -1125,10 +1402,12 @@ class CohortEligibilityOverflowTests(unittest.TestCase):
             budget.charge()
             return jobs(repository,identifier)
         fixture[5].request=bounded_request;fixture[5].jobs=bounded_jobs
-        with self.assertRaisesRegex(cohort.CohortError,"role read budget exhausted"):self.select(fixture)
-        self.assertEqual(budget.used,900)
+        fixture[5].budget=budget
+        selected=self.select(fixture)["member_ids"]
+        self.assertGreater(len(selected),0)
+        self.assertLessEqual(budget.used,900)
         self.assertEqual(fixture[3],original)
-        self.assertFalse(any("/actions/artifacts?" in endpoint for endpoint in fixture[4]))
+        self.assertEqual(sum("/actions/artifacts?" in endpoint for endpoint in fixture[4]),len(selected))
 
 
 class CohortDeferredFollowerTests(unittest.TestCase):
@@ -1304,3 +1583,80 @@ class CohortSnapshotObservationTests(unittest.TestCase):
                        lambda source:source.update(head_sha="f"*40),
                        lambda source:source.update(head_repository=None)):
             with self.subTest(change=change),self.assertRaises(cohort.CohortError):self.snapshot(transition=True,mutation=change)
+
+
+class CohortOpenPRSnapshotTests(unittest.TestCase):
+    def snapshot(self,count,mutation=None):
+        import copy,urllib.parse
+        pulls=[dict(CohortSensorPaginationTests().sensor(number)["pull_requests"][0],number=number)
+               for number in range(1,count+1)]
+        calls=[];scan=[0]
+        class Reader:
+            def request(self,endpoint):
+                page=int(urllib.parse.parse_qs(urllib.parse.urlsplit(endpoint).query)["page"][0])
+                if page==1:scan[0]+=1
+                calls.append((scan[0],page))
+                rows=copy.deepcopy(pulls[(page-1)*100:page*100])
+                if mutation:mutation(rows,scan[0],page)
+                return rows
+        return cohort.open_pr_snapshot(Reader(),"owner/repository",101,"master"),calls
+
+    def test_all_pages_and_terminal_are_read_twice_with_existing_six_hundred_bound(self):
+        for count in (0,99,100,599,600):
+            with self.subTest(count=count):
+                pulls,calls=self.snapshot(count)
+                self.assertEqual(len(pulls),count)
+                self.assertEqual(calls,[(scan,page) for scan in (1,2) for page in range(1,count//100+2)])
+        with self.assertRaisesRegex(cohort.CohortError,"page bound"):self.snapshot(601)
+
+    def test_page_two_drift_is_rejected_even_with_stable_first_page(self):
+        def drift(rows,scan,page):
+            if scan==2 and page==2:rows[0]["body"]="changed"
+        with self.assertRaisesRegex(cohort.CohortError,"did not stabilize"):self.snapshot(201,drift)
+        def typed_drift(rows,scan,page):
+            if page==2:rows[0]["unrelated_integer"]=1 if scan==1 else 1.0
+        with self.assertRaisesRegex(cohort.CohortError,"did not stabilize"):self.snapshot(201,typed_drift)
+
+    def test_duplicate_and_malformed_api_entries_are_not_normalized(self):
+        for change in ({"number":True},{"state":"closed"}):
+            with self.subTest(change=change),self.assertRaises(cohort.CohortError):
+                self.snapshot(1,lambda rows,scan,page:rows[0].update(change) if rows else None)
+        def duplicate(rows,scan,page):
+            if page==2:rows[0]["number"]=1
+        with self.assertRaisesRegex(cohort.CohortError,"identity malformed"):self.snapshot(101,duplicate)
+
+    def test_absent_open_snapshot_source_requires_individual_positive_current_observation(self):
+        import copy,urllib.parse
+        source=CohortSensorPaginationTests().sensor(1)
+        for observation in (None,{"state":"closed"},{"draft":True},{"body":None}):
+            calls=[]
+            class Reader:
+                def request(self,endpoint):
+                    calls.append(endpoint)
+                    if "/pulls/" in endpoint:
+                        if observation is None:return None
+                        return dict(copy.deepcopy(source["pull_requests"][0]),**observation)
+                    state=urllib.parse.parse_qs(urllib.parse.urlsplit(endpoint).query)["status"][0]
+                    return {"total_count":int(state=="queued"),"workflow_runs":[source] if state=="queued" else []}
+            with self.subTest(observation=observation):
+                if observation is None:
+                    with self.assertRaises(cohort.CohortError):
+                        cohort.active_source_snapshot(Reader(),"owner/repository",101,"master",current_prs={})
+                else:
+                    self.assertEqual(cohort.active_source_snapshot(Reader(),"owner/repository",101,"master",current_prs={}),{})
+                self.assertEqual(sum("/pulls/" in endpoint for endpoint in calls),1)
+
+    def test_selected_current_body_and_native_clock_are_rechecked_before_authority(self):
+        owner=CohortEligibilityOverflowTests()
+        fixture=owner.fixture(1)
+        request=fixture[5].request
+        def drift(endpoint):
+            value=request(endpoint)
+            if "/pulls/" in endpoint:value["body"]="changed"
+            return value
+        fixture[5].request=drift
+        with self.assertRaisesRegex(cohort.CohortError,"double-read drift"):owner.select(fixture)
+        fixture=owner.fixture(1)
+        fixture[3][1]["member"]["latch_started_at"]="1970-01-01T00:01:42Z"
+        fixture[3][1]["member"]["source_deadline_epoch"]+=1
+        with self.assertRaisesRegex(cohort.CohortError,"native clock drift"):owner.select(fixture)

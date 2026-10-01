@@ -96,6 +96,7 @@ DISPATCHER_TERMINAL_CONCLUSIONS = frozenset({
     "startup_failure", "success", "timed_out",
 })
 MAX_DISPATCHER_FENCE_RUNS = 100
+COHORT_EARLY_MUTEX_WORKFLOW_BLOB = "1e599afba75f6c3504dd3468705dae5d3faa3412"
 # A terminal continuation handles at most 125 PRs.  Every sensor/CI listing is
 # restricted by the immutable current PR head and a small bounded page chain,
 # rather than paging arbitrary retained workflow history with the App token.
@@ -242,6 +243,9 @@ _cohort_context: dict[str, Any] | None = None
 _cohort_members_by_target: dict[int, list[dict[str, Any]]] = {}
 _cohort_api_counts: dict[str, int] | None = None
 _cohort_covered_generations: dict[tuple[object, ...], DispatcherGeneration] = {}
+_cohort_inventory_noop_generations: dict[tuple[object, ...], DispatcherGeneration] = {}
+_cohort_pending_generations: dict[tuple[object, ...], DispatcherGeneration] = {}
+_cohort_pending_exemptions: frozenset[int] = frozenset()
 _cohort_alias_index: dict[int, int] | None = None
 _cohort_generation_identities: dict[int, str] = {}
 _early_writer_admission: EarlyWriterAdmission | None = None
@@ -775,7 +779,8 @@ def dispatcher_generations(
 
 
 def cohort_dispatcher_generations(current: DispatcherGeneration) -> tuple[dict[int, DispatcherGeneration], frozenset[int]]:
-    global _cohort_alias_index
+    global _cohort_alias_index, _cohort_pending_exemptions
+    _cohort_pending_exemptions = frozenset()
     if _cohort_context is None or _terminal_deadline_monotonic is None:
         raise GovernanceError("Cohort generation fence is not admitted.")
     helper = cohort_helper()
@@ -791,7 +796,8 @@ def cohort_dispatcher_generations(current: DispatcherGeneration) -> tuple[dict[i
     })
     generations: dict[int, DispatcherGeneration] = {}
     covered: set[int] = set()
-    first_page = None
+    raw_runs: list[dict[str, Any]] = []
+    page_snapshots: list[tuple[str, str]] = []
     expected_total = None
     seen = 0
     noncovered = 0
@@ -799,85 +805,301 @@ def cohort_dispatcher_generations(current: DispatcherGeneration) -> tuple[dict[i
     proof_key = (header["owner_dispatcher_run_id"], header["owner_run_attempt"],
                  _cohort_context["artifact_id"], _cohort_context["artifact_digest"],
                  header["workflow_blob_sha"], _cohort_context["cohort_digest"])
+    def strict_snapshot(value: object) -> str:
+        try:
+            return json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False).encode("utf-8", "strict").decode("utf-8")
+        except (TypeError, ValueError, UnicodeError) as error:
+            raise GovernanceError("Cohort dispatcher inventory is not strict JSON.") from error
+
+    def immutable_identity(value: dict[str, Any]) -> dict[str, Any]:
+        names = ("id", "run_number", "run_attempt", "name", "display_title", "path", "event",
+                 "workflow_id", "head_sha", "head_branch", "repository", "head_repository",
+                 "actor", "triggering_actor", "pull_requests", "created_at")
+        identity = {name: value.get(name) for name in names}
+        for name in ("repository", "head_repository", "actor", "triggering_actor"):
+            item = identity[name]
+            if isinstance(item, dict):
+                fields = ("id", "name", "full_name", "url") if name in {"repository", "head_repository"} else ("id", "login", "type")
+                identity[name] = {key: item.get(key) for key in fields}
+        return identity
+
     for page_number in range(1, MAX_SHARED_SNAPSHOT_PAGES + 1):
-        page = object_page(_page_endpoint(endpoint, page_number))
+        page_endpoint = _page_endpoint(endpoint, page_number)
+        page = object_page(page_endpoint)
         runs, total = page.get("workflow_runs"), page.get("total_count")
         if (
             not isinstance(runs, list) or len(runs) > 100 or type(total) is not int
-            or total < 1 or total >= MAX_SHARED_SNAPSHOT_PAGES * 100
+            or total < 1 or total > MAX_SHARED_SNAPSHOT_PAGES * 100
             or (expected_total is not None and total != expected_total)
         ):
             raise GovernanceError("Cohort dispatcher inventory is incomplete.")
-        if first_page is None:
-            first_page, expected_total = page, total
+        if expected_total is None:
+            expected_total = total
+        page_snapshots.append((page_endpoint, strict_snapshot(page)))
         for run in runs:
             candidate = dispatcher_generation(run)
             if candidate.workflow_id != current.workflow_id or candidate.created_at < current.created_at or candidate.identifier in generations:
                 raise GovernanceError("Cohort dispatcher identity/order is invalid or duplicated.")
             generations[candidate.identifier] = candidate
-            identity_fields = ("id", "run_number", "run_attempt", "name", "display_title", "path", "event",
-                               "workflow_id", "head_sha", "head_branch", "repository", "head_repository",
-                               "actor", "triggering_actor", "pull_requests", "created_at")
-            identity = {name: run.get(name) for name in identity_fields}
-            for name in ("repository", "head_repository"):
-                value = identity[name]
-                if isinstance(value, dict):
-                    identity[name] = {key: value.get(key) for key in ("id", "name", "full_name", "url")}
-            for name in ("actor", "triggering_actor"):
-                value = identity[name]
-                if isinstance(value, dict):
-                    identity[name] = {key: value.get(key) for key in ("id", "login", "type")}
-            try:
-                fingerprint = hashlib.sha256(json.dumps(
-                    identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
-                ).encode("utf-8", "strict")).hexdigest()
-            except (ValueError, TypeError, UnicodeError) as error:
-                raise GovernanceError("Cohort dispatcher cached identity is malformed.") from error
-            previous_identity = _cohort_generation_identities.get(candidate.identifier)
-            if previous_identity is not None and previous_identity != fingerprint:
-                raise GovernanceError("Cohort dispatcher immutable identity changed.")
-            _cohort_generation_identities[candidate.identifier] = fingerprint
-            key = proof_key + (candidate, fingerprint)
-            positive = _cohort_covered_generations.get(key) == candidate
-            title = run.get("display_title")
-            title_match = re.fullmatch(r"sensor=([1-9][0-9]*) action=(in_progress|completed)", title) if isinstance(title, str) else None
-            source_hint = _cohort_alias_index.get(candidate.identifier)
-            deferred_candidate = candidate.event == "workflow_run" and title_match is not None and int(title_match[1]) not in header["member_ids"]
-            if source_hint is None and title_match is not None and candidate.event == "workflow_run":
-                source_hint = int(title_match[1])
-            proof_candidate = candidate.identifier in _cohort_alias_index or source_hint is not None
-            if not positive and candidate.identifier != current.identifier and proof_candidate:
-                positive = helper.consumer_is_covered(
+            raw_runs.append(run)
+        seen += len(runs)
+        if seen == expected_total:
+            break
+        if len(runs) != 100 or seen > expected_total:
+            raise GovernanceError("Cohort dispatcher page chain is truncated.")
+    if seen != expected_total:
+        raise GovernanceError("Cohort dispatcher history exceeds the existing six-page bound.")
+    if (type(header["owner_dispatcher_run_id"]) is not int or header["owner_dispatcher_run_id"] != current.identifier or type(header["owner_run_attempt"]) is not int
+        or header["owner_run_attempt"] != 1 or generations.get(current.identifier) != current):
+        raise GovernanceError("Current cohort owner is absent or changed in the complete inventory.")
+    raw_owner = next(run for run in raw_runs if run["id"] == current.identifier)
+    owner_observations: list[str] = []
+
+    def inventory_read_json(value: str, *, timeout: float) -> dict[str, Any]:
+        if value != f"repos/{REPOSITORY}":
+            result = cohort_read_json(value, timeout=timeout)
+            if value == f"repos/{REPOSITORY}/actions/runs/{current.identifier}":
+                if dispatcher_generation(result, expected_identifier=current.identifier, require_success=True) != current:
+                    raise GovernanceError("Current cohort owner native observation changed.")
+                identity = immutable_identity(result)
+                identity.update(status=result.get("status"), conclusion=result.get("conclusion"))
+                owner_observations.append(strict_snapshot(identity))
+            return result
+        # producerのdefault branch再束縛だけは、固定repository自身のGETを使う。
+        if not 0 < timeout <= GITHUB_API_TIMEOUT_SECONDS:
+            raise GovernanceError("Cohort repository identity timeout is invalid.")
+        try:
+            result = json.loads(command([value], deadline=time.monotonic()+timeout, cohort_precharged=True))
+        except json.JSONDecodeError as error:
+            raise GovernanceError("Cohort repository identity is not JSON.") from error
+        if not isinstance(result, dict):
+            raise GovernanceError("Cohort repository identity is not an object.")
+        return result
+
+    reader = helper._Reader(inventory_read_json, cohort_read_archive, CohortBudget(), deadline, header["workflow_blob_sha"])
+    owner = reader.producer(REPOSITORY, current.identifier, os.environ.get("GITHUB_SHA", ""), header["workflow_blob_sha"])
+    if (len(owner_observations) != 2 or owner_observations[0] != owner_observations[1]
+        or dispatcher_generation(owner, expected_identifier=current.identifier, require_success=True) != current
+        or strict_snapshot(immutable_identity(owner)) != strict_snapshot(immutable_identity(raw_owner))):
+        raise GovernanceError("Current cohort owner identity or lifecycle changed.")
+    early_mutex = False
+    pending_lease_key = None
+    mutex_identity = None
+    def pending_mutex_identity(owner_jobs: list[dict[str, Any]]) -> str:
+        jobs = []
+        for job in owner_jobs:
+            if job.get("name") in {helper.ELECTION_JOB, helper.ADMISSION_JOB}:
+                value = {name: job.get(name) for name in ("id", "run_id", "run_attempt", "head_sha", "name")}
+                value["binding_stages"] = [{name: step.get(name) for name in ("number", "name", "status", "conclusion")}
+                    for step in job["steps"] if step["name"].startswith((helper.SELECTED_PREFIX, helper.ADMITTED_PREFIX))]
+                jobs.append(value)
+        return strict_snapshot(sorted(jobs,key=lambda job:job["name"]))
+
+    def pending_mutex_is_active(owner_jobs: list[dict[str, Any]]) -> bool:
+        elections = [job for job in owner_jobs if job.get("name") == helper.ELECTION_JOB]
+        admissions = [job for job in owner_jobs if job.get("name") == helper.ADMISSION_JOB]
+        if len(elections) != 1 or len(admissions) != 1:
+            return False
+        election, admission = elections[0], admissions[0]
+        elected = helper.SELECTED_PREFIX + f"owner={current.identifier} artifact={_cohort_context['artifact_id']} digest={_cohort_context['artifact_digest']}"
+        admitted = helper.ADMITTED_PREFIX + f"owner={current.identifier} artifact={_cohort_context['artifact_id']} digest={_cohort_context['artifact_digest']}"
+        stages, admission_stages = election.get("steps"), admission.get("steps")
+        if not all(isinstance(steps, list) and all(isinstance(step, dict) for step in steps) for steps in (stages, admission_stages)):
+            return False
+        for steps in (stages, admission_stages):
+            numbers = [step.get("number") for step in steps]
+            names = [step.get("name") for step in steps]
+            if (not all(type(number) is int and number > 0 for number in numbers)
+                or len(set(numbers)) != len(numbers) or not all(isinstance(name, str) for name in names)
+                or len(set(names)) != len(names)):
+                return False
+        return (
+            election.get("status") == "in_progress" and election.get("conclusion") is None
+            and admission.get("status") == "completed" and admission.get("conclusion") == "success"
+            and all(type(job.get("run_id")) is int and job["run_id"] == current.identifier
+                    and job.get("head_sha") == header["workflow_sha"]
+                    and ("run_attempt" not in job or type(job["run_attempt"]) is int and job["run_attempt"] == 1)
+                    for job in (election, admission))
+            and len([step for step in stages if step["name"].startswith(helper.SELECTED_PREFIX)]) == 1
+            and len([step for step in admission_stages if step["name"].startswith(helper.ADMITTED_PREFIX)]) == 1
+            and any(step["name"] == elected and step.get("status") == "completed" and step.get("conclusion") == "success" for step in stages)
+            and any(step["name"] == admitted and step.get("status") == "completed" and step.get("conclusion") == "success" for step in admission_stages)
+            and not any(step["name"].startswith(helper.HANDOFF_PREFIX)
+                        and not (step.get("status") == "queued" and step.get("conclusion") is None
+                                 or step.get("status") == "completed" and step.get("conclusion") == "skipped") for step in stages)
+        )
+
+    if (os.environ.get("GOVERNANCE_SCOPE") == "early" and current.status == "in_progress"
+        and header["workflow_blob_sha"] == COHORT_EARLY_MUTEX_WORKFLOW_BLOB):
+        if time.time() >= min(deadline, header["root_deadline_epoch"], *(
+            member["source_deadline_epoch"] for member in _cohort_context["members_by_id"].values()
+        )):
+            raise GovernanceError("Cohort pending lease exceeded an original deadline.")
+        # 固定blobのnative ELECTION mutexは、early writer完了までawait-handoffを保持する。
+        reference = reader.request(f"repos/{REPOSITORY}/git/ref/heads/{default_branch_name()}")
+        if not isinstance(reference, dict) or reference.get("object", {}).get("sha") != os.environ.get("GITHUB_SHA", ""):
+            raise GovernanceError("Cohort pending mutex default workflow changed.")
+        owner_jobs = reader.jobs(REPOSITORY, current.identifier)
+        early_mutex = pending_mutex_is_active(owner_jobs)
+        if early_mutex:
+            mutex_identity = pending_mutex_identity(owner_jobs)
+            clocks = strict_snapshot({str(identifier): member for identifier, member in _cohort_context["members_by_id"].items()})
+            pending_lease_key = proof_key + ("early", header["root_deadline_epoch"], _terminal_deadline_monotonic, clocks)
+            if any(key[:-2] != pending_lease_key for key in _cohort_pending_generations):
+                _cohort_pending_generations.clear()
+                raise GovernanceError("Cohort pending lease immutable context or original clock changed.")
+        else:
+            _cohort_pending_generations.clear()
+            raise GovernanceError("Cohort early pending mutex is not active.")
+    else:
+        _cohort_pending_generations.clear()
+
+    def pending_is_held(run: dict[str, Any]) -> bool:
+        if not early_mutex or run.get("event") != "workflow_run" or run.get("status") not in DISPATCHER_ACTIVE_STATUSES:
+            return False
+        title = run.get("display_title")
+        source = re.fullmatch(r"sensor=([1-9][0-9]*) action=(in_progress|completed)", title) if isinstance(title, str) else None
+        if (source is None or run.get("name") not in {DISPATCHER_NAME, title}
+            or not helper.repository_matches(run.get("repository"), REPOSITORY, header["repository_id"])
+            or not helper.repository_matches(run.get("head_repository"), REPOSITORY, header["repository_id"])):
+            return False
+        jobs = reader.jobs(REPOSITORY, run["id"])
+        by_name: dict[str, dict[str, Any]] = {}
+        readonly = {"Preflight workflow_run governance source", helper.PRODUCER_JOB, helper.ELECTION_JOB,
+                    helper.ADMISSION_JOB, RESERVED_SENSOR_WAIT_NAME, RESOLVE_EVENT_NAME, "Acknowledge bound early review sensor"}
+        for job in jobs:
+            name, steps = job.get("name"), job.get("steps")
+            if (not isinstance(name, str) or name not in helper.MUTATING_JOBS | readonly or name in by_name
+                or type(job.get("run_id")) is not int or job["run_id"] != run["id"] or job.get("head_sha") != header["workflow_sha"]
+                or not (job.get("status") in {"queued", "in_progress"} and job.get("conclusion") is None
+                        or job.get("status") == "completed" and isinstance(job.get("conclusion"), str)
+                        and job["conclusion"] in DISPATCHER_TERMINAL_CONCLUSIONS)
+                or not isinstance(steps, list) or not all(isinstance(step, dict) for step in steps)):
+                return False
+            numbers, names = set(), set()
+            for step in steps:
+                if (type(step.get("number")) is not int or step["number"] < 1 or not isinstance(step.get("name"), str)
+                    or step["number"] in numbers or step["name"] in names
+                    or not (step.get("status") in {"queued", "in_progress"} and step.get("conclusion") is None
+                            or step.get("status") == "completed" and isinstance(step.get("conclusion"), str)
+                            and step["conclusion"] in DISPATCHER_TERMINAL_CONCLUSIONS)
+                    or step["name"].startswith((helper.SELECTED_PREFIX, helper.ADMITTED_PREFIX, helper.RECOVERY_PREFIX))
+                    and not (step.get("status") == "queued" and step.get("conclusion") is None
+                             or step.get("status") == "completed" and step.get("conclusion") == "skipped")):
+                    return False
+                numbers.add(step["number"])
+                names.add(step["name"])
+            by_name[name] = job
+        election, admission = by_name.get(helper.ELECTION_JOB), by_name.get(helper.ADMISSION_JOB)
+        if (not isinstance(election, dict) or election.get("status") != "queued" or election.get("conclusion") is not None
+            or not all(step.get("status") == "queued" and step.get("conclusion") is None for step in election["steps"])
+            or not isinstance(admission, dict) or not (admission.get("status") in {"queued", "in_progress"} and admission.get("conclusion") is None
+                                                     or admission.get("status") == "completed" and admission.get("conclusion") == "skipped")):
+            return False
+        for name in helper.MUTATING_JOBS:
+            job = by_name.get(name)
+            if not isinstance(job, dict) or not (job.get("status") == "queued" and job.get("conclusion") is None
+                or job.get("status") == "completed" and job.get("conclusion") == "skipped"):
+                return False
+            if not all(step.get("status") == "queued" and step.get("conclusion") is None
+                       or step.get("status") == "completed" and step.get("conclusion") == "skipped" for step in job["steps"]):
+                return False
+        preflight, publisher = by_name.get(PREFLIGHT_WORKFLOW_RUN_SOURCE_NAME), by_name.get(helper.PRODUCER_JOB)
+        if any(not isinstance(job, dict) or job.get("status") != "completed" or job.get("conclusion") != "success" for job in (preflight, publisher)):
+            return False
+        marker = sensor_identity_marker(preflight, REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME)
+        if marker is None or marker["name"] != REVIEW_SENSOR_STAGED_ADMISSION_STEP_NAME:
+            return False
+        payloads = [step for step in publisher["steps"] if step["name"].startswith(helper.PAYLOAD_PREFIX)]
+        uploads = [step for step in publisher["steps"] if step["name"].startswith("Upload immutable ")]
+        return (len(payloads) == len(uploads) == 1 and re.fullmatch(helper.PAYLOAD_PREFIX + r"source sha256=[0-9a-f]{64}", payloads[0]["name"]) is not None
+                and all(step.get("status") == "completed" and step.get("conclusion") == "success" for step in (payloads[0], uploads[0]))
+                and uploads[0]["name"] == f"Upload immutable krr-governance-source-{source[1]}-attempt-1")
+    pending_identities: dict[int, str] = {}
+    pending_covered: dict[tuple[object, ...], DispatcherGeneration] = {}
+    pending_noops: dict[tuple[object, ...], DispatcherGeneration] = {}
+    pending_held: dict[tuple[object, ...], DispatcherGeneration] = {}
+    held_ids: set[int] = set()
+    for run in raw_runs:
+        candidate = generations[run["id"]]
+        identity = immutable_identity(run)
+        try:
+            fingerprint = hashlib.sha256(json.dumps(
+                identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+            ).encode("utf-8", "strict")).hexdigest()
+        except (ValueError, TypeError, UnicodeError) as error:
+            raise GovernanceError("Cohort dispatcher cached identity is malformed.") from error
+        previous_identity = _cohort_generation_identities.get(candidate.identifier)
+        if previous_identity is not None and previous_identity != fingerprint:
+            raise GovernanceError("Cohort dispatcher immutable identity changed.")
+        pending_identities[candidate.identifier] = fingerprint
+        key = proof_key + (candidate, fingerprint)
+        if candidate.identifier == current.identifier:
+            continue
+        if pending_lease_key is not None and candidate.status in DISPATCHER_ACTIVE_STATUSES:
+            pending_key = pending_lease_key + (candidate, fingerprint)
+            held = _cohort_pending_generations.get(pending_key) == candidate
+            if not held:
+                held = pending_is_held(run)
+            if held:
+                pending_held[pending_key] = candidate
+                held_ids.add(candidate.identifier)
+        if candidate.identifier not in _cohort_context.get("recovered_predecessor_ids", []):
+            inventory_noop = _cohort_inventory_noop_generations.get(key) == candidate
+            if not inventory_noop:
+                inventory_noop = helper.terminal_inventory_is_nonmutating(_cohort_context, run, reader=reader)
+            if inventory_noop:
+                pending_noops[key] = candidate
+                del generations[candidate.identifier]
+                continue
+        positive = _cohort_covered_generations.get(key) == candidate
+        title = run.get("display_title")
+        title_match = re.fullmatch(r"sensor=([1-9][0-9]*) action=(in_progress|completed)", title) if isinstance(title, str) else None
+        source_hint = _cohort_alias_index.get(candidate.identifier)
+        deferred_candidate = candidate.event == "workflow_run" and title_match is not None and int(title_match[1]) not in header["member_ids"]
+        if source_hint is None and title_match is not None and candidate.event == "workflow_run":
+            source_hint = int(title_match[1])
+        proof_candidate = candidate.identifier in _cohort_alias_index or source_hint is not None
+        if not positive and candidate.identifier != current.identifier and proof_candidate:
+            positive = helper.consumer_is_covered(
+                _cohort_context, run, read_json=cohort_read_json, read_archive=cohort_read_archive,
+                budget=CohortBudget(), deadline=deadline,
+            )
+            if not positive and deferred_candidate:
+                positive = helper.consumer_is_deferred(
                     _cohort_context, run, read_json=cohort_read_json, read_archive=cohort_read_archive,
                     budget=CohortBudget(), deadline=deadline,
                 )
-                if not positive and deferred_candidate:
-                    positive = helper.consumer_is_deferred(
-                        _cohort_context, run, read_json=cohort_read_json, read_archive=cohort_read_archive,
-                        budget=CohortBudget(), deadline=deadline,
-                    )
-                if positive:
-                    _cohort_covered_generations[key] = candidate
             if positive:
-                covered.add(candidate.identifier)
-            else:
-                noncovered += 1
-                if noncovered >= MAX_DISPATCHER_FENCE_RUNS:
-                    raise GovernanceError("Unknown/direct dispatcher fence exceeds its original bounded window.")
-        seen += len(runs)
-        if seen == expected_total:
-            anchor = object_page(_page_endpoint(endpoint, 1))
-            try:
-                # 数値と真偽値の型変化も、二読のidentity変化として拒否する。
-                stable = json.dumps(anchor, sort_keys=True, allow_nan=False) == json.dumps(first_page, sort_keys=True, allow_nan=False)
-            except (TypeError, ValueError) as error:
-                raise GovernanceError("Cohort dispatcher first-page fence is malformed.") from error
-            if not stable:
-                raise GovernanceError("Cohort dispatcher first-page fence changed.")
-            return generations, frozenset(covered)
-        if len(runs) != 100 or seen > expected_total:
-            raise GovernanceError("Cohort dispatcher page chain is truncated.")
-    raise GovernanceError("Cohort dispatcher history exceeds the existing six-page bound.")
+                pending_covered[key] = candidate
+        if positive:
+            covered.add(candidate.identifier)
+        else:
+            noncovered += 1
+            # 検証済ownerを別枠にし、native FIFOのpending上限100件だけを許可する。
+            if noncovered > MAX_DISPATCHER_FENCE_RUNS:
+                raise GovernanceError("Unknown/direct cohort dispatcher fence exceeds its native pending window.")
+    # page 2以降の同数置換も、native job証明後の完全二読で拒否する。
+    for page_endpoint, snapshot in page_snapshots:
+        if strict_snapshot(object_page(page_endpoint)) != snapshot:
+            raise GovernanceError("Cohort dispatcher complete inventory changed during proof.")
+    if early_mutex:
+        reader.cache.pop(("jobs", REPOSITORY, current.identifier), None)
+        after_jobs = reader.jobs(REPOSITORY, current.identifier)
+        after_ref = reader.request(f"repos/{REPOSITORY}/git/ref/heads/{default_branch_name()}")
+        if (not pending_mutex_is_active(after_jobs) or pending_mutex_identity(after_jobs) != mutex_identity
+            or not isinstance(after_ref, dict) or after_ref.get("object", {}).get("sha") != os.environ.get("GITHUB_SHA", "")
+            or time.time() >= min(deadline, header["root_deadline_epoch"], *(
+                member["source_deadline_epoch"] for member in _cohort_context["members_by_id"].values()
+            ))):
+            _cohort_pending_generations.clear()
+            raise GovernanceError("Cohort pending mutex closed or expired during native proof.")
+    _cohort_generation_identities.update(pending_identities)
+    _cohort_covered_generations.update(pending_covered)
+    _cohort_inventory_noop_generations.update(pending_noops)
+    _cohort_pending_generations.update(pending_held)
+    _cohort_pending_exemptions = frozenset(held_ids)
+    return generations, frozenset(covered)
 
 
 def dispatcher_generation_is_newer(
@@ -1301,6 +1523,8 @@ def reject_newer_dispatcher_barrier(head: str) -> None:
     proves that it is still before the bound early hand-off.
     """
 
+    global _dispatcher_admission_evidence_wait_remaining, _cohort_pending_exemptions
+    _cohort_pending_exemptions = frozenset()
     if os.environ.get("GITHUB_ACTIONS") != "true":
         return
     if not SHA.fullmatch(head):
@@ -1308,7 +1532,6 @@ def reject_newer_dispatcher_barrier(head: str) -> None:
     current_value = os.environ.get("GOVERNANCE_DISPATCHER_RUN_ID", "")
     if not NUMBER.fullmatch(current_value):
         raise NoPostGovernanceError("Writer dispatcher source is invalid for dispatcher fence.")
-    global _dispatcher_admission_evidence_wait_remaining
     while True:
         try:
             current_value_response = api_json(
@@ -1342,6 +1565,9 @@ def reject_newer_dispatcher_barrier(head: str) -> None:
                         for candidate in generations.values())):
                 early_source = verified_early_sensor_source(current_generation, head)
             for candidate_generation in generations.values():
+                if (_cohort_context is not None and os.environ.get("GOVERNANCE_SCOPE") == "early"
+                    and candidate_generation.identifier in _cohort_pending_exemptions):
+                    continue
                 if (
                     dispatcher_generation_is_newer(candidate_generation, current_generation)
                     and candidate_generation.identifier not in covered
@@ -1376,6 +1602,9 @@ def reject_newer_dispatcher_barrier(head: str) -> None:
                 0.0, time.monotonic() - before_sleep,
             )
         except GovernanceError as error:
+            if _cohort_context is not None:
+                _cohort_pending_generations.clear()
+                _cohort_pending_exemptions = frozenset()
             raise NoPostGovernanceError("Dispatcher barrier evidence is invalid.") from error
 
 
@@ -3014,13 +3243,16 @@ def terminalize_initial_evidence_failure(
 
 def main() -> int:
     global _dispatcher_admission_evidence_wait_remaining, _terminal_deadline_monotonic
-    global _cohort_context, _cohort_members_by_target, _cohort_api_counts, _early_writer_admission, _cohort_alias_index
+    global _cohort_context, _cohort_members_by_target, _cohort_api_counts, _early_writer_admission, _cohort_alias_index, _cohort_pending_exemptions
     _cohort_context = None
     _cohort_members_by_target = {}
     _cohort_api_counts = None
     _early_writer_admission = None
     _cohort_alias_index = None
     _cohort_covered_generations.clear()
+    _cohort_inventory_noop_generations.clear()
+    _cohort_pending_generations.clear()
+    _cohort_pending_exemptions = frozenset()
     _cohort_generation_identities.clear()
     if not REPOSITORY or not SERVER_URL or not NUMBER.fullmatch(WRITER_RUN_ID):
         print("Writer runtime identity is invalid.", file=sys.stderr)

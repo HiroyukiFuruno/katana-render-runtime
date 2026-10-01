@@ -65,7 +65,7 @@ jobs:
           test -d "$RUNNER_TEMP"
           set -o noclobber
           cat > "$RUNNER_TEMP/krr-governance-sensor-reader.py" <<'PY'
-          PINNED_DISPATCHER_WORKFLOW_BLOB_SHA = "15898ddcb68ea07f4caf9c5575bffafec308df54"
+          PINNED_DISPATCHER_WORKFLOW_BLOB_SHA = "1e599afba75f6c3504dd3468705dae5d3faa3412"
           def workflow_path_matches(value: object, expected: str) -> bool:
               if value == expected:
                   return True

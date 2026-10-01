@@ -624,6 +624,101 @@ def verify_cohort_lease(cohort, *, phase, read_json, budget, deadline):
     cohort["registered_writers"] = registered
 
 
+def terminal_inventory_is_nonmutating(cohort, generation, *, reader):
+    """Inventoryだけの肯定分類。callerは証明前後の全raw pageを型敏感に二読する。"""
+    try:
+        header = cohort["header"]
+        repository, owner = header["repository"], header["owner_dispatcher_run_id"]
+        trusted = reader.cache.get(("producer", repository, owner))
+        workflow = ("workflow", repository, header["workflow_sha"], header["workflow_blob_sha"])
+        _require(isinstance(trusted, dict) and workflow in reader.cache
+                 and type(trusted.get("id")) is int and trusted["id"] == owner
+                 and _integer(trusted.get("workflow_id")) and trusted.get("head_sha") == header["workflow_sha"]
+                 and repository_matches(trusted.get("repository"), repository, header["repository_id"])
+                 and time.time() < min(reader.deadline, header["root_deadline_epoch"]),
+                 "Inventory requires an already trusted current owner")
+        _require(isinstance(generation, dict) and _integer(generation.get("id")) and generation["id"] != owner
+                 and type(generation.get("run_attempt")) is int and generation["run_attempt"] == 1
+                 and _integer(generation.get("run_number")) and _integer(generation.get("workflow_id"))
+                 and generation["workflow_id"] == trusted["workflow_id"]
+                 and generation.get("head_sha") == header["workflow_sha"]
+                 and generation.get("head_branch") == trusted.get("head_branch")
+                 and generation.get("path") in {".github/workflows/pr-governance.yml",
+                     ".github/workflows/pr-governance.yml@" + trusted["head_branch"],
+                     ".github/workflows/pr-governance.yml@refs/heads/" + trusted["head_branch"]}
+                 and repository_matches(generation.get("repository"), repository, header["repository_id"])
+                 and repository_matches(generation.get("head_repository"), repository, header["repository_id"])
+                 and generation.get("event") == "workflow_run" and generation.get("status") == "completed"
+                 and generation.get("conclusion") in {"failure", "cancelled", "success"}, "Not a terminal trusted inventory callback")
+        completed_noop = generation["conclusion"] == "success"
+        title = generation.get("display_title")
+        source = re.fullmatch(r"sensor=([1-9][0-9]*) action=(?:in_progress|completed)", title) if isinstance(title, str) else None
+        _require(source is not None and generation.get("name") in {"PR governance dispatcher", title}
+                 and (not completed_noop or title == f"sensor={source[1]} action=completed"),
+                 "Inventory callback source title is unknown")
+        jobs = reader.jobs(repository, generation["id"])
+        readonly = {"Preflight workflow_run governance source", PRODUCER_JOB, ELECTION_JOB, ADMISSION_JOB,
+                    "Preserve pending review sensor before direct dispatch", "Resolve relevant governance event",
+                    "Acknowledge bound early review sensor"}
+        conclusions = {"success", "failure", "cancelled", "skipped", "timed_out", "action_required", "neutral", "stale"}
+        by_name = {}
+        for job in jobs:
+            name, steps = job.get("name"), job.get("steps")
+            _require(isinstance(name, str) and name in MUTATING_JOBS | readonly and name not in by_name
+                     and _integer(job.get("id")) and type(job.get("run_id")) is int and job["run_id"] == generation["id"]
+                     and ("run_attempt" not in job or type(job["run_attempt"]) is int and job["run_attempt"] == 1)
+                     and job.get("head_sha") == header["workflow_sha"] and job.get("status") == "completed"
+                     and job.get("conclusion") in conclusions
+                     and isinstance(steps, list), "Inventory exact native job identity is ambiguous")
+            numbers, names = set(), set()
+            for step in steps:
+                _require(isinstance(step, dict) and _integer(step.get("number")) and step["number"] not in numbers
+                         and isinstance(step.get("name"), str) and step["name"] not in names
+                         and step.get("status") == "completed" and step.get("conclusion") in conclusions,
+                         "Inventory native step identity is ambiguous")
+                numbers.add(step["number"]); names.add(step["name"])
+                # skippedな条件付きtemplateは正常REST入力だが、選出・回復を実行したownerは除外しない。
+                _require(not step["name"].startswith((SELECTED_PREFIX, ADMITTED_PREFIX, RECOVERY_PREFIX))
+                         or step["conclusion"] == "skipped", "Inventory cannot hide selected/admitted/recovery owners")
+                if name in MUTATING_JOBS:
+                    _require(step["conclusion"] == "skipped", "Skipped mutation job has an executed native step")
+            by_name[name] = job
+        for name in MUTATING_JOBS:
+            job = by_name.get(name)
+            _require(isinstance(job, dict) and job.get("conclusion") == "skipped", "Governance mutation path was not skipped")
+        preflight = by_name.get("Preflight workflow_run governance source")
+        _require(isinstance(preflight, dict) and preflight.get("conclusion") == "success", "Inventory preflight did not succeed")
+        if completed_noop:
+            # completed callbackはnative no-opだけを証明し、元sourceの成功やACKへ昇格しない。
+            markers = [step for step in preflight["steps"] if step["name"].startswith(COMPLETED_NOOP_PREFIX)]
+            _require(title == f"sensor={source[1]} action=completed" and len(markers) == 1
+                     and markers[0]["name"] == COMPLETED_NOOP_PREFIX + source[1] and markers[0]["conclusion"] == "success",
+                     "Inventory completed callback native no-op is not exact")
+            for name in (PRODUCER_JOB, ELECTION_JOB, ADMISSION_JOB):
+                job = by_name.get(name)
+                _require(isinstance(job, dict) and job.get("conclusion") == "skipped"
+                         and all(step["conclusion"] == "skipped" for step in job["steps"]),
+                         "Inventory no-op backend path was not skipped")
+            return True
+        for name, conclusions in (("Preflight workflow_run governance source", {"success"}),
+                                  (PRODUCER_JOB, {"success"}), (ELECTION_JOB, {"cancelled", "skipped"}),
+                                  (ADMISSION_JOB, {"failure", "cancelled", "skipped"})):
+            job = by_name.get(name)
+            _require(isinstance(job, dict) and job.get("conclusion") in conclusions, "Inventory stage is not positively unadmitted")
+        stages = by_name[PRODUCER_JOB]["steps"]
+        payloads = [step for step in stages if step["name"].startswith(PAYLOAD_PREFIX)]
+        uploads = [step for step in stages if step["name"].startswith("Upload immutable ")]
+        _require(len(payloads) == len(uploads) == 1
+                 and re.fullmatch(PAYLOAD_PREFIX + r"source sha256=[0-9a-f]{64}", payloads[0]["name"]) is not None
+                 and payloads[0]["conclusion"] == uploads[0]["conclusion"] == "success"
+                 and uploads[0]["name"] == f"Upload immutable krr-governance-source-{source[1]}-attempt-1",
+                 "Inventory source publisher lacks exact native positive stages")
+        # source journal/member/clockを読まず、ACK・coverage・backend権限を一切作らない。
+        return True
+    except (CohortError, KeyError, TypeError):
+        return False
+
+
 def consumer_is_covered(cohort, generation, *, read_json, read_archive, budget, deadline):
     """選出済memberの取消consumerだけを、ACKとは独立して肯定分類する。"""
     return _consumer_follower_proof(cohort, generation, read_json=read_json, read_archive=read_archive,
@@ -1038,7 +1133,9 @@ class _Transport:
             value = json.loads(data)
         except ValueError:
             raise CohortError("Invalid cohort JSON response") from None
-        _require(isinstance(value, dict), "Cohort read object unavailable")
+        _require(isinstance(value, dict) or isinstance(value, list)
+                 and re.fullmatch(r"repos/[^/]+/[^/]+/pulls\?state=open&per_page=100&page=[1-7]", endpoint),
+                 "Cohort read object unavailable")
         etags = re.findall(r'(?im)^etag:\s*(W/"[^"\r\n]+"|"[^"\r\n]+")\s*$', headers)
         _require(len(etags) <= 1, "Ambiguous conditional read metadata")
         if etags:
@@ -1182,9 +1279,37 @@ def current_source_eligible(source, current_pr, repository, repository_id, branc
     return True
 
 
-def active_source_snapshot(reader, repository, repository_id, branch):
+def open_pr_snapshot(reader, repository, repository_id, branch):
+    snapshots = []
+    for _ in range(2):
+        pulls = {}
+        pages = []
+        for page in range(1, 8):
+            rows = reader.request(f"repos/{repository}/pulls?state=open&per_page=100&page={page}")
+            _require(isinstance(rows, list) and len(rows) <= 100, "Open PR snapshot page malformed")
+            pages.append(rows)
+            for pull in rows:
+                _require(isinstance(pull, dict) and _integer(pull.get("number"))
+                         and pull["number"] not in pulls and pull.get("state") == "open",
+                         "Open PR snapshot identity malformed")
+                pulls[pull["number"]] = pull
+            _require(len(pulls) <= 600, "Open PR snapshot exceeds existing page bound")
+            if len(rows) < 100:
+                break
+        else:
+            raise CohortError("Open PR snapshot terminal page missing")
+        try:
+            snapshots.append(json.dumps(pages, sort_keys=True, allow_nan=False))
+        except (TypeError, ValueError) as error:
+            raise CohortError("Open PR snapshot observation malformed") from error
+    _require(snapshots[0] == snapshots[1], "Open PR snapshot did not stabilize")
+    return pulls
+
+
+def active_source_snapshot(reader, repository, repository_id, branch, *, current_prs=None):
     runs = {}
-    identities, current_prs, observed = {}, {}, set()
+    identities, observed = {}, set()
+    current_prs = {} if current_prs is None else current_prs
     for status in ("requested", "queued", "waiting", "pending", "in_progress"):
         endpoint = f"repos/{repository}/actions/workflows/pr-governance-review-events.yml/runs?status={status}&per_page=100&page="
         for attempt in range(4):
@@ -1296,11 +1421,12 @@ def select_cohort(reader):
     from pathlib import Path
     repository, repository_id, owner, sha, blob = _producer_context(reader)
     branch = os.environ["DEFAULT_BRANCH"]
-    sources = active_source_snapshot(reader, repository, repository_id, branch)
+    current_prs = open_pr_snapshot(reader, repository, repository_id, branch)
+    sources = active_source_snapshot(reader, repository, repository_id, branch, current_prs=current_prs)
     own_ref = {"artifact_id": int(os.environ["COHORT_OWN_JOURNAL_ID"]), "artifact_digest": os.environ["COHORT_OWN_JOURNAL_DIGEST"]}
     own_journal, _ = reader.artifact(own_ref, "source", repository, expected_producer=owner)
     validate_journal_clock(own_journal, reader)
-    members, source_refs, aliases, roots, current_prs = {}, {}, {}, [(own_journal["root_deadline_epoch"], own_ref)], {}
+    members, source_refs, aliases, roots = {}, {}, {}, [(own_journal["root_deadline_epoch"], own_ref)]
     candidates = []
     for identifier, source in sorted(sources.items()):
         number = source["pull_requests"][0]["number"]
@@ -1312,7 +1438,12 @@ def select_cohort(reader):
         admitted_at = source_latch_clock(source, reader.jobs(repository, identifier), now=time.time())
         if admitted_at is not None:
             candidates.append((source_deadline(admitted_at, now=time.time()), identifier, source))
-    for _, identifier, source in sorted(candidates, key=lambda item: item[:2])[:MAX_MEMBERS]:
+    # 全sensorの元Await期限を比較し、最悪2journalと時計双読を既存role予算へ予約する。
+    limit = MAX_MEMBERS
+    if reader.budget is not None:
+        limit = min(limit, max(0, (reader.budget.limit - reader.budget.used - 3) // 13))
+        _require(not candidates or limit > 0, "Cohort selection has no journal read reservation")
+    for native_deadline, identifier, source in sorted(candidates, key=lambda item: item[:2])[:limit]:
         name = f"krr-governance-source-{identifier}-attempt-1"
         listing = reader.request(f"repos/{repository}/actions/artifacts?name={name}&per_page=100&page=1")
         entries, total = listing.get("artifacts"), listing.get("total_count")
@@ -1333,7 +1464,11 @@ def select_cohort(reader):
         member = journal["member"]
         if member["latch_started_at"] is None:
             member = resolve_member_clock(member, read_json=reader.read_json, budget=reader.budget, deadline=reader.deadline)
+        _require(member["source_deadline_epoch"] == native_deadline, "Selected original native clock drift")
         _require(time.time() < member["source_deadline_epoch"], "Source original latch expired before election")
+        final_pr = reader.request(f"repos/{repository}/pulls/{number}")
+        _require(all(member_source_matches(item[3]["member"], source, final_pr) for item in verified),
+                 "Selected current PR double-read drift")
         members[identifier] = member
         source_refs[identifier] = [identifier, creator, metadata["id"], metadata["digest"]]
         aliases[identifier] = sorted({item[1] for item in verified})
@@ -1550,7 +1685,7 @@ def completed_consumer_is_noop(cohort, generation, *, reader):
 
 
 class DispatcherCohortFilter:
-    """raw完全pageを読み、肯定証明済followerだけ旧100件domainから除く。"""
+    """raw完全pageを読み、肯定証明済のcontext ownerとfollowerを旧100件domainから除く。"""
     def __init__(self, artifact_id, digest, owner, *, read_json, read_archive, budget, deadline, phase):
         repository = os.environ["GITHUB_REPOSITORY"]
         self.reader = _Reader(read_json, read_archive, budget, deadline)
@@ -1563,7 +1698,48 @@ class DispatcherCohortFilter:
         verify_cohort_lease(self.cohort, phase=phase, read_json=read_json, budget=budget, deadline=deadline)
         self.known = cohort_known_producer_ids(self.cohort, read_json=read_json, read_archive=read_archive,
                                               budget=budget, deadline=deadline)
-        self.owner, self.repository, self.covered = owner, repository, {}
+        self.owner, self.repository, self.covered, self.phase = owner, repository, {}, phase
+        self.nonmutating = {}
+
+    @staticmethod
+    def _strict_json(value):
+        try:
+            return json.dumps(value, sort_keys=True, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise CohortError("Context inventory identity is not strict JSON") from error
+
+    def _verify_context_owner(self, generation):
+        header = self.cohort["header"]
+        _require(type(generation.get("id")) is int and generation["id"] == self.owner
+                 and time.time() < min(self.reader.deadline, header["root_deadline_epoch"]),
+                 "Context owner identity/deadline drift")
+        identity = ("id", "run_attempt", "name", "display_title", "head_sha", "head_branch", "path",
+                    "event", "workflow_id", "run_number", "repository", "head_repository")
+        def wire(record, keys):
+            return self._strict_json({key: record.get(key) for key in keys})
+        trusted = self.reader.producer(self.repository, self.owner, header["workflow_sha"], header["workflow_blob_sha"])
+        endpoint = f"repos/{self.repository}/actions/runs/{self.owner}"
+        before = self.reader.request(endpoint)
+        _require(isinstance(before, dict) and wire(trusted, identity) == wire(before, identity)
+                 and wire(generation, identity + ("status", "conclusion")) == wire(before, identity + ("status", "conclusion")),
+                 "Context owner raw/current identity drift")
+        current = load_cohort(self.cohort["artifact_id"], self.cohort["artifact_digest"], expected_owner=self.owner,
+                              expected_segment=None, member_ids=None if not header["member_ids"] else {header["member_ids"][0]},
+                              allow_empty=not header["member_ids"], read_json=self.reader.read_json,
+                              read_archive=self.reader.read_archive, budget=self.reader.budget, deadline=self.reader.deadline)
+        _require(canonical(current["header"]) == canonical(header), "Context owner immutable cohort drift")
+        for member in current["members_by_id"].values():
+            normalized = resolve_member_clock(member, read_json=self.reader.read_json,
+                                              budget=self.reader.budget, deadline=self.reader.deadline)
+            _require(time.time() < normalized["source_deadline_epoch"], "Context owner original source expired")
+        verify_cohort_lease(current, phase=self.phase, read_json=self.reader.read_json,
+                            budget=self.reader.budget, deadline=self.reader.deadline)
+        after = self.reader.request(endpoint)
+        _require(isinstance(after, dict)
+                 and wire(before, identity + ("status", "conclusion")) == wire(after, identity + ("status", "conclusion"))
+                 and (after.get("status") in ACTIVE and after.get("conclusion") is None
+                      or self.phase == "all" and after.get("status") == "completed" and after.get("conclusion") == "success"),
+                 "Context owner current lifecycle drift")
 
     def page(self, endpoint, initial):
         from copy import deepcopy
@@ -1592,34 +1768,60 @@ class DispatcherCohortFilter:
         flattened = []
         for page in pages:
             entries = page.get("workflow_runs") if isinstance(page, dict) else None
-            _require(isinstance(entries, list) and len(entries) <= 100 and page.get("total_count") == total
+            _require(isinstance(entries, list) and len(entries) <= 100 and type(page.get("total_count")) is int and page["total_count"] == total
                      and all(isinstance(run, dict) and _integer(run.get("id")) for run in entries), "Raw dispatcher page malformed")
             flattened.extend(entries)
         _require(len(flattened) == total and len({run["id"] for run in flattened}) == total
-                 and self.reader.request(endpoint_page(1)) == first, "Raw dispatcher inventory duplicate/drift/truncated")
+                 and self._strict_json(self.reader.request(endpoint_page(1))) == self._strict_json(first),
+                 "Raw dispatcher inventory duplicate/drift/truncated")
         retained = []
         immutable = ("id", "run_attempt", "name", "display_title", "head_sha", "head_branch", "path", "event", "workflow_id", "run_number", "repository", "head_repository", "status", "conclusion")
-        for run in flattened:
-            identifier = run["id"]
-            binding = {key: deepcopy(run.get(key)) for key in immutable}
-            if identifier in self.covered:
-                _require(self.covered[identifier] == binding, "Covered immutable producer identity drift")
-                continue
-            if identifier in self.known and consumer_is_covered(self.cohort, run, read_json=self.reader.read_json,
-                                                              read_archive=self.reader.read_archive, budget=self.reader.budget, deadline=self.reader.deadline):
-                self.covered[identifier] = binding
-                continue
-            if (run.get("event") == "workflow_run" and isinstance(run.get("display_title"), str)
-                    and re.fullmatch(r"sensor=[1-9][0-9]* action=(?:in_progress|completed)", run["display_title"])
-                    and consumer_is_deferred(self.cohort, run, read_json=self.reader.read_json,
-                                            read_archive=self.reader.read_archive, budget=self.reader.budget, deadline=self.reader.deadline)):
-                self.covered[identifier] = binding
-                continue
-            if completed_consumer_is_noop(self.cohort, run, reader=self.reader):
-                self.covered[identifier] = binding
-                continue
-            retained.append(run)
-        _require(len(retained) <= 100, "Unknown/direct dispatcher inventory exceeds existing bound")
+        pending_nonmutating, pending_covered, observed_jobs = {}, {}, set()
+        try:
+            for run in flattened:
+                identifier = run["id"]
+                binding = {key: deepcopy(run.get(key)) for key in immutable}
+                if identifier == self.owner:
+                    # 選出・admission済みownerは現在context自身であり、member権限とは分けて再検証する。
+                    self._verify_context_owner(run)
+                    continue
+                if identifier in self.nonmutating:
+                    _require(self._strict_json(self.nonmutating[identifier]) == self._strict_json(binding),
+                             "Nonmutating inventory identity drift")
+                    continue
+                observed_jobs.add(identifier)
+                if terminal_inventory_is_nonmutating(self.cohort, run, reader=self.reader):
+                    # 終端job証拠はinventory除外専用であり、sourceのACK権限を追加しない。
+                    pending_nonmutating[identifier] = binding
+                    continue
+                if identifier in self.covered:
+                    _require(self._strict_json(self.covered[identifier]) == self._strict_json(binding),
+                             "Covered immutable producer identity drift")
+                    continue
+                if identifier in self.known and consumer_is_covered(self.cohort, run, read_json=self.reader.read_json,
+                                                                  read_archive=self.reader.read_archive, budget=self.reader.budget, deadline=self.reader.deadline):
+                    pending_covered[identifier] = binding
+                    continue
+                if (run.get("event") == "workflow_run" and isinstance(run.get("display_title"), str)
+                        and re.fullmatch(r"sensor=[1-9][0-9]* action=(?:in_progress|completed)", run["display_title"])
+                        and consumer_is_deferred(self.cohort, run, read_json=self.reader.read_json,
+                                                read_archive=self.reader.read_archive, budget=self.reader.budget, deadline=self.reader.deadline)):
+                    pending_covered[identifier] = binding
+                    continue
+                if completed_consumer_is_noop(self.cohort, run, reader=self.reader):
+                    pending_covered[identifier] = binding
+                    continue
+                retained.append(run)
+            for number, before in enumerate(pages, 1):
+                _require(self._strict_json(self.reader.request(endpoint_page(number))) == self._strict_json(before),
+                         "Raw dispatcher full inventory drift after job proof")
+            _require(len(retained) <= 100, "Unknown/direct dispatcher inventory exceeds existing bound")
+        except Exception:
+            for identifier in observed_jobs:
+                self.reader.cache.pop(("jobs", self.repository, identifier), None)
+            raise
+        self.nonmutating.update(pending_nonmutating)
+        self.covered.update(pending_covered)
         return {"total_count": len(retained), "workflow_runs": retained if requested_page == 1 else []}
 
 
