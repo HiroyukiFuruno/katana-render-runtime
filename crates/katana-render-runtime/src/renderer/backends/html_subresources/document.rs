@@ -200,7 +200,14 @@ mod tests {
 
         let resources = load_document_resources(&loader, &mut document);
 
-        assert_eq!(resources.scripts, ["head", "body"]);
+        assert_eq!(
+            resources
+                .scripts
+                .iter()
+                .map(|script| script.source())
+                .collect::<Vec<_>>(),
+            ["head", "body"]
+        );
         assert_eq!(resources.body_onload_script_index, Some(1));
     }
 

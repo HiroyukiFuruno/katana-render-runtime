@@ -1,7 +1,8 @@
+use crate::renderer::backends::html_document::HtmlDocumentScript;
 use crate::renderer::backends::html_runtime::script::{
-    DOM_CONTENT_LOADED_DISPATCH, HtmlTryCatchScope, WINDOW_LOAD_DISPATCH,
-    body_onload_install_script, check_bridge_error, evaluate, evaluate_and_wait_for_promise,
-    install_dom_bridge, perform_microtask_checkpoint,
+    DOM_CONTENT_LOADED_DISPATCH, HtmlTryCatchScope, ParserBodyOnloadInstaller,
+    WINDOW_LOAD_DISPATCH, body_onload_source_payload, check_bridge_error, evaluate,
+    evaluate_and_wait_for_promise, install_dom_bridge, perform_microtask_checkpoint,
 };
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 
@@ -12,7 +13,7 @@ type ScriptEvaluator<'a> = dyn FnMut(&str, &str) -> Result<(), HtmlRuntimeError>
 impl StaticHtmlRuntime {
     pub(super) fn execute_inline_scripts(
         isolate: &mut v8::OwnedIsolate,
-        scripts: &[String],
+        scripts: &[HtmlDocumentScript],
         body_onload_script_index: Option<usize>,
         body_onload_source: Option<&str>,
         document_url: &str,
@@ -21,9 +22,9 @@ impl StaticHtmlRuntime {
         let context = v8::Context::new(handle_scope, Default::default());
         let context_scope = &mut v8::ContextScope::new(handle_scope, context);
         v8::tc_scope!(let scope, &mut **context_scope);
-        install_dom_bridge(scope, document_url)?;
+        let installer = install_dom_bridge(scope, document_url)?;
         let mut execute_script =
-            |name: &str, script: &str| evaluate_static_script(scope, name, script);
+            |name: &str, script: &str| evaluate_static_script(scope, name, script, &installer);
         Self::run_static_scripts(
             scripts,
             body_onload_script_index,
@@ -36,7 +37,7 @@ impl StaticHtmlRuntime {
     }
 
     fn run_static_scripts(
-        scripts: &[String],
+        scripts: &[HtmlDocumentScript],
         body_onload_script_index: Option<usize>,
         body_onload_source: Option<&str>,
         content_loaded: (&str, &str),
@@ -45,13 +46,13 @@ impl StaticHtmlRuntime {
     ) -> Result<(), HtmlRuntimeError> {
         for (script_index, script) in scripts.iter().enumerate() {
             if body_onload_script_index == Some(script_index) {
-                let install = body_onload_install_script(body_onload_source);
+                let install = body_onload_source_payload(body_onload_source);
                 execute_script("krr-html-body-onload", &install)?;
             }
-            execute_script("inline-script", script)?;
+            execute_script(script.name(), script.source())?;
         }
         if body_onload_script_index == Some(scripts.len()) {
-            let install = body_onload_install_script(body_onload_source);
+            let install = body_onload_source_payload(body_onload_source);
             execute_script("krr-html-body-onload", &install)?;
         }
         execute_script(content_loaded.0, content_loaded.1)?;
@@ -64,8 +65,13 @@ fn evaluate_static_script(
     scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>,
     name: &str,
     script: &str,
+    installer: &ParserBodyOnloadInstaller,
 ) -> Result<(), HtmlRuntimeError> {
-    let result = if name == "krr-html-window-load" {
+    let result = if name == "krr-html-body-onload" {
+        installer.install_initial(scope, script)
+    } else if name == "krr-html-later-body-onload" {
+        installer.install(scope, Some(script), true)
+    } else if name == "krr-html-window-load" {
         evaluate_and_wait_for_promise(scope, name, script)
     } else {
         evaluate(scope, name, script)

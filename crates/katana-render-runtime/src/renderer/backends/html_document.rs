@@ -47,6 +47,27 @@ pub(super) struct LaterBodyOnloadToken {
     pub(super) source: String,
 }
 
+#[derive(Debug, PartialEq)]
+pub(super) enum HtmlDocumentScript {
+    Source(String),
+    LaterBodyOnload(String),
+}
+
+impl HtmlDocumentScript {
+    pub(super) fn source(&self) -> &str {
+        match self {
+            Self::Source(source) | Self::LaterBodyOnload(source) => source,
+        }
+    }
+
+    pub(super) fn name(&self) -> &'static str {
+        match self {
+            Self::Source(_) => "inline-script",
+            Self::LaterBodyOnload(_) => "krr-html-later-body-onload",
+        }
+    }
+}
+
 impl LaterBodyOnloadToken {
     pub(super) fn record_source_order(
         tokens: &mut std::iter::Peekable<std::slice::IterMut<'_, Self>>,

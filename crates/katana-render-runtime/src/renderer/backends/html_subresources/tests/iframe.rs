@@ -139,7 +139,7 @@ fn iframe_after_table_select_transition_executes_before_parent_script_and_load()
         resources
             .scripts
             .iter()
-            .any(|script| script.contains("'frame|'"))
+            .any(|script| script.source().contains("'frame|'"))
     );
     let session = StaticHtmlRuntime
         .start_interactive(&source)

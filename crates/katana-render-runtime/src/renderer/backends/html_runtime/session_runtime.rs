@@ -3,7 +3,7 @@ use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
 use crate::renderer::backends::html_browser::HtmlBrowserSource;
 #[cfg(test)]
 use crate::renderer::backends::html_debug_trace::HtmlDebugTrace;
-use crate::renderer::backends::html_document::HtmlDocument;
+use crate::renderer::backends::html_document::{HtmlDocument, HtmlDocumentScript};
 use crate::renderer::backends::html_runtime::dom_state::HtmlDomBridgeState;
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 use markup5ever_rcdom::{Handle, NodeData};
@@ -23,7 +23,7 @@ impl StaticHtmlRuntime {
         self.start(source)?.snapshot()
     }
 
-    fn requires_runtime(document: &HtmlDocument, scripts: &[String]) -> bool {
+    fn requires_runtime(document: &HtmlDocument, scripts: &[HtmlDocumentScript]) -> bool {
         !scripts.is_empty() || contains_lifecycle_handler(&document.document)
     }
 
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn interactive_duplicate_body_onload_survives_earlier_attribute_removal() {
         let source = must_result(HtmlBrowserSource::new(
-            r#"<body onload="document.getElementById('status').textContent = 'first-body'"><p id=status>Waiting</p><script>document.body.removeAttribute('onload');</script><body onload="document.getElementById('status').textContent = 'later-body'">"#,
+            r#"<body onload="document.getElementById('status').textContent = 'first-body'"><p id=status>Waiting</p><script>document.body.removeAttribute('onload'); globalThis.__krrInstallStaticBodyLoadHandler = () => {};</script><body onload="document.getElementById('status').textContent = 'later-body'">"#,
             "https://example.test/index.html",
         ));
 
@@ -182,6 +182,21 @@ mod tests {
             r#"document.body.removeAttribute('onload'); document.body.getAttribute = () => 'spoof'; document.body.setAttribute = () => {}; Object.defineProperty(document, 'body', { get: () => null }); document.querySelector = () => null; globalThis.__krr_dom = () => null;"#,
             r#"<body onload="document.getElementById('status').textContent = 'second'">"#,
             "second",
+        ),
+        (
+            r#"const savedFunction = Function; const savedString = String; const savedApply = Reflect.apply; const statusCaptured = document.getElementById('status'); document.body.removeAttribute('onload'); globalThis.__krrInstallStaticBodyLoadHandler = () => {}; globalThis.Function = () => null; globalThis.String = () => 'spoof'; Reflect.apply = () => null;"#,
+            r#"<body onload="statusCaptured.textContent = 'second'"><script>globalThis.Function = savedFunction; globalThis.String = savedString; Reflect.apply = savedApply;</script>"#,
+            "second",
+        ),
+        (
+            r#"const savedMapGet = Map.prototype.get; const savedMapSet = Map.prototype.set; const savedMapDelete = Map.prototype.delete; const savedWeakGet = WeakMap.prototype.get; const savedWeakSet = WeakMap.prototype.set; const statusCaptured = document.getElementById('status'); document.body.removeAttribute('onload'); Map.prototype.get = () => undefined; Map.prototype.set = () => {}; Map.prototype.delete = () => {}; WeakMap.prototype.get = () => undefined; WeakMap.prototype.set = () => {};"#,
+            r#"<body onload="statusCaptured.textContent = 'second'"><script>Map.prototype.get = savedMapGet; Map.prototype.set = savedMapSet; Map.prototype.delete = savedMapDelete; WeakMap.prototype.get = savedWeakGet; WeakMap.prototype.set = savedWeakSet;</script>"#,
+            "second",
+        ),
+        (
+            r#"document.body.removeAttribute('onload'); window.authorCalls = 0; globalThis.__krrInstallStaticBodyLoadHandler = () => { window.authorCalls += 1; };"#,
+            r#"<body onload="document.getElementById('status').textContent = `second:${window.authorCalls}`"><script>__krrInstallStaticBodyLoadHandler('author-source', true);</script>"#,
+            "second:1",
         ),
     ];
 
@@ -471,7 +486,9 @@ mod tests {
     fn inline_scripts_forward_body_onload_install_errors() {
         let result = StaticHtmlRuntime::run_inline_interactive_scripts(
             "https://example.test/index.html",
-            &["document.body.dataset.ready = 'yes';".to_string()],
+            &[super::HtmlDocumentScript::Source(
+                "document.body.dataset.ready = 'yes';".to_string(),
+            )],
             Some(0),
             None,
             &mut |script, _source| Err(HtmlRuntimeError::JavaScriptCompile(script.to_string())),

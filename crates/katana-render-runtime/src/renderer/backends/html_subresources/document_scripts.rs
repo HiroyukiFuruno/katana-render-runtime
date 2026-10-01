@@ -1,13 +1,15 @@
 use super::HtmlSubresourceLoader;
 use super::document::{attribute, is_tag, load_text, text_content};
-use crate::renderer::backends::html_document::{HtmlDocument, LaterBodyOnloadToken};
+use crate::renderer::backends::html_document::{
+    HtmlDocument, HtmlDocumentScript, LaterBodyOnloadToken,
+};
 use html5ever::ns;
 use markup5ever_rcdom::{Handle, NodeData};
 
 pub(super) fn load_scripts(
     loader: &HtmlSubresourceLoader,
     document: &HtmlDocument,
-) -> (Vec<String>, Option<usize>) {
+) -> (Vec<HtmlDocumentScript>, Option<usize>) {
     let mut collector = ScriptCollector::new(loader, document);
     collector.collect(&document.source_order);
     collector.finish()
@@ -15,7 +17,7 @@ pub(super) fn load_scripts(
 
 struct ScriptCollector<'a> {
     loader: &'a HtmlSubresourceLoader,
-    scripts: Vec<String>,
+    scripts: Vec<HtmlDocumentScript>,
     body_source_order_index: Option<usize>,
     source_order_index: usize,
     body_onload_script_index: Option<usize>,
@@ -58,7 +60,7 @@ impl<'a> ScriptCollector<'a> {
     fn collect_inline_frame_node(&mut self, node: &Handle) {
         if is_html_tag(node, "script") {
             if let Some(script) = load_script(self.loader, node) {
-                self.scripts.push(script);
+                self.scripts.push(HtmlDocumentScript::Source(script));
             }
             return;
         }
@@ -69,7 +71,7 @@ impl<'a> ScriptCollector<'a> {
 
     fn collect_script(&mut self, node: &Handle, _inside_inline_frame: bool) {
         if let Some(script) = load_script(self.loader, node) {
-            self.scripts.push(script);
+            self.scripts.push(HtmlDocumentScript::Source(script));
         }
     }
 
@@ -83,14 +85,12 @@ impl<'a> ScriptCollector<'a> {
             && token.source_order_index == self.source_order_index
         {
             self.scripts
-                .push(HtmlDocument::later_body_onload_install_script(
-                    &token.source,
-                ));
+                .push(HtmlDocumentScript::LaterBodyOnload(token.source.clone()));
             self.next_later_token += 1;
         }
     }
 
-    fn finish(self) -> (Vec<String>, Option<usize>) {
+    fn finish(self) -> (Vec<HtmlDocumentScript>, Option<usize>) {
         (self.scripts, self.body_onload_script_index)
     }
 }
@@ -110,8 +110,12 @@ fn load_script(loader: &HtmlSubresourceLoader, node: &Handle) -> Option<String> 
 mod tests {
     use super::load_scripts;
     use crate::renderer::backends::html_browser::HtmlBrowserSource;
-    use crate::renderer::backends::html_document::HtmlDocument;
+    use crate::renderer::backends::html_document::{HtmlDocument, HtmlDocumentScript};
     use crate::renderer::backends::html_subresources::HtmlSubresourceLoader;
+
+    fn script_sources(scripts: &[HtmlDocumentScript]) -> Vec<&str> {
+        scripts.iter().map(HtmlDocumentScript::source).collect()
+    }
 
     fn must_result<T, E>(result: Result<T, E>) -> T {
         assert!(result.is_ok());
@@ -144,7 +148,7 @@ mod tests {
 
         let (scripts, body_onload_script_index) = load_scripts(&loader, &document);
 
-        assert_eq!(scripts, ["window.onload = child;"]);
+        assert_eq!(script_sources(&scripts), ["window.onload = child;"]);
         assert_eq!(body_onload_script_index, Some(1));
     }
 
@@ -173,7 +177,7 @@ mod tests {
 
         let (scripts, body_onload_script_index) = load_scripts(&loader, &document);
 
-        assert_eq!(scripts, ["window.onload = child;"]);
+        assert_eq!(script_sources(&scripts), ["window.onload = child;"]);
         assert_eq!(body_onload_script_index, Some(0));
     }
 
@@ -188,7 +192,7 @@ mod tests {
 
         let (scripts, body_onload_script_index) = load_scripts(&loader, &document);
 
-        assert_eq!(scripts, ["before", "after"]);
+        assert_eq!(script_sources(&scripts), ["before", "after"]);
         assert_eq!(body_onload_script_index, Some(2));
     }
 
@@ -217,7 +221,7 @@ mod tests {
 
         let (scripts, body_onload_script_index) = load_scripts(&loader, &document);
 
-        assert_eq!(scripts, ["before", "frame"]);
+        assert_eq!(script_sources(&scripts), ["before", "frame"]);
         assert_eq!(body_onload_script_index, Some(1));
     }
 
@@ -244,7 +248,7 @@ mod tests {
 
         let (scripts, body_onload_script_index) = load_scripts(&loader, &document);
 
-        assert_eq!(scripts, ["a", "parent", "b"]);
+        assert_eq!(script_sources(&scripts), ["a", "parent", "b"]);
         assert_eq!(body_onload_script_index, Some(2));
     }
 
@@ -270,6 +274,6 @@ mod tests {
 
         let (scripts, _) = load_scripts(&loader, &document);
 
-        assert_eq!(scripts, ["html"]);
+        assert_eq!(script_sources(&scripts), ["html"]);
     }
 }

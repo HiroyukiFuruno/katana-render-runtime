@@ -6,17 +6,17 @@ pub(super) use super::evaluation::{evaluate, evaluate_value, perform_microtask_c
 pub(super) use super::promise::evaluate_and_wait_for_promise;
 
 pub(super) const DOM_BOOTSTRAP: &str = include_str!("dom_bootstrap.js");
-
-pub(super) const BODY_ONLOAD_INSTALL: &str = "__krrInstallStaticBodyLoadHandler();";
+#[path = "parser_body_onload.rs"]
+mod parser_body_onload;
+pub(super) use parser_body_onload::ParserBodyOnloadInstaller;
 pub(super) const DOM_CONTENT_LOADED_DISPATCH: &str = "__krrDispatchDocumentContentLoaded();";
 pub(super) const WINDOW_LOAD_DISPATCH: &str = "__krrDispatchWindowLoad();";
 
-pub(super) fn body_onload_install_script(source: Option<&str>) -> String {
-    let Some(source) = source else {
-        return BODY_ONLOAD_INSTALL.to_string();
-    };
-    let source = serde_json::Value::String(source.to_owned()).to_string();
-    format!("__krrInstallStaticBodyLoadHandler({source});")
+pub(super) fn body_onload_source_payload(source: Option<&str>) -> String {
+    source
+        .map(|source| serde_json::Value::String(source.to_owned()))
+        .unwrap_or(serde_json::Value::Null)
+        .to_string()
 }
 pub(super) type HtmlTryCatchScope<'pin, 'scope, 'object, 'isolate> =
     v8::PinnedRef<'pin, v8::TryCatch<'scope, 'object, v8::HandleScope<'isolate>>>;
@@ -24,7 +24,7 @@ pub(super) type HtmlTryCatchScope<'pin, 'scope, 'object, 'isolate> =
 pub(super) fn install_dom_bridge(
     scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>,
     document_url: &str,
-) -> Result<(), HtmlRuntimeError> {
+) -> Result<ParserBodyOnloadInstaller, HtmlRuntimeError> {
     let context = scope.get_current_context();
     let global = context.global(scope);
     let name_error = HtmlRuntimeError::DomBridge("DOM function name allocation failed".to_string());
@@ -37,7 +37,8 @@ pub(super) fn install_dom_bridge(
         .set(scope, name.into(), callback.into())
         .ok_or(registration_error)?;
     evaluate(scope, "krr-html-dom-bootstrap", DOM_BOOTSTRAP)?;
-    install_location(scope, document_url)
+    install_location(scope, document_url)?;
+    ParserBodyOnloadInstaller::capture(scope)
 }
 
 fn install_location(

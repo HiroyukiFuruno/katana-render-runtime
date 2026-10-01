@@ -1,7 +1,8 @@
+use crate::renderer::backends::html_document::HtmlDocumentScript;
 use crate::renderer::backends::html_runtime::script::{
-    DOM_CONTENT_LOADED_DISPATCH, WINDOW_LOAD_DISPATCH, body_onload_install_script,
-    check_bridge_error, evaluate, evaluate_and_wait_for_promise, install_dom_bridge,
-    perform_microtask_checkpoint,
+    DOM_CONTENT_LOADED_DISPATCH, ParserBodyOnloadInstaller, WINDOW_LOAD_DISPATCH,
+    body_onload_source_payload, check_bridge_error, evaluate, evaluate_and_wait_for_promise,
+    install_dom_bridge, perform_microtask_checkpoint,
 };
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 
@@ -12,7 +13,7 @@ type InteractiveScriptEvaluator<'a> = dyn FnMut(&str, &str) -> Result<(), HtmlRu
 impl StaticHtmlRuntime {
     pub(super) fn execute_interactive_scripts(
         isolate: &mut v8::OwnedIsolate,
-        scripts: &[String],
+        scripts: &[HtmlDocumentScript],
         body_onload_script_index: Option<usize>,
         body_onload_source: Option<&str>,
         document_url: &str,
@@ -20,12 +21,12 @@ impl StaticHtmlRuntime {
         v8::scope!(let handle_scope, isolate);
         let context = v8::Context::new(handle_scope, Default::default());
         let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        {
+        let installer = {
             v8::tc_scope!(let scope, &mut **context_scope);
-            install_dom_bridge(scope, document_url)?;
-        }
+            install_dom_bridge(scope, document_url)?
+        };
         let mut evaluate = |name: &str, script: &str| -> Result<(), HtmlRuntimeError> {
-            Self::evaluate_interactive_script(context_scope, name, script)
+            Self::evaluate_interactive_script(context_scope, name, script, &installer)
         };
         Self::run_inline_interactive_scripts(
             document_url,
@@ -42,9 +43,14 @@ impl StaticHtmlRuntime {
         context_scope: &mut v8::ContextScope<'_, '_, v8::HandleScope<'_>>,
         name: &str,
         script: &str,
+        installer: &ParserBodyOnloadInstaller,
     ) -> Result<(), HtmlRuntimeError> {
         v8::tc_scope!(let scope, &mut **context_scope);
-        if name == "krr-html-window-load" {
+        if name == "krr-html-body-onload" {
+            installer.install_initial(scope, script)
+        } else if name == "krr-html-later-body-onload" {
+            installer.install(scope, Some(script), true)
+        } else if name == "krr-html-window-load" {
             evaluate_and_wait_for_promise(scope, name, script)
         } else {
             evaluate(scope, name, script)
@@ -55,7 +61,7 @@ impl StaticHtmlRuntime {
 
     pub(super) fn run_inline_interactive_scripts(
         document_url: &str,
-        scripts: &[String],
+        scripts: &[HtmlDocumentScript],
         body_onload_script_index: Option<usize>,
         body_onload_source: Option<&str>,
         evaluate: &mut InteractiveScriptEvaluator<'_>,
@@ -68,7 +74,7 @@ impl StaticHtmlRuntime {
                 script_index,
                 evaluate,
             )?;
-            let result = evaluate("inline-script", script);
+            let result = evaluate(script.name(), script.source());
             Self::accept_interactive_script_result(
                 result,
                 document_url,
@@ -93,7 +99,7 @@ impl StaticHtmlRuntime {
     ) -> Result<(), HtmlRuntimeError> {
         (body_onload_script_index == Some(script_index))
             .then(|| {
-                let install = body_onload_install_script(body_onload_source);
+                let install = body_onload_source_payload(body_onload_source);
                 Self::run_interactive_script(
                     document_url,
                     "krr-html-body-onload",

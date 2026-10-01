@@ -1,5 +1,5 @@
 use super::super::html_dom_helpers::collect_scripts;
-use super::HtmlDocument;
+use super::{HtmlDocument, HtmlDocumentScript};
 #[path = "html_document_parse_source_order.rs"]
 mod source_order;
 #[path = "html_document_parse_tree.rs"]
@@ -42,7 +42,7 @@ impl HtmlDocument {
         super::super::html_snapshot::render_document(&self.document)
     }
 
-    pub(crate) fn inline_scripts(&self) -> Result<Vec<String>, String> {
+    pub(crate) fn inline_scripts(&self) -> Result<Vec<HtmlDocumentScript>, String> {
         let mut scripts = Vec::new();
         collect_scripts(&self.document, &mut scripts)?;
         Ok(self.append_later_body_onload_scripts(scripts))
@@ -60,12 +60,7 @@ impl HtmlDocument {
         self.body_onload_source.as_deref()
     }
 
-    pub(in crate::renderer::backends) fn later_body_onload_install_script(source: &str) -> String {
-        let source = serde_json::Value::String(source.to_owned()).to_string();
-        format!("__krrInstallStaticBodyLoadHandler({source}, true);")
-    }
-
-    fn append_later_body_onload_scripts(&self, scripts: Vec<String>) -> Vec<String> {
+    fn append_later_body_onload_scripts(&self, scripts: Vec<String>) -> Vec<HtmlDocumentScript> {
         let mut ordered = Vec::with_capacity(scripts.len() + self.later_body_onload_tokens.len());
         let mut tokens = self.later_body_onload_tokens.iter().peekable();
         for (index, script) in scripts
@@ -75,10 +70,10 @@ impl HtmlDocument {
             .enumerate()
         {
             while let Some(token) = tokens.next_if(|token| token.script_index == index) {
-                ordered.push(Self::later_body_onload_install_script(&token.source));
+                ordered.push(HtmlDocumentScript::LaterBodyOnload(token.source.clone()));
             }
             if let Some(script) = script {
-                ordered.push(script);
+                ordered.push(HtmlDocumentScript::Source(script));
             }
         }
         ordered

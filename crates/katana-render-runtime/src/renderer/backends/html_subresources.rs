@@ -13,7 +13,7 @@ pub(super) use policy::HtmlSubresourcePolicy;
 
 pub(super) struct HtmlDocumentResources {
     pub(super) stylesheets: std::collections::HashMap<String, String>,
-    pub(super) scripts: Vec<String>,
+    pub(super) scripts: Vec<crate::renderer::backends::html_document::HtmlDocumentScript>,
     pub(super) body_onload_script_index: Option<usize>,
     pub(super) body_onload_source: Option<String>,
 }

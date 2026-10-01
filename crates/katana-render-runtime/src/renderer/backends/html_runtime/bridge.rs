@@ -119,7 +119,7 @@ mod tests {
         v8::tc_scope!(let scope, &mut **context_scope);
 
         let installed = install_dom_bridge(scope, "about:blank");
-        assert!(installed.is_ok(), "{installed:?}");
+        assert!(installed.is_ok(), "{:?}", installed.err());
         let callback = evaluate_value(scope, "krr-html-dom-callback", "__krr_dom('unsupported');");
         assert!(callback.is_ok(), "{callback:?}");
 
@@ -143,7 +143,7 @@ mod tests {
         v8::tc_scope!(let scope, &mut **context_scope);
 
         let installed = install_dom_bridge(scope, "about:blank");
-        assert!(installed.is_ok(), "{installed:?}");
+        assert!(installed.is_ok(), "{:?}", installed.err());
         assert!(
             evaluate_value(
                 scope,
