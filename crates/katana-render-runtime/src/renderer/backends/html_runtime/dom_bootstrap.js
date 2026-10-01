@@ -121,7 +121,6 @@ const __krrListenerOptions = (options) => ({
 const __krrEventTargetListeners = new WeakMap();
 const __krrEventHandlers = new WeakMap();
 const __krrLifecyclePropertyOverrides = new WeakMap();
-const __krrPrevalidatedImageEvents = new WeakMap();
 const __krrPrevalidatedImageEventAttribute = "data-krr-prevalidated-image-event";
 const __krrLifecycleEventTypes = new Set(["load", "error", "readystatechange", "DOMContentLoaded"]);
 const __krrNormalizeLifecycleEventType = (type) => {
@@ -589,7 +588,6 @@ const __krrElementPrototype = {
     const attributeName = String(name);
     const attributeValue = String(value);
     __krrNativeDom("setAttribute", this.__krrNodeId, attributeName, attributeValue);
-    if (attributeName.toLowerCase() === "src") __krrPrevalidatedImageEvents.delete(this);
     const lifecycleEventType = attributeName.toLowerCase().startsWith("on")
       ? __krrNormalizeLifecycleEventType(attributeName.slice(2))
       : null;
@@ -605,7 +603,6 @@ const __krrElementPrototype = {
       : null;
     const hadAttribute = __krrNativeDom("getAttribute", this.__krrNodeId, attributeName) !== null;
     __krrNativeDom("removeAttribute", this.__krrNodeId, attributeName);
-    if (attributeName.toLowerCase() === "src") __krrPrevalidatedImageEvents.delete(this);
     if (hadAttribute && lifecycleEventType !== null) {
       if (__krrIsWindowLoadNode(this.__krrNodeId) && lifecycleEventType === "load")
         __krrInstallBodyLoadHandler(this, null);
@@ -768,11 +765,8 @@ const __krrSeedPrevalidatedImageEvents = () => {
     return;
   }
   for (const image of images) {
-    const source = image.getAttribute("src");
-    const eventType = image.getAttribute(__krrPrevalidatedImageEventAttribute);
     image.removeAttribute(__krrPrevalidatedImageEventAttribute);
-    if (source !== null && (eventType === "load" || eventType === "error"))
-      __krrPrevalidatedImageEvents.set(image, { source, eventType });
+    // HTML属性は文書作成者が指定できるため、検証済み結果の証拠としては使わない。
   }
 };
 __krrSeedPrevalidatedImageEvents();
@@ -1907,9 +1901,7 @@ const __krrPercentEncodedImageBytes = (payload) => {
   }
   return bytes;
 };
-const __krrImageLoadEventType = (image, source) => {
-  const prevalidated = __krrPrevalidatedImageEvents.get(image);
-  if (prevalidated?.source === source) return prevalidated.eventType;
+const __krrImageLoadEventType = (_image, source) => {
   if (typeof source !== "string" || source.slice(0, "data:".length).toLowerCase() !== "data:")
     return "error";
   const separator = source.indexOf(",");
@@ -1924,7 +1916,7 @@ const __krrImageLoadEventType = (image, source) => {
   return "error";
 };
 
-const __krrDispatchImageLoad = (image) => {
+const __krrDispatchImageLoad = async (image) => {
   let source = image.getAttribute("src");
   let lastDispatchedSource = null;
   // load/error handlerによるsrc差替えを再試行し、相互差替えでも有限回で打ち切る。
@@ -1934,6 +1926,7 @@ const __krrDispatchImageLoad = (image) => {
     try {
       image.dispatchEvent(new Event(eventType));
     } catch (_error) {}
+    await __krrLifecycleCheckpoint();
     const replacement = image.getAttribute("src");
     if (replacement === source) return lastDispatchedSource;
     source = replacement;
@@ -1960,7 +1953,7 @@ const __krrDispatchPendingImages = async (document, state = {}) => {
       if (dispatchedImageSources.get(image) === source) continue;
       foundImage = true;
       dispatched = true;
-      const dispatchedSource = __krrDispatchImageLoad(image);
+      const dispatchedSource = await __krrDispatchImageLoad(image);
       // 実dispatch済みsourceだけを記録し、上限時の差替え先は次のscanで評価する。
       dispatchedImageSources.set(image, dispatchedSource);
       await __krrLifecycleCheckpoint();

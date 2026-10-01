@@ -1,3 +1,4 @@
+use super::html_runtime::StaticHtmlRuntime;
 use super::{HtmlRenderInput, HtmlRenderer};
 use base64::Engine as _;
 
@@ -32,6 +33,35 @@ fn preserves_rejected_image_data_urls_for_interactive_scripts_and_dispatches_err
         ),
         "{output}"
     );
+    Ok(())
+}
+
+#[test]
+fn static_runtime_ignores_author_supplied_prevalidated_image_event_markers() -> TestResult {
+    let valid_png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    let source = format!(
+        r#"<p id=status></p><img src="data:image/png;base64,!" data-krr-prevalidated-image-event="load" onload="document.getElementById('status').textContent += 'invalid-load|'" onerror="document.getElementById('status').textContent += 'invalid-error|' "><img src="{valid_png}" data-krr-prevalidated-image-event="error" onload="document.getElementById('status').textContent += 'valid-load|'" onerror="document.getElementById('status').textContent += 'valid-error|'">"#,
+    );
+    let output = start_static_runtime(&source)?;
+
+    assert!(
+        output.contains(">invalid-error|valid-load|</p>"),
+        "{output}"
+    );
+    Ok(())
+}
+
+#[test]
+fn static_runtime_cancels_intermediate_image_source_replaced_in_microtask() -> TestResult {
+    let image_a = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+    let image_b = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    let image_c = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201%201%22%3E%3C%2Fsvg%3E";
+    let source = format!(
+        r#"<p id=status></p><img src="{image_a}" onload="const source = this.getAttribute('src'); if (source === '{image_a}') {{ document.getElementById('status').textContent += 'a-load|'; this.src = '{image_b}'; Promise.resolve().then(() => {{ this.src = '{image_c}'; }}); }} else if (source === '{image_b}') document.getElementById('status').textContent += 'b-load|'; else if (source === '{image_c}') document.getElementById('status').textContent += 'c-load|'" onerror="document.getElementById('status').textContent += 'image-error|'">"#,
+    );
+    let output = start_static_runtime(&source)?;
+
+    assert!(output.contains(">a-load|c-load|</p>"), "{output}");
     Ok(())
 }
 
@@ -231,6 +261,15 @@ fn percent_encoded_data_url(media_type: &str, base64_payload: &str) -> TestResul
         .map(|byte| format!("%{byte:02X}"))
         .collect::<String>();
     Ok(format!("data:{media_type},{payload}"))
+}
+
+fn start_static_runtime(html: &str) -> TestResult<String> {
+    let session = StaticHtmlRuntime
+        .start(html)
+        .map_err(|error| format!("HTML runtime must start: {error}"))?;
+    session
+        .snapshot()
+        .map_err(|error| format!("HTML runtime must expose its actual document: {error}"))
 }
 
 fn render(html: &str) -> TestResult<String> {

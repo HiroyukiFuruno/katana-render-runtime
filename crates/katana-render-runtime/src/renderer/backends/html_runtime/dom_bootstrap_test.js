@@ -10,7 +10,7 @@ const listenerOptions = source.match(
   /^const __krrListenerOptions = \(options\) => \(\{[\s\S]*?^\}\);/m,
 )?.[0];
 const imageLoadEventType = source.match(
-  /const __krrImageLoadEventType = \(image, source\) => \{[\s\S]*?\n\};/,
+  /const __krrImageLoadEventType = \(_image, source\) => \{[\s\S]*?\n\};/,
 )?.[0];
 const imageSrcProperties = source.match(
   /^ {2}get src\(\) \{[\s\S]*?^ {2}set src\(value\) \{[\s\S]*?^ {2}\},$/m,
@@ -60,7 +60,7 @@ const installEventTarget = source.match(
   /^const __krrInstallEventTarget = \(target\) => \{[\s\S]*?^\};/m,
 )?.[0];
 const dispatchImageLoad = source.match(
-  /^const __krrDispatchImageLoad = \(image\) => \{[\s\S]*?^\};/m,
+  /^const __krrDispatchImageLoad = async \(image\) => \{[\s\S]*?^\};/m,
 )?.[0];
 const dispatchPendingImages = source.match(
   /^const __krrDispatchPendingImages = async \(document, state = \{\}\) => \{[\s\S]*?^\};/m,
@@ -450,7 +450,7 @@ test("generic dispatchEventでもcaptureのstopImmediatePropagation後にdeferre
   expect(event.eventPhase).toBe(0);
 });
 
-test("onerrorのsrc差替えはload/errorを再評価し最大8回で終了する", () => {
+test("onerrorのsrc差替えはload/errorを再評価し最大8回で終了する", async () => {
   expect(dispatchImageLoad).toBeDefined();
 
   const eventTypes = [];
@@ -469,6 +469,7 @@ test("onerrorのsrc差替えはload/errorを再評価し最大8回で終了す�
     "image",
     "Event",
     "__krrImageLoadEventType",
+    "__krrLifecycleCheckpoint",
     `${dispatchImageLoad}\nreturn __krrDispatchImageLoad;`,
   )(
     image,
@@ -478,9 +479,10 @@ test("onerrorのsrc差替えはload/errorを再評価し最大8回で終了す�
       }
     },
     (_image, source) => (source === "valid" ? "load" : "error"),
+    Promise.resolve.bind(Promise),
   );
 
-  dispatch(image);
+  await dispatch(image);
   expect(eventTypes).toEqual(["error", "load"]);
 
   image.source = "a";
@@ -489,12 +491,12 @@ test("onerrorのsrc差替えはload/errorを再評価し最大8回で終了す�
     image.source = image.source === "a" ? "b" : "a";
   };
   eventTypes.length = 0;
-  dispatch(image);
+  await dispatch(image);
   expect(eventTypes).toHaveLength(8);
   expect(eventTypes.every((eventType) => eventType === "error")).toBe(true);
 });
 
-test("onloadのsrc差替え後も新しいsrcを検証してload/errorを再dispatchする", () => {
+test("onloadのsrc差替え後も新しいsrcを検証してload/errorを再dispatchする", async () => {
   expect(dispatchImageLoad).toBeDefined();
 
   const eventTypes = [];
@@ -513,6 +515,7 @@ test("onloadのsrc差替え後も新しいsrcを検証してload/errorを再disp
     "image",
     "Event",
     "__krrImageLoadEventType",
+    "__krrLifecycleCheckpoint",
     `${dispatchImageLoad}\nreturn __krrDispatchImageLoad;`,
   )(
     image,
@@ -522,10 +525,55 @@ test("onloadのsrc差替え後も新しいsrcを検証してload/errorを再disp
       }
     },
     (_image, source) => (source === "valid" ? "load" : "error"),
+    Promise.resolve.bind(Promise),
   );
 
-  dispatch(image);
+  await dispatch(image);
   expect(eventTypes).toEqual(["load", "error"]);
+});
+
+test("同一画像の各source event前にmicrotaskを処理し中間srcをキャンセルする", async () => {
+  expect(dispatchImageLoad).toBeDefined();
+
+  const calls = [];
+  const image = {
+    source: "A",
+    getAttribute(name) {
+      expect(name).toBe("src");
+      return this.source;
+    },
+    dispatchEvent(event) {
+      calls.push(`${this.source}:${event.type}`);
+      if (this.source === "A") {
+        this.source = "B";
+        queueMicrotask(() => {
+          this.source = "C";
+          calls.push("microtask");
+        });
+      }
+    },
+  };
+  const dispatch = new Function(
+    "image",
+    "Event",
+    "__krrImageLoadEventType",
+    "__krrLifecycleCheckpoint",
+    `${dispatchImageLoad}\nreturn __krrDispatchImageLoad;`,
+  )(
+    image,
+    class Event {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    (_target, source) => (source === "A" || source === "C" ? "load" : "error"),
+    Promise.resolve.bind(Promise),
+  );
+
+  await dispatch(image);
+
+  expect(calls).toEqual(["A:load", "microtask", "C:load"]);
+  expect(image.source).toBe("C");
 });
 
 test("8回目の同期src差替えは未dispatchとして次のscanで評価する", async () => {
@@ -547,8 +595,9 @@ test("8回目の同期src差替えは未dispatchとして次のscanで評価す�
   const dispatchImage = new Function(
     "Event",
     "__krrImageLoadEventType",
+    "__krrLifecycleCheckpoint",
     `${dispatchImageLoad}\nreturn __krrDispatchImageLoad;`,
-  )(class Event {}, () => "load");
+  )(class Event {}, () => "load", Promise.resolve.bind(Promise));
   const document = { querySelectorAll: () => [image] };
   const dispatchPending = createPendingImageDispatcher(document, dispatchImage);
 
@@ -1019,8 +1068,9 @@ test("空iframe再走査はページ側Promise置換に依存しない", async (
   expect(calls).toEqual(["lifecycle-checkpoint", "lifecycle-checkpoint"]);
 });
 
-test("前処理済み画像のload結果を再利用し、srcをscript-assignedした後は再検証する", () => {
+test("author指定の画像loadマーカーを除去しnative検証結果を使う", () => {
   expect(seedPrevalidatedImageEvents).toBeDefined();
+  expect(imageLoadEventType).toBeDefined();
 
   const sourceUrl = "data:image/png;base64,AA==";
   const attributes = new Map([
@@ -1035,116 +1085,53 @@ test("前処理済み画像のload結果を再利用し、srcをscript-assigned�
       attributes.delete(name);
     },
   };
-  const prevalidated = new WeakMap();
-  new Function(
+  const seed = new Function(
     "document",
-    "__krrPrevalidatedImageEvents",
     "__krrPrevalidatedImageEventAttribute",
     `${seedPrevalidatedImageEvents}\nreturn __krrSeedPrevalidatedImageEvents;`,
-  )(
-    { querySelectorAll: (selector) => (selector === "img" ? [image] : []) },
-    prevalidated,
-    "data-krr-prevalidated-image-event",
-  )();
+  )({ querySelectorAll: () => [image] }, "data-krr-prevalidated-image-event");
+  seed();
 
   expect(attributes.has("data-krr-prevalidated-image-event")).toBe(false);
   const calls = [];
   const imageEventType = new Function(
     "globalThis",
-    "__krrPrevalidatedImageEvents",
     `${nativeDomCapture}\n${imageLoadEventType}\nreturn __krrImageLoadEventType;`,
-  )(
-    {
-      __krr_dom(...arguments_) {
-        calls.push(arguments_);
-        return "error";
-      },
+  )({
+    __krr_dom(...arguments_) {
+      calls.push(arguments_);
+      return "error";
     },
-    prevalidated,
-  );
-  expect(imageEventType(image, sourceUrl)).toBe("load");
-  expect(calls).toEqual([]);
+  });
 
-  const bridgeAttributes = new Map([["src", sourceUrl]]);
-  const bridge = (operation, _nodeId, name, value) => {
-    if (operation === "setAttribute") {
-      bridgeAttributes.set(name, value);
-      return null;
-    }
-    if (operation === "getAttribute") return bridgeAttributes.get(name) ?? null;
-    if (operation === "validateImageDataUrl") return "error";
-    throw new Error(`unexpected native operation: ${operation}`);
-  };
-  const elementPrototype = new Function(
-    "globalThis",
-    "__krrPrevalidatedImageEvents",
-    `const __krrNativeDom = globalThis.__krr_dom;
-const __krrNormalizeLifecycleEventType = () => null;
-const __krrIsWindowLoadNode = () => false;
-const __krrInstallBodyLoadHandler = () => {};
-const __krrInstallInlineHandler = () => {};
-return ({${imageSrcProperties}\n${getAttributeMethod}\n${setAttributeMethod}});`,
-  )({ __krr_dom: bridge }, prevalidated);
-  const assignedImage = Object.assign(Object.create(elementPrototype), { __krrNodeId: "image-1" });
-  prevalidated.set(assignedImage, { source: sourceUrl, eventType: "load" });
-  assignedImage.src = sourceUrl;
-  expect(imageEventType(assignedImage, assignedImage.src)).toBe("error");
+  expect(imageEventType(image, sourceUrl)).toBe("error");
+  expect(calls).toEqual([["validateImageDataUrl", sourceUrl]]);
 });
 
-test("前処理済み画像のerror結果を再利用し、同じdata URLを再デコードしない", () => {
-  expect(seedPrevalidatedImageEvents).toBeDefined();
+test("author指定の画像errorマーカーもnativeのload結果を上書きしない", () => {
   expect(imageLoadEventType).toBeDefined();
 
   const sourceUrl = "data:image/png;base64,AA==";
-  const attributes = new Map([
-    ["src", sourceUrl],
-    ["data-krr-prevalidated-image-event", "error"],
-  ]);
-  const image = {
-    getAttribute(name) {
-      return attributes.get(name) ?? null;
-    },
-    removeAttribute(name) {
-      attributes.delete(name);
-    },
-  };
-  const prevalidated = new WeakMap();
-  new Function(
-    "document",
-    "__krrPrevalidatedImageEvents",
-    "__krrPrevalidatedImageEventAttribute",
-    `${seedPrevalidatedImageEvents}\nreturn __krrSeedPrevalidatedImageEvents;`,
-  )(
-    { querySelectorAll: (selector) => (selector === "img" ? [image] : []) },
-    prevalidated,
-    "data-krr-prevalidated-image-event",
-  )();
-
   const calls = [];
   const imageEventType = new Function(
     "globalThis",
-    "__krrPrevalidatedImageEvents",
     `${nativeDomCapture}\n${imageLoadEventType}\nreturn __krrImageLoadEventType;`,
-  )(
-    {
-      __krr_dom(...arguments_) {
-        calls.push(arguments_);
-        return "load";
-      },
+  )({
+    __krr_dom(...arguments_) {
+      calls.push(arguments_);
+      return "load";
     },
-    prevalidated,
-  );
+  });
 
-  expect(imageEventType(image, sourceUrl)).toBe("error");
-  expect(calls).toEqual([]);
+  expect(imageEventType({ getAttribute: () => sourceUrl }, sourceUrl)).toBe("load");
+  expect(calls).toEqual([["validateImageDataUrl", sourceUrl]]);
 });
 
-test("初期DOM列挙を提供しないminimal bridgeでは前処理済み画像seedをskipする", () => {
+test("初期DOM列挙を提供しないminimal bridgeではマーカー除去をskipする", () => {
   expect(seedPrevalidatedImageEvents).toBeDefined();
 
   const seed = new Function(
     "document",
-    "__krrPrevalidatedImageEvents",
     "__krrPrevalidatedImageEventAttribute",
     `${seedPrevalidatedImageEvents}\nreturn __krrSeedPrevalidatedImageEvents;`,
   )(
@@ -1153,7 +1140,6 @@ test("初期DOM列挙を提供しないminimal bridgeでは前処理済み画像
         throw new Error("DOM state is unavailable");
       },
     },
-    new WeakMap(),
     "data-krr-prevalidated-image-event",
   );
 
