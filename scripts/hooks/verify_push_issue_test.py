@@ -857,6 +857,21 @@ class VerifyPushIssueTest(unittest.TestCase):
             issue_loader=issues.get,
         )
 
+    def test_release_branch_recognition_matches_stable_version_grammar(self) -> None:
+        cases = (
+            ("release/v0.4.22", True),
+            ("release/v00.04.00022", True),
+            ("release/v1.2", False),
+            ("release/v1.2.3-rc1", False),
+            ("release/vfeature", False),
+            ("release/v1.2.3/extra", False),
+            ("prefix/release/v1.2.3", False),
+            ("release/v1.2.3\n", False),
+        )
+        for branch, expected in cases:
+            with self.subTest(branch=branch):
+                self.assertEqual(subject.is_release_branch(branch), expected)
+
     def test_release_branch_requires_an_issue_somewhere_in_its_range(self) -> None:
         with self.assertRaisesRegex(subject.ContractViolation, "commit範囲"):
             self.validate(
