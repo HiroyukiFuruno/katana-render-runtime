@@ -62,6 +62,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         conditional = "if: github.event_name == 'pull_request' || inputs.publish_crates == true"
         self.assertGreaterEqual(self.release.count(conditional), 3)
         self.assertIn("publish_if_needed katana-render-runtime-cli\nwait_for_crate katana-render-runtime-cli", self.publisher)
+        cleanup = self.workflow_step(self.release, "Cleanup published release state")
+        self.assertNotIn("--delete-remote", cleanup)
 
     def test_retry_rejoins_the_same_publication_completion_path(self) -> None:
         publish = self.retry.index("- name: Publish crates.io from release tag")
@@ -74,6 +76,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn('gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --verify-tag', retry_publish)
         self.assertNotIn("--latest", retry_publish)
         self.assertIn("python3 scripts/release/cleanup_release_state.py", self.retry)
+        cleanup_step = self.workflow_step(self.retry, "Cleanup published release state")
+        self.assertNotIn("--delete-remote", cleanup_step)
 
     def run_plantuml_install(self, failures: int, checksum: str) -> tuple[subprocess.CompletedProcess[str], Path, int]:
         root = Path(__file__).parents[2]

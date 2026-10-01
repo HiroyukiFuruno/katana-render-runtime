@@ -58,6 +58,14 @@ class CleanupReleaseStateTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
+    def test_remote_delete_requires_explicit_cli_opt_in(self) -> None:
+        self.assertFalse(subject._parse_arguments(["--version", "v9.9.9"]).delete_remote)
+        self.assertTrue(
+            subject._parse_arguments(
+                ["--version", "v9.9.9", "--delete-remote"]
+            ).delete_remote
+        )
+
     def git(self, *arguments: str, cwd: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["git", *arguments],
@@ -85,13 +93,19 @@ class CleanupReleaseStateTest(unittest.TestCase):
             )
             self.git("push", "origin", "master", cwd=self.repository)
 
-    def cleanup(self, *, published: bool = True) -> list[str]:
+    def cleanup(
+        self,
+        *,
+        published: bool = True,
+        delete_remote: bool = False,
+    ) -> list[str]:
         return subject.cleanup_release_state(
             repository=self.repository,
             version="v9.9.9",
             release_branch="release/v9.9.9",
             remote="origin",
             default_branch="master",
+            delete_remote=delete_remote,
             release_checker=lambda _version: published,
         )
 
@@ -134,7 +148,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
     def test_switches_to_default_and_deletes_merged_local_and_remote_branch(self) -> None:
         self.create_release_branch(merge=True)
         self.git("switch", "release/v9.9.9", cwd=self.repository)
-        actions = self.cleanup()
+        actions = self.cleanup(delete_remote=True)
         current = self.git("branch", "--show-current", cwd=self.repository).stdout.strip()
         local = self.git("branch", "--list", "release/v9.9.9", cwd=self.repository).stdout
         self.assertEqual(current, "master")
@@ -142,6 +156,17 @@ class CleanupReleaseStateTest(unittest.TestCase):
         self.assertFalse(self.remote_branch_exists("release/v9.9.9"))
         self.assertIn("pulled origin/master with --ff-only", actions)
         self.assertIn("remote branch release/v9.9.9 deleted", actions)
+
+    def test_default_cleanup_preserves_remote_and_deletes_merged_local_branch(self) -> None:
+        self.create_release_branch(merge=True)
+        self.git("switch", "release/v9.9.9", cwd=self.repository)
+
+        actions = self.cleanup()
+
+        local = self.git("branch", "--list", "release/v9.9.9", cwd=self.repository).stdout
+        self.assertEqual(local.strip(), "")
+        self.assertTrue(self.remote_branch_exists("release/v9.9.9"))
+        self.assertIn("remote branch release/v9.9.9 preserved", actions)
 
     def test_retains_unmerged_branch(self) -> None:
         self.create_release_branch(merge=False)
@@ -185,7 +210,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
             "generated\n", encoding="utf-8"
         )
 
-        actions = self.cleanup()
+        actions = self.cleanup(delete_remote=True)
 
         self.assertIn("remote branch release/v9.9.9 deleted", actions)
         self.assertTrue((self.repository / "target" / "package" / "artifact.crate").exists())
@@ -222,7 +247,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
         self.create_release_branch(merge=True)
         worktree = self.root / "release-worktree"
         self.git("worktree", "add", str(worktree), "release/v9.9.9", cwd=self.repository)
-        actions = self.cleanup()
+        actions = self.cleanup(delete_remote=True)
         self.assertFalse(worktree.exists())
         self.assertFalse(self.remote_branch_exists("release/v9.9.9"))
         self.assertTrue(any(action.startswith("worktree ") for action in actions))
@@ -253,7 +278,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
             "refs/remotes/origin/release/v9.9.9",
             cwd=self.repository,
         )
-        self.cleanup()
+        self.cleanup(delete_remote=True)
         self.assertFalse(self.remote_branch_exists("release/v9.9.9"))
 
     def test_refreshes_stale_release_tracking_ref_before_ancestry_audit(self) -> None:
@@ -271,7 +296,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
             cwd=self.repository,
         )
 
-        actions = self.cleanup()
+        actions = self.cleanup(delete_remote=True)
 
         self.assertIn("remote branch release/v9.9.9 deleted", actions)
         self.assertFalse(self.remote_branch_exists("release/v9.9.9"))
@@ -298,7 +323,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
 
         with mock.patch.object(subject, "_run_git", side_effect=advance_before_delete):
             with self.assertRaisesRegex(subject.CleanupError, "push .* failed"):
-                self.cleanup()
+                self.cleanup(delete_remote=True)
         self.assertTrue(self.remote_branch_exists("release/v9.9.9"))
 
     def test_refuses_cleanup_when_push_url_targets_different_repository_at_same_sha(self) -> None:
@@ -319,7 +344,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(subject.CleanupError, "push URL.*異なるrepository"):
-            self.cleanup()
+            self.cleanup(delete_remote=True)
 
         local = self.git("branch", "--list", "release/v9.9.9", cwd=self.repository).stdout
         self.assertNotEqual(local.strip(), "")
@@ -337,7 +362,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
             cwd=self.repository,
         )
 
-        actions = self.cleanup()
+        actions = self.cleanup(delete_remote=True)
 
         self.assertIn("remote branch release/v9.9.9 deleted", actions)
         self.assertFalse(self.remote_branch_exists("release/v9.9.9"))
@@ -366,7 +391,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
         self.assertEqual(push_urls, [str(self.remote), str(self.remote)])
 
         with mock.patch.object(subject, "_run_git", wraps=subject._run_git) as run_git:
-            self.cleanup()
+            self.cleanup(delete_remote=True)
 
         delete_pushes = [
             call
@@ -408,7 +433,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
             return original_run_git(repository, *arguments, **kwargs)
 
         with mock.patch.object(subject, "_run_git", side_effect=change_config_before_delete):
-            self.cleanup()
+            self.cleanup(delete_remote=True)
 
         self.assertEqual(push_arguments[1], str(self.remote))
         self.assertFalse(self.remote_branch_exists("release/v9.9.9"))
@@ -428,6 +453,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
             release_branch="release/v9.9.9",
             remote="origin",
             default_branch="master",
+            delete_remote=True,
             release_checker=publication_check,
         )
 
@@ -448,7 +474,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
             return original_run_git(repository, *arguments, **kwargs)
 
         with mock.patch.object(subject, "_run_git", side_effect=record_network_call):
-            self.cleanup()
+            self.cleanup(delete_remote=True)
 
         source_urls = [
             arguments[1] if arguments[0] == "fetch" else arguments[2] if arguments[0] == "pull" else arguments[3]
@@ -485,7 +511,7 @@ class CleanupReleaseStateTest(unittest.TestCase):
             return original_run_git(repository, *arguments, **kwargs)
 
         with mock.patch.object(subject, "_run_git", side_effect=change_config_after_audit):
-            self.cleanup()
+            self.cleanup(delete_remote=True)
 
         self.assertTrue(changed)
         self.assertGreaterEqual(len(network_calls), 4)
