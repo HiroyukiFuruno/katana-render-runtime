@@ -40,6 +40,9 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
             "Prepare trusted cohort proof reader",
             "Complete trusted cohort proof reader",
             "Finalize trusted cohort proof reader",
+            "Prepare trusted member grant decoder",
+            "Complete trusted member grant proof reader",
+            "Finalize trusted member grant proof reader",
         ):
             marker = f"      - name: {name}\n"
             self.assertTrue(marker in self.sensor, f"Missing actual preparation step: {name}")
@@ -51,11 +54,20 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
                 capture_output=True, text=True, check=False,
             )
             self.assertEqual(result.returncode, 0, f"{name}: {result.stderr}")
-        start = self.sensor.index("          check_name =")
-        end = self.sensor.index("          deadline =", start)
-        self.program = textwrap.dedent(self.sensor[start:end])
+        for name in ("Prepare trusted sensor latch program", "Await matching trusted governance Check Run"):
+            block = self.sensor.split(f"      - name: {name}\n", 1)[1].split("\n      - name:", 1)[0]
+            shell = textwrap.dedent(block.split("        run: |\n", 1)[1])
+            if name.startswith("Await"):
+                shell = shell.rsplit('python3 "$RUNNER_TEMP/krr-governance-sensor-latch.py"', 1)[0]
+            result = subprocess.run(["bash", "-c", shell], env={**os.environ, "RUNNER_TEMP": self.reader_directory.name},
+                                    capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, f"{name}: {result.stderr}")
+        self.await_program = (Path(self.reader_directory.name) / "krr-governance-sensor-latch.py").read_text()
+        start = self.await_program.index("check_name =")
+        end = self.await_program.index("deadline = time.monotonic() + timeout", start)
+        self.program = self.await_program[start:end]
 
-    def namespace(self) -> dict[str, object]:
+    def namespace(self, overrides=None) -> dict[str, object]:
         environment = {
             "HEAD_SHA": self.head,
             "PR_NUMBER": "72",
@@ -70,6 +82,7 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
             "GITHUB_SERVER_URL": "https://github.com",
             "RUNNER_TEMP": self.reader_directory.name,
         }
+        environment.update(overrides or {})
         namespace: dict[str, object] = {
             "json": json,
             "os": os,
@@ -516,6 +529,362 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
             self.assertIsNone(reader())
             self.assertEqual(reader(), [current])
 
+    def test_prefixed_invalid_member_grant_rejects_without_legacy_artifact_fallback(self) -> None:
+        namespace = self.namespace()
+        reader = namespace["cohort_reader_namespace"]
+        query = {"source_run_id": "17", "cohort_artifact_id": "1",
+                 "cohort_artifact_digest": "sha256:" + "a" * 64, "cohort_segment": "1",
+                 "pr_base_sha": self.base, "pr_head_sha": self.head, "pr_body_sha256": "b" * 64}
+        for prefix in ("ci", "release"):
+            query.update({prefix + suffix: value for suffix, value in
+                          (("_workflow_id", "1"), ("_run_id", "1"), ("_run_number", "1"),
+                           ("_run_attempt", "1"), ("_status", "completed"), ("_conclusion", "success"))})
+        check = {"id": 501, "details_url": "https://github.com/owner/repository/actions/runs/200?" +
+                 __import__("urllib.parse", fromlist=["urlencode"]).urlencode(query),
+                 "output": {"summary": "KRR cohort member grant v1\n{}"}}
+        writer = {"id": 200, "display_title": "source=100 scope=early segment=1"}
+        def forbidden(endpoint, *, timeout):
+            self.fail("Invalid grant entered legacy artifact proof: " + endpoint)
+        for summary in ("KRR cohort member grant", "KRR cohort member grant v2\n{}",
+                        "KRR cohort member grant v1\n{}", "KRR cohort member grant v1\n" + "x" * 8192):
+            with self.subTest(summary=summary[:30]), patch.dict(os.environ, {"GITHUB_REPOSITORY": self.repository}), \
+                 self.assertRaises(RuntimeError):
+                check["output"]["summary"] = summary
+                reader["sensor_cohort_binding"](check, writer, self.source(), {}, read_json=forbidden,
+                    read_archive=forbidden, budget=namespace["sensor_read_budget"], deadline=time.time() + 60,
+                    workflow_blob=namespace["PINNED_DISPATCHER_WORKFLOW_BLOB_SHA"])
+
+    def member_grant_fixture(self):
+        import hashlib
+        import pr_governance_cohort_test as grant_fixtures
+        fixture, context, source, writer, check, _ = grant_fixtures.MemberGrantTests().fixture()
+        code = (ROOT / "scripts/review/pr_governance_status_writer.py").read_bytes()
+        blob = hashlib.sha1(b"blob " + str(len(code)).encode() + b"\0" + code).hexdigest()
+        endpoint = "repos/owner/repository/contents/scripts/review/pr_governance_status_writer.py?ref=" + fixture.sha
+        fixture.data[endpoint].update(sha=blob, size=len(code), content=base64.b64encode(code).decode())
+        with patch.object(time, "time", return_value=250):
+            check["output"]["summary"] = grant_fixtures.cohort.encode_member_grant(
+                context, 7, writer_id=writer["id"], segment=1, writer_workflow_blob=blob)
+        fixture.check_snapshot["pages"][0]["check_runs"][0]["output"] = dict(check["output"])
+        return fixture, source, writer, check, blob
+
+    def test_member_grant_uses_fresh_native_proof_without_reopening_artifacts(self) -> None:
+        import pr_governance_cohort_test as grant_fixtures
+        fixture, source, writer, check, _ = self.member_grant_fixture()
+        reader = self.namespace()["cohort_reader_namespace"]
+        fixture.calls.clear()
+        def forbidden_archive(endpoint, *, timeout):
+            self.fail("Member grant reopened immutable archive: " + endpoint)
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": fixture.repository, "CHECK_APP_ID": "4766933"}), \
+             patch.object(time, "time", return_value=250):
+            boundary = reader["sensor_cohort_binding"](check, writer, source,
+                fixture.data["repos/owner/repository/pulls/7"], read_json=fixture.read_json,
+                read_archive=forbidden_archive, budget=grant_fixtures.Budget(), deadline=300,
+                workflow_blob=fixture.blob, check_snapshot=fixture.check_snapshot)
+        self.assertEqual(boundary, 5500)
+        self.assertFalse(any("/artifacts/" in endpoint for endpoint in fixture.calls))
+
+    def test_cohort_check_without_member_grant_keeps_legacy_artifact_proof(self) -> None:
+        import pr_governance_cohort_test as grant_fixtures
+        fixture, _, source, writer, check, _ = grant_fixtures.MemberGrantTests().fixture()
+        check["output"] = {"summary": "Legacy trusted governance result."}
+        reader = self.namespace()["cohort_reader_namespace"]
+        fixture.calls.clear()
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": fixture.repository}), patch.object(time, "time", return_value=250):
+            boundary = reader["sensor_cohort_binding"](check, writer, source,
+                fixture.data["repos/owner/repository/pulls/7"], read_json=fixture.read_json,
+                read_archive=fixture.read_archive, budget=grant_fixtures.Budget(), deadline=300,
+                workflow_blob=fixture.blob, check_snapshot=fixture.check_snapshot)
+        self.assertEqual(boundary, 5500)
+        self.assertTrue(any(endpoint.endswith("/zip") for endpoint in fixture.calls))
+
+    def test_member_grant_rejects_current_body_source_output_patch_and_newer_check(self) -> None:
+        import copy
+        import pr_governance_cohort_test as grant_fixtures
+        for mutation in ("body", "source-attempt", "source-repository", "output-patch", "newer-check"):
+            with self.subTest(mutation=mutation):
+                fixture, source, writer, check, _ = self.member_grant_fixture()
+                reader = self.namespace()["cohort_reader_namespace"]
+                latest_reads = 0
+                def native_read(endpoint, *, timeout):
+                    nonlocal latest_reads
+                    if "/check-runs?" in endpoint:
+                        latest_reads += 1
+                        if mutation == "newer-check":
+                            newer = copy.deepcopy(check)
+                            newer.update(id=778, external_id=check["external_id"].replace("writer-99", "writer-101"),
+                                         status="in_progress", conclusion=None)
+                            return {"total_count": 1, "check_runs": [newer]}
+                    value = fixture.read_json(endpoint, timeout=timeout)
+                    if endpoint.endswith("/pulls/7") and mutation == "body": value["body"] = "changed"
+                    if endpoint.endswith("/actions/runs/11") and mutation == "source-attempt": value["run_attempt"] = 2
+                    if endpoint.endswith("/actions/runs/11") and mutation == "source-repository": value["repository"]["id"] = 101.0
+                    if "/check-runs?" in endpoint and mutation == "output-patch":
+                        value["check_runs"][0]["output"]["text"] = "patched"
+                    return value
+                def forbidden_archive(endpoint, *, timeout):
+                    self.fail("Rejected member grant used legacy archive: " + endpoint)
+                with patch.dict(os.environ, {"GITHUB_REPOSITORY": fixture.repository, "CHECK_APP_ID": "4766933"}), \
+                     patch.object(time, "time", return_value=250), self.assertRaises(RuntimeError):
+                    reader["sensor_cohort_binding"](check, writer, source,
+                        fixture.data["repos/owner/repository/pulls/7"], read_json=native_read,
+                        read_archive=forbidden_archive, budget=grant_fixtures.Budget(), deadline=300,
+                        workflow_blob=fixture.blob, check_snapshot=fixture.check_snapshot)
+                if mutation in {"output-patch", "newer-check"}: self.assertEqual(latest_reads, 1)
+
+    def test_member_grant_rejects_foreign_union_generation_pin_and_original_clock(self) -> None:
+        import pr_governance_cohort_test as grant_fixtures
+        for mutation in ("foreign-source", "writer-replay", "writer-pin", "bool-attempt", "clock-remint"):
+            with self.subTest(mutation=mutation):
+                fixture, source, writer, check, _ = self.member_grant_fixture()
+                reader = self.namespace()["cohort_reader_namespace"]
+                prefix = "KRR cohort member grant v1\n"
+                grant = json.loads(check["output"]["summary"][len(prefix):])
+                if mutation == "foreign-source": grant["members"][0][0] = 12
+                elif mutation == "writer-replay": grant["writer_run_id"] = 100
+                elif mutation == "writer-pin": grant["writer_workflow_blob_sha"] = "f" * 40
+                elif mutation == "bool-attempt": grant["writer_run_attempt"] = True
+                else: grant["members"][0][1] += 1
+                check["output"]["summary"] = prefix + json.dumps(grant, sort_keys=True, separators=(",", ":"))
+                def forbidden_archive(endpoint, *, timeout):
+                    self.fail("Replayed member grant used legacy archive: " + endpoint)
+                with patch.dict(os.environ, {"GITHUB_REPOSITORY": fixture.repository}), \
+                     patch.object(time, "time", return_value=250), self.assertRaises(RuntimeError):
+                    reader["sensor_cohort_binding"](check, writer, source,
+                        fixture.data["repos/owner/repository/pulls/7"], read_json=fixture.read_json,
+                        read_archive=forbidden_archive, budget=grant_fixtures.Budget(), deadline=300,
+                        workflow_blob=fixture.blob, check_snapshot=fixture.check_snapshot)
+
+    def test_member_grant_exports_match_the_shared_helper_and_exact_writer_pin(self) -> None:
+        import hashlib
+        helper = ast.parse((ROOT / "scripts/review/pr_governance_cohort.py").read_text())
+        private = ast.parse((Path(self.reader_directory.name) / "krr-governance-cohort-reader.py").read_text())
+        for name in ("decode_member_grant", "sensor_member_metadata_binding", "verify_sensor_member_grant"):
+            original = next(node for node in helper.body if isinstance(node, ast.FunctionDef) and node.name == name)
+            embedded = next(node for node in private.body if isinstance(node, ast.FunctionDef) and node.name == name)
+            self.assertEqual(ast.dump(original, include_attributes=False), ast.dump(embedded, include_attributes=False))
+        original_query = next(node for node in helper.body if isinstance(node, ast.Assign)
+            and any(getattr(target, "id", None) == "MEMBER_GRANT_METADATA_QUERY" for target in node.targets))
+        private_query = next(node for node in private.body if isinstance(node, ast.Assign)
+            and any(getattr(target, "id", None) == "MEMBER_GRANT_METADATA_QUERY" for target in node.targets))
+        self.assertEqual(ast.dump(original_query, include_attributes=False), ast.dump(private_query, include_attributes=False))
+        code = (ROOT / "scripts/review/pr_governance_status_writer.py").read_bytes()
+        blob = hashlib.sha1(b"blob " + str(len(code)).encode() + b"\0" + code).hexdigest()
+        self.assertEqual(self.namespace()["cohort_reader_namespace"]["PINNED_WRITER_SOURCE_BLOB_SHA"], blob)
+
+    def test_waiter_rejects_prefixed_grant_without_cohort_query_and_keeps_direct_legacy(self) -> None:
+        start = self.await_program.index("deadline = time.monotonic() + timeout")
+        program = self.await_program[start:]
+        for summary, exit_code in (("KRR cohort member grant v1\n{}", 1), ("Legacy trusted result.", 0)):
+            with self.subTest(summary=summary):
+                namespace = self.namespace()
+                check = {"id": 501, "name": "KRR / PR governance (trusted check)", "app": {"id": 4766933},
+                         "head_sha": self.head, "external_id": f"krr-governance/v1/{self.head}/writer-91",
+                         "details_url": "https://github.com/owner/repository/actions/runs/91?source_run_id=17",
+                         "status": "completed", "conclusion": "success", "output": {"summary": summary}}
+                writer = {"id": 91, "name": "PR governance status writer", "display_title": "source=17 scope=early segment=0",
+                          "event": "workflow_dispatch", "path": ".github/workflows/pr-governance-status-writer.yml@master",
+                          "repository": self.source()["repository"], "run_attempt": 1, "status": "in_progress"}
+                calls = []
+                def api(endpoint, *_args, **_kwargs):
+                    calls.append(endpoint)
+                    if endpoint == "repos/" + self.repository: return {"id": 101, "name": "repository", "url": self.repository_identity[2]}
+                    if endpoint.endswith("/actions/runs/17"): return self.source()
+                    if endpoint.endswith("/actions/runs/91"): return writer
+                    if endpoint.endswith("/pulls/72"): return {}
+                    self.fail("Unexpected direct/grant waiter API: " + endpoint)
+                namespace["api_json"] = api
+                namespace["source_bound_trusted_check_runs"] = lambda: [check]
+                with patch.dict(os.environ, {"GITHUB_REPOSITORY": self.repository}), self.assertRaises(SystemExit) as result:
+                    exec(compile(program, "sensor-grant-terminal-workflow", "exec"), namespace)
+                self.assertEqual(result.exception.code, exit_code)
+                self.assertEqual(any(endpoint.endswith("/pulls/72") for endpoint in calls), exit_code == 1)
+
+    def native_grant_waiter(self, *, total=1, page_drift=False, initial_reads=0, legacy_dispatcher=False, metadata_drift=None):
+        import copy
+        import hashlib
+        fixture, source, writer, check, _ = self.member_grant_fixture()
+        repo = {"id": 101, "name": "repository", "url": self.repository_identity[2], "full_name": self.repository}
+        fixture.data["repos/" + self.repository].update(repo)
+        for run in (source, writer, fixture.run):
+            for field in ("repository", "head_repository"):
+                run[field].update(repo)
+        for field in ("base", "head"):
+            fixture.data["repos/owner/repository/pulls/7"][field]["repo"].update(repo)
+        namespace = self.namespace({"HEAD_SHA": fixture.member["head_sha"], "PR_NUMBER": "7", "SOURCE_RUN_ID": "11"})
+        # unitのdispatcher authorityはfixture由来、writer source pinは実blobを検証する。
+        namespace["PINNED_DISPATCHER_WORKFLOW_BLOB_SHA"] = fixture.blob
+        namespace["api_read_count"] = initial_reads
+        rows = [check]
+        for index in range(total - 1):
+            older = copy.deepcopy(check)
+            older.update(id=index + 1, external_id="krr-governance/v1/" + check["head_sha"] + "/writer-" + str(index + 10000),
+                         details_url=check["details_url"].replace("source_run_id=11", "source_run_id=12"),
+                         status="queued", conclusion=None, started_at=None, completed_at=None, output={"summary": "legacy pending"})
+            if legacy_dispatcher:
+                older["external_id"] = older["external_id"].replace("/writer-", "/dispatcher-")
+                older["details_url"] = older["details_url"].replace("/actions/runs/99?", "/actions/runs/98?")
+            rows.append(older)
+        rows[0]["native_extra"] = {"unchanged": 1}
+        page_reads = {}
+        start = self.await_program.index("deadline = time.monotonic() + timeout")
+        program = self.await_program[start:]
+        calls, statuses = [], []
+        metadata_count = [0]
+        import pr_governance_cohort_test as grant_fixtures
+        metadata, _, _ = grant_fixtures.MemberGrantTests().metadata(
+            fixture, namespace["cohort_reader_namespace"]["PINNED_WRITER_SOURCE_BLOB_SHA"])
+        clock = [250.0]
+        def advance(seconds):
+            clock[0] += seconds
+        def response(arguments, **options):
+            if arguments[2] == "graphql":
+                fields = dict(arguments[index + 1].split("=", 1) for index, value in enumerate(arguments[:-1]) if value == "-f")
+                self.assertEqual(fields, {"query": namespace["cohort_reader_namespace"]["MEMBER_GRANT_METADATA_QUERY"],
+                    "owner": "owner", "name": "repository", "writerExpression": fixture.sha + ":scripts/review/pr_governance_status_writer.py"})
+                self.assertEqual(arguments[arguments.index("--method") + 1], "POST")
+                self.assertEqual(options["env"]["GH_TOKEN"], "fixture-token")
+                metadata_count[0] += 1
+                calls.append("graphql")
+                value = copy.deepcopy(metadata)
+                if metadata_count[0] == 2 and metadata_drift is not None:
+                    metadata_drift(value)
+                statuses.append(200)
+                return subprocess.CompletedProcess(arguments, 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps(value), "")
+            endpoint = next(value for value in arguments if value.startswith("repos/"))
+            calls.append(endpoint)
+            if "/check-runs?" in endpoint:
+                number = int(parse_qs(urlparse(endpoint).query)["page"][0])
+                page_reads[number] = page_reads.get(number, 0) + 1
+                value = {"total_count": total, "check_runs": copy.deepcopy(rows[(number - 1) * 100:number * 100]),
+                         "native_page_extra": {"page": number}}
+                if page_drift and number == 2 and page_reads[number] == 2:
+                    value["check_runs"][0].update(id=888, external_id="krr-governance/v1/" + check["head_sha"] + "/writer-888")
+            else:
+                value = fixture.read_json(endpoint, timeout=options["timeout"])
+            body = json.dumps(value, sort_keys=True, allow_nan=False)
+            tag = '"' + hashlib.sha256(body.encode()).hexdigest() + '"'
+            unchanged = "If-None-Match: " + tag in arguments
+            status = 304 if unchanged else 200
+            statuses.append(status)
+            return subprocess.CompletedProcess(arguments, 1 if unchanged else 0,
+                f"HTTP/2.0 {status} {'Not Modified' if unchanged else 'OK'}\r\nETag: {tag}\r\n\r\n" + ("" if unchanged else body), "")
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": self.repository, "GH_TOKEN": "fixture-token"}), \
+             patch.object(time, "time", side_effect=lambda: clock[0]), patch.object(time, "monotonic", side_effect=lambda: clock[0]), \
+             patch.object(time, "sleep", side_effect=advance), patch.object(subprocess, "run", side_effect=response), self.assertRaises(SystemExit) as result:
+            exec(compile(program, "sensor-grant-native-terminal-workflow", "exec"), namespace)
+        return result.exception.code, namespace, clock[0], calls, statuses, page_reads
+
+    def test_waiter_grant_success_executes_actual_conditional_native_transport(self) -> None:
+        code, namespace, epoch, calls, statuses, page_reads = self.native_grant_waiter()
+        self.assertEqual(code, 0)
+        self.assertIn(304, statuses)
+        self.assertFalse(any("/artifacts/" in endpoint for endpoint in calls))
+        self.assertFalse(any("filter=latest" in endpoint for endpoint in calls))
+        self.assertEqual(page_reads, {1: 3})
+        self.assertEqual(epoch, 310.0)
+        self.assertLessEqual(namespace["api_read_count"], 300)
+        snapshot = json.loads(namespace["source_check_snapshot_bytes"])
+        self.assertEqual(snapshot["pages"][0]["native_page_extra"], {"page": 1})
+        self.assertEqual(snapshot["pages"][0]["check_runs"][0]["native_extra"], {"unchanged": 1})
+        self.assertEqual(snapshot["endpoints"], [path for path in calls if "/check-runs?" in path][:1])
+
+    def test_waiter_complete_raw_pages_reject_balanced_page_two_replacement(self) -> None:
+        for drift, expected in ((False, 0), (True, 1)):
+            with self.subTest(drift=drift):
+                code, namespace, epoch, calls, statuses, page_reads = self.native_grant_waiter(total=102, page_drift=drift)
+                self.assertEqual(code, expected)
+                self.assertEqual(page_reads, {1: 3, 2: 2})
+                self.assertEqual(epoch, 310.0)
+                snapshot = json.loads(namespace["source_check_snapshot_bytes"])
+                self.assertEqual(len(snapshot["pages"]), 2)
+                self.assertEqual(len(snapshot["pages"][1]["check_runs"]), 2)
+                self.assertEqual(snapshot["pages"][1]["native_page_extra"], {"page": 2})
+                self.assertFalse(any("/artifacts/" in endpoint for endpoint in calls))
+
+    def test_all_workflow_run_blocks_fit_the_existing_actions_command_limit(self) -> None:
+        for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            source = path.read_text()
+            blocks = re.finditer(r"(?ms)^ {6,8}run: \|\n(.*?)(?=^ {4,6}- name: |^  [A-Za-z_-]|\Z)", source)
+            for block in blocks:
+                command = textwrap.dedent(block.group(1))
+                with self.subTest(path=path.name, command=command.splitlines()[0] if command else "empty"):
+                    self.assertLessEqual(len(command.encode("utf-8")), 21_000)
+            for quoted in re.finditer(r'(?m)^ {6,8}run: (".*")$', source):
+                self.assertLessEqual(len(json.loads(quoted.group(1)).encode("utf-8")), 21_000)
+        ast.parse(self.await_program)
+        self.assertIn("deadline = time.monotonic() + timeout", self.await_program)
+        self.assertEqual(self.sensor.count("      - name: Await matching trusted governance Check Run\n"), 1)
+
+    def test_waiter_new_grant_preserves_legacy_dispatcher_check_history(self) -> None:
+        code, namespace, _, calls, _, _ = self.native_grant_waiter(total=2, legacy_dispatcher=True)
+        self.assertEqual(code, 0)
+        snapshot = json.loads(namespace["source_check_snapshot_bytes"])
+        self.assertIn("/dispatcher-", snapshot["pages"][0]["check_runs"][1]["external_id"])
+        self.assertIn("/writer-", snapshot["pages"][0]["check_runs"][0]["external_id"])
+        self.assertFalse(any("/artifacts/" in endpoint for endpoint in calls))
+
+    def test_waiter_initial_scan_and_grant_proof_share_the_existing_300_attempt_cap(self) -> None:
+        code, namespace, _, calls, _, _ = self.native_grant_waiter(initial_reads=290)
+        self.assertEqual(code, 1)
+        self.assertEqual(namespace["api_read_count"], 300)
+        self.assertEqual(len(calls), 10)
+        self.assertIsNotNone(namespace["source_check_snapshot_bytes"])
+
+
+
+    def test_waiter_native_metadata_query_is_fresh_twice_and_preserves_original_clock(self) -> None:
+        code, namespace, epoch, calls, _, _ = self.native_grant_waiter()
+        self.assertEqual((code, epoch), (0, 310.0))
+        self.assertEqual(calls.count("graphql"), 2)
+        self.assertEqual(namespace["primary_quota"]["metadata_cost"], 2)
+        self.assertEqual(namespace["primary_quota"]["metadata_requests"], 2)
+        self.assertEqual(namespace["original_boundary"], 5500)
+        self.assertFalse(any("/actions/runs/11/attempts/1/jobs?" in value or "/contents/" in value or "/git/ref/" in value for value in calls))
+        self.assertLessEqual(namespace["api_read_count"], 300)
+
+    def test_waiter_native_metadata_closing_drift_fails_without_rest_fallback(self) -> None:
+        cases = {
+            "repository-type": lambda value: value["data"]["repository"].update(databaseId=101.0),
+            "default-head": lambda value: value["data"]["repository"]["defaultBranchRef"]["target"].update(oid="f" * 40),
+            "writer-bytes": lambda value: value["data"]["repository"]["writer"].update(text="changed"),
+            "node-id": lambda value: value["data"]["repository"].update(id="different-native-id"),
+            "errors": lambda value: value.update(errors=[]),
+        }
+        for name, drift in cases.items():
+            with self.subTest(name=name):
+                code, _, _, calls, _, _ = self.native_grant_waiter(metadata_drift=drift)
+                self.assertEqual(code, 1)
+                self.assertEqual(calls.count("graphql"), 2)
+                self.assertFalse(any("/contents/" in value or "/git/ref/" in value for value in calls))
+
+    def test_metadata_transport_rejects_nonfixed_query_http_errors_cost_and_timeout(self) -> None:
+        import copy
+        from types import SimpleNamespace
+        reader = self.namespace()["cohort_reader_namespace"]
+        query = reader["MEMBER_GRANT_METADATA_QUERY"]
+        variables = {"owner": "owner", "name": "repository", "writerExpression": "a" * 40 + ":scripts/review/pr_governance_status_writer.py"}
+        valid = {"data": {"repository": {}, "rateLimit": {"cost": 1}}}
+        cases = {"query": query + " mutation{}", "variables": {**variables, "owner": "foreign"},
+                 "http": "HTTP/2 403 Forbidden\r\nRetry-After: 60\r\n\r\n" + json.dumps(valid),
+                 "errors": "HTTP/2 200 OK\r\n\r\n" + json.dumps({**valid, "errors": []}),
+                 "cost-type": "HTTP/2 200 OK\r\n\r\n" + json.dumps({"data": {"rateLimit": {"cost": True}}}),
+                 "duplicate": 'HTTP/2 200 OK\r\n\r\n{"data":{},"data":{"rateLimit":{"cost":1}}}',
+                 "deadline": None, "timeout": None}
+        for name, changed in cases.items():
+            with self.subTest(name=name), patch.dict(os.environ, {"GITHUB_REPOSITORY": self.repository, "GH_TOKEN": "fixture-token"}), \
+                 patch.object(time, "monotonic", return_value=250):
+                calls = []
+                def run(arguments, **options):
+                    calls.append(arguments)
+                    self.assertLessEqual(options["timeout"], 20)
+                    if name == "timeout": raise subprocess.TimeoutExpired(arguments, options["timeout"])
+                    return SimpleNamespace(returncode=0, stdout=changed if name in {"http", "errors", "cost-type", "duplicate"} else "HTTP/2 200 OK\r\n\r\n" + json.dumps(copy.deepcopy(valid)))
+                with self.assertRaises(reader["CohortError"]):
+                    reader["sensor_metadata_request"](changed if name == "query" else query,
+                        changed if name == "variables" else variables, request_timeout=20,
+                        deadline=250 if name == "deadline" else 300, run=run, primary={})
+                self.assertEqual(bool(calls), name not in {"query", "variables", "deadline"})
 
 class GovernanceDispatcherContractTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -7056,8 +7425,13 @@ raise SystemExit(91)
         carried_dispatches: list[list[str]] = []
         registered: list[dict[str, object]] = []
 
+        conditional_reads: list[list[str]] = []
         def response(value: object, code: int = 0) -> subprocess.CompletedProcess[str]:
-            return subprocess.CompletedProcess([], code, json.dumps(value), "")
+            body = json.dumps(value)
+            if current_arguments[0] is not None and "--include" in current_arguments[0]:
+                conditional_reads.append(list(current_arguments[0]))
+                body = f"HTTP/2 200 OK\r\n\r\n{body}"
+            return subprocess.CompletedProcess([], code, body, "")
 
         dispatcher_source_active = {
             "id": 9, "workflow_id": 8, "name": "PR governance dispatcher",
@@ -7069,6 +7443,7 @@ raise SystemExit(91)
         }
 
         def dispatch_transport(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            current_arguments[0] = arguments
             endpoint = next((item for item in arguments if isinstance(item, str) and item.startswith("repos/")), arguments[-1])
             if isinstance(endpoint, str) and endpoint == "repos/owner/repository":
                 return response({**rest_repository, "full_name": "owner/repository", "default_branch": "master"})
@@ -7138,6 +7513,7 @@ raise SystemExit(91)
             terminal_writes: list[int] = []
 
             def writer_transport(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+                current_arguments[0] = arguments
                 if arguments and arguments[0] == sys.executable:
                     # verify_push_issue is an external contract command. Its
                     # failure exercises the writer's ordinary fail-closed path.
@@ -7223,6 +7599,8 @@ raise SystemExit(91)
                 finally:
                     sys.modules.pop(module_name, None)
             self.assertEqual(terminal_writes, [92, 91])
+            self.assertTrue(conditional_reads)
+            self.assertTrue(all("--hostname" in arguments for arguments in conditional_reads))
 
             # A non-success first writer, an old writer seeing a newer
             # dispatcher generation, and a default-branch drift are all
@@ -7239,6 +7617,7 @@ raise SystemExit(91)
                         await_program = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", await_steps[0].group("body"), re.DOTALL)
                         self.assertIsNotNone(await_program); assert await_program is not None
                         def failed_await_transport(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+                            current_arguments[0] = arguments
                             endpoint = arguments[-1]
                             if isinstance(endpoint, str) and endpoint.endswith("/actions/runs/77"):
                                 return response(failed)
@@ -7257,6 +7636,7 @@ raise SystemExit(91)
                         # barrier; a failed main never makes a continuation
                         # dispatch eligible.
                         def stopping_transport(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                            current_arguments[0] = arguments
                             if mode == "default-branch-drift":
                                 endpoint = next((item for item in arguments if isinstance(item, str) and item.startswith("repos/")), arguments[-1])
                                 if isinstance(endpoint, str) and endpoint.endswith("/git/ref/heads/master"):

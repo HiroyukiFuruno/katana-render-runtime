@@ -45,6 +45,13 @@ HEADER_FIELDS = frozenset({
 })
 PAGE_FIELDS = frozenset({"v", "kind", "owner_dispatcher_run_id", "entries"})
 BATCH_FIELDS = frozenset({"v", "kind", "owner_dispatcher_run_id", "segment", "target_members"})
+MEMBER_GRANT_PREFIX = "KRR cohort member grant v1\n"
+MEMBER_GRANT_FIELDS = frozenset({
+    "v", "kind", "repository", "repository_id", "pr_number", "base_ref", "base_sha", "head_sha", "pr_body_sha256",
+    "workflow_sha", "workflow_blob_sha", "writer_workflow_blob_sha", "owner_dispatcher_run_id", "owner_run_attempt",
+    "writer_run_id", "writer_run_attempt", "cohort_artifact_id", "cohort_artifact_digest", "cohort_digest",
+    "segment", "root_deadline_epoch", "members",
+})
 PAYLOAD_PREFIX = "Record verified cohort payload "
 JOURNAL_PREFIX = "Record verified cohort journal "
 SELECTED_PREFIX = "Record elected cohort admission "
@@ -203,6 +210,360 @@ def validate_member(member, *, now=None):
     _require(member["source_deadline_epoch"] == expected and (expected is None or type(member["source_deadline_epoch"]) in (int, float)),
              "Source clock reset")
     return member
+
+
+def decode_member_grant(summary, *, writer_workflow_blob):
+    """writer_workflow_blobは固定writer.pyのGit blob。grantはmembershipだけを証明する。"""
+    if not isinstance(summary, str) or not summary.startswith("KRR cohort member grant"):
+        return None
+    _require(summary.startswith(MEMBER_GRANT_PREFIX) and _hex(writer_workflow_blob, 40), "Unknown member grant version/pin")
+    try:
+        data = summary.encode("utf-8", "strict")
+    except UnicodeError:
+        raise CohortError("Invalid member grant UTF-8") from None
+    _require(len(data) <= MAX_BYTES, "Member grant exceeds existing byte bound")
+    grant = decode_payload(data[len(MEMBER_GRANT_PREFIX.encode()):], MEMBER_GRANT_FIELDS)
+    _require(grant["kind"] == "cohort-member-grant" and _repository_name(grant["repository"])
+             and isinstance(grant["base_ref"], str) and grant["base_ref"] and not any(c.isspace() for c in grant["base_ref"]),
+             "Invalid member grant repository/base")
+    try:
+        grant["base_ref"].encode("utf-8", "strict")
+    except UnicodeError:
+        raise CohortError("Invalid member grant base UTF-8") from None
+    for key in ("repository_id", "pr_number", "owner_dispatcher_run_id", "writer_run_id", "cohort_artifact_id", "root_deadline_epoch"):
+        _require(_integer(grant[key]), "Invalid member grant integer")
+    _require(type(grant["owner_run_attempt"]) is type(grant["writer_run_attempt"]) is int
+             and grant["owner_run_attempt"] == grant["writer_run_attempt"] == 1
+             and type(grant["segment"]) is int and 1 <= grant["segment"] <= 4, "Invalid member grant attempt/segment")
+    for key in ("base_sha", "head_sha", "workflow_sha", "workflow_blob_sha", "writer_workflow_blob_sha"):
+        _require(_hex(grant[key], 40), "Invalid member grant SHA")
+    _require(grant["writer_workflow_blob_sha"] == writer_workflow_blob and _hex(grant["pr_body_sha256"], 64)
+             and _hex(grant["cohort_digest"], 64) and _digest(grant["cohort_artifact_digest"]), "Member grant digest/pin drift")
+    members = grant["members"]
+    _require(isinstance(members, list) and 1 <= len(members) <= MAX_MEMBERS
+             and all(isinstance(entry, list) and len(entry) == 2 and _integer(entry[0])
+                     and type(entry[1]) in (int, float) and math.isfinite(entry[1]) and entry[1] > 0 for entry in members),
+             "Invalid member grant union/clock")
+    _require([entry[0] for entry in members] == sorted({entry[0] for entry in members}), "Ambiguous member grant union")
+    return grant
+
+
+def encode_member_grant(cohort, number, *, writer_id, segment, writer_workflow_blob):
+    """検証済みtarget全体を記録し、current native時計をgrantで再開しない。"""
+    registered = cohort.get("registered_writers", {}).get(segment)
+    _require(_integer(number) and _integer(writer_id) and type(segment) is int and 1 <= segment <= 4
+             and cohort.get("loaded_segments") == [segment] and type(cohort["loaded_segments"][0]) is int and type(registered) is int
+             and registered == writer_id, "Unregistered member grant writer")
+    header, members = cohort["header"], cohort["members_by_id"]
+    ids = cohort["target_members_by_number"].get(number)
+    complete = sorted(identifier for identifier, member in members.items() if member.get("pr_number") == number)
+    _require(isinstance(ids, list) and ids and ids == complete and ids == sorted(set(ids)), "Incomplete member grant target union")
+    indexed = dict(zip(header["member_ids"], map(int, header["member_segments"])))
+    _require(all(indexed.get(identifier) == segment for identifier in ids), "Foreign member grant segment")
+    target = [validate_member(members[identifier]) for identifier in ids]
+    first = target[0]
+    shared = ("repository", "repository_id", "pr_number", "base_ref", "base_sha", "head_sha", "pr_body_sha256")
+    _require(all(member["source_run_id"] == identifier and all(member[key] == first[key] for key in shared)
+                 and member["source_deadline_epoch"] is not None and time.time() < member["source_deadline_epoch"]
+                 for identifier, member in zip(ids, target)), "Member grant target/clock drift")
+    _require(first["repository"] == header["repository"] and first["repository_id"] == header["repository_id"]
+             and time.time() < header["root_deadline_epoch"], "Member grant root/repository drift")
+    grant = dict((key, first[key]) for key in shared)
+    grant.update(v=1, kind="cohort-member-grant", workflow_sha=header["workflow_sha"], workflow_blob_sha=header["workflow_blob_sha"],
+                 writer_workflow_blob_sha=writer_workflow_blob, owner_dispatcher_run_id=header["owner_dispatcher_run_id"],
+                 owner_run_attempt=header["owner_run_attempt"], writer_run_id=writer_id, writer_run_attempt=1,
+                 cohort_artifact_id=cohort["artifact_id"], cohort_artifact_digest=cohort["artifact_digest"],
+                 cohort_digest=cohort["cohort_digest"], segment=segment, root_deadline_epoch=header["root_deadline_epoch"],
+                 members=[[identifier, member["source_deadline_epoch"]] for identifier, member in zip(ids, target)])
+    summary = MEMBER_GRANT_PREFIX + canonical(grant).decode("utf-8")
+    _require(decode_member_grant(summary, writer_workflow_blob=writer_workflow_blob) == grant, "Member grant canonical roundtrip")
+    return summary
+
+
+MEMBER_GRANT_METADATA_QUERY = """query SensorMemberMetadata($owner:String!,$name:String!,$writerExpression:String!){
+  repository(owner:$owner,name:$name){id databaseId nameWithOwner url
+    defaultBranchRef{name target{__typename oid}}
+    writer:object(expression:$writerExpression){__typename oid ... on Blob{text byteSize isBinary isTruncated}}}
+  rateLimit{cost}
+}"""
+
+
+def sensor_member_metadata_binding(value, grant, writer_workflow_blob):
+    """Appの自称pinではなく、独立native Blobの実bytesからissuerを検証する。"""
+    _require(isinstance(value, dict) and set(value) == {"data"} and isinstance(value["data"], dict)
+             and set(value["data"]) == {"repository", "rateLimit"}
+             and isinstance(value["data"]["rateLimit"], dict) and set(value["data"]["rateLimit"]) == {"cost"}
+             and _integer(value["data"]["rateLimit"]["cost"]), "Grant native metadata response/errors")
+    record = value["data"]["repository"]
+    _require(isinstance(record, dict) and set(record) == {"id", "databaseId", "nameWithOwner", "url", "defaultBranchRef", "writer"}
+             and isinstance(record["id"], str) and record["id"] and not any(c.isspace() or ord(c) < 32 for c in record["id"])
+             and type(record["databaseId"]) is int and record["databaseId"] == grant["repository_id"]
+             and record["nameWithOwner"] == grant["repository"] and record["url"] == "https://github.com/" + grant["repository"],
+             "Grant native metadata repository identity")
+    branch, blob = record["defaultBranchRef"], record["writer"]
+    _require(isinstance(branch, dict) and set(branch) == {"name", "target"} and branch["name"] == grant["base_ref"]
+             and isinstance(branch["target"], dict) and set(branch["target"]) == {"__typename", "oid"}
+             and branch["target"]["__typename"] == "Commit" and branch["target"]["oid"] == grant["workflow_sha"],
+             "Grant native metadata default drift")
+    _require(isinstance(blob, dict) and set(blob) == {"__typename", "oid", "text", "byteSize", "isBinary", "isTruncated"}
+             and blob["__typename"] == "Blob" and blob["oid"] == writer_workflow_blob
+             and blob["isBinary"] is False and blob["isTruncated"] is False
+             and type(blob["byteSize"]) is int and isinstance(blob["text"], str), "Grant native metadata writer fields")
+    try:
+        record["id"].encode("utf-8", "strict")
+        code = blob["text"].encode("utf-8", "strict")
+    except UnicodeError as error:
+        raise CohortError("Grant native metadata bytes invalid") from error
+    _require(blob["byteSize"] == len(code)
+             and hashlib.sha1(b"blob " + str(len(code)).encode() + b"\0" + code).hexdigest() == writer_workflow_blob,
+             "Grant native metadata independent writer blob drift")
+    return record
+
+
+def verify_sensor_member_grant(check, writer, source, current_pr, *, read_json, budget, deadline,
+                               workflow_blob, writer_workflow_blob, check_snapshot=None, read_metadata=None):
+    """固定Appのmembershipを再利用する。承認・coverage権限と元のsource時計は再生成しない。"""
+    summary = check.get("output", {}).get("summary") if isinstance(check, dict) and isinstance(check.get("output"), dict) else None
+    grant = decode_member_grant(summary, writer_workflow_blob=writer_workflow_blob)
+    _require(grant is not None and grant["workflow_blob_sha"] == workflow_blob, "Missing/foreign member grant")
+    repo, repo_id = grant["repository"], grant["repository_id"]
+    owner, writer_id = grant["owner_dispatcher_run_id"], grant["writer_run_id"]
+    reader = _Reader(read_json, None, budget, deadline)
+    now = time.time()
+    clocks = dict(grant["members"])
+    _require(isinstance(source, dict) and _integer(source.get("id")) and source["id"] in clocks
+             and now < min(grant["root_deadline_epoch"], clocks[source["id"]]), "Foreign/expired grant source")
+
+    def snapshot(value):
+        # native API全体の大きさに、artifact marker専用のbyte上限を流用しない。
+        try:
+            return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("ascii")
+        except (TypeError, ValueError, UnicodeError) as error:
+            raise CohortError("Invalid typed grant native snapshot") from error
+
+    def metadata_binding():
+        remaining = deadline - time.time()
+        _require(remaining > 0 and callable(read_metadata), "Grant native metadata deadline/callback")
+        budget.charge()
+        try:
+            value = read_metadata(MEMBER_GRANT_METADATA_QUERY,
+                                  {"owner": repo.split("/")[0], "name": repo.split("/")[1],
+                                   "writerExpression": grant["workflow_sha"] + ":scripts/review/pr_governance_status_writer.py"},
+                                  timeout=min(20, remaining))
+        except (OSError, ValueError, TypeError) as error:
+            raise CohortError("Grant native metadata request failed") from error
+        _require(time.time() < deadline, "Grant native metadata original deadline elapsed")
+        return snapshot(sensor_member_metadata_binding(value, grant, writer_workflow_blob))
+
+    def check_binding(value):
+        _require(isinstance(value, dict) and _integer(value.get("id"))
+                 and value.get("name") == "KRR / PR governance (trusted check)"
+                 and isinstance(value.get("app"), dict) and type(value["app"].get("id")) is int
+                 and value["app"]["id"] == 4766933 and value.get("head_sha") == grant["head_sha"]
+                 and value.get("external_id") == f"krr-governance/v1/{grant['head_sha']}/writer-{writer_id}"
+                 and value.get("status") == "completed" and value.get("conclusion") == "success"
+                 and isinstance(value.get("output"), dict) and value["output"].get("summary") == summary,
+                 "App Check Run/grant binding drift")
+        url = urllib.parse.urlsplit(value.get("details_url") if isinstance(value.get("details_url"), str) else "")
+        _require(url.scheme == "https" and url.netloc == "github.com" and not url.fragment
+                 and url.path == f"/{repo}/actions/runs/{writer_id}", "Grant Check Run details identity")
+        pairs = urllib.parse.parse_qsl(url.query, keep_blank_values=True)
+        query = dict(pairs)
+        expected = {"source_run_id", "cohort_artifact_id", "cohort_artifact_digest", "cohort_segment",
+                    "pr_base_sha", "pr_head_sha", "pr_body_sha256"}
+        expected |= {prefix + "_" + key for prefix in ("ci", "release")
+                     for key in ("workflow_id", "run_id", "run_number", "run_attempt", "status", "conclusion")}
+        _require(len(pairs) == len(query) and set(query) == expected, "Grant Check Run query ambiguity")
+        for key in ("source_run_id", "cohort_artifact_id", "cohort_segment"):
+            _require(re.fullmatch(r"[1-9][0-9]*", query[key]) is not None, "Grant Check Run integer query")
+        _require(int(query["source_run_id"]) in clocks and int(query["cohort_artifact_id"]) == grant["cohort_artifact_id"]
+                 and int(query["cohort_segment"]) == grant["segment"]
+                 and query["cohort_artifact_digest"] == grant["cohort_artifact_digest"]
+                 and all(query["pr_" + key] == grant[key] for key in ("base_sha", "head_sha"))
+                 and query["pr_body_sha256"] == grant["pr_body_sha256"],
+                 "Grant Check Run target/artifact drift")
+        for prefix in ("ci", "release"):
+            _require(all(re.fullmatch(r"[1-9][0-9]*", query[prefix + "_" + key]) is not None
+                         for key in ("workflow_id", "run_id", "run_number"))
+                     and query[prefix + "_run_attempt"] == "1" and query[prefix + "_status"] == "completed"
+                     and query[prefix + "_conclusion"] == "success", "Grant Check Run CI evidence drift")
+        for key in ("started_at", "completed_at"):
+            _require(isinstance(value.get(key), str) and canonical_timestamp(value[key]) == value[key], "Grant Check Run native clock")
+        started_epoch = datetime.fromisoformat(value["started_at"].replace("Z", "+00:00")).timestamp()
+        completed_epoch = datetime.fromisoformat(value["completed_at"].replace("Z", "+00:00")).timestamp()
+        _require(started_epoch <= completed_epoch <= time.time(), "Grant Check Run lifecycle clock")
+        return {key: value.get(key) for key in ("id", "name", "app", "head_sha", "external_id", "details_url",
+                                               "status", "conclusion", "started_at", "completed_at", "output")}
+
+    initial_check = snapshot(check_binding(check))
+    scan_fields = {"repository", "head_sha", "check_name", "app_id", "source_run_id", "check_run_id",
+                   "max_source_check_pages", "endpoints", "pages"}
+    _require(isinstance(check_snapshot, dict) and set(check_snapshot) == scan_fields
+             and check_snapshot["repository"] == repo and check_snapshot["head_sha"] == grant["head_sha"]
+             and check_snapshot["check_name"] == "KRR / PR governance (trusted check)"
+             and type(check_snapshot["app_id"]) is int and check_snapshot["app_id"] == 4766933
+             and type(check_snapshot["source_run_id"]) is int and check_snapshot["source_run_id"] == source["id"]
+             and type(check_snapshot["check_run_id"]) is int and check_snapshot["check_run_id"] == check["id"]
+             and _integer(check_snapshot["max_source_check_pages"]), "Missing/foreign complete native Check Run snapshot")
+    pages, endpoints = check_snapshot["pages"], check_snapshot["endpoints"]
+    _require(isinstance(pages, list) and pages and isinstance(endpoints, list) and len(endpoints) == len(pages)
+             and len(pages) <= check_snapshot["max_source_check_pages"]
+             and isinstance(pages[0], dict) and _integer(pages[0].get("total_count")), "Incomplete native Check Run pages")
+    total = pages[0]["total_count"]
+    _require(len(pages) == (total + 99) // 100, "Incomplete native Check Run page count")
+    query = urllib.parse.urlencode({"check_name": "KRR / PR governance (trusted check)", "app_id": 4766933,
+                                   "filter": "all", "per_page": 100})
+    base_endpoint = f"repos/{repo}/commits/{grant['head_sha']}/check-runs?" + query
+    page_bytes, all_checks = [], []
+    for number, (endpoint, page) in enumerate(zip(endpoints, pages), 1):
+        _require(endpoint == base_endpoint + f"&page={number}" and isinstance(page, dict)
+                 and type(page.get("total_count")) is int and page["total_count"] == total
+                 and isinstance(page.get("check_runs"), list) and len(page["check_runs"]) == min(100, total - 100 * (number - 1)),
+                 "Native Check Run endpoint/page drift")
+        page_bytes.append(snapshot(page))
+        all_checks.extend(page["check_runs"])
+    ids, external_ids = set(), set()
+    for value in all_checks:
+        _require(isinstance(value, dict) and _integer(value.get("id")) and value["id"] not in ids
+                 and value.get("name") == check_snapshot["check_name"] and value.get("head_sha") == grant["head_sha"]
+                 and isinstance(value.get("app"), dict) and type(value["app"].get("id")) is int and value["app"]["id"] == 4766933
+                 and isinstance(value.get("external_id"), str)
+                 and re.fullmatch(re.escape(f"krr-governance/v1/{grant['head_sha']}/") + r"(?:writer|dispatcher)-[1-9][0-9]*", value["external_id"])
+                 and value["external_id"] not in external_ids
+                 and (value.get("status") in {"queued", "in_progress"} and value.get("conclusion") is None
+                      or value.get("status") == "completed" and value.get("conclusion") in {
+                          "action_required", "cancelled", "failure", "neutral", "success", "skipped", "stale", "timed_out", "startup_failure"}),
+                 "Native Check Run duplicate/identity/lifecycle drift")
+        for key in ("started_at", "completed_at"):
+            _require(value.get(key) is None or isinstance(value[key], str) and canonical_timestamp(value[key]) == value[key],
+                     "Native Check Run timestamp drift")
+        if value.get("started_at") is not None and value.get("completed_at") is not None:
+            _require(datetime.fromisoformat(value["started_at"].replace("Z", "+00:00")) <=
+                     datetime.fromisoformat(value["completed_at"].replace("Z", "+00:00")), "Native Check Run lifecycle chronology")
+        ids.add(value["id"]); external_ids.add(value["external_id"])
+    _require(len(all_checks) == total and snapshot(check_binding(max(all_checks, key=lambda value: value["id"]))) == initial_check,
+             "Native Check Run newest immutable generation drift")
+
+    def native_run(value, identifier, path, name):
+        _require(isinstance(value, dict) and type(value.get("id")) is int and value["id"] == identifier
+                 and type(value.get("run_attempt")) is int and value["run_attempt"] == 1
+                 and _integer(value.get("workflow_id")) and _integer(value.get("run_number"))
+                 and value.get("head_sha") == grant["workflow_sha"] and value.get("head_branch") == grant["base_ref"]
+                 and value.get("path") in {path, path + "@" + grant["base_ref"], path + "@refs/heads/" + grant["base_ref"]}
+                 and repository_matches(value.get("repository"), repo, repo_id)
+                 and repository_matches(value.get("head_repository"), repo, repo_id)
+                 and (value.get("name") == name or isinstance(value.get("display_title"), str)
+                      and value.get("name") == value["display_title"]), "Grant native run identity")
+        if identifier == writer_id:
+            _require(value.get("event") == "workflow_dispatch"
+                     and value.get("display_title") == f"source={owner} scope=early segment={grant['segment']}"
+                     and (value.get("status") in ACTIVE and value.get("conclusion") is None
+                          or value.get("status") == "completed" and value.get("conclusion") == "success"), "Grant writer phase/lifecycle")
+        else:
+            title = value.get("display_title")
+            match = re.fullmatch(r"sensor=([1-9][0-9]*) action=(?:in_progress|completed)", title) if isinstance(title, str) and len(title) <= 160 else None
+            # fixed default workflowの正規名は、既存writerと同じ有限event契約で受理する。
+            _require(value.get("event") in {"pull_request_target", "issue_comment", "issues", "schedule", "workflow_dispatch", "workflow_run"}
+                     and value.get("status") in ACTIVE
+                     and value.get("conclusion") is None
+                     and (value.get("name") == name or value.get("event") == "workflow_run"
+                          and match is not None and _integer(int(match[1]))),
+                     "Grant owner lease lifecycle")
+        return {key: value.get(key) for key in ("id", "run_attempt", "workflow_id", "run_number", "name", "display_title",
+                                               "head_sha", "head_branch", "path", "event", "repository", "head_repository")}
+
+    writer_identity = snapshot(native_run(writer, writer_id, ".github/workflows/pr-governance-status-writer.yml", "PR governance status writer"))
+    owner_endpoint = f"repos/{repo}/actions/runs/{owner}"
+    owner_identity = snapshot(native_run(reader.request(owner_endpoint), owner, ".github/workflows/pr-governance.yml", "PR governance dispatcher"))
+
+    def native_jobs(identifier, sha):
+        reader.cache.pop(("jobs", repo, identifier), None)
+        jobs = reader.jobs(repo, identifier)
+        _require(len({job.get("name") for job in jobs}) == len(jobs), "Grant duplicate native job")
+        for job in jobs:
+            _require(type(job.get("run_id")) is int and job["run_id"] == identifier and job.get("head_sha") == sha
+                     and isinstance(job.get("name"), str) and isinstance(job.get("steps"), list), "Grant native job identity")
+            steps = job["steps"]
+            _require(all(isinstance(step, dict) and _integer(step.get("number")) and isinstance(step.get("name"), str) for step in steps)
+                     and len({step["number"] for step in steps}) == len(steps), "Grant native step identity")
+        return jobs
+
+    def native_lease():
+        jobs = native_jobs(owner, grant["workflow_sha"])
+        named = {job["name"]: job for job in jobs}
+        binding = f"owner={owner} artifact={grant['cohort_artifact_id']} digest={grant['cohort_artifact_digest']}"
+        projection = []
+        for name, prefix, status, conclusion in ((ELECTION_JOB, SELECTED_PREFIX, "in_progress", None),
+                                                  (ADMISSION_JOB, ADMITTED_PREFIX, "completed", "success")):
+            job = named.get(name)
+            _require(job is not None and job.get("status") == status and job.get("conclusion") == conclusion, "Grant native admission/lease")
+            markers = [step for step in job["steps"] if step["name"].startswith(prefix)]
+            _require(len(markers) == 1 and markers[0]["name"] == prefix + binding
+                     and markers[0].get("status") == "completed" and markers[0].get("conclusion") == "success", "Grant native admission binding")
+            if name == ELECTION_JOB:
+                _require(not any(step["name"].startswith(HANDOFF_PREFIX) and
+                                 not (step.get("status") == "queued" and step.get("conclusion") is None
+                                      or step.get("status") == "completed" and step.get("conclusion") == "skipped")
+                                 for step in job["steps"]), "Grant native handoff closed")
+            projection.append([job["id"], name, status, conclusion, markers[0]])
+        registration = REGISTER_PREFIX + f"segment={grant['segment']} run={writer_id} artifact={grant['cohort_artifact_id']} digest={grant['cohort_artifact_digest']}"
+        markers = [(job, step) for job in jobs for step in job["steps"]
+                   if step["name"].startswith(REGISTER_PREFIX + f"segment={grant['segment']} ")]
+        _require(len(markers) == 1 and markers[0][0]["name"] == "Service bound cohort review sources"
+                 and markers[0][0].get("status") == "in_progress" and markers[0][0].get("conclusion") is None
+                 and markers[0][1]["name"] == registration and markers[0][1].get("status") == "completed"
+                 and markers[0][1].get("conclusion") == "success", "Grant native writer registration")
+        projection.append([markers[0][0]["id"], markers[0][1]])
+        return snapshot(projection)
+
+    lease = native_lease()
+    # 固定App writerが確定した元attemptの時計だけを再利用し、現在時刻から期限を作り直さない。
+    try:
+        started = canonical_timestamp(datetime.fromtimestamp(clocks[source["id"]] - 5400, timezone.utc).isoformat(timespec="microseconds"))
+        _require(source_deadline(started, now=now) == clocks[source["id"]], "Grant original clock roundtrip drift")
+    except (OverflowError, OSError, ValueError) as error:
+        raise CohortError("Grant original clock is outside native UTC range") from error
+    member = {key: grant[key] for key in ("repository", "repository_id", "pr_number", "base_ref", "base_sha", "head_sha", "pr_body_sha256")}
+    member.update(source_run_id=source["id"], source_run_attempt=source.get("run_attempt"), source_workflow_id=source.get("workflow_id"),
+                  source_run_number=source.get("run_number"), source_event=source.get("event"), latch_started_at=started,
+                  source_deadline_epoch=clocks[source["id"]])
+    _require(started is not None and member_source_matches(member, source, current_pr), "Grant current PR/source/native clock drift")
+    after_source = reader.request(f"repos/{repo}/actions/runs/{source['id']}")
+    source_keys = ("id", "run_attempt", "workflow_id", "run_number", "name", "event", "path", "head_sha", "repository", "head_repository", "pull_requests")
+    _require(isinstance(after_source, dict) and snapshot([source.get(key) for key in source_keys]) == snapshot([after_source.get(key) for key in source_keys])
+             and member_source_matches(member, after_source, current_pr), "Grant source closing drift")
+    if read_metadata is None:
+        path = "scripts/review/pr_governance_status_writer.py"
+        content = reader.request(f"repos/{repo}/contents/{path}?ref={grant['workflow_sha']}")
+        _require(isinstance(content, dict) and content.get("path") == path and content.get("encoding") == "base64"
+                 and content.get("sha") == writer_workflow_blob and isinstance(content.get("content"), str), "Grant fixed writer content")
+        try:
+            code = base64.b64decode(content["content"].replace("\n", ""), validate=True)
+        except (ValueError, TypeError) as error:
+            raise CohortError("Grant fixed writer bytes") from error
+        _require(type(content.get("size")) is int and content["size"] == len(code)
+                 and hashlib.sha1(b"blob " + str(len(code)).encode() + b"\0" + code).hexdigest() == writer_workflow_blob, "Grant fixed writer blob drift")
+    else:
+        metadata_before = metadata_binding()
+    # callerの全native page観測と、proof後の全page再読を比較し、page順序やtimestampを権限にしない。
+    for endpoint, before in zip(endpoints, page_bytes):
+        _require(snapshot(reader.request(endpoint)) == before, "Grant complete current generation snapshot drift")
+    if read_metadata is None:
+        repository = reader.request(f"repos/{repo}")
+        ref = reader.request(f"repos/{repo}/git/ref/heads/{urllib.parse.quote(grant['base_ref'], safe='')}")
+        _require(repository_matches(repository, repo, repo_id) and repository.get("default_branch") == grant["base_ref"]
+                 and isinstance(ref, dict) and isinstance(ref.get("object"), dict) and ref["object"].get("sha") == grant["workflow_sha"], "Grant current default drift")
+    else:
+        _require(metadata_before == metadata_binding(), "Grant native metadata closing drift")
+    _require(writer_identity == snapshot(native_run(reader.request(f"repos/{repo}/actions/runs/{writer_id}"), writer_id,
+                                                      ".github/workflows/pr-governance-status-writer.yml", "PR governance status writer"))
+             and owner_identity == snapshot(native_run(reader.request(owner_endpoint), owner,
+                                                        ".github/workflows/pr-governance.yml", "PR governance dispatcher"))
+             and lease == native_lease(), "Grant closing native lease drift")
+    closing_pr = reader.request(f"repos/{repo}/pulls/{grant['pr_number']}")
+    _require(member_source_matches(member, after_source, closing_pr), "Grant closing current PR/body drift")
+    _require(time.time() < min(grant["root_deadline_epoch"], member["source_deadline_epoch"]), "Grant original deadline expired")
+    return min(grant["root_deadline_epoch"], member["source_deadline_epoch"])
 
 
 def _repository_name(value):
@@ -493,7 +854,15 @@ def load_cohort(artifact_id, digest, *, expected_owner, expected_segment, read_j
             identifier, creator, journal_id, journal_digest = entry
             local_ids.append(identifier)
             if identifier in selected:
-                journal, journal_metadata = reader.artifact({"artifact_id": journal_id, "artifact_digest": journal_digest}, "source", repository, expected_producer=creator)
+                journal_metadata = reader.request(f"repos/{repository}/actions/artifacts/{journal_id}")
+                _require(isinstance(journal_metadata, dict) and type(journal_metadata.get("id")) is int
+                         and journal_metadata["id"] == journal_id and journal_metadata.get("digest") == journal_digest
+                         and isinstance(journal_metadata.get("workflow_run"), dict)
+                         and type(journal_metadata["workflow_run"].get("id")) is int
+                         and journal_metadata["workflow_run"]["id"] == creator, "Source child artifact binding drift")
+                # 固定workflowが記録したcanonical本文とuploadを検証し、同じchild ZIPの再取得を省く。
+                journal, _ = _journal_from_metadata(reader, journal_metadata, identifier, repository,
+                                                    header["repository_id"], header["workflow_sha"], header["workflow_blob_sha"])
                 _require(type(journal["producer_run_attempt"]) is int and journal["producer_run_attempt"] == 1
                          and journal["repository"] == repository and journal["repository_id"] == header["repository_id"]
                          and _integer(journal["root_deadline_epoch"]) and journal["root_deadline_epoch"] >= header["root_deadline_epoch"], "Journal original root clock/binding")
@@ -1391,18 +1760,32 @@ def _journal_from_metadata(reader, metadata, source_id, repository, repository_i
              and metadata.get("expired") is False and metadata.get("name") == f"krr-governance-source-{source_id}-attempt-1"
              and type(metadata.get("size_in_bytes")) is int and 0 < metadata["size_in_bytes"] <= MAX_BYTES, "Source journal metadata invalid")
     binding = metadata.get("workflow_run")
-    _require(isinstance(binding, dict) and _integer(binding.get("id")) and binding.get("repository_id") == repository_id
-             and binding.get("head_repository_id") == repository_id and binding.get("head_sha") == sha, "Source journal immutable creator binding")
+    _require(isinstance(binding, dict) and _integer(binding.get("id"))
+             and type(binding.get("repository_id")) is int and binding["repository_id"] == repository_id
+             and type(binding.get("head_repository_id")) is int and binding["head_repository_id"] == repository_id
+             and binding.get("head_sha") == sha, "Source journal immutable creator binding")
     producer = reader.producer(repository, binding["id"], sha, blob)
-    _require(repository_matches(producer.get("repository"), repository, repository_id), "Source journal creator repository drift")
+    _require(type(producer.get("id")) is int and producer["id"] == binding["id"]
+             and type(producer.get("run_attempt")) is int and producer["run_attempt"] == 1
+             and repository_matches(producer.get("repository"), repository, repository_id), "Source journal creator repository drift")
     jobs = reader.jobs(repository, binding["id"])
+    _require(all(type(job.get("run_id")) is int and job["run_id"] == binding["id"]
+                 and job.get("head_sha") == sha for job in jobs), "Source journal native job identity drift")
     publishers = [job for job in jobs if job.get("name") == PRODUCER_JOB]
     _require(len(publishers) == 1 and publishers[0].get("status") == "completed" and publishers[0].get("conclusion") == "success", "Source journal publisher is not complete")
     steps = publishers[0].get("steps")
-    _require(isinstance(steps, list) and all(isinstance(step, dict) for step in steps), "Source journal publisher stages missing")
+    _require(isinstance(steps, list) and all(isinstance(step, dict) and _integer(step.get("number"))
+             and isinstance(step.get("name"), str) for step in steps)
+             and len({step["number"] for step in steps}) == len(steps)
+             and len({step["name"] for step in steps}) == len(steps), "Source journal publisher stages missing/ambiguous")
     bindings = [step for step in steps if isinstance(step.get("name"), str) and step["name"].startswith(JOURNAL_PREFIX)]
     _require(len(bindings) == 1, "Source journal publisher binding ambiguous")
     journal = _decode_journal_stage(bindings[0])
+    payloads = [step for step in steps if step["name"].startswith(PAYLOAD_PREFIX)]
+    _require(len(payloads) == 1
+             and payloads[0]["name"] == PAYLOAD_PREFIX + "source sha256=" + hashlib.sha256(canonical(journal)).hexdigest()
+             and payloads[0].get("status") == "completed" and payloads[0].get("conclusion") == "success",
+             "Source journal canonical payload binding drift")
     _require(journal["producer_run_id"] == binding["id"] and journal["repository"] == repository
              and journal["repository_id"] == repository_id and journal["workflow_sha"] == sha and journal["workflow_blob_sha"] == blob,
              "Source journal canonical binding drift")
@@ -1413,7 +1796,8 @@ def _journal_from_metadata(reader, metadata, source_id, repository, repository_i
     _require(len(upload) == 1 and upload[0].get("status") == "completed" and upload[0].get("conclusion") == "success", "Source journal upload stage missing")
     after = reader.request(f"repos/{repository}/actions/artifacts/{metadata['id']}")
     keys = ("id", "name", "digest", "expired", "size_in_bytes", "workflow_run")
-    _require(isinstance(after, dict) and all(after.get(key) == metadata.get(key) for key in keys), "Source journal metadata changed")
+    _require(isinstance(after, dict) and canonical({key: after.get(key) for key in keys})
+             == canonical({key: metadata.get(key) for key in keys}), "Source journal metadata changed")
     return journal, producer
 
 

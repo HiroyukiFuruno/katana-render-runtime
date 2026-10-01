@@ -4742,7 +4742,8 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
     def _run(self) -> dict[str, object]:
         return {
             "id": 101,
-            "created_at": "2026-08-30T00:00:00Z",
+            "started_at": "2026-08-30T00:00:00Z",
+            "completed_at": "2026-08-30T00:01:00Z",
             "name": subject._TRUSTED_CHECK,
             "head_sha": self.head,
             "app": {"id": self.app_id},
@@ -4767,6 +4768,16 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
                 f"https://github.com/{self.repository}/actions/runs/{self.source_run_id}"
             ),
         }
+
+    def _native_run(self) -> dict[str, object]:
+        run = self._run()
+        run.pop("created_at", None)
+        run.pop("updated_at", None)
+        run.update({
+            "started_at": "2026-08-30T00:00:00Z",
+            "completed_at": "2026-08-30T00:01:00Z",
+        })
+        return run
 
     def _protection(self, checks: list[dict[str, object]] | None = None) -> dict[str, object]:
         current_checks = (
@@ -4793,6 +4804,7 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
         source_history: list[dict[str, object]] | None = None,
         source_history_pages: list[list[dict[str, object]]] | None = None,
         exclude_trusted_governance_check: bool = False,
+        raw_rest: bool = False,
     ) -> str | None:
         check_pages = pages if pages is not None else [{"check_runs": [self._run()]}]
         latch_check_pages = (
@@ -4821,6 +4833,10 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
             if endpoint.endswith("/protection/required_status_checks"):
                 return required
             if "/check-runs?" in endpoint:
+                if raw_rest:
+                    pages = latch_check_pages if "review" in endpoint and "latch" in endpoint else check_pages
+                    page = int(parse_qs(urlparse(endpoint).query)["page"][0])
+                    return pages[page - 1] if page <= len(pages) else {"check_runs": []}
                 if "review" in endpoint and "latch" in endpoint:
                     return latch_check_pages
                 if exclude_trusted_governance_check:
@@ -4861,6 +4877,46 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
                 self.body_sha256,
                 exclude_trusted_governance_check=exclude_trusted_governance_check,
             )
+
+    def test_accepts_native_rest_check_run_without_created_or_updated_keys(self) -> None:
+        run = self._native_run()
+        self.assertNotIn("created_at", run)
+        self.assertNotIn("updated_at", run)
+        self.assertIsNone(self._gate(pages=[{"check_runs": [run]}], raw_rest=True))
+
+    def test_native_generation_order_uses_id_even_when_started_at_is_earlier(self) -> None:
+        old = self._native_run()
+        newer = {
+            **old, "id": 102, "external_id": f"krr-governance/v1/{self.head}/writer-102",
+            "started_at": "2026-08-29T23:59:59Z", "completed_at": None,
+            "status": "in_progress", "conclusion": None,
+        }
+        self.assertIsNotNone(self._gate(pages=[{"check_runs": [old, newer]}], raw_rest=True))
+        self.assertIsNone(self._gate(pages=[{"check_runs": [newer, {**old, "id": 103,
+            "external_id": f"krr-governance/v1/{self.head}/writer-103"}]}], raw_rest=True))
+
+    def test_native_check_run_rejects_invalid_clocks_and_typed_identity(self) -> None:
+        run = self._native_run()
+        variants = {
+            "missing-start": {key: value for key, value in run.items() if key != "started_at"},
+            "null-start": {**run, "started_at": None},
+            "bool-start": {**run, "started_at": True},
+            "invalid-start": {**run, "started_at": "2026-02-30T00:00:00Z"},
+            "missing-completion": {key: value for key, value in run.items() if key != "completed_at"},
+            "null-completion": {**run, "completed_at": None},
+            "bool-completion": {**run, "completed_at": True},
+            "reversed-clock": {**run, "completed_at": "2026-08-29T23:59:59Z"},
+            "invalid-completion": {**run, "completed_at": "2026-02-30T00:00:00Z"},
+            "pending-with-completion": {**run, "status": "in_progress", "conclusion": None},
+            "float-id": {**run, "id": 101.0},
+            "bool-id": {**run, "id": True},
+            "float-app": {**run, "app": {"id": float(self.app_id)}},
+        }
+        for label, invalid in variants.items():
+            with self.subTest(label=label):
+                self.assertIsNotNone(self._gate(pages=[{"check_runs": [invalid]}], raw_rest=True))
+        duplicate = {**run, "external_id": f"krr-governance/v1/{self.head}/writer-102"}
+        self.assertIsNotNone(self._gate(pages=[{"check_runs": [run, duplicate]}], raw_rest=True))
 
     def test_rejects_trusted_check_with_stale_pr_body_digest(self) -> None:
         run = self._run()
@@ -5249,29 +5305,30 @@ class StrictGovernanceCheckRunTest(unittest.TestCase):
             "external_id": f"krr-governance/v1/{self.head}/writer-102",
             "status": "in_progress",
             "conclusion": None,
+            "completed_at": None,
         }
         # A previous success must not mask pending/failure in the generation
         # with the greatest immutable Check Run ID.
         self.assertIsNotNone(self._gate(pages=[{"check_runs": [old, newest]}]))
-        newest_failure = {**newest, "status": "completed", "conclusion": "failure"}
+        newest_failure = {**newest, "status": "completed", "conclusion": "failure", "completed_at": "2026-08-30T00:01:00Z"}
         self.assertIsNotNone(self._gate(pages=[{"check_runs": [old, newest_failure]}]))
 
     def test_newest_immutable_generation_parses_fractional_timestamps(self) -> None:
-        old_success = {**self._run(), "created_at": "2026-08-30T00:00:00Z"}
+        old_success = {**self._run(), "started_at": "2026-08-30T00:00:00Z"}
         newer_pending = {
             **old_success,
             "id": 102,
-            "created_at": "2026-08-30T00:00:00.1Z",
+            "started_at": "2026-08-30T00:00:00.1Z",
             "external_id": f"krr-governance/v1/{self.head}/writer-102",
             "status": "in_progress",
             "conclusion": None,
+            "completed_at": None,
         }
-        # Lexicographic ordering puts the non-fractional `Z` after `.1Z`.
-        # The parsed instant must instead select the pending generation.
+        # native時刻の小数部も受理するが、pending世代は不変IDで選ぶ。
         self.assertIsNotNone(self._gate(pages=[{"check_runs": [old_success, newer_pending]}]))
 
     def test_newest_immutable_generation_rejects_invalid_timestamp(self) -> None:
-        invalid = {**self._run(), "created_at": "2026-02-30T00:00:00Z"}
+        invalid = {**self._run(), "started_at": "2026-02-30T00:00:00Z"}
         self.assertIsNotNone(self._gate(pages=[{"check_runs": [invalid]}]))
 
     def test_governance_check_requires_exact_branch_protection_app_bindings(self) -> None:

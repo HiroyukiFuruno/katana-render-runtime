@@ -27,6 +27,8 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
         for name in (
             "Prepare trusted cohort sensor reader", "Prepare trusted cohort proof reader",
             "Complete trusted cohort proof reader", "Finalize trusted cohort proof reader",
+            "Prepare trusted member grant decoder", "Complete trusted member grant proof reader",
+            "Finalize trusted member grant proof reader",
         ):
             marker = f"      - name: {name}\n"
             self.assertIn(marker, self.sensor)
@@ -34,6 +36,15 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
             shell = textwrap.dedent(prepare.split("        run: |\n", 1)[1])
             result = subprocess.run(["bash", "-c", shell], capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, f"{name}: {result.stderr}")
+
+        for name in ("Prepare trusted sensor latch program", "Await matching trusted governance Check Run"):
+            block = self.sensor.split(f"      - name: {name}\n", 1)[1].split("\n      - name:", 1)[0]
+            shell = textwrap.dedent(block.split("        run: |\n", 1)[1])
+            if name.startswith("Await"):
+                shell = shell.rsplit('python3 "$RUNNER_TEMP/krr-governance-sensor-latch.py"', 1)[0]
+            result = subprocess.run(["bash", "-c", shell], capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, f"{name}: {result.stderr}")
+        self.await_program = (Path(self.reader_directory.name) / "krr-governance-sensor-latch.py").read_text()
 
     def test_unsupported_review_thread_webhook_is_not_an_actions_trigger(self) -> None:
         self.assertNotIn("pull_request_review_thread:", self.sensor)
@@ -110,9 +121,9 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
     def test_sensor_accepts_only_current_writer_generation_scoped_check_ids(self) -> None:
         """Keep the sensor bound to an exact writer run and immutable generation."""
 
-        start = self.sensor.index("          check_name =")
-        end = self.sensor.index("          deadline =", start)
-        program = textwrap.dedent(self.sensor[start:end])
+        start = self.await_program.index("check_name =")
+        end = self.await_program.index("deadline = time.monotonic() + timeout", start)
+        program = self.await_program[start:end]
         head = "A" * 40
         with patch.dict(
             os.environ,
@@ -216,9 +227,9 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
     def test_sensor_revalidation_rejects_wrong_source_head_pr_repo_and_writer_run(self) -> None:
         """A completed Check Run cannot bypass the sensor/writer generation fences."""
 
-        start = self.sensor.index("          check_name =")
-        end = self.sensor.index("          deadline =", start)
-        program = textwrap.dedent(self.sensor[start:end])
+        start = self.await_program.index("check_name =")
+        end = self.await_program.index("deadline = time.monotonic() + timeout", start)
+        program = self.await_program[start:end]
         head, base = "a" * 40, "b" * 40
         with patch.dict(
             os.environ,
@@ -303,9 +314,9 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
     def test_sensor_scans_source_bound_check_runs_and_rejects_bad_boundaries(self) -> None:
         """Historical checks may span pages, but every page boundary remains fail-closed."""
 
-        start = self.sensor.index("          check_name =")
-        end = self.sensor.index("          deadline =", start)
-        program = textwrap.dedent(self.sensor[start:end])
+        start = self.await_program.index("check_name =")
+        end = self.await_program.index("deadline = time.monotonic() + timeout", start)
+        program = self.await_program[start:end]
         head, base = "a" * 40, "b" * 40
         with patch.dict(
             os.environ,
@@ -470,9 +481,9 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
     def test_sensor_restarts_after_a_page_one_status_transition_before_accepting_success(self) -> None:
         """A normal Check Run update restarts the scan and requires a fresh anchor."""
 
-        start = self.sensor.index("          check_name =")
-        end = self.sensor.index("          deadline =", start)
-        program = textwrap.dedent(self.sensor[start:end])
+        start = self.await_program.index("check_name =")
+        end = self.await_program.index("deadline = time.monotonic() + timeout", start)
+        program = self.await_program[start:end]
         head, base = "a" * 40, "b" * 40
         with patch.dict(
             os.environ,
@@ -551,9 +562,9 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
     def test_sensor_drops_a_candidate_collected_before_a_page_one_generation_race(self) -> None:
         """A candidate from the old snapshot cannot survive a new-run page-one restart."""
 
-        start = self.sensor.index("          check_name =")
-        end = self.sensor.index("          deadline =", start)
-        program = textwrap.dedent(self.sensor[start:end])
+        start = self.await_program.index("check_name =")
+        end = self.await_program.index("deadline = time.monotonic() + timeout", start)
+        program = self.await_program[start:end]
         head, base = "a" * 40, "b" * 40
         with patch.dict(
             os.environ,
@@ -632,13 +643,7 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
     def test_sensor_waits_for_a_newer_source_bound_generation_after_terminal_failure(self) -> None:
         """A resolved thread can be repaired only by a later dispatcher generation."""
 
-        match = re.search(
-            r"(?ms)^      - name: Await matching trusted governance Check Run\n.*?^          python3 - <<'PY'\n(.*?)^          PY$",
-            self.sensor,
-        )
-        self.assertIsNotNone(match)
-        assert match is not None
-        program = textwrap.dedent(match.group(1))
+        program = self.await_program
         head, base = "a" * 40, "b" * 40
         repository = "owner/repo"
         repository_identity = {

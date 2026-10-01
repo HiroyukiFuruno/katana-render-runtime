@@ -5,6 +5,7 @@ import base64
 import copy
 import hashlib
 import io
+import inspect
 import json
 import os
 import re
@@ -13,12 +14,17 @@ import textwrap
 import unittest
 import urllib.parse
 import zipfile
+from contextlib import ExitStack
+from collections import Counter, deque
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pr_governance_cohort as cohort
 import pr_governance_cohort_test as cohort_fixtures
 import pr_governance_status_writer_test as writer_fixtures
+import pr_governance_event_test as sensor_fixtures
 from pr_governance_cohort_test import RawArtifactFixture
 
 
@@ -346,7 +352,7 @@ class GovernanceContextOwnerInventoryTest(unittest.TestCase):
     def fixture(self, *, phase="early"):
         with patch.object(cohort.time, "time", return_value=2_000_000_000):
             raw, _, _, _ = cohort_fixtures.CohortFollowerAndHandoffTests().follower()
-        raw.steps[cohort.PRODUCER_JOB][:] = raw.steps[cohort.PRODUCER_JOB][:2]
+        raw.steps[cohort.PRODUCER_JOB][:] = raw.steps[cohort.PRODUCER_JOB][:3]
         raw.run.update(status="in_progress", conclusion=None)
         binding = f"owner=100 artifact=1 digest={raw.header_ref['artifact_digest']}"
         raw.steps[cohort.ELECTION_JOB].append({"name": cohort.SELECTED_PREFIX + binding,
@@ -516,13 +522,93 @@ class GovernanceContextOwnerInventoryTest(unittest.TestCase):
 
 
 class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
-    """単体simulation。decision成功入力・admission即ready・凍結時計であり、live SLAではない。"""
+    """単体simulation。通常は凍結時計、decision成功入力・admission即readyであり、live SLAではない。"""
 
     def replay(self, total: int, *, policy: str | None = None, enforce_raw_filter: bool = False,
                raw_filter_phase: str = "all", include_completed_callbacks: bool = True,
                enforce_writer_barrier: bool = False, drain_pending: bool = False,
-               enforce_check_writes: bool = False) -> dict:
+               enforce_check_writes: bool = False, advance_pacing_clock: bool = False,
+               enforce_installation_quota: bool = False, conditional_helper_transport: bool = False,
+               cold_process: bool = False, conditional_writer_transport: bool = False,
+               actual_sensor_loop: bool = False) -> dict:
         self.assertFalse(enforce_check_writes and not enforce_writer_barrier)
+        self.assertFalse(advance_pacing_clock and not enforce_check_writes)
+        self.assertFalse(enforce_installation_quota and not advance_pacing_clock)
+        self.assertFalse(cold_process and not advance_pacing_clock)
+        self.assertFalse(conditional_writer_transport and not cold_process)
+        self.assertFalse(actual_sensor_loop and not (conditional_writer_transport and conditional_helper_transport))
+        check_app_id = 4766933 if cold_process else 9001
+        virtual_clock = [200.0]
+        mutation_times, ack_times = [], []
+        installation_requests, installation_window = [], deque()
+        helper_requests, storage_requests = [], []
+        metadata_requests = []
+        writer_http_attempts = []
+        installation_peak, installation_rejected_at = [0], [None]
+        def app_request(function, endpoint=None, method="GET", component="writer"):
+            while installation_window and installation_window[0] <= virtual_clock[0] - 3600:
+                installation_window.popleft()
+            if enforce_installation_quota and len(installation_window) >= 4500:
+                installation_rejected_at[0] = virtual_clock[0]
+                error = cohort.CohortError if component == "helper" else writer_fixtures.WRITER.NoPostGovernanceError
+                raise error("Shared App installation rolling3600 quota is exhausted.")
+            installation_requests.append({"epoch": virtual_clock[0], "function": function,
+                                          "endpoint": endpoint, "method": method, "component": component})
+            installation_window.append(virtual_clock[0])
+            installation_peak[0] = max(installation_peak[0], len(installation_window))
+        def native_timestamp():
+            return datetime.fromtimestamp(virtual_clock[0], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        def installation_metrics():
+            reads = [value for value in installation_requests if value["method"] == "GET"]
+            counts = Counter((value["function"], value["endpoint"]) for value in reads)
+            attempts = ([value for value in writer_http_attempts if value["principal"] == "App"]
+                        if conditional_writer_transport else
+                        [dict(value, status=200) for value in installation_requests if value["component"] == "writer"])
+            attempts += [dict(value, method="GET") for value in helper_requests if value["principal"] == "App"]
+            return {"app_total": len(installation_requests), "app_rolling3600_peak": installation_peak[0],
+                    "writer_transport": "actual-conditional" if conditional_writer_transport else "bare-get-diagnostic",
+                    "app_rejected_epoch": installation_rejected_at[0],
+                    "app_reads": len(reads), "app_mutations": len(installation_requests) - len(reads),
+                    "app_by_component": dict(Counter(value["component"] for value in installation_requests)),
+                    "app_primary_by_function": dict(Counter(value["function"] for value in installation_requests)),
+                    "app_attempts": len(attempts),
+                    "app_status_counts": dict(Counter(value.get("status", 200) for value in attempts)),
+                    "app_secondary_points": sum(1 if value["method"] == "GET" else 5 for value in attempts),
+                    "writer_http_status_counts": dict(Counter(value["status"] for value in writer_http_attempts)),
+                    "writer_http_attempts": len(writer_http_attempts),
+                    "writer_secondary_points": sum(1 if value["method"] == "GET" else 5 for value in writer_http_attempts),
+                    "top_read_endpoints": [(function, endpoint, count) for (function, endpoint), count in counts.most_common(5)]}
+        def helper_metrics():
+            default_attempts = [value for value in helper_requests if value["principal"] == "GITHUB_TOKEN"]
+            default = [value for value in default_attempts if value.get("status", 200) != 304]
+            counts = Counter((value["function"], value["endpoint"]) for value in default)
+            json_counts = Counter((value["function"], value["endpoint"]) for value in default
+                                  if value.get("status", 200) == 200)
+            window, peak = deque(), 0
+            for value in default:
+                while window and window[0] <= value["epoch"] - 3600:
+                    window.popleft()
+                window.append(value["epoch"])
+                peak = max(peak, len(window))
+            return {"github_token_reads": len(default), "github_token_rolling3600_peak": peak,
+                    "helper_transport": "actual-conditional" if conditional_helper_transport else "bare-get-diagnostic",
+                    "github_token_attempts": len(default_attempts),
+                    "github_token_primary_by_role": dict(Counter(value["function"] for value in default)),
+                    "github_token_json200_by_role": dict(Counter(value["function"] for value in default
+                                                                  if value.get("status", 200) == 200)),
+                    "github_token_status_counts": dict(Counter(value.get("status", 200) for value in default_attempts)),
+                    "github_token_secondary_get_points": len(default_attempts),
+                    "helper_status_counts": dict(Counter(value.get("status", 200) for value in helper_requests)),
+                    "helper_secondary_get_points": len(helper_requests),
+                    "top_github_token_endpoints": [(function, endpoint, count) for (function, endpoint), count in counts.most_common(5)],
+                    "top_github_token_json200_endpoints": [(function, endpoint, count) for (function, endpoint), count in json_counts.most_common(5)],
+                    "storage_attempts": len(storage_requests),
+                    "github_token_graphql_requests": len(metadata_requests),
+                    "github_token_graphql_primary_cost": sum(value["cost"] for value in metadata_requests),
+                    "github_token_graphql_rolling3600_peak": max((sum(item["cost"] for item in metadata_requests
+                        if value["epoch"] - 3600 < item["epoch"] <= value["epoch"]) for value in metadata_requests), default=0),
+                    "github_token_graphql_secondary_points": sum(value["secondary_points"] for value in metadata_requests),
+                    "github_token_total_rest_graphql_attempts": len(default_attempts) + len(metadata_requests)}
         workflow = (ROOT / ".github/workflows/pr-governance.yml").read_text(encoding="utf-8")
         graph = jobs(workflow)
         election = graph[ELECTION]
@@ -544,6 +630,11 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
         raw.data[prefix + "/contents/.github/workflows/pr-governance.yml?ref=" + raw.sha].update(
             sha=raw.blob, size=len(raw.code), content=base64.b64encode(raw.code).decode(),
         )
+        writer_code = (ROOT / "scripts/review/pr_governance_status_writer.py").read_bytes()
+        writer_blob = hashlib.sha1(b"blob " + str(len(writer_code)).encode() + b"\0" + writer_code).hexdigest()
+        raw.data[prefix + "/contents/scripts/review/pr_governance_status_writer.py?ref=" + raw.sha] = {
+            "path": "scripts/review/pr_governance_status_writer.py", "encoding": "base64", "sha": writer_blob,
+            "size": len(writer_code), "content": base64.b64encode(writer_code).decode()}
         metadata, archives, runs, run_jobs, sources, pulls = {}, {}, {}, {}, {}, {}
         next_artifact, requests, roles, pending, cancelled = [1000], [], [], [], []
         own_journals, original_source_archives, acknowledged, owners, cohort_sizes, role_reads, raw_filter_reads = {}, {}, set(), [], [], [], []
@@ -552,18 +643,72 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
         writer_runs, checks, written_sources = {}, {}, set()
         writer_read_counts, sensor_binding_reads = {}, []
         sensor_reader = {}
+        sensor_tasks, sensor_completion_times = {}, []
+        sensor_namespaces = {}
+        sensor_caches, sensor_primary = {}, {}
+        def sensor_read(endpoint, *, timeout, source_id, budget):
+            if conditional_helper_transport:
+                def native_response(arguments, **options):
+                    value = read(endpoint, timeout=options["timeout"])
+                    body = json.dumps(value, sort_keys=True, allow_nan=False)
+                    tag = '"' + hashlib.sha256(body.encode("utf-8")).hexdigest() + '"'
+                    unchanged = "If-None-Match: " + tag in arguments
+                    status = 304 if unchanged else 200
+                    helper_requests.append({"epoch": virtual_clock[0], "function": "sensor-cohort-binding",
+                                            "endpoint": endpoint, "principal": "GITHUB_TOKEN", "status": status})
+                    return SimpleNamespace(returncode=1 if unchanged else 0,
+                        stdout=f"HTTP/2.0 {status} {'Not Modified' if unchanged else 'OK'}\r\nETag: {tag}\r\n\r\n" + ("" if unchanged else body))
+                return sensor_reader["sensor_json_request"](endpoint, budget=budget,
+                    cache=sensor_caches.setdefault(source_id, {}), primary=sensor_primary.setdefault(source_id, {"hits": 0}),
+                    precharged=True, request_timeout=timeout, deadline=5500, terminal_page=False, inspect_link=False,
+                    run=native_response, authenticated=True)
+            if advance_pacing_clock:
+                helper_requests.append({"epoch": virtual_clock[0], "function": "sensor-cohort-binding",
+                                        "endpoint": endpoint, "principal": "GITHUB_TOKEN"})
+            return read(endpoint, timeout=timeout)
+        def sensor_archive(endpoint, *, timeout, source_id, budget):
+            if not conditional_helper_transport:
+                return archives[int(endpoint.split("/")[-2])]
+            def open_request(request, requested_timeout):
+                if request.full_url.startswith("https://api.github.com/"):
+                    helper_requests.append({"epoch": virtual_clock[0], "function": "sensor-archive",
+                                            "endpoint": endpoint, "principal": "GITHUB_TOKEN", "status": 302})
+                    return SimpleNamespace(code=302, headers={"Location": "https://fixture.blob.core.windows.net/archive"})
+                self.assertFalse(request.has_header("Authorization"))
+                storage_requests.append((virtual_clock[0], "sensor-archive", "GITHUB_TOKEN"))
+                return SimpleNamespace(code=200, read=lambda limit: archives[int(endpoint.split("/")[-2])][:limit])
+            with patch.dict(sensor_reader, {"_open_no_redirect": open_request}):
+                return sensor_reader["sensor_archive_read"](endpoint, timeout=timeout, deadline=5500,
+                    budget=budget, token="fixture-default", primary=sensor_primary.setdefault(source_id, {"hits": 0}))
         if enforce_check_writes:
             sensor_workflow = (ROOT / ".github/workflows/pr-governance-review-events.yml").read_text()
             private_chunks = re.findall(r'          cat >>? [^\n]*krr-governance-cohort-reader.py[^\n]*<<\x27PY\x27\n(.*?)^          PY$',
                                         sensor_workflow, re.MULTILINE | re.DOTALL)
-            self.assertEqual(len(private_chunks), 3)
+            self.assertEqual(len(private_chunks), 6)
             for chunk in private_chunks:
                 exec(compile(textwrap.dedent(chunk), "native-sensor-cohort-reader", "exec"), sensor_reader)
         repo = {"id": 101, "full_name": raw.repository, "name": "repository",
                 "url": "https://api.github.com/repos/" + raw.repository}
+        raw.data[prefix].update(repo)
 
         def step(name):
             return {"name": name, "status": "completed", "conclusion": "success"}
+        def complete_callback(identifier):
+            callback = 20000 + identifier
+            if callback in runs:
+                return
+            title = f"sensor={identifier} action=completed"
+            runs[callback] = dict(raw.run, id=callback, run_number=callback, name=title,
+                display_title=title, repository=repo, head_repository=repo, created_at=native_timestamp(),
+                status="completed", conclusion="success")
+            run_jobs[callback] = [{"id": callback * 100 + index, "run_id": callback,
+                "head_sha": raw.sha, "name": name, "status": "completed",
+                "conclusion": "success" if name == "Preflight workflow_run governance source" else "skipped",
+                "steps": [dict(step(cohort.COMPLETED_NOOP_PREFIX + str(identifier)), number=1)]
+                    if name == "Preflight workflow_run governance source" else []}
+                for index, name in enumerate(sorted(cohort.MUTATING_JOBS | {cohort.PRODUCER_JOB,
+                    cohort.ELECTION_JOB, cohort.ADMISSION_JOB, "Preflight workflow_run governance source"}), 1)]
+            completed_callbacks.append(callback)
 
         def upload(payload, producer, segment=None):
             identifier = next_artifact[0]
@@ -594,9 +739,9 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
         for offset in range(total):
             identifier, number, dispatcher = 1000 + offset, offset + 1, 10000 + offset
             source_head = f"{number:040x}"
-            pull = {"number": number, "state": "open", "draft": False, "body": "body",
+            pull = {"number": number, "state": "open", "draft": False, "body": f"Fixes #{number + 1000}" if cold_process else "body",
                     "base": {"ref": "master", "sha": "b" * 40, "repo": repo},
-                    "head": {"sha": source_head, "repo": repo}}
+                    "head": {"sha": source_head, "ref": f"release/native-{number}", "repo": repo}}
             sources[identifier] = {"id": identifier, "run_attempt": 1, "workflow_id": 9, "run_number": number,
                 "name": "PR governance review sensor", "event": "pull_request_review", "head_sha": source_head,
                 "path": ".github/workflows/pr-governance-review-events.yml", "repository": repo, "head_repository": repo,
@@ -630,6 +775,20 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
             requests.append(endpoint)
             self.assertGreater(timeout, 0)
             self.assertLessEqual(timeout, 20)
+            if endpoint == prefix + "/rulesets/21909389":
+                return {"id": 21909389, "name": "KRR PR governance merge authority", "source": raw.repository,
+                    "source_type": "Repository", "target": "branch", "enforcement": "active",
+                    "conditions": {"ref_name": {"include": ["refs/heads/master"], "exclude": []}},
+                    "bypass_actors": [{"actor_id": 4766933, "actor_type": "Integration", "bypass_mode": "pull_request"}],
+                    "rules": [{"type": "update", "parameters": {"update_allows_fetch_and_merge": False}}]}
+            if endpoint == prefix + "/branches/master/protection":
+                names = [writer_fixtures.WRITER.CHECK_NAME, "KRR / PR governance review latch", "KRR / PR governance affected-head barrier"]
+                return {"url": "https://api.github.com/" + endpoint, "enforce_admins": {"enabled": True},
+                    "required_conversation_resolution": {"enabled": True}, "required_status_checks": {
+                        "url": "https://api.github.com/" + endpoint + "/required_status_checks",
+                        "contexts_url": "https://api.github.com/" + endpoint + "/required_status_checks/contexts",
+                        "strict": True, "contexts": names,
+                        "checks": [{"context": name, "app_id": app} for name, app in zip(names, (4766933, 15368, 4766933))]}}
             if "/actions/artifacts/" in endpoint:
                 return copy.deepcopy(metadata[int(endpoint.rsplit("/", 1)[1])])
             if "/actions/artifacts?" in endpoint:
@@ -664,29 +823,153 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
                 return copy.deepcopy(checks[int(endpoint.rsplit("/", 1)[1])])
             if "/check-runs?" in endpoint:
                 head = endpoint.split("/commits/")[1].split("/")[0]
+                if urllib.parse.parse_qs(urllib.parse.urlsplit(endpoint).query).get("check_name") == ["KRR / PR governance affected-head barrier"]:
+                    return {"total_count": 0, "check_runs": []}
                 entries = [check for check in checks.values() if check["head_sha"] == head][-1:]
                 return {"total_count": len(entries), "check_runs": copy.deepcopy(entries)}
             if "/pulls/" in endpoint:
                 return copy.deepcopy(pulls[int(endpoint.rsplit("/", 1)[1])])
             return raw.read_json(endpoint, timeout=timeout)
 
-        class Transport:
+        sensor_case = None
+        if actual_sensor_loop:
+            sensor_case = sensor_fixtures.GovernanceReviewSensorIdentityContractTest()
+            sensor_case.setUp()
+            self.addCleanup(sensor_case.doCleanups)
+            start = sensor_case.await_program.index("deadline = time.monotonic() + timeout")
+            body = ast.parse(sensor_case.await_program[start:])
+            class CooperativeSleep(ast.NodeTransformer):
+                def visit_Expr(self, node):
+                    if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute)
+                        and isinstance(node.value.func.value, ast.Name) and node.value.func.value.id == "time"
+                        and node.value.func.attr == "sleep"):
+                        return ast.copy_location(ast.Expr(value=ast.Yield(value=node.value.args[0])), node)
+                    return self.generic_visit(node)
+            body = CooperativeSleep().visit(body)
+            bindings = sorted({node.id for node in ast.walk(body) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)})
+            coroutine = ast.Module(body=[ast.FunctionDef(name="await_native_sensor", args=ast.arguments(
+                posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[]),
+                body=[ast.Global(names=bindings), *body.body], decorator_list=[])], type_ignores=[])
+            sensor_program = compile(ast.fix_missing_locations(coroutine), "actual-sensor-await-cooperative-sleep", "exec")
+
+        def finish_sensor(source_id):
+            sources[source_id].update(status="completed", conclusion="success")
+            run_jobs[source_id][0].update(status="completed", conclusion="success")
+            run_jobs[source_id][0]["steps"][0].update(status="completed", conclusion="success", completed_at=native_timestamp())
+            if include_completed_callbacks:
+                complete_callback(source_id)
+
+        def resume_sensor(source_id):
+            task = sensor_tasks[source_id]
+            namespace = sensor_namespaces[source_id]
+            state = (id(namespace["check_scan"]), id(namespace["api_response_cache"]), id(namespace["sensor_read_budget"]))
+            self.assertEqual(task.setdefault("state", state), state)
+            previous_attempts = namespace["api_read_count"]
+            def native_response(arguments, **options):
+                if arguments[2] == "graphql":
+                    fields = dict(arguments[index + 1].split("=", 1) for index, value in enumerate(arguments[:-1]) if value == "-f")
+                    self.assertEqual(fields, {"query": cohort.MEMBER_GRANT_METADATA_QUERY,
+                        "owner": raw.repository.split("/")[0], "name": raw.repository.split("/")[1],
+                        "writerExpression": raw.sha + ":scripts/review/pr_governance_status_writer.py"})
+                    self.assertEqual(options["env"]["GH_TOKEN"], "fixture-default")
+                    repository = read(prefix, timeout=options["timeout"])
+                    reference = read(prefix + "/git/ref/heads/master", timeout=options["timeout"])
+                    contents = read(prefix + "/contents/scripts/review/pr_governance_status_writer.py?ref=" + raw.sha, timeout=options["timeout"])
+                    code = base64.b64decode(contents["content"]).decode("utf-8")
+                    value = {"data": {"repository": {"id": "R_native_opaque", "databaseId": repository["id"],
+                        "nameWithOwner": repository["full_name"], "url": "https://github.com/" + repository["full_name"],
+                        "defaultBranchRef": {"name": repository["default_branch"], "target": {"__typename": "Commit", "oid": reference["object"]["sha"]}},
+                        "writer": {"__typename": "Blob", "oid": contents["sha"], "text": code,
+                            "byteSize": len(code.encode()), "isBinary": False, "isTruncated": False}}, "rateLimit": {"cost": 1}}}
+                    metadata_requests.append({"epoch": virtual_clock[0], "function": "sensor-metadata",
+                        "source_id": source_id, "principal": "GITHUB_TOKEN", "status": 200, "cost": value["data"]["rateLimit"]["cost"], "secondary_points": 1})
+                    return SimpleNamespace(returncode=0, stdout="HTTP/2.0 200 OK\r\n\r\n" + json.dumps(value), stderr="")
+                endpoint = next(value for value in arguments if value.startswith(prefix))
+                value = read(endpoint, timeout=options["timeout"])
+                body = json.dumps(value, sort_keys=True, allow_nan=False)
+                tag = '\"' + hashlib.sha256(body.encode()).hexdigest() + '\"'
+                unchanged = "If-None-Match: " + tag in arguments
+                status = 304 if unchanged else 200
+                helper_requests.append({"epoch": virtual_clock[0], "function": "sensor-await",
+                                        "endpoint": endpoint, "principal": "GITHUB_TOKEN", "status": status})
+                return SimpleNamespace(returncode=1 if unchanged else 0, stdout=
+                    f"HTTP/2.0 {status} {'Not Modified' if unchanged else 'OK'}\r\nETag: {tag}\r\n\r\n" + ("" if unchanged else body), stderr="")
+            try:
+                with patch.dict(os.environ, {"GH_TOKEN": "fixture-default"}), patch("subprocess.run", side_effect=native_response):
+                    duration = next(task["generator"])
+                self.assertEqual(duration, 60)
+                self.assertGreater(namespace["api_read_count"], previous_attempts)
+                self.assertLessEqual(namespace["api_read_count"], 300)
+                task["due"] = virtual_clock[0] + duration
+            except SystemExit as error:
+                if error.code != 0:
+                    raise cohort.CohortError(f"Actual sensor source={source_id} epoch={virtual_clock[0]} reads={namespace['api_read_count']}/300 rejected") from error
+                self.assertEqual(namespace["original_boundary"], 5500)
+                sensor_binding_reads.append((source_id, namespace["api_read_count"]))
+                sensor_completion_times.append((virtual_clock[0], source_id))
+                written_sources.add(source_id)
+                finish_sensor(source_id)
+                del sensor_tasks[source_id]
+
+        def advance_clock(duration):
+            target = virtual_clock[0] + duration
+            if actual_sensor_loop:
+                while sensor_tasks:
+                    due = min(task["due"] for task in sensor_tasks.values())
+                    if due > target:
+                        break
+                    virtual_clock[0] = due
+                    for source_id in sorted(list(sensor_tasks)):
+                        if sensor_tasks[source_id]["due"] == due:
+                            resume_sensor(source_id)
+            virtual_clock[0] = target
+
+        native_transport = cohort._Transport
+        class Transport(native_transport):
             def __init__(self, token, budget):
-                self.primary_reads, self.budget = 0, budget
+                super().__init__(token, budget)
             def json(self, endpoint, *, timeout):
+                if conditional_helper_transport:
+                    def native_response(arguments, **kwargs):
+                        value = read(endpoint, timeout=timeout)
+                        body = json.dumps(value, sort_keys=True, allow_nan=False)
+                        etag = '"' + hashlib.sha256(body.encode("utf-8")).hexdigest() + '"'
+                        matching = [arguments[index + 1] for index, argument in enumerate(arguments[:-1]) if argument == "-H"]
+                        unchanged = matching == ["If-None-Match: " + etag]
+                        status = 304 if unchanged else 200
+                        self.account(endpoint, status=status)
+                        return SimpleNamespace(returncode=0, stdout=f"HTTP/2 {status} {'Not Modified' if unchanged else 'OK'}\netag: {etag}\n\n" + ("" if unchanged else body), stderr="")
+                    with patch("subprocess.run", side_effect=native_response):
+                        return super().json(endpoint, timeout=timeout)
                 self.primary_reads += 1
+                self.account(endpoint)
                 return read(endpoint, timeout=timeout)
             def archive(self, endpoint, *, timeout):
+                self.account(endpoint, status=302)
                 self.budget.charge()
+                storage_requests.append((virtual_clock[0], os.environ.get("COHORT_MODE", "raw-filter"), "helper"))
                 return archives[int(endpoint.split("/")[-2])]
+            def account(self, endpoint, *, status=200):
+                if not advance_pacing_clock:
+                    return
+                mode = os.environ.get("COHORT_MODE", "raw-filter-" + raw_filter_phase)
+                principal = "App" if mode in {"ack-members", "raw-filter-early"} else "GITHUB_TOKEN"
+                helper_requests.append({"epoch": virtual_clock[0], "function": mode,
+                                        "endpoint": endpoint, "principal": principal, "status": status})
+                if principal == "App" and status != 304:
+                    app_request(mode, endpoint, component="helper")
 
         env = {"GITHUB_REPOSITORY": raw.repository, "GITHUB_RUN_ATTEMPT": "1", "WORKFLOW_SHA": raw.sha,
                "WORKFLOW_REF": raw.repository + "/.github/workflows/pr-governance.yml@refs/heads/master",
                "DEFAULT_BRANCH": "master", "GH_TOKEN": "fixture", "COHORT_ORIGINAL_ROOT_DEADLINE": "21200",
                "COHORT_VALID": "true", "COHORT_SENSOR_SOURCE": "true"}
         initial_directory = os.getcwd()
-        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, env), \
-                patch.object(cohort.time, "time", return_value=200), patch.object(cohort, "_Transport", Transport):
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, env), ExitStack() as clocks, \
+                patch.object(cohort.time, "time", side_effect=lambda: virtual_clock[0]), patch.object(cohort, "_Transport", Transport):
+            if advance_pacing_clock:
+                # 同一clockを全ownerで継続し、epoch期限をmonotonic pacingと同時に進める。
+                clocks.enter_context(patch.object(cohort.time, "monotonic", side_effect=lambda: virtual_clock[0]))
+                clocks.enter_context(patch.object(cohort.time, "sleep", side_effect=advance_clock))
             def run(mode, owner, directory, extra=None):
                 directory.mkdir(exist_ok=True)
                 os.chdir(directory)
@@ -703,11 +986,20 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
                 return values
 
             try:
+                if actual_sensor_loop:
+                    for source_id, source in sources.items():
+                        namespace = sensor_case.namespace({"HEAD_SHA": source["head_sha"], "PR_NUMBER": str(source["pull_requests"][0]["number"]),
+                            "SOURCE_RUN_ID": str(source_id)})
+                        exec(sensor_program, namespace)
+                        sensor_namespaces[source_id] = namespace
+                        sensor_tasks[source_id] = {"generator": namespace["await_native_sensor"](), "due": virtual_clock[0]}
+                    advance_clock(0)
                 for offset, source in enumerate(sources.values()):
                     owner = 10000 + offset
                     directory = Path(temporary) / str(owner)
                     hint = dict(raw.member, source_run_id=source["id"], source_run_number=source["run_number"],
-                                pr_number=source["pull_requests"][0]["number"], head_sha=source["head_sha"])
+                                pr_number=source["pull_requests"][0]["number"], head_sha=source["head_sha"],
+                                pr_body_sha256=hashlib.sha256(source["pull_requests"][0]["body"].encode()).hexdigest())
                     run("producer", owner, directory, {"COHORT_MEMBER_HINT": json.dumps(hint)})
                     own_journals[owner] = upload(json.loads((directory / "cohort-journal/binding.json").read_text()), owner)
                     if offset:
@@ -768,14 +1060,53 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
                                 f"segment={index} run={identifier} artifact={header['artifact_id']} digest={header['artifact_digest']}"), number=index))
                         service_job = next(job for job in run_jobs[owner] if job["name"] == "Service bound cohort review sources")
                         service_job.update(status="in_progress", conclusion=None, steps=registration_steps)
+                        if cold_process:
+                            next(job for job in run_jobs[owner] if job["name"] == writer.RESOLVER_FAILURE_BARRIER_NAME).update(status="completed", conclusion="success")
                     def probe_writer(phase):
                         writer = writer_fixtures.WRITER
+                        native_charge = writer.cohort_charge
+                        native_api, native_object_page, native_command, native_read = writer.api_json, writer.object_page, writer.command, writer.cohort_read_json
+                        def app_endpoint(endpoint, method="GET"):
+                            if advance_pacing_clock and installation_requests and installation_requests[-1]["endpoint"] is None:
+                                installation_requests[-1].update(endpoint=endpoint, method=method)
+                        def charged(*, default_token=False):
+                            if not advance_pacing_clock or default_token:
+                                return native_charge(default_token=default_token)
+                            native_charge(default_token=False)
+                            if conditional_writer_transport:
+                                return
+                            frame, function = inspect.currentframe().f_back, "unknown"
+                            while frame is not None:
+                                if frame.f_code.co_filename == writer.__file__ and frame.f_code.co_name != "charge":
+                                    function = frame.f_code.co_name
+                                    break
+                                frame = frame.f_back
+                            app_request(function)
+                        def app_read(endpoint, *, timeout):
+                            app_endpoint(endpoint)
+                            return read(endpoint, timeout=timeout)
+                        def app_archive(endpoint, *, timeout):
+                            if conditional_writer_transport:
+                                app_request("cohort_read_archive", endpoint)
+                                writer_http_attempts.append({"epoch": virtual_clock[0], "method": "GET", "status": 302, "principal": "App"})
+                            app_endpoint(endpoint)
+                            if writer._cold_native_observations is not None:
+                                native_charge(default_token=False)
+                            # productionと同じstorage attemptはrole予算だけを消費する。
+                            native_charge(default_token=False)
+                            storage_requests.append((virtual_clock[0], phase, "writer"))
+                            return archives[int(endpoint.split("/")[-2])]
                         context = cohort.load_cohort(header["artifact_id"], header["artifact_digest"],
                             expected_owner=owner, expected_segment=None, read_json=read,
                             read_archive=lambda endpoint, timeout: archives[int(endpoint.split("/")[-2])],
                             budget=cohort.ReadBudget(900), deadline=21200, allow_empty=not state["member_ids"])
                         def api(endpoint, *, default_token=False):
                             writer.cohort_charge(default_token=default_token)
+                            if not default_token:
+                                app_endpoint(endpoint)
+                            elif advance_pacing_clock:
+                                helper_requests.append({"epoch": virtual_clock[0], "function": "writer-default",
+                                                        "endpoint": endpoint, "principal": "GITHUB_TOKEN"})
                             return read(endpoint, timeout=20)
                         def command(arguments, **kwargs):
                             if not kwargs.get("cohort_precharged", False):
@@ -783,50 +1114,103 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
                             if arguments[0] == "--method":
                                 self.assertTrue(enforce_check_writes)
                                 method, endpoint = arguments[1:3]
+                                app_endpoint(endpoint, method)
                                 fields = dict(argument.split("=", 1) for argument in arguments[4::2])
                                 if method == "POST":
                                     self.assertEqual(endpoint, prefix + "/check-runs")
                                     identifier = 50000 + len(checks)
                                     checks[identifier] = {"id": identifier, "name": fields["name"],
                                         "head_sha": fields["head_sha"], "external_id": fields["external_id"],
-                                        "app": {"id": 9001}, "conclusion": None, "updated_at": "1970-01-01T00:03:20Z"}
+                                        "app": {"id": check_app_id}, "conclusion": None, "updated_at": "1970-01-01T00:03:20Z",
+                                        "started_at": native_timestamp(), "completed_at": None}
                                 else:
                                     self.assertEqual(method, "PATCH")
                                     identifier = int(endpoint.rsplit("/", 1)[1])
                                 checks[identifier].update({key: fields[key] for key in ("status", "conclusion", "details_url") if key in fields})
+                                checks[identifier]["output"] = {key: fields["output[" + key + "]"] for key in ("title", "summary") if "output[" + key + "]" in fields}
+                                if fields.get("status") == "completed":
+                                    checks[identifier]["completed_at"] = native_timestamp()
+                                if advance_pacing_clock:
+                                    checks[identifier]["updated_at"] = native_timestamp()
+                                    mutation_times.append((virtual_clock[0], method, fields["status"]))
                                 return json.dumps(checks[identifier])
                             self.assertEqual(len(arguments), 1)
                             self.assertTrue(arguments[0].startswith(prefix))
+                            app_endpoint(arguments[0])
                             return json.dumps(read(arguments[0], timeout=20))
+                        def native_response(arguments, **options):
+                            self.assertEqual(arguments[:2], ["gh", "api"])
+                            request = arguments[2:]
+                            endpoint = next(value for value in request if value.startswith(prefix))
+                            method = request[request.index("--method") + 1] if "--method" in request else "GET"
+                            default = options["env"]["GH_TOKEN"] == "fixture-default"
+                            if method != "GET":
+                                app_request("write_check", endpoint, method)
+                                writer_http_attempts.append({"epoch": virtual_clock[0], "method": method, "status": 201, "principal": "App"})
+                                return SimpleNamespace(returncode=0, stdout=command(request, cohort_precharged=True), stderr="")
+                            value = read(endpoint, timeout=options["timeout"])
+                            body = json.dumps(value, sort_keys=True, allow_nan=False)
+                            tag = '"' + hashlib.sha256(body.encode("utf-8")).hexdigest() + '"'
+                            headers = [request[index + 1] for index, argument in enumerate(request[:-1]) if argument == "-H"]
+                            unchanged = "If-None-Match: " + tag in headers
+                            status = 304 if unchanged else 200
+                            writer_http_attempts.append({"epoch": virtual_clock[0], "method": method, "status": status,
+                                                         "principal": "GITHUB_TOKEN" if default else "App"})
+                            if default:
+                                helper_requests.append({"epoch": virtual_clock[0], "function": "writer-default",
+                                    "endpoint": endpoint, "principal": "GITHUB_TOKEN", "status": status})
+                            elif status != 304:
+                                frame, function = inspect.currentframe().f_back, "unknown"
+                                while frame is not None:
+                                    if frame.f_code.co_filename == writer.__file__ and frame.f_code.co_name not in {"command", "api_json", "object_page", "cohort_read_json"}:
+                                        function = frame.f_code.co_name
+                                        break
+                                    frame = frame.f_back
+                                app_request(function, endpoint)
+                            if "--include" in request:
+                                body = f"HTTP/2.0 {status} {'Not Modified' if unchanged else 'OK'}\r\nETag: {tag}\r\n\r\n" + ("" if unchanged else body)
+                            return SimpleNamespace(returncode=1 if unchanged else 0, stdout=body, stderr="")
                         extra = {"GITHUB_ACTIONS": "true", "GITHUB_SHA": raw.sha, "GITHUB_REF_NAME": "master",
                             "GOVERNANCE_DISPATCHER_RUN_ID": str(owner), "GOVERNANCE_SCOPE": phase,
                             "GOVERNANCE_COHORT_ARTIFACT_ID": str(header["artifact_id"]),
                             "GOVERNANCE_COHORT_ARTIFACT_DIGEST": header["artifact_digest"],
-                            "KRR_GOVERNANCE_CHECK_APP_ID": "9001"}
-                        elapsed = [200.0]
-                        with patch.dict(os.environ, extra), patch.multiple(writer, REPOSITORY=raw.repository,
+                            "GH_TOKEN": "fixture-app-read", "DEFAULT_READ_TOKEN": "fixture-default", "CHECK_WRITE_TOKEN": "fixture-app-write",
+                            "KRR_GOVERNANCE_CHECK_APP_ID": str(check_app_id)}
+                        elapsed = virtual_clock if advance_pacing_clock else [200.0]
+                        with ExitStack() as writer_patches:
+                            writer_patches.enter_context(patch.dict(os.environ, extra))
+                            writer_patches.enter_context(patch.multiple(writer, REPOSITORY=raw.repository,
                             SERVER_URL="https://github.com", WRITER_RUN_ID=str(owner), _cohort_context=context,
-                            _terminal_deadline_monotonic=writer.time.monotonic() + 21000,
+                            _terminal_deadline_monotonic=(21200 if advance_pacing_clock else writer.time.monotonic() + 21000),
                             _cohort_api_counts={"default": 0, "app": 0}, _cohort_alias_index=None,
                             _cohort_covered_generations={}, _cohort_inventory_noop_generations={},
                             _cohort_pending_generations={}, _cohort_pending_exemptions=frozenset(),
-                            _cohort_generation_identities={}, _nonreconciling_dispatcher_generations={}), \
-                                patch.object(writer, "api_json", api), patch.object(writer, "object_page", api), \
-                                patch.object(writer, "command", command), \
-                                patch.object(writer, "cohort_read_json", read), \
-                                patch.object(writer, "cohort_read_archive", lambda endpoint, timeout: archives[int(endpoint.split("/")[-2])]), \
-                                patch.object(writer, "cohort_helper", return_value=cohort):
-                            try:
-                                writer.reject_newer_dispatcher_barrier("c" * 40)
-                                outcome = "allowed"
-                            except writer.NoPostGovernanceError:
-                                outcome = "preempted"
-                                if phase == "early":
-                                    raise
-                            writer_barriers.append((owner, phase, outcome, writer._cohort_api_counts["app"]))
+                            _cohort_cold_publication_guards={}, _cohort_members_by_target={}, _early_writer_admission=None,
+                            _cold_native_observations=None, _cohort_member_grant_code_proof=None,
+                            _cohort_member_grant_check_runs=set(),
+                            _conditional_json_reads=conditional_writer_transport, _conditional_read_cache={},
+                            _conditional_read_counts=dict.fromkeys(writer._conditional_read_counts, 0),
+                            _cohort_generation_identities={}, _nonreconciling_dispatcher_generations={}))
+                            for name, value in {"api_json": native_api if conditional_writer_transport else api,
+                                    "object_page": native_object_page if conditional_writer_transport else api,
+                                    "command": native_command if conditional_writer_transport else command,
+                                    "cohort_charge": charged, "cohort_read_json": native_read if conditional_writer_transport else app_read,
+                                    "cohort_read_archive": app_archive}.items():
+                                writer_patches.enter_context(patch.object(writer, name, value))
+                            writer_patches.enter_context(patch.object(writer.subprocess, "run", side_effect=native_response))
+                            writer_patches.enter_context(patch.object(writer, "cohort_helper", return_value=cohort))
+                            if not cold_process or phase == "all":
+                                try:
+                                    writer.reject_newer_dispatcher_barrier("c" * 40)
+                                    outcome = "allowed"
+                                except writer.NoPostGovernanceError:
+                                    outcome = "preempted"
+                                    if phase == "early":
+                                        raise
+                                writer_barriers.append((owner, phase, outcome, writer._cohort_api_counts["app"]))
                             if phase == "early" and enforce_check_writes:
                                 with patch.object(writer.time, "monotonic", side_effect=lambda: elapsed[0]), \
-                                        patch.object(writer.time, "sleep", side_effect=lambda duration: elapsed.__setitem__(0, elapsed[0] + duration)), \
+                                        patch.object(writer.time, "sleep", side_effect=advance_clock if actual_sensor_loop else lambda duration: elapsed.__setitem__(0, elapsed[0] + duration)), \
                                         patch.object(writer, "_last_check_write_at", None), \
                                         patch.object(writer, "_bound_check_runs", {}):
                                     previous_segment = None
@@ -842,6 +1226,11 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
                                             writer._cohort_pending_exemptions = frozenset()
                                             writer._cohort_generation_identities = {}
                                             writer._nonreconciling_dispatcher_generations = {}
+                                            writer._cold_native_observations = None
+                                            writer._cohort_member_grant_code_proof = None
+                                            writer._cohort_member_grant_check_runs = set()
+                                            writer._conditional_read_cache = {}
+                                            writer._conditional_read_counts = dict.fromkeys(writer._conditional_read_counts, 0)
                                         previous_segment = segment
                                         writer_id = owner * 10 + segment
                                         with patch.object(writer, "WRITER_RUN_ID", str(writer_id)), \
@@ -854,56 +1243,84 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
                                                 base=member["base_sha"], head=member["head_sha"], body_sha256=member["pr_body_sha256"])
                                             head = sources[source_id]["head_sha"]
                                             try:
-                                                pending_check = writer.write_check(head, state="in_progress",
-                                                    description="Fixture decision pending", details_url=details)
-                                                terminal = writer.write_check(head, state="success",
-                                                    description="Fixture decision success", details_url=details, existing=pending_check)
+                                                if cold_process:
+                                                    if writer._early_writer_admission is None or writer._early_writer_admission.job_id != writer_id * 100:
+                                                        started = native_timestamp()
+                                                        native_writer_job = {"id": writer_id * 100, "run_id": writer_id, "run_attempt": 1,
+                                                            "run_url": "https://api.github.com/" + prefix + f"/actions/runs/{writer_id}",
+                                                            "url": "https://api.github.com/" + prefix + f"/actions/jobs/{writer_id * 100}",
+                                                            "head_sha": raw.sha, "head_branch": "master", "workflow_name": writer.WRITER_WORKFLOW_NAME,
+                                                            "name": "Write authoritative governance Check Runs", "status": "in_progress", "conclusion": None,
+                                                            "started_at": started, "steps": [{"number": 1, "status": "in_progress", "conclusion": None,
+                                                                "started_at": started, "name": "Revalidate every current open pull request and publish fenced states"}]}
+                                                        run_jobs[writer_id] = [native_writer_job]
+                                                        segment_targets = tuple(state["members"][str(identifier)]["pr_number"]
+                                                            for offset, identifier in enumerate(state["member_ids"])
+                                                            if int(state["member_segments"][offset]) == segment)
+                                                        writer.prepare_cohort_writer(writer.DispatcherSource(owner, "workflow_run", 1),
+                                                            header["artifact_id"], header["artifact_digest"], segment, segment_targets, phase="early")
+                                                    with patch.object(writer, "contract", return_value="success"), \
+                                                            patch.object(writer, "sensor", return_value=source_id), \
+                                                            patch.object(writer, "generation", side_effect=[*generations, *generations]), \
+                                                            patch.object(writer, "final_closer_is_unique", return_value=True):
+                                                        writer.process(member["pr_number"], {str(member["pr_number"] + 1000): frozenset({member["pr_number"]})}, "unit-decision-input")
+                                                    terminal = writer.check_run(head)
+                                                    if position == 0:
+                                                        writer_barriers.append((owner, phase, "allowed", writer._cohort_api_counts["app"]))
+                                                else:
+                                                    pending_check = writer.write_check(head, state="in_progress",
+                                                        description="Fixture decision pending", details_url=details)
+                                                    terminal = writer.write_check(head, state="success",
+                                                        description="Fixture decision success", details_url=details, existing=pending_check)
                                             except writer.NoPostGovernanceError as error:
                                                 raise writer.NoPostGovernanceError(f"Actual writer early owner={owner} "
                                                     f"completed={len(written_sources)} checks={len(checks)} "
                                                     f"app={writer._cohort_api_counts['app']}/4500: {error}") from error
                                             self.assertEqual(terminal["conclusion"], "success")
-                                            sensor_budget = cohort.ReadBudget(900)
-                                            boundary = sensor_reader["sensor_cohort_binding"](terminal,
-                                                writer_runs[writer_id], sources[source_id], pulls[member["pr_number"]],
-                                                read_json=read, read_archive=lambda endpoint, timeout: archives[int(endpoint.split("/")[-2])],
-                                                budget=sensor_budget, deadline=21200, workflow_blob=raw.blob)
-                                            self.assertEqual(boundary, 5500)
-                                            sensor_binding_reads.append((source_id, sensor_budget.used))
+                                            if not actual_sensor_loop:
+                                                sensor_budget = cohort.ReadBudget(300)
+                                                boundary = sensor_reader["sensor_cohort_binding"](terminal,
+                                                    writer_runs[writer_id], sources[source_id], pulls[member["pr_number"]],
+                                                    read_json=lambda endpoint, timeout: sensor_read(endpoint, timeout=timeout, source_id=source_id, budget=sensor_budget),
+                                                    read_archive=lambda endpoint, timeout: sensor_archive(endpoint, timeout=timeout, source_id=source_id, budget=sensor_budget),
+                                                    budget=sensor_budget, deadline=21200, workflow_blob=raw.blob)
+                                                self.assertEqual(boundary, 5500)
+                                                sensor_binding_reads.append((source_id, sensor_budget.used))
+                                                written_sources.add(source_id)
+                                                if advance_pacing_clock:
+                                                    # sensorの完了はbatch ACKを待たず、検証済みterminal直後に起きる。
+                                                    sources[source_id].update(status="completed", conclusion="success")
+                                                    run_jobs[source_id][0].update(status="completed", conclusion="success")
+                                                    run_jobs[source_id][0]["steps"][0].update(status="completed", conclusion="success",
+                                                                                            completed_at=native_timestamp())
+                                                    if include_completed_callbacks:
+                                                        complete_callback(source_id)
                                             writer_read_counts[writer_id] = writer._cohort_api_counts["app"]
-                                            written_sources.add(source_id)
                     if enforce_writer_barrier:
                         probe_writer("early")
+                    if actual_sensor_loop:
+                        while any(identifier in sensor_tasks for identifier in state["member_ids"]):
+                            advance_clock(min(task["due"] for task in sensor_tasks.values()) - virtual_clock[0])
                     for identifier in state["member_ids"]:
                         if enforce_check_writes:
                             self.assertIn(identifier, written_sources)
                         self.assertEqual(state["members"][str(identifier)]["source_deadline_epoch"], 5500)
                         sources[identifier].update(status="completed", conclusion="success")
                         run_jobs[identifier][0].update(status="completed", conclusion="success")
-                        run_jobs[identifier][0]["steps"][0].update(status="completed", conclusion="success",
-                                                                   completed_at="1970-01-01T00:03:20Z")
+                        if not advance_pacing_clock:
+                            run_jobs[identifier][0]["steps"][0].update(status="completed", conclusion="success",
+                                                                       completed_at=native_timestamp())
                         reader = cohort._Reader(read, lambda endpoint, timeout: archives[int(endpoint.split("/")[-2])],
                                                 cohort.ReadBudget(300), 21200)
                         self.assertTrue(cohort.completed_sensor_noop(sources[identifier], pulls[sources[identifier]["pull_requests"][0]["number"]],
                             reader=reader, workflow_sha=raw.sha, workflow_blob=raw.blob))
                         if include_completed_callbacks:
-                            callback = 20000 + identifier
-                            title = f"sensor={identifier} action=completed"
-                            runs[callback] = dict(raw.run, id=callback, run_number=callback, name=title,
-                                display_title=title, repository=repo, head_repository=repo, created_at="1970-01-01T00:03:20Z",
-                                status="completed", conclusion="success")
-                            run_jobs[callback] = [{"id": callback * 100 + index, "run_id": callback,
-                                "head_sha": raw.sha, "name": name, "status": "completed",
-                                "conclusion": "success" if name == "Preflight workflow_run governance source" else "skipped",
-                                "steps": [dict(step(cohort.COMPLETED_NOOP_PREFIX + str(identifier)), number=1)]
-                                    if name == "Preflight workflow_run governance source" else []}
-                                for index, name in enumerate(sorted(cohort.MUTATING_JOBS | {cohort.PRODUCER_JOB,
-                                    cohort.ELECTION_JOB, cohort.ADMISSION_JOB, "Preflight workflow_run governance source"}), 1)]
-                            completed_callbacks.append(callback)
+                            complete_callback(identifier)
                     for index in range(1, state["batch_count"] + 1):
                         result = run("ack-members", owner, directory, {"COHORT_SEGMENT": str(index),
                             "COHORT_ARTIFACT_ID": str(header["artifact_id"]), "COHORT_ARTIFACT_DIGEST": header["artifact_digest"]})
                         acknowledged.update(json.loads(result["acknowledged_source_ids"]))
+                        ack_times.append((virtual_clock[0], owner, len(acknowledged)))
                     for name in ("Service bound cohort review sources", "Preserve pending review sensor before direct dispatch",
                                  "Preserve admitted sources before obsolete heavy preemption"):
                         existing = next((job for job in run_jobs[owner] if job["name"] == name), None)
@@ -954,6 +1371,18 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
                         if native_job["status"] == "queued":
                             native_job.update(status="completed", conclusion="skipped")
                     self.assertEqual({identifier: archives[identifier] for identifier in original_source_archives}, original_source_archives)
+            except (cohort.CohortError, writer_fixtures.WRITER.GovernanceError) as error:
+                error.replay_metrics = {"epoch": virtual_clock[0], "monotonic": virtual_clock[0],
+                    "owners": list(owners), "cohort_sizes": list(cohort_sizes),
+                    "written": len(written_sources), "published_terminal": sum(value.get("conclusion") == "success" for value in checks.values()),
+                    "acknowledged": len(acknowledged),
+                    "mutations": list(mutation_times), "ack_times": list(ack_times),
+                    "source_deadline_epoch": 5500, "root_deadline_epoch": 21200,
+                    "expired_sources": sum(source["status"] != "completed" and virtual_clock[0] >= 5500 for source in sources.values()),
+                    "initial_callback_count": total, "completed_callback_count": len(completed_callbacks),
+                    "callback_inventory_count": len(runs), "installation_quota": installation_metrics(),
+                    "helper_resources": helper_metrics()}
+                raise
             finally:
                 os.chdir(initial_directory)
         return {"acknowledged": acknowledged, "owners": owners, "cancelled": cancelled, "roles": roles,
@@ -964,6 +1393,11 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
                 "writer_barriers": writer_barriers,
                 "written_sources": written_sources,
                 "writer_read_counts": writer_read_counts, "sensor_binding_reads": sensor_binding_reads,
+                "virtual_epoch": virtual_clock[0], "mutation_times": mutation_times, "ack_times": ack_times,
+                "sensor_completion_times": sensor_completion_times,
+                "sensor_attempts": {source: namespace["api_read_count"] for source, namespace in sensor_namespaces.items()},
+                "installation_quota": installation_metrics(),
+                "helper_resources": helper_metrics(),
                 "remaining": {identifier for identifier, source in sources.items() if source["status"] != "completed"}}
 
     def test_fifo_role_simulation_preserves_successor_for_401_and_600_sources(self) -> None:
@@ -1006,6 +1440,92 @@ class GovernanceCohortSchedulingReplayTest(unittest.TestCase):
         old_all = [outcome for _, phase, outcome, _ in result["writer_barriers"][:-1] if phase == "all"]
         self.assertEqual(set(old_all), {"preempted"})
         self.assertEqual(result["writer_barriers"][-1][1:3], ("all", "allowed"))
+
+    def test_real_pacing_401_and_600_expire_original_source_clock(self) -> None:
+        # callback増加を除く容量対照でも期限不足となる。native transportの時間は0秒の下限対照。
+        self.pacing_failures = {}
+        for total, first_batch in ((401, 35), (600, 20)):
+            with self.subTest(total=total):
+                with self.assertRaisesRegex(writer_fixtures.WRITER.NoPostGovernanceError,
+                                             "Actual writer early.*Dispatcher barrier evidence is invalid") as failure:
+                    self.replay(total, enforce_raw_filter=True, enforce_writer_barrier=True,
+                                enforce_check_writes=True, include_completed_callbacks=False,
+                                advance_pacing_clock=True)
+                metrics = failure.exception.replay_metrics
+                self.pacing_failures[total] = metrics
+                self.assertEqual(metrics["cohort_sizes"][0], first_batch)
+                self.assertEqual(metrics["source_deadline_epoch"], 100 + 5400)
+                self.assertEqual(metrics["root_deadline_epoch"], 200 + 21000)
+                self.assertEqual(metrics["epoch"], metrics["monotonic"])
+                self.assertGreaterEqual(metrics["epoch"], metrics["source_deadline_epoch"])
+                self.assertLess(metrics["epoch"], metrics["source_deadline_epoch"] + 8.1)
+                self.assertEqual(len(metrics["mutations"]), 2 * metrics["written"])
+                for before, after in zip(metrics["mutations"], metrics["mutations"][1:]):
+                    self.assertAlmostEqual(after[0] - before[0], 8.1)
+                self.assertLess(metrics["mutations"][-1][0], metrics["source_deadline_epoch"])
+                self.assertLess(metrics["acknowledged"], total)
+                self.assertGreater(metrics["expired_sources"], 0)
+                self.assertLess(metrics["ack_times"][-1][0], metrics["source_deadline_epoch"])
+                self.assertGreater(total * 2 * writer_fixtures.WRITER.CHECK_WRITE_INTERVAL_SECONDS, 5400)
+
+    def test_shared_installation_quota_stops_bounded_200_and_401_before_deadline(self) -> None:
+        self.quota_failures = {}
+        for total, callbacks in ((200, True), (401, True), (401, False)):
+            with self.subTest(total=total, completed_callbacks=callbacks):
+                with self.assertRaises((cohort.CohortError, writer_fixtures.WRITER.NoPostGovernanceError)) as failure:
+                    self.replay(total, enforce_raw_filter=True, enforce_writer_barrier=True,
+                                enforce_check_writes=True, include_completed_callbacks=callbacks,
+                                advance_pacing_clock=True, enforce_installation_quota=True)
+                metrics = failure.exception.replay_metrics
+                self.quota_failures[total, callbacks] = metrics
+                quota = metrics["installation_quota"]
+                self.assertEqual(quota["app_total"], 4500)
+                self.assertEqual(quota["app_rolling3600_peak"], 4500)
+                self.assertEqual(quota["app_reads"] + quota["app_mutations"], 4500)
+                self.assertEqual(set(quota["app_by_component"]), {"writer", "helper"})
+                self.assertEqual(quota["app_rejected_epoch"], metrics["epoch"])
+                self.assertEqual(metrics["source_deadline_epoch"], 5500)
+                self.assertEqual(metrics["root_deadline_epoch"], 21200)
+                self.assertLess(metrics["epoch"], 5500)
+                self.assertLess(metrics["acknowledged"], total)
+                self.assertGreater(metrics["helper_resources"]["github_token_reads"], 1000)
+                self.assertEqual(metrics["callback_inventory_count"], total + metrics["completed_callback_count"])
+                if not callbacks:
+                    self.assertEqual(metrics["completed_callback_count"], 0)
+                else:
+                    self.assertGreater(metrics["completed_callback_count"], 0)
+
+    def test_actual_grant_sensor_cooperative_poll_preserves_state_clock_and_role_budget(self) -> None:
+        result = self.replay(1, enforce_raw_filter=True, enforce_writer_barrier=True,
+            enforce_check_writes=True, advance_pacing_clock=True, enforce_installation_quota=True,
+            conditional_helper_transport=True, cold_process=True, conditional_writer_transport=True, actual_sensor_loop=True)
+        self.assertEqual(result["written_sources"], {1000})
+        self.assertEqual(result["acknowledged"], {1000})
+        self.assertEqual(result["virtual_epoch"], 320)
+        self.assertEqual(result["sensor_completion_times"], [(320, 1000)])
+        self.assertEqual(result["sensor_attempts"], {1000: 20})
+        self.assertEqual(result["callback_inventory_count"], 2)
+        self.assertEqual(result["helper_resources"]["github_token_primary_by_role"]["sensor-await"], 8)
+        self.assertEqual(result["helper_resources"]["github_token_graphql_requests"], 2)
+        self.assertEqual(result["helper_resources"]["github_token_graphql_primary_cost"], 2)
+        self.assertEqual(result["helper_resources"]["github_token_graphql_secondary_points"], 2)
+        self.assertTrue(result["writer_read_counts"])
+        self.assertLess(max(result["writer_read_counts"].values()), 4500)
+
+    def test_actual_conditional_transports_cold_20_native_posts_and_acks(self) -> None:
+        result = self.replay(20, enforce_raw_filter=True, enforce_writer_barrier=True,
+            enforce_check_writes=True, advance_pacing_clock=True, enforce_installation_quota=True,
+            conditional_helper_transport=True, cold_process=True, conditional_writer_transport=True, actual_sensor_loop=True)
+        self.assertEqual(result["written_sources"], set(range(1000, 1020)))
+        self.assertEqual(result["acknowledged"], result["written_sources"])
+        self.assertEqual(result["callback_inventory_count"], 40)
+        self.assertEqual([(method, status) for _, method, status in result["mutation_times"]], [("POST", "completed")] * 20)
+        self.assertGreaterEqual(result["virtual_epoch"], 200 + 20 * 8.1)
+        self.assertLess(result["virtual_epoch"], 5500)
+        self.assertGreater(result["installation_quota"]["writer_http_status_counts"][304], 0)
+        self.assertGreater(result["helper_resources"]["helper_status_counts"][304], 0)
+        self.assertLess(result["installation_quota"]["app_rolling3600_peak"], 4500)
+        self.assertLess(result["helper_resources"]["github_token_rolling3600_peak"], 1000)
 
     def test_old_single_policy_exhausts_real_owners_before_overflow_ack(self) -> None:
         for total in (401, 600):

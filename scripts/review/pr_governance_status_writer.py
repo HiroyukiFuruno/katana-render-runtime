@@ -10,6 +10,7 @@ single Check Run PATCH helper.
 from __future__ import annotations
 
 import hashlib
+import base64
 import importlib.util
 import json
 import os
@@ -97,6 +98,7 @@ DISPATCHER_TERMINAL_CONCLUSIONS = frozenset({
 })
 MAX_DISPATCHER_FENCE_RUNS = 100
 COHORT_EARLY_MUTEX_WORKFLOW_BLOB = "1e599afba75f6c3504dd3468705dae5d3faa3412"
+COHORT_COLD_MERGE_AUTHORITY_RULESET_ID = 21909389
 # A terminal continuation handles at most 125 PRs.  Every sensor/CI listing is
 # restricted by the immutable current PR head and a small bounded page chain,
 # rather than paging arbitrary retained workflow history with the App token.
@@ -246,6 +248,13 @@ _cohort_covered_generations: dict[tuple[object, ...], DispatcherGeneration] = {}
 _cohort_inventory_noop_generations: dict[tuple[object, ...], DispatcherGeneration] = {}
 _cohort_pending_generations: dict[tuple[object, ...], DispatcherGeneration] = {}
 _cohort_pending_exemptions: frozenset[int] = frozenset()
+_cohort_cold_publication_guards: dict[tuple[str, str], str] = {}
+_cohort_member_grant_code_proof: tuple[str, str, str] | None = None
+_cohort_member_grant_check_runs: set[tuple[str, str, int]] = set()
+_cold_native_observations: dict[str, Any] | None = None
+_conditional_json_reads = os.environ.get("GITHUB_ACTIONS") == "true"
+_conditional_read_cache: dict[tuple[str, ...], tuple[str, str]] = {}
+_conditional_read_counts = {"attempt": 0, "primary": 0, "not_modified": 0, "app_primary": 0, "default_primary": 0}
 _cohort_alias_index: dict[int, int] | None = None
 _cohort_generation_identities: dict[int, str] = {}
 _early_writer_admission: EarlyWriterAdmission | None = None
@@ -382,20 +391,93 @@ def command(
         if remaining <= 0:
             raise GovernanceError("Governance terminal deadline exceeded.")
         timeout = min(timeout, remaining)
+    observation_key = None
+    scope = _cold_native_observations
+    if scope is not None and not check_write and not default_token and len(arguments) == 1 and arguments[0] in scope["endpoints"]:
+        observation_key = (arguments[0], hashlib.sha256(environment["GH_TOKEN"].encode("utf-8", errors="strict")).hexdigest())
+        if not scope["refresh"] and observation_key in scope["values"]:
+            return scope["values"][observation_key]
+    if scope is not None:
+        # Readerの前課金はscope内だけ保留し、実際のHTTP requestをここで一度数える。
+        cohort_precharged = False
     if _cohort_api_counts is not None and not cohort_precharged:
         cohort_charge(default_token=default_token)
+    conditional = (_conditional_json_reads and not check_write and len(arguments) == 1
+                   and isinstance(arguments[0], str)
+                   and (arguments[0] == f"repos/{REPOSITORY}" or arguments[0].startswith(f"repos/{REPOSITORY}/")))
+    prior = None
+    request_arguments = list(arguments)
+    if conditional:
+        endpoint = arguments[0]
+        if any(character in endpoint for character in ("\r", "\n", "\x00")):
+            raise GovernanceError("Conditional JSON endpoint is invalid.")
+        accept, version = "application/vnd.github+json", "2022-11-28"
+        key = ("default" if default_token else "app-read", REPOSITORY,
+               hashlib.sha256(environment["GH_TOKEN"].encode("utf-8", errors="strict")).hexdigest(),
+               accept, version, "https://api.github.com/" + endpoint)
+        prior = _conditional_read_cache.get(key)
+        request_arguments.extend(["--hostname", "github.com", "--include", "-H", f"Accept: {accept}", "-H", f"X-GitHub-Api-Version: {version}"])
+        if prior is not None:
+            request_arguments.extend(["-H", "If-None-Match: " + prior[0]])
+        _conditional_read_counts["attempt"] += 1
     try:
         result = subprocess.run(
-            ["gh", "api", *arguments], capture_output=True, text=True,
+            ["gh", "api", *request_arguments], capture_output=True, text=True,
             check=False, env=environment, timeout=timeout,
         )
     except subprocess.TimeoutExpired as error:
         raise GovernanceError("GitHub API request timed out.") from error
     if effective_deadline is not None and time.monotonic() > effective_deadline:
         raise GovernanceError("Governance terminal deadline exceeded.")
+    if conditional:
+        raw = result.stdout.replace("\r\n", "\n")
+        headers, separator, body = raw.partition("\n\n")
+        lines = headers.split("\n")
+        status = re.fullmatch(r"HTTP/(?:1\.[01]|2(?:\.0)?|3(?:\.0)?) ([0-9]{3})(?: [^\r\n]*)?", lines[0])
+        if (not separator or status is None or any(not re.fullmatch(r"[A-Za-z0-9!#$%&'*+.^_`|~-]+: [^\r\n]*", line) for line in lines[1:])):
+            raise GovernanceError("Conditional JSON HTTP metadata is invalid.")
+        etag_lines = [line.split(":", 1)[1].strip() for line in lines[1:] if line.split(":", 1)[0].lower() == "etag"]
+        if len(etag_lines) > 1 or any(re.fullmatch(r'(?:W/)?"[^"\x00-\x20\x7f]+"', tag) is None for tag in etag_lines):
+            raise GovernanceError("Conditional JSON ETag is invalid.")
+        if status[1] == "304":
+            if result.returncode not in {0, 1} or prior is None or body or etag_lines != [prior[0]]:
+                raise GovernanceError("Conditional JSON 304 is not bound to the exact read.")
+            _conditional_read_counts["not_modified"] += 1
+            return remember_cold_native_observation(observation_key, prior[1])
+        _conditional_read_counts["primary"] += 1
+        _conditional_read_counts["default_primary" if default_token else "app_primary"] += 1
+        if result.returncode != 0 or status[1] != "200":
+            raise GovernanceError("Conditional JSON read failed closed.")
+        try:
+            value = json.loads(body, parse_constant=lambda _: (_ for _ in ()).throw(ValueError("nonfinite JSON")))
+            if not isinstance(value, (dict, list)):
+                raise ValueError("JSON collection required")
+            snapshot = json.dumps(value, allow_nan=False, ensure_ascii=False)
+            snapshot.encode("utf-8", errors="strict")
+        except (ValueError, UnicodeError) as error:
+            raise GovernanceError("Conditional JSON body is invalid.") from error
+        if etag_lines:
+            _conditional_read_cache[key] = (etag_lines[0], snapshot)
+        else:
+            _conditional_read_cache.pop(key, None)
+        return remember_cold_native_observation(observation_key, snapshot)
     if result.returncode != 0:
         raise GovernanceError("GitHub API request failed.")
-    return result.stdout
+    return remember_cold_native_observation(observation_key, result.stdout)
+
+
+def remember_cold_native_observation(key: tuple[str, str] | None, snapshot: str) -> str:
+    if key is not None and _cold_native_observations is not None and not _cold_native_observations["refresh"]:
+        try:
+            value = json.loads(snapshot)
+            if not isinstance(value, dict):
+                raise ValueError("object required")
+            snapshot = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+            snapshot.encode("utf-8", errors="strict")
+        except (ValueError, UnicodeError) as error:
+            raise NoPostGovernanceError("Cold native observation is invalid.") from error
+        _cold_native_observations["values"][key] = snapshot
+    return snapshot
 
 
 def api_json(endpoint: str, *, default_token: bool = False) -> Any:
@@ -1464,21 +1546,30 @@ def _valid_check(value: object, head: str, *, external_id: str | None = None) ->
         raise GovernanceError("Check Run response is invalid.")
     app = value.get("app")
     updated_at = value.get("updated_at")
-    # GitHub は作成直後の in-progress Check Run に ``updated_at: null`` を返す。
-    # この場合は ``started_at`` だけが世代を固定するため、その対が欠ける形は受理しない。
+    # native Check Runはupdated_atを省くため、開始・完了時刻をfingerprintへ束縛する。
     has_valid_timestamp = (
         isinstance(updated_at, str)
         or (
             updated_at is None
-            and value.get("status") == "in_progress"
-            and value.get("conclusion") is None
-            and isinstance(value.get("started_at"), str)
+            and (
+                value.get("status") == "in_progress" and value.get("conclusion") is None
+                and isinstance(value.get("started_at"), str) and bool(value["started_at"])
+                and value.get("completed_at") is None
+                or value.get("status") == "completed" and value.get("conclusion") in {"success", "failure", "neutral", "cancelled", "timed_out", "action_required", "skipped", "stale"}
+                and isinstance(value.get("completed_at"), str) and bool(value["completed_at"])
+                and (value.get("started_at") is None or isinstance(value.get("started_at"), str) and bool(value["started_at"]))
+            )
         )
     )
+    if has_valid_timestamp and updated_at is None:
+        started = dispatcher_created_at(value["started_at"]) if value.get("started_at") is not None else None
+        completed = dispatcher_created_at(value["completed_at"]) if value.get("completed_at") is not None else None
+        if started is not None and completed is not None and completed < started:
+            has_valid_timestamp = False
     if (
-        type(value.get("id")) is not int or value.get("name") != CHECK_NAME
+        type(value.get("id")) is not int or value["id"] < 1 or value.get("name") != CHECK_NAME
         or value.get("head_sha") != head or value.get("external_id") != (external_id if external_id is not None else check_external_id(head))
-        or not isinstance(app, dict) or app.get("id") != check_app_id()
+        or not isinstance(app, dict) or type(app.get("id")) is not int or app.get("id") != check_app_id()
         or not has_valid_timestamp
     ):
         raise GovernanceError("Check Run identity is invalid.")
@@ -1664,6 +1755,242 @@ def pace_check_write() -> None:
     _last_check_write_at = now
 
 
+def cohort_cold_publication_context(head: str) -> str | None:
+    """元の入場・member時計を持つearly writerだけにcold経路を限定する。"""
+    if (os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("GOVERNANCE_SCOPE") != "early"
+        or _cohort_context is None or _early_writer_admission is None):
+        return None
+    header = _cohort_context.get("header")
+    admission = _early_writer_admission
+    segment = os.environ.get("GOVERNANCE_CONTINUATION_INDEX", "")
+    try:
+        members = [member for values in _cohort_members_by_target.values() for member in values if member.get("head_sha") == head]
+        if (not isinstance(header, dict) or header.get("workflow_blob_sha") != COHORT_EARLY_MUTEX_WORKFLOW_BLOB
+            or header.get("repository") != REPOSITORY or header.get("workflow_sha") != os.environ.get("GITHUB_SHA")
+            or str(header.get("owner_dispatcher_run_id")) != os.environ.get("GOVERNANCE_DISPATCHER_RUN_ID")
+            or re.fullmatch(r"[1-4]", segment) is None or not NUMBER.fullmatch(WRITER_RUN_ID)
+            or type(_cohort_context["registered_writers"].get(int(segment))) is not int
+            or _cohort_context["registered_writers"][int(segment)] != int(WRITER_RUN_ID)
+            or not members or admission.root_deadline != header.get("root_deadline_epoch")
+            or time.time() >= min(admission.deadline_epoch, header["root_deadline_epoch"], *(member["source_deadline_epoch"] for member in members))
+            or time.monotonic() >= admission.deadline_monotonic):
+            return None
+        return json.dumps([header, _cohort_context["artifact_id"], _cohort_context["artifact_digest"],
+                           WRITER_RUN_ID, segment, admission.__dict__, members], sort_keys=True, allow_nan=False)
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise NoPostGovernanceError("Cold cohort admission is invalid.") from error
+
+
+@contextmanager
+def cold_native_observation_scope(head: str):
+    global _cold_native_observations, _cohort_alias_index, _cohort_pending_exemptions
+    if _cold_native_observations is not None or cohort_cold_publication_context(head) is None:
+        raise NoPostGovernanceError("Cold native proof scope is unavailable.")
+    owner = _cohort_context["header"]["owner_dispatcher_run_id"]
+    root = f"repos/{REPOSITORY}"
+    scope = {"endpoints": {root, root + f"/actions/runs/{owner}",
+             root + f"/actions/runs/{owner}/attempts/1/jobs?per_page=100&page=1",
+             root + f"/git/ref/heads/{default_branch_name()}"}, "values": {}, "refresh": False}
+    caches = (_cohort_covered_generations, _cohort_inventory_noop_generations,
+              _cohort_pending_generations, _cohort_generation_identities)
+    originals = [dict(cache) for cache in caches]
+    alias_index = None if _cohort_alias_index is None else dict(_cohort_alias_index)
+    registrations = dict(_cohort_context["registered_writers"])
+    _cold_native_observations = scope
+    try:
+        yield scope
+    except BaseException:
+        # 閉じるfresh証明の失敗を、途中で得たcache authorityへ変換しない。
+        for cache, original in zip(caches, originals):
+            cache.clear()
+            cache.update(original)
+        _cohort_alias_index = alias_index
+        _cohort_context["registered_writers"] = registrations
+        _cohort_pending_exemptions = frozenset()
+        raise
+    finally:
+        _cold_native_observations = None
+
+
+def verify_cohort_cold_publication_guard(head: str, *, expected: tuple[str, ...] | None = None) -> tuple[str, ...]:
+    """別のrequired checkがmergeを阻止する間だけpending POSTを省く。"""
+    context = cohort_cold_publication_context(head)
+    if context is None:
+        raise NoPostGovernanceError("Cold publication is outside an admitted early cohort.")
+    barrier = "KRR / PR governance affected-head barrier"
+    protection_endpoint = f"repos/{REPOSITORY}/branches/{default_branch_name()}/protection"
+    checks_endpoint = f"repos/{REPOSITORY}/commits/{head}/check-runs?" + urlencode({
+        "check_name": barrier, "app_id": 4766933, "filter": "all", "per_page": 100,
+    })
+    def strict(value: object) -> str:
+        return json.dumps(value, sort_keys=True, allow_nan=False)
+    def ruleset() -> str:
+        # 他rulesetの追加はこの固定update制約を緩和できないため、発見をauthorityにしない。
+        value = api_json(f"repos/{REPOSITORY}/rulesets/{COHORT_COLD_MERGE_AUTHORITY_RULESET_ID}")
+        actor = {"actor_id": 4766933, "actor_type": "Integration", "bypass_mode": "pull_request"}
+        if (not isinstance(value, dict) or type(value.get("id")) is not int or value["id"] != COHORT_COLD_MERGE_AUTHORITY_RULESET_ID
+            or value.get("name") != "KRR PR governance merge authority" or value.get("target") != "branch"
+            or value.get("enforcement") != "active" or value.get("source") != REPOSITORY
+            or ("source_type" in value and value["source_type"] != "Repository")
+            or value.get("conditions") != {"ref_name": {"include": [f"refs/heads/{default_branch_name()}"], "exclude": []}}
+            or value.get("bypass_actors") != [actor]
+            or type(value["bypass_actors"][0].get("actor_id")) is not int
+            or value.get("rules") not in ([{"type": "update"}], [{"type": "update", "parameters": {"update_allows_fetch_and_merge": False}}])
+            or ("parameters" in value["rules"][0] and value["rules"][0]["parameters"]["update_allows_fetch_and_merge"] is not False)):
+            raise NoPostGovernanceError("Cold publication App-only merge authority drifted.")
+        return strict(value)
+    def protection() -> dict[str, Any]:
+        value = api_json(protection_endpoint)
+        required = value.get("required_status_checks")
+        checks = required.get("checks") if isinstance(required, dict) else None
+        contexts = required.get("contexts") if isinstance(required, dict) else None
+        admins, conversations = value.get("enforce_admins"), value.get("required_conversation_resolution")
+        required_url = "https://api.github.com/" + protection_endpoint + "/required_status_checks"
+        if (value.get("url") != "https://api.github.com/" + protection_endpoint
+            or not isinstance(admins, dict) or admins.get("enabled") is not True
+            or not isinstance(conversations, dict) or conversations.get("enabled") is not True
+            or not isinstance(required, dict) or set(required) != {"url", "contexts_url", "strict", "contexts", "checks"}
+            or required.get("url") != required_url or required.get("contexts_url") != required_url + "/contexts"
+            or required.get("strict") is not True or not isinstance(checks, list) or not isinstance(contexts, list)
+            or any(not isinstance(item, dict) or set(item) != {"context", "app_id"}
+                   or not isinstance(item["context"], str) or not item["context"]
+                   or type(item["app_id"]) is not int or item["app_id"] < 1 for item in checks)
+            or contexts != [item["context"] for item in checks] or len(set(contexts)) != len(contexts)):
+            raise NoPostGovernanceError("Cold publication protection schema is invalid.")
+        identities = {item["context"]: item["app_id"] for item in checks}
+        if (identities.get(barrier) != 4766933 or identities.get(CHECK_NAME) != 4766933
+            or identities.get("KRR / PR governance review latch") != 15368
+            or "KRR / PR governance bootstrap" in identities):
+            raise NoPostGovernanceError("Cold publication required App bindings are invalid.")
+        return value
+    def lease() -> str:
+        owner = _cohort_context["header"]["owner_dispatcher_run_id"]
+        value = api_json(f"repos/{REPOSITORY}/actions/runs/{owner}/attempts/1/jobs?per_page=100&page=1")
+        jobs, count = value.get("jobs"), value.get("total_count")
+        if (not isinstance(jobs, list) or type(count) is not int or count != len(jobs) or not 1 <= count <= 100
+            or any(not isinstance(job, dict) or type(job.get("id")) is not int or job["id"] < 1
+                   or type(job.get("run_id")) is not int or job["run_id"] != owner
+                   or job.get("head_sha") != _cohort_context["header"]["workflow_sha"]
+                   or ("run_attempt" in job and (type(job["run_attempt"]) is not int or job["run_attempt"] != 1))
+                   or not isinstance(job.get("name"), str) for job in jobs)
+            or len({job["id"] for job in jobs}) != len(jobs)):
+            raise NoPostGovernanceError("Cold publication native lease jobs are invalid.")
+        names = [job.get("name") for job in jobs]
+        if len(set(names)) != len(names):
+            raise NoPostGovernanceError("Cold publication native lease jobs are ambiguous.")
+        helper = cohort_helper()
+        election = next((job for job in jobs if job["name"] == helper.ELECTION_JOB), None)
+        admission = next((job for job in jobs if job["name"] == helper.ADMISSION_JOB), None)
+        service = next((job for job in jobs if job["name"] == "Service bound cohort review sources"), None)
+        barrier_job = next((job for job in jobs if job["name"] == RESOLVER_FAILURE_BARRIER_NAME), None)
+        if (election is None or election.get("status") != "in_progress" or election.get("conclusion") is not None
+            or admission is None or admission.get("status") != "completed" or admission.get("conclusion") != "success"
+            or service is None or service.get("status") != "in_progress" or service.get("conclusion") is not None
+            or barrier_job is None or barrier_job.get("status") != "completed" or barrier_job.get("conclusion") != "success"):
+            raise NoPostGovernanceError("Cold publication service/barrier lease is unavailable.")
+        for job in (election, admission, service):
+            stages = job.get("steps")
+            if (not isinstance(stages, list) or any(not isinstance(step, dict)
+                or type(step.get("number")) is not int or step["number"] < 1
+                or not isinstance(step.get("name"), str) for step in stages)
+                or len({step["number"] for step in stages}) != len(stages)
+                or len({step["name"] for step in stages}) != len(stages)):
+                raise NoPostGovernanceError("Cold publication native lease stages are ambiguous.")
+        for job, prefix in ((election, helper.SELECTED_PREFIX), (admission, helper.ADMITTED_PREFIX)):
+            matches = [step for step in job["steps"] if step["name"].startswith(prefix)]
+            required_marker = prefix + f"owner={owner} artifact={_cohort_context['artifact_id']} digest={_cohort_context['artifact_digest']}"
+            if (len(matches) != 1 or matches[0]["name"] != required_marker
+                or matches[0].get("status") != "completed" or matches[0].get("conclusion") != "success"):
+                raise NoPostGovernanceError("Cold publication native election/admission binding changed.")
+        if any(step["name"].startswith(helper.HANDOFF_PREFIX)
+               and not (step.get("status") == "queued" and step.get("conclusion") is None
+                        or step.get("status") == "completed" and step.get("conclusion") == "skipped")
+               for step in election["steps"]):
+            raise NoPostGovernanceError("Cold publication native mutex has handed off.")
+        marker = helper.REGISTER_PREFIX + f"segment={os.environ['GOVERNANCE_CONTINUATION_INDEX']} run={WRITER_RUN_ID} artifact={_cohort_context['artifact_id']} digest={_cohort_context['artifact_digest']}"
+        steps = service.get("steps")
+        matches = [step for step in steps if isinstance(step, dict) and step.get("name") == marker] if isinstance(steps, list) else []
+        if (len(matches) != 1 or type(matches[0].get("number")) is not int or matches[0]["number"] < 1
+            or matches[0].get("status") != "completed" or matches[0].get("conclusion") != "success"):
+            raise NoPostGovernanceError("Cold publication native writer registration is invalid.")
+        binding_stages = [step for job in (election, admission) for step in job["steps"]
+                          if step["name"].startswith((helper.SELECTED_PREFIX, helper.ADMITTED_PREFIX))]
+        return strict([[(job["id"], job["run_id"], job.get("run_attempt"), job["head_sha"], job["name"])
+                        for job in (election, admission, service, barrier_job)], binding_stages, matches[0]])
+    try:
+        with cold_native_observation_scope(head) as observations:
+            initial_lease = lease()
+            repository = api_json(f"repos/{REPOSITORY}")
+            if (repository.get("default_branch") != default_branch_name() or repository.get("full_name") != REPOSITORY
+                or type(repository.get("id")) is not int or repository["id"] != _cohort_context["header"]["repository_id"]):
+                raise NoPostGovernanceError("Cold publication repository identity is invalid.")
+            reference = api_json(f"repos/{REPOSITORY}/git/ref/heads/{default_branch_name()}")
+            if reference.get("object", {}).get("sha") != os.environ.get("GITHUB_SHA"):
+                raise NoPostGovernanceError("Cold publication default ref changed.")
+            before = protection()
+            before_ruleset = ruleset()
+            raw_pages, entries, total = [], [], None
+            for number in range(1, 7):
+                page = object_page(checks_endpoint + f"&page={number}")
+                count, values = page.get("total_count"), page.get("check_runs")
+                if (type(count) is not int or not 0 <= count <= 600 or not isinstance(values, list)
+                    or len(values) != min(100, count - (number - 1) * 100) or (total is not None and count != total)):
+                    raise NoPostGovernanceError("Cold publication barrier pages are incomplete.")
+                total = count; raw_pages.append(strict(page)); entries.extend(values)
+                if len(entries) == total:
+                    break
+            identities = []
+            for check in entries:
+                if (not isinstance(check, dict) or type(check.get("id")) is not int or check["id"] < 1
+                    or check.get("name") != barrier or check.get("head_sha") != head
+                    or not isinstance(check.get("app"), dict) or type(check["app"].get("id")) is not int
+                    or check["app"]["id"] != 4766933 or check.get("status") not in {"queued", "in_progress", "completed"}
+                    or (check.get("status") != "completed" and check.get("conclusion") is not None)
+                    or (check.get("status") == "completed" and check.get("conclusion") not in {"failure", "cancelled", "timed_out", "action_required", "stale"})):
+                    raise NoPostGovernanceError("Cold publication target barrier may permit merge or has invalid identity.")
+                identities.append(check["id"])
+            if len(entries) != total or len(set(identities)) != len(identities):
+                raise NoPostGovernanceError("Cold publication barrier inventory is ambiguous.")
+            for number, page in enumerate(raw_pages, 1):
+                if strict(object_page(checks_endpoint + f"&page={number}")) != page:
+                    raise NoPostGovernanceError("Cold publication barrier inventory changed.")
+            if (strict(protection()) != strict(before)
+                or strict(api_json(f"repos/{REPOSITORY}/git/ref/heads/{default_branch_name()}")) != strict(reference)):
+                raise NoPostGovernanceError("Cold publication protection/default ref changed during proof.")
+            reject_newer_dispatcher_barrier(head)
+            owner_endpoint = f"repos/{REPOSITORY}/actions/runs/{_cohort_context['header']['owner_dispatcher_run_id']}"
+            owner_before = next(json.loads(value) for key, value in observations["values"].items() if key[0] == owner_endpoint)
+            def owner_identity(value: dict[str, Any]) -> str:
+                dispatcher_generation(value, expected_identifier=_cohort_context["header"]["owner_dispatcher_run_id"], require_success=True)
+                helper = cohort_helper()
+                if any(not helper.repository_matches(value.get(name), REPOSITORY, _cohort_context["header"]["repository_id"])
+                       for name in ("repository", "head_repository")):
+                    raise NoPostGovernanceError("Cold native owner repository identity changed.")
+                return strict({name: value.get(name) for name in (
+                    "id", "run_number", "run_attempt", "name", "display_title", "path", "event", "workflow_id",
+                    "head_sha", "head_branch", "repository", "head_repository", "actor", "triggering_actor", "pull_requests",
+                    "created_at", "status", "conclusion")})
+            before_owner_identity = owner_identity(owner_before)
+            observations["refresh"] = True
+            owner_after = api_json(owner_endpoint)
+            repository_after = api_json(f"repos/{REPOSITORY}")
+            reference_after = api_json(f"repos/{REPOSITORY}/git/ref/heads/{default_branch_name()}")
+            if (owner_identity(owner_after) != before_owner_identity
+                or strict({name: repository_after.get(name) for name in ("id", "full_name", "default_branch")})
+                   != strict({name: repository.get(name) for name in ("id", "full_name", "default_branch")})
+                or strict(reference_after) != strict(reference)):
+                raise NoPostGovernanceError("Cold native owner/default identity changed during proof.")
+            if (lease() != initial_lease or cohort_cold_publication_context(head) != context
+                or time.time() >= min(member["source_deadline_epoch"] for member in _cohort_context["members_by_id"].values())):
+                raise NoPostGovernanceError("Cold publication original service lease changed.")
+            result = (context, strict(before), before_ruleset, strict(raw_pages), initial_lease)
+            if expected is not None and result != expected:
+                raise NoPostGovernanceError("Cold publication guard changed since admission.")
+            return result
+    except (GovernanceError, KeyError, TypeError, ValueError, OverflowError, StopIteration) as error:
+        raise NoPostGovernanceError("Cold publication merge-block proof failed.") from error
+
+
 def initial_evidence_failure_recovery_budget_seconds(target_count: int) -> float:
     """Return the bounded terminal window required to close one all-open slice."""
     if type(target_count) is not int or not 0 <= target_count <= MAX_TERMINAL_BATCH:
@@ -1682,9 +2009,13 @@ def write_check(
     details_url: str,
     existing: dict[str, Any] | None = None,
     expected_fingerprint: tuple[object, ...] | None = None,
+    member_grant: str | None = None,
 ) -> dict[str, Any]:
     if state not in {"in_progress", "success", "failure"}:
         raise GovernanceError("Check Run state is invalid.")
+    if member_grant is not None:
+        validate_member_grant_write(member_grant, head, state, details_url)
+    summary = description if member_grant is None else member_grant
     early_pending = (
         state == "in_progress"
         and os.environ.get("GOVERNANCE_SCOPE") == "early"
@@ -1694,6 +2025,15 @@ def write_check(
         if check_fingerprint(current) != expected_fingerprint:
             raise NoPostGovernanceError("Check Run changed before terminal write.")
         existing = current
+    cold_terminal = existing is None and state != "in_progress"
+    cold_key = (head, check_external_id(head))
+    cold_guard = _cohort_cold_publication_guards.get(cold_key) if cold_terminal else None
+    if cold_terminal and cold_guard is None:
+        raise NoPostGovernanceError("Terminal Check Run creation lacks a bound cold-publication guard.")
+    if cold_terminal:
+        _cohort_cold_publication_guards.pop(cold_key, None)
+        if cohort_cold_publication_context(head) != cold_guard:
+            raise NoPostGovernanceError("Cold publication eligibility changed before terminal creation.")
     if existing is None:
         # A production all-open writer is bound to the exact IDs returned by
         # the invalidator POSTs.  Falling back to a new same-name generation
@@ -1701,10 +2041,13 @@ def write_check(
         # terminal decision.
         if os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("GOVERNANCE_SCOPE") == "all":
             raise NoPostGovernanceError("Bound all-open Check Run is missing.")
-        arguments = ["--method", "POST", f"repos/{REPOSITORY}/check-runs", "-f", f"name={CHECK_NAME}", "-f", f"head_sha={head}", "-f", f"external_id={check_external_id(head)}", "-f", "status=in_progress", "-f", f"details_url={details_url}", "-f", f"output[title]={CHECK_NAME}", "-f", f"output[summary]={description}"]
+        arguments = ["--method", "POST", f"repos/{REPOSITORY}/check-runs", "-f", f"name={CHECK_NAME}", "-f", f"head_sha={head}", "-f", f"external_id={check_external_id(head)}", "-f", "status=in_progress", "-f", f"details_url={details_url}", "-f", f"output[title]={CHECK_NAME}", "-f", f"output[summary]={summary}"]
+        if cold_terminal:
+            arguments[arguments.index("status=in_progress")] = "status=completed"
+            arguments.extend(["-f", f"conclusion={state}"])
     else:
         identifier = _valid_check(existing, head)["id"]
-        arguments = ["--method", "PATCH", f"repos/{REPOSITORY}/check-runs/{identifier}", "-f", f"details_url={details_url}", "-f", f"output[title]={CHECK_NAME}", "-f", f"output[summary]={description}"]
+        arguments = ["--method", "PATCH", f"repos/{REPOSITORY}/check-runs/{identifier}", "-f", f"details_url={details_url}", "-f", f"output[title]={CHECK_NAME}", "-f", f"output[summary]={summary}"]
         if state == "in_progress":
             arguments.extend(["-f", "status=in_progress"])
         else:
@@ -1722,8 +2065,14 @@ def write_check(
     pace_check_write()
     # This read must be adjacent to the mutation. A newer dispatcher may have
     # arrived while pacing or while the old writer revalidated its source.
-    if early_pending or state != "in_progress":
+    if (early_pending or state != "in_progress") and not cold_terminal:
         reject_newer_dispatcher_barrier(head)
+    if cold_terminal:
+        cold_proof = verify_cohort_cold_publication_guard(head)
+        if check_fingerprint(check_run(head)) != ():
+            raise NoPostGovernanceError("Cold Check Run appeared immediately before terminal creation.")
+    if member_grant is not None:
+        validate_member_grant_write(member_grant, head, state, details_url)
     try:
         value = json.loads(command(arguments, check_write=True))
     except json.JSONDecodeError as error:
@@ -1734,13 +2083,44 @@ def write_check(
     expected_conclusion = None if state == "in_progress" else state
     if checked.get("status") != expected_status or checked.get("conclusion") != expected_conclusion or checked.get("details_url") != details_url:
         raise GovernanceError("Check Run write state is invalid.")
+    if member_grant is not None:
+        _cohort_member_grant_check_runs.add((head, checked["external_id"], checked["id"]))
     reread = check_run(head)
+    if member_grant is not None:
+        exact_output = all(isinstance(item.get("output"), dict) and item["output"].get("title") == CHECK_NAME
+                           and item["output"].get("summary") == member_grant for item in (checked, reread) if item is not None)
+        if (reread is None or not exact_output or check_fingerprint(reread) != check_fingerprint(checked)):
+            known_success = (cold_terminal and state == "success" and reread is not None
+                             and reread.get("id") == checked["id"] and reread.get("external_id") == checked["external_id"]
+                             and reread.get("details_url") == details_url and reread.get("status") == "completed"
+                             and reread.get("conclusion") == "success")
+            if known_success:
+                # receiptだけではなくfresh exact generationを得た場合だけ、原fenceで成功を無効化する。
+                try:
+                    write_check(head, state="failure", description="Trusted PR governance failed closed.",
+                                details_url=details_url, existing=reread, expected_fingerprint=check_fingerprint(reread))
+                except GovernanceError as error:
+                    raise NoPostGovernanceError("Member grant drifted and exact-generation cleanup failed.") from error
+            raise NoPostGovernanceError("Check Run member grant output changed after publication.")
     if reread is None or check_fingerprint(reread) != check_fingerprint(checked):
         raise GovernanceError("Check Run changed after write.")
     # Leave an already-created old early generation pending when the new
     # barrier appeared between its POST and this exact-generation reread.
     if early_pending:
         reject_newer_dispatcher_barrier(head)
+    if cold_terminal:
+        try:
+            verify_cohort_cold_publication_guard(head, expected=cold_proof)
+        except GovernanceError as error:
+            if state == "success":
+                # 既知のexact generationだけを無効化し、不明POSTは再試行しない。
+                try:
+                    write_check(head, state="failure", description="Trusted PR governance failed closed.",
+                                details_url=details_url, existing=reread,
+                                expected_fingerprint=check_fingerprint(reread))
+                except GovernanceError as cleanup_error:
+                    raise NoPostGovernanceError("Cold publication lost its merge-block proof and exact-generation cleanup failed.") from cleanup_error
+            raise NoPostGovernanceError("Cold publication lost its merge-block proof after publication.") from error
     return reread
 
 
@@ -1800,7 +2180,20 @@ def check_fingerprint(value: dict[str, Any] | None) -> tuple[object, ...]:
     if value is None:
         return ()
     checked = _valid_check(value, value.get("head_sha", ""))
-    return (checked["id"], checked["updated_at"], checked.get("status"), checked.get("conclusion"), checked.get("details_url"), checked["external_id"])
+    result = (checked["id"], checked.get("updated_at"), checked.get("status"), checked.get("conclusion"), checked.get("details_url"), checked["external_id"])
+    if checked.get("updated_at") is None:
+        result += (("updated_at" in checked, checked.get("started_at"), checked.get("completed_at")),)
+    output = checked.get("output")
+    summary = output.get("summary") if isinstance(output, dict) else None
+    if (isinstance(summary, str) and summary.startswith("KRR cohort member grant ")
+        or (checked["head_sha"], checked["external_id"], checked["id"]) in _cohort_member_grant_check_runs):
+        try:
+            digest = hashlib.sha256(json.dumps(output, sort_keys=True, ensure_ascii=False,
+                                               allow_nan=False).encode("utf-8", "strict")).hexdigest()
+        except (ValueError, UnicodeError) as error:
+            raise GovernanceError("Member grant output fingerprint is invalid.") from error
+        result += (("cohort-member-grant", digest),)
+    return result
 
 
 def write_governance_check(
@@ -1810,6 +2203,7 @@ def write_governance_check(
     target_url: str,
     *,
     expected_fingerprint: tuple[object, ...] | None = None,
+    member_grant: str | None = None,
 ) -> tuple[object, ...]:
     """Compatibility entry point backed exclusively by one external Check Run."""
     mapped = {"pending": "in_progress", "success": "success", "failure": "failure"}.get(state)
@@ -1818,8 +2212,9 @@ def write_governance_check(
     existing = check_run(head)
     if expected_fingerprint is not None and check_fingerprint(existing) != expected_fingerprint:
         raise NoPostGovernanceError("Check Run changed before governance write.")
-    if existing is None and mapped != "in_progress":
-        # Check Runs cannot be created directly in a completed state.
+    if (existing is None and mapped != "in_progress"
+        and (head, check_external_id(head)) not in _cohort_cold_publication_guards):
+        # APIはcompleted POSTを許可するが、通常経路は先に旧成功を無効化する。
         existing = write_check(
             head,
             state="in_progress",
@@ -1828,14 +2223,22 @@ def write_governance_check(
             expected_fingerprint=expected_fingerprint,
         )
         expected_fingerprint = check_fingerprint(existing)
-    value = write_check(
-        head,
-        state=mapped,
-        description=description,
-        details_url=target_url,
-        existing=existing,
-        expected_fingerprint=expected_fingerprint,
-    )
+    cold_attempt = existing is None and mapped != "in_progress" and (head, check_external_id(head)) in _cohort_cold_publication_guards
+    try:
+        value = write_check(
+            head,
+            state=mapped,
+            description=description,
+            details_url=target_url,
+            existing=existing,
+            expected_fingerprint=expected_fingerprint,
+            **({"member_grant": member_grant} if member_grant is not None else {}),
+        )
+    except GovernanceError as error:
+        if cold_attempt:
+            # POST結果が不明なとき、別generationの再POSTをcleanupとして作らない。
+            raise NoPostGovernanceError("Cold publication did not establish a verified terminal result.") from error
+        raise
     return check_fingerprint(value)
 
 
@@ -1989,11 +2392,14 @@ def cohort_charge(*, default_token: bool = False) -> None:
 
 class CohortBudget:
     def charge(self) -> None:
-        cohort_charge()
+        if _cold_native_observations is None:
+            cohort_charge()
 
 
 def cohort_read_json(endpoint: str, *, timeout: float) -> dict[str, Any]:
-    if not endpoint.startswith(f"repos/{REPOSITORY}/") or not 0 < timeout <= GITHUB_API_TIMEOUT_SECONDS:
+    if (not isinstance(endpoint, str)
+        or not (endpoint == f"repos/{REPOSITORY}" or endpoint.startswith(f"repos/{REPOSITORY}/"))
+        or not 0 < timeout <= GITHUB_API_TIMEOUT_SECONDS):
         raise GovernanceError("Cohort JSON transport boundary is invalid.")
     try:
         value = json.loads(command([endpoint], deadline=time.monotonic() + timeout, cohort_precharged=True))
@@ -2012,6 +2418,8 @@ class NoCohortRedirect(HTTPRedirectHandler):
 def cohort_read_archive(endpoint: str, *, timeout: float) -> bytes:
     if re.fullmatch(rf"repos/{re.escape(REPOSITORY)}/actions/artifacts/[1-9][0-9]*/zip", endpoint) is None or not 0 < timeout <= 20:
         raise GovernanceError("Cohort artifact transport boundary is invalid.")
+    if _cold_native_observations is not None:
+        cohort_charge()
     fixed = time.monotonic() + timeout
     if _terminal_deadline_monotonic is not None:
         fixed = min(fixed, _terminal_deadline_monotonic)
@@ -2290,6 +2698,79 @@ def verify_cohort_target(number: int, current_pr: dict[str, Any], source_id: int
     if source_id is not None and source_id != latest:
         raise NoPostGovernanceError("The latest exact-head sensor is outside this cohort target.")
     return latest
+
+
+def cohort_member_grant_code_blob() -> str:
+    global _cohort_member_grant_code_proof
+    code = Path(__file__).read_bytes()
+    blob = hashlib.sha1(b"blob " + str(len(code)).encode() + b"\0" + code).hexdigest()
+    key = (REPOSITORY, os.environ.get("GITHUB_SHA", ""), blob)
+    if _cohort_member_grant_code_proof != key:
+        path = "scripts/review/pr_governance_status_writer.py"
+        value = api_json(f"repos/{REPOSITORY}/contents/{path}?ref={key[1]}")
+        try:
+            if (not SHA.fullmatch(key[1]) or not isinstance(value, dict) or value.get("path") != path
+                or value.get("encoding") != "base64" or value.get("sha") != blob
+                or type(value.get("size")) is not int or value["size"] != len(code)
+                or not isinstance(value.get("content"), str)
+                or base64.b64decode(value["content"].replace("\n", ""), validate=True) != code):
+                raise ValueError("Writer source differs from the trusted default SHA")
+        except (ValueError, TypeError) as error:
+            raise NoPostGovernanceError("Member grant writer source proof is invalid.") from error
+        _cohort_member_grant_code_proof = key
+    return blob
+
+
+def build_cohort_member_grant(number: int, current_pr: dict[str, Any], source_id: int | None) -> str | None:
+    if (os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("GOVERNANCE_SCOPE") != "early"
+        or _cohort_context is None):
+        return None
+    try:
+        if cohort_cold_publication_context(current_pr["head"]["sha"]) is None:
+            raise GovernanceError("Member grant original admission is unavailable.")
+        verify_cohort_target(number, current_pr, source_id)
+        members = _cohort_members_by_target[number]
+        ids = _cohort_context["target_members_by_number"][number]
+        canonical = lambda value: json.dumps(value, sort_keys=True, allow_nan=False)
+        if (ids != sorted(member["source_run_id"] for member in members)
+            or canonical([_cohort_context["members_by_id"][identifier] for identifier in ids]) != canonical(members)):
+            raise GovernanceError("Member grant full target union changed.")
+        helper = cohort_helper()
+        summary = helper.encode_member_grant(_cohort_context, number, writer_id=int(WRITER_RUN_ID),
+                                            segment=int(os.environ["GOVERNANCE_CONTINUATION_INDEX"]),
+                                            writer_workflow_blob=cohort_member_grant_code_blob())
+        grant = helper.decode_member_grant(summary, writer_workflow_blob=_cohort_member_grant_code_proof[2])
+        if (grant["base_ref"] != current_pr["base"]["ref"] or grant["base_sha"] != current_pr["base"]["sha"]
+            or grant["head_sha"] != current_pr["head"]["sha"]
+            or grant["pr_body_sha256"] != pr_body_sha256(current_pr.get("body"))):
+            raise GovernanceError("Member grant current pull request changed.")
+        return summary
+    except (GovernanceError, RuntimeError, KeyError, TypeError, ValueError, OSError) as error:
+        raise NoPostGovernanceError("Member grant publication proof failed.") from error
+
+
+def validate_member_grant_write(summary: str, head: str, state: str, details: str) -> None:
+    try:
+        if state != "success" or cohort_cold_publication_context(head) is None:
+            raise GovernanceError("Member grant is outside a successful admitted cohort.")
+        helper = cohort_helper()
+        blob = cohort_member_grant_code_blob()
+        grant = helper.decode_member_grant(summary, writer_workflow_blob=blob)
+        if grant is None or summary != helper.encode_member_grant(
+            _cohort_context, grant["pr_number"], writer_id=int(WRITER_RUN_ID),
+            segment=int(os.environ["GOVERNANCE_CONTINUATION_INDEX"]), writer_workflow_blob=blob):
+            raise GovernanceError("Member grant canonical union/context changed.")
+        query = parse_qs(urlparse(details).query, keep_blank_values=True)
+        required = {"pr_base_sha": grant["base_sha"], "pr_head_sha": head, "pr_body_sha256": grant["pr_body_sha256"],
+                    "cohort_artifact_id": str(grant["cohort_artifact_id"]), "cohort_artifact_digest": grant["cohort_artifact_digest"],
+                    "cohort_segment": str(grant["segment"])}
+        if (grant["head_sha"] != head or urlparse(details)._replace(query="").geturl() != target_url()
+            or any(query.get(name) != [value] for name, value in required.items())
+            or len(query.get("source_run_id", [])) != 1
+            or query["source_run_id"][0] not in {str(entry[0]) for entry in grant["members"]}):
+            raise GovernanceError("Member grant current Check Run details changed.")
+    except (GovernanceError, RuntimeError, KeyError, TypeError, ValueError, OSError) as error:
+        raise NoPostGovernanceError("Member grant Check Run binding failed.") from error
 
 
 def canonical_preserved_writer_map(raw: str, preserved: tuple[int, ...]) -> dict[int, tuple[int, int]]:
@@ -2919,7 +3400,13 @@ def process(number: int, claimants: dict[str, frozenset[int]], snapshot_path: st
     # The dispatcher is the only event-path invalidator.  Main always defers
     # terminal publication, so it reuses that pending status (or a scheduled
     # baseline) rather than creating a second pending status for every PR.
-    pending = check_baseline(head) if defer_terminal else write_governance_check(head, "pending", "Trusted governance revalidation is running.", target_url())
+    cold = False
+    if not draft and cohort_cold_publication_context(head) is not None:
+        pending = check_baseline(head)
+        if not pending:
+            _cohort_cold_publication_guards[(head, check_external_id(head))] = cohort_cold_publication_context(head)
+            cold = True
+    pending = pending if cold else check_baseline(head) if defer_terminal else write_governance_check(head, "pending", "Trusted governance revalidation is running.", target_url())
     body_sha256 = ""
     try:
         body_sha256 = pr_body_sha256(initial.get("body"))
@@ -2992,15 +3479,20 @@ def process(number: int, claimants: dict[str, frozenset[int]], snapshot_path: st
             state, description = "failure", "Pull request body changed during governance revalidation."
         if os.environ.get("GITHUB_ACTIONS") == "true":
             rebind_trusted_default_writer()
+        member_grant = None
         if state == "success" and _cohort_context is not None and os.environ.get("GOVERNANCE_SCOPE") == "early":
-            verify_cohort_target(number, pull(number), sensor_id)
+            current_pr = pull(number)
+            if terminal_count == 0:
+                member_grant = build_cohort_member_grant(number, current_pr, sensor_id)
+            else:
+                verify_cohort_target(number, current_pr, sensor_id)
         write_governance_check(head, state, description, target_url(
             source_run_id=sensor_id if state == "success" and terminal_count == 0 else None,
             generations=current_generations if state == "success" else None,
             base=base if state == "success" else None,
             head=head if state == "success" else None,
             body_sha256=body_sha256 if state == "success" else None,
-        ), expected_fingerprint=pending)
+        ), expected_fingerprint=pending, **({"member_grant": member_grant} if member_grant is not None else {}))
     except NoPostGovernanceError:
         raise
     except GovernanceError:
@@ -3082,6 +3574,13 @@ def finalize_decision(decision: PendingDecision, claimants: dict[str, frozenset[
         # terminal PATCH直前にwriterのdefault refを再束縛する。
         rebind_started = True
         rebind_trusted_default_writer()
+        member_grant = None
+        if state == "success" and _cohort_context is not None and os.environ.get("GOVERNANCE_SCOPE") == "early":
+            current_pr = pull(decision.number)
+            if terminal_count == 0:
+                member_grant = build_cohort_member_grant(decision.number, current_pr, decision.sensor_id)
+            else:
+                verify_cohort_target(decision.number, current_pr, decision.sensor_id)
         terminal_write_started = True
         write_governance_check(decision.head, state, description, target_url(
             source_run_id=decision.sensor_id if state == "success" and terminal_count == 0 else None,
@@ -3089,7 +3588,8 @@ def finalize_decision(decision: PendingDecision, claimants: dict[str, frozenset[
             base=decision.base if state == "success" else None,
             head=decision.head if state == "success" else None,
             body_sha256=decision.body_sha256 if state == "success" else None,
-        ), expected_fingerprint=decision.pending_check_fingerprint)
+        ), expected_fingerprint=decision.pending_check_fingerprint,
+           **({"member_grant": member_grant} if member_grant is not None else {}))
         return True
     except NoPostGovernanceError:
         raise
@@ -3111,6 +3611,8 @@ def decision_write_cost(decision: PendingDecision) -> int:
     """Reserve every Check Run mutation before attempting a terminal decision."""
     if decision.pending_check_fingerprint:
         return 1
+    if (decision.head, check_external_id(decision.head)) in _cohort_cold_publication_guards:
+        return 2
     return 1 if decision.state == "pending" else 2
 
 
@@ -3253,6 +3755,7 @@ def main() -> int:
     _cohort_inventory_noop_generations.clear()
     _cohort_pending_generations.clear()
     _cohort_pending_exemptions = frozenset()
+    _cohort_cold_publication_guards.clear()
     _cohort_generation_identities.clear()
     if not REPOSITORY or not SERVER_URL or not NUMBER.fullmatch(WRITER_RUN_ID):
         print("Writer runtime identity is invalid.", file=sys.stderr)

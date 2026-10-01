@@ -167,7 +167,8 @@ class GovernanceOverflowContractTest(unittest.TestCase):
             # 新しい予約/ACK証跡のAPI wrapper2件も、既存の全API inventoryへ含める。
             ("dispatcher", self.dispatcher, 107),
             ("status writer", self.workflow, 2),
-            ("review events", self.review_events, 1),
+            # native GraphQL metadata readもRESTと同じ20秒上限で検査する。
+            ("review events", self.review_events, 2),
             ("cohort helper", "", 3),
         )
         for name, workflow, expected_count in workflows:

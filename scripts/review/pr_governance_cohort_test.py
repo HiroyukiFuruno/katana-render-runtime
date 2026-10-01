@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import io
 import json
@@ -291,6 +292,8 @@ class RawArtifactFixture:
                       "Preflight workflow_run governance source": [{"number": 1, "name": "Exclude unavailable fork sources before dispatcher lock",
                       "status": "completed", "conclusion": "success", "started_at": "1970-01-01T00:01:40Z", "completed_at": "1970-01-01T00:03:20Z"}]}
         journal_ref = self.artifact(4, self.journal)
+        self.steps[cohort.PRODUCER_JOB].append({"number": 3, "name": cohort.JOURNAL_PREFIX + base64.b64encode(cohort.canonical(self.journal)).decode(),
+                                              "status": "completed", "conclusion": "success"})
         page = {"v": 1, "kind": "members", "owner_dispatcher_run_id": 100, "entries": [[11, 100, 4, journal_ref["artifact_digest"]]]}
         batch = {"v": 1, "kind": "batch", "owner_dispatcher_run_id": 100, "segment": 1, "target_members": [[7, [11]]]}
         self.header = {"v": 1, "kind": "cohort", "owner_dispatcher_run_id": 100, "owner_run_attempt": 1,
@@ -310,7 +313,6 @@ class RawArtifactFixture:
         repo_path = "repos/" + self.repository
         self.data[repo_path] = {"default_branch": "master"}
         self.data[repo_path + "/git/ref/heads/master"] = {"object": {"sha": self.sha}}
-        import base64
         self.data[repo_path + "/contents/.github/workflows/pr-governance.yml?ref=" + self.sha] = {
             "path": ".github/workflows/pr-governance.yml", "encoding": "base64", "sha": self.blob,
             "size": len(self.code), "content": base64.b64encode(self.code).decode()}
@@ -359,6 +361,117 @@ class RawArtifactFixture:
 
 
 class CohortRawBoundaryTests(unittest.TestCase):
+    def native_child(self):
+        import copy
+        fixture = RawArtifactFixture()
+        journal = copy.deepcopy(fixture.journal)
+        journal["producer_run_id"] = 99
+        reference = fixture.artifact(6, journal)
+        fixture.metadata[6]["workflow_run"]["id"] = 99
+        producer_steps = copy.deepcopy(fixture.steps[cohort.PRODUCER_JOB][-2:])
+        producer_steps.append({"number": producer_steps[-1]["number"] + 1,
+                              "name": cohort.JOURNAL_PREFIX + base64.b64encode(cohort.canonical(journal)).decode(),
+                              "status": "completed", "conclusion": "success"})
+        fixture.steps[cohort.PRODUCER_JOB][:] = fixture.steps[cohort.PRODUCER_JOB][:3]
+        producer = copy.deepcopy(fixture.run)
+        producer.update(id=99, run_number=89)
+        endpoint = "repos/owner/repository/actions/runs/99"
+        fixture.data[endpoint] = producer
+        fixture.data[endpoint + "/attempts/1/jobs?per_page=100&page=1"] = {"total_count": 2, "jobs": [
+            {"id": 991, "run_id": 99, "run_attempt": 1, "head_sha": fixture.sha, "name": cohort.PRODUCER_JOB,
+             "status": "completed", "conclusion": "success", "steps": producer_steps},
+            {"id": 992, "run_id": 99, "run_attempt": 1, "head_sha": fixture.sha,
+             "name": "Preflight workflow_run governance source", "status": "completed", "conclusion": "success",
+             "steps": copy.deepcopy(fixture.steps["Preflight workflow_run governance source"])}]}
+        fixture.steps[cohort.ELECTION_JOB][:] = []
+        fixture.header["member_pages"] = [fixture.artifact(2, {"v": 1, "kind": "members", "owner_dispatcher_run_id": 100,
+                                                              "entries": [[11, 99, 6, reference["artifact_digest"]]]}, 1)]
+        fixture.header["alias_pages"] = [fixture.artifact(5, {"v": 1, "kind": "aliases", "owner_dispatcher_run_id": 100,
+                                                             "entries": [[11, [99, 100]]]}, 1)]
+        fixture.header["batches"] = [fixture.artifact(3, {"v": 1, "kind": "batch", "owner_dispatcher_run_id": 100,
+                                                         "segment": 1, "target_members": [[7, [11]]]}, 1)]
+        fixture.header.pop("cohort_digest")
+        fixture.header["cohort_digest"] = hashlib.sha256(cohort.canonical(fixture.header)).hexdigest()
+        fixture.header_ref = fixture.artifact(1, fixture.header)
+        fixture.archives.pop(6)
+        return fixture, producer_steps, journal
+
+    def test_native_child_journal_is_verified_without_reopening_unavailable_archive(self):
+        fixture, _, _ = self.native_child()
+        result = fixture.load()
+        self.assertEqual(result["members_by_id"], {11: fixture.member})
+        self.assertEqual(result["producer_ids_by_member"], {11: 99})
+        self.assertNotIn("repos/owner/repository/actions/artifacts/6/zip", fixture.calls)
+        self.assertIn("repos/owner/repository/actions/artifacts/4/zip", fixture.calls)
+        self.assertEqual(fixture.calls.count("repos/owner/repository/actions/artifacts/6"), 2)
+
+    def test_native_child_journal_rejects_marker_upload_and_typed_binding_drift(self):
+        import copy
+        cases = ("missing_marker", "duplicate_marker", "invalid_marker", "failed_marker", "wrong_payload",
+                 "missing_payload", "wrong_upload", "failed_upload", "body", "root", "source", "workflow",
+                 "attempt", "producer_attempt", "step_number", "job_run_id", "job_head", "job_attempt",
+                 "metadata_id", "metadata_digest", "metadata_name", "metadata_creator", "metadata_repo",
+                 "metadata_head_repo", "metadata_head", "metadata_after")
+        for mutation in cases:
+            fixture, steps, journal = self.native_child()
+            metadata = fixture.metadata[6]
+            jobs = fixture.data["repos/owner/repository/actions/runs/99/attempts/1/jobs?per_page=100&page=1"]["jobs"]
+            if mutation == "missing_marker": steps.pop()
+            elif mutation == "duplicate_marker": steps.append(copy.deepcopy(steps[-1]))
+            elif mutation == "invalid_marker": steps[-1]["name"] = cohort.JOURNAL_PREFIX + "not base64"
+            elif mutation == "failed_marker": steps[-1]["conclusion"] = "failure"
+            elif mutation == "wrong_payload": steps[0]["name"] += "foreign"
+            elif mutation == "missing_payload": steps.pop(0)
+            elif mutation == "wrong_upload": steps[1]["name"] += "foreign"
+            elif mutation == "failed_upload": steps[1]["conclusion"] = "failure"
+            elif mutation in {"body", "root", "source", "workflow", "attempt"}:
+                if mutation == "body": journal["member"]["pr_body_sha256"] = "d" * 64
+                elif mutation == "root": journal["root_deadline_epoch"] += 1
+                elif mutation == "source": journal["member"]["source_run_id"] = 12
+                elif mutation == "workflow": journal["workflow_blob_sha"] = "d" * 40
+                else: journal["producer_run_attempt"] = True
+                steps[-1]["name"] = cohort.JOURNAL_PREFIX + base64.b64encode(cohort.canonical(journal)).decode()
+            elif mutation == "producer_attempt": fixture.data["repos/owner/repository/actions/runs/99"]["run_attempt"] = 2
+            elif mutation == "step_number": steps[-1]["number"] = float(steps[-1]["number"])
+            elif mutation == "job_run_id": jobs[0]["run_id"] = 99.0
+            elif mutation == "job_head": jobs[0]["head_sha"] = "d" * 40
+            elif mutation == "job_attempt": jobs[0]["run_attempt"] = True
+            elif mutation == "metadata_id": metadata["id"] = 6.0
+            elif mutation == "metadata_digest": metadata["digest"] = "sha256:" + "d" * 64
+            elif mutation == "metadata_name": metadata["name"] = "krr-governance-source-12-attempt-1"
+            elif mutation == "metadata_creator": metadata["workflow_run"]["id"] = 99.0
+            elif mutation == "metadata_repo": metadata["workflow_run"]["repository_id"] = 101.0
+            elif mutation == "metadata_head_repo": metadata["workflow_run"]["head_repository_id"] = 101.0
+            elif mutation == "metadata_head": metadata["workflow_run"]["head_sha"] = "d" * 40
+            else:
+                read = fixture.read_json
+                count = [0]
+                def changed(endpoint, *, timeout):
+                    value = read(endpoint, timeout=timeout)
+                    if endpoint == "repos/owner/repository/actions/artifacts/6":
+                        count[0] += 1
+                        if count[0] == 2: value["workflow_run"]["repository_id"] = 101.0
+                    return value
+                fixture.read_json = changed
+            with self.subTest(mutation=mutation), self.assertRaises(cohort.CohortError):
+                fixture.load()
+            self.assertNotIn("repos/owner/repository/actions/artifacts/6/zip", fixture.calls)
+
+    def test_native_child_preserves_original_root_and_alias_validation(self):
+        from unittest.mock import patch
+        fixture, _, _ = self.native_child()
+        fixture.data["repos/owner/repository/actions/runs/99/attempts/1/jobs?per_page=100&page=1"]["jobs"][1]["steps"][0]["completed_at"] = "1970-01-01T00:02:00Z"
+        with self.assertRaises(cohort.CohortError): fixture.load()
+        fixture, _, _ = self.native_child()
+        context = fixture.load()
+        with patch.object(cohort.time, "time", return_value=200):
+            self.assertEqual(cohort.cohort_known_producer_ids(context, read_json=fixture.read_json,
+                             read_archive=fixture.read_archive, budget=Budget(), deadline=300), {99: 11, 100: 11})
+            context["header"]["alias_pages"] = context["header"]["member_pages"]
+            with self.assertRaises(cohort.CohortError):
+                cohort.cohort_known_producer_ids(context, read_json=fixture.read_json,
+                                                read_archive=fixture.read_archive, budget=Budget(), deadline=300)
+
     def test_real_api_shapes_bind_header_pages_journal_owner_and_original_clock(self):
         fixture = RawArtifactFixture()
         result = fixture.load()
@@ -711,7 +824,7 @@ class DispatcherInventoryBoundaryTests(unittest.TestCase):
     def fixture(self):
         import copy
         fixture,context,run,jobs=CohortFollowerAndHandoffTests().follower()
-        fixture.steps[cohort.PRODUCER_JOB][:]=fixture.steps[cohort.PRODUCER_JOB][:2]
+        fixture.steps[cohort.PRODUCER_JOB][:]=fixture.steps[cohort.PRODUCER_JOB][:3]
         fixture.run.update(status="in_progress",conclusion=None)
         binding="owner=100 artifact=1 digest="+fixture.header_ref["artifact_digest"]
         fixture.steps[cohort.ELECTION_JOB].append({"name":cohort.SELECTED_PREFIX+binding,"status":"completed","conclusion":"success"})
@@ -1660,3 +1773,487 @@ class CohortOpenPRSnapshotTests(unittest.TestCase):
         fixture[3][1]["member"]["latch_started_at"]="1970-01-01T00:01:42Z"
         fixture[3][1]["member"]["source_deadline_epoch"]+=1
         with self.assertRaisesRegex(cohort.CohortError,"native clock drift"):owner.select(fixture)
+
+
+class MemberGrantTests(unittest.TestCase):
+    def fixture(self):
+        import copy
+        fixture, context, _, _ = CohortFollowerAndHandoffTests().follower()
+        fixture.steps[cohort.PRODUCER_JOB][:] = fixture.steps[cohort.PRODUCER_JOB][:3]
+        context["registered_writers"] = {1: 99}
+        fixture.run.update(status="in_progress", conclusion=None, head_repository=copy.deepcopy(fixture.run["repository"]))
+        binding = "owner=100 artifact=1 digest=" + fixture.header_ref["artifact_digest"]
+        fixture.steps[cohort.ELECTION_JOB].append({"number": 50, "name": cohort.SELECTED_PREFIX + binding,
+                                                 "status": "completed", "conclusion": "success"})
+        for index, name, marker in ((999, cohort.ADMISSION_JOB, cohort.ADMITTED_PREFIX + binding),
+                                   (1001, "Service bound cohort review sources", cohort.REGISTER_PREFIX +
+                                    "segment=1 run=99 artifact=1 digest=" + fixture.header_ref["artifact_digest"])):
+            fixture.jobs["jobs"].append({"id": index, "run_id": 100, "head_sha": fixture.sha, "run_attempt": 1,
+                "name": name, "status": "completed" if index == 999 else "in_progress",
+                "conclusion": "success" if index == 999 else None,
+                "steps": [{"number": 1, "name": marker, "status": "completed", "conclusion": "success"}]})
+        fixture.jobs["total_count"] = len(fixture.jobs["jobs"])
+        source = fixture.data["repos/owner/repository/actions/runs/11"]
+        source.update(status="in_progress", conclusion=None)
+        writer = {"id": 99, "run_attempt": 1, "name": "PR governance status writer", "display_title": "source=100 scope=early segment=1",
+                  "event": "workflow_dispatch", "path": ".github/workflows/pr-governance-status-writer.yml@master",
+                  "head_sha": fixture.sha, "head_branch": "master", "repository": source["repository"], "head_repository": source["repository"],
+                  "workflow_id": 8, "run_number": 10, "status": "in_progress", "conclusion": None}
+        fixture.data["repos/owner/repository/actions/runs/99"] = writer
+        fixture.data["repos/owner/repository"].update(id=101, full_name=fixture.repository)
+        code = b"trusted immutable writer source"
+        blob = hashlib.sha1(b"blob " + str(len(code)).encode() + b"\0" + code).hexdigest()
+        fixture.data["repos/owner/repository/contents/scripts/review/pr_governance_status_writer.py?ref=" + fixture.sha] = {
+            "path": "scripts/review/pr_governance_status_writer.py", "encoding": "base64", "sha": blob,
+            "size": len(code), "content": base64.b64encode(code).decode()}
+        from unittest.mock import patch
+        with patch.object(cohort.time, "time", return_value=250):
+            summary = cohort.encode_member_grant(context, 7, writer_id=99, segment=1, writer_workflow_blob=blob)
+        query = {"source_run_id": "11", "cohort_artifact_id": "1", "cohort_artifact_digest": fixture.header_ref["artifact_digest"],
+                 "cohort_segment": "1", "pr_base_sha": fixture.member["base_sha"], "pr_head_sha": fixture.member["head_sha"],
+                 "pr_body_sha256": fixture.member["pr_body_sha256"]}
+        for prefix in ("ci", "release"):
+            query.update({prefix + "_workflow_id": "2", prefix + "_run_id": "3", prefix + "_run_number": "4",
+                          prefix + "_run_attempt": "1", prefix + "_status": "completed", prefix + "_conclusion": "success"})
+        check = {"id": 777, "name": "KRR / PR governance (trusted check)", "app": {"id": 4766933}, "head_sha": fixture.member["head_sha"],
+                 "external_id": "krr-governance/v1/" + fixture.member["head_sha"] + "/writer-99", "status": "completed", "conclusion": "success",
+                 "started_at": "1970-01-01T00:03:20Z", "completed_at": "1970-01-01T00:04:10Z",
+                 "details_url": "https://github.com/owner/repository/actions/runs/99?" + cohort.urllib.parse.urlencode(query),
+                 "output": {"summary": summary}}
+        fixture.data["repos/owner/repository/check-runs/777"] = check
+        fixture.check_endpoint = "repos/owner/repository/commits/" + fixture.member["head_sha"] + "/check-runs?" + cohort.urllib.parse.urlencode({"check_name": "KRR / PR governance (trusted check)", "app_id": 4766933, "filter": "all", "per_page": 100}) + "&page=1"
+        fixture.data[fixture.check_endpoint] = {"total_count": 1, "check_runs": [check]}
+        fixture.check_snapshot = {"repository": fixture.repository, "head_sha": check["head_sha"], "check_name": check["name"],
+                                  "app_id": 4766933, "source_run_id": source["id"], "check_run_id": check["id"],
+                                  "max_source_check_pages": 181, "endpoints": [fixture.check_endpoint],
+                                  "pages": [copy.deepcopy(fixture.data[fixture.check_endpoint])]}
+        return fixture, context, source, writer, check, blob
+
+    def verify(self, fixture, source, writer, check, blob, *, budget=None, read_metadata=None):
+        from unittest.mock import patch
+        with patch.object(cohort.time, "time", return_value=250):
+            return cohort.verify_sensor_member_grant(check, writer, source, fixture.data["repos/owner/repository/pulls/7"],
+                read_json=fixture.read_json, budget=Budget() if budget is None else budget, deadline=300, workflow_blob=fixture.blob, writer_workflow_blob=blob,
+                check_snapshot=fixture.check_snapshot, **({"read_metadata": read_metadata} if read_metadata is not None else {}))
+
+    def metadata(self, fixture, blob):
+        import copy
+        fixture.calls.clear()
+        contents = fixture.data["repos/owner/repository/contents/scripts/review/pr_governance_status_writer.py?ref=" + fixture.sha]
+        code = base64.b64decode(contents["content"]).decode("utf-8")
+        native = {"data": {"repository": {"id": "R_native_opaque", "databaseId": 101,
+            "nameWithOwner": fixture.repository, "url": "https://github.com/" + fixture.repository,
+            "defaultBranchRef": {"name": "master", "target": {"__typename": "Commit", "oid": fixture.sha}},
+            "writer": {"__typename": "Blob", "oid": blob, "text": code, "byteSize": len(code.encode()),
+                       "isBinary": False, "isTruncated": False}}, "rateLimit": {"cost": 1}}}
+        calls = []
+        def read(query, variables, *, timeout):
+            self.assertEqual(query, cohort.MEMBER_GRANT_METADATA_QUERY)
+            self.assertEqual(variables, {"owner": "owner", "name": "repository", "writerExpression": fixture.sha + ":scripts/review/pr_governance_status_writer.py"})
+            self.assertLessEqual(timeout, 20)
+            calls.append(len(fixture.calls))
+            return copy.deepcopy(native)
+        return native, calls, read
+
+    def test_metadata_native_batch_preserves_independent_bytes_and_shared_budget(self):
+        fixture, _, source, writer, check, blob = self.fixture()
+        _, calls, read = self.metadata(fixture, blob)
+        budget = cohort.ReadBudget(300)
+        self.assertEqual(self.verify(fixture, source, writer, check, blob, budget=budget, read_metadata=read), 5500)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(budget.used, 10)
+        self.assertEqual(len(fixture.calls), 8)
+        self.assertFalse(any("/contents/" in path or path == "repos/owner/repository" or "/git/ref/" in path for path in fixture.calls))
+        self.assertIn(fixture.check_endpoint, fixture.calls[calls[0]:calls[1]])
+        self.assertIn("repos/owner/repository/pulls/7", fixture.calls)
+
+    def test_metadata_native_errors_and_identity_types_never_fallback(self):
+        changes = [lambda value: value.update(errors=[{"message": "native access denied"}]),
+                   lambda value: value.update(data=None),
+                   lambda value: value["data"]["rateLimit"].update(cost=True),
+                   lambda value: value["data"].update(repository=None),
+                   lambda value: value["data"]["repository"].update(databaseId=101.0),
+                   lambda value: value["data"]["repository"].update(id=True),
+                   lambda value: value["data"]["repository"].update(nameWithOwner="foreign/repository"),
+                   lambda value: value["data"]["repository"].update(url="https://github.com/foreign/repository"),
+                   lambda value: value["data"]["repository"]["defaultBranchRef"].update(name="other"),
+                   lambda value: value["data"]["repository"]["defaultBranchRef"]["target"].update(__typename="Tag"),
+                   lambda value: value["data"]["repository"]["defaultBranchRef"]["target"].update(oid="d" * 40),
+                   lambda value: value["data"]["repository"]["writer"].update(isBinary=True),
+                   lambda value: value["data"]["repository"]["writer"].update(isTruncated=True),
+                   lambda value: value["data"]["repository"]["writer"].update(byteSize=True),
+                   lambda value: value["data"]["repository"]["writer"].update(text="changed native bytes"),
+                   lambda value: value["data"]["repository"]["writer"].update(text="bad\ud800"),
+                   lambda value: value["data"]["repository"]["writer"].update(oid="d" * 40)]
+        for index, change in enumerate(changes):
+            fixture, _, source, writer, check, blob = self.fixture()
+            value, calls, read = self.metadata(fixture, blob)
+            change(value)
+            with self.subTest(index=index), self.assertRaises(cohort.CohortError):
+                self.verify(fixture, source, writer, check, blob, read_metadata=read)
+            self.assertEqual(len(calls), 1)
+            self.assertFalse(any("/contents/" in path or path == "repos/owner/repository" for path in fixture.calls))
+
+    def test_metadata_native_closing_drift_and_callback_failure_fail_closed(self):
+        fixture, _, source, writer, check, blob = self.fixture()
+        _, calls, read = self.metadata(fixture, blob)
+        def drift(query, variables, *, timeout):
+            value = read(query, variables, timeout=timeout)
+            if len(calls) == 2:
+                value["data"]["repository"]["id"] += "changed"
+            return value
+        with self.assertRaisesRegex(cohort.CohortError, "metadata.*drift"):
+            self.verify(fixture, source, writer, check, blob, read_metadata=drift)
+        self.assertEqual(len(calls), 2)
+        fixture, _, source, writer, check, blob = self.fixture()
+        fixture.calls.clear()
+        def failed(query, variables, *, timeout):
+            raise cohort.CohortError("native GraphQL failed")
+        with self.assertRaisesRegex(cohort.CohortError, "GraphQL failed"):
+            self.verify(fixture, source, writer, check, blob, read_metadata=failed)
+        self.assertFalse(any("/contents/" in path for path in fixture.calls))
+
+    def test_metadata_native_request_obeys_original_role_budget(self):
+        fixture, _, source, writer, check, blob = self.fixture()
+        _, calls, read = self.metadata(fixture, blob)
+        with self.assertRaises(cohort.CohortError):
+            self.verify(fixture, source, writer, check, blob, budget=cohort.ReadBudget(9), read_metadata=read)
+        self.assertLessEqual(len(calls), 2)
+
+    def test_native_grant_reuses_membership_without_any_artifact_archive(self):
+        fixture, _, source, writer, check, blob = self.fixture()
+        fixture.calls.clear(); fixture.archives.clear()
+        self.assertEqual(self.verify(fixture, source, writer, check, blob), 5500)
+        self.assertFalse(any("/artifacts/" in endpoint for endpoint in fixture.calls))
+        self.assertEqual(len(fixture.calls), 11)
+        self.assertNotIn("repos/owner/repository/actions/runs/11/attempts/1/jobs?per_page=100&page=1", fixture.calls)
+
+    def test_grant_original_clock_does_not_reopen_source_jobs(self):
+        fixture, _, source, writer, check, blob = self.fixture()
+        original = fixture.read_json
+        def native(path, *, timeout):
+            self.assertNotEqual(path, "repos/owner/repository/actions/runs/11/attempts/1/jobs?per_page=100&page=1")
+            return original(path, timeout=timeout)
+        fixture.read_json = native
+        self.assertEqual(self.verify(fixture, source, writer, check, blob), 5500)
+
+    def test_original_clock_producer_still_rejects_native_start_drift(self):
+        from unittest.mock import patch
+        fixture, context, _, _, _, _ = self.fixture()
+        fixture.data["repos/owner/repository/actions/runs/11/attempts/1/jobs?per_page=100&page=1"]["jobs"][0]["steps"][0]["started_at"] = "1970-01-01T00:01:41Z"
+        with patch.object(cohort.time, "time", return_value=250), self.assertRaisesRegex(cohort.CohortError, "clock drift"):
+            cohort.resolve_member_clock(context["members_by_id"][11], read_json=fixture.read_json,
+                                        budget=Budget(), deadline=300)
+
+    def test_grant_original_clock_rejects_future_out_of_range_and_precision_loss(self):
+        import copy
+        for deadline in (5500.0000001, 8000, 253402311600, 1e308, True, float("inf")):
+            fixture, _, source, writer, check, blob = self.fixture()
+            grant = cohort.decode_member_grant(check["output"]["summary"], writer_workflow_blob=blob)
+            grant["members"] = [[11, deadline]]
+            check["output"]["summary"] = cohort.MEMBER_GRANT_PREFIX + json.dumps(grant, sort_keys=True, separators=(",", ":"))
+            fixture.check_snapshot["pages"][0]["check_runs"][0]["output"] = copy.deepcopy(check["output"])
+            with self.subTest(deadline=deadline), self.assertRaises(cohort.CohortError):
+                self.verify(fixture, source, writer, check, blob)
+
+    def test_grant_closing_output_cannot_reset_original_clock_to_now(self):
+        import copy
+        fixture, _, source, writer, check, blob = self.fixture()
+        original = fixture.read_json
+        def changed(path, *, timeout):
+            value = original(path, timeout=timeout)
+            if path == fixture.check_endpoint:
+                value = copy.deepcopy(value)
+                grant = cohort.decode_member_grant(value["check_runs"][0]["output"]["summary"], writer_workflow_blob=blob)
+                grant["members"] = [[11, 250 + 5400]]
+                value["check_runs"][0]["output"]["summary"] = cohort.MEMBER_GRANT_PREFIX + cohort.canonical(grant).decode()
+            return value
+        fixture.read_json = changed
+        with self.assertRaisesRegex(cohort.CohortError, "snapshot drift"):
+            self.verify(fixture, source, writer, check, blob)
+
+    def test_complete_200_target_union_roundtrip_and_byte_limit(self):
+        import copy
+        from unittest.mock import patch
+        _, context, _, _, _, blob = self.fixture()
+        original = copy.deepcopy(context["members_by_id"][11])
+        ids = list(range(110298349000, 110298349200))
+        context["members_by_id"] = {identifier: dict(original, source_run_id=identifier) for identifier in ids}
+        context["target_members_by_number"] = {7: ids}
+        context["header"].update(member_ids=ids, member_segments="1" * 200)
+        with patch.object(cohort.time, "time", return_value=250):
+            summary = cohort.encode_member_grant(context, 7, writer_id=99, segment=1, writer_workflow_blob=blob)
+        self.assertEqual(cohort.decode_member_grant(summary, writer_workflow_blob=blob)["members"], [[identifier, 5500] for identifier in ids])
+        self.assertLessEqual(len(summary.encode()), 8192)
+        oversized = cohort.decode_member_grant(summary, writer_workflow_blob=blob)
+        oversized["members"] = [[9007199254740000 + index, 253402306199.99997] for index in range(200)]
+        with self.assertRaisesRegex(cohort.CohortError, "byte bound"):
+            cohort.decode_member_grant(cohort.MEMBER_GRANT_PREFIX + cohort.canonical(oversized).decode(), writer_workflow_blob=blob)
+
+    def test_canonical_size_boundary_and_reserved_family(self):
+        _, _, _, _, check, blob = self.fixture()
+        grant = cohort.decode_member_grant(check["output"]["summary"], writer_workflow_blob=blob)
+        base = cohort.MEMBER_GRANT_PREFIX + cohort.canonical(grant).decode()
+        grant["base_ref"] += "x" * (8192 - len(base.encode()))
+        exact = cohort.MEMBER_GRANT_PREFIX + cohort.canonical(grant).decode()
+        self.assertEqual(len(exact.encode()), 8192)
+        self.assertIsNotNone(cohort.decode_member_grant(exact, writer_workflow_blob=blob))
+        for summary in (exact + " ", "KRR cohort member grant", "KRR cohort member grant v", "KRR cohort member grant v2\n{}"):
+            with self.subTest(summary=summary[:30]), self.assertRaises(cohort.CohortError):
+                cohort.decode_member_grant(summary, writer_workflow_blob=blob)
+        for summary in (None, 1, {}, "legacy governance decision"):
+            self.assertIsNone(cohort.decode_member_grant(summary, writer_workflow_blob=blob))
+
+    def test_builder_rejects_incomplete_or_untyped_target(self):
+        import copy
+        from unittest.mock import patch
+        _, original, _, _, _, blob = self.fixture()
+        variants = [lambda value: value["target_members_by_number"].update({7: []}),
+                    lambda value: value.update(loaded_segments=[True]),
+                    lambda value: value["registered_writers"].update({1: 99.0}),
+                    lambda value: value["members_by_id"][11].update(repository_id=101.0),
+                    lambda value: value["members_by_id"][11].update(pr_number=7.0),
+                    lambda value: value["members_by_id"].update({12: dict(value["members_by_id"][11], source_run_id=12)})]
+        for change in variants:
+            context = copy.deepcopy(original); change(context)
+            with self.subTest(change=change), patch.object(cohort.time, "time", return_value=250), self.assertRaises(cohort.CohortError):
+                cohort.encode_member_grant(context, 7, writer_id=99, segment=1, writer_workflow_blob=blob)
+
+    def test_parser_rejects_noncanonical_or_untyped_union(self):
+        import copy
+        _, _, _, _, check, blob = self.fixture()
+        grant = cohort.decode_member_grant(check["output"]["summary"], writer_workflow_blob=blob)
+        variants = [("repository_id", True), ("pr_number", 7.0), ("owner_run_attempt", True), ("segment", 1.0),
+                    ("writer_workflow_blob_sha", "d" * 40), ("members", [[11, True]]), ("members", [[11.0, 5500]]),
+                    ("members", [[11, 5500], [11, 5500]]), ("members", [[12, 5500], [11, 5500]]),
+                    ("base_ref", "bad\ud800")]
+        for key, value in variants:
+            changed = copy.deepcopy(grant); changed[key] = value
+            summary = cohort.MEMBER_GRANT_PREFIX + json.dumps(changed, sort_keys=True, separators=(",", ":"))
+            with self.subTest(key=key, value=repr(value)), self.assertRaises(cohort.CohortError):
+                cohort.decode_member_grant(summary, writer_workflow_blob=blob)
+        for raw in ('{"v":1,"v":1}', check["output"]["summary"].split("\n", 1)[1] + "\n",
+                    check["output"]["summary"].split("\n", 1)[1].replace("5500", "NaN")):
+            with self.assertRaises(cohort.CohortError):
+                cohort.decode_member_grant(cohort.MEMBER_GRANT_PREFIX + raw, writer_workflow_blob=blob)
+
+    def test_native_identity_clock_and_replay_negatives(self):
+        import copy
+        changes = [lambda f, s, w, c: s.update(run_attempt=True),
+                   lambda f, s, w, c: w.update(id=99.0),
+                   lambda f, s, w, c: w.update(display_title="source=100 scope=all segment=1"),
+                   lambda f, s, w, c: f.data["repos/owner/repository/pulls/7"].update(body="new body"),
+                   lambda f, s, w, c: f.data["repos/owner/repository/git/ref/heads/master"]["object"].update(sha="d" * 40),
+                   lambda f, s, w, c: f.run.update(status="completed", conclusion="cancelled"),
+                   lambda f, s, w, c: f.jobs["jobs"][0].update(run_id=100.0),
+                   lambda f, s, w, c: f.steps[cohort.ELECTION_JOB][-1].update(number=True),
+                   lambda f, s, w, c: f.steps[cohort.ELECTION_JOB][-1].update(name=cohort.SELECTED_PREFIX + "owner=100 artifact=2 digest=" + f.header_ref["artifact_digest"]),
+                   lambda f, s, w, c: f.jobs["jobs"][-1]["steps"][0].update(name=cohort.REGISTER_PREFIX + "segment=1 run=98 artifact=1 digest=" + f.header_ref["artifact_digest"]),
+                   lambda f, s, w, c: f.steps[cohort.ELECTION_JOB].append({"number": 51, "name": cohort.HANDOFF_PREFIX + "owner=100", "status": "completed", "conclusion": "success"}),
+                   lambda f, s, w, c: c.update(id=True),
+                   lambda f, s, w, c: c["app"].update(id=4766933.0),
+                   lambda f, s, w, c: c.update(details_url=c["details_url"] + "&pr_body_sha256=" + "a" * 64),
+                   lambda f, s, w, c: f.data[f.check_endpoint].update(check_runs=[dict(c, id=778)]),
+                   lambda f, s, w, c: f.data[f.check_endpoint].update(check_runs=[dict(c, output={"summary": c["output"]["summary"] + " "})])]
+        for index, change in enumerate(changes):
+            fixture, _, source, writer, check, blob = self.fixture()
+            change(fixture, source, writer, check)
+            with self.subTest(index=index), self.assertRaises(cohort.CohortError):
+                self.verify(fixture, source, writer, check, blob)
+
+    def test_closing_native_lifecycle_and_output_drift(self):
+        import copy
+        for endpoint_kind in ("owner", "jobs", "writer", "source", "pr"):
+            fixture, _, source, writer, check, blob = self.fixture()
+            original = fixture.read_json
+            endpoint = ("repos/owner/repository/pulls/7" if endpoint_kind == "pr" else
+                        "repos/owner/repository/actions/runs/" + {"owner": "100", "jobs": "100/attempts/1/jobs?per_page=100&page=1", "writer": "99", "source": "11"}[endpoint_kind])
+            calls = 0
+            def drift(path, *, timeout):
+                nonlocal calls
+                value = original(path, timeout=timeout)
+                if path == endpoint:
+                    calls += 1
+                    if calls == (2 if endpoint_kind in {"owner", "jobs"} else 1):
+                        if endpoint_kind == "jobs":
+                            value["jobs"][-1]["steps"][0]["name"] += " stale"
+                        elif endpoint_kind == "source":
+                            value["workflow_id"] = 9.0
+                        elif endpoint_kind == "pr":
+                            value["body"] = "changed during native proof"
+                        else:
+                            value.update(status="completed", conclusion="cancelled")
+                return value
+            fixture.read_json = drift
+            with self.subTest(kind=endpoint_kind), self.assertRaises(cohort.CohortError):
+                self.verify(fixture, source, writer, check, blob)
+
+    def test_fractional_original_source_clock_is_preserved(self):
+        from unittest.mock import patch
+        fixture, context, source, writer, check, blob = self.fixture()
+        context["members_by_id"][11].update(latch_started_at="1970-01-01T00:01:40.125Z", source_deadline_epoch=5500.125)
+        fixture.data["repos/owner/repository/actions/runs/11/attempts/1/jobs?per_page=100&page=1"]["jobs"][0]["steps"][0]["started_at"] = "1970-01-01T00:01:40.125Z"
+        with patch.object(cohort.time, "time", return_value=250):
+            check["output"]["summary"] = cohort.encode_member_grant(context, 7, writer_id=99, segment=1, writer_workflow_blob=blob)
+        fixture.check_snapshot["pages"][0]["check_runs"][0]["output"]["summary"] = check["output"]["summary"]
+        self.assertEqual(self.verify(fixture, source, writer, check, blob), 5500.125)
+
+    def test_native_api_size_is_independent_of_marker_byte_bound(self):
+        fixture, _, source, writer, check, blob = self.fixture()
+        check["output"]["text"] = "native Check Run text " * 1000
+        source["repository"]["description"] = "native repository metadata " * 1000
+        fixture.run["repository"]["description"] = "native owner repository metadata " * 1000
+        fixture.check_snapshot["pages"][0]["check_runs"][0]["output"] = dict(check["output"])
+        self.assertEqual(self.verify(fixture, source, writer, check, blob), 5500)
+
+    def test_grant_native_artifact_owner_pin_and_expiry_negatives(self):
+        for key, value in (("root_deadline_epoch", 249), ("owner_dispatcher_run_id", 101),
+                           ("cohort_artifact_id", 2), ("cohort_artifact_digest", "sha256:" + "d" * 64),
+                           ("workflow_blob_sha", "d" * 40), ("writer_workflow_blob_sha", "d" * 40),
+                           ("members", [[12, 5500]])):
+            fixture, _, source, writer, check, blob = self.fixture()
+            grant = cohort.decode_member_grant(check["output"]["summary"], writer_workflow_blob=blob)
+            grant[key] = value
+            check["output"]["summary"] = cohort.MEMBER_GRANT_PREFIX + cohort.canonical(grant).decode()
+            with self.subTest(key=key), self.assertRaises((cohort.CohortError, KeyError)):
+                self.verify(fixture, source, writer, check, blob)
+
+    def test_owner_event_and_title_match_existing_writer_contract(self):
+        import os
+        import pr_governance_status_writer as writer_contract
+        from unittest.mock import patch
+        cases = [(event, "PR governance dispatcher", None) for event in sorted(writer_contract.DISPATCHER_EVENTS)]
+        cases += [("workflow_run", "sensor=11 action=in_progress", "sensor=11 action=in_progress"),
+                  ("workflow_dispatch", "sensor=11 action=in_progress", "sensor=11 action=in_progress"),
+                  ("workflow_run", "sensor=11 action=other", "sensor=11 action=other"),
+                  ("push", "PR governance dispatcher", None), ("workflow_run", "foreign", "foreign")]
+        for event, name, title in cases:
+            fixture, _, source, writer, check, blob = self.fixture()
+            fixture.run.update(event=event, name=name, display_title=title)
+            with patch.dict(os.environ, {"GOVERNANCE_COHORT_ARTIFACT_ID": "1", "GOVERNANCE_COHORT_ARTIFACT_DIGEST": fixture.header_ref["artifact_digest"]}):
+                expected = event in writer_contract.DISPATCHER_EVENTS and writer_contract.dispatcher_name_matches(fixture.run)
+            with self.subTest(event=event, name=name):
+                if expected:
+                    self.assertEqual(self.verify(fixture, source, writer, check, blob), 5500)
+                else:
+                    with self.assertRaises(cohort.CohortError):
+                        self.verify(fixture, source, writer, check, blob)
+
+    def test_skipped_handoff_keeps_original_native_lease(self):
+        for status, conclusion, accepted in (("queued", None, True), ("completed", "skipped", True),
+                                              ("pending", None, False), ("in_progress", None, False),
+                                              ("completed", "success", False), ("completed", "failure", False)):
+            fixture, _, source, writer, check, blob = self.fixture()
+            fixture.steps[cohort.ELECTION_JOB].append({"number": 51, "name": cohort.HANDOFF_PREFIX +
+                "owner=100 artifact=1 digest=" + fixture.header_ref["artifact_digest"], "status": status, "conclusion": conclusion})
+            with self.subTest(status=status, conclusion=conclusion):
+                if accepted:
+                    self.assertEqual(self.verify(fixture, source, writer, check, blob), 5500)
+                else:
+                    with self.assertRaises(cohort.CohortError):
+                        self.verify(fixture, source, writer, check, blob)
+
+    def test_higher_immutable_id_pending_on_page_two_defeats_timestamp_latest(self):
+        import copy
+        fixture, _, source, writer, check, blob = self.fixture()
+        first = []
+        for index in range(100):
+            old = copy.deepcopy(check)
+            old.update(id=index + 1, external_id="krr-governance/v1/" + check["head_sha"] + "/writer-" + str(index + 1000))
+            first.append(old)
+        newer = copy.deepcopy(check)
+        newer.update(id=778, external_id="krr-governance/v1/" + check["head_sha"] + "/writer-9999",
+                     status="in_progress", conclusion=None, started_at="1970-01-01T00:01:00Z", completed_at=None)
+        endpoint = fixture.check_endpoint.rsplit("&page=", 1)[0]
+        fixture.data[endpoint + "&page=1"] = {"total_count": 102, "check_runs": first}
+        fixture.data[endpoint + "&page=2"] = {"total_count": 102, "check_runs": [check, newer]}
+        fixture.check_snapshot["endpoints"] = [endpoint + "&page=1", endpoint + "&page=2"]
+        fixture.check_snapshot["pages"] = [copy.deepcopy(fixture.data[path]) for path in fixture.check_snapshot["endpoints"]]
+        with self.assertRaises(cohort.CohortError):
+            self.verify(fixture, source, writer, check, blob)
+
+    def complete_check_pages(self, fixture, check, total=102):
+        import copy
+        entries = []
+        for index in range(total - 1):
+            older = copy.deepcopy(check)
+            older.update(id=index + 1, external_id="krr-governance/v1/" + check["head_sha"] + "/writer-" + str(index + 10000),
+                         status="queued", conclusion=None, started_at=None, completed_at=None, output={"summary": "legacy pending"})
+            entries.append(older)
+        entries.append(check)
+        base = fixture.check_endpoint.rsplit("&page=", 1)[0]
+        endpoints = [base + "&page=" + str(number) for number in range(1, (total + 99) // 100 + 1)]
+        for number, endpoint in enumerate(endpoints):
+            fixture.data[endpoint] = {"total_count": total, "check_runs": entries[number * 100:(number + 1) * 100]}
+        fixture.check_snapshot.update(endpoints=endpoints, pages=[fixture.read_json(endpoint, timeout=20) for endpoint in endpoints], check_run_id=check["id"])
+        fixture.calls.clear()
+        return endpoints
+
+    def test_complete_initial_native_snapshot_and_closing_every_page(self):
+        fixture, _, source, writer, check, blob = self.fixture()
+        endpoints = self.complete_check_pages(fixture, check)
+        self.assertEqual(self.verify(fixture, source, writer, check, blob), 5500)
+        self.assertEqual([path for path in fixture.calls if path in endpoints], endpoints)
+        self.assertEqual(len(fixture.calls), 12)
+
+    def test_original_181_page_history_fits_existing_role_300(self):
+        fixture, _, source, writer, check, blob = self.fixture()
+        check["id"] = 20000
+        endpoints = self.complete_check_pages(fixture, check, total=18001)
+        budget = cohort.ReadBudget(300)
+        self.assertEqual(len(endpoints), 181)
+        self.assertEqual(self.verify(fixture, source, writer, check, blob, budget=budget), 5500)
+        self.assertEqual(budget.used, 191)
+        self.assertEqual([path for path in fixture.calls if path in endpoints], endpoints)
+
+    def test_native_page_two_same_count_replacement_and_raw_type_drift(self):
+        import copy
+        changes = [lambda row: row.update(id=778, external_id="krr-governance/v1/" + "c" * 40 + "/writer-9999"),
+                   lambda row: row["output"].update(summary="different native output"),
+                   lambda row: row.update(id=777.0), lambda row: row["app"].update(id=4766933.0)]
+        for index, change in enumerate(changes):
+            fixture, _, source, writer, check, blob = self.fixture()
+            endpoints = self.complete_check_pages(fixture, check)
+            fixture.data[endpoints[-1]] = copy.deepcopy(fixture.data[endpoints[-1]])
+            change(fixture.data[endpoints[-1]]["check_runs"][-1])
+            with self.subTest(index=index), self.assertRaises(cohort.CohortError):
+                self.verify(fixture, source, writer, check, blob)
+            self.assertIn(endpoints[-1], fixture.calls)
+
+    def test_snapshot_missing_incomplete_context_and_duplicates_fail_closed(self):
+        import copy
+        changes = [lambda f: setattr(f, "check_snapshot", None),
+                   lambda f: f.check_snapshot.update(max_source_check_pages=True),
+                   lambda f: f.check_snapshot.update(source_run_id=11.0),
+                   lambda f: f.check_snapshot["endpoints"].__setitem__(0, f.check_snapshot["endpoints"][0].replace("filter=all", "filter=latest")),
+                   lambda f: f.check_snapshot["pages"].pop(),
+                   lambda f: f.check_snapshot["pages"][1]["check_runs"][0].update(id=1),
+                   lambda f: f.check_snapshot["pages"][1]["check_runs"][0].update(external_id=f.check_snapshot["pages"][0]["check_runs"][0]["external_id"]),
+                   lambda f: f.check_snapshot["pages"][1].update(total_count=102.0),
+                   lambda f: f.check_snapshot["pages"][1]["check_runs"][0]["app"].update(id=True)]
+        for index, change in enumerate(changes):
+            fixture, _, source, writer, check, blob = self.fixture()
+            self.complete_check_pages(fixture, check)
+            change(fixture)
+            with self.subTest(index=index), self.assertRaises(cohort.CohortError):
+                self.verify(fixture, source, writer, check, blob)
+
+    def test_existing_dispatcher_history_coexists_with_exact_writer_grant(self):
+        fixture, _, source, writer, check, blob = self.fixture()
+        self.complete_check_pages(fixture, check, total=2)
+        old = fixture.check_snapshot["pages"][0]["check_runs"][0]
+        old["external_id"] = "krr-governance/v1/" + check["head_sha"] + "/dispatcher-100"
+        fixture.data[fixture.check_endpoint]["check_runs"][0]["external_id"] = old["external_id"]
+        self.assertEqual(self.verify(fixture, source, writer, check, blob), 5500)
+
+    def test_history_generation_grammar_never_promotes_selected_dispatcher(self):
+        for suffix in ("dispatcher-0", "dispatcher-01", "other-100", "Dispatcher-100", "writer-0"):
+            fixture, _, source, writer, check, blob = self.fixture()
+            self.complete_check_pages(fixture, check, total=2)
+            fixture.check_snapshot["pages"][0]["check_runs"][0]["external_id"] = "krr-governance/v1/" + check["head_sha"] + "/" + suffix
+            with self.subTest(suffix=suffix), self.assertRaises(cohort.CohortError):
+                self.verify(fixture, source, writer, check, blob)
+        fixture, _, source, writer, check, blob = self.fixture()
+        check["external_id"] = "krr-governance/v1/" + check["head_sha"] + "/dispatcher-99"
+        with self.assertRaises(cohort.CohortError):
+            self.verify(fixture, source, writer, check, blob)

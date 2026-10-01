@@ -298,6 +298,8 @@ jobs:
 
           import json
 
+          import math
+
           import os
 
           import re
@@ -317,6 +319,8 @@ jobs:
           from datetime import datetime, timezone
 
           MAX_BYTES = 8192
+
+          PINNED_WRITER_SOURCE_BLOB_SHA = "53201f952840e2f0943eafe1f033839db50466fe"
 
           MAX_MEMBERS = 200
 
@@ -885,7 +889,6 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          python3 -c 'import os, pathlib, stat; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"krr-governance-cohort-reader.py"; s=p.lstat(); assert stat.S_ISREG(s.st_mode) and s.st_uid==os.getuid() and s.st_mode & 0o077 == 0'
           cat >> "$RUNNER_TEMP/krr-governance-cohort-reader.py" <<'PY'
           def _require(condition, message):
               if not condition:
@@ -1134,8 +1137,416 @@ jobs:
               origin = journal["root_deadline_epoch"] - 21000
               _require(_utc_epoch(scopes[0].get("started_at")) <= origin <= _utc_epoch(scopes[0].get("completed_at")) <= time.time(),
                        "Root clock restarted/future/outside creator stage")
+          PY
 
-          def sensor_cohort_binding(check, writer, source, current_pr, *, read_json, read_archive, budget, deadline, workflow_blob):
+      - name: Prepare trusted member grant decoder
+        run: |
+          set -euo pipefail
+          umask 077
+          cat >> "$RUNNER_TEMP/krr-governance-cohort-reader.py" <<'PY'
+          MEMBER_GRANT_PREFIX = "KRR cohort member grant v1\n"
+
+          MEMBER_GRANT_FIELDS = frozenset({
+              "v", "kind", "repository", "repository_id", "pr_number", "base_ref", "base_sha", "head_sha", "pr_body_sha256",
+              "workflow_sha", "workflow_blob_sha", "writer_workflow_blob_sha", "owner_dispatcher_run_id", "owner_run_attempt",
+              "writer_run_id", "writer_run_attempt", "cohort_artifact_id", "cohort_artifact_digest", "cohort_digest",
+              "segment", "root_deadline_epoch", "members",
+          })
+
+          def decode_member_grant(summary, *, writer_workflow_blob):
+              """writer_workflow_blobは固定writer.pyのGit blob。grantはmembershipだけを証明する。"""
+              if not isinstance(summary, str) or not summary.startswith("KRR cohort member grant"):
+                  return None
+              _require(summary.startswith(MEMBER_GRANT_PREFIX) and _hex(writer_workflow_blob, 40), "Unknown member grant version/pin")
+              try:
+                  data = summary.encode("utf-8", "strict")
+              except UnicodeError:
+                  raise CohortError("Invalid member grant UTF-8") from None
+              _require(len(data) <= MAX_BYTES, "Member grant exceeds existing byte bound")
+              grant = decode_payload(data[len(MEMBER_GRANT_PREFIX.encode()):], MEMBER_GRANT_FIELDS)
+              _require(grant["kind"] == "cohort-member-grant" and _repository_name(grant["repository"])
+                       and isinstance(grant["base_ref"], str) and grant["base_ref"] and not any(c.isspace() for c in grant["base_ref"]),
+                       "Invalid member grant repository/base")
+              try:
+                  grant["base_ref"].encode("utf-8", "strict")
+              except UnicodeError:
+                  raise CohortError("Invalid member grant base UTF-8") from None
+              for key in ("repository_id", "pr_number", "owner_dispatcher_run_id", "writer_run_id", "cohort_artifact_id", "root_deadline_epoch"):
+                  _require(_integer(grant[key]), "Invalid member grant integer")
+              _require(type(grant["owner_run_attempt"]) is type(grant["writer_run_attempt"]) is int
+                       and grant["owner_run_attempt"] == grant["writer_run_attempt"] == 1
+                       and type(grant["segment"]) is int and 1 <= grant["segment"] <= 4, "Invalid member grant attempt/segment")
+              for key in ("base_sha", "head_sha", "workflow_sha", "workflow_blob_sha", "writer_workflow_blob_sha"):
+                  _require(_hex(grant[key], 40), "Invalid member grant SHA")
+              _require(grant["writer_workflow_blob_sha"] == writer_workflow_blob and _hex(grant["pr_body_sha256"], 64)
+                       and _hex(grant["cohort_digest"], 64) and _digest(grant["cohort_artifact_digest"]), "Member grant digest/pin drift")
+              members = grant["members"]
+              _require(isinstance(members, list) and 1 <= len(members) <= MAX_MEMBERS
+                       and all(isinstance(entry, list) and len(entry) == 2 and _integer(entry[0])
+                               and type(entry[1]) in (int, float) and math.isfinite(entry[1]) and entry[1] > 0 for entry in members),
+                       "Invalid member grant union/clock")
+              _require([entry[0] for entry in members] == sorted({entry[0] for entry in members}), "Ambiguous member grant union")
+              return grant
+
+          MEMBER_GRANT_METADATA_QUERY = """query SensorMemberMetadata($owner:String!,$name:String!,$writerExpression:String!){
+            repository(owner:$owner,name:$name){id databaseId nameWithOwner url
+              defaultBranchRef{name target{__typename oid}}
+              writer:object(expression:$writerExpression){__typename oid ... on Blob{text byteSize isBinary isTruncated}}}
+            rateLimit{cost}
+          }"""
+
+          def sensor_member_metadata_binding(value, grant, writer_workflow_blob):
+              """Appの自称pinではなく、独立native Blobの実bytesからissuerを検証する。"""
+              _require(isinstance(value, dict) and set(value) == {"data"} and isinstance(value["data"], dict)
+                       and set(value["data"]) == {"repository", "rateLimit"}
+                       and isinstance(value["data"]["rateLimit"], dict) and set(value["data"]["rateLimit"]) == {"cost"}
+                       and _integer(value["data"]["rateLimit"]["cost"]), "Grant native metadata response/errors")
+              record = value["data"]["repository"]
+              _require(isinstance(record, dict) and set(record) == {"id", "databaseId", "nameWithOwner", "url", "defaultBranchRef", "writer"}
+                       and isinstance(record["id"], str) and record["id"] and not any(c.isspace() or ord(c) < 32 for c in record["id"])
+                       and type(record["databaseId"]) is int and record["databaseId"] == grant["repository_id"]
+                       and record["nameWithOwner"] == grant["repository"] and record["url"] == "https://github.com/" + grant["repository"],
+                       "Grant native metadata repository identity")
+              branch, blob = record["defaultBranchRef"], record["writer"]
+              _require(isinstance(branch, dict) and set(branch) == {"name", "target"} and branch["name"] == grant["base_ref"]
+                       and isinstance(branch["target"], dict) and set(branch["target"]) == {"__typename", "oid"}
+                       and branch["target"]["__typename"] == "Commit" and branch["target"]["oid"] == grant["workflow_sha"],
+                       "Grant native metadata default drift")
+              _require(isinstance(blob, dict) and set(blob) == {"__typename", "oid", "text", "byteSize", "isBinary", "isTruncated"}
+                       and blob["__typename"] == "Blob" and blob["oid"] == writer_workflow_blob
+                       and blob["isBinary"] is False and blob["isTruncated"] is False
+                       and type(blob["byteSize"]) is int and isinstance(blob["text"], str), "Grant native metadata writer fields")
+              try:
+                  record["id"].encode("utf-8", "strict")
+                  code = blob["text"].encode("utf-8", "strict")
+              except UnicodeError as error:
+                  raise CohortError("Grant native metadata bytes invalid") from error
+              _require(blob["byteSize"] == len(code)
+                       and hashlib.sha1(b"blob " + str(len(code)).encode() + b"\0" + code).hexdigest() == writer_workflow_blob,
+                       "Grant native metadata independent writer blob drift")
+              return record
+
+          def sensor_metadata_request(query, variables, *, request_timeout, deadline, run, primary):
+              import subprocess
+              _require(query == MEMBER_GRANT_METADATA_QUERY and isinstance(variables, dict)
+                       and set(variables) == {"owner", "name", "writerExpression"}, "Sensor metadata query is not fixed")
+              repository = os.environ.get("GITHUB_REPOSITORY", "")
+              _require(repository.count("/") == 1
+                       and variables["owner"] == repository.split("/")[0]
+                       and variables["name"] == repository.split("/")[1]
+                       and isinstance(variables["writerExpression"], str)
+                       and re.fullmatch(r"[0-9a-f]{40}:scripts/review/pr_governance_status_writer\.py", variables["writerExpression"]),
+                       "Sensor metadata variables are not bound")
+              remaining = deadline - time.monotonic()
+              _require(remaining > 0 and type(request_timeout) in {int, float}
+                       and math.isfinite(request_timeout) and 0 < request_timeout <= 20,
+                       "Sensor metadata original deadline elapsed")
+              arguments = ["gh", "api", "graphql", "--hostname", "github.com", "--include", "--method", "POST",
+                           "-f", "query=" + query]
+              for name in ("owner", "name", "writerExpression"):
+                  _require(isinstance(variables[name], str) and bool(variables[name])
+                           and "\0" not in variables[name] and "\n" not in variables[name], "Sensor metadata variable is invalid")
+                  arguments.extend(["-f", name + "=" + variables[name]])
+              primary["metadata_requests"] = primary.get("metadata_requests", 0) + 1
+              token = os.environ.get("GH_TOKEN", "")
+              _require(isinstance(token, str) and bool(token), "Sensor metadata read credentials unavailable")
+              try:
+                  response = run(arguments, capture_output=True, text=True, check=False,
+                                 timeout=min(20, request_timeout, remaining),
+                                 env={"GH_TOKEN": token, "PATH": os.environ["PATH"]})
+              except (TimeoutError, subprocess.TimeoutExpired) as error:
+                  raise CohortError("Sensor metadata request timed out") from error
+              _require(response.returncode == 0 and time.monotonic() < deadline,
+                       "Sensor metadata request failed or exceeded original deadline")
+              headers, separator, raw = response.stdout.replace("\r\n", "\n").partition("\n\n")
+              lines = headers.split("\n")
+              _require(separator and re.fullmatch(r"HTTP/(?:1\.[01]|2(?:\.0)?|3(?:\.0)?) 200(?: [^\r\n]*)?", lines[0])
+                       and all(re.fullmatch(r"[A-Za-z0-9!#$%&'*+.^_`|~-]+: [^\r\n]*", line) for line in lines[1:]),
+                       "Sensor metadata HTTP status is invalid")
+              def pairs(items):
+                  result = {}
+                  for key, item in items:
+                      _require(key not in result, "Duplicate sensor metadata field")
+                      result[key] = item
+                  return result
+              try:
+                  value = json.loads(raw, object_pairs_hook=pairs, parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Nonfinite metadata JSON")))
+                  json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8", "strict")
+              except (ValueError, UnicodeError) as error:
+                  raise CohortError("Sensor metadata JSON is invalid") from error
+              _require(isinstance(value, dict) and "errors" not in value, "Sensor metadata GraphQL errors")
+              data = value.get("data")
+              rate = data.get("rateLimit") if isinstance(data, dict) else None
+              cost = rate.get("cost") if isinstance(rate, dict) else None
+              _require(type(cost) is int and 0 < cost <= 1000, "Sensor metadata native cost is invalid")
+              primary["metadata_cost"] = primary.get("metadata_cost", 0) + cost
+              return value
+          PY
+
+      - name: Complete trusted member grant proof reader
+        run: |
+          set -euo pipefail
+          umask 077
+          cat >> "$RUNNER_TEMP/krr-governance-cohort-reader.py" <<'PY'
+          def verify_sensor_member_grant(check, writer, source, current_pr, *, read_json, budget, deadline,
+                                         workflow_blob, writer_workflow_blob, check_snapshot=None, read_metadata=None):
+              """固定Appのmembershipを再利用する。承認・coverage権限と元のsource時計は再生成しない。"""
+              summary = check.get("output", {}).get("summary") if isinstance(check, dict) and isinstance(check.get("output"), dict) else None
+              grant = decode_member_grant(summary, writer_workflow_blob=writer_workflow_blob)
+              _require(grant is not None and grant["workflow_blob_sha"] == workflow_blob, "Missing/foreign member grant")
+              repo, repo_id = grant["repository"], grant["repository_id"]
+              owner, writer_id = grant["owner_dispatcher_run_id"], grant["writer_run_id"]
+              reader = _Reader(read_json, None, budget, deadline)
+              now = time.time()
+              clocks = dict(grant["members"])
+              _require(isinstance(source, dict) and _integer(source.get("id")) and source["id"] in clocks
+                       and now < min(grant["root_deadline_epoch"], clocks[source["id"]]), "Foreign/expired grant source")
+
+              def snapshot(value):
+                  # native API全体の大きさに、artifact marker専用のbyte上限を流用しない。
+                  try:
+                      return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("ascii")
+                  except (TypeError, ValueError, UnicodeError) as error:
+                      raise CohortError("Invalid typed grant native snapshot") from error
+
+              def metadata_binding():
+                  remaining = deadline - time.time()
+                  _require(remaining > 0 and callable(read_metadata), "Grant native metadata deadline/callback")
+                  budget.charge()
+                  try:
+                      value = read_metadata(MEMBER_GRANT_METADATA_QUERY,
+                                            {"owner": repo.split("/")[0], "name": repo.split("/")[1],
+                                             "writerExpression": grant["workflow_sha"] + ":scripts/review/pr_governance_status_writer.py"},
+                                            timeout=min(20, remaining))
+                  except (OSError, ValueError, TypeError) as error:
+                      raise CohortError("Grant native metadata request failed") from error
+                  _require(time.time() < deadline, "Grant native metadata original deadline elapsed")
+                  return snapshot(sensor_member_metadata_binding(value, grant, writer_workflow_blob))
+
+              def check_binding(value):
+                  _require(isinstance(value, dict) and _integer(value.get("id"))
+                           and value.get("name") == "KRR / PR governance (trusted check)"
+                           and isinstance(value.get("app"), dict) and type(value["app"].get("id")) is int
+                           and value["app"]["id"] == 4766933 and value.get("head_sha") == grant["head_sha"]
+                           and value.get("external_id") == f"krr-governance/v1/{grant['head_sha']}/writer-{writer_id}"
+                           and value.get("status") == "completed" and value.get("conclusion") == "success"
+                           and isinstance(value.get("output"), dict) and value["output"].get("summary") == summary,
+                           "App Check Run/grant binding drift")
+                  url = urllib.parse.urlsplit(value.get("details_url") if isinstance(value.get("details_url"), str) else "")
+                  _require(url.scheme == "https" and url.netloc == "github.com" and not url.fragment
+                           and url.path == f"/{repo}/actions/runs/{writer_id}", "Grant Check Run details identity")
+                  pairs = urllib.parse.parse_qsl(url.query, keep_blank_values=True)
+                  query = dict(pairs)
+                  expected = {"source_run_id", "cohort_artifact_id", "cohort_artifact_digest", "cohort_segment",
+                              "pr_base_sha", "pr_head_sha", "pr_body_sha256"}
+                  expected |= {prefix + "_" + key for prefix in ("ci", "release")
+                               for key in ("workflow_id", "run_id", "run_number", "run_attempt", "status", "conclusion")}
+                  _require(len(pairs) == len(query) and set(query) == expected, "Grant Check Run query ambiguity")
+                  for key in ("source_run_id", "cohort_artifact_id", "cohort_segment"):
+                      _require(re.fullmatch(r"[1-9][0-9]*", query[key]) is not None, "Grant Check Run integer query")
+                  _require(int(query["source_run_id"]) in clocks and int(query["cohort_artifact_id"]) == grant["cohort_artifact_id"]
+                           and int(query["cohort_segment"]) == grant["segment"]
+                           and query["cohort_artifact_digest"] == grant["cohort_artifact_digest"]
+                           and all(query["pr_" + key] == grant[key] for key in ("base_sha", "head_sha"))
+                           and query["pr_body_sha256"] == grant["pr_body_sha256"],
+                           "Grant Check Run target/artifact drift")
+                  for prefix in ("ci", "release"):
+                      _require(all(re.fullmatch(r"[1-9][0-9]*", query[prefix + "_" + key]) is not None
+                                   for key in ("workflow_id", "run_id", "run_number"))
+                               and query[prefix + "_run_attempt"] == "1" and query[prefix + "_status"] == "completed"
+                               and query[prefix + "_conclusion"] == "success", "Grant Check Run CI evidence drift")
+                  for key in ("started_at", "completed_at"):
+                      _require(isinstance(value.get(key), str) and canonical_timestamp(value[key]) == value[key], "Grant Check Run native clock")
+                  started_epoch = datetime.fromisoformat(value["started_at"].replace("Z", "+00:00")).timestamp()
+                  completed_epoch = datetime.fromisoformat(value["completed_at"].replace("Z", "+00:00")).timestamp()
+                  _require(started_epoch <= completed_epoch <= time.time(), "Grant Check Run lifecycle clock")
+                  return {key: value.get(key) for key in ("id", "name", "app", "head_sha", "external_id", "details_url",
+                                                         "status", "conclusion", "started_at", "completed_at", "output")}
+
+              initial_check = snapshot(check_binding(check))
+              scan_fields = {"repository", "head_sha", "check_name", "app_id", "source_run_id", "check_run_id",
+                             "max_source_check_pages", "endpoints", "pages"}
+              _require(isinstance(check_snapshot, dict) and set(check_snapshot) == scan_fields
+                       and check_snapshot["repository"] == repo and check_snapshot["head_sha"] == grant["head_sha"]
+                       and check_snapshot["check_name"] == "KRR / PR governance (trusted check)"
+                       and type(check_snapshot["app_id"]) is int and check_snapshot["app_id"] == 4766933
+                       and type(check_snapshot["source_run_id"]) is int and check_snapshot["source_run_id"] == source["id"]
+                       and type(check_snapshot["check_run_id"]) is int and check_snapshot["check_run_id"] == check["id"]
+                       and _integer(check_snapshot["max_source_check_pages"]), "Missing/foreign complete native Check Run snapshot")
+              pages, endpoints = check_snapshot["pages"], check_snapshot["endpoints"]
+              _require(isinstance(pages, list) and pages and isinstance(endpoints, list) and len(endpoints) == len(pages)
+                       and len(pages) <= check_snapshot["max_source_check_pages"]
+                       and isinstance(pages[0], dict) and _integer(pages[0].get("total_count")), "Incomplete native Check Run pages")
+              total = pages[0]["total_count"]
+              _require(len(pages) == (total + 99) // 100, "Incomplete native Check Run page count")
+              query = urllib.parse.urlencode({"check_name": "KRR / PR governance (trusted check)", "app_id": 4766933,
+                                             "filter": "all", "per_page": 100})
+              base_endpoint = f"repos/{repo}/commits/{grant['head_sha']}/check-runs?" + query
+              page_bytes, all_checks = [], []
+              for number, (endpoint, page) in enumerate(zip(endpoints, pages), 1):
+                  _require(endpoint == base_endpoint + f"&page={number}" and isinstance(page, dict)
+                           and type(page.get("total_count")) is int and page["total_count"] == total
+                           and isinstance(page.get("check_runs"), list) and len(page["check_runs"]) == min(100, total - 100 * (number - 1)),
+                           "Native Check Run endpoint/page drift")
+                  page_bytes.append(snapshot(page))
+                  all_checks.extend(page["check_runs"])
+              ids, external_ids = set(), set()
+              for value in all_checks:
+                  _require(isinstance(value, dict) and _integer(value.get("id")) and value["id"] not in ids
+                           and value.get("name") == check_snapshot["check_name"] and value.get("head_sha") == grant["head_sha"]
+                           and isinstance(value.get("app"), dict) and type(value["app"].get("id")) is int and value["app"]["id"] == 4766933
+                           and isinstance(value.get("external_id"), str)
+                           and re.fullmatch(re.escape(f"krr-governance/v1/{grant['head_sha']}/") + r"(?:writer|dispatcher)-[1-9][0-9]*", value["external_id"])
+                           and value["external_id"] not in external_ids
+                           and (value.get("status") in {"queued", "in_progress"} and value.get("conclusion") is None
+                                or value.get("status") == "completed" and value.get("conclusion") in {
+                                    "action_required", "cancelled", "failure", "neutral", "success", "skipped", "stale", "timed_out", "startup_failure"}),
+                           "Native Check Run duplicate/identity/lifecycle drift")
+                  for key in ("started_at", "completed_at"):
+                      _require(value.get(key) is None or isinstance(value[key], str) and canonical_timestamp(value[key]) == value[key],
+                               "Native Check Run timestamp drift")
+                  if value.get("started_at") is not None and value.get("completed_at") is not None:
+                      _require(datetime.fromisoformat(value["started_at"].replace("Z", "+00:00")) <=
+                               datetime.fromisoformat(value["completed_at"].replace("Z", "+00:00")), "Native Check Run lifecycle chronology")
+                  ids.add(value["id"]); external_ids.add(value["external_id"])
+              _require(len(all_checks) == total and snapshot(check_binding(max(all_checks, key=lambda value: value["id"]))) == initial_check,
+                       "Native Check Run newest immutable generation drift")
+
+              def native_run(value, identifier, path, name):
+                  _require(isinstance(value, dict) and type(value.get("id")) is int and value["id"] == identifier
+                           and type(value.get("run_attempt")) is int and value["run_attempt"] == 1
+                           and _integer(value.get("workflow_id")) and _integer(value.get("run_number"))
+                           and value.get("head_sha") == grant["workflow_sha"] and value.get("head_branch") == grant["base_ref"]
+                           and value.get("path") in {path, path + "@" + grant["base_ref"], path + "@refs/heads/" + grant["base_ref"]}
+                           and repository_matches(value.get("repository"), repo, repo_id)
+                           and repository_matches(value.get("head_repository"), repo, repo_id)
+                           and (value.get("name") == name or isinstance(value.get("display_title"), str)
+                                and value.get("name") == value["display_title"]), "Grant native run identity")
+                  if identifier == writer_id:
+                      _require(value.get("event") == "workflow_dispatch"
+                               and value.get("display_title") == f"source={owner} scope=early segment={grant['segment']}"
+                               and (value.get("status") in ACTIVE and value.get("conclusion") is None
+                                    or value.get("status") == "completed" and value.get("conclusion") == "success"), "Grant writer phase/lifecycle")
+                  else:
+                      title = value.get("display_title")
+                      match = re.fullmatch(r"sensor=([1-9][0-9]*) action=(?:in_progress|completed)", title) if isinstance(title, str) and len(title) <= 160 else None
+                      # fixed default workflowの正規名は、既存writerと同じ有限event契約で受理する。
+                      _require(value.get("event") in {"pull_request_target", "issue_comment", "issues", "schedule", "workflow_dispatch", "workflow_run"}
+                               and value.get("status") in ACTIVE
+                               and value.get("conclusion") is None
+                               and (value.get("name") == name or value.get("event") == "workflow_run"
+                                    and match is not None and _integer(int(match[1]))),
+                               "Grant owner lease lifecycle")
+                  return {key: value.get(key) for key in ("id", "run_attempt", "workflow_id", "run_number", "name", "display_title",
+                                                         "head_sha", "head_branch", "path", "event", "repository", "head_repository")}
+
+              writer_identity = snapshot(native_run(writer, writer_id, ".github/workflows/pr-governance-status-writer.yml", "PR governance status writer"))
+              owner_endpoint = f"repos/{repo}/actions/runs/{owner}"
+              owner_identity = snapshot(native_run(reader.request(owner_endpoint), owner, ".github/workflows/pr-governance.yml", "PR governance dispatcher"))
+
+              def native_jobs(identifier, sha):
+                  reader.cache.pop(("jobs", repo, identifier), None)
+                  jobs = reader.jobs(repo, identifier)
+                  _require(len({job.get("name") for job in jobs}) == len(jobs), "Grant duplicate native job")
+                  for job in jobs:
+                      _require(type(job.get("run_id")) is int and job["run_id"] == identifier and job.get("head_sha") == sha
+                               and isinstance(job.get("name"), str) and isinstance(job.get("steps"), list), "Grant native job identity")
+                      steps = job["steps"]
+                      _require(all(isinstance(step, dict) and _integer(step.get("number")) and isinstance(step.get("name"), str) for step in steps)
+                               and len({step["number"] for step in steps}) == len(steps), "Grant native step identity")
+                  return jobs
+
+              def native_lease():
+                  jobs = native_jobs(owner, grant["workflow_sha"])
+                  named = {job["name"]: job for job in jobs}
+                  binding = f"owner={owner} artifact={grant['cohort_artifact_id']} digest={grant['cohort_artifact_digest']}"
+                  projection = []
+                  for name, prefix, status, conclusion in ((ELECTION_JOB, SELECTED_PREFIX, "in_progress", None),
+                                                            (ADMISSION_JOB, ADMITTED_PREFIX, "completed", "success")):
+                      job = named.get(name)
+                      _require(job is not None and job.get("status") == status and job.get("conclusion") == conclusion, "Grant native admission/lease")
+                      markers = [step for step in job["steps"] if step["name"].startswith(prefix)]
+                      _require(len(markers) == 1 and markers[0]["name"] == prefix + binding
+                               and markers[0].get("status") == "completed" and markers[0].get("conclusion") == "success", "Grant native admission binding")
+                      if name == ELECTION_JOB:
+                          _require(not any(step["name"].startswith(HANDOFF_PREFIX) and
+                                           not (step.get("status") == "queued" and step.get("conclusion") is None
+                                                or step.get("status") == "completed" and step.get("conclusion") == "skipped")
+                                           for step in job["steps"]), "Grant native handoff closed")
+                      projection.append([job["id"], name, status, conclusion, markers[0]])
+                  registration = REGISTER_PREFIX + f"segment={grant['segment']} run={writer_id} artifact={grant['cohort_artifact_id']} digest={grant['cohort_artifact_digest']}"
+                  markers = [(job, step) for job in jobs for step in job["steps"]
+                             if step["name"].startswith(REGISTER_PREFIX + f"segment={grant['segment']} ")]
+                  _require(len(markers) == 1 and markers[0][0]["name"] == "Service bound cohort review sources"
+                           and markers[0][0].get("status") == "in_progress" and markers[0][0].get("conclusion") is None
+                           and markers[0][1]["name"] == registration and markers[0][1].get("status") == "completed"
+                           and markers[0][1].get("conclusion") == "success", "Grant native writer registration")
+                  projection.append([markers[0][0]["id"], markers[0][1]])
+                  return snapshot(projection)
+
+              lease = native_lease()
+              # 固定App writerが確定した元attemptの時計だけを再利用し、現在時刻から期限を作り直さない。
+              try:
+                  started = canonical_timestamp(datetime.fromtimestamp(clocks[source["id"]] - 5400, timezone.utc).isoformat(timespec="microseconds"))
+                  _require(source_deadline(started, now=now) == clocks[source["id"]], "Grant original clock roundtrip drift")
+              except (OverflowError, OSError, ValueError) as error:
+                  raise CohortError("Grant original clock is outside native UTC range") from error
+              member = {key: grant[key] for key in ("repository", "repository_id", "pr_number", "base_ref", "base_sha", "head_sha", "pr_body_sha256")}
+              member.update(source_run_id=source["id"], source_run_attempt=source.get("run_attempt"), source_workflow_id=source.get("workflow_id"),
+                            source_run_number=source.get("run_number"), source_event=source.get("event"), latch_started_at=started,
+                            source_deadline_epoch=clocks[source["id"]])
+              _require(started is not None and member_source_matches(member, source, current_pr), "Grant current PR/source/native clock drift")
+              after_source = reader.request(f"repos/{repo}/actions/runs/{source['id']}")
+              source_keys = ("id", "run_attempt", "workflow_id", "run_number", "name", "event", "path", "head_sha", "repository", "head_repository", "pull_requests")
+              _require(isinstance(after_source, dict) and snapshot([source.get(key) for key in source_keys]) == snapshot([after_source.get(key) for key in source_keys])
+                       and member_source_matches(member, after_source, current_pr), "Grant source closing drift")
+              if read_metadata is None:
+                  path = "scripts/review/pr_governance_status_writer.py"
+                  content = reader.request(f"repos/{repo}/contents/{path}?ref={grant['workflow_sha']}")
+                  _require(isinstance(content, dict) and content.get("path") == path and content.get("encoding") == "base64"
+                           and content.get("sha") == writer_workflow_blob and isinstance(content.get("content"), str), "Grant fixed writer content")
+                  try:
+                      code = base64.b64decode(content["content"].replace("\n", ""), validate=True)
+                  except (ValueError, TypeError) as error:
+                      raise CohortError("Grant fixed writer bytes") from error
+                  _require(type(content.get("size")) is int and content["size"] == len(code)
+                           and hashlib.sha1(b"blob " + str(len(code)).encode() + b"\0" + code).hexdigest() == writer_workflow_blob, "Grant fixed writer blob drift")
+              else:
+                  metadata_before = metadata_binding()
+              # callerの全native page観測と、proof後の全page再読を比較し、page順序やtimestampを権限にしない。
+              for endpoint, before in zip(endpoints, page_bytes):
+                  _require(snapshot(reader.request(endpoint)) == before, "Grant complete current generation snapshot drift")
+              if read_metadata is None:
+                  repository = reader.request(f"repos/{repo}")
+                  ref = reader.request(f"repos/{repo}/git/ref/heads/{urllib.parse.quote(grant['base_ref'], safe='')}")
+                  _require(repository_matches(repository, repo, repo_id) and repository.get("default_branch") == grant["base_ref"]
+                           and isinstance(ref, dict) and isinstance(ref.get("object"), dict) and ref["object"].get("sha") == grant["workflow_sha"], "Grant current default drift")
+              else:
+                  _require(metadata_before == metadata_binding(), "Grant native metadata closing drift")
+              _require(writer_identity == snapshot(native_run(reader.request(f"repos/{repo}/actions/runs/{writer_id}"), writer_id,
+                                                                ".github/workflows/pr-governance-status-writer.yml", "PR governance status writer"))
+                       and owner_identity == snapshot(native_run(reader.request(owner_endpoint), owner,
+                                                                  ".github/workflows/pr-governance.yml", "PR governance dispatcher"))
+                       and lease == native_lease(), "Grant closing native lease drift")
+              closing_pr = reader.request(f"repos/{repo}/pulls/{grant['pr_number']}")
+              _require(member_source_matches(member, after_source, closing_pr), "Grant closing current PR/body drift")
+              _require(time.time() < min(grant["root_deadline_epoch"], member["source_deadline_epoch"]), "Grant original deadline expired")
+              return min(grant["root_deadline_epoch"], member["source_deadline_epoch"])
+          PY
+
+      - name: Finalize trusted member grant proof reader
+        run: |
+          set -euo pipefail
+          umask 077
+          cat >> "$RUNNER_TEMP/krr-governance-cohort-reader.py" <<'PY'
+          def sensor_cohort_binding(check, writer, source, current_pr, *, read_json, read_archive, budget, deadline, workflow_blob, check_snapshot=None, read_metadata=None):
+              summary = check.get("output", {}).get("summary") if isinstance(check.get("output"), dict) else None
+              grant = decode_member_grant(summary, writer_workflow_blob=PINNED_WRITER_SOURCE_BLOB_SHA)
+              if grant is not None:
+                  return verify_sensor_member_grant(check, writer, source, current_pr, read_json=read_json,
+                                                    budget=budget, deadline=deadline, workflow_blob=workflow_blob,
+                                                    writer_workflow_blob=PINNED_WRITER_SOURCE_BLOB_SHA,
+                                                    check_snapshot=check_snapshot, read_metadata=read_metadata)
               details = check.get("details_url")
               query = urllib.parse.parse_qs(urllib.parse.urlsplit(details).query, keep_blank_values=True)
               required = {"source_run_id", "cohort_artifact_id", "cohort_artifact_digest", "cohort_segment",
@@ -1168,23 +1579,12 @@ jobs:
               return min(member["source_deadline_epoch"], cohort["header"]["root_deadline_epoch"])
           PY
 
-      - name: Await matching trusted governance Check Run
-        if: ${{ github.run_attempt == 1 && github.event.pull_request.draft == false && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == github.event.repository.default_branch }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          SOURCE_RUN_ID: ${{ github.run_id }}
-          CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
-          # 600 * 8.1 = 4,860 seconds. Sixty-second polls permit at most
-          # 91 bounded three-read Check Run polls within this 90-minute wait.
-          POLL_INTERVAL_SECONDS: '60'
-          POLL_TIMEOUT_SECONDS: '5400'
+      - name: Prepare trusted sensor latch program
         run: |
-          python3 - <<'PY'
+          set -euo pipefail
+          umask 077
+          set -o noclobber
+          cat > "$RUNNER_TEMP/krr-governance-sensor-latch.py" <<'PY'
           import json
           import os
           import re
@@ -1341,6 +1741,15 @@ jobs:
                   fail("Cohort JSON proof is not an object.")
               return value
 
+          def cohort_metadata_read(query, variables, *, timeout):
+              try:
+                  return cohort_reader_namespace["sensor_metadata_request"](
+                      query, variables, request_timeout=timeout, deadline=deadline,
+                      run=subprocess.run, primary=primary_quota,
+                  )
+              except (ValueError, RuntimeError, subprocess.TimeoutExpired):
+                  fail("Cohort native metadata proof is invalid.")
+
           def cohort_archive_read(relative_endpoint, *, timeout):
               return cohort_reader_namespace["sensor_archive_read"](
                   relative_endpoint, timeout=timeout, deadline=deadline,
@@ -1348,7 +1757,29 @@ jobs:
               )
 
           endpoint = f"repos/{repository}/commits/{head_sha}/check-runs?" + urlencode({"check_name": check_name, "app_id": app_id, "filter": "all", "per_page": 100})
+          PY
 
+      - name: Await matching trusted governance Check Run
+        if: ${{ github.run_attempt == 1 && github.event.pull_request.draft == false && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == github.event.repository.default_branch }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+          # 600 * 8.1 = 4,860 seconds. Sixty-second polls permit at most
+          # 91 bounded three-read Check Run polls within this 90-minute wait.
+          POLL_INTERVAL_SECONDS: '60'
+          POLL_TIMEOUT_SECONDS: '5400'
+        run: |
+          set -euo pipefail
+          test -f "$RUNNER_TEMP/krr-governance-sensor-latch.py"
+          test ! -L "$RUNNER_TEMP/krr-governance-sensor-latch.py"
+          test -O "$RUNNER_TEMP/krr-governance-sensor-latch.py"
+          cat >> "$RUNNER_TEMP/krr-governance-sensor-latch.py" <<'PY'
           def check_run_page(
               page: int,
               *,
@@ -1384,6 +1815,7 @@ jobs:
                   if type(identifier) is not int or identifier < 1 or identifier in identifiers:
                       fail("Trusted governance Check Run response is invalid.")
                   identifiers.add(identifier)
+              check_page_observations[page] = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
               return total_count, runs, identifiers
 
           # Historical runs for an unchanged SHA are retained indefinitely.
@@ -1398,12 +1830,16 @@ jobs:
           source_pages_per_poll = 2
           max_source_check_pages = 1 + source_pages_per_poll * (check_run_polls - 1)
           check_scan: dict[str, object] = {}
+          check_page_observations: dict[int, bytes] = {}
+          source_check_snapshot_bytes: bytes | None = None
 
           def begin_source_check_scan(
               total_count: int,
               first_page: list[dict[str, object]],
               first_identifiers: set[int],
           ) -> None:
+              global source_check_snapshot_bytes
+              source_check_snapshot_bytes = None
               page_count = max(1, (total_count + 99) // 100)
               if (
                   page_count > max_source_check_pages
@@ -1414,6 +1850,7 @@ jobs:
               check_scan.update({
                   "snapshot": (total_count, first_page, first_identifiers),
                   "page_count": page_count,
+                  "pages": [check_page_observations[1]],
                   "next_page": 2,
                   "identifiers": set(first_identifiers),
                   "matches": [check for check in first_page if check_matches_source(check)],
@@ -1459,6 +1896,7 @@ jobs:
               return int(writer_run_id)
 
           def source_bound_trusted_check_runs() -> list[dict[str, object]] | None:
+              global source_check_snapshot_bytes
               # A one-page snapshot needs its Link fence on the final anchor.
               # Request the headers without prematurely rejecting a normal
               # one-to-many page transition before it can be restarted.
@@ -1468,7 +1906,7 @@ jobs:
               )
               if not check_scan:
                   begin_source_check_scan(*first)
-              elif first != check_scan.get("snapshot"):
+              elif check_page_observations[1] != check_scan["pages"][0]:
                   # Check Run ordering and history can change between polls.
                   # The old snapshot, including any candidate collected from
                   # it, is never reusable; restart from this complete page-one
@@ -1479,6 +1917,16 @@ jobs:
                   if not isinstance(matches, list):
                       fail("Trusted governance Check Run scan is invalid.")
                   matches = newest_source_bound_check_runs(matches)
+                  source_check_snapshot_bytes = None
+                  if len(matches) == 1:
+                      # 全rawページを固定し、closing proofへ同じendpointの観測だけを渡す。
+                      source_check_snapshot_bytes = json.dumps({
+                          "repository": repository, "head_sha": head_sha, "check_name": check_name,
+                          "app_id": int(app_id), "source_run_id": int(source_run_id),
+                          "check_run_id": matches[0]["id"], "max_source_check_pages": max_source_check_pages,
+                          "endpoints": [endpoint + f"&page={page}" for page in range(1, check_scan["page_count"] + 1)],
+                          "pages": [json.loads(page) for page in check_scan["pages"]],
+                      }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
                   check_scan.clear()
                   return matches
 
@@ -1509,6 +1957,7 @@ jobs:
                       or identifiers & page_identifiers
                   ):
                       fail("Trusted governance Check Run response changed during pagination.")
+                  check_scan["pages"].append(check_page_observations[next_page])
                   identifiers.update(page_identifiers)
                   matches.extend(check for check in page if check_matches_source(check))
                   next_page += 1
@@ -1588,15 +2037,17 @@ jobs:
                       else:
                           fail("Trusted governance Check Run writer generation is invalid.")
                       cohort_query = parse_qs(urlsplit(terminal["details_url"]).query, keep_blank_values=True)
-                      if "cohort_artifact_id" in cohort_query:
+                      summary = terminal.get("output", {}).get("summary") if isinstance(terminal.get("output"), dict) else None
+                      if "cohort_artifact_id" in cohort_query or isinstance(summary, str) and summary.startswith("KRR cohort member grant"):
                           current_pr = api_json(f"repos/{repository}/pulls/{pr_number}", "Cohort current PR is invalid.")
                           current_source = api_json(f"repos/{repository}/actions/runs/{source_run_id}", "Cohort current source is invalid.")
                           try:
                               original_boundary = cohort_reader_namespace["sensor_cohort_binding"](
                                   terminal, writer_run, current_source, current_pr,
-                                  read_json=cohort_json_read, read_archive=cohort_archive_read,
+                                  read_json=cohort_json_read, read_archive=cohort_archive_read, read_metadata=cohort_metadata_read,
                                   budget=sensor_read_budget, deadline=time.time() + deadline - time.monotonic(),
                                   workflow_blob=PINNED_DISPATCHER_WORKFLOW_BLOB_SHA,
+                                  check_snapshot=json.loads(source_check_snapshot_bytes) if source_check_snapshot_bytes is not None else None,
                               )
                           except (ValueError, RuntimeError, TypeError, KeyError):
                               fail("Cohort sensor membership or writer proof is invalid.")
@@ -1615,3 +2066,4 @@ jobs:
                   fail("Timed out waiting for a matching trusted governance Check Run.")
               time.sleep(interval)
           PY
+          python3 "$RUNNER_TEMP/krr-governance-sensor-latch.py"

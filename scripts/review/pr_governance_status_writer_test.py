@@ -1276,7 +1276,8 @@ class StatusWriterUnitTest(unittest.TestCase):
              patch.object(WRITER.time,"time",return_value=250.0), patch.object(WRITER.time,"monotonic",return_value=1000.0), \
              patch.object(WRITER,"_terminal_deadline_monotonic",None), patch.object(WRITER,"_cohort_context",None), \
              patch.object(WRITER,"_cohort_members_by_target",{}), patch.object(WRITER,"_cohort_api_counts",None), \
-             patch.object(WRITER,"_early_writer_admission",None), patch.object(WRITER,"cohort_read_json",side_effect=read), \
+             patch.object(WRITER,"_early_writer_admission",None), \
+             patch.object(WRITER,"command",side_effect=lambda args,**kwargs:json.dumps(read(args[0]))), \
              patch.object(WRITER,"cohort_read_archive",side_effect=fixture.read_archive), patch.object(WRITER,"api_json",side_effect=read), \
              patch.object(WRITER,"ensure_writer_run_is_active") as active:
             WRITER.prepare_cohort_writer(WRITER.DispatcherSource(100,"workflow_run",1),1,fixture.header_ref["artifact_digest"],1,(7,),phase="early")
@@ -1286,6 +1287,17 @@ class StatusWriterUnitTest(unittest.TestCase):
             self.assertEqual(WRITER._terminal_deadline_monotonic,2160.0)
             self.assertEqual(active.call_count,2)
             self.assertEqual(sum('/runs/11' in endpoint for endpoint in counts),3)
+
+    def test_cohort_json_repository_boundary_accepts_only_exact_repository(self):
+        with self.identity(),patch.object(WRITER,"command",return_value='{"id":101}') as command:
+            self.assertEqual(WRITER.cohort_read_json("repos/owner/repository",timeout=20),{"id":101})
+            self.assertEqual(WRITER.cohort_read_json("repos/owner/repository/actions/runs/88",timeout=20),{"id":101})
+            for endpoint in ("repos/owner/repository-other","repos/owner/repository-other/actions/runs/88",
+                             "repos/other/repository","repos/owner/repository?repo=other/repository",
+                             "https://api.github.com/repos/owner/repository",None):
+                with self.subTest(endpoint=endpoint),self.assertRaises(WRITER.GovernanceError):
+                    WRITER.cohort_read_json(endpoint,timeout=20)
+            self.assertEqual(command.call_count,2)
 
     def test_preserved_cohort_writer_requires_complete_phase_and_entire_batch_original_clock(self):
         import copy
@@ -1614,6 +1626,438 @@ class StatusWriterUnitTest(unittest.TestCase):
             self.assertFalse(WRITER._cohort_pending_generations)
             self.assertFalse(WRITER._cohort_pending_exemptions)
 
+    def cohort_cold_native_probe(self, *, change=None, outcome="failure", scope="early", deferred=False, expected_error=False, expected_mutations=(), conditional=False):
+        import copy
+        import time
+        from contextlib import ExitStack
+        helper,context,runs,jobs=self.native_pending_mutex_fixture()
+        context["registered_writers"]={1:99}
+        registration={"name":helper.REGISTER_PREFIX+"segment=1 run=99 artifact=7 digest="+context["artifact_digest"],
+                      "number":1,"status":"completed","conclusion":"success"}
+        service=next(job for job in jobs[88]["jobs"] if job["name"]=="Service bound cohort review sources")
+        service.update(status="in_progress",steps=[registration])
+        barrier=next(job for job in jobs[88]["jobs"] if job["name"]==WRITER.RESOLVER_FAILURE_BARRIER_NAME)
+        barrier.update(status="completed",conclusion="success")
+        member={"source_run_id":9000,"head_sha":"a"*40,"source_deadline_epoch":time.time()+300,
+                "pr_body_sha256":WRITER.pr_body_sha256("Fixes #64")}
+        started=int(time.time())-5100
+        member.update(repository="owner/repository",repository_id=101,source_run_attempt=1,
+                      source_workflow_id=501,source_run_number=9000,source_event="pull_request",pr_number=72,
+                      base_ref="master",base_sha="d"*40,latch_started_at=WRITER.datetime.fromtimestamp(started,WRITER.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                      source_deadline_epoch=started+5400)
+        context["members_by_id"]={9000:member}
+        context.update(target_members_by_number={72:[9000]},loaded_segments=[1])
+        context["header"].update(member_ids=[9000],member_segments="1")
+        if change=="grant_union_complete":
+            context["members_by_id"][9001]={**member,"source_run_id":9001,"source_run_number":9001}
+            context["target_members_by_number"][72].append(9001)
+            context["header"].update(member_ids=[9000,9001],member_segments="11")
+        if change=="grant_union_missing":context["target_members_by_number"][72].append(9001)
+        elif change=="grant_union_hidden":context["members_by_id"][9001]={**member,"source_run_id":9001}
+        elif change=="grant_body":member["pr_body_sha256"]="0"*64
+        elif change=="grant_clock_reset":member["source_deadline_epoch"]+=1
+        elif change=="grant_context_digest":context["cohort_digest"]="0"*63
+        current=self.pull(72)
+        current["base"]["sha"]="d"*40
+        for side in ("base","head"):current[side]["repo"]["id"]=101
+        protection={"url":"https://api.github.com/repos/owner/repository/branches/master/protection",
+                    "enforce_admins":{"enabled":True},"required_conversation_resolution":{"enabled":True},
+                    "required_status_checks":{"url":"https://api.github.com/repos/owner/repository/branches/master/protection/required_status_checks",
+                      "contexts_url":"https://api.github.com/repos/owner/repository/branches/master/protection/required_status_checks/contexts",
+                      "strict":True,"contexts":[WRITER.CHECK_NAME,"KRR / PR governance review latch","KRR / PR governance affected-head barrier"],
+                      "checks":[{"context":WRITER.CHECK_NAME,"app_id":4766933},
+                                {"context":"KRR / PR governance review latch","app_id":15368},
+                                {"context":"KRR / PR governance affected-head barrier","app_id":4766933}]}}
+        checks={};mutations=[];reads=[];protection_calls=[0];current_check_reads=[0];bound_check_reads=[0]
+        ruleset={"id":21909389,"name":"KRR PR governance merge authority","source":"owner/repository","source_type":"Repository",
+                 "target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["refs/heads/master"],"exclude":[]}},
+                 "bypass_actors":[{"actor_id":4766933,"actor_type":"Integration","bypass_mode":"pull_request"}],
+                 "rules":[{"type":"update","parameters":{"update_allows_fetch_and_merge":False}}]}
+        old_success={"id":7,"name":WRITER.CHECK_NAME,"head_sha":"a"*40,"app":{"id":4766933},
+                     "external_id":"krr-governance/v1/"+"a"*40+"/writer-98","updated_at":"before",
+                     "status":"completed","conclusion":"success","details_url":"https://github.com/owner/repository/actions/runs/98"}
+        if change=="existing_current":
+            checks["a"*40]={**old_success,"id":9,"external_id":"krr-governance/v1/"+"a"*40+"/writer-99",
+                            "status":"in_progress","conclusion":None}
+        if change=="native_check_timestamps":
+            old_success.pop("updated_at")
+            old_success.update(started_at="2026-10-01T00:00:00Z",completed_at="2026-10-01T00:00:01Z")
+        def native_api(command,**options):
+            endpoint=command[2];reads.append(endpoint)
+            if "--method" in command:
+                method=command[command.index("--method")+1];fields={}
+                for index,arg in enumerate(command):
+                    if arg=="-f":
+                        key,value=command[index+1].split("=",1);fields[key]=value
+                value={"id":9,"name":WRITER.CHECK_NAME,"head_sha":"a"*40,"app":{"id":4766933},
+                       "external_id":WRITER.check_external_id("a"*40),"updated_at":str(len(mutations)),
+                       "status":fields["status"],"conclusion":fields.get("conclusion"),"details_url":fields["details_url"],
+                       "output":{"title":fields["output[title]"],"summary":fields["output[summary]"]}}
+                if change=="native_check_timestamps":
+                    value.pop("updated_at")
+                    value.update(started_at="2026-10-01T00:01:00Z",completed_at="2026-10-01T00:01:01Z" if value["status"]=="completed" else None)
+                if change=="grant_summary_response" and method=="POST":value["output"]["summary"]="KRR cohort member grant v1\n{}"
+                checks["a"*40]=value;mutations.append((method,value["status"],value["conclusion"]))
+                if change=="unknown_post" and method=="POST":
+                    return subprocess.CompletedProcess(command,0,"invalid-json","")
+            elif "/rulesets/21909389" in endpoint:
+                value=copy.deepcopy(ruleset)
+                if change=="ruleset_missing":value=None
+                elif change=="ruleset_wrong_id":value["id"]=21909390
+                elif change=="ruleset_admin_bypass":value["bypass_actors"].append({"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"})
+                elif change=="ruleset_wrong_app":value["bypass_actors"][0]["actor_id"]=42
+                elif change=="ruleset_float_app":value["bypass_actors"][0]["actor_id"]=4766933.0
+                elif change=="ruleset_direct_bypass":value["bypass_actors"][0]["bypass_mode"]="always"
+                elif change=="ruleset_inactive":value["enforcement"]="evaluate"
+                elif change=="ruleset_wrong_branch":value["conditions"]["ref_name"]["include"]=["refs/heads/other"]
+                elif change=="ruleset_midproof" and protection_calls[0]>1:value["enforcement"]="disabled"
+            elif "/branches/master/protection" in endpoint:
+                protection_calls[0]+=1
+                value=copy.deepcopy(protection)
+                if change=="removed_barrier":
+                    value["required_status_checks"]["checks"].pop();value["required_status_checks"]["contexts"].pop()
+                elif change=="wrong_app":value["required_status_checks"]["checks"][-1]["app_id"]=15368
+                elif change=="float_app":value["required_status_checks"]["checks"][-1]["app_id"]=4766933.0
+                elif change=="strict_disabled":value["required_status_checks"]["strict"]=False
+                elif change=="admins_disabled":value["enforce_admins"]["enabled"]=False
+                elif change=="conversation_disabled":value["required_conversation_resolution"]["enabled"]=False
+                elif change=="duplicate_context":
+                    value["required_status_checks"]["checks"].append(value["required_status_checks"]["checks"][-1]);value["required_status_checks"]["contexts"].append(value["required_status_checks"]["contexts"][-1])
+                elif change=="midproof_removal" and protection_calls[0]==2:
+                    value["required_status_checks"]["checks"].pop();value["required_status_checks"]["contexts"].pop()
+                elif change=="protection_schema":value["required_status_checks"]["contexts"]={}
+            elif "/commits/" in endpoint and "/check-runs?" in endpoint:
+                from urllib.parse import parse_qs,urlparse
+                query=parse_qs(urlparse("https://api.github.com/"+endpoint).query)
+                if query["check_name"]==["KRR / PR governance affected-head barrier"]:
+                    candidates=[]
+                    if change in {"barrier_success","barrier_neutral","barrier_skipped","barrier_foreign_app","barrier_float_id"}:
+                        candidate={"id":17,"name":"KRR / PR governance affected-head barrier","head_sha":"a"*40,
+                                   "app":{"id":4766933},"status":"completed","conclusion":"failure"}
+                        if change in {"barrier_success","barrier_neutral","barrier_skipped"}:candidate["conclusion"]=change[8:]
+                        elif change=="barrier_foreign_app":candidate["app"]["id"]=42
+                        elif change=="barrier_float_id":candidate["id"]=17.0
+                        candidates=[candidate]
+                else:
+                    current_check_reads[0]+=1
+                    candidates=[checks.get("a"*40,old_success)]
+                    if change=="latest_generation" and current_check_reads[0]>=5 and not mutations:
+                        candidates=[{**old_success,"id":19,"external_id":WRITER.check_external_id("a"*40)}]
+                value={"total_count":len(candidates),"check_runs":candidates}
+            elif "/check-runs/9" in endpoint:
+                bound_check_reads[0]+=1
+                value=copy.deepcopy(checks["a"*40])
+                if change in {"grant_summary_reread","grant_cleanup_race"} and value["conclusion"]=="success":
+                    value["output"]["summary"]="KRR cohort member grant v1\n{}"
+                    if change=="grant_cleanup_race" and bound_check_reads[0]>1:value["output"]["summary"]="removed grant"
+                    checks["a"*40]=copy.deepcopy(value)
+                if change=="grant_summary_latest":value["id"]=19
+            elif "/contents/scripts/review/pr_governance_status_writer.py?ref=" in endpoint:
+                import base64,hashlib
+                code=Path(WRITER.__file__).read_bytes()
+                value={"path":"scripts/review/pr_governance_status_writer.py","encoding":"base64",
+                       "sha":hashlib.sha1(b"blob "+str(len(code)).encode()+b"\0"+code).hexdigest(),
+                       "size":len(code),"content":base64.b64encode(code).decode()}
+            elif "/actions/workflows/" in endpoint:
+                page=int(endpoint.rsplit("page=",1)[1]);value={"total_count":len(runs),"workflow_runs":runs[(page-1)*100:page*100]}
+            elif endpoint=="repos/owner/repository":
+                value={"default_branch":"master","id":101,"full_name":"owner/repository"}
+                if change=="closing_repository_float" and protection_calls[0]:value["id"]=101.0
+            elif "/git/ref/heads/master" in endpoint:
+                value={"object":{"sha":("c" if change=="default_ref" or change=="closing_default_ref" and protection_calls[0] else "d")*40}}
+            elif "/jobs?" in endpoint:
+                identifier=int(endpoint.split("/runs/")[1].split("/")[0])
+                value=copy.deepcopy(jobs[identifier])
+                if identifier==88 and protection_calls[0] and change in {"lease_handoff","lease_completed","lease_cancelled","lease_admission_failure","lease_selected_float","lease_registration_duplicate"}:
+                    elected=next(job for job in value["jobs"] if job["name"]==helper.ELECTION_JOB)
+                    admitted=next(job for job in value["jobs"] if job["name"]==helper.ADMISSION_JOB)
+                    service=next(job for job in value["jobs"] if job["name"]=="Service bound cohort review sources")
+                    if change=="lease_handoff":elected["steps"][-1].update(status="completed",conclusion="success")
+                    elif change=="lease_completed":elected.update(status="completed",conclusion="success")
+                    elif change=="lease_cancelled":elected.update(status="completed",conclusion="cancelled")
+                    elif change=="lease_admission_failure":admitted.update(conclusion="failure")
+                    elif change=="lease_selected_float":elected["steps"][0]["number"]=1.0
+                    elif change=="lease_registration_duplicate":service["steps"].append({**registration,"name":"duplicate"})
+            elif "/actions/runs/" in endpoint:
+                identifier=int(endpoint.rsplit("/",1)[1])
+                if identifier in context["members_by_id"]:
+                    item=context["members_by_id"][identifier]
+                    value={"id":identifier,"run_attempt":1,"workflow_id":item["source_workflow_id"],"run_number":item["source_run_number"],
+                           "name":"PR governance review sensor","event":item["source_event"],"head_sha":item["head_sha"],
+                           "path":".github/workflows/pr-governance-review-events.yml","repository":current["base"]["repo"],
+                           "head_repository":current["head"]["repo"],"status":"in_progress","conclusion":None,"pull_requests":[current]}
+                    if change=="grant_source_drift":value["run_attempt"]=2
+                else:value=copy.deepcopy(next(run for run in runs if run["id"]==identifier))
+                if value["id"]==88 and protection_calls[0]:
+                    if change=="closing_owner_number_float":value["run_number"]=float(value["run_number"])
+                    elif change=="closing_owner_workflow_float":value["workflow_id"]=float(value["workflow_id"])
+                    elif change=="closing_owner_attempt":value["run_attempt"]=2
+                    elif change=="closing_owner_cancelled":value.update(status="completed",conclusion="cancelled")
+                    elif change=="closing_owner_head_repository":value["head_repository"]={"id":102,"full_name":"owner/repository"}
+            else:raise AssertionError(endpoint)
+            body=json.dumps(copy.deepcopy(value),sort_keys=True)
+            if "--include" in command and "--method" not in command:
+                import hashlib
+                tag='"'+hashlib.sha256(body.encode()).hexdigest()+'"'
+                if "If-None-Match: "+tag in command:
+                    return subprocess.CompletedProcess(command,1,"HTTP/2.0 304 Not Modified\r\nETag: "+tag+"\r\n\r\n","")
+                body="HTTP/2.0 200 OK\r\nETag: "+tag+"\r\n\r\n"+body
+            return subprocess.CompletedProcess(command,0,body,"")
+        env={"GITHUB_ACTIONS":"true","GITHUB_SHA":"d"*40,"GITHUB_REF_NAME":"master","GITHUB_REPOSITORY":"owner/repository",
+             "GH_TOKEN":"native-read-fixture","CHECK_WRITE_TOKEN":"native-write-fixture","KRR_GOVERNANCE_CHECK_APP_ID":"4766933",
+             "GOVERNANCE_DISPATCHER_RUN_ID":"88","GOVERNANCE_SCOPE":scope,"GOVERNANCE_CONTINUATION_INDEX":"1",
+             "GOVERNANCE_COHORT_ARTIFACT_ID":"7","GOVERNANCE_COHORT_ARTIFACT_DIGEST":context["artifact_digest"]}
+        now=time.time();admission=WRITER.EarlyWriterAdmission(100,1,now,now,(member["source_deadline_epoch"],),context["header"]["root_deadline_epoch"],now+300,time.monotonic()+300)
+        with ExitStack() as stack:
+            stack.enter_context(self.identity());stack.enter_context(patch.dict(os.environ,env))
+            for name,value in {"_cohort_context":context,"_cohort_members_by_target":{72:[context["members_by_id"][identifier] for identifier in context["target_members_by_number"][72] if identifier in context["members_by_id"]]},"_cohort_alias_index":{},
+                "_cohort_covered_generations":{},"_cohort_inventory_noop_generations":{},"_cohort_pending_generations":{},
+                "_cohort_pending_exemptions":frozenset(),"_cohort_generation_identities":{},"_cohort_api_counts":{"default":0,"app":0},
+                "_early_writer_admission":admission,"_terminal_deadline_monotonic":admission.deadline_monotonic,
+                "_bound_check_runs":{},"_cohort_cold_publication_guards":{},"_conditional_json_reads":conditional,
+                "_cohort_member_grant_code_proof":None,
+                "_cohort_member_grant_check_runs":set(),
+                "_conditional_read_cache":{},"_conditional_read_counts":dict.fromkeys(WRITER._conditional_read_counts,0)}.items():
+                stack.enter_context(patch.object(WRITER,name,value,create=True))
+            stack.enter_context(patch.object(WRITER,"cohort_helper",return_value=helper))
+            stack.enter_context(patch.object(WRITER,"pull",return_value=current))
+            contract=stack.enter_context(patch.object(WRITER,"contract",side_effect=outcome if isinstance(outcome,Exception) else None,return_value=outcome))
+            stack.enter_context(patch.object(WRITER,"sensor",return_value=max(context["members_by_id"])))
+            generations=(WRITER.Generation("CI","x",44,101,1,1,"completed","success"),
+                         WRITER.Generation("release-preflight","y",45,102,1,1,"completed","success"))
+            stack.enter_context(patch.object(WRITER,"generation",side_effect=[*generations,*generations]))
+            stack.enter_context(patch.object(WRITER,"final_closer_is_unique",return_value=True))
+            stack.enter_context(patch.object(WRITER,"ensure_writer_run_is_active"))
+            stack.enter_context(patch.object(WRITER,"pace_check_write"))
+            stack.enter_context(patch.object(WRITER.subprocess,"run",side_effect=native_api))
+            if expected_error:
+                with self.assertRaises(expected_error if isinstance(expected_error,type) else WRITER.NoPostGovernanceError):
+                    WRITER.process(72,{"64":frozenset({72})},"/tmp/cohort-cold-fixture",defer_terminal=deferred)
+                self.assertEqual(mutations,list(expected_mutations))
+            else:
+                decision=WRITER.process(72,{"64":frozenset({72})},"/tmp/cohort-cold-fixture",defer_terminal=deferred)
+                contract.assert_called_once()
+                if deferred:
+                    self.assertFalse(mutations)
+                    self.assertEqual(WRITER.decision_write_cost(decision),2)
+                    WRITER.finalize_decision(decision,{"64":frozenset({72})},None)
+            self.cold_read_metrics={**WRITER._conditional_read_counts,"app_attempts":WRITER._cohort_api_counts["app"],"native_attempts":len(reads)}
+            self.cold_native_checks=copy.deepcopy(checks)
+            self.cold_cache_state={name:dict(getattr(WRITER,name)) for name in (
+                "_cohort_covered_generations","_cohort_inventory_noop_generations","_cohort_pending_generations",
+                "_cohort_generation_identities")}
+            return mutations,reads
+
+    def test_admitted_cohort_cold_failure_uses_one_completed_native_post(self):
+        """既存同HEAD成功があっても、別required barrierが閉じた状態でfailureを一度だけ作る。"""
+        mutations,reads=self.cohort_cold_native_probe()
+        self.assertEqual(mutations,[("POST","completed","failure")])
+        self.assertGreaterEqual(sum("/branches/master/protection" in endpoint for endpoint in reads),4)
+        mutations,_=self.cohort_cold_native_probe(change="native_check_timestamps",outcome="success")
+        self.assertEqual(mutations,[("POST","completed","success")])
+        mutations,_=self.cohort_cold_native_probe(change="native_check_timestamps",outcome="success",conditional=True)
+        self.assertEqual(mutations,[("POST","completed","success")])
+        self.assertGreater(self.cold_read_metrics["not_modified"],0)
+        self.assertGreater(self.cold_read_metrics["attempt"],self.cold_read_metrics["primary"])
+
+    def test_cold_guard_shares_only_its_native_owner_observations(self):
+        _,reads=self.cohort_cold_native_probe(conditional=True)
+        self.assertEqual(self.cold_read_metrics["app_attempts"],len(reads))
+        for endpoint in (
+            "repos/owner/repository/actions/runs/88",
+            "repos/owner/repository/actions/runs/88/attempts/1/jobs?per_page=100&page=1",
+            "repos/owner/repository/git/ref/heads/master",
+            "repos/owner/repository",
+        ):
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(reads.count(endpoint),4)
+
+    def test_cold_composite_closing_native_identity_drift_never_mutates(self):
+        for change in ("closing_owner_number_float","closing_owner_workflow_float","closing_owner_attempt",
+                       "closing_owner_cancelled","closing_owner_head_repository","closing_repository_float","closing_default_ref"):
+            with self.subTest(change=change):
+                self.cohort_cold_native_probe(change=change,expected_error=True)
+                self.assertIsNone(WRITER._cold_native_observations)
+                self.assertTrue(all(not value for value in self.cold_cache_state.values()))
+
+    def test_admitted_cohort_cold_success_and_deferred_failure_post_once(self):
+        for outcome,deferred in (("success",False),("failure",True)):
+            with self.subTest(outcome=outcome,deferred=deferred):
+                mutations,_=self.cohort_cold_native_probe(outcome=outcome,deferred=deferred)
+                self.assertEqual(mutations,[("POST","completed",outcome)])
+
+    def test_admitted_cohort_cold_barrier_protection_drift_never_mutates(self):
+        for change in ("removed_barrier","wrong_app","float_app","strict_disabled","admins_disabled","conversation_disabled",
+                       "duplicate_context","midproof_removal","protection_schema","barrier_success","barrier_neutral",
+                       "barrier_skipped","barrier_foreign_app","barrier_float_id","default_ref","latest_generation"):
+            with self.subTest(change=change):self.cohort_cold_native_probe(change=change,expected_error=True)
+
+    def test_admitted_cohort_cold_native_lease_drift_never_mutates(self):
+        for change in ("lease_handoff","lease_completed","lease_cancelled","lease_admission_failure",
+                       "lease_selected_float","lease_registration_duplicate"):
+            with self.subTest(change=change):self.cohort_cold_native_probe(change=change,expected_error=True)
+
+    def test_admitted_cohort_cold_requires_exact_app_only_ruleset(self):
+        for change in ("ruleset_missing","ruleset_wrong_id","ruleset_admin_bypass","ruleset_wrong_app","ruleset_float_app",
+                       "ruleset_direct_bypass","ruleset_inactive","ruleset_wrong_branch"):
+            with self.subTest(change=change):self.cohort_cold_native_probe(change=change,expected_error=True)
+
+    def test_admitted_cohort_cold_late_drift_cleans_only_known_success_generation(self):
+        for outcome in ("success","failure"):
+            expected=[("POST","completed",outcome)]
+            if outcome=="success":expected.append(("PATCH","completed","failure"))
+            with self.subTest(outcome=outcome):
+                self.cohort_cold_native_probe(change="ruleset_midproof",outcome=outcome,expected_error=True,expected_mutations=expected)
+        self.cohort_cold_native_probe(change="unknown_post",outcome="success",expected_error=True,
+                                     expected_mutations=[("POST","completed","success")])
+
+    def test_admitted_cohort_exception_terminalizes_and_existing_generation_stays_patch(self):
+        self.cohort_cold_native_probe(outcome=WRITER.GovernanceError("fixture validation failure"),expected_error=WRITER.GovernanceError,
+                                     expected_mutations=[("POST","completed","failure")])
+        mutations,_=self.cohort_cold_native_probe(change="existing_current",outcome="success")
+        self.assertEqual(mutations,[("PATCH","in_progress",None),("PATCH","completed","success")])
+
+    def test_direct_terminal_creation_preserves_pending_then_terminal_protocol(self):
+        head="a"*40
+        pending={"id":9,"name":WRITER.CHECK_NAME,"head_sha":head,"app":{"id":42},
+                 "external_id":f"krr-governance/v1/{head}/unit","updated_at":"first",
+                 "status":"in_progress","conclusion":None,"details_url":"https://github.com/owner/repository/actions/runs/99"}
+        terminal={**pending,"updated_at":"last","status":"completed","conclusion":"success"}
+        with self.identity(),patch.dict(os.environ,{"GITHUB_ACTIONS":"false","GOVERNANCE_SCOPE":"","KRR_GOVERNANCE_CHECK_APP_ID":"42"}), \
+             patch.object(WRITER,"_bound_check_runs",{}),patch.object(WRITER,"_cohort_cold_publication_guards",{}), \
+             patch.object(WRITER,"check_run",side_effect=[None,pending,pending,terminal]), \
+             patch.object(WRITER,"command",side_effect=[json.dumps(pending),json.dumps(terminal)]) as command, \
+             patch.object(WRITER,"pace_check_write"):
+            WRITER.write_governance_check(head,"success","fixture",pending["details_url"])
+        self.assertIn("POST",command.call_args_list[0].args[0])
+        self.assertIn("status=in_progress",command.call_args_list[0].args[0])
+        self.assertIn("PATCH",command.call_args_list[1].args[0])
+        self.assertIn("status=completed",command.call_args_list[1].args[0])
+
+    def test_native_check_run_omitted_updated_at_uses_native_lifecycle_timestamps(self):
+        head="a"*40
+        value={"id":9,"name":WRITER.CHECK_NAME,"head_sha":head,"app":{"id":42},
+               "external_id":f"krr-governance/v1/{head}/unit","status":"in_progress","conclusion":None,
+               "started_at":"2026-10-01T00:00:00Z","completed_at":None,"details_url":"https://github.com/owner/repository/actions/runs/99"}
+        with self.identity(),patch.dict(os.environ,{"GOVERNANCE_SCOPE":"","KRR_GOVERNANCE_CHECK_APP_ID":"42"}):
+            first=WRITER.check_fingerprint(value)
+            completed={**value,"status":"completed","conclusion":"success","completed_at":"2026-10-01T00:01:00Z"}
+            last=WRITER.check_fingerprint(completed)
+            self.assertNotEqual(first,last)
+            self.assertNotEqual(last,WRITER.check_fingerprint({**completed,"completed_at":"2026-10-01T00:02:00Z"}))
+            for invalid in ({**completed,"completed_at":None},{**value,"started_at":None},{**completed,"app":{"id":42.0}},
+                            {**completed,"completed_at":"2026-10-01T00:00:00+00:00"},
+                            {**completed,"completed_at":"2026-02-31T00:00:00Z"},{**value,"started_at":"bad"},
+                            {**completed,"completed_at":"2026-09-30T23:59:00Z"}):
+                with self.subTest(invalid=invalid),self.assertRaises(WRITER.GovernanceError):WRITER.check_fingerprint(invalid)
+
+    def test_member_grant_output_drift_changes_native_check_fingerprint(self):
+        value={"id":9,"name":WRITER.CHECK_NAME,"head_sha":"a"*40,"app":{"id":42},
+               "external_id":"krr-governance/v1/"+"a"*40+"/unit","status":"completed","conclusion":"success",
+               "updated_at":"unchanged","details_url":"https://github.com/owner/repository/actions/runs/99",
+               "output":{"title":WRITER.CHECK_NAME,"summary":"KRR cohort member grant v1\n{}"}}
+        with self.identity(),patch.dict(os.environ,{"GOVERNANCE_SCOPE":"","KRR_GOVERNANCE_CHECK_APP_ID":"42"}):
+            first=WRITER.check_fingerprint(value)
+            for summary in ("KRR cohort member grant v1\n{\"members\":[]}","removed grant"):
+                with self.subTest(summary=summary):
+                    self.assertNotEqual(first,WRITER.check_fingerprint({**value,"output":{**value["output"],"summary":summary}}))
+
+    def test_successful_cold_native_member_grant_is_full_bound_and_single_post(self):
+        mutations,_=self.cohort_cold_native_probe(change="grant_union_complete",outcome="success",conditional=True)
+        self.assertEqual(mutations,[("POST","completed","success")])
+        check=self.cold_native_checks["a"*40]
+        code=Path(WRITER.__file__).read_bytes()
+        import hashlib
+        blob=hashlib.sha1(b"blob "+str(len(code)).encode()+b"\0"+code).hexdigest()
+        grant=WRITER.cohort_helper().decode_member_grant(check["output"]["summary"],writer_workflow_blob=blob)
+        self.assertEqual(grant["members"][0][0],9000)
+        self.assertEqual([entry[0] for entry in grant["members"]],[9000,9001])
+        self.assertEqual(grant["writer_run_id"],99)
+        self.assertEqual(grant["head_sha"],check["head_sha"])
+        self.assertNotIn("check_run_id",grant)
+        self.assertLessEqual(len(check["output"]["summary"].encode()),8192)
+
+    def test_invalid_cohort_member_grant_proof_never_mutates(self):
+        for change in ("grant_union_missing","grant_union_hidden","grant_body","grant_clock_reset","grant_context_digest","grant_source_drift"):
+            with self.subTest(change=change):self.cohort_cold_native_probe(change=change,outcome="success",expected_error=True)
+
+    def test_native_member_grant_response_and_reread_drift_never_replay_post(self):
+        for change in ("grant_summary_response","grant_summary_reread"):
+            with self.subTest(change=change):
+                self.cohort_cold_native_probe(change=change,outcome="success",expected_error=True,
+                                             expected_mutations=[("POST","completed","success"),("PATCH","completed","failure")])
+        for change in ("grant_summary_latest","grant_cleanup_race"):
+            with self.subTest(change=change):
+                self.cohort_cold_native_probe(change=change,outcome="success",expected_error=True,
+                                             expected_mutations=[("POST","completed","success")])
+
+    def test_direct_or_all_member_grant_injection_never_calls_api(self):
+        for scope in ("early","all",""):
+            with self.subTest(scope=scope),self.identity(),patch.dict(os.environ,{"GITHUB_ACTIONS":"true","GOVERNANCE_SCOPE":scope}), \
+                 patch.object(WRITER,"_cohort_context",None),patch.object(WRITER,"command") as command:
+                with self.assertRaises(WRITER.NoPostGovernanceError):
+                    WRITER.write_check("a"*40,state="success",description="fixture",details_url=WRITER.target_url(),
+                                       member_grant="KRR cohort member grant v1\n{}")
+                command.assert_not_called()
+
+    def test_conditional_json_304_is_fresh_bound_and_returns_independent_values(self):
+        first=subprocess.CompletedProcess([],0,'HTTP/2.0 200 OK\r\nETag: "one"\r\n\r\n{"native":{"id":1}}',"")
+        cached=subprocess.CompletedProcess([],1,'HTTP/2.0 304 Not Modified\r\nETag: "one"\r\n\r\n',"")
+        with self.identity(),patch.dict(os.environ,{"GH_TOKEN":"read-credential"}), \
+             patch.object(WRITER,"_conditional_json_reads",True),patch.object(WRITER,"_conditional_read_cache",{}), \
+             patch.object(WRITER,"_conditional_read_counts",dict.fromkeys(WRITER._conditional_read_counts,0)), \
+             patch.object(WRITER,"_cohort_api_counts",{"app":0,"default":0}), \
+             patch.object(WRITER.subprocess,"run",side_effect=[first,cached,cached]) as run:
+            one=WRITER.api_json("repos/owner/repository/actions/runs/88")
+            one["native"]["id"]=99
+            two=WRITER.api_json("repos/owner/repository/actions/runs/88")
+            self.assertEqual(two,{"native":{"id":1}})
+            two["native"]["id"]=100
+            self.assertEqual(WRITER.api_json("repos/owner/repository/actions/runs/88"),{"native":{"id":1}})
+            self.assertIn('If-None-Match: "one"',run.call_args_list[1].args[0])
+            self.assertEqual(WRITER._conditional_read_counts["attempt"],3)
+            self.assertEqual(WRITER._conditional_read_counts["primary"],1)
+            self.assertEqual(WRITER._conditional_read_counts["not_modified"],2)
+            self.assertEqual(WRITER._cohort_api_counts["app"],3)
+
+    def test_conditional_json_scope_changes_and_etag_removal_do_not_reuse_authority(self):
+        etag=subprocess.CompletedProcess([],0,'HTTP/2.0 200 OK\nETag: "one"\n\n{"id":1}',"")
+        missing=subprocess.CompletedProcess([],0,'HTTP/2.0 200 OK\n\n{"id":2}',"")
+        with self.identity(),patch.dict(os.environ,{"GH_TOKEN":"read-credential","DEFAULT_READ_TOKEN":"default-credential"}), \
+             patch.object(WRITER,"_conditional_json_reads",True),patch.object(WRITER,"_conditional_read_cache",{}), \
+             patch.object(WRITER,"_conditional_read_counts",dict.fromkeys(WRITER._conditional_read_counts,0)), \
+             patch.object(WRITER.subprocess,"run",side_effect=[etag,etag,etag,etag,missing,etag]) as run:
+            endpoint="repos/owner/repository/actions/runs/88?per_page=100&page=1"
+            WRITER.api_json(endpoint)
+            WRITER.api_json(endpoint.replace("page=1","page=2"))
+            WRITER.api_json(endpoint,default_token=True)
+            with patch.dict(os.environ,{"GH_TOKEN":"rotated-credential"}):WRITER.api_json(endpoint)
+            self.assertEqual(WRITER.api_json(endpoint),{"id":2})
+            WRITER.api_json(endpoint)
+            for index in (0,1,2,3,5):
+                self.assertFalse(any(value.startswith("If-None-Match:") for value in run.call_args_list[index].args[0]))
+            self.assertTrue(all("github.com" in call.args[0] for call in run.call_args_list))
+
+    def test_conditional_json_rejects_unbound_or_malformed_responses_without_fallback(self):
+        first=subprocess.CompletedProcess([],0,'HTTP/2.0 200 OK\nETag: "one"\n\n{"id":1}',"")
+        invalids=[(1,'HTTP/2.0 304 Not Modified\nETag: "two"\n\n'),(1,'HTTP/2.0 304 Not Modified\n\n'),
+                  (1,'HTTP/2.0 304 Not Modified\nETag: "one"\n\n{}'),(2,'HTTP/2.0 304 Not Modified\nETag: "one"\n\n'),
+                  (1,'HTTP/2.0 403 Forbidden\nETag: "one"\n\n{}'),(0,'HTTP/2.0 200 OK\nETag: "one"\nETag: "two"\n\n{}'),
+                  (0,'HTTP/2.0 200 OK\nETag: one\n\n{}'),(0,'HTTP/2.0 200 OK\n\nNaN'),(0,'HTTP/2.0 200 OK\n\n{}\nHTTP/2.0 200 OK'),
+                  (0,'not HTTP\n\n{}')]
+        for code,raw in invalids:
+            with self.subTest(raw=raw),self.identity(),patch.dict(os.environ,{"GH_TOKEN":"read-credential"}), \
+                 patch.object(WRITER,"_conditional_json_reads",True),patch.object(WRITER,"_conditional_read_cache",{}), \
+                 patch.object(WRITER,"_conditional_read_counts",dict.fromkeys(WRITER._conditional_read_counts,0)), \
+                 patch.object(WRITER.subprocess,"run",side_effect=[first,subprocess.CompletedProcess([],code,raw,"")]):
+                WRITER.api_json("repos/owner/repository/actions/runs/88")
+                with self.assertRaises(WRITER.GovernanceError):WRITER.api_json("repos/owner/repository/actions/runs/88")
+        with self.identity(),patch.dict(os.environ,{"GH_TOKEN":"read-credential"}), \
+             patch.object(WRITER,"_conditional_json_reads",True),patch.object(WRITER,"_conditional_read_cache",{}), \
+             patch.object(WRITER,"_conditional_read_counts",dict.fromkeys(WRITER._conditional_read_counts,0)), \
+             patch.object(WRITER.subprocess,"run",return_value=subprocess.CompletedProcess([],1,'HTTP/2.0 304 Not Modified\nETag: "one"\n\n',"")):
+            with self.assertRaises(WRITER.GovernanceError):WRITER.api_json("repos/owner/repository/actions/runs/88")
+
     def test_native_pending_mutex_invalidates_on_native_lease_clock_and_default_changes(self):
         import copy
         for change in ("handoff","completed","cancelled","job_identity","job_run_id_type","selected_digest",
@@ -1927,18 +2371,30 @@ class StatusWriterUnitTest(unittest.TestCase):
                     WRITER.dispatcher_generation(changed)
 
     def actual_sensor_proof_reader(self):
+        import ast
         import runpy
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         environment = dict(os.environ, RUNNER_TEMP=directory.name)
         workflow = (ROOT / ".github/workflows/pr-governance-review-events.yml").read_text()
         for stage in ("Prepare trusted cohort sensor reader", "Prepare trusted cohort proof reader",
-                      "Complete trusted cohort proof reader", "Finalize trusted cohort proof reader"):
+                      "Complete trusted cohort proof reader", "Finalize trusted cohort proof reader",
+                      "Prepare trusted member grant decoder", "Complete trusted member grant proof reader",
+                      "Finalize trusted member grant proof reader"):
             stage_text = workflow.split("      - name: " + stage + "\n", 1)[1]
             stage_shell = textwrap.dedent(stage_text.split("        run: |\n", 1)[1].split("      - name: ", 1)[0])
             result = subprocess.run(["bash", "-c", stage_shell], env=environment, text=True, capture_output=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
-        return runpy.run_path(str(Path(directory.name) / "krr-governance-cohort-reader.py"))
+        reader_path = Path(directory.name) / "krr-governance-cohort-reader.py"
+        reader = runpy.run_path(str(reader_path))
+        self.assertTrue({"decode_member_grant", "verify_sensor_member_grant", "sensor_cohort_binding"} <= reader.keys())
+        prepared = ast.parse(reader_path.read_text())
+        shared = ast.parse((ROOT / "scripts/review/pr_governance_cohort.py").read_text())
+        for name in ("decode_member_grant", "verify_sensor_member_grant"):
+            first = next(node for node in prepared.body if isinstance(node, ast.FunctionDef) and node.name == name)
+            second = next(node for node in shared.body if isinstance(node, ast.FunctionDef) and node.name == name)
+            self.assertEqual(ast.dump(first, include_attributes=False), ast.dump(second, include_attributes=False))
+        return reader
 
     def test_sensor_archive_counts_api_primary_and_storage_http_separately(self):
         reader = self.actual_sensor_proof_reader()
@@ -2090,24 +2546,39 @@ class StatusWriterUnitTest(unittest.TestCase):
             self.assertEqual(len(bad.calls), 1)
 
     def test_sensor_reader_preparation_executes_actual_static_module_with_private_file(self):
+        import ast
         import re
         import stat
         workflow = (ROOT / ".github/workflows/pr-governance-review-events.yml").read_text()
         prepare = workflow.split("      - name: Prepare trusted cohort sensor reader\n", 1)[1]
         prepare = prepare.split("        run: |\n", 1)[1].split("      - name: ", 1)[0]
         shell = textwrap.dedent(prepare)
-        start = workflow.index("          import runpy, stat\n")
-        finish = workflow.index("          def api_json(", start)
-        import_code = textwrap.dedent(workflow[start:finish])
         with tempfile.TemporaryDirectory() as directory:
             environment = dict(os.environ, RUNNER_TEMP=directory)
             result = subprocess.run(["bash", "-c", shell], env=environment, text=True, capture_output=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
-            for stage in ("Prepare trusted cohort proof reader", "Complete trusted cohort proof reader", "Finalize trusted cohort proof reader"):
+            for stage in ("Prepare trusted cohort proof reader", "Complete trusted cohort proof reader", "Finalize trusted cohort proof reader",
+                          "Prepare trusted member grant decoder", "Complete trusted member grant proof reader",
+                          "Finalize trusted member grant proof reader"):
                 stage_text = workflow.split("      - name: " + stage + "\n", 1)[1]
                 stage_shell = textwrap.dedent(stage_text.split("        run: |\n", 1)[1].split("      - name: ", 1)[0])
                 prepared = subprocess.run(["bash", "-c", stage_shell], env=environment, text=True, capture_output=True, check=False)
                 self.assertEqual(prepared.returncode, 0, prepared.stderr)
+            for stage in ("Prepare trusted sensor latch program", "Await matching trusted governance Check Run"):
+                stage_text = workflow.split("      - name: " + stage + "\n", 1)[1]
+                stage_shell = textwrap.dedent(stage_text.split("        run: |\n", 1)[1].split("      - name: ", 1)[0])
+                if stage.startswith("Await"):
+                    stage_shell = stage_shell.rsplit('python3 "$RUNNER_TEMP/krr-governance-sensor-latch.py"', 1)[0]
+                prepared = subprocess.run(["bash", "-c", stage_shell], env=environment, text=True, capture_output=True, check=False)
+                self.assertEqual(prepared.returncode, 0, prepared.stderr)
+            latch = Path(directory) / "krr-governance-sensor-latch.py"
+            self.assertTrue(stat.S_ISREG(latch.lstat().st_mode))
+            self.assertEqual(latch.lstat().st_mode & 0o077, 0)
+            program = latch.read_text()
+            ast.parse(program)
+            start = program.index("import runpy, stat\n")
+            finish = program.index("def api_json(", start)
+            import_code = program[start:finish]
             reader = Path(directory) / "krr-governance-sensor-reader.py"
             before = reader.read_bytes()
             self.assertTrue(stat.S_ISREG(reader.lstat().st_mode))

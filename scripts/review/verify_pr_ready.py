@@ -2814,26 +2814,39 @@ def _governance_check_error(
         # Check Run PATCH has no CAS, so the newest immutable ID is the only
         # authoritative generation; an old success must never mask a newer
         # pending or failure.  Duplicating one external-id is ambiguous.
-        generations: dict[str, tuple[Mapping[str, object], datetime]] = {}
+        generations: dict[str, Mapping[str, object]] = {}
+        generation_ids: set[int] = set()
         external_pattern = re.compile(rf"krr-governance/v1/{re.escape(head.lower())}/(?:dispatcher|writer)-[1-9][0-9]*$")
         for item in matches:
             identifier = item.get("id")
             external = item.get("external_id")
-            created_at = item.get("created_at")
-            if type(identifier) is not int or identifier < 1 or not isinstance(external, str) or external_pattern.fullmatch(external) is None or not isinstance(created_at, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z", created_at):
+            started_at, completed_at = item.get("started_at"), item.get("completed_at")
+            app = item.get("app")
+            if (type(identifier) is not int or identifier < 1
+                or not isinstance(app, Mapping) or type(app.get("id")) is not int
+                or not isinstance(external, str) or external_pattern.fullmatch(external) is None
+                or not isinstance(started_at, str)
+                or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z", started_at) is None):
                 return "trusted Check Run immutable generation is invalid"
             try:
-                created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                if item.get("status") == "completed":
+                    if not isinstance(completed_at, str) or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z", completed_at) is None:
+                        return "trusted Check Run immutable generation is invalid"
+                    if datetime.fromisoformat(completed_at.replace("Z", "+00:00")) < started:
+                        return "trusted Check Run immutable generation is invalid"
+                elif completed_at is not None:
+                    return "trusted Check Run immutable generation is invalid"
             except ValueError:
                 return "trusted Check Run immutable generation is invalid"
-            if external in generations:
+            if external in generations or identifier in generation_ids:
                 return "trusted Check Run immutable generation is ambiguous"
-            generations[external] = (item, created)
+            generations[external] = item
+            generation_ids.add(identifier)
         if not generations:
             return "trusted Check Run immutable generation is missing"
-        run = max(
-            generations.values(), key=lambda item: (item[1], int(item[0]["id"]))
-        )[0]
+        # REST Check Runにcreated_at/updated_atはなく、started_atもPATCH可能なためIDだけで世代を選ぶ。
+        run = max(generations.values(), key=lambda item: int(item["id"]))
         if run.get("status") != "completed" or run.get("conclusion") != "success":
             return "trusted Check Run is not completed successfully"
         external_id = run.get("external_id")
