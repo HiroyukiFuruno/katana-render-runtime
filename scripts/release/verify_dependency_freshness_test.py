@@ -5,6 +5,7 @@ import builtins
 import importlib.util
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -21,6 +22,86 @@ MODULE_SPEC.loader.exec_module(freshness)
 
 
 class DependencyFreshnessTest(unittest.TestCase):
+    def test_fetch_authenticates_only_exact_github_api_origin(self) -> None:
+        seen_headers: list[dict[str, str]] = []
+
+        class Response(io.BytesIO):
+            status = 200
+
+        class Opener:
+            def open(self, req: object, timeout: int) -> Response:
+                seen_headers.append(dict(req.header_items()))
+                return Response(b"{}")
+
+        with patch.dict(os.environ, {"GH_TOKEN": "secret-gh-token", "GITHUB_TOKEN": "fallback-token"}):
+            with patch.object(freshness.request, "build_opener", return_value=Opener()):
+                for url in (
+                    "https://api.github.com/repos/jgraph/drawio/releases/latest",
+                    "https://crates.io/api/v1/crates/serde",
+                    "https://api.github.com.evil.test/repos/example",
+                    "http://api.github.com/repos/example",
+                    "https://api.github.com:444/repos/example",
+                ):
+                    freshness.fetch(url)
+
+        self.assertEqual(seen_headers[0].get("Authorization"), "Bearer secret-gh-token")
+        self.assertTrue(all("Authorization" not in headers for headers in seen_headers[1:]))
+
+    def test_fetch_uses_github_token_when_gh_token_is_absent(self) -> None:
+        class Response(io.BytesIO):
+            status = 200
+
+        class Opener:
+            def open(self, req: object, timeout: int) -> Response:
+                self.headers = dict(req.header_items())
+                return Response(b"{}")
+
+        opener = Opener()
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "fallback-token"}, clear=True):
+            with patch.object(freshness.request, "build_opener", return_value=opener):
+                freshness.fetch("https://api.github.com/repos/example/repo/releases/latest")
+        self.assertEqual(opener.headers.get("Authorization"), "Bearer fallback-token")
+
+    def test_fetch_rejects_invalid_token_without_exposing_it_or_opening_request(self) -> None:
+        for token in ("secret\nvalue", "secret\rvalue", "secret\x01value", "secret value", "secret-é"):
+            with self.subTest(token=repr(token)):
+                with patch.dict(os.environ, {"GH_TOKEN": token}, clear=True):
+                    with patch.object(freshness.request, "build_opener") as build_opener:
+                        with self.assertRaises(ValueError) as error:
+                            freshness.fetch("https://api.github.com/repos/example/repo/releases/latest")
+                self.assertNotIn(token, str(error.exception))
+                build_opener.assert_not_called()
+
+    def test_fetch_without_github_token_remains_anonymous(self) -> None:
+        class Response(io.BytesIO):
+            status = 200
+
+        class Opener:
+            def open(self, req: object, timeout: int) -> Response:
+                self.headers = dict(req.header_items())
+                return Response(b"{}")
+
+        opener = Opener()
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(freshness.request, "build_opener", return_value=opener):
+                freshness.fetch("https://api.github.com/repos/example/repo/releases/latest")
+        self.assertNotIn("Authorization", opener.headers)
+
+    def test_redirect_handler_strips_authorization(self) -> None:
+        original = freshness.request.Request(
+            "https://api.github.com/repos/example/repo/releases/latest",
+            headers={"Authorization": "Bearer secret-gh-token"},
+        )
+        handler = freshness._StripAuthorizationRedirectHandler()
+        for target in (
+            "https://attacker.example/collect",
+            "https://api.github.com/repos/example/repo/redirected",
+        ):
+            with self.subTest(target=target):
+                redirected = handler.redirect_request(original, None, 302, "Found", {}, target)
+                self.assertIsNotNone(redirected)
+                self.assertNotIn("Authorization", dict(redirected.header_items()))
+
     def test_python310_fallback_reads_single_quoted_alternate_registry_dependency(self) -> None:
         fallback_name = "verify_dependency_freshness_py310_fallback"
         fallback_spec = importlib.util.spec_from_file_location(fallback_name, MODULE_PATH)
