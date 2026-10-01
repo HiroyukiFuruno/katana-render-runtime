@@ -194,7 +194,57 @@ mod tests {
         database
             .face(face_id)
             .cloned()
-            .ok_or_else(|| "bundled face must exist".to_string())
+            .ok_or("bundled face must exist".to_string())
+    }
+
+    fn duplicate_sfnt_as_two_face_ttc(sfnt: &[u8]) -> Result<Vec<u8>, String> {
+        let table_count = sfnt_table_count(sfnt)?;
+        let directory_end = table_count
+            .checked_mul(16)
+            .and_then(|length| length.checked_add(12))
+            .ok_or("SFNT table directory length overflowed")?;
+        if sfnt.len() < directory_end {
+            return Err("SFNT table directory is truncated".to_string());
+        }
+        let capacity = sfnt
+            .len()
+            .checked_add(20)
+            .ok_or("TTC fixture length overflowed")?;
+        let mut ttc = Vec::with_capacity(capacity);
+        ttc.extend_from_slice(b"ttcf");
+        ttc.extend_from_slice(&0x0001_0000_u32.to_be_bytes());
+        ttc.extend_from_slice(&2_u32.to_be_bytes());
+        ttc.extend_from_slice(&20_u32.to_be_bytes());
+        ttc.extend_from_slice(&20_u32.to_be_bytes());
+        ttc.extend_from_slice(sfnt);
+        relocate_ttc_table_offsets(&mut ttc, table_count)?;
+        Ok(ttc)
+    }
+
+    fn sfnt_table_count(sfnt: &[u8]) -> Result<usize, String> {
+        let count = sfnt.get(4..6).ok_or("SFNT table count must exist")?;
+        Ok(u16::from_be_bytes([count[0], count[1]]) as usize)
+    }
+
+    fn relocate_ttc_table_offsets(ttc: &mut [u8], table_count: usize) -> Result<(), String> {
+        for index in 0..table_count {
+            let offset = 20 + 12 + index * 16 + 8;
+            let table_offset = ttc
+                .get(offset..offset + 4)
+                .ok_or("SFNT table offset must exist")?;
+            let absolute = u32::from_be_bytes([
+                table_offset[0],
+                table_offset[1],
+                table_offset[2],
+                table_offset[3],
+            ])
+            .checked_add(20)
+            .ok_or("TTC table offset overflowed")?;
+            ttc.get_mut(offset..offset + 4)
+                .ok_or("TTC table offset must exist")?
+                .copy_from_slice(&absolute.to_be_bytes());
+        }
+        Ok(())
     }
 
     fn add_fallback_fixture_face(
@@ -345,6 +395,50 @@ mod tests {
     }
 
     #[test]
+    fn glyph_probe_matches_shaping_for_bundled_ttc_face_data() -> Result<(), String> {
+        let bundled = bundled_font_db();
+        let face_id = matching_font_face(&bundled, "Noto Sans", 400, false)
+            .ok_or("bundled Latin face must exist")?;
+        let sfnt = bundled
+            .with_face_data(face_id, |data, _| data.to_vec())
+            .ok_or("bundled Latin face bytes must exist")?;
+        let ttc = duplicate_sfnt_as_two_face_ttc(&sfnt)?;
+        let mut collection_face = bundled
+            .face(face_id)
+            .cloned()
+            .ok_or("bundled face must exist")?;
+        collection_face.index = 1;
+        collection_face.source = Source::Binary(Arc::new(ttc));
+        let mut database = Database::new();
+        let collection_id = database.push_face_info(collection_face);
+
+        assert!(font_has_char(&database, collection_id, 'A'));
+        assert!(!font_has_char(&database, collection_id, '\u{10ffff}'));
+        for character in ['A', '\u{10ffff}'] {
+            assert_eq!(
+                font_has_char(&database, collection_id, character),
+                shaping_face_has_char(&database, collection_id, character)
+            );
+        }
+        assert_collection_glyph_predicate(&database);
+        Ok(())
+    }
+
+    #[test]
+    fn ttc_fixture_rejects_missing_and_truncated_sfnt_directories() {
+        assert!(duplicate_sfnt_as_two_face_ttc(&[]).is_err());
+        assert!(duplicate_sfnt_as_two_face_ttc(&[0, 1, 0, 0, 0, 1]).is_err());
+    }
+
+    #[test]
+    fn ttc_fixture_rejects_table_offset_overflow() {
+        let mut ttc = vec![0; 44];
+        ttc[40..44].copy_from_slice(&u32::MAX.to_be_bytes());
+
+        assert!(relocate_ttc_table_offsets(&mut ttc, 1).is_err());
+    }
+
+    #[test]
     fn glyph_probe_rejects_missing_face_corrupt_data_and_invalid_collection_index()
     -> Result<(), String> {
         let bundled = bundled_font_db();
@@ -372,6 +466,7 @@ mod tests {
                 shaping_face_has_char(&database, identifier, 'A')
             );
         }
+        assert_collection_glyph_predicate(&database);
         Ok(())
     }
 
