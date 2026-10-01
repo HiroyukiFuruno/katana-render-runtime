@@ -2280,7 +2280,7 @@ jobs:
                       or repo(current_head.get("repo")) != repository_id or current_head.get("sha") != head["sha"]):
                       raise SystemExit("Bound early sensor current PR changed.")
                   break
-              if source.get("status") not in {"queued", "in_progress"} or source.get("conclusion") is not None:
+              if source.get("status") not in {"requested", "queued", "waiting", "pending", "in_progress"} or source.get("conclusion") is not None:
                   raise SystemExit("Bound early sensor terminal state is unknown.")
               remaining = deadline - time.time()
               if remaining <= 0:

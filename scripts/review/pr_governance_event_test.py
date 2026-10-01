@@ -7434,6 +7434,92 @@ class WriteReconciliationConcurrencyTest(unittest.TestCase):
                     else:
                         with self.assertRaises(SystemExit):exec(program,{})
 
+    def test_sensor_ack_waits_for_every_active_state_with_null_conclusion(self) -> None:
+        program = self.program("Require exact bound sensor acknowledgement")
+        active_states = ("requested", "queued", "waiting", "pending", "in_progress")
+        for states in [(state,) for state in active_states] + [active_states]:
+            for conclusion in (None, "success"):
+                with self.subTest(states=states, active_conclusion=conclusion):
+                    source = self.source(); sources = [dict(source, status=state, conclusion=conclusion) for state in states] + [source]
+                    pull = {"number": 72, "state": "open", "draft": False, "base": source["pull_requests"][0]["base"], "head": source["pull_requests"][0]["head"]}
+                    reads = []; source_reads = []
+                    def request(arguments, **keywords):
+                        endpoint = arguments[2]; reads.append(endpoint)
+                        self.assertEqual(keywords["timeout"], 20)
+                        if endpoint == "repos/owner/repository": value = self.repository()
+                        elif "/pulls/" in endpoint: value = pull
+                        else:
+                            source_reads.append(endpoint); value = sources[min(len(source_reads) - 1, len(sources) - 1)]
+                        return subprocess.CompletedProcess(arguments, 0, json.dumps(value), "")
+                    environment = {"GITHUB_REPOSITORY": "owner/repository", "SOURCE_RUN_ID": "200", "DEFAULT_BRANCH": "master", "ROOT_DEADLINE_EPOCH": "3000", "EARLY_DEADLINE_EPOCH": "2000"}
+                    with patch.dict(os.environ, environment), patch("subprocess.run", side_effect=request), patch("time.time", return_value=1000), patch("time.sleep") as sleep:
+                        if conclusion is None:
+                            exec(program, {})
+                            self.assertEqual(len(source_reads), len(states) + 1)
+                            self.assertEqual(sleep.call_count, len(states))
+                            self.assertEqual(reads[-1], "repos/owner/repository/pulls/72")
+                        else:
+                            with self.assertRaisesRegex(SystemExit, "Bound early sensor terminal state is unknown"): exec(program, {})
+                            self.assertEqual(len(source_reads), 1); sleep.assert_not_called()
+
+    def test_sensor_ack_revalidates_identity_and_terminal_result_after_active_transition(self) -> None:
+        program = self.program("Require exact bound sensor acknowledgement")
+        scenarios = ("success", "failure", "cancelled", "null", "unknown-conclusion", "unknown-state", "changed-id", "changed-attempt", "changed-path", "changed-event", "changed-repository", "changed-head", "draft", "closed", "stale-pr")
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario):
+                source = self.source(); terminal = json.loads(json.dumps(source))
+                pull = {"number": 72, "state": "open", "draft": False, "base": source["pull_requests"][0]["base"], "head": source["pull_requests"][0]["head"]}
+                if scenario in {"failure", "cancelled"}: terminal["conclusion"] = scenario
+                if scenario == "null": terminal["conclusion"] = None
+                if scenario == "unknown-conclusion": terminal["conclusion"] = "unknown"
+                if scenario == "unknown-state": terminal.update(status="unknown", conclusion=None)
+                if scenario == "changed-id": terminal["id"] = 201
+                if scenario == "changed-attempt": terminal["run_attempt"] = 2
+                if scenario == "changed-path": terminal["path"] = ".github/workflows/other.yml"
+                if scenario == "changed-event": terminal["event"] = "push"
+                if scenario == "changed-repository": terminal["repository"]["id"] = 2
+                if scenario == "changed-head": terminal["head_sha"] = "c" * 40
+                if scenario == "draft": pull["draft"] = True
+                if scenario == "closed": pull["state"] = "closed"
+                if scenario == "stale-pr": pull["head"] = dict(pull["head"], sha="c" * 40)
+                source_reads = []
+                def request(arguments, **keywords):
+                    endpoint = arguments[2]
+                    if endpoint == "repos/owner/repository": value = self.repository()
+                    elif "/pulls/" in endpoint: value = pull
+                    else:
+                        source_reads.append(endpoint); value = dict(source, status="pending", conclusion=None) if len(source_reads) == 1 else terminal
+                    return subprocess.CompletedProcess(arguments, 0, json.dumps(value), "")
+                environment = {"GITHUB_REPOSITORY": "owner/repository", "SOURCE_RUN_ID": "200", "DEFAULT_BRANCH": "master", "ROOT_DEADLINE_EPOCH": "3000", "EARLY_DEADLINE_EPOCH": "2000"}
+                with patch.dict(os.environ, environment), patch("subprocess.run", side_effect=request), patch("time.time", return_value=1000), patch("time.sleep") as sleep:
+                    if scenario == "success": exec(program, {})
+                    else:
+                        with self.assertRaises(SystemExit): exec(program, {})
+                    self.assertEqual(len(source_reads), 2)
+                    sleep.assert_called_once_with(5)
+
+    def test_sensor_ack_active_wait_retains_request_budget_and_minimum_deadline(self) -> None:
+        program = self.program("Require exact bound sensor acknowledgement")
+        for scenario in ("request-budget", "root-deadline", "early-deadline"):
+            with self.subTest(scenario=scenario):
+                source = dict(self.source(), status="requested", conclusion=None); reads = []; timeouts = []; sleeps = []; now = [1000]
+                def request(arguments, **keywords):
+                    endpoint = arguments[2]; reads.append(endpoint); timeouts.append(keywords["timeout"])
+                    value = self.repository() if endpoint == "repos/owner/repository" else source
+                    return subprocess.CompletedProcess(arguments, 0, json.dumps(value), "")
+                def sleep(seconds):
+                    sleeps.append(seconds)
+                    if scenario != "request-budget": now[0] += seconds
+                root = "1010" if scenario == "root-deadline" else "3000"
+                early = "1010" if scenario == "early-deadline" else "2000"
+                environment = {"GITHUB_REPOSITORY": "owner/repository", "SOURCE_RUN_ID": "200", "DEFAULT_BRANCH": "master", "ROOT_DEADLINE_EPOCH": root, "EARLY_DEADLINE_EPOCH": early}
+                with patch.dict(os.environ, environment), patch("subprocess.run", side_effect=request), patch("time.time", side_effect=lambda: now[0]), patch("time.sleep", side_effect=sleep):
+                    with self.assertRaisesRegex(SystemExit, "Bound sensor acknowledgement deadline or request budget elapsed"): exec(program, {})
+                self.assertEqual(len(reads), 300 if scenario == "request-budget" else 3)
+                self.assertEqual(len(sleeps), 299 if scenario == "request-budget" else 2)
+                self.assertEqual(timeouts, [20] * 300 if scenario == "request-budget" else [10, 10, 5])
+                self.assertEqual(set(sleeps), {5})
+
     def test_expired_sensor_ack_performs_no_api_call(self) -> None:
         program=self.program("Require exact bound sensor acknowledgement")
         with patch.dict(os.environ,{"GITHUB_REPOSITORY":"owner/repository","SOURCE_RUN_ID":"200","DEFAULT_BRANCH":"master","ROOT_DEADLINE_EPOCH":"1000","EARLY_DEADLINE_EPOCH":"2000"}),patch("time.time",return_value=1000),patch("subprocess.run") as request:
