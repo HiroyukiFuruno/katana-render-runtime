@@ -1164,13 +1164,15 @@ def current_source_eligible(source, current_pr, repository, repository_id, branc
                  "Current source PR repository malformed")
         if repo["id"] == repository_id or repo.get("full_name") == repository:
             _require(repository_matches(repo, repository, repository_id), "Current source PR repository identity contradicts itself")
-    body = current_pr.get("body")
+    _require("body" in current_pr, "Current source PR body malformed")
+    body = "" if current_pr["body"] is None else current_pr["body"]
     _require(isinstance(body, str) and "\0" not in body, "Current source PR body malformed")
     try:
         body.encode("utf-8", "strict")
     except UnicodeError as error:
         raise CohortError("Current source PR body malformed") from error
-    if (current_pr["state"] != "open" or current_pr["draft"]
+    # 本文なしのPRはIssue契約を持てないため、journal照合へ進めず対象外とする。
+    if (not body or current_pr["state"] != "open" or current_pr["draft"]
             or not repository_matches(base["repo"], repository, repository_id)
             or not repository_matches(head["repo"], repository, repository_id)
             or base["ref"] != branch or base["sha"] != original["base"]["sha"]

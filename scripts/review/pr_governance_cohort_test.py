@@ -743,6 +743,12 @@ class CohortConditionalTransportTests(unittest.TestCase):
 
 class CohortCLIReplayTests(unittest.TestCase):
     def test_four_hundred_notifications_survive_real_producer_select_admit_handoff(self):
+        self.replay_notifications()
+
+    def test_bodyless_started_and_unstarted_sources_do_not_block_valid_cli_cohort(self):
+        self.replay_notifications(bodyless=True)
+
+    def replay_notifications(self, *, bodyless=False):
         import base64, copy, os, tempfile, urllib.parse
         from pathlib import Path
         from unittest.mock import patch
@@ -752,7 +758,7 @@ class CohortCLIReplayTests(unittest.TestCase):
         metadata, archives, raw_runs, raw_jobs, sources, pulls = {}, {}, {}, {}, {}, {}
         repo = {"id": 101, "full_name": raw.repository}
         next_artifact = [1000]
-        native_outputs = []
+        native_outputs, requests = [], []
         def upload(payload, producer, segment=None):
             identifier = next_artifact[0]; next_artifact[0] += 1
             kind = payload["kind"]
@@ -787,6 +793,7 @@ class CohortCLIReplayTests(unittest.TestCase):
             raw_jobs[identifier] = [{"id": identifier*100, "run_id": identifier, "head_sha": source["head_sha"], "name": "KRR / PR governance review latch", "status": "in_progress" if offset < 2 else "queued", "conclusion": None,
                 "steps": [{"number": 5, "name": "Await matching trusted governance Check Run", "started_at": "1970-01-01T00:01:40Z", "status": "in_progress", "conclusion": None}] if offset < 2 else []}]
         def read(endpoint, *, timeout):
+            requests.append(endpoint)
             self.assertGreater(timeout, 0); self.assertLessEqual(timeout, 20)
             if "/actions/artifacts/" in endpoint: return copy.deepcopy(metadata[int(endpoint.rsplit("/",1)[1])])
             if "/actions/artifacts?" in endpoint:
@@ -828,12 +835,25 @@ class CohortCLIReplayTests(unittest.TestCase):
                         payload=json.loads((directory/'cohort-journal/binding.json').read_text()); upload(payload, identifier)
                 self.assertEqual(len(native_outputs), 400)
                 self.assertEqual({item['name'] for item in metadata.values()}, {f'krr-governance-source-{identifier}-attempt-1' for identifier in sources})
+                if bodyless:
+                    for offset, body in enumerate((None,"",None,"")):
+                        identifier,number=2000+offset,201+offset
+                        source=copy.deepcopy(sources[1000 if offset<2 else 1002])
+                        source.update(id=identifier,run_number=identifier)
+                        source["pull_requests"][0].update(number=number,body=body)
+                        sources[identifier],pulls[number]=source,copy.deepcopy(source["pull_requests"][0])
+                        raw_jobs[identifier]=copy.deepcopy(raw_jobs[1000 if offset<2 else 1002])
                 owner=90000; producer(owner); directory=Path(temporary)/str(owner)
                 run('producer', owner, directory, {"COHORT_MEMBER_HINT": "null", "COHORT_SENSOR_SOURCE": "false"})
                 own=upload(json.loads((directory/'cohort-journal/binding.json').read_text()), owner)
                 outputs=run('select', owner, directory, {"COHORT_OWN_JOURNAL_ID": str(own['artifact_id']), "COHORT_OWN_JOURNAL_DIGEST": own['artifact_digest']})
                 state=json.loads((directory/'cohort-selection/state.json').read_text())
                 self.assertEqual(state['member_ids'], [1000,1001]); self.assertEqual(outputs['batch_count'], '1')
+                if bodyless:
+                    self.assertFalse(any(f"krr-governance-source-{identifier}-attempt" in endpoint
+                                         for identifier in range(2000,2004) for endpoint in requests))
+                    self.assertFalse(any(f"/actions/runs/{identifier}/" in endpoint
+                                         for identifier in range(2000,2004) for endpoint in requests))
                 native={}
                 for kind in ('members','aliases','batch'):
                     reference=upload(json.loads((directory/f'cohort-selection/{kind}-1/binding.json').read_text()), owner, 1)
@@ -1239,18 +1259,36 @@ class CohortEmptyHeaderTests(unittest.TestCase):
 
 
 class CohortSnapshotObservationTests(unittest.TestCase):
-    def snapshot(self, *, transition=False, mutation=None):
+    def snapshot(self, *, transition=False, mutation=None, current_change=None):
         import copy, urllib.parse
         source=CohortSensorPaginationTests().sensor(1)
         other=copy.deepcopy(source);other["status"]="in_progress"
         if mutation:mutation(other)
+        pull=copy.deepcopy(source["pull_requests"][0])
+        if callable(current_change):current_change(pull)
+        elif current_change:pull.update(current_change)
         class Reader:
             def request(self,endpoint):
-                if "/pulls/" in endpoint:return copy.deepcopy(source["pull_requests"][0])
+                if "/pulls/" in endpoint:return copy.deepcopy(pull)
                 state=urllib.parse.parse_qs(urllib.parse.urlsplit(endpoint).query)["status"][0]
                 rows=[source] if state=="queued" else [other] if state=="in_progress" and transition else []
                 return {"total_count":len(rows),"workflow_runs":copy.deepcopy(rows)}
         return cohort.active_source_snapshot(Reader(),"owner/repository",101,"master")
+
+    def test_nullable_and_empty_current_body_filter_active_and_retired_source(self):
+        for body in (None,""):
+            for change in ({},{"state":"closed"},{"draft":True},
+                           {"head":{"sha":"f"*40,"repo":{"id":101,"full_name":"owner/repository"}}}):
+                with self.subTest(body=body,change=change):
+                    self.assertEqual(self.snapshot(transition=True,current_change=dict(change,body=body)),{})
+
+    def test_nonnullable_malformed_current_body_rejects_active_and_retired_source(self):
+        for body in (False,0,1.0,[],{},"\0","\ud800"):
+            for state in ("open","closed"):
+                with self.subTest(body=body,state=state),self.assertRaisesRegex(cohort.CohortError,"body malformed"):
+                    self.snapshot(current_change={"body":body,"state":state})
+        with self.assertRaisesRegex(cohort.CohortError,"body malformed"):
+            self.snapshot(current_change=lambda pull:pull.pop("body"))
 
     def test_native_partition_transition_retains_one_source_and_identity_drift_rejects(self):
         self.assertEqual(self.snapshot(transition=True)[1]["status"],"in_progress")
