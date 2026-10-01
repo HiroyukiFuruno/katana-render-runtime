@@ -220,6 +220,30 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn actual_html_select_ancestor_sets_positive_branch() -> Result<(), String> {
+        let mut document =
+            HtmlDocument::parse("<select id=outer><option id=option>choice</option></select>");
+        let select = actual_element(&mut document, "outer")?;
+        let option = actual_element(&mut document, "option")?;
+
+        assert!(!has_html_select_ancestor(&select));
+        assert!(has_html_select_ancestor(&option));
+        Ok(())
+    }
+
+    #[test]
+    fn actual_element_reports_missing_id() -> Result<(), String> {
+        let mut document = HtmlDocument::parse("");
+        let result = actual_element(&mut document, "missing");
+
+        assert!(matches!(
+            result,
+            Err(error) if error == "actual DOM element #missing is missing"
+        ));
+        Ok(())
+    }
+
     fn actual_element(document: &mut HtmlDocument, id: &str) -> Result<Handle, String> {
         let node_id = document
             .get_element_by_id(id)

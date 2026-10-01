@@ -117,9 +117,15 @@ fn collect_iframes(
 
 fn iframe_context(node: &Handle, in_template: bool, in_select: bool) -> (bool, bool) {
     (
-        in_template || is_element_named(node, "template"),
+        in_template || is_html_template(node),
         in_select || node_is_html_select(node),
     )
+}
+
+fn is_html_template(node: &Handle) -> bool {
+    matches!(&node.data, markup5ever_rcdom::NodeData::Element { name, .. }
+        if name.ns.as_str() == "http://www.w3.org/1999/xhtml"
+            && name.local.as_str() == "template")
 }
 
 pub(super) fn node_is_html_select(node: &Handle) -> bool {
@@ -160,6 +166,40 @@ fn is_element_named(node: &Handle, expected_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use html5ever::{parse_document, tendril::TendrilSink};
+
+    fn element_by_id(node: &Handle, id: &str) -> Option<Handle> {
+        if let markup5ever_rcdom::NodeData::Element { attrs, .. } = &node.data
+            && attrs.borrow().iter().any(|attribute| {
+                attribute.name.local.as_str() == "id" && attribute.value.as_ref() == id
+            })
+        {
+            return Some(node.clone());
+        }
+        let children = node.children.borrow();
+        for child in children.iter() {
+            if let Some(found) = element_by_id(child, id) {
+                return Some(found);
+            }
+        }
+        drop(children);
+        if let markup5ever_rcdom::NodeData::Element {
+            template_contents, ..
+        } = &node.data
+            && let Some(template_contents) = template_contents.borrow().as_ref()
+        {
+            return element_by_id(template_contents, id);
+        }
+        None
+    }
+
+    fn required_element_by_id(node: &Handle, id: &str) -> Result<Handle, String> {
+        element_by_id(node, id).ok_or_else(|| format!("element #{id} is missing"))
+    }
+
+    fn replay_test_source_order(parsed: &RcDom, entries: Vec<SourceOrderEntry>) -> Vec<Handle> {
+        finish_source_order(parsed, entries, None, None, &RefCell::new(HashMap::new())).1
+    }
 
     #[test]
     fn no_iframe_document_has_no_collected_iframes() {
@@ -207,5 +247,65 @@ mod tests {
         collect_iframes(&document.document, &mut iframes, false, false);
 
         assert!(iframes.is_empty());
+    }
+
+    #[test]
+    fn required_element_by_id_reports_missing_id() -> Result<(), String> {
+        let document = RcDom::default();
+        let missing = required_element_by_id(&document.document, "missing");
+
+        assert!(matches!(missing, Err(error) if error == "element #missing is missing"));
+        Ok(())
+    }
+
+    #[test]
+    fn svg_template_keeps_foreign_object_iframe_in_source_order() -> Result<(), String> {
+        let document = parse_document(RcDom::default(), Default::default()).one(
+            r#"<script id=before>before()</script><svg><template><foreignObject><iframe id=frame></iframe><script id=inside>inside()</script></foreignObject></template></svg><script id=after>after()</script>"#,
+        );
+        let before = required_element_by_id(&document.document, "before")?;
+        let frame = required_element_by_id(&document.document, "frame")?;
+        let inside = required_element_by_id(&document.document, "inside")?;
+        let after = required_element_by_id(&document.document, "after")?;
+        let source_order = replay_test_source_order(
+            &document,
+            vec![
+                SourceOrderEntry::Script(before.clone()),
+                SourceOrderEntry::Iframe { in_select: false },
+                SourceOrderEntry::Script(inside.clone()),
+                SourceOrderEntry::Script(after.clone()),
+            ],
+        );
+
+        assert!(matches!(
+            &frame.data,
+            markup5ever_rcdom::NodeData::Element { name, .. }
+                if name.ns.as_str() == "http://www.w3.org/1999/xhtml"
+                    && name.local.as_str() == "iframe"
+        ));
+        assert_eq!(source_order.len(), 4);
+        for (actual, expected) in source_order.iter().zip([&before, &frame, &inside, &after]) {
+            assert!(Rc::ptr_eq(actual, expected));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn html_template_iframe_remains_inert_in_source_order() -> Result<(), String> {
+        let document = parse_document(RcDom::default(), Default::default())
+            .one("<template><iframe id=hidden></iframe></template><iframe id=visible></iframe>");
+        let visible = required_element_by_id(&document.document, "visible")?;
+        let source_order = replay_test_source_order(
+            &document,
+            vec![
+                SourceOrderEntry::Iframe { in_select: false },
+                SourceOrderEntry::Iframe { in_select: false },
+            ],
+        );
+
+        assert_eq!(source_order.len(), 1);
+        assert!(Rc::ptr_eq(&source_order[0], &visible));
+        assert!(element_by_id(&document.document, "hidden").is_some());
+        Ok(())
     }
 }
