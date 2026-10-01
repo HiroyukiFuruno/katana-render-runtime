@@ -24,6 +24,7 @@ impl HtmlDocument {
             nodes: HashMap::new(),
             node_ids: HashMap::new(),
             next_node_id: 1,
+            prevalidated_image_events: HashMap::new(),
         };
         document.register_subtree(&document.document.clone());
         document

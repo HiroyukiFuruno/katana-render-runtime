@@ -11,10 +11,12 @@ pub(super) fn load_document_resources(
     loader: &HtmlSubresourceLoader,
     document: &mut HtmlDocument,
 ) -> HtmlDocumentResources {
+    document.clear_prevalidated_image_events();
     super::iframe::inline_iframes(loader, document);
     let stylesheets = load_stylesheets(loader, &document.document);
     let (scripts, body_onload_script_index) = load_scripts(loader, document);
-    inline_images(loader, &document.document);
+    let root = document.document.clone();
+    inline_images(loader, document, &root);
     HtmlDocumentResources {
         stylesheets,
         scripts,
@@ -42,17 +44,19 @@ fn collect_stylesheet_references(node: &Handle, references: &mut Vec<String>) {
     }
 }
 
-fn inline_images(loader: &HtmlSubresourceLoader, node: &Handle) {
+fn inline_images(loader: &HtmlSubresourceLoader, document: &mut HtmlDocument, node: &Handle) {
     if is_tag(node, "img") {
         remove_attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE);
         if let Some(source) = attribute(node, "src") {
             match loader.load_image_data_url(&source) {
                 Ok(data_url) => {
                     set_attribute(node, "src", &data_url);
+                    document.cache_prevalidated_image_event(data_url, "load");
                     set_or_append_attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE, "load");
                 }
                 Err(error) => {
                     log_subresource_failure(loader, "image", &source, &error);
+                    document.cache_prevalidated_image_event(source, "error");
                     set_or_append_attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE, "error");
                 }
             }
@@ -60,7 +64,7 @@ fn inline_images(loader: &HtmlSubresourceLoader, node: &Handle) {
     }
     let children = node.children.borrow().clone();
     for child in children {
-        inline_images(loader, &child);
+        inline_images(loader, document, &child);
     }
 }
 

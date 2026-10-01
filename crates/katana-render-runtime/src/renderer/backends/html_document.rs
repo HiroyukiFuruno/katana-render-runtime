@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
 use markup5ever_rcdom::Handle;
+use sha2::{Digest, Sha256};
+
+const IMAGE_SOURCE_DIGEST_SIZE: usize = 32;
 
 #[path = "html_document_mutation.rs"]
 mod mutation;
@@ -32,6 +35,29 @@ pub(super) struct HtmlDocument {
     nodes: HashMap<u64, Handle>,
     node_ids: HashMap<usize, u64>,
     next_node_id: u64,
+    /* WHY: 生 URL は大きいため保持せず、作成者属性と独立した固定長キーで実使用量を抑える。 */
+    prevalidated_image_events: HashMap<(usize, [u8; IMAGE_SOURCE_DIGEST_SIZE]), &'static str>,
+}
+
+impl HtmlDocument {
+    pub(super) fn clear_prevalidated_image_events(&mut self) {
+        self.prevalidated_image_events.clear();
+    }
+
+    pub(super) fn cache_prevalidated_image_event(&mut self, source: String, event: &'static str) {
+        self.prevalidated_image_events
+            .insert(image_source_identity(&source), event);
+    }
+
+    pub(super) fn prevalidated_image_event(&self, source: &str) -> Option<&'static str> {
+        self.prevalidated_image_events
+            .get(&image_source_identity(source))
+            .copied()
+    }
+}
+
+fn image_source_identity(source: &str) -> (usize, [u8; IMAGE_SOURCE_DIGEST_SIZE]) {
+    (source.len(), Sha256::digest(source.as_bytes()).into())
 }
 
 /// Dynamic DOM projection used only by KRR's interactive HTML runtime.
