@@ -15,6 +15,7 @@ import subprocess
 import sys
 import zipfile
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 from urllib import error, parse, request
 
@@ -408,14 +409,28 @@ def _verify_runs(
     if not verified:
         raise EvidencePendingError("expected at least one current-base CI run")
 
-    # run id と attempt は不変の workflow 世代を表す。GitHub は PR base 更新時に
-    # 古い run の埋め込み pull_requests 関係を書き換えることがあるため、古い成功
-    # 世代が新しい pending / failed 世代を隠せないよう、全候補の不変な結合を検証後に
-    # 最新世代だけを評価する。
+    # 古いrunの再実行も新しい世代になるため、IDではなくattemptの開始時刻を使う。
     generations = [(run["id"], run["run_attempt"]) for run in verified]
     if len(set(generations)) != len(generations):
         raise EvidenceError("current-head CI runs have duplicated run generations")
-    latest = max(verified, key=lambda run: (run["id"], run["run_attempt"]))
+    started_runs = []
+    for run in verified:
+        started_at = run.get("run_started_at")
+        if not isinstance(started_at, str) or not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", started_at
+        ):
+            raise EvidenceError("CI workflow run start time is invalid")
+        try:
+            started = datetime.strptime(started_at, "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError as exc:
+            raise EvidenceError("CI workflow run start time is invalid") from exc
+        started_runs.append((started, run))
+    latest_start = max(started for started, _ in started_runs)
+    latest_runs = [run for started, run in started_runs if started == latest_start]
+    # 秒精度で順序を確定できない複数世代から、成功だけを選んではならない。
+    if len(latest_runs) != 1:
+        raise EvidencePendingError("current-head CI run start times are ambiguous")
+    latest = latest_runs[0]
     if latest.get("status") != "completed":
         raise EvidencePendingError("all current-head CI runs are still in progress or unsuccessful")
     if latest.get("conclusion") != "success":

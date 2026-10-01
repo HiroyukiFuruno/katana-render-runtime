@@ -59,6 +59,7 @@ def payloads() -> dict[str, object]:
     run = {
         "id": RUN_ID,
         "run_attempt": 1,
+        "run_started_at": "2026-10-01T12:00:00Z",
         "event": "pull_request",
         "path": MODULE.WORKFLOW_PATH,
         "head_sha": HEAD,
@@ -209,6 +210,7 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
                     final = copy.deepcopy(initial)
                     newer = copy.deepcopy(final["workflow_runs"][0])
                     newer.update(status=status, conclusion=conclusion)
+                    newer["run_started_at"] = "2026-10-01T12:01:00Z"
                     if rerun:
                         newer["run_attempt"] += 1
                         final["workflow_runs"] = [newer]
@@ -385,6 +387,7 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
         reopened = copy.deepcopy(runs["workflow_runs"][0])  # type: ignore[index]
         reopened["id"] = 124
         reopened["run_attempt"] = 1
+        reopened["run_started_at"] = "2026-10-01T12:01:00Z"
         runs["total_count"] = 2  # type: ignore[index]
         runs["workflow_runs"].append(reopened)  # type: ignore[index]
         job = copy.deepcopy(responses["repos/owner/repository/actions/runs/123/jobs?per_page=100&page=1"])
@@ -408,12 +411,49 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
         runs = responses[WORKFLOW_RUNS_PATH]
         pending = copy.deepcopy(runs["workflow_runs"][0])  # type: ignore[index]
         pending["id"] = RUN_ID + 1
+        pending["run_started_at"] = "2026-10-01T12:01:00Z"
         pending["status"] = "in_progress"
         pending["conclusion"] = None
         runs["total_count"] = 2  # type: ignore[index]
         runs["workflow_runs"].append(pending)  # type: ignore[index]
         with self.assertRaisesRegex(MODULE.EvidencePendingError, "still in progress"):
             self.verify(responses)
+
+    def test_older_run_rerun_supersedes_newer_run_success(self) -> None:
+        for status, conclusion, error_type in (
+            ("in_progress", None, MODULE.EvidencePendingError),
+            ("completed", "failure", MODULE.EvidenceError),
+            ("completed", "success", None),
+        ):
+            with self.subTest(status=status, conclusion=conclusion):
+                successful = payloads()[WORKFLOW_RUNS_PATH]["workflow_runs"][0]
+                rerun = copy.deepcopy(successful)
+                rerun.update(
+                    id=RUN_ID - 1, run_attempt=2,
+                    run_started_at="2026-10-01T12:01:00Z",
+                    status=status, conclusion=conclusion,
+                )
+                args = ([rerun, successful], REPOSITORY, 90, BASE, HEAD, MODULE.WORKFLOW_PATH)
+                if error_type is None:
+                    self.assertEqual(MODULE._verify_runs(*args), rerun)
+                else:
+                    with self.assertRaises(error_type):
+                        MODULE._verify_runs(*args)
+
+    def test_run_chronology_rejects_invalid_or_missing_start_time(self) -> None:
+        for started_at in (None, 1, "", "2026-02-30T12:00:00Z", "2026-10-01T12:00:00+00:00"):
+            with self.subTest(started_at=started_at):
+                run = payloads()[WORKFLOW_RUNS_PATH]["workflow_runs"][0]
+                run["run_started_at"] = started_at
+                with self.assertRaisesRegex(MODULE.EvidenceError, "start time is invalid"):
+                    MODULE._verify_runs([run], REPOSITORY, 90, BASE, HEAD, MODULE.WORKFLOW_PATH)
+
+    def test_same_second_generations_do_not_select_a_successful_run(self) -> None:
+        successful = payloads()[WORKFLOW_RUNS_PATH]["workflow_runs"][0]
+        rerun = copy.deepcopy(successful)
+        rerun.update(id=RUN_ID - 1, run_attempt=2, status="in_progress", conclusion=None)
+        with self.assertRaisesRegex(MODULE.EvidencePendingError, "start times are ambiguous"):
+            MODULE._verify_runs([successful, rerun], REPOSITORY, 90, BASE, HEAD, MODULE.WORKFLOW_PATH)
 
     def test_rejects_malformed_binding_among_current_head_runs(self) -> None:
         responses = payloads()
