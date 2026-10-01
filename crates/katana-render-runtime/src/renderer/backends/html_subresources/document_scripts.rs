@@ -1,6 +1,6 @@
 use super::HtmlSubresourceLoader;
 use super::document::{attribute, is_tag, load_text, text_content};
-use crate::renderer::backends::html_document::HtmlDocument;
+use crate::renderer::backends::html_document::{HtmlDocument, LaterBodyOnloadToken};
 use html5ever::ns;
 use markup5ever_rcdom::{Handle, NodeData};
 
@@ -8,7 +8,7 @@ pub(super) fn load_scripts(
     loader: &HtmlSubresourceLoader,
     document: &HtmlDocument,
 ) -> (Vec<String>, Option<usize>) {
-    let mut collector = ScriptCollector::new(loader, document.body_onload_source_order_index);
+    let mut collector = ScriptCollector::new(loader, document);
     collector.collect(&document.source_order);
     collector.finish()
 }
@@ -19,16 +19,20 @@ struct ScriptCollector<'a> {
     body_source_order_index: Option<usize>,
     source_order_index: usize,
     body_onload_script_index: Option<usize>,
+    later_body_onload_tokens: &'a [LaterBodyOnloadToken],
+    next_later_token: usize,
 }
 
 impl<'a> ScriptCollector<'a> {
-    fn new(loader: &'a HtmlSubresourceLoader, body_source_order_index: Option<usize>) -> Self {
+    fn new(loader: &'a HtmlSubresourceLoader, document: &'a HtmlDocument) -> Self {
         Self {
             loader,
             scripts: Vec::new(),
-            body_source_order_index,
+            body_source_order_index: document.body_onload_source_order_index,
             source_order_index: 0,
             body_onload_script_index: None,
+            later_body_onload_tokens: &document.later_body_onload_tokens,
+            next_later_token: 0,
         }
     }
 
@@ -74,6 +78,15 @@ impl<'a> ScriptCollector<'a> {
             && self.body_source_order_index == Some(self.source_order_index)
         {
             self.body_onload_script_index = Some(self.scripts.len());
+        }
+        while let Some(token) = self.later_body_onload_tokens.get(self.next_later_token)
+            && token.source_order_index == self.source_order_index
+        {
+            self.scripts
+                .push(HtmlDocument::later_body_onload_install_script(
+                    &token.source,
+                ));
+            self.next_later_token += 1;
         }
     }
 

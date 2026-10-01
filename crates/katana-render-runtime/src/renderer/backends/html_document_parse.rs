@@ -20,6 +20,7 @@ impl HtmlDocument {
             body_onload_source,
             body_onload_source_order_index,
             source_order,
+            later_body_onload_tokens,
         } = parse_with_source_order(source);
         let mut document = Self {
             document: parsed.document,
@@ -27,6 +28,7 @@ impl HtmlDocument {
             body_onload_source,
             source_order,
             body_onload_source_order_index,
+            later_body_onload_tokens,
             nodes: HashMap::new(),
             node_ids: HashMap::new(),
             next_node_id: 1,
@@ -43,7 +45,7 @@ impl HtmlDocument {
     pub(crate) fn inline_scripts(&self) -> Result<Vec<String>, String> {
         let mut scripts = Vec::new();
         collect_scripts(&self.document, &mut scripts)?;
-        Ok(scripts)
+        Ok(self.append_later_body_onload_scripts(scripts))
     }
 
     /// body または frameset の onload 属性へ到達する前に実行される inline script 数を返す。
@@ -56,6 +58,30 @@ impl HtmlDocument {
 
     pub(crate) fn body_onload_source(&self) -> Option<&str> {
         self.body_onload_source.as_deref()
+    }
+
+    pub(in crate::renderer::backends) fn later_body_onload_install_script(source: &str) -> String {
+        let source = serde_json::Value::String(source.to_owned()).to_string();
+        format!("__krrInstallStaticBodyLoadHandler({source}, true);")
+    }
+
+    fn append_later_body_onload_scripts(&self, scripts: Vec<String>) -> Vec<String> {
+        let mut ordered = Vec::with_capacity(scripts.len() + self.later_body_onload_tokens.len());
+        let mut tokens = self.later_body_onload_tokens.iter().peekable();
+        for (index, script) in scripts
+            .into_iter()
+            .map(Some)
+            .chain(std::iter::once(None))
+            .enumerate()
+        {
+            while let Some(token) = tokens.next_if(|token| token.script_index == index) {
+                ordered.push(Self::later_body_onload_install_script(&token.source));
+            }
+            if let Some(script) = script {
+                ordered.push(script);
+            }
+        }
+        ordered
     }
 }
 
@@ -120,6 +146,32 @@ mod tests {
         );
 
         assert_eq!(document.body_onload_script_index(), Some(1));
+    }
+
+    #[test]
+    fn later_body_onload_tokens_follow_html_parser_context_transitions() {
+        for suffix in [
+            "<template><body onload='ignored'></template><body onload='later'>",
+            "<select><body onload='ignored'></select><body onload='later'>",
+            "<table><select><tr><td><body onload='later'>",
+            "<svg><body onload='later'>",
+            "<svg><template><body onload='later'>",
+            "<svg><foreignObject><template><body onload='ignored'></template><body onload='later'>",
+            "</body></html><body onload='later'>",
+        ] {
+            let document = HtmlDocument::parse(&format!(
+                "<body onload='first'><script>before()</script>{suffix}"
+            ));
+            let tokens = &document.later_body_onload_tokens;
+            assert_eq!(tokens.len(), 1, "{suffix}");
+            assert_eq!(tokens[0].source, "later", "{suffix}");
+            assert_eq!(tokens[0].script_index, 1, "{suffix}");
+            assert_eq!(tokens[0].source_order_index, 1, "{suffix}");
+        }
+        let document = HtmlDocument::parse(
+            "<frameset onload='first'><frameset onload='ignored'><body onload='ignored'>",
+        );
+        assert!(document.later_body_onload_tokens.is_empty());
     }
 
     #[test]

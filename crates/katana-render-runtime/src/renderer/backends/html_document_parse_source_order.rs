@@ -1,4 +1,5 @@
-use super::tree::WindowLoadHandlerObserver;
+use super::super::LaterBodyOnloadToken;
+use super::tree::{LaterBodyObserver, WindowLoadHandlerObserver};
 #[path = "html_document_parse_source_order_events.rs"]
 mod events;
 use events::{SourceOrderEntry, finish_source_order, node_is_html_select, node_is_visible};
@@ -21,6 +22,7 @@ pub(super) struct SourceOrderSink {
     body_onload_source: RefCell<Option<String>>,
     body_onload_source_order_index: Cell<Option<usize>>,
     source_order: RefCell<Vec<SourceOrderEntry>>,
+    later_body_onload_tokens: RefCell<Vec<LaterBodyOnloadToken>>,
 }
 
 pub(super) struct ParsedSourceOrder {
@@ -29,6 +31,7 @@ pub(super) struct ParsedSourceOrder {
     pub(super) body_onload_source: Option<String>,
     pub(super) body_onload_source_order_index: Option<usize>,
     pub(super) source_order: Vec<Handle>,
+    pub(super) later_body_onload_tokens: Vec<LaterBodyOnloadToken>,
 }
 
 struct OpenSelectObserver {
@@ -56,17 +59,20 @@ impl SourceOrderSink {
             body_onload_source: RefCell::new(None),
             body_onload_source_order_index: Cell::new(None),
             source_order: RefCell::new(Vec::new()),
+            later_body_onload_tokens: RefCell::new(Vec::new()),
         }
     }
 
     pub(super) fn finish(self) -> ParsedSourceOrder {
         let parsed = self.tree_builder.sink.finish();
+        let mut later_body_onload_tokens = self.later_body_onload_tokens.into_inner();
         let (body_onload_source_order_index, source_order) = finish_source_order(
             &parsed,
             self.source_order.into_inner(),
             self.body_onload_source_order_index.get(),
             self.body_onload_script_index.get(),
             &self.node_visibility,
+            &mut later_body_onload_tokens,
         );
         ParsedSourceOrder {
             document: parsed,
@@ -74,6 +80,7 @@ impl SourceOrderSink {
             body_onload_source: self.body_onload_source.into_inner(),
             body_onload_source_order_index,
             source_order,
+            later_body_onload_tokens,
         }
     }
 
@@ -110,14 +117,14 @@ impl SourceOrderSink {
             return;
         };
         let name = tag.name.to_string();
-        if self.body_onload_script_index.get().is_some()
-            || !self
-                .window_load_handler_observer
-                .borrow_mut()
-                .token_created_or_updated_window_load_handler(
-                    &self.tree_builder.sink.document,
-                    &name,
-                )
+        if self.body_onload_script_index.get().is_some() {
+            self.observe_later_body_onload(&name, source);
+            return;
+        }
+        if !self
+            .window_load_handler_observer
+            .borrow_mut()
+            .token_created_or_updated_window_load_handler(&self.tree_builder.sink.document, &name)
         {
             return;
         }
@@ -125,6 +132,23 @@ impl SourceOrderSink {
         self.body_onload_source.replace(Some(source));
         self.body_onload_source_order_index
             .set(Some(self.source_order.borrow().len()));
+    }
+
+    fn observe_later_body_onload(&self, name: &str, source: String) {
+        if !name.eq_ignore_ascii_case("body") {
+            return;
+        }
+        let observer = LaterBodyObserver::default();
+        self.tree_builder.trace_handles(&observer);
+        if observer.accepts_body_token() {
+            self.later_body_onload_tokens
+                .borrow_mut()
+                .push(LaterBodyOnloadToken {
+                    script_index: self.scripts.get(),
+                    source_order_index: self.source_order.borrow().len(),
+                    source,
+                });
+        }
     }
 
     fn node_is_visible(&self, node: &Handle) -> bool {
@@ -203,6 +227,7 @@ mod tests {
             None,
             None,
             &visibility,
+            &mut [],
         );
 
         assert!(source_order.is_empty());

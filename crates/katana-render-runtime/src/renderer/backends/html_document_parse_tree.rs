@@ -1,6 +1,34 @@
-use html5ever::ns;
+use html5ever::{ns, tree_builder::Tracer};
 use markup5ever_rcdom::{Handle, NodeData};
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
+
+#[derive(Default)]
+pub(super) struct LaterBodyObserver {
+    body_present: Cell<bool>,
+    inert_context: Cell<bool>,
+}
+
+impl LaterBodyObserver {
+    pub(super) fn accepts_body_token(&self) -> bool {
+        self.body_present.get() && !self.inert_context.get()
+    }
+}
+
+impl Tracer for LaterBodyObserver {
+    type Handle = Handle;
+
+    fn trace_handle(&self, node: &Handle) {
+        if let NodeData::Element { name, .. } = &node.data
+            && name.ns == ns!(html)
+        {
+            match name.local.as_str() {
+                "body" => self.body_present.set(true),
+                "template" | "select" | "frameset" => self.inert_context.set(true),
+                _ => {}
+            }
+        }
+    }
+}
 
 #[derive(Default)]
 pub(super) struct WindowLoadHandlerObserver {

@@ -748,7 +748,16 @@ Object.defineProperty(globalThis, "onload", {
     __krrInstallLifecycleProperty(globalThis, "load", value);
   },
 });
-globalThis.__krrInstallStaticBodyLoadHandler = (parserSource) => {
+globalThis.__krrInstallStaticBodyLoadHandler = (parserSource, laterToken = false) => {
+  if (laterToken) {
+    const nodeId =
+      __krrNativeDom("querySelector", "body") ?? __krrNativeDom("querySelector", "html > frameset");
+    if (nodeId !== null && __krrNativeDom("getAttribute", nodeId, "onload") === null) {
+      __krrNativeDom("setAttribute", nodeId, "onload", parserSource);
+      __krrInstallBodyLoadHandler(__krrElement(nodeId), parserSource);
+    }
+    return;
+  }
   const install = (element) => {
     if (parserSource === undefined) {
       __krrInstallBodyLoadHandler(element, element.getAttribute("onload"));

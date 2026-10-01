@@ -1,3 +1,4 @@
+use super::super::super::LaterBodyOnloadToken;
 use markup5ever_rcdom::{Handle, RcDom};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -6,21 +7,33 @@ pub(super) enum SourceOrderEntry {
     Iframe { in_select: bool },
 }
 
+struct SourceOrderReplay<'a> {
+    iframes: &'a [(Handle, bool, bool)],
+    iframe_index: usize,
+    document: &'a Handle,
+    node_visibility: &'a RefCell<HashMap<usize, bool>>,
+}
+
 pub(super) fn finish_source_order(
     parsed: &RcDom,
     entries: Vec<SourceOrderEntry>,
     body_onload_event_index: Option<usize>,
     body_onload_script_index: Option<usize>,
     node_visibility: &RefCell<HashMap<usize, bool>>,
+    later_body_onload_tokens: &mut [LaterBodyOnloadToken],
 ) -> (Option<usize>, Vec<Handle>) {
     let mut iframes = Vec::new();
     collect_iframes(&parsed.document, &mut iframes, false, false);
     let (mut body_onload_source_order_index, source_order) = replay_source_order(
         entries,
-        &iframes,
+        SourceOrderReplay {
+            iframes: &iframes,
+            iframe_index: 0,
+            document: &parsed.document,
+            node_visibility,
+        },
         body_onload_event_index,
-        &parsed.document,
-        node_visibility,
+        later_body_onload_tokens,
     );
     if body_onload_source_order_index.is_none() && body_onload_script_index.is_some() {
         body_onload_source_order_index = Some(source_order.len());
@@ -30,31 +43,44 @@ pub(super) fn finish_source_order(
 
 fn replay_source_order(
     entries: Vec<SourceOrderEntry>,
-    iframes: &[(Handle, bool, bool)],
+    mut replay: SourceOrderReplay<'_>,
     body_onload_event_index: Option<usize>,
-    document: &Handle,
-    node_visibility: &RefCell<HashMap<usize, bool>>,
+    later_body_onload_tokens: &mut [LaterBodyOnloadToken],
 ) -> (Option<usize>, Vec<Handle>) {
-    let mut iframe_index = 0;
     let mut source_order = Vec::with_capacity(entries.len());
     let mut body_onload_source_order_index = None;
+    let mut later_tokens = later_body_onload_tokens.iter_mut().peekable();
     for (event_index, entry) in entries.into_iter().enumerate() {
+        LaterBodyOnloadToken::record_source_order(
+            &mut later_tokens,
+            event_index,
+            source_order.len(),
+        );
         if body_onload_event_index == Some(event_index) {
             body_onload_source_order_index = Some(source_order.len());
         }
+        replay.append(entry, &mut source_order);
+    }
+    for token in later_tokens {
+        token.source_order_index = source_order.len();
+    }
+    (body_onload_source_order_index, source_order)
+}
+
+impl SourceOrderReplay<'_> {
+    fn append(&mut self, entry: SourceOrderEntry, source_order: &mut Vec<Handle>) {
         match entry {
             SourceOrderEntry::Script(script) => source_order.push(script),
             SourceOrderEntry::Iframe { in_select } => append_iframe(
-                &mut source_order,
-                iframes,
-                &mut iframe_index,
+                source_order,
+                self.iframes,
+                &mut self.iframe_index,
                 in_select,
-                document,
-                node_visibility,
+                self.document,
+                self.node_visibility,
             ),
         }
     }
-    (body_onload_source_order_index, source_order)
 }
 
 fn append_iframe(
@@ -198,7 +224,15 @@ mod tests {
     }
 
     fn replay_test_source_order(parsed: &RcDom, entries: Vec<SourceOrderEntry>) -> Vec<Handle> {
-        finish_source_order(parsed, entries, None, None, &RefCell::new(HashMap::new())).1
+        finish_source_order(
+            parsed,
+            entries,
+            None,
+            None,
+            &RefCell::new(HashMap::new()),
+            &mut [],
+        )
+        .1
     }
 
     #[test]
@@ -221,6 +255,7 @@ mod tests {
             None,
             None,
             &visibility,
+            &mut [],
         );
 
         assert!(source_order.is_empty());
@@ -232,7 +267,7 @@ mod tests {
         let visibility = RefCell::new(HashMap::new());
 
         let (body_onload_index, source_order) =
-            finish_source_order(&document, Vec::new(), None, Some(0), &visibility);
+            finish_source_order(&document, Vec::new(), None, Some(0), &visibility, &mut []);
 
         assert_eq!(body_onload_index, Some(0));
         assert!(source_order.is_empty());

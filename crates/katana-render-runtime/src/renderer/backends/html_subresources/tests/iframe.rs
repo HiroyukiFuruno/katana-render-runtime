@@ -99,6 +99,29 @@ fn iframe_scripts_do_not_shift_parent_body_onload_parser_position() -> TestResul
 }
 
 #[test]
+fn later_duplicate_body_onload_replays_after_foster_parented_iframe_scripts() -> TestResult {
+    let fixture = LocalFixture::new()?;
+    std::fs::write(
+        fixture.root.join("frame.html"),
+        "<script>document.body.removeAttribute('onload'); document.getElementById('status').textContent += 'frame|';</script>",
+    )
+    .map_err(to_string)?;
+    let source = fixture.source(
+        r#"<body onload="document.getElementById('status').textContent += 'first'"><p id=status></p><template><iframe src=ignored.html></iframe></template><table><iframe src=frame.html></iframe><body onload="document.getElementById('status').textContent += 'second'"><script>document.getElementById('status').textContent += 'parent|';</script></table>"#,
+    )?;
+    let snapshot = StaticHtmlRuntime
+        .start_interactive(&source)
+        .and_then(|session| session.snapshot())
+        .map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r#"<p id="status">frame|parent|second</p>"#),
+        "{snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
 fn iframe_after_table_select_transition_executes_before_parent_script_and_load() -> TestResult {
     let fixture = LocalFixture::new()?;
     std::fs::write(

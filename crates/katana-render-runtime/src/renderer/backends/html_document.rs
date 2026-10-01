@@ -33,11 +33,30 @@ pub(super) struct HtmlDocument {
     pub(super) body_onload_source: Option<String>,
     pub(super) source_order: Vec<Handle>,
     pub(super) body_onload_source_order_index: Option<usize>,
+    pub(super) later_body_onload_tokens: Vec<LaterBodyOnloadToken>,
     nodes: HashMap<u64, Handle>,
     node_ids: HashMap<usize, u64>,
     next_node_id: u64,
     /* WHY: 生 URL は大きいため保持せず、作成者属性と独立した固定長キーで実使用量を抑える。 */
     prevalidated_image_events: HashMap<(usize, [u8; IMAGE_SOURCE_DIGEST_SIZE]), &'static str>,
+}
+
+pub(super) struct LaterBodyOnloadToken {
+    pub(super) script_index: usize,
+    pub(super) source_order_index: usize,
+    pub(super) source: String,
+}
+
+impl LaterBodyOnloadToken {
+    pub(super) fn record_source_order(
+        tokens: &mut std::iter::Peekable<std::slice::IterMut<'_, Self>>,
+        event_index: usize,
+        source_order_index: usize,
+    ) {
+        while let Some(token) = tokens.next_if(|token| token.source_order_index == event_index) {
+            token.source_order_index = source_order_index;
+        }
+    }
 }
 
 impl HtmlDocument {
