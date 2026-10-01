@@ -1208,6 +1208,531 @@ class StatusWriterUnitTest(unittest.TestCase):
             with self.assertRaises(WRITER.GovernanceError):
                 WRITER.dispatcher_generations(66, WRITER.dispatcher_created_at(run["created_at"]))
 
+    def test_four_admitted_early_writers_pace_four_hundred_writes_inside_original_clocks(self):
+        from datetime import datetime, timezone
+        began = 1790812920.0
+        clock, writes = [began], []
+        def stamp(value): return datetime.fromtimestamp(value,timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        def sleep(seconds): clock[0] += seconds
+        with self.identity(), patch.dict(os.environ,{"GITHUB_ACTIONS":"true","GITHUB_SHA":"d"*40,"GITHUB_REF_NAME":"master","GOVERNANCE_SCOPE":"early"}), \
+             patch.object(WRITER.time,"time",side_effect=lambda:clock[0]), \
+             patch.object(WRITER.time,"monotonic",side_effect=lambda:clock[0]-began+1000), \
+             patch.object(WRITER.time,"sleep",side_effect=sleep),patch.object(WRITER,"_last_check_write_at",None):
+            for segment in range(1,5):
+                sleep(30)
+                page=self.admission_metadata();page["jobs"][0]["started_at"]=stamp(clock[0]);page["jobs"][0]["steps"][0]["started_at"]=stamp(clock[0])
+                admission=WRITER.early_writer_admission(page,tuple([began+5400]*50),began+21000)
+                sleep(180)
+                WRITER._last_check_write_at=None
+                for _ in range(100):
+                    WRITER.pace_check_write()
+                    WRITER.early_writer_admission(page,tuple([began+5400]*50),began+21000,previous=admission)
+                    writes.append((segment,clock[0]))
+            self.assertEqual(len(writes),400)
+            self.assertAlmostEqual(clock[0]-began,4080.0,places=4)
+            self.assertTrue(all(at < began+5400 for _,at in writes))
+            # 元期限を過ぎたqueueはwriter clockを新たに開始できない。
+            clock[0]=began+5401
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.early_writer_admission(page,(began+5400,),began+21000)
+
+    def test_cohort_all_writer_never_extends_original_root_or_terminal_deadline(self):
+        from types import SimpleNamespace
+        context = {"header":{"root_deadline_epoch":300.0},"members_by_id":{},"target_members_by_number":{}}
+        helper = SimpleNamespace(load_cohort=lambda *a,**kw:context,verify_cohort_lease=lambda *a,**kw:None)
+        for previous, expected in ((2000.0,1050.0),(1020.0,1020.0),(None,1050.0)):
+            with self.subTest(previous=previous), self.identity(), patch.object(WRITER,"cohort_helper",return_value=helper), \
+                 patch.object(WRITER.time,"time",return_value=250.0),patch.object(WRITER.time,"monotonic",return_value=1000.0), \
+                 patch.object(WRITER,"_cohort_context",None),patch.object(WRITER,"_cohort_members_by_target",{}), \
+                 patch.object(WRITER,"_cohort_api_counts",None),patch.object(WRITER,"_terminal_deadline_monotonic",previous):
+                WRITER.prepare_cohort_writer(WRITER.DispatcherSource(88,"workflow_run",1),7,"sha256:"+"a"*64,1,(),phase="all")
+                self.assertEqual(WRITER._terminal_deadline_monotonic,expected)
+
+    def test_actual_cohort_loader_lease_registration_and_writer_admission_connect(self):
+        sys.path.insert(0, str(ROOT / "scripts/review"))
+        from pr_governance_cohort_test import RawArtifactFixture
+        helper = WRITER.cohort_helper()
+        fixture = RawArtifactFixture()
+        fixture.run.update(status="in_progress", conclusion=None)
+        fixture.steps[helper.ELECTION_JOB].extend([
+            {"number": 20, "name": helper.SELECTED_PREFIX+f"owner=100 artifact=1 digest={fixture.header_ref['artifact_digest']}", "status":"completed","conclusion":"success"},
+            {"number": 21, "name": helper.REGISTER_PREFIX+f"segment=1 run=99 artifact=1 digest={fixture.header_ref['artifact_digest']}", "status":"completed","conclusion":"success"}])
+        fixture.jobs["jobs"].append({"id":4,"run_id":100,"run_attempt":1,"head_sha":fixture.sha,
+            "name":helper.ADMISSION_JOB,"status":"completed","conclusion":"success","steps":[
+            {"number":1,"name":helper.ADMITTED_PREFIX+f"owner=100 artifact=1 digest={fixture.header_ref['artifact_digest']}","status":"completed","conclusion":"success"}]})
+        fixture.jobs["total_count"] = 4
+        source = {"id":11,"status":"in_progress","head_sha":"c"*40,"run_attempt":1}
+        fixture.data["repos/owner/repository/actions/runs/11"] = source
+        fixture.data["repos/owner/repository/actions/runs/11/attempts/1/jobs?per_page=100&page=1"] = {
+            "total_count":1,"jobs":[{"id":11,"run_id":11,"head_sha":"c"*40,"name":"KRR / PR governance review latch",
+            "steps":[{"number":1,"name":"Await matching trusted governance Check Run","status":"in_progress","started_at":"1970-01-01T00:01:40Z"}]}]}
+        page = self.admission_metadata();job=page["jobs"][0];job.update(head_sha=fixture.sha, started_at="1970-01-01T00:03:20Z")
+        job["steps"][0]["started_at"] = "1970-01-01T00:03:30Z"
+        counts = []
+        def read(endpoint, **kwargs):
+            counts.append(endpoint)
+            return page if "/runs/99/attempts/1/jobs?" in endpoint else fixture.read_json(endpoint, timeout=20)
+        with self.identity(), patch.dict(os.environ,{"GITHUB_REPOSITORY":"owner/repository","GITHUB_SHA":fixture.sha,"GITHUB_REF_NAME":"master"}), \
+             patch.object(WRITER.time,"time",return_value=250.0), patch.object(WRITER.time,"monotonic",return_value=1000.0), \
+             patch.object(WRITER,"_terminal_deadline_monotonic",None), patch.object(WRITER,"_cohort_context",None), \
+             patch.object(WRITER,"_cohort_members_by_target",{}), patch.object(WRITER,"_cohort_api_counts",None), \
+             patch.object(WRITER,"_early_writer_admission",None), patch.object(WRITER,"cohort_read_json",side_effect=read), \
+             patch.object(WRITER,"cohort_read_archive",side_effect=fixture.read_archive), patch.object(WRITER,"api_json",side_effect=read), \
+             patch.object(WRITER,"ensure_writer_run_is_active") as active:
+            WRITER.prepare_cohort_writer(WRITER.DispatcherSource(100,"workflow_run",1),1,fixture.header_ref["artifact_digest"],1,(7,),phase="early")
+            self.assertEqual(WRITER._cohort_context["registered_writers"],{1:99})
+            self.assertEqual(WRITER._cohort_members_by_target[7],[fixture.member])
+            self.assertEqual(WRITER._early_writer_admission.deadline_epoch,1410.0)
+            self.assertEqual(WRITER._terminal_deadline_monotonic,2160.0)
+            self.assertEqual(active.call_count,2)
+            self.assertEqual(sum('/runs/11' in endpoint for endpoint in counts),3)
+
+    def test_preserved_cohort_writer_requires_complete_phase_and_entire_batch_original_clock(self):
+        import copy
+        began = 1790812920.0
+        page = self.admission_metadata()
+        job = page["jobs"][0]
+        job.update(status="completed", conclusion="success", completed_at="2026-10-01T00:04:00Z")
+        job["steps"][0].update(status="completed", conclusion="success", completed_at="2026-10-01T00:03:00Z")
+        run = {"id": 99, "name": "PR governance status writer", "display_title": "source=88 scope=early segment=1",
+               "path": ".github/workflows/pr-governance-status-writer.yml@master", "head_sha": "d"*40, "head_branch": "master",
+               "run_attempt": 1, "event": "workflow_dispatch", "status": "completed", "conclusion": "success",
+               "repository": self.rest_repository(), "actor": {"login": "krr[bot]", "type": "Bot"}, "triggering_actor": {"login": "krr[bot]", "type": "Bot"}}
+        context = {"registered_writers": {1: 99}, "header": {"owner_dispatcher_run_id": 88, "root_deadline_epoch": began-120+21000,
+                   "member_ids": [17,18], "member_segments": "11"}, "members_by_id": {
+                   17: {"latch_started_at": "2026-10-01T00:02:00Z", "source_deadline_epoch": began+5400},
+                   18: {"latch_started_at": "2026-10-01T00:02:00Z", "source_deadline_epoch": began+5400}}}
+        def read(endpoint):
+            return copy.deepcopy(page if "/jobs?" in endpoint else run)
+        with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d"*40, "GITHUB_REF_NAME": "master", "KRR_GOVERNANCE_APP_BOT_LOGIN": "krr[bot]"}), \
+             patch.object(WRITER.time, "time", return_value=began+10000), patch.object(WRITER, "_cohort_context", context), \
+             patch.object(WRITER, "api_json", side_effect=read):
+            # 原source clockは過去でも、当時clock内に完了したexact writerは保持する。
+            WRITER.verify_preserved_cohort_writers({72:(99,101)})
+            for change in ("duplicate_job", "duplicate_step", "wrong_attempt", "foreign_url", "late_write", "omitted_target_clock"):
+                with self.subTest(change=change):
+                    original_page, original_context = copy.deepcopy(page), copy.deepcopy(context)
+                    if change == "duplicate_job": page["jobs"].append(copy.deepcopy(job));page["total_count"] = 2
+                    elif change == "duplicate_step": job["steps"].append(copy.deepcopy(job["steps"][0]))
+                    elif change == "wrong_attempt": job["run_attempt"] = 2
+                    elif change == "foreign_url": job["url"] = "https://api.github.com/repos/other/repo/actions/jobs/123"
+                    elif change == "late_write": job["steps"][0]["completed_at"] = "2026-10-01T00:23:00Z";job["completed_at"] = "2026-10-01T00:24:00Z"
+                    else:
+                        context["members_by_id"][18] = {"latch_started_at": "2026-09-30T22:32:30Z", "source_deadline_epoch": began+30}
+                    with self.assertRaises(WRITER.GovernanceError): WRITER.verify_preserved_cohort_writers({72:(99,101)})
+                    page.clear();page.update(original_page);job = page["jobs"][0]
+                    context.clear();context.update(original_context)
+
+    def test_cohort_writer_registration_waits_only_for_missing_exact_binding(self):
+        from types import SimpleNamespace
+        clock = [100.0]
+        calls = []
+        cohort = {"header": {"root_deadline_epoch": 200.0}, "members_by_id": {17: {"source_deadline_epoch": 180.0}}, "registered_writers": {}}
+        def refresh(value, **kwargs):
+            calls.append(kwargs["deadline"])
+            if len(calls) == 2: value["registered_writers"][1] = 99
+        def sleep(seconds): clock[0] += seconds
+        with self.identity(), patch.object(WRITER, "cohort_helper", return_value=SimpleNamespace(verify_cohort_lease=refresh)), \
+             patch.object(WRITER.time, "time", side_effect=lambda: clock[0]), \
+             patch.object(WRITER.time, "monotonic", side_effect=lambda: clock[0]+1000), patch.object(WRITER.time, "sleep", side_effect=sleep):
+            WRITER.await_cohort_writer_registration(cohort, 1, deadline=105.0)
+            self.assertEqual((calls, clock[0]), ([105.0, 105.0], 102.0))
+            cohort["registered_writers"][1] = 100
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.await_cohort_writer_registration(cohort, 1, deadline=105.0)
+            self.assertEqual(len(calls), 2)
+            cohort["registered_writers"].clear()
+            cohort["members_by_id"][17]["source_deadline_epoch"] = 103.0
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.await_cohort_writer_registration(cohort, 1, deadline=105.0)
+            self.assertEqual(clock[0], 103.0)
+            self.assertLessEqual(max(calls), 105.0)
+
+    def test_cohort_owner_lease_api_failure_stops_before_any_coverage_exemption(self):
+        from types import SimpleNamespace
+        def failed(*args,**kwargs): raise RuntimeError("API unavailable")
+        with self.identity(), patch.dict(os.environ,{"GITHUB_ACTIONS":"true","GITHUB_SHA":"d"*40,"GITHUB_REF_NAME":"master","GOVERNANCE_SCOPE":"early"}), \
+             patch.object(WRITER,"_cohort_context",{"header":{}}), \
+             patch.object(WRITER,"_terminal_deadline_monotonic",__import__("time").monotonic()+30), \
+             patch.object(WRITER,"api_json",return_value=self.dispatcher_run()), \
+             patch.object(WRITER,"cohort_helper",return_value=SimpleNamespace(verify_cohort_lease=failed)), \
+             patch.object(WRITER,"cohort_dispatcher_generations") as covered:
+            with self.assertRaises(WRITER.NoPostGovernanceError):
+                WRITER.reject_newer_dispatcher_barrier("a"*40)
+        covered.assert_not_called()
+
+    def test_cohort_dispatcher_fence_classifies_proven_callbacks_before_original_unknown_cap(self):
+        from types import SimpleNamespace
+        import copy
+        clock = __import__("time").monotonic()
+        context = {"header": {"owner_dispatcher_run_id": 88, "owner_run_attempt": 1,
+                   "workflow_blob_sha": "e"*40, "member_ids": [900]},
+                   "artifact_id": 7, "artifact_digest": "sha256:"+"a"*64, "cohort_digest": "f"*64}
+        current_run = self.dispatcher_run()
+        callbacks = [self.dispatcher_run(identifier=100+i, event="workflow_run", status="completed", conclusion="cancelled") for i in range(200)]
+        for callback in callbacks:
+            callback.update(name="sensor=900 action=completed", display_title="sensor=900 action=completed")
+        proof_calls = []
+        def proof(_context, run, **kwargs):
+            proof_calls.append(run["id"])
+            return run["id"] >= 100
+        helper = SimpleNamespace(cohort_known_producer_ids=lambda *a, **kw: {v["id"]: 900 for v in callbacks}, consumer_is_covered=proof)
+        runs = [current_run, *callbacks]
+        def page(endpoint):
+            number = int(endpoint.rsplit("page=",1)[1]);return {"total_count": len(runs), "workflow_runs": copy.deepcopy(runs[(number-1)*100:number*100])}
+        with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d"*40, "GITHUB_REF_NAME": "master", "GOVERNANCE_COHORT_ARTIFACT_ID": "7", "GOVERNANCE_COHORT_ARTIFACT_DIGEST": "sha256:"+"a"*64}), \
+             patch.object(WRITER, "_cohort_context", context), patch.object(WRITER, "_cohort_alias_index", None), \
+             patch.object(WRITER, "_cohort_covered_generations", {}), patch.object(WRITER, "_cohort_generation_identities", {}), patch.object(WRITER, "_terminal_deadline_monotonic", clock+30), \
+             patch.object(WRITER, "cohort_helper", return_value=helper), patch.object(WRITER, "object_page", side_effect=page):
+            current = WRITER.dispatcher_generation(current_run)
+            generations, covered = WRITER.cohort_dispatcher_generations(current)
+            self.assertEqual((len(generations),len(covered),len(proof_calls)), (201,200,200))
+            WRITER.cohort_dispatcher_generations(current)
+            self.assertEqual(len(proof_calls),200)
+            # 同じIDのidentity/lifecycle変化はpositive cacheを再利用しない。
+            callbacks[0]["run_number"] += 1
+            runs[1] = callbacks[0]
+            helper.consumer_is_covered = lambda *a, **kw: False
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.cohort_dispatcher_generations(current)
+            callbacks[0]["run_number"] -= 1
+            callbacks[1]["conclusion"] = "failure"
+            runs[2] = callbacks[1]
+            _, covered = WRITER.cohort_dispatcher_generations(current)
+            self.assertNotIn(101, covered)
+            runs.extend(self.dispatcher_run(identifier=1000+i) for i in range(99))
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.cohort_dispatcher_generations(current)
+            runs = [current_run, callbacks[0], callbacks[0]]
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.cohort_dispatcher_generations(current)
+
+    def test_recovered_predecessor_index_is_only_a_positive_proof_hint(self):
+        from types import SimpleNamespace
+        clock = __import__("time").monotonic()
+        context = {"header": {"owner_dispatcher_run_id": 88, "owner_run_attempt": 1,
+                   "workflow_blob_sha": "e"*40, "member_ids": [900]},
+                   "artifact_id": 7, "artifact_digest": "sha256:"+"a"*64, "cohort_digest": "f"*64}
+        current_run = self.dispatcher_run(identifier=88)
+        predecessor = self.dispatcher_run(identifier=89, status="completed", conclusion="failure")
+        unknown = self.dispatcher_run(identifier=90, status="completed", conclusion="failure")
+        runs = [current_run, predecessor, unknown]
+        page = {"total_count": len(runs), "workflow_runs": runs}
+        calls = []
+        def proof(_context, run, **kwargs):
+            calls.append(run["id"])
+            return run["id"] == 89
+        helper = SimpleNamespace(cohort_known_producer_ids=lambda *a, **kw: {88: None, 89: None}, consumer_is_covered=proof)
+        with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d"*40, "GITHUB_REF_NAME": "master", "GOVERNANCE_COHORT_ARTIFACT_ID": "7", "GOVERNANCE_COHORT_ARTIFACT_DIGEST": "sha256:"+"a"*64}), \
+             patch.object(WRITER, "_cohort_context", context), patch.object(WRITER, "_cohort_alias_index", None), \
+             patch.object(WRITER, "_cohort_covered_generations", {}), patch.object(WRITER, "_cohort_generation_identities", {}), patch.object(WRITER, "_terminal_deadline_monotonic", clock+30), \
+             patch.object(WRITER, "cohort_helper", return_value=helper), patch.object(WRITER, "object_page", return_value=page):
+            current = WRITER.dispatcher_generation(current_run)
+            _, covered = WRITER.cohort_dispatcher_generations(current)
+            self.assertEqual(covered, frozenset({89}))
+            self.assertEqual(calls, [89])
+            WRITER.cohort_dispatcher_generations(current)
+            self.assertEqual(calls, [89])
+            WRITER._cohort_covered_generations.clear()
+            helper.consumer_is_covered = lambda *a, **kw: False
+            _, covered = WRITER.cohort_dispatcher_generations(current)
+            self.assertFalse(covered)
+            def unavailable(*args, **kwargs): raise RuntimeError("API unavailable")
+            helper.consumer_is_covered = unavailable
+            with self.assertRaises(RuntimeError):
+                WRITER.cohort_dispatcher_generations(current)
+            self.assertFalse(WRITER._cohort_covered_generations)
+
+    def test_cohort_dispatcher_dynamic_name_requires_exact_title_and_bound_dispatch_inputs(self):
+        value = self.dispatcher_run(event="workflow_run")
+        value.update(name="sensor=900 action=in_progress", display_title="sensor=900 action=in_progress")
+        with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d"*40, "GITHUB_REF_NAME": "master", "GOVERNANCE_COHORT_ARTIFACT_ID": "0"}):
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.dispatcher_generation(value)
+        with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d"*40, "GITHUB_REF_NAME": "master",
+             "GOVERNANCE_COHORT_ARTIFACT_ID": "7", "GOVERNANCE_COHORT_ARTIFACT_DIGEST": "sha256:"+"a"*64}):
+            self.assertEqual(WRITER.dispatcher_generation(value).identifier, 88)
+            for changed in (value | {"name": "sensor=901 action=in_progress"},
+                            value | {"display_title": "sensor=900 action=requested"},
+                            value | {"event": "issues"}, value | {"run_attempt": 2}):
+                with self.subTest(changed=changed), self.assertRaises(WRITER.GovernanceError):
+                    WRITER.dispatcher_generation(changed)
+
+    def actual_sensor_proof_reader(self):
+        import runpy
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        environment = dict(os.environ, RUNNER_TEMP=directory.name)
+        workflow = (ROOT / ".github/workflows/pr-governance-review-events.yml").read_text()
+        for stage in ("Prepare trusted cohort sensor reader", "Prepare trusted cohort proof reader",
+                      "Complete trusted cohort proof reader", "Finalize trusted cohort proof reader"):
+            stage_text = workflow.split("      - name: " + stage + "\n", 1)[1]
+            stage_shell = textwrap.dedent(stage_text.split("        run: |\n", 1)[1].split("      - name: ", 1)[0])
+            result = subprocess.run(["bash", "-c", stage_shell], env=environment, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        return runpy.run_path(str(Path(directory.name) / "krr-governance-cohort-reader.py"))
+
+    def test_sensor_archive_counts_api_primary_and_storage_http_separately(self):
+        reader = self.actual_sensor_proof_reader()
+        calls = []
+        class Budget:
+            reads = 1
+            def charge(self): self.reads += 1
+        class Response:
+            def __init__(self, status, location=None):
+                self.code = status; self.headers = {"Location":location} if location else {}
+            def read(self, limit): return b"zip-proof"
+        def open_request(request, timeout):
+            calls.append((request, timeout))
+            return Response(302,"https://productionresultssa.blob.core.windows.net/proof") if len(calls)==1 else Response(200)
+        reader["sensor_archive_read"].__globals__["_open_no_redirect"] = open_request
+        budget, primary = Budget(), {"hits":0}
+        value = reader["sensor_archive_read"]("repos/owner/repository/actions/artifacts/7/zip", timeout=20,
+                deadline=__import__("time").monotonic()+30,budget=budget,token="read-only",primary=primary)
+        self.assertEqual((value,budget.reads,primary["hits"]),(b"zip-proof",2,1))
+        self.assertEqual(calls[0][0].get_header("Authorization"),"Bearer read-only")
+        self.assertIsNone(calls[1][0].get_header("Authorization"))
+        self.assertTrue(all(0<timeout<=20 for _,timeout in calls))
+
+    def test_sensor_etag_304_keeps_attempt_cap_and_revalidates_exact_cached_payload(self):
+        reader = self.actual_sensor_proof_reader()
+        request = reader["sensor_json_request"]
+        class Budget:
+            reads = 0
+            def charge(self):
+                if self.reads >= 300: raise RuntimeError("exhausted")
+                self.reads += 1
+        budget, cache, primary, calls = Budget(), {}, {"hits": 0}, []
+        responses = iter((
+            'HTTP/2 200 OK\nETag: "a"\n\n{"value":1}',
+            'HTTP/2 304 Not Modified\nETag: "a"\n\n',
+            'HTTP/2 200 OK\nETag: "b"\n\n{"value":2}',
+            'HTTP/2 304 Not Modified\n\n',
+        ))
+        def run(arguments, **kwargs):
+            calls.append(arguments)
+            raw = next(responses)
+            return subprocess.CompletedProcess(arguments, 1 if "304 Not Modified" in raw else 0, raw, "gh: HTTP 304" if "304 Not Modified" in raw else "")
+        def read():
+            return request("repos/owner/repository/proof", budget=budget, cache=cache, primary=primary,
+                           precharged=False, request_timeout=20, deadline=__import__("time").monotonic()+30,
+                           terminal_page=False, inspect_link=False, run=run, authenticated=True)
+        first = read(); first["value"] = 999
+        self.assertEqual(read(), {"value": 1})
+        self.assertEqual(read(), {"value": 2})
+        self.assertEqual(read(), {"value": 2})
+        self.assertEqual((budget.reads, primary["hits"]), (4, 2))
+        self.assertIn('If-None-Match: "a"', calls[1])
+        self.assertIn('If-None-Match: "b"', calls[3])
+        bad_responses = (
+            ('HTTP/2 304 Not Modified\n\n', {}),
+            ('HTTP/2 304 Not Modified\nETag: "drift"\n\n', cache),
+            ('HTTP/2 200 OK\nETag: "a"\nETag: "b"\n\n{}', {}),
+            ('HTTP/2 403 Forbidden\n\n{}', {}),
+            ('HTTP/2 304 Not Modified\n\n{}', cache),
+            ('HTTP/2 500 Internal Server Error\n\n{}', cache),
+            ('transport failed', cache),
+        )
+        for raw, existing in bad_responses:
+            with self.subTest(response=raw), self.assertRaises(RuntimeError):
+                request("repos/owner/repository/proof", budget=budget, cache=existing, primary=primary,
+                        precharged=False, request_timeout=20, deadline=__import__("time").monotonic()+30,
+                        terminal_page=False, inspect_link=False,
+                        run=lambda *args, **kwargs: subprocess.CompletedProcess(args, 1, raw, "gh: failed"), authenticated=True)
+        exhausted = Budget(); exhausted.reads = 300
+        with self.assertRaises(RuntimeError):
+            request("repos/owner/repository/proof", budget=exhausted, cache={}, primary=primary,
+                    precharged=False, request_timeout=20, deadline=__import__("time").monotonic()+30,
+                    terminal_page=False, inspect_link=False, run=run, authenticated=True)
+
+    def test_cohort_target_proof_supports_two_hundred_sources_for_one_current_pr(self):
+        current = self.pull(72)
+        repository = self.rest_repository()
+        current["base"]["repo"] = dict(repository)
+        current["head"]["repo"] = dict(repository)
+        members, sources = [], {}
+        for offset in range(200):
+            identifier = 900 + offset
+            member = {
+                "source_run_id": identifier, "source_run_attempt": 1, "source_workflow_id": 44,
+                "source_run_number": offset + 1, "source_event": "pull_request_review", "pr_number": 72,
+                "base_ref": "master", "base_sha": "b" * 40, "head_sha": "a" * 40,
+                "pr_body_sha256": WRITER.pr_body_sha256(current["body"]),
+                "latch_started_at": "2026-10-01T00:02:00Z", "source_deadline_epoch": 1790818320,
+                "repository": "owner/repository", "repository_id": 101,
+            }
+            source = self.generation(identifier=identifier, status="in_progress", conclusion=None)
+            source.update(name="PR governance review sensor", event="pull_request_review",
+                          run_number=offset + 1, path=".github/workflows/pr-governance-review-events.yml",
+                          head_repository=dict(repository))
+            members.append(member); sources[identifier] = source
+        def read(endpoint, **kwargs):
+            return sources[int(endpoint.rsplit("/", 1)[1])]
+        with self.identity(), patch.object(WRITER.time, "time", return_value=1790813000.0), \
+             patch.object(WRITER, "_cohort_context", {"header": {"member_ids": list(sources)}}), \
+             patch.object(WRITER, "_cohort_members_by_target", {72: members}), \
+             patch.object(WRITER, "api_json", side_effect=read) as api:
+            self.assertEqual(WRITER.verify_cohort_target(72, current, 1099), 1099)
+            self.assertEqual(api.call_count, 200)
+            for changed, latest in ((current | {"body": "Fixes #65"}, 1099), (current, 1100)):
+                with self.subTest(latest=latest, body=changed["body"]), self.assertRaises(WRITER.NoPostGovernanceError):
+                    WRITER.verify_cohort_target(72, changed, latest)
+            sources[900]["run_attempt"] = 2
+            with self.assertRaises(WRITER.NoPostGovernanceError):
+                WRITER.verify_cohort_target(72, current, 1099)
+            sources[900]["run_attempt"] = 1
+            sources[900].update(status="completed", conclusion="cancelled")
+            with self.assertRaises(WRITER.NoPostGovernanceError):
+                WRITER.verify_cohort_target(72, current, 1099)
+
+    def test_cohort_archive_transport_keeps_storage_request_without_authentication(self):
+        class Storage:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit):
+                self.limit = limit
+                return b"zip-proof"
+        class Opener:
+            def __init__(self, location): self.calls = []; self.location = location
+            def open(self, request, *, timeout):
+                self.calls.append((request, timeout))
+                if len(self.calls) == 1:
+                    raise WRITER.HTTPError(request.full_url, 302, "Found", {"Location": self.location}, None)
+                return Storage()
+        opener = Opener("https://productionresultssa.blob.core.windows.net/artifact?signature=bound")
+        with self.identity(), patch.dict(os.environ, {"GH_TOKEN": "read-scope"}), \
+             patch.object(WRITER, "_cohort_api_counts", {"default": 0, "app": 1}), \
+             patch.object(WRITER, "_terminal_deadline_monotonic", None), \
+             patch.object(WRITER, "build_opener", return_value=opener):
+            self.assertEqual(WRITER.cohort_read_archive("repos/owner/repository/actions/artifacts/7/zip", timeout=20), b"zip-proof")
+            self.assertEqual(WRITER._cohort_api_counts, {"default": 0, "app": 2})
+        self.assertEqual(opener.calls[0][0].get_header("Authorization"), "Bearer read-scope")
+        self.assertIsNone(opener.calls[1][0].get_header("Authorization"))
+        self.assertTrue(all(0 < timeout <= 20 for _, timeout in opener.calls))
+        for location in ("http://productionresultssa.blob.core.windows.net/x", "https://evil.example/x",
+                         "https://user@productionresultssa.blob.core.windows.net/x",
+                         "https://productionresultssa.blob.core.windows.net.evil.example/x"):
+            bad = Opener(location)
+            with self.subTest(location=location), self.identity(), patch.dict(os.environ, {"GH_TOKEN": "read-scope"}), \
+                 patch.object(WRITER, "build_opener", return_value=bad), \
+                 patch.object(WRITER, "_terminal_deadline_monotonic", None), \
+                 self.assertRaises(WRITER.GovernanceError):
+                WRITER.cohort_read_archive("repos/owner/repository/actions/artifacts/7/zip", timeout=20)
+            self.assertEqual(len(bad.calls), 1)
+
+    def test_sensor_reader_preparation_executes_actual_static_module_with_private_file(self):
+        import re
+        import stat
+        workflow = (ROOT / ".github/workflows/pr-governance-review-events.yml").read_text()
+        prepare = workflow.split("      - name: Prepare trusted cohort sensor reader\n", 1)[1]
+        prepare = prepare.split("        run: |\n", 1)[1].split("      - name: ", 1)[0]
+        shell = textwrap.dedent(prepare)
+        start = workflow.index("          import runpy, stat\n")
+        finish = workflow.index("          def api_json(", start)
+        import_code = textwrap.dedent(workflow[start:finish])
+        with tempfile.TemporaryDirectory() as directory:
+            environment = dict(os.environ, RUNNER_TEMP=directory)
+            result = subprocess.run(["bash", "-c", shell], env=environment, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for stage in ("Prepare trusted cohort proof reader", "Complete trusted cohort proof reader", "Finalize trusted cohort proof reader"):
+                stage_text = workflow.split("      - name: " + stage + "\n", 1)[1]
+                stage_shell = textwrap.dedent(stage_text.split("        run: |\n", 1)[1].split("      - name: ", 1)[0])
+                prepared = subprocess.run(["bash", "-c", stage_shell], env=environment, text=True, capture_output=True, check=False)
+                self.assertEqual(prepared.returncode, 0, prepared.stderr)
+            reader = Path(directory) / "krr-governance-sensor-reader.py"
+            before = reader.read_bytes()
+            self.assertTrue(stat.S_ISREG(reader.lstat().st_mode))
+            self.assertEqual(reader.lstat().st_mode & 0o077, 0)
+            def fail(message):
+                raise RuntimeError(message)
+            namespace = {"os": os, "re": re, "fail": fail,
+                         "workflow_ref_pattern": re.compile(r"[A-Za-z0-9._/-]+")}
+            with patch.dict(os.environ, environment):
+                exec(import_code, namespace)
+            self.assertTrue(namespace["workflow_path_matches"]("trusted.yml@master", "trusted.yml"))
+            self.assertFalse(namespace["workflow_path_matches"]("trusted.yml@../head", "trusted.yml"))
+            repeated = subprocess.run(["bash", "-c", shell], env=environment, text=True, capture_output=True, check=False)
+            self.assertNotEqual(repeated.returncode, 0)
+            self.assertEqual(reader.read_bytes(), before)
+            reader.chmod(0o644)
+            with patch.dict(os.environ, environment), self.assertRaisesRegex(RuntimeError, "file boundary"):
+                exec(import_code, namespace)
+
+    def test_cohort_preservation_map_binds_exact_writer_and_check_per_target(self):
+        self.assertEqual(WRITER.canonical_preserved_writer_map("[[72,99,444],[73,100,445]]", (72,73)), {72:(99,444),73:(100,445)})
+        self.assertEqual(WRITER.canonical_preserved_writer_map("[]", ()), {})
+        for raw, preserved in (
+            ("[[72,99,444],[72,100,445]]", (72,)),
+            ("[[72,99,444],[73,100,444]]", (72,73)),
+            ("[[72,true,444]]", (72,)), ("[[72,0,444]]", (72,)),
+            ("[[72,99,444]]", (73,)), ("[[73,100,445],[72,99,444]]", (72,73)),
+            ("[[72, 99, 444]]", (72,)), ("{}", ()),
+        ):
+            with self.subTest(raw=raw), self.assertRaises(WRITER.GovernanceError):
+                WRITER.canonical_preserved_writer_map(raw, preserved)
+
+    def admission_metadata(self):
+        job = {
+            "id": 123, "run_id": 99, "run_url": "https://api.github.com/repos/owner/repository/actions/runs/99",
+            "url": "https://api.github.com/repos/owner/repository/actions/jobs/123",
+            "head_sha": "d" * 40, "head_branch": "master", "workflow_name": "PR governance status writer",
+            "name": "Write authoritative governance Check Runs", "status": "in_progress", "conclusion": None,
+            "started_at": "2026-10-01T00:00:00Z", "completed_at": None,
+            "steps": [{"number": 8, "name": "Revalidate every current open pull request and publish fenced states",
+                       "status": "in_progress", "conclusion": None,
+                       "started_at": "2026-10-01T00:02:00Z", "completed_at": None}],
+        }
+        return {"total_count": 1, "jobs": [job]}
+
+    def test_cohort_writer_admission_clamps_many_sources_without_restarting_clock(self):
+        page = self.admission_metadata()
+        began = 1790812920.0
+        with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
+             patch.object(WRITER.time, "time", return_value=began + 10), \
+             patch.object(WRITER.time, "monotonic", return_value=100.0):
+            admission = WRITER.early_writer_admission(page, (began + 5400, began + 900), began - 120 + 21000)
+        self.assertEqual(admission.deadline_epoch, began + 900)
+        self.assertEqual(admission.deadline_monotonic, 990.0)
+        changed = json.loads(json.dumps(page))
+        changed["jobs"][0]["steps"][0]["started_at"] = "2026-10-01T00:03:00Z"
+        with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
+             patch.object(WRITER.time, "time", return_value=began + 100), \
+             patch.object(WRITER.time, "monotonic", return_value=190.0):
+            self.assertEqual(WRITER.early_writer_admission(page, (began + 5400, began + 900), began - 120 + 21000, previous=admission), admission)
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.early_writer_admission(changed, (began + 5400, began + 900), began - 120 + 21000, previous=admission)
+
+    def test_cohort_writer_admission_rejects_incomplete_or_foreign_phase(self):
+        baseline = self.admission_metadata()
+        changes = [
+            ("duplicate-job", lambda p: p["jobs"].append(dict(p["jobs"][0]))),
+            ("missing-job", lambda p: p.update(jobs=[], total_count=0)),
+            ("truncated-page", lambda p: p.update(total_count=2)),
+            ("old-attempt", lambda p: p["jobs"][0].update(run_attempt=2)),
+            ("wrong-writer", lambda p: p["jobs"][0].update(run_id=100)),
+            ("wrong-head", lambda p: p["jobs"][0].update(head_sha="e" * 40)),
+            ("missing-step", lambda p: p["jobs"][0].update(steps=[])),
+            ("duplicate-step", lambda p: p["jobs"][0]["steps"].append(dict(p["jobs"][0]["steps"][0]))),
+            ("phase-unstarted", lambda p: p["jobs"][0]["steps"][0].update(status="queued", started_at=None)),
+            ("missing-time", lambda p: p["jobs"][0]["steps"][0].update(started_at=None)),
+            ("future-time", lambda p: p["jobs"][0]["steps"][0].update(started_at="2026-10-02T00:00:00Z")),
+            ("malformed-time", lambda p: p["jobs"][0]["steps"][0].update(started_at="not-a-timestamp")),
+            ("failed-phase", lambda p: p["jobs"][0]["steps"][0].update(status="completed", conclusion="failure", completed_at="2026-10-01T00:02:01Z")),
+        ]
+        for label, mutate in changes:
+            page = json.loads(json.dumps(baseline)); mutate(page)
+            with self.subTest(label=label), self.identity(), \
+                 patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
+                 patch.object(WRITER.time, "time", return_value=1790813000.0):
+                with self.assertRaises(WRITER.GovernanceError):
+                    WRITER.early_writer_admission(page, (1790818400.0,), 1790834000.0)
+        with self.identity(), patch.dict(os.environ, {"GITHUB_SHA": "d" * 40, "GITHUB_REF_NAME": "master"}), \
+             patch.object(WRITER.time, "time", return_value=1790813000.0):
+            for sources, root in (((), 1790834000.0), ((1790812900.0,), 1790834000.0), ((1790818400.0,), 1790812900.0)):
+                with self.subTest(source_deadlines=sources, root=root), self.assertRaises(WRITER.GovernanceError):
+                    WRITER.early_writer_admission(baseline, sources, root)
+
     def test_writer_and_sensor_attempt_boundaries_reject_bool_zero_string_and_retry(self) -> None:
         head = "a" * 40
         writer_run = {
@@ -1420,6 +1945,17 @@ class StatusWriterUnitTest(unittest.TestCase):
                  patch.object(WRITER, "trusted_dispatcher_source") as source:
                 self.assertEqual(WRITER.main(), 1)
                 source.assert_not_called()
+
+    def test_cohort_early_target_limit_is_fifty_per_exact_segment_without_weakening_legacy(self):
+        for count, segment, admitted in ((50,1,True),(51,1,False),(50,4,True),(50,0,False),(50,5,False)):
+            with self.subTest(count=count,segment=segment), self.identity(), patch.dict(os.environ,{
+                "GOVERNANCE_SCOPE":"early","GOVERNANCE_TARGET_NUMBERS":json.dumps(list(range(1,count+1)),separators=(",",":")),
+                "GOVERNANCE_CONTINUATION_INDEX":str(segment),"GOVERNANCE_COHORT_ARTIFACT_ID":"7",
+                "GOVERNANCE_COHORT_ARTIFACT_DIGEST":"sha256:"+"a"*64}), \
+                patch.object(WRITER,"trusted_dispatcher_source",side_effect=WRITER.GovernanceError("boundary probe")) as source:
+                self.assertEqual(WRITER.main(),1)
+                self.assertEqual(source.call_count, int(admitted))
+        self.assertEqual(WRITER.MAX_EARLY_TARGETS,100)
 
     def test_early_scope_rejects_more_than_one_hundred_targets_before_api_reads(self) -> None:
         targets = json.dumps(list(range(1, WRITER.MAX_EARLY_TARGETS + 2)), separators=(",", ":"))

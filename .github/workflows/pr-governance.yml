@@ -13,9 +13,15 @@ on:
     # synchronous pending status for every unchanged PR.
     - cron: '17 */6 * * *'
   workflow_dispatch:
+    inputs:
+      recovery_owner:
+        description: Expected failed selected owner; independently verified before admission
+        required: false
+        default: ''
+        type: string
   workflow_run:
     workflows: [PR governance review sensor, CI, release-preflight]
-    types: [requested, in_progress, completed]
+    types: [in_progress, completed]
 
 permissions:
   actions: read
@@ -47,6 +53,11 @@ jobs:
       pull_request_target_noop: ${{ steps.scope.outputs.pull_request_target_noop }}
       issue_event_noop: ${{ steps.scope.outputs.issue_event_noop }}
       root_deadline_epoch: ${{ steps.scope.outputs.root_deadline_epoch }}
+      cohort_member_hint: ${{ steps.scope.outputs.cohort_member_hint }}
+      completed_sensor_noop: ${{ steps.scope.outputs.completed_sensor_noop }}
+      cohort_recovery_owner: ${{ steps.scope.outputs.cohort_recovery_owner }}
+      cohort_recovery_journal: ${{ steps.scope.outputs.cohort_recovery_journal }}
+      cohort_recovery_digest: ${{ steps.scope.outputs.cohort_recovery_digest }}
     steps:
       - name: Exclude unavailable fork sources before dispatcher lock
         id: scope
@@ -58,6 +69,7 @@ jobs:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_ACTION: ${{ github.event.action }}
+          RECOVERY_OWNER_HINT: ${{ inputs.recovery_owner }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           PR_ACTION: ${{ github.event.action }}
@@ -165,13 +177,773 @@ jobs:
         # arm/waitのAPI phaseと合わせ、自身sourceだけgeneration fenceを通す。
         if: ${{ steps.scope.outputs.valid == 'true' && steps.scope.outputs.reconcile == 'true' && steps.scope.outputs.sensor_reservation == 'true' }}
         run: 'true'
+      - name: Record verified completed review sensor callback no-op source=${{ github.event.workflow_run.id }}
+        if: ${{ steps.scope.outputs.completed_sensor_noop == 'true' }}
+        run: 'true'
+
+      - name: Record verified failed cohort recovery owner=${{ steps.scope.outputs.cohort_recovery_owner }} journal=${{ steps.scope.outputs.cohort_recovery_journal }} digest=${{ steps.scope.outputs.cohort_recovery_digest }} root=${{ steps.scope.outputs.root_deadline_epoch }}
+        if: ${{ steps.scope.outputs.valid == 'true' && steps.scope.outputs.cohort_recovery_owner != '' }}
+        run: 'true'
+
+  publish-cohort-journal:
+    name: Publish immutable governance cohort journal
+    needs:
+    - preflight-workflow-run-source
+    if: ${{ needs.preflight-workflow-run-source.result == 'success' && needs.preflight-workflow-run-source.outputs.reconcile == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+    - name: Run trusted cohort producer
+      id: binding
+      env:
+        GH_TOKEN: ${{ github.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.preflight-workflow-run-source.outputs.root_deadline_epoch }}
+        COHORT_MODE: producer
+        COHORT_MEMBER_HINT: ${{ needs.preflight-workflow-run-source.outputs.cohort_member_hint }}
+        COHORT_VALID: ${{ needs.preflight-workflow-run-source.outputs.valid }}
+        COHORT_SENSOR_SOURCE: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Record verified cohort payload source sha256=${{ steps.binding.outputs.payload_sha256 }}
+      run: 'true'
+    - name: Record verified cohort journal ${{ steps.binding.outputs.binding_base64 }}
+      run: 'true'
+    - name: Upload immutable ${{ steps.binding.outputs.artifact_name }}
+      id: upload
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: ${{ steps.binding.outputs.artifact_name }}
+        path: cohort-journal/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: sha256:${{ steps.upload.outputs.artifact-digest }}
+  elect-cohort-owner:
+    name: Elect read-only governance cohort owner
+    needs:
+    - preflight-workflow-run-source
+    - publish-cohort-journal
+    if: ${{ needs.publish-cohort-journal.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+    - name: Run trusted cohort select
+      id: selection
+      env:
+        GH_TOKEN: ${{ github.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.preflight-workflow-run-source.outputs.root_deadline_epoch }}
+        COHORT_MODE: select
+        COHORT_OWN_JOURNAL_ID: ${{ needs.publish-cohort-journal.outputs.artifact_id }}
+        COHORT_OWN_JOURNAL_DIGEST: ${{ needs.publish-cohort-journal.outputs.artifact_digest }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Record verified cohort payload members sha256=${{ steps.selection.outputs.members_1_sha256 }}
+      run: 'true'
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 1 }}
+    - name: Upload immutable krr-governance-members-${{ github.run_id }}-attempt-1-1
+      id: members-1
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-members-${{ github.run_id }}-attempt-1-1
+        path: cohort-selection/members-1/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 1 }}
+    - name: Record verified cohort payload members sha256=${{ steps.selection.outputs.members_2_sha256 }}
+      run: 'true'
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 2 }}
+    - name: Upload immutable krr-governance-members-${{ github.run_id }}-attempt-1-2
+      id: members-2
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-members-${{ github.run_id }}-attempt-1-2
+        path: cohort-selection/members-2/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 2 }}
+    - name: Record verified cohort payload members sha256=${{ steps.selection.outputs.members_3_sha256 }}
+      run: 'true'
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 3 }}
+    - name: Upload immutable krr-governance-members-${{ github.run_id }}-attempt-1-3
+      id: members-3
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-members-${{ github.run_id }}-attempt-1-3
+        path: cohort-selection/members-3/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 3 }}
+    - name: Record verified cohort payload members sha256=${{ steps.selection.outputs.members_4_sha256 }}
+      run: 'true'
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 4 }}
+    - name: Upload immutable krr-governance-members-${{ github.run_id }}-attempt-1-4
+      id: members-4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-members-${{ github.run_id }}-attempt-1-4
+        path: cohort-selection/members-4/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 4 }}
+    - name: Record verified cohort payload aliases sha256=${{ steps.selection.outputs.aliases_1_sha256 }}
+      run: 'true'
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 1 }}
+    - name: Upload immutable krr-governance-aliases-${{ github.run_id }}-attempt-1-1
+      id: aliases-1
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-aliases-${{ github.run_id }}-attempt-1-1
+        path: cohort-selection/aliases-1/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 1 }}
+    - name: Record verified cohort payload aliases sha256=${{ steps.selection.outputs.aliases_2_sha256 }}
+      run: 'true'
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 2 }}
+    - name: Upload immutable krr-governance-aliases-${{ github.run_id }}-attempt-1-2
+      id: aliases-2
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-aliases-${{ github.run_id }}-attempt-1-2
+        path: cohort-selection/aliases-2/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 2 }}
+    - name: Record verified cohort payload aliases sha256=${{ steps.selection.outputs.aliases_3_sha256 }}
+      run: 'true'
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 3 }}
+    - name: Upload immutable krr-governance-aliases-${{ github.run_id }}-attempt-1-3
+      id: aliases-3
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-aliases-${{ github.run_id }}-attempt-1-3
+        path: cohort-selection/aliases-3/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 3 }}
+    - name: Record verified cohort payload aliases sha256=${{ steps.selection.outputs.aliases_4_sha256 }}
+      run: 'true'
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 4 }}
+    - name: Upload immutable krr-governance-aliases-${{ github.run_id }}-attempt-1-4
+      id: aliases-4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-aliases-${{ github.run_id }}-attempt-1-4
+        path: cohort-selection/aliases-4/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+      if: ${{ fromJSON(steps.selection.outputs.member_page_count) >= 4 }}
+    - name: Record verified cohort payload batch sha256=${{ steps.selection.outputs.batch_1_sha256 }}
+      run: 'true'
+      if: ${{ fromJSON(steps.selection.outputs.batch_count) >= 1 }}
+    - name: Upload immutable krr-governance-batch-${{ github.run_id }}-attempt-1-1
+      id: batch-1
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-batch-${{ github.run_id }}-attempt-1-1
+        path: cohort-selection/batch-1/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+      if: ${{ fromJSON(steps.selection.outputs.batch_count) >= 1 }}
+    - name: Record verified cohort payload batch sha256=${{ steps.selection.outputs.batch_2_sha256 }}
+      run: 'true'
+      if: ${{ fromJSON(steps.selection.outputs.batch_count) >= 2 }}
+    - name: Upload immutable krr-governance-batch-${{ github.run_id }}-attempt-1-2
+      id: batch-2
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-batch-${{ github.run_id }}-attempt-1-2
+        path: cohort-selection/batch-2/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+      if: ${{ fromJSON(steps.selection.outputs.batch_count) >= 2 }}
+    - name: Record verified cohort payload batch sha256=${{ steps.selection.outputs.batch_3_sha256 }}
+      run: 'true'
+      if: ${{ fromJSON(steps.selection.outputs.batch_count) >= 3 }}
+    - name: Upload immutable krr-governance-batch-${{ github.run_id }}-attempt-1-3
+      id: batch-3
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-batch-${{ github.run_id }}-attempt-1-3
+        path: cohort-selection/batch-3/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+      if: ${{ fromJSON(steps.selection.outputs.batch_count) >= 3 }}
+    - name: Record verified cohort payload batch sha256=${{ steps.selection.outputs.batch_4_sha256 }}
+      run: 'true'
+      if: ${{ fromJSON(steps.selection.outputs.batch_count) >= 4 }}
+    - name: Upload immutable krr-governance-batch-${{ github.run_id }}-attempt-1-4
+      id: batch-4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-batch-${{ github.run_id }}-attempt-1-4
+        path: cohort-selection/batch-4/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+      if: ${{ fromJSON(steps.selection.outputs.batch_count) >= 4 }}
+    - name: Run trusted cohort build-header
+      id: header
+      env:
+        GH_TOKEN: ${{ github.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.preflight-workflow-run-source.outputs.root_deadline_epoch }}
+        COHORT_MODE: build-header
+        COHORT_MEMBERS_1_ID: ${{ steps.members-1.outputs.artifact-id }}
+        COHORT_MEMBERS_1_DIGEST: ${{ steps.members-1.outputs.artifact-digest }}
+        COHORT_MEMBERS_2_ID: ${{ steps.members-2.outputs.artifact-id }}
+        COHORT_MEMBERS_2_DIGEST: ${{ steps.members-2.outputs.artifact-digest }}
+        COHORT_MEMBERS_3_ID: ${{ steps.members-3.outputs.artifact-id }}
+        COHORT_MEMBERS_3_DIGEST: ${{ steps.members-3.outputs.artifact-digest }}
+        COHORT_MEMBERS_4_ID: ${{ steps.members-4.outputs.artifact-id }}
+        COHORT_MEMBERS_4_DIGEST: ${{ steps.members-4.outputs.artifact-digest }}
+        COHORT_ALIASES_1_ID: ${{ steps.aliases-1.outputs.artifact-id }}
+        COHORT_ALIASES_1_DIGEST: ${{ steps.aliases-1.outputs.artifact-digest }}
+        COHORT_ALIASES_2_ID: ${{ steps.aliases-2.outputs.artifact-id }}
+        COHORT_ALIASES_2_DIGEST: ${{ steps.aliases-2.outputs.artifact-digest }}
+        COHORT_ALIASES_3_ID: ${{ steps.aliases-3.outputs.artifact-id }}
+        COHORT_ALIASES_3_DIGEST: ${{ steps.aliases-3.outputs.artifact-digest }}
+        COHORT_ALIASES_4_ID: ${{ steps.aliases-4.outputs.artifact-id }}
+        COHORT_ALIASES_4_DIGEST: ${{ steps.aliases-4.outputs.artifact-digest }}
+        COHORT_BATCH_1_ID: ${{ steps.batch-1.outputs.artifact-id }}
+        COHORT_BATCH_1_DIGEST: ${{ steps.batch-1.outputs.artifact-digest }}
+        COHORT_BATCH_2_ID: ${{ steps.batch-2.outputs.artifact-id }}
+        COHORT_BATCH_2_DIGEST: ${{ steps.batch-2.outputs.artifact-digest }}
+        COHORT_BATCH_3_ID: ${{ steps.batch-3.outputs.artifact-id }}
+        COHORT_BATCH_3_DIGEST: ${{ steps.batch-3.outputs.artifact-digest }}
+        COHORT_BATCH_4_ID: ${{ steps.batch-4.outputs.artifact-id }}
+        COHORT_BATCH_4_DIGEST: ${{ steps.batch-4.outputs.artifact-digest }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Record verified cohort payload cohort sha256=${{ steps.header.outputs.payload_sha256 }}
+      run: 'true'
+    - name: Upload immutable krr-governance-cohort-${{ github.run_id }}-attempt-1
+      id: cohort
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: krr-governance-cohort-${{ github.run_id }}-attempt-1
+        path: cohort-header/binding.json
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 1
+    - name: Record elected cohort admission owner=${{ github.run_id }} artifact=${{ steps.cohort.outputs.artifact-id }} digest=sha256:${{ steps.cohort.outputs.artifact-digest }}
+      run: 'true'
+    - name: Run trusted cohort await-handoff
+      id: handoff
+      env:
+        GH_TOKEN: ${{ github.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.preflight-workflow-run-source.outputs.root_deadline_epoch }}
+        COHORT_MODE: await-handoff
+        COHORT_ARTIFACT_ID: ${{ steps.cohort.outputs.artifact-id }}
+        COHORT_ARTIFACT_DIGEST: sha256:${{ steps.cohort.outputs.artifact-digest }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Record closed cohort handoff owner=${{ github.run_id }} artifact=${{ steps.cohort.outputs.artifact-id }} digest=sha256:${{ steps.cohort.outputs.artifact-digest }}
+      run: 'true'
+    concurrency:
+      group: pr-governance-cohort-election-${{ github.repository_id }}
+      queue: single
+      cancel-in-progress: false
+  admit-cohort-backend:
+    name: Admit verified governance cohort backend
+    needs:
+    - preflight-workflow-run-source
+    - publish-cohort-journal
+    if: ${{ needs.publish-cohort-journal.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+    - name: Run trusted cohort admission
+      id: binding
+      env:
+        GH_TOKEN: ${{ github.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.preflight-workflow-run-source.outputs.root_deadline_epoch }}
+        COHORT_MODE: admission
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Record verified cohort backend admission owner=${{ github.run_id }} artifact=${{ steps.binding.outputs.cohort_artifact_id }} digest=${{ steps.binding.outputs.cohort_artifact_digest }}
+      run: 'true'
+    outputs:
+      owner: ${{ steps.binding.outputs.owner }}
+      cohort_artifact_id: ${{ steps.binding.outputs.cohort_artifact_id }}
+      cohort_artifact_digest: ${{ steps.binding.outputs.cohort_artifact_digest }}
+      cohort_digest: ${{ steps.binding.outputs.cohort_digest }}
+      root_deadline_epoch: ${{ steps.binding.outputs.root_deadline_epoch }}
+      source_ids: ${{ steps.binding.outputs.source_ids }}
+      member_count: ${{ steps.binding.outputs.member_count }}
+      batch_count: ${{ steps.binding.outputs.batch_count }}
+
   arm-reserved-sensor-barrier:
     # This App-bound required context must be active before a direct mutation
     # waits outside the dispatcher lane.  Taking that lane here would cancel
     # the sensor whose latch the reservation is preserving.
     name: Arm barrier before reserved review sensors
-    needs: preflight-workflow-run-source
-    if: ${{ needs.preflight-workflow-run-source.outputs.sensor_reservation == 'true' && needs.preflight-workflow-run-source.outputs.valid == 'true' && needs.preflight-workflow-run-source.outputs.reconcile == 'true' }}
+    needs: [preflight-workflow-run-source, admit-cohort-backend]
+    if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (needs.preflight-workflow-run-source.outputs.sensor_reservation == 'true' && needs.preflight-workflow-run-source.outputs.valid == 'true' && needs.preflight-workflow-run-source.outputs.reconcile == 'true') }}
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -246,13 +1018,1358 @@ jobs:
           os.environ["DEFAULT_BRANCH"] = branch
           exec(compile(program, f"reserved-barrier@{workflow_sha}", "exec"), {"__name__": "__main__"})
           PY
+  cohort-early-service:
+    name: Service bound cohort review sources
+    needs:
+    - preflight-workflow-run-source
+    - admit-cohort-backend
+    - arm-reserved-sensor-barrier
+    - establish-resolver-failure-barrier
+    if: ${{ always() && needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && needs.establish-resolver-failure-barrier.result == 'success' && (needs.arm-reserved-sensor-barrier.result == 'success' || needs.arm-reserved-sensor-barrier.result == 'skipped') }}
+    environment: pr-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 94
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      preserved_target_writer_map: ${{ steps.manifest.outputs.preserved_target_writer_map }}
+      preserved_targets: ${{ steps.manifest.outputs.preserved_targets }}
+      preserved_check_manifest: ${{ steps.manifest.outputs.preserved_check_manifest }}
+    steps:
+    - name: Create scoped cohort batch 1 token
+      id: cohort-token-1
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 1 }}
+      uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+      with:
+        app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+        permission-checks: read
+        permission-contents: read
+        permission-pull-requests: read
+    - name: Run bound cohort dispatch-early segment 1
+      id: dispatch-1
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 1 }}
+      env:
+        GH_TOKEN: ${{ steps.cohort-token-1.outputs.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+        COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }}
+        COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+        CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        COHORT_MODE: dispatch-early
+        COHORT_SEGMENT: '1'
+        COHORT_DISPATCH_TOKEN: ${{ steps.cohort-token-1.outputs.token }}
+        COHORT_WRITER_ID: ${{ steps.dispatch-1.outputs.writer_run_id }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Record bound cohort early writer segment=1 run=${{ steps.dispatch-1.outputs.writer_run_id }} artifact=${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }} digest=${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 1 }}
+      run: 'true'
+    - name: Run bound cohort await-early segment 1
+      id: await-1
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 1 }}
+      env:
+        GH_TOKEN: ${{ steps.cohort-token-1.outputs.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+        COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }}
+        COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+        CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        COHORT_MODE: await-early
+        COHORT_SEGMENT: '1'
+        COHORT_DISPATCH_TOKEN: ${{ steps.cohort-token-1.outputs.token }}
+        COHORT_WRITER_ID: ${{ steps.dispatch-1.outputs.writer_run_id }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Run bound cohort ack-members segment 1
+      id: ack-1
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 1 }}
+      env:
+        GH_TOKEN: ${{ steps.cohort-token-1.outputs.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+        COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }}
+        COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+        CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        COHORT_MODE: ack-members
+        COHORT_SEGMENT: '1'
+        COHORT_DISPATCH_TOKEN: ${{ steps.cohort-token-1.outputs.token }}
+        COHORT_WRITER_ID: ${{ steps.dispatch-1.outputs.writer_run_id }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Create scoped cohort batch 2 token
+      id: cohort-token-2
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 2 }}
+      uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+      with:
+        app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+        permission-checks: read
+        permission-contents: read
+        permission-pull-requests: read
+    - name: Run bound cohort dispatch-early segment 2
+      id: dispatch-2
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 2 }}
+      env:
+        GH_TOKEN: ${{ steps.cohort-token-2.outputs.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+        COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }}
+        COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+        CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        COHORT_MODE: dispatch-early
+        COHORT_SEGMENT: '2'
+        COHORT_DISPATCH_TOKEN: ${{ steps.cohort-token-2.outputs.token }}
+        COHORT_WRITER_ID: ${{ steps.dispatch-2.outputs.writer_run_id }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Record bound cohort early writer segment=2 run=${{ steps.dispatch-2.outputs.writer_run_id }} artifact=${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }} digest=${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 2 }}
+      run: 'true'
+    - name: Run bound cohort await-early segment 2
+      id: await-2
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 2 }}
+      env:
+        GH_TOKEN: ${{ steps.cohort-token-2.outputs.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+        COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }}
+        COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+        CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        COHORT_MODE: await-early
+        COHORT_SEGMENT: '2'
+        COHORT_DISPATCH_TOKEN: ${{ steps.cohort-token-2.outputs.token }}
+        COHORT_WRITER_ID: ${{ steps.dispatch-2.outputs.writer_run_id }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Run bound cohort ack-members segment 2
+      id: ack-2
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 2 }}
+      env:
+        GH_TOKEN: ${{ steps.cohort-token-2.outputs.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+        COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }}
+        COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+        CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        COHORT_MODE: ack-members
+        COHORT_SEGMENT: '2'
+        COHORT_DISPATCH_TOKEN: ${{ steps.cohort-token-2.outputs.token }}
+        COHORT_WRITER_ID: ${{ steps.dispatch-2.outputs.writer_run_id }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Create scoped cohort batch 3 token
+      id: cohort-token-3
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 3 }}
+      uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+      with:
+        app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+        permission-checks: read
+        permission-contents: read
+        permission-pull-requests: read
+    - name: Run bound cohort dispatch-early segment 3
+      id: dispatch-3
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 3 }}
+      env:
+        GH_TOKEN: ${{ steps.cohort-token-3.outputs.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+        COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }}
+        COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+        CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        COHORT_MODE: dispatch-early
+        COHORT_SEGMENT: '3'
+        COHORT_DISPATCH_TOKEN: ${{ steps.cohort-token-3.outputs.token }}
+        COHORT_WRITER_ID: ${{ steps.dispatch-3.outputs.writer_run_id }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Record bound cohort early writer segment=3 run=${{ steps.dispatch-3.outputs.writer_run_id }} artifact=${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }} digest=${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 3 }}
+      run: 'true'
+    - name: Run bound cohort await-early segment 3
+      id: await-3
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 3 }}
+      env:
+        GH_TOKEN: ${{ steps.cohort-token-3.outputs.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+        COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }}
+        COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+        CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        COHORT_MODE: await-early
+        COHORT_SEGMENT: '3'
+        COHORT_DISPATCH_TOKEN: ${{ steps.cohort-token-3.outputs.token }}
+        COHORT_WRITER_ID: ${{ steps.dispatch-3.outputs.writer_run_id }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Run bound cohort ack-members segment 3
+      id: ack-3
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 3 }}
+      env:
+        GH_TOKEN: ${{ steps.cohort-token-3.outputs.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+        COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }}
+        COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+        CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        COHORT_MODE: ack-members
+        COHORT_SEGMENT: '3'
+        COHORT_DISPATCH_TOKEN: ${{ steps.cohort-token-3.outputs.token }}
+        COHORT_WRITER_ID: ${{ steps.dispatch-3.outputs.writer_run_id }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Create scoped cohort batch 4 token
+      id: cohort-token-4
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 4 }}
+      uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+      with:
+        app-id: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        private-key: ${{ secrets.KRR_GOVERNANCE_APP_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+        permission-checks: read
+        permission-contents: read
+        permission-pull-requests: read
+    - name: Run bound cohort dispatch-early segment 4
+      id: dispatch-4
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 4 }}
+      env:
+        GH_TOKEN: ${{ steps.cohort-token-4.outputs.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+        COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }}
+        COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+        CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        COHORT_MODE: dispatch-early
+        COHORT_SEGMENT: '4'
+        COHORT_DISPATCH_TOKEN: ${{ steps.cohort-token-4.outputs.token }}
+        COHORT_WRITER_ID: ${{ steps.dispatch-4.outputs.writer_run_id }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Record bound cohort early writer segment=4 run=${{ steps.dispatch-4.outputs.writer_run_id }} artifact=${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }} digest=${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 4 }}
+      run: 'true'
+    - name: Run bound cohort await-early segment 4
+      id: await-4
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 4 }}
+      env:
+        GH_TOKEN: ${{ steps.cohort-token-4.outputs.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+        COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }}
+        COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+        CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        COHORT_MODE: await-early
+        COHORT_SEGMENT: '4'
+        COHORT_DISPATCH_TOKEN: ${{ steps.cohort-token-4.outputs.token }}
+        COHORT_WRITER_ID: ${{ steps.dispatch-4.outputs.writer_run_id }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Run bound cohort ack-members segment 4
+      id: ack-4
+      if: ${{ fromJSON(needs.admit-cohort-backend.outputs.batch_count) >= 4 }}
+      env:
+        GH_TOKEN: ${{ steps.cohort-token-4.outputs.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        WORKFLOW_SHA: ${{ github.workflow_sha }}
+        COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+        COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id }}
+        COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest }}
+        CHECK_APP_ID: ${{ vars.KRR_GOVERNANCE_APP_ID }}
+        COHORT_MODE: ack-members
+        COHORT_SEGMENT: '4'
+        COHORT_DISPATCH_TOKEN: ${{ steps.cohort-token-4.outputs.token }}
+        COHORT_WRITER_ID: ${{ steps.dispatch-4.outputs.writer_run_id }}
+      run: |
+        python3 - <<'PY'
+        import base64
+        import hashlib
+        import json
+        import os
+        import re
+        import subprocess
+        import time
+
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        workflow_ref = os.environ.get("WORKFLOW_REF", "")
+        workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+        script_path = "scripts/review/pr_governance_cohort.py"
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+            or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+            or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+        ):
+            raise SystemExit("Governance runner source is not the trusted default branch.")
+
+        def arm_issue_source_failure(message):
+            # Issue mutations must establish the App-bound resolver barrier
+            # even when the immutable source loader cannot read GitHub.
+            # Let the barrier job run, then fail it via ``valid=false``;
+            # exiting this preflight step first would erase its outputs and
+            # leave a former trusted success exposed.
+            if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                raise SystemExit(message)
+            output_path = os.environ.get("GITHUB_OUTPUT", "")
+            if not output_path:
+                raise SystemExit(message)
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write("reconcile=true\n")
+                output.write("valid=false\n")
+                output.write("priority=false\n")
+                output.write("sensor_reservation=false\n")
+                output.write("sensor_run_ids=[]\n")
+                output.write("pull_request_target_noop=false\n")
+                output.write("issue_event_noop=false\n")
+                output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+            raise SystemExit(0)
+
+        def request(path):
+            try:
+                result = subprocess.run(
+                    ["gh", "api", "--hostname", "github.com", path],
+                    capture_output=True, text=True, check=False, timeout=20,
+                )
+            except subprocess.TimeoutExpired:
+                arm_issue_source_failure("Trusted governance source timed out.")
+            if result.returncode != 0:
+                arm_issue_source_failure("Unable to read trusted governance source.")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                arm_issue_source_failure("Trusted governance source is not JSON.")
+            if not isinstance(value, dict):
+                arm_issue_source_failure("Trusted governance source is invalid.")
+            return value
+
+        repository_record = request(f"repos/{repository}")
+        if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+            arm_issue_source_failure("Governance runner default branch changed.")
+        content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+        encoded = content.get("content")
+        blob_sha = content.get("sha")
+        if (
+            content.get("type") != "file"
+            or content.get("encoding") != "base64"
+            or not isinstance(encoded, str)
+            or len(encoded) > 300_000
+            or not isinstance(blob_sha, str)
+            or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+        ):
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        try:
+            program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+        except (ValueError, UnicodeError):
+            arm_issue_source_failure("Trusted governance source cannot be decoded.")
+        raw_program = program.encode("utf-8", "strict")
+        if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+            raise SystemExit("Trusted cohort helper blob mismatch.")
+        if not program or "\x00" in program:
+            arm_issue_source_failure("Trusted governance source is invalid.")
+        exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
+        PY
+    - name: Collect exact cohort preservation map
+      id: manifest
+      env:
+        MAP_1: ${{ steps.await-1.outputs.preserved_target_writer_map }}
+        MAP_2: ${{ steps.await-2.outputs.preserved_target_writer_map }}
+        MAP_3: ${{ steps.await-3.outputs.preserved_target_writer_map }}
+        MAP_4: ${{ steps.await-4.outputs.preserved_target_writer_map }}
+      run: |
+        python3 - <<'PYCODE'
+        import json,os
+        rows=[]
+        for n in range(1,5):
+            raw=os.environ.get(f"MAP_{n}","")
+            if raw:
+                value=json.loads(raw)
+                if not isinstance(value,list): raise SystemExit("Invalid cohort map")
+                rows.extend(value)
+        if any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in rows) or len(rows)>200 or len({row[0] for row in rows})!=len(rows) or len({row[2] for row in rows})!=len(rows): raise SystemExit("Ambiguous cohort map")
+        rows.sort()
+        with open(os.environ["GITHUB_OUTPUT"],"a") as out:
+            out.write("preserved_target_writer_map="+json.dumps(rows,separators=(",",":"))+"\n")
+            out.write("preserved_targets="+json.dumps([row[0] for row in rows],separators=(",",":"))+"\n")
+            out.write("preserved_check_manifest="+json.dumps([[row[0],row[2]] for row in rows],separators=(",",":"))+"\n")
+        PYCODE
+
   wait-for-active-review-sensor:
     # A direct event must not replace the pending requested/in-progress
     # sensor dispatcher. The sensor itself waits for its bounded writer, so a
     # terminal source run proves that reservation has been released.
     name: Preserve pending review sensor before direct dispatch
-    needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier]
-    if: ${{ needs.preflight-workflow-run-source.outputs.sensor_reservation == 'true' && needs.preflight-workflow-run-source.outputs.valid == 'true' && needs.arm-reserved-sensor-barrier.result == 'success' }}
+    needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier, cohort-early-service, admit-cohort-backend]
+    if: ${{ needs.preflight-workflow-run-source.outputs.sensor_reservation == 'true' && needs.preflight-workflow-run-source.outputs.valid == 'true' && needs.arm-reserved-sensor-barrier.result == 'success' && needs.admit-cohort-backend.outputs.member_count != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 94
     permissions:
@@ -261,7 +2378,7 @@ jobs:
       - name: Await the captured review sensor terminal state
         env:
           GH_TOKEN: ${{ github.token }}
-          SENSOR_RUN_IDS: ${{ needs.preflight-workflow-run-source.outputs.sensor_run_ids }}
+          SENSOR_RUN_IDS: ${{ needs.admit-cohort-backend.outputs.source_ids || needs.preflight-workflow-run-source.outputs.sensor_run_ids }}
         run: |
           python3 - <<'PY'
           import json
@@ -485,8 +2602,8 @@ jobs:
           PY
   establish-resolver-failure-barrier:
     name: Establish resolver-failure merge barrier
-    needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier, wait-for-active-review-sensor]
-    if: ${{ always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ((github.event.workflow_run.name == 'PR governance review sensor' && (github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'pull_request_review' || github.event.workflow_run.event == 'pull_request_review_comment')) || ((github.event.workflow_run.name == 'CI' || github.event.workflow_run.name == 'release-preflight') && github.event.workflow_run.event == 'pull_request'))) }}
+    needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier, admit-cohort-backend]
+    if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ((github.event.workflow_run.name == 'PR governance review sensor' && (github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'pull_request_review' || github.event.workflow_run.event == 'pull_request_review_comment')) || ((github.event.workflow_run.name == 'CI' || github.event.workflow_run.name == 'release-preflight') && github.event.workflow_run.event == 'pull_request')))) }}
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -663,7 +2780,6 @@ jobs:
           EVENT_SOURCE_VALID: ${{ needs.preflight-workflow-run-source.outputs.valid }}
           SENSOR_RESERVATION: ${{ needs.preflight-workflow-run-source.outputs.sensor_reservation }}
           RESERVED_BARRIER_RESULT: ${{ needs.arm-reserved-sensor-barrier.result }}
-          SENSOR_WAIT_RESULT: ${{ needs.wait-for-active-review-sensor.result }}
         run: |
           python3 - <<'PY'
           import os
@@ -674,7 +2790,6 @@ jobs:
               os.environ.get("SENSOR_RESERVATION") == "true"
               and (
                   os.environ.get("RESERVED_BARRIER_RESULT") != "success"
-                  or os.environ.get("SENSOR_WAIT_RESULT") != "success"
               )
           ):
               raise SystemExit("Reserved review sensor did not reach a safe terminal state; barrier remains active.")
@@ -682,7 +2797,7 @@ jobs:
 
   safe-obsolete-heavy-preemption:
     name: Preserve admitted sources before obsolete heavy preemption
-    needs: [preflight-workflow-run-source, establish-resolver-failure-barrier, wait-for-active-review-sensor]
+    needs: [preflight-workflow-run-source, establish-resolver-failure-barrier, wait-for-active-review-sensor, admit-cohort-backend]
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -690,7 +2805,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
-    if: ${{ !cancelled() && needs.preflight-workflow-run-source.outputs.valid == 'true' && needs.establish-resolver-failure-barrier.result == 'success' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') }}
+    if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (!cancelled() && needs.preflight-workflow-run-source.outputs.valid == 'true' && needs.establish-resolver-failure-barrier.result == 'success' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped')) }}
     steps:
       - name: Create safe obsolete heavy cancellation token
         id: preemption-token
@@ -704,11 +2819,110 @@ jobs:
           permission-checks: read
           permission-contents: read
           permission-pull-requests: read
+      - name: Prepare trusted immutable cohort fence reader
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import re
+          import subprocess
+          import time
+
+          repository = os.environ.get("GITHUB_REPOSITORY", "")
+          workflow_ref = os.environ.get("WORKFLOW_REF", "")
+          workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+          script_path = "scripts/review/pr_governance_cohort.py"
+          if (
+              re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+              or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+              or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+          ):
+              raise SystemExit("Governance runner source is not the trusted default branch.")
+
+          def arm_issue_source_failure(message):
+              # Issue mutations must establish the App-bound resolver barrier
+              # even when the immutable source loader cannot read GitHub.
+              # Let the barrier job run, then fail it via ``valid=false``;
+              # exiting this preflight step first would erase its outputs and
+              # leave a former trusted success exposed.
+              if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                  raise SystemExit(message)
+              output_path = os.environ.get("GITHUB_OUTPUT", "")
+              if not output_path:
+                  raise SystemExit(message)
+              with open(output_path, "a", encoding="utf-8") as output:
+                  output.write("reconcile=true\n")
+                  output.write("valid=false\n")
+                  output.write("priority=false\n")
+                  output.write("sensor_reservation=false\n")
+                  output.write("sensor_run_ids=[]\n")
+                  output.write("pull_request_target_noop=false\n")
+                  output.write("issue_event_noop=false\n")
+                  output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+              raise SystemExit(0)
+
+          def request(path):
+              try:
+                  result = subprocess.run(
+                      ["gh", "api", "--hostname", "github.com", path],
+                      capture_output=True, text=True, check=False, timeout=20,
+                  )
+              except subprocess.TimeoutExpired:
+                  arm_issue_source_failure("Trusted governance source timed out.")
+              if result.returncode != 0:
+                  arm_issue_source_failure("Unable to read trusted governance source.")
+              try:
+                  value = json.loads(result.stdout)
+              except json.JSONDecodeError as error:
+                  arm_issue_source_failure("Trusted governance source is not JSON.")
+              if not isinstance(value, dict):
+                  arm_issue_source_failure("Trusted governance source is invalid.")
+              return value
+
+          repository_record = request(f"repos/{repository}")
+          if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+              arm_issue_source_failure("Governance runner default branch changed.")
+          content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+          encoded = content.get("content")
+          blob_sha = content.get("sha")
+          if (
+              content.get("type") != "file"
+              or content.get("encoding") != "base64"
+              or not isinstance(encoded, str)
+              or len(encoded) > 300_000
+              or not isinstance(blob_sha, str)
+              or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+          ):
+              arm_issue_source_failure("Trusted governance source is invalid.")
+          try:
+              program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+          except (ValueError, UnicodeError):
+              arm_issue_source_failure("Trusted governance source cannot be decoded.")
+          raw_program = program.encode("utf-8", "strict")
+          if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+              raise SystemExit("Trusted cohort helper blob mismatch.")
+          if not program or "\x00" in program:
+              arm_issue_source_failure("Trusted governance source is invalid.")
+          from pathlib import Path
+          import stat
+          path=Path(os.environ["RUNNER_TEMP"])/"krr-cohort-fence-reader.py"
+          fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+          with os.fdopen(fd,"w",encoding="utf-8") as output: output.write(program)
+          PY
       - name: Stop only acknowledged obsolete heavy reconciliation
         env:
           GH_TOKEN: ${{ steps.preemption-token.outputs.token }}
           DEFAULT_HEAD: ${{ needs.establish-resolver-failure-barrier.outputs.default_head }}
           DEFAULT_BRANCH: ${{ needs.establish-resolver-failure-barrier.outputs.default_branch }}
+          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
+          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
           ROOT_DEADLINE_EPOCH: ${{ needs.establish-resolver-failure-barrier.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
@@ -734,7 +2948,27 @@ jobs:
           def fail(message):
               raise SystemExit(message)
 
-          def api(endpoint, method="GET", cancellation_run=None):
+          cohort_ns=None
+          def cohort_reader():
+              global cohort_ns
+              if cohort_ns is None:
+                  import runpy,stat
+                  from pathlib import Path
+                  p=Path(os.environ["RUNNER_TEMP"])/"krr-cohort-fence-reader.py"; st=p.lstat()
+                  if not stat.S_ISREG(st.st_mode) or st.st_uid!=os.getuid() or stat.S_IMODE(st.st_mode)!=0o600: raise SystemExit("Untrusted cohort reader")
+                  cohort_ns=runpy.run_path(str(p),run_name="trusted_cohort_reader")
+              return cohort_ns
+          def cohort_page(endpoint,value):
+              if os.environ.get("COHORT_ARTIFACT_ID","0")=="0" or "/actions/workflows/" not in endpoint or "/runs?" not in endpoint: return value
+              ns=cohort_reader()
+              return ns["filter_runtime_dispatcher_page"](endpoint,value,read_json=lambda endpoint,timeout: api(endpoint,cohort_raw=True),read_archive=lambda endpoint,timeout: cohort_archive(endpoint,timeout),deadline=deadline,phase="early")
+          def cohort_archive(endpoint,timeout):
+              global reads
+              reads+=2
+              if reads>850 or time.time()>=deadline: fail("Obsolete heavy-phase admission evidence budget is exhausted.")
+              return cohort_reader()["read_artifact_archive"](endpoint,os.environ["GH_TOKEN"],timeout)
+
+          def api(endpoint, method="GET", cancellation_run=None, cohort_raw=False):
               global reads
               reads += 1
               remaining = deadline - time.time()
@@ -750,7 +2984,8 @@ jobs:
                           return None
                   fail("Unable to bind obsolete heavy-phase evidence.")
               try:
-                  return json.loads(result.stdout) if result.stdout else None
+                  value=json.loads(result.stdout) if result.stdout else None
+                  return value if cohort_raw or method!="GET" else cohort_page(endpoint,value)
               except ValueError:
                   fail("Obsolete heavy-phase evidence is not JSON.")
 
@@ -1169,7 +3404,7 @@ jobs:
 
   publish-resolver-barrier-marker:
     name: Publish serialized resolver-failure barrier marker
-    needs: [establish-resolver-failure-barrier, safe-obsolete-heavy-preemption]
+    needs: [establish-resolver-failure-barrier, safe-obsolete-heavy-preemption, admit-cohort-backend]
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1181,6 +3416,7 @@ jobs:
       group: pr-governance-status-${{ github.repository_id }}
       queue: max
       cancel-in-progress: false
+    if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' }}
     steps:
       - name: Create resolver-failure barrier marker write token
         id: marker-write
@@ -1256,7 +3492,7 @@ jobs:
 
   resolve_event:
     name: Resolve relevant governance event
-    needs: [establish-resolver-failure-barrier, publish-resolver-barrier-marker, wait-for-active-review-sensor]
+    needs: [establish-resolver-failure-barrier, publish-resolver-barrier-marker, wait-for-active-review-sensor, elect-cohort-owner]
     if: ${{ !cancelled() && needs.establish-resolver-failure-barrier.result == 'success' && needs.establish-resolver-failure-barrier.outputs.reconcile == 'true' && needs.publish-resolver-barrier-marker.result == 'success' && (needs.wait-for-active-review-sensor.result == 'success' || needs.wait-for-active-review-sensor.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1370,7 +3606,7 @@ jobs:
 
   prepare-current-targets:
     name: Prepare immutable governance target partitions
-    needs: [resolve_event]
+    needs: [resolve_event, admit-cohort-backend, cohort-early-service]
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1378,7 +3614,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
-    if: ${{ needs.resolve_event.outputs.reconcile == 'true' && github.run_attempt == 1 }}
+    if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (needs.resolve_event.outputs.reconcile == 'true' && github.run_attempt == 1) }}
     outputs:
       has_targets: ${{ steps.current-targets.outputs.has_targets }}
       targets: ${{ steps.current-targets.outputs.targets }}
@@ -1386,7 +3622,7 @@ jobs:
       event_targets: ${{ steps.current-targets.outputs.event_targets }}
       has_event_targets: ${{ steps.current-targets.outputs.has_event_targets }}
       has_priority_targets: ${{ steps.current-targets.outputs.has_priority_targets }}
-      priority_targets: ${{ steps.current-targets.outputs.priority_targets }}
+      priority_targets: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.cohort-early-service.outputs.preserved_targets || steps.current-targets.outputs.priority_targets }}
       preinvalidate_targets: ${{ steps.current-targets.outputs.preinvalidate_targets }}
       has_preinvalidate_targets: ${{ steps.current-targets.outputs.has_preinvalidate_targets }}
       invalidation_head_cap_exceeded: ${{ steps.current-targets.outputs.invalidation_head_cap_exceeded }}
@@ -1879,7 +4115,7 @@ jobs:
 
   reconcile-all-open:
     name: Reconcile all current governance pull requests
-    needs: [resolve_event, prepare-current-targets]
+    needs: [resolve_event, prepare-current-targets, admit-cohort-backend, cohort-early-service]
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 290
@@ -1887,10 +4123,11 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
-    if: ${{ needs.prepare-current-targets.result == 'success' }}
+    if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (needs.prepare-current-targets.result == 'success') }}
     outputs:
       preserved_check_manifest: ${{ steps.await-early.outputs.preserved_check_manifest || '[]' }}
       preserved_writer_run_id: ${{ steps.dispatch-early.outputs.writer_run_id || '0' }}
+      preserved_target_writer_map: ${{ needs.cohort-early-service.outputs.preserved_target_writer_map }}
       early_deadline_epoch: ${{ steps.await-early.outputs.early_deadline_epoch }}
     concurrency:
       group: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && format('pr-governance-review-sensor-{0}-{1}', github.repository_id, github.event.workflow_run.id) || format('pr-governance-reconcile-{0}', github.repository_id) }}
@@ -1911,7 +4148,7 @@ jobs:
           permission-contents: read
           permission-pull-requests: read
       - name: Dispatch and bind the early event writer
-        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true'
+        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true' && needs.admit-cohort-backend.outputs.member_count == '0'
         id: dispatch-early
         env:
           GH_TOKEN: ${{ steps.dispatcher-token.outputs.token }}
@@ -1994,7 +4231,7 @@ jobs:
           raise SystemExit("Early governance writer registration timed out.")
           PY
       - name: Create fresh early Check Run read token
-        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true'
+        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true' && needs.admit-cohort-backend.outputs.member_count == '0'
         id: early-check-read-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -2005,7 +4242,7 @@ jobs:
           permission-checks: read
           permission-pull-requests: read
       - name: Await the bound early event writer before all-open invalidation
-        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true'
+        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true' && needs.admit-cohort-backend.outputs.member_count == '0'
         id: await-early
         env:
           GH_TOKEN: ${{ steps.dispatcher-token.outputs.token }}
@@ -2185,7 +4422,7 @@ jobs:
 
   acknowledge-early-sensor:
     name: Acknowledge bound early review sensor
-    needs: [resolve_event, prepare-current-targets, reconcile-all-open]
+    needs: [resolve_event, prepare-current-targets, reconcile-all-open, admit-cohort-backend]
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -2193,7 +4430,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
-    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && needs.prepare-current-targets.outputs.has_priority_targets == 'true' }}
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && needs.prepare-current-targets.outputs.has_priority_targets == 'true' && needs.admit-cohort-backend.outputs.member_count == '0' }}
     steps:
       - name: Require exact bound sensor acknowledgement
         env:
@@ -2292,7 +4529,7 @@ jobs:
 
   audit-reconciliation-history:
     name: Audit complete pending Check Run histories
-    needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor]
+    needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, admit-cohort-backend]
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 290
@@ -2300,7 +4537,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
-    if: ${{ !cancelled() && needs.reconcile-all-open.result == 'success' && (needs.acknowledge-early-sensor.result == 'success' || needs.acknowledge-early-sensor.result == 'skipped') }}
+    if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (!cancelled() && needs.reconcile-all-open.result == 'success' && (needs.acknowledge-early-sensor.result == 'success' || needs.acknowledge-early-sensor.result == 'skipped')) }}
     outputs:
       carry_manifest: ${{ steps.retained-history-audit.outputs.carry_manifest }}
     steps:
@@ -2434,7 +4671,7 @@ jobs:
 
   write-reconciliation-pending:
     name: Write complete pending reconciliation Check Runs
-    needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history]
+    needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history, admit-cohort-backend]
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 290
@@ -2442,7 +4679,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
-    if: ${{ !cancelled() && needs.audit-reconciliation-history.result == 'success' && needs.reconcile-all-open.result == 'success' && (needs.acknowledge-early-sensor.result == 'success' || needs.acknowledge-early-sensor.result == 'skipped') }}
+    if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (!cancelled() && needs.audit-reconciliation-history.result == 'success' && needs.reconcile-all-open.result == 'success' && (needs.acknowledge-early-sensor.result == 'success' || needs.acknowledge-early-sensor.result == 'skipped')) }}
     concurrency:
       group: pr-governance-status-${{ github.repository_id }}
       queue: max
@@ -3014,8 +5251,8 @@ jobs:
 
   release-complete-affected-head-barrier:
     name: Release complete affected-head merge barrier
-    needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, write-reconciliation-pending]
-    if: ${{ !cancelled() && needs.reconcile-all-open.result == 'success' && needs.write-reconciliation-pending.result == 'success' && (needs.acknowledge-early-sensor.result == 'success' || needs.acknowledge-early-sensor.result == 'skipped') && needs.prepare-current-targets.outputs.affected_barrier_active == 'true' }}
+    needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, write-reconciliation-pending, admit-cohort-backend]
+    if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (!cancelled() && needs.reconcile-all-open.result == 'success' && needs.write-reconciliation-pending.result == 'success' && (needs.acknowledge-early-sensor.result == 'success' || needs.acknowledge-early-sensor.result == 'skipped') && needs.prepare-current-targets.outputs.affected_barrier_active == 'true') }}
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -3033,6 +5270,8 @@ jobs:
           DEFAULT_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
+          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
+          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
           ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
@@ -3081,6 +5320,103 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-administration: write
+      - name: Prepare trusted immutable cohort fence reader
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import re
+          import subprocess
+          import time
+
+          repository = os.environ.get("GITHUB_REPOSITORY", "")
+          workflow_ref = os.environ.get("WORKFLOW_REF", "")
+          workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+          script_path = "scripts/review/pr_governance_cohort.py"
+          if (
+              re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+              or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+              or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+          ):
+              raise SystemExit("Governance runner source is not the trusted default branch.")
+
+          def arm_issue_source_failure(message):
+              # Issue mutations must establish the App-bound resolver barrier
+              # even when the immutable source loader cannot read GitHub.
+              # Let the barrier job run, then fail it via ``valid=false``;
+              # exiting this preflight step first would erase its outputs and
+              # leave a former trusted success exposed.
+              if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                  raise SystemExit(message)
+              output_path = os.environ.get("GITHUB_OUTPUT", "")
+              if not output_path:
+                  raise SystemExit(message)
+              with open(output_path, "a", encoding="utf-8") as output:
+                  output.write("reconcile=true\n")
+                  output.write("valid=false\n")
+                  output.write("priority=false\n")
+                  output.write("sensor_reservation=false\n")
+                  output.write("sensor_run_ids=[]\n")
+                  output.write("pull_request_target_noop=false\n")
+                  output.write("issue_event_noop=false\n")
+                  output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+              raise SystemExit(0)
+
+          def request(path):
+              try:
+                  result = subprocess.run(
+                      ["gh", "api", "--hostname", "github.com", path],
+                      capture_output=True, text=True, check=False, timeout=20,
+                  )
+              except subprocess.TimeoutExpired:
+                  arm_issue_source_failure("Trusted governance source timed out.")
+              if result.returncode != 0:
+                  arm_issue_source_failure("Unable to read trusted governance source.")
+              try:
+                  value = json.loads(result.stdout)
+              except json.JSONDecodeError as error:
+                  arm_issue_source_failure("Trusted governance source is not JSON.")
+              if not isinstance(value, dict):
+                  arm_issue_source_failure("Trusted governance source is invalid.")
+              return value
+
+          repository_record = request(f"repos/{repository}")
+          if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+              arm_issue_source_failure("Governance runner default branch changed.")
+          content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+          encoded = content.get("content")
+          blob_sha = content.get("sha")
+          if (
+              content.get("type") != "file"
+              or content.get("encoding") != "base64"
+              or not isinstance(encoded, str)
+              or len(encoded) > 300_000
+              or not isinstance(blob_sha, str)
+              or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+          ):
+              arm_issue_source_failure("Trusted governance source is invalid.")
+          try:
+              program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+          except (ValueError, UnicodeError):
+              arm_issue_source_failure("Trusted governance source cannot be decoded.")
+          raw_program = program.encode("utf-8", "strict")
+          if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+              raise SystemExit("Trusted cohort helper blob mismatch.")
+          if not program or "\x00" in program:
+              arm_issue_source_failure("Trusted governance source is invalid.")
+          from pathlib import Path
+          import stat
+          path=Path(os.environ["RUNNER_TEMP"])/"krr-cohort-fence-reader.py"
+          fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+          with os.fdopen(fd,"w",encoding="utf-8") as output: output.write(program)
+          PY
       - name: Release complete affected-head merge barrier only after full pending coverage
         env:
           READ_TOKEN: ${{ steps.read-token.outputs.token }}
@@ -3096,6 +5432,7 @@ jobs:
           PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_CHECK_MANIFEST: ${{ needs.reconcile-all-open.outputs.preserved_check_manifest }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
+          COHORT_PRESERVED_MAP: ${{ needs.reconcile-all-open.outputs.preserved_target_writer_map || '[]' }}
           PRE_MANIFEST_1: ${{ needs.write-reconciliation-pending.outputs.pre_manifest_1 }}
           PRE_MANIFEST_2: ${{ needs.write-reconciliation-pending.outputs.pre_manifest_2 }}
           TAIL_MANIFEST_1: ${{ needs.write-reconciliation-pending.outputs.tail_manifest_1 }}
@@ -3131,17 +5468,18 @@ jobs:
               if result.returncode!=0: raise E("Affected-head barrier release API request failed.")
               try: return json.loads(result.stdout)
               except json.JSONDecodeError as error: raise E("Affected-head barrier release API response is not JSON.") from error
-          def canonical(value): return json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=True)
-          def records(protection):
-              required=protection.get("required_status_checks") if isinstance(protection,dict) else None
-              checks=required.get("checks") if isinstance(required,dict) else None; contexts=required.get("contexts") if isinstance(required,dict) else None; strict=required.get("strict") if isinstance(required,dict) else None
-              if not isinstance(required,dict) or set(required)!={"url","contexts_url","strict","contexts","checks"} or required["url"]!=status_checks_url or required["contexts_url"]!=contexts_url or not isinstance(checks,list) or not isinstance(contexts,list) or type(strict) is not bool: raise E("Affected-head barrier branch protection is invalid.")
-              result=[]
-              for item in checks:
-                  if not isinstance(item,dict) or set(item)!={"context","app_id"} or not isinstance(item["context"],str) or not item["context"] or "\x00" in item["context"] or (item["app_id"] is not None and type(item["app_id"]) is not int): raise E("Affected-head barrier branch protection is invalid.")
-                  result.append((item["context"],item["app_id"]))
-              if len(set(result))!=len(result) or len({name for name,_ in result})!=len(result) or [name for name,_ in result]!=contexts: raise E("Affected-head barrier branch protection is invalid.")
-              return required,result
+          def canonical(v): return cr()["protection_canonical"](v)
+          cohort_ns=None
+          def cr():
+              global cohort_ns
+              if cohort_ns is None:
+                  import runpy,stat
+                  from pathlib import Path
+                  p=Path(os.environ["RUNNER_TEMP"])/"krr-cohort-fence-reader.py"; st=p.lstat()
+                  if not stat.S_ISREG(st.st_mode) or st.st_uid!=os.getuid() or stat.S_IMODE(st.st_mode)!=0o600: raise SystemExit("Untrusted cohort reader")
+                  cohort_ns=runpy.run_path(str(p),run_name="trusted_cohort_reader")
+              return cohort_ns
+          def records(protection): return cr()["protection_records"](protection,status_checks_url,contexts_url)
           def mutate(method):
               result=subprocess.run(["gh","api","--hostname","github.com","--method",method,contexts_endpoint,"--input","-"],input=json.dumps({"contexts":[context]},separators=(",",":")),capture_output=True,text=True,check=False,env=a, timeout=bounded_root_timeout())
               if result.returncode!=0: return None
@@ -3173,7 +5511,8 @@ jobs:
               values.append(value)
           targets,snapshots,preserved,pm,pre_1,pre_2,tail_1,tail_2,duplicates=values
           p_run=os.environ.get("PRESERVED_WRITER_RUN_ID", "")
-          if not isinstance(targets,list) or any(type(number) is not int or number<1 for number in targets) or len(set(targets))!=len(targets) or not isinstance(snapshots,list) or len(snapshots)!=len(targets) or any(not isinstance(entry,list) or len(entry)!=3 or entry[0]!=number or not isinstance(entry[1],str) or re.fullmatch(r"[0-9a-fA-F]{40}",entry[1]) is None or type(entry[2]) is not bool for entry,number in zip(snapshots,targets,strict=True)) or not isinstance(preserved,list) or any(type(number) is not int or number<1 for number in preserved) or len(set(preserved))!=len(preserved) or not set(preserved).issubset(targets) or not re.fullmatch(r"0|[1-9][0-9]*",p_run) or bool(preserved)!=(p_run!="0") or not all(isinstance(manifest,list) for manifest in (pm,pre_1,pre_2,tail_1,tail_2)) or not isinstance(duplicates,list) or duplicates:
+          cohort_preserved=cr()["canonical_preserved_map"](os.environ.get("COHORT_PRESERVED_MAP","[]"),preserved,pm,p_run) if os.environ.get("COHORT_PRESERVED_MAP","[]")!="[]" else {}
+          if not isinstance(targets,list) or any(type(number) is not int or number<1 for number in targets) or len(set(targets))!=len(targets) or not isinstance(snapshots,list) or len(snapshots)!=len(targets) or any(not isinstance(entry,list) or len(entry)!=3 or entry[0]!=number or not isinstance(entry[1],str) or re.fullmatch(r"[0-9a-fA-F]{40}",entry[1]) is None or type(entry[2]) is not bool for entry,number in zip(snapshots,targets,strict=True)) or not isinstance(preserved,list) or any(type(number) is not int or number<1 for number in preserved) or len(set(preserved))!=len(preserved) or not set(preserved).issubset(targets) or not re.fullmatch(r"0|[1-9][0-9]*",p_run) or (bool(preserved)!=(p_run!="0") and not cohort_preserved) or not all(isinstance(manifest,list) for manifest in (pm,pre_1,pre_2,tail_1,tail_2)) or not isinstance(duplicates,list) or duplicates:
               raise E("Affected-head barrier manifest is invalid.")
           expected={number:(entry[1].lower(),entry[2]) for entry,number in zip(snapshots,targets,strict=True)}; p_set=set(preserved)
           pending=[entry for entry in [*pre_1,*pre_2,*tail_1,*tail_2] if isinstance(entry,list) and entry and entry[0] not in p_set]
@@ -3183,6 +5522,10 @@ jobs:
           ref_head=reference.get("object",{}).get("sha") if isinstance(reference,dict) and isinstance(reference.get("object"),dict) else None
           blob_sha=blob.get("sha") if isinstance(blob,dict) else None
           if not isinstance(repo,dict) or repo.get("default_branch")!=branch or not isinstance(ref_head,str) or ref_head.lower()!=head.lower() or not isinstance(blob_sha,str) or re.fullmatch(r"[0-9a-fA-F]{40}",blob_sha) is None: raise E("Affected-head barrier source changed before release.")
+          def cohort_page(endpoint,value):
+              if os.environ.get("COHORT_ARTIFACT_ID","0")=="0" or "/actions/workflows/" not in endpoint or "/runs?" not in endpoint: return value
+              ns=cr()
+              return ns["filter_runtime_dispatcher_page"](endpoint,value,read_json=lambda endpoint,timeout: request([endpoint],env=r),token=read_token,deadline=absolute_root_deadline,phase="all")
           def api_page(arguments,page_number,message,include=False):
               if include and page_number==6: arguments.insert(4,"--include")
               try: response=subprocess.run(arguments,capture_output=True,text=True,check=False,env=r,timeout=bounded_root_timeout())
@@ -3192,7 +5535,7 @@ jobs:
               if page_number==6:
                   headers,separator,raw=raw.replace("\r\n","\n").partition("\n\n")
                   if not separator or not headers.startswith("HTTP/") or re.search(r'(?im)^link:.*rel="next"',headers): raise E(message+" exceeds the fixed page window.")
-              try: return json.loads(raw)
+              try: return cohort_page(arguments[-1],json.loads(raw))
               except json.JSONDecodeError as error: raise E(message+" is not JSON.") from error
           def pull_page(page_number):
               page=api_page(["gh","api","--hostname","github.com",f"repos/{repository}/pulls?state=open&per_page=100&page={page_number}"],page_number,"Affected-head barrier current pull request response",True)
@@ -3276,8 +5619,10 @@ jobs:
               check_app=check.get("app") if isinstance(check,dict) else None; details=check.get("details_url") if isinstance(check,dict) else None
               valid=isinstance(check,dict) and check.get("id")==identifier and check.get("name")=="KRR / PR governance (trusted check)" and check.get("head_sha")==h and isinstance(check_app,dict) and check_app.get("id")==app_id
               if number in p_set:
+                  exact_writer=cohort_preserved.get(number,(p_run,None))[0]
+                  pp=urlparse(f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/{exact_writer}")
                   parsed=urlparse(details) if isinstance(details,str) else None
-                  if not valid or check.get("external_id")!=f"krr-governance/v1/{h}/writer-{p_run}" or check.get("status")!="completed" or check.get("conclusion")!="success" or parsed is None or parsed.scheme!=pp.scheme or parsed.netloc!=pp.netloc or parsed.path!=pp.path or parsed.params or parsed.fragment: raise SystemExit("Affected-head barrier preserved early Check Run is invalid.")
+                  if not valid or check.get("external_id")!=f"krr-governance/v1/{h}/writer-{exact_writer}" or check.get("status")!="completed" or check.get("conclusion")!="success" or parsed is None or parsed.scheme!=pp.scheme or parsed.netloc!=pp.netloc or parsed.path!=pp.path or parsed.params or parsed.fragment: raise SystemExit("Affected-head barrier preserved early Check Run is invalid.")
                   continue
               if not valid or check.get("external_id")!=f"krr-governance/v1/{h}/dispatcher-{dispatcher}" or check.get("status")!="in_progress" or check.get("conclusion") is not None or not isinstance(details,str): raise SystemExit("Affected-head barrier pending Check Run is invalid.")
               parts=urlparse(details); query=parse_qs(parts.query,keep_blank_values=True)
@@ -3297,8 +5642,8 @@ jobs:
 
   terminal-all-open-writer:
     name: Complete terminal repository-wide governance writers
-    needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, write-reconciliation-pending, release-complete-affected-head-barrier]
-    if: ${{ !cancelled() && needs.reconcile-all-open.result == 'success' && needs.write-reconciliation-pending.result == 'success' && (needs.acknowledge-early-sensor.result == 'success' || needs.acknowledge-early-sensor.result == 'skipped') && needs.release-complete-affected-head-barrier.result == 'success' }}
+    needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, write-reconciliation-pending, release-complete-affected-head-barrier, admit-cohort-backend]
+    if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (!cancelled() && needs.reconcile-all-open.result == 'success' && needs.write-reconciliation-pending.result == 'success' && (needs.acknowledge-early-sensor.result == 'success' || needs.acknowledge-early-sensor.result == 'skipped') && needs.release-complete-affected-head-barrier.result == 'success') }}
     environment: pr-governance
     runs-on: ubuntu-latest
     timeout-minutes: 290
@@ -3356,6 +5701,9 @@ jobs:
           WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
           WRITER_PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
+          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
+          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
+          COHORT_PRESERVED_MAP: ${{ needs.reconcile-all-open.outputs.preserved_target_writer_map || '[]' }}
           WRITER_CARRY_TARGET_NUMBERS_1: ${{ needs.write-reconciliation-pending.outputs.tail_carry_1 }}
           WRITER_CARRY_TARGET_NUMBERS_2: ${{ needs.write-reconciliation-pending.outputs.tail_carry_2 }}
           WRITER_PREINVALIDATE_TARGETS: ${{ needs.prepare-current-targets.outputs.preinvalidate_targets }}
@@ -3406,6 +5754,10 @@ jobs:
           raw_all_targets = os.environ.get("WRITER_ALL_OPEN_TARGETS", "")
           raw_all_snapshots = os.environ.get("WRITER_ALL_OPEN_SNAPSHOTS", "")
           raw_preserved = os.environ.get("WRITER_PRESERVED_TARGETS", "")
+
+          cohort_id=os.environ.get("COHORT_ARTIFACT_ID","0"); cohort_digest=os.environ.get("COHORT_ARTIFACT_DIGEST",""); cohort_map_raw=os.environ.get("COHORT_PRESERVED_MAP","[]")
+          cohort_map=json.loads(cohort_map_raw); cohort_mode=cohort_id!="0"
+          if not re.fullmatch(r"0|[1-9][0-9]*",cohort_id) or not isinstance(cohort_map,list) or json.dumps(cohort_map,separators=(",",":"))!=cohort_map_raw or any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in cohort_map) or len({row[0] for row in cohort_map})!=len(cohort_map) or len({row[2] for row in cohort_map})!=len(cohort_map) or (cohort_mode and (not re.fullmatch(r"sha256:[0-9a-f]{64}",cohort_digest) or not cohort_map)) or (not cohort_mode and (cohort_digest or cohort_map)): raise SystemExit("Invalid cohort preservation binding")
           preserved_writer_run_id = os.environ.get("PRESERVED_WRITER_RUN_ID", "")
           raw_pre_targets = os.environ.get("WRITER_PREINVALIDATE_TARGETS", "")
           raw_pre_manifest_1 = os.environ.get("WRITER_PRE_CHECK_MANIFEST_1", "")
@@ -3446,7 +5798,7 @@ jobs:
               or not set(preserved).issubset(targets)
               or json.dumps(preserved, separators=(",", ":")) != raw_preserved
               or not re.fullmatch(r"0|[1-9][0-9]*", preserved_writer_run_id)
-              or bool(preserved) != (preserved_writer_run_id != "0")
+              or (bool(preserved) != (preserved_writer_run_id != "0") and not cohort_mode)
               or not isinstance(pre_targets, list) or any(type(number) is not int or number < 1 for number in pre_targets) or len(set(pre_targets)) != len(pre_targets)
               or not set(pre_targets).issubset(targets)
               or json.dumps(pre_targets, separators=(",", ":")) != raw_pre_targets
@@ -3608,7 +5960,7 @@ jobs:
           before_ids = {run.get("id") for run in before if type(run.get("id")) is int}
           if len(before_ids) != len(before):
               raise SystemExit("Governance writer run identity is invalid.")
-          result = subprocess.run(["gh", "api", "--method", "POST", f"repos/{repository}/actions/workflows/pr-governance-status-writer.yml/dispatches", "-f", f"ref={branch}", "-f", f"inputs[dispatcher_run_id]={dispatcher_run_id}", "-f", f"inputs[scope]={scope}", "-f", f"inputs[target_numbers]={raw_targets}", "-f", f"inputs[preserved_target_numbers]={raw_preserved}", "-f", f"inputs[preserved_writer_run_id]={preserved_writer_run_id}", "-f", f"inputs[check_manifest]={raw_manifest}", "-f", f"inputs[terminal_batch_numbers]={json.dumps(batches[0],separators=(',', ':'))}", "-f", "inputs[continuation_index]=1", "-f", f"inputs[terminal_order_numbers]={json.dumps(terminal_order,separators=(',', ':'))}", "-f", "inputs[completed_writer_run_ids]=[]", "-f", f"inputs[terminal_deadline_epoch]={int(os.environ['TERMINAL_SEGMENT_STARTED_AT']) + 3750}"], capture_output=True, text=True, check=False, timeout=20)
+          result = subprocess.run(["gh", "api", "--method", "POST", f"repos/{repository}/actions/workflows/pr-governance-status-writer.yml/dispatches", "-f", f"ref={branch}", "-f", f"inputs[dispatcher_run_id]={dispatcher_run_id}", "-f", f"inputs[scope]={scope}", "-f", f"inputs[target_numbers]={raw_targets}", "-f", f"inputs[preserved_target_numbers]={raw_preserved}", "-f", f"inputs[preserved_writer_run_id]={preserved_writer_run_id}", "-f", f"inputs[cohort_artifact_id]={cohort_id}", "-f", f"inputs[cohort_artifact_digest]={cohort_digest}", "-f", f"inputs[preserved_target_writer_map]={cohort_map_raw}", "-f", f"inputs[check_manifest]={raw_manifest}", "-f", f"inputs[terminal_batch_numbers]={json.dumps(batches[0],separators=(',', ':'))}", "-f", "inputs[continuation_index]=1", "-f", f"inputs[terminal_order_numbers]={json.dumps(terminal_order,separators=(',', ':'))}", "-f", "inputs[completed_writer_run_ids]=[]", "-f", f"inputs[terminal_deadline_epoch]={int(os.environ['TERMINAL_SEGMENT_STARTED_AT']) + 3750}"], capture_output=True, text=True, check=False, timeout=20)
           if result.returncode != 0:
               raise SystemExit("Unable to dispatch governance arbiter.")
           started = os.environ.get("TERMINAL_SEGMENT_STARTED_AT", "")
@@ -3806,6 +6158,9 @@ jobs:
           WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
           WRITER_PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
+          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
+          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
+          COHORT_PRESERVED_MAP: ${{ needs.reconcile-all-open.outputs.preserved_target_writer_map || '[]' }}
           WRITER_CHECK_MANIFEST: ${{ steps.dispatch-all-1.outputs.check_manifest }}
           WRITER_TERMINAL_ORDER: ${{ steps.dispatch-all-1.outputs.terminal_order_numbers }}
           COMPLETED_WRITER_RUN_IDS: ${{ format('[{0}]', steps.dispatch-all-1.outputs.writer_run_id) }}
@@ -3824,6 +6179,10 @@ jobs:
           raw_targets = os.environ.get("WRITER_TARGETS", "")
           raw_snapshots = os.environ.get("WRITER_ALL_OPEN_SNAPSHOTS", "")
           raw_preserved = os.environ.get("WRITER_PRESERVED_TARGETS", "")
+
+          cohort_id=os.environ.get("COHORT_ARTIFACT_ID","0"); cohort_digest=os.environ.get("COHORT_ARTIFACT_DIGEST",""); cohort_map_raw=os.environ.get("COHORT_PRESERVED_MAP","[]")
+          cohort_map=json.loads(cohort_map_raw); cohort_mode=cohort_id!="0"
+          if not re.fullmatch(r"0|[1-9][0-9]*",cohort_id) or not isinstance(cohort_map,list) or json.dumps(cohort_map,separators=(",",":"))!=cohort_map_raw or any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in cohort_map) or len({row[0] for row in cohort_map})!=len(cohort_map) or len({row[2] for row in cohort_map})!=len(cohort_map) or (cohort_mode and (not re.fullmatch(r"sha256:[0-9a-f]{64}",cohort_digest) or not cohort_map)) or (not cohort_mode and (cohort_digest or cohort_map)): raise SystemExit("Invalid cohort preservation binding")
           preserved_writer = os.environ.get("PRESERVED_WRITER_RUN_ID", "")
           raw_manifest = os.environ.get("WRITER_CHECK_MANIFEST", "")
           raw_batch = os.environ.get("TERMINAL_BATCH", "")
@@ -3834,7 +6193,7 @@ jobs:
               targets, snapshots, preserved, manifest, batch, terminal_order, completed = (json.loads(value) for value in (raw_targets, raw_snapshots, raw_preserved, raw_manifest, raw_batch, raw_order, raw_completed))
           except json.JSONDecodeError as error:
               raise SystemExit("Governance terminal segment boundary is invalid.") from error
-          if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch) or re.fullmatch(r"[0-9a-fA-F]{40}", writer_head) is None or not re.fullmatch(r"[1-9][0-9]*", source) or index != "2" or not re.fullmatch(r"0|[1-9][0-9]*", preserved_writer) or any(not isinstance(value, list) for value in (targets, snapshots, preserved, manifest, batch, terminal_order, completed)) or any(type(number) is not int or number < 1 for number in targets + preserved + batch + terminal_order + completed) or len(set(targets)) != len(targets) or len(set(preserved)) != len(preserved) or len(set(terminal_order)) != len(terminal_order) or len(set(completed)) != len(completed) or len(completed) != 1 or len(batch) > 125 or not batch or json.dumps(targets, separators=(",", ":")) != raw_targets or json.dumps(snapshots, separators=(",", ":")) != raw_snapshots or json.dumps(preserved, separators=(",", ":")) != raw_preserved or json.dumps(manifest, separators=(",", ":")) != raw_manifest or json.dumps(batch, separators=(",", ":")) != raw_batch or json.dumps(terminal_order, separators=(",", ":")) != raw_order or json.dumps(completed, separators=(",", ":")) != raw_completed or batch != terminal_order[125:250] or not set(preserved).issubset(targets) or bool(preserved) != (preserved_writer != "0") or any(not isinstance(item, list) or len(item) != 2 or type(item[0]) is not int or item[0] < 1 or type(item[1]) is not int or item[1] < 1 for item in manifest) or len({item[0] for item in manifest}) != len(manifest) or len({item[1] for item in manifest}) != len(manifest):
+          if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch) or re.fullmatch(r"[0-9a-fA-F]{40}", writer_head) is None or not re.fullmatch(r"[1-9][0-9]*", source) or index != "2" or not re.fullmatch(r"0|[1-9][0-9]*", preserved_writer) or any(not isinstance(value, list) for value in (targets, snapshots, preserved, manifest, batch, terminal_order, completed)) or any(type(number) is not int or number < 1 for number in targets + preserved + batch + terminal_order + completed) or len(set(targets)) != len(targets) or len(set(preserved)) != len(preserved) or len(set(terminal_order)) != len(terminal_order) or len(set(completed)) != len(completed) or len(completed) != 1 or len(batch) > 125 or not batch or json.dumps(targets, separators=(",", ":")) != raw_targets or json.dumps(snapshots, separators=(",", ":")) != raw_snapshots or json.dumps(preserved, separators=(",", ":")) != raw_preserved or json.dumps(manifest, separators=(",", ":")) != raw_manifest or json.dumps(batch, separators=(",", ":")) != raw_batch or json.dumps(terminal_order, separators=(",", ":")) != raw_order or json.dumps(completed, separators=(",", ":")) != raw_completed or batch != terminal_order[125:250] or not set(preserved).issubset(targets) or (bool(preserved) != (preserved_writer != "0") and not cohort_mode) or any(not isinstance(item, list) or len(item) != 2 or type(item[0]) is not int or item[0] < 1 or type(item[1]) is not int or item[1] < 1 for item in manifest) or len({item[0] for item in manifest}) != len(manifest) or len({item[1] for item in manifest}) != len(manifest):
               raise SystemExit("Governance terminal segment boundary is invalid.")
           expected_snapshots = {}
           for item in snapshots:
@@ -3937,7 +6296,7 @@ jobs:
               return runs
           before = {run.get("id") for run in runs() if type(run.get("id")) is int}
           if len(before) == 0 and False: raise SystemExit("unreachable")
-          dispatched = subprocess.run(["gh", "api", "--method", "POST", f"repos/{repository}/actions/workflows/pr-governance-status-writer.yml/dispatches", "-f", f"ref={branch}", "-f", f"inputs[dispatcher_run_id]={source}", "-f", "inputs[scope]=all", "-f", f"inputs[target_numbers]={raw_targets}", "-f", f"inputs[preserved_target_numbers]={raw_preserved}", "-f", f"inputs[preserved_writer_run_id]={preserved_writer}", "-f", f"inputs[check_manifest]={raw_manifest}", "-f", f"inputs[terminal_batch_numbers]={raw_batch}", "-f", "inputs[continuation_index]=2", "-f", f"inputs[terminal_order_numbers]={raw_order}", "-f", f"inputs[completed_writer_run_ids]={raw_completed}", "-f", f"inputs[terminal_deadline_epoch]={int(os.environ['TERMINAL_SEGMENT_STARTED_AT']) + 3750}"], capture_output=True, text=True, check=False, timeout=20)
+          dispatched = subprocess.run(["gh", "api", "--method", "POST", f"repos/{repository}/actions/workflows/pr-governance-status-writer.yml/dispatches", "-f", f"ref={branch}", "-f", f"inputs[dispatcher_run_id]={source}", "-f", "inputs[scope]=all", "-f", f"inputs[target_numbers]={raw_targets}", "-f", f"inputs[preserved_target_numbers]={raw_preserved}", "-f", f"inputs[preserved_writer_run_id]={preserved_writer}", "-f", f"inputs[cohort_artifact_id]={cohort_id}", "-f", f"inputs[cohort_artifact_digest]={cohort_digest}", "-f", f"inputs[preserved_target_writer_map]={cohort_map_raw}", "-f", f"inputs[check_manifest]={raw_manifest}", "-f", f"inputs[terminal_batch_numbers]={raw_batch}", "-f", "inputs[continuation_index]=2", "-f", f"inputs[terminal_order_numbers]={raw_order}", "-f", f"inputs[completed_writer_run_ids]={raw_completed}", "-f", f"inputs[terminal_deadline_epoch]={int(os.environ['TERMINAL_SEGMENT_STARTED_AT']) + 3750}"], capture_output=True, text=True, check=False, timeout=20)
           if dispatched.returncode != 0: raise SystemExit("Unable to dispatch governance terminal segment.")
           started=os.environ.get("TERMINAL_SEGMENT_STARTED_AT", "")
           if re.fullmatch(r"[1-9][0-9]*",started) is None:
@@ -4077,6 +6436,9 @@ jobs:
           WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
           WRITER_PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
+          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
+          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
+          COHORT_PRESERVED_MAP: ${{ needs.reconcile-all-open.outputs.preserved_target_writer_map || '[]' }}
           WRITER_CHECK_MANIFEST: ${{ steps.dispatch-all-1.outputs.check_manifest }}
           WRITER_TERMINAL_ORDER: ${{ steps.dispatch-all-1.outputs.terminal_order_numbers }}
           COMPLETED_WRITER_RUN_IDS: ${{ format('[{0},{1}]', steps.dispatch-all-1.outputs.writer_run_id, steps.dispatch-all-2.outputs.writer_run_id) }}
@@ -4088,10 +6450,14 @@ jobs:
           python3 - <<'PY'
           import json, os, re, subprocess, time
           from urllib.parse import urlencode
+
+          cohort_id=os.environ.get("COHORT_ARTIFACT_ID","0"); cohort_digest=os.environ.get("COHORT_ARTIFACT_DIGEST",""); cohort_map_raw=os.environ.get("COHORT_PRESERVED_MAP","[]")
+          cohort_map=json.loads(cohort_map_raw); cohort_mode=cohort_id!="0"
+          if not re.fullmatch(r"0|[1-9][0-9]*",cohort_id) or not isinstance(cohort_map,list) or json.dumps(cohort_map,separators=(",",":"))!=cohort_map_raw or any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in cohort_map) or len({row[0] for row in cohort_map})!=len(cohort_map) or len({row[2] for row in cohort_map})!=len(cohort_map) or (cohort_mode and (not re.fullmatch(r"sha256:[0-9a-f]{64}",cohort_digest) or not cohort_map)) or (not cohort_mode and (cohort_digest or cohort_map)): raise SystemExit("Invalid cohort preservation binding")
           repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); head=os.environ.get("WRITER_HEAD", ""); source=os.environ.get("DISPATCHER_RUN_ID", ""); index=os.environ.get("CONTINUATION_INDEX", ""); raw_targets=os.environ.get("WRITER_TARGETS", ""); raw_snapshots=os.environ.get("WRITER_ALL_OPEN_SNAPSHOTS", ""); raw_preserved=os.environ.get("WRITER_PRESERVED_TARGETS", ""); preserved_writer=os.environ.get("PRESERVED_WRITER_RUN_ID", ""); raw_manifest=os.environ.get("WRITER_CHECK_MANIFEST", ""); raw_batch=os.environ.get("TERMINAL_BATCH", ""); raw_order=os.environ.get("WRITER_TERMINAL_ORDER", ""); raw_completed=os.environ.get("COMPLETED_WRITER_RUN_IDS", "")
           try: targets,snapshots,preserved,manifest,batch,terminal_order,completed=(json.loads(item) for item in (raw_targets,raw_snapshots,raw_preserved,raw_manifest,raw_batch,raw_order,raw_completed))
           except json.JSONDecodeError as error: raise SystemExit("Governance terminal segment boundary is invalid.") from error
-          if not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or not re.fullmatch(r"[1-9][0-9]*",source) or index!="3" or not re.fullmatch(r"0|[1-9][0-9]*",preserved_writer) or any(not isinstance(item,list) for item in (targets,snapshots,preserved,manifest,batch,terminal_order,completed)) or any(type(number) is not int or number<1 for number in targets+preserved+batch+terminal_order+completed) or len(set(targets))!=len(targets) or len(set(preserved))!=len(preserved) or len(set(terminal_order))!=len(terminal_order) or len(set(completed))!=len(completed) or len(completed)!=2 or not batch or len(batch)>125 or json.dumps(targets,separators=(",",":"))!=raw_targets or json.dumps(snapshots,separators=(",",":"))!=raw_snapshots or json.dumps(preserved,separators=(",",":"))!=raw_preserved or json.dumps(manifest,separators=(",",":"))!=raw_manifest or json.dumps(batch,separators=(",",":"))!=raw_batch or json.dumps(terminal_order,separators=(",",":"))!=raw_order or json.dumps(completed,separators=(",",":"))!=raw_completed or batch!=terminal_order[250:375] or not set(preserved).issubset(targets) or bool(preserved)!=(preserved_writer!="0") or any(not isinstance(entry,list) or len(entry)!=2 or type(entry[0]) is not int or entry[0]<1 or type(entry[1]) is not int or entry[1]<1 for entry in manifest) or len({entry[0] for entry in manifest})!=len(manifest) or len({entry[1] for entry in manifest})!=len(manifest): raise SystemExit("Governance terminal segment boundary is invalid.")
+          if not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or not re.fullmatch(r"[1-9][0-9]*",source) or index!="3" or not re.fullmatch(r"0|[1-9][0-9]*",preserved_writer) or any(not isinstance(item,list) for item in (targets,snapshots,preserved,manifest,batch,terminal_order,completed)) or any(type(number) is not int or number<1 for number in targets+preserved+batch+terminal_order+completed) or len(set(targets))!=len(targets) or len(set(preserved))!=len(preserved) or len(set(terminal_order))!=len(terminal_order) or len(set(completed))!=len(completed) or len(completed)!=2 or not batch or len(batch)>125 or json.dumps(targets,separators=(",",":"))!=raw_targets or json.dumps(snapshots,separators=(",",":"))!=raw_snapshots or json.dumps(preserved,separators=(",",":"))!=raw_preserved or json.dumps(manifest,separators=(",",":"))!=raw_manifest or json.dumps(batch,separators=(",",":"))!=raw_batch or json.dumps(terminal_order,separators=(",",":"))!=raw_order or json.dumps(completed,separators=(",",":"))!=raw_completed or batch!=terminal_order[250:375] or not set(preserved).issubset(targets) or (bool(preserved)!=(preserved_writer!="0") and not cohort_mode) or any(not isinstance(entry,list) or len(entry)!=2 or type(entry[0]) is not int or entry[0]<1 or type(entry[1]) is not int or entry[1]<1 for entry in manifest) or len({entry[0] for entry in manifest})!=len(manifest) or len({entry[1] for entry in manifest})!=len(manifest): raise SystemExit("Governance terminal segment boundary is invalid.")
           expected={}
           for entry in snapshots:
               if not isinstance(entry,list) or len(entry)!=3 or type(entry[0]) is not int or entry[0]<1 or not isinstance(entry[1],str) or re.fullmatch(r"[0-9a-fA-F]{40}",entry[1]) is None or type(entry[2]) is not bool or entry[0] in expected: raise SystemExit("Governance terminal segment boundary is invalid.")
@@ -4167,7 +6533,7 @@ jobs:
               if type(total) is not int or total<0 or total>100 or not isinstance(runs,list) or len(runs)!=total or not all(isinstance(run,dict) for run in runs): raise SystemExit("Governance terminal writer runs are invalid.")
               return runs
           before={run.get("id") for run in runs() if type(run.get("id")) is int}
-          posted=subprocess.run(["gh","api","--method","POST",f"repos/{repo}/actions/workflows/pr-governance-status-writer.yml/dispatches","-f",f"ref={branch}","-f",f"inputs[dispatcher_run_id]={source}","-f","inputs[scope]=all","-f",f"inputs[target_numbers]={raw_targets}","-f",f"inputs[preserved_target_numbers]={raw_preserved}","-f",f"inputs[preserved_writer_run_id]={preserved_writer}","-f",f"inputs[check_manifest]={raw_manifest}","-f",f"inputs[terminal_batch_numbers]={raw_batch}","-f","inputs[continuation_index]=3","-f",f"inputs[terminal_order_numbers]={raw_order}","-f",f"inputs[completed_writer_run_ids]={raw_completed}","-f",f"inputs[terminal_deadline_epoch]={int(os.environ['TERMINAL_SEGMENT_STARTED_AT'])+3750}"],capture_output=True,text=True,check=False, timeout=20)
+          posted=subprocess.run(["gh","api","--method","POST",f"repos/{repo}/actions/workflows/pr-governance-status-writer.yml/dispatches","-f",f"ref={branch}","-f",f"inputs[dispatcher_run_id]={source}","-f","inputs[scope]=all","-f",f"inputs[target_numbers]={raw_targets}","-f",f"inputs[preserved_target_numbers]={raw_preserved}","-f",f"inputs[preserved_writer_run_id]={preserved_writer}", "-f", f"inputs[cohort_artifact_id]={cohort_id}", "-f", f"inputs[cohort_artifact_digest]={cohort_digest}", "-f", f"inputs[preserved_target_writer_map]={cohort_map_raw}","-f",f"inputs[check_manifest]={raw_manifest}","-f",f"inputs[terminal_batch_numbers]={raw_batch}","-f","inputs[continuation_index]=3","-f",f"inputs[terminal_order_numbers]={raw_order}","-f",f"inputs[completed_writer_run_ids]={raw_completed}","-f",f"inputs[terminal_deadline_epoch]={int(os.environ['TERMINAL_SEGMENT_STARTED_AT'])+3750}"],capture_output=True,text=True,check=False, timeout=20)
           if posted.returncode!=0: raise SystemExit("Unable to dispatch governance terminal segment.")
           started=os.environ.get("TERMINAL_SEGMENT_STARTED_AT", "")
           if re.fullmatch(r"[1-9][0-9]*",started) is None:
@@ -4305,6 +6671,9 @@ jobs:
           WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
           WRITER_PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
+          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
+          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
+          COHORT_PRESERVED_MAP: ${{ needs.reconcile-all-open.outputs.preserved_target_writer_map || '[]' }}
           WRITER_CHECK_MANIFEST: ${{ steps.dispatch-all-1.outputs.check_manifest }}
           WRITER_TERMINAL_ORDER: ${{ steps.dispatch-all-1.outputs.terminal_order_numbers }}
           COMPLETED_WRITER_RUN_IDS: ${{ format('[{0},{1},{2}]', steps.dispatch-all-1.outputs.writer_run_id, steps.dispatch-all-2.outputs.writer_run_id, steps.dispatch-all-3.outputs.writer_run_id) }}
@@ -4316,10 +6685,14 @@ jobs:
           python3 - <<'PY'
           import json, os, re, subprocess, time
           from urllib.parse import urlencode
+
+          cohort_id=os.environ.get("COHORT_ARTIFACT_ID","0"); cohort_digest=os.environ.get("COHORT_ARTIFACT_DIGEST",""); cohort_map_raw=os.environ.get("COHORT_PRESERVED_MAP","[]")
+          cohort_map=json.loads(cohort_map_raw); cohort_mode=cohort_id!="0"
+          if not re.fullmatch(r"0|[1-9][0-9]*",cohort_id) or not isinstance(cohort_map,list) or json.dumps(cohort_map,separators=(",",":"))!=cohort_map_raw or any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in cohort_map) or len({row[0] for row in cohort_map})!=len(cohort_map) or len({row[2] for row in cohort_map})!=len(cohort_map) or (cohort_mode and (not re.fullmatch(r"sha256:[0-9a-f]{64}",cohort_digest) or not cohort_map)) or (not cohort_mode and (cohort_digest or cohort_map)): raise SystemExit("Invalid cohort preservation binding")
           repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); head=os.environ.get("WRITER_HEAD", ""); source=os.environ.get("DISPATCHER_RUN_ID", ""); index=os.environ.get("CONTINUATION_INDEX", ""); raw_targets=os.environ.get("WRITER_TARGETS", ""); raw_snapshots=os.environ.get("WRITER_ALL_OPEN_SNAPSHOTS", ""); raw_preserved=os.environ.get("WRITER_PRESERVED_TARGETS", ""); preserved_writer=os.environ.get("PRESERVED_WRITER_RUN_ID", ""); raw_manifest=os.environ.get("WRITER_CHECK_MANIFEST", ""); raw_batch=os.environ.get("TERMINAL_BATCH", ""); raw_order=os.environ.get("WRITER_TERMINAL_ORDER", ""); raw_completed=os.environ.get("COMPLETED_WRITER_RUN_IDS", "")
           try: targets,snapshots,preserved,manifest,batch,terminal_order,completed=(json.loads(item) for item in (raw_targets,raw_snapshots,raw_preserved,raw_manifest,raw_batch,raw_order,raw_completed))
           except json.JSONDecodeError as error: raise SystemExit("Governance terminal segment boundary is invalid.") from error
-          if not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or not re.fullmatch(r"[1-9][0-9]*",source) or index!="4" or not re.fullmatch(r"0|[1-9][0-9]*",preserved_writer) or any(not isinstance(item,list) for item in (targets,snapshots,preserved,manifest,batch,terminal_order,completed)) or any(type(number) is not int or number<1 for number in targets+preserved+batch+terminal_order+completed) or len(set(targets))!=len(targets) or len(set(preserved))!=len(preserved) or len(set(terminal_order))!=len(terminal_order) or len(set(completed))!=len(completed) or len(completed)!=3 or not batch or len(batch)>125 or json.dumps(targets,separators=(",",":"))!=raw_targets or json.dumps(snapshots,separators=(",",":"))!=raw_snapshots or json.dumps(preserved,separators=(",",":"))!=raw_preserved or json.dumps(manifest,separators=(",",":"))!=raw_manifest or json.dumps(batch,separators=(",",":"))!=raw_batch or json.dumps(terminal_order,separators=(",",":"))!=raw_order or json.dumps(completed,separators=(",",":"))!=raw_completed or batch!=terminal_order[375:500] or not set(preserved).issubset(targets) or bool(preserved)!=(preserved_writer!="0") or any(not isinstance(entry,list) or len(entry)!=2 or type(entry[0]) is not int or entry[0]<1 or type(entry[1]) is not int or entry[1]<1 for entry in manifest) or len({entry[0] for entry in manifest})!=len(manifest) or len({entry[1] for entry in manifest})!=len(manifest): raise SystemExit("Governance terminal segment boundary is invalid.")
+          if not re.fullmatch(r"[A-Za-z0-9._/-]+",branch) or re.fullmatch(r"[0-9a-fA-F]{40}",head) is None or not re.fullmatch(r"[1-9][0-9]*",source) or index!="4" or not re.fullmatch(r"0|[1-9][0-9]*",preserved_writer) or any(not isinstance(item,list) for item in (targets,snapshots,preserved,manifest,batch,terminal_order,completed)) or any(type(number) is not int or number<1 for number in targets+preserved+batch+terminal_order+completed) or len(set(targets))!=len(targets) or len(set(preserved))!=len(preserved) or len(set(terminal_order))!=len(terminal_order) or len(set(completed))!=len(completed) or len(completed)!=3 or not batch or len(batch)>125 or json.dumps(targets,separators=(",",":"))!=raw_targets or json.dumps(snapshots,separators=(",",":"))!=raw_snapshots or json.dumps(preserved,separators=(",",":"))!=raw_preserved or json.dumps(manifest,separators=(",",":"))!=raw_manifest or json.dumps(batch,separators=(",",":"))!=raw_batch or json.dumps(terminal_order,separators=(",",":"))!=raw_order or json.dumps(completed,separators=(",",":"))!=raw_completed or batch!=terminal_order[375:500] or not set(preserved).issubset(targets) or (bool(preserved)!=(preserved_writer!="0") and not cohort_mode) or any(not isinstance(entry,list) or len(entry)!=2 or type(entry[0]) is not int or entry[0]<1 or type(entry[1]) is not int or entry[1]<1 for entry in manifest) or len({entry[0] for entry in manifest})!=len(manifest) or len({entry[1] for entry in manifest})!=len(manifest): raise SystemExit("Governance terminal segment boundary is invalid.")
           expected={}
           for entry in snapshots:
               if not isinstance(entry,list) or len(entry)!=3 or type(entry[0]) is not int or entry[0]<1 or not isinstance(entry[1],str) or re.fullmatch(r"[0-9a-fA-F]{40}",entry[1]) is None or type(entry[2]) is not bool or entry[0] in expected: raise SystemExit("Governance terminal segment boundary is invalid.")
@@ -4395,7 +6768,7 @@ jobs:
               if type(total) is not int or total<0 or total>100 or not isinstance(runs,list) or len(runs)!=total or not all(isinstance(run,dict) for run in runs): raise SystemExit("Governance terminal writer runs are invalid.")
               return runs
           before={run.get("id") for run in runs() if type(run.get("id")) is int}
-          posted=subprocess.run(["gh","api","--method","POST",f"repos/{repo}/actions/workflows/pr-governance-status-writer.yml/dispatches","-f",f"ref={branch}","-f",f"inputs[dispatcher_run_id]={source}","-f","inputs[scope]=all","-f",f"inputs[target_numbers]={raw_targets}","-f",f"inputs[preserved_target_numbers]={raw_preserved}","-f",f"inputs[preserved_writer_run_id]={preserved_writer}","-f",f"inputs[check_manifest]={raw_manifest}","-f",f"inputs[terminal_batch_numbers]={raw_batch}","-f","inputs[continuation_index]=4","-f",f"inputs[terminal_order_numbers]={raw_order}","-f",f"inputs[completed_writer_run_ids]={raw_completed}","-f",f"inputs[terminal_deadline_epoch]={int(os.environ['TERMINAL_SEGMENT_STARTED_AT'])+3750}"],capture_output=True,text=True,check=False, timeout=20)
+          posted=subprocess.run(["gh","api","--method","POST",f"repos/{repo}/actions/workflows/pr-governance-status-writer.yml/dispatches","-f",f"ref={branch}","-f",f"inputs[dispatcher_run_id]={source}","-f","inputs[scope]=all","-f",f"inputs[target_numbers]={raw_targets}","-f",f"inputs[preserved_target_numbers]={raw_preserved}","-f",f"inputs[preserved_writer_run_id]={preserved_writer}", "-f", f"inputs[cohort_artifact_id]={cohort_id}", "-f", f"inputs[cohort_artifact_digest]={cohort_digest}", "-f", f"inputs[preserved_target_writer_map]={cohort_map_raw}","-f",f"inputs[check_manifest]={raw_manifest}","-f",f"inputs[terminal_batch_numbers]={raw_batch}","-f","inputs[continuation_index]=4","-f",f"inputs[terminal_order_numbers]={raw_order}","-f",f"inputs[completed_writer_run_ids]={raw_completed}","-f",f"inputs[terminal_deadline_epoch]={int(os.environ['TERMINAL_SEGMENT_STARTED_AT'])+3750}"],capture_output=True,text=True,check=False, timeout=20)
           if posted.returncode!=0: raise SystemExit("Unable to dispatch governance terminal segment.")
           started=os.environ.get("TERMINAL_SEGMENT_STARTED_AT", "")
           if re.fullmatch(r"[1-9][0-9]*",started) is None:
@@ -4469,4 +6842,111 @@ jobs:
               if remaining<=0: break
               time.sleep(min(30,remaining))
           raise SystemExit("Governance terminal writer did not reach a terminal state.")
+          PY
+
+  dispatch-failed-cohort-recovery:
+    name: Dispatch failed selected cohort recovery
+    needs: [preflight-workflow-run-source, publish-cohort-journal, elect-cohort-owner, admit-cohort-backend, arm-reserved-sensor-barrier, cohort-early-service, wait-for-active-review-sensor, establish-resolver-failure-barrier, safe-obsolete-heavy-preemption, publish-resolver-barrier-marker, resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history, write-reconciliation-pending, release-complete-affected-head-barrier, terminal-all-open-writer]
+    if: ${{ always() && needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (needs.preflight-workflow-run-source.result == 'failure' || needs.publish-cohort-journal.result == 'failure' || needs.elect-cohort-owner.result == 'failure' || needs.admit-cohort-backend.result == 'failure' || needs.arm-reserved-sensor-barrier.result == 'failure' || needs.cohort-early-service.result == 'failure' || needs.wait-for-active-review-sensor.result == 'failure' || needs.establish-resolver-failure-barrier.result == 'failure' || needs.safe-obsolete-heavy-preemption.result == 'failure' || needs.publish-resolver-barrier-marker.result == 'failure' || needs.resolve_event.result == 'failure' || needs.prepare-current-targets.result == 'failure' || needs.reconcile-all-open.result == 'failure' || needs.acknowledge-early-sensor.result == 'failure' || needs.audit-reconciliation-history.result == 'failure' || needs.write-reconciliation-pending.result == 'failure' || needs.release-complete-affected-head-barrier.result == 'failure' || needs.terminal-all-open-writer.result == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Dispatch exact failed selected owner recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          COHORT_ORIGINAL_ROOT_DEADLINE: ${{ needs.admit-cohort-backend.outputs.root_deadline_epoch }}
+          COHORT_MODE: dispatch-recovery
+        run: |
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import re
+          import subprocess
+          import time
+
+          repository = os.environ.get("GITHUB_REPOSITORY", "")
+          workflow_ref = os.environ.get("WORKFLOW_REF", "")
+          workflow_sha = os.environ.get("WORKFLOW_SHA", "")
+          script_path = "scripts/review/pr_governance_cohort.py"
+          if (
+              re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is None
+              or re.fullmatch(r"[0-9a-fA-F]{40}", workflow_sha) is None
+              or workflow_ref != f"{repository}/.github/workflows/pr-governance.yml@refs/heads/{os.environ.get('DEFAULT_BRANCH', '')}"
+          ):
+              raise SystemExit("Governance runner source is not the trusted default branch.")
+
+          def arm_issue_source_failure(message):
+              # Issue mutations must establish the App-bound resolver barrier
+              # even when the immutable source loader cannot read GitHub.
+              # Let the barrier job run, then fail it via ``valid=false``;
+              # exiting this preflight step first would erase its outputs and
+              # leave a former trusted success exposed.
+              if os.environ.get("EVENT_NAME") not in {"issues", "issue_comment"}:
+                  raise SystemExit(message)
+              output_path = os.environ.get("GITHUB_OUTPUT", "")
+              if not output_path:
+                  raise SystemExit(message)
+              with open(output_path, "a", encoding="utf-8") as output:
+                  output.write("reconcile=true\n")
+                  output.write("valid=false\n")
+                  output.write("priority=false\n")
+                  output.write("sensor_reservation=false\n")
+                  output.write("sensor_run_ids=[]\n")
+                  output.write("pull_request_target_noop=false\n")
+                  output.write("issue_event_noop=false\n")
+                  output.write(f"root_deadline_epoch={int(time.time()) + 21_000}\n")
+              raise SystemExit(0)
+
+          def request(path):
+              try:
+                  result = subprocess.run(
+                      ["gh", "api", "--hostname", "github.com", path],
+                      capture_output=True, text=True, check=False, timeout=20,
+                  )
+              except subprocess.TimeoutExpired:
+                  arm_issue_source_failure("Trusted governance source timed out.")
+              if result.returncode != 0:
+                  arm_issue_source_failure("Unable to read trusted governance source.")
+              try:
+                  value = json.loads(result.stdout)
+              except json.JSONDecodeError as error:
+                  arm_issue_source_failure("Trusted governance source is not JSON.")
+              if not isinstance(value, dict):
+                  arm_issue_source_failure("Trusted governance source is invalid.")
+              return value
+
+          repository_record = request(f"repos/{repository}")
+          if repository_record.get("default_branch") != os.environ.get("DEFAULT_BRANCH", ""):
+              arm_issue_source_failure("Governance runner default branch changed.")
+          content = request(f"repos/{repository}/contents/{script_path}?ref={workflow_sha}")
+          encoded = content.get("content")
+          blob_sha = content.get("sha")
+          if (
+              content.get("type") != "file"
+              or content.get("encoding") != "base64"
+              or not isinstance(encoded, str)
+              or len(encoded) > 300_000
+              or not isinstance(blob_sha, str)
+              or re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha) is None
+          ):
+              arm_issue_source_failure("Trusted governance source is invalid.")
+          try:
+              program = base64.b64decode(encoded.replace("\n", ""), validate=True).decode("utf-8", "strict")
+          except (ValueError, UnicodeError):
+              arm_issue_source_failure("Trusted governance source cannot be decoded.")
+          raw_program = program.encode("utf-8", "strict")
+          if hashlib.sha1(b"blob " + str(len(raw_program)).encode("ascii") + b"\0" + raw_program).hexdigest() != blob_sha:
+              raise SystemExit("Trusted cohort helper blob mismatch.")
+          if not program or "\x00" in program:
+              arm_issue_source_failure("Trusted governance source is invalid.")
+          exec(compile(program, f"{script_path}@{workflow_sha}", "exec"), {"__name__": "__main__", "__file__": script_path})
           PY

@@ -107,8 +107,8 @@ class GovernanceSensorStateContractTest(unittest.TestCase):
 
     def test_sensor_identity_observers_have_an_explicit_role_inventory(self):
         observers = set()
-        for match in re.finditer(r"python3 - <<'PY'\n(.*?)\n          PY", self.workflow, re.DOTALL):
-            tree = ast.parse(textwrap.dedent(match.group(1)))
+        for match in re.finditer(r"(?P<indent> {8}| {10})python3 - <<'PY'\n(?P<body>.*?)\n(?P=indent)PY(?=\n|$)", self.workflow, re.DOTALL):
+            tree = ast.parse(textwrap.dedent(match.group("body")))
             if any(isinstance(node, ast.Constant) and node.value == "PR governance review sensor" for node in ast.walk(tree)):
                 names = re.findall(r"- name: (.+)", self.workflow[:match.start()])
                 self.assertTrue(names)

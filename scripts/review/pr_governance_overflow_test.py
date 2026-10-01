@@ -165,21 +165,23 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         """Keep the complete API-call inventory bounded as the three workflows grow."""
         workflows = (
             # 新しい予約/ACK証跡のAPI wrapper2件も、既存の全API inventoryへ含める。
-            ("dispatcher", self.dispatcher, 87),
+            ("dispatcher", self.dispatcher, 107),
             ("status writer", self.workflow, 2),
             ("review events", self.review_events, 1),
+            ("cohort helper", "", 3),
         )
         for name, workflow, expected_count in workflows:
             with self.subTest(workflow=name):
-                blocks = re.finditer(r"(?ms)^          python3 - <<'PY'\n(.*?)^          PY$", workflow)
+                blocks = re.finditer(
+                    r"(?ms)^(?P<indent> {8}| {10})(?:python3 -|cat (?:>|>>) \"\$RUNNER_TEMP/krr-governance-(?:sensor|cohort)-reader\.py\") <<'PY'\n(?P<body>.*?)(?P=indent)PY$",
+                    workflow,
+                )
                 api_calls: list[ast.Call] = []
-                sources = [
-                    "".join(
-                        line[10:] if line.startswith("          ") else line
-                        for line in block.group(1).splitlines(keepends=True)
-                    )
-                    for block in blocks
-                ]
+                sources = [textwrap.dedent(block.group("body")) for block in blocks]
+                for quoted in re.finditer(r'(?m)^ {6,8}run: (".*")$', workflow):
+                    command = json.loads(quoted.group(1))
+                    if command.startswith("python3 - <<'PY'\n"):
+                        sources.append(command.split("\n", 1)[1].rsplit("\nPY", 1)[0])
                 if name == "dispatcher":
                     sources.extend(
                         (ROOT / "scripts/review" / script).read_text(encoding="utf-8")
@@ -188,6 +190,8 @@ class GovernanceOverflowContractTest(unittest.TestCase):
                             "pr_governance_resolve_event.py",
                         )
                     )
+                if name == "cohort helper":
+                    sources.append((ROOT / "scripts/review/pr_governance_cohort.py").read_text(encoding="utf-8"))
                 for source in sources:
                     tree = ast.parse(source)
                     finite_timeout_names = {
@@ -203,10 +207,14 @@ class GovernanceOverflowContractTest(unittest.TestCase):
                     for call in ast.walk(tree):
                         if not (
                             isinstance(call, ast.Call)
-                            and isinstance(call.func, ast.Attribute)
-                            and isinstance(call.func.value, ast.Name)
-                            and call.func.value.id == "subprocess"
-                            and call.func.attr == "run"
+                            and (
+                                isinstance(call.func, ast.Attribute)
+                                and isinstance(call.func.value, ast.Name)
+                                and call.func.value.id == "subprocess"
+                                and call.func.attr == "run"
+                                or name == "review events" and isinstance(call.func, ast.Name)
+                                and call.func.id == "run"
+                            )
                         ):
                             continue
                         rendered = ast.get_source_segment(source, call) or ""
@@ -218,6 +226,19 @@ class GovernanceOverflowContractTest(unittest.TestCase):
                         if isinstance(timeout, ast.Constant):
                             self.assertIsInstance(timeout.value, (int, float))
                             self.assertLessEqual(timeout.value, 20)
+                        elif name == "cohort helper" and isinstance(timeout, ast.Name) and timeout.id == "timeout":
+                            transports = [node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_Transport"]
+                            self.assertEqual(len(transports), 1)
+                            methods = [node for node in transports[0].body if isinstance(node, ast.FunctionDef) and node.name == "json"]
+                            self.assertEqual(len(methods), 1)
+                            guards = [node for node in methods[0].body if isinstance(node, ast.Expr)
+                                      and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                                      and node.value.func.id == "_require" and node.value.args
+                                      and "timeout" in ast.unparse(node.value.args[0])]
+                            self.assertEqual(len(guards), 1)
+                            self.assertLess(guards[0].lineno, call.lineno)
+                            self.assertEqual(ast.unparse(guards[0].value.args[0]),
+                                             "type(timeout) in {int, float} and math.isfinite(timeout) and (0 < timeout <= 20)")
                         else:
                             self.assertIsInstance(timeout, ast.Call)
                             assert isinstance(timeout, ast.Call)
@@ -244,10 +265,10 @@ class GovernanceOverflowContractTest(unittest.TestCase):
                                 continue
                             self.assertEqual(timeout.func.id, "min")
                             self.assertIn("remaining", ast.unparse(timeout))
-                            self.assertRegex(
+                            self.assertIsNotNone(re.search(
+                                r"\bremaining\s*=\s*(?:reader\.)?[A-Za-z_]*deadline\s*-\s*time\.(?:time|monotonic)\(\)",
                                 source,
-                                r"\bremaining\s*=\s*[A-Za-z_]*deadline\s*-\s*time\.(?:time|monotonic)\(\)",
-                            )
+                            ), "API timeout must derive from its original remaining deadline")
                             self.assertTrue(
                                 any(
                                     (
@@ -270,15 +291,16 @@ class GovernanceOverflowContractTest(unittest.TestCase):
 
     def test_dispatcher_run_blocks_fit_the_actions_command_limit(self) -> None:
         """GitHub Actions rejects an expanded `run:` command over 21,000 bytes."""
-        blocks = re.finditer(r"(?ms)^        run: \|\n(.*?)(?=^      - name: |^  [A-Za-z_-]|\Z)", self.dispatcher_workflow)
+        blocks = re.finditer(r"(?ms)^ {6,8}run: \|\n(.*?)(?=^ {4,6}- name: |^  [A-Za-z_-]|\Z)", self.dispatcher_workflow)
         for block in blocks:
-            command = "".join(
-                line[10:] if line.startswith("          ") else line
-                for line in block.group(1).splitlines(keepends=True)
-            )
+            command = textwrap.dedent(block.group(1))
             with self.subTest(command=command.splitlines()[0] if command else "empty"):
-                self.assertLessEqual(len(command), 21_000)
-        for script in ("pr_governance_preflight.py", "pr_governance_resolve_event.py"):
+                self.assertLessEqual(len(command.encode("utf-8")), 21_000)
+        for quoted in re.finditer(r'(?m)^ {6,8}run: (".*")$', self.dispatcher_workflow):
+            command = json.loads(quoted.group(1))
+            with self.subTest(quoted_command=command.splitlines()[0] if command else "empty"):
+                self.assertLessEqual(len(command.encode("utf-8")), 21_000)
+        for script in ("pr_governance_preflight.py", "pr_governance_resolve_event.py", "pr_governance_cohort.py"):
             self.assertLessEqual(
                 len((ROOT / "scripts/review" / script).read_text(encoding="utf-8")),
                 300_000,
@@ -289,7 +311,7 @@ class GovernanceOverflowContractTest(unittest.TestCase):
         phase_seconds = 350 * 60
         self.assertLess(phase_seconds, 6 * 60 * 60)
         self.assertIn("root_deadline_epoch = int(time.time()) + 21_000", self.dispatcher)
-        self.assertEqual(self.dispatcher.count("timeout-minutes: 15"), 6)
+        self.assertEqual(self.dispatcher.count("timeout-minutes: 15"), 7)
         self.assertIn("timeout-minutes: 30", self.dispatcher)
         self.assertIn("timeout-minutes: 290", self.dispatcher)
         self.assertIn("The operational cap includes the whole job", self.dispatcher)

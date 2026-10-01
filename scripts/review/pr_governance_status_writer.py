@@ -10,6 +10,7 @@ single Check Run PATCH helper.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -24,6 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "hooks"))
@@ -99,6 +102,7 @@ MAX_DISPATCHER_FENCE_RUNS = 100
 MAX_TERMINAL_BATCH = 125
 MAX_TERMINAL_CONTINUATIONS = 4
 MAX_EARLY_TARGETS = 100
+MAX_COHORT_EARLY_TARGETS = 50
 MAX_TERMINAL_ORDER = MAX_TERMINAL_BATCH * MAX_TERMINAL_CONTINUATIONS
 MAX_EVIDENCE_TARGETS = MAX_TERMINAL_BATCH
 # GitHub returns at most 100 workflow runs per REST page.  Keep a separate
@@ -122,18 +126,125 @@ BODY_SHA256 = re.compile(r"[0-9a-f]{64}")
 NUMBER = re.compile(r"[1-9][0-9]*")
 
 
+@dataclass(frozen=True)
+class EarlyWriterAdmission:
+    job_id: int
+    step_number: int
+    job_started: float
+    step_started: float
+    source_deadlines: tuple[float, ...]
+    root_deadline: float
+    deadline_epoch: float
+    deadline_monotonic: float
+
+
+def admission_timestamp(value: object) -> float:
+    if not isinstance(value, str) or re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})", value,
+    ) is None:
+        raise GovernanceError("Writer admission timestamp is malformed.")
+    if not value.endswith("Z") and (int(value[-5:-3]) > 23 or int(value[-2:]) > 59):
+        raise GovernanceError("Writer admission timestamp offset is malformed.")
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError as error:
+        raise GovernanceError("Writer admission timestamp is malformed.") from error
+
+
+def early_writer_admission(
+    page: object, source_deadlines: tuple[float, ...], root_deadline: float,
+    *, previous: EarlyWriterAdmission | None = None,
+) -> EarlyWriterAdmission:
+    """Pin this exact attempt's write step, with every original source clock."""
+    now, monotonic = time.time(), time.monotonic()
+    if (
+        not isinstance(source_deadlines, tuple) or not 1 <= len(source_deadlines) <= MAX_RESERVED_SENSOR_IDS
+        or any(type(value) not in {int, float} or not now < value < float("inf") for value in source_deadlines)
+        or type(root_deadline) not in {int, float} or not now < root_deadline < float("inf")
+    ):
+        raise GovernanceError("Original source/root writer deadline is invalid or elapsed.")
+    jobs = page.get("jobs") if isinstance(page, dict) else None
+    total = page.get("total_count") if isinstance(page, dict) else None
+    if (
+        not isinstance(jobs, list) or not 1 <= len(jobs) <= 100
+        or type(total) is not int or total != len(jobs)
+        or any(not isinstance(job, dict) or type(job.get("id")) is not int or job["id"] < 1 for job in jobs)
+        or len({job["id"] for job in jobs}) != len(jobs)
+    ):
+        raise GovernanceError("Writer attempt jobs are incomplete or duplicated.")
+    matches = [job for job in jobs if job.get("name") == "Write authoritative governance Check Runs"]
+    if len(matches) != 1:
+        raise GovernanceError("Writer admission job is missing or duplicated.")
+    job = matches[0]
+    if (
+        type(job.get("run_id")) is not int or job["run_id"] != int(WRITER_RUN_ID)
+        or job.get("run_url") != f"https://api.github.com/repos/{REPOSITORY}/actions/runs/{WRITER_RUN_ID}"
+        or job.get("url") != f"https://api.github.com/repos/{REPOSITORY}/actions/jobs/{job['id']}"
+        or job.get("head_sha") != os.environ.get("GITHUB_SHA")
+        or job.get("head_branch") != default_branch_name()
+        or job.get("workflow_name") != WRITER_WORKFLOW_NAME
+        or ("run_attempt" in job and (type(job["run_attempt"]) is not int or job["run_attempt"] != 1))
+    ):
+        raise GovernanceError("Writer admission job identity does not match this attempt.")
+    steps = job.get("steps")
+    if (
+        not isinstance(steps, list)
+        or any(not isinstance(step, dict) or type(step.get("number")) is not int or step["number"] < 1 for step in steps)
+        or len({step["number"] for step in steps}) != len(steps)
+    ):
+        raise GovernanceError("Writer admission steps are invalid or duplicated.")
+    matches = [step for step in steps if step.get("name") == "Revalidate every current open pull request and publish fenced states"]
+    if len(matches) != 1:
+        raise GovernanceError("Writer admission step is missing or duplicated.")
+    step = matches[0]
+    timestamps = []
+    for metadata in (job, step):
+        if metadata.get("status") != "in_progress" or metadata.get("conclusion") is not None or metadata.get("completed_at") is not None:
+            raise GovernanceError("Writer write phase is not currently admitted.")
+        started = admission_timestamp(metadata.get("started_at"))
+        if started > now or started < root_deadline - 21000:
+            raise GovernanceError("Writer admission timestamp is outside its original root clock.")
+        timestamps.append(started)
+    job_started, step_started = timestamps
+    if job_started > step_started:
+        raise GovernanceError("Writer admission timestamps are reversed.")
+    boundary = min(step_started + 1200, root_deadline, *source_deadlines)
+    if boundary <= now:
+        raise GovernanceError("Writer admission deadline elapsed.")
+    if previous is not None:
+        if (
+            (previous.job_id, previous.step_number, previous.job_started, previous.step_started,
+             previous.source_deadlines, previous.root_deadline, previous.deadline_epoch)
+            != (job["id"], step["number"], job_started, step_started, source_deadlines, root_deadline, boundary)
+            or monotonic >= previous.deadline_monotonic
+        ):
+            raise GovernanceError("Writer admission identity or original clock changed.")
+        return previous
+    return EarlyWriterAdmission(
+        job["id"], step["number"], job_started, step_started, source_deadlines,
+        root_deadline, boundary, monotonic + boundary - now,
+    )
+
+
 def writer_run_title(dispatcher_run_id: str, scope: str, continuation_index: str) -> str:
     """Return the exact dynamic Actions title for one writer generation."""
     if (
         NUMBER.fullmatch(dispatcher_run_id) is None
         or scope not in {"early", "all"}
-        or (scope == "early" and continuation_index != "0")
+        or (scope == "early" and continuation_index not in {"0", "1", "2", "3", "4"})
         or (scope == "all" and continuation_index not in {"1", "2", "3", "4"})
     ):
         raise GovernanceError("Writer run title boundary is invalid.")
     return f"source={dispatcher_run_id} scope={scope} segment={continuation_index}"
 
 
+_cohort_context: dict[str, Any] | None = None
+_cohort_members_by_target: dict[int, list[dict[str, Any]]] = {}
+_cohort_api_counts: dict[str, int] | None = None
+_cohort_covered_generations: dict[tuple[object, ...], DispatcherGeneration] = {}
+_cohort_alias_index: dict[int, int] | None = None
+_cohort_generation_identities: dict[int, str] = {}
+_early_writer_admission: EarlyWriterAdmission | None = None
 _last_check_write_at: float | None = None
 _bound_check_runs: dict[tuple[str, str], int] = {}
 _bound_check_ids_by_number: dict[int, int] = {}
@@ -247,7 +358,7 @@ def read_environment(*, default_token: bool = False) -> dict[str, str]:
 
 def command(
     arguments: list[str], *, check_write: bool = False, default_token: bool = False,
-    deadline: float | None = None,
+    deadline: float | None = None, cohort_precharged: bool = False,
 ) -> str:
     """Run one bounded GitHub API request without allowing a stalled child."""
     environment = os.environ.copy()
@@ -267,6 +378,8 @@ def command(
         if remaining <= 0:
             raise GovernanceError("Governance terminal deadline exceeded.")
         timeout = min(timeout, remaining)
+    if _cohort_api_counts is not None and not cohort_precharged:
+        cohort_charge(default_token=default_token)
     try:
         result = subprocess.run(
             ["gh", "api", *arguments], capture_output=True, text=True,
@@ -566,6 +679,23 @@ def dispatcher_created_at(value: object) -> datetime:
         raise GovernanceError("Dispatcher generation timestamp is invalid.") from error
 
 
+def dispatcher_name_matches(value: dict[str, Any]) -> bool:
+    if value.get("name") == DISPATCHER_NAME:
+        return True
+    artifact = os.environ.get("GOVERNANCE_COHORT_ARTIFACT_ID", "0")
+    digest = os.environ.get("GOVERNANCE_COHORT_ARTIFACT_DIGEST", "")
+    title = value.get("display_title")
+    if (
+        NUMBER.fullmatch(artifact) is None or int(artifact) > MAX_ACTIONS_RUN_ID
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+        or not isinstance(title, str) or len(title) > 160
+        or value.get("event") != "workflow_run" or value.get("name") != title
+    ):
+        return False
+    match = re.fullmatch(r"sensor=([1-9][0-9]*) action=(in_progress|completed)", title)
+    return match is not None and int(match[1]) <= MAX_ACTIONS_RUN_ID
+
+
 def dispatcher_generation(value: object, *, expected_identifier: int | None = None, require_success: bool = False) -> DispatcherGeneration:
     """Validate one default-branch dispatcher generation completely."""
     expected_head = os.environ.get("GITHUB_SHA", "")
@@ -581,7 +711,7 @@ def dispatcher_generation(value: object, *, expected_identifier: int | None = No
         and type(identifier) is int and identifier > 0
         and (expected_identifier is None or identifier == expected_identifier)
         and type(workflow_id) is int and workflow_id > 0
-        and value.get("name") == DISPATCHER_NAME
+        and dispatcher_name_matches(value)
         and workflow_path_is_default(value.get("path"), DISPATCHER_PATH)
         and value.get("event") in DISPATCHER_EVENTS and value.get("head_branch") == branch
         and value.get("head_sha") == expected_head
@@ -642,6 +772,100 @@ def dispatcher_generations(
             raise GovernanceError("Dispatcher generation is duplicated within the bounded page.")
         generations[generation.identifier] = generation
     return generations
+
+
+def cohort_dispatcher_generations(current: DispatcherGeneration) -> tuple[dict[int, DispatcherGeneration], frozenset[int]]:
+    global _cohort_alias_index
+    if _cohort_context is None or _terminal_deadline_monotonic is None:
+        raise GovernanceError("Cohort generation fence is not admitted.")
+    helper = cohort_helper()
+    deadline = time.time() + _terminal_deadline_monotonic - time.monotonic()
+    if _cohort_alias_index is None:
+        _cohort_alias_index = helper.cohort_known_producer_ids(
+            _cohort_context, read_json=cohort_read_json, read_archive=cohort_read_archive,
+            budget=CohortBudget(), deadline=deadline,
+        )
+    endpoint = f"repos/{REPOSITORY}/actions/workflows/{current.workflow_id}/runs?" + urlencode({
+        "branch": default_branch_name(), "created": ">=" + current.created_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "per_page": 100,
+    })
+    generations: dict[int, DispatcherGeneration] = {}
+    covered: set[int] = set()
+    first_page = None
+    expected_total = None
+    seen = 0
+    noncovered = 0
+    header = _cohort_context["header"]
+    proof_key = (header["owner_dispatcher_run_id"], header["owner_run_attempt"],
+                 _cohort_context["artifact_id"], _cohort_context["artifact_digest"],
+                 header["workflow_blob_sha"], _cohort_context["cohort_digest"])
+    for page_number in range(1, MAX_SHARED_SNAPSHOT_PAGES + 1):
+        page = object_page(_page_endpoint(endpoint, page_number))
+        runs, total = page.get("workflow_runs"), page.get("total_count")
+        if (
+            not isinstance(runs, list) or len(runs) > 100 or type(total) is not int
+            or total < 1 or total >= MAX_SHARED_SNAPSHOT_PAGES * 100
+            or (expected_total is not None and total != expected_total)
+        ):
+            raise GovernanceError("Cohort dispatcher inventory is incomplete.")
+        if first_page is None:
+            first_page, expected_total = page, total
+        for run in runs:
+            candidate = dispatcher_generation(run)
+            if candidate.workflow_id != current.workflow_id or candidate.created_at < current.created_at or candidate.identifier in generations:
+                raise GovernanceError("Cohort dispatcher identity/order is invalid or duplicated.")
+            generations[candidate.identifier] = candidate
+            identity_fields = ("id", "run_number", "run_attempt", "name", "display_title", "path", "event",
+                               "workflow_id", "head_sha", "head_branch", "repository", "head_repository",
+                               "actor", "triggering_actor", "pull_requests", "created_at")
+            identity = {name: run.get(name) for name in identity_fields}
+            for name in ("repository", "head_repository"):
+                value = identity[name]
+                if isinstance(value, dict):
+                    identity[name] = {key: value.get(key) for key in ("id", "name", "full_name", "url")}
+            for name in ("actor", "triggering_actor"):
+                value = identity[name]
+                if isinstance(value, dict):
+                    identity[name] = {key: value.get(key) for key in ("id", "login", "type")}
+            try:
+                fingerprint = hashlib.sha256(json.dumps(
+                    identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+                ).encode("utf-8", "strict")).hexdigest()
+            except (ValueError, TypeError, UnicodeError) as error:
+                raise GovernanceError("Cohort dispatcher cached identity is malformed.") from error
+            previous_identity = _cohort_generation_identities.get(candidate.identifier)
+            if previous_identity is not None and previous_identity != fingerprint:
+                raise GovernanceError("Cohort dispatcher immutable identity changed.")
+            _cohort_generation_identities[candidate.identifier] = fingerprint
+            key = proof_key + (candidate, fingerprint)
+            positive = _cohort_covered_generations.get(key) == candidate
+            title = run.get("display_title")
+            title_match = re.fullmatch(r"sensor=([1-9][0-9]*) action=(in_progress|completed)", title) if isinstance(title, str) else None
+            source_hint = _cohort_alias_index.get(candidate.identifier)
+            if source_hint is None and title_match is not None and int(title_match[1]) in header["member_ids"]:
+                source_hint = int(title_match[1])
+            proof_candidate = candidate.identifier in _cohort_alias_index or source_hint is not None
+            if not positive and candidate.identifier != current.identifier and proof_candidate:
+                positive = helper.consumer_is_covered(
+                    _cohort_context, run, read_json=cohort_read_json, read_archive=cohort_read_archive,
+                    budget=CohortBudget(), deadline=deadline,
+                )
+                if positive:
+                    _cohort_covered_generations[key] = candidate
+            if positive:
+                covered.add(candidate.identifier)
+            else:
+                noncovered += 1
+                if noncovered >= MAX_DISPATCHER_FENCE_RUNS:
+                    raise GovernanceError("Unknown/direct dispatcher fence exceeds its original bounded window.")
+        seen += len(runs)
+        if seen == expected_total:
+            if object_page(_page_endpoint(endpoint, 1)) != first_page:
+                raise GovernanceError("Cohort dispatcher first-page fence changed.")
+            return generations, frozenset(covered)
+        if len(runs) != 100 or seen > expected_total:
+            raise GovernanceError("Cohort dispatcher page chain is truncated.")
+    raise GovernanceError("Cohort dispatcher history exceeds the existing six-page bound.")
 
 
 def dispatcher_generation_is_newer(
@@ -1083,9 +1307,19 @@ def reject_newer_dispatcher_barrier(head: str) -> None:
                 expected_identifier=int(current_value),
                 require_success=True,
             )
-            generations = dispatcher_generations(
-                current_generation.workflow_id, current_generation.created_at,
-            )
+            covered = frozenset()
+            if _cohort_context is not None:
+                helper = cohort_helper()
+                try:
+                    helper.verify_cohort_lease(
+                        _cohort_context, phase=os.environ["GOVERNANCE_SCOPE"], read_json=cohort_read_json,
+                        budget=CohortBudget(), deadline=time.time() + _terminal_deadline_monotonic - time.monotonic(),
+                    )
+                    generations, covered = cohort_dispatcher_generations(current_generation)
+                except (ValueError, RuntimeError) as error:
+                    raise GovernanceError("Cohort generation lease or coverage proof failed.") from error
+            else:
+                generations = dispatcher_generations(current_generation.workflow_id, current_generation.created_at)
             snapshot_current = generations.get(current_generation.identifier)
             if snapshot_current != current_generation:
                 raise GovernanceError("Current dispatcher generation is absent or changed in the paginated snapshot.")
@@ -1098,6 +1332,7 @@ def reject_newer_dispatcher_barrier(head: str) -> None:
             for candidate_generation in generations.values():
                 if (
                     dispatcher_generation_is_newer(candidate_generation, current_generation)
+                    and candidate_generation.identifier not in covered
                     and dispatcher_generation_reconciles(candidate_generation, early_source_run_id=early_source)
                 ):
                     raise NoPostGovernanceError("A newer dispatcher generation owns this Check Run head.")
@@ -1427,8 +1662,20 @@ def preserved_early_success(value: dict[str, Any], head: str, writer_run_id: int
         "pr_body_sha256",
     }
     expected_base = os.environ.get("GITHUB_SHA", "")
+    cohort_required = {"cohort_artifact_id", "cohort_artifact_digest", "cohort_segment"}
+    cohort_query_valid = True
+    if set(query).intersection(cohort_required):
+        registered = _cohort_context.get("registered_writers", {}) if _cohort_context is not None else {}
+        segments = [segment for segment, identifier in registered.items() if identifier == writer_run_id]
+        cohort_query_valid = bool(
+            _cohort_context is not None and len(segments) == 1
+            and query.get("cohort_artifact_id") == [str(_cohort_context["artifact_id"])]
+            and query.get("cohort_artifact_digest") == [_cohort_context["artifact_digest"]]
+            and query.get("cohort_segment") == [str(segments[0])]
+        )
+        required |= cohort_required
     return (
-        set(query) == required and query.get("pr_head_sha") == [head]
+        cohort_query_valid and set(query) == required and query.get("pr_head_sha") == [head]
         and query.get("pr_body_sha256") == [body_sha256]
         and (not expected_base or query.get("pr_base_sha") == [expected_base])
         and query.get("ci_status") == ["completed"] and query.get("ci_conclusion") == ["success"]
@@ -1490,11 +1737,348 @@ def trusted_completed_terminal_writers(
             raise GovernanceError("Completed terminal writer is not a trusted App run.")
 
 
+def cohort_charge(*, default_token: bool = False) -> None:
+    if _cohort_api_counts is None:
+        raise GovernanceError("Cohort request accounting is not initialized.")
+    bucket, limit = ("default", 1000) if default_token else ("app", 4500)
+    if _cohort_api_counts[bucket] >= limit:
+        raise GovernanceError("Cohort request budget is exhausted.")
+    _cohort_api_counts[bucket] += 1
+
+
+class CohortBudget:
+    def charge(self) -> None:
+        cohort_charge()
+
+
+def cohort_read_json(endpoint: str, *, timeout: float) -> dict[str, Any]:
+    if not endpoint.startswith(f"repos/{REPOSITORY}/") or not 0 < timeout <= GITHUB_API_TIMEOUT_SECONDS:
+        raise GovernanceError("Cohort JSON transport boundary is invalid.")
+    try:
+        value = json.loads(command([endpoint], deadline=time.monotonic() + timeout, cohort_precharged=True))
+    except json.JSONDecodeError as error:
+        raise GovernanceError("Cohort JSON response is malformed.") from error
+    if not isinstance(value, dict):
+        raise GovernanceError("Cohort JSON response is not an object.")
+    return value
+
+
+class NoCohortRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
+
+
+def cohort_read_archive(endpoint: str, *, timeout: float) -> bytes:
+    if re.fullmatch(rf"repos/{re.escape(REPOSITORY)}/actions/artifacts/[1-9][0-9]*/zip", endpoint) is None or not 0 < timeout <= 20:
+        raise GovernanceError("Cohort artifact transport boundary is invalid.")
+    fixed = time.monotonic() + timeout
+    if _terminal_deadline_monotonic is not None:
+        fixed = min(fixed, _terminal_deadline_monotonic)
+    opener = build_opener(NoCohortRedirect())
+    request = Request("https://api.github.com/" + endpoint, headers={
+        "Authorization": "Bearer " + read_environment()["GH_TOKEN"],
+        "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
+    })
+    try:
+        try:
+            with opener.open(request, timeout=min(20, fixed - time.monotonic())) as response:
+                raise GovernanceError("Cohort artifact API did not return its storage redirect.")
+        except HTTPError as response:
+            if response.code != 302:
+                raise GovernanceError("Cohort artifact API failed.") from response
+            location = response.headers.get("Location")
+            response.close()
+        if not isinstance(location, str):
+            raise GovernanceError("Cohort artifact storage redirect is missing.")
+        parsed = urlparse(location)
+        if (
+            parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+            or parsed.port not in {None, 443} or parsed.fragment
+            or not any(parsed.hostname.endswith(suffix) for suffix in (
+                ".blob.core.windows.net", ".actions.githubusercontent.com", ".githubusercontent.com",
+            ))
+        ):
+            raise GovernanceError("Cohort artifact storage redirect is outside the trusted boundary.")
+        remaining = fixed - time.monotonic()
+        if remaining <= 0:
+            raise GovernanceError("Cohort artifact deadline elapsed.")
+        # 認証付きAPIと署名付きstorageは別requestにし、storageへtokenを渡さない。
+        cohort_charge()
+        with opener.open(Request(location), timeout=min(20, remaining)) as response:
+            if response.status != 200:
+                raise GovernanceError("Cohort artifact storage failed.")
+            value = response.read(MAX_SENSOR_MARKER_BYTES + 1)
+        if len(value) > MAX_SENSOR_MARKER_BYTES or time.monotonic() >= fixed:
+            raise GovernanceError("Cohort artifact size or deadline exceeded.")
+        return value
+    except (HTTPError, URLError, TimeoutError, ValueError) as error:
+        raise GovernanceError("Cohort artifact transport failed.") from error
+
+
+def cohort_helper():
+    path = Path(__file__).with_name("pr_governance_cohort.py")
+    spec = importlib.util.spec_from_file_location("krr_writer_cohort", path)
+    if spec is None or spec.loader is None:
+        raise GovernanceError("Trusted cohort helper is unavailable.")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except (OSError, ImportError) as error:
+        raise GovernanceError("Trusted cohort helper could not be loaded.") from error
+    return module
+
+
+def await_cohort_writer_registration(cohort: dict[str, Any], segment: int, *, deadline: float) -> None:
+    helper = cohort_helper()
+    original_deadline = min(deadline, cohort["header"]["root_deadline_epoch"], *(
+        member["source_deadline_epoch"] for member in cohort["members_by_id"].values()
+    ))
+    monotonic_deadline = time.monotonic() + original_deadline - time.time()
+    while True:
+        registered = cohort["registered_writers"].get(segment)
+        if registered is not None:
+            if type(registered) is not int or registered != int(WRITER_RUN_ID):
+                raise GovernanceError("Cohort early segment belongs to a foreign writer.")
+            if time.time() >= original_deadline or time.monotonic() >= monotonic_deadline:
+                raise GovernanceError("Cohort registration exceeded its original deadline.")
+            return
+        remaining = min(original_deadline - time.time(), monotonic_deadline - time.monotonic())
+        if remaining <= 0:
+            raise GovernanceError("Cohort early registration was not admitted in time.")
+        # native REGISTER成功の公開だけを待ち、ownerやoriginal clockを取り直さない。
+        time.sleep(min(1, remaining))
+        try:
+            helper.verify_cohort_lease(
+                cohort, phase="early", read_json=cohort_read_json,
+                budget=CohortBudget(), deadline=min(original_deadline, time.time() + monotonic_deadline - time.monotonic()),
+            )
+        except (ValueError, RuntimeError) as error:
+            raise GovernanceError("Cohort registration lease read failed.") from error
+
+
+def prepare_cohort_writer(
+    dispatcher_source: DispatcherSource, artifact_id: int, artifact_digest: str,
+    segment: int, targets: tuple[int, ...], *, phase: str,
+) -> None:
+    global _cohort_context, _cohort_members_by_target, _cohort_api_counts
+    global _early_writer_admission, _terminal_deadline_monotonic
+    helper = cohort_helper()
+    _cohort_api_counts = {"default": 0, "app": 0}
+    bootstrap_deadline = time.time() + TERMINAL_WRITER_STARTUP_RESERVE_SECONDS
+    if _terminal_deadline_monotonic is not None:
+        bootstrap_deadline = min(bootstrap_deadline, time.time() + _terminal_deadline_monotonic - time.monotonic())
+    try:
+        cohort = helper.load_cohort(
+            artifact_id, artifact_digest, expected_owner=dispatcher_source.identifier,
+            expected_segment=segment if phase == "early" else None, read_json=cohort_read_json,
+            read_archive=cohort_read_archive, budget=CohortBudget(), deadline=bootstrap_deadline,
+        )
+        helper.verify_cohort_lease(
+            cohort, phase=phase, read_json=cohort_read_json,
+            budget=CohortBudget(), deadline=bootstrap_deadline,
+        )
+        if phase == "early":
+            members = helper.validate_target_members(cohort, segment, list(targets))
+            normalized = {}
+            for identifier, member in cohort["members_by_id"].items():
+                normalized[identifier] = helper.resolve_member_clock(
+                    member, read_json=cohort_read_json, budget=CohortBudget(), deadline=bootstrap_deadline,
+                )
+            cohort["members_by_id"] = normalized
+            members = helper.validate_target_members(cohort, segment, list(targets))
+        else:
+            # all-open は4 early segment全体のexact preservation proofを読む。
+            members = {
+                number: [cohort["members_by_id"][identifier] for identifier in cohort["target_members_by_number"][number]]
+                for number in targets if number in cohort["target_members_by_number"]
+            }
+            if set(members) != set(targets):
+                raise GovernanceError("Preserved target is outside the exact cohort.")
+    except (ValueError, RuntimeError) as error:
+        raise GovernanceError("Cohort writer membership or owner lease is invalid.") from error
+    if phase == "early":
+        await_cohort_writer_registration(cohort, segment, deadline=bootstrap_deadline)
+        for number in targets:
+            for member in members[number]:
+                started = admission_timestamp(member.get("latch_started_at"))
+                if member.get("source_deadline_epoch") != started + 5400 or started > time.time():
+                    raise GovernanceError("Cohort original source latch clock changed.")
+        source_deadlines = tuple(
+            member.get("source_deadline_epoch")
+            for number in targets for member in members[number]
+        )
+        if any(type(value) not in {int, float} for value in source_deadlines):
+            raise GovernanceError("Cohort source latch has not been admitted.")
+        ensure_writer_run_is_active()
+        page = api_json(f"repos/{REPOSITORY}/actions/runs/{WRITER_RUN_ID}/attempts/1/jobs?per_page=100&page=1")
+        ensure_writer_run_is_active()
+        admission = early_writer_admission(page, source_deadlines, cohort["header"]["root_deadline_epoch"])
+        _early_writer_admission = admission
+        _terminal_deadline_monotonic = admission.deadline_monotonic
+    if phase == "all":
+        remaining = cohort["header"]["root_deadline_epoch"] - time.time()
+        if remaining <= 0:
+            raise GovernanceError("Cohort original root deadline elapsed before preservation.")
+        root_monotonic = time.monotonic() + remaining
+        _terminal_deadline_monotonic = min(
+            _terminal_deadline_monotonic if _terminal_deadline_monotonic is not None else time.monotonic() + 3750,
+            root_monotonic,
+        )
+    _cohort_context = cohort
+    _cohort_members_by_target = members
+
+
+def restore_preserved_member_clock(member: dict[str, Any], current_pr: dict[str, Any]) -> dict[str, Any]:
+    helper = cohort_helper()
+    endpoint = f"repos/{REPOSITORY}/actions/runs/{member['source_run_id']}"
+    before = api_json(endpoint)
+    page = api_json(endpoint + "/attempts/1/jobs?per_page=100&page=1")
+    jobs, count = page.get("jobs"), page.get("total_count")
+    if (
+        not isinstance(jobs, list) or type(count) is not int or count != len(jobs) or not 1 <= count <= 100
+        or any(not isinstance(job, dict) or type(job.get("id")) is not int or job["id"] < 1 for job in jobs)
+        or len({job["id"] for job in jobs}) != len(jobs)
+    ):
+        raise GovernanceError("Preserved source attempt jobs are incomplete or ambiguous.")
+    after = api_json(endpoint)
+    immutable = ("id", "run_attempt", "workflow_id", "run_number", "name", "event", "path", "head_sha", "repository", "head_repository", "pull_requests")
+    if not isinstance(before, dict) or not isinstance(after, dict) or any(before.get(key) != after.get(key) for key in immutable):
+        raise GovernanceError("Preserved source immutable identity changed.")
+    try:
+        started = helper.source_latch_clock(after, jobs, now=time.time())
+        if started is None or member["latch_started_at"] not in {None, started}:
+            raise GovernanceError("Preserved source original latch clock changed.")
+        normalized = dict(member, latch_started_at=started, source_deadline_epoch=helper.source_deadline(started, now=time.time()))
+        if not helper.member_source_matches(normalized, after, current_pr):
+            raise GovernanceError("Preserved member/current PR identity changed.")
+    except (ValueError, RuntimeError) as error:
+        raise GovernanceError("Preserved member original clock proof is invalid.") from error
+    # 完了済earlyの歴史的clockは再開始しない。後段はwrite completed_atを元deadlineへ照合する。
+    return normalized
+
+
+def verify_preserved_cohort_writers(preserved_map: Mapping[int, tuple[int, int]]) -> None:
+    if _cohort_context is None:
+        raise GovernanceError("Cohort preservation context is missing.")
+    registered = _cohort_context["registered_writers"]
+    if len(set(registered.values())) != len(registered):
+        raise GovernanceError("Cohort writer registration is duplicated.")
+    bot = os.environ.get("KRR_GOVERNANCE_APP_BOT_LOGIN", "")
+    owner = _cohort_context["header"]["owner_dispatcher_run_id"]
+    for identifier in sorted({value[0] for value in preserved_map.values()}):
+        segments = [segment for segment, writer in registered.items() if writer == identifier]
+        if len(segments) != 1 or not bot:
+            raise GovernanceError("Preserved writer is outside the registered cohort.")
+        title = writer_run_title(str(owner), "early", str(segments[0]))
+        endpoint = f"repos/{REPOSITORY}/actions/runs/{identifier}"
+        before = api_json(endpoint)
+        if not (
+            isinstance(before, dict) and type(before.get("id")) is int and before["id"] == identifier
+            and before.get("display_title") == title and before.get("name") in {title, WRITER_WORKFLOW_NAME}
+            and workflow_path_is_default(before.get("path"), WRITER_WORKFLOW_PATH)
+            and before.get("head_sha") == os.environ.get("GITHUB_SHA") and before.get("head_branch") == default_branch_name()
+            and type(before.get("run_attempt")) is int and before["run_attempt"] == 1
+            and before.get("event") == "workflow_dispatch" and before.get("status") == "completed"
+            and before.get("conclusion") == "success"
+            and repository_rest_identity(before.get("repository"), REPOSITORY) is not _INVALID_REPOSITORY_IDENTITY
+            and all(isinstance(before.get(key), dict) and before[key].get("login") == bot
+                    and before[key].get("type") == "Bot" for key in ("actor", "triggering_actor"))
+        ):
+            raise GovernanceError("Preserved early writer is not a completed trusted App run.")
+        page = api_json(f"{endpoint}/attempts/1/jobs?per_page=100&page=1")
+        jobs, total = (page.get("jobs"), page.get("total_count")) if isinstance(page, dict) else (None, None)
+        if (not isinstance(jobs, list) or type(total) is not int or total != len(jobs) or not 1 <= total <= 100
+            or any(not isinstance(job, dict) or type(job.get("id")) is not int or job["id"] < 1 for job in jobs)
+            or len({job["id"] for job in jobs}) != len(jobs)):
+            raise GovernanceError("Preserved writer jobs are incomplete or duplicated.")
+        matches = [job for job in jobs if isinstance(job, dict) and job.get("name") == "Write authoritative governance Check Runs"]
+        if len(matches) != 1:
+            raise GovernanceError("Preserved writer write job is ambiguous.")
+        job = matches[0]
+        steps = job.get("steps")
+        if (not isinstance(steps, list)
+            or any(not isinstance(step, dict) or type(step.get("number")) is not int or step["number"] < 1 for step in steps)
+            or len({step["number"] for step in steps}) != len(steps)):
+            raise GovernanceError("Preserved writer steps are invalid or duplicated.")
+        writes = [step for step in steps if step.get("name") == "Revalidate every current open pull request and publish fenced states"]
+        if (
+            type(job.get("id")) is not int or job["id"] < 1
+            or type(job.get("run_id")) is not int or job["run_id"] != identifier
+            or job.get("head_sha") != os.environ.get("GITHUB_SHA")
+            or job.get("head_branch") != default_branch_name() or job.get("workflow_name") != WRITER_WORKFLOW_NAME
+            or job.get("url") != f"https://api.github.com/repos/{REPOSITORY}/actions/jobs/{job['id']}"
+            or job.get("run_url") != f"https://api.github.com/repos/{REPOSITORY}/actions/runs/{identifier}"
+            or ("run_attempt" in job and (type(job["run_attempt"]) is not int or job["run_attempt"] != 1))
+            or job.get("status") != "completed" or job.get("conclusion") != "success"
+            or len(writes) != 1 or writes[0].get("status") != "completed" or writes[0].get("conclusion") != "success"
+        ):
+            raise GovernanceError("Preserved early writer write phase did not complete.")
+        started, finished = admission_timestamp(writes[0].get("started_at")), admission_timestamp(writes[0].get("completed_at"))
+        # preservation対象から外れたtargetも同じwriterのoriginal最小clockに含む。
+        member_ids = [member_id for member_id, member_segment in zip(
+            _cohort_context["header"]["member_ids"], _cohort_context["header"]["member_segments"],
+        ) if int(member_segment) == segments[0]]
+        members = [_cohort_context["members_by_id"][member_id] for member_id in member_ids]
+        if not members or any(member.get("source_deadline_epoch") != admission_timestamp(member.get("latch_started_at")) + 5400 for member in members):
+            raise GovernanceError("Preserved writer original batch clock is invalid.")
+        root = _cohort_context["header"]["root_deadline_epoch"]
+        job_started, job_finished = admission_timestamp(job.get("started_at")), admission_timestamp(job.get("completed_at"))
+        boundary = min(started + 1200, root, *(member["source_deadline_epoch"] for member in members))
+        if not root - 21000 <= job_started <= started <= finished <= job_finished <= time.time() or finished > boundary or api_json(endpoint) != before:
+            raise GovernanceError("Preserved early writer clock or identity changed.")
+
+
+def verify_cohort_target(number: int, current_pr: dict[str, Any], source_id: int | None = None) -> int:
+    if _cohort_context is None or number not in _cohort_members_by_target:
+        raise NoPostGovernanceError("Cohort target membership is unavailable.")
+    members = _cohort_members_by_target[number]
+    helper = cohort_helper()
+    for member in members:
+        source = api_json(f"repos/{REPOSITORY}/actions/runs/{member['source_run_id']}")
+        if not helper.member_source_matches(member, source, current_pr):
+            raise NoPostGovernanceError("Cohort member source or current PR identity changed.")
+        if not (
+            isinstance(source, dict)
+            and ((source.get("status") in DISPATCHER_ACTIVE_STATUSES and source.get("conclusion") is None)
+                 or (source.get("status") == "completed" and source.get("conclusion") == "success"))
+        ):
+            raise NoPostGovernanceError("Cohort member source is no longer a valid latch.")
+    latest = max(members, key=lambda member: (member["source_run_number"], member["source_run_id"]))["source_run_id"]
+    if source_id is not None and source_id != latest:
+        raise NoPostGovernanceError("The latest exact-head sensor is outside this cohort target.")
+    return latest
+
+
+def canonical_preserved_writer_map(raw: str, preserved: tuple[int, ...]) -> dict[int, tuple[int, int]]:
+    try:
+        entries = json.loads(raw)
+    except (TypeError, json.JSONDecodeError) as error:
+        raise GovernanceError("Preserved target/writer map is invalid.") from error
+    if not isinstance(entries, list) or json.dumps(entries, separators=(",", ":")) != raw:
+        raise GovernanceError("Preserved target/writer map is not canonical.")
+    result: dict[int, tuple[int, int]] = {}
+    checks: set[int] = set()
+    for entry in entries:
+        if (
+            not isinstance(entry, list) or len(entry) != 3
+            or any(type(value) is not int or not 1 <= value <= MAX_ACTIONS_RUN_ID for value in entry)
+            or entry[0] in result or entry[2] in checks
+        ):
+            raise GovernanceError("Preserved target/writer map has duplicate or malformed identities.")
+        result[entry[0]] = (entry[1], entry[2])
+        checks.add(entry[2])
+    if tuple(result) != preserved:
+        raise GovernanceError("Preserved target/writer map does not match the preserved order.")
+    return result
+
+
 def observed_invalidations(
     snapshot: OpenSnapshot, source: DispatcherSource, scope: str, targets: tuple[int, ...],
     preserved: tuple[int, ...] = (), preserved_writer_run_id: int = 0,
     terminal_order: tuple[int, ...] = (), continuation_index: int = 1,
     completed_writer_run_ids: tuple[int, ...] = (),
+    preserved_writer_map: Mapping[int, tuple[int, int]] | None = None,
 ) -> tuple[OpenSnapshot, frozenset[int]]:
     """Bind the writer scope to current App invalidations from one dispatcher."""
     if scope not in {"early", "all"}:
@@ -1509,7 +2093,7 @@ def observed_invalidations(
             len(set(preserved)) != len(preserved)
             or any(type(number) is not int or number < 1 for number in preserved)
             or not set(preserved).issubset(targets)
-            or (bool(preserved) != (preserved_writer_run_id > 0))
+            or (bool(preserved) != (bool(preserved_writer_map) if preserved_writer_map is not None else preserved_writer_run_id > 0))
         ):
             raise GovernanceError("All-open preserved target boundary is invalid.")
         if continuation_index < 1:
@@ -1563,14 +2147,17 @@ def observed_invalidations(
         if number not in expected_numbers:
             continue
         if number in preserved:
+            preserved_writer = preserved_writer_map[number][0] if preserved_writer_map is not None else preserved_writer_run_id
             preserved_value = check_run_for_external_id(
                 head,
-                CHECK_EXTERNAL_PREFIX + head.lower() + f"/writer-{preserved_writer_run_id}",
+                CHECK_EXTERNAL_PREFIX + head.lower() + f"/writer-{preserved_writer}",
             )
             if preserved_value is None:
                 raise GovernanceError("Preserved early governance Check Run is missing.")
+            if preserved_writer_map is not None and preserved_value.get("id") != preserved_writer_map[number][1]:
+                raise GovernanceError("Preserved exact Check Run identity changed.")
             if not preserved_early_success(
-                preserved_value, head, preserved_writer_run_id,
+                preserved_value, head, preserved_writer,
                 body_sha256=pr_body_sha256(pull_request.get("body")),
             ):
                 raise GovernanceError("Preserved early governance success is invalid.")
@@ -1840,7 +2427,10 @@ def _evidence_snapshot_with_deadline(snapshot: OpenSnapshot, target_numbers: tup
             head,
             "Initial review sensor",
             anchor_default_token=True,
-            additional_default_pages=(frozenset({2}) if index < MAX_DEFAULT_INITIAL_SENSOR_PAGE_2_HEADS else frozenset()),
+            additional_default_pages=(frozenset({2}) if (
+                index < MAX_DEFAULT_INITIAL_SENSOR_PAGE_2_HEADS
+                and (_cohort_context is None or os.environ.get("GOVERNANCE_CONTINUATION_INDEX") == "1")
+            ) else frozenset()),
         )
     sensor_runs = {
         event: tuple(
@@ -1867,7 +2457,7 @@ def _evidence_snapshot_with_deadline(snapshot: OpenSnapshot, target_numbers: tup
                 head,
                 "Initial CI generation",
                 max_runs=MAX_EVIDENCE_RUNS_PER_PAGE,
-                default_token=True,
+                default_token=(_cohort_context is None or path == ".github/workflows/release-preflight.yml"),
             ))
         workflow_ids[path] = workflow_id
         workflow_runs[path] = tuple(values)
@@ -2058,6 +2648,10 @@ def target_url(
     query: dict[str, str] = {}
     if source_run_id is not None:
         query["source_run_id"] = str(source_run_id)
+    if source_run_id is not None and _cohort_context is not None and os.environ.get("GOVERNANCE_SCOPE") == "early":
+        query["cohort_artifact_id"] = str(_cohort_context["artifact_id"])
+        query["cohort_artifact_digest"] = _cohort_context["artifact_digest"]
+        query["cohort_segment"] = os.environ["GOVERNANCE_CONTINUATION_INDEX"]
     if generations is not None:
         for prefix, item in zip(("ci", "release"), generations, strict=True):
             query[f"{prefix}_workflow_id"] = str(item.workflow_id)
@@ -2115,6 +2709,8 @@ def process(number: int, claimants: dict[str, frozenset[int]], snapshot_path: st
                 )
             return
         sensor_id = sensor(number, base, head, evidence)
+        if _cohort_context is not None and os.environ.get("GOVERNANCE_SCOPE") == "early":
+            sensor_id = verify_cohort_target(number, initial, sensor_id)
         current_generations = (
             generation(number, base, head, "CI", ".github/workflows/test-and-build.yml", evidence),
             generation(number, base, head, "release-preflight", ".github/workflows/release-preflight.yml", evidence),
@@ -2154,6 +2750,8 @@ def process(number: int, claimants: dict[str, frozenset[int]], snapshot_path: st
             state, description = "failure", "Pull request body changed during governance revalidation."
         if os.environ.get("GITHUB_ACTIONS") == "true":
             rebind_trusted_default_writer()
+        if state == "success" and _cohort_context is not None and os.environ.get("GOVERNANCE_SCOPE") == "early":
+            verify_cohort_target(number, pull(number), sensor_id)
         write_governance_check(head, state, description, target_url(
             source_run_id=sensor_id if state == "success" and terminal_count == 0 else None,
             generations=current_generations if state == "success" else None,
@@ -2403,6 +3001,14 @@ def terminalize_initial_evidence_failure(
 
 def main() -> int:
     global _dispatcher_admission_evidence_wait_remaining, _terminal_deadline_monotonic
+    global _cohort_context, _cohort_members_by_target, _cohort_api_counts, _early_writer_admission, _cohort_alias_index
+    _cohort_context = None
+    _cohort_members_by_target = {}
+    _cohort_api_counts = None
+    _early_writer_admission = None
+    _cohort_alias_index = None
+    _cohort_covered_generations.clear()
+    _cohort_generation_identities.clear()
     if not REPOSITORY or not SERVER_URL or not NUMBER.fullmatch(WRITER_RUN_ID):
         print("Writer runtime identity is invalid.", file=sys.stderr)
         return 1
@@ -2417,6 +3023,18 @@ def main() -> int:
     raw_continuation_index = os.environ.get("GOVERNANCE_CONTINUATION_INDEX", "")
     raw_completed_writer_run_ids = os.environ.get("GOVERNANCE_COMPLETED_WRITER_RUN_IDS", "")
     raw_terminal_deadline = os.environ.get("GOVERNANCE_TERMINAL_DEADLINE_EPOCH", "0")
+    raw_cohort_artifact = os.environ.get("GOVERNANCE_COHORT_ARTIFACT_ID", "0")
+    raw_cohort_digest = os.environ.get("GOVERNANCE_COHORT_ARTIFACT_DIGEST", "")
+    raw_preserved_map = os.environ.get("GOVERNANCE_PRESERVED_TARGET_WRITER_MAP", "[]")
+    cohort_mode = raw_cohort_artifact != "0"
+    if (
+        re.fullmatch(r"0|[1-9][0-9]*", raw_cohort_artifact) is None
+        or int(raw_cohort_artifact) > MAX_ACTIONS_RUN_ID
+        or (cohort_mode and re.fullmatch(r"sha256:[0-9a-f]{64}", raw_cohort_digest) is None)
+        or (not cohort_mode and (raw_cohort_digest or raw_preserved_map != "[]"))
+    ):
+        print("Writer cohort artifact boundary is invalid.", file=sys.stderr)
+        return 1
     _terminal_deadline_monotonic = None
     _dispatcher_admission_evidence_wait_remaining = None
     _bound_check_runs.clear()
@@ -2469,7 +3087,8 @@ def main() -> int:
         terminal_order = tuple(decoded_terminal_order)
         terminal_batch = tuple(decoded_terminal_batch)
         completed_writer_run_ids = tuple(decoded_completed_writer_run_ids)
-    except (json.JSONDecodeError, ValueError):
+        preserved_writer_map = canonical_preserved_writer_map(raw_preserved_map, preserved) if cohort_mode else None
+    except (json.JSONDecodeError, ValueError, GovernanceError):
         print("Writer target boundary is invalid.", file=sys.stderr)
         return 1
     if (
@@ -2477,11 +3096,15 @@ def main() -> int:
         or any(number < 1 for number in targets)
         or len(set(preserved)) != len(preserved)
         or any(number < 1 for number in preserved)
-        or (scope == "all" and (not set(preserved).issubset(targets) or bool(preserved) != (preserved_writer_run_id != "0")))
+        or (scope == "all" and (not set(preserved).issubset(targets) or bool(preserved) != (bool(preserved_writer_map) if cohort_mode else preserved_writer_run_id != "0")))
         or (scope == "early" and not targets)
         or (scope == "early" and (preserved or preserved_writer_run_id != "0"))
         or (scope == "early" and (decoded_manifest or terminal_order or completed_writer_run_ids))
-            or (scope == "early" and (len(targets) > MAX_EARLY_TARGETS or terminal_batch or raw_continuation_index != "0"))
+            or (scope == "early" and (
+                len(targets) > (MAX_COHORT_EARLY_TARGETS if cohort_mode else MAX_EARLY_TARGETS)
+                or terminal_batch
+                or (raw_continuation_index not in {"1", "2", "3", "4"} if cohort_mode else raw_continuation_index != "0")
+            ))
         or (scope == "all" and os.environ.get("GITHUB_ACTIONS") == "true" and (
             not re.fullmatch(rf"[1-{MAX_TERMINAL_CONTINUATIONS}]", raw_continuation_index)
             or not terminal_order or len(terminal_order) > MAX_TERMINAL_ORDER or len(set(terminal_order)) != len(terminal_order)
@@ -2513,6 +3136,17 @@ def main() -> int:
     ) else 0
     try:
         dispatcher_source = trusted_dispatcher_source(int(dispatcher_run_id))
+        if cohort_mode:
+            prepare_cohort_writer(
+                dispatcher_source, int(raw_cohort_artifact), raw_cohort_digest,
+                int(raw_continuation_index), targets if scope == "early" else preserved,
+                phase=scope,
+            )
+        if cohort_mode and scope == "all":
+            for number, members in _cohort_members_by_target.items():
+                current_pr = pull(number)
+                _cohort_members_by_target[number] = [restore_preserved_member_clock(member, current_pr) for member in members]
+            verify_preserved_cohort_writers(preserved_writer_map)
         snapshot = open_snapshot()
         if scope == "all" and os.environ.get("GITHUB_ACTIONS") == "true":
             event_tail = tuple(number for number in targets if number not in preserved)
@@ -2527,7 +3161,7 @@ def main() -> int:
                 head = pull_request.get("head_sha")
                 if number in _bound_check_ids_by_number and isinstance(head, str) and SHA.fullmatch(head):
                     external = CHECK_EXTERNAL_PREFIX + head.lower() + (
-                        f"/writer-{preserved_writer_run_id}" if number in preserved else f"/dispatcher-{dispatcher_run_id}"
+                        f"/writer-{preserved_writer_map[number][0] if cohort_mode else preserved_writer_run_id}" if number in preserved else f"/dispatcher-{dispatcher_run_id}"
                     )
                     _bound_check_runs[(head, external)] = _bound_check_ids_by_number[number]
             if continuation_index > 1:
@@ -2537,6 +3171,7 @@ def main() -> int:
         scoped_snapshot, carry = observed_invalidations(
             snapshot, dispatcher_source, scope, targets, preserved, int(preserved_writer_run_id),
             terminal_order, continuation_index, completed_writer_run_ids,
+            **({"preserved_writer_map": preserved_writer_map} if cohort_mode else {}),
         )
         if scope == "all" and set(preserved).intersection(scoped_snapshot.numbers):
             raise GovernanceError("Preserved early success reappeared in an all-open terminal segment.")

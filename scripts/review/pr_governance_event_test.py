@@ -33,6 +33,24 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.sensor = (ROOT / ".github/workflows/pr-governance-review-events.yml").read_text(encoding="utf-8")
+        self.reader_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.reader_directory.cleanup)
+        for name in (
+            "Prepare trusted cohort sensor reader",
+            "Prepare trusted cohort proof reader",
+            "Complete trusted cohort proof reader",
+            "Finalize trusted cohort proof reader",
+        ):
+            marker = f"      - name: {name}\n"
+            self.assertTrue(marker in self.sensor, f"Missing actual preparation step: {name}")
+            prepare = self.sensor.split(marker, 1)[1].split("\n      - name:", 1)[0]
+            shell = textwrap.dedent(prepare.split("        run: |\n", 1)[1])
+            result = subprocess.run(
+                ["bash", "-c", shell],
+                env={**os.environ, "RUNNER_TEMP": self.reader_directory.name},
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, f"{name}: {result.stderr}")
         start = self.sensor.index("          check_name =")
         end = self.sensor.index("          deadline =", start)
         self.program = textwrap.dedent(self.sensor[start:end])
@@ -50,6 +68,7 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
             "POLL_TIMEOUT_SECONDS": "5400",
             "GITHUB_REPOSITORY": self.repository,
             "GITHUB_SERVER_URL": "https://github.com",
+            "RUNNER_TEMP": self.reader_directory.name,
         }
         namespace: dict[str, object] = {
             "json": json,
@@ -200,6 +219,14 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
             {**writer, "name": "source=17 scope=early segment=0"},
             "91", self.repository_identity,
         ))
+        # cohort の世代を明示した場合だけ、個別sourceと異なる owner の writer を受理する。
+        cohort_writer = {**writer, "display_title": "source=18 scope=early segment=1"}
+        self.assertTrue(matches(cohort_writer, "91", self.repository_identity,
+                                cohort_owner="18", cohort_segment="1"))
+        self.assertFalse(matches(cohort_writer, "91", self.repository_identity,
+                                 cohort_owner="19", cohort_segment="1"))
+        self.assertFalse(matches(cohort_writer, "91", self.repository_identity,
+                                 cohort_owner="18", cohort_segment="2"))
         for changed in (
             {**writer, "repository": {**writer["repository"], "full_name": "other/repository"}},
             {**writer, "repository": {**writer["repository"], "id": 202}},
@@ -303,16 +330,15 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
             calls.append((page, included))
             self.assertIn(page, pages)
             payload = json.dumps({"total_count": 201, "check_runs": pages[page]})
-            if included:
-                self.assertEqual(page, 3)
-                payload = "HTTP/2 200 OK\n\n" + payload
+            self.assertTrue(included)
+            payload = "HTTP/2 200 OK\n\n" + payload
             return subprocess.CompletedProcess(arguments, 0, payload, "")
 
         with patch.object(subprocess, "run", side_effect=fake_run):
             self.assertIsNone(reader())
             result = reader()
         self.assertEqual(result, [candidate])
-        self.assertEqual(calls, [(1, False), (2, False), (3, True), (1, False)])
+        self.assertEqual(calls, [(1, True), (2, True), (3, True), (1, True)])
 
     def test_source_bound_check_run_scan_keeps_an_empty_history_pending(self) -> None:
         """No Check Run yet is a valid pending state, not malformed pagination."""
@@ -333,7 +359,7 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
         with patch.object(subprocess, "run", side_effect=fake_run):
             self.assertIsNone(reader())
             self.assertEqual(reader(), [])
-        self.assertEqual(calls, [False, True])
+        self.assertEqual(calls, [True, True])
 
     def test_source_bound_check_run_scan_has_a_budget_derived_page_ceiling(self) -> None:
         """The 90-minute latch cannot turn retained history into an unbounded API scan."""
@@ -345,7 +371,8 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
 
         def fake_run(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
             self.assertTrue(arguments[-1].endswith("page=1"))
-            payload = json.dumps({"total_count": page_limit * 100 + 1, "check_runs": [{"id": value} for value in range(1, 101)]})
+            self.assertIn("--include", arguments)
+            payload = "HTTP/2 200 OK\n\n" + json.dumps({"total_count": page_limit * 100 + 1, "check_runs": [{"id": value} for value in range(1, 101)]})
             return subprocess.CompletedProcess(arguments, 0, payload, "")
 
         with patch.object(subprocess, "run", side_effect=fake_run), self.assertRaises(SystemExit):
@@ -383,9 +410,8 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
                 self.assertEqual(page, 3)
                 runs = [candidate]
             payload = json.dumps({"total_count": 201, "check_runs": runs})
-            if "--include" in arguments:
-                self.assertEqual(page, 3)
-                payload = "HTTP/2 200 OK\n\n" + payload
+            self.assertIn("--include", arguments)
+            payload = "HTTP/2 200 OK\n\n" + payload
             return subprocess.CompletedProcess(arguments, 0, payload, "")
 
         with patch.object(subprocess, "run", side_effect=fake_run):
@@ -396,7 +422,7 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
         self.assertEqual(first_page_reads, 3)
         self.assertEqual(
             calls,
-            [(1, False), (2, False), (3, True), (1, False), (2, False), (3, True), (1, False)],
+            [(1, True), (2, True), (3, True), (1, True), (2, True), (3, True), (1, True)],
         )
 
     def test_source_bound_check_run_scan_rejects_ambiguous_raced_and_malformed_pages(self) -> None:
@@ -438,8 +464,7 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
                         page_total -= 1
                     payload = json.dumps({"total_count": page_total, "check_runs": pages[page]})
                     if "--include" in arguments:
-                        self.assertEqual(page, 3)
-                        link = 'Link: <https://api.github.com/next>; rel="next"\n' if mode == "link-overflow" else ""
+                        link = 'Link: <https://api.github.com/next>; rel="next"\n' if mode == "link-overflow" and page == 3 else ""
                         payload = f"HTTP/2 200 OK\n{link}\n" + payload
                     return subprocess.CompletedProcess(arguments, 0, payload, "")
 
@@ -483,9 +508,8 @@ class GovernanceReviewSensorIdentityContractTest(unittest.TestCase):
             assert page_match is not None
             page = int(page_match.group(1))
             payload = json.dumps({"total_count": 202, "check_runs": pages[page]})
-            if "--include" in arguments:
-                self.assertEqual(page, 3)
-                payload = "HTTP/2 200 OK\n\n" + payload
+            self.assertIn("--include", arguments)
+            payload = "HTTP/2 200 OK\n\n" + payload
             return subprocess.CompletedProcess(arguments, 0, payload, "")
 
         with patch.object(subprocess, "run", side_effect=fake_run):
@@ -497,6 +521,14 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
     def setUp(self) -> None:
         self.actual_workflow = (ROOT / ".github/workflows/pr-governance.yml").read_text(encoding="utf-8")
         self.workflow = self._materialize_trusted_programs(self.actual_workflow)
+        self.fence_reader_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.fence_reader_directory.cleanup)
+        fence_path = Path(self.fence_reader_directory.name) / "krr-cohort-fence-reader.py"
+        fence_path.write_bytes((ROOT / "scripts/review/pr_governance_cohort.py").read_bytes())
+        fence_path.chmod(0o600)
+        reader_environment = patch.dict(os.environ, {"RUNNER_TEMP": self.fence_reader_directory.name}, clear=False)
+        reader_environment.start()
+        self.addCleanup(reader_environment.stop)
         prior_root_deadline = os.environ.get("ROOT_DEADLINE_EPOCH")
         os.environ["ROOT_DEADLINE_EPOCH"] = str(int(time.time()) + 350 * 60)
         if prior_root_deadline is None:
@@ -556,6 +588,8 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                 [[head, 0] for head in heads], separators=(",", ":")
             )
         additions["ROOT_DEADLINE_EPOCH"] = environment.get("ROOT_DEADLINE_EPOCH", "4102444800")
+        if "RUNNER_TEMP" in os.environ:
+            additions["RUNNER_TEMP"] = environment.get("RUNNER_TEMP", os.environ["RUNNER_TEMP"])
         return environment | additions
 
     @staticmethod
@@ -964,10 +998,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         )
         self.assertIn("str(posted)!=app_id", self.workflow)
 
-        preflight = self.workflow[
-            self.workflow.index("  preflight-workflow-run-source:"):
-            self.workflow.index("  arm-reserved-sensor-barrier:")
-        ]
+        preflight = self._job_block("preflight-workflow-run-source")
         self.assertIn("name: Preflight workflow_run governance source", preflight)
         self.assertIn("pull_request_target_noop: ${{ steps.scope.outputs.pull_request_target_noop }}", preflight)
         self.assertIn('output.write("pull_request_target_noop="', preflight)
@@ -2607,11 +2638,11 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             resolver,
         )
         self.assertIn("reconcile: ${{ steps.targets.outputs.reconcile }}", resolver)
-        self.assertIn("if: ${{ needs.resolve_event.outputs.reconcile == 'true' && github.run_attempt == 1 }}", self._job_block("prepare-current-targets"))
+        self.assertIn("if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (needs.resolve_event.outputs.reconcile == 'true' && github.run_attempt == 1) }}", self._job_block("prepare-current-targets"))
         self.assertIn("pr-governance-reconcile-{0}", self.workflow)
         self.assertIn("AFFECTED: ${{ needs.prepare-current-targets.outputs.all_invalidation_chunk_1 }}", self.workflow)
-        self.assertIn("if: ${{ needs.prepare-current-targets.result == 'success' }}", reconcile)
-        self.assertIn("if: ${{ needs.prepare-current-targets.result == 'success' }}", reconcile)
+        self.assertIn("if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (needs.prepare-current-targets.result == 'success') }}", reconcile)
+        self.assertIn("if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (needs.prepare-current-targets.result == 'success') }}", reconcile)
         self.assertIn("environment: pr-governance", reconcile)
         match = re.search(
             r"- name: Re-enumerate every current local governance pull request.*?python3 - <<'PY'\n(.*?)\n          PY",
@@ -2808,7 +2839,11 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         self.assertEqual(len(lifecycle), 1)
         expected = lifecycle[0] - {"completed"}
         self.assertEqual(expected, {"requested", "queued", "waiting", "pending", "in_progress"})
-        trees = [preflight_tree] + [ast.parse(textwrap.dedent(program)) for program in re.findall(r"python3 - <<'PY'\n(.*?)\n          PY", self.actual_workflow, re.S)]
+        programs = [match.group("body") for match in re.finditer(
+            r"(?m)^(?P<indent> {8}| {10})python3 - <<'PY'\n(?P<body>.*?)\n(?P=indent)PY(?=\n|$)",
+            self.actual_workflow, re.S,
+        )]
+        trees = [preflight_tree] + [ast.parse(textwrap.dedent(program)) for program in programs]
         scans = 0
         for tree in trees:
             constants = {}
@@ -2887,10 +2922,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             re.DOTALL,
         )
         self.assertIsNotNone(scope_match); assert scope_match is not None
-        preflight = self.workflow[
-            self.workflow.index("  preflight-workflow-run-source:"):
-            self.workflow.index("  arm-reserved-sensor-barrier:")
-        ]
+        preflight = self._job_block("preflight-workflow-run-source")
         self.assertNotIn("environment:", preflight)
         self.assertNotIn("secrets.", preflight)
         self.assertNotIn("concurrency:", preflight)
@@ -2902,21 +2934,21 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             self.workflow.index("  establish-resolver-failure-barrier:"):
             self.workflow.index("  resolve_event:")
         ]
-        self.assertIn("needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier, wait-for-active-review-sensor]", establish)
+        self.assertIn("needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier, admit-cohort-backend]", establish)
         self.assertIn("needs.preflight-workflow-run-source.outputs.reconcile == 'true'", establish)
         self.assertIn("needs.preflight-workflow-run-source.outputs.valid", establish)
         self.assertLess(establish.index("concurrency:"), establish.index("Create resolver-failure barrier marker write token"))
         self.assertLess(establish.index("Activate resolver-failure merge barrier"), establish.index("Fail closed after classification barrier activation"))
         self.assertIn("EVENT_SOURCE_VALID: ${{ needs.preflight-workflow-run-source.outputs.valid }}", establish)
         self.assertEqual(preflight.count("WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}"), 1)
-        self.assertIn("needs: [establish-resolver-failure-barrier, publish-resolver-barrier-marker, wait-for-active-review-sensor]", self._job_block("resolve_event"))
+        self.assertIn("needs: [establish-resolver-failure-barrier, publish-resolver-barrier-marker, wait-for-active-review-sensor, elect-cohort-owner]", self._job_block("resolve_event"))
         reconcile = self._job_block("reconcile-all-open")
-        self.assertIn("needs: [resolve_event, prepare-current-targets]", reconcile)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, admit-cohort-backend, cohort-early-service]", reconcile)
         wait = self.workflow[
             self.workflow.index("  wait-for-active-review-sensor:"):
             self.workflow.index("  establish-resolver-failure-barrier:")
         ]
-        self.assertIn("needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier]", wait)
+        self.assertIn("needs: [preflight-workflow-run-source, arm-reserved-sensor-barrier, cohort-early-service, admit-cohort-backend]", wait)
         self.assertNotIn("concurrency:", wait)
         self._assert_waiter_sensor_identity_contract(wait)
         self.assertIn('run.get("conclusion") == "success"', wait)
@@ -3371,10 +3403,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
             re.DOTALL,
         )
         self.assertIsNotNone(scope_match); assert scope_match is not None
-        preflight = self.workflow[
-            self.workflow.index("  preflight-workflow-run-source:"):
-            self.workflow.index("  arm-reserved-sensor-barrier:")
-        ]
+        preflight = self._job_block("preflight-workflow-run-source")
         self.assertIn("github.event_name != 'workflow_run'", preflight)
         self.assertIn("PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}", preflight)
         self.assertIn("PR_BASE_REF: ${{ github.event.pull_request.base.ref }}", preflight)
@@ -3531,8 +3560,8 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
     def test_only_priority_targets_preempt_the_current_reconciler(self) -> None:
         # issue_comment は affected set を解決へ渡すが、全件走査を中断せず
         # admitted writer の early targets を維持する。
-        self.assertIn("needs: [resolve_event, prepare-current-targets]", self._job_block("reconcile-all-open"))
-        self.assertIn("if: ${{ needs.resolve_event.outputs.reconcile == 'true' && github.run_attempt == 1 }}", self._job_block("prepare-current-targets"))
+        self.assertIn("needs: [resolve_event, prepare-current-targets, admit-cohort-backend, cohort-early-service]", self._job_block("reconcile-all-open"))
+        self.assertIn("if: ${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (needs.resolve_event.outputs.reconcile == 'true' && github.run_attempt == 1) }}", self._job_block("prepare-current-targets"))
         self.assertIn("Re-enumerate every current local governance pull request", self.workflow)
         self.assertNotIn("steps.targets.outputs.affected", self.workflow)
         self.assertIn("AFFECTED: ${{ needs.prepare-current-targets.outputs.all_invalidation_chunk_1 }}", self.workflow)
@@ -3841,13 +3870,13 @@ raise SystemExit(91)
         # Early writer acknowledgement and history audit then precede the
         # remaining pending chunks, their failure fence, and barrier release.
         self.assertLess(establish.index("Activate resolver-failure merge barrier"), establish.index("Verify resolver-failure barrier source after activation"))
-        self.assertIn("needs: [establish-resolver-failure-barrier, safe-obsolete-heavy-preemption]", marker)
-        self.assertIn("needs: [establish-resolver-failure-barrier, publish-resolver-barrier-marker, wait-for-active-review-sensor]", admission)
-        self.assertIn("needs: [resolve_event]", prepare)
-        self.assertIn("needs: [resolve_event, prepare-current-targets]", reconcile)
-        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open]", acknowledge)
-        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor]", audit)
-        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history]", pending)
+        self.assertIn("needs: [establish-resolver-failure-barrier, safe-obsolete-heavy-preemption, admit-cohort-backend]", marker)
+        self.assertIn("needs: [establish-resolver-failure-barrier, publish-resolver-barrier-marker, wait-for-active-review-sensor, elect-cohort-owner]", admission)
+        self.assertIn("needs: [resolve_event, admit-cohort-backend, cohort-early-service]", prepare)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, admit-cohort-backend, cohort-early-service]", reconcile)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, admit-cohort-backend]", acknowledge)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, admit-cohort-backend]", audit)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history, admit-cohort-backend]", pending)
         self.assertIn("write-reconciliation-pending", release)
         self.assertIn("release-complete-affected-head-barrier", terminal)
         self.assertLess(reconcile.index("Dispatch and bind the early event writer"), reconcile.index("Await the bound early event writer before all-open invalidation"))
@@ -3887,10 +3916,10 @@ raise SystemExit(91)
         await_early = reconcile.index("- name: Await the bound early event writer before all-open invalidation")
         all_open = pending.index("- name: Invalidate every current pull request for the all-open writer")
         self.assertLess(dispatch, await_early)
-        self.assertIn("needs: [resolve_event, prepare-current-targets]", reconcile)
-        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open]", acknowledge)
-        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor]", audit)
-        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history]", pending)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, admit-cohort-backend, cohort-early-service]", reconcile)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, admit-cohort-backend]", acknowledge)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, admit-cohort-backend]", audit)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history, admit-cohort-backend]", pending)
         self.assertIn("early_deadline_epoch: ${{ steps.await-early.outputs.early_deadline_epoch }}", reconcile)
         first_pending = pending.index("- name: Pre-invalidate priority event heads (first TTL-safe chunk)")
         second_pending = pending.index("- name: Pre-invalidate priority event heads (second TTL-safe chunk)")
@@ -4065,12 +4094,12 @@ raise SystemExit(91)
         pending = self._job_block("write-reconciliation-pending")
         release = self._job_block("release-complete-affected-head-barrier")
         self.assertLess(establish.index("- name: Activate resolver-failure merge barrier"), establish.index("- name: Verify resolver-failure barrier source after activation"))
-        self.assertIn("needs: [resolve_event]", preflight)
-        self.assertIn("needs: [resolve_event, prepare-current-targets]", reconcile)
-        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open]", acknowledgement)
-        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor]", history)
-        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history]", pending)
-        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, write-reconciliation-pending]", release)
+        self.assertIn("needs: [resolve_event, admit-cohort-backend, cohort-early-service]", preflight)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, admit-cohort-backend, cohort-early-service]", reconcile)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, admit-cohort-backend]", acknowledgement)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, admit-cohort-backend]", history)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history, admit-cohort-backend]", pending)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, write-reconciliation-pending, admit-cohort-backend]", release)
         self.assertIn("- name: Verify established affected-head merge barrier for reconciliation", preflight)
         self.assertIn("- name: Dispatch and bind the early event writer", reconcile)
         self.assertIn("- name: Await the bound early event writer before all-open invalidation", reconcile)
@@ -4543,9 +4572,9 @@ raise SystemExit(91)
             establish_job.index("- name: Verify resolver-failure barrier source after activation"),
         )
         self.assertIn("- name: Verify established affected-head merge barrier for reconciliation", prepare_job)
-        self.assertIn("needs: [resolve_event]", prepare_job)
-        self.assertIn("needs: [resolve_event, prepare-current-targets]", reconcile_job)
-        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history]", pending_job)
+        self.assertIn("needs: [resolve_event, admit-cohort-backend, cohort-early-service]", prepare_job)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, admit-cohort-backend, cohort-early-service]", reconcile_job)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history, admit-cohort-backend]", pending_job)
         self.assertIn("write-reconciliation-pending", release_job)
         self.assertIn("release-complete-affected-head-barrier", terminal_job)
         self.assertEqual(self.workflow.count("- name: Activate resolver-failure merge barrier"), 1)
@@ -4727,7 +4756,7 @@ raise SystemExit(91)
         self.assertIsNotNone(resolver); self.assertIsNotNone(activate); self.assertIsNotNone(source); self.assertIsNotNone(verify_source); self.assertIsNotNone(marker)
         assert resolver is not None and activate is not None and source is not None and verify_source is not None and marker is not None
         resolver_job = self._job_block("resolve_event")
-        self.assertIn("needs: [establish-resolver-failure-barrier, publish-resolver-barrier-marker, wait-for-active-review-sensor]", resolver_job)
+        self.assertIn("needs: [establish-resolver-failure-barrier, publish-resolver-barrier-marker, wait-for-active-review-sensor, elect-cohort-owner]", resolver_job)
         self.assertIn("needs.publish-resolver-barrier-marker.result == 'success'", resolver_job)
         reconciler_job = self._job_block("reconcile-all-open")
         preflight_generation_lock = (
@@ -4756,8 +4785,8 @@ raise SystemExit(91)
         self.assertLess(activation_position, verification_position)
         # The barrier's live verification must finish before the downstream
         # admission and marker jobs can run.
-        self.assertIn("needs: [establish-resolver-failure-barrier, safe-obsolete-heavy-preemption]", marker_job)
-        self.assertIn("needs: [establish-resolver-failure-barrier, publish-resolver-barrier-marker, wait-for-active-review-sensor]", resolver_job)
+        self.assertIn("needs: [establish-resolver-failure-barrier, safe-obsolete-heavy-preemption, admit-cohort-backend]", marker_job)
+        self.assertIn("needs: [establish-resolver-failure-barrier, publish-resolver-barrier-marker, wait-for-active-review-sensor, elect-cohort-owner]", resolver_job)
         self.assertNotIn("subprocess.run", source.group(1))
         for step in (
             "Create resolver-failure barrier branch-protection token",
@@ -4950,14 +4979,14 @@ raise SystemExit(91)
         self.assertIsNotNone(condition); assert condition is not None
         self.assertEqual(
             condition.group("value"),
-            "${{ always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ("
+            "${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && github.run_attempt == 1 && (github.event_name != 'workflow_run' || ("
             "(github.event.workflow_run.name == 'PR governance review sensor' && "
             "(github.event.workflow_run.event == 'pull_request' || "
             "github.event.workflow_run.event == 'pull_request_review' || "
             "github.event.workflow_run.event == 'pull_request_review_comment')) || "
             "((github.event.workflow_run.name == 'CI' || "
             "github.event.workflow_run.name == 'release-preflight') && "
-            "github.event.workflow_run.event == 'pull_request'))) }}",
+            "github.event.workflow_run.event == 'pull_request')))) }}",
         )
 
         def permitted(attempt: int, event_name: str, workflow_name: str = "", workflow_event: str = "") -> bool:
@@ -5024,8 +5053,8 @@ raise SystemExit(91)
         self.assertIn(f"- name: {activate_name}", establish_job)
         self.assertIn("- name: Verify established affected-head merge barrier for reconciliation", prepare_job)
         self.assertIn("Verify resolver-failure barrier source after activation", establish_job)
-        self.assertIn("needs: [resolve_event]", prepare_job)
-        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history]", marker_job)
+        self.assertIn("needs: [resolve_event, admit-cohort-backend, cohort-early-service]", prepare_job)
+        self.assertIn("needs: [resolve_event, prepare-current-targets, reconcile-all-open, acknowledge-early-sensor, audit-reconciliation-history, admit-cohort-backend]", marker_job)
         self.assertIn("write-reconciliation-pending", release_job)
         self.assertLess(pre_positions[0], pre_positions[1])
         self.assertLess(pre_positions[1], marker_job.index("- name: Fail closed after deferred priority barrier setup"))
@@ -7365,12 +7394,12 @@ class WriteReconciliationConcurrencyTest(unittest.TestCase):
             condition = re.search(r"^    if: \$\{\{ (.*?) \}\}$", self.job(job_name), re.MULTILINE)
             self.assertIsNotNone(condition)
             assert condition is not None
-            self.assertTrue(condition.group(1).startswith("!cancelled() && "))
-            values = {"needs.reconcile-all-open.result":"success", "needs.write-reconciliation-pending.result":"success", "needs.prepare-current-targets.outputs.affected_barrier_active":"true", "needs.release-complete-affected-head-barrier.result":"success", "needs.acknowledge-early-sensor.result":"skipped"}
-            self.assertTrue(GovernanceDispatcherContractTest._github_if(condition.group(1).removeprefix("!cancelled() && ").strip(),values))
+            self.assertIn("!cancelled() && ", condition.group(1))
+            values = {"needs.admit-cohort-backend.result":"success", "needs.admit-cohort-backend.outputs.owner":"true", "needs.reconcile-all-open.result":"success", "needs.write-reconciliation-pending.result":"success", "needs.prepare-current-targets.outputs.affected_barrier_active":"true", "needs.release-complete-affected-head-barrier.result":"success", "needs.acknowledge-early-sensor.result":"skipped"}
+            self.assertTrue(GovernanceDispatcherContractTest._github_if(condition.group(1).replace("!cancelled() && ", "").strip(),values))
             for result in ("failure","cancelled","unknown"):
                 values["needs.acknowledge-early-sensor.result"]=result
-                self.assertFalse(GovernanceDispatcherContractTest._github_if(condition.group(1).removeprefix("!cancelled() && ").strip(),values))
+                self.assertFalse(GovernanceDispatcherContractTest._github_if(condition.group(1).replace("!cancelled() && ", "").strip(),values))
 
     def test_skipped_reservation_wait_keeps_valid_resolver_routes(self) -> None:
         condition=re.search(r"^    if: \$\{\{ (.*?) \}\}$",self.job("resolve_event"),re.MULTILINE)

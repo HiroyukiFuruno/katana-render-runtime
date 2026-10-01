@@ -19,6 +19,21 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
         root = Path(__file__).parents[2]
         self.sensor = (root / ".github/workflows/pr-governance-review-events.yml").read_text(encoding="utf-8")
         self.writer = (root / "scripts/review/pr_governance_status_writer.py").read_text(encoding="utf-8")
+        self.reader_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.reader_directory.cleanup)
+        environment = patch.dict(os.environ, {"RUNNER_TEMP": self.reader_directory.name}, clear=False)
+        environment.start()
+        self.addCleanup(environment.stop)
+        for name in (
+            "Prepare trusted cohort sensor reader", "Prepare trusted cohort proof reader",
+            "Complete trusted cohort proof reader", "Finalize trusted cohort proof reader",
+        ):
+            marker = f"      - name: {name}\n"
+            self.assertIn(marker, self.sensor)
+            prepare = self.sensor.split(marker, 1)[1].split("\n      - name:", 1)[0]
+            shell = textwrap.dedent(prepare.split("        run: |\n", 1)[1])
+            result = subprocess.run(["bash", "-c", shell], capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, f"{name}: {result.stderr}")
 
     def test_unsupported_review_thread_webhook_is_not_an_actions_trigger(self) -> None:
         self.assertNotIn("pull_request_review_thread:", self.sensor)
@@ -192,8 +207,8 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
         self.assertIn("Trusted governance Check Run response changed during pagination.", self.sensor)
         self.assertIn("terminal_page: bool = False", self.sensor)
         self.assertIn("timeout=20", self.sensor)
-        self.assertIn("except subprocess.TimeoutExpired:", self.sensor)
-        self.assertEqual(self.sensor.count("subprocess.run("), 1)
+        self.assertIn("subprocess.TimeoutExpired", self.sensor)
+        self.assertEqual(self.sensor.count("result = run(arguments, capture_output=True"), 1)
         self.assertIn('rel="next"', self.sensor)
         self.assertEqual(600 * 8.1, 4860)
         self.assertLessEqual((1 + (5400 + 60 - 1) // 60) * 3 + 3, 300)
@@ -523,7 +538,6 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
                 runs = [candidate]
             payload = json.dumps({"total_count": 101, "check_runs": runs})
             if "--include" in arguments:
-                self.assertEqual(page, 2)
                 payload = "HTTP/2 200 OK\n\n" + payload
             return subprocess.CompletedProcess(arguments, 0, payload, "")
 
@@ -532,7 +546,7 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
             self.assertIsNone(reader())
             self.assertIsNone(reader())
             self.assertEqual(reader(), [candidate])
-        self.assertEqual(calls, [(1, False), (2, True), (1, False), (2, True), (1, False)])
+        self.assertEqual(calls, [(1, True), (2, True), (1, True), (2, True), (1, True)])
 
     def test_sensor_drops_a_candidate_collected_before_a_page_one_generation_race(self) -> None:
         """A candidate from the old snapshot cannot survive a new-run page-one restart."""
@@ -605,7 +619,6 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
                 total = 101 if page_one_reads == 1 else 102
             payload = json.dumps({"total_count": total, "check_runs": runs})
             if "--include" in arguments:
-                self.assertEqual(page, 2)
                 payload = "HTTP/2 200 OK\n\n" + payload
             return subprocess.CompletedProcess(arguments, 0, payload, "")
 
@@ -614,7 +627,7 @@ class GovernanceReviewSensorContractTest(unittest.TestCase):
             self.assertIsNone(reader())
             self.assertIsNone(reader())
             self.assertEqual(reader(), [])
-        self.assertEqual(calls, [(1, False), (2, True), (1, False), (2, True), (1, False)])
+        self.assertEqual(calls, [(1, True), (2, True), (1, True), (2, True), (1, True)])
 
     def test_sensor_waits_for_a_newer_source_bound_generation_after_terminal_failure(self) -> None:
         """A resolved thread can be repaired only by a later dispatcher generation."""

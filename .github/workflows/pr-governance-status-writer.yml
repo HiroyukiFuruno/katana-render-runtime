@@ -36,7 +36,7 @@ on:
         required: true
         type: string
       continuation_index:
-        description: Trusted all-snapshot terminal segment 1 through 4; early is always zero.
+        description: Trusted segment 1 through 4; legacy early uses zero.
         required: true
         type: string
       terminal_order_numbers:
@@ -50,6 +50,21 @@ on:
         # turn a successful-looking foreign run into a continuation grant.
         description: Canonical completed prior all-writer run IDs; early and segment one are empty.
         required: true
+        type: string
+      cohort_artifact_id:
+        description: Immutable elected cohort artifact ID; zero preserves legacy dispatch.
+        required: false
+        default: '0'
+        type: string
+      cohort_artifact_digest:
+        description: Exact sha256 artifact digest; empty only for legacy dispatch.
+        required: false
+        default: ''
+        type: string
+      preserved_target_writer_map:
+        description: Canonical PR, exact early writer and Check Run tuples for cohort preservation.
+        required: false
+        default: '[]'
         type: string
       terminal_deadline_epoch:
         description: Absolute terminal-window deadline for all-scope continuations; zero for early scope.
@@ -220,6 +235,9 @@ jobs:
           GOVERNANCE_PRESERVED_TARGET_NUMBERS: ${{ inputs.preserved_target_numbers }}
           GOVERNANCE_PRESERVED_WRITER_RUN_ID: ${{ inputs.preserved_writer_run_id }}
           GOVERNANCE_CHECK_MANIFEST: ${{ inputs.check_manifest }}
+          GOVERNANCE_COHORT_ARTIFACT_ID: ${{ inputs.cohort_artifact_id }}
+          GOVERNANCE_COHORT_ARTIFACT_DIGEST: ${{ inputs.cohort_artifact_digest }}
+          GOVERNANCE_PRESERVED_TARGET_WRITER_MAP: ${{ inputs.preserved_target_writer_map }}
           GOVERNANCE_TERMINAL_BATCH_NUMBERS: ${{ inputs.terminal_batch_numbers }}
           GOVERNANCE_CONTINUATION_INDEX: ${{ inputs.continuation_index }}
           GOVERNANCE_TERMINAL_ORDER_NUMBERS: ${{ inputs.terminal_order_numbers }}

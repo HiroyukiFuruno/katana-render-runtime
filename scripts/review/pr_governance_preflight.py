@@ -23,6 +23,7 @@ issue_event_noop = False
 priority = True
 sensor_reservation = False
 sensor_run_ids = []
+cohort_recovery = None
 
 def request(path):
     try:
@@ -417,6 +418,33 @@ elif event_name in {"issues", "issue_comment"}:
                     and initial_source[2] == initial_identity[2]
                     and initial_source[5] == (initial_identity[0], repository)
                 )
+elif event_name == "workflow_dispatch" and os.environ.get("RECOVERY_OWNER_HINT", ""):
+    valid = False
+    priority = False
+    try:
+        import base64, hashlib
+        identifier = os.environ.get("RECOVERY_OWNER_HINT", "")
+        if re.fullmatch(r"[1-9][0-9]*", identifier) is None:
+            raise ValueError("Invalid failed owner callback")
+        workflow_sha = os.environ["WORKFLOW_SHA"]
+        content = request(f"repos/{repository}/contents/scripts/review/pr_governance_cohort.py?ref={workflow_sha}")
+        if not isinstance(content, dict) or content.get("type") != "file" or content.get("encoding") != "base64" or not isinstance(content.get("content"), str) or len(content["content"]) > 300000:
+            raise ValueError("Untrusted recovery reader")
+        data = base64.b64decode(content["content"].replace("\n", ""), validate=True)
+        if hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest() != content.get("sha"):
+            raise ValueError("Recovery helper blob drift")
+        namespace = {"__name__": "trusted_cohort_recovery"}
+        exec(compile(data.decode("utf-8", "strict"), "trusted-cohort-recovery", "exec"), namespace)
+        workflow = request(f"repos/{repository}/contents/.github/workflows/pr-governance.yml?ref={workflow_sha}")
+        if not isinstance(workflow, dict) or not isinstance(workflow.get("sha"), str): raise ValueError("Recovery workflow blob missing")
+        budget = namespace["ReadBudget"](300)
+        transport = namespace["_Transport"](os.environ["GH_TOKEN"], budget)
+        reader = namespace["_Reader"](transport.json, transport.archive, budget, root_deadline_epoch)
+        cohort_recovery = namespace["await_failed_owner_recovery"](reader, repository, int(identifier), workflow_sha, workflow["sha"])
+        root_deadline_epoch = cohort_recovery["root_deadline_epoch"]
+        valid = True
+    except (ValueError, TypeError, KeyError, RuntimeError, UnicodeError):
+        cohort_recovery = None
 elif event_name == "workflow_run":
     run_id = os.environ.get("WORKFLOW_RUN_ID", "")
     source_attempt = os.environ.get("WORKFLOW_RUN_ATTEMPT", "")
@@ -760,7 +788,7 @@ def active_local_review_sensors() -> list[int] | None:
 if (
     os.environ.get("DIRECT_PRIORITY_FENCE") == "1"
     and valid and reconcile
-    and event_name in {"pull_request_target", "issues", "issue_comment"}
+    and (event_name in {"pull_request_target", "issues", "issue_comment"} or cohort_recovery is not None)
 ):
     active_sensors = active_local_review_sensors()
     if active_sensors is None:
@@ -776,12 +804,66 @@ if (
 if not valid:
     priority = False
 
+# 既存分類の成功結果だけをjournal producerへ渡す。未started時計はproducerが元attemptから読む。
+cohort_member_hint = None
+if event_name == "workflow_run" and valid and reconcile and isinstance(locals().get("run"), dict) and run.get("name") == "PR governance review sensor":
+    try:
+        body = pull.get("body")
+        if (not isinstance(body, str) or "\0" in body or type(run.get("workflow_id")) is not int or run["workflow_id"] < 1):
+            raise ValueError("Unavailable strict source binding")
+        import hashlib
+        cohort_member_hint = {
+            "source_run_id": run["id"], "source_run_attempt": 1,
+            "source_workflow_id": run["workflow_id"], "source_run_number": run["run_number"],
+            "source_event": run["event"], "pr_number": pull["number"], "base_ref": pull["base"]["ref"],
+            "base_sha": pull["base"]["sha"].lower(), "head_sha": pull["head"]["sha"].lower(),
+            "pr_body_sha256": hashlib.sha256(body.encode("utf-8", "strict")).hexdigest(),
+            "latch_started_at": None, "source_deadline_epoch": None,
+            "repository": repository, "repository_id": repository_id,
+        }
+    except (ValueError, UnicodeError, KeyError, TypeError):
+        # journalを作れない入力を既存分類の成功やsource ACKへ昇格しない。
+        cohort_member_hint = None
+
+completed_sensor_noop = False
+if (valid and reconcile and event_name == "workflow_run" and isinstance(cohort_member_hint, dict)
+    and isinstance(run, dict) and run.get("name") == "PR governance review sensor"
+    and run.get("status") == "completed" and run.get("conclusion") == "success"):
+    try:
+        import base64, hashlib
+        workflow_sha = os.environ["WORKFLOW_SHA"]
+        content = request(f"repos/{repository}/contents/scripts/review/pr_governance_cohort.py?ref={workflow_sha}")
+        if not isinstance(content, dict) or content.get("type") != "file" or content.get("encoding") != "base64" or not isinstance(content.get("content"), str) or len(content["content"]) > 300000:
+            raise ValueError("Untrusted cohort reader")
+        data = base64.b64decode(content["content"].replace("\n", ""), validate=True)
+        if hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest() != content.get("sha"):
+            raise ValueError("Cohort reader blob changed")
+        namespace = {"__name__": "trusted_cohort_preflight"}
+        exec(compile(data.decode("utf-8", "strict"), "trusted-cohort-preflight", "exec"), namespace)
+        budget = namespace["ReadBudget"](300)
+        transport = namespace["_Transport"](os.environ["GH_TOKEN"], budget)
+        reader = namespace["_Reader"](transport.json, transport.archive, budget, root_deadline_epoch)
+        workflow = request(f"repos/{repository}/contents/.github/workflows/pr-governance.yml?ref={workflow_sha}")
+        if not isinstance(workflow, dict) or not isinstance(workflow.get("sha"), str): raise ValueError("Workflow blob missing")
+        completed_sensor_noop = namespace["completed_sensor_noop"](run, pull, reader=reader, workflow_sha=workflow_sha, workflow_blob=workflow["sha"])
+        if completed_sensor_noop:
+            reconcile = False
+            priority = False
+    except (ValueError, TypeError, KeyError, RuntimeError, UnicodeError):
+        # 追加no-op証明の欠落は通常reconciliationへ戻し、成功免除にしない。
+        completed_sensor_noop = False
+
 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
     output.write("reconcile=" + ("true" if reconcile else "false") + "\n")
     output.write("valid=" + ("true" if valid else "false") + "\n")
     output.write("priority=" + ("true" if priority else "false") + "\n")
     output.write("sensor_reservation=" + ("true" if sensor_reservation else "false") + "\n")
     output.write("sensor_run_ids=" + json.dumps(sensor_run_ids, separators=(",", ":")) + "\n")
+    output.write("cohort_recovery_owner=" + (str(cohort_recovery["owner"]) if cohort_recovery else "") + "\n")
+    output.write("cohort_recovery_journal=" + (str(cohort_recovery["journal"]) if cohort_recovery else "") + "\n")
+    output.write("cohort_recovery_digest=" + (cohort_recovery["digest"] if cohort_recovery else "") + "\n")
+    output.write("completed_sensor_noop=" + ("true" if completed_sensor_noop else "false") + "\n")
+    output.write("cohort_member_hint=" + json.dumps(cohort_member_hint, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n")
     output.write("pull_request_target_noop=" + ("true" if pull_request_target_noop else "false") + "\n")
     output.write("issue_event_noop=" + ("true" if issue_event_noop else "false") + "\n")
     output.write(f"root_deadline_epoch={root_deadline_epoch}\n")

@@ -55,9 +55,10 @@ class GovernanceAdminSerializationTest(unittest.TestCase):
     def test_step_expressions_only_reference_steps_in_the_same_job(self) -> None:
         for name, job in self.jobs.items():
             with self.subTest(job=name):
-                identifiers = set(re.findall(r"(?m)^        id: ([A-Za-z0-9_-]+)$", job))
+                step_body = job.split("\n    steps:\n", 1)[1]
+                identifiers = set(re.findall(r"(?m)^(?:      |        )id: ([A-Za-z0-9_-]+)$", step_body))
                 expressions = re.findall(r"\$\{\{(.*?)\}\}", job, re.DOTALL)
-                expressions.extend(re.findall(r"(?m)^        if: (.+)$", job))
+                expressions.extend(re.findall(r"(?m)^(?:      |        )if: (.+)$", step_body))
                 references = set(re.findall(
                     r"\bsteps\.([A-Za-z0-9_-]+)\.", "\n".join(expressions),
                 ))

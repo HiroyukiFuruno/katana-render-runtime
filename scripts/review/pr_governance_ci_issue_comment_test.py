@@ -132,9 +132,9 @@ class GovernanceCiAndIssueContractTest(unittest.TestCase):
                 expression,
                 expected
                 if label == "preflight"
-                else "${{ always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && "
+                else "${{ needs.admit-cohort-backend.result == 'success' && needs.admit-cohort-backend.outputs.owner == 'true' && (always() && needs.preflight-workflow-run-source.outputs.reconcile == 'true' && "
                 + allowlist
-                + " }}",
+                + ") }}",
             )
 
         self.assertIn("outputs:\n      reconcile: ${{ steps.scope.outputs.reconcile }}", preflight)
