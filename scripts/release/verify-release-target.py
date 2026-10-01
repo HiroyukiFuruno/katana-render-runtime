@@ -16,16 +16,20 @@ from urllib import error, request
 
 REQUIRED_LATEST_RELEASE = "v0.4.21"
 REQUIRED_TARGET_RELEASE = "v0.4.22"
-# manifest更新は、v0.4.22で指定された修正を含むレビュー済みsource headからだけ
-# 行える。squash merge候補にこのcommitの祖先性を要求するとGitHub上で正当な
-# candidateを拒否するため、通常のrelease candidate検証とは分離する。
-REQUIRED_RELEASE_SOURCE_COMMITS = (
+REQUIRED_RELEASE_COMMITS = (
     "1bc497bdfd3b8c4318e9ee1609d147b6925b43e5",  # v0.4.22指定修正
+    "d0ab9c408e9b876f130dbd5a8f33051cc44b5242",  # Issue #95 font探索
+    "78ed1b87cc94bcdd158b42e7c00e69e882bbb094",  # Issue #95 実HTML 60秒検証
+    "a8481e9c13ceb43d9e08388958c32f507f9ddb85",  # Issue #93 body load回帰
+    "f5ff74ecf7287375bc0e835e8db374766145a55b",  # Issue #93 parser実状態
+    "4d1ec0a03c6fd95a8ca9f4c1ad8a30d4ad84f76e",  # Issue #92/#93 image・Promise load
 )
-# 通常のrelease candidateは、実レビュー対象のPR #99 default baseを祖先に持ち、
-# 不変manifestでリリース内容を保存しなければならない。
+# manifestの更新元と公開candidateの両方に、v0.4.22指定修正とIssue #93/#95
+# 修正を要求する。PR #99のdefault baseと不変manifestもcandidateに要求する。
+REQUIRED_RELEASE_SOURCE_COMMITS = REQUIRED_RELEASE_COMMITS
 REQUIRED_RELEASE_CANDIDATE_ANCESTORS = (
     "9ad18a07358cf28b742cc00c12c0c9f85956d20a",  # PR #99のdefault base
+    *REQUIRED_RELEASE_COMMITS,
 )
 # squash merge 後も default history に残る v0.4.21 の merge commit を、
 # 変更集合の起点として使う。期待値そのものは commit/tree object ではなく、
@@ -33,7 +37,7 @@ REQUIRED_RELEASE_CANDIDATE_ANCESTORS = (
 REQUIRED_RELEASE_BASE = "7f984d16400fe3e097a3380dd7641d78c5852352"
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "4558c59a46a36cb38eed478403387619c39465ebdb8855ce42a3adce5ffb31ca"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "2efaa989e6bb58487f04b361d001146b97ea529dc6a3a17391b9388facae23ab"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",

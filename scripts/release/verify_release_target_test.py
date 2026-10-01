@@ -20,6 +20,7 @@ VERIFY_RELEASE_TARGET = util.module_from_spec(MODULE_SPEC)
 sys.modules[MODULE_SPEC.name] = VERIFY_RELEASE_TARGET
 MODULE_SPEC.loader.exec_module(VERIFY_RELEASE_TARGET)
 REQUIRED_SOURCE_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_SOURCE_COMMITS
+REQUIRED_RELEASE_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_COMMITS
 REQUIRED_CANDIDATE_ANCESTORS = (
     VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_CANDIDATE_ANCESTORS
 )
@@ -127,44 +128,54 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 ).stdout.strip()
 
             source_repository = self.source_git("rev-parse", "--show-toplevel")
+            git("fetch", "-q", source_repository, "HEAD:refs/heads/release")
+            release_head = git("rev-parse", "refs/heads/release")
             git(
-                "fetch",
-                "-q",
-                source_repository,
-                REQUIRED_CANDIDATE_ANCESTORS[0],
-                REQUIRED_SOURCE_COMMITS[0],
-                VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE,
+                "read-tree",
+                f"{release_head}^{{tree}}",
             )
+            altered_blob = subprocess.run(
+                ["git", "hash-object", "-w", "--stdin"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                input=b"intentionally altered release payload\n",
+                env=isolated_git_environment(),
+            ).stdout.decode("ascii").strip()
+            git("update-index", "--cacheinfo", f"100644,{altered_blob},docs/release.md")
+            altered_tree = git("write-tree")
             manifest_mismatch = git(
                 "-c",
                 "user.name=release-target-test",
                 "-c",
                 "user.email=release-target-test@example.invalid",
                 "commit-tree",
-                f"{VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE}^{{tree}}",
+                altered_tree,
                 "-p",
-                REQUIRED_SOURCE_COMMITS[0],
+                release_head,
                 "-m",
                 "release descendant with a mismatched manifest",
             )
             git("update-ref", "refs/heads/manifest-mismatch", manifest_mismatch)
-            self.assertEqual(
-                subprocess.run(
-                    [
-                        "git",
-                        "merge-base",
-                        "--is-ancestor",
-                REQUIRED_CANDIDATE_ANCESTORS[0],
-                        manifest_mismatch,
-                    ],
-                    cwd=repository,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    env=isolated_git_environment(),
-                ).returncode,
-                0,
-            )
+            for required_commit in REQUIRED_CANDIDATE_ANCESTORS:
+                self.assertEqual(
+                    subprocess.run(
+                        [
+                            "git",
+                            "merge-base",
+                            "--is-ancestor",
+                            required_commit,
+                            manifest_mismatch,
+                        ],
+                        cwd=repository,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env=isolated_git_environment(),
+                    ).returncode,
+                    0,
+                    required_commit,
+                )
 
             result = self.run_check(
                 "v0.4.22", "v0.4.21", "manifest-mismatch", repository
@@ -239,7 +250,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(required_commit, result.stderr)
 
-    def test_accepts_actual_head_equivalent_squash_with_required_base_ancestry(
+    def test_rejects_equivalent_squash_candidate_missing_required_release_commits(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -362,8 +373,11 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     0,
                 )
 
-                accepted = self.run_check("v0.4.22", "v0.4.21", "HEAD", fresh_repository)
-                self.assertEqual(accepted.returncode, 0, accepted.stderr)
+                rejected_squash = self.run_check(
+                    "v0.4.22", "v0.4.21", "HEAD", fresh_repository
+                )
+                self.assertNotEqual(rejected_squash.returncode, 0)
+                self.assertIn(REQUIRED_RELEASE_COMMITS[0], rejected_squash.stderr)
 
                 invalid_squash = git(
                     "commit-tree",
@@ -382,11 +396,30 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     "commit-tree",
                     f"{VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE}^{{tree}}",
                     "-p",
-                    REQUIRED_CANDIDATE_ANCESTORS[0],
+                    source_head,
                     "-m",
-                    "arbitrary tree with the required default base",
+                    "arbitrary release tree with all required commits",
                 )
                 git("branch", "-f", "arbitrary-tree", arbitrary_tree_with_required_base)
+                for required_commit in REQUIRED_CANDIDATE_ANCESTORS:
+                    self.assertEqual(
+                        subprocess.run(
+                            [
+                                "git",
+                                "merge-base",
+                                "--is-ancestor",
+                                required_commit,
+                                "arbitrary-tree",
+                            ],
+                            cwd=repository,
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                            env=isolated_git_environment(),
+                        ).returncode,
+                        0,
+                        required_commit,
+                    )
                 rejected_manifest = self.run_check(
                     "v0.4.22", "v0.4.21", "arbitrary-tree", repository
                 )
