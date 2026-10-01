@@ -291,6 +291,7 @@ jobs:
           pending_ids = set(decoded_run_ids)
           expected_path = ".github/workflows/pr-governance-review-events.yml"
           allowed_events = {"pull_request", "pull_request_review", "pull_request_review_comment"}
+          active_sensor_statuses = ("requested", "queued", "waiting", "pending", "in_progress")
 
           def api(path, failure):
               result = subprocess.run(
@@ -385,8 +386,8 @@ jobs:
                   or value.get("name") != "PR governance review sensor" or value.get("event") not in allowed_events
                   or type(value.get("run_attempt")) is not int or value["run_attempt"] != 1
                   or not workflow_path_matches(value.get("path"), expected_path)
-                  or status not in {"queued", "in_progress", "completed"}
-                  or (status in {"queued", "in_progress"} and value.get("conclusion") is not None)
+                  or status not in {*active_sensor_statuses, "completed"}
+                  or (status in active_sensor_statuses and value.get("conclusion") is not None)
                   or canonical_repository_binding(value.get("repository")) != local_binding or head_binding is None
                   or not isinstance(pulls, list) or len(pulls) != 1
                   or not isinstance(head_sha, str) or sha_pattern.fullmatch(head_sha) is None):
@@ -424,7 +425,8 @@ jobs:
 
           def active_successors(excluded_identifiers):
               successors = set()
-              for status in ("queued", "in_progress"):
+              identities = {}
+              for status in active_sensor_statuses:
                   value = api(
                       f"repos/{repository}/actions/workflows/pr-governance-review-events.yml/runs?status={status}&per_page=100&page=1",
                       "Unable to re-read an active review sensor.",
@@ -433,14 +435,29 @@ jobs:
                   runs = value.get("workflow_runs") if isinstance(value, dict) else None
                   if type(total) is not int or total < 0 or total > 100 or not isinstance(runs, list) or len(runs) != total:
                       raise SystemExit("Active review sensor list is invalid.")
+                  page_identifiers = set()
                   for candidate in runs:
                       identifier = candidate.get("id") if isinstance(candidate, dict) else None
-                      if type(identifier) is not int or identifier < 1:
+                      if (type(identifier) is not int or identifier < 1 or identifier in page_identifiers
+                          or candidate.get("status") not in {*active_sensor_statuses, "completed"}):
                           raise SystemExit("Active review sensor list is invalid.")
-                      if identifier in excluded_identifiers:
-                          continue
-                      if validate_sensor(candidate, identifier, allow_out_of_scope=True):
+                      page_identifiers.add(identifier)
+                      local = validate_sensor(candidate, identifier, allow_out_of_scope=True)
+                      pull = candidate["pull_requests"][0]
+                      identity = (
+                          identifier, candidate["name"], candidate["event"], candidate["run_attempt"], candidate["path"],
+                          canonical_repository_binding(candidate["repository"]), canonical_repository_binding(candidate["head_repository"]),
+                          candidate["head_sha"], pull["number"], pull["base"]["ref"], canonical_repository_binding(pull["base"]["repo"]),
+                          pull["head"]["sha"], canonical_repository_binding(pull["head"]["repo"]),
+                      )
+                      # 状態別APIの間で遷移した同一runは、固定identityが一致する場合だけ統合する。
+                      if identifier in identities and identities[identifier] != identity:
+                          raise SystemExit("Active review sensor changed identity.")
+                      identities[identifier] = identity
+                      if local and identifier not in excluded_identifiers:
                           successors.add(identifier)
+                          if len(successors | excluded_identifiers) > 200:
+                              raise SystemExit("Active review sensor reservation exceeds its captured limit.")
               return successors
 
           while pending_ids:
@@ -459,7 +476,7 @@ jobs:
                       if not pending_ids:
                           raise SystemExit("Cancelled review sensor has no active local successor.")
                       continue
-                  if status not in {"queued", "in_progress"}:
+                  if status not in active_sensor_statuses:
                       raise SystemExit("Captured review sensor state is invalid.")
               # 捕捉後に始まったsensorも保護し、成功時に予約を取り落とさない。
               pending_ids.update(active_successors(pending_ids))

@@ -685,28 +685,30 @@ def active_local_review_sensors() -> list[int] | None:
     local_binding = current_repository[:2]
     default_branch = current_repository[2]
     allowed_events = {"pull_request", "pull_request_review", "pull_request_review_comment"}
-    identifiers = []
-    seen_identifiers = set()
-    for status in ("queued", "in_progress"):
+    active_sensor_statuses = ("requested", "queued", "waiting", "pending", "in_progress")
+    identifiers = set()
+    identities = {}
+    for status in active_sensor_statuses:
         listed = request(f"repos/{repository}/actions/workflows/pr-governance-review-events.yml/runs?status={status}&per_page=100&page=1")
         runs = listed.get("workflow_runs") if isinstance(listed, dict) else None
         total = listed.get("total_count") if isinstance(listed, dict) else None
         if type(total) is not int or total < 0 or total > 100 or not isinstance(runs, list) or len(runs) != total:
             return None
+        page_identifiers = set()
         for run in runs:
             if not isinstance(run, dict):
                 return None
             run_id = run.get("id")
             pulls = run.get("pull_requests")
             run_head_binding = canonical_repository_binding(run.get("head_repository"))
-            if (type(run_id) is not int or not 1 <= run_id <= 2**63 - 1 or run_id in seen_identifiers
+            if (type(run_id) is not int or not 1 <= run_id <= 2**63 - 1 or run_id in page_identifiers
                 or run.get("name") != "PR governance review sensor" or run.get("event") not in allowed_events
-                or run.get("status") != status or type(run.get("run_attempt")) is not int or run["run_attempt"] != 1
+                or run.get("status") not in active_sensor_statuses or run.get("conclusion") is not None or type(run.get("run_attempt")) is not int or run["run_attempt"] != 1
                 or not workflow_path_matches(run.get("path"), expected_path)
                 or canonical_repository_binding(run.get("repository")) != local_binding
                 or run_head_binding is None or not isinstance(pulls, list) or len(pulls) != 1):
                 return None
-            seen_identifiers.add(run_id)
+            page_identifiers.add(run_id)
             pull = pulls[0]
             base = pull.get("base") if isinstance(pull, dict) else None
             head = pull.get("head") if isinstance(pull, dict) else None
@@ -717,6 +719,15 @@ def active_local_review_sensors() -> list[int] | None:
                 or canonical_repository_binding(head.get("repo")) != run_head_binding
                 or not isinstance(head.get("sha"), str) or re.fullmatch(r"[0-9a-fA-F]{40}", head["sha"]) is None):
                 return None
+            identity = (
+                run_id, run["name"], run["event"], run["run_attempt"], run["path"],
+                canonical_repository_binding(run["repository"]), run_head_binding, run.get("head_sha"),
+                number, base["ref"], canonical_repository_binding(base["repo"]), head["sha"], canonical_repository_binding(head["repo"]),
+            )
+            # 状態別APIの間で遷移した同一runは、固定identityが一致する場合だけ統合する。
+            if run_id in identities and identities[run_id] != identity:
+                return None
+            identities[run_id] = identity
             current = request(f"repos/{repository}/pulls/{number}")
             current_base = current.get("base") if isinstance(current, dict) else None
             current_head = current.get("head") if isinstance(current, dict) else None
@@ -736,7 +747,9 @@ def active_local_review_sensors() -> list[int] | None:
                 or current_base["ref"] != default_branch or run_head_binding != current_head_binding
                 or current_head_binding != local_binding):
                 continue
-            identifiers.append(run_id)
+            identifiers.add(run_id)
+            if len(identifiers) > 200:
+                return None
     return sorted(identifiers)
 
 

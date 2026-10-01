@@ -2666,6 +2666,165 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                     self.assertEqual(values["writer_head"], "a" * 40)
                     self.assertEqual(values["default_branch"], "master")
 
+    def test_cancelled_sensor_tracks_successors_in_every_active_state(self) -> None:
+        match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", self._job_block("wait-for-active-review-sensor"), re.S)
+        self.assertIsNotNone(match); assert match is not None
+        program = textwrap.dedent(match.group(1))
+        repository = {"id": 7, "name": "repository", "url": "https://api.github.com/repos/owner/repository", "full_name": "owner/repository", "default_branch": "master"}
+        pull = {"number": 99, "state": "open", "draft": False, "base": {"ref": "master", "repo": repository}, "head": {"sha": "a" * 40, "repo": repository}}
+        for state in ("requested", "queued", "waiting", "pending", "in_progress"):
+            with self.subTest(state=state):
+                sensor = {"id": 18, "name": "PR governance review sensor", "event": "pull_request_review", "run_attempt": 1, "path": ".github/workflows/pr-governance-review-events.yml@master", "status": state, "conclusion": None, "repository": repository, "head_repository": repository, "head_sha": "a" * 40, "pull_requests": [{"number": 99, "base": pull["base"], "head": pull["head"]}]}
+                successor_reads = []
+                status_queries = []
+                def request(arguments, **keywords):
+                    endpoint = arguments[-1]
+                    self.assertEqual(keywords["timeout"], 20)
+                    if endpoint == "repos/owner/repository": value = repository
+                    elif endpoint.endswith("/pulls/99"): value = pull
+                    elif endpoint.endswith("/runs/17"): value = dict(sensor, id=17, status="completed", conclusion="cancelled")
+                    elif endpoint.endswith("/runs/18"):
+                        successor_reads.append(endpoint)
+                        value = sensor if len(successor_reads) == 1 else dict(sensor, status="completed", conclusion="success")
+                    else:
+                        status = parse_qs(urlparse(endpoint).query)["status"][0]
+                        status_queries.append(status)
+                        values = [sensor] if status == state and len(successor_reads) < 2 else []
+                        value = {"total_count": len(values), "workflow_runs": values}
+                    return subprocess.CompletedProcess(arguments, 0, json.dumps(value), "")
+                with patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repository", "SENSOR_RUN_IDS": "[17]"}), patch("subprocess.run", side_effect=request), patch("time.sleep"):
+                    exec(program, {})
+                self.assertEqual(len(successor_reads), 2)
+                self.assertEqual(set(status_queries), {"requested", "queued", "waiting", "pending", "in_progress"})
+
+    def test_successor_completed_during_active_query_keeps_direct_terminal_verification(self) -> None:
+        match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", self._job_block("wait-for-active-review-sensor"), re.S)
+        self.assertIsNotNone(match); assert match is not None
+        program = textwrap.dedent(match.group(1))
+        repository = {"id": 7, "name": "repository", "url": "https://api.github.com/repos/owner/repository", "full_name": "owner/repository", "default_branch": "master"}
+        pull = {"number": 99, "state": "open", "draft": False, "base": {"ref": "master", "repo": repository}, "head": {"sha": "a" * 40, "repo": repository}}
+        for conclusion in ("success", "failure", "cancelled", None, "unknown"):
+            with self.subTest(conclusion=conclusion):
+                sensor = {"id": 18, "name": "PR governance review sensor", "event": "pull_request_review", "run_attempt": 1, "path": ".github/workflows/pr-governance-review-events.yml@master", "status": "completed", "conclusion": conclusion, "repository": repository, "head_repository": repository, "head_sha": "a" * 40, "pull_requests": [{"number": 99, "base": pull["base"], "head": pull["head"]}]}
+                direct_reads = []; listed = []
+                def request(arguments, **keywords):
+                    endpoint = arguments[-1]
+                    self.assertEqual(keywords["timeout"], 20)
+                    if endpoint == "repos/owner/repository": value = repository
+                    elif endpoint.endswith("/pulls/99"): value = pull
+                    elif endpoint.endswith("/runs/17"): value = dict(sensor, id=17, conclusion="cancelled")
+                    elif endpoint.endswith("/runs/18"):
+                        direct_reads.append(endpoint); value = sensor
+                    else:
+                        status = parse_qs(urlparse(endpoint).query)["status"][0]
+                        values = [sensor] if status == "in_progress" and not listed else []
+                        if values: listed.append(18)
+                        value = {"total_count": len(values), "workflow_runs": values}
+                    return subprocess.CompletedProcess(arguments, 0, json.dumps(value), "")
+                with patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repository", "SENSOR_RUN_IDS": "[17]"}), patch("subprocess.run", side_effect=request), patch("time.sleep"):
+                    if conclusion == "success": exec(program, {})
+                    else:
+                        message = "Cancelled review sensor has no active local successor" if conclusion == "cancelled" else "Captured review sensor did not complete successfully"
+                        with self.assertRaisesRegex(SystemExit, message): exec(program, {})
+                self.assertEqual(direct_reads, ["repos/owner/repository/actions/runs/18"])
+
+    def test_successor_inventory_keeps_invalid_evidence_and_combined_cap_fail_closed(self) -> None:
+        match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", self._job_block("wait-for-active-review-sensor"), re.S)
+        self.assertIsNotNone(match); assert match is not None
+        program = textwrap.dedent(match.group(1)).split("\nwhile pending_ids:", 1)[0]
+        repository = {"id": 7, "name": "repository", "url": "https://api.github.com/repos/owner/repository", "full_name": "owner/repository", "default_branch": "master"}
+        pull = {"number": 99, "state": "open", "draft": False, "base": {"ref": "master", "repo": repository}, "head": {"sha": "a" * 40, "repo": repository}}
+        for scenario in ("unknown-state", "active-conclusion", "duplicate-id", "page-cap", "combined-cap", "bad-attempt"):
+            with self.subTest(scenario=scenario):
+                sensor = {"id": 18, "name": "PR governance review sensor", "event": "pull_request_review", "run_attempt": 1, "path": ".github/workflows/pr-governance-review-events.yml@master", "status": "queued", "conclusion": None, "repository": repository, "head_repository": repository, "head_sha": "a" * 40, "pull_requests": [{"number": 99, "base": pull["base"], "head": pull["head"]}]}
+                if scenario == "unknown-state": sensor["status"] = "unknown"
+                if scenario == "active-conclusion": sensor["conclusion"] = "success"
+                if scenario == "bad-attempt": sensor["run_attempt"] = True
+                def request(arguments, **keywords):
+                    endpoint = arguments[-1]
+                    if endpoint == "repos/owner/repository": value = repository
+                    elif endpoint.endswith("/pulls/99"): value = pull
+                    else:
+                        status = parse_qs(urlparse(endpoint).query)["status"][0]
+                        values = ([sensor, dict(sensor)] if scenario == "duplicate-id" else [sensor]) if status == "queued" else []
+                        if scenario == "combined-cap" and status in {"requested", "queued", "waiting"}:
+                            index = ("requested", "queued", "waiting").index(status)
+                            values = [dict(sensor, id=1000 + index * 100 + offset, status=status) for offset in range(100 if index < 2 else 1)]
+                        value = {"total_count": 101 if scenario == "page-cap" else len(values), "workflow_runs": values}
+                    return subprocess.CompletedProcess(arguments, 0, json.dumps(value), "")
+                with patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repository", "SENSOR_RUN_IDS": "[17]"}), patch("subprocess.run", side_effect=request):
+                    namespace = {}
+                    exec(program, namespace)
+                    with self.assertRaises(SystemExit): namespace["active_successors"](set())
+
+    def test_successor_inventory_merges_only_matching_partition_transitions(self) -> None:
+        match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", self._job_block("wait-for-active-review-sensor"), re.S)
+        self.assertIsNotNone(match); assert match is not None
+        program = textwrap.dedent(match.group(1)).split("\nwhile pending_ids:", 1)[0]
+        repository = {"id": 7, "name": "repository", "url": "https://api.github.com/repos/owner/repository", "full_name": "owner/repository", "default_branch": "master"}
+        pull = {"number": 99, "state": "open", "draft": False, "base": {"ref": "master", "repo": repository}, "head": {"sha": "a" * 40, "repo": repository}}
+        sensor = {"id": 18, "name": "PR governance review sensor", "event": "pull_request_review", "run_attempt": 1, "path": ".github/workflows/pr-governance-review-events.yml@master", "conclusion": None, "repository": repository, "head_repository": repository, "head_sha": "a" * 40, "pull_requests": [{"number": 99, "base": pull["base"], "head": pull["head"]}]}
+        scenarios = [(first, second, "transition") for first, second in (("requested", "queued"), ("queued", "in_progress"), ("waiting", "pending"), ("pending", "in_progress"))]
+        scenarios += [("queued", "in_progress", "mutable-metadata"), ("queued", "in_progress", "query-state-drift"), ("queued", "in_progress", "identity-drift"), ("requested", "queued", "out-of-scope"), ("requested", "queued", "local-limit"), ("requested", "queued", "pending-union-limit")]
+        for first, second, scenario in scenarios:
+            with self.subTest(first=first, second=second, scenario=scenario):
+                def request(arguments, **keywords):
+                    endpoint = arguments[-1]
+                    self.assertEqual(keywords["timeout"], 20)
+                    if endpoint == "repos/owner/repository": value = repository
+                    elif endpoint.endswith("/pulls/99"): value = pull
+                    elif endpoint.endswith("/pulls/80"): value = dict(pull, number=80, state="closed")
+                    else:
+                        status = parse_qs(urlparse(endpoint).query)["status"][0]
+                        values = [dict(sensor, status=status)] if status in (first, second) else []
+                        if scenario == "mutable-metadata" and status == second: values[0]["repository"] = dict(sensor["repository"], description="updated")
+                        if scenario == "query-state-drift" and status == first: values[0]["status"] = second
+                        if scenario == "identity-drift" and status == second:
+                            values[0]["event"] = "pull_request_review_comment"
+                        if scenario in {"out-of-scope", "local-limit", "pending-union-limit"}:
+                            if status in {"requested", "queued"}:
+                                offset = 0 if status == "requested" else 100
+                                values = [dict(sensor, id=1000 + offset + index, status=status) for index in range(100)]
+                                if scenario == "out-of-scope":
+                                    for value in values: value["pull_requests"] = [dict(sensor["pull_requests"][0], number=80)]
+                            elif status == "waiting" and scenario == "out-of-scope":
+                                values = [dict(sensor, id=2000, status=status, pull_requests=[dict(sensor["pull_requests"][0], number=80)])]
+                            elif status == "in_progress" and scenario == "out-of-scope": values = [dict(sensor, status=status)]
+                            else: values = []
+                    if "/runs?" in endpoint: value = {"total_count": len(values), "workflow_runs": values}
+                    return subprocess.CompletedProcess(arguments, 0, json.dumps(value), "")
+                with patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repository", "SENSOR_RUN_IDS": "[17]"}), patch("subprocess.run", side_effect=request):
+                    namespace = {}; exec(program, namespace)
+                    if scenario in {"identity-drift", "pending-union-limit"}:
+                        with self.assertRaises(SystemExit): namespace["active_successors"]({17} if scenario == "pending-union-limit" else set())
+                    else:
+                        actual = namespace["active_successors"](set())
+                        self.assertEqual(actual, set(range(1000, 1200)) if scenario == "local-limit" else {18})
+
+    def test_sensor_active_scans_match_the_existing_lifecycle_contract(self) -> None:
+        preflight = (ROOT / "scripts/review/pr_governance_preflight.py").read_text(encoding="utf-8")
+        preflight_tree = ast.parse(preflight)
+        lifecycle = [ast.literal_eval(node.value) for node in ast.walk(preflight_tree) if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "lifecycle" for target in node.targets)]
+        self.assertEqual(len(lifecycle), 1)
+        expected = lifecycle[0] - {"completed"}
+        self.assertEqual(expected, {"requested", "queued", "waiting", "pending", "in_progress"})
+        trees = [preflight_tree] + [ast.parse(textwrap.dedent(program)) for program in re.findall(r"python3 - <<'PY'\n(.*?)\n          PY", self.actual_workflow, re.S)]
+        scans = 0
+        for tree in trees:
+            constants = {}
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign):
+                    try: value = ast.literal_eval(node.value)
+                    except (ValueError, TypeError): continue
+                    for target in node.targets:
+                        if isinstance(target, ast.Name): constants[target.id] = value
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.For) or "pr-governance-review-events.yml/runs?status=" not in ast.unparse(node): continue
+                scans += 1
+                values = constants[node.iter.id] if isinstance(node.iter, ast.Name) else ast.literal_eval(node.iter)
+                self.assertEqual(set(values), expected)
+        self.assertEqual(scans, 2)
+
     def _assert_waiter_sensor_identity_contract(self, wait: str) -> None:
         match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", wait, re.S)
         self.assertIsNotNone(match); assert match is not None
@@ -2692,7 +2851,9 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
         namespace = {"re": re, "repository": repository, "api": api,
                      "expected_path": sensor["path"], "allowed_events": {"pull_request", "pull_request_review", "pull_request_review_comment"},
                      "sha_pattern": re.compile(r"[0-9a-fA-F]{40}")}
-        exec(compile(ast.Module(body=functions, type_ignores=[]), "waiter-identity-contract", "exec"), namespace)
+        constants = [node for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "active_sensor_statuses" for target in node.targets)]
+        self.assertEqual(len(constants), 1)
+        exec(compile(ast.Module(body=constants + functions, type_ignores=[]), "waiter-identity-contract", "exec"), namespace)
         validate = namespace["validate_sensor"]
         for path in (sensor["path"], sensor["path"] + "@refs/heads/master"):
             with self.subTest(canonical_path=path):
@@ -2701,7 +2862,7 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                 self.assertTrue(validate(candidate, 17))
                 self.assertEqual(reads, [f"repos/{repository}", f"repos/{repository}/pulls/99"])
         for field, bad in (("path", sensor["path"] + "@master?x=1"), ("path", sensor["path"] + "/other@master"),
-                           ("event", "push"), ("status", "waiting"), ("conclusion", "success"), ("run_attempt", True), ("id", True)):
+                           ("event", "push"), ("status", "unknown"), ("conclusion", "success"), ("run_attempt", True), ("id", True)):
             with self.subTest(field=field, bad=bad), self.assertRaises(SystemExit):
                 candidate = json.loads(json.dumps(sensor)); candidate[field] = bad
                 validate(candidate, 17)

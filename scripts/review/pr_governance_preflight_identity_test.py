@@ -83,7 +83,10 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         payloads.  This intentionally tests the production inline program, not
         a copy of its identity predicates.
         """
-        supplied = responses or {}
+        supplied = dict(responses or {})
+        for status in ("requested", "queued", "waiting", "pending", "in_progress"):
+            endpoint = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?status={status}&per_page=100&page=1"
+            supplied.setdefault(endpoint, [{"total_count": 0, "workflow_runs": []}])
         reads: dict[str, int] = {}
         script_endpoint = (
             f"repos/{REPOSITORY}/contents/scripts/review/pr_governance_preflight.py"
@@ -378,6 +381,68 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
         self.assertEqual(result["priority"], "true")
         self.assertEqual(result["sensor_reservation"], "false")
         self.assertEqual(result["sensor_run_ids"], "[]")
+
+    def test_initial_sensor_capture_covers_every_active_state(self) -> None:
+        for status in ("requested", "queued", "waiting", "pending", "in_progress"):
+            with self.subTest(status=status):
+                sensor = {"id": 17, "name": "PR governance review sensor", "event": "pull_request_review", "status": status, "conclusion": None, "run_attempt": 1,
+                          "path": ".github/workflows/pr-governance-review-events.yml", "repository": self.repository(), "head_repository": self.repository(), "head_sha": HEAD,
+                          "pull_requests": [{"number": NUMBER, "base": {"ref": "master", "repo": self.repository()}, "head": {"sha": HEAD, "repo": self.repository()}}]}
+                endpoint = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?status={status}&per_page=100&page=1"
+                result = self.execute(responses={PR_ENDPOINT: [self.pull(), self.pull()], endpoint: [{"total_count": 1, "workflow_runs": [sensor]}]}, direct_priority_fence=True)
+                self.assertEqual(result["valid"], "true")
+                self.assertEqual(result["sensor_reservation"], "true")
+                self.assertEqual(result["sensor_run_ids"], "[17]")
+
+    def test_initial_sensor_scan_keeps_invalid_evidence_and_combined_cap_fail_closed(self) -> None:
+        prefix = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+        for scenario in ("unknown-state", "active-conclusion", "duplicate-id", "page-cap", "combined-cap"):
+            with self.subTest(scenario=scenario):
+                sensor = {"id": 17, "name": "PR governance review sensor", "event": "pull_request_review", "status": "requested", "conclusion": None, "run_attempt": 1,
+                          "path": ".github/workflows/pr-governance-review-events.yml", "repository": self.repository(), "head_repository": self.repository(), "head_sha": HEAD,
+                          "pull_requests": [{"number": NUMBER, "base": {"ref": "master", "repo": self.repository()}, "head": {"sha": HEAD, "repo": self.repository()}}]}
+                if scenario == "unknown-state": sensor["status"] = "unknown"
+                if scenario == "active-conclusion": sensor["conclusion"] = "success"
+                values = [sensor, dict(sensor)] if scenario == "duplicate-id" else [sensor]
+                responses = {PR_ENDPOINT: [self.pull(), self.pull()], prefix + "status=requested&per_page=100&page=1": [{"total_count": 101 if scenario == "page-cap" else len(values), "workflow_runs": values}]}
+                if scenario == "combined-cap":
+                    for index, status in enumerate(("requested", "queued", "waiting")):
+                        values = [dict(sensor, id=1000 + index * 100 + offset, status=status) for offset in range(100 if index < 2 else 1)]
+                        responses[prefix + f"status={status}&per_page=100&page=1"] = [{"total_count": len(values), "workflow_runs": values}]
+                result = self.execute(responses=responses, direct_priority_fence=True)
+                self.assertEqual(result["valid"], "false")
+                self.assertEqual(result["priority"], "false")
+                self.assertEqual(result["sensor_reservation"], "false")
+
+    def test_initial_sensor_capture_merges_only_matching_partition_transitions(self) -> None:
+        prefix = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+        sensor = {"id": 17, "name": "PR governance review sensor", "event": "pull_request_review", "conclusion": None, "run_attempt": 1,
+                  "path": ".github/workflows/pr-governance-review-events.yml", "repository": self.repository(), "head_repository": self.repository(), "head_sha": HEAD,
+                  "pull_requests": [{"number": NUMBER, "base": {"ref": "master", "repo": self.repository()}, "head": {"sha": HEAD, "repo": self.repository()}}]}
+        scenarios = [(first, second, "transition") for first, second in (("requested", "queued"), ("queued", "in_progress"), ("waiting", "pending"), ("pending", "in_progress"))]
+        scenarios += [("queued", "in_progress", "mutable-metadata"), ("queued", "in_progress", "query-state-drift"), ("queued", "in_progress", "identity-drift"), ("requested", "queued", "out-of-scope"), ("requested", "queued", "local-limit")]
+        for first, second, scenario in scenarios:
+            with self.subTest(first=first, second=second, scenario=scenario):
+                responses = {PR_ENDPOINT: [self.pull(), self.pull()]}
+                for status in (first, second):
+                    values = [dict(sensor, status=status)]
+                    if scenario == "mutable-metadata" and status == second: values[0]["repository"] = dict(sensor["repository"], description="updated")
+                    if scenario == "query-state-drift" and status == first: values[0]["status"] = second
+                    if scenario == "identity-drift" and status == second: values[0]["event"] = "pull_request_review_comment"
+                    responses[prefix + f"status={status}&per_page=100&page=1"] = [{"total_count": len(values), "workflow_runs": values}]
+                if scenario in {"out-of-scope", "local-limit"}:
+                    for index, status in enumerate(("requested", "queued", "waiting", "in_progress")):
+                        values = [dict(sensor, id=1000 + index * 100 + offset, status=status) for offset in range(100 if index < 2 else 1)] if index < 2 or scenario == "out-of-scope" else []
+                        if scenario == "out-of-scope" and index < 3:
+                            for value in values: value["pull_requests"] = [dict(sensor["pull_requests"][0], number=80)]
+                        if index == 3 and scenario == "out-of-scope": values = [dict(sensor, status=status)]
+                        responses[prefix + f"status={status}&per_page=100&page=1"] = [{"total_count": len(values), "workflow_runs": values}]
+                    responses[f"repos/{REPOSITORY}/pulls/80"] = [self.pull(number=80, state="closed")]
+                result = self.execute(responses=responses, direct_priority_fence=True)
+                self.assertEqual(result["valid"], "false" if scenario == "identity-drift" else "true")
+                if scenario != "identity-drift":
+                    self.assertEqual(result["sensor_reservation"], "true")
+                    self.assertEqual(json.loads(result["sensor_run_ids"]), list(range(1000, 1200)) if scenario == "local-limit" else [17])
 
     def test_active_sensor_reserves_a_stable_local_default_comment(self) -> None:
         """A valid priority PR comment still reserves the active sensor slot."""
