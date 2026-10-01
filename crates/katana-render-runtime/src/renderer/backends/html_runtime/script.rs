@@ -10,6 +10,14 @@ pub(super) const DOM_BOOTSTRAP: &str = include_str!("dom_bootstrap.js");
 pub(super) const BODY_ONLOAD_INSTALL: &str = "__krrInstallStaticBodyLoadHandler();";
 pub(super) const DOM_CONTENT_LOADED_DISPATCH: &str = "__krrDispatchDocumentContentLoaded();";
 pub(super) const WINDOW_LOAD_DISPATCH: &str = "__krrDispatchWindowLoad();";
+
+pub(super) fn body_onload_install_script(source: Option<&str>) -> String {
+    let Some(source) = source else {
+        return BODY_ONLOAD_INSTALL.to_string();
+    };
+    let source = serde_json::Value::String(source.to_owned()).to_string();
+    format!("__krrInstallStaticBodyLoadHandler({source});")
+}
 pub(super) type HtmlTryCatchScope<'pin, 'scope, 'object, 'isolate> =
     v8::PinnedRef<'pin, v8::TryCatch<'scope, 'object, v8::HandleScope<'isolate>>>;
 

@@ -200,6 +200,48 @@ window.addEventListener('load', () => { captures += 1; }, true);
 }
 
 #[test]
+fn later_duplicate_body_onload_survives_earlier_attribute_removal() -> TestResult {
+    let output = render(
+        r#"<body><p id=status>Waiting</p><script>document.body.removeAttribute('onload');</script><body onload="document.getElementById('status').textContent = 'later-body'">"#,
+    )?;
+
+    assert!(output.contains(">later-body</p>"), "{output}");
+    Ok(())
+}
+
+#[test]
+fn later_duplicate_body_onload_uses_native_dom_after_method_overrides() -> TestResult {
+    let output = render(
+        r#"<body><p id=status>Waiting</p><script>document.body.removeAttribute('onload'); document.body.getAttribute = () => null; document.body.setAttribute = () => {};</script><body onload="document.getElementById('status').textContent = 'later-body'">"#,
+    )?;
+
+    assert!(output.contains(">later-body</p>"), "{output}");
+    Ok(())
+}
+
+#[test]
+fn removed_earlier_body_onload_is_not_restored_by_duplicate_body_without_onload() -> TestResult {
+    let output = render(
+        r#"<body onload="document.getElementById('status').textContent = 'old-body'"><p id=status>Waiting</p><script>document.body.removeAttribute('onload');</script><body>"#,
+    )?;
+
+    assert!(output.contains(">Waiting</p>"), "{output}");
+    assert!(!output.contains(">old-body</p>"), "{output}");
+    Ok(())
+}
+
+#[test]
+fn earlier_body_onload_mutation_survives_later_duplicate_body_token() -> TestResult {
+    let output = render(
+        r#"<body><p id=status>Waiting</p><script>document.body.setAttribute('onload', "document.getElementById('status').textContent = 'script-body'");</script><body onload="document.getElementById('status').textContent = 'token-body'">"#,
+    )?;
+
+    assert!(output.contains(">script-body</p>"), "{output}");
+    assert!(!output.contains(">token-body</p>"), "{output}");
+    Ok(())
+}
+
+#[test]
 fn dispatches_scriptless_element_ready_state_handlers() -> TestResult {
     let output = render(
         r#"<p id=status></p><iframe data-krr-local-frame onreadystatechange="document.getElementById('status').textContent += `${document.readyState}|`"></iframe>"#,

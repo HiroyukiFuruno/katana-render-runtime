@@ -1,6 +1,7 @@
 use crate::renderer::backends::html_runtime::script::{
-    BODY_ONLOAD_INSTALL, DOM_CONTENT_LOADED_DISPATCH, WINDOW_LOAD_DISPATCH, check_bridge_error,
-    evaluate, evaluate_and_wait_for_promise, install_dom_bridge, perform_microtask_checkpoint,
+    DOM_CONTENT_LOADED_DISPATCH, WINDOW_LOAD_DISPATCH, body_onload_install_script,
+    check_bridge_error, evaluate, evaluate_and_wait_for_promise, install_dom_bridge,
+    perform_microtask_checkpoint,
 };
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 
@@ -13,6 +14,7 @@ impl StaticHtmlRuntime {
         isolate: &mut v8::OwnedIsolate,
         scripts: &[String],
         body_onload_script_index: Option<usize>,
+        body_onload_source: Option<&str>,
         document_url: &str,
     ) -> Result<v8::Global<v8::Context>, HtmlRuntimeError> {
         v8::scope!(let handle_scope, isolate);
@@ -29,6 +31,7 @@ impl StaticHtmlRuntime {
             document_url,
             scripts,
             body_onload_script_index,
+            body_onload_source,
             &mut evaluate,
         )?;
         Self::run_interactive_lifecycle_scripts(document_url, &mut evaluate)?;
@@ -54,12 +57,14 @@ impl StaticHtmlRuntime {
         document_url: &str,
         scripts: &[String],
         body_onload_script_index: Option<usize>,
+        body_onload_source: Option<&str>,
         evaluate: &mut InteractiveScriptEvaluator<'_>,
     ) -> Result<(), HtmlRuntimeError> {
         for (script_index, script) in scripts.iter().enumerate() {
             Self::install_interactive_body_onload(
                 document_url,
                 body_onload_script_index,
+                body_onload_source,
                 script_index,
                 evaluate,
             )?;
@@ -73,6 +78,7 @@ impl StaticHtmlRuntime {
         Self::install_interactive_body_onload(
             document_url,
             body_onload_script_index,
+            body_onload_source,
             scripts.len(),
             evaluate,
         )
@@ -81,15 +87,17 @@ impl StaticHtmlRuntime {
     pub(super) fn install_interactive_body_onload(
         document_url: &str,
         body_onload_script_index: Option<usize>,
+        body_onload_source: Option<&str>,
         script_index: usize,
         evaluate: &mut InteractiveScriptEvaluator<'_>,
     ) -> Result<(), HtmlRuntimeError> {
         (body_onload_script_index == Some(script_index))
             .then(|| {
+                let install = body_onload_install_script(body_onload_source);
                 Self::run_interactive_script(
                     document_url,
                     "krr-html-body-onload",
-                    BODY_ONLOAD_INSTALL,
+                    &install,
                     evaluate,
                 )
             })

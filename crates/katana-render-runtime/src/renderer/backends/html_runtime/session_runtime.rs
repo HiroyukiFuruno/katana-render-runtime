@@ -33,6 +33,7 @@ impl StaticHtmlRuntime {
             .inline_scripts()
             .map_err(HtmlRuntimeError::ExternalScript)?;
         let body_onload_script_index = document.body_onload_script_index();
+        let body_onload_source = document.body_onload_source().map(str::to_owned);
 
         DiagramV8Runtime::ensure_initialized();
         let mut isolate = v8::Isolate::new(Default::default());
@@ -42,6 +43,7 @@ impl StaticHtmlRuntime {
             &mut isolate,
             &scripts,
             body_onload_script_index,
+            body_onload_source.as_deref(),
             "about:blank",
         )?;
         Ok(StaticHtmlRuntimeSession {
@@ -135,6 +137,22 @@ mod tests {
         );
         assert!(
             !snapshot.contains(r#"<p id="status">head</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn interactive_duplicate_body_onload_survives_earlier_attribute_removal() {
+        let source = must_result(HtmlBrowserSource::new(
+            r#"<body><p id=status>Waiting</p><script>document.body.removeAttribute('onload');</script><body onload="document.getElementById('status').textContent = 'later-body'">"#,
+            "https://example.test/index.html",
+        ));
+
+        let snapshot =
+            must_result(must_result(StaticHtmlRuntime.start_interactive(&source)).snapshot());
+
+        assert!(
+            snapshot.contains(r#"<p id="status">later-body</p>"#),
             "{snapshot}"
         );
     }
@@ -316,8 +334,13 @@ mod tests {
     fn script_context_setup_rejects_invalid_document_urls_in_both_modes() {
         DiagramV8Runtime::ensure_initialized();
         let mut static_isolate = v8::Isolate::new(Default::default());
-        let static_result =
-            StaticHtmlRuntime::execute_inline_scripts(&mut static_isolate, &[], None, "http://[");
+        let static_result = StaticHtmlRuntime::execute_inline_scripts(
+            &mut static_isolate,
+            &[],
+            None,
+            None,
+            "http://[",
+        );
         assert!(matches!(
             static_result,
             Err(HtmlRuntimeError::DomBridge(message))
@@ -328,6 +351,7 @@ mod tests {
         let interactive_result = StaticHtmlRuntime::execute_interactive_scripts(
             &mut interactive_isolate,
             &[],
+            None,
             None,
             "http://[",
         );
@@ -401,6 +425,7 @@ mod tests {
             "https://example.test/index.html",
             &["document.body.dataset.ready = 'yes';".to_string()],
             Some(0),
+            None,
             &mut |script, _source| Err(HtmlRuntimeError::JavaScriptCompile(script.to_string())),
         );
 

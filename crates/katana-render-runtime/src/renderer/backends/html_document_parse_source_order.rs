@@ -18,8 +18,17 @@ pub(super) struct SourceOrderSink {
     node_visibility: RefCell<HashMap<usize, bool>>,
     window_load_handler_observer: RefCell<WindowLoadHandlerObserver>,
     body_onload_script_index: Cell<Option<usize>>,
+    body_onload_source: RefCell<Option<String>>,
     body_onload_source_order_index: Cell<Option<usize>>,
     source_order: RefCell<Vec<SourceOrderEntry>>,
+}
+
+pub(super) struct ParsedSourceOrder {
+    pub(super) document: RcDom,
+    pub(super) body_onload_script_index: Option<usize>,
+    pub(super) body_onload_source: Option<String>,
+    pub(super) body_onload_source_order_index: Option<usize>,
+    pub(super) source_order: Vec<Handle>,
 }
 
 struct OpenSelectObserver {
@@ -44,12 +53,13 @@ impl SourceOrderSink {
             node_visibility: RefCell::new(HashMap::new()),
             window_load_handler_observer: RefCell::new(WindowLoadHandlerObserver::default()),
             body_onload_script_index: Cell::new(None),
+            body_onload_source: RefCell::new(None),
             body_onload_source_order_index: Cell::new(None),
             source_order: RefCell::new(Vec::new()),
         }
     }
 
-    pub(super) fn finish(self) -> (RcDom, Option<usize>, Option<usize>, Vec<Handle>) {
+    pub(super) fn finish(self) -> ParsedSourceOrder {
         let parsed = self.tree_builder.sink.finish();
         let (body_onload_source_order_index, source_order) = finish_source_order(
             &parsed,
@@ -58,12 +68,13 @@ impl SourceOrderSink {
             self.body_onload_script_index.get(),
             &self.node_visibility,
         );
-        (
-            parsed,
-            self.body_onload_script_index.get(),
+        ParsedSourceOrder {
+            document: parsed,
+            body_onload_script_index: self.body_onload_script_index.get(),
+            body_onload_source: self.body_onload_source.into_inner(),
             body_onload_source_order_index,
             source_order,
-        )
+        }
     }
 
     fn observe_script(&self, node: &Handle) {
@@ -95,18 +106,11 @@ impl SourceOrderSink {
     }
 
     fn observe_window_load_handler(&self, tag: &Tag) {
+        let Some(source) = window_load_handler_source(tag) else {
+            return;
+        };
         let name = tag.name.to_string();
-        let load_handler_element =
-            name.eq_ignore_ascii_case("body") || name.eq_ignore_ascii_case("frameset");
-        if !load_handler_element
-            || self.body_onload_script_index.get().is_some()
-            || !tag.attrs.iter().any(|attribute| {
-                attribute
-                    .name
-                    .local
-                    .to_string()
-                    .eq_ignore_ascii_case("onload")
-            })
+        if self.body_onload_script_index.get().is_some()
             || !self
                 .window_load_handler_observer
                 .borrow_mut()
@@ -118,6 +122,7 @@ impl SourceOrderSink {
             return;
         }
         self.body_onload_script_index.set(Some(self.scripts.get()));
+        self.body_onload_source.replace(Some(source));
         self.body_onload_source_order_index
             .set(Some(self.source_order.borrow().len()));
     }
@@ -129,6 +134,23 @@ impl SourceOrderSink {
             &self.node_visibility,
         )
     }
+}
+
+fn window_load_handler_source(tag: &Tag) -> Option<String> {
+    let name = tag.name.to_string();
+    if !name.eq_ignore_ascii_case("body") && !name.eq_ignore_ascii_case("frameset") {
+        return None;
+    }
+    tag.attrs
+        .iter()
+        .find(|attribute| {
+            attribute
+                .name
+                .local
+                .to_string()
+                .eq_ignore_ascii_case("onload")
+        })
+        .map(|attribute| attribute.value.to_string())
 }
 
 impl TokenSink for SourceOrderSink {
@@ -166,8 +188,7 @@ mod tests {
             had_duplicate_attributes: false,
         });
 
-        let (_, _, _, source_order) = sink.finish();
-        assert!(source_order.is_empty());
+        assert!(sink.finish().source_order.is_empty());
     }
 
     #[test]

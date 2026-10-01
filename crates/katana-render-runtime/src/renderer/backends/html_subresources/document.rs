@@ -15,12 +15,14 @@ pub(super) fn load_document_resources(
     super::iframe::inline_iframes(loader, document);
     let stylesheets = load_stylesheets(loader, &document.document);
     let (scripts, body_onload_script_index) = load_scripts(loader, document);
+    let body_onload_source = document.body_onload_source().map(str::to_owned);
     let root = document.document.clone();
     inline_images(loader, document, &root);
     HtmlDocumentResources {
         stylesheets,
         scripts,
         body_onload_script_index,
+        body_onload_source,
     }
 }
 

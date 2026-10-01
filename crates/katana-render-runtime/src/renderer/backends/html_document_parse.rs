@@ -8,17 +8,23 @@ use html5ever::{
     TokenizerResult,
     tokenizer::{BufferQueue, Tokenizer, TokenizerOpts},
 };
-use markup5ever_rcdom::{Handle, RcDom};
-use source_order::SourceOrderSink;
+use markup5ever_rcdom::RcDom;
+use source_order::{ParsedSourceOrder, SourceOrderSink};
 use std::collections::HashMap;
 
 impl HtmlDocument {
     pub(crate) fn parse(source: &str) -> Self {
-        let (parsed, body_onload_script_index, body_onload_source_order_index, source_order) =
-            parse_with_source_order(source);
+        let ParsedSourceOrder {
+            document: parsed,
+            body_onload_script_index,
+            body_onload_source,
+            body_onload_source_order_index,
+            source_order,
+        } = parse_with_source_order(source);
         let mut document = Self {
             document: parsed.document,
             body_onload_script_index,
+            body_onload_source,
             source_order,
             body_onload_source_order_index,
             nodes: HashMap::new(),
@@ -47,9 +53,13 @@ impl HtmlDocument {
     pub(crate) fn body_onload_script_index(&self) -> Option<usize> {
         self.body_onload_script_index
     }
+
+    pub(crate) fn body_onload_source(&self) -> Option<&str> {
+        self.body_onload_source.as_deref()
+    }
 }
 
-fn parse_with_source_order(source: &str) -> (RcDom, Option<usize>, Option<usize>, Vec<Handle>) {
+fn parse_with_source_order(source: &str) -> ParsedSourceOrder {
     let sink = SourceOrderSink::new(RcDom::default());
     let tokenizer = Tokenizer::new(sink, TokenizerOpts::default());
     let input = BufferQueue::default();
@@ -92,6 +102,16 @@ mod tests {
             "<svg><select><foreignObject><iframe id=real></iframe></foreignObject></select></svg>",
         ),
     ];
+
+    #[test]
+    fn duplicate_body_token_retains_its_parser_observed_onload_source() {
+        let document = HtmlDocument::parse(
+            r#"<body><script>document.body.removeAttribute('onload')</script><body onload="run()">"#,
+        );
+
+        assert_eq!(document.body_onload_script_index(), Some(1));
+        assert_eq!(document.body_onload_source(), Some("run()"));
+    }
 
     #[test]
     fn body_onload_uses_later_duplicate_body_token_position() {

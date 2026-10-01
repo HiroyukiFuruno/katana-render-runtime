@@ -23,7 +23,7 @@ const bodyLoadHandler = source.match(
   /^const __krrInstallBodyLoadHandler = \(body, source\) => \{[\s\S]*?^\};/m,
 )?.[0];
 const staticBodyLoadHandler = source.match(
-  /^globalThis\.__krrInstallStaticBodyLoadHandler = \(\) => \{[\s\S]*?^\};/m,
+  /^globalThis\.__krrInstallStaticBodyLoadHandler = \(parserSource\) => \{[\s\S]*?^\};/m,
 )?.[0];
 const windowLoadNodeCheck = source.match(
   /^const __krrIsWindowLoadNode = \(nodeId\) => \{[\s\S]*?^\};/m,

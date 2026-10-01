@@ -748,14 +748,27 @@ Object.defineProperty(globalThis, "onload", {
     __krrInstallLifecycleProperty(globalThis, "load", value);
   },
 });
-globalThis.__krrInstallStaticBodyLoadHandler = () => {
+globalThis.__krrInstallStaticBodyLoadHandler = (parserSource) => {
+  const install = (element) => {
+    if (parserSource === undefined) {
+      __krrInstallBodyLoadHandler(element, element.getAttribute("onload"));
+      return;
+    }
+    const currentSource = __krrNativeDom("getAttribute", element.__krrNodeId, "onload");
+    if (currentSource === null) {
+      __krrNativeDom("setAttribute", element.__krrNodeId, "onload", parserSource);
+      __krrInstallBodyLoadHandler(element, parserSource);
+    } else if (currentSource === parserSource) {
+      __krrInstallBodyLoadHandler(element, currentSource);
+    }
+  };
   const body = document.body;
   if (body !== null) {
-    __krrInstallBodyLoadHandler(body, body.getAttribute("onload"));
+    install(body);
     return;
   }
   const frameset = document.querySelector("html > frameset");
-  if (frameset !== null) __krrInstallBodyLoadHandler(frameset, frameset.getAttribute("onload"));
+  if (frameset !== null) install(frameset);
 };
 const __krrSeedPrevalidatedImageEvents = () => {
   let images;
