@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 import os
+import shlex
 import subprocess
 import tempfile
 from pathlib import Path
@@ -14,6 +15,73 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.preflight = (root / ".github/workflows/release-preflight.yml").read_text(encoding="utf-8")
         self.retry = (root / ".github/workflows/release-publish-retry.yml").read_text(encoding="utf-8")
         self.publisher = (root / "scripts/release/publish-crates.sh").read_text(encoding="utf-8")
+
+    def test_coverage_uses_official_clean_and_full_gate_without_wiping_build_cache(self) -> None:
+        root = Path(__file__).parents[2]
+        lines = (root / "Justfile").read_text(encoding="utf-8").splitlines()
+        recipe_start = next(
+            index for index, line in enumerate(lines) if line.startswith("coverage:")
+        )
+        recipe_commands = []
+        for line in lines[recipe_start + 1 :]:
+            if line.startswith("    "):
+                recipe_commands.append(line.strip())
+            elif not line:
+                continue
+            else:
+                break
+
+        parsed_commands = [shlex.split(command) for command in recipe_commands]
+        coverage_commands = [tokens for tokens in parsed_commands if "llvm-cov" in tokens]
+        cleanup_commands = [tokens for tokens in coverage_commands if "clean" in tokens]
+        measurement_commands = [
+            tokens for tokens in coverage_commands if "clean" not in tokens
+        ]
+        self.assertEqual(len(cleanup_commands), 1)
+        self.assertEqual(len(measurement_commands), 1)
+        cleanup = cleanup_commands[0]
+        coverage = measurement_commands[0]
+        self.assertEqual(cleanup[cleanup.index("llvm-cov") + 1], "clean")
+        self.assertIn("--workspace", cleanup)
+        self.assertLess(parsed_commands.index(cleanup), parsed_commands.index(coverage))
+
+        required_options = (
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            "--locked",
+            "--summary-only",
+            "--fail-under-lines",
+            "--fail-uncovered-lines",
+        )
+        for option in required_options:
+            with self.subTest(option=option):
+                self.assertIn(option, coverage)
+        self.assertEqual(
+            coverage[coverage.index("--fail-under-lines") + 1],
+            "{{COVERAGE_MIN_LINES}}",
+        )
+        self.assertIn(
+            "{{COVERAGE_MAX_UNCOVERED_LINES}}",
+            coverage[coverage.index("--fail-uncovered-lines") + 1],
+        )
+
+        forbidden_options = ("--no-clean", "--no-report", "--no-run")
+        for tokens in coverage_commands:
+            for option in forbidden_options:
+                self.assertNotIn(option, tokens)
+        for tokens in parsed_commands:
+            if tokens and tokens[0] == "rm":
+                self.assertFalse(
+                    any(
+                        argument == "target"
+                        or argument.startswith(("target/", "./target/"))
+                        for argument in tokens[1:]
+                    ),
+                    "coverage must retain Cargo build caches",
+                )
+            if len(tokens) > 1 and tokens[1] == "clean":
+                self.assertIn("llvm-cov", tokens)
 
     @staticmethod
     def workflow_step(workflow: str, name: str) -> str:

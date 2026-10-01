@@ -116,7 +116,9 @@ fn coverage_gate_remains_strict_and_includes_integration_targets()
     assert!(recipe.contains("--all-targets"));
     assert!(recipe.contains("--fail-under-lines {{COVERAGE_MIN_LINES}}"));
     assert!(recipe.contains("--fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}"));
-    assert!(recipe.contains("rm -rf target/llvm-cov-target target/debug/deps"));
+    assert!(recipe.contains("llvm-cov clean --workspace"));
+    assert!(!recipe.contains("rm -rf target/"));
+    assert!(!recipe.contains("cargo clean"));
     assert!(
         justfile
             .contains("COVERAGE_MIN_LINES := env_var_or_default(\"COVERAGE_MIN_LINES\", \"100\")")
