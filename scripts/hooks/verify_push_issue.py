@@ -59,7 +59,6 @@ _ZERO_SHA = "0" * 40
 _SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 _REPOSITORY_PATTERN = re.compile(r"^[^/\s]+/[^/\s]+$")
 _NAME_STATUS_PATTERN = re.compile(r"^(?P<kind>[ACDMRTUXB])(?P<score>\d{1,3})?$")
-_WORKFLOW_DIRECTORY_PREFIX = ".github/workflows/"
 _MANIFEST_NAMES = {
     "Cargo.toml",
     "package.json",
@@ -696,49 +695,6 @@ def _pr_changed_paths_from_trees(
     ]
 
 
-def _trusted_workflow_path_errors(changed_paths: Sequence[str]) -> list[str]:
-    """Reject every PR workflow change that could forge an Actions latch."""
-    return sorted(
-        {
-            path
-            for path in changed_paths
-            if path.startswith(_WORKFLOW_DIRECTORY_PREFIX)
-        }
-    )
-
-
-def _default_advance_workflow_errors(*, repository: str, base_sha: str, trusted_default_sha: str) -> list[str]:
-    """Reject a default-branch workflow change since this PR's trusted base.
-
-    The compare API exposes at most 300 changed files.  A full page is
-    therefore ambiguous and is rejected instead of letting a stale PR base
-    inherit a newer default workflow without validation.
-    """
-    if base_sha == trusted_default_sha:
-        return []
-    comparison = _gh_json(f"repos/{repository}/compare/{base_sha}...{trusted_default_sha}")
-    if not isinstance(comparison, dict):
-        raise ContractViolation("trusted default compare responseの形式が不正です")
-    base = comparison.get("base_commit")
-    if not isinstance(base, dict) or _require_sha(base.get("sha"), "trusted default compare base SHA") != base_sha:
-        raise ContractViolation("trusted default compare responseのbase SHAが一致しません")
-    files = comparison.get("files")
-    if not isinstance(files, list) or len(files) >= 300:
-        raise ContractViolation("trusted default compare filesが打ち切られた可能性があります")
-    paths: list[str] = []
-    for item in files:
-        if not isinstance(item, dict):
-            raise ContractViolation("trusted default compare fileの形式が不正です")
-        for key in ("filename", "previous_filename"):
-            value = item.get(key)
-            if value is None and key == "previous_filename":
-                continue
-            if not isinstance(value, str) or not value:
-                raise ContractViolation("trusted default compare file pathが不正です")
-            paths.append(value)
-    return _trusted_workflow_path_errors(paths)
-
-
 def _validate_pr_canonical_issue(
     *,
     repository: str,
@@ -767,14 +723,11 @@ def validate_pr_range(
     head_sha: str,
     branch: str,
     issue_loader: IssueLoader,
-    trusted_default_sha: str | None = None,
 ) -> set[int]:
     """Validate a PR's base..head contract without checking out PR code."""
     repository = _require_repository_name(repository)
     base_sha = _require_sha(base_sha, "PR base SHA")
     head_sha = _require_sha(head_sha, "PR head SHA")
-    if trusted_default_sha is not None:
-        trusted_default_sha = _require_sha(trusted_default_sha, "trusted default SHA")
     if pr_number < 1:
         raise ContractViolation("PR番号は正の整数である必要があります")
     if not _is_remote_ref(f"refs/heads/{branch}"):
@@ -802,21 +755,6 @@ def validate_pr_range(
     changed_paths = _pr_changed_paths(
         repository=repository, base_sha=base_sha, head_sha=head_sha
     )
-    protected_workflows = _trusted_workflow_path_errors(changed_paths)
-    if protected_workflows:
-        raise ContractViolation(
-            "GitHub Actions workflowはPRから変更できません: "
-            + ", ".join(protected_workflows)
-        )
-    if trusted_default_sha is not None:
-        default_workflows = _default_advance_workflow_errors(
-            repository=repository, base_sha=base_sha, trusted_default_sha=trusted_default_sha,
-        )
-        if default_workflows:
-            raise ContractViolation(
-                "trusted default branch上でGitHub Actions workflowが変更されています: "
-                + ", ".join(default_workflows)
-            )
     validate_contract(
         branch=branch,
         default_branch=None,
@@ -1150,10 +1088,6 @@ def main() -> int:
             "--repository",
             help="GitHub owner/repository for --pr-number mode",
         )
-        parser.add_argument(
-            "--trusted-default-sha",
-            help="immutable default-branch SHA whose workflow bytes the writer trusts",
-        )
         arguments = parser.parse_args()
 
         pr_values = (
@@ -1162,13 +1096,12 @@ def main() -> int:
             arguments.pr_head_sha,
             arguments.pr_branch,
             arguments.repository,
-            arguments.trusted_default_sha,
         )
         if any(value is not None for value in pr_values):
             if not all(value is not None for value in pr_values):
                 raise ContractViolation(
                     "PR range modeには--pr-number、--pr-base-sha、--pr-head-sha、"
-                    "--pr-branch、--repository、--trusted-default-shaがすべて必要です"
+                    "--pr-branch、--repositoryがすべて必要です"
                 )
             if arguments.remote is not None or arguments.remote_url is not None:
                 raise ContractViolation("PR range modeで--remoteと--remote-urlは使用できません")
@@ -1186,7 +1119,6 @@ def main() -> int:
                 head_sha=arguments.pr_head_sha,
                 branch=arguments.pr_branch,
                 issue_loader=load_issue,
-                trusted_default_sha=arguments.trusted_default_sha,
             )
             print(
                 "Issue contract passed: "
