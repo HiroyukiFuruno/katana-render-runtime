@@ -405,20 +405,6 @@ const __krrElement = (nodeId) => {
   const element = __krrInstallEventTarget(Object.create(__krrElementPrototype));
   Object.defineProperty(element, "__krrNodeId", { value: normalizedId });
   for (const eventType of __krrLifecycleEventTypes) {
-    Object.defineProperty(element, `on${eventType}`, {
-      configurable: true,
-      get() {
-        if (eventType === "load" && __krrRouteWindowLoadElement(this)) return window.onload;
-        return __krrEventHandlers.get(this)?.get(eventType) ?? null;
-      },
-      set(value) {
-        if (eventType === "load" && __krrRouteWindowLoadElement(this)) {
-          __krrInstallLifecycleProperty(window, eventType, value);
-          return;
-        }
-        __krrInstallLifecycleProperty(this, eventType, value);
-      },
-    });
     const source = __krrNativeDom("getAttribute", normalizedId, `on${eventType}`);
     if (source !== null) {
       // body.onload は Window の load プロパティと共有する。静的文書では Rust 側が
@@ -737,6 +723,22 @@ globalThis.document = __krrInstallEventTarget({
     return __krrDocumentReadyState;
   },
 });
+for (const eventType of __krrLifecycleEventTypes) {
+  Object.defineProperty(__krrElementPrototype, `on${eventType}`, {
+    configurable: true,
+    get() {
+      if (eventType === "load" && __krrRouteWindowLoadElement(this)) return window.onload;
+      return __krrEventHandlers.get(this)?.get(eventType) ?? null;
+    },
+    set(value) {
+      if (eventType === "load" && __krrRouteWindowLoadElement(this)) {
+        __krrInstallLifecycleProperty(window, eventType, value);
+        return;
+      }
+      __krrInstallLifecycleProperty(this, eventType, value);
+    },
+  });
+}
 globalThis.window = globalThis;
 __krrInstallEventTarget(globalThis);
 Object.defineProperty(globalThis, "onload", {

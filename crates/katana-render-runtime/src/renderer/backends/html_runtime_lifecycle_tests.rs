@@ -126,7 +126,7 @@ status.dataset.nullable = `${nullableOptions.bubbles}:${nullableOptions.cancelab
 }
 
 #[test]
-fn deleting_lifecycle_handler_does_not_restore_the_inline_handler() -> TestResult {
+fn deleting_lifecycle_handler_preserves_the_assigned_handler() -> TestResult {
     let output = render(
         r#"<p id=status>unchanged</p><iframe id=frame data-krr-local-frame onload="document.getElementById('status').textContent = 'inline'"></iframe><script>
 const frame = document.getElementById('frame');
@@ -135,9 +135,42 @@ delete frame.onload;
 </script>"#,
     )?;
 
+    assert!(output.contains(">assigned</p>"), "{output}");
+    assert!(!output.contains(">inline</p>"), "{output}");
+    Ok(())
+}
+
+#[test]
+fn deleting_a_lifecycle_shadow_restores_the_assigned_handler() -> TestResult {
+    let output = render(
+        r#"<p id=status>unchanged</p><iframe id=frame data-krr-local-frame onload="document.getElementById('status').textContent = 'inline'"></iframe><script>
+const frame = document.getElementById('frame');
+frame.onload = () => { document.getElementById('status').textContent = 'assigned'; };
+Object.defineProperty(frame, 'onload', { configurable: true, value: () => { document.getElementById('status').textContent = 'shadow'; } });
+delete frame.onload;
+</script>"#,
+    )?;
+
+    assert!(output.contains(">assigned</p>"), "{output}");
+    assert!(!output.contains(">inline</p>"), "{output}");
+    assert!(!output.contains(">shadow</p>"), "{output}");
+    Ok(())
+}
+
+#[test]
+fn deleting_a_lifecycle_shadow_does_not_restore_a_cleared_inline_handler() -> TestResult {
+    let output = render(
+        r#"<p id=status>unchanged</p><iframe id=frame data-krr-local-frame onload="document.getElementById('status').textContent = 'inline'"></iframe><script>
+const frame = document.getElementById('frame');
+frame.onload = null;
+Object.defineProperty(frame, 'onload', { configurable: true, value: () => { document.getElementById('status').textContent = 'shadow'; } });
+delete frame.onload;
+</script>"#,
+    )?;
+
     assert!(output.contains(">unchanged</p>"), "{output}");
     assert!(!output.contains(">inline</p>"), "{output}");
-    assert!(!output.contains(">assigned</p>"), "{output}");
+    assert!(!output.contains(">shadow</p>"), "{output}");
     Ok(())
 }
 
