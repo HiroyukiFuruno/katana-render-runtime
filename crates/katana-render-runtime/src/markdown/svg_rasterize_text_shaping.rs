@@ -1,6 +1,8 @@
 use super::font::html_font_db_for_text;
 use resvg::usvg;
 
+#[path = "svg_rasterize_text_shaping_cache.rs"]
+mod cache;
 #[path = "svg_rasterize_text_fallback.rs"]
 mod fallback;
 #[path = "svg_rasterize_text_font.rs"]
@@ -8,6 +10,7 @@ mod font;
 #[path = "svg_rasterize_text_weight.rs"]
 mod weight;
 
+use cache::cached_shaped_run;
 use fallback::html_font_runs;
 use font::matching_font_face;
 
@@ -30,8 +33,7 @@ pub(super) fn shaped_text_width(
     let base_face_id = matching_font_face(&database, font_family, font_weight, italic)?;
     let mut advance = 0.0;
     for (face_id, run) in html_font_runs(&database, base_face_id, text, font_weight, italic) {
-        advance +=
-            shape_text_with_face(&database, face_id, &run, font_size, font_feature_settings)?;
+        advance += cached_shaped_run(&database, face_id, &run, font_size, font_feature_settings)?;
     }
     let spacing = text.chars().count().saturating_sub(1) as f32 * letter_spacing;
     Some(advance + spacing)

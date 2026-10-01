@@ -99,6 +99,26 @@ mod tests {
     }
 
     #[test]
+    fn image_data_url_validation_returns_load_only_for_fully_decodable_data_images() {
+        let state = state();
+        let valid_png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        let truncated_webp = "data:image/webp;base64,UklGRggAAABXRUJQ";
+
+        assert!(matches!(
+            state.dispatch("validateImageDataUrl", &[valid_png.to_string()]),
+            Ok(super::super::types::DomValue::String(value)) if value == "load"
+        ));
+        assert!(matches!(
+            state.dispatch("validateImageDataUrl", &[truncated_webp.to_string()]),
+            Ok(super::super::types::DomValue::String(value)) if value == "error"
+        ));
+        assert!(matches!(
+            state.dispatch("validateImageDataUrl", &["https://example.test/image.png".to_string()]),
+            Ok(super::super::types::DomValue::String(value)) if value == "error"
+        ));
+    }
+
+    #[test]
     fn unsupported_lookup_node_operation_reports_contract_error() {
         let state = state();
         assert!(matches!(

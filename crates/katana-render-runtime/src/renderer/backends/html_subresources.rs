@@ -1,5 +1,7 @@
 mod document;
+mod document_scripts;
 mod iframe;
+mod image_data;
 mod policy;
 #[cfg(test)]
 mod tests;
@@ -12,6 +14,7 @@ pub(super) use policy::HtmlSubresourcePolicy;
 pub(super) struct HtmlDocumentResources {
     pub(super) stylesheets: std::collections::HashMap<String, String>,
     pub(super) scripts: Vec<String>,
+    pub(super) body_onload_script_index: Option<usize>,
 }
 
 pub(super) struct HtmlSubresourceLoader {
@@ -44,6 +47,10 @@ impl HtmlSubresourceLoader {
     pub(super) fn load_image_data_url(&self, reference: &str) -> Result<String, String> {
         let url = self.policy.resolve_subresource(reference)?;
         transport::load_image_data_url(&url)
+    }
+
+    pub(super) fn image_data_url_is_decodable(reference: &str) -> bool {
+        transport::image_data_url_is_decodable(reference)
     }
 
     fn load_iframe(&self, reference: &str) -> Result<HtmlBrowserSource, String> {

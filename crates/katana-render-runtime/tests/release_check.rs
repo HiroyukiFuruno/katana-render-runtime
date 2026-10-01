@@ -44,24 +44,24 @@ fn release_verify_tests_the_packaged_library_sources() -> Result<(), Box<dyn std
 }
 
 #[test]
-fn release_target_check_requires_v0_4_21_intent() -> Result<(), Box<dyn std::error::Error>> {
+fn release_target_check_requires_v0_4_22_intent() -> Result<(), Box<dyn std::error::Error>> {
     let root = workspace_root()?;
-    assert!(release_target_check(root, "0.4.21", "0.4.20", "HEAD")?);
-    assert!(release_target_check(root, "0.4.21", "0.4.21", "HEAD")?);
+    assert!(release_target_check(root, "0.4.22", "0.4.21", "HEAD")?);
+    assert!(release_target_check(root, "0.4.22", "0.4.22", "HEAD")?);
     assert!(!release_target_check(
         root,
+        "0.4.22",
         "0.4.21",
-        "0.4.20",
         "missing-release-head",
     )?);
-    assert!(!release_target_check(root, "0.4.21", "0.4.19", "HEAD")?);
     assert!(!release_target_check(root, "0.4.22", "0.4.20", "HEAD")?);
+    assert!(!release_target_check(root, "0.4.23", "0.4.21", "HEAD")?);
     for version in [
         "0.3.9", "0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.4.4", "0.4.5", "0.4.6", "0.4.7", "0.4.8",
         "0.4.9", "0.4.10", "0.4.11", "0.4.12", "0.4.13", "0.4.14", "0.4.15", "0.4.16", "0.4.17",
-        "0.4.18", "0.4.19", "0.4.20", "0.5.0", "1.0.0", "2.0.0",
+        "0.4.18", "0.4.19", "0.4.20", "0.4.21", "0.5.0", "1.0.0", "2.0.0",
     ] {
-        assert!(!release_target_check(root, version, "0.4.20", "HEAD",)?);
+        assert!(!release_target_check(root, version, "0.4.21", "HEAD",)?);
     }
     Ok(())
 }
@@ -130,11 +130,13 @@ fn quality_gate_requires_the_html_runtime_in_the_crate_package()
 -> Result<(), Box<dyn std::error::Error>> {
     let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
     let package_check = recipe_body(&justfile, "html-runtime-package-check")?;
+    let rust_lane = recipe_body(&justfile, "check-rust")?;
 
     assert!(
-        justfile.contains("html-runtime-package-check plantuml-runtime-package-check"),
-        "check must require the HTML runtime package gate"
+        rust_lane.contains("just html-runtime-package-check"),
+        "the Cargo lane must require the HTML runtime package gate"
     );
+    assert!(rust_lane.contains("just plantuml-runtime-package-check"));
     assert!(package_check.contains("src/renderer/backends/html_runtime/dom_bootstrap.js"));
     Ok(())
 }
@@ -215,11 +217,16 @@ fn pre_push_uses_the_ordered_issue_contract_dispatcher() -> Result<(), Box<dyn s
 #[test]
 fn local_quality_gate_runs_repository_automation_contract_tests()
 -> Result<(), Box<dyn std::error::Error>> {
-    let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
+    let root = workspace_root()?;
+    let justfile = std::fs::read_to_string(root.join("Justfile"))?;
     let check = recipe_body(&justfile, "check")?;
+    let contracts_lane = recipe_body(&justfile, "check-contracts")?;
     let automation = recipe_body(&justfile, "automation-contract-test")?;
+    let scheduler = std::fs::read_to_string(root.join("scripts/hooks/run_parallel_checks.py"))?;
 
-    assert!(check.contains("automation-contract-test"));
+    assert!(check.contains("run_parallel_checks.py"));
+    assert!(scheduler.contains("Lane(\"contracts\", \"check-contracts\")"));
+    assert!(contracts_lane.contains("just automation-contract-test"));
     for script_dir in ["scripts/hooks", "scripts/release"] {
         assert!(
             automation.contains(&format!("unittest discover -s {script_dir} -p '*_test.py'")),
@@ -234,9 +241,53 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
 -> Result<(), Box<dyn std::error::Error>> {
     let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
     let recipe = recipe_body(&justfile, "depends-update-all")?;
+    let commands = recipe
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let positions = dependency_update_command_positions(&commands)?;
 
+    assert_dependency_update_command_order(&commands, positions);
+    assert_dependency_update_quality_gates(recipe);
+    Ok(())
+}
+
+fn dependency_update_command_positions(
+    commands: &[&str],
+) -> Result<(usize, usize, usize), std::io::Error> {
+    let broad_upgrade = commands
+        .iter()
+        .position(|line| line.starts_with("{{CARGO}} upgrade "))
+        .ok_or_else(|| std::io::Error::other("broad Cargo upgrade command is missing"))?;
+    let html_pair_update = commands
+        .iter()
+        .position(|line| line.contains("scripts/release/update_html5ever_pair.py"))
+        .ok_or_else(|| std::io::Error::other("html5ever pair update command is missing"))?;
+    let lockfile_update = commands
+        .iter()
+        .position(|line| *line == "{{CARGO}} update")
+        .ok_or_else(|| std::io::Error::other("Cargo lockfile update command is missing"))?;
+
+    Ok((broad_upgrade, html_pair_update, lockfile_update))
+}
+
+fn assert_dependency_update_command_order(commands: &[&str], positions: (usize, usize, usize)) {
+    let (broad_upgrade, html_pair_update, lockfile_update) = positions;
+    assert_eq!(
+        commands[broad_upgrade],
+        "{{CARGO}} upgrade -i allow --pinned allow"
+    );
+    assert_eq!(
+        commands[html_pair_update],
+        "python3 scripts/release/update_html5ever_pair.py --cargo \"{{CARGO}}\""
+    );
+    assert!(broad_upgrade < html_pair_update && html_pair_update < lockfile_update);
+    assert!(!commands[broad_upgrade].contains("--exclude"));
+}
+
+fn assert_dependency_update_quality_gates(recipe: &str) {
     for required in [
-        "{{CARGO}} upgrade --incompatible allow --pinned allow --recursive true",
         "{{CARGO}} update",
         "bun update --latest",
         "runtime-assets/depends-update-all.ts",
@@ -250,7 +301,6 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
             "depends-update-all must require {required}"
         );
     }
-    Ok(())
 }
 
 #[test]

@@ -173,6 +173,10 @@ impl HtmlBrowserSession {
 mod tests;
 
 #[cfg(test)]
+#[path = "session_requirements_tests.rs"]
+mod requirements_tests;
+
+#[cfg(test)]
 #[path = "session_fragment_tests.rs"]
 mod fragment_tests;
 

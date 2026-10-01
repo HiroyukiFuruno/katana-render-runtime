@@ -27,12 +27,21 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         target = justfile.index("python3 scripts/release/verify-release-target.py")
         self.assertLess(freshness, target)
         self.assertIn('run: just VERSION="${{ steps.version.outputs.version }}" release-target-check', self.release)
-        self.assertIn("- name: Release quality gate", self.preflight)
-        self.assertIn("timeout-minutes: 65", self.preflight)
-        self.assertIn("run: just release-quality", self.preflight)
-        self.assertIn("- name: Release-specific verification", self.preflight)
-        self.assertIn("timeout-minutes: 35", self.preflight)
-        self.assertIn('run: just VERSION="${{ steps.version.outputs.version }}" release-specific', self.preflight)
+        self.assertIn("- name: Release check", self.preflight)
+        self.assertIn('run: just VERSION="${{ steps.version.outputs.version }}" release-check', self.preflight)
+        self.assertIn("- name: Release preflight checks", self.preflight)
+        preflight_step = self.preflight[self.preflight.index("- name: Release preflight checks"):]
+        self.assertIn("env:\n          GH_TOKEN: ${{ github.token }}", preflight_step)
+        self.assertIn('run: just VERSION="${{ steps.version.outputs.version }}" release-preflight-check', preflight_step)
+        self.assertNotIn("- name: Release quality gate", self.preflight)
+        self.assertNotIn("- name: Release-specific verification", self.preflight)
+
+    def test_release_preflight_uses_read_only_permissions_for_api_lookups(self) -> None:
+        permissions = self.preflight[self.preflight.index("permissions:"):self.preflight.index("\nenv:")]
+        self.assertEqual(
+            permissions,
+            "permissions:\n  actions: read\n  contents: read\n  pull-requests: read\n",
+        )
 
     def test_public_release_and_cleanup_follow_both_registry_publications(self) -> None:
         publish = self.release.index("- name: Publish crates.io")

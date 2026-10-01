@@ -14,6 +14,7 @@ impl HtmlLayoutRenderer {
         positioning_origin_node_id: Option<u64>,
     ) -> usize {
         let index = self.element_boxes.len();
+        self.ownership.element_box_indices.insert(node_id, index);
         self.element_boxes.push(ElementBox {
             node_id,
             x: 0.0,
