@@ -15,6 +15,13 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.retry = (root / ".github/workflows/release-publish-retry.yml").read_text(encoding="utf-8")
         self.publisher = (root / "scripts/release/publish-crates.sh").read_text(encoding="utf-8")
 
+    @staticmethod
+    def workflow_step(workflow: str, name: str) -> str:
+        marker = f"      - name: {name}\n"
+        start = workflow.index(marker)
+        end = workflow.find("\n      - ", start + len(marker))
+        return workflow[start:] if end < 0 else workflow[start:end]
+
     def test_release_checks_install_the_bun_resolver_before_freshness_validation(self) -> None:
         for job in (self.release[self.release.index("  release-context:"):self.release.index("  release:\n")], self.release[self.release.index("  release:\n"):]):
             self.assertIn("uses: oven-sh/setup-bun@v2", job)
@@ -26,13 +33,16 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         freshness = justfile.index("python3 scripts/release/verify_dependency_freshness.py")
         target = justfile.index("python3 scripts/release/verify-release-target.py")
         self.assertLess(freshness, target)
-        self.assertIn('run: just VERSION="${{ steps.version.outputs.version }}" release-target-check', self.release)
-        self.assertIn("- name: Release check", self.preflight)
-        self.assertIn('run: just VERSION="${{ steps.version.outputs.version }}" release-check', self.preflight)
-        self.assertIn("- name: Release preflight checks", self.preflight)
-        preflight_step = self.preflight[self.preflight.index("- name: Release preflight checks"):]
-        self.assertIn("env:\n          GH_TOKEN: ${{ github.token }}", preflight_step)
-        self.assertIn('run: just VERSION="${{ steps.version.outputs.version }}" release-preflight-check', preflight_step)
+        freshness_steps = (
+            (self.release, "Release target check", 'run: just VERSION="${{ steps.version.outputs.version }}" release-target-check'),
+            (self.release, "Verify release package", 'run: just VERSION="${{ needs.release-context.outputs.version }}" release-verify'),
+            (self.preflight, "Release check", 'run: just VERSION="${{ steps.version.outputs.version }}" release-check'),
+            (self.preflight, "Release preflight checks", 'run: just VERSION="${{ steps.version.outputs.version }}" release-preflight-check'),
+        )
+        for workflow, name, command in freshness_steps:
+            step = self.workflow_step(workflow, name)
+            self.assertIn(command, step, name)
+            self.assertIn("env:\n          GH_TOKEN: ${{ github.token }}", step, name)
         self.assertNotIn("- name: Release quality gate", self.preflight)
         self.assertNotIn("- name: Release-specific verification", self.preflight)
 
