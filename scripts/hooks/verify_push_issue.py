@@ -65,7 +65,7 @@ _CLOSING_ISSUE_REFERENCE_PATTERN = re.compile(
 _ZERO_SHA = "0" * 40
 _SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 _REPOSITORY_PATTERN = re.compile(r"^[^/\s]+/[^/\s]+$")
-_RELEASE_BRANCH_PATTERN = re.compile(r"release/v[0-9]+\.[0-9]+\.[0-9]+\Z")
+_RELEASE_BRANCH_PATTERN = re.compile(r"release/v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z")
 _NAME_STATUS_PATTERN = re.compile(r"^(?P<kind>[ACDMRTUXB])(?P<score>\d{1,3})?$")
 _MANIFEST_NAMES = {
     "Cargo.toml",

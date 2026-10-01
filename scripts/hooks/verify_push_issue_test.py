@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -860,7 +861,12 @@ class VerifyPushIssueTest(unittest.TestCase):
     def test_release_branch_recognition_matches_stable_version_grammar(self) -> None:
         cases = (
             ("release/v0.4.22", True),
-            ("release/v00.04.00022", True),
+            ("release/v10.20.300", True),
+            ("release/v0.0.0", True),
+            ("release/v00.4.22", False),
+            ("release/v0.04.22", False),
+            ("release/v0.4.00022", False),
+            ("release/v00.04.00022", False),
             ("release/v1.2", False),
             ("release/v1.2.3-rc1", False),
             ("release/vfeature", False),
@@ -871,6 +877,45 @@ class VerifyPushIssueTest(unittest.TestCase):
         for branch, expected in cases:
             with self.subTest(branch=branch):
                 self.assertEqual(subject.is_release_branch(branch), expected)
+
+    def test_release_branch_recognition_matches_the_real_release_resolver(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        cargo_manifest = repository_root / "Cargo.toml"
+        cargo_version = tomllib.loads(cargo_manifest.read_text())["workspace"]["package"]["version"]
+        version_parts = cargo_version.split(".")
+        canonical_branch = f"release/v{cargo_version}"
+        child_environment = os.environ.copy()
+        child_environment.pop("GITHUB_OUTPUT", None)
+
+        def resolve(branch: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [
+                    "bash",
+                    "scripts/release/resolve-release-version.sh",
+                    "pull_request",
+                    "",
+                    branch,
+                ],
+                cwd=repository_root,
+                capture_output=True,
+                check=False,
+                env=child_environment,
+                text=True,
+            )
+
+        with self.subTest(branch=canonical_branch):
+            self.assertTrue(subject.is_release_branch(canonical_branch))
+            result = resolve(canonical_branch)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+        for index, component in enumerate(version_parts):
+            noncanonical_parts = version_parts.copy()
+            noncanonical_parts[index] = f"0{component}"
+            branch = f"release/v{'.'.join(noncanonical_parts)}"
+            with self.subTest(branch=branch):
+                self.assertFalse(subject.is_release_branch(branch))
+                result = resolve(branch)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
 
     def test_release_branch_requires_an_issue_somewhere_in_its_range(self) -> None:
         with self.assertRaisesRegex(subject.ContractViolation, "commit範囲"):
