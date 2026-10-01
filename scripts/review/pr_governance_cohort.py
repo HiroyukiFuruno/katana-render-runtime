@@ -217,6 +217,36 @@ def repository_matches(value, name, identifier):
     return value.get("name") == name.split("/")[1] and value.get("url") == "https://api.github.com/repos/" + name
 
 
+def _validate_member_source_identity(member, source):
+    validate_member(member)
+    _require(isinstance(source, dict), "Source/PR unavailable")
+    repo, repo_id = member["repository"], member["repository_id"]
+    path = ".github/workflows/pr-governance-review-events.yml"
+    _require(type(source.get("id")) is int and source["id"] == member["source_run_id"]
+             and type(source.get("run_attempt")) is int and source["run_attempt"] == 1
+             and type(source.get("workflow_id")) is int and source["workflow_id"] == member["source_workflow_id"]
+             and type(source.get("run_number")) is int and source["run_number"] == member["source_run_number"]
+             and source.get("name") == "PR governance review sensor" and source.get("event") == member["source_event"]
+             and source.get("head_sha") == member["head_sha"]
+             and source.get("path") in {path, path + "@" + member["base_ref"], path + "@refs/heads/" + member["base_ref"]}
+             and repository_matches(source.get("repository"), repo, repo_id)
+             and repository_matches(source.get("head_repository"), repo, repo_id)
+             and (source.get("status") in ACTIVE and source.get("conclusion") is None
+                  or source.get("status") == "completed" and source.get("conclusion") == "success"),
+             "Source identity/state drift")
+    pulls = source.get("pull_requests")
+    _require(isinstance(pulls, list) and len(pulls) == 1 and isinstance(pulls[0], dict), "Ambiguous source PR")
+    pull = pulls[0]
+    for actual in (pull,):
+        base, head = actual.get("base"), actual.get("head")
+        _require(type(actual.get("number")) is int and actual["number"] == member["pr_number"]
+                 and isinstance(base, dict) and isinstance(head, dict)
+                 and base.get("ref") == member["base_ref"] and base.get("sha") == member["base_sha"]
+                 and head.get("sha") == member["head_sha"]
+                 and repository_matches(base.get("repo"), repo, repo_id)
+                 and repository_matches(head.get("repo"), repo, repo_id), "Current/source PR binding drift")
+
+
 def member_source_matches(member, source, current_pr):
     try:
         validate_member(member)
@@ -410,7 +440,8 @@ class _Reader:
         return payload, metadata
 
 
-def load_cohort(artifact_id, digest, *, expected_owner, expected_segment, read_json, read_archive, budget, deadline, member_ids=None, trusted_workflow_blob=None):
+def load_cohort(artifact_id, digest, *, expected_owner, expected_segment, read_json, read_archive, budget, deadline, member_ids=None, trusted_workflow_blob=None, allow_empty=False):
+    _require(type(allow_empty) is bool and (not allow_empty or expected_segment is None and member_ids is None), "Empty context cannot grant selective authority")
     _require(_integer(artifact_id) and _digest(digest) and _integer(expected_owner)
              and (expected_segment is None or type(expected_segment) is int and 1 <= expected_segment <= 4), "Invalid cohort binding")
     repository = os.environ.get("GITHUB_REPOSITORY", "")
@@ -433,17 +464,17 @@ def load_cohort(artifact_id, digest, *, expected_owner, expected_segment, read_j
              and metadata["workflow_run"].get("head_repository_id") == header["repository_id"]
              and metadata["workflow_run"].get("head_sha") == header["workflow_sha"], "Cohort repository/workflow binding")
     identifiers = header["member_ids"]
-    _require(isinstance(identifiers, list) and 1 <= len(identifiers) <= MAX_MEMBERS
+    _require(isinstance(identifiers, list) and (0 if allow_empty else 1) <= len(identifiers) <= MAX_MEMBERS
              and all(_integer(identifier) for identifier in identifiers) and identifiers == sorted(set(identifiers)), "Cohort member reservation cap")
     segments = header["member_segments"]
-    _require(isinstance(segments, str) and len(segments) == len(identifiers) and re.fullmatch(r"[1-4]+", segments), "Invalid member segment index")
+    _require(isinstance(segments, str) and len(segments) == len(identifiers) and re.fullmatch(r"[1-4]*" if allow_empty and not identifiers else r"[1-4]+", segments), "Invalid member segment index")
     indexed_segments = dict(zip(identifiers, map(int, segments)))
     selected = ({identifier for identifier in identifiers if expected_segment is None or indexed_segments[identifier] == expected_segment}
                 if member_ids is None else member_ids)
-    _require(isinstance(selected, set) and selected and selected <= set(identifiers), "Foreign selective member")
+    _require(isinstance(selected, set) and (bool(selected) or allow_empty and not identifiers) and selected <= set(identifiers), "Foreign selective member")
     selected_segments = {indexed_segments[identifier] for identifier in selected}
     _require(isinstance(header["member_pages"], list) and len(header["member_pages"]) == (len(identifiers) + 49) // 50
-             and isinstance(header["batches"], list) and 1 <= len(header["batches"]) <= 4
+             and isinstance(header["batches"], list) and (0 if allow_empty and not identifiers else 1) <= len(header["batches"]) <= 4
              and set(indexed_segments.values()) == set(range(1, len(header["batches"]) + 1)), "Invalid cohort page count")
     _require(isinstance(header["alias_pages"], list) and len(header["alias_pages"]) == (len(identifiers) + 49) // 50, "Invalid alias page count")
     all_refs = [_ref(ref) for ref in header["member_pages"] + header["alias_pages"] + header["batches"] + [header["root_journal"]]]
@@ -503,6 +534,20 @@ def load_cohort(artifact_id, digest, *, expected_owner, expected_segment, read_j
     root_producer = reader.producer(repository, root_journal["producer_run_id"], root_journal["workflow_sha"], root_journal["workflow_blob_sha"])
     _require(repository_matches(root_producer.get("repository"), repository, header["repository_id"])
              and root_metadata["workflow_run"].get("head_sha") == root_journal["workflow_sha"], "Root clock creator drift")
+    if not identifiers:
+        _require(header["member_pages"] == header["alias_pages"] == header["batches"] == [] and segments == "", "Empty cohort has hidden selective authority")
+        jobs = reader.jobs(repository, expected_owner)
+        for job_name, prefix in ((ELECTION_JOB, SELECTED_PREFIX), (ADMISSION_JOB, ADMITTED_PREFIX)):
+            matches = [job for job in jobs if job.get("name") == job_name]
+            _require(len(matches) == 1 and matches[0].get("head_sha") == header["workflow_sha"], "Empty cohort owner stage missing/ambiguous")
+            job = matches[0]
+            _require((job_name == ELECTION_JOB and job.get("status") == "in_progress" and job.get("conclusion") is None)
+                     or job.get("status") == "completed" and job.get("conclusion") == "success", "Empty cohort owner was not selected/admitted")
+            steps = job.get("steps")
+            marker = prefix + f"owner={expected_owner} artifact={artifact_id} digest={digest}"
+            _require(isinstance(steps, list) and all(isinstance(step, dict) for step in steps), "Empty owner native stages malformed")
+            stages = [step for step in steps if isinstance(step.get("name"), str) and step["name"].startswith(prefix)]
+            _require(len(stages) == 1 and stages[0].get("name") == marker and stages[0].get("status") == "completed" and stages[0].get("conclusion") == "success", "Empty owner native binding missing/ambiguous")
     return {"header": header, "members_by_id": journals, "target_members_by_number": targets,
             "registered_writers": {}, "artifact_id": artifact_id, "artifact_digest": digest,
             "cohort_digest": header["cohort_digest"], "producer_ids_by_member": owner_ids, "loaded_segments": sorted(selected_segments), "trusted_workflow_blob": trusted_workflow_blob,
@@ -580,7 +625,18 @@ def verify_cohort_lease(cohort, *, phase, read_json, budget, deadline):
 
 
 def consumer_is_covered(cohort, generation, *, read_json, read_archive, budget, deadline):
-    """取消consumerは成功済journalと実在する非mutation stageでのみ分類する。"""
+    """選出済memberの取消consumerだけを、ACKとは独立して肯定分類する。"""
+    return _consumer_follower_proof(cohort, generation, read_json=read_json, read_archive=read_archive,
+                                    budget=budget, deadline=deadline, deferred=False)
+
+
+def consumer_is_deferred(cohort, generation, *, read_json, read_archive, budget, deadline):
+    """超過分の非mutation followerを分類し、member追加やACK権限を与えない。"""
+    return _consumer_follower_proof(cohort, generation, read_json=read_json, read_archive=read_archive,
+                                    budget=budget, deadline=deadline, deferred=True)
+
+
+def _consumer_follower_proof(cohort, generation, *, read_json, read_archive, budget, deadline, deferred):
     try:
         header = cohort["header"]
         repository, identifier = header["repository"], generation.get("id")
@@ -589,6 +645,7 @@ def consumer_is_covered(cohort, generation, *, read_json, read_archive, budget, 
                  and (generation.get("event") == "workflow_run" or identifier in cohort.get("recovered_predecessor_ids", [])), "Not a cancelled source consumer")
         reader = _Reader(read_json, read_archive, budget, deadline, cohort.get("trusted_workflow_blob"))
         if identifier in cohort.get("recovered_predecessor_ids", []):
+            _require(not deferred, "Recovered predecessor is not a deferred source")
             current = reader.producer(repository, header["owner_dispatcher_run_id"], header["workflow_sha"], header["workflow_blob_sha"])
             _require(repository_matches(current.get("repository"), repository, header["repository_id"]), "Recovery owner repository drift")
             preflights = [job for job in reader.jobs(repository, current["id"]) if job.get("name") == "Preflight workflow_run governance source"]
@@ -611,19 +668,52 @@ def consumer_is_covered(cohort, generation, *, read_json, read_archive, budget, 
         _require(len(candidates) == 1, "Missing/ambiguous consumer journal")
         journal, _ = reader.artifact({"artifact_id": candidates[0]["id"], "artifact_digest": candidates[0]["digest"]}, "source", repository, expected_producer=identifier)
         member = validate_member(journal["member"])
-        _require(member["source_run_id"] in header["member_ids"], "Cancelled consumer source is outside the exact cohort")
-        bound = cohort["members_by_id"].get(member["source_run_id"])
-        if bound is None:
-            projection = load_cohort(cohort["artifact_id"], cohort["artifact_digest"], expected_owner=header["owner_dispatcher_run_id"],
-                                     expected_segment=None, read_json=read_json, read_archive=read_archive, budget=budget,
-                                     deadline=deadline, member_ids={member["source_run_id"]}, trusted_workflow_blob=cohort.get("trusted_workflow_blob"))
-            bound = projection["members_by_id"][member["source_run_id"]]
-        # null hintは現在時刻へ置換せず、元attemptのAwait stageから時計だけを復元する。
-        member = _covered_member_clock(member, reader)
-        bound = _covered_member_clock(bound, reader)
-        _require(bound == member, "Cancelled consumer immutable source tuple drift")
+        _require(journal["repository"] == repository and journal["repository_id"] == header["repository_id"]
+                 and journal["workflow_sha"] == header["workflow_sha"] and journal["workflow_blob_sha"] == header["workflow_blob_sha"],
+                 "Consumer journal differs from the trusted default workflow")
+        if deferred:
+            _require(member["source_run_id"] not in header["member_ids"], "Selected source is not deferred")
+            title = generation.get("display_title")
+            _require(isinstance(title, str) and re.fullmatch(rf"sensor={member['source_run_id']} action=(?:in_progress|completed)", title), "Deferred callback source hint differs from immutable journal")
+            validate_journal_clock(journal, reader)
+            source_endpoint = f"repos/{repository}/actions/runs/{member['source_run_id']}"
+            before = reader.request(source_endpoint)
+            source_jobs = reader.jobs(repository, member["source_run_id"])
+            pull = reader.request(f"repos/{repository}/pulls/{member['pr_number']}")
+            after = reader.request(source_endpoint)
+            keys = ("id", "run_attempt", "workflow_id", "run_number", "name", "event", "path", "head_sha", "repository", "head_repository", "pull_requests")
+            current_after = reader.request(f"repos/{repository}/pulls/{member['pr_number']}")
+            _require(isinstance(before, dict) and isinstance(after, dict)
+                     and before.get("status") in ACTIVE and after.get("status") in ACTIVE
+                     and all(before.get(key) == after.get(key) for key in keys)
+                     and isinstance(current_after, dict) and current_after == pull,
+                     "Deferred original source/current PR observation changed")
+            _validate_member_source_identity(member, before)
+            _validate_member_source_identity(member, after)
+            eligible = current_source_eligible(after, pull, repository, header["repository_id"], member["base_ref"])
+            if eligible:
+                _require(member_source_matches(member, before, pull) and member_source_matches(member, after, pull),
+                         "Deferred eligible source/current PR body drift")
+            started = source_latch_clock(after, source_jobs, now=time.time())
+            _require(member["latch_started_at"] in (None, started), "Deferred source original clock drift")
+            if started is not None:
+                _require(time.time() < source_deadline(started, now=time.time()), "Deferred original latch expired")
+        else:
+            _require(member["source_run_id"] in header["member_ids"], "Cancelled consumer source is outside the exact cohort")
+            bound = cohort["members_by_id"].get(member["source_run_id"])
+            if bound is None:
+                projection = load_cohort(cohort["artifact_id"], cohort["artifact_digest"], expected_owner=header["owner_dispatcher_run_id"],
+                                         expected_segment=None, read_json=read_json, read_archive=read_archive, budget=budget,
+                                         deadline=deadline, member_ids={member["source_run_id"]}, trusted_workflow_blob=cohort.get("trusted_workflow_blob"))
+                bound = projection["members_by_id"][member["source_run_id"]]
+            # null hintは現在時刻へ置換せず、元attemptのAwait stageから時計だけを復元する。
+            member = _covered_member_clock(member, reader)
+            bound = _covered_member_clock(bound, reader)
+            _require(bound == member, "Cancelled consumer immutable source tuple drift")
         producer = reader.producer(repository, identifier, journal["workflow_sha"], journal["workflow_blob_sha"])
         _require(producer.get("status") == "completed" and producer.get("conclusion") in {"cancelled", "failure"}, "Consumer cancellation drift")
+        keys = ("id", "run_attempt", "name", "head_sha", "head_branch", "path", "event", "workflow_id", "run_number", "repository", "status", "conclusion")
+        _require(all(producer.get(key) == generation.get(key) for key in keys), "Consumer generation identity drift")
         jobs = reader.jobs(repository, identifier)
         by_name = {}
         for job in jobs:
@@ -1049,26 +1139,76 @@ def produce_journal(reader):
     _write_outputs({"artifact_name": name, "payload_sha256": hashlib.sha256(data).hexdigest(), "binding_base64": binding})
 
 
+def current_source_eligible(source, current_pr, repository, repository_id, branch):
+    """対象外は現在のPRを肯定観測した場合だけ除外し、観測不備は拒否する。"""
+    _require(isinstance(current_pr, dict) and isinstance(source, dict), "Current source PR observation unavailable")
+    pulls = source.get("pull_requests")
+    _require(isinstance(pulls, list) and len(pulls) == 1 and isinstance(pulls[0], dict), "Current source PR binding ambiguous")
+    original = pulls[0]
+    original_base, original_head = original.get("base"), original.get("head")
+    _require(_integer(original.get("number")) and isinstance(original_base, dict) and isinstance(original_head, dict)
+             and _hex(original_base.get("sha"), 40) and _hex(original_head.get("sha"), 40)
+             and source.get("head_sha") == original_head["sha"], "Source embedded PR/head identity malformed")
+    _require(_integer(current_pr.get("number")) and current_pr["number"] == original.get("number")
+             and current_pr.get("state") in ("open", "closed") and type(current_pr.get("draft")) is bool,
+             "Current source PR state/identity malformed")
+    base, head = current_pr.get("base"), current_pr.get("head")
+    _require(isinstance(base, dict) and isinstance(head, dict)
+             and isinstance(base.get("ref"), str) and bool(base["ref"]) and not any(c.isspace() for c in base["ref"])
+             and _hex(base.get("sha"), 40) and _hex(head.get("sha"), 40), "Current source PR refs malformed")
+    for repo in (base.get("repo"), head.get("repo")):
+        _require(isinstance(repo, dict) and _integer(repo.get("id"))
+                 and (_repository_name(repo.get("full_name"))
+                      or isinstance(repo.get("name"), str) and bool(repo["name"])
+                      and isinstance(repo.get("url"), str) and repo["url"].startswith("https://api.github.com/repos/")),
+                 "Current source PR repository malformed")
+        if repo["id"] == repository_id or repo.get("full_name") == repository:
+            _require(repository_matches(repo, repository, repository_id), "Current source PR repository identity contradicts itself")
+    body = current_pr.get("body")
+    _require(isinstance(body, str) and "\0" not in body, "Current source PR body malformed")
+    try:
+        body.encode("utf-8", "strict")
+    except UnicodeError as error:
+        raise CohortError("Current source PR body malformed") from error
+    if (current_pr["state"] != "open" or current_pr["draft"]
+            or not repository_matches(base["repo"], repository, repository_id)
+            or not repository_matches(head["repo"], repository, repository_id)
+            or base["ref"] != branch or base["sha"] != original["base"]["sha"]
+            or head["sha"] != original["head"]["sha"] or head["sha"] != source.get("head_sha")):
+        return False
+
+    return True
+
+
 def active_source_snapshot(reader, repository, repository_id, branch):
     runs = {}
-    identities = {}
+    identities, current_prs, observed = {}, {}, set()
     for status in ("requested", "queued", "waiting", "pending", "in_progress"):
         endpoint = f"repos/{repository}/actions/workflows/pr-governance-review-events.yml/runs?status={status}&per_page=100&page="
         for attempt in range(4):
             first = reader.request(endpoint + "1")
+            _require(isinstance(first, dict), "Active sensor inventory observation malformed")
             total = first.get("total_count")
             _require(type(total) is int and 0 <= total <= 600, "Incomplete active sensor inventory")
             entries, seen = [], set()
             for page in range(1, max(1, (total + 99) // 100) + 1):
                 response = first if page == 1 else reader.request(endpoint + str(page))
+                _require(isinstance(response, dict), "Active sensor page observation malformed")
                 items = response.get("workflow_runs")
-                _require(response.get("total_count") == total and isinstance(items, list)
+                _require(type(response.get("total_count")) is int and response["total_count"] == total and isinstance(items, list)
                          and len(items) == min(100, max(0, total - (page - 1) * 100)), "Incomplete active sensor page")
                 for item in items:
                     _require(isinstance(item, dict) and _integer(item.get("id")) and item["id"] not in seen, "Duplicate active sensor inventory")
                     seen.add(item["id"])
                 entries.extend(items)
-            if reader.request(endpoint + "1") == first:
+            anchor = reader.request(endpoint + "1")
+            _require(isinstance(anchor, dict), "Active sensor anchor observation malformed")
+            try:
+                # Pythonの等値比較はbool/intやfloat/intの型変化を見逃すため、JSONの型を保持する。
+                stable = json.dumps(anchor, sort_keys=True, allow_nan=False) == json.dumps(first, sort_keys=True, allow_nan=False)
+            except (TypeError, ValueError) as error:
+                raise CohortError("Invalid active sensor anchor observation") from error
+            if stable:
                 break
         else:
             raise CohortError("Active sensor inventory did not stabilize")
@@ -1085,21 +1225,37 @@ def active_source_snapshot(reader, repository, repository_id, branch):
                                             ".github/workflows/pr-governance-review-events.yml@refs/heads/" + branch}
                      and repository_matches(run.get("repository"), repository, repository_id), "Invalid active sensor identity")
             page_ids.add(run["id"])
+            observed.add(run["id"])
+            _require(len(observed) <= 600, "Aggregate active sensor inventory exceeds existing page bound")
             pulls = run.get("pull_requests")
             _require(isinstance(pulls, list) and len(pulls) == 1 and isinstance(pulls[0], dict), "Ambiguous active sensor PR")
             pull = pulls[0]
             base, head = pull.get("base"), pull.get("head")
             _require(_integer(pull.get("number")) and isinstance(base, dict) and isinstance(head, dict)
+                     and isinstance(base.get("ref"), str) and bool(base["ref"]) and not any(c.isspace() for c in base["ref"])
                      and _hex(base.get("sha"), 40) and _hex(head.get("sha"), 40)
+                     and run["head_sha"] == head["sha"]
                      and repository_matches(base.get("repo"), repository, repository_id), "Active sensor PR binding invalid")
-            local = repository_matches(head.get("repo"), repository, repository_id) and repository_matches(run.get("head_repository"), repository, repository_id)
-            if not local or base.get("ref") != branch:
-                continue
+            for source_repo in (head.get("repo"), run.get("head_repository")):
+                _require(isinstance(source_repo, dict) and _integer(source_repo.get("id"))
+                         and (_repository_name(source_repo.get("full_name"))
+                              or isinstance(source_repo.get("name"), str) and bool(source_repo["name"])
+                              and isinstance(source_repo.get("url"), str) and source_repo["url"].startswith("https://api.github.com/repos/")),
+                         "Active sensor head repository observation malformed")
+            _require(head["repo"]["id"] == run["head_repository"]["id"], "Active sensor head repository identity contradicts itself")
             identity = (run["id"], run["run_attempt"], run["workflow_id"], run["run_number"], run["event"], run["path"],
-                        run["head_sha"], pull["number"], base["ref"], base["sha"], head["sha"])
+                        run["head_sha"], pull["number"], base["ref"], base["sha"], head["sha"],
+                        head["repo"]["id"], head["repo"].get("full_name"), run["head_repository"].get("full_name"))
             _require(run["id"] not in identities or identities[run["id"]] == identity, "Cross-partition sensor identity drift")
-            identities[run["id"]], runs[run["id"]] = identity, run
-            _require(len(runs) <= MAX_MEMBERS, "Existing local sensor reservation cap exceeded")
+            identities[run["id"]] = identity
+            local = repository_matches(head["repo"], repository, repository_id) and repository_matches(run["head_repository"], repository, repository_id)
+            if not local or base["ref"] != branch:
+                continue
+            number = pull["number"]
+            if number not in current_prs:
+                current_prs[number] = reader.request(f"repos/{repository}/pulls/{number}")
+            if current_source_eligible(run, current_prs[number], repository, repository_id, branch):
+                runs[run["id"]] = run
     return runs
 
 
@@ -1143,11 +1299,18 @@ def select_cohort(reader):
     own_journal, _ = reader.artifact(own_ref, "source", repository, expected_producer=owner)
     validate_journal_clock(own_journal, reader)
     members, source_refs, aliases, roots, current_prs = {}, {}, {}, [(own_journal["root_deadline_epoch"], own_ref)], {}
+    candidates = []
     for identifier, source in sorted(sources.items()):
-        # 未開始sourceの時計を捏造せず、開始済みmemberを先にACKしてrunnerを解放する。
-        admitted_at = source_latch_clock(source, reader.jobs(repository, identifier), now=time.time())
-        if admitted_at is None:
+        number = source["pull_requests"][0]["number"]
+        if number not in current_prs:
+            current_prs[number] = reader.request(f"repos/{repository}/pulls/{number}")
+        if not current_source_eligible(source, current_prs[number], repository, repository_id, branch):
             continue
+        # 未開始と超過分のjournalは変更せず、元Await期限が早いmemberを先に処理する。
+        admitted_at = source_latch_clock(source, reader.jobs(repository, identifier), now=time.time())
+        if admitted_at is not None:
+            candidates.append((source_deadline(admitted_at, now=time.time()), identifier, source))
+    for _, identifier, source in sorted(candidates, key=lambda item: item[:2])[:MAX_MEMBERS]:
         name = f"krr-governance-source-{identifier}-attempt-1"
         listing = reader.request(f"repos/{repository}/actions/artifacts?name={name}&per_page=100&page=1")
         entries, total = listing.get("artifacts"), listing.get("total_count")
@@ -1390,10 +1553,11 @@ class DispatcherCohortFilter:
         repository = os.environ["GITHUB_REPOSITORY"]
         self.reader = _Reader(read_json, read_archive, budget, deadline)
         header, _ = self.reader.artifact({"artifact_id": artifact_id, "artifact_digest": digest}, "cohort", repository, expected_producer=owner)
-        _require(isinstance(header.get("member_ids"), list) and header["member_ids"], "No member cohort fence")
+        _require(isinstance(header.get("member_ids"), list), "Member cohort fence inventory malformed")
+        empty = not header["member_ids"]
         self.cohort = load_cohort(artifact_id, digest, expected_owner=owner, expected_segment=None,
-                                 member_ids={header["member_ids"][0]}, read_json=read_json, read_archive=read_archive,
-                                 budget=budget, deadline=deadline)
+                                 member_ids=None if empty else {header["member_ids"][0]}, allow_empty=empty,
+                                 read_json=read_json, read_archive=read_archive, budget=budget, deadline=deadline)
         verify_cohort_lease(self.cohort, phase=phase, read_json=read_json, budget=budget, deadline=deadline)
         self.known = cohort_known_producer_ids(self.cohort, read_json=read_json, read_archive=read_archive,
                                               budget=budget, deadline=deadline)
@@ -1441,6 +1605,12 @@ class DispatcherCohortFilter:
                 continue
             if identifier in self.known and consumer_is_covered(self.cohort, run, read_json=self.reader.read_json,
                                                               read_archive=self.reader.read_archive, budget=self.reader.budget, deadline=self.reader.deadline):
+                self.covered[identifier] = binding
+                continue
+            if (run.get("event") == "workflow_run" and isinstance(run.get("display_title"), str)
+                    and re.fullmatch(r"sensor=[1-9][0-9]* action=(?:in_progress|completed)", run["display_title"])
+                    and consumer_is_deferred(self.cohort, run, read_json=self.reader.read_json,
+                                            read_archive=self.reader.read_archive, budget=self.reader.budget, deadline=self.reader.deadline)):
                 self.covered[identifier] = binding
                 continue
             if completed_consumer_is_noop(self.cohort, run, reader=self.reader):

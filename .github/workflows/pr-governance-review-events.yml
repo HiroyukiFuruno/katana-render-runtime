@@ -65,7 +65,7 @@ jobs:
           test -d "$RUNNER_TEMP"
           set -o noclobber
           cat > "$RUNNER_TEMP/krr-governance-sensor-reader.py" <<'PY'
-          PINNED_DISPATCHER_WORKFLOW_BLOB_SHA = "d0c18bb1d83537d8bad68f842c4457d715844740"
+          PINNED_DISPATCHER_WORKFLOW_BLOB_SHA = "15898ddcb68ea07f4caf9c5575bffafec308df54"
           def workflow_path_matches(value: object, expected: str) -> bool:
               if value == expected:
                   return True
@@ -375,54 +375,57 @@ jobs:
           class CohortError(RuntimeError):
               pass
 
-          def _hex(value, width):
-              return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{%d}" % width, value) is not None
+          def _digest(value):
+              return isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
 
-          def decode_payload(data, fields):
-              _require(isinstance(data, bytes) and len(data) <= MAX_BYTES, "Invalid payload bytes")
-              def pairs(items):
-                  result = {}
-                  for key, value in items:
-                      _require(key not in result, "Duplicate payload field")
-                      result[key] = value
-                  return result
+          def canonical(value):
               try:
-                  value = json.loads(data.decode("utf-8", "strict"), object_pairs_hook=pairs,
-                                     parse_constant=lambda _: (_ for _ in ()).throw(CohortError("Nonfinite number")))
-              except (ValueError, UnicodeError) as error:
-                  raise CohortError("Malformed payload") from error
-              _require(isinstance(value, dict) and set(value) == fields and canonical(value) == data,
-                       "Noncanonical payload schema")
-              _require(type(value.get("v")) is int and value["v"] == 1, "Unknown cohort schema")
-              return value
+                  data = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("ascii")
+              except (TypeError, ValueError, UnicodeError) as error:
+                  raise CohortError("Invalid canonical payload") from error
+              _require(len(data) <= MAX_BYTES, "Cohort payload exceeds the existing marker byte bound")
+              return data
 
-          class _NoRedirect(urllib.request.HTTPRedirectHandler):
-              def redirect_request(self, req, fp, code, msg, headers, newurl):
-                  return None
-
-          def _open_no_redirect(request, timeout):
+          def read_artifact_archive(endpoint, token, timeout, open_request=None):
+              _require(isinstance(endpoint, str) and re.fullmatch(r"repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/artifacts/[1-9][0-9]*/zip", endpoint),
+                       "Noncanonical artifact API endpoint")
+              open_request = open_request or _open_no_redirect
+              request = urllib.request.Request("https://api.github.com/" + endpoint,
+                                               headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+                                                        "X-GitHub-Api-Version": "2022-11-28"})
               try:
-                  return urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout)
-              except urllib.error.HTTPError as response:
-                  return response
-
-          def canonical_timestamp(value):
-              _require(isinstance(value, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})", value), "Invalid raw stage timestamp")
+                  response = open_request(request, timeout)
+              except (OSError, urllib.error.URLError) as error:
+                  raise CohortError("Artifact API request failed") from None
+              _require(response.code == 302, "Artifact API did not return a signed archive redirect")
+              location = response.headers.get("Location")
+              parsed = urllib.parse.urlsplit(location) if isinstance(location, str) else None
+              _require(parsed is not None and parsed.scheme == "https" and parsed.hostname
+                       and (parsed.hostname.endswith(".blob.core.windows.net") or parsed.hostname.endswith(".actions.githubusercontent.com")) and parsed.username is None and parsed.password is None
+                       and not parsed.fragment, "Invalid artifact storage redirect")
+              # 署名済みstorage URLへAPI認証headerを転送しない。URL自体も例外・ログへ含めない。
               try:
-                  stamp = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
-              except ValueError as error:
-                  raise CohortError("Invalid raw stage timestamp") from error
-              text = stamp.strftime("%Y-%m-%dT%H:%M:%S")
-              if stamp.microsecond:
-                  text += "." + f"{stamp.microsecond:06d}".rstrip("0")
-              return text + "Z"
+                  archive = open_request(urllib.request.Request(location), timeout)
+              except (OSError, urllib.error.URLError):
+                  raise CohortError("Artifact storage request failed") from None
+              _require(archive.code == 200, "Artifact storage download failed")
+              data = archive.read(MAX_BYTES + 1)
+              _require(len(data) <= MAX_BYTES, "Artifact archive exceeds its bound")
+              return data
 
-          def repository_matches(value, name, identifier):
-              if not isinstance(value, dict) or type(value.get("id")) is not int or value["id"] != identifier:
-                  return False
-              if value.get("full_name") == name:
-                  return value.get("url") in (None, "https://api.github.com/repos/" + name)
-              return value.get("name") == name.split("/")[1] and value.get("url") == "https://api.github.com/repos/" + name
+          def validate_member(member, *, now=None):
+              _require(isinstance(member, dict) and set(member) == MEMBER_FIELDS, "Invalid member schema")
+              for key in ("source_run_id", "source_workflow_id", "source_run_number", "pr_number", "repository_id"):
+                  _require(_integer(member[key]), "Invalid member integer")
+              _require(type(member["source_run_attempt"]) is int and member["source_run_attempt"] == 1
+                       and member["source_event"] in SENSOR_EVENTS and _repository_name(member["repository"])
+                       and isinstance(member["base_ref"], str) and member["base_ref"] and not any(c.isspace() for c in member["base_ref"])
+                       and _hex(member["base_sha"], 40) and _hex(member["head_sha"], 40)
+                       and _hex(member["pr_body_sha256"], 64), "Invalid member identity")
+              expected = source_deadline(member["latch_started_at"], now=time.time() if now is None else now)
+              _require(member["source_deadline_epoch"] == expected and (expected is None or type(member["source_deadline_epoch"]) in (int, float)),
+                       "Source clock reset")
+              return member
 
           def verify_cohort_lease(cohort, *, phase, read_json, budget, deadline):
               _require(phase in {"early", "all"}, "Unknown cohort lease phase")
@@ -481,37 +484,40 @@ jobs:
                        and (after.get("status") != "completed" or after.get("conclusion") == "success"), "Owner double-read lifecycle drift")
               cohort["registered_writers"] = registered
 
-          def source_latch_clock(source, jobs, *, now):
-              _require(isinstance(source, dict) and _integer(source.get("id")), "Invalid source clock run")
-              matches = [job for job in jobs if job.get("name") == "KRR / PR governance review latch"]
-              if not matches:
-                  _require(source.get("status") in ACTIVE and not jobs, "Source latch job missing")
-                  return None
-              _require(len(matches) == 1, "Source latch job ambiguous")
-              job = matches[0]
-              _require(job.get("run_id") == source["id"] and ("run_attempt" not in job or type(job["run_attempt"]) is int and job["run_attempt"] == 1)
-                       and job.get("head_sha") == source.get("head_sha"), "Source latch attempt/head drift")
-              steps = job.get("steps")
-              _require(isinstance(steps, list) and all(isinstance(step, dict) for step in steps), "Source latch steps missing")
-              if not steps:
-                  _require(source.get("status") in ACTIVE and job.get("status") in {"queued", "in_progress"}
-                           and job.get("conclusion") is None, "Source terminal clock missing")
-                  return None
-              matches = [step for step in steps if step.get("name") == "Await matching trusted governance Check Run"]
-              _require(len(matches) == 1, "Source latch step ambiguous")
-              step = matches[0]
-              if step.get("started_at") is None:
-                  _require(source.get("status") in ACTIVE and step.get("status") in {"queued", "in_progress"}, "Source terminal clock missing")
-                  return None
-              _require(type(step.get("number")) is int and step["number"] > 0 and step.get("status") in {"in_progress", "completed"}, "Source latch step identity")
-              started = canonical_timestamp(step["started_at"])
-              source_deadline(started, now=now)
-              return started
-
           RECOVERY_PREFIX = "Record verified failed cohort recovery "
 
           class RecoveryNotDrained(CohortError):
               pass
+
+          def drain_owner_backend(reader, repository, producer, repository_id, sha):
+              identifier = producer["id"]
+              created = producer.get("created_at")
+              _require(_utc_epoch(created) <= time.time(), "Failed owner creation timestamp missing/future")
+              query = urllib.parse.urlencode({"created": ">=" + created, "per_page": 100, "page": 1})
+              endpoint = f"repos/{repository}/actions/workflows/pr-governance-status-writer.yml/runs?{query}"
+              snapshot = reader.request(endpoint)
+              runs = snapshot.get("workflow_runs")
+              _require(type(snapshot.get("total_count")) is int and isinstance(runs, list)
+                       and snapshot["total_count"] == len(runs) <= 100 and all(isinstance(run, dict) and _integer(run.get("id")) for run in runs)
+                       and len({run["id"] for run in runs}) == len(runs), "Incomplete failed backend drain inventory")
+              for run in runs:
+                  title = run.get("display_title", "")
+                  if not isinstance(title, str) or not title.startswith(f"source={identifier} "):
+                      continue
+                  _require(re.fullmatch(rf"source={identifier} scope=(?:early|all) segment=[0-4]", title)
+                           and run.get("event") == "workflow_dispatch" and run.get("run_attempt") == 1
+                           and run.get("head_sha") == sha and run.get("head_branch") == producer.get("head_branch")
+                           and run.get("path") in {".github/workflows/pr-governance-status-writer.yml", ".github/workflows/pr-governance-status-writer.yml@" + producer["head_branch"]}
+                           and repository_matches(run.get("repository"), repository, repository_id), "Foreign failed owner backend")
+                  before = reader.request(f"repos/{repository}/actions/runs/{run['id']}")
+                  _require(before == run, "Failed backend drain listing drift")
+                  if before.get("status") != "completed":
+                      _require(before.get("status") in ACTIVE and before.get("conclusion") is None, "Invalid failed backend state")
+                      raise RecoveryNotDrained("Failed owner backend is still active")
+                  _require(before.get("conclusion") in {"success", "failure", "cancelled", "timed_out", "action_required", "neutral", "skipped"}, "Unknown failed backend terminal state")
+                  after = reader.request(f"repos/{repository}/actions/runs/{run['id']}")
+                  _require(after == before, "Failed backend terminal double-read drift")
+              _require(reader.request(endpoint) == snapshot, "Failed backend inventory changed during drain")
 
           def recover_failed_owner(reader, repository, identifier, sha, blob, reference=None):
               reader.cache.pop(("producer", repository, identifier), None)
@@ -579,6 +585,257 @@ jobs:
               _require(final == producer, "Failed owner recovery double-read drift")
               return {"owner": identifier, "journal": root_ref["artifact_id"], "digest": root_ref["artifact_digest"], "root_deadline_epoch": root}
 
+          def sensor_writer_title_binding(writer, query):
+              if "cohort_artifact_id" not in query:
+                  return {}
+              title = re.fullmatch(r"source=([1-9][0-9]*) scope=early segment=([1-4])", writer.get("display_title", ""))
+              _require(title is not None and query.get("cohort_segment") == [title[2]], "Cohort writer/query segment drift")
+              return {"cohort_owner": title[1], "cohort_segment": title[2]}
+
+          def sensor_archive_read(endpoint, *, timeout, deadline, budget, token, primary):
+              storage_reads = 0
+              def open_request(request, requested_timeout):
+                  nonlocal storage_reads
+                  if storage_reads:
+                      budget.charge()
+                  else:
+                      primary["hits"] += 1
+                  storage_reads += 1
+                  remaining = deadline - time.monotonic()
+                  _require(remaining > 0, "Sensor original artifact deadline elapsed")
+                  return _open_no_redirect(request, min(20, requested_timeout, remaining))
+              value = read_artifact_archive(endpoint, token, timeout, open_request=open_request)
+              _require(time.monotonic() < deadline, "Sensor original artifact deadline elapsed")
+              return value
+          PY
+
+      - name: Complete trusted cohort proof reader
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 -c 'import os, pathlib, stat; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"krr-governance-cohort-reader.py"; s=p.lstat(); assert stat.S_ISREG(s.st_mode) and s.st_uid==os.getuid() and s.st_mode & 0o077 == 0'
+          cat >> "$RUNNER_TEMP/krr-governance-cohort-reader.py" <<'PY'
+          def _integer(value):
+              return type(value) is int and 1 <= value <= 2**63 - 1
+
+          def _hex(value, width):
+              return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{%d}" % width, value) is not None
+
+          def decode_archive(data):
+              _require(isinstance(data, bytes) and len(data) <= MAX_BYTES, "Artifact archive exceeds its bound")
+              try:
+                  with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                      entries = archive.infolist()
+                      _require(len(entries) == 1, "Artifact must have exactly one entry")
+                      entry = entries[0]
+                      mode = entry.external_attr >> 16
+                      _require(entry.filename == "binding.json" and not entry.is_dir() and not entry.flag_bits & 1
+                               and not stat.S_ISLNK(mode) and (not stat.S_IFMT(mode) or stat.S_ISREG(mode))
+                               and 0 < entry.file_size <= MAX_BYTES and entry.compress_size <= MAX_BYTES,
+                               "Invalid artifact entry")
+                      with archive.open(entry) as stream:
+                          payload = stream.read(MAX_BYTES + 1)
+                      _require(len(payload) == entry.file_size and len(payload) <= MAX_BYTES, "Artifact expansion exceeds its bound")
+                      return payload
+              except (zipfile.BadZipFile, OSError, RuntimeError, ValueError) as error:
+                  if isinstance(error, CohortError):
+                      raise
+                  raise CohortError("Invalid artifact archive") from error
+
+          def _repository_name(value):
+              return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value) is not None
+
+          def repository_matches(value, name, identifier):
+              if not isinstance(value, dict) or type(value.get("id")) is not int or value["id"] != identifier:
+                  return False
+              if value.get("full_name") == name:
+                  return value.get("url") in (None, "https://api.github.com/repos/" + name)
+              return value.get("name") == name.split("/")[1] and value.get("url") == "https://api.github.com/repos/" + name
+
+          def member_source_matches(member, source, current_pr):
+              try:
+                  validate_member(member)
+                  _require(isinstance(source, dict) and isinstance(current_pr, dict), "Source/PR unavailable")
+                  repo, repo_id = member["repository"], member["repository_id"]
+                  path = ".github/workflows/pr-governance-review-events.yml"
+                  _require(type(source.get("id")) is int and source["id"] == member["source_run_id"]
+                           and type(source.get("run_attempt")) is int and source["run_attempt"] == 1
+                           and type(source.get("workflow_id")) is int and source["workflow_id"] == member["source_workflow_id"]
+                           and type(source.get("run_number")) is int and source["run_number"] == member["source_run_number"]
+                           and source.get("name") == "PR governance review sensor" and source.get("event") == member["source_event"]
+                           and source.get("head_sha") == member["head_sha"]
+                           and source.get("path") in {path, path + "@" + member["base_ref"], path + "@refs/heads/" + member["base_ref"]}
+                           and repository_matches(source.get("repository"), repo, repo_id)
+                           and repository_matches(source.get("head_repository"), repo, repo_id)
+                           and (source.get("status") in ACTIVE and source.get("conclusion") is None
+                                or source.get("status") == "completed" and source.get("conclusion") == "success"),
+                           "Source identity/state drift")
+                  pulls = source.get("pull_requests")
+                  _require(isinstance(pulls, list) and len(pulls) == 1 and isinstance(pulls[0], dict), "Ambiguous source PR")
+                  pull = pulls[0]
+                  for actual in (pull, current_pr):
+                      base, head = actual.get("base"), actual.get("head")
+                      _require(type(actual.get("number")) is int and actual["number"] == member["pr_number"]
+                               and isinstance(base, dict) and isinstance(head, dict)
+                               and base.get("ref") == member["base_ref"] and base.get("sha") == member["base_sha"]
+                               and head.get("sha") == member["head_sha"]
+                               and repository_matches(base.get("repo"), repo, repo_id)
+                               and repository_matches(head.get("repo"), repo, repo_id), "Current/source PR binding drift")
+                  body = current_pr.get("body")
+                  _require(current_pr.get("state") == "open" and current_pr.get("draft") is False and isinstance(body, str)
+                           and "\0" not in body and hashlib.sha256(body.encode("utf-8", "strict")).hexdigest() == member["pr_body_sha256"],
+                           "Current Ready PR/body drift")
+                  return True
+              except (CohortError, KeyError, TypeError, UnicodeError):
+                  return False
+
+          def _ref(value):
+              _require(isinstance(value, dict) and set(value) == {"artifact_id", "artifact_digest"}
+                       and _integer(value["artifact_id"]) and _digest(value["artifact_digest"]), "Invalid immutable child reference")
+              return value
+
+          def load_cohort(artifact_id, digest, *, expected_owner, expected_segment, read_json, read_archive, budget, deadline, member_ids=None, trusted_workflow_blob=None, allow_empty=False):
+              _require(type(allow_empty) is bool and (not allow_empty or expected_segment is None and member_ids is None), "Empty context cannot grant selective authority")
+              _require(_integer(artifact_id) and _digest(digest) and _integer(expected_owner)
+                       and (expected_segment is None or type(expected_segment) is int and 1 <= expected_segment <= 4), "Invalid cohort binding")
+              repository = os.environ.get("GITHUB_REPOSITORY", "")
+              _require(_repository_name(repository), "Missing exact repository context")
+              reader = _Reader(read_json, read_archive, budget, deadline, trusted_workflow_blob)
+              header, metadata = reader.artifact({"artifact_id": artifact_id, "artifact_digest": digest}, "cohort", repository,
+                                                 expected_producer=expected_owner)
+              _require(header["owner_run_attempt"] == 1 and type(header["owner_run_attempt"]) is int
+                       and header["repository"] == repository and _integer(header["repository_id"])
+                       and _hex(header["workflow_sha"], 40) and _hex(header["workflow_blob_sha"], 40)
+                       and _integer(header["root_deadline_epoch"]) and time.time() < header["root_deadline_epoch"],
+                       "Invalid cohort header identity/clock")
+              reader.deadline = min(reader.deadline, header["root_deadline_epoch"])
+              content = dict(header)
+              content.pop("cohort_digest")
+              _require(_hex(header["cohort_digest"], 64) and hashlib.sha256(canonical(content)).hexdigest() == header["cohort_digest"], "Cohort canonical digest")
+              producer = reader.producer(repository, expected_owner, header["workflow_sha"], header["workflow_blob_sha"])
+              _require(repository_matches(producer.get("repository"), repository, header["repository_id"])
+                       and metadata["workflow_run"].get("repository_id") == header["repository_id"]
+                       and metadata["workflow_run"].get("head_repository_id") == header["repository_id"]
+                       and metadata["workflow_run"].get("head_sha") == header["workflow_sha"], "Cohort repository/workflow binding")
+              identifiers = header["member_ids"]
+              _require(isinstance(identifiers, list) and (0 if allow_empty else 1) <= len(identifiers) <= MAX_MEMBERS
+                       and all(_integer(identifier) for identifier in identifiers) and identifiers == sorted(set(identifiers)), "Cohort member reservation cap")
+              segments = header["member_segments"]
+              _require(isinstance(segments, str) and len(segments) == len(identifiers) and re.fullmatch(r"[1-4]*" if allow_empty and not identifiers else r"[1-4]+", segments), "Invalid member segment index")
+              indexed_segments = dict(zip(identifiers, map(int, segments)))
+              selected = ({identifier for identifier in identifiers if expected_segment is None or indexed_segments[identifier] == expected_segment}
+                          if member_ids is None else member_ids)
+              _require(isinstance(selected, set) and (bool(selected) or allow_empty and not identifiers) and selected <= set(identifiers), "Foreign selective member")
+              selected_segments = {indexed_segments[identifier] for identifier in selected}
+              _require(isinstance(header["member_pages"], list) and len(header["member_pages"]) == (len(identifiers) + 49) // 50
+                       and isinstance(header["batches"], list) and (0 if allow_empty and not identifiers else 1) <= len(header["batches"]) <= 4
+                       and set(indexed_segments.values()) == set(range(1, len(header["batches"]) + 1)), "Invalid cohort page count")
+              _require(isinstance(header["alias_pages"], list) and len(header["alias_pages"]) == (len(identifiers) + 49) // 50, "Invalid alias page count")
+              all_refs = [_ref(ref) for ref in header["member_pages"] + header["alias_pages"] + header["batches"] + [header["root_journal"]]]
+              _require(len({ref["artifact_id"] for ref in all_refs}) == len(all_refs), "Duplicate cohort child artifact")
+              journals, owner_ids = {}, {}
+              for index, reference in enumerate(header["member_pages"]):
+                  slice_ids = identifiers[index * 50:(index + 1) * 50]
+                  if not selected.intersection(slice_ids):
+                      continue
+                  page, _ = reader.artifact(reference, "members", repository, expected_producer=expected_owner)
+                  entries = page["entries"]
+                  _require(isinstance(entries, list) and len(entries) == len(slice_ids), "Invalid source reference page")
+                  local_ids = []
+                  for entry in entries:
+                      _require(isinstance(entry, list) and len(entry) == 4 and all(_integer(value) for value in entry[:3]) and _digest(entry[3]), "Malformed journal reference")
+                      identifier, creator, journal_id, journal_digest = entry
+                      local_ids.append(identifier)
+                      if identifier in selected:
+                          journal, journal_metadata = reader.artifact({"artifact_id": journal_id, "artifact_digest": journal_digest}, "source", repository, expected_producer=creator)
+                          _require(type(journal["producer_run_attempt"]) is int and journal["producer_run_attempt"] == 1
+                                   and journal["repository"] == repository and journal["repository_id"] == header["repository_id"]
+                                   and _integer(journal["root_deadline_epoch"]) and journal["root_deadline_epoch"] >= header["root_deadline_epoch"], "Journal original root clock/binding")
+                          validate_journal_clock(journal, reader)
+                          member = validate_member(journal["member"])
+                          _require(member["source_run_id"] == identifier and member["repository"] == repository
+                                   and member["repository_id"] == header["repository_id"], "Member source identity drift")
+                          journal_producer = reader.producer(repository, creator, journal["workflow_sha"], journal["workflow_blob_sha"])
+                          _require(repository_matches(journal_producer.get("repository"), repository, header["repository_id"])
+                                   and journal_metadata["workflow_run"].get("head_sha") == journal["workflow_sha"], "Journal producer repository/workflow drift")
+                          journals[identifier] = member
+                          owner_ids[identifier] = creator
+                  _require(local_ids == slice_ids, "Incomplete/duplicate/unsorted source page")
+              _require(set(journals) == selected, "Missing selected member proof")
+              targets = {}
+              for segment in sorted(selected_segments):
+                  batch, _ = reader.artifact(header["batches"][segment - 1], "batch", repository, expected_producer=expected_owner)
+                  _require(type(batch["segment"]) is int and batch["segment"] == segment, "Wrong cohort segment")
+                  entries = batch["target_members"]
+                  _require(isinstance(entries, list) and 1 <= len(entries) <= MAX_BATCH_TARGETS, "Early target cap")
+                  numbers, batch_ids = [], []
+                  for entry in entries:
+                      _require(isinstance(entry, list) and len(entry) == 2 and _integer(entry[0]) and isinstance(entry[1], list)
+                               and entry[1] and all(_integer(identifier) for identifier in entry[1]) and entry[1] == sorted(set(entry[1])), "Invalid target/member mapping")
+                      number, ids = entry
+                      numbers.append(number)
+                      batch_ids.extend(ids)
+                      _require(number not in targets, "Duplicate cohort target")
+                      targets[number] = ids
+                      for identifier in set(ids) & selected:
+                          _require(journals[identifier]["pr_number"] == number, "Member target drift")
+                  _require(numbers == sorted(set(numbers)) and len(batch_ids) == len(set(batch_ids))
+                           and sorted(batch_ids) == [identifier for identifier in identifiers if indexed_segments[identifier] == segment], "Incomplete batch member union")
+              root_journal, root_metadata = reader.artifact(header["root_journal"], "source", repository)
+              _require(root_journal["root_deadline_epoch"] == header["root_deadline_epoch"]
+                       and root_journal["repository_id"] == header["repository_id"], "Original root clock reset")
+              validate_journal_clock(root_journal, reader)
+              root_producer = reader.producer(repository, root_journal["producer_run_id"], root_journal["workflow_sha"], root_journal["workflow_blob_sha"])
+              _require(repository_matches(root_producer.get("repository"), repository, header["repository_id"])
+                       and root_metadata["workflow_run"].get("head_sha") == root_journal["workflow_sha"], "Root clock creator drift")
+              if not identifiers:
+                  _require(header["member_pages"] == header["alias_pages"] == header["batches"] == [] and segments == "", "Empty cohort has hidden selective authority")
+                  jobs = reader.jobs(repository, expected_owner)
+                  for job_name, prefix in ((ELECTION_JOB, SELECTED_PREFIX), (ADMISSION_JOB, ADMITTED_PREFIX)):
+                      matches = [job for job in jobs if job.get("name") == job_name]
+                      _require(len(matches) == 1 and matches[0].get("head_sha") == header["workflow_sha"], "Empty cohort owner stage missing/ambiguous")
+                      job = matches[0]
+                      _require((job_name == ELECTION_JOB and job.get("status") == "in_progress" and job.get("conclusion") is None)
+                               or job.get("status") == "completed" and job.get("conclusion") == "success", "Empty cohort owner was not selected/admitted")
+                      steps = job.get("steps")
+                      marker = prefix + f"owner={expected_owner} artifact={artifact_id} digest={digest}"
+                      _require(isinstance(steps, list) and all(isinstance(step, dict) for step in steps), "Empty owner native stages malformed")
+                      stages = [step for step in steps if isinstance(step.get("name"), str) and step["name"].startswith(prefix)]
+                      _require(len(stages) == 1 and stages[0].get("name") == marker and stages[0].get("status") == "completed" and stages[0].get("conclusion") == "success", "Empty owner native binding missing/ambiguous")
+              return {"header": header, "members_by_id": journals, "target_members_by_number": targets,
+                      "registered_writers": {}, "artifact_id": artifact_id, "artifact_digest": digest,
+                      "cohort_digest": header["cohort_digest"], "producer_ids_by_member": owner_ids, "loaded_segments": sorted(selected_segments), "trusted_workflow_blob": trusted_workflow_blob,
+                      "recovered_predecessor_ids": sorted(reader.cache.get("recovered_predecessor_ids", set()))}
+
+          def resolve_member_clock(member, *, read_json, budget, deadline):
+              validate_member(member)
+              reader = _Reader(read_json, None, budget, deadline)
+              repo, identifier = member["repository"], member["source_run_id"]
+              endpoint = f"repos/{repo}/actions/runs/{identifier}"
+              source = reader.request(endpoint)
+              jobs = reader.jobs(repo, identifier)
+              after = reader.request(endpoint)
+              keys = ("id", "run_attempt", "workflow_id", "run_number", "name", "event", "path", "head_sha", "repository", "head_repository", "pull_requests")
+              _require(isinstance(source, dict) and isinstance(after, dict) and all(source.get(key) == after.get(key) for key in keys), "Original source clock identity drift")
+              started = source_latch_clock(after, jobs, now=time.time())
+              _require(started is not None, "Source latch is not admitted")
+              _require(member["latch_started_at"] in (None, started), "Source original clock drift")
+              normalized = dict(member)
+              normalized["latch_started_at"] = started
+              normalized["source_deadline_epoch"] = source_deadline(started, now=time.time())
+              _require(time.time() < min(normalized["source_deadline_epoch"], deadline), "Source original deadline expired")
+              return normalized
+
+          def recovery_marker(steps):
+              candidates = [step for step in steps if isinstance(step.get("name"), str) and step["name"].startswith(RECOVERY_PREFIX)]
+              _require(len(candidates) <= 1, "Ambiguous recovery native stage")
+              if not candidates:
+                  return None
+              step = candidates[0]
+              match = re.fullmatch(RECOVERY_PREFIX + r"owner=([1-9][0-9]*) journal=([1-9][0-9]*) digest=(sha256:[0-9a-f]{64}) root=([1-9][0-9]*)", step["name"])
+              _require(match is not None and step.get("status") == "completed" and step.get("conclusion") == "success", "Failed recovery native stage")
+              return {"owner": int(match[1]), "journal": int(match[2]), "digest": match[3], "root_deadline_epoch": int(match[4])}
+
           def sensor_json_request(endpoint, *, budget, cache, primary, precharged, request_timeout, deadline,
                                   terminal_page, inspect_link, run, authenticated):
               if not precharged:
@@ -624,70 +881,64 @@ jobs:
               return (value, has_next) if inspect_link else value
           PY
 
-      - name: Complete trusted cohort proof reader
+      - name: Finalize trusted cohort proof reader
         run: |
           set -euo pipefail
           umask 077
           python3 -c 'import os, pathlib, stat; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"krr-governance-cohort-reader.py"; s=p.lstat(); assert stat.S_ISREG(s.st_mode) and s.st_uid==os.getuid() and s.st_mode & 0o077 == 0'
           cat >> "$RUNNER_TEMP/krr-governance-cohort-reader.py" <<'PY'
-          def _digest(value):
-              return isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+          def _require(condition, message):
+              if not condition:
+                  raise CohortError(message)
 
-          def validate_member(member, *, now=None):
-              _require(isinstance(member, dict) and set(member) == MEMBER_FIELDS, "Invalid member schema")
-              for key in ("source_run_id", "source_workflow_id", "source_run_number", "pr_number", "repository_id"):
-                  _require(_integer(member[key]), "Invalid member integer")
-              _require(type(member["source_run_attempt"]) is int and member["source_run_attempt"] == 1
-                       and member["source_event"] in SENSOR_EVENTS and _repository_name(member["repository"])
-                       and isinstance(member["base_ref"], str) and member["base_ref"] and not any(c.isspace() for c in member["base_ref"])
-                       and _hex(member["base_sha"], 40) and _hex(member["head_sha"], 40)
-                       and _hex(member["pr_body_sha256"], 64), "Invalid member identity")
-              expected = source_deadline(member["latch_started_at"], now=time.time() if now is None else now)
-              _require(member["source_deadline_epoch"] == expected and (expected is None or type(member["source_deadline_epoch"]) in (int, float)),
-                       "Source clock reset")
-              return member
-
-          def member_source_matches(member, source, current_pr):
+          def decode_payload(data, fields):
+              _require(isinstance(data, bytes) and len(data) <= MAX_BYTES, "Invalid payload bytes")
+              def pairs(items):
+                  result = {}
+                  for key, value in items:
+                      _require(key not in result, "Duplicate payload field")
+                      result[key] = value
+                  return result
               try:
-                  validate_member(member)
-                  _require(isinstance(source, dict) and isinstance(current_pr, dict), "Source/PR unavailable")
-                  repo, repo_id = member["repository"], member["repository_id"]
-                  path = ".github/workflows/pr-governance-review-events.yml"
-                  _require(type(source.get("id")) is int and source["id"] == member["source_run_id"]
-                           and type(source.get("run_attempt")) is int and source["run_attempt"] == 1
-                           and type(source.get("workflow_id")) is int and source["workflow_id"] == member["source_workflow_id"]
-                           and type(source.get("run_number")) is int and source["run_number"] == member["source_run_number"]
-                           and source.get("name") == "PR governance review sensor" and source.get("event") == member["source_event"]
-                           and source.get("head_sha") == member["head_sha"]
-                           and source.get("path") in {path, path + "@" + member["base_ref"], path + "@refs/heads/" + member["base_ref"]}
-                           and repository_matches(source.get("repository"), repo, repo_id)
-                           and repository_matches(source.get("head_repository"), repo, repo_id)
-                           and (source.get("status") in ACTIVE and source.get("conclusion") is None
-                                or source.get("status") == "completed" and source.get("conclusion") == "success"),
-                           "Source identity/state drift")
-                  pulls = source.get("pull_requests")
-                  _require(isinstance(pulls, list) and len(pulls) == 1 and isinstance(pulls[0], dict), "Ambiguous source PR")
-                  pull = pulls[0]
-                  for actual in (pull, current_pr):
-                      base, head = actual.get("base"), actual.get("head")
-                      _require(type(actual.get("number")) is int and actual["number"] == member["pr_number"]
-                               and isinstance(base, dict) and isinstance(head, dict)
-                               and base.get("ref") == member["base_ref"] and base.get("sha") == member["base_sha"]
-                               and head.get("sha") == member["head_sha"]
-                               and repository_matches(base.get("repo"), repo, repo_id)
-                               and repository_matches(head.get("repo"), repo, repo_id), "Current/source PR binding drift")
-                  body = current_pr.get("body")
-                  _require(current_pr.get("state") == "open" and current_pr.get("draft") is False and isinstance(body, str)
-                           and "\0" not in body and hashlib.sha256(body.encode("utf-8", "strict")).hexdigest() == member["pr_body_sha256"],
-                           "Current Ready PR/body drift")
-                  return True
-              except (CohortError, KeyError, TypeError, UnicodeError):
-                  return False
-
-          def _ref(value):
-              _require(isinstance(value, dict) and set(value) == {"artifact_id", "artifact_digest"}
-                       and _integer(value["artifact_id"]) and _digest(value["artifact_digest"]), "Invalid immutable child reference")
+                  value = json.loads(data.decode("utf-8", "strict"), object_pairs_hook=pairs,
+                                     parse_constant=lambda _: (_ for _ in ()).throw(CohortError("Nonfinite number")))
+              except (ValueError, UnicodeError) as error:
+                  raise CohortError("Malformed payload") from error
+              _require(isinstance(value, dict) and set(value) == fields and canonical(value) == data,
+                       "Noncanonical payload schema")
+              _require(type(value.get("v")) is int and value["v"] == 1, "Unknown cohort schema")
               return value
+
+          class _NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          def _open_no_redirect(request, timeout):
+              try:
+                  return urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout)
+              except urllib.error.HTTPError as response:
+                  return response
+
+          def canonical_timestamp(value):
+              _require(isinstance(value, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})", value), "Invalid raw stage timestamp")
+              try:
+                  stamp = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+              except ValueError as error:
+                  raise CohortError("Invalid raw stage timestamp") from error
+              text = stamp.strftime("%Y-%m-%dT%H:%M:%S")
+              if stamp.microsecond:
+                  text += "." + f"{stamp.microsecond:06d}".rstrip("0")
+              return text + "Z"
+
+          def source_deadline(started_at, *, now):
+              if started_at is None:
+                  return None
+              canonical = canonical_timestamp(started_at)
+              _require(canonical == started_at, "Source journal timestamp is not canonical UTC")
+              started = datetime.fromisoformat(canonical.replace("Z", "+00:00")).timestamp()
+              _require(started <= now, "Future source latch clock")
+              result = started + 5400
+              return int(result) if result.is_integer() else result
 
           class _Reader:
               def __init__(self, read_json, read_archive, budget, deadline, trusted_workflow_blob=None):
@@ -824,37 +1075,35 @@ jobs:
                   self.cache[cache_key] = (payload, metadata)
                   return payload, metadata
 
-          def resolve_member_clock(member, *, read_json, budget, deadline):
-              validate_member(member)
-              reader = _Reader(read_json, None, budget, deadline)
-              repo, identifier = member["repository"], member["source_run_id"]
-              endpoint = f"repos/{repo}/actions/runs/{identifier}"
-              source = reader.request(endpoint)
-              jobs = reader.jobs(repo, identifier)
-              after = reader.request(endpoint)
-              keys = ("id", "run_attempt", "workflow_id", "run_number", "name", "event", "path", "head_sha", "repository", "head_repository", "pull_requests")
-              _require(isinstance(source, dict) and isinstance(after, dict) and all(source.get(key) == after.get(key) for key in keys), "Original source clock identity drift")
-              started = source_latch_clock(after, jobs, now=time.time())
-              _require(started is not None, "Source latch is not admitted")
-              _require(member["latch_started_at"] in (None, started), "Source original clock drift")
-              normalized = dict(member)
-              normalized["latch_started_at"] = started
-              normalized["source_deadline_epoch"] = source_deadline(started, now=time.time())
-              _require(time.time() < min(normalized["source_deadline_epoch"], deadline), "Source original deadline expired")
-              return normalized
+          def source_latch_clock(source, jobs, *, now):
+              _require(isinstance(source, dict) and _integer(source.get("id")), "Invalid source clock run")
+              matches = [job for job in jobs if job.get("name") == "KRR / PR governance review latch"]
+              if not matches:
+                  _require(source.get("status") in ACTIVE and not jobs, "Source latch job missing")
+                  return None
+              _require(len(matches) == 1, "Source latch job ambiguous")
+              job = matches[0]
+              _require(job.get("run_id") == source["id"] and ("run_attempt" not in job or type(job["run_attempt"]) is int and job["run_attempt"] == 1)
+                       and job.get("head_sha") == source.get("head_sha"), "Source latch attempt/head drift")
+              steps = job.get("steps")
+              _require(isinstance(steps, list) and all(isinstance(step, dict) for step in steps), "Source latch steps missing")
+              if not steps:
+                  _require(source.get("status") in ACTIVE and job.get("status") in {"queued", "in_progress"}
+                           and job.get("conclusion") is None, "Source terminal clock missing")
+                  return None
+              matches = [step for step in steps if step.get("name") == "Await matching trusted governance Check Run"]
+              _require(len(matches) == 1, "Source latch step ambiguous")
+              step = matches[0]
+              if step.get("started_at") is None:
+                  _require(source.get("status") in ACTIVE and step.get("status") in {"queued", "in_progress"}, "Source terminal clock missing")
+                  return None
+              _require(type(step.get("number")) is int and step["number"] > 0 and step.get("status") in {"in_progress", "completed"}, "Source latch step identity")
+              started = canonical_timestamp(step["started_at"])
+              source_deadline(started, now=now)
+              return started
 
           def _utc_epoch(value):
               return datetime.fromisoformat(canonical_timestamp(value).replace("Z", "+00:00")).timestamp()
-
-          def recovery_marker(steps):
-              candidates = [step for step in steps if isinstance(step.get("name"), str) and step["name"].startswith(RECOVERY_PREFIX)]
-              _require(len(candidates) <= 1, "Ambiguous recovery native stage")
-              if not candidates:
-                  return None
-              step = candidates[0]
-              match = re.fullmatch(RECOVERY_PREFIX + r"owner=([1-9][0-9]*) journal=([1-9][0-9]*) digest=(sha256:[0-9a-f]{64}) root=([1-9][0-9]*)", step["name"])
-              _require(match is not None and step.get("status") == "completed" and step.get("conclusion") == "success", "Failed recovery native stage")
-              return {"owner": int(match[1]), "journal": int(match[2]), "digest": match[3], "root_deadline_epoch": int(match[4])}
 
           def validate_journal_clock(journal, reader):
               _require(type(journal["producer_run_attempt"]) is int and journal["producer_run_attempt"] == 1
@@ -885,224 +1134,6 @@ jobs:
               origin = journal["root_deadline_epoch"] - 21000
               _require(_utc_epoch(scopes[0].get("started_at")) <= origin <= _utc_epoch(scopes[0].get("completed_at")) <= time.time(),
                        "Root clock restarted/future/outside creator stage")
-
-          def sensor_writer_title_binding(writer, query):
-              if "cohort_artifact_id" not in query:
-                  return {}
-              title = re.fullmatch(r"source=([1-9][0-9]*) scope=early segment=([1-4])", writer.get("display_title", ""))
-              _require(title is not None and query.get("cohort_segment") == [title[2]], "Cohort writer/query segment drift")
-              return {"cohort_owner": title[1], "cohort_segment": title[2]}
-          PY
-
-      - name: Finalize trusted cohort proof reader
-        run: |
-          set -euo pipefail
-          umask 077
-          python3 -c 'import os, pathlib, stat; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"krr-governance-cohort-reader.py"; s=p.lstat(); assert stat.S_ISREG(s.st_mode) and s.st_uid==os.getuid() and s.st_mode & 0o077 == 0'
-          cat >> "$RUNNER_TEMP/krr-governance-cohort-reader.py" <<'PY'
-          def _require(condition, message):
-              if not condition:
-                  raise CohortError(message)
-
-          def _integer(value):
-              return type(value) is int and 1 <= value <= 2**63 - 1
-
-          def canonical(value):
-              try:
-                  data = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("ascii")
-              except (TypeError, ValueError, UnicodeError) as error:
-                  raise CohortError("Invalid canonical payload") from error
-              _require(len(data) <= MAX_BYTES, "Cohort payload exceeds the existing marker byte bound")
-              return data
-
-          def decode_archive(data):
-              _require(isinstance(data, bytes) and len(data) <= MAX_BYTES, "Artifact archive exceeds its bound")
-              try:
-                  with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                      entries = archive.infolist()
-                      _require(len(entries) == 1, "Artifact must have exactly one entry")
-                      entry = entries[0]
-                      mode = entry.external_attr >> 16
-                      _require(entry.filename == "binding.json" and not entry.is_dir() and not entry.flag_bits & 1
-                               and not stat.S_ISLNK(mode) and (not stat.S_IFMT(mode) or stat.S_ISREG(mode))
-                               and 0 < entry.file_size <= MAX_BYTES and entry.compress_size <= MAX_BYTES,
-                               "Invalid artifact entry")
-                      with archive.open(entry) as stream:
-                          payload = stream.read(MAX_BYTES + 1)
-                      _require(len(payload) == entry.file_size and len(payload) <= MAX_BYTES, "Artifact expansion exceeds its bound")
-                      return payload
-              except (zipfile.BadZipFile, OSError, RuntimeError, ValueError) as error:
-                  if isinstance(error, CohortError):
-                      raise
-                  raise CohortError("Invalid artifact archive") from error
-
-          def read_artifact_archive(endpoint, token, timeout, open_request=None):
-              _require(isinstance(endpoint, str) and re.fullmatch(r"repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/artifacts/[1-9][0-9]*/zip", endpoint),
-                       "Noncanonical artifact API endpoint")
-              open_request = open_request or _open_no_redirect
-              request = urllib.request.Request("https://api.github.com/" + endpoint,
-                                               headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
-                                                        "X-GitHub-Api-Version": "2022-11-28"})
-              try:
-                  response = open_request(request, timeout)
-              except (OSError, urllib.error.URLError) as error:
-                  raise CohortError("Artifact API request failed") from None
-              _require(response.code == 302, "Artifact API did not return a signed archive redirect")
-              location = response.headers.get("Location")
-              parsed = urllib.parse.urlsplit(location) if isinstance(location, str) else None
-              _require(parsed is not None and parsed.scheme == "https" and parsed.hostname
-                       and (parsed.hostname.endswith(".blob.core.windows.net") or parsed.hostname.endswith(".actions.githubusercontent.com")) and parsed.username is None and parsed.password is None
-                       and not parsed.fragment, "Invalid artifact storage redirect")
-              # 署名済みstorage URLへAPI認証headerを転送しない。URL自体も例外・ログへ含めない。
-              try:
-                  archive = open_request(urllib.request.Request(location), timeout)
-              except (OSError, urllib.error.URLError):
-                  raise CohortError("Artifact storage request failed") from None
-              _require(archive.code == 200, "Artifact storage download failed")
-              data = archive.read(MAX_BYTES + 1)
-              _require(len(data) <= MAX_BYTES, "Artifact archive exceeds its bound")
-              return data
-
-          def source_deadline(started_at, *, now):
-              if started_at is None:
-                  return None
-              canonical = canonical_timestamp(started_at)
-              _require(canonical == started_at, "Source journal timestamp is not canonical UTC")
-              started = datetime.fromisoformat(canonical.replace("Z", "+00:00")).timestamp()
-              _require(started <= now, "Future source latch clock")
-              result = started + 5400
-              return int(result) if result.is_integer() else result
-
-          def _repository_name(value):
-              return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value) is not None
-
-          def load_cohort(artifact_id, digest, *, expected_owner, expected_segment, read_json, read_archive, budget, deadline, member_ids=None, trusted_workflow_blob=None):
-              _require(_integer(artifact_id) and _digest(digest) and _integer(expected_owner)
-                       and (expected_segment is None or type(expected_segment) is int and 1 <= expected_segment <= 4), "Invalid cohort binding")
-              repository = os.environ.get("GITHUB_REPOSITORY", "")
-              _require(_repository_name(repository), "Missing exact repository context")
-              reader = _Reader(read_json, read_archive, budget, deadline, trusted_workflow_blob)
-              header, metadata = reader.artifact({"artifact_id": artifact_id, "artifact_digest": digest}, "cohort", repository,
-                                                 expected_producer=expected_owner)
-              _require(header["owner_run_attempt"] == 1 and type(header["owner_run_attempt"]) is int
-                       and header["repository"] == repository and _integer(header["repository_id"])
-                       and _hex(header["workflow_sha"], 40) and _hex(header["workflow_blob_sha"], 40)
-                       and _integer(header["root_deadline_epoch"]) and time.time() < header["root_deadline_epoch"],
-                       "Invalid cohort header identity/clock")
-              reader.deadline = min(reader.deadline, header["root_deadline_epoch"])
-              content = dict(header)
-              content.pop("cohort_digest")
-              _require(_hex(header["cohort_digest"], 64) and hashlib.sha256(canonical(content)).hexdigest() == header["cohort_digest"], "Cohort canonical digest")
-              producer = reader.producer(repository, expected_owner, header["workflow_sha"], header["workflow_blob_sha"])
-              _require(repository_matches(producer.get("repository"), repository, header["repository_id"])
-                       and metadata["workflow_run"].get("repository_id") == header["repository_id"]
-                       and metadata["workflow_run"].get("head_repository_id") == header["repository_id"]
-                       and metadata["workflow_run"].get("head_sha") == header["workflow_sha"], "Cohort repository/workflow binding")
-              identifiers = header["member_ids"]
-              _require(isinstance(identifiers, list) and 1 <= len(identifiers) <= MAX_MEMBERS
-                       and all(_integer(identifier) for identifier in identifiers) and identifiers == sorted(set(identifiers)), "Cohort member reservation cap")
-              segments = header["member_segments"]
-              _require(isinstance(segments, str) and len(segments) == len(identifiers) and re.fullmatch(r"[1-4]+", segments), "Invalid member segment index")
-              indexed_segments = dict(zip(identifiers, map(int, segments)))
-              selected = ({identifier for identifier in identifiers if expected_segment is None or indexed_segments[identifier] == expected_segment}
-                          if member_ids is None else member_ids)
-              _require(isinstance(selected, set) and selected and selected <= set(identifiers), "Foreign selective member")
-              selected_segments = {indexed_segments[identifier] for identifier in selected}
-              _require(isinstance(header["member_pages"], list) and len(header["member_pages"]) == (len(identifiers) + 49) // 50
-                       and isinstance(header["batches"], list) and 1 <= len(header["batches"]) <= 4
-                       and set(indexed_segments.values()) == set(range(1, len(header["batches"]) + 1)), "Invalid cohort page count")
-              _require(isinstance(header["alias_pages"], list) and len(header["alias_pages"]) == (len(identifiers) + 49) // 50, "Invalid alias page count")
-              all_refs = [_ref(ref) for ref in header["member_pages"] + header["alias_pages"] + header["batches"] + [header["root_journal"]]]
-              _require(len({ref["artifact_id"] for ref in all_refs}) == len(all_refs), "Duplicate cohort child artifact")
-              journals, owner_ids = {}, {}
-              for index, reference in enumerate(header["member_pages"]):
-                  slice_ids = identifiers[index * 50:(index + 1) * 50]
-                  if not selected.intersection(slice_ids):
-                      continue
-                  page, _ = reader.artifact(reference, "members", repository, expected_producer=expected_owner)
-                  entries = page["entries"]
-                  _require(isinstance(entries, list) and len(entries) == len(slice_ids), "Invalid source reference page")
-                  local_ids = []
-                  for entry in entries:
-                      _require(isinstance(entry, list) and len(entry) == 4 and all(_integer(value) for value in entry[:3]) and _digest(entry[3]), "Malformed journal reference")
-                      identifier, creator, journal_id, journal_digest = entry
-                      local_ids.append(identifier)
-                      if identifier in selected:
-                          journal, journal_metadata = reader.artifact({"artifact_id": journal_id, "artifact_digest": journal_digest}, "source", repository, expected_producer=creator)
-                          _require(type(journal["producer_run_attempt"]) is int and journal["producer_run_attempt"] == 1
-                                   and journal["repository"] == repository and journal["repository_id"] == header["repository_id"]
-                                   and _integer(journal["root_deadline_epoch"]) and journal["root_deadline_epoch"] >= header["root_deadline_epoch"], "Journal original root clock/binding")
-                          validate_journal_clock(journal, reader)
-                          member = validate_member(journal["member"])
-                          _require(member["source_run_id"] == identifier and member["repository"] == repository
-                                   and member["repository_id"] == header["repository_id"], "Member source identity drift")
-                          journal_producer = reader.producer(repository, creator, journal["workflow_sha"], journal["workflow_blob_sha"])
-                          _require(repository_matches(journal_producer.get("repository"), repository, header["repository_id"])
-                                   and journal_metadata["workflow_run"].get("head_sha") == journal["workflow_sha"], "Journal producer repository/workflow drift")
-                          journals[identifier] = member
-                          owner_ids[identifier] = creator
-                  _require(local_ids == slice_ids, "Incomplete/duplicate/unsorted source page")
-              _require(set(journals) == selected, "Missing selected member proof")
-              targets = {}
-              for segment in sorted(selected_segments):
-                  batch, _ = reader.artifact(header["batches"][segment - 1], "batch", repository, expected_producer=expected_owner)
-                  _require(type(batch["segment"]) is int and batch["segment"] == segment, "Wrong cohort segment")
-                  entries = batch["target_members"]
-                  _require(isinstance(entries, list) and 1 <= len(entries) <= MAX_BATCH_TARGETS, "Early target cap")
-                  numbers, batch_ids = [], []
-                  for entry in entries:
-                      _require(isinstance(entry, list) and len(entry) == 2 and _integer(entry[0]) and isinstance(entry[1], list)
-                               and entry[1] and all(_integer(identifier) for identifier in entry[1]) and entry[1] == sorted(set(entry[1])), "Invalid target/member mapping")
-                      number, ids = entry
-                      numbers.append(number)
-                      batch_ids.extend(ids)
-                      _require(number not in targets, "Duplicate cohort target")
-                      targets[number] = ids
-                      for identifier in set(ids) & selected:
-                          _require(journals[identifier]["pr_number"] == number, "Member target drift")
-                  _require(numbers == sorted(set(numbers)) and len(batch_ids) == len(set(batch_ids))
-                           and sorted(batch_ids) == [identifier for identifier in identifiers if indexed_segments[identifier] == segment], "Incomplete batch member union")
-              root_journal, root_metadata = reader.artifact(header["root_journal"], "source", repository)
-              _require(root_journal["root_deadline_epoch"] == header["root_deadline_epoch"]
-                       and root_journal["repository_id"] == header["repository_id"], "Original root clock reset")
-              validate_journal_clock(root_journal, reader)
-              root_producer = reader.producer(repository, root_journal["producer_run_id"], root_journal["workflow_sha"], root_journal["workflow_blob_sha"])
-              _require(repository_matches(root_producer.get("repository"), repository, header["repository_id"])
-                       and root_metadata["workflow_run"].get("head_sha") == root_journal["workflow_sha"], "Root clock creator drift")
-              return {"header": header, "members_by_id": journals, "target_members_by_number": targets,
-                      "registered_writers": {}, "artifact_id": artifact_id, "artifact_digest": digest,
-                      "cohort_digest": header["cohort_digest"], "producer_ids_by_member": owner_ids, "loaded_segments": sorted(selected_segments), "trusted_workflow_blob": trusted_workflow_blob,
-                      "recovered_predecessor_ids": sorted(reader.cache.get("recovered_predecessor_ids", set()))}
-
-          def drain_owner_backend(reader, repository, producer, repository_id, sha):
-              identifier = producer["id"]
-              created = producer.get("created_at")
-              _require(_utc_epoch(created) <= time.time(), "Failed owner creation timestamp missing/future")
-              query = urllib.parse.urlencode({"created": ">=" + created, "per_page": 100, "page": 1})
-              endpoint = f"repos/{repository}/actions/workflows/pr-governance-status-writer.yml/runs?{query}"
-              snapshot = reader.request(endpoint)
-              runs = snapshot.get("workflow_runs")
-              _require(type(snapshot.get("total_count")) is int and isinstance(runs, list)
-                       and snapshot["total_count"] == len(runs) <= 100 and all(isinstance(run, dict) and _integer(run.get("id")) for run in runs)
-                       and len({run["id"] for run in runs}) == len(runs), "Incomplete failed backend drain inventory")
-              for run in runs:
-                  title = run.get("display_title", "")
-                  if not isinstance(title, str) or not title.startswith(f"source={identifier} "):
-                      continue
-                  _require(re.fullmatch(rf"source={identifier} scope=(?:early|all) segment=[0-4]", title)
-                           and run.get("event") == "workflow_dispatch" and run.get("run_attempt") == 1
-                           and run.get("head_sha") == sha and run.get("head_branch") == producer.get("head_branch")
-                           and run.get("path") in {".github/workflows/pr-governance-status-writer.yml", ".github/workflows/pr-governance-status-writer.yml@" + producer["head_branch"]}
-                           and repository_matches(run.get("repository"), repository, repository_id), "Foreign failed owner backend")
-                  before = reader.request(f"repos/{repository}/actions/runs/{run['id']}")
-                  _require(before == run, "Failed backend drain listing drift")
-                  if before.get("status") != "completed":
-                      _require(before.get("status") in ACTIVE and before.get("conclusion") is None, "Invalid failed backend state")
-                      raise RecoveryNotDrained("Failed owner backend is still active")
-                  _require(before.get("conclusion") in {"success", "failure", "cancelled", "timed_out", "action_required", "neutral", "skipped"}, "Unknown failed backend terminal state")
-                  after = reader.request(f"repos/{repository}/actions/runs/{run['id']}")
-                  _require(after == before, "Failed backend terminal double-read drift")
-              _require(reader.request(endpoint) == snapshot, "Failed backend inventory changed during drain")
 
           def sensor_cohort_binding(check, writer, source, current_pr, *, read_json, read_archive, budget, deadline, workflow_blob):
               details = check.get("details_url")
@@ -1135,22 +1166,6 @@ jobs:
                            and all(re.fullmatch(r"[1-9][0-9]*", query[prefix + key][0]) for key in ("_workflow_id", "_run_id", "_run_number")),
                            "Cohort CI proof is incomplete")
               return min(member["source_deadline_epoch"], cohort["header"]["root_deadline_epoch"])
-
-          def sensor_archive_read(endpoint, *, timeout, deadline, budget, token, primary):
-              storage_reads = 0
-              def open_request(request, requested_timeout):
-                  nonlocal storage_reads
-                  if storage_reads:
-                      budget.charge()
-                  else:
-                      primary["hits"] += 1
-                  storage_reads += 1
-                  remaining = deadline - time.monotonic()
-                  _require(remaining > 0, "Sensor original artifact deadline elapsed")
-                  return _open_no_redirect(request, min(20, requested_timeout, remaining))
-              value = read_artifact_archive(endpoint, token, timeout, open_request=open_request)
-              _require(time.monotonic() < deadline, "Sensor original artifact deadline elapsed")
-              return value
           PY
 
       - name: Await matching trusted governance Check Run

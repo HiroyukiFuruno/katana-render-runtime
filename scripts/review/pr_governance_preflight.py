@@ -717,10 +717,36 @@ def active_local_review_sensors() -> list[int] | None:
     identifiers = set()
     identities = {}
     for status in active_sensor_statuses:
-        listed = request(f"repos/{repository}/actions/workflows/pr-governance-review-events.yml/runs?status={status}&per_page=100&page=1")
-        runs = listed.get("workflow_runs") if isinstance(listed, dict) else None
-        total = listed.get("total_count") if isinstance(listed, dict) else None
-        if type(total) is not int or total < 0 or total > 100 or not isinstance(runs, list) or len(runs) != total:
+        endpoint = f"repos/{repository}/actions/workflows/pr-governance-review-events.yml/runs?status={status}&per_page=100&page="
+        for attempt in range(4):
+            listed = request(endpoint + "1")
+            total = listed.get("total_count") if isinstance(listed, dict) else None
+            if type(total) is not int or not 0 <= total <= 600:
+                return None
+            runs = []
+            inventory_ids = set()
+            for page in range(1, max(1, (total + 99) // 100) + 1):
+                response = listed if page == 1 else request(endpoint + str(page))
+                items = response.get("workflow_runs") if isinstance(response, dict) else None
+                if (not isinstance(response, dict) or type(response.get("total_count")) is not int or response["total_count"] != total
+                    or not isinstance(items, list) or len(items) != min(100, max(0, total - (page - 1) * 100))):
+                    return None
+                for item in items:
+                    run_id = item.get("id") if isinstance(item, dict) else None
+                    if type(run_id) is not int or not 1 <= run_id <= 2**63 - 1 or run_id in inventory_ids:
+                        return None
+                    inventory_ids.add(run_id)
+                runs.extend(items)
+            anchor = request(endpoint + "1")
+            if anchor is None:
+                return None
+            try:
+                stable = json.dumps(anchor, sort_keys=True, allow_nan=False) == json.dumps(listed, sort_keys=True, allow_nan=False)
+            except (ValueError, TypeError):
+                return None
+            if stable:
+                break
+        else:
             return None
         page_identifiers = set()
         for run in runs:
@@ -756,6 +782,8 @@ def active_local_review_sensors() -> list[int] | None:
             if run_id in identities and identities[run_id] != identity:
                 return None
             identities[run_id] = identity
+            if len(identities) > 600:
+                return None
             current = request(f"repos/{repository}/pulls/{number}")
             current_base = current.get("base") if isinstance(current, dict) else None
             current_head = current.get("head") if isinstance(current, dict) else None
@@ -776,9 +804,8 @@ def active_local_review_sensors() -> list[int] | None:
                 or current_head_binding != local_binding):
                 continue
             identifiers.add(run_id)
-            if len(identifiers) > 200:
-                return None
-    return sorted(identifiers)
+    # 予約は古い実runから200件に限定し、超過分の権限と時計はdurable collectorへ残す。
+    return sorted(identifiers)[:200]
 
 
 # A priority direct event retains its low-latency preemption when no sensor is

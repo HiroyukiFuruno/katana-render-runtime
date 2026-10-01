@@ -842,7 +842,8 @@ def cohort_dispatcher_generations(current: DispatcherGeneration) -> tuple[dict[i
             title = run.get("display_title")
             title_match = re.fullmatch(r"sensor=([1-9][0-9]*) action=(in_progress|completed)", title) if isinstance(title, str) else None
             source_hint = _cohort_alias_index.get(candidate.identifier)
-            if source_hint is None and title_match is not None and int(title_match[1]) in header["member_ids"]:
+            deferred_candidate = candidate.event == "workflow_run" and title_match is not None and int(title_match[1]) not in header["member_ids"]
+            if source_hint is None and title_match is not None and candidate.event == "workflow_run":
                 source_hint = int(title_match[1])
             proof_candidate = candidate.identifier in _cohort_alias_index or source_hint is not None
             if not positive and candidate.identifier != current.identifier and proof_candidate:
@@ -850,6 +851,11 @@ def cohort_dispatcher_generations(current: DispatcherGeneration) -> tuple[dict[i
                     _cohort_context, run, read_json=cohort_read_json, read_archive=cohort_read_archive,
                     budget=CohortBudget(), deadline=deadline,
                 )
+                if not positive and deferred_candidate:
+                    positive = helper.consumer_is_deferred(
+                        _cohort_context, run, read_json=cohort_read_json, read_archive=cohort_read_archive,
+                        budget=CohortBudget(), deadline=deadline,
+                    )
                 if positive:
                     _cohort_covered_generations[key] = candidate
             if positive:
@@ -860,7 +866,13 @@ def cohort_dispatcher_generations(current: DispatcherGeneration) -> tuple[dict[i
                     raise GovernanceError("Unknown/direct dispatcher fence exceeds its original bounded window.")
         seen += len(runs)
         if seen == expected_total:
-            if object_page(_page_endpoint(endpoint, 1)) != first_page:
+            anchor = object_page(_page_endpoint(endpoint, 1))
+            try:
+                # 数値と真偽値の型変化も、二読のidentity変化として拒否する。
+                stable = json.dumps(anchor, sort_keys=True, allow_nan=False) == json.dumps(first_page, sort_keys=True, allow_nan=False)
+            except (TypeError, ValueError) as error:
+                raise GovernanceError("Cohort dispatcher first-page fence is malformed.") from error
+            if not stable:
                 raise GovernanceError("Cohort dispatcher first-page fence changed.")
             return generations, frozenset(covered)
         if len(runs) != 100 or seen > expected_total:
@@ -1873,6 +1885,7 @@ def prepare_cohort_writer(
             artifact_id, artifact_digest, expected_owner=dispatcher_source.identifier,
             expected_segment=segment if phase == "early" else None, read_json=cohort_read_json,
             read_archive=cohort_read_archive, budget=CohortBudget(), deadline=bootstrap_deadline,
+            allow_empty=phase == "all",
         )
         helper.verify_cohort_lease(
             cohort, phase=phase, read_json=cohort_read_json,
@@ -1893,7 +1906,7 @@ def prepare_cohort_writer(
                 number: [cohort["members_by_id"][identifier] for identifier in cohort["target_members_by_number"][number]]
                 for number in targets if number in cohort["target_members_by_number"]
             }
-            if set(members) != set(targets):
+            if set(members) != set(targets) and cohort["header"].get("member_ids") != []:
                 raise GovernanceError("Preserved target is outside the exact cohort.")
     except (ValueError, RuntimeError) as error:
         raise GovernanceError("Cohort writer membership or owner lease is invalid.") from error
@@ -3087,7 +3100,9 @@ def main() -> int:
         terminal_order = tuple(decoded_terminal_order)
         terminal_batch = tuple(decoded_terminal_batch)
         completed_writer_run_ids = tuple(decoded_completed_writer_run_ids)
-        preserved_writer_map = canonical_preserved_writer_map(raw_preserved_map, preserved) if cohort_mode else None
+        preserved_writer_map = canonical_preserved_writer_map(
+            raw_preserved_map, preserved if raw_preserved_map != "[]" else (),
+        ) if cohort_mode else None
     except (json.JSONDecodeError, ValueError, GovernanceError):
         print("Writer target boundary is invalid.", file=sys.stderr)
         return 1
@@ -3096,7 +3111,7 @@ def main() -> int:
         or any(number < 1 for number in targets)
         or len(set(preserved)) != len(preserved)
         or any(number < 1 for number in preserved)
-        or (scope == "all" and (not set(preserved).issubset(targets) or bool(preserved) != (bool(preserved_writer_map) if cohort_mode else preserved_writer_run_id != "0")))
+        or (scope == "all" and (not set(preserved).issubset(targets) or bool(preserved) != (bool(preserved_writer_map) or preserved_writer_run_id != "0")))
         or (scope == "early" and not targets)
         or (scope == "early" and (preserved or preserved_writer_run_id != "0"))
         or (scope == "early" and (decoded_manifest or terminal_order or completed_writer_run_ids))
@@ -3142,7 +3157,14 @@ def main() -> int:
                 int(raw_continuation_index), targets if scope == "early" else preserved,
                 phase=scope,
             )
-        if cohort_mode and scope == "all":
+        member_cohort_mode = bool(_cohort_context["header"]["member_ids"]) if cohort_mode else False
+        if scope == "all":
+            if member_cohort_mode:
+                if tuple(preserved_writer_map) != preserved or preserved_writer_run_id != "0":
+                    raise GovernanceError("Member cohort preservation differs from its exact writer map.")
+            elif preserved_writer_map or bool(preserved) != (preserved_writer_run_id != "0"):
+                raise GovernanceError("Empty cohort cannot authorize member preservation.")
+        if member_cohort_mode and scope == "all":
             for number, members in _cohort_members_by_target.items():
                 current_pr = pull(number)
                 _cohort_members_by_target[number] = [restore_preserved_member_clock(member, current_pr) for member in members]
@@ -3161,7 +3183,7 @@ def main() -> int:
                 head = pull_request.get("head_sha")
                 if number in _bound_check_ids_by_number and isinstance(head, str) and SHA.fullmatch(head):
                     external = CHECK_EXTERNAL_PREFIX + head.lower() + (
-                        f"/writer-{preserved_writer_map[number][0] if cohort_mode else preserved_writer_run_id}" if number in preserved else f"/dispatcher-{dispatcher_run_id}"
+                        f"/writer-{preserved_writer_map[number][0] if member_cohort_mode else preserved_writer_run_id}" if number in preserved else f"/dispatcher-{dispatcher_run_id}"
                     )
                     _bound_check_runs[(head, external)] = _bound_check_ids_by_number[number]
             if continuation_index > 1:
@@ -3171,7 +3193,7 @@ def main() -> int:
         scoped_snapshot, carry = observed_invalidations(
             snapshot, dispatcher_source, scope, targets, preserved, int(preserved_writer_run_id),
             terminal_order, continuation_index, completed_writer_run_ids,
-            **({"preserved_writer_map": preserved_writer_map} if cohort_mode else {}),
+            **({"preserved_writer_map": preserved_writer_map} if member_cohort_mode else {}),
         )
         if scope == "all" and set(preserved).intersection(scoped_snapshot.numbers):
             raise GovernanceError("Preserved early success reappeared in an all-open terminal segment.")

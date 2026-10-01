@@ -1407,6 +1407,154 @@ class StatusWriterUnitTest(unittest.TestCase):
             with self.assertRaises(WRITER.GovernanceError):
                 WRITER.cohort_dispatcher_generations(current)
 
+    def test_cohort_fence_anchor_preserves_json_numeric_types(self):
+        import copy
+        from types import SimpleNamespace
+        context = {"header": {"owner_dispatcher_run_id": 88, "owner_run_attempt": 1,
+                   "workflow_blob_sha": "e"*40, "member_ids": [900]},
+                   "artifact_id": 7, "artifact_digest": "sha256:"+"a"*64, "cohort_digest": "f"*64}
+        current_run = self.dispatcher_run()
+        helper = SimpleNamespace(cohort_known_producer_ids=lambda *a, **kw: {}, consumer_is_covered=lambda *a, **kw: False)
+        for change in ("boolean_count", "float_count", "boolean_attempt"):
+            calls = []
+            def page(endpoint):
+                calls.append(endpoint)
+                result = {"total_count": 1, "workflow_runs": [copy.deepcopy(current_run)]}
+                if len(calls) == 2:
+                    if change == "boolean_count": result["total_count"] = True
+                    elif change == "float_count": result["total_count"] = 1.0
+                    else: result["workflow_runs"][0]["run_attempt"] = True
+                return result
+            with self.subTest(change=change), self.identity(), \
+                 patch.dict(os.environ, {"GITHUB_SHA": "d"*40, "GITHUB_REF_NAME": "master", "GOVERNANCE_COHORT_ARTIFACT_ID": "7", "GOVERNANCE_COHORT_ARTIFACT_DIGEST": "sha256:"+"a"*64}), \
+                 patch.object(WRITER, "_cohort_context", context), patch.object(WRITER, "_cohort_alias_index", None), \
+                 patch.object(WRITER, "_cohort_covered_generations", {}), patch.object(WRITER, "_cohort_generation_identities", {}), \
+                 patch.object(WRITER, "_terminal_deadline_monotonic", __import__("time").monotonic()+30), \
+                 patch.object(WRITER, "cohort_helper", return_value=helper), patch.object(WRITER, "object_page", side_effect=page):
+                with self.assertRaises(WRITER.GovernanceError):
+                    WRITER.cohort_dispatcher_generations(WRITER.dispatcher_generation(current_run))
+                self.assertEqual(len(calls), 2)
+
+    def test_overflow_deferred_callbacks_require_positive_proof_before_original_fence_cap(self):
+        from types import SimpleNamespace
+        import copy
+        context = {"header": {"owner_dispatcher_run_id": 88, "owner_run_attempt": 1,
+                   "workflow_blob_sha": "e"*40, "member_ids": [900]},
+                   "artifact_id": 7, "artifact_digest": "sha256:"+"a"*64, "cohort_digest": "f"*64}
+        current_run = self.dispatcher_run()
+        callbacks = [self.dispatcher_run(identifier=100+i, event="workflow_run", status="completed", conclusion="cancelled") for i in range(201)]
+        for index, callback in enumerate(callbacks):
+            callback.update(name=f"sensor={901+index} action=in_progress", display_title=f"sensor={901+index} action=in_progress")
+        calls = []
+        def deferred(_context, run, **kwargs):
+            calls.append(run["id"])
+            return run["id"] >= 100
+        helper = SimpleNamespace(cohort_known_producer_ids=lambda *a, **kw: {},
+                                 consumer_is_covered=lambda *a, **kw: False, consumer_is_deferred=deferred)
+        runs = [current_run, *callbacks]
+        def page(endpoint):
+            number = int(endpoint.rsplit("page=",1)[1])
+            return {"total_count":len(runs),"workflow_runs":copy.deepcopy(runs[(number-1)*100:number*100])}
+        with self.identity(), patch.dict(os.environ,{"GITHUB_SHA":"d"*40,"GITHUB_REF_NAME":"master", "GOVERNANCE_COHORT_ARTIFACT_ID":"7","GOVERNANCE_COHORT_ARTIFACT_DIGEST":"sha256:"+"a"*64}), \
+             patch.object(WRITER,"_cohort_context",context),patch.object(WRITER,"_cohort_alias_index",None), \
+             patch.object(WRITER,"_cohort_covered_generations",{}),patch.object(WRITER,"_cohort_generation_identities",{}), \
+             patch.object(WRITER,"_terminal_deadline_monotonic",__import__("time").monotonic()+30), \
+             patch.object(WRITER,"cohort_helper",return_value=helper),patch.object(WRITER,"object_page",side_effect=page):
+            current = WRITER.dispatcher_generation(current_run)
+            generations, covered = WRITER.cohort_dispatcher_generations(current)
+            self.assertEqual((len(generations),len(covered),len(calls)),(202,201,201))
+            self.assertEqual(context["header"]["member_ids"],[900])
+            WRITER.cohort_dispatcher_generations(current)
+            self.assertEqual(len(calls),201)
+            WRITER._cohort_covered_generations.clear()
+            helper.consumer_is_deferred = lambda *a, **kw: False
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.cohort_dispatcher_generations(current)
+            runs = [current_run, *[self.dispatcher_run(identifier=1000+i) for i in range(99)]]
+            calls.clear()
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.cohort_dispatcher_generations(current)
+            self.assertFalse(calls)
+
+    def test_empty_cohort_permission_is_explicit_and_all_phase_only(self):
+        from types import SimpleNamespace
+        context = {"header":{"root_deadline_epoch":300.0,"member_ids":[]},
+                   "members_by_id":{},"target_members_by_number":{}}
+        calls = []
+        def load(*args, **kwargs):
+            calls.append(kwargs)
+            if not kwargs.get("allow_empty",False):
+                raise RuntimeError("Empty cohort requires explicit permission")
+            return context
+        helper = SimpleNamespace(load_cohort=load,verify_cohort_lease=lambda *a,**kw:None)
+        with self.identity(),patch.object(WRITER,"cohort_helper",return_value=helper), \
+             patch.object(WRITER.time,"time",return_value=250.0),patch.object(WRITER.time,"monotonic",return_value=1000.0), \
+             patch.object(WRITER,"_terminal_deadline_monotonic",None),patch.object(WRITER,"_cohort_context",None), \
+             patch.object(WRITER,"_cohort_members_by_target",{}),patch.object(WRITER,"_cohort_api_counts",None):
+            WRITER.prepare_cohort_writer(WRITER.DispatcherSource(88,"workflow_run",1),7,"sha256:"+"a"*64,1,(),phase="all")
+            self.assertIs(WRITER._cohort_context,context)
+            self.assertEqual(WRITER._cohort_members_by_target,{})
+            self.assertEqual(WRITER._terminal_deadline_monotonic,1050.0)
+            with self.assertRaises(WRITER.GovernanceError):
+                WRITER.prepare_cohort_writer(WRITER.DispatcherSource(88,"workflow_run",1),7,"sha256:"+"a"*64,1,(),phase="early")
+        self.assertTrue(calls[0]["allow_empty"])
+        self.assertFalse(calls[1].get("allow_empty",False))
+
+    def test_actual_empty_cohort_keeps_direct_and_issue_scalar_preservation_proof(self):
+        from pr_governance_cohort_test import CohortEmptyHeaderTests
+        fixture, reference = CohortEmptyHeaderTests().fixture()
+        fixture.run.update(status="in_progress", conclusion=None)
+        fixture.jobs["jobs"][1].update(status="completed",conclusion="success")
+        helper = WRITER.cohort_helper()
+        fixture.jobs["jobs"][1]["steps"].append({"name":helper.HANDOFF_PREFIX+"owner=100 artifact=10 digest="+reference["artifact_digest"],"status":"completed","conclusion":"success","number":21})
+        with self.identity(),patch.dict(os.environ,{"GITHUB_REPOSITORY":fixture.repository}), \
+             patch.object(WRITER.time,"time",return_value=200.0),patch.object(WRITER.time,"monotonic",return_value=1000.0), \
+             patch.object(WRITER,"_terminal_deadline_monotonic",None),patch.object(WRITER,"_cohort_context",None), \
+             patch.object(WRITER,"_cohort_members_by_target",{}),patch.object(WRITER,"_cohort_api_counts",None), \
+             patch.object(WRITER,"cohort_read_json",side_effect=fixture.read_json),patch.object(WRITER,"cohort_read_archive",side_effect=fixture.read_archive):
+            WRITER.prepare_cohort_writer(WRITER.DispatcherSource(100,"issues",1),10,reference["artifact_digest"],1,(72,),phase="all")
+            context = WRITER._cohort_context
+            self.assertEqual(context["header"]["member_ids"],[])
+            self.assertEqual(WRITER._cohort_members_by_target,{})
+        # 空headerはgenerationの根拠だけを与え、旧writer/bodyの厳密な証明を維持する。
+        import ast
+        program = ast.parse((ROOT/"scripts/review/pr_governance_status_writer_test.py").read_text())
+        original = next(node for cls in program.body if isinstance(cls,ast.ClassDef) for node in cls.body
+                        if isinstance(node,ast.FunctionDef) and node.name=="test_all_scope_preserves_only_the_bound_early_success_and_skips_its_rewrite")
+        for event in ("pull_request_target","issues"):
+            copied = __import__("copy").deepcopy(original)
+            for node in ast.walk(copied):
+                if isinstance(node,ast.Call) and isinstance(node.func,ast.Attribute) and node.func.attr=="DispatcherSource":
+                    node.args[1]=ast.Constant(event)
+            namespace={"WRITER":WRITER,"patch":patch,"os":os,"frozenset":frozenset}
+            exec(compile(ast.fix_missing_locations(ast.Module(body=[copied],type_ignores=[])),"legacy-scalar-proof","exec"),namespace)
+            with self.subTest(event=event),patch.object(WRITER,"_cohort_context",context):
+                namespace[copied.name](self)
+
+    def test_empty_native_context_main_keeps_legacy_scalar_routing_and_rejects_member_map(self):
+        from pr_governance_cohort_test import CohortEmptyHeaderTests
+        fixture, reference = CohortEmptyHeaderTests().fixture()
+        fixture.run.update(status="in_progress",conclusion=None)
+        fixture.jobs["jobs"][1].update(status="completed",conclusion="success")
+        helper=WRITER.cohort_helper()
+        fixture.jobs["jobs"][1]["steps"].append({"name":helper.HANDOFF_PREFIX+"owner=100 artifact=10 digest="+reference["artifact_digest"],"status":"completed","conclusion":"success","number":21})
+        empty=WRITER.OpenSnapshot((),{},())
+        env={"GITHUB_REPOSITORY":fixture.repository,"GITHUB_ACTIONS":"false","GOVERNANCE_DISPATCHER_RUN_ID":"100","GOVERNANCE_SCOPE":"all","GOVERNANCE_TARGET_NUMBERS":"[72]","GOVERNANCE_PRESERVED_TARGET_NUMBERS":"[72]","GOVERNANCE_PRESERVED_WRITER_RUN_ID":"71","GOVERNANCE_COHORT_ARTIFACT_ID":"10","GOVERNANCE_COHORT_ARTIFACT_DIGEST":reference["artifact_digest"],"GOVERNANCE_PRESERVED_TARGET_WRITER_MAP":"[]","GOVERNANCE_CHECK_MANIFEST":"[]","GOVERNANCE_TERMINAL_ORDER_NUMBERS":"[]","GOVERNANCE_TERMINAL_BATCH_NUMBERS":"[]","GOVERNANCE_COMPLETED_WRITER_RUN_IDS":"[]","GOVERNANCE_CONTINUATION_INDEX":"1"}
+        for event in ("pull_request_target","issues"):
+            for member_map in ("[]","[[72,71,711]]"):
+                with self.subTest(event=event,member_map=member_map),self.identity(),patch.dict(os.environ,env|{"GOVERNANCE_PRESERVED_TARGET_WRITER_MAP":member_map}), \
+                     patch.object(WRITER.time,"time",return_value=200.0),patch.object(WRITER.time,"monotonic",return_value=1000.0), \
+                     patch.object(WRITER,"cohort_read_json",side_effect=fixture.read_json),patch.object(WRITER,"cohort_read_archive",side_effect=fixture.read_archive), \
+                     patch.object(WRITER,"trusted_dispatcher_source",return_value=WRITER.DispatcherSource(100,event,1)), \
+                     patch.object(WRITER,"open_snapshot",return_value=empty),patch.object(WRITER,"evidence_snapshot",return_value=None), \
+                     patch.object(WRITER,"observed_invalidations",return_value=(empty,frozenset())) as observed,patch.object(WRITER,"write_governance_check") as post:
+                    self.assertEqual(WRITER.main(),0 if member_map=="[]" else 1)
+                    if member_map=="[]":
+                        self.assertNotIn("preserved_writer_map",observed.call_args.kwargs)
+                        self.assertEqual(observed.call_args.args[5],71)
+                    else: observed.assert_not_called()
+                    post.assert_not_called()
+
     def test_recovered_predecessor_index_is_only_a_positive_proof_hint(self):
         from types import SimpleNamespace
         clock = __import__("time").monotonic()

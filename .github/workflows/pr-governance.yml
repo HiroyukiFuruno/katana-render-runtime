@@ -1037,6 +1037,7 @@ jobs:
       preserved_target_writer_map: ${{ steps.manifest.outputs.preserved_target_writer_map }}
       preserved_targets: ${{ steps.manifest.outputs.preserved_targets }}
       preserved_check_manifest: ${{ steps.manifest.outputs.preserved_check_manifest }}
+      acknowledged_source_ids: ${{ steps.manifest.outputs.acknowledged_source_ids }}
     steps:
     - name: Create scoped cohort batch 1 token
       id: cohort-token-1
@@ -2345,9 +2346,27 @@ jobs:
         MAP_2: ${{ steps.await-2.outputs.preserved_target_writer_map }}
         MAP_3: ${{ steps.await-3.outputs.preserved_target_writer_map }}
         MAP_4: ${{ steps.await-4.outputs.preserved_target_writer_map }}
+        ACK_1: ${{ steps.ack-1.outputs.acknowledged_source_ids }}
+        ACK_2: ${{ steps.ack-2.outputs.acknowledged_source_ids }}
+        ACK_3: ${{ steps.ack-3.outputs.acknowledged_source_ids }}
+        ACK_4: ${{ steps.ack-4.outputs.acknowledged_source_ids }}
+        SOURCE_IDS: ${{ needs.admit-cohort-backend.outputs.source_ids }}
+        BATCH_COUNT: ${{ needs.admit-cohort-backend.outputs.batch_count }}
       run: |
         python3 - <<'PYCODE'
         import json,os
+        source_ids=json.loads(os.environ["SOURCE_IDS"])
+        batch_count=json.loads(os.environ["BATCH_COUNT"])
+        if not isinstance(source_ids,list) or len(source_ids)>200 or any(type(value) is not int or value<1 for value in source_ids) or source_ids!=sorted(set(source_ids)) or type(batch_count) is not int or not 0<=batch_count<=4 or bool(source_ids)!=bool(batch_count): raise SystemExit("Invalid selected source ACK binding")
+        acknowledged=[]
+        for n in range(1,5):
+            raw=os.environ.get(f"ACK_{n}","")
+            if n<=batch_count:
+                value=json.loads(raw)
+                if not isinstance(value,list) or not value or len(value)>200 or any(type(identifier) is not int or identifier<1 for identifier in value) or value!=sorted(set(value)): raise SystemExit("Invalid exact source ACK")
+                acknowledged.extend(value)
+            elif raw: raise SystemExit("Foreign source ACK segment")
+        if len(acknowledged)!=len(set(acknowledged)) or sorted(acknowledged)!=source_ids: raise SystemExit("Incomplete exact source ACK union")
         rows=[]
         for n in range(1,5):
             raw=os.environ.get(f"MAP_{n}","")
@@ -2358,6 +2377,7 @@ jobs:
         if any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in rows) or len(rows)>200 or len({row[0] for row in rows})!=len(rows) or len({row[2] for row in rows})!=len(rows): raise SystemExit("Ambiguous cohort map")
         rows.sort()
         with open(os.environ["GITHUB_OUTPUT"],"a") as out:
+            out.write("acknowledged_source_ids="+json.dumps(source_ids,separators=(",",":"))+"\n")
             out.write("preserved_target_writer_map="+json.dumps(rows,separators=(",",":"))+"\n")
             out.write("preserved_targets="+json.dumps([row[0] for row in rows],separators=(",",":"))+"\n")
             out.write("preserved_check_manifest="+json.dumps([[row[0],row[2]] for row in rows],separators=(",",":"))+"\n")
@@ -2379,6 +2399,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SENSOR_RUN_IDS: ${{ needs.admit-cohort-backend.outputs.source_ids || needs.preflight-workflow-run-source.outputs.sensor_run_ids }}
+          COHORT_SOURCE_IDS: ${{ needs.admit-cohort-backend.outputs.source_ids }}
+          COHORT_ACKNOWLEDGED_SOURCE_IDS: ${{ needs.cohort-early-service.outputs.acknowledged_source_ids }}
+          COHORT_SERVICE_RESULT: ${{ needs.cohort-early-service.result }}
         run: |
           python3 - <<'PY'
           import json
@@ -2405,6 +2428,19 @@ jobs:
               or decoded_run_ids != sorted(set(decoded_run_ids))
           ):
               raise SystemExit("Captured review sensor identity is invalid.")
+          cohort_source_ids = os.environ.get("COHORT_SOURCE_IDS", "")
+          cohort_mode = bool(cohort_source_ids)
+          if cohort_mode:
+              try:
+                  selected_ids = json.loads(cohort_source_ids)
+                  acknowledged_ids = json.loads(os.environ.get("COHORT_ACKNOWLEDGED_SOURCE_IDS", ""))
+              except json.JSONDecodeError as error:
+                  raise SystemExit("Exact cohort source ACK is invalid.") from error
+              if (not isinstance(selected_ids, list) or not isinstance(acknowledged_ids, list)
+                  or any(type(identifier) is not int for identifier in selected_ids + acknowledged_ids)
+                  or selected_ids != decoded_run_ids or acknowledged_ids != decoded_run_ids
+                  or os.environ.get("COHORT_SERVICE_RESULT") != "success"):
+                  raise SystemExit("Exact cohort source ACK is incomplete.")
           pending_ids = set(decoded_run_ids)
           expected_path = ".github/workflows/pr-governance-review-events.yml"
           allowed_events = {"pull_request", "pull_request_review", "pull_request_review_comment"}
@@ -2588,6 +2624,8 @@ jobs:
                           continue
                       if run.get("conclusion") != "cancelled":
                           raise SystemExit("Captured review sensor did not complete successfully.")
+                      if cohort_mode:
+                          raise SystemExit("Acknowledged cohort source did not remain successful.")
                       pending_ids.remove(run_id)
                       pending_ids.update(active_successors(pending_ids))
                       if not pending_ids:
@@ -2595,8 +2633,9 @@ jobs:
                       continue
                   if status not in active_sensor_statuses:
                       raise SystemExit("Captured review sensor state is invalid.")
-              # 捕捉後に始まったsensorも保護し、成功時に予約を取り落とさない。
-              pending_ids.update(active_successors(pending_ids))
+              # native ACK済cohortは選抜済IDだけに束縛し、超過分を予約へ混ぜない。
+              if not cohort_mode:
+                  pending_ids.update(active_successors(pending_ids))
               if pending_ids:
                   time.sleep(5)
           PY
@@ -2921,8 +2960,8 @@ jobs:
           GH_TOKEN: ${{ steps.preemption-token.outputs.token }}
           DEFAULT_HEAD: ${{ needs.establish-resolver-failure-barrier.outputs.default_head }}
           DEFAULT_BRANCH: ${{ needs.establish-resolver-failure-barrier.outputs.default_branch }}
-          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
-          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
+          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
+          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
           ROOT_DEADLINE_EPOCH: ${{ needs.establish-resolver-failure-barrier.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
@@ -3621,8 +3660,8 @@ jobs:
       target_snapshots: ${{ steps.current-targets.outputs.target_snapshots }}
       event_targets: ${{ steps.current-targets.outputs.event_targets }}
       has_event_targets: ${{ steps.current-targets.outputs.has_event_targets }}
-      has_priority_targets: ${{ steps.current-targets.outputs.has_priority_targets }}
-      priority_targets: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.cohort-early-service.outputs.preserved_targets || steps.current-targets.outputs.priority_targets }}
+      has_priority_targets: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && needs.admit-cohort-backend.outputs.member_count == '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id != '' && 'false' || steps.current-targets.outputs.has_priority_targets }}
+      priority_targets: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && needs.admit-cohort-backend.outputs.member_count == '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id != '' && '[]' || (needs.admit-cohort-backend.outputs.member_count != '0' && needs.cohort-early-service.outputs.preserved_targets || steps.current-targets.outputs.priority_targets) }}
       preinvalidate_targets: ${{ steps.current-targets.outputs.preinvalidate_targets }}
       has_preinvalidate_targets: ${{ steps.current-targets.outputs.has_preinvalidate_targets }}
       invalidation_head_cap_exceeded: ${{ steps.current-targets.outputs.invalidation_head_cap_exceeded }}
@@ -4148,7 +4187,7 @@ jobs:
           permission-contents: read
           permission-pull-requests: read
       - name: Dispatch and bind the early event writer
-        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true' && needs.admit-cohort-backend.outputs.member_count == '0'
+        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true' && needs.admit-cohort-backend.outputs.member_count == '0' && !(github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && needs.admit-cohort-backend.outputs.cohort_artifact_id != '')
         id: dispatch-early
         env:
           GH_TOKEN: ${{ steps.dispatcher-token.outputs.token }}
@@ -4231,7 +4270,7 @@ jobs:
           raise SystemExit("Early governance writer registration timed out.")
           PY
       - name: Create fresh early Check Run read token
-        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true' && needs.admit-cohort-backend.outputs.member_count == '0'
+        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true' && needs.admit-cohort-backend.outputs.member_count == '0' && !(github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && needs.admit-cohort-backend.outputs.cohort_artifact_id != '')
         id: early-check-read-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
@@ -4242,7 +4281,7 @@ jobs:
           permission-checks: read
           permission-pull-requests: read
       - name: Await the bound early event writer before all-open invalidation
-        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true' && needs.admit-cohort-backend.outputs.member_count == '0'
+        if: needs.prepare-current-targets.outputs.has_priority_targets == 'true' && needs.admit-cohort-backend.outputs.member_count == '0' && !(github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && needs.admit-cohort-backend.outputs.cohort_artifact_id != '')
         id: await-early
         env:
           GH_TOKEN: ${{ steps.dispatcher-token.outputs.token }}
@@ -4430,7 +4469,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
-    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && needs.prepare-current-targets.outputs.has_priority_targets == 'true' && needs.admit-cohort-backend.outputs.member_count == '0' }}
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR governance review sensor' && needs.prepare-current-targets.outputs.has_priority_targets == 'true' && needs.admit-cohort-backend.outputs.member_count == '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id == '' }}
     steps:
       - name: Require exact bound sensor acknowledgement
         env:
@@ -5270,8 +5309,8 @@ jobs:
           DEFAULT_HEAD: ${{ needs.prepare-current-targets.outputs.writer_head }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
-          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
-          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
+          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
+          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
           ROOT_DEADLINE_EPOCH: ${{ needs.resolve_event.outputs.root_deadline_epoch }}
         run: |
           python3 - <<'PY'
@@ -5701,8 +5740,8 @@ jobs:
           WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
           WRITER_PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
-          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
-          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
+          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
+          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
           COHORT_PRESERVED_MAP: ${{ needs.reconcile-all-open.outputs.preserved_target_writer_map || '[]' }}
           WRITER_CARRY_TARGET_NUMBERS_1: ${{ needs.write-reconciliation-pending.outputs.tail_carry_1 }}
           WRITER_CARRY_TARGET_NUMBERS_2: ${{ needs.write-reconciliation-pending.outputs.tail_carry_2 }}
@@ -5756,8 +5795,8 @@ jobs:
           raw_preserved = os.environ.get("WRITER_PRESERVED_TARGETS", "")
 
           cohort_id=os.environ.get("COHORT_ARTIFACT_ID","0"); cohort_digest=os.environ.get("COHORT_ARTIFACT_DIGEST",""); cohort_map_raw=os.environ.get("COHORT_PRESERVED_MAP","[]")
-          cohort_map=json.loads(cohort_map_raw); cohort_mode=cohort_id!="0"
-          if not re.fullmatch(r"0|[1-9][0-9]*",cohort_id) or not isinstance(cohort_map,list) or json.dumps(cohort_map,separators=(",",":"))!=cohort_map_raw or any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in cohort_map) or len({row[0] for row in cohort_map})!=len(cohort_map) or len({row[2] for row in cohort_map})!=len(cohort_map) or (cohort_mode and (not re.fullmatch(r"sha256:[0-9a-f]{64}",cohort_digest) or not cohort_map)) or (not cohort_mode and (cohort_digest or cohort_map)): raise SystemExit("Invalid cohort preservation binding")
+          cohort_map=json.loads(cohort_map_raw); cohort_mode=bool(cohort_map)
+          if not re.fullmatch(r"0|[1-9][0-9]*",cohort_id) or not isinstance(cohort_map,list) or json.dumps(cohort_map,separators=(",",":"))!=cohort_map_raw or any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in cohort_map) or len({row[0] for row in cohort_map})!=len(cohort_map) or len({row[2] for row in cohort_map})!=len(cohort_map) or (cohort_id!="0" and not re.fullmatch(r"sha256:[0-9a-f]{64}",cohort_digest)) or (cohort_id=="0" and (cohort_digest or cohort_map)): raise SystemExit("Invalid cohort preservation binding")
           preserved_writer_run_id = os.environ.get("PRESERVED_WRITER_RUN_ID", "")
           raw_pre_targets = os.environ.get("WRITER_PREINVALIDATE_TARGETS", "")
           raw_pre_manifest_1 = os.environ.get("WRITER_PRE_CHECK_MANIFEST_1", "")
@@ -6158,8 +6197,8 @@ jobs:
           WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
           WRITER_PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
-          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
-          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
+          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
+          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
           COHORT_PRESERVED_MAP: ${{ needs.reconcile-all-open.outputs.preserved_target_writer_map || '[]' }}
           WRITER_CHECK_MANIFEST: ${{ steps.dispatch-all-1.outputs.check_manifest }}
           WRITER_TERMINAL_ORDER: ${{ steps.dispatch-all-1.outputs.terminal_order_numbers }}
@@ -6181,8 +6220,8 @@ jobs:
           raw_preserved = os.environ.get("WRITER_PRESERVED_TARGETS", "")
 
           cohort_id=os.environ.get("COHORT_ARTIFACT_ID","0"); cohort_digest=os.environ.get("COHORT_ARTIFACT_DIGEST",""); cohort_map_raw=os.environ.get("COHORT_PRESERVED_MAP","[]")
-          cohort_map=json.loads(cohort_map_raw); cohort_mode=cohort_id!="0"
-          if not re.fullmatch(r"0|[1-9][0-9]*",cohort_id) or not isinstance(cohort_map,list) or json.dumps(cohort_map,separators=(",",":"))!=cohort_map_raw or any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in cohort_map) or len({row[0] for row in cohort_map})!=len(cohort_map) or len({row[2] for row in cohort_map})!=len(cohort_map) or (cohort_mode and (not re.fullmatch(r"sha256:[0-9a-f]{64}",cohort_digest) or not cohort_map)) or (not cohort_mode and (cohort_digest or cohort_map)): raise SystemExit("Invalid cohort preservation binding")
+          cohort_map=json.loads(cohort_map_raw); cohort_mode=bool(cohort_map)
+          if not re.fullmatch(r"0|[1-9][0-9]*",cohort_id) or not isinstance(cohort_map,list) or json.dumps(cohort_map,separators=(",",":"))!=cohort_map_raw or any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in cohort_map) or len({row[0] for row in cohort_map})!=len(cohort_map) or len({row[2] for row in cohort_map})!=len(cohort_map) or (cohort_id!="0" and not re.fullmatch(r"sha256:[0-9a-f]{64}",cohort_digest)) or (cohort_id=="0" and (cohort_digest or cohort_map)): raise SystemExit("Invalid cohort preservation binding")
           preserved_writer = os.environ.get("PRESERVED_WRITER_RUN_ID", "")
           raw_manifest = os.environ.get("WRITER_CHECK_MANIFEST", "")
           raw_batch = os.environ.get("TERMINAL_BATCH", "")
@@ -6436,8 +6475,8 @@ jobs:
           WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
           WRITER_PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
-          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
-          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
+          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
+          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
           COHORT_PRESERVED_MAP: ${{ needs.reconcile-all-open.outputs.preserved_target_writer_map || '[]' }}
           WRITER_CHECK_MANIFEST: ${{ steps.dispatch-all-1.outputs.check_manifest }}
           WRITER_TERMINAL_ORDER: ${{ steps.dispatch-all-1.outputs.terminal_order_numbers }}
@@ -6452,8 +6491,8 @@ jobs:
           from urllib.parse import urlencode
 
           cohort_id=os.environ.get("COHORT_ARTIFACT_ID","0"); cohort_digest=os.environ.get("COHORT_ARTIFACT_DIGEST",""); cohort_map_raw=os.environ.get("COHORT_PRESERVED_MAP","[]")
-          cohort_map=json.loads(cohort_map_raw); cohort_mode=cohort_id!="0"
-          if not re.fullmatch(r"0|[1-9][0-9]*",cohort_id) or not isinstance(cohort_map,list) or json.dumps(cohort_map,separators=(",",":"))!=cohort_map_raw or any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in cohort_map) or len({row[0] for row in cohort_map})!=len(cohort_map) or len({row[2] for row in cohort_map})!=len(cohort_map) or (cohort_mode and (not re.fullmatch(r"sha256:[0-9a-f]{64}",cohort_digest) or not cohort_map)) or (not cohort_mode and (cohort_digest or cohort_map)): raise SystemExit("Invalid cohort preservation binding")
+          cohort_map=json.loads(cohort_map_raw); cohort_mode=bool(cohort_map)
+          if not re.fullmatch(r"0|[1-9][0-9]*",cohort_id) or not isinstance(cohort_map,list) or json.dumps(cohort_map,separators=(",",":"))!=cohort_map_raw or any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in cohort_map) or len({row[0] for row in cohort_map})!=len(cohort_map) or len({row[2] for row in cohort_map})!=len(cohort_map) or (cohort_id!="0" and not re.fullmatch(r"sha256:[0-9a-f]{64}",cohort_digest)) or (cohort_id=="0" and (cohort_digest or cohort_map)): raise SystemExit("Invalid cohort preservation binding")
           repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); head=os.environ.get("WRITER_HEAD", ""); source=os.environ.get("DISPATCHER_RUN_ID", ""); index=os.environ.get("CONTINUATION_INDEX", ""); raw_targets=os.environ.get("WRITER_TARGETS", ""); raw_snapshots=os.environ.get("WRITER_ALL_OPEN_SNAPSHOTS", ""); raw_preserved=os.environ.get("WRITER_PRESERVED_TARGETS", ""); preserved_writer=os.environ.get("PRESERVED_WRITER_RUN_ID", ""); raw_manifest=os.environ.get("WRITER_CHECK_MANIFEST", ""); raw_batch=os.environ.get("TERMINAL_BATCH", ""); raw_order=os.environ.get("WRITER_TERMINAL_ORDER", ""); raw_completed=os.environ.get("COMPLETED_WRITER_RUN_IDS", "")
           try: targets,snapshots,preserved,manifest,batch,terminal_order,completed=(json.loads(item) for item in (raw_targets,raw_snapshots,raw_preserved,raw_manifest,raw_batch,raw_order,raw_completed))
           except json.JSONDecodeError as error: raise SystemExit("Governance terminal segment boundary is invalid.") from error
@@ -6671,8 +6710,8 @@ jobs:
           WRITER_ALL_OPEN_SNAPSHOTS: ${{ needs.prepare-current-targets.outputs.target_snapshots }}
           WRITER_PRESERVED_TARGETS: ${{ needs.prepare-current-targets.outputs.priority_targets }}
           PRESERVED_WRITER_RUN_ID: ${{ needs.reconcile-all-open.outputs.preserved_writer_run_id }}
-          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
-          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.member_count != '0' && needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
+          COHORT_ARTIFACT_ID: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_id || '0' }}
+          COHORT_ARTIFACT_DIGEST: ${{ needs.admit-cohort-backend.outputs.cohort_artifact_digest || '' }}
           COHORT_PRESERVED_MAP: ${{ needs.reconcile-all-open.outputs.preserved_target_writer_map || '[]' }}
           WRITER_CHECK_MANIFEST: ${{ steps.dispatch-all-1.outputs.check_manifest }}
           WRITER_TERMINAL_ORDER: ${{ steps.dispatch-all-1.outputs.terminal_order_numbers }}
@@ -6687,8 +6726,8 @@ jobs:
           from urllib.parse import urlencode
 
           cohort_id=os.environ.get("COHORT_ARTIFACT_ID","0"); cohort_digest=os.environ.get("COHORT_ARTIFACT_DIGEST",""); cohort_map_raw=os.environ.get("COHORT_PRESERVED_MAP","[]")
-          cohort_map=json.loads(cohort_map_raw); cohort_mode=cohort_id!="0"
-          if not re.fullmatch(r"0|[1-9][0-9]*",cohort_id) or not isinstance(cohort_map,list) or json.dumps(cohort_map,separators=(",",":"))!=cohort_map_raw or any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in cohort_map) or len({row[0] for row in cohort_map})!=len(cohort_map) or len({row[2] for row in cohort_map})!=len(cohort_map) or (cohort_mode and (not re.fullmatch(r"sha256:[0-9a-f]{64}",cohort_digest) or not cohort_map)) or (not cohort_mode and (cohort_digest or cohort_map)): raise SystemExit("Invalid cohort preservation binding")
+          cohort_map=json.loads(cohort_map_raw); cohort_mode=bool(cohort_map)
+          if not re.fullmatch(r"0|[1-9][0-9]*",cohort_id) or not isinstance(cohort_map,list) or json.dumps(cohort_map,separators=(",",":"))!=cohort_map_raw or any(not isinstance(row,list) or len(row)!=3 or any(type(value) is not int or value<1 for value in row) for row in cohort_map) or len({row[0] for row in cohort_map})!=len(cohort_map) or len({row[2] for row in cohort_map})!=len(cohort_map) or (cohort_id!="0" and not re.fullmatch(r"sha256:[0-9a-f]{64}",cohort_digest)) or (cohort_id=="0" and (cohort_digest or cohort_map)): raise SystemExit("Invalid cohort preservation binding")
           repo=os.environ["GITHUB_REPOSITORY"]; branch=os.environ.get("DEFAULT_BRANCH", ""); head=os.environ.get("WRITER_HEAD", ""); source=os.environ.get("DISPATCHER_RUN_ID", ""); index=os.environ.get("CONTINUATION_INDEX", ""); raw_targets=os.environ.get("WRITER_TARGETS", ""); raw_snapshots=os.environ.get("WRITER_ALL_OPEN_SNAPSHOTS", ""); raw_preserved=os.environ.get("WRITER_PRESERVED_TARGETS", ""); preserved_writer=os.environ.get("PRESERVED_WRITER_RUN_ID", ""); raw_manifest=os.environ.get("WRITER_CHECK_MANIFEST", ""); raw_batch=os.environ.get("TERMINAL_BATCH", ""); raw_order=os.environ.get("WRITER_TERMINAL_ORDER", ""); raw_completed=os.environ.get("COMPLETED_WRITER_RUN_IDS", "")
           try: targets,snapshots,preserved,manifest,batch,terminal_order,completed=(json.loads(item) for item in (raw_targets,raw_snapshots,raw_preserved,raw_manifest,raw_batch,raw_order,raw_completed))
           except json.JSONDecodeError as error: raise SystemExit("Governance terminal segment boundary is invalid.") from error

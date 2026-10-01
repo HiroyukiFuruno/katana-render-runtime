@@ -150,6 +150,7 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
                 except SystemExit as error:
                     if error.code not in (None, 0):
                         raise
+            self.last_reads = reads
             return dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
 
     def assert_fail_closed(self, result: dict[str, str]) -> None:
@@ -394,9 +395,56 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
                 self.assertEqual(result["sensor_reservation"], "true")
                 self.assertEqual(result["sensor_run_ids"], "[17]")
 
-    def test_initial_sensor_scan_keeps_invalid_evidence_and_combined_cap_fail_closed(self) -> None:
+    def bounded_sensor_inventory(self, count: int, *, status: str = "requested") -> dict[str, list[object]]:
+        sensor = {"name": "PR governance review sensor", "event": "pull_request_review", "status": status,
+                  "conclusion": None, "run_attempt": 1, "path": ".github/workflows/pr-governance-review-events.yml",
+                  "repository": self.repository(), "head_repository": self.repository(), "head_sha": HEAD,
+                  "pull_requests": [{"number": NUMBER, "base": {"ref": "master", "repo": self.repository()},
+                                     "head": {"sha": HEAD, "repo": self.repository()}}]}
+        runs = [dict(json.loads(json.dumps(sensor)), id=1000 + offset) for offset in range(count)]
+        prefix = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?status={status}&per_page=100&page="
+        return {prefix + str(page + 1): [{"total_count": count, "workflow_runs": runs[page * 100:(page + 1) * 100]}]
+                for page in range(max(1, (count + 99) // 100))}
+
+    def test_bounded_overflow_inventory_reserves_oldest_two_hundred(self) -> None:
+        for count in (201, 600):
+            with self.subTest(count=count):
+                responses = self.bounded_sensor_inventory(count)
+                result = self.execute(responses=responses, direct_priority_fence=True)
+                self.assertEqual(result["valid"], "true")
+                self.assertEqual(result["sensor_reservation"], "true")
+                self.assertEqual(json.loads(result["sensor_run_ids"]), list(range(1000, 1200)))
+                inventory_reads = {endpoint: reads for endpoint, reads in self.last_reads.items()
+                                   if "/actions/workflows/pr-governance-review-events.yml/runs?" in endpoint}
+                self.assertEqual(sum(inventory_reads.values()), max(1, (count + 99) // 100) + 9)
+                self.assertTrue(all("page=7" not in endpoint for endpoint in inventory_reads))
+
+    def test_bounded_overflow_capture_is_independent_of_api_order(self) -> None:
+        responses = self.bounded_sensor_inventory(600)
+        pages = list(responses)
+        runs = [run for endpoint in pages for run in responses[endpoint][0]["workflow_runs"]]
+        runs.reverse()
+        for page, endpoint in enumerate(pages):
+            responses[endpoint][0]["workflow_runs"] = runs[page * 100:(page + 1) * 100]
+        result = self.execute(responses=responses, direct_priority_fence=True)
+        self.assertEqual(result["valid"], "true")
+        self.assertEqual(json.loads(result["sensor_run_ids"]), list(range(1000, 1200)))
+
+    def test_bounded_inventory_retries_only_an_unstable_anchor(self) -> None:
+        responses = self.bounded_sensor_inventory(201)
+        endpoint = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?status=requested&per_page=100&page=1"
+        first = responses[endpoint][0]
+        changed = json.loads(json.dumps(first))
+        changed["workflow_runs"][0]["status"] = "queued"
+        responses[endpoint] = [first, changed, first, first]
+        result = self.execute(responses=responses, direct_priority_fence=True)
+        self.assertEqual(result["valid"], "true")
+        self.assertEqual(json.loads(result["sensor_run_ids"]), list(range(1000, 1200)))
+        self.assertEqual(self.last_reads[endpoint], 4)
+
+    def test_initial_sensor_scan_keeps_invalid_evidence_and_inventory_cap_fail_closed(self) -> None:
         prefix = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
-        for scenario in ("unknown-state", "active-conclusion", "duplicate-id", "page-cap", "combined-cap"):
+        for scenario in ("unknown-state", "active-conclusion", "duplicate-id", "page-cap", "inventory-cap"):
             with self.subTest(scenario=scenario):
                 sensor = {"id": 17, "name": "PR governance review sensor", "event": "pull_request_review", "status": "requested", "conclusion": None, "run_attempt": 1,
                           "path": ".github/workflows/pr-governance-review-events.yml", "repository": self.repository(), "head_repository": self.repository(), "head_sha": HEAD,
@@ -405,14 +453,77 @@ class GovernancePreflightIdentityTest(unittest.TestCase):
                 if scenario == "active-conclusion": sensor["conclusion"] = "success"
                 values = [sensor, dict(sensor)] if scenario == "duplicate-id" else [sensor]
                 responses = {PR_ENDPOINT: [self.pull(), self.pull()], prefix + "status=requested&per_page=100&page=1": [{"total_count": 101 if scenario == "page-cap" else len(values), "workflow_runs": values}]}
-                if scenario == "combined-cap":
-                    for index, status in enumerate(("requested", "queued", "waiting")):
-                        values = [dict(sensor, id=1000 + index * 100 + offset, status=status) for offset in range(100 if index < 2 else 1)]
-                        responses[prefix + f"status={status}&per_page=100&page=1"] = [{"total_count": len(values), "workflow_runs": values}]
+                if scenario == "inventory-cap":
+                    responses = self.bounded_sensor_inventory(600)
+                    values = [dict(sensor, id=1600, status="queued")]
+                    responses[prefix + "status=queued&per_page=100&page=1"] = [{"total_count": 1, "workflow_runs": values}]
                 result = self.execute(responses=responses, direct_priority_fence=True)
                 self.assertEqual(result["valid"], "false")
                 self.assertEqual(result["priority"], "false")
                 self.assertEqual(result["sensor_reservation"], "false")
+
+    def test_bounded_overflow_still_validates_every_page_and_tail(self) -> None:
+        prefix = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?status=requested&per_page=100&page="
+        for scenario in ("unavailable-page", "timeout-page", "missing-page", "total-drift", "duplicate-page-id",
+                         "malformed-tail", "identity-drift-tail", "oversized-total", "unstable-anchor", "unavailable-anchor", "typed-anchor-drift"):
+            with self.subTest(scenario=scenario):
+                responses = self.bounded_sensor_inventory(600)
+                last = responses[prefix + "6"][0]
+                if scenario == "unavailable-page": responses[prefix + "6"] = [False]
+                if scenario == "missing-page": last["workflow_runs"].pop()
+                if scenario == "total-drift": last["total_count"] = 599
+                if scenario == "duplicate-page-id": last["workflow_runs"][-1]["id"] = 1000
+                if scenario == "malformed-tail": last["workflow_runs"][-1]["run_attempt"] = True
+                if scenario == "identity-drift-tail": last["workflow_runs"][-1]["repository"] = self.repository(identifier=202)
+                if scenario == "oversized-total": responses[prefix + "1"][0]["total_count"] = 601
+                if scenario == "unstable-anchor":
+                    first = responses[prefix + "1"][0]
+                    changed = json.loads(json.dumps(first))
+                    changed["workflow_runs"][0]["status"] = "queued"
+                    responses[prefix + "1"] = [first, changed] * 4
+                if scenario == "unavailable-anchor": responses[prefix + "1"].append(False)
+                if scenario == "typed-anchor-drift":
+                    first = responses[prefix + "1"][0]
+                    changed = json.loads(json.dumps(first))
+                    changed["workflow_runs"][0]["run_attempt"] = True
+                    responses[prefix + "1"] = [first, changed] * 4
+                result = self.execute(responses=responses, direct_priority_fence=True,
+                                      timeout_endpoint=prefix + "6" if scenario == "timeout-page" else None)
+                self.assertEqual(result["valid"], "false")
+                self.assertEqual(result["sensor_reservation"], "false")
+                self.assertEqual(result["sensor_run_ids"], "[]")
+
+    def test_bounded_overflow_validates_transition_identity_after_capture_limit(self) -> None:
+        for drift in (False, True):
+            with self.subTest(drift=drift):
+                responses = self.bounded_sensor_inventory(600)
+                prefix = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"
+                tail = json.loads(json.dumps(responses[prefix + "status=requested&per_page=100&page=6"][0]["workflow_runs"][-1]))
+                tail["status"] = "in_progress"
+                if drift: tail["event"] = "pull_request_review_comment"
+                responses[prefix + "status=in_progress&per_page=100&page=1"] = [{"total_count": 1, "workflow_runs": [tail]}]
+                result = self.execute(responses=responses, direct_priority_fence=True)
+                self.assertEqual(result["valid"], "false" if drift else "true")
+                self.assertEqual(json.loads(result["sensor_run_ids"]), [] if drift else list(range(1000, 1200)))
+
+    def test_bounded_overflow_skips_only_positively_observed_ineligible_current_pr(self) -> None:
+        for scenario in ("closed", "draft", "stale", "other-base", "foreign-head", "api-error", "malformed"):
+            with self.subTest(scenario=scenario):
+                responses = self.bounded_sensor_inventory(600)
+                prefix = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?status=requested&per_page=100&page="
+                responses[prefix + "1"][0]["workflow_runs"][0]["pull_requests"][0]["number"] = 80
+                current = self.pull(number=80)
+                if scenario == "closed": current["state"] = "closed"
+                if scenario == "draft": current["draft"] = True
+                if scenario == "stale": current["head"]["sha"] = "f" * 40
+                if scenario == "other-base": current["base"]["ref"] = "release/next"
+                if scenario == "foreign-head": current["head"]["repo"] = {"id": 202, "full_name": "other/repository"}
+                if scenario == "malformed": current["draft"] = "false"
+                responses[f"repos/{REPOSITORY}/pulls/80"] = [False if scenario == "api-error" else current]
+                result = self.execute(responses=responses, direct_priority_fence=True)
+                invalid = scenario in {"api-error", "malformed"}
+                self.assertEqual(result["valid"], "false" if invalid else "true")
+                self.assertEqual(json.loads(result["sensor_run_ids"]), [] if invalid else list(range(1001, 1201)))
 
     def test_initial_sensor_capture_merges_only_matching_partition_transitions(self) -> None:
         prefix = f"repos/{REPOSITORY}/actions/workflows/pr-governance-review-events.yml/runs?"

@@ -2697,6 +2697,49 @@ class GovernanceDispatcherContractTest(unittest.TestCase):
                     self.assertEqual(values["writer_head"], "a" * 40)
                     self.assertEqual(values["default_branch"], "master")
 
+    def test_native_cohort_waiter_uses_only_exact_successful_source_ack(self) -> None:
+        match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", self._job_block("wait-for-active-review-sensor"), re.S)
+        self.assertIsNotNone(match)
+        program = textwrap.dedent(match.group(1))
+        repository = {"id":7,"name":"repository","url":"https://api.github.com/repos/owner/repository","full_name":"owner/repository","default_branch":"master"}
+        pull = {"number":99,"state":"open","draft":False,"base":{"ref":"master","repo":repository},"head":{"sha":"a"*40,"repo":repository}}
+        sensor = {"id":17,"name":"PR governance review sensor","event":"pull_request_review","run_attempt":1,"path":".github/workflows/pr-governance-review-events.yml@master","status":"completed","conclusion":"success","repository":repository,"head_repository":repository,"head_sha":"a"*40,"pull_requests":[{"number":99,"base":pull["base"],"head":pull["head"]}]}
+        base = {"GITHUB_REPOSITORY":"owner/repository","SENSOR_RUN_IDS":"[17]","COHORT_SOURCE_IDS":"[17]","COHORT_ACKNOWLEDGED_SOURCE_IDS":"[17]","COHORT_SERVICE_RESULT":"success"}
+        for mutation in ({},{"COHORT_ACKNOWLEDGED_SOURCE_IDS":"[18]"},{"COHORT_ACKNOWLEDGED_SOURCE_IDS":"[true]"},{"COHORT_SOURCE_IDS":"[18]"},{"COHORT_SERVICE_RESULT":"failure"},{"COHORT_ACKNOWLEDGED_SOURCE_IDS":""},{"conclusion":"cancelled"}):
+            reads=[]
+            def request(arguments, **keywords):
+                endpoint=arguments[-1];reads.append(endpoint)
+                if endpoint=="repos/owner/repository": value=repository
+                elif endpoint.endswith("/pulls/99"): value=pull
+                elif endpoint.endswith("/runs/17"): value=dict(sensor,conclusion=mutation.get("conclusion","success"))
+                else: self.fail("Native selected waiter re-scanned global overflow: "+endpoint)
+                return subprocess.CompletedProcess(arguments,0,json.dumps(value),"")
+            env=base|{key:value for key,value in mutation.items() if key!="conclusion"}
+            with self.subTest(mutation=mutation),patch.dict(os.environ,env),patch("subprocess.run",side_effect=request),patch("time.sleep"):
+                if mutation:
+                    with self.assertRaises(SystemExit): exec(program,{})
+                else: exec(program,{})
+            self.assertFalse(any("runs?status=" in endpoint for endpoint in reads))
+
+    def test_cohort_service_manifest_requires_exact_complete_source_ack_union(self) -> None:
+        block=self._job_block("cohort-early-service").split("- name: Collect exact cohort preservation map",1)[1]
+        match=re.search(r"python3 - <<'PYCODE'\n(.*?)\n        PYCODE",block,re.S)
+        self.assertIsNotNone(match);program=textwrap.dedent(match.group(1))
+        ids=list(range(1,201))
+        for mutation in ({},{"ACK_1":"[1]"},{"ACK_1":"[true]"},{"ACK_2":"[2]"},{"BATCH_COUNT":"0"},{"SOURCE_IDS":"[]"}):
+            with tempfile.TemporaryDirectory() as directory:
+                output=Path(directory)/"output"
+                env={"GITHUB_OUTPUT":str(output),"SOURCE_IDS":json.dumps(ids,separators=(",",":")),"BATCH_COUNT":"1","ACK_1":json.dumps(ids,separators=(",",":")),"ACK_2":"","ACK_3":"","ACK_4":"","MAP_1":"[[7,99,711]]","MAP_2":"","MAP_3":"","MAP_4":""}|mutation
+                with self.subTest(mutation=mutation),patch.dict(os.environ,env):
+                    if mutation:
+                        with self.assertRaises((SystemExit,json.JSONDecodeError)):exec(program,{})
+                        self.assertFalse(output.exists())
+                    else:
+                        exec(program,{})
+                        values=dict(line.split("=",1) for line in output.read_text().splitlines())
+                        self.assertEqual(json.loads(values["acknowledged_source_ids"]),ids)
+                        self.assertEqual(json.loads(values["preserved_target_writer_map"]),[[7,99,711]])
+
     def test_cancelled_sensor_tracks_successors_in_every_active_state(self) -> None:
         match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", self._job_block("wait-for-active-review-sensor"), re.S)
         self.assertIsNotNone(match); assert match is not None
