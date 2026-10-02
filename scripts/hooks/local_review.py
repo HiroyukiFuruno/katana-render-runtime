@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+
+from local_review_contract import MODEL, PROMPT, REASONING, receipt_payload, validate_receipt, validate_review
+from local_review_state import ReviewError, cache_path, canonical, command, digest, gate_configuration, issue_context
+from local_review_state import repository_root, requirements_context, source_snapshot, strict_json
+
+
+SCHEMA = Path(__file__).with_suffix(".schema.json")
+
+
+def arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Review exact local changes before the full quality gate.")
+    parser.add_argument("--issue", type=int, action="append", default=[])
+    parser.add_argument("--base", default="origin/master")
+    parser.add_argument("--requirements")
+    parser.add_argument("--receipt", default="tmp/local-review/receipt.json")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check-receipt", action="store_true")
+    mode.add_argument("--print-input", action="store_true")
+    return parser.parse_args()
+
+
+def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[int]:
+    numbers = args.issue
+    configured = os.environ.get("REVIEW_ISSUE", "")
+    if not numbers and configured:
+        if not re.fullmatch(r"[1-9][0-9]*(?:[ ,]+[1-9][0-9]*)*", configured):
+            raise ReviewError("REVIEW_ISSUE must contain positive Issue numbers")
+        numbers = [int(number) for number in re.split(r"[ ,]+", configured)]
+    if not numbers:
+        messages = command(["git", "log", "--format=%B", f"{args.base}..HEAD", "--"], root)
+        references = {int(number) for number in re.findall(r"\bRefs\s+#([1-9][0-9]*)\b", messages)}
+        if len(references) > 1:
+            raise ReviewError("multiple branch Issues; set REVIEW_ISSUE explicitly")
+        numbers = sorted(references)
+    if not numbers:
+        retained = retained_inputs(receipt)
+        if retained is not None:
+            numbers = [issue["number"] for issue in retained["issues"]]
+    if not numbers and receipt.exists():
+        stored = strict_json(receipt.read_text())
+        try:
+            validate_receipt(stored, stored["inputs"])
+            numbers = [issue["number"] for issue in stored["inputs"]["issues"]]
+        except (KeyError, TypeError) as error:
+            raise ReviewError("receipt Issue identity is invalid") from error
+    if not numbers or any(type(number) is not int or number < 1 for number in numbers):
+        raise ReviewError("set REVIEW_ISSUE or pass --issue for the current requirements")
+    return sorted(set(numbers))
+
+
+def build_inputs(root: Path, args: argparse.Namespace, numbers: list[int]) -> dict:
+    return {"schema": 1, "repository": "HiroyukiFuruno/katana-render-runtime",
+            "source": source_snapshot(root, args.base), "issues": issue_context(root, numbers),
+            "requirements": requirements_context(root, args.requirements),
+            "gate_configuration": gate_configuration(root),
+            "model": MODEL, "reasoning": REASONING,
+            "schema_sha256": hashlib.sha256(SCHEMA.read_bytes()).hexdigest(),
+            "prompt_sha256": hashlib.sha256(PROMPT.encode()).hexdigest()}
+
+
+def retained_inputs(receipt: Path, numbers: list[int] | None = None) -> dict | None:
+    path = receipt.parent / "last-input.json"
+    if not path.exists():
+        return None
+    stored = strict_json(path.read_text())
+    issues = stored.get("issues") if isinstance(stored, dict) else None
+    if not isinstance(issues, list) or not issues:
+        raise ReviewError("retained input has no Issue identity")
+    if any(not isinstance(issue, dict) or type(issue.get("number")) is not int
+           or issue["number"] < 1 for issue in issues):
+        raise ReviewError("retained input has invalid Issue identities")
+    if numbers is not None and sorted(issue["number"] for issue in issues) != sorted(numbers):
+        return None
+    report_path = receipt.parent / "last-review.json"
+    if not report_path.is_file():
+        raise ReviewError("retained input is unverifiable; explicitly set Issue and requirements")
+    report = strict_json(report_path.read_text())
+    if not isinstance(report, dict) or report.get("input_sha256") != digest(stored):
+        raise ReviewError("retained input does not match its structured review")
+    if stored.get("model") != MODEL or stored.get("reasoning") != REASONING:
+        raise ReviewError("retained input has an unexpected review configuration")
+    return stored
+
+
+def requirements_path(root: Path, args: argparse.Namespace, receipt: Path, numbers: list[int]) -> str | None:
+    if args.requirements is not None:
+        return args.requirements
+    if "REVIEW_REQUIREMENTS" in os.environ:
+        configured = os.environ["REVIEW_REQUIREMENTS"]
+        if not configured.strip():
+            raise ReviewError("REVIEW_REQUIREMENTS must identify a requirements file")
+        return configured
+    retained = retained_inputs(receipt, numbers)
+    if retained is not None and sorted(issue["number"] for issue in retained["issues"]) == sorted(numbers):
+        stored = retained
+    elif receipt.exists():
+        payload = strict_json(receipt.read_text())
+        if not isinstance(payload, dict) or not isinstance(payload.get("inputs"), dict):
+            raise ReviewError("stored requirements cannot be recovered from an invalid receipt")
+        validate_receipt(payload, payload["inputs"])
+        stored = payload["inputs"]
+    else:
+        return None
+    if sorted(issue["number"] for issue in stored["issues"]) != sorted(numbers):
+        return None
+    requirements = stored.get("requirements")
+    if requirements is None:
+        return None
+    if not isinstance(requirements, dict) or not isinstance(requirements.get("path"), str):
+        raise ReviewError("stored requirements path is invalid")
+    path = requirements["path"]
+    requirements_context(root, path)
+    return path
+
+
+def read_receipt(path: Path, inputs: dict) -> dict:
+    receipt = strict_json(path.read_text())
+    result = validate_receipt(receipt, inputs)
+    original = strict_json(path.with_suffix(".review.json").read_text())
+    if original != result:
+        raise ReviewError("receipt differs from the original structured review")
+    return result
+
+
+def review_command(root: Path, result: Path) -> list[str]:
+    return ["rtk", "proxy", "codex", "exec", "--ignore-user-config", "--ephemeral",
+            "--sandbox", "read-only", "--model", MODEL,
+            "-c", f'model_reasoning_effort="{REASONING}"', "--color", "never",
+            "--cd", str(root), "--output-schema", str(SCHEMA),
+            "--output-last-message", str(result), "-"]
+
+
+def compact_input(root: Path, inputs: dict) -> dict:
+    base = inputs["source"]["base_sha"]
+    changes = {}
+    selections = {"working": ["diff", "--name-only", "-z", base, "--"],
+                  "staged": ["diff", "--cached", "--name-only", "-z", base, "--"],
+                  "untracked": ["ls-files", "--others", "--exclude-standard", "-z"]}
+    for key, selection in selections.items():
+        changes[key] = sorted(set(command(["git", *selection], root).split("\0")) - {""})
+    return {"input_sha256": digest(inputs), "base_sha": base,
+            "source_snapshot_sha256": digest(inputs["source"]), "changes": changes,
+            "issues": inputs["issues"], "requirements": inputs["requirements"],
+            "gate_configuration": inputs["gate_configuration"],
+            "model": inputs["model"], "reasoning": inputs["reasoning"]}
+
+
+def invoke_review(root: Path, directory: Path, inputs: dict) -> dict:
+    result_path = directory / "result.json"
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment["KRR_LOCAL_REVIEW_ACTIVE"] = "1"
+    payload = compact_input(root, inputs)
+    prompt = PROMPT + "\n固定入力:\n" + canonical(payload).decode()
+    diagnostic = directory.parent / "last-codex-stderr.log"
+    atomic_json(directory.parent / "last-input.json", inputs)
+    with diagnostic.open("w") as errors:
+        result = subprocess.run(review_command(root, result_path), cwd=root, env=environment,
+                                input=prompt, text=True, stdout=subprocess.DEVNULL, stderr=errors,
+                                timeout=600, check=False)
+    if result.returncode:
+        raise ReviewError(f"Codex review failed (exit {result.returncode}); inspect {diagnostic}")
+    if not result_path.is_file() or result_path.stat().st_size > 1024 * 1024:
+        raise ReviewError("Codex did not return a bounded structured review")
+    review = strict_json(result_path.read_text())
+    retained = directory.parent / "last-review.json"
+    atomic_json(retained, review)
+    try:
+        validate_review(review, inputs)
+    except ReviewError as error:
+        raise ReviewError(f"{error}; findings retained in {retained}") from error
+    return review
+
+
+def atomic_json(path: Path, value: dict) -> None:
+    with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent, delete=False) as output:
+        output.write(canonical(value))
+        temporary = Path(output.name)
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def obtain_receipt(root: Path, args: argparse.Namespace, path: Path, inputs: dict, numbers: list[int]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = path.parent / "review.lock"
+    try:
+        descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as error:
+        raise ReviewError("another local review is active; do not start recursive reviews") from error
+    try:
+        os.close(descriptor)
+        with tempfile.TemporaryDirectory(prefix="codex-", dir=path.parent) as directory:
+            review = invoke_review(root, Path(directory), inputs)
+        if build_inputs(root, args, numbers) != inputs:
+            raise ReviewError("review input changed during review; receipt was not accepted")
+        atomic_json(path.with_suffix(".review.json"), review)
+        atomic_json(path, receipt_payload(inputs, review))
+        read_receipt(path, inputs)
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def run(args: argparse.Namespace) -> int:
+    if os.environ.get("KRR_LOCAL_REVIEW_ACTIVE") == "1":
+        raise ReviewError("nested local review/check is prohibited")
+    if os.environ.get("CI", "").lower() == "true" or os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+        print("Local review SKIP in CI: existing cloud/native quality gates remain required.")
+        return 0
+    root = repository_root()
+    path = cache_path(root, args.receipt)
+    numbers = issue_numbers(root, args, path)
+    args.requirements = requirements_path(root, args, path, numbers)
+    inputs = build_inputs(root, args, numbers)
+    if args.print_input:
+        print(json.dumps({"input_sha256": digest(inputs), "inputs": inputs}, ensure_ascii=False))
+        return 0
+    try:
+        read_receipt(path, inputs)
+        if build_inputs(root, args, numbers) != inputs:
+            raise ReviewError("review input changed during receipt reuse")
+        print(f"Local review REUSE {digest(inputs)}; full quality gate remains required.")
+        return 0
+    except (OSError, ReviewError) as error:
+        if args.check_receipt:
+            raise ReviewError(f"local review receipt rejected: {error}") from error
+        print("Local review receipt missing/invalid/stale; starting read-only High review.")
+    obtain_receipt(root, args, path, inputs, numbers)
+    print(f"Local review PASS {digest(inputs)}; full quality gate remains required.")
+    return 0
+
+
+def main() -> int:
+    try:
+        return run(arguments())
+    except (OSError, ReviewError, subprocess.SubprocessError) as error:
+        print(f"Local review rejected: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

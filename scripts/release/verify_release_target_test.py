@@ -24,6 +24,7 @@ REQUIRED_RELEASE_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_COMMITS
 REQUIRED_CANDIDATE_ANCESTORS = (
     VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_CANDIDATE_ANCESTORS
 )
+PUBLISHED_V0422_SNAPSHOT = "185d056de67282a4056729296e57c164a6a343d6"
 
 
 def isolated_git_environment() -> dict[str, str]:
@@ -40,7 +41,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
         self,
         target: str,
         latest: str,
-        head_ref: str = "HEAD",
+        head_ref: str = PUBLISHED_V0422_SNAPSHOT,
         cwd: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -128,7 +129,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 ).stdout.strip()
 
             source_repository = self.source_git("rev-parse", "--show-toplevel")
-            git("fetch", "-q", source_repository, "HEAD:refs/heads/release")
+            git(
+                "fetch",
+                "-q",
+                source_repository,
+                f"{PUBLISHED_V0422_SNAPSHOT}:refs/heads/release",
+            )
             release_head = git("rev-parse", "refs/heads/release")
             git(
                 "read-tree",
@@ -190,6 +196,8 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 str(SCRIPT),
                 "--target-version",
                 "v0.4.22",
+                "--head-ref",
+                PUBLISHED_V0422_SNAPSHOT,
                 "--print-release-manifest",
             ],
             check=False,
@@ -315,7 +323,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 git("init", "-q")
                 git("config", "user.email", "release-test@example.invalid")
                 git("config", "user.name", "Release Target Test")
-                git("fetch", "-q", str(source_repository), "HEAD:refs/heads/release")
+                git(
+                    "fetch",
+                    "-q",
+                    str(source_repository),
+                    f"{PUBLISHED_V0422_SNAPSHOT}:refs/heads/release",
+                )
                 squash = git(
                     "commit-tree",
                     # Model GitHub's squash merge: the candidate retains the

@@ -46,23 +46,35 @@ fn release_verify_tests_the_packaged_library_sources() -> Result<(), Box<dyn std
 #[test]
 fn release_target_check_requires_v0_4_22_intent() -> Result<(), Box<dyn std::error::Error>> {
     let root = workspace_root()?;
-    assert!(release_target_check(root, "0.4.22", "0.4.21", "HEAD")?);
-    assert!(release_target_check(root, "0.4.22", "0.4.22", "HEAD")?);
-    assert!(!release_target_check(
-        root,
-        "0.4.22",
-        "0.4.21",
-        "missing-release-head",
-    )?);
-    assert!(!release_target_check(root, "0.4.22", "0.4.20", "HEAD")?);
-    assert!(!release_target_check(root, "0.4.23", "0.4.21", "HEAD")?);
+    // 公開release manifestは不変対象を検証し、その後CI-only差分で過去snapshotを変更しない。
+    const RELEASE_HEAD: &str = "185d056de67282a4056729296e57c164a6a343d6";
+    assert_release_target_check(root, "0.4.22", "0.4.21", RELEASE_HEAD, true)?;
+    assert_release_target_check(root, "0.4.22", "0.4.22", RELEASE_HEAD, true)?;
+    assert_release_target_check(root, "0.4.22", "0.4.21", "missing-release-head", false)?;
+    assert_release_target_check(root, "0.4.22", "0.4.20", RELEASE_HEAD, false)?;
+    assert_release_target_check(root, "0.4.23", "0.4.21", RELEASE_HEAD, false)?;
     for version in [
         "0.3.9", "0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.4.4", "0.4.5", "0.4.6", "0.4.7", "0.4.8",
         "0.4.9", "0.4.10", "0.4.11", "0.4.12", "0.4.13", "0.4.14", "0.4.15", "0.4.16", "0.4.17",
         "0.4.18", "0.4.19", "0.4.20", "0.4.21", "0.5.0", "1.0.0", "2.0.0",
     ] {
-        assert!(!release_target_check(root, version, "0.4.21", "HEAD",)?);
+        assert_release_target_check(root, version, "0.4.21", RELEASE_HEAD, false)?;
     }
+    Ok(())
+}
+
+fn assert_release_target_check(
+    root: &Path,
+    target: &str,
+    latest: &str,
+    head_ref: &str,
+    expected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(
+        release_target_check(root, target, latest, head_ref)?,
+        expected,
+        "target={target}, latest={latest}, head={head_ref}"
+    );
     Ok(())
 }
 

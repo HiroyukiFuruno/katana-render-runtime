@@ -185,7 +185,10 @@ automation-contract-test:
 # Run independent local quality-gate lanes concurrently. Cargo and PlantUML
 # work stay in one lane because they share build/cache outputs.
 check:
-    python3 scripts/hooks/run_parallel_checks.py --jobs {{CHECK_JOBS}}
+    @export COVERAGE_MIN_LINES={{quote(COVERAGE_MIN_LINES)}} COVERAGE_MAX_UNCOVERED_LINES={{quote(COVERAGE_MAX_UNCOVERED_LINES)}} \
+      TEST_THREADS={{quote(TEST_THREADS)}} RUSTFLAGS={{quote(RUSTFLAGS)}} CARGO={{quote(CARGO)}} JOBS={{quote(JOBS)}} CHECK_JOBS={{quote(CHECK_JOBS)}}; \
+      python3 scripts/hooks/local_review.py && \
+      python3 scripts/hooks/run_parallel_checks.py --jobs "$CHECK_JOBS"
     @echo "checks passed"
 
 # Cargo operations share target/ and the PlantUML cache, so keep them ordered.
