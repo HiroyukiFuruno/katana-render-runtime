@@ -80,12 +80,12 @@ def source_snapshot(root: Path, base: str) -> dict[str, Any]:
         raise ReviewError("unmerged index cannot be reviewed")
     paths = set(names.split("\0")) | set(baseline.split("\0"))
     files = {name: file_record(root, name) for name in sorted(paths - {""})}
-    return {"base_sha": base_sha, "files": files, "index_overrides": staged_overrides(root, entries)}
+    return {"base_sha": base_sha, "files": files, "index_overrides": staged_overrides(root, entries, base_sha)}
 
 
-def staged_overrides(root: Path, entries: list[str]) -> list[str]:
+def staged_overrides(root: Path, entries: list[str], base_sha: str) -> list[str]:
     overrides = []
-    staged = command(["git", "diff", "--cached", "--name-only", "-z", "HEAD", "--"], root)
+    staged = command(["git", "diff", "--cached", "--name-only", "-z", base_sha, "--"], root)
     indexed = {entry.split("\t", 1)[1]: entry for entry in entries}
     for name in sorted(set(staged.split("\0")) - {""}):
         entry = indexed.get(name)
