@@ -249,10 +249,16 @@ def gate_configuration(root: Path) -> dict[str, str]:
     values = {name: command(["just", "--justfile", str(root / "Justfile"),
                             "--evaluate", name], root).rstrip("\n") for name in names}
     cargo_names = ("CARGO_BUILD_TARGET", "CARGO_BUILD_RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS",
+                   "CARGO_BUILD_RUSTC", "CARGO_BUILD_RUSTC_WRAPPER",
+                   "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER", "CARGO_BUILD_TARGET_DIR",
                    "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "RUSTUP_TOOLCHAIN")
     values.update({name: os.environ.get(name, "") for name in cargo_names})
     values["RUSTC"] = os.environ.get("RUSTC", "rustc")
-    target = os.environ.get("CARGO_TARGET_DIR", "target")
+    values.update({f"{name}_PRESENT": str(name in os.environ).lower()
+                   for name in (*cargo_names, "RUSTC")})
+    if "CARGO_BUILD_TARGET_DIR" in os.environ:
+        values["CARGO_BUILD_TARGET_DIR"] = str((root / os.environ["CARGO_BUILD_TARGET_DIR"]).resolve())
+    target = os.environ.get("CARGO_TARGET_DIR", values["CARGO_BUILD_TARGET_DIR"] or "target")
     values["CARGO_TARGET_DIR"] = str((root / target).resolve())
     build = os.environ.get("CARGO_BUILD_BUILD_DIR", target)
     values["CARGO_BUILD_BUILD_DIR"] = str((root / build).resolve())

@@ -789,6 +789,97 @@ class GitSnapshotTest(unittest.TestCase):
 
 
 class DriverContractTest(unittest.TestCase):
+    def test_actual_just_gate_tracks_cargo_environment_presence_and_receipt_identity(self) -> None:
+        from local_review_state import gate_configuration
+
+        root = Path(__file__).resolve().parents[2]
+        cargo_names = (
+            "CARGO_BUILD_TARGET", "CARGO_BUILD_RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS",
+            "CARGO_BUILD_RUSTC", "CARGO_BUILD_RUSTC_WRAPPER",
+            "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER", "CARGO_BUILD_TARGET_DIR",
+            "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "RUSTUP_TOOLCHAIN", "RUSTC",
+        )
+        clean_environment = {"PATH": os.environ["PATH"], "CI": "true"}
+
+        with patch.dict(os.environ, clean_environment, clear=True):
+            absent = gate_configuration(root)
+        empty_environment = {**clean_environment, **{name: "" for name in cargo_names}}
+        with patch.dict(os.environ, empty_environment, clear=True):
+            present_empty = gate_configuration(root)
+        nonempty_environment = {
+            **clean_environment,
+            **{name: f"review-value-{index}" for index, name in enumerate(cargo_names)},
+        }
+        nonempty_environment["CARGO_BUILD_TARGET_DIR"] = "tmp/review-value-target"
+        nonempty_environment["GITHUB_TOKEN"] = "secret-must-not-enter-the-input"
+        with patch.dict(os.environ, nonempty_environment, clear=True):
+            nonempty = gate_configuration(root)
+
+        for name in cargo_names:
+            with self.subTest(variable=name):
+                self.assertIn(name, absent)
+                self.assertIn(f"{name}_PRESENT", absent)
+                self.assertEqual(absent[name], "rustc" if name == "RUSTC" else "")
+                self.assertEqual(absent[f"{name}_PRESENT"], "false")
+                expected_empty = str(root) if name == "CARGO_BUILD_TARGET_DIR" else ""
+                self.assertEqual(present_empty[name], expected_empty)
+                self.assertEqual(present_empty[f"{name}_PRESENT"], "true")
+                expected_value = (
+                    str((root / nonempty_environment[name]).resolve())
+                    if name == "CARGO_BUILD_TARGET_DIR"
+                    else f"review-value-{cargo_names.index(name)}"
+                )
+                self.assertEqual(nonempty[name], expected_value)
+                self.assertEqual(nonempty[f"{name}_PRESENT"], "true")
+
+        baseline = {**inputs(), "source": source_snapshot(root, "HEAD"),
+                    "requirements": None, "gate_configuration": absent}
+        receipt = receipt_payload(baseline, review(baseline))
+        empty_inputs = {**baseline, "gate_configuration": present_empty}
+        nonempty_inputs = {**baseline, "gate_configuration": nonempty}
+        self.assertNotEqual(digest(baseline), digest(empty_inputs))
+        self.assertNotEqual(digest(empty_inputs), digest(nonempty_inputs))
+        for changed in (empty_inputs, nonempty_inputs):
+            with self.assertRaisesRegex(ReviewError, "another input|stale"):
+                validate_receipt(receipt, changed)
+        self.assertNotIn("secret-must-not-enter-the-input", json.dumps(nonempty))
+        self.assertNotIn("GITHUB_TOKEN", nonempty)
+
+    def test_cargo_target_directory_direct_alias_and_default_precedence(self) -> None:
+        from local_review_state import gate_configuration
+
+        root = Path(__file__).resolve().parents[2]
+        clean_environment = {"PATH": os.environ["PATH"], "CI": "true"}
+        with patch.dict(os.environ, clean_environment, clear=True):
+            default = gate_configuration(root)
+        with patch.dict(os.environ, {**clean_environment, "CARGO_BUILD_TARGET_DIR": "tmp/alias-target"}, clear=True):
+            alias = gate_configuration(root)
+        with patch.dict(os.environ, {
+            **clean_environment,
+            "CARGO_BUILD_TARGET_DIR": "tmp/alias-target",
+            "CARGO_TARGET_DIR": "tmp/direct-target",
+        }, clear=True):
+            direct = gate_configuration(root)
+        with patch.dict(os.environ, {
+            **clean_environment,
+            "CARGO_BUILD_TARGET_DIR": str(root / "tmp/alias-target"),
+        }, clear=True):
+            absolute_alias = gate_configuration(root)
+        with patch.dict(os.environ, {
+            **clean_environment,
+            "CARGO_BUILD_TARGET_DIR": "tmp/alias-target",
+            "CARGO_TARGET_DIR": str(root / "tmp/direct-target"),
+        }, clear=True):
+            absolute_direct = gate_configuration(root)
+
+        self.assertEqual(default["CARGO_TARGET_DIR"], str(root / "target"))
+        self.assertEqual(alias["CARGO_TARGET_DIR"], str(root / "tmp/alias-target"))
+        self.assertEqual(alias["CARGO_BUILD_BUILD_DIR"], str(root / "tmp/alias-target"))
+        self.assertEqual(direct["CARGO_TARGET_DIR"], str(root / "tmp/direct-target"))
+        self.assertEqual(absolute_alias["CARGO_TARGET_DIR"], alias["CARGO_TARGET_DIR"])
+        self.assertEqual(absolute_alias, alias)
+        self.assertEqual(absolute_direct, direct)
+
     def test_actual_just_overrides_reach_review_and_quality_runner(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         names = ("COVERAGE_MIN_LINES", "COVERAGE_MAX_UNCOVERED_LINES", "TEST_THREADS",
