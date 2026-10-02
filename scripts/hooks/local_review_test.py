@@ -4,6 +4,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import shutil
 import shlex
 import subprocess
 import sys
@@ -1080,6 +1081,76 @@ class DriverContractTest(unittest.TestCase):
                 with self.assertRaisesRegex(ReviewError, "GitHub repository"):
                     issue_context(root, [89])
             self.assertFalse(gh_calls)
+
+        invalid_remote_outputs = (
+            "ssh://git@github\t.com/HiroyukiFuruno/katana-render-runtime.git\n",
+            "ssh://git@github.com/HiroyukiFuruno/\r\nkatana-render-runtime.git\n",
+            "\tssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git\n",
+            "\rssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git\n",
+            " ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git\n",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git\t\n",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git\r\n",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git \n",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git\x00\n",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git\x7f\n",
+        )
+        for remote_output in invalid_remote_outputs:
+            with self.subTest(remote_output=repr(remote_output)), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                gh_calls = []
+
+                def injected_git_output(arguments, cwd, input_bytes=None):
+                    if arguments == ["git", "remote", "get-url", "origin"]:
+                        return remote_output
+                    if arguments[0] == "gh":
+                        gh_calls.append(arguments)
+                        return "{}"
+                    return command(arguments, cwd, input_bytes)
+
+                # NUL は Git 設定へ保存できないため、command 出力の境界で検証する。
+                with patch("local_review_state.command", side_effect=injected_git_output):
+                    with self.assertRaisesRegex(ReviewError, "GitHub repository|scoped"):
+                        issue_context(root, [89])
+                self.assertFalse(gh_calls)
+
+    def test_real_git_control_char_origins_are_rejected_before_github_api_call(self) -> None:
+        invalid_origins = (
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git\r",
+            "ssh://git@github.com/HiroyukiFuruno/\r\nkatana-render-runtime.git",
+        )
+        for origin in invalid_origins:
+            with self.subTest(origin=repr(origin)), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                command(["git", "init", "--quiet"], root)
+                command(["git", "config", "remote.origin.url", origin], root)
+                git_arguments = ["git", "remote", "get-url", "origin"]
+                rtk = shutil.which("rtk")
+                if rtk is not None:
+                    git_arguments = [rtk, "proxy", *git_arguments]
+                raw_stdout = subprocess.run(git_arguments, cwd=root, capture_output=True,
+                                            check=True, text=False).stdout
+                normalized_stdout = subprocess.run(git_arguments, cwd=root, capture_output=True,
+                                                   check=True, text=True).stdout
+                if origin.endswith("\r"):
+                    self.assertTrue(raw_stdout.endswith(b".git\r\n"))
+                    self.assertTrue(normalized_stdout.endswith(".git\n"))
+                    self.assertFalse(normalized_stdout.endswith(".git\r\n"))
+                else:
+                    self.assertIn(b"/\r\nkatana-render-runtime.git\n", raw_stdout)
+                    self.assertIn("/\nkatana-render-runtime.git\n", normalized_stdout)
+                    self.assertNotIn("/\r\nkatana-render-runtime.git", normalized_stdout)
+                gh_calls = []
+
+                def real_git_record_gh(arguments, cwd, input_bytes=None):
+                    if arguments[0] == "gh":
+                        gh_calls.append(arguments)
+                        return "{}"
+                    return command(arguments, cwd, input_bytes)
+
+                with patch("local_review_state.command", side_effect=real_git_record_gh):
+                    with self.assertRaisesRegex(ReviewError, "GitHub repository|scoped"):
+                        issue_context(root, [89])
+                self.assertFalse(gh_calls)
 
     def test_codex_is_read_only_high_and_precedes_quality_lanes(self) -> None:
         arguments = local_review.review_command(Path.cwd(), Path("result.json"))

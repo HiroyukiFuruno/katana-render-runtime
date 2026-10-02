@@ -156,7 +156,9 @@ def working_entry(root: Path, name: str) -> str | None:
 
 
 def issue_context(root: Path, numbers: list[int]) -> list[dict[str, Any]]:
-    remote = command(["git", "remote", "get-url", "origin"], root).strip()
+    remote = command(["git", "remote", "get-url", "origin"], root, input_bytes=b"").removesuffix("\n")
+    if any(ord(character) <= 32 or ord(character) == 127 for character in remote):
+        raise ReviewError("origin must identify a GitHub repository")
     prefix = "https://github.com/"
     if remote.startswith("git@github.com:"):
         repository = remote.removeprefix("git@github.com:").removesuffix(".git")
