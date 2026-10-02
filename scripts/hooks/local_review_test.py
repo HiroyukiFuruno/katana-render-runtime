@@ -4,6 +4,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -133,6 +134,87 @@ class GitSnapshotTest(unittest.TestCase):
         self.assertEqual(before, source_snapshot(self.root, self.base))
         self.commit("changes")
         self.assertEqual(before, source_snapshot(self.root, self.base))
+
+    def test_real_git_clean_filters_preserve_same_working_bytes_across_commit(self) -> None:
+        for filter_kind in ("autocrlf", "custom"):
+            with self.subTest(filter=filter_kind), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                command(["git", "init", "--quiet"], root)
+                if filter_kind == "autocrlf":
+                    command(["git", "config", "core.autocrlf", "true"], root)
+                    (root / ".gitattributes").write_text("*.txt text eol=lf\n")
+                else:
+                    (root / ".gitattributes").write_text("*.txt filter=uppercase\n")
+                    clean = (f"{shlex.quote(sys.executable)} -c "
+                             '"import sys; sys.stdout.write(sys.stdin.read().upper())"')
+                    command(["git", "config", "filter.uppercase.clean", clean], root)
+                command(["git", "add", ".gitattributes"], root)
+                command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "filter setup"], root)
+                base = command(["git", "rev-parse", "HEAD"], root).strip()
+                source = root / "example.txt"
+                source.write_bytes(b"same working bytes\r\n" if filter_kind == "autocrlf" else b"same working bytes\n")
+                before = source_snapshot(root, base)
+                command(["git", "add", "example.txt"], root)
+                staged = source_snapshot(root, base)
+                command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "filtered source"], root)
+                committed = source_snapshot(root, base)
+                self.assertEqual(before, staged)
+                self.assertEqual(before, committed)
+                source.write_bytes(b"different working bytes\r\n" if filter_kind == "autocrlf"
+                                   else b"SAME WORKING BYTES\n")
+                if filter_kind == "custom":
+                    head_blob = command(["git", "rev-parse", "HEAD:example.txt"], root).strip()
+                    filtered_blob = command(["git", "hash-object", "--path=example.txt", "--", "example.txt"],
+                                            root).strip()
+                    self.assertEqual(head_blob, filtered_blob)
+                self.assertNotEqual(committed, source_snapshot(root, base))
+
+    def test_sha256_repository_preserves_regular_and_symlink_blob_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            command(["git", "init", "--quiet", "--object-format=sha256"], root)
+            try:
+                (root / ".gitattributes").write_text("*.txt filter=uppercase\n")
+                clean = (f"{shlex.quote(sys.executable)} -c "
+                         '"import sys; sys.stdout.write(sys.stdin.read().upper())"')
+                command(["git", "config", "filter.uppercase.clean", clean], root)
+                (root / "target-a").write_text("target a\n")
+                (root / "target-b").write_text("target b\n")
+                (root / "link.txt").symlink_to("target-a")
+            except OSError as error:
+                self.skipTest(f"filesystem cannot create symbolic links: {error}")
+            command(["git", "add", "-A"], root)
+            command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                     "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "initial SHA-256 tree"], root)
+            base = command(["git", "rev-parse", "HEAD"], root).strip()
+
+            (root / "example.txt").write_bytes(b"same working bytes\n")
+            (root / "link.txt").unlink()
+            (root / "link.txt").symlink_to("target-b")
+            before = source_snapshot(root, base)
+            command(["git", "add", "example.txt", "link.txt"], root)
+            staged = source_snapshot(root, base)
+            command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                     "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "SHA-256 changes"], root)
+            committed = source_snapshot(root, base)
+            self.assertEqual(before, staged)
+            self.assertEqual(before, committed)
+            self.assertEqual(command(["git", "show", "HEAD:link.txt"], root).strip(), "target-b")
+
+            (root / "example.txt").write_bytes(b"different working bytes\n")
+            self.assertNotEqual(committed, source_snapshot(root, base))
+            (root / "example.txt").write_bytes(b"same working bytes\n")
+            (root / "link.txt").unlink()
+            (root / "link.txt").write_text("target-b")
+            changed_mode = source_snapshot(root, base)
+            self.assertNotEqual(committed, changed_mode)
+            self.assertEqual(changed_mode["files"]["link.txt"]["kind"], "file")
+            (root / "link.txt").unlink()
+            deleted = source_snapshot(root, base)
+            self.assertNotEqual(changed_mode, deleted)
+            self.assertEqual(deleted["files"]["link.txt"], {"kind": "deleted"})
 
     def commit_index(self, message: str) -> None:
         command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",

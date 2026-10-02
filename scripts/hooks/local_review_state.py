@@ -37,7 +37,7 @@ def strict_json(raw: str) -> Any:
         raise ReviewError("invalid review JSON") from error
 
 
-def command(arguments: list[str], root: Path) -> str:
+def command(arguments: list[str], root: Path, input_bytes: bytes | None = None) -> str:
     environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     rtk = shutil.which("rtk")
     if rtk is None:
@@ -50,11 +50,12 @@ def command(arguments: list[str], root: Path) -> str:
     try:
         result = subprocess.run(
             executable, cwd=root, env=environment,
-            capture_output=True, text=True, check=True, timeout=60,
+            capture_output=True, text=input_bytes is None, input=input_bytes,
+            check=True, timeout=60,
         )
     except (OSError, subprocess.SubprocessError) as error:
         raise ReviewError(f"read-only command failed: {arguments[0]}") from error
-    return result.stdout
+    return result.stdout.decode() if isinstance(result.stdout, bytes) else result.stdout
 
 
 def repository_root() -> Path:
@@ -106,7 +107,7 @@ def staged_overrides(root: Path, entries: list[str], base_sha: str, head_sha: st
     indexed = {entry.split("\t", 1)[1]: entry for entry in entries}
     for name in sorted(candidates):
         entry = indexed.get(name)
-        current = working_entry(root / name)
+        current = working_entry(root, name)
         indexed_value = None if entry is None else entry.split("\t", 1)[0].rsplit(" ", 1)[0]
         if indexed_value != current:
             overrides.append(entry if entry is not None else f"deleted\t{name}")
@@ -120,12 +121,13 @@ def head_overrides(root: Path, base_sha: str, head_sha: str, entries: dict[str, 
         entry = entries.get(name)
         fields = None if entry is None else entry.split()
         value = None if fields is None else f"{fields[0]} {fields[2]}"
-        if value != working_entry(root / name):
+        if value != working_entry(root, name):
             overrides.append(f"deleted\t{name}" if value is None else f"{value}\t{name}")
     return overrides
 
 
-def working_entry(path: Path) -> str | None:
+def working_entry(root: Path, name: str) -> str | None:
+    path = root / name
     try:
         mode = path.lstat().st_mode
     except FileNotFoundError:
@@ -133,10 +135,14 @@ def working_entry(path: Path) -> str | None:
     if stat.S_ISLNK(mode):
         content = os.fsencode(os.readlink(path))
         file_mode = "120000"
-    else:
-        content = path.read_bytes()
+    elif stat.S_ISREG(mode):
         file_mode = "100755" if mode & 0o111 else "100644"
-    blob = hashlib.sha1(f"blob {len(content)}\0".encode() + content).hexdigest()
+        blob = command(["git", "hash-object", f"--path={name}", "--", name], root).strip()
+        return f"{file_mode} {blob}"
+    else:
+        raise ReviewError(f"unsupported source entry: {name}")
+    blob = command(["git", "hash-object", "--stdin", "--no-filters"], root,
+                   input_bytes=content).strip()
     return f"{file_mode} {blob}"
 
 
