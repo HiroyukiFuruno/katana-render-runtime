@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -17,6 +19,25 @@ from local_review_state import repository_root, requirements_context, source_sna
 
 
 SCHEMA = Path(__file__).with_suffix(".schema.json")
+REVIEW_TIMEOUT_SECONDS = 1800
+REVIEW_ANALYSIS_SECONDS = 1500
+REVIEW_POLICY = """
+レビュー時間はruntimeの性能基準とは別です。runtime 60秒/close 5秒等の既存基準を変更しません。
+最初にchangesと要求を6観点へ対応付け、変更ファイルを関心事ごとに一度読み、必要な直接依存だけ調べてください。
+同じ内容のworking/staged diffや以前に読んだソースの全文を重ねて表示せず、相違部分・引用行に絞ってください。
+過去レビューの再利用は同じ内容と要求の対応を照合してから行い、旧PASSを今回のinputへ転記しないでください。
+原本測定のwhole-source hashが違う場合は同一と扱わず、対象実装のhash一致と変更範囲を調べ、
+提案修正の効果の根拠と正式公開版の後工程を区別してください。要求に必要な正式再測定はpendingへ残します。
+analysis_deadline_utcまでに必要な観点を調査し、その後は新たな探索を開始せず構造化結論を完成してください。
+未確認・不一致を発見したら具体的証拠を保存し、解決に必要な直接箇所だけ調べてください。
+期限までに全観点を確認できなければblocked/FAILです。探索を延々続けたり、未確認をPASSにしてはいけません。
+残りの時間は引用・input_sha256・全6観点・各Issue・findings・pendingのschema確認に使ってください。
+"""
+
+
+def review_prompt() -> str:
+    return (PROMPT + REVIEW_POLICY + f"\nreview process budget: {REVIEW_TIMEOUT_SECONDS}s; "
+            f"analysis budget: {REVIEW_ANALYSIS_SECONDS}s.\n")
 
 
 def arguments() -> argparse.Namespace:
@@ -67,7 +88,7 @@ def build_inputs(root: Path, args: argparse.Namespace, numbers: list[int]) -> di
             "gate_configuration": gate_configuration(root),
             "model": MODEL, "reasoning": REASONING,
             "schema_sha256": hashlib.sha256(SCHEMA.read_bytes()).hexdigest(),
-            "prompt_sha256": hashlib.sha256(PROMPT.encode()).hexdigest()}
+            "prompt_sha256": hashlib.sha256(review_prompt().encode()).hexdigest()}
 
 
 def retained_inputs(receipt: Path, numbers: list[int] | None = None) -> dict | None:
@@ -157,20 +178,41 @@ def compact_input(root: Path, inputs: dict) -> dict:
             "model": inputs["model"], "reasoning": inputs["reasoning"]}
 
 
+def run_review_process(arguments: list[str], root: Path, environment: dict, prompt: str, diagnostic: Path) -> int:
+    with diagnostic.open("w") as errors, subprocess.Popen(
+        arguments, cwd=root, env=environment, stdin=subprocess.PIPE, text=True,
+        stdout=subprocess.DEVNULL, stderr=errors, start_new_session=True,
+    ) as process:
+        try:
+            process.communicate(prompt, timeout=REVIEW_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL) if os.name == "posix" else process.kill()
+            except ProcessLookupError:
+                pass
+            process.communicate()
+            raise
+        return process.returncode
+
+
 def invoke_review(root: Path, directory: Path, inputs: dict) -> dict:
     result_path = directory / "result.json"
     environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     environment["KRR_LOCAL_REVIEW_ACTIVE"] = "1"
     payload = compact_input(root, inputs)
-    prompt = PROMPT + "\n固定入力:\n" + canonical(payload).decode()
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=REVIEW_ANALYSIS_SECONDS)
+    payload["review_budget"] = {"process_timeout_seconds": REVIEW_TIMEOUT_SECONDS,
+                                "analysis_seconds": REVIEW_ANALYSIS_SECONDS,
+                                "analysis_deadline_utc": deadline.isoformat()}
+    prompt = review_prompt() + "\n固定入力:\n" + canonical(payload).decode()
     diagnostic = directory.parent / "last-codex-stderr.log"
     atomic_json(directory.parent / "last-input.json", inputs)
-    with diagnostic.open("w") as errors:
-        result = subprocess.run(review_command(root, result_path), cwd=root, env=environment,
-                                input=prompt, text=True, stdout=subprocess.DEVNULL, stderr=errors,
-                                timeout=600, check=False)
-    if result.returncode:
-        raise ReviewError(f"Codex review failed (exit {result.returncode}); inspect {diagnostic}")
+    try:
+        returncode = run_review_process(review_command(root, result_path), root, environment, prompt, diagnostic)
+    except subprocess.TimeoutExpired as error:
+        raise ReviewError(f"Codex review exceeded {REVIEW_TIMEOUT_SECONDS}s; no receipt accepted; inspect {diagnostic}") from error
+    if returncode:
+        raise ReviewError(f"Codex review failed (exit {returncode}); inspect {diagnostic}")
     if not result_path.is_file() or result_path.stat().st_size > 1024 * 1024:
         raise ReviewError("Codex did not return a bounded structured review")
     review = strict_json(result_path.read_text())

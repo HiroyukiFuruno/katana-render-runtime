@@ -316,10 +316,10 @@ class DriverContractTest(unittest.TestCase):
             result["verdict"] = "FAIL"
             child = root / "codex-test"
             child.mkdir()
-            def returned(arguments, **_options):
+            def returned(arguments, *_options):
                 Path(arguments[arguments.index("--output-last-message") + 1]).write_text(json.dumps(result))
-                return SimpleNamespace(returncode=0)
-            with patch.object(local_review, "compact_input", return_value={}), patch.object(subprocess, "run", side_effect=returned):
+                return 0
+            with patch.object(local_review, "compact_input", return_value={}), patch.object(local_review, "run_review_process", side_effect=returned):
                 with self.assertRaisesRegex(ReviewError, "findings retained"):
                     local_review.invoke_review(root, child, value)
             receipt = root / "receipt.json"
@@ -349,11 +349,11 @@ class DriverContractTest(unittest.TestCase):
             child = root / "codex-test"
             child.mkdir()
 
-            def returned(arguments, **_options):
+            def returned(arguments, *_options):
                 Path(arguments[arguments.index("--output-last-message") + 1]).write_text(json.dumps(result))
-                return SimpleNamespace(returncode=0)
+                return 0
 
-            with patch.object(local_review, "compact_input", return_value={}), patch.object(subprocess, "run", side_effect=returned):
+            with patch.object(local_review, "compact_input", return_value={}), patch.object(local_review, "run_review_process", side_effect=returned):
                 with self.assertRaisesRegex(ReviewError, "findings retained"):
                     local_review.invoke_review(root, child, value)
             self.assertEqual(json.loads((root / "last-review.json").read_text()), result)
@@ -364,10 +364,77 @@ class DriverContractTest(unittest.TestCase):
             root = Path(temporary)
             child = root / "codex-test"
             child.mkdir()
-            with patch.object(local_review, "compact_input", return_value={}), patch.object(subprocess, "run", return_value=SimpleNamespace(returncode=2)):
+            with patch.object(local_review, "compact_input", return_value={}), patch.object(local_review, "run_review_process", return_value=2):
                 with self.assertRaisesRegex(ReviewError, "exit 2"):
                     local_review.invoke_review(root, child, inputs())
             self.assertFalse((root / "receipt.json").exists())
+
+
+    def test_prompt_scope_and_finite_review_budget_are_input_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = SimpleNamespace(base="origin/master", requirements=None)
+            with patch.object(local_review, "source_snapshot", return_value=inputs()["source"]), patch.object(local_review, "issue_context", return_value=inputs()["issues"]), patch.object(local_review, "gate_configuration", return_value={}):
+                before = local_review.build_inputs(root, args, [89])
+                with patch.object(local_review, "REVIEW_TIMEOUT_SECONDS", 1801):
+                    after = local_review.build_inputs(root, args, [89])
+                self.assertNotEqual(before["prompt_sha256"], after["prompt_sha256"])
+                with self.assertRaisesRegex(ReviewError, "another input|stale"):
+                    validate_receipt(receipt_payload(before, review(before)), after)
+            prompt = local_review.review_prompt()
+            self.assertLess(local_review.REVIEW_ANALYSIS_SECONDS, local_review.REVIEW_TIMEOUT_SECONDS)
+            self.assertIn("blocked/FAIL", prompt)
+            self.assertIn("runtime 60秒/close 5秒", prompt)
+            self.assertTrue(all(check in prompt for check in CHECKS))
+
+    def test_review_request_carries_deadline_and_timeout_rejects_receipt(self) -> None:
+        value = inputs()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receipt = root / "receipt.json"
+            args = SimpleNamespace()
+            def timed_out(arguments, _root, _environment, prompt, diagnostic):
+                payload = json.loads(prompt.split("固定入力:\n", 1)[1])
+                budget = payload["review_budget"]
+                self.assertEqual(budget["process_timeout_seconds"], 1800)
+                self.assertEqual(budget["analysis_seconds"], 1500)
+                self.assertIn("+00:00", budget["analysis_deadline_utc"])
+                diagnostic.write_text("partial review; not a PASS")
+                raise subprocess.TimeoutExpired(arguments, 1800)
+            with patch.object(local_review, "compact_input", return_value={"input_sha256": digest(value)}), patch.object(local_review, "run_review_process", side_effect=timed_out):
+                with self.assertRaisesRegex(ReviewError, "exceeded 1800s; no receipt accepted; inspect"):
+                    local_review.obtain_receipt(root, args, receipt, value, [89])
+            self.assertFalse(receipt.exists())
+            self.assertFalse(receipt.with_suffix(".review.json").exists())
+            self.assertFalse((root / "review.lock").exists())
+            self.assertEqual(json.loads((root / "last-input.json").read_text()), value)
+            self.assertEqual((root / "last-codex-stderr.log").read_text(), "partial review; not a PASS")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process groups")
+    def test_timeout_kills_review_process_group_and_reaps_wrapper(self) -> None:
+        process = unittest.mock.MagicMock()
+        process.pid = 12345
+        process.communicate.side_effect = [subprocess.TimeoutExpired("codex", 1800), (None, None)]
+        process.__enter__.return_value = process
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(subprocess, "Popen", return_value=process) as launch, patch.object(os, "killpg") as kill:
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    local_review.run_review_process(["codex"], root, {}, "review", root / "stderr.log")
+            self.assertTrue(launch.call_args.kwargs["start_new_session"])
+            kill.assert_called_once_with(12345, local_review.signal.SIGKILL)
+            self.assertEqual(process.communicate.call_count, 2)
+
+    def test_real_review_process_timeout_retains_stderr(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            diagnostic = root / "stderr.log"
+            script = "import sys,time; print('partial review', file=sys.stderr, flush=True); time.sleep(10)"
+            with patch.object(local_review, "REVIEW_TIMEOUT_SECONDS", 0.2):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    local_review.run_review_process([sys.executable, "-c", script], root, dict(os.environ), "review", diagnostic)
+            self.assertIn("partial review", diagnostic.read_text())
+
 
     def test_same_issue_body_does_not_expire_on_comment_timestamp(self) -> None:
         payload = {"number": 89, "title": "quality", "body": "requirements", "state": "open",
