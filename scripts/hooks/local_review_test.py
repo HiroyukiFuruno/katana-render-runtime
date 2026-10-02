@@ -313,6 +313,7 @@ class GitSnapshotTest(unittest.TestCase):
         self.assertEqual(compact["changes"]["staged"], [crlf_name])
         self.assertEqual(staged["new_tracked_paths"], [])
 
+    @unittest.skipUnless(os.name == "posix", "non-UTF-8 Git paths require POSIX")
     def test_non_utf8_git_paths_remain_distinct_and_digestable(self) -> None:
         def raw(arguments: list[str], input_bytes: bytes = b"") -> bytes:
             return command(arguments, self.root, input_bytes=input_bytes).encode()
