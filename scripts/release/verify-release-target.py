@@ -22,6 +22,7 @@ REQUIRED_RELEASE_COMMITS = (
     "322a85eb75892944c009231b534885601553c488",  # Issue #89のCI品質契約
     "1410802e9d63c8e1c3347a24dad858de52523612",  # Issue #95のglyph cache修正
     "cf15441d102924a3b8e254b7ab9fc377a7daade3",  # v0.4.23のversion metadataと固定契約
+    "2e7b5c7312abc72bd7db8fcd8b5fc3c36f5cc079",  # release対象契約の認証harness
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -39,7 +40,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "4d642c8f1bd835155d336cb18b9ce6e8475a1424a6d7dc9273cdf28b93a889b7"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "4bdcfb79c8492931f67f4ce9723cd6d8a4a6a2ddc6ec8d97b7ae939ace4ff58d"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
