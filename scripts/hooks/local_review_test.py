@@ -189,7 +189,7 @@ class GitSnapshotTest(unittest.TestCase):
         command(["git", "restore", "--source", self.base, "--staged", "--", "example.py"], self.root)
         after = source_snapshot(self.root, self.base)
         self.assertEqual(before["files"], after["files"])
-        self.assertEqual(before["index_overrides"], after["index_overrides"])
+        self.assertTrue(after["index_overrides"])
         self.assertNotEqual(before, after)
         with self.assertRaisesRegex(ReviewError, "another input|stale"):
             validate_receipt(receipt, {**value, "source": after})
@@ -227,6 +227,42 @@ class GitSnapshotTest(unittest.TestCase):
         self.assertEqual(before["files"], after["files"])
         self.assertNotEqual(before, after)
         self.assertTrue(any(entry.endswith("\tnew.py") for entry in after["head_overrides"]))
+
+    def test_exact_head_worktree_bytes_still_bind_after_index_restore_for_all_entry_kinds(self) -> None:
+        for kind in ("content", "mode", "deletion", "newfile"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                command(["git", "init", "--quiet"], root)
+                (root / "example.py").write_text("original\n")
+                command(["git", "add", "-A"], root)
+                command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "initial"], root)
+                base = command(["git", "rev-parse", "HEAD"], root).strip()
+                if kind == "content":
+                    (root / "example.py").write_text("changed C\n")
+                    path = "example.py"
+                elif kind == "mode":
+                    (root / "example.py").chmod(0o755)
+                    path = "example.py"
+                elif kind == "deletion":
+                    command(["git", "rm", "example.py"], root)
+                    path = "example.py"
+                else:
+                    (root / "new.py").write_text("new C\n")
+                    path = "new.py"
+                command(["git", "add", "-A"], root)
+                command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", f"HEAD {kind}"], root)
+                before = source_snapshot(root, base)
+                command(["git", "restore", "--source", base, "--staged", "--", path], root)
+                after = source_snapshot(root, base)
+                self.assertEqual(before["files"], after["files"])
+                self.assertEqual(before["head_overrides"], after["head_overrides"])
+                self.assertFalse(before["index_overrides"])
+                self.assertTrue(after["index_overrides"])
+                value = {**inputs(), "source": before, "requirements": None, "gate_configuration": {}}
+                with self.assertRaisesRegex(ReviewError, "another input|stale"):
+                    validate_receipt(receipt_payload(value, review(value)), {**value, "source": after})
 
     def test_head_tracked_ignored_file_remains_in_snapshot_without_index_entry(self) -> None:
         (self.root / ".gitignore").write_text("tmp/\nignored.py\n")
@@ -327,7 +363,7 @@ class DriverContractTest(unittest.TestCase):
         repository = Path(__file__).resolve().parents[2]
         names = ("COVERAGE_MIN_LINES", "COVERAGE_MAX_UNCOVERED_LINES", "TEST_THREADS",
                  "RUSTFLAGS", "CARGO", "JOBS", "CHECK_JOBS")
-        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"PATH": os.environ["PATH"], "CI": "true"}, clear=True):
             root = Path(temporary).resolve()
             (root / "Justfile").write_text((repository / "Justfile").read_text())
             (root / "Cargo.toml").write_text('[package]\nversion = "0.4.22"\n')
@@ -383,17 +419,17 @@ class DriverContractTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         args = SimpleNamespace(base="origin/master", requirements=None)
         with patch.object(local_review, "source_snapshot", return_value=inputs()["source"]), patch.object(local_review, "issue_context", return_value=inputs()["issues"]):
-            with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+            with patch.dict(os.environ, {"PATH": os.environ["PATH"], "CI": "true"}, clear=True):
                 baseline = local_review.build_inputs(root, args, [89])
             for name, changed in [("COVERAGE_MIN_LINES", "95"), ("COVERAGE_MAX_UNCOVERED_LINES", "2"),
                                   ("TEST_THREADS", "8"), ("RUSTFLAGS", ""), ("CARGO", "cargo --offline"),
                                   ("CARGO_BUILD_TARGET", "aarch64-apple-darwin")]:
-                with self.subTest(name=name), patch.dict(os.environ, {"PATH": os.environ["PATH"], name: changed}, clear=True):
+                with self.subTest(name=name), patch.dict(os.environ, {"PATH": os.environ["PATH"], "CI": "true", name: changed}, clear=True):
                     updated = local_review.build_inputs(root, args, [89])
                     self.assertNotEqual(baseline, updated)
                     with self.assertRaisesRegex(ReviewError, "another input"):
                         validate_receipt(receipt_payload(baseline, review(baseline)), updated)
-            defaults = {"PATH": os.environ["PATH"], "COVERAGE_MIN_LINES": "100",
+            defaults = {"PATH": os.environ["PATH"], "CI": "true", "COVERAGE_MIN_LINES": "100",
                         "COVERAGE_MAX_UNCOVERED_LINES": "0", "TEST_THREADS": "1", "RUSTFLAGS": "-D warnings",
                         "GITHUB_TOKEN": "secret-not-an-input"}
             with patch.dict(os.environ, defaults, clear=True):
@@ -463,6 +499,24 @@ class DriverContractTest(unittest.TestCase):
             with self.assertRaisesRegex(ReviewError, "nested"):
                 local_review.run(args)
 
+    def test_command_uses_rtk_locally_and_raw_tool_in_ci_when_rtk_is_absent(self) -> None:
+        completed = subprocess.CompletedProcess(["git"], 0, stdout="ok\n", stderr="")
+        with patch("local_review_state.shutil.which", return_value="/bin/rtk"), patch("local_review_state.subprocess.run", return_value=completed) as run:
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(command(["git", "status"], Path.cwd()), "ok\n")
+            self.assertEqual(run.call_args.args[0], ["/bin/rtk", "proxy", "git", "status"])
+        with patch("local_review_state.shutil.which", return_value=None), patch("local_review_state.subprocess.run", return_value=completed) as run:
+            with patch.dict(os.environ, {"CI": "true"}, clear=True):
+                self.assertEqual(command(["git", "status"], Path.cwd()), "ok\n")
+            self.assertEqual(run.call_args.args[0], ["git", "status"])
+        with patch("local_review_state.shutil.which", return_value=None), patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ReviewError, "rtk is required"):
+                command(["git", "status"], Path.cwd())
+        for flag in ("CI", "GITHUB_ACTIONS"):
+            with patch("local_review_state.shutil.which", return_value=None), patch.dict(os.environ, {flag: "false"}, clear=True):
+                with self.assertRaisesRegex(ReviewError, "rtk is required"):
+                    command(["git", "status"], Path.cwd())
+
     def test_failed_initial_review_preserves_requirements_and_issue_without_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {}, clear=True):
             root = Path(temporary).resolve()
@@ -494,9 +548,79 @@ class DriverContractTest(unittest.TestCase):
                 local_review.requirements_path(root, args, receipt, [89])
             value["requirements"]["path"] = "different.md"
             (root / "last-input.json").write_text(json.dumps(value))
-            with self.assertRaisesRegex(ReviewError, "retained input"):
-                local_review.requirements_path(root, args, receipt, [89])
+            self.assertIsNone(local_review.requirements_path(root, args, receipt, [89]))
             self.assertIsNone(local_review.requirements_path(root, args, receipt, [120]))
+
+    def test_first_cli_failure_allows_ordinary_retry_with_explicit_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {}, clear=True):
+            root = Path(temporary).resolve()
+            requirement = root / "requirements.md"
+            requirement.write_text("required native semantics\n")
+            receipt = root / "tmp" / "receipt.json"
+            args = SimpleNamespace(issue=[89], base="origin/master", requirements=None,
+                                   receipt="tmp/receipt.json", print_input=False, check_receipt=False)
+            with patch.object(local_review, "repository_root", return_value=root), \
+                    patch.object(local_review, "source_snapshot", return_value=inputs()["source"]), \
+                    patch.object(local_review, "issue_context", return_value=inputs()["issues"]), \
+                    patch.object(local_review, "gate_configuration", return_value={}):
+                value = local_review.build_inputs(root, args, [89])
+                child = root / "codex-test"
+                child.mkdir(parents=True)
+                with patch.object(local_review, "compact_input", return_value={}), \
+                        patch.object(local_review, "run_review_process", return_value=2):
+                    with self.assertRaisesRegex(ReviewError, "exit 2"):
+                        local_review.obtain_receipt(root, args, receipt, value, [89])
+                self.assertTrue((receipt.parent / "last-input.json").is_file())
+                self.assertFalse((receipt.parent / "last-review.json").exists())
+                self.assertIsNone(local_review.retained_inputs(receipt))
+
+                result = review(value)
+                def successful_review(arguments, *_options):
+                    result_path = Path(arguments[arguments.index("--output-last-message") + 1])
+                    result_path.write_text(json.dumps(result))
+                    return 0
+
+                with patch.object(local_review, "compact_input", return_value={}), \
+                        patch.object(local_review, "run_review_process", side_effect=successful_review):
+                    self.assertEqual(local_review.run(args), 0)
+                self.assertTrue(receipt.is_file())
+                self.assertEqual(json.loads(receipt.read_text())["review"], result)
+
+    def test_stale_retained_review_is_not_reused_for_new_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {}, clear=True):
+            root = Path(temporary).resolve()
+            requirement = root / "requirements.md"
+            requirement.write_text("required native semantics\n")
+            receipt = root / "tmp" / "receipt.json"
+            receipt.parent.mkdir(parents=True)
+            args = SimpleNamespace(issue=[89], base="origin/master", requirements=None,
+                                   receipt="tmp/receipt.json", print_input=False, check_receipt=False)
+            with patch.object(local_review, "repository_root", return_value=root), \
+                    patch.object(local_review, "source_snapshot", return_value=inputs()["source"]), \
+                    patch.object(local_review, "issue_context", return_value=inputs()["issues"]), \
+                    patch.object(local_review, "gate_configuration", return_value={}):
+                current = local_review.build_inputs(root, args, [89])
+                stale = copy.deepcopy(current)
+                stale["source"] = {**stale["source"], "files": {"old.py": {"sha256": "e" * 64}}}
+                (receipt.parent / "last-input.json").write_text(json.dumps(stale))
+                (receipt.parent / "last-review.json").write_text(json.dumps(review(current)))
+                self.assertIsNone(local_review.retained_inputs(receipt, [89]))
+                fresh = review(current)
+                with patch.object(local_review, "invoke_review", return_value=fresh) as invoke:
+                    self.assertEqual(local_review.run(args), 0)
+                invoke.assert_called_once()
+                self.assertEqual(json.loads(receipt.read_text())["review"], fresh)
+
+    def test_malformed_or_nonobject_retained_review_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receipt = root / "receipt.json"
+            (root / "last-input.json").write_text(json.dumps(inputs()))
+            for raw in ("{bad", "[]"):
+                with self.subTest(raw=raw):
+                    (root / "last-review.json").write_text(raw)
+                    with self.assertRaisesRegex(ReviewError, "invalid review JSON|structured object|does not match"):
+                        local_review.retained_inputs(receipt)
 
     def test_failed_findings_survive_temporary_review_directory(self) -> None:
         value = inputs()

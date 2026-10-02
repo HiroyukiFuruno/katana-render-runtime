@@ -106,10 +106,15 @@ def retained_inputs(receipt: Path, numbers: list[int] | None = None) -> dict | N
         return None
     report_path = receipt.parent / "last-review.json"
     if not report_path.is_file():
-        raise ReviewError("retained input is unverifiable; explicitly set Issue and requirements")
+        # 初回失敗ではCodex起動前にlast-inputだけが残るため、診断原本として保持し、
+        # レビュー結果とは扱わず、現在のIssue/requirements指定による再試行を妨げない。
+        return None
     report = strict_json(report_path.read_text())
-    if not isinstance(report, dict) or report.get("input_sha256") != digest(stored):
-        raise ReviewError("retained input does not match its structured review")
+    if not isinstance(report, dict):
+        raise ReviewError("retained review is not a structured object")
+    if report.get("input_sha256") != digest(stored):
+        # 診断原本は保持するが、別入力の結果を現在のレビュー文脈へ流用しない。
+        return None
     if stored.get("model") != MODEL or stored.get("reasoning") != REASONING:
         raise ReviewError("retained input has an unexpected review configuration")
     return stored

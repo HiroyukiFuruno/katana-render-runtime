@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 from typing import Any
@@ -38,9 +39,17 @@ def strict_json(raw: str) -> Any:
 
 def command(arguments: list[str], root: Path) -> str:
     environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    rtk = shutil.which("rtk")
+    if rtk is None:
+        if os.environ.get("CI", "").lower() == "true" or os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+            executable = arguments
+        else:
+            raise ReviewError("rtk is required for local review commands")
+    else:
+        executable = [rtk, "proxy", *arguments]
     try:
         result = subprocess.run(
-            ["rtk", "proxy", *arguments], cwd=root, env=environment,
+            executable, cwd=root, env=environment,
             capture_output=True, text=True, check=True, timeout=60,
         )
     except (OSError, subprocess.SubprocessError) as error:
@@ -85,15 +94,17 @@ def source_snapshot(root: Path, base: str) -> dict[str, Any]:
     paths = set(names.split("\0")) | set(baseline.split("\0")) | set(head_entries)
     files = {name: file_record(root, name) for name in sorted(paths - {""})}
     return {"base_sha": base_sha, "files": files,
-            "index_overrides": staged_overrides(root, entries, base_sha),
+            "index_overrides": staged_overrides(root, entries, base_sha, head_sha),
             "head_overrides": head_overrides(root, base_sha, head_sha, head_entries)}
 
 
-def staged_overrides(root: Path, entries: list[str], base_sha: str) -> list[str]:
+def staged_overrides(root: Path, entries: list[str], base_sha: str, head_sha: str) -> list[str]:
     overrides = []
     staged = command(["git", "diff", "--cached", "--no-renames", "--name-only", "-z", base_sha, "--"], root)
+    head = command(["git", "diff", "--no-renames", "--name-only", "-z", base_sha, head_sha, "--"], root)
+    candidates = (set(staged.split("\0")) | set(head.split("\0"))) - {""}
     indexed = {entry.split("\t", 1)[1]: entry for entry in entries}
-    for name in sorted(set(staged.split("\0")) - {""}):
+    for name in sorted(candidates):
         entry = indexed.get(name)
         current = working_entry(root / name)
         indexed_value = None if entry is None else entry.split("\t", 1)[0].rsplit(" ", 1)[0]
