@@ -134,11 +134,15 @@ def source_snapshot(root: Path, base: str) -> dict[str, Any]:
     files = {name: file_record(root, name) for name in sorted(paths - {""})}
     working_paths = working_diff_base_names | cached_diff_base_names | head_diff_base_names | untracked_names
     working_blobs = {name: working_entry(root, name) for name in sorted(working_paths)}
+    candidate_paths = cached_diff_base_names | head_diff_base_names
+    omitted_working_paths = (sorted(working_diff_base_names - candidate_paths)
+                             if candidate_paths else [])
     return {"base_sha": base_sha, "files": files,
             "new_tracked_paths": sorted((cached_diff_base_names | head_diff_base_names) - base_names),
             "index_overrides": staged_overrides(root, entries, base_sha, head_sha),
             "head_overrides": head_overrides(root, base_sha, head_sha, head_entries),
-            "working_blobs": working_blobs}
+            "working_blobs": working_blobs,
+            "omitted_working_paths": omitted_working_paths}
 
 
 def staged_overrides(root: Path, entries: list[str], base_sha: str, head_sha: str) -> list[str]:
@@ -190,16 +194,44 @@ def working_entry(root: Path, name: str) -> str | None:
     return f"{file_mode} {blob}"
 
 
+def normalize_remote_url(remote: str) -> str:
+    hex_digits = frozenset("0123456789abcdefABCDEF")
+    for index, character in enumerate(remote):
+        if (character == "%" and
+                (index + 2 >= len(remote) or
+                 remote[index + 1] not in hex_digits or remote[index + 2] not in hex_digits)):
+            raise ReviewError("origin must identify a GitHub repository")
+    try:
+        raw = urlsplit(remote)
+        normalized = unquote_to_bytes(remote).decode("utf-8")
+        decoded = urlsplit(normalized)
+
+        def decode_component(value: str | None) -> str | None:
+            return None if value is None else unquote_to_bytes(value).decode("utf-8")
+
+        raw_hostname = decode_component(raw.hostname)
+        if (raw_hostname is not None and raw_hostname.lower() != decoded.hostname) or \
+                raw.scheme != decoded.scheme or \
+                decode_component(raw.username) != decoded.username or \
+                decode_component(raw.password) != decoded.password or \
+                decode_component(raw.path) != decoded.path:
+            raise ReviewError("origin must identify a GitHub repository")
+    except (UnicodeError, ValueError) as error:
+        raise ReviewError("origin must identify a GitHub repository") from error
+    if (any(ord(character) <= 32 or ord(character) == 127 or character.isspace()
+            for character in normalized) or "?" in normalized or "#" in normalized):
+        raise ReviewError("origin must identify a GitHub repository")
+    return normalized
+
+
 def issue_context(root: Path, numbers: list[int]) -> list[dict[str, Any]]:
     remote = command(["git", "remote", "get-url", "origin"], root, input_bytes=b"").removesuffix("\n")
     if any(ord(character) <= 32 or ord(character) == 127 for character in remote):
         raise ReviewError("origin must identify a GitHub repository")
     if remote.startswith("git@github.com:"):
         repository = remote.removeprefix("git@github.com:").removesuffix(".git")
-    elif remote.startswith("https://"):
-        if (any(character.isspace() for character in remote) or
-                "?" in remote or "#" in remote):
-            raise ReviewError("origin must identify a GitHub repository")
+    elif remote.startswith(("https://", "ssh://")):
+        remote = normalize_remote_url(remote)
         try:
             parsed = urlsplit(remote)
             port = parsed.port
@@ -209,40 +241,13 @@ def issue_context(root: Path, numbers: list[int]) -> list[dict[str, Any]]:
         if authority.endswith(":"):
             raise ReviewError("origin must identify a GitHub repository")
         path = parsed.path.removeprefix("/")
-        if (parsed.scheme != "https" or parsed.hostname != "github.com" or
-                parsed.username is not None or parsed.password is not None or
-                port not in (None, 443) or parsed.query or parsed.fragment or
-                not path or path.startswith("/") or path.count("/") != 1):
-            raise ReviewError("origin must identify a GitHub repository")
-        repository = path.removesuffix(".git")
-    elif remote.startswith("ssh://"):
-        hex_digits = frozenset("0123456789abcdefABCDEF")
-        for index, character in enumerate(remote):
-            if (character == "%" and
-                    (index + 2 >= len(remote) or
-                     remote[index + 1] not in hex_digits or remote[index + 2] not in hex_digits)):
-                raise ReviewError("origin must identify a GitHub repository")
-        try:
-            remote = unquote_to_bytes(remote).decode("utf-8")
-        except UnicodeDecodeError as error:
-            raise ReviewError("origin must identify a GitHub repository") from error
-        if any(ord(character) <= 32 or ord(character) == 127 or character.isspace()
-               for character in remote):
-            raise ReviewError("origin must identify a GitHub repository")
-        if "?" in remote or "#" in remote:
-            raise ReviewError("origin must identify a GitHub repository")
-        try:
-            parsed = urlsplit(remote)
-            port = parsed.port
-        except ValueError as error:
-            raise ReviewError("origin must identify a GitHub repository") from error
-        authority = parsed.netloc.rsplit("@", 1)[-1]
-        if authority.endswith(":"):
-            raise ReviewError("origin must identify a GitHub repository")
-        path = parsed.path.removeprefix("/")
-        if (parsed.scheme != "ssh" or parsed.hostname != "github.com" or
-                parsed.username != "git" or parsed.password is not None or
-                port not in (None, 22) or parsed.query or parsed.fragment or
+        if parsed.scheme == "https":
+            valid = (parsed.hostname == "github.com" and parsed.username is None and
+                     parsed.password is None and port in (None, 443))
+        else:
+            valid = (parsed.hostname == "github.com" and parsed.username == "git" and
+                     parsed.password is None and port in (None, 22))
+        if (not valid or parsed.query or parsed.fragment or
                 not path or path.startswith("/") or path.count("/") != 1):
             raise ReviewError("origin must identify a GitHub repository")
         repository = path.removesuffix(".git")

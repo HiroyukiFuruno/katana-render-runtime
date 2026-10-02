@@ -169,6 +169,63 @@ class GitSnapshotTest(unittest.TestCase):
         self.commit("changes")
         self.assertEqual(staged, source_snapshot(self.root, self.base))
 
+    @unittest.skipUnless(os.name == "posix", "POSIX file permission bits are required")
+    def test_real_git_reset_one_staged_path_then_commit_another_invalidates_receipt(self) -> None:
+        for kind in ("modified", "deleted", "executable"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                command(["git", "init", "--quiet"], root)
+                command(["git", "config", "core.filemode", "true"], root)
+                first = root / "first.py"
+                second = root / "second.py"
+                first.write_text("first baseline\n")
+                second.write_text("second baseline\n")
+                command(["git", "add", "-A"], root)
+                command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "baseline"], root)
+                base = command(["git", "rev-parse", "HEAD"], root).strip()
+
+                if kind == "modified":
+                    first.write_text("first working change\n")
+                elif kind == "deleted":
+                    first.unlink()
+                else:
+                    first.chmod(0o755)
+                second.write_text("second working change\n")
+                command(["git", "add", "-A"], root)
+                before = source_snapshot(root, base)
+                value = {**inputs(), "source": before}
+                receipt = receipt_payload(value, review(value))
+
+                command(["git", "reset", "--quiet", "--", "first.py"], root)
+                command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "commit second", "--",
+                         "second.py"], root)
+                after = source_snapshot(root, base)
+
+                self.assertEqual(before["files"], after["files"])
+                self.assertEqual(before["working_blobs"], after["working_blobs"])
+                self.assertNotEqual(before, after)
+                self.assertEqual(after["omitted_working_paths"], ["first.py"])
+                with self.assertRaisesRegex(ReviewError, "another input|stale"):
+                    validate_receipt(receipt, {**value, "source": after})
+
+    def test_real_git_stage_and_commit_all_tracked_changes_reuses_receipt(self) -> None:
+        first = self.root / "first.py"
+        second = self.root / "second.py"
+        first.write_text("first working change\n")
+        second.write_text("second working change\n")
+        command(["git", "add", "-A"], self.root)
+        staged = source_snapshot(self.root, self.base)
+        value = {**inputs(), "source": staged}
+        receipt = receipt_payload(value, review(value))
+
+        self.commit("commit all tracked changes")
+        committed = source_snapshot(self.root, self.base)
+
+        self.assertEqual(staged, committed)
+        self.assertEqual(validate_receipt(receipt, {**value, "source": committed})["verdict"], "PASS")
+
     def test_hidden_git_index_flags_reject_review_candidates(self) -> None:
         flag_cases = (
             ("assume-unchanged", ("--assume-unchanged",), ("--no-assume-unchanged",), "h", "H"),
@@ -1609,6 +1666,10 @@ class DriverContractTest(unittest.TestCase):
         origins = (
             "https://github.com/HiroyukiFuruno/katana-render-runtime.git",
             "https://github.com:443/HiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com/%48iroyukiFuruno/katana-render-runtime.git",
+            "https://%67ithub.com/HiroyukiFuruno/katana-render-runtime.git",
+            "https://%47itHub.com/HiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com/HiroyukiFuruno/%6batana-render-runtime.git",
             "git@github.com:HiroyukiFuruno/katana-render-runtime.git",
             "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git",
             "ssh://git@github.com:22/HiroyukiFuruno/katana-render-runtime.git",
@@ -1648,6 +1709,20 @@ class DriverContractTest(unittest.TestCase):
             "https://github.com/HiroyukiFuruno/katana-render-runtime.git#fragment",
             "https://github.com/HiroyukiFuruno/katana-render-runtime.git#",
             "https://github.com:/HiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git%G1",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git%FF",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git?%FF",
+            "https://user%40github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git%3Fquery=1",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git%23fragment",
+            "https://github.com/HiroyukiFuruno%2fnested/katana-render-runtime.git",
+            "https://github.com:444/HiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com:%34%34%34/HiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com%2fHiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com%3a443/HiroyukiFuruno/katana-render-runtime.git",
+            "https://git%40github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "https://%2567ithub.com/HiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com/HiroyukiFuruno/katana-render-%2572untime.git",
             "https://github.com/HiroyukiFuruno/katana-render-runtime.git\r",
             "https://github.com/HiroyukiFuruno/\r\nkatana-render-runtime.git",
         )
@@ -1668,6 +1743,23 @@ class DriverContractTest(unittest.TestCase):
                     with self.assertRaisesRegex(ReviewError, "GitHub repository|scoped"):
                         issue_context(root, [89])
                 self.assertFalse(gh_calls)
+
+    def test_invalid_surrogate_https_origin_is_rejected_before_github_api_call(self) -> None:
+        gh_calls = []
+        origin = "https://github.com/HiroyukiFuruno/katana-render-runtime\udcff.git"
+
+        def mocked_command(arguments, _root, input_bytes=None):
+            if arguments[:3] == ["git", "remote", "get-url"]:
+                return origin
+            if arguments[0] == "gh":
+                gh_calls.append(arguments)
+                return "{}"
+            self.fail(f"unexpected command: {arguments}")
+
+        with patch("local_review_state.command", side_effect=mocked_command):
+            with self.assertRaisesRegex(ReviewError, "GitHub repository"):
+                issue_context(Path.cwd(), [89])
+        self.assertFalse(gh_calls)
 
     def test_invalid_ssh_origins_are_rejected_before_github_api_call(self) -> None:
         invalid_origins = (
@@ -1695,6 +1787,8 @@ class DriverContractTest(unittest.TestCase):
             "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git%23",
             "ssh://git@github.com%3a/HiroyukiFuruno/katana-render-runtime.git",
             "ssh://g%2569t@github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git%40github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com%2fHiroyukiFuruno/katana-render-runtime.git",
             "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git%FF",
             "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git%G1",
         )

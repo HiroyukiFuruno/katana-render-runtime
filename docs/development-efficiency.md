@@ -48,7 +48,7 @@ Justfileの有効coverage閾値、threads、RUSTFLAGS、Cargo command、並列�
 通常targetとcoverage専用target/build-dirを絶対pathへ正規化する。同じpathの相対／絶対指定は同一入力になる。
 同じ既定値を明示するだけなら再利用でき、実際の値が変われば失効する。全環境変数や認証情報は採取しない。
 tracked／unstaged／untracked／deleted を含み、削除は base のファイル一覧から保持する。
-通常の staging／commit だけで内容が同じ場合は再利用できる。working tree と異なる index／HEAD の内容・mode・削除は固定 base との差分から別に拘束する。
+通常の全対象 staging／commit だけで内容が同じ場合は再利用できる。working tree と異なる index／HEAD の内容・mode・削除に加え、候補の index／HEAD 差分から外れた working 変更を別に拘束する。一部を stage から外して他のファイルだけを commit した場合は、working 内容が同じでも旧 receipt を失効させる。working-only の初回レビューと、全対象の staging／commit の安全な再利用は維持する。
 レビュー開始前後と再利用時に入力を再取得し、source や要求が変われば古い PASS を受け入れない。
 CLI には変更一覧と入力 digest を渡し、全ファイルの hash 一覧を無駄に読み込ませない。
 
