@@ -1006,6 +1006,81 @@ class DriverContractTest(unittest.TestCase):
         with patch("local_review_state.command", side_effect=responses):
             self.assertEqual(before, issue_context(Path.cwd(), [89]))
 
+    def test_github_origin_url_forms_share_the_same_issue_context(self) -> None:
+        payload = {"number": 89, "title": "quality", "body": "requirements", "state": "open",
+                   "html_url": "https://github.com/HiroyukiFuruno/katana-render-runtime/issues/89"}
+        origins = (
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "git@github.com:HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com:22/HiroyukiFuruno/katana-render-runtime.git",
+        )
+        observed = []
+        for origin in origins:
+            with self.subTest(origin=origin), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                command(["git", "init", "--quiet"], root)
+                command(["git", "remote", "add", "origin", origin], root)
+                gh_calls = []
+
+                def real_git_mock_gh(arguments, cwd, input_bytes=None):
+                    if arguments[0] == "gh":
+                        gh_calls.append(arguments)
+                        return json.dumps(payload)
+                    return command(arguments, cwd, input_bytes)
+
+                with patch("local_review_state.command", side_effect=real_git_mock_gh):
+                    observed.append(issue_context(root, [89]))
+                self.assertEqual(len(gh_calls), 1)
+                self.assertEqual(gh_calls[0], ["gh", "api", "repos/HiroyukiFuruno/katana-render-runtime/issues/89"])
+        self.assertTrue(all(value == observed[0] for value in observed[1:]))
+
+    def test_invalid_ssh_origins_are_rejected_before_github_api_call(self) -> None:
+        invalid_origins = (
+            "ssh://git@not-github.example/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com/OtherOwner/katana-render-runtime.git",
+            "ssh://git@github.com/HiroyukiFuruno/nested/katana-render-runtime.git",
+            "ssh://other@github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git:secret@github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com:2222/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git?query=1",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git#fragment",
+        )
+        for origin in invalid_origins:
+            with self.subTest(origin=origin), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                command(["git", "init", "--quiet"], root)
+                command(["git", "remote", "add", "origin", origin], root)
+                gh_calls = []
+
+                def real_git_record_gh(arguments, cwd, input_bytes=None):
+                    if arguments[0] == "gh":
+                        gh_calls.append(arguments)
+                        return "{}"
+                    return command(arguments, cwd, input_bytes)
+
+                with patch("local_review_state.command", side_effect=real_git_record_gh):
+                    with self.assertRaisesRegex(ReviewError, "GitHub repository|scoped"):
+                        issue_context(root, [89])
+                self.assertFalse(gh_calls)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            gh_calls = []
+
+            def malformed_remote(arguments, cwd, input_bytes=None):
+                if arguments == ["git", "remote", "get-url", "origin"]:
+                    return "ssh://git@[github.com/HiroyukiFuruno/katana-render-runtime.git\n"
+                if arguments[0] == "gh":
+                    gh_calls.append(arguments)
+                    return "{}"
+                return command(arguments, cwd, input_bytes)
+
+            with patch("local_review_state.command", side_effect=malformed_remote):
+                with self.assertRaisesRegex(ReviewError, "GitHub repository"):
+                    issue_context(root, [89])
+            self.assertFalse(gh_calls)
+
     def test_codex_is_read_only_high_and_precedes_quality_lanes(self) -> None:
         arguments = local_review.review_command(Path.cwd(), Path("result.json"))
         self.assertIn("read-only", arguments)

@@ -8,6 +8,7 @@ import shutil
 import stat
 import subprocess
 from typing import Any
+from urllib.parse import urlsplit
 
 
 class ReviewError(RuntimeError):
@@ -161,6 +162,19 @@ def issue_context(root: Path, numbers: list[int]) -> list[dict[str, Any]]:
         repository = remote.removeprefix("git@github.com:").removesuffix(".git")
     elif remote.startswith(prefix):
         repository = remote.removeprefix(prefix).removesuffix(".git")
+    elif remote.startswith("ssh://"):
+        try:
+            parsed = urlsplit(remote)
+            port = parsed.port
+        except ValueError as error:
+            raise ReviewError("origin must identify a GitHub repository") from error
+        path = parsed.path.removeprefix("/")
+        if (parsed.scheme != "ssh" or parsed.hostname != "github.com" or
+                parsed.username != "git" or parsed.password is not None or
+                port not in (None, 22) or parsed.query or parsed.fragment or
+                not path or path.startswith("/") or path.count("/") != 1):
+            raise ReviewError("origin must identify a GitHub repository")
+        repository = path.removesuffix(".git")
     else:
         raise ReviewError("origin must identify a GitHub repository")
     if repository != "HiroyukiFuruno/katana-render-runtime":
