@@ -30,6 +30,9 @@ REQUIRED_RELEASE_COMMITS = (
     "85df066a5e38395b4a6088b28440c8ec0a4afba1",  # Issue #89の複数Issue証跡再利用
     "74a974874b3c4f54a2df0993cb6fc6e5ab8b1750",  # Issue #89のレビュー原本照合
     "4531fdb6bd6a18283886130a9a607305bff38d20",  # Issue #89の全証跡推定原本照合
+    "2a14f27e80d91725d6a24db4b45136f8cf62382a",  # Issue #89のGit変換とobject形式照合
+    "e6b7e0ffaed736b53081d388555ceedef945dc13",  # 最新Mermaid12.1.0の依存更新
+    "45a4952f3ae45c2d05901b160ab638059b56c058",  # Mermaid12.1.0の公式参照・文書同期
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -47,7 +50,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "09885d6cddb73a1c1b7149b046dbf48fe87815661cda2de139fbe705cf76fba4"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "63bf1239f49b46e8bb7b464e9e1216804993e92af36d422985181e612cba8723"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
