@@ -105,6 +105,12 @@ def source_snapshot(root: Path, base: str) -> dict[str, Any]:
     head_diff_base_names = set(command(
         ["git", "diff", "--no-renames", "--name-only", "-z", base_sha, head_sha, "--"], root
     ).split("\0")) - {""}
+    working_diff_base_names = set(command(
+        ["git", "diff", "--no-renames", "--name-only", "-z", base_sha, "--"], root
+    ).split("\0")) - {""}
+    untracked_names = set(command(
+        ["git", "ls-files", "--others", "--exclude-standard", "-z"], root
+    ).split("\0")) - {""}
     index = command(["git", "ls-files", "--stage", "-z"], root)
     head_tree = command(["git", "ls-tree", "-r", "-z", head_sha], root)
     head_entries = {entry.split("\t", 1)[1]: entry.split("\t", 1)[0]
@@ -114,10 +120,13 @@ def source_snapshot(root: Path, base: str) -> dict[str, Any]:
         raise ReviewError("unmerged index cannot be reviewed")
     paths = set(names.split("\0")) | set(baseline.split("\0")) | set(head_entries)
     files = {name: file_record(root, name) for name in sorted(paths - {""})}
+    working_paths = working_diff_base_names | cached_diff_base_names | head_diff_base_names | untracked_names
+    working_blobs = {name: working_entry(root, name) for name in sorted(working_paths)}
     return {"base_sha": base_sha, "files": files,
             "new_tracked_paths": sorted((cached_diff_base_names | head_diff_base_names) - base_names),
             "index_overrides": staged_overrides(root, entries, base_sha, head_sha),
-            "head_overrides": head_overrides(root, base_sha, head_sha, head_entries)}
+            "head_overrides": head_overrides(root, base_sha, head_sha, head_entries),
+            "working_blobs": working_blobs}
 
 
 def staged_overrides(root: Path, entries: list[str], base_sha: str, head_sha: str) -> list[str]:

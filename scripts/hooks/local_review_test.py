@@ -376,6 +376,51 @@ class GitSnapshotTest(unittest.TestCase):
                     self.assertEqual(head_blob, filtered_blob)
                 self.assertNotEqual(committed, source_snapshot(root, base))
 
+    def test_worktree_clean_filter_blob_change_invalidates_receipt_but_same_filter_reuses(self) -> None:
+        for change_clean_filter in (False, True):
+            label = "changed-clean-filter" if change_clean_filter else "unchanged-clean-filter"
+            with self.subTest(filter=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                command(["git", "init", "--quiet"], root)
+                command(["git", "config", "filter.review.clean", "cat"], root)
+                command(["git", "config", "filter.review.smudge", "cat"], root)
+                command(["git", "config", "filter.review.required", "true"], root)
+                (root / ".gitattributes").write_text("*.txt filter=review\n")
+                source = root / "example.txt"
+                source.write_text("baseline\n")
+                command(["git", "add", ".gitattributes", "example.txt"], root)
+                command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "filter baseline"], root)
+                base = command(["git", "rev-parse", "HEAD"], root).strip()
+
+                source.write_text("reviewed\n")
+                reviewed_bytes = source.read_bytes()
+                before = source_snapshot(root, base)
+                self.assertEqual(before["index_overrides"], [])
+                self.assertEqual(before["head_overrides"], [])
+                value = {**inputs(), "source": before, "requirements": None,
+                         "gate_configuration": {}}
+                receipt = receipt_payload(value, review(value))
+
+                if change_clean_filter:
+                    command(["git", "config", "filter.review.clean", "sed 's/reviewed/pushed/g'"], root)
+                command(["git", "add", "example.txt"], root)
+                clean_blob = command(["git", "cat-file", "blob", ":example.txt"], root)
+                expected_blob = "pushed\n" if change_clean_filter else "reviewed\n"
+                self.assertEqual(clean_blob, expected_blob)
+                command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", label], root)
+
+                self.assertEqual(source.read_bytes(), reviewed_bytes)
+                after = source_snapshot(root, base)
+                if change_clean_filter:
+                    self.assertNotEqual(before, after)
+                    with self.assertRaisesRegex(ReviewError, "another input|stale"):
+                        validate_receipt(receipt, {**value, "source": after})
+                else:
+                    self.assertEqual(before, after)
+                    self.assertEqual(validate_receipt(receipt, {**value, "source": after})["verdict"], "PASS")
+
     def test_sha256_repository_preserves_regular_and_symlink_blob_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
