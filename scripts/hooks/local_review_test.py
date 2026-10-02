@@ -446,6 +446,59 @@ class GitSnapshotTest(unittest.TestCase):
             with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
                 local_review.issue_numbers(self.root, args, receipt)
 
+    def test_receipt_only_issue_and_requirements_recovery_validates_original_review(self) -> None:
+        requirement = self.root / "requirements.md"
+        requirement.write_text("receipt-only requirements\n")
+        self.commit("add retained requirements fixture")
+        root = self.root.resolve()
+        value = inputs()
+        value["requirements"] = local_review.requirements_context(root, "requirements.md")
+        result = review(value)
+        receipt = self.root / "tmp" / "receipt.json"
+        receipt.parent.mkdir(exist_ok=True)
+        receipt.write_text(json.dumps(receipt_payload(value, result)))
+        sidecar = receipt.with_suffix(".review.json")
+        sidecar.write_text(json.dumps(result))
+        run_args = SimpleNamespace(issue=[], base=self.base, requirements=None, receipt="tmp/receipt.json",
+                                   check_receipt=False, print_input=False)
+        requirements_args = SimpleNamespace(requirements=None)
+
+        def git_command(arguments: list[str], root: Path) -> str:
+            return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
+
+        with patch.dict(os.environ, {}, clear=True), \
+                patch.object(local_review, "command", side_effect=git_command), \
+                patch.object(local_review, "repository_root", return_value=root), \
+                patch.object(local_review, "cache_path", return_value=receipt), \
+                patch.object(local_review, "build_inputs", return_value=value), \
+                patch.object(local_review, "invoke_review") as invoke:
+            self.assertEqual(local_review.issue_numbers(self.root, run_args, receipt), [89])
+            self.assertEqual(local_review.requirements_path(root, requirements_args, receipt, [89]),
+                             "requirements.md")
+            self.assertEqual(local_review.run(run_args), 0)
+            invoke.assert_not_called()
+
+        for label, original in (("missing", None), ("corrupt", "{"),
+                                ("mismatch", json.dumps({**result, "summary": "changed"}))):
+            with self.subTest(original=label), \
+                    patch.dict(os.environ, {}, clear=True), \
+                    patch.object(local_review, "command", side_effect=git_command), \
+                    patch.object(local_review, "repository_root", return_value=root), \
+                    patch.object(local_review, "cache_path", return_value=receipt), \
+                    patch.object(local_review, "build_inputs", return_value=value), \
+                    patch.object(local_review, "invoke_review") as invoke:
+                if original is None:
+                    sidecar.unlink(missing_ok=True)
+                else:
+                    sidecar.write_text(original)
+                with self.assertRaises((OSError, ReviewError)):
+                    local_review.issue_numbers(self.root, run_args, receipt)
+                with self.assertRaises((OSError, ReviewError)):
+                    local_review.requirements_path(root, requirements_args, receipt, [89])
+                with self.assertRaises((OSError, ReviewError)):
+                    local_review.run(run_args)
+                invoke.assert_not_called()
+
 
 class DriverContractTest(unittest.TestCase):
     def test_actual_just_overrides_reach_review_and_quality_runner(self) -> None:
@@ -533,7 +586,9 @@ class DriverContractTest(unittest.TestCase):
             value = inputs()
             value["requirements"] = local_review.requirements_context(root, "requirements.md")
             receipt = root / "receipt.json"
-            receipt.write_text(json.dumps(receipt_payload(value, review(value))))
+            result = review(value)
+            receipt.write_text(json.dumps(receipt_payload(value, result)))
+            receipt.with_suffix(".review.json").write_text(json.dumps(result))
             args = SimpleNamespace(requirements=None)
             selected = local_review.requirements_path(root, args, receipt, [89])
             self.assertEqual(selected, "requirements.md")
@@ -550,7 +605,9 @@ class DriverContractTest(unittest.TestCase):
             with self.assertRaisesRegex(ReviewError, "requirements"):
                 local_review.requirements_path(root, args, receipt, [89])
             value["requirements"] = {"content": "lost path", "sha256": "a" * 64}
-            receipt.write_text(json.dumps(receipt_payload(value, review(value))))
+            result = review(value)
+            receipt.write_text(json.dumps(receipt_payload(value, result)))
+            receipt.with_suffix(".review.json").write_text(json.dumps(result))
             with self.assertRaisesRegex(ReviewError, "requirements"):
                 local_review.requirements_path(root, args, receipt, [89])
 

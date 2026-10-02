@@ -83,7 +83,7 @@ def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[i
     if not numbers and receipt.exists():
         stored = strict_json(receipt.read_text())
         try:
-            validate_receipt(stored, stored["inputs"])
+            read_receipt(receipt, stored["inputs"])
             numbers = [issue["number"] for issue in stored["inputs"]["issues"]]
         except (KeyError, TypeError) as error:
             raise ReviewError("receipt Issue identity is invalid") from error
@@ -146,7 +146,7 @@ def requirements_path(root: Path, args: argparse.Namespace, receipt: Path, numbe
         payload = strict_json(receipt.read_text())
         if not isinstance(payload, dict) or not isinstance(payload.get("inputs"), dict):
             raise ReviewError("stored requirements cannot be recovered from an invalid receipt")
-        validate_receipt(payload, payload["inputs"])
+        read_receipt(receipt, payload["inputs"])
         stored = payload["inputs"]
     else:
         return None
