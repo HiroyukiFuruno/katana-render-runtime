@@ -36,6 +36,7 @@ REQUIRED_RELEASE_COMMITS = (
     "0f89e24c6754e57273420670163d59f64f3afb91",  # 新規ファイルのpush包含をレビュー証跡へ固定
     "676fcb3ede5c1079495f5e90101e7821e072c82a",  # GitHub SSH URIの互換性修正
     "cdbe8d15af5ee67be2d46868ffc4a8c27b293a56",  # origin制御文字と実Git改行境界の拒否
+    "91ac5111d69e911d2c4d8043d6cfae96f9947b4e",  # SSH originの空delimiterと空portの拒否
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -53,7 +54,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "b0cd1f46b4eaf935ff777365b7f5db802ae6b72b5733a6ef20db7a0d15b8cb47"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "d793062179a0e2c130a461e51142d60f247af8e5f0c3fdf3684c65f8b1c5efa6"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
