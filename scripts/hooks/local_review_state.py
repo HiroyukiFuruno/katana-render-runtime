@@ -228,8 +228,13 @@ def issue_context(root: Path, numbers: list[int]) -> list[dict[str, Any]]:
     remote = command(["git", "remote", "get-url", "origin"], root, input_bytes=b"").removesuffix("\n")
     if any(ord(character) <= 32 or ord(character) == 127 for character in remote):
         raise ReviewError("origin must identify a GitHub repository")
-    if remote.startswith("git@github.com:"):
-        repository = remote.removeprefix("git@github.com:").removesuffix(".git")
+    elif "@" in remote and ":" in remote and not remote.startswith(("https://", "ssh://")):
+        username, separator, authority_path = remote.partition("@")
+        host, separator, path = authority_path.partition(":")
+        if (separator != ":" or username != "git" or host.casefold() != "github.com" or
+                "@" in host or not path):
+            raise ReviewError("origin must identify a GitHub repository")
+        repository = path.removesuffix(".git")
     elif remote.startswith(("https://", "ssh://")):
         remote = normalize_remote_url(remote)
         try:

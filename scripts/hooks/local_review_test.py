@@ -1671,6 +1671,7 @@ class DriverContractTest(unittest.TestCase):
             "https://%47itHub.com/HiroyukiFuruno/katana-render-runtime.git",
             "https://github.com/HiroyukiFuruno/%6batana-render-runtime.git",
             "git@github.com:HiroyukiFuruno/katana-render-runtime.git",
+            "git@GitHub.com:HiroyukiFuruno/katana-render-runtime.git",
             "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git",
             "ssh://git@github.com:22/HiroyukiFuruno/katana-render-runtime.git",
             "ssh://g%69t@github.com/HiroyukiFuruno/katana-render-runtime.git",
@@ -1698,6 +1699,38 @@ class DriverContractTest(unittest.TestCase):
                 self.assertEqual(len(gh_calls), 1)
                 self.assertEqual(gh_calls[0], ["gh", "api", "repos/HiroyukiFuruno/katana-render-runtime/issues/89"])
         self.assertTrue(all(value == observed[0] for value in observed[1:]))
+
+    def test_invalid_scp_origins_are_rejected_before_github_api_call(self) -> None:
+        invalid_origins = (
+            "Git@github.com:HiroyukiFuruno/katana-render-runtime.git",
+            "git@github.com:2222/HiroyukiFuruno/katana-render-runtime.git",
+            "git@github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "git@github.com:HiroyukiFuruno/nested/katana-render-runtime.git",
+            "git@github.com:HiroyukiFuruno/katana-render-runtime.git?query=1",
+            "git@github.com:HiroyukiFuruno/katana-render-runtime.git#fragment",
+            "git%40github.com:HiroyukiFuruno/katana-render-runtime.git",
+            "git@github%2ecom:HiroyukiFuruno/katana-render-runtime.git",
+            "git@github.com%3aHiroyukiFuruno/katana-render-runtime.git",
+            "git@github.com:OtherOwner/katana-render-runtime.git@extra",
+            "git@github.com:HiroyukiFuruno/katana-render-runtime.git%0a",
+        )
+        for origin in invalid_origins:
+            with self.subTest(origin=origin), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                command(["git", "init", "--quiet"], root)
+                command(["git", "config", "remote.origin.url", origin], root)
+                gh_calls = []
+
+                def real_git_record_gh(arguments, cwd, input_bytes=None):
+                    if arguments[0] == "gh":
+                        gh_calls.append(arguments)
+                        return "{}"
+                    return command(arguments, cwd, input_bytes)
+
+                with patch("local_review_state.command", side_effect=real_git_record_gh):
+                    with self.assertRaisesRegex(ReviewError, "GitHub repository|scoped"):
+                        issue_context(root, [89])
+                self.assertFalse(gh_calls)
 
     def test_invalid_https_origins_are_rejected_before_github_api_call(self) -> None:
         invalid_origins = (
