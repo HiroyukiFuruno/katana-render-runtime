@@ -42,6 +42,7 @@ REQUIRED_RELEASE_COMMITS = (
     "d3f04d90618f10869d2a98a31bc6c7392b77fbf0",  # Rollup4.64.0の最新互換依存更新
     "451573aeb68ad95830ed78c05cc021961bf20a00",  # hidden index・owner execute・Git-zの正確な証跡拘束
     "7e8c0d2a894512ea0e6e4456ebb7e7abf1faa098",  # Cargo環境のpresence・compiler alias・target優先順の拘束
+    "20b44b2d599be4802c66e2ddab401067e411495b",  # Cargoの空target-dirを証跡正規化前に拒否
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -59,7 +60,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "44c8097e2c76345a426041a40dbdd421bcca70e806adcf5a0cb6e32f45a59de9"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "a39db9e6409c78ea4239ede908ef17f9f72677ed98b01f1a7eb366aefc364a62"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
