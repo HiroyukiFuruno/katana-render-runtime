@@ -401,17 +401,48 @@ class GitSnapshotTest(unittest.TestCase):
         def git_command(arguments: list[str], root: Path) -> str:
             return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
 
-        with tempfile.TemporaryDirectory() as temporary, \
-                patch.dict(os.environ, {}, clear=True), \
+        receipt = self.root / "tmp" / "receipt.json"
+        value = inputs()
+        value["issues"].append({"number": 95, "body_sha256": "e" * 64})
+        result = review(value)
+        result["issues"].append({"number": 95, "body_sha256": "e" * 64, "result": "verified",
+                                 "evidence": copy.deepcopy(result["issues"][0]["evidence"])})
+        valid_payload = receipt_payload(value, result)
+        receipt.parent.mkdir(exist_ok=True)
+        receipt.write_text(json.dumps(valid_payload))
+        sidecar = receipt.with_suffix(".review.json")
+        for label, original in (("missing sidecar", None), ("corrupt sidecar", "{"),
+                                ("mismatched sidecar", json.dumps({**result, "summary": "changed"}))):
+            with self.subTest(sidecar=label), \
+                    patch.dict(os.environ, {}, clear=True), \
+                    patch.object(local_review, "command", side_effect=git_command), \
+                    patch.object(local_review, "repository_root", return_value=self.root), \
+                    patch.object(local_review, "cache_path", return_value=receipt), \
+                    patch.object(local_review, "invoke_review") as invoke:
+                if original is None:
+                    sidecar.unlink(missing_ok=True)
+                else:
+                    sidecar.write_text(original)
+                with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
+                    local_review.issue_numbers(self.root, args, receipt)
+                run_args = SimpleNamespace(issue=[], base=self.base, requirements=None, receipt="tmp/receipt.json",
+                                           check_receipt=False, print_input=False)
+                with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
+                    local_review.run(run_args)
+                invoke.assert_not_called()
+
+        receipt.write_text(json.dumps(receipt_payload(inputs(), review(inputs()))))
+        sidecar.write_text(json.dumps(review(inputs())))
+        for contents in (json.dumps(receipt_payload(inputs(), review(inputs()))), "{", "{}"):
+            with self.subTest(receipt=contents), \
+                    patch.dict(os.environ, {}, clear=True), \
+                    patch.object(local_review, "command", side_effect=git_command):
+                receipt.write_text(contents)
+                with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
+                    local_review.issue_numbers(self.root, args, receipt)
+        receipt.unlink()
+        with patch.dict(os.environ, {}, clear=True), \
                 patch.object(local_review, "command", side_effect=git_command):
-            receipt = Path(temporary) / "receipt.json"
-            mismatched = receipt_payload(inputs(), review(inputs()))
-            for contents in (json.dumps(mismatched), "{", "{}"):
-                with self.subTest(contents=contents[:10]):
-                    receipt.write_text(contents)
-                    with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
-                        local_review.issue_numbers(self.root, args, receipt)
-            receipt.unlink()
             with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
                 local_review.issue_numbers(self.root, args, receipt)
 

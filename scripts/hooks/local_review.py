@@ -67,7 +67,7 @@ def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[i
             if receipt.exists():
                 try:
                     stored = strict_json(receipt.read_text())
-                    validate_receipt(stored, stored["inputs"])
+                    read_receipt(receipt, stored["inputs"])
                     stored_issues = stored["inputs"]["issues"]
                     if isinstance(stored_issues, list):
                         receipt_numbers = {issue["number"] for issue in stored_issues}
