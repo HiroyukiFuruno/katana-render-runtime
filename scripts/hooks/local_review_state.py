@@ -8,7 +8,7 @@ import shutil
 import stat
 import subprocess
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote_to_bytes, urlsplit
 
 
 class ReviewError(RuntimeError):
@@ -165,6 +165,19 @@ def issue_context(root: Path, numbers: list[int]) -> list[dict[str, Any]]:
     elif remote.startswith(prefix):
         repository = remote.removeprefix(prefix).removesuffix(".git")
     elif remote.startswith("ssh://"):
+        hex_digits = frozenset("0123456789abcdefABCDEF")
+        for index, character in enumerate(remote):
+            if (character == "%" and
+                    (index + 2 >= len(remote) or
+                     remote[index + 1] not in hex_digits or remote[index + 2] not in hex_digits)):
+                raise ReviewError("origin must identify a GitHub repository")
+        try:
+            remote = unquote_to_bytes(remote).decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ReviewError("origin must identify a GitHub repository") from error
+        if any(ord(character) <= 32 or ord(character) == 127 or character.isspace()
+               for character in remote):
+            raise ReviewError("origin must identify a GitHub repository")
         if "?" in remote or "#" in remote:
             raise ReviewError("origin must identify a GitHub repository")
         try:

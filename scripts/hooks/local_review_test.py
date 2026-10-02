@@ -1015,6 +1015,11 @@ class DriverContractTest(unittest.TestCase):
             "git@github.com:HiroyukiFuruno/katana-render-runtime.git",
             "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git",
             "ssh://git@github.com:22/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://g%69t@github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github%2ecom/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com:%32%32/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com/HiroyukiFuruno%2fkatana-render-runtime.git",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime%2egit",
         )
         observed = []
         for origin in origins:
@@ -1049,6 +1054,21 @@ class DriverContractTest(unittest.TestCase):
             "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git?",
             "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git#",
             "ssh://git@github.com:/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git%0a",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git%00",
+            "ssh://git@not-github%2eexample/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://g%69t@github.com/Other%4fwner/katana-render-runtime.git",
+            "ssh://other%40git@github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git%3apassword@github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com:%32%32%32%32/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com/HiroyukiFuruno%2fnested%2fkatana-render-runtime.git",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render%252druntime.git",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git%3f",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git%23",
+            "ssh://git@github.com%3a/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://g%2569t@github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git%FF",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git%G1",
         )
         for origin in invalid_origins:
             with self.subTest(origin=origin), tempfile.TemporaryDirectory() as temporary:
