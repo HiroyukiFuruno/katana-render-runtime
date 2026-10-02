@@ -49,6 +49,7 @@ REQUIRED_RELEASE_COMMITS = (
     "73df5c6a934b40cc166d709ceb6b184ea057f10f",  # 一時フォント障害の選択を描画内で再利用
     "d72b80e802d9b857eb71503ad1fce6cdf3f5fcf0",  # 非UTF8のGitパスを可逆なレビュー証跡へ保持
     "c8704bf9b2cc26c43f85f0e9dad35f31ee11d4e0",  # 非UTF8のGit名回帰をPOSIX環境へ限定
+    "9c0a96d0e83063c148693cce0a531e1a19b99a1a",  # レビュー候補包含とorigin復号境界の拘束
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -66,7 +67,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "6d98e9b86d7c2355ae9a7e184918623ff765f69081d9052b28cc08a76fb785a0"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "6c8ebd95a740b01db0284ab5c60ff858e44cccd3bc29bb970161663e31e5a098"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
