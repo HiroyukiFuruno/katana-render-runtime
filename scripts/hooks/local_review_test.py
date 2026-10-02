@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import copy
+from contextlib import redirect_stdout
+import errno
+import io
 import json
 import os
 from pathlib import Path
@@ -122,6 +125,22 @@ class ReceiptContractTest(unittest.TestCase):
     def test_json_duplicate_fields_are_rejected(self) -> None:
         with self.assertRaisesRegex(ReviewError, "duplicate"):
             strict_json('{"verdict":"FAIL","verdict":"PASS"}')
+
+    def test_print_input_escapes_surrogate_git_paths(self) -> None:
+        value = {"source": {"files": {"bad\udcff": {"kind": "deleted"}}}}
+        args = SimpleNamespace(issue=[89], base="HEAD", requirements=None,
+                               receipt="tmp/receipt.json", print_input=True, check_receipt=False)
+        output = io.StringIO()
+        root = Path.cwd()
+        with patch.dict(os.environ, {}, clear=True), redirect_stdout(output), \
+                patch.object(local_review, "repository_root", return_value=root), \
+                patch.object(local_review, "cache_path", return_value=root / "tmp/receipt.json"), \
+                patch.object(local_review, "issue_numbers", return_value=[89]), \
+                patch.object(local_review, "requirements_path", return_value=None), \
+                patch.object(local_review, "build_inputs", return_value=value):
+            self.assertEqual(local_review.run(args), 0)
+        encoded = output.getvalue().encode("ascii")
+        self.assertIn(b"bad\\udcff", encoded)
 
 
 class GitSnapshotTest(unittest.TestCase):
@@ -293,6 +312,113 @@ class GitSnapshotTest(unittest.TestCase):
         })
         self.assertEqual(compact["changes"]["staged"], [crlf_name])
         self.assertEqual(staged["new_tracked_paths"], [])
+
+    def test_non_utf8_git_paths_remain_distinct_and_digestable(self) -> None:
+        def raw(arguments: list[str], input_bytes: bytes = b"") -> bytes:
+            return command(arguments, self.root, input_bytes=input_bytes).encode()
+
+        def direct_git(arguments: list[str]) -> None:
+            subprocess.run(arguments, cwd=self.root, capture_output=True, check=True)
+
+        bad_ff = b"bad\xff"
+        bad_fe = b"bad\xfe"
+        blob_ff = raw(["git", "hash-object", "-w", "--stdin"], b"ff\n").strip()
+        blob_fe = raw(["git", "hash-object", "-w", "--stdin"], b"fe\n").strip()
+        tree_input = (b"100644 blob " + blob_ff + b"\t" + bad_ff + b"\0" +
+                      b"100644 blob " + blob_fe + b"\t" + bad_fe + b"\0")
+        tree = raw(["git", "mktree", "-z"], tree_input).strip()
+        commit = command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                          "-c", "commit.gpgsign=false", "commit-tree", tree], self.root,
+                         input_bytes=b"non-UTF-8 paths\n").strip()
+        command(["git", "update-ref", "refs/heads/non-utf8", commit], self.root)
+
+        output = command(["git", "ls-tree", "-r", "--name-only", "-z", commit], self.root)
+        self.assertEqual({os.fsencode(name) for name in output.split("\0") if name}, {bad_ff, bad_fe})
+        snapshot = source_snapshot(self.root, commit)
+        snapshot_paths = {os.fsencode(name) for name in snapshot["files"]}
+        self.assertTrue({bad_ff, bad_fe}.issubset(snapshot_paths))
+        self.assertEqual(len({name for name in snapshot["files"] if name.startswith("bad")}), 2)
+        value = {**inputs(), "source": snapshot}
+        self.assertEqual(digest(value), digest(json.loads(json.dumps(value))))
+        validate_receipt(receipt_payload(value, review(value)), value)
+
+        # macOS のファイルシステムでは作れない名前でも、Git index は保持できるため、
+        # stage から commit まで同じ raw bytes として扱うことを確認する。
+        for name, blob in ((bad_ff, blob_ff), (bad_fe, blob_fe)):
+            direct_git(["git", "update-index", "--add", "--cacheinfo",
+                        f"100644,{blob.decode()},{os.fsdecode(name)}"])
+        staged = source_snapshot(self.root, self.base)
+        index_tree = command(["git", "write-tree"], self.root).strip()
+        index_commit = command(["git", "-c", "user.name=Review fixture", "-c",
+                                "user.email=review@example.invalid", "-c", "commit.gpgsign=false",
+                                "commit-tree", index_tree, "-p", self.base], self.root,
+                               input_bytes=b"stage raw paths\n").strip()
+        staged_index_paths = {os.fsencode(entry.rsplit("\t", 1)[-1])
+                              for entry in staged["index_overrides"]}
+        self.assertEqual(staged_index_paths, {bad_ff, bad_fe})
+        command(["git", "update-ref", "HEAD", index_commit], self.root)
+        self.assertEqual(command(["git", "rev-parse", "HEAD"], self.root).strip(), index_commit)
+        committed = source_snapshot(self.root, self.base)
+        committed_head_paths = {os.fsencode(entry.rsplit("\t", 1)[-1])
+                                for entry in committed["head_overrides"]}
+        committed_index_paths = {os.fsencode(entry.rsplit("\t", 1)[-1])
+                                 for entry in committed["index_overrides"]}
+        self.assertEqual(staged["files"], committed["files"])
+        self.assertEqual(staged["working_blobs"], committed["working_blobs"])
+        self.assertEqual(committed_index_paths, {bad_ff, bad_fe})
+        self.assertEqual(committed_head_paths, {bad_ff, bad_fe})
+        committed_value = {**inputs(), "source": committed}
+        validate_receipt(receipt_payload(committed_value, review(committed_value)), committed_value)
+
+        changed_blob = raw(["git", "hash-object", "-w", "--stdin"], b"ff changed\n").strip()
+        direct_git(["git", "update-index", "--add", "--cacheinfo",
+                    f"100644,{changed_blob.decode()},{os.fsdecode(bad_ff)}"])
+        changed = source_snapshot(self.root, self.base)
+        with self.assertRaisesRegex(ReviewError, "another input|stale"):
+            validate_receipt(receipt_payload(committed_value, review(committed_value)),
+                             {**committed_value, "source": changed})
+
+    @unittest.skipUnless(os.name == "posix", "non-UTF-8 worktree names require POSIX")
+    def test_non_utf8_worktree_paths_survive_stage_commit_and_receipt_reuse(self) -> None:
+        if os.name == "nt":
+            self.skipTest("Windows does not support this filename contract")
+        root_bytes = os.fsencode(str(self.root))
+        names = (b"bad\xff", b"bad\xfe")
+
+        def write_bytes(name: bytes, content: bytes) -> None:
+            try:
+                fd = os.open(root_bytes + b"/" + name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+            except OSError as error:
+                if error.errno == errno.EILSEQ:
+                    self.skipTest("filesystem rejects non-UTF-8 worktree names")
+                raise
+            try:
+                os.write(fd, content)
+            finally:
+                os.close(fd)
+
+        def direct_git(arguments: list[str]) -> None:
+            subprocess.run(arguments, cwd=self.root, capture_output=True, check=True)
+
+        write_bytes(names[0], b"ff original\n")
+        write_bytes(names[1], b"fe original\n")
+        untracked = source_snapshot(self.root, self.base)
+        untracked_paths = {os.fsencode(name) for name in untracked["files"]}
+        self.assertTrue(set(names).issubset(untracked_paths))
+        direct_git(["git", "add", "--", *(os.fsdecode(name) for name in names)])
+        staged = source_snapshot(self.root, self.base)
+        self.assertEqual(staged["files"], untracked["files"])
+        staged_value = {**inputs(), "source": staged}
+        staged_receipt = receipt_payload(staged_value, review(staged_value))
+        self.commit("commit non-UTF-8 worktree paths")
+        committed = source_snapshot(self.root, self.base)
+        self.assertEqual(committed, staged)
+        validate_receipt(staged_receipt, {**staged_value, "source": committed})
+
+        write_bytes(names[0], b"ff changed\n")
+        changed = source_snapshot(self.root, self.base)
+        with self.assertRaisesRegex(ReviewError, "another input|stale"):
+            validate_receipt(staged_receipt, {**staged_value, "source": changed})
 
     def test_resetting_staged_new_file_while_committing_tracked_source_invalidates_receipt(self) -> None:
         tracked = self.root / "example.py"

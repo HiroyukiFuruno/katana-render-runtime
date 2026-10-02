@@ -278,7 +278,7 @@ def run(args: argparse.Namespace) -> int:
     args.requirements = requirements_path(root, args, path, numbers)
     inputs = build_inputs(root, args, numbers)
     if args.print_input:
-        print(json.dumps({"input_sha256": digest(inputs), "inputs": inputs}, ensure_ascii=False))
+        print(json.dumps({"input_sha256": digest(inputs), "inputs": inputs}, ensure_ascii=True))
         return 0
     try:
         read_receipt(path, inputs)

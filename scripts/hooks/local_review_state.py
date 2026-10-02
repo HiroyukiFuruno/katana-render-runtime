@@ -16,7 +16,7 @@ class ReviewError(RuntimeError):
 
 
 def canonical(value: Any) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def digest(value: Any) -> str:
@@ -58,7 +58,7 @@ def command(arguments: list[str], root: Path, input_bytes: bytes | None = None) 
         )
     except (OSError, subprocess.SubprocessError) as error:
         raise ReviewError(f"read-only command failed: {arguments[0]}") from error
-    return result.stdout.decode() if isinstance(result.stdout, bytes) else result.stdout
+    return os.fsdecode(result.stdout) if isinstance(result.stdout, bytes) else result.stdout
 
 
 def repository_root() -> Path:
