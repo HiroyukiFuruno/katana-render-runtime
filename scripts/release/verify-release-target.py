@@ -14,30 +14,32 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib import error, request
 
-REQUIRED_LATEST_RELEASE = "v0.4.21"
-REQUIRED_TARGET_RELEASE = "v0.4.22"
+PUBLISHED_V0422_SNAPSHOT = "185d056de67282a4056729296e57c164a6a343d6"
+PUBLISHED_V0422_RELEASE_MANIFEST_SHA256 = "1ddeddc37c0735a7278755f26f8985aee9176fc978b437766d57be7d0e342d9e"
+REQUIRED_LATEST_RELEASE = "v0.4.22"
+REQUIRED_TARGET_RELEASE = "v0.4.23"
 REQUIRED_RELEASE_COMMITS = (
-    "1bc497bdfd3b8c4318e9ee1609d147b6925b43e5",  # v0.4.22指定修正
-    "d0ab9c408e9b876f130dbd5a8f33051cc44b5242",  # Issue #95 font探索
-    "78ed1b87cc94bcdd158b42e7c00e69e882bbb094",  # Issue #95 実HTML 60秒検証
-    "a8481e9c13ceb43d9e08388958c32f507f9ddb85",  # Issue #93 body load回帰
-    "f5ff74ecf7287375bc0e835e8db374766145a55b",  # Issue #93 parser実状態
-    "4d1ec0a03c6fd95a8ca9f4c1ad8a30d4ad84f76e",  # Issue #92/#93 image・Promise load
+    "322a85eb75892944c009231b534885601553c488",  # Issue #89のCI品質契約
+    "1410802e9d63c8e1c3347a24dad858de52523612",  # Issue #95のglyph cache修正
+    "cf15441d102924a3b8e254b7ab9fc377a7daade3",  # v0.4.23のversion metadataと固定契約
 )
-# manifestの更新元と公開candidateの両方に、v0.4.22指定修正とIssue #93/#95
-# 修正を要求する。PR #99のdefault baseと不変manifestもcandidateに要求する。
-REQUIRED_RELEASE_SOURCE_COMMITS = REQUIRED_RELEASE_COMMITS
-REQUIRED_RELEASE_CANDIDATE_ANCESTORS = (
-    "9ad18a07358cf28b742cc00c12c0c9f85956d20a",  # PR #99のdefault base
+# 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
+REQUIRED_RELEASE_SOURCE_COMMITS = (
+    PUBLISHED_V0422_SNAPSHOT,
     *REQUIRED_RELEASE_COMMITS,
 )
-# squash merge 後も default history に残る v0.4.21 の merge commit を、
+REQUIRED_RELEASE_CANDIDATE_ANCESTORS = (
+    PUBLISHED_V0422_SNAPSHOT,
+    *REQUIRED_RELEASE_COMMITS,
+)
+# squash merge 後も default history に残る v0.4.22 release snapshotを、
 # 変更集合の起点として使う。期待値そのものは commit/tree object ではなく、
 # base からの non-gate 差分を表す不変な内容 manifest に固定する。
-REQUIRED_RELEASE_BASE = "7f984d16400fe3e097a3380dd7641d78c5852352"
+REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
-# 自己参照しない。raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "1ddeddc37c0735a7278755f26f8985aee9176fc978b437766d57be7d0e342d9e"
+# 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
+# raw diff は path、file mode、base/target blob を含む。
+REQUIRED_RELEASE_MANIFEST_SHA256 = "4d642c8f1bd835155d336cb18b9ce6e8475a1424a6d7dc9273cdf28b93a889b7"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
