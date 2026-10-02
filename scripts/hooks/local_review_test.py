@@ -129,11 +129,57 @@ class GitSnapshotTest(unittest.TestCase):
     def test_staging_and_committing_same_bytes_preserves_source_snapshot(self) -> None:
         (self.root / "example.py").write_text("changed\n")
         (self.root / "new.py").write_text("new\n")
-        before = source_snapshot(self.root, self.base)
+        untracked = source_snapshot(self.root, self.base)
         command(["git", "add", "-A"], self.root)
-        self.assertEqual(before, source_snapshot(self.root, self.base))
+        staged = source_snapshot(self.root, self.base)
+        self.assertNotEqual(untracked, staged)
         self.commit("changes")
-        self.assertEqual(before, source_snapshot(self.root, self.base))
+        self.assertEqual(staged, source_snapshot(self.root, self.base))
+
+    def test_resetting_staged_new_file_while_committing_tracked_source_invalidates_receipt(self) -> None:
+        tracked = self.root / "example.py"
+        tracked.write_text("reviewed tracked change\n")
+        (self.root / "new.py").write_text("reviewed new source\n")
+        command(["git", "add", "-A"], self.root)
+        reviewed = source_snapshot(self.root, self.base)
+        value = {**inputs(), "source": reviewed}
+        receipt = receipt_payload(value, review(value))
+
+        command(["git", "reset", "--quiet", "HEAD", "--", "new.py"], self.root)
+        self.commit_index("commit tracked source only")
+
+        current = source_snapshot(self.root, self.base)
+        self.assertEqual(reviewed["files"], current["files"])
+        self.assertNotEqual(reviewed, current)
+        with self.assertRaisesRegex(ReviewError, "another input|stale"):
+            validate_receipt(receipt, {**value, "source": current})
+
+    def test_intent_to_add_is_distinct_from_fully_staged_new_file(self) -> None:
+        for contents in ("", "new source\n"):
+            with self.subTest(contents=contents):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    command(["git", "init", "--quiet"], root)
+                    (root / "example.py").write_text("original\n")
+                    command(["git", "add", "example.py"], root)
+                    command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                             "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "initial"], root)
+                    base = command(["git", "rev-parse", "HEAD"], root).strip()
+                    path = root / "candidate.py"
+                    path.write_text(contents)
+                    untracked = source_snapshot(root, base)
+                    command(["git", "add", "-N", "candidate.py"], root)
+                    intent = source_snapshot(root, base)
+                    self.assertEqual(untracked["files"], intent["files"])
+                    self.assertEqual(untracked, intent)
+
+                    command(["git", "add", "candidate.py"], root)
+                    staged = source_snapshot(root, base)
+                    self.assertEqual(intent["files"], staged["files"])
+                    self.assertNotEqual(untracked, staged)
+                    command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                             "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "commit candidate"], root)
+                    self.assertEqual(staged, source_snapshot(root, base))
 
     def test_real_git_clean_filters_preserve_same_working_bytes_across_commit(self) -> None:
         for filter_kind in ("autocrlf", "custom"):
@@ -148,11 +194,12 @@ class GitSnapshotTest(unittest.TestCase):
                     clean = (f"{shlex.quote(sys.executable)} -c "
                              '"import sys; sys.stdout.write(sys.stdin.read().upper())"')
                     command(["git", "config", "filter.uppercase.clean", clean], root)
-                command(["git", "add", ".gitattributes"], root)
+                source = root / "example.txt"
+                source.write_text("initial tracked content\n")
+                command(["git", "add", ".gitattributes", "example.txt"], root)
                 command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
                          "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "filter setup"], root)
                 base = command(["git", "rev-parse", "HEAD"], root).strip()
-                source = root / "example.txt"
                 source.write_bytes(b"same working bytes\r\n" if filter_kind == "autocrlf" else b"same working bytes\n")
                 before = source_snapshot(root, base)
                 command(["git", "add", "example.txt"], root)
@@ -161,7 +208,7 @@ class GitSnapshotTest(unittest.TestCase):
                          "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "filtered source"], root)
                 committed = source_snapshot(root, base)
                 self.assertEqual(before, staged)
-                self.assertEqual(before, committed)
+                self.assertEqual(staged, committed)
                 source.write_bytes(b"different working bytes\r\n" if filter_kind == "autocrlf"
                                    else b"SAME WORKING BYTES\n")
                 if filter_kind == "custom":
@@ -180,6 +227,7 @@ class GitSnapshotTest(unittest.TestCase):
                 clean = (f"{shlex.quote(sys.executable)} -c "
                          '"import sys; sys.stdout.write(sys.stdin.read().upper())"')
                 command(["git", "config", "filter.uppercase.clean", clean], root)
+                (root / "example.txt").write_text("initial content\n")
                 (root / "target-a").write_text("target a\n")
                 (root / "target-b").write_text("target b\n")
                 (root / "link.txt").symlink_to("target-a")
@@ -200,7 +248,7 @@ class GitSnapshotTest(unittest.TestCase):
                      "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "SHA-256 changes"], root)
             committed = source_snapshot(root, base)
             self.assertEqual(before, staged)
-            self.assertEqual(before, committed)
+            self.assertEqual(staged, committed)
             self.assertEqual(command(["git", "show", "HEAD:link.txt"], root).strip(), "target-b")
 
             (root / "example.txt").write_bytes(b"different working bytes\n")

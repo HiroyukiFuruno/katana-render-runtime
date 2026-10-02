@@ -82,10 +82,17 @@ def file_record(root: Path, name: str) -> dict[str, Any]:
 
 def source_snapshot(root: Path, base: str) -> dict[str, Any]:
     base_sha = command(["git", "rev-parse", "--verify", "--end-of-options", f"{base}^{{commit}}"], root).strip()
+    head_sha = command(["git", "rev-parse", "--verify", "HEAD^{commit}"], root).strip()
     names = command(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], root)
     baseline = command(["git", "ls-tree", "-r", "--name-only", "-z", base_sha], root)
+    base_names = set(baseline.split("\0")) - {""}
+    cached_diff_base_names = set(command(
+        ["git", "diff", "--cached", "--no-renames", "--name-only", "-z", base_sha, "--"], root
+    ).split("\0")) - {""}
+    head_diff_base_names = set(command(
+        ["git", "diff", "--no-renames", "--name-only", "-z", base_sha, head_sha, "--"], root
+    ).split("\0")) - {""}
     index = command(["git", "ls-files", "--stage", "-z"], root)
-    head_sha = command(["git", "rev-parse", "--verify", "HEAD^{commit}"], root).strip()
     head_tree = command(["git", "ls-tree", "-r", "-z", head_sha], root)
     head_entries = {entry.split("\t", 1)[1]: entry.split("\t", 1)[0]
                     for entry in head_tree.split("\0") if entry}
@@ -95,6 +102,7 @@ def source_snapshot(root: Path, base: str) -> dict[str, Any]:
     paths = set(names.split("\0")) | set(baseline.split("\0")) | set(head_entries)
     files = {name: file_record(root, name) for name in sorted(paths - {""})}
     return {"base_sha": base_sha, "files": files,
+            "new_tracked_paths": sorted((cached_diff_base_names | head_diff_base_names) - base_names),
             "index_overrides": staged_overrides(root, entries, base_sha, head_sha),
             "head_overrides": head_overrides(root, base_sha, head_sha, head_entries)}
 
