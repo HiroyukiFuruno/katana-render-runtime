@@ -83,8 +83,8 @@ fn cached_html_face_for_key(
         HTML_FALLBACK_CACHE.with(|cache| {
             insert_html_face(&mut cache.borrow_mut(), database, key, face_id);
         });
-        render_faces.insert(key, face_id);
     }
+    render_faces.insert(key, face_id);
     face_id
 }
 
@@ -288,12 +288,21 @@ mod tests {
             cached_html_face(&database, base, 'A', 400, false, &mut render_faces),
             fallback
         );
-        assert!(render_faces.is_empty());
+        assert_eq!(render_faces.len(), 1);
+        assert_eq!(
+            cached_html_face(&database, base, 'A', 400, false, &mut render_faces),
+            fallback
+        );
         std::fs::write(&path, bytes)?;
-        let recovered = cached_html_face(&database, base, 'A', 400, false, &mut render_faces);
+        assert_eq!(
+            cached_html_face(&database, base, 'A', 400, false, &mut render_faces),
+            fallback
+        );
+        let mut next_render_faces = HashMap::new();
+        let recovered = cached_html_face(&database, base, 'A', 400, false, &mut next_render_faces);
         std::fs::remove_file(path)?;
         assert_eq!(recovered, base);
-        assert_eq!(render_faces.len(), 1);
+        assert_eq!(next_render_faces.len(), 1);
         Ok(())
     }
 
@@ -307,12 +316,17 @@ mod tests {
             cached_html_face(&database, base, 'A', 400, false, &mut render_faces),
             fallback
         );
-        assert!(render_faces.is_empty());
+        assert_eq!(render_faces.len(), 1);
         std::fs::write(&path, bytes)?;
-        let recovered = cached_html_face(&database, base, 'A', 400, false, &mut render_faces);
+        assert_eq!(
+            cached_html_face(&database, base, 'A', 400, false, &mut render_faces),
+            fallback
+        );
+        let mut next_render_faces = HashMap::new();
+        let recovered = cached_html_face(&database, base, 'A', 400, false, &mut next_render_faces);
         std::fs::remove_file(path)?;
         assert_eq!(recovered, candidate);
-        assert!(render_faces.is_empty());
+        assert_eq!(next_render_faces.len(), 1);
         Ok(())
     }
 
