@@ -44,6 +44,8 @@ REQUIRED_RELEASE_COMMITS = (
     "7e8c0d2a894512ea0e6e4456ebb7e7abf1faa098",  # Cargo環境のpresence・compiler alias・target優先順の拘束
     "20b44b2d599be4802c66e2ddab401067e411495b",  # Cargoの空target-dirを証跡正規化前に拒否
     "63339c19d0963f739c2fb751dcd04d9879168751",  # 作業ツリーのGit clean変換後blobをレビュー証跡へ拘束
+    "652508bd51a8f8dee49d43ccb888a14df2e75630",  # libc0.2.190の最新互換依存更新
+    "27b9272c2d2bee9f14ab6336e3a6fa5d0c4727fa",  # パス種別変更とHTTPS既定ポートのレビュー互換性
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -61,7 +63,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "9f983560d3dbe0198a53d04ed428a1c521ceef438fda65ea66d73a16c12cc8c2"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "a51556f8993c6344021ca7f2456ea0775fa9a38a0ad193f22ba5ca7deadaba35"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
