@@ -421,6 +421,87 @@ class GitSnapshotTest(unittest.TestCase):
                     self.assertEqual(before, after)
                     self.assertEqual(validate_receipt(receipt, {**value, "source": after})["verdict"], "PASS")
 
+    def test_tracked_leaf_replaced_by_directory_snapshots_and_reuses_after_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            command(["git", "init", "--quiet"], root)
+            (root / "pkg").write_text("old leaf\n")
+            command(["git", "add", "pkg"], root)
+            command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                     "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "tracked package leaf"], root)
+            base = command(["git", "rev-parse", "HEAD"], root).strip()
+
+            (root / "pkg").unlink()
+            (root / "pkg").mkdir()
+            (root / "pkg" / "mod.py").write_text("new module\n")
+            worktree = source_snapshot(root, base)
+            self.assertEqual(worktree["files"]["pkg"], {"kind": "deleted"})
+            self.assertEqual(worktree["files"]["pkg/mod.py"]["kind"], "file")
+
+            command(["git", "add", "-A"], root)
+            staged = source_snapshot(root, base)
+            self.assertEqual(staged["files"], worktree["files"])
+            self.assertEqual(staged["new_tracked_paths"], ["pkg/mod.py"])
+            value = {**inputs(), "source": staged, "requirements": None,
+                     "gate_configuration": {}}
+            receipt = receipt_payload(value, review(value))
+
+            command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                     "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "commit package directory"], root)
+            committed = source_snapshot(root, base)
+            self.assertEqual(staged, committed)
+            self.assertEqual(validate_receipt(receipt, {**value, "source": committed})["verdict"], "PASS")
+
+    def test_tracked_directory_replaced_by_leaf_snapshots_and_reuses_after_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            command(["git", "init", "--quiet"], root)
+            (root / "pkg").mkdir()
+            (root / "pkg" / "mod.py").write_text("old module\n")
+            command(["git", "add", "pkg/mod.py"], root)
+            command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                     "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "tracked package module"], root)
+            base = command(["git", "rev-parse", "HEAD"], root).strip()
+
+            (root / "pkg" / "mod.py").unlink()
+            (root / "pkg").rmdir()
+            (root / "pkg").write_text("new package leaf\n")
+            worktree = source_snapshot(root, base)
+            self.assertEqual(worktree["files"]["pkg/mod.py"], {"kind": "deleted"})
+            self.assertEqual(worktree["files"]["pkg"]["kind"], "file")
+
+            command(["git", "add", "-A"], root)
+            staged = source_snapshot(root, base)
+            self.assertEqual(staged["files"], worktree["files"])
+            self.assertEqual(staged["new_tracked_paths"], ["pkg"])
+            value = {**inputs(), "source": staged, "requirements": None,
+                     "gate_configuration": {}}
+            receipt = receipt_payload(value, review(value))
+
+            command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                     "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "commit package leaf"], root)
+            committed = source_snapshot(root, base)
+            self.assertEqual(staged, committed)
+            self.assertEqual(validate_receipt(receipt, {**value, "source": committed})["verdict"], "PASS")
+
+    def test_gitlink_entries_are_rejected_in_index_and_head(self) -> None:
+        for committed in (False, True):
+            with self.subTest(committed=committed), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                command(["git", "init", "--quiet"], root)
+                (root / "tracked.py").write_text("base\n")
+                command(["git", "add", "tracked.py"], root)
+                command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "base"], root)
+                base = command(["git", "rev-parse", "HEAD"], root).strip()
+                command(["git", "update-index", "--add", "--cacheinfo", "160000",
+                         "1" * 40, "vendor"], root)
+                if committed:
+                    command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                             "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "gitlink"], root)
+                with self.assertRaisesRegex(ReviewError, "submodule entries cannot be reviewed: vendor"):
+                    source_snapshot(root, base)
+
     def test_sha256_repository_preserves_regular_and_symlink_blob_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1400,6 +1481,7 @@ class DriverContractTest(unittest.TestCase):
                    "html_url": "https://github.com/HiroyukiFuruno/katana-render-runtime/issues/89"}
         origins = (
             "https://github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com:443/HiroyukiFuruno/katana-render-runtime.git",
             "git@github.com:HiroyukiFuruno/katana-render-runtime.git",
             "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git",
             "ssh://git@github.com:22/HiroyukiFuruno/katana-render-runtime.git",
@@ -1428,6 +1510,37 @@ class DriverContractTest(unittest.TestCase):
                 self.assertEqual(len(gh_calls), 1)
                 self.assertEqual(gh_calls[0], ["gh", "api", "repos/HiroyukiFuruno/katana-render-runtime/issues/89"])
         self.assertTrue(all(value == observed[0] for value in observed[1:]))
+
+    def test_invalid_https_origins_are_rejected_before_github_api_call(self) -> None:
+        invalid_origins = (
+            "https://github.com:444/HiroyukiFuruno/katana-render-runtime.git",
+            "https://user@github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "https://git:secret@github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git?query=1",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git?",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git#fragment",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git#",
+            "https://github.com:/HiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git\r",
+            "https://github.com/HiroyukiFuruno/\r\nkatana-render-runtime.git",
+        )
+        for origin in invalid_origins:
+            with self.subTest(origin=repr(origin)), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                command(["git", "init", "--quiet"], root)
+                command(["git", "config", "remote.origin.url", origin], root)
+                gh_calls = []
+
+                def real_git_record_gh(arguments, cwd, input_bytes=None):
+                    if arguments[0] == "gh":
+                        gh_calls.append(arguments)
+                        return "{}"
+                    return command(arguments, cwd, input_bytes)
+
+                with patch("local_review_state.command", side_effect=real_git_record_gh):
+                    with self.assertRaisesRegex(ReviewError, "GitHub repository|scoped"):
+                        issue_context(root, [89])
+                self.assertFalse(gh_calls)
 
     def test_invalid_ssh_origins_are_rejected_before_github_api_call(self) -> None:
         invalid_origins = (

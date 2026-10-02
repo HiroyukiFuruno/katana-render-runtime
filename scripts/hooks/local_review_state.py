@@ -69,7 +69,7 @@ def file_record(root: Path, name: str) -> dict[str, Any]:
     path = root / name
     try:
         mode = path.lstat().st_mode
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):
         return {"kind": "deleted"}
     if stat.S_ISLNK(mode):
         content = os.fsencode(os.readlink(path))
@@ -77,6 +77,8 @@ def file_record(root: Path, name: str) -> dict[str, Any]:
     elif stat.S_ISREG(mode):
         content = path.read_bytes()
         kind = "file"
+    elif stat.S_ISDIR(mode):
+        return {"kind": "deleted"}
     else:
         raise ReviewError(f"unsupported source entry: {name}")
     return {"kind": kind, "executable": bool(mode & stat.S_IXUSR),
@@ -118,6 +120,16 @@ def source_snapshot(root: Path, base: str) -> dict[str, Any]:
     entries = [entry for entry in index.split("\0") if entry]
     if any(entry.split("\t", 1)[0].split()[-1] != "0" for entry in entries):
         raise ReviewError("unmerged index cannot be reviewed")
+    submodule_paths = {
+        entry.split("\t", 1)[1]
+        for entry in entries
+        if entry.split("\t", 1)[0].split()[0] == "160000"
+    }
+    submodule_paths.update(
+        name for name, entry in head_entries.items() if entry.split()[0] == "160000"
+    )
+    if submodule_paths:
+        raise ReviewError(f"submodule entries cannot be reviewed: {', '.join(sorted(submodule_paths))}")
     paths = set(names.split("\0")) | set(baseline.split("\0")) | set(head_entries)
     files = {name: file_record(root, name) for name in sorted(paths - {""})}
     working_paths = working_diff_base_names | cached_diff_base_names | head_diff_base_names | untracked_names
@@ -160,7 +172,7 @@ def working_entry(root: Path, name: str) -> str | None:
     path = root / name
     try:
         mode = path.lstat().st_mode
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):
         return None
     if stat.S_ISLNK(mode):
         content = os.fsencode(os.readlink(path))
@@ -169,6 +181,8 @@ def working_entry(root: Path, name: str) -> str | None:
         file_mode = "100755" if mode & stat.S_IXUSR else "100644"
         blob = command(["git", "hash-object", f"--path={name}", "--", name], root).strip()
         return f"{file_mode} {blob}"
+    elif stat.S_ISDIR(mode):
+        return None
     else:
         raise ReviewError(f"unsupported source entry: {name}")
     blob = command(["git", "hash-object", "--stdin", "--no-filters"], root,
@@ -180,11 +194,27 @@ def issue_context(root: Path, numbers: list[int]) -> list[dict[str, Any]]:
     remote = command(["git", "remote", "get-url", "origin"], root, input_bytes=b"").removesuffix("\n")
     if any(ord(character) <= 32 or ord(character) == 127 for character in remote):
         raise ReviewError("origin must identify a GitHub repository")
-    prefix = "https://github.com/"
     if remote.startswith("git@github.com:"):
         repository = remote.removeprefix("git@github.com:").removesuffix(".git")
-    elif remote.startswith(prefix):
-        repository = remote.removeprefix(prefix).removesuffix(".git")
+    elif remote.startswith("https://"):
+        if (any(character.isspace() for character in remote) or
+                "?" in remote or "#" in remote):
+            raise ReviewError("origin must identify a GitHub repository")
+        try:
+            parsed = urlsplit(remote)
+            port = parsed.port
+        except ValueError as error:
+            raise ReviewError("origin must identify a GitHub repository") from error
+        authority = parsed.netloc.rsplit("@", 1)[-1]
+        if authority.endswith(":"):
+            raise ReviewError("origin must identify a GitHub repository")
+        path = parsed.path.removeprefix("/")
+        if (parsed.scheme != "https" or parsed.hostname != "github.com" or
+                parsed.username is not None or parsed.password is not None or
+                port not in (None, 443) or parsed.query or parsed.fragment or
+                not path or path.startswith("/") or path.count("/") != 1):
+            raise ReviewError("origin must identify a GitHub repository")
+        repository = path.removesuffix(".git")
     elif remote.startswith("ssh://"):
         hex_digits = frozenset("0123456789abcdefABCDEF")
         for index, character in enumerate(remote):
