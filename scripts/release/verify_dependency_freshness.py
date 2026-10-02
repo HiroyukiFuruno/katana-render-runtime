@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -33,6 +34,16 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
 TIMEOUT_SECONDS = 15
 MAX_RESPONSE_BYTES = 1_000_000
 RUNTIME_CATALOG = Path("scripts/runtime-assets/runtime-asset-common.ts")
+
+
+class _StripAuthorizationRedirectHandler(request.HTTPRedirectHandler):
+    """転送先への認証情報流出を防ぐため、redirectでは認証ヘッダーを除去する。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None:
+            redirected.remove_header("Authorization")
+        return redirected
 
 
 @total_ordering
@@ -702,8 +713,21 @@ def runtime_assets(root: Path) -> list[Package]:
 
 def fetch(url: str) -> bytes:
     headers = {"Accept": "application/json", "User-Agent": "katana-render-runtime-release-freshness"}
+    parsed_url = parse.urlsplit(url)
+    if (
+        parsed_url.scheme == "https"
+        and parsed_url.hostname == "api.github.com"
+        and parsed_url.port in (None, 443)
+    ):
+        token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        if token:
+            # ヘッダー例外へ秘密値が混入しないよう、可視 ASCII 以外を送信前に拒否する。
+            if any(not 0x21 <= ord(character) <= 0x7E for character in token):
+                raise ValueError("GitHub API token contains invalid header characters")
+            headers["Authorization"] = f"Bearer {token}"
     try:
-        with request.urlopen(request.Request(url, headers=headers), timeout=TIMEOUT_SECONDS) as response:
+        opener = request.build_opener(_StripAuthorizationRedirectHandler())
+        with opener.open(request.Request(url, headers=headers), timeout=TIMEOUT_SECONDS) as response:
             if not 200 <= response.status < 300:
                 raise ValueError(f"HTTP {response.status}")
             body = response.read(MAX_RESPONSE_BYTES + 1)

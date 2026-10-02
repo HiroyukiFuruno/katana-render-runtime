@@ -26,7 +26,7 @@ fn local_resources_feed_css_v8_and_image_layout() -> TestResult {
         resources
             .scripts
             .iter()
-            .any(|script| script.contains("scripted"))
+            .any(|script| script.source().contains("scripted"))
     );
     assert!(document.render().contains("data:image/svg+xml;base64,"));
     assert_frame_contains(&frame.pixels, [16, 185, 129]);

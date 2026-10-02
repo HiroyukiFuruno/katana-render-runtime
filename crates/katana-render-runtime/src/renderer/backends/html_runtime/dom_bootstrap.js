@@ -1,4 +1,5 @@
 const __krrNativeDom = globalThis.__krr_dom;
+const __krrLifecycleCheckpoint = Promise.resolve.bind(Promise);
 class __KrrEvent {
   constructor(...args) {
     if (args.length === 0) throw new TypeError("Event type must be provided");
@@ -120,10 +121,12 @@ const __krrListenerOptions = (options) => ({
 const __krrEventTargetListeners = new WeakMap();
 const __krrEventHandlers = new WeakMap();
 const __krrLifecyclePropertyOverrides = new WeakMap();
-const __krrLifecycleEventTypes = new Set(["load", "readystatechange", "DOMContentLoaded"]);
+const __krrPrevalidatedImageEventAttribute = "data-krr-prevalidated-image-event";
+const __krrLifecycleEventTypes = new Set(["load", "error", "readystatechange", "DOMContentLoaded"]);
 const __krrNormalizeLifecycleEventType = (type) => {
   const normalized = String(type).toLowerCase();
-  if (normalized === "load" || normalized === "readystatechange") return normalized;
+  if (normalized === "load" || normalized === "error" || normalized === "readystatechange")
+    return normalized;
   if (normalized === "domcontentloaded") return "DOMContentLoaded";
   return null;
 };
@@ -174,26 +177,41 @@ const __krrInstallLifecycleProperty = (target, type, value) => {
   overrides.add(eventType);
   __krrStoreEventHandler(target, eventType, typeof value === "function" ? value : null);
 };
+const __krrDispatchListenerEntry = (entries, entry, target, event, capture) => {
+  if (!entries.includes(entry) || entry.capture !== capture) return true;
+  if (entry.once) entries.splice(entries.indexOf(entry), 1);
+  event.__krrPassiveListener = entry.passive;
+  try {
+    if (typeof entry.callback === "function") entry.callback.call(target, event);
+    else entry.callback.handleEvent.call(entry.callback, event);
+  } catch (error) {
+    if (!["readystatechange", "load", "error", "DOMContentLoaded"].includes(String(event.type)))
+      throw error;
+    if (!event.__krrHasListenerError) {
+      event.__krrListenerError = error;
+      event.__krrHasListenerError = true;
+    }
+  } finally {
+    event.__krrPassiveListener = false;
+  }
+  return !event.__krrImmediatePropagationStopped;
+};
 const __krrDispatchListeners = (listeners, target, event, capture) => {
   const entries = listeners.get(String(event.type)) || [];
   for (const entry of [...entries]) {
-    if (!entries.includes(entry)) continue;
-    if (entry.capture !== capture) continue;
-    if (entry.once) entries.splice(entries.indexOf(entry), 1);
-    event.__krrPassiveListener = entry.passive;
-    try {
-      if (typeof entry.callback === "function") entry.callback.call(target, event);
-      else entry.callback.handleEvent.call(entry.callback, event);
-    } finally {
-      event.__krrPassiveListener = false;
-    }
-    if (event.__krrImmediatePropagationStopped) break;
+    if (!__krrDispatchListenerEntry(entries, entry, target, event, capture)) break;
   }
   __krrSyncEventTarget(target, event.type, entries);
 };
 const __krrDispatchHandler = (target, event) => {
   if (event.__krrImmediatePropagationStopped) return;
-  const handler = target[`on${event.type}`];
+  const eventType = String(event.type);
+  const handlers = __krrEventHandlers.get(target);
+  const isManagedLifecycleHandler =
+    (target === globalThis && eventType === "load") ||
+    (target === globalThis.document && eventType === "readystatechange") ||
+    (__krrElementInstances.has(target) && __krrLifecycleEventTypes.has(eventType));
+  const handler = isManagedLifecycleHandler ? handlers?.get(eventType) : target[`on${eventType}`];
   if (typeof handler !== "function") return;
   const result = handler.call(target, event);
   if (result === false && event.cancelable) event.preventDefault();
@@ -213,12 +231,24 @@ const __krrEndDispatch = (event) => {
   event.eventPhase = 0;
   event.__krrDispatching = false;
 };
-const __krrDispatchTargetPhase = (target, event, capture, phase) => {
+const __krrDispatchTargetPhase = (target, event, capture, phase, deferListenerError = false) => {
   event.currentTarget = target;
   event.eventPhase = phase;
   const listeners = __krrEventTargetListeners.get(target) || new Map();
   __krrDispatchListeners(listeners, target, event, capture);
-  if (!capture) __krrDispatchHandler(target, event);
+  if (!capture) {
+    try {
+      __krrDispatchHandler(target, event);
+    } catch (error) {
+      if (!event.__krrHasListenerError) throw error;
+    }
+    if (event.__krrHasListenerError && !deferListenerError) {
+      const error = event.__krrListenerError;
+      delete event.__krrListenerError;
+      delete event.__krrHasListenerError;
+      throw error;
+    }
+  }
 };
 const __krrInstallEventTarget = (target) => {
   const listeners = new Map();
@@ -277,6 +307,7 @@ const __krrInstallEventTarget = (target) => {
           __krrDispatchTargetPhase(target, event, true, Event.AT_TARGET);
           if (!event.__krrImmediatePropagationStopped)
             __krrDispatchTargetPhase(target, event, false, Event.AT_TARGET);
+          __krrThrowDeferredListenerError(event);
           return !event.defaultPrevented;
         } finally {
           __krrEndDispatch(event);
@@ -341,6 +372,37 @@ const __krrClassToken = (token) => {
 };
 const __krrElements = new Map();
 const __krrElementInstances = new WeakSet();
+const __krrIsWindowLoadNode = (nodeId) => {
+  const normalizedId = String(nodeId);
+  const bodyId = String(__krrNativeDom("querySelector", "body") ?? "");
+  return (
+    bodyId === normalizedId ||
+    (bodyId === "" &&
+      String(__krrNativeDom("querySelector", "html > frameset") ?? "") === normalizedId)
+  );
+};
+const __krrInstallBodyLoadHandler = (body, source) => {
+  __krrLifecyclePropertyOverrides.get(globalThis)?.delete("load");
+  if (source === null || source === undefined) {
+    __krrStoreEventHandler(window, "load", null);
+    return;
+  }
+  try {
+    const handler = Function("event", String(source));
+    __krrStoreEventHandler(window, "load", (event) => handler.call(body, event));
+  } catch (_error) {
+    __krrStoreEventHandler(window, "load", null);
+  }
+};
+const __krrRouteWindowLoadElement = (element) => {
+  if (!element || !__krrIsWindowLoadNode(element.__krrNodeId)) return false;
+  const handler = __krrEventHandlers.get(element)?.get("load");
+  if (typeof handler === "function") {
+    __krrStoreEventHandler(window, "load", (event) => handler.call(element, event));
+    __krrStoreEventHandler(element, "load", null);
+  }
+  return true;
+};
 const __krrElement = (nodeId) => {
   if (nodeId === null || nodeId === undefined || nodeId === "") return null;
   const normalizedId = String(nodeId);
@@ -349,17 +411,13 @@ const __krrElement = (nodeId) => {
   const element = __krrInstallEventTarget(Object.create(__krrElementPrototype));
   Object.defineProperty(element, "__krrNodeId", { value: normalizedId });
   for (const eventType of __krrLifecycleEventTypes) {
-    Object.defineProperty(element, `on${eventType}`, {
-      configurable: true,
-      get() {
-        return __krrEventHandlers.get(this)?.get(eventType) ?? null;
-      },
-      set(value) {
-        __krrInstallLifecycleProperty(this, eventType, value);
-      },
-    });
     const source = __krrNativeDom("getAttribute", normalizedId, `on${eventType}`);
-    if (source !== null) __krrInstallInlineHandler(element, eventType, source);
+    if (source !== null) {
+      // body.onload は Window の load プロパティと共有する。静的文書では Rust 側が
+      // body 開始タグのパーサ位置で導入するため、bootstrap 時には先取りしない。
+      if (__krrIsWindowLoadNode(normalizedId) && eventType === "load") continue;
+      else __krrInstallInlineHandler(element, eventType, source);
+    }
   }
   __krrElements.set(normalizedId, element);
   __krrElementInstances.add(element);
@@ -457,6 +515,12 @@ const __krrElementPrototype = {
   set href(value) {
     __krrNativeDom("setAttribute", this.__krrNodeId, "href", String(value));
   },
+  get src() {
+    return __krrNativeDom("getAttribute", this.__krrNodeId, "src") || "";
+  },
+  set src(value) {
+    this.setAttribute("src", String(value));
+  },
   get value() {
     return __krrNativeDom("getAttribute", this.__krrNodeId, "value") || "";
   },
@@ -516,9 +580,13 @@ const __krrElementPrototype = {
     const attributeName = String(name);
     const attributeValue = String(value);
     __krrNativeDom("setAttribute", this.__krrNodeId, attributeName, attributeValue);
-    if (attributeName.toLowerCase().startsWith("on")) {
-      __krrInstallInlineHandler(this, attributeName.slice(2), attributeValue);
-    }
+    const lifecycleEventType = attributeName.toLowerCase().startsWith("on")
+      ? __krrNormalizeLifecycleEventType(attributeName.slice(2))
+      : null;
+    if (__krrIsWindowLoadNode(this.__krrNodeId) && lifecycleEventType === "load")
+      __krrInstallBodyLoadHandler(this, attributeValue);
+    else if (lifecycleEventType !== null)
+      __krrInstallInlineHandler(this, lifecycleEventType, attributeValue);
   },
   removeAttribute(name) {
     const attributeName = String(name);
@@ -528,7 +596,9 @@ const __krrElementPrototype = {
     const hadAttribute = __krrNativeDom("getAttribute", this.__krrNodeId, attributeName) !== null;
     __krrNativeDom("removeAttribute", this.__krrNodeId, attributeName);
     if (hadAttribute && lifecycleEventType !== null) {
-      __krrInstallInlineHandler(this, lifecycleEventType, null);
+      if (__krrIsWindowLoadNode(this.__krrNodeId) && lifecycleEventType === "load")
+        __krrInstallBodyLoadHandler(this, null);
+      else __krrInstallInlineHandler(this, lifecycleEventType, null);
     }
   },
   querySelector(selector) {
@@ -579,8 +649,27 @@ const __krrInlineHandler = (target, event) => {
   if (result === false && event.cancelable) event.preventDefault();
 };
 const __krrDispatchElementPhase = (target, event, capture, phase) => {
-  __krrDispatchTargetPhase(target, event, capture, phase);
-  if (!capture && !event.__krrImmediatePropagationStopped) __krrInlineHandler(target, event);
+  __krrDispatchTargetPhase(target, event, capture, phase, true);
+  if (!capture && !event.__krrImmediatePropagationStopped) {
+    try {
+      __krrInlineHandler(target, event);
+    } catch (error) {
+      if (!event.__krrHasListenerError) throw error;
+    }
+    if (event.__krrHasListenerError) {
+      const error = event.__krrListenerError;
+      delete event.__krrListenerError;
+      delete event.__krrHasListenerError;
+      throw error;
+    }
+  }
+};
+const __krrThrowDeferredListenerError = (event) => {
+  if (!event.__krrHasListenerError) return;
+  const error = event.__krrListenerError;
+  delete event.__krrListenerError;
+  delete event.__krrHasListenerError;
+  throw error;
 };
 const __krrDispatchElementEvent = (target, event) => {
   __krrBeginDispatch(target, event);
@@ -605,6 +694,7 @@ const __krrDispatchElementEvent = (target, event) => {
         if (event.__krrPropagationStopped) break;
       }
     }
+    __krrThrowDeferredListenerError(event);
     return event;
   } finally {
     __krrEndDispatch(event);
@@ -639,8 +729,89 @@ globalThis.document = __krrInstallEventTarget({
     return __krrDocumentReadyState;
   },
 });
+const __krrDocumentPrototype = Object.create(Object.getPrototypeOf(globalThis.document));
+Object.defineProperty(__krrDocumentPrototype, "onreadystatechange", {
+  configurable: true,
+  get() {
+    return __krrEventHandlers.get(this)?.get("readystatechange") ?? null;
+  },
+  set(value) {
+    __krrInstallLifecycleProperty(this, "readystatechange", value);
+  },
+});
+Object.setPrototypeOf(globalThis.document, __krrDocumentPrototype);
+for (const eventType of __krrLifecycleEventTypes) {
+  Object.defineProperty(__krrElementPrototype, `on${eventType}`, {
+    configurable: true,
+    get() {
+      if (eventType === "load" && __krrRouteWindowLoadElement(this))
+        return __krrEventHandlers.get(window)?.get("load") ?? null;
+      return __krrEventHandlers.get(this)?.get(eventType) ?? null;
+    },
+    set(value) {
+      if (eventType === "load" && __krrRouteWindowLoadElement(this)) {
+        __krrInstallLifecycleProperty(window, eventType, value);
+        return;
+      }
+      __krrInstallLifecycleProperty(this, eventType, value);
+    },
+  });
+}
 globalThis.window = globalThis;
 __krrInstallEventTarget(globalThis);
+Object.defineProperty(globalThis, "onload", {
+  configurable: true,
+  get() {
+    return __krrEventHandlers.get(globalThis)?.get("load") ?? null;
+  },
+  set(value) {
+    __krrInstallLifecycleProperty(globalThis, "load", value);
+  },
+});
+globalThis.__krrInstallStaticBodyLoadHandler = (parserSource, laterToken = false) => {
+  if (laterToken) {
+    const nodeId =
+      __krrNativeDom("querySelector", "body") ?? __krrNativeDom("querySelector", "html > frameset");
+    if (nodeId !== null && __krrNativeDom("getAttribute", nodeId, "onload") === null) {
+      __krrNativeDom("setAttribute", nodeId, "onload", parserSource);
+      __krrInstallBodyLoadHandler(__krrElement(nodeId), parserSource);
+    }
+    return;
+  }
+  const install = (element) => {
+    if (parserSource === undefined) {
+      __krrInstallBodyLoadHandler(element, element.getAttribute("onload"));
+      return;
+    }
+    const currentSource = __krrNativeDom("getAttribute", element.__krrNodeId, "onload");
+    if (currentSource === null) {
+      __krrNativeDom("setAttribute", element.__krrNodeId, "onload", parserSource);
+      __krrInstallBodyLoadHandler(element, parserSource);
+    } else if (currentSource === parserSource) {
+      __krrInstallBodyLoadHandler(element, currentSource);
+    }
+  };
+  const body = document.body;
+  if (body !== null) {
+    install(body);
+    return;
+  }
+  const frameset = document.querySelector("html > frameset");
+  if (frameset !== null) install(frameset);
+};
+const __krrSeedPrevalidatedImageEvents = () => {
+  let images;
+  try {
+    images = document.querySelectorAll("img");
+  } catch (_error) {
+    return;
+  }
+  for (const image of images) {
+    image.removeAttribute(__krrPrevalidatedImageEventAttribute);
+    // HTML属性は文書作成者が指定できるため、検証済み結果の証拠としては使わない。
+  }
+};
+__krrSeedPrevalidatedImageEvents();
 const __krrLayoutMetrics = () => JSON.parse(__krrNativeDom("layoutMetrics"));
 Object.defineProperties(globalThis, {
   innerWidth: { get: () => __krrLayoutMetrics().width },
@@ -1262,16 +1433,637 @@ globalThis.__krrPrepareIntersectionObservers = () => {
   return [...__krrIntersectionObservers].some((observer) => observer.targets.size > 0);
 };
 window.addEventListener("scroll", globalThis.__krrRefreshIntersectionObservers);
+const __krrDispatchDocumentReadyStateChange = () => {
+  // document handler の例外は、同じ state transition の要素通知を中断させない。
+  try {
+    document.dispatchEvent(new Event("readystatechange"));
+  } catch (_error) {}
+};
+const __krrDispatchElementReadyStateChange = () => {
+  for (const element of document.querySelectorAll("*")) {
+    const handler = __krrEventHandlers.get(element)?.get("readystatechange");
+    const listeners = __krrEventTargetListeners.get(element)?.get("readystatechange");
+    if (typeof handler === "function" || (listeners?.length ?? 0) > 0) {
+      // 個々の要素 handler の例外は、後続要素と window.load を中断させない。
+      try {
+        element.dispatchEvent(new Event("readystatechange"));
+      } catch (_error) {}
+    }
+  }
+};
 globalThis.__krrDispatchDocumentContentLoaded = () => {
   __krrDocumentReadyState = "interactive";
-  document.dispatchEvent(new Event("readystatechange"));
+  __krrDispatchDocumentReadyStateChange();
+  __krrDispatchElementReadyStateChange();
   document.dispatchEvent(new Event("DOMContentLoaded"));
 };
-globalThis.__krrDispatchWindowLoad = () => {
-  __krrDocumentReadyState = "complete";
-  document.dispatchEvent(new Event("readystatechange"));
-  for (const frame of document.querySelectorAll("iframe")) {
-    if (frame.contentDocument) frame.dispatchEvent(new Event("load"));
+const __krrBase64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const __krrBase64Index = (value) => __krrBase64Alphabet.indexOf(String.fromCharCode(value));
+const __krrBase64PayloadIsValid = (encoded, padding) => {
+  for (let index = 0; index < encoded.length - padding; index += 1)
+    if (__krrBase64Index(encoded[index]) < 0) return false;
+  return true;
+};
+const __krrBase64QuartetBytes = (encoded, offset) => {
+  const first = __krrBase64Index(encoded[offset]);
+  const second = __krrBase64Index(encoded[offset + 1]);
+  const third = encoded[offset + 2] === 61 ? 0 : __krrBase64Index(encoded[offset + 2]);
+  const fourth = encoded[offset + 3] === 61 ? 0 : __krrBase64Index(encoded[offset + 3]);
+  if (first < 0 || second < 0 || third < 0 || fourth < 0) return null;
+  const bytes = [(first << 2) | (second >> 4)];
+  if (encoded[offset + 2] !== 61) bytes.push(((second & 15) << 4) | (third >> 2));
+  if (encoded[offset + 3] !== 61) bytes.push(((third & 3) << 6) | fourth);
+  return bytes;
+};
+const __krrBase64ImageBytes = (payload) => {
+  const encoded = __krrPercentEncodedImageBytes(payload);
+  if (encoded === null || encoded.length % 4 !== 0) return null;
+  const padding = encoded.at(-1) === 61 ? (encoded.at(-2) === 61 ? 2 : 1) : 0;
+  if (!__krrBase64PayloadIsValid(encoded, padding)) return null;
+  const bytes = [];
+  for (let offset = 0; offset < encoded.length; offset += 4) {
+    const quartet = __krrBase64QuartetBytes(encoded, offset);
+    if (quartet === null) return null;
+    bytes.push(...quartet);
   }
+  return bytes;
+};
+
+const __krrDecodeJpegDcCoefficient = (reader, tables, huffmanTables) => {
+  const length = reader.decodeSymbol(huffmanTables.get(`0:${tables >> 4}`));
+  return length !== null && length <= 11 && reader.readBits(length) !== null;
+};
+const __krrDecodeJpegAcCoefficients = (reader, tables, huffmanTables) => {
+  for (let coefficient = 1; coefficient < 64; ) {
+    const symbol = reader.decodeSymbol(huffmanTables.get(`1:${tables & 15}`));
+    if (symbol === null) return false;
+    const run = symbol >> 4;
+    const size = symbol & 15;
+    if (size === 0) {
+      if (run === 0) return true;
+      if (run !== 15 || coefficient + 16 > 64) return false;
+      coefficient += 16;
+      continue;
+    }
+    if (size > 10 || coefficient + run >= 64 || reader.readBits(size) === null) return false;
+    coefficient += run + 1;
+  }
+  return true;
+};
+const __krrDecodeBaselineJpegBlock = (reader, tables, huffmanTables) =>
+  __krrDecodeJpegDcCoefficient(reader, tables, huffmanTables) &&
+  __krrDecodeJpegAcCoefficients(reader, tables, huffmanTables);
+const __krrJpegEntropyReader = (bytes, offset) => {
+  let byteOffset = offset;
+  let currentByte = 0;
+  let remainingBits = 0;
+  const readByte = () => {
+    if (byteOffset >= bytes.length) return null;
+    const value = bytes[byteOffset];
+    byteOffset += 1;
+    if (value !== 255) return value;
+    if (byteOffset >= bytes.length || bytes[byteOffset] !== 0) {
+      byteOffset -= 1;
+      return null;
+    }
+    byteOffset += 1;
+    return 255;
+  };
+  const readBits = (count) => {
+    let value = 0;
+    for (let index = 0; index < count; index += 1) {
+      if (remainingBits === 0) {
+        const next = readByte();
+        if (next === null) return null;
+        currentByte = next;
+        remainingBits = 8;
+      }
+      value = (value << 1) | ((currentByte >> (remainingBits - 1)) & 1);
+      remainingBits -= 1;
+    }
+    return value;
+  };
+  const decodeSymbol = (table) => {
+    let code = 0;
+    for (let length = 1; length <= 16; length += 1) {
+      const bit = readBits(1);
+      if (bit === null) return null;
+      code = (code << 1) | bit;
+      const symbol = table[length].get(code);
+      if (symbol !== undefined) return symbol;
+    }
+    return null;
+  };
+  const consumeRestartMarker = (expected) => {
+    if (
+      remainingBits > 0 &&
+      (currentByte & ((1 << remainingBits) - 1)) !== (1 << remainingBits) - 1
+    )
+      return false;
+    remainingBits = 0;
+    if (bytes[byteOffset] !== 255) return false;
+    while (bytes[byteOffset] === 255) byteOffset += 1;
+    if (byteOffset >= bytes.length || bytes[byteOffset] !== 208 + expected) return false;
+    byteOffset += 1;
+    return true;
+  };
+  return { readBits, decodeSymbol, consumeRestartMarker, offset: () => byteOffset };
+};
+const __krrBaselineJpegMcuCount = (frame) => {
+  const horizontal = Math.max(...frame.components.map((component) => component.horizontal));
+  const vertical = Math.max(...frame.components.map((component) => component.vertical));
+  return Math.ceil(frame.width / (8 * horizontal)) * Math.ceil(frame.height / (8 * vertical));
+};
+const __krrDecodeBaselineJpegEntropy = (
+  bytes,
+  offset,
+  frame,
+  scanComponents,
+  huffmanTables,
+  restartInterval,
+) => {
+  const reader = __krrJpegEntropyReader(bytes, offset);
+  const mcuCount = __krrBaselineJpegMcuCount(frame);
+  for (let mcu = 0; mcu < mcuCount; mcu += 1) {
+    for (const component of scanComponents) {
+      for (let block = 0; block < component.horizontal * component.vertical; block += 1) {
+        if (!__krrDecodeBaselineJpegBlock(reader, component.tables, huffmanTables)) return null;
+      }
+    }
+    if (
+      restartInterval > 0 &&
+      mcu + 1 < mcuCount &&
+      (mcu + 1) % restartInterval === 0 &&
+      !reader.consumeRestartMarker((Math.floor((mcu + 1) / restartInterval) - 1) % 8)
+    )
+      return null;
+  }
+  return reader.offset();
+};
+const __krrJpegStartOfFrame = (marker) =>
+  (marker >= 192 && marker <= 195) ||
+  (marker >= 197 && marker <= 199) ||
+  (marker >= 201 && marker <= 203) ||
+  (marker >= 205 && marker <= 207);
+const __krrReadJpegMarker = (bytes, offset) => {
+  if (bytes[offset] !== 255) return null;
+  let markerOffset = offset;
+  while (bytes[markerOffset] === 255) markerOffset += 1;
+  if (markerOffset >= bytes.length || bytes[markerOffset] === 0) return null;
+  return { marker: bytes[markerOffset], offset: markerOffset + 1 };
+};
+const __krrReadJpegSegment = (bytes, offset) => {
+  if (offset + 2 > bytes.length) return null;
+  const length = (bytes[offset] << 8) | bytes[offset + 1];
+  if (length < 2 || offset + length > bytes.length) return null;
+  return { start: offset + 2, end: offset + length };
+};
+const __krrReadJpegQuantizationTables = (bytes, segment, tables) => {
+  let offset = segment.start;
+  while (offset < segment.end) {
+    const descriptor = bytes[offset];
+    const precision = descriptor >> 4;
+    const tableId = descriptor & 15;
+    const length = precision === 0 ? 65 : precision === 1 ? 129 : 0;
+    if (tableId > 3 || length === 0 || offset + length > segment.end) return false;
+    tables.add(tableId);
+    offset += length;
+  }
+  return offset === segment.end;
+};
+const __krrReadJpegHuffmanTable = (bytes, offset, end) => {
+  if (offset + 17 > end) return null;
+  const descriptor = bytes[offset];
+  const tableClass = descriptor >> 4;
+  const tableId = descriptor & 15;
+  if (tableClass > 1 || tableId > 3) return null;
+  let values = 0;
+  let code = 0;
+  const table = Array.from({ length: 17 }, () => new Map());
+  for (let length = 1; length <= 16; length += 1) {
+    const count = bytes[offset + length];
+    values += count;
+    code <<= 1;
+    if (code + count > 1 << length) return null;
+    for (let index = 0; index < count; index += 1)
+      table[length].set(code++, bytes[offset + 17 + values - count + index]);
+  }
+  const nextOffset = offset + 17 + values;
+  if (nextOffset > end) return null;
+  return { key: `${tableClass}:${tableId}`, table, nextOffset };
+};
+const __krrReadJpegHuffmanTables = (bytes, segment, tables) => {
+  let offset = segment.start;
+  while (offset < segment.end) {
+    const result = __krrReadJpegHuffmanTable(bytes, offset, segment.end);
+    if (result === null) return false;
+    tables.set(result.key, result.table);
+    offset = result.nextOffset;
+  }
+  return offset === segment.end;
+};
+const __krrReadJpegFrame = (bytes, marker, segment) => {
+  const length = segment.end - segment.start;
+  if (length < 6) return null;
+  const height = (bytes[segment.start + 1] << 8) | bytes[segment.start + 2];
+  const width = (bytes[segment.start + 3] << 8) | bytes[segment.start + 4];
+  const componentCount = bytes[segment.start + 5];
+  if (height === 0 || width === 0 || componentCount === 0 || length !== 6 + componentCount * 3)
+    return null;
+  const componentsById = new Map();
+  const components = [];
+  for (let offset = segment.start + 6; offset < segment.end; offset += 3) {
+    const id = bytes[offset];
+    const sampling = bytes[offset + 1];
+    const quantizationTable = bytes[offset + 2];
+    const component = { id, horizontal: sampling >> 4, vertical: sampling & 15, quantizationTable };
+    if (
+      id === 0 ||
+      component.horizontal === 0 ||
+      component.vertical === 0 ||
+      quantizationTable > 3 ||
+      componentsById.has(id)
+    )
+      return null;
+    componentsById.set(id, component);
+    components.push(component);
+  }
+  return { marker, width, height, components, componentsById };
+};
+const __krrReadJpegScanComponents = (bytes, segment, state) => {
+  const length = segment.end - segment.start;
+  const count = bytes[segment.start];
+  if (count === 0 || length !== 4 + count * 2) return null;
+  const components = [];
+  for (let offset = segment.start + 1; offset < segment.start + 1 + count * 2; offset += 2) {
+    const component = state.frame.componentsById.get(bytes[offset]);
+    const tables = bytes[offset + 1];
+    if (
+      component === undefined ||
+      !state.quantizationTables.has(component.quantizationTable) ||
+      !state.huffmanTables.has(`0:${tables >> 4}`) ||
+      !state.huffmanTables.has(`1:${tables & 15}`)
+    )
+      return null;
+    components.push({ ...component, tables });
+  }
+  return components;
+};
+const __krrFindJpegScanMarker = (bytes, offset) => {
+  let scanOffset = offset;
+  while (scanOffset < bytes.length) {
+    if (bytes[scanOffset] !== 255) {
+      scanOffset += 1;
+      continue;
+    }
+    const markerOffset = scanOffset;
+    scanOffset += 1;
+    while (bytes[scanOffset] === 255) scanOffset += 1;
+    if (scanOffset >= bytes.length) return null;
+    const marker = bytes[scanOffset];
+    scanOffset += 1;
+    if (marker === 0 || (marker >= 208 && marker <= 215)) continue;
+    return markerOffset;
+  }
+  return null;
+};
+const __krrReadJpegRestartInterval = (bytes, segment, state) => {
+  if (segment.end - segment.start !== 2) return false;
+  state.restartInterval = (bytes[segment.start] << 8) | bytes[segment.start + 1];
+  return true;
+};
+const __krrReadJpegScan = (bytes, segment, state) => {
+  const components = __krrReadJpegScanComponents(bytes, segment, state);
+  if (components === null) return null;
+  state.hasScan = true;
+  if (state.frame.marker === 192 && components.length === state.frame.components.length)
+    return __krrDecodeBaselineJpegEntropy(
+      bytes,
+      segment.end,
+      state.frame,
+      components,
+      state.huffmanTables,
+      state.restartInterval,
+    );
+  return __krrFindJpegScanMarker(bytes, segment.end);
+};
+const __krrJpegMarkerHasNoSegment = (marker) => marker === 1 || (marker >= 208 && marker <= 215);
+const __krrAdvanceJpegSegment = (bytes, marker, offset, state) => {
+  const segment = __krrReadJpegSegment(bytes, offset);
+  if (segment === null) return null;
+  if (marker === 219)
+    return __krrReadJpegQuantizationTables(bytes, segment, state.quantizationTables)
+      ? segment.end
+      : null;
+  if (marker === 196)
+    return __krrReadJpegHuffmanTables(bytes, segment, state.huffmanTables) ? segment.end : null;
+  if (marker === 221)
+    return __krrReadJpegRestartInterval(bytes, segment, state) ? segment.end : null;
+  if (__krrJpegStartOfFrame(marker)) {
+    state.frame = __krrReadJpegFrame(bytes, marker, segment);
+    state.hasFrame = state.frame !== null;
+    return state.hasFrame ? segment.end : null;
+  }
+  return marker === 218 && state.hasFrame ? __krrReadJpegScan(bytes, segment, state) : segment.end;
+};
+const __krrAdvanceJpeg = (bytes, marker, offset, state) => {
+  if (marker === 217)
+    return state.hasFrame && state.hasScan && offset === bytes.length ? true : null;
+  if (__krrJpegMarkerHasNoSegment(marker)) return offset;
+  return __krrAdvanceJpegSegment(bytes, marker, offset, state);
+};
+const __krrJpegBytesAreDecodable = (bytes) => {
+  if (bytes.length < 4 || bytes[0] !== 255 || bytes[1] !== 216) return false;
+  const state = {
+    hasFrame: false,
+    hasScan: false,
+    quantizationTables: new Set(),
+    huffmanTables: new Map(),
+    frame: null,
+    restartInterval: 0,
+  };
+  for (let offset = 2; offset < bytes.length; ) {
+    const marker = __krrReadJpegMarker(bytes, offset);
+    if (marker === null) return false;
+    const nextOffset = __krrAdvanceJpeg(bytes, marker.marker, marker.offset, state);
+    if (nextOffset === true) return true;
+    if (nextOffset === null) return false;
+    offset = nextOffset;
+  }
+  return false;
+};
+const __krrGifUint16 = (bytes, offset) => bytes[offset] | (bytes[offset + 1] << 8);
+const __krrGifColorTableEnd = (bytes, offset, packed) => {
+  if ((packed & 0x80) === 0) return offset;
+  const end = offset + 3 * (1 << ((packed & 0x07) + 1));
+  return end <= bytes.length ? end : null;
+};
+const __krrGifSkipSubBlocks = (bytes, offset, mustContainData) => {
+  let sawData = false;
+  while (offset < bytes.length) {
+    const length = bytes[offset];
+    offset += 1;
+    if (length === 0) return !mustContainData || sawData ? offset : null;
+    const end = offset + length;
+    if (end > bytes.length) return null;
+    sawData = true;
+    offset = end;
+  }
+  return null;
+};
+const __krrGifScreen = (bytes) => {
+  const startsWith = (prefix) => prefix.every((value, index) => bytes[index] === value);
+  const supportedHeader =
+    startsWith([71, 73, 70, 56, 55, 97]) || startsWith([71, 73, 70, 56, 57, 97]);
+  if (!supportedHeader || bytes.length < 13) return null;
+  const width = __krrGifUint16(bytes, 6);
+  const height = __krrGifUint16(bytes, 8);
+  if (width === 0 || height === 0) return null;
+  const globalColorTable = (bytes[10] & 0x80) !== 0;
+  const offset = __krrGifColorTableEnd(bytes, 13, bytes[10]);
+  return offset === null ? null : { width, height, globalColorTable, offset };
+};
+const __krrGifImageEnd = (bytes, offset, screen) => {
+  if (bytes.length - offset < 9) return null;
+  const left = __krrGifUint16(bytes, offset);
+  const top = __krrGifUint16(bytes, offset + 2);
+  const width = __krrGifUint16(bytes, offset + 4);
+  const height = __krrGifUint16(bytes, offset + 6);
+  const packed = bytes[offset + 8];
+  const fitsScreen = left + width <= screen.width && top + height <= screen.height;
+  if (width === 0 || height === 0 || !fitsScreen || (!screen.globalColorTable && !(packed & 0x80)))
+    return null;
+  const dataStart = __krrGifColorTableEnd(bytes, offset + 9, packed);
+  if (dataStart === null || dataStart >= bytes.length) return null;
+  const lzwCodeSize = bytes[dataStart];
+  if (lzwCodeSize < 2 || lzwCodeSize > 8) return null;
+  return __krrGifSkipSubBlocks(bytes, dataStart + 1, true);
+};
+const __krrGifNextBlock = (bytes, offset, screen) => {
+  const marker = bytes[offset];
+  if (marker === 0x3b) return { complete: true, image: false, offset: offset + 1 };
+  if (marker === 0x21) {
+    if (offset + 1 >= bytes.length) return null;
+    const nextOffset = __krrGifSkipSubBlocks(bytes, offset + 2, false);
+    return nextOffset === null ? null : { complete: false, image: false, offset: nextOffset };
+  }
+  if (marker !== 0x2c) return null;
+  const nextOffset = __krrGifImageEnd(bytes, offset + 1, screen);
+  return nextOffset === null ? null : { complete: false, image: true, offset: nextOffset };
+};
+// GIF は logical-screen descriptor、色テーブル、画像descriptorとdata sub-blockを検証する。
+const __krrGifBytesAreDecodable = (bytes) => {
+  const screen = __krrGifScreen(bytes);
+  if (screen === null) return false;
+  let offset = screen.offset;
+  let sawImage = false;
+  while (offset < bytes.length) {
+    const block = __krrGifNextBlock(bytes, offset, screen);
+    if (block === null) return false;
+    if (block.complete) return sawImage && block.offset === bytes.length;
+    sawImage ||= block.image;
+    offset = block.offset;
+  }
+  return false;
+};
+const __krrSvgLatin1Text = (bytes) => {
+  const chunkSize = 8192;
+  const chunks = [];
+  for (let offset = 0; offset < bytes.length; offset += chunkSize)
+    chunks.push(String.fromCharCode(...bytes.slice(offset, offset + chunkSize)));
+  return chunks.join("");
+};
+const __krrSkipXmlWhitespace = (text, offset) => {
+  while (offset < text.length && /[\t\n\r ]/.test(text[offset])) offset += 1;
+  return offset;
+};
+const __krrXmlTerminatorEnd = (text, offset, terminator) => {
+  const end = text.indexOf(terminator, offset);
+  return end < 0 ? -1 : end + terminator.length;
+};
+const __krrSvgDoctypeEnd = (text, start) => {
+  const matched = /^<!DOCTYPE[\t\n\r ]+(?:"[^"]*"|'[^']*'|\[[\s\S]*?\]|[^>])*>/i.exec(
+    text.slice(start),
+  );
+  return matched === null ? -1 : start + matched[0].length;
+};
+const __krrSvgPreambleItem = (text, offset, sawDoctype) => {
+  if (text.startsWith("<!--", offset))
+    return { end: __krrXmlTerminatorEnd(text, offset, "-->"), doctype: false };
+  if (text.startsWith("<?", offset))
+    return { end: __krrXmlTerminatorEnd(text, offset, "?>"), doctype: false };
+  if (!sawDoctype && text.slice(offset, offset + 9).toUpperCase() === "<!DOCTYPE") {
+    if (!/[\t\n\r ]/.test(text[offset + 9])) return { end: -1, doctype: true };
+    return { end: __krrSvgDoctypeEnd(text, offset), doctype: true };
+  }
+  return null;
+};
+const __krrSvgBytesAreDecodable = (bytes) => {
+  const text = __krrSvgLatin1Text(bytes);
+  let offset = bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191 ? 3 : 0;
+  offset = __krrSkipXmlWhitespace(text, offset);
+  if (text.slice(offset, offset + 5) === "<?xml") {
+    if (!/[\t\n\r ]/.test(text[offset + 5])) return false;
+    offset = __krrXmlTerminatorEnd(text, offset, "?>");
+    if (offset < 0) return false;
+    offset = __krrSkipXmlWhitespace(text, offset);
+  }
+  let sawDoctype = false;
+  for (;;) {
+    const item = __krrSvgPreambleItem(text, offset, sawDoctype);
+    if (item === null) break;
+    if (item.end < 0) return false;
+    sawDoctype ||= item.doctype;
+    offset = __krrSkipXmlWhitespace(text, item.end);
+  }
+  return /^<svg(?:[\t\n\r />])/.test(text.slice(offset));
+};
+const __krrImageBytesAreDecodable = (mediaType, bytes) => {
+  if (mediaType === "image/gif") return __krrGifBytesAreDecodable(bytes);
+  // JPEG は SOI/EOI だけでは破損データを見逃すため、フレームと走査を構造まで検証する。
+  if (mediaType === "image/jpeg") return __krrJpegBytesAreDecodable(bytes);
+  if (mediaType === "image/svg+xml") return __krrSvgBytesAreDecodable(bytes);
+  return false;
+};
+const __krrPercentEncodedImageBytes = (payload) => {
+  const bytes = [];
+  for (let offset = 0; offset < payload.length; ) {
+    const character = payload[offset];
+    if (character === "%") {
+      const encoded = payload.slice(offset + 1, offset + 3);
+      if (!/^[0-9A-Fa-f]{2}$/.test(encoded)) return null;
+      bytes.push(Number.parseInt(encoded, 16));
+      offset += 3;
+      continue;
+    }
+    const codePoint = payload.codePointAt(offset);
+    if (codePoint === undefined || codePoint > 127) return null;
+    bytes.push(codePoint);
+    offset += 1;
+  }
+  return bytes;
+};
+const __krrImageLoadEventType = (_image, source) => {
+  if (typeof source !== "string" || source.slice(0, "data:".length).toLowerCase() !== "data:")
+    return "error";
+  const separator = source.indexOf(",");
+  if (separator < 0) return "error";
+  const metadata = source.slice("data:".length, separator);
+  const mediaType = metadata.split(";", 1)[0].trim().toLowerCase();
+  if (!mediaType.startsWith("image/")) return "error";
+  // GIF/JPEG/PNG/WebP/SVGは、static/interactiveで共通のRust完全デコーダへ委譲する。
+  if (["image/gif", "image/jpeg", "image/png", "image/svg+xml", "image/webp"].includes(mediaType))
+    return __krrNativeDom("validateImageDataUrl", source) === "load" ? "load" : "error";
+  // 未対応の画像形式は、payloadをJSのnumber配列へ変換せず即時に拒否する。
+  return "error";
+};
+
+const __krrDispatchImageLoad = async (image) => {
+  let source = image.getAttribute("src");
+  let lastDispatchedSource = null;
+  // load/error handlerによるsrc差替えを再試行し、相互差替えでも有限回で打ち切る。
+  for (let attempt = 0; source !== null && attempt < 8; attempt += 1) {
+    const eventType = __krrImageLoadEventType(image, source);
+    lastDispatchedSource = source;
+    try {
+      image.dispatchEvent(new Event(eventType));
+    } catch (_error) {}
+    await __krrLifecycleCheckpoint();
+    const replacement = image.getAttribute("src");
+    if (replacement === source) return lastDispatchedSource;
+    source = replacement;
+  }
+  return lastDispatchedSource;
+};
+
+const __krrDispatchPendingImages = async (document, state = {}) => {
+  const dispatchedImageSources = state.dispatchedImageSources || new Map();
+  state.dispatchedImageSources = dispatchedImageSources;
+  const maxImageDispatches = 1024;
+  const maxImageRescans = 8;
+  let emptyRescanCount = 0;
+  let imageDispatches = state.imageDispatches || 0;
+  let dispatched = false;
+  for (
+    let rescan = 0;
+    rescan < maxImageRescans && emptyRescanCount < 2 && imageDispatches < maxImageDispatches;
+    rescan += 1
+  ) {
+    let foundImage = false;
+    for (const image of document.querySelectorAll("img")) {
+      const source = image.getAttribute("src");
+      if (dispatchedImageSources.get(image) === source) continue;
+      foundImage = true;
+      dispatched = true;
+      const dispatchedSource = await __krrDispatchImageLoad(image);
+      // 実dispatch済みsourceだけを記録し、上限時の差替え先は次のscanで評価する。
+      dispatchedImageSources.set(image, dispatchedSource);
+      await __krrLifecycleCheckpoint();
+      // microtaskでsrcが差し替えられた場合は、次のscanで新しい値を再評価する。
+      imageDispatches += 1;
+      state.imageDispatches = imageDispatches;
+      if (imageDispatches >= maxImageDispatches) {
+        await __krrLifecycleCheckpoint();
+        return dispatched;
+      }
+    }
+    await __krrLifecycleCheckpoint();
+    emptyRescanCount = foundImage ? 0 : emptyRescanCount + 1;
+  }
+  return dispatched;
+};
+
+const __krrDispatchLocalFrame = (frame) => {
+  try {
+    frame.dispatchEvent(new Event("load"));
+  } catch (_error) {}
+};
+
+const __krrDispatchPendingLocalFrames = async (document, state = {}) => {
+  const dispatchedFrames = state.dispatchedFrames || new Set();
+  state.dispatchedFrames = dispatchedFrames;
+  const maxFrameDispatches = 1024;
+  const maxFrameRescans = 8;
+  let emptyFrameRescanCount = 0;
+  let frameDispatches = state.frameDispatches || 0;
+  let dispatched = false;
+  for (
+    let rescan = 0;
+    rescan < maxFrameRescans && emptyFrameRescanCount < 2 && frameDispatches < maxFrameDispatches;
+    rescan += 1
+  ) {
+    let foundFrame = false;
+    for (const frame of document.querySelectorAll("iframe")) {
+      if (!frame.contentDocument || dispatchedFrames.has(frame)) continue;
+      foundFrame = true;
+      dispatched = true;
+      dispatchedFrames.add(frame);
+      __krrDispatchLocalFrame(frame);
+      await __krrLifecycleCheckpoint();
+      frameDispatches += 1;
+      state.frameDispatches = frameDispatches;
+      if (frameDispatches >= maxFrameDispatches) break;
+    }
+    await __krrLifecycleCheckpoint();
+    emptyFrameRescanCount = foundFrame ? 0 : emptyFrameRescanCount + 1;
+  }
+  return dispatched;
+};
+
+globalThis.__krrDispatchWindowLoad = async () => {
+  const body = document.body;
+  if (body !== null) __krrRouteWindowLoadElement(body);
+  else
+    __krrRouteWindowLoadElement(__krrElement(__krrNativeDom("querySelector", "html > frameset")));
+  const resourceDispatchState = {};
+  for (let pass = 0; pass < 8; pass += 1) {
+    const framesDispatched = await __krrDispatchPendingLocalFrames(document, resourceDispatchState);
+    const imagesDispatched = await __krrDispatchPendingImages(document, resourceDispatchState);
+    if (!framesDispatched && !imagesDispatched) break;
+    await __krrLifecycleCheckpoint();
+  }
+  __krrDocumentReadyState = "complete";
+  __krrDispatchDocumentReadyStateChange();
+  __krrDispatchElementReadyStateChange();
   window.dispatchEvent(new Event("load"));
 };

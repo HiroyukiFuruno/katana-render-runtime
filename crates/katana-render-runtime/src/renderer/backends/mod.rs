@@ -13,12 +13,24 @@ mod html_dom_helpers;
 mod html_interactive;
 mod html_runtime;
 #[cfg(test)]
+mod html_runtime_data_url_decoder_tests;
+#[cfg(test)]
 #[path = "html_runtime_dom_error_tests.rs"]
 mod html_runtime_dom_error_tests;
+#[cfg(test)]
+mod html_runtime_image_lifecycle_tests;
 #[cfg(test)]
 mod html_runtime_interaction_tests;
 #[cfg(test)]
 mod html_runtime_intersection_observer_tests;
+#[cfg(test)]
+mod html_runtime_lifecycle_tests;
+#[cfg(test)]
+mod html_runtime_png_decoder_tests;
+#[cfg(test)]
+mod html_runtime_ready_state_tests;
+#[cfg(test)]
+mod html_runtime_svg_lifecycle_tests;
 #[cfg(test)]
 mod html_runtime_tests;
 mod html_snapshot;

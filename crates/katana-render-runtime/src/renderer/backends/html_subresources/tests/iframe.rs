@@ -1,6 +1,7 @@
 use super::support::{LocalFixture, TestResult, assert_frame_contains, to_string, viewport};
 use crate::renderer::backends::html_browser::HTML_BROWSER_MAX_SOURCE_BYTES;
 use crate::renderer::backends::html_document::HtmlDocument;
+use crate::renderer::backends::html_runtime::StaticHtmlRuntime;
 use crate::renderer::backends::html_subresources::HtmlSubresourceLoader;
 use crate::renderer::backends::html_subresources::iframe::required_html_root;
 use crate::renderer::backends::{HtmlBrowserSource, HtmlRuntime};
@@ -72,6 +73,84 @@ fn slide_wrapper_source(fixture: &LocalFixture) -> TestResult<HtmlBrowserSource>
     std::fs::write(fixture.root.join("source.html"), SLIDE_SOURCE).map_err(to_string)?;
     let origin = format!("{}?slide=2", fixture.origin()?);
     HtmlBrowserSource::new(SLIDE_WRAPPER, origin).map_err(to_string)
+}
+
+#[test]
+fn iframe_scripts_do_not_shift_parent_body_onload_parser_position() -> TestResult {
+    let fixture = LocalFixture::new()?;
+    std::fs::write(
+        fixture.root.join("frame.html"),
+        r#"<script>window.onload = () => { document.getElementById('status').textContent = 'frame'; };</script>"#,
+    )
+    .map_err(to_string)?;
+    let source = fixture.source(
+        r#"<p id=status>initial</p><iframe src=frame.html></iframe><script>window.onload = () => { document.getElementById('status').textContent = 'first'; };</script><body onload="document.getElementById('status').textContent = 'second'">"#,
+    )?;
+    let session = StaticHtmlRuntime
+        .start_interactive(&source)
+        .map_err(to_string)?;
+    let snapshot = session.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r#"<p id="status">second</p>"#),
+        "{snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
+fn later_duplicate_body_onload_replays_after_foster_parented_iframe_scripts() -> TestResult {
+    let fixture = LocalFixture::new()?;
+    std::fs::write(
+        fixture.root.join("frame.html"),
+        "<script>document.body.removeAttribute('onload'); document.getElementById('status').textContent += 'frame|';</script>",
+    )
+    .map_err(to_string)?;
+    let source = fixture.source(
+        r#"<body onload="document.getElementById('status').textContent += 'first'"><p id=status></p><template><iframe src=ignored.html></iframe></template><table><iframe src=frame.html></iframe><body onload="document.getElementById('status').textContent += 'second'"><script>document.getElementById('status').textContent += 'parent|';</script></table>"#,
+    )?;
+    let snapshot = StaticHtmlRuntime
+        .start_interactive(&source)
+        .and_then(|session| session.snapshot())
+        .map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r#"<p id="status">frame|parent|second</p>"#),
+        "{snapshot}"
+    );
+    Ok(())
+}
+
+#[test]
+fn iframe_after_table_select_transition_executes_before_parent_script_and_load() -> TestResult {
+    let fixture = LocalFixture::new()?;
+    std::fs::write(
+        fixture.root.join("frame.html"),
+        r#"<script>document.getElementById('status').textContent += 'frame|';</script>"#,
+    )
+    .map_err(to_string)?;
+    let source = fixture.source(
+        r#"<p id=status></p><table><select><tr><td><iframe id=real src=frame.html></iframe></td></tr></table><script>document.getElementById('status').textContent += 'after|';</script><body onload="document.getElementById('status').textContent += 'load|'">"#,
+    )?;
+    let mut document = HtmlDocument::parse(&source.raw_html);
+    assert!(document.get_element_by_id("real").is_some());
+    let resources = HtmlSubresourceLoader::new(&source).load(&mut document);
+    assert!(
+        resources
+            .scripts
+            .iter()
+            .any(|script| script.source().contains("'frame|'"))
+    );
+    let session = StaticHtmlRuntime
+        .start_interactive(&source)
+        .map_err(to_string)?;
+    let snapshot = session.snapshot().map_err(to_string)?;
+
+    assert!(
+        snapshot.contains(r#"<p id="status">frame|after|load|</p>"#),
+        "{snapshot}"
+    );
+    Ok(())
 }
 
 #[test]

@@ -4,6 +4,7 @@ REPO_ROOT := justfile_directory()
 RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)
 RTK_CMD := if RTK == "" { "" } else { RTK + " " }
 JOBS := env_var_or_default("JOBS", "2")
+CHECK_JOBS := env_var_or_default("CHECK_JOBS", "3")
 FIXTURE_JOBS := env_var_or_default("FIXTURE_JOBS", JOBS)
 TEST_THREADS := env_var_or_default("TEST_THREADS", "1")
 TEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " -- --test-threads=" + TEST_THREADS }
@@ -19,7 +20,7 @@ COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
 MERMAID_JS_VERSION := "12.0.0"
 MERMAID_ZENUML_JS_VERSION := "1.0.1"
-DRAWIO_JS_VERSION := "31.5.3"
+DRAWIO_JS_VERSION := "31.6.1"
 MATHJAX_JS_VERSION := "4.1.3"
 ZENUML_CORE_JS_VERSION := "4.3.0"
 PLANTUML_JAR_VERSION := "1.2026.8"
@@ -49,6 +50,11 @@ fmt:
 fmt-check:
     {{CARGO}} fmt --all -- --check
 
+# 実入力の遅延再発を捕捉するため、初期描画とcloseを60秒上限で検証する。
+html-first-frame-check input expected_sha256 report="tmp/html-first-frame.json":
+    {{CARGO}} build --locked -p katana-render-runtime --example html_initial_frame_probe
+    python3 scripts/release/verify_html_first_frame.py --input "{{input}}" --expected-sha256 "{{expected_sha256}}" --binary "{{env_var_or_default('CARGO_TARGET_DIR', 'target')}}/debug/examples/html_initial_frame_probe" --report "{{report}}"
+
 # Run strict Clippy checks
 lint:
     RUSTFLAGS="-D warnings" {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity
@@ -73,7 +79,6 @@ unit-test: plantuml-install
 # Run coverage as a required full-check gate
 coverage: plantuml-install
     {{CARGO}} llvm-cov clean --workspace
-    rm -rf target/llvm-cov-target target/debug/deps target/debug/incremental target/debug/build target/debug/examples target/debug/.fingerprint target/package
     {{CARGO}} llvm-cov --workspace --all-targets --all-features --locked --summary-only --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}{{TEST_THREAD_ARGS}}
 
 # Verify pinned runtime asset checksums
@@ -177,9 +182,35 @@ automation-contract-test:
     python3 -m unittest discover -s scripts/hooks -p '*_test.py'
     python3 -m unittest discover -s scripts/release -p '*_test.py'
 
-# Run the local quality gate
-check: fmt-check lint runtime-bundle-check runtime-asset-script-test automation-contract-test unit-test ast-lint dependency-leak biome typecheck runtime-asset-check runtime-package-asset-check runtime-bundle-package-check html-runtime-package-check plantuml-runtime-package-check
+# Run independent local quality-gate lanes concurrently. Cargo and PlantUML
+# work stay in one lane because they share build/cache outputs.
+check:
+    python3 scripts/hooks/run_parallel_checks.py --jobs {{CHECK_JOBS}}
     @echo "checks passed"
+
+# Cargo operations share target/ and the PlantUML cache, so keep them ordered.
+check-rust:
+    just fmt-check
+    just lint
+    just unit-test
+    just ast-lint
+    just dependency-leak
+    just runtime-asset-check
+    just runtime-package-asset-check
+    just runtime-bundle-package-check
+    just html-runtime-package-check
+    just plantuml-runtime-package-check
+
+# These checks read source/generated assets and do not write the shared Cargo target.
+check-assets:
+    just runtime-bundle-check
+    just runtime-asset-script-test
+    just biome
+    just typecheck
+
+# Python contract suites use isolated temporary repositories.
+check-contracts:
+    just automation-contract-test
 
 # Sweep old build artifacts locally (older than 7 days)
 sweep:
@@ -196,6 +227,15 @@ release-target-check:
     python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --repo "{{RELEASE_REPO}}"
     bash scripts/release/assert-tag-safe.sh "{{TAG}}" origin
     bash scripts/release/assert-crates-not-published.sh "{{VERSION}}"
+
+# Show or explicitly synchronize the checked-in immutable release-content manifest.
+# The normal release target check continues to reject a mismatch until this source
+# change is reviewed and committed.
+release-target-manifest:
+    python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --head-ref HEAD --print-release-manifest
+
+release-target-manifest-update:
+    python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --head-ref HEAD --update-release-manifest
 
 # Verify package metadata and dry-run the first publishable crate
 release-verify: release-target-check
@@ -221,6 +261,9 @@ release-specific: release-openspec-archive release-verify
 # Verify release branch readiness before merging
 release-check: release-quality release-specific
 
+# Verify release-only checks after PR CI quality evidence has been verified
+release-preflight-check: release-openspec-archive release-verify
+
 
 # Install Playwright Chromium for official Mermaid / Draw.io reference rendering
 browser-install:
@@ -232,7 +275,8 @@ krr-build:
 
 # Force-update all Rust and JavaScript dependencies plus pinned runtime assets, then run required checks
 depends-update-all:
-    {{CARGO}} upgrade --incompatible allow --pinned allow --recursive true
+    {{CARGO}} upgrade -i allow --pinned allow
+    python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"
     {{CARGO}} update
     bun update --latest
     bun run scripts/runtime-assets/depends-update-all.ts

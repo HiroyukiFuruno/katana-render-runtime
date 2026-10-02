@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 import os
+import shlex
 import subprocess
 import tempfile
 from pathlib import Path
@@ -15,6 +16,80 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.retry = (root / ".github/workflows/release-publish-retry.yml").read_text(encoding="utf-8")
         self.publisher = (root / "scripts/release/publish-crates.sh").read_text(encoding="utf-8")
 
+    def test_coverage_uses_official_clean_and_full_gate_without_wiping_build_cache(self) -> None:
+        root = Path(__file__).parents[2]
+        lines = (root / "Justfile").read_text(encoding="utf-8").splitlines()
+        recipe_start = next(
+            index for index, line in enumerate(lines) if line.startswith("coverage:")
+        )
+        recipe_commands = []
+        for line in lines[recipe_start + 1 :]:
+            if line.startswith("    "):
+                recipe_commands.append(line.strip())
+            elif not line:
+                continue
+            else:
+                break
+
+        parsed_commands = [shlex.split(command) for command in recipe_commands]
+        coverage_commands = [tokens for tokens in parsed_commands if "llvm-cov" in tokens]
+        cleanup_commands = [tokens for tokens in coverage_commands if "clean" in tokens]
+        measurement_commands = [
+            tokens for tokens in coverage_commands if "clean" not in tokens
+        ]
+        self.assertEqual(len(cleanup_commands), 1)
+        self.assertEqual(len(measurement_commands), 1)
+        cleanup = cleanup_commands[0]
+        coverage = measurement_commands[0]
+        self.assertEqual(cleanup[cleanup.index("llvm-cov") + 1], "clean")
+        self.assertIn("--workspace", cleanup)
+        self.assertLess(parsed_commands.index(cleanup), parsed_commands.index(coverage))
+
+        required_options = (
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            "--locked",
+            "--summary-only",
+            "--fail-under-lines",
+            "--fail-uncovered-lines",
+        )
+        for option in required_options:
+            with self.subTest(option=option):
+                self.assertIn(option, coverage)
+        self.assertEqual(
+            coverage[coverage.index("--fail-under-lines") + 1],
+            "{{COVERAGE_MIN_LINES}}",
+        )
+        self.assertIn(
+            "{{COVERAGE_MAX_UNCOVERED_LINES}}",
+            coverage[coverage.index("--fail-uncovered-lines") + 1],
+        )
+
+        forbidden_options = ("--no-clean", "--no-report", "--no-run")
+        for tokens in coverage_commands:
+            for option in forbidden_options:
+                self.assertNotIn(option, tokens)
+        for tokens in parsed_commands:
+            if tokens and tokens[0] == "rm":
+                self.assertFalse(
+                    any(
+                        argument == "target"
+                        or argument.startswith(("target/", "./target/"))
+                        for argument in tokens[1:]
+                    ),
+                    "coverage must retain Cargo build caches",
+                )
+            if len(tokens) > 1 and tokens[1] == "clean":
+                self.assertIn("llvm-cov", tokens)
+
+    @staticmethod
+    def workflow_step(workflow: str, name: str) -> str:
+        marker = f"      - name: {name}\n"
+        start = workflow.index(marker)
+        end = workflow.find("\n      - ", start + len(marker))
+        return workflow[start:] if end < 0 else workflow[start:end]
+
     def test_release_checks_install_the_bun_resolver_before_freshness_validation(self) -> None:
         for job in (self.release[self.release.index("  release-context:"):self.release.index("  release:\n")], self.release[self.release.index("  release:\n"):]):
             self.assertIn("uses: oven-sh/setup-bun@v2", job)
@@ -26,13 +101,25 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         freshness = justfile.index("python3 scripts/release/verify_dependency_freshness.py")
         target = justfile.index("python3 scripts/release/verify-release-target.py")
         self.assertLess(freshness, target)
-        self.assertIn('run: just VERSION="${{ steps.version.outputs.version }}" release-target-check', self.release)
-        self.assertIn("- name: Release quality gate", self.preflight)
-        self.assertIn("timeout-minutes: 65", self.preflight)
-        self.assertIn("run: just release-quality", self.preflight)
-        self.assertIn("- name: Release-specific verification", self.preflight)
-        self.assertIn("timeout-minutes: 35", self.preflight)
-        self.assertIn('run: just VERSION="${{ steps.version.outputs.version }}" release-specific', self.preflight)
+        freshness_steps = (
+            (self.release, "Release target check", 'run: just VERSION="${{ steps.version.outputs.version }}" release-target-check'),
+            (self.release, "Verify release package", 'run: just VERSION="${{ needs.release-context.outputs.version }}" release-verify'),
+            (self.preflight, "Release check", 'run: just VERSION="${{ steps.version.outputs.version }}" release-check'),
+            (self.preflight, "Release preflight checks", 'run: just VERSION="${{ steps.version.outputs.version }}" release-preflight-check'),
+        )
+        for workflow, name, command in freshness_steps:
+            step = self.workflow_step(workflow, name)
+            self.assertIn(command, step, name)
+            self.assertIn("env:\n          GH_TOKEN: ${{ github.token }}", step, name)
+        self.assertNotIn("- name: Release quality gate", self.preflight)
+        self.assertNotIn("- name: Release-specific verification", self.preflight)
+
+    def test_release_preflight_uses_read_only_permissions_for_api_lookups(self) -> None:
+        permissions = self.preflight[self.preflight.index("permissions:"):self.preflight.index("\nenv:")]
+        self.assertEqual(
+            permissions,
+            "permissions:\n  actions: read\n  contents: read\n  pull-requests: read\n",
+        )
 
     def test_public_release_and_cleanup_follow_both_registry_publications(self) -> None:
         publish = self.release.index("- name: Publish crates.io")
@@ -43,6 +130,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         conditional = "if: github.event_name == 'pull_request' || inputs.publish_crates == true"
         self.assertGreaterEqual(self.release.count(conditional), 3)
         self.assertIn("publish_if_needed katana-render-runtime-cli\nwait_for_crate katana-render-runtime-cli", self.publisher)
+        cleanup = self.workflow_step(self.release, "Cleanup published release state")
+        self.assertNotIn("--delete-remote", cleanup)
 
     def test_retry_rejoins_the_same_publication_completion_path(self) -> None:
         publish = self.retry.index("- name: Publish crates.io from release tag")
@@ -55,6 +144,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn('gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --verify-tag', retry_publish)
         self.assertNotIn("--latest", retry_publish)
         self.assertIn("python3 scripts/release/cleanup_release_state.py", self.retry)
+        cleanup_step = self.workflow_step(self.retry, "Cleanup published release state")
+        self.assertNotIn("--delete-remote", cleanup_step)
 
     def run_plantuml_install(self, failures: int, checksum: str) -> tuple[subprocess.CompletedProcess[str], Path, int]:
         root = Path(__file__).parents[2]

@@ -13,28 +13,30 @@ PR 作成前には `lefthook run pre-pr` を実行し、対象版番号（versio
 
 GitHub のブランチ保護（branch protection）では、少なくとも次を必須検査（required check）にする。
 
-- `Test and Build (macos-latest)`
-- `Test and Build (ubuntu-latest)`
-- `Test and Build (windows-latest)`
+- `Test and Build (ubuntu-latest, linux64)`
+- `Test and Build (macos-15, mac-arm64)`
+- `Test and Build (macos-15-intel, mac-x64)`
+- `Test and Build (windows-latest, win64)`
 - `preflight`
 
 ## リリース前検査
 
-`release-preflight` は `release/v...` ブランチの取り込み依頼（Pull Request）で `just release-check` を実行する。
-`just release-check` は、release 予定版番号（version）より前の OpenSpec change が active 側に残っている場合に失敗する。
-内容は次の通り。
+`release-preflight` は、同一リポジトリ内の `release/v...` ブランチから作成された取り込み依頼（Pull Request）では、`CI` が同じ repository / PR / base SHA / head SHA で生成した Ubuntu 品質証跡を検証してから、`just release-preflight-check` を実行する。検証対象は同一 workflow run attempt の Ubuntu job と必須 step であり、APIから証跡を二度取得して一致を確認する。実行中のCIは上限付きで待機する。証跡の欠落・重複・不一致・failure・再取得中の変化は失敗として扱い、古い成功runへフォールバックしない。
+
+この経路では `check` と `coverage` を再実行せず、成功済みの同一HEAD CI証跡を再利用する。Ubuntu CI側で release 用の runtime asset script test、automation contract test、runtime package asset check を実行する。品質条件は維持し、行カバレッジ100%、未到達行0、描画スコア下限99を適用する。Ubuntu CIのcoverage工程には45分の上限があり、timeoutまたは失敗時にはディスク使用量・プロセス一覧・coverage summaryの診断を記録する。`workflow_dispatch` による手動実行は証跡再利用を行わず、従来どおり `just release-check` で完全な品質検査とリリース固有検査を実行する。
+
+`just release-check` はローカルの完全検査である。PR経路の `just release-preflight-check` は、リリース固有検査を行う。いずれもrelease予定版番号（version）より前のOpenSpec changeがactive側に残っている場合は失敗する。リリース前検査の内容は次の通り。
 
 - 版番号（version）が GitHub Release / remote tag 上の自然な次版であること。`v0.3.0` は rename release として KDR の版番号を引き継ぐ
 - ユーザーが対象versionへ含めるよう指定した全commitをrelease branchが祖先として含むこと
 - 対象タグ（tag）が remote 上の既存タグを上書きしないこと
 - 対象版番号（version）が crates.io に未公開であること
-- 整形確認（format）、静的検査（lint）、単体テスト（unit test）、抽象構文木検査（AST lint）
-- KatanA UI 依存の混入検知（dependency leak）
-- カバレッジ（coverage）。行カバレッジ（line coverage）100%、未到達行（uncovered line）0
-- runtime bundle の同期、TypeScript 型検査、runtime asset の checksum 確認
+- リリース固有のOpenSpec archive確認
+- `katana-render-runtime` の梱包（package）後のライブラリ検査、公開の事前実行（publish dry-run）とpackage収録確認
+- 完全品質検査（`just release-check` または再利用するUbuntu CI証跡）では、整形（format）、静的検査（lint）、単体テスト（unit test）、抽象構文木検査（AST lint）、KatanA UI依存の混入検知（dependency leak）、runtime bundle同期、TypeScript型検査、runtime asset checksum確認を行う
+- カバレッジ（coverage）は行カバレッジ（line coverage）100%、未到達行（uncovered line）0を維持する。描画比較の最低スコア99も維持する
 - `Cargo.toml` の版番号（version）と branch 版番号（branch version）の一致
 - 作業領域（workspace）内部依存の版番号（version）一致
-- `katana-render-runtime` の梱包（package）と公開の事前実行（publish dry-run）
 - `katana-render-runtime-cli` の梱包（package）収録対象確認
 
 ## 依存更新の実行メモ
@@ -108,6 +110,20 @@ python3 scripts/release/cleanup_release_state.py \
 ```
 
 Issue起点と依存更新証跡の書式は [Issue起点の変更契約](issue-driven-workflow.md) を参照する。
+
+## 実HTMLの初期描画と終了の確認
+
+HTMLの性能修正では、対象原本のSHA-256を固定して次を実行する。
+
+```bash
+rtk proxy just html-first-frame-check '/path/to/input.html' '<input-sha256>' 'tmp/html-first-frame.json'
+```
+
+ビルド時間を除き、1280×900・scale 1の初期フレームと実際のsession closeを
+プロセス全体の60秒上限で検証する。終了コード、フレームの寸法・バッファ、
+入力・実行ファイルのハッシュ、CPU時間、残存プロセスの有無をJSONへ記録する。
+タイムアウト、close失敗、実行中の入力・バイナリ変更は失敗となる。
+この検証は、公開レジストリ版を使うホストの受入やfragment・sticky動作の確認とは別に行う。
 
 ## 必要な秘匿値
 

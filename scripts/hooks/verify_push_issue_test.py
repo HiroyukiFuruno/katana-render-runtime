@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import io
+import base64
+import hashlib
 import os
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -623,6 +626,97 @@ class VerifyPushIssueTest(unittest.TestCase):
         )
         self.assertEqual(updates, (("feature-a", "a" * 40), ("feature-b", "b" * 40)))
 
+    def test_fast_forward_push_checks_only_the_new_remote_to_local_range(self) -> None:
+        repository = Path("/tmp/verify-push-range")
+        remote_sha = "a" * 40
+        local_sha = "b" * 40
+        with patch.object(subject, "_is_ancestor", side_effect=(True, False)) as ancestor:
+            self.assertEqual(
+                subject.push_validation_range_base(
+                    repository,
+                    remote_sha=remote_sha,
+                    local_sha=local_sha,
+                    default_range_base="origin/master",
+                ),
+                remote_sha,
+            )
+        self.assertEqual(
+            ancestor.call_args_list,
+            [
+                ((repository, remote_sha, local_sha), {}),
+                ((repository, "origin/master", local_sha), {}),
+            ],
+        )
+
+    def test_fast_forward_push_after_merging_live_default_excludes_default_commits(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+
+            def git(*arguments: str) -> str:
+                return subprocess.run(
+                    ["git", *arguments],
+                    cwd=repository,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+
+            git("init", "--initial-branch=master")
+            git("config", "user.name", "Issue Contract Test")
+            git("config", "user.email", "issue@example.com")
+            (repository / "base.txt").write_text("base\n", encoding="utf-8")
+            git("add", "base.txt")
+            git("commit", "-m", "initial")
+            git("switch", "-c", "feature/default-merge")
+            (repository / "feature.txt").write_text("feature\n", encoding="utf-8")
+            git("add", "feature.txt")
+            git("commit", "-m", "feat: feature", "-m", "Refs #64")
+            remote_sha = git("rev-parse", "HEAD")
+            git("switch", "master")
+            (repository / "default.txt").write_text("default\n", encoding="utf-8")
+            git("add", "default.txt")
+            git("commit", "-m", "chore: live default advance")
+            default_sha = git("rev-parse", "HEAD")
+            git("switch", "feature/default-merge")
+            git("merge", "--no-ff", "master", "-m", "merge live default\n\nRefs #64")
+            local_sha = git("rev-parse", "HEAD")
+
+            range_base = subject.push_validation_range_base(
+                repository,
+                remote_sha=remote_sha,
+                local_sha=local_sha,
+                default_range_base=default_sha,
+            )
+            self.assertEqual(range_base, default_sha)
+            messages = subject.parse_commit_messages(
+                subject._run_git(
+                    repository, "log", "--reverse", "-z", "--format=%B", f"{range_base}..{local_sha}"
+                )
+            )
+            self.assertNotIn("chore: live default advance", messages)
+            subject.validate_contract(
+                branch="feature/default-merge",
+                default_branch="master",
+                repository="HiroyukiFuruno/katana-render-runtime",
+                commit_messages=messages,
+                changed_paths=["feature.txt"],
+                issue_loader=lambda number: self.issue(number) if number == 64 else None,
+            )
+
+    def test_non_fast_forward_push_falls_back_to_live_default_range(self) -> None:
+        with patch.object(subject, "_is_ancestor", return_value=False):
+            self.assertEqual(
+                subject.push_validation_range_base(
+                    Path("/tmp/verify-push-range"),
+                    remote_sha="a" * 40,
+                    local_sha="b" * 40,
+                    default_range_base="origin/master",
+                ),
+                "origin/master",
+            )
+
     def test_nonatomic_combined_push_uses_remote_default_as_feature_base(self) -> None:
         """A rejected default update must not hide unreferenced local commits."""
         with tempfile.TemporaryDirectory() as directory:
@@ -750,6 +844,86 @@ class VerifyPushIssueTest(unittest.TestCase):
             issue_loader=issues.get,
         )
 
+    def test_release_branch_accepts_the_complete_issue_set_without_per_commit_refs(self) -> None:
+        issues = {64: self.issue(64), 65: self.issue(65)}
+        subject.validate_contract(
+            branch="release/v0.4.22",
+            default_branch="master",
+            repository="HiroyukiFuruno/katana-render-runtime",
+            commit_messages=[
+                "release: prepare v0.4.22\n\nRefs #64 #65",
+                "fix: apply release review feedback",
+            ],
+            changed_paths=["scripts/hooks/pre-push.sh"],
+            issue_loader=issues.get,
+        )
+
+    def test_release_branch_recognition_matches_stable_version_grammar(self) -> None:
+        cases = (
+            ("release/v0.4.22", True),
+            ("release/v10.20.300", True),
+            ("release/v0.0.0", True),
+            ("release/v00.4.22", False),
+            ("release/v0.04.22", False),
+            ("release/v0.4.00022", False),
+            ("release/v00.04.00022", False),
+            ("release/v1.2", False),
+            ("release/v1.2.3-rc1", False),
+            ("release/vfeature", False),
+            ("release/v1.2.3/extra", False),
+            ("prefix/release/v1.2.3", False),
+            ("release/v1.2.3\n", False),
+        )
+        for branch, expected in cases:
+            with self.subTest(branch=branch):
+                self.assertEqual(subject.is_release_branch(branch), expected)
+
+    def test_release_branch_recognition_matches_the_real_release_resolver(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        cargo_manifest = repository_root / "Cargo.toml"
+        cargo_version = tomllib.loads(cargo_manifest.read_text())["workspace"]["package"]["version"]
+        version_parts = cargo_version.split(".")
+        canonical_branch = f"release/v{cargo_version}"
+        child_environment = os.environ.copy()
+        child_environment.pop("GITHUB_OUTPUT", None)
+
+        def resolve(branch: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [
+                    "bash",
+                    "scripts/release/resolve-release-version.sh",
+                    "pull_request",
+                    "",
+                    branch,
+                ],
+                cwd=repository_root,
+                capture_output=True,
+                check=False,
+                env=child_environment,
+                text=True,
+            )
+
+        with self.subTest(branch=canonical_branch):
+            self.assertTrue(subject.is_release_branch(canonical_branch))
+            result = resolve(canonical_branch)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+        for index, component in enumerate(version_parts):
+            noncanonical_parts = version_parts.copy()
+            noncanonical_parts[index] = f"0{component}"
+            branch = f"release/v{'.'.join(noncanonical_parts)}"
+            with self.subTest(branch=branch):
+                self.assertFalse(subject.is_release_branch(branch))
+                result = resolve(branch)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+
+    def test_release_branch_requires_an_issue_somewhere_in_its_range(self) -> None:
+        with self.assertRaisesRegex(subject.ContractViolation, "commit範囲"):
+            self.validate(
+                branch="release/v0.4.22",
+                messages=["release: v0.4.22", "fix: review feedback"],
+            )
+
     def test_foreign_repository_issue_does_not_satisfy_the_contract(self) -> None:
         with self.assertRaisesRegex(subject.ContractViolation, "Issue参照"):
             self.validate(
@@ -769,6 +943,736 @@ class VerifyPushIssueTest(unittest.TestCase):
                 branch="release/v0.4.21",
                 changed_paths=["Cargo.lock"],
                 issue=self.issue(state="CLOSED"),
+            )
+
+    def test_closed_release_reference_is_rejected_when_its_commit_is_active(self) -> None:
+        closed = self.issue(64, state="CLOSED")
+        with self.assertRaisesRegex(subject.ContractViolation, "重複"):
+            subject._effective_release_issue_numbers(
+                repository="HiroyukiFuruno/katana-render-runtime",
+                references_by_commit=[("a" * 40, {64})],
+                net_paths=["src/active.rs"],
+                issue_loader=lambda _number: closed,
+                commit_paths=lambda _sha: ["src/active.rs"],
+                commit_surviving_paths=lambda _sha, paths: paths,
+            )
+
+    def test_genuinely_obsolete_closed_release_reference_is_accepted(self) -> None:
+        closed = self.issue(64, state="CLOSED")
+        result = subject._effective_release_issue_numbers(
+            repository="HiroyukiFuruno/katana-render-runtime",
+            references_by_commit=[("a" * 40, {64})],
+            net_paths=["src/current.rs"],
+            issue_loader=lambda _number: closed,
+            commit_paths=lambda _sha: ["old/removed-workflow.yml"],
+            commit_surviving_paths=lambda _sha, _paths: [],
+        )
+        self.assertEqual(result, set())
+
+    def test_local_commit_path_proof_uses_real_git_history(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
+            old_path = repository / "old" / "obsolete.yml"
+            old_path.parent.mkdir()
+            old_path.write_text("baseline\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
+            old_path.write_text("obsolete change\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "old governance\n\nRefs #64"], cwd=repository, check=True)
+            commit = subject._run_git(repository, "rev-parse", "HEAD")
+            self.assertEqual(subject._local_commit_paths(repository, commit), ["old/obsolete.yml"])
+            (repository / "src").mkdir()
+            (repository / "src" / "active.rs").write_text("active\n", encoding="utf-8")
+            old_path.write_text("baseline\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "active change\n\nRefs #65"], cwd=repository, check=True)
+            net_paths = subject.parse_name_status_paths(
+                subject._run_git(repository, "diff", "--name-status", "-z", "--find-renames", "HEAD~2...HEAD")
+            )
+            active_commit = subject._run_git(repository, "rev-parse", "HEAD")
+            edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]] = {}
+            result = subject._effective_release_issue_numbers(
+                repository="HiroyukiFuruno/katana-render-runtime",
+                references_by_commit=[(commit, {64}), (active_commit, {65})],
+                net_paths=net_paths,
+                issue_loader=lambda number: self.issue(number, state="CLOSED" if number == 64 else "OPEN"),
+                commit_paths=lambda sha: subject._local_commit_paths(repository, sha),
+                commit_surviving_paths=lambda sha, paths: subject._local_surviving_paths_at_head(
+                    repository, sha, active_commit, paths, edge_cache
+                ),
+            )
+            self.assertEqual(result, {65})
+
+    def test_closed_reference_rejects_issue_content_renamed_to_current_net_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
+            (repository / "README.md").write_text("baseline\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
+            baseline = subject._run_git(repository, "rev-parse", "HEAD")
+            old_path = repository / "old" / "name.rs"
+            old_path.parent.mkdir()
+            old_path.write_text("surviving issue content\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "add old source\n\nRefs #64"], cwd=repository, check=True)
+            issue_commit = subject._run_git(repository, "rev-parse", "HEAD")
+            new_path = repository / "new" / "name.rs"
+            new_path.parent.mkdir()
+            old_path.rename(new_path)
+            subprocess.run(["git", "add", "-A"], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "move source"], cwd=repository, check=True)
+            new_path.write_text("surviving issue content\n" + ("edited line\n" * 30), encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "edit moved source"], cwd=repository, check=True)
+            head = subject._run_git(repository, "rev-parse", "HEAD")
+            net_paths = subject.parse_name_status_paths(
+                subject._run_git(
+                    repository,
+                    "diff",
+                    "--name-status",
+                    "-z",
+                    "--find-renames",
+                    baseline,
+                    head,
+                )
+            )
+            self.assertEqual(net_paths, ["new/name.rs"])
+            self.assertEqual(subject._local_commit_paths(repository, issue_commit), ["old/name.rs"])
+            edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]] = {}
+            surviving_paths = subject._local_surviving_paths_at_head(
+                repository, issue_commit, head, ["old/name.rs"], edge_cache
+            )
+            self.assertEqual(surviving_paths, ["new/name.rs"])
+            with self.assertRaisesRegex(subject.ContractViolation, "rename先"):
+                subject._effective_release_issue_numbers(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    references_by_commit=[(issue_commit, {64})],
+                    net_paths=net_paths,
+                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
+                    commit_paths=lambda sha: subject._local_commit_paths(repository, sha),
+                    commit_surviving_paths=lambda sha, paths: subject._local_surviving_paths_at_head(
+                        repository, sha, head, paths, edge_cache
+                    ),
+                )
+
+    def test_local_second_parent_rename_survives_merge_and_remains_active(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init", "-q", "--initial-branch=main"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
+            (repository / "README.md").write_text("baseline\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
+            baseline = subject._run_git(repository, "rev-parse", "HEAD")
+            old_path = repository / "old" / "name.rs"
+            old_path.parent.mkdir()
+            old_path.write_text("surviving issue content\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "add source\n\nRefs #64"], cwd=repository, check=True)
+            issue_commit = subject._run_git(repository, "rev-parse", "HEAD")
+            subprocess.run(["git", "switch", "-qc", "rename-side"], cwd=repository, check=True)
+            new_path = repository / "new" / "name.rs"
+            new_path.parent.mkdir()
+            old_path.rename(new_path)
+            subprocess.run(["git", "add", "-A"], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "rename on second parent"], cwd=repository, check=True)
+            rename_commit = subject._run_git(repository, "rev-parse", "HEAD")
+            subprocess.run(["git", "switch", "main"], cwd=repository, check=True, capture_output=True)
+            (repository / "README.md").write_text("mainline update\n", encoding="utf-8")
+            subprocess.run(["git", "add", "README.md"], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "mainline update"], cwd=repository, check=True)
+            subprocess.run(
+                ["git", "merge", "--no-ff", "-qm", "merge rename side", "rename-side"],
+                cwd=repository,
+                check=True,
+            )
+            head = subject._run_git(repository, "rev-parse", "HEAD")
+            parents = subject._run_git(repository, "rev-list", "--parents", "-n", "1", head).split()
+            self.assertEqual(len(parents), 3)
+            self.assertEqual(parents[2], rename_commit)
+            net_paths = subject.parse_name_status_paths(
+                subject._run_git(repository, "diff", "--name-status", "-z", "--find-renames", baseline, head)
+            )
+            self.assertEqual(net_paths, ["README.md", "new/name.rs"])
+            edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]] = {}
+            surviving = subject._local_surviving_paths_at_head(
+                repository, issue_commit, head, ["old/name.rs"], edge_cache
+            )
+            self.assertEqual(surviving, ["new/name.rs"])
+            self.assertNotEqual(issue_commit, rename_commit)
+
+    def test_local_renamed_closed_reference_is_obsolete_after_surviving_path_deletion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
+            (repository / "README.md").write_text("baseline\n", encoding="utf-8")
+            (repository / "src").mkdir()
+            (repository / "src" / "active.rs").write_text("baseline active\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
+            baseline = subject._run_git(repository, "rev-parse", "HEAD")
+            old_path = repository / "old" / "name.rs"
+            old_path.parent.mkdir()
+            old_path.write_text("obsolete governance content\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "add obsolete source\n\nRefs #64"], cwd=repository, check=True)
+            issue_commit = subject._run_git(repository, "rev-parse", "HEAD")
+            new_path = repository / "new" / "name.rs"
+            new_path.parent.mkdir()
+            old_path.rename(new_path)
+            subprocess.run(["git", "add", "-A"], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "rename source"], cwd=repository, check=True)
+            new_path.unlink()
+            (repository / "src" / "active.rs").write_text("current active\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "delete obsolete source\n\nRefs #65"], cwd=repository, check=True)
+            head = subject._run_git(repository, "rev-parse", "HEAD")
+            net_paths = subject.parse_name_status_paths(
+                subject._run_git(
+                    repository,
+                    "diff",
+                    "--name-status",
+                    "-z",
+                    "--find-renames",
+                    baseline,
+                    head,
+                )
+            )
+            self.assertEqual(net_paths, ["src/active.rs"])
+            edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]] = {}
+            result = subject._effective_release_issue_numbers(
+                repository="HiroyukiFuruno/katana-render-runtime",
+                references_by_commit=[(issue_commit, {64})],
+                net_paths=net_paths,
+                issue_loader=lambda number: self.issue(number, state="CLOSED"),
+                commit_paths=lambda sha: subject._local_commit_paths(repository, sha),
+                commit_surviving_paths=lambda sha, paths: subject._local_surviving_paths_at_head(
+                    repository, sha, head, paths, edge_cache
+                ),
+            )
+            self.assertEqual(result, set())
+
+    def test_local_same_commit_heavy_move_rewrite_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
+            (repository / "README.md").write_text("baseline\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
+            baseline = subject._run_git(repository, "rev-parse", "HEAD")
+            old_path = repository / "old" / "name.rs"
+            old_path.parent.mkdir()
+            old_path.write_text("".join(f"old unique line {index}\n" for index in range(20)), encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "add source\n\nRefs #64"], cwd=repository, check=True)
+            issue_commit = subject._run_git(repository, "rev-parse", "HEAD")
+            old_path.unlink()
+            new_path = repository / "new" / "name.rs"
+            new_path.parent.mkdir()
+            new_path.write_text("".join(f"new unrelated rewrite {index}\n" for index in range(60)), encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "move and rewrite in one commit"], cwd=repository, check=True)
+            head = subject._run_git(repository, "rev-parse", "HEAD")
+            net_paths = subject.parse_name_status_paths(
+                subject._run_git(repository, "diff", "--name-status", "-z", "--find-renames", baseline, head)
+            )
+            self.assertEqual(net_paths, ["new/name.rs"])
+            edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]] = {}
+            self.assertEqual(
+                set(subject._local_path_edge_records(repository, issue_commit, head, edge_cache)),
+                {("D", ("old/name.rs",)), ("A", ("new/name.rs",))},
+            )
+            with self.assertRaisesRegex(subject.ContractViolation, "削除と同一edgeの追加"):
+                subject._effective_release_issue_numbers(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    references_by_commit=[(issue_commit, {64})],
+                    net_paths=net_paths,
+                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
+                    commit_paths=lambda sha: subject._local_commit_paths(repository, sha),
+                    commit_surviving_paths=lambda sha, paths: subject._local_surviving_paths_at_head(
+                        repository, sha, head, paths, edge_cache
+                    ),
+                )
+
+    @staticmethod
+    def remote_git_history(repository: Path, calls: list[str]):
+        """実Gitのimmutable objectをGitHubのcommit/tree/compare形式で返す。"""
+        def gh_json(endpoint: str) -> object:
+            calls.append(endpoint)
+            if "/git/commits/" in endpoint:
+                sha = endpoint.rsplit("/", 1)[1]
+                parents = subject._run_git(repository, "rev-list", "--parents", "-n", "1", sha).split()[1:]
+                tree = subject._run_git(repository, "rev-parse", f"{sha}^{{tree}}")
+                return {"sha": sha, "parents": [{"sha": parent} for parent in parents], "tree": {"sha": tree}}
+            if "/git/trees/" in endpoint:
+                tree = endpoint.rsplit("/", 1)[1].split("?", 1)[0]
+                entries = []
+                for record in subject._run_git(repository, "ls-tree", "-rz", tree).split("\x00"):
+                    if record:
+                        metadata, path = record.split("\t", 1)
+                        mode, entry_type, sha = metadata.split()
+                        entries.append({"path": path, "mode": mode, "type": entry_type, "sha": sha})
+                return {"sha": tree, "truncated": False, "tree": entries}
+            if "/git/blobs/" in endpoint:
+                sha = endpoint.rsplit("/", 1)[1]
+                data = subprocess.check_output(["git", "cat-file", "blob", sha], cwd=repository)
+                return {"sha": sha, "size": len(data), "encoding": "base64", "content": base64.b64encode(data).decode()}
+            if "/compare/" in endpoint:
+                base, head = endpoint.rsplit("/", 1)[1].split("...")
+                commits = subject._run_git(repository, "rev-list", "--reverse", "--topo-order", f"{base}..{head}").splitlines()
+                files = []
+                for kind, paths in subject._local_path_edge_records(repository, base, head, {}):
+                    status = {"A": "added", "C": "added", "D": "removed", "M": "modified", "R": "renamed"}[kind]
+                    entry = {"filename": paths[-1], "status": status}
+                    if kind == "R":
+                        entry["previous_filename"] = paths[0]
+                    files.append(entry)
+                return {"base_commit": {"sha": base}, "total_commits": len(commits), "ahead_by": len(commits), "commits": [{"sha": sha} for sha in commits], "files": files}
+            raise AssertionError(f"unexpected GitHub API request: {endpoint}")
+        return gh_json
+
+    def test_remote_added_copy_then_source_deletion_retains_closed_provenance(self) -> None:
+        self.assert_added_copy_then_source_deletion_retains_closed_provenance(edited_copy=False)
+
+    def test_remote_edited_copy_then_source_deletion_matches_native_git_provenance(self) -> None:
+        self.assert_added_copy_then_source_deletion_retains_closed_provenance(edited_copy=True)
+
+    def assert_added_copy_then_source_deletion_retains_closed_provenance(self, *, edited_copy: bool) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            def git(*arguments: str) -> str:
+                return subject._run_git(repository, *arguments)
+            git("init", "-q", "--initial-branch=main")
+            git("config", "user.email", "test@example.com")
+            git("config", "user.name", "Hook test")
+            original = "".join(f"closed issue implementation line {index}\n" for index in range(100))
+            (repository / "old.rs").write_text(original, encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "source")
+            source = git("rev-parse", "HEAD")
+            shutil.copyfile(repository / "old.rs", repository / "copied.rs")
+            (repository / "copied.rs").chmod(0o755)
+            if edited_copy:
+                (repository / "copied.rs").write_text(original.replace("line 99\n", "edited last line\n"), encoding="utf-8")
+            for index in range(299):
+                (repository / f"asset-{index}.txt").write_text(f"independent asset {index}\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "copy")
+            copied = git("rev-parse", "HEAD")
+            self.assertIn(("C", ("old.rs", "copied.rs")), subject._local_path_edge_records(repository, source, copied, {}))
+            git("rm", "old.rs")
+            git("commit", "-qm", "delete original")
+            head = git("rev-parse", "HEAD")
+            local = subject._local_surviving_paths_at_head(repository, source, head, ["old.rs"], {})
+            calls: list[str] = []
+            with patch.object(subject, "_gh_json", side_effect=self.remote_git_history(repository, calls)):
+                remote = subject._pr_surviving_paths_at_head("owner/repo", source, head, ["old.rs"], {})
+            self.assertEqual(local, ["copied.rs"])
+            self.assertEqual(remote, local)
+            with self.assertRaisesRegex(subject.ContractViolation, "rename先"):
+                subject._effective_release_issue_numbers(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    references_by_commit=[(source, {64})], net_paths=["copied.rs"],
+                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
+                    commit_paths=lambda _sha: ["old.rs"],
+                    commit_surviving_paths=lambda _sha, _paths: remote,
+                )
+
+    def test_merge_independent_addition_and_retired_paths_have_local_remote_parity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            def git(*arguments: str) -> str:
+                return subject._run_git(repository, *arguments)
+            git("init", "-q", "--initial-branch=main")
+            git("config", "user.email", "test@example.com")
+            git("config", "user.name", "Hook test")
+            (repository / "old.rs").write_text("retired closed issue implementation\n", encoding="utf-8")
+            (repository / "README.md").write_text("baseline\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "source")
+            source = git("rev-parse", "HEAD")
+            git("switch", "-qc", "retired")
+            git("rm", "old.rs")
+            git("commit", "-qm", "retire source")
+            retired = git("rev-parse", "HEAD")
+            (repository / "drawio.br").write_text("unrelated compressed drawio asset\n", encoding="utf-8")
+            for index in range(300):
+                (repository / f"drawio-asset-{index}.txt").write_text(f"drawio asset {index}\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "add independent asset")
+            added = git("rev-parse", "HEAD")
+            git("switch", "main")
+            (repository / "README.md").write_text("mainline update\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "mainline")
+            mainline = git("rev-parse", "HEAD")
+            git("merge", "--no-ff", "-qm", "merge independent asset and retirement", "retired")
+            head = git("rev-parse", "HEAD")
+            records = subject._local_path_edge_records(repository, mainline, head, {})
+            self.assertIn(("D", ("old.rs",)), records)
+            self.assertIn(("A", ("drawio.br",)), records)
+            self.assertGreaterEqual(len(records), 300)
+            local_edges = {}
+            local = subject._local_surviving_paths_at_head(repository, source, head, ["old.rs"], local_edges)
+            self.assertEqual(local, [])
+            self.assertNotIn((retired, added), local_edges)
+            remote_edges = {}
+            calls: list[str] = []
+            with patch.object(subject, "_gh_json", side_effect=self.remote_git_history(repository, calls)):
+                remote = subject._pr_surviving_paths_at_head("owner/repo", source, head, ["old.rs"], remote_edges)
+            self.assertEqual(remote, local)
+            self.assertNotIn((retired, added), remote_edges)
+            self.assertIn(f"repos/owner/repo/git/commits/{added}", calls)
+            tree_calls = [endpoint for endpoint in calls if "/git/trees/" in endpoint]
+            self.assertEqual(len(tree_calls), len(set(tree_calls)))
+
+    def test_merge_new_addition_without_other_parent_origin_stays_ambiguous(self) -> None:
+        source_entry = ("blob", "100644", "a" * 40)
+        new_entry = ("blob", "100644", "b" * 40)
+        trees = {"parent": {"old.rs": source_entry}, "other": {}, "merge": {"new.rs": new_entry}}
+        records = (("D", ("old.rs",)), ("A", ("new.rs",)))
+        proven = subject._prove_path_additions(
+            ["old.rs"], records, "parent", "merge", ["parent", "other"],
+            {"parent": {"old.rs"}, "other": set()}, trees.__getitem__,
+        )
+        with self.assertRaisesRegex(subject.ContractViolation, "削除と同一edgeの追加"):
+            subject._advance_path_state(["old.rs"], proven)
+
+    def test_merge_other_parent_tracked_copy_is_not_independent_addition(self) -> None:
+        source_entry = ("blob", "100644", "a" * 40)
+        copied_entry = ("blob", "100644", "b" * 40)
+        trees = {
+            "parent": {"old.rs": source_entry},
+            "other": {"copied.rs": copied_entry},
+            "merge": {"copied.rs": copied_entry},
+        }
+        records = (("D", ("old.rs",)), ("A", ("copied.rs",)))
+        proven = subject._prove_path_additions(
+            ["old.rs"], records, "parent", "merge", ["parent", "other"],
+            {"parent": {"old.rs"}, "other": {"copied.rs"}}, trees.__getitem__,
+        )
+        with self.assertRaisesRegex(subject.ContractViolation, "削除と同一edgeの追加"):
+            subject._advance_path_state(["old.rs"], proven)
+
+    def test_deleted_state_skips_large_edge_after_full_commit_dag_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            def git(*arguments: str) -> str:
+                return subject._run_git(repository, *arguments)
+            git("init", "-q", "--initial-branch=main")
+            git("config", "user.email", "test@example.com")
+            git("config", "user.name", "Hook test")
+            (repository / "old.rs").write_text("obsolete implementation\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "source")
+            source = git("rev-parse", "HEAD")
+            git("rm", "old.rs")
+            git("commit", "-qm", "retire source")
+            retired = git("rev-parse", "HEAD")
+            for index in range(300):
+                (repository / f"unrelated-{index}.txt").write_text(f"unrelated asset {index}\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "large unrelated change")
+            head = git("rev-parse", "HEAD")
+            calls: list[str] = []
+            with patch.object(subject, "_gh_json", side_effect=self.remote_git_history(repository, calls)):
+                remote = subject._pr_surviving_paths_at_head("owner/repo", source, head, ["old.rs"], {})
+            self.assertEqual(remote, [])
+            self.assertEqual(subject._local_surviving_paths_at_head(repository, source, head, ["old.rs"], {}), remote)
+            self.assertIn(f"repos/owner/repo/git/commits/{head}", calls)
+            self.assertNotIn(f"repos/owner/repo/compare/{retired}...{head}", calls)
+
+    def test_tree_proof_rejects_wrong_identity_and_malformed_entries(self) -> None:
+        commit_sha, tree_sha, blob_sha = (character * 40 for character in "abc")
+        entry = {"path": "source.rs", "type": "blob", "mode": "100644", "sha": blob_sha}
+        valid = {"sha": tree_sha, "truncated": False, "tree": [entry]}
+        invalid = [
+            {**valid, "sha": "d" * 40},
+            {**valid, "truncated": True},
+            {**valid, "tree": [entry, entry]},
+            {**valid, "tree": [{**entry, "mode": "040000"}]},
+            {**valid, "tree": [{**entry, "type": "unknown"}]},
+            {**valid, "tree": [{**entry, "path": "../source.rs"}]},
+            {**valid, "tree": [{**entry, "sha": "invalid"}]},
+        ]
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                with patch.object(subject, "_gh_json", return_value=payload):
+                    with self.assertRaises(subject.ContractViolation):
+                        subject._git_tree_entries(
+                            repository="owner/repo", commit_sha=commit_sha,
+                            label="closed Issue provenance",
+                            commit_payload={"sha": commit_sha, "tree": {"sha": tree_sha}},
+                        )
+
+    def test_blob_proof_validates_identity_encoding_content_and_reuses_cache(self) -> None:
+        data = b"immutable source\n"
+        sha = hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+        valid = {"sha": sha, "size": len(data), "encoding": "base64", "content": base64.b64encode(data).decode()}
+        cache = {}
+        with patch.object(subject, "_gh_json", return_value=valid) as loader:
+            self.assertEqual(subject._pr_blob_bytes("owner/repo", sha, cache), data)
+            self.assertEqual(subject._pr_blob_bytes("owner/repo", sha, cache), data)
+        self.assertEqual(loader.call_count, 1)
+        invalid = [
+            {**valid, "sha": "d" * 40}, {**valid, "encoding": "hex"},
+            {**valid, "size": len(data) + 1}, {**valid, "size": subject._MAX_PROVENANCE_BLOB_BYTES + 1},
+            {**valid, "content": "invalid base64!"},
+            {**valid, "content": base64.b64encode(b"different source\n").decode()},
+        ]
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                with patch.object(subject, "_gh_json", return_value=payload):
+                    with self.assertRaises(subject.ContractViolation):
+                        subject._pr_blob_bytes("owner/repo", sha, {})
+        with patch.object(subject, "_gh_json", return_value=valid):
+            with patch.object(subject, "_MAX_PROVENANCE_BLOB_BYTES", len(data)):
+                with self.assertRaisesRegex(subject.ContractViolation, "cacheが上限超過"):
+                    subject._pr_blob_bytes("owner/repo", sha, {"e" * 40: b"existing"})
+
+    def test_native_copy_detector_isolates_inherited_git_environment_and_global_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subject._run_git(repository, "init", "-q", "--initial-branch=main")
+            subject._run_git(repository, "config", "user.email", "test@example.com")
+            subject._run_git(repository, "config", "user.name", "Hook test")
+            (repository / "README.md").write_text("real repository\n", encoding="utf-8")
+            subject._run_git(repository, "add", ".")
+            subject._run_git(repository, "commit", "-qm", "baseline")
+            git_directory = repository / ".git"
+            head = subject._run_git(repository, "rev-parse", "HEAD")
+            objects_before = {path.relative_to(git_directory / "objects") for path in (git_directory / "objects").rglob("*") if path.is_file()}
+            sentinel = repository / "external-diff-ran"
+            external = repository / "external.sh"
+            external.write_text(f"#!/bin/sh\ntouch '{sentinel}'\n", encoding="utf-8")
+            external.chmod(0o755)
+            global_config = repository / "global-config"
+            global_config.write_text(f"[diff]\n external = {external}\n", encoding="utf-8")
+            data = "".join(f"source implementation line {index}\n" for index in range(100)).encode()
+            edited = data.replace(b"line 99\n", b"changed final line\n")
+            blobs = {hashlib.sha1(f"blob {len(blob)}\0".encode() + blob).hexdigest(): blob for blob in (data, edited)}
+            original_sha, copied_sha = blobs
+            inherited = {
+                "GIT_DIR": str(git_directory), "GIT_COMMON_DIR": str(git_directory),
+                "GIT_WORK_TREE": str(repository), "GIT_INDEX_FILE": str(git_directory / "index"),
+                "GIT_OBJECT_DIRECTORY": str(git_directory / "objects"),
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(git_directory / "objects"),
+                "GIT_CONFIG_GLOBAL": str(global_config), "GIT_EXTERNAL_DIFF": str(external),
+            }
+            with patch.dict(os.environ, inherited):
+                copies = subject._native_copy_sources(
+                    {"old.rs": ("blob", "100644", original_sha)},
+                    {"copied.rs": ("blob", "100755", copied_sha)}, blobs.__getitem__,
+                )
+            self.assertEqual(copies, {"copied.rs": "old.rs"})
+            self.assertFalse(sentinel.exists())
+            self.assertEqual(subject._run_git(repository, "rev-parse", "HEAD"), head)
+            objects_after = {path.relative_to(git_directory / "objects") for path in (git_directory / "objects").rglob("*") if path.is_file()}
+            self.assertEqual(objects_after, objects_before)
+
+    def test_remote_commit_rename_provenance_rejects_current_net_path(self) -> None:
+        repository = "HiroyukiFuruno/katana-render-runtime"
+        issue_commit, head = "c" * 40, "d" * 40
+        compare = {
+            "base_commit": {"sha": issue_commit},
+            "total_commits": 1,
+            "ahead_by": 1,
+            "commits": [{"sha": head}],
+            "files": [{
+                "filename": "new/name.rs",
+                "previous_filename": "old/name.rs",
+                "status": "renamed",
+            }],
+        }
+        commit = {"sha": head, "parents": [{"sha": issue_commit}]}
+
+        def gh_json(*arguments: str) -> object:
+            if arguments[0] == f"repos/{repository}/git/commits/{head}":
+                return commit
+            if arguments[0] == f"repos/{repository}/compare/{issue_commit}...{head}":
+                return compare
+            raise AssertionError(f"unexpected GitHub API request: {arguments}")
+
+        with patch.object(subject, "_gh_json", side_effect=gh_json):
+            surviving_paths = subject._pr_surviving_paths_at_head(
+                repository,
+                issue_commit,
+                head,
+                ["old/name.rs"],
+                {},
+            )
+        self.assertEqual(surviving_paths, ["new/name.rs"])
+        with self.assertRaisesRegex(subject.ContractViolation, "rename先"):
+            subject._effective_release_issue_numbers(
+                repository=repository,
+                references_by_commit=[(issue_commit, {64})],
+                net_paths=["new/name.rs"],
+                issue_loader=lambda number: self.issue(number, state="CLOSED"),
+                commit_paths=lambda _sha: ["old/name.rs"],
+                commit_surviving_paths=lambda _sha, _paths: surviving_paths,
+            )
+
+    def test_remote_rename_provenance_traces_both_merge_parents_and_later_edits(self) -> None:
+        repository = "HiroyukiFuruno/katana-render-runtime"
+        source, mainline, rename_side, merge, head = (
+            character * 40 for character in ("1", "2", "3", "4", "5")
+        )
+        compare_range = {
+            "base_commit": {"sha": source},
+            "total_commits": 4,
+            "ahead_by": 4,
+            "commits": [{"sha": sha} for sha in (mainline, rename_side, merge, head)],
+        }
+        commits = {
+            mainline: {"sha": mainline, "parents": [{"sha": source}]},
+            rename_side: {"sha": rename_side, "parents": [{"sha": source}]},
+            merge: {"sha": merge, "parents": [{"sha": mainline}, {"sha": rename_side}]},
+            head: {"sha": head, "parents": [{"sha": merge}]},
+        }
+        edge_files = {
+            (source, mainline): [],
+            (source, rename_side): [{
+                "filename": "new/name.rs",
+                "previous_filename": "old/name.rs",
+                "status": "renamed",
+            }],
+            (mainline, merge): [{
+                "filename": "new/name.rs",
+                "previous_filename": "old/name.rs",
+                "status": "renamed",
+            }],
+            (rename_side, merge): [],
+            (merge, head): [{"filename": "new/name.rs", "status": "modified"}],
+        }
+        calls: list[str] = []
+
+        def gh_json(*arguments: str) -> object:
+            endpoint = arguments[0]
+            calls.append(endpoint)
+            if endpoint == f"repos/{repository}/compare/{source}...{head}":
+                return compare_range
+            for commit_sha, payload in commits.items():
+                if endpoint == f"repos/{repository}/git/commits/{commit_sha}":
+                    return payload
+            for (parent_sha, commit_sha), files in edge_files.items():
+                if endpoint == f"repos/{repository}/compare/{parent_sha}...{commit_sha}":
+                    return {"base_commit": {"sha": parent_sha}, "files": files}
+            raise AssertionError(f"unexpected GitHub API request: {arguments}")
+
+        edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]] = {}
+        with patch.object(subject, "_gh_json", side_effect=gh_json):
+            with self.assertRaisesRegex(subject.ContractViolation, "rename先"):
+                subject._effective_release_issue_numbers(
+                    repository=repository,
+                    references_by_commit=[(source, {64})],
+                    net_paths=["new/name.rs"],
+                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
+                    commit_paths=lambda _sha: ["old/name.rs"],
+                    commit_surviving_paths=lambda sha, paths: subject._pr_surviving_paths_at_head(
+                        repository, sha, head, paths, edge_cache
+                    ),
+                )
+        self.assertIn((merge, head), edge_cache)
+        self.assertEqual(len(edge_cache), len(edge_files))
+
+    def test_remote_same_commit_heavy_move_rewrite_fails_closed(self) -> None:
+        repository = "HiroyukiFuruno/katana-render-runtime"
+        source, head = "6" * 40, "7" * 40
+        compare = {
+            "base_commit": {"sha": source},
+            "total_commits": 1,
+            "ahead_by": 1,
+            "commits": [{"sha": head}],
+            "files": [
+                {"filename": "old/name.rs", "status": "removed"},
+                {"filename": "new/name.rs", "status": "added"},
+            ],
+        }
+        commit = {"sha": head, "parents": [{"sha": source}]}
+
+        def gh_json(*arguments: str) -> object:
+            endpoint = arguments[0]
+            if endpoint == f"repos/{repository}/git/commits/{head}":
+                return commit
+            if endpoint == f"repos/{repository}/compare/{source}...{head}":
+                return compare
+            raise AssertionError(f"unexpected GitHub API request: {arguments}")
+
+        edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]] = {}
+        with patch.object(subject, "_gh_json", side_effect=gh_json):
+            with self.assertRaisesRegex(subject.ContractViolation, "削除と同一edgeの追加"):
+                subject._effective_release_issue_numbers(
+                    repository=repository,
+                    references_by_commit=[(source, {64})],
+                    net_paths=["new/name.rs"],
+                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
+                    commit_paths=lambda _sha: ["old/name.rs"],
+                    commit_surviving_paths=lambda sha, paths: subject._pr_surviving_paths_at_head(
+                        repository, sha, head, paths, edge_cache
+                    ),
+                )
+
+    def test_closed_release_reference_fails_closed_on_missing_or_truncated_provenance(self) -> None:
+        closed = self.issue(64, state="CLOSED")
+        for paths in ([],):
+            with self.subTest(paths=paths), self.assertRaisesRegex(subject.ContractViolation, "証跡不足"):
+                subject._effective_release_issue_numbers(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    references_by_commit=[("a" * 40, {64})],
+                    net_paths=["src/current.rs"],
+                    issue_loader=lambda _number: closed,
+                    commit_paths=lambda _sha: paths,
+                    commit_surviving_paths=lambda _sha, _paths: [],
+                )
+        with self.assertRaisesRegex(subject.ContractViolation, "provenance incomplete"):
+            subject._effective_release_issue_numbers(
+                repository="HiroyukiFuruno/katana-render-runtime",
+                references_by_commit=[("a" * 40, {64})],
+                net_paths=["src/current.rs"],
+                issue_loader=lambda _number: closed,
+                commit_paths=lambda _sha: (_ for _ in ()).throw(
+                    subject.ContractViolation("provenance incomplete")
+                ),
+                commit_surviving_paths=lambda _sha, _paths: [],
+            )
+
+    def test_closed_release_reference_intersects_renamed_source_path(self) -> None:
+        closed = self.issue(64, state="CLOSED")
+        renamed = subject.parse_name_status_paths("R100\0old/name.rs\0new/name.rs\0")
+        with self.assertRaisesRegex(subject.ContractViolation, "重複"):
+            subject._effective_release_issue_numbers(
+                repository="HiroyukiFuruno/katana-render-runtime",
+                references_by_commit=[("a" * 40, {64})],
+                net_paths=renamed,
+                issue_loader=lambda _number: closed,
+                commit_paths=lambda _sha: ["old/name.rs"],
+                commit_surviving_paths=lambda _sha, paths: paths,
+            )
+
+    def test_merge_commit_closed_reference_fails_conservatively(self) -> None:
+        closed = self.issue(64, state="CLOSED")
+        with self.assertRaisesRegex(subject.ContractViolation, "merge"):
+            subject._effective_release_issue_numbers(
+                repository="HiroyukiFuruno/katana-render-runtime",
+                references_by_commit=[("a" * 40, {64})],
+                net_paths=["src/current.rs"],
+                issue_loader=lambda _number: closed,
+                commit_paths=lambda _sha: (_ for _ in ()).throw(
+                    subject.ContractViolation("merge commitのprovenanceを判定できません")
+                ),
+                commit_surviving_paths=lambda _sha, _paths: [],
             )
 
     def test_lockfile_only_transitive_update_still_requires_dependency_evidence(self) -> None:
@@ -1146,6 +2050,65 @@ class VerifyPushIssueTest(unittest.TestCase):
             )
         self.assertEqual(len(calls), 2)
 
+    def test_release_pr_range_accepts_obsolete_closed_reference_with_open_issue(self) -> None:
+        repository = "HiroyukiFuruno/katana-render-runtime"
+        base_sha, obsolete_sha, head_sha = "a" * 40, "c" * 40, "b" * 40
+        main_compare = {
+            "base_commit": {"sha": base_sha},
+            "merge_base_commit": {"sha": base_sha},
+            "status": "ahead",
+            "ahead_by": 2,
+            "behind_by": 0,
+            "total_commits": 2,
+            "commits": [
+                {"sha": obsolete_sha, "commit": {"message": "old change\n\nRefs #64"}},
+                {"sha": head_sha, "commit": {"message": "current change\n\nRefs #65"}},
+            ],
+            "files": [{"filename": "src/active.rs"}],
+        }
+        historical_compare = {
+            "base_commit": {"sha": base_sha},
+            "files": [{"filename": "old/obsolete.yml"}],
+        }
+        rename_compare = {
+            "base_commit": {"sha": obsolete_sha},
+            "total_commits": 1,
+            "ahead_by": 1,
+            "commits": [{"sha": head_sha}],
+            "files": [
+                {"filename": "old/obsolete.yml", "status": "removed"},
+                {"filename": "src/active.rs", "status": "modified"},
+            ],
+        }
+
+        def gh_json(*arguments: str) -> object:
+            endpoint = arguments[0]
+            if endpoint == f"repos/{repository}/compare/{base_sha}...{head_sha}":
+                return main_compare
+            if endpoint == f"repos/{repository}/git/commits/{obsolete_sha}":
+                return {"sha": obsolete_sha, "parents": [{"sha": base_sha}]}
+            if endpoint == f"repos/{repository}/compare/{base_sha}...{obsolete_sha}":
+                return historical_compare
+            if endpoint == f"repos/{repository}/compare/{obsolete_sha}...{head_sha}":
+                return rename_compare
+            if endpoint == f"repos/{repository}/git/commits/{head_sha}":
+                return {"sha": head_sha, "parents": [{"sha": obsolete_sha}]}
+            raise AssertionError(f"unexpected GitHub API request: {arguments}")
+
+        def issue_loader(number: int) -> subject.Issue:
+            return self.issue(number, state="CLOSED" if number == 64 else "OPEN")
+
+        with patch.object(subject, "_gh_json", side_effect=gh_json):
+            references = subject.validate_pr_range(
+                repository=repository,
+                pr_number=99,
+                base_sha=base_sha,
+                head_sha=head_sha,
+                branch="release/v0.4.22",
+                issue_loader=issue_loader,
+            )
+        self.assertEqual(references, {65})
+
     def test_pr_range_rejects_zero_referenced_issues(self) -> None:
         base_sha = "a" * 40
         head_sha = "b" * 40
@@ -1199,6 +2162,36 @@ class VerifyPushIssueTest(unittest.TestCase):
                     issue_loader=lambda number: self.issue(number),
                 )
 
+    def test_release_pr_range_accepts_multiple_open_canonical_issues(self) -> None:
+        base_sha = "a" * 40
+        head_sha = "b" * 40
+        compare = {
+            "base_commit": {"sha": base_sha},
+            "merge_base_commit": {"sha": base_sha},
+            "status": "ahead",
+            "ahead_by": 2,
+            "behind_by": 0,
+            "total_commits": 2,
+            "commits": [
+                {"sha": "c" * 40, "commit": {"message": "release: v0.4.22\n\nRefs #64 #65"}},
+                {"sha": head_sha, "commit": {"message": "fix: review feedback"}},
+            ],
+            "files": [{"filename": "scripts/hooks/pre-push.sh"}],
+        }
+        issues = {64: self.issue(64), 65: self.issue(65)}
+        with patch.object(subject, "_gh_json", return_value=compare):
+            self.assertEqual(
+                subject.validate_pr_range(
+                    repository="HiroyukiFuruno/katana-render-runtime",
+                    pr_number=99,
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                    branch="release/v0.4.22",
+                    issue_loader=issues.get,
+                ),
+                {64, 65},
+            )
+
     def test_pr_range_rejects_closed_release_issue(self) -> None:
         base_sha = "a" * 40
         head_sha = "b" * 40
@@ -1218,7 +2211,7 @@ class VerifyPushIssueTest(unittest.TestCase):
             "files": [{"filename": "Cargo.lock"}],
         }
         with patch.object(subject, "_gh_json", return_value=compare):
-            with self.assertRaisesRegex(subject.ContractViolation, "OPEN"):
+            with self.assertRaisesRegex(subject.ContractViolation, "provenance commit SHA"):
                 subject.validate_pr_range(
                     repository="HiroyukiFuruno/katana-render-runtime",
                     pr_number=87,
@@ -1566,9 +2559,9 @@ class VerifyPushIssueTest(unittest.TestCase):
             if f"/git/commits/{head_sha}" in endpoint:
                 return {"sha": head_sha, "tree": {"sha": head_tree_sha}}
             if f"/git/trees/{merge_base_tree_sha}?recursive=1" in endpoint:
-                return {"truncated": False, "tree": merge_base_entries}
+                return {"sha": merge_base_tree_sha, "truncated": False, "tree": merge_base_entries}
             if f"/git/trees/{head_tree_sha}?recursive=1" in endpoint:
-                return {"truncated": False, "tree": head_entries}
+                return {"sha": head_tree_sha, "truncated": False, "tree": head_entries}
             raise AssertionError(endpoint)
 
         with patch.object(subject, "_gh_json", side_effect=gh_json):

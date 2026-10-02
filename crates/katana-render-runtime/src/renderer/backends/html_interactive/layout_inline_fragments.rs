@@ -37,11 +37,8 @@ impl HtmlLayoutRenderer {
             return;
         }
         for owner in &self.ownership.inline_fragment_owners {
-            if let Some(element_box) = self
-                .element_boxes
-                .iter_mut()
-                .rev()
-                .find(|element_box| element_box.node_id == *owner)
+            if let Some(&index) = self.ownership.element_box_indices.get(owner)
+                && let Some(element_box) = self.element_boxes.get_mut(index)
             {
                 element_box
                     .inline_fragments

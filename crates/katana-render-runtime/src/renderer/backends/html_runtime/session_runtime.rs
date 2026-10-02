@@ -3,19 +3,13 @@ use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
 use crate::renderer::backends::html_browser::HtmlBrowserSource;
 #[cfg(test)]
 use crate::renderer::backends::html_debug_trace::HtmlDebugTrace;
-use crate::renderer::backends::html_document::HtmlDocument;
+use crate::renderer::backends::html_document::{HtmlDocument, HtmlDocumentScript};
 use crate::renderer::backends::html_runtime::dom_state::HtmlDomBridgeState;
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 use markup5ever_rcdom::{Handle, NodeData};
 use std::collections::HashMap;
 
-use super::super::script::{
-    DOM_CONTENT_LOADED_DISPATCH, WINDOW_LOAD_DISPATCH, check_bridge_error, evaluate,
-    install_dom_bridge, perform_microtask_checkpoint,
-};
 use super::{StaticHtmlRuntime, StaticHtmlRuntimeSession};
-
-type ScriptEvaluator<'a> = dyn FnMut(&str, &str) -> Result<(), HtmlRuntimeError> + 'a;
 
 impl StaticHtmlRuntime {
     pub(crate) fn render(&self, source: &str) -> Result<String, HtmlRuntimeError> {
@@ -29,7 +23,7 @@ impl StaticHtmlRuntime {
         self.start(source)?.snapshot()
     }
 
-    fn requires_runtime(document: &HtmlDocument, scripts: &[String]) -> bool {
+    fn requires_runtime(document: &HtmlDocument, scripts: &[HtmlDocumentScript]) -> bool {
         !scripts.is_empty() || contains_lifecycle_handler(&document.document)
     }
 
@@ -38,12 +32,20 @@ impl StaticHtmlRuntime {
         let scripts = document
             .inline_scripts()
             .map_err(HtmlRuntimeError::ExternalScript)?;
+        let body_onload_script_index = document.body_onload_script_index();
+        let body_onload_source = document.body_onload_source().map(str::to_owned);
 
         DiagramV8Runtime::ensure_initialized();
         let mut isolate = v8::Isolate::new(Default::default());
         isolate.set_slot(HtmlDomBridgeState::new(document));
 
-        let context = Self::execute_inline_scripts(&mut isolate, &scripts, "about:blank")?;
+        let context = Self::execute_inline_scripts(
+            &mut isolate,
+            &scripts,
+            body_onload_script_index,
+            body_onload_source.as_deref(),
+            "about:blank",
+        )?;
         Ok(StaticHtmlRuntimeSession {
             context: Some(context),
             isolate: Some(isolate),
@@ -58,129 +60,15 @@ impl StaticHtmlRuntime {
     ) -> Result<StaticHtmlRuntimeSession, HtmlRuntimeError> {
         self.start_interactive_traced(source, &HtmlDebugTrace::disabled())
     }
-
-    fn execute_inline_scripts(
-        isolate: &mut v8::OwnedIsolate,
-        scripts: &[String],
-        document_url: &str,
-    ) -> Result<v8::Global<v8::Context>, HtmlRuntimeError> {
-        v8::scope!(let handle_scope, isolate);
-        let context = v8::Context::new(handle_scope, Default::default());
-        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        v8::tc_scope!(let scope, &mut **context_scope);
-        install_dom_bridge(scope, document_url)?;
-        let mut execute_script = |name: &str, script: &str| -> Result<(), HtmlRuntimeError> {
-            evaluate(scope, name, script)
-                .and_then(|()| perform_microtask_checkpoint(scope))
-                .and_then(|()| check_bridge_error(scope))
-        };
-        Self::run_static_scripts(
-            document_url,
-            scripts,
-            ("krr-html-dom-content-loaded", DOM_CONTENT_LOADED_DISPATCH),
-            ("krr-html-window-load", WINDOW_LOAD_DISPATCH),
-            &mut execute_script,
-        )?;
-        Ok(v8::Global::new(scope, context))
-    }
-
-    pub(super) fn execute_interactive_scripts(
-        isolate: &mut v8::OwnedIsolate,
-        scripts: &[String],
-        document_url: &str,
-    ) -> Result<v8::Global<v8::Context>, HtmlRuntimeError> {
-        v8::scope!(let handle_scope, isolate);
-        let context = v8::Context::new(handle_scope, Default::default());
-        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        {
-            v8::tc_scope!(let scope, &mut **context_scope);
-            install_dom_bridge(scope, document_url)?;
-        }
-        let mut evaluate = |name: &str, script: &str| -> Result<(), HtmlRuntimeError> {
-            v8::tc_scope!(let scope, &mut **context_scope);
-            evaluate(scope, name, script)
-                .and_then(|()| perform_microtask_checkpoint(scope))
-                .and_then(|()| check_bridge_error(scope))
-        };
-        Self::run_inline_interactive_scripts(document_url, scripts, &mut evaluate)?;
-        Self::run_interactive_lifecycle_scripts(document_url, &mut evaluate)?;
-        Ok(v8::Global::new(context_scope, context))
-    }
-
-    fn run_static_scripts(
-        _document_url: &str,
-        scripts: &[String],
-        content_loaded: (&str, &str),
-        window_load: (&str, &str),
-        execute_script: &mut ScriptEvaluator<'_>,
-    ) -> Result<(), HtmlRuntimeError> {
-        for script in scripts {
-            execute_script("inline-script", script)?;
-        }
-        execute_script(content_loaded.0, content_loaded.1)?;
-        execute_script(window_load.0, window_load.1)?;
-        Ok(())
-    }
-
-    fn run_inline_interactive_scripts(
-        document_url: &str,
-        scripts: &[String],
-        evaluate: &mut ScriptEvaluator<'_>,
-    ) -> Result<(), HtmlRuntimeError> {
-        for (script_index, script) in scripts.iter().enumerate() {
-            let result = evaluate("inline-script", script);
-            Self::accept_interactive_script_result(
-                result,
-                document_url,
-                &format!("inline-script[{script_index}]"),
-            )?;
-        }
-        Ok(())
-    }
-
-    fn run_interactive_lifecycle_scripts(
-        document_url: &str,
-        evaluate: &mut ScriptEvaluator<'_>,
-    ) -> Result<(), HtmlRuntimeError> {
-        Self::accept_interactive_script_result(
-            evaluate("krr-html-dom-content-loaded", DOM_CONTENT_LOADED_DISPATCH),
-            document_url,
-            "krr-html-dom-content-loaded",
-        )?;
-        Self::accept_interactive_script_result(
-            evaluate("krr-html-window-load", WINDOW_LOAD_DISPATCH),
-            document_url,
-            "krr-html-window-load",
-        )?;
-        Ok(())
-    }
-
-    fn accept_interactive_script_result(
-        result: Result<(), HtmlRuntimeError>,
-        document_url: &str,
-        script: &str,
-    ) -> Result<(), HtmlRuntimeError> {
-        match result {
-            Ok(()) => Ok(()),
-            Err(error @ HtmlRuntimeError::JavaScriptException(_)) => {
-                tracing::error!(
-                    document_url,
-                    script,
-                    error = %error,
-                    "Interactive HTML script failed; continuing document execution"
-                );
-                Ok(())
-            }
-            Err(error) => Err(error),
-        }
-    }
 }
 
 fn contains_lifecycle_handler(node: &Handle) -> bool {
     if let NodeData::Element { attrs, .. } = &node.data
         && attrs.borrow().iter().any(|attribute| {
             let name = attribute.name.local.as_str();
-            name.eq_ignore_ascii_case("onload") || name.eq_ignore_ascii_case("onreadystatechange")
+            name.eq_ignore_ascii_case("onerror")
+                || name.eq_ignore_ascii_case("onload")
+                || name.eq_ignore_ascii_case("onreadystatechange")
         })
     {
         return true;
@@ -218,9 +106,136 @@ mod tests {
     }
 
     #[test]
+    fn static_window_load_rejection_is_forwarded_to_the_renderer() {
+        let result = StaticHtmlRuntime.start(
+            "<script>window.addEventListener('load', () => { throw new Error('load'); });</script>",
+        );
+
+        assert!(matches!(
+            result,
+            Err(HtmlRuntimeError::JavaScriptException(message)) if message.contains("load")
+        ));
+    }
+
+    #[test]
+    fn interactive_browser_body_onload_follows_parser_order() {
+        let source = must_result(HtmlBrowserSource::new(
+            r#"<head><script>window.onload = () => { document.getElementById('status').textContent = 'head'; };</script></head><body onload="document.getElementById('status').textContent = 'body'"><p id=status></p><script>window.onload = () => { document.getElementById('status').textContent = 'body-script'; };</script></body>"#,
+            "https://example.test/index.html",
+        ));
+
+        let snapshot =
+            must_result(must_result(StaticHtmlRuntime.start_interactive(&source)).snapshot());
+
+        assert!(
+            snapshot.contains(r#"<p id="status">body-script</p>"#),
+            "{snapshot}"
+        );
+        assert!(
+            !snapshot.contains(r#"<p id="status">body</p>"#),
+            "{snapshot}"
+        );
+        assert!(
+            !snapshot.contains(r#"<p id="status">head</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn interactive_duplicate_body_onload_survives_earlier_attribute_removal() {
+        let source = must_result(HtmlBrowserSource::new(
+            r#"<body onload="document.getElementById('status').textContent = 'first-body'"><p id=status>Waiting</p><script>document.body.removeAttribute('onload'); globalThis.__krrInstallStaticBodyLoadHandler = () => {};</script><body onload="document.getElementById('status').textContent = 'later-body'">"#,
+            "https://example.test/index.html",
+        ));
+
+        let snapshot =
+            must_result(must_result(StaticHtmlRuntime.start_interactive(&source)).snapshot());
+
+        assert!(
+            snapshot.contains(r#"<p id="status">later-body</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    const LATER_BODY_ONLOAD_CASES: &[(&str, &str, &str)] = &[
+        (
+            r#""#,
+            r#"<body onload="document.getElementById('status').textContent = 'second'">"#,
+            "first",
+        ),
+        (
+            r#"window.onload = () => document.getElementById('status').textContent = 'author';"#,
+            r#"<body onload="document.getElementById('status').textContent = 'first'">"#,
+            "author",
+        ),
+        (
+            r#"document.body.removeAttribute('onload');"#,
+            r#"<body onload="document.getElementById('status').textContent = 'second'"><script>document.body.removeAttribute('onload');</script><body onload="document.getElementById('status').textContent = 'third'">"#,
+            "third",
+        ),
+        (
+            r#"document.body.removeAttribute('onload');"#,
+            r#"<template><body onload="document.getElementById('status').textContent = 'second'"></template><select><body onload="document.getElementById('status').textContent = 'second'"></select>"#,
+            "Waiting",
+        ),
+        (
+            r#"document.body.removeAttribute('onload'); document.body.getAttribute = () => 'spoof'; document.body.setAttribute = () => {}; Object.defineProperty(document, 'body', { get: () => null }); document.querySelector = () => null; globalThis.__krr_dom = () => null;"#,
+            r#"<body onload="document.getElementById('status').textContent = 'second'">"#,
+            "second",
+        ),
+        (
+            r#"const savedFunction = Function; const savedString = String; const savedApply = Reflect.apply; const statusCaptured = document.getElementById('status'); document.body.removeAttribute('onload'); globalThis.__krrInstallStaticBodyLoadHandler = () => {}; globalThis.Function = () => null; globalThis.String = () => 'spoof'; Reflect.apply = () => null;"#,
+            r#"<body onload="statusCaptured.textContent = 'second'"><script>globalThis.Function = savedFunction; globalThis.String = savedString; Reflect.apply = savedApply;</script>"#,
+            "second",
+        ),
+        (
+            r#"const savedMapGet = Map.prototype.get; const savedMapSet = Map.prototype.set; const savedMapDelete = Map.prototype.delete; const savedWeakGet = WeakMap.prototype.get; const savedWeakSet = WeakMap.prototype.set; const statusCaptured = document.getElementById('status'); document.body.removeAttribute('onload'); Map.prototype.get = () => undefined; Map.prototype.set = () => {}; Map.prototype.delete = () => {}; WeakMap.prototype.get = () => undefined; WeakMap.prototype.set = () => {};"#,
+            r#"<body onload="statusCaptured.textContent = 'second'"><script>Map.prototype.get = savedMapGet; Map.prototype.set = savedMapSet; Map.prototype.delete = savedMapDelete; WeakMap.prototype.get = savedWeakGet; WeakMap.prototype.set = savedWeakSet;</script>"#,
+            "second",
+        ),
+        (
+            r#"document.body.removeAttribute('onload'); window.authorCalls = 0; globalThis.__krrInstallStaticBodyLoadHandler = () => { window.authorCalls += 1; };"#,
+            r#"<body onload="document.getElementById('status').textContent = `second:${window.authorCalls}`"><script>__krrInstallStaticBodyLoadHandler('author-source', true);</script>"#,
+            "second:1",
+        ),
+    ];
+
+    #[test]
+    fn interactive_later_duplicate_body_onload_preserves_live_parser_state() {
+        let first = "document.getElementById('status').textContent = 'first'";
+        for (middle, later, expected) in LATER_BODY_ONLOAD_CASES {
+            let source = must_result(HtmlBrowserSource::new(
+                format!(
+                    r#"<body onload="{first}"><p id=status>Waiting</p><script>{middle}</script>{later}"#
+                ),
+                "https://example.test/index.html",
+            ));
+            let snapshot =
+                must_result(must_result(StaticHtmlRuntime.start_interactive(&source)).snapshot());
+            assert!(
+                snapshot.contains(&format!(">{expected}</p>")),
+                "{}: {snapshot}",
+                source.raw_html
+            );
+        }
+    }
+
+    #[test]
     fn scriptless_local_iframe_onload_uses_the_runtime_lifecycle_dispatch() {
         let snapshot = must_result(StaticHtmlRuntime.render(
             r#"<p id=status>Waiting</p><iframe data-krr-local-frame onload="document.getElementById('status').textContent = 'Ready'"></iframe>"#,
+        ));
+
+        assert!(
+            snapshot.contains(r#"<p id="status">Ready</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn scriptless_image_onerror_uses_the_runtime_lifecycle_dispatch() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<p id=status>Waiting</p><img src="data:image/png;base64,!" onerror="document.getElementById('status').textContent = 'Ready'">"#,
         ));
 
         assert!(
@@ -292,6 +307,45 @@ mod tests {
     }
 
     #[test]
+    fn dynamically_added_body_onload_uses_the_window_lifecycle_dispatch() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<body><p id=status>Waiting</p><script>
+                document.body.setAttribute('onload', "document.getElementById('status').textContent = 'Ready'");
+            </script></body>"#,
+        ));
+
+        assert!(
+            snapshot.contains(r#"<p id="status">Ready</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn replacing_body_onload_replaces_the_window_lifecycle_handler() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<body onload="document.getElementById('status').textContent = 'Old'"><p id=status>Waiting</p><script>
+                document.body.setAttribute('onload', "document.getElementById('status').textContent = 'New'");
+            </script></body>"#,
+        ));
+
+        assert!(snapshot.contains(r#"<p id="status">New</p>"#), "{snapshot}");
+    }
+
+    #[test]
+    fn removing_body_onload_clears_the_window_lifecycle_handler() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<body onload="document.getElementById('status').textContent = 'Unexpected'"><p id=status>Waiting</p><script>
+                document.body.removeAttribute('onload');
+            </script></body>"#,
+        ));
+
+        assert!(
+            snapshot.contains(r#"<p id="status">Waiting</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
     fn lifecycle_attribute_stringifies_stateful_values_once_for_storage_and_handler() {
         let snapshot = must_result(StaticHtmlRuntime.render(
             r#"<p id=status>Waiting</p><iframe id=frame data-krr-local-frame></iframe><script>
@@ -343,8 +397,13 @@ mod tests {
     fn script_context_setup_rejects_invalid_document_urls_in_both_modes() {
         DiagramV8Runtime::ensure_initialized();
         let mut static_isolate = v8::Isolate::new(Default::default());
-        let static_result =
-            StaticHtmlRuntime::execute_inline_scripts(&mut static_isolate, &[], "http://[");
+        let static_result = StaticHtmlRuntime::execute_inline_scripts(
+            &mut static_isolate,
+            &[],
+            None,
+            None,
+            "http://[",
+        );
         assert!(matches!(
             static_result,
             Err(HtmlRuntimeError::DomBridge(message))
@@ -355,6 +414,8 @@ mod tests {
         let interactive_result = StaticHtmlRuntime::execute_interactive_scripts(
             &mut interactive_isolate,
             &[],
+            None,
+            None,
             "http://[",
         );
         assert!(matches!(
@@ -385,27 +446,11 @@ mod tests {
     }
 
     #[test]
-    fn run_static_scripts_forwards_window_load_error() {
-        let mut calls = Vec::new();
-        let result = StaticHtmlRuntime::run_static_scripts(
-            "https://example.test/index.html",
-            &[],
-            ("content-loaded", ""),
-            ("window-load", ""),
-            &mut |name, _source| {
-                calls.push(name.to_string());
-                if name == "window-load" {
-                    return Err(HtmlRuntimeError::JavaScriptCompile(name.to_string()));
-                }
-                Ok(())
-            },
-        );
+    fn repeated_page_dom_callbacks_cannot_extend_the_execution_budget_indefinitely() {
+        let result = StaticHtmlRuntime
+            .start("<script>while (true) { __krr_dom('getElementById', 'missing'); }</script>");
 
-        assert_eq!(calls, ["content-loaded", "window-load"]);
-        assert!(matches!(
-            result,
-            Err(HtmlRuntimeError::JavaScriptCompile(message)) if message == "window-load"
-        ));
+        assert_eq!(result.err(), Some(HtmlRuntimeError::ExecutionTimeout));
     }
 
     #[test]
@@ -434,6 +479,24 @@ mod tests {
             result,
             Err(HtmlRuntimeError::JavaScriptCompile(message))
                 if message == "krr-html-window-load"
+        ));
+    }
+
+    #[test]
+    fn inline_scripts_forward_body_onload_install_errors() {
+        let result = StaticHtmlRuntime::run_inline_interactive_scripts(
+            "https://example.test/index.html",
+            &[super::HtmlDocumentScript::Source(
+                "document.body.dataset.ready = 'yes';".to_string(),
+            )],
+            Some(0),
+            None,
+            &mut |script, _source| Err(HtmlRuntimeError::JavaScriptCompile(script.to_string())),
+        );
+
+        assert!(matches!(
+            result,
+            Err(HtmlRuntimeError::JavaScriptCompile(message)) if message == "krr-html-body-onload"
         ));
     }
 

@@ -20,6 +20,8 @@ impl StaticHtmlRuntime {
         let context = Self::execute_interactive_scripts(
             &mut isolate,
             &resources.scripts,
+            resources.body_onload_script_index,
+            resources.body_onload_source.as_deref(),
             source.origin.as_str(),
         )?;
         trace.finish(

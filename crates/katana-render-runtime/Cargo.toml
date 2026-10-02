@@ -15,8 +15,8 @@ include = [
     "src/renderer/backends/html_runtime/*.js",
     "src/markdown/diagram_runtime/generated/*.js",
     "src/markdown/diagram_runtime/generated/*.sha256",
-    "vendor/drawio/31.5.3/drawio.min.js.br",
-    "vendor/drawio/31.5.3/drawio.min.js.sha256",
+    "vendor/drawio/31.6.1/drawio.min.js.br",
+    "vendor/drawio/31.6.1/drawio.min.js.sha256",
     "vendor/mermaid/12.0.0/mermaid.min.js.br",
     "vendor/mermaid/12.0.0/mermaid.min.js.sha256",
     "vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js.sha256",
@@ -34,6 +34,7 @@ anyhow = { workspace = true }
 base64 = { workspace = true }
 brotli-decompressor = { workspace = true }
 include_dir = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 jni = { workspace = true }
 html5ever = { workspace = true }
 markup5ever = { workspace = true }
@@ -61,4 +62,3 @@ unicode-width = { workspace = true }
 brotli-decompressor = { workspace = true }
 
 [dev-dependencies]
-image = { version = "0.25", default-features = false, features = ["png"] }

@@ -298,6 +298,7 @@ def cleanup_release_state(
     release_branch: str,
     remote: str,
     default_branch: str,
+    delete_remote: bool = False,
     release_checker: ReleaseChecker | None = None,
 ) -> list[str]:
     repository = repository.resolve()
@@ -358,7 +359,7 @@ def cleanup_release_state(
     if local_exists:
         _run_git(repository, "branch", "-d", release_branch)
         actions.append(f"local branch {release_branch} deleted")
-    if remote_exists:
+    if remote_exists and delete_remote:
         if audited_remote_sha is None:
             raise CleanupError("remote branchの監査SHAを取得できません")
         _run_git(
@@ -369,6 +370,8 @@ def cleanup_release_state(
             f":refs/heads/{release_branch}",
         )
         actions.append(f"remote branch {release_branch} deleted")
+    elif remote_exists:
+        actions.append(f"remote branch {release_branch} preserved")
     _run_git(repository, "worktree", "prune")
     actions.append("worktree metadata pruned")
     return actions
@@ -381,6 +384,11 @@ def _parse_arguments(arguments: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--version", required=True)
     parser.add_argument("--release-branch")
     parser.add_argument("--remote", default="origin")
+    parser.add_argument(
+        "--delete-remote",
+        action="store_true",
+        help="統合済みrelease branchをremoteからも削除します（明示指定時のみ）",
+    )
     parser.add_argument("--default-branch", default="master")
     parser.add_argument("--repository", type=Path, default=Path.cwd())
     return parser.parse_args(arguments)
@@ -396,6 +404,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             release_branch=release_branch,
             remote=options.remote,
             default_branch=options.default_branch,
+            delete_remote=options.delete_remote,
         )
     except CleanupError as error:
         print(f"Release cleanup blocked: {error}", file=sys.stderr)

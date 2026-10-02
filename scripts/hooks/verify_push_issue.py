@@ -2,10 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -26,6 +31,8 @@ class Issue:
 
 
 IssueLoader = Callable[[int], Optional[Issue]]
+TreeEntries = dict[str, tuple[str, str, str]]
+_MAX_PROVENANCE_BLOB_BYTES = 100 * 1024 * 1024
 
 
 def _read_push_input(stream: IO[str]) -> str:
@@ -58,6 +65,7 @@ _CLOSING_ISSUE_REFERENCE_PATTERN = re.compile(
 _ZERO_SHA = "0" * 40
 _SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 _REPOSITORY_PATTERN = re.compile(r"^[^/\s]+/[^/\s]+$")
+_RELEASE_BRANCH_PATTERN = re.compile(r"release/v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z")
 _NAME_STATUS_PATTERN = re.compile(r"^(?P<kind>[ACDMRTUXB])(?P<score>\d{1,3})?$")
 _MANIFEST_NAMES = {
     "Cargo.toml",
@@ -288,12 +296,21 @@ def dependency_contract_paths(paths: Sequence[str]) -> tuple[list[str], list[str
 
 def parse_name_status_paths(raw: str) -> list[str]:
     """Collect every changed path from `git diff --name-status -z` output."""
+    return [
+        path
+        for _status, record_paths in _parse_name_status_records(raw)
+        for path in record_paths
+    ]
+
+
+def _parse_name_status_records(raw: str) -> list[tuple[str, tuple[str, ...]]]:
+    """Parse complete name-status records while retaining rename endpoints."""
     if not raw:
         return []
     if not raw.endswith("\0"):
         raise ContractViolation("git diff --name-status -z outputが途中で切れています")
     fields = raw.split("\0")[:-1]
-    paths: list[str] = []
+    records: list[tuple[str, tuple[str, ...]]] = []
     index = 0
     while index < len(fields):
         status = fields[index]
@@ -319,8 +336,8 @@ def parse_name_status_paths(raw: str) -> list[str]:
         index += required_paths
         if any(not path for path in record_paths):
             raise ContractViolation("git diff --name-status -z pathが空です")
-        paths.extend(record_paths)
-    return paths
+        records.append((kind, tuple(record_paths)))
+    return records
 
 
 def parse_commit_messages(raw: str) -> list[str]:
@@ -407,18 +424,30 @@ def validate_contract(
     commit_messages: Sequence[str],
     changed_paths: Sequence[str],
     issue_loader: IssueLoader,
+    release_issue_numbers: set[int] | None = None,
 ) -> None:
     if branch == default_branch:
         return
 
     referenced_numbers: set[int] = set()
-    for index, message in enumerate(commit_messages, start=1):
-        references = issue_numbers(message, repository)
-        if not references:
-            raise ContractViolation(
-                f"非default branchのcommit {index}に対象repositoryのIssue参照がありません"
-            )
-        referenced_numbers.update(references)
+    release_branch = is_release_branch(branch)
+    if release_branch and release_issue_numbers is not None:
+        if any(type(number) is not int or number < 1 for number in release_issue_numbers):
+            raise ContractViolation("release Issue集合の形式が不正です")
+        referenced_numbers.update(release_issue_numbers)
+    else:
+        for index, message in enumerate(commit_messages, start=1):
+            references = issue_numbers(message, repository)
+            if not references and not release_branch:
+                raise ContractViolation(
+                    f"非default branchのcommit {index}に対象repositoryのIssue参照がありません"
+                )
+            referenced_numbers.update(references)
+
+    if not referenced_numbers:
+        raise ContractViolation(
+            "非default branchのcommit範囲に対象repositoryのIssue参照がありません"
+        )
 
     loaded_issues: list[Issue] = []
     for number in sorted(referenced_numbers):
@@ -444,10 +473,60 @@ def validate_contract(
     )
 
 
+def _effective_release_issue_numbers(
+    *,
+    repository: str,
+    references_by_commit: Sequence[tuple[str, set[int]]],
+    net_paths: Sequence[str],
+    issue_loader: IssueLoader,
+    commit_paths: Callable[[str], Sequence[str]],
+    commit_surviving_paths: Callable[[str, Sequence[str]], Sequence[str]],
+) -> set[int]:
+    """Allow closed refs only when every referencing commit is obsolete in this diff."""
+    net_path_set = set(net_paths)
+    by_issue: dict[int, list[str]] = {}
+    for commit, references in references_by_commit:
+        for number in references:
+            by_issue.setdefault(number, []).append(commit)
+    effective: set[int] = set()
+    for number, commits in by_issue.items():
+        issue = issue_loader(number)
+        if issue is None:
+            raise ContractViolation(f"Issue #{number}を対象repositoryで確認できません")
+        canonical_url = f"https://github.com/{repository}/issues/{number}"
+        if (
+            type(issue.number) is not int
+            or issue.number != number
+            or not isinstance(issue.url, str)
+            or issue.url.casefold() != canonical_url.casefold()
+        ):
+            raise ContractViolation(f"Issue #{number}は対象repositoryのcanonical Issueではありません")
+        if issue.state == "OPEN":
+            effective.add(number)
+            continue
+        if issue.state != "CLOSED" or not commits:
+            raise ContractViolation(f"Issue #{number}はOPENではありません: {issue.state}")
+        for commit in commits:
+            paths = tuple(commit_paths(commit))
+            if not paths or net_path_set.intersection(paths):
+                raise ContractViolation(f"closed Issue #{number}の参照commitが現行差分と重複するか証跡不足です")
+            surviving_paths = set(commit_surviving_paths(commit, paths))
+            if net_path_set.intersection(surviving_paths):
+                raise ContractViolation(
+                    f"closed Issue #{number}の参照commit由来の内容がrename先で現行差分に残っています"
+                )
+    return effective
+
+
 def _require_sha(value: object, label: str) -> str:
     if not isinstance(value, str) or _SHA_PATTERN.fullmatch(value) is None:
         raise ContractViolation(f"{label}は40文字のSHAである必要があります")
     return value.lower()
+
+
+def is_release_branch(branch: str) -> bool:
+    """完全なリリースIssue集合を許可するbranchか判定する。"""
+    return _RELEASE_BRANCH_PATTERN.fullmatch(branch) is not None
 
 
 def _require_repository_name(value: str) -> str:
@@ -472,12 +551,12 @@ def _gh_json(*arguments: str) -> object:
         raise ContractViolation("GitHub API responseがJSONではありません") from error
 
 
-def _pr_commit_messages(
+def _pr_commit_records(
     *,
     repository: str,
     base_sha: str,
     head_sha: str,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     comparison = _gh_json(
         f"repos/{repository}/compare/{base_sha}...{head_sha}"
     )
@@ -513,21 +592,24 @@ def _pr_commit_messages(
         )
     if ahead_by == 0:
         raise ContractViolation("PR base..headに検証対象commitがありません")
-    messages: list[str] = []
-    commit_shas: list[str] = []
+    records: list[tuple[str, str]] = []
     for commit in commits:
         if not isinstance(commit, dict):
             raise ContractViolation("GitHub compare responseのcommitが不正です")
-        commit_shas.append(_require_sha(commit.get("sha"), "compare commit SHA"))
+        commit_sha = _require_sha(commit.get("sha"), "compare commit SHA")
         payload = commit.get("commit")
         if not isinstance(payload, dict) or not isinstance(payload.get("message"), str):
             raise ContractViolation("GitHub compare responseのcommit messageが不正です")
-        messages.append(payload["message"])
+        records.append((commit_sha, payload["message"]))
     # GitHub's compare response does not expose head_commit.  The final item
     # is the head tip only after the full base..head range above was verified.
-    if commit_shas[-1] != head_sha:
+    if records[-1][0] != head_sha:
         raise ContractViolation("GitHub compare responseの最終commitがhead SHAと一致しません")
-    return messages
+    return records
+
+
+def _pr_commit_messages(*, repository: str, base_sha: str, head_sha: str) -> list[str]:
+    return [message for _, message in _pr_commit_records(repository=repository, base_sha=base_sha, head_sha=head_sha)]
 
 
 def referenced_issue_snapshot(
@@ -636,9 +718,11 @@ def _pr_changed_paths(
 
 
 def _git_tree_entries(
-    *, repository: str, commit_sha: str, label: str
-) -> dict[str, tuple[str, str, str]]:
-    commit = _gh_json(f"repos/{repository}/git/commits/{commit_sha}")
+    *, repository: str, commit_sha: str, label: str, commit_payload: object = None
+) -> TreeEntries:
+    commit = commit_payload if commit_payload is not None else _gh_json(
+        f"repos/{repository}/git/commits/{commit_sha}"
+    )
     if not isinstance(commit, dict):
         raise ContractViolation(f"{label} commit responseの形式が不正です")
     if _require_sha(commit.get("sha"), f"{label} commit SHA") != commit_sha:
@@ -650,6 +734,8 @@ def _git_tree_entries(
     payload = _gh_json(f"repos/{repository}/git/trees/{tree_sha}?recursive=1")
     if not isinstance(payload, dict) or payload.get("truncated") is not False:
         raise ContractViolation(f"{label} tree responseが打ち切られたか形式不正です")
+    if _require_sha(payload.get("sha"), f"{label} tree response SHA") != tree_sha:
+        raise ContractViolation(f"{label} tree response SHAが一致しません")
     entries = payload.get("tree")
     if not isinstance(entries, list):
         raise ContractViolation(f"{label} tree entriesの形式が不正です")
@@ -669,9 +755,10 @@ def _git_tree_entries(
             or any(part in {"", ".", ".."} for part in path.split("/"))
         ):
             raise ContractViolation(f"{label} tree entry pathの形式が不正です")
-        if not isinstance(entry_type, str) or not entry_type:
+        valid_modes = {"blob": {"100644", "100755", "120000"}, "tree": {"040000"}, "commit": {"160000"}}
+        if not isinstance(entry_type, str) or entry_type not in valid_modes:
             raise ContractViolation(f"{label} tree entry typeの形式が不正です")
-        if not isinstance(mode, str) or not mode:
+        if not isinstance(mode, str) or mode not in valid_modes[entry_type]:
             raise ContractViolation(f"{label} tree entry modeの形式が不正です")
         normalized_sha = _require_sha(entry_sha, f"{label} tree entry SHA")
         if path in result:
@@ -733,28 +820,46 @@ def validate_pr_range(
     if not _is_remote_ref(f"refs/heads/{branch}"):
         raise ContractViolation(f"PR head branchの形式が不正です: {branch!r}")
 
-    commit_messages = _pr_commit_messages(
+    commit_records = _pr_commit_records(
         repository=repository,
         base_sha=base_sha,
         head_sha=head_sha,
     )
-    references: set[int] = set()
-    for message in commit_messages:
-        references.update(issue_numbers(message, repository))
-    if len(references) != 1:
+    commit_messages = [message for _, message in commit_records]
+    references_by_commit: list[tuple[str, set[int]]] = []
+    for sha, message in commit_records:
+        references_by_commit.append((sha, issue_numbers(message, repository)))
+    references = {number for _, numbers in references_by_commit for number in numbers}
+    if not references or (not is_release_branch(branch) and len(references) != 1):
         raise ContractViolation(
-            "PR rangeの参照Issueは同一repositoryのcanonicalなOPEN Issue 1件である必要があります: "
+            "PR rangeの参照Issueは同一repositoryのcanonicalなOPEN Issue "
+            + ("1件" if not is_release_branch(branch) else "1件以上")
+            + "である必要があります: "
             f"件数={len(references)}"
         )
-    _validate_pr_canonical_issue(
-        repository=repository,
-        number=next(iter(references)),
-        issue_loader=issue_loader,
-    )
-
-    changed_paths = _pr_changed_paths(
-        repository=repository, base_sha=base_sha, head_sha=head_sha
-    )
+    if not is_release_branch(branch):
+        for number in sorted(references):
+            _validate_pr_canonical_issue(repository=repository, number=number, issue_loader=issue_loader)
+    changed_paths = _pr_changed_paths(repository=repository, base_sha=base_sha, head_sha=head_sha)
+    if is_release_branch(branch):
+        edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]] = {}
+        tree_cache: dict[str, TreeEntries] = {}
+        commit_cache: dict[str, dict[str, object]] = {}
+        blob_cache: dict[str, bytes] = {}
+        effective = _effective_release_issue_numbers(
+            repository=repository,
+            references_by_commit=references_by_commit,
+            net_paths=changed_paths,
+            issue_loader=issue_loader,
+            commit_paths=lambda sha: _pr_commit_paths(repository, sha, commit_cache),
+            commit_surviving_paths=lambda sha, paths: _pr_surviving_paths_at_head(
+                repository, sha, head_sha, paths, edge_cache, tree_cache, commit_cache, blob_cache
+            ),
+        )
+        if not effective:
+            raise ContractViolation("release PRにOPEN Issue参照がありません")
+    else:
+        effective = references
     validate_contract(
         branch=branch,
         default_branch=None,
@@ -762,8 +867,401 @@ def validate_pr_range(
         commit_messages=commit_messages,
         changed_paths=changed_paths,
         issue_loader=issue_loader,
+        release_issue_numbers=effective if is_release_branch(branch) else None,
     )
-    return references
+    return effective
+
+
+def _pr_commit_paths(
+    repository: str, sha: str,
+    commit_cache: Optional[dict[str, dict[str, object]]] = None,
+) -> list[str]:
+    """Fetch complete immutable paths for one non-merge commit; truncation fails closed."""
+    payload = None if commit_cache is None else commit_cache.get(sha)
+    if payload is None:
+        payload = _gh_json(f"repos/{repository}/git/commits/{sha}")
+    if not isinstance(payload, dict) or _require_sha(payload.get("sha"), "provenance commit SHA") != sha:
+        raise ContractViolation("closed Issue参照commitのprovenanceが不正です")
+    if commit_cache is not None:
+        commit_cache[sha] = payload
+    parents = payload.get("parents")
+    if not isinstance(parents, list) or len(parents) != 1 or not isinstance(parents[0], dict):
+        raise ContractViolation("merge commitのclosed Issue provenanceは判定できません")
+    parent_sha = _require_sha(parents[0].get("sha"), "provenance parent SHA")
+    return _pr_changed_paths(repository=repository, base_sha=parent_sha, head_sha=sha)
+
+
+def _advance_path_state(
+    paths: Sequence[str], records: Sequence[tuple[str, tuple[str, ...]]]
+) -> set[str]:
+    """親commitのpath集合を、1つのimmutable parent-child edgeに沿って進める。"""
+    current = set(paths)
+    tracked_deletions = {
+        record_paths[0]
+        for kind, record_paths in records
+        if kind == "D" and record_paths[0] in current
+    }
+    additions = {
+        record_paths[0]
+        for kind, record_paths in records
+        if kind == "A"
+    }
+    if tracked_deletions and additions:
+        raise ContractViolation(
+            "closed Issue provenanceでtracked pathの削除と同一edgeの追加がありrename判定できません"
+        )
+    removed: set[str] = set()
+    added: set[str] = set()
+    for kind, record_paths in records:
+        if kind == "R" and record_paths[0] in current:
+            removed.add(record_paths[0])
+            added.add(record_paths[1])
+        elif kind == "C" and record_paths[0] in current:
+            added.add(record_paths[1])
+        elif kind == "D" and record_paths[0] in current:
+            removed.add(record_paths[0])
+    return (current - removed) | added
+
+
+def _prove_path_additions(
+    paths: Sequence[str],
+    records: Sequence[tuple[str, tuple[str, ...]]],
+    parent_sha: str,
+    commit_sha: str,
+    parents: Sequence[str],
+    states: dict[str, set[str]],
+    tree_loader: Callable[[str], TreeEntries],
+    copy_detector: Optional[Callable[[TreeEntries, TreeEntries], dict[str, str]]] = None,
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """追加の同一blobコピーと、別parentから来た独立追加だけを証明する。"""
+    additions = [record_paths[0] for kind, record_paths in records if kind == "A"]
+    if not additions:
+        return tuple(records)
+    if len(parents) == 1 and any(
+        kind == "D" and record_paths[0] in paths for kind, record_paths in records
+    ):
+        # 大幅編集を伴う移動はblob一致では証明できないため、従来どおり拒否する。
+        return tuple(records)
+    parent_tree = tree_loader(parent_sha)
+    child_tree = tree_loader(commit_sha)
+    tracked_entries: dict[tuple[str, str], str] = {}
+    for path in paths:
+        entry = parent_tree.get(path)
+        if entry is None:
+            raise ContractViolation("closed Issue provenanceのtracked pathがparent treeにありません")
+        tracked_entries[(entry[0], entry[2])] = path
+    all_tracked_entries = set(tracked_entries)
+    other_trees: list[tuple[str, TreeEntries]] = []
+    if len(parents) > 1:
+        for other_sha in parents:
+            if other_sha == parent_sha:
+                continue
+            other_tree = tree_loader(other_sha)
+            other_trees.append((other_sha, other_tree))
+            for path in states.get(other_sha, set()):
+                entry = other_tree.get(path)
+                if entry is None:
+                    raise ContractViolation("closed Issue provenanceのtracked pathがparent treeにありません")
+                all_tracked_entries.add((entry[0], entry[2]))
+    proven: list[tuple[str, tuple[str, ...]]] = []
+    for kind, record_paths in records:
+        if kind != "A":
+            proven.append((kind, record_paths))
+            continue
+        path = record_paths[0]
+        entry = child_tree.get(path)
+        if entry is None or path in parent_tree:
+            raise ContractViolation("closed Issue provenanceの追加pathがimmutable treeと一致しません")
+        content_identity = (entry[0], entry[2])
+        if content_identity in tracked_entries:
+            proven.append(("C", (tracked_entries[content_identity], path)))
+        elif content_identity not in all_tracked_entries and any(
+            other_tree.get(path) == entry and path not in states.get(other_sha, set())
+            for other_sha, other_tree in other_trees
+        ):
+            # mergeの同一path・同一blobが別parentですでに存在する場合だけ除外する。
+            continue
+        else:
+            proven.append((kind, record_paths))
+    if copy_detector is not None:
+        candidates = {
+            record_paths[0]: child_tree[record_paths[0]]
+            for kind, record_paths in proven if kind == "A"
+            and child_tree[record_paths[0]][0] == "blob"
+        }
+        sources = {path: parent_tree[path] for path in paths if parent_tree[path][0] == "blob"}
+        if candidates and sources:
+            copies = copy_detector(sources, candidates)
+            proven = [
+                ("C", (copies[record_paths[0]], record_paths[0]))
+                if kind == "A" and record_paths[0] in copies else (kind, record_paths)
+                for kind, record_paths in proven
+            ]
+    return tuple(proven)
+
+
+def _pr_blob_bytes(repository: str, sha: str, cache: dict[str, bytes]) -> bytes:
+    if sha in cache:
+        return cache[sha]
+    payload = _gh_json(f"repos/{repository}/git/blobs/{sha}")
+    if not isinstance(payload, dict) or _require_sha(payload.get("sha"), "provenance blob SHA") != sha:
+        raise ContractViolation("closed Issue provenanceのblob SHAが一致しません")
+    size, content = payload.get("size"), payload.get("content")
+    if (
+        payload.get("encoding") != "base64" or type(size) is not int
+        or not 0 <= size <= _MAX_PROVENANCE_BLOB_BYTES or not isinstance(content, str)
+        or len(content) > (_MAX_PROVENANCE_BLOB_BYTES * 4 // 3 + 4) * 2
+    ):
+        raise ContractViolation("closed Issue provenanceのblob responseが不正か上限超過です")
+    try:
+        decoded = base64.b64decode(content.replace("\n", ""), validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ContractViolation("closed Issue provenanceのblob encodingが不正です") from error
+    if len(decoded) != size or hashlib.sha1(f"blob {size}\0".encode() + decoded).hexdigest() != sha:
+        raise ContractViolation("closed Issue provenanceのblob contentがimmutable SHAと一致しません")
+    if sum(len(data) for data in cache.values()) + size > _MAX_PROVENANCE_BLOB_BYTES:
+        raise ContractViolation("closed Issue provenanceのblob cacheが上限超過です")
+    cache[sha] = decoded
+    return decoded
+
+
+def _native_copy_sources(
+    sources: TreeEntries, candidates: TreeEntries, blob_loader: Callable[[str], bytes]
+) -> dict[str, str]:
+    """未証明の追加だけに既存Gitのcopy判定を適用し、object DBを本repoから隔離する。"""
+    environment = {
+        name: value for name, value in os.environ.items() if not name.startswith("GIT_")
+    }
+    environment.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull})
+    with tempfile.TemporaryDirectory(prefix="krr-provenance-") as directory:
+        object_db = Path(directory) / "objects.git"
+
+        def git(*arguments: str, data: bytes = b"") -> bytes:
+            result = subprocess.run(
+                ["git", "--git-dir", str(object_db), "-c", f"core.attributesFile={os.devnull}", *arguments], input=data,
+                cwd=directory, env=environment, capture_output=True, check=False,
+            )
+            if result.returncode != 0:
+                raise ContractViolation("closed Issue provenanceの隔離Git copy判定に失敗しました")
+            return result.stdout
+
+        git("init", "--bare", "--template=", str(object_db))
+        for sha in sorted({entry[2] for entry in [*sources.values(), *candidates.values()]}):
+            actual_sha = git("hash-object", "-w", "--stdin", data=blob_loader(sha)).decode().strip()
+            if actual_sha != sha:
+                raise ContractViolation("closed Issue provenanceの隔離blob SHAが一致しません")
+
+        def tree(entries: TreeEntries) -> str:
+            directories: dict[str, dict[str, tuple[str, str, str]]] = {"": {}}
+            for path, entry in entries.items():
+                parts = path.split("/")
+                parent = ""
+                for component in parts[:-1]:
+                    child = f"{parent}/{component}" if parent else component
+                    directories.setdefault(child, {})
+                    parent = child
+                directories[parent][parts[-1]] = entry
+            for directory_name in sorted(directories, key=lambda name: name.count("/") + bool(name), reverse=True):
+                records = b"".join(
+                    f"{mode} {entry_type} {sha}\t{name}\0".encode()
+                    for name, (entry_type, mode, sha) in sorted(directories[directory_name].items())
+                )
+                tree_sha = git("mktree", "-z", data=records).decode().strip()
+                if not directory_name:
+                    return tree_sha
+                parent, _, name = directory_name.rpartition("/")
+                if name in directories[parent]:
+                    raise ContractViolation("closed Issue provenanceの隔離tree pathが衝突しています")
+                directories[parent][name] = ("tree", "040000", tree_sha)
+            raise ContractViolation("closed Issue provenanceの隔離treeを作成できません")
+
+        before = tree(sources)
+        after = tree({**sources, **candidates})
+        records = _parse_name_status_records(git(
+            "diff", "--no-ext-diff", "--no-textconv", "--name-status", "-z",
+            "--find-renames", "--find-copies", "--find-copies-harder", before, after,
+        ).decode())
+        return {
+            paths[1]: paths[0] for kind, paths in records
+            if kind == "C" and paths[0] in sources and paths[1] in candidates
+        }
+
+
+def _pr_surviving_paths_at_head(
+    repository: str,
+    sha: str,
+    head_sha: str,
+    source_paths: Sequence[str],
+    edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]],
+    tree_cache: Optional[dict[str, TreeEntries]] = None,
+    commit_cache: Optional[dict[str, dict[str, object]]] = None,
+    blob_cache: Optional[dict[str, bytes]] = None,
+) -> list[str]:
+    """Trace source paths through every source-descendant parent edge to the PR head."""
+    sha = _require_sha(sha, "provenance commit SHA")
+    head_sha = _require_sha(head_sha, "provenance head SHA")
+    if sha == head_sha:
+        return list(source_paths)
+    comparison = _gh_json(f"repos/{repository}/compare/{sha}...{head_sha}")
+    if not isinstance(comparison, dict):
+        raise ContractViolation("closed Issue rename provenanceのcompare responseが不正です")
+    base_commit = comparison.get("base_commit")
+    if not isinstance(base_commit, dict) or _require_sha(
+        base_commit.get("sha"), "rename provenance base SHA"
+    ) != sha:
+        raise ContractViolation("closed Issue rename provenanceのbase SHAが一致しません")
+    commits = comparison.get("commits")
+    total_commits = comparison.get("total_commits")
+    ahead_by = comparison.get("ahead_by")
+    if (
+        not isinstance(commits, list)
+        or not commits
+        or type(total_commits) is not int
+        or total_commits != len(commits)
+        or type(ahead_by) is not int
+        or ahead_by != total_commits
+    ):
+        raise ContractViolation("closed Issue rename provenanceのcommit一覧が不完全です")
+    parents_by_commit: dict[str, tuple[str, ...]] = {}
+    tree_cache = {} if tree_cache is None else tree_cache
+    commit_cache = {} if commit_cache is None else commit_cache
+    blob_cache = {} if blob_cache is None else blob_cache
+
+    def tree_loader(commit_sha: str) -> TreeEntries:
+        if commit_sha not in tree_cache:
+            tree_cache[commit_sha] = _git_tree_entries(
+                repository=repository, commit_sha=commit_sha,
+                label="closed Issue provenance", commit_payload=commit_cache.get(commit_sha),
+            )
+        return tree_cache[commit_sha]
+
+    for commit_record in commits:
+        if not isinstance(commit_record, dict):
+            raise ContractViolation("closed Issue rename provenanceのcommit entryが不正です")
+        commit_sha = _require_sha(commit_record.get("sha"), "rename provenance commit SHA")
+        if commit_sha in parents_by_commit:
+            raise ContractViolation("closed Issue rename provenanceのcommit一覧に重複があります")
+        commit_payload = commit_cache.get(commit_sha)
+        if commit_payload is None:
+            commit_payload = _gh_json(f"repos/{repository}/git/commits/{commit_sha}")
+        if not isinstance(commit_payload, dict) or _require_sha(
+            commit_payload.get("sha"), "rename provenance commit SHA"
+        ) != commit_sha:
+            raise ContractViolation("closed Issue rename provenance commitが不正です")
+        commit_cache[commit_sha] = commit_payload
+        parents = commit_payload.get("parents")
+        if not isinstance(parents, list) or any(not isinstance(parent, dict) for parent in parents):
+            raise ContractViolation("closed Issue rename provenanceのparent一覧が不正です")
+        parents_by_commit[commit_sha] = tuple(
+            _require_sha(parent.get("sha"), "rename provenance parent SHA")
+            for parent in parents
+        )
+    states: dict[str, set[str]] = {sha: set(source_paths)}
+    pending = set(parents_by_commit)
+    while pending:
+        ready = [
+            commit_sha
+            for commit_sha in pending
+            if all(parent_sha not in pending for parent_sha in parents_by_commit[commit_sha])
+        ]
+        if not ready:
+            raise ContractViolation("closed Issue rename provenanceのcommit DAGにcycleがあります")
+        for commit_sha in ready:
+            current: set[str] = set()
+            for parent_sha in parents_by_commit[commit_sha]:
+                if parent_sha not in states or not states[parent_sha]:
+                    continue
+                edge = _pr_path_edge_records(
+                    repository, parent_sha, commit_sha, edge_cache, tree_loader
+                )
+                proven_edge = _prove_path_additions(
+                    states[parent_sha], edge, parent_sha, commit_sha,
+                    parents_by_commit[commit_sha], states, tree_loader,
+                    lambda sources, candidates: _native_copy_sources(
+                        sources, candidates, lambda blob_sha: _pr_blob_bytes(repository, blob_sha, blob_cache)
+                    ),
+                )
+                current.update(_advance_path_state(states[parent_sha], proven_edge))
+            if any(parent_sha in states for parent_sha in parents_by_commit[commit_sha]):
+                states[commit_sha] = current
+            pending.remove(commit_sha)
+    if head_sha not in states:
+        raise ContractViolation("closed Issue rename provenanceが指定headに到達していません")
+    return sorted(states[head_sha])
+
+
+def _pr_path_edge_records(
+    repository: str,
+    parent_sha: str,
+    commit_sha: str,
+    edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]],
+    tree_loader: Optional[Callable[[str], TreeEntries]] = None,
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    key = (parent_sha, commit_sha)
+    if key in edge_cache:
+        return edge_cache[key]
+    comparison = _gh_json(
+        f"repos/{repository}/compare/{parent_sha}...{commit_sha}"
+    )
+    if not isinstance(comparison, dict):
+        raise ContractViolation("closed Issue rename provenanceのcommit compareが不正です")
+    base_commit = comparison.get("base_commit")
+    if not isinstance(base_commit, dict) or _require_sha(
+        base_commit.get("sha"), "rename provenance parent SHA"
+    ) != parent_sha:
+        raise ContractViolation("closed Issue rename provenanceのparent SHAが一致しません")
+    files = comparison.get("files")
+    if not isinstance(files, list):
+        raise ContractViolation(
+            f"closed Issue rename provenanceのfile一覧が不完全です: {parent_sha}...{commit_sha}"
+        )
+    if len(files) >= 300:
+        if tree_loader is None:
+            raise ContractViolation(
+                f"closed Issue rename provenanceのfile一覧が不完全です: {parent_sha}...{commit_sha}"
+            )
+        # compareの上限に達したedgeは、完全性を検証済みのimmutable treeで置き換える。
+        parent_tree = tree_loader(parent_sha)
+        child_tree = tree_loader(commit_sha)
+        paths = sorted(set(parent_tree) | set(child_tree))
+        tree_records: list[tuple[str, tuple[str, ...]]] = []
+        for path in paths:
+            before = parent_tree.get(path)
+            after = child_tree.get(path)
+            if before == after:
+                continue
+            before = before if before is not None and before[0] != "tree" else None
+            after = after if after is not None and after[0] != "tree" else None
+            if before is None and after is None:
+                continue
+            kind = "A" if before is None else "D" if after is None else "M"
+            tree_records.append((kind, (path,)))
+        edge_cache[key] = tuple(tree_records)
+        return edge_cache[key]
+    records: list[tuple[str, tuple[str, ...]]] = []
+    for changed_file in files:
+        if not isinstance(changed_file, dict):
+            raise ContractViolation("closed Issue rename provenanceのfile entryが不正です")
+        filename = changed_file.get("filename")
+        status = changed_file.get("status")
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or status not in {"added", "removed", "modified", "renamed"}
+        ):
+            raise ContractViolation("closed Issue rename provenanceのfile情報が不正です")
+        previous_filename = changed_file.get("previous_filename")
+        if status == "renamed":
+            if not isinstance(previous_filename, str) or not previous_filename:
+                raise ContractViolation("closed Issue rename provenanceのprevious_filenameが不正です")
+            records.append(("R", (previous_filename, filename)))
+        elif previous_filename is not None:
+            raise ContractViolation("closed Issue rename provenanceに予期しないprevious_filenameがあります")
+        else:
+            kind = {"added": "A", "removed": "D", "modified": "M"}[status]
+            records.append((kind, (filename,)))
+    edge_cache[key] = tuple(records)
+    return edge_cache[key]
 
 
 def _run_git(repository: Path, *arguments: str) -> str:
@@ -778,6 +1276,48 @@ def _run_git(repository: Path, *arguments: str) -> str:
         detail = result.stderr.strip() or result.stdout.strip()
         raise ContractViolation(f"git {' '.join(arguments)} failed: {detail}")
     return result.stdout.strip()
+
+
+def _is_ancestor(repository: Path, ancestor: str, descendant: str) -> bool:
+    """fast-forward関係を判定し、Git実行失敗は拒否する。"""
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise ContractViolation("push rangeのancestor判定に失敗しました")
+
+
+def push_validation_range_base(
+    repository: Path,
+    *,
+    remote_sha: str,
+    local_sha: str,
+    default_range_base: str,
+) -> str:
+    """通常のfast-forward pushではremote先端を起点にする。
+
+    feature branchがremote先端より後のlive defaultをmergeした場合は、
+    live defaultから到達可能なcommitをIssue検査へ含めない。non-fast-forward
+    更新は信頼できる増分範囲を持たないため、live default branchから検証する。
+    """
+    remote_sha = _require_sha(remote_sha, "push remote SHA")
+    local_sha = _require_sha(local_sha, "push local SHA")
+    if remote_sha == _ZERO_SHA:
+        return default_range_base
+    if _is_ancestor(repository, remote_sha, local_sha):
+        if _is_ancestor(repository, default_range_base, local_sha) and not _is_ancestor(
+            repository, default_range_base, remote_sha
+        ):
+            return default_range_base
+        return remote_sha
+    return default_range_base
 
 
 def _repository_name(remote_url: str) -> str:
@@ -1056,6 +1596,118 @@ def _load_issue(repository_name: str, number: int) -> Issue | None:
     )
 
 
+def _local_commit_paths(repository: Path, sha: str) -> list[str]:
+    parents = _run_git(repository, "rev-list", "--parents", "-n", "1", sha).split()
+    if len(parents) != 2 or parents[0] != sha:
+        raise ContractViolation("merge commitまたは不完全なclosed Issue provenanceです")
+    return parse_name_status_paths(
+        _run_git(repository, "diff", "--name-status", "-z", "--find-renames", parents[1], sha)
+    )
+
+
+def _local_surviving_paths_at_head(
+    repository: Path,
+    sha: str,
+    head_sha: str,
+    source_paths: Sequence[str],
+    edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]],
+    tree_cache: Optional[dict[str, TreeEntries]] = None,
+) -> list[str]:
+    """全parent edgeを辿り、mergeとrename後の編集・削除を反映する。"""
+    sha = _require_sha(sha, "provenance commit SHA")
+    head_sha = _require_sha(head_sha, "provenance head SHA")
+    if sha == head_sha:
+        return list(source_paths)
+    if not _is_ancestor(repository, sha, head_sha):
+        raise ContractViolation("closed Issue rename provenance commitが検証対象headのancestorではありません")
+    commits = _run_git(
+        repository,
+        "rev-list",
+        "--reverse",
+        "--topo-order",
+        "--ancestry-path",
+        f"{sha}..{head_sha}",
+    ).splitlines()
+    if not commits or head_sha not in commits:
+        raise ContractViolation("closed Issue rename provenanceのcommit一覧が不完全です")
+    parents_by_commit: dict[str, tuple[str, ...]] = {}
+    tree_cache = {} if tree_cache is None else tree_cache
+
+    def tree_loader(commit_sha: str) -> TreeEntries:
+        if commit_sha not in tree_cache:
+            raw = _run_git(repository, "ls-tree", "-r", "-z", "--full-tree", commit_sha)
+            entries: TreeEntries = {}
+            for record in raw.split("\x00"):
+                if not record:
+                    continue
+                metadata, separator, path = record.partition("\t")
+                fields = metadata.split()
+                if not separator or len(fields) != 3 or not path or path in entries:
+                    raise ContractViolation("closed Issue provenanceのlocal tree entryが不正です")
+                mode, entry_type, entry_sha = fields
+                entries[path] = (entry_type, mode, _require_sha(entry_sha, "local tree entry SHA"))
+            tree_cache[commit_sha] = entries
+        return tree_cache[commit_sha]
+
+    for commit_sha in commits:
+        fields = _run_git(repository, "rev-list", "--parents", "-n", "1", commit_sha).split()
+        if not fields or fields[0] != commit_sha:
+            raise ContractViolation("closed Issue rename provenanceのcommit情報が不正です")
+        parents_by_commit[commit_sha] = tuple(fields[1:])
+    states: dict[str, set[str]] = {sha: set(source_paths)}
+    pending = set(parents_by_commit)
+    while pending:
+        ready = [
+            commit_sha
+            for commit_sha in pending
+            if all(parent_sha not in pending for parent_sha in parents_by_commit[commit_sha])
+        ]
+        if not ready:
+            raise ContractViolation("closed Issue rename provenanceのcommit DAGにcycleがあります")
+        for commit_sha in ready:
+            current: set[str] = set()
+            for parent_sha in parents_by_commit[commit_sha]:
+                if parent_sha not in states or not states[parent_sha]:
+                    continue
+                edge = _local_path_edge_records(repository, parent_sha, commit_sha, edge_cache)
+                proven_edge = _prove_path_additions(
+                    states[parent_sha], edge, parent_sha, commit_sha,
+                    parents_by_commit[commit_sha], states, tree_loader,
+                )
+                current.update(
+                    _advance_path_state(states[parent_sha], proven_edge)
+                )
+            if any(parent_sha in states for parent_sha in parents_by_commit[commit_sha]):
+                states[commit_sha] = current
+            pending.remove(commit_sha)
+    if head_sha not in states:
+        raise ContractViolation("closed Issue rename provenanceが指定headに到達していません")
+    return sorted(states[head_sha])
+
+
+def _local_path_edge_records(
+    repository: Path,
+    parent_sha: str,
+    commit_sha: str,
+    edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]],
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    key = (parent_sha, commit_sha)
+    if key not in edge_cache:
+        raw = _run_git(
+            repository,
+            "diff",
+            "--name-status",
+            "-z",
+            "--find-renames",
+            "--find-copies",
+            "--find-copies-harder",
+            parent_sha,
+            commit_sha,
+        )
+        edge_cache[key] = tuple(_parse_name_status_records(raw))
+    return edge_cache[key]
+
+
 def main() -> int:
     try:
         parser = argparse.ArgumentParser(description="Validate Issue references on push")
@@ -1153,11 +1805,29 @@ def main() -> int:
         # substitute for the base of a feature range.
         default_range_base = default_ref
         push_updates = pushed_branch_updates(updates, default_branch=default_branch)
-        validation_targets = list(push_updates) if push_updates else []
+        pushed_remote_heads = {
+            (remote_ref.removeprefix("refs/heads/"), local_sha): remote_sha
+            for _local_ref, local_sha, remote_ref, remote_sha in updates
+            if local_sha != _ZERO_SHA
+            and remote_ref.startswith("refs/heads/")
+            and remote_ref.removeprefix("refs/heads/") != default_branch
+        }
+        validation_targets: list[tuple[str, str, str]] = []
+        for target_branch, target_revision in push_updates:
+            remote_sha = pushed_remote_heads[(target_branch, target_revision)]
+            range_base = default_range_base
+            if not is_release_branch(target_branch):
+                range_base = push_validation_range_base(
+                    repository,
+                    remote_sha=remote_sha,
+                    local_sha=target_revision,
+                    default_range_base=default_range_base,
+                )
+            validation_targets.append((target_branch, target_revision, range_base))
         if not validation_targets and not push_input.strip() and branch != default_branch:
             if not branch:
                 raise ContractViolation("空のpre-push入力ではcheckout branchが必要です")
-            validation_targets.append((branch, "HEAD"))
+            validation_targets.append((branch, "HEAD", default_range_base))
 
         if not validation_targets:
             if branch == default_branch:
@@ -1173,17 +1843,31 @@ def main() -> int:
                 cache[number] = _load_issue(repository_name, number)
             return cache[number]
 
+        local_edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]] = {}
+        local_tree_cache: dict[str, TreeEntries] = {}
         all_references: set[int] = set()
-        for target_branch, target_revision in validation_targets:
+        for target_branch, target_revision, range_base in validation_targets:
             commit_output = _run_git(
                 repository,
                 "log",
                 "--reverse",
                 "-z",
                 "--format=%B",
-                f"{default_range_base}..{target_revision}",
+                f"{range_base}..{target_revision}",
             )
             commit_messages = parse_commit_messages(commit_output)
+            if is_release_branch(target_branch):
+                commit_shas = _run_git(
+                    repository,
+                    "log",
+                    "--reverse",
+                    "--format=%H",
+                    f"{range_base}..{target_revision}",
+                ).splitlines()
+                if len(commit_shas) != len(commit_messages):
+                    raise ContractViolation("release commit provenanceが不完全です")
+            else:
+                commit_shas = []
             changed_output = _run_git(
                 repository,
                 "diff",
@@ -1192,11 +1876,30 @@ def main() -> int:
                 "--find-renames",
                 "--find-copies",
                 "--find-copies-harder",
-                f"{default_range_base}...{target_revision}",
+                f"{range_base}...{target_revision}",
             )
             changed_paths = parse_name_status_paths(changed_output)
-            for message in commit_messages:
-                all_references.update(issue_numbers(message, repository_name))
+            if is_release_branch(target_branch):
+                refs_by_commit = [
+                    (sha, issue_numbers(message, repository_name))
+                    for sha, message in zip(commit_shas, commit_messages)
+                ]
+                effective = _effective_release_issue_numbers(
+                    repository=repository_name,
+                    references_by_commit=refs_by_commit,
+                    net_paths=changed_paths,
+                    issue_loader=load_issue,
+                    commit_paths=lambda sha: _local_commit_paths(repository, sha),
+                    commit_surviving_paths=lambda sha, paths: _local_surviving_paths_at_head(
+                        repository, sha, target_revision, paths, local_edge_cache, local_tree_cache
+                    ),
+                )
+                if not effective:
+                    raise ContractViolation("release範囲にOPEN Issue参照がありません")
+                all_references.update(effective)
+            else:
+                for message in commit_messages:
+                    all_references.update(issue_numbers(message, repository_name))
 
             validate_contract(
                 branch=target_branch,
@@ -1205,6 +1908,7 @@ def main() -> int:
                 commit_messages=commit_messages,
                 changed_paths=changed_paths,
                 issue_loader=load_issue,
+                release_issue_numbers=effective if is_release_branch(target_branch) else None,
             )
 
         references = sorted(all_references)

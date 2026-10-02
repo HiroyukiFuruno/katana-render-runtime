@@ -1,8 +1,22 @@
-use base64::Engine as _;
+use super::image_data;
+use base64::{Engine as _, engine::general_purpose::GeneralPurpose};
 use percent_encoding::percent_decode_str;
 use url::Url;
 
+const BASE64_BLOCK_SIZE: usize = 4;
+const BASE64_REMAINDER_TWO: usize = 2;
+const BASE64_REMAINDER_THREE: usize = 3;
+
+const FORGIVING_BASE64: GeneralPurpose = GeneralPurpose::new(
+    &base64::alphabet::STANDARD,
+    base64::engine::general_purpose::GeneralPurposeConfig::new()
+        .with_decode_allow_trailing_bits(true),
+);
+
 const MAX_SUBRESOURCE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_BASE64_DATA_URL_BYTES: u64 = MAX_SUBRESOURCE_BYTES.div_ceil(3) * 4;
+const MAX_PERCENT_ENCODED_DATA_URL_BYTES: u64 = MAX_SUBRESOURCE_BYTES * 3;
+const MAX_PERCENT_ENCODED_BASE64_DATA_URL_BYTES: u64 = MAX_BASE64_DATA_URL_BYTES * 3;
 
 pub(super) fn load_text(url: &Url) -> Result<String, String> {
     let text = String::from_utf8(load_bytes(url)?)
@@ -10,13 +24,28 @@ pub(super) fn load_text(url: &Url) -> Result<String, String> {
     Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_string())
 }
 
+pub(super) fn image_data_url_is_decodable(reference: &str) -> bool {
+    let Ok(url) = Url::parse(reference) else {
+        return false;
+    };
+    if url.scheme() != "data" {
+        return false;
+    }
+    load_bytes(&url)
+        .and_then(|bytes| image_data::validate_data_url(&url, &bytes))
+        .is_ok()
+}
+
 pub(super) fn load_image_data_url(url: &Url) -> Result<String, String> {
     if url.scheme() == "data" {
+        image_data::validate_data_url(url, &load_bytes(url)?)?;
         return Ok(url.to_string());
     }
-    let bytes = load_bytes(url)?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(format!("data:{};base64,{encoded}", image_mime_type(url)))
+    let payload = load_image_bytes(url)?;
+    let media_type =
+        image_data::resolve_media_type(payload.declared_media_type.as_deref(), &payload.bytes)?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(payload.bytes);
+    Ok(format!("data:{media_type};base64,{encoded}"))
 }
 
 fn load_bytes(url: &Url) -> Result<Vec<u8>, String> {
@@ -29,7 +58,35 @@ fn load_bytes(url: &Url) -> Result<Vec<u8>, String> {
     }
 }
 
+struct ImagePayload {
+    bytes: Vec<u8>,
+    declared_media_type: Option<String>,
+}
+
+fn load_image_bytes(url: &Url) -> Result<ImagePayload, String> {
+    if matches!(url.scheme(), "http" | "https") {
+        let payload = load_http_payload(url)?;
+        return Ok(ImagePayload {
+            bytes: payload.bytes,
+            declared_media_type: payload.content_type,
+        });
+    }
+    Ok(ImagePayload {
+        bytes: load_bytes(url)?,
+        declared_media_type: None,
+    })
+}
+
 fn load_http(url: &Url) -> Result<Vec<u8>, String> {
+    Ok(load_http_payload(url)?.bytes)
+}
+
+struct HttpPayload {
+    bytes: Vec<u8>,
+    content_type: Option<String>,
+}
+
+fn load_http_payload(url: &Url) -> Result<HttpPayload, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .max_redirects(0)
         .build()
@@ -38,147 +95,105 @@ fn load_http(url: &Url) -> Result<Vec<u8>, String> {
         .get(url.as_str())
         .call()
         .map_err(|error| format!("network subresource could not be read: {error}"))?;
-    response
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|header| header.to_str().ok())
+        .map(str::to_owned);
+    let bytes = response
         .body_mut()
         .with_config()
         .limit(MAX_SUBRESOURCE_BYTES)
         .read_to_vec()
-        .map_err(|error| format!("network subresource body could not be read: {error}"))
+        .map_err(|error| format!("network subresource body could not be read: {error}"))?;
+    Ok(HttpPayload {
+        bytes,
+        content_type,
+    })
 }
 
 fn decode_data_url(url: &Url) -> Result<Vec<u8>, String> {
-    let source = &url.as_str()["data:".len()..];
+    let without_fragment = url
+        .as_str()
+        .split_once('#')
+        .map_or(url.as_str(), |(source, _)| source);
+    let source = &without_fragment["data:".len()..];
     let (metadata, payload) = source.split_once(',').ok_or("data URL has no payload")?;
-    if metadata
-        .split(';')
-        .any(|part| part.eq_ignore_ascii_case("base64"))
-    {
-        return base64::engine::general_purpose::STANDARD
-            .decode(payload)
-            .map_err(|error| format!("data URL base64 payload is invalid: {error}"));
+    if uses_base64_data_url_encoding(metadata) {
+        return decode_base64_data_url_payload(payload);
     }
-    Ok(percent_decode_str(payload).collect())
+    decode_percent_data_url_payload(payload)
 }
 
-fn image_mime_type(url: &Url) -> &'static str {
-    let extension = url.path().rsplit('.').next().map(str::to_ascii_lowercase);
-    match extension.as_deref() {
-        Some("gif") => "image/gif",
-        Some("jpeg" | "jpg") => "image/jpeg",
-        Some("svg") => "image/svg+xml",
-        Some("webp") => "image/webp",
-        _ => "image/png",
+fn uses_base64_data_url_encoding(metadata: &str) -> bool {
+    metadata
+        .split(';')
+        .next_back()
+        .is_some_and(|part| part.eq_ignore_ascii_case("base64"))
+}
+
+fn decode_base64_data_url_payload(payload: &str) -> Result<Vec<u8>, String> {
+    check_data_url_size(
+        payload.len(),
+        MAX_PERCENT_ENCODED_BASE64_DATA_URL_BYTES,
+        "encoded",
+    )?;
+    let decoded_payload = percent_decode_str(payload).collect::<Vec<u8>>();
+    let normalized_payload = normalize_forgiving_base64(&decoded_payload);
+    check_data_url_size(
+        normalized_payload.len(),
+        MAX_BASE64_DATA_URL_BYTES,
+        "base64 encoded",
+    )?;
+    let bytes = decode_forgiving_base64(&normalized_payload)
+        .map_err(|error| format!("data URL base64 payload is invalid: {error}"))?;
+    check_data_url_size(bytes.len(), MAX_SUBRESOURCE_BYTES, "decoded")?;
+    Ok(bytes)
+}
+
+fn decode_percent_data_url_payload(payload: &str) -> Result<Vec<u8>, String> {
+    check_data_url_size(payload.len(), MAX_PERCENT_ENCODED_DATA_URL_BYTES, "encoded")?;
+    let bytes = percent_decode_str(payload).collect::<Vec<_>>();
+    check_data_url_size(bytes.len(), MAX_SUBRESOURCE_BYTES, "decoded")?;
+    Ok(bytes)
+}
+
+fn check_data_url_size(size: usize, limit: u64, representation: &str) -> Result<(), String> {
+    if size as u64 > limit {
+        return Err(format!(
+            "data URL {representation} payload exceeds the {limit}-byte limit"
+        ));
     }
+    Ok(())
+}
+
+fn decode_forgiving_base64(payload: &[u8]) -> Result<Vec<u8>, base64::DecodeError> {
+    let payload = normalize_forgiving_base64(payload);
+    if payload.contains(&b'=') {
+        return FORGIVING_BASE64.decode(payload);
+    }
+    let padding = match payload.len() % BASE64_BLOCK_SIZE {
+        0 => 0,
+        BASE64_REMAINDER_TWO => BASE64_REMAINDER_TWO,
+        BASE64_REMAINDER_THREE => 1,
+        _ => return FORGIVING_BASE64.decode(payload),
+    };
+    let mut padded = payload;
+    padded.extend(std::iter::repeat_n(b'=', padding));
+    FORGIVING_BASE64.decode(padded)
+}
+
+fn normalize_forgiving_base64(payload: &[u8]) -> Vec<u8> {
+    payload
+        .iter()
+        .copied()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{image_mime_type, load_bytes, load_image_data_url, load_text};
-    use std::io::Write;
-    use std::net::TcpListener;
-    use std::path::Path;
-    use std::thread;
-    use url::Url;
-
-    #[test]
-    fn data_urls_support_percent_base64_and_image_passthrough() {
-        with_url("data:text/plain,hello%20world", |percent| {
-            assert_eq!(load_text(percent).ok().as_deref(), Some("hello world"));
-        });
-        with_url("data:text/plain,%EF%BB%BF%7B%22ready%22%3Atrue%7D", |bom| {
-            assert_eq!(load_text(bom).ok().as_deref(), Some("{\"ready\":true}"));
-        });
-        with_url("data:text/plain;base64,aGVsbG8=", |base64| {
-            assert_eq!(load_text(base64).ok().as_deref(), Some("hello"));
-        });
-        with_url("data:image/png;base64,AA==", |image| {
-            assert_eq!(
-                load_image_data_url(image).ok().as_deref(),
-                Some(image.as_str())
-            );
-        });
-        with_url("data:text/plain", |url| assert!(load_text(url).is_err()));
-        with_url("data:text/plain;base64,!", |url| {
-            assert!(load_text(url).is_err());
-        });
-        with_url("data:application/octet-stream;base64,/w==", |url| {
-            assert!(load_text(url).is_err());
-        });
-    }
-
-    #[test]
-    fn unsupported_schemes_and_image_extensions_are_explicit() {
-        with_url("ftp://example.test/image.png", |ftp| {
-            assert!(load_bytes(ftp).is_err());
-            assert_eq!(image_mime_type(ftp), "image/png");
-        });
-        assert_image_mime_type("image.gif", "image/gif");
-        assert_image_mime_type("image.jpg", "image/jpeg");
-        assert_image_mime_type("image.svg", "image/svg+xml");
-        assert_image_mime_type("image.webp", "image/webp");
-    }
-
-    #[test]
-    fn local_and_http_read_errors_are_reported() {
-        with_url("file://example.test/unsupported", |url| {
-            assert!(load_bytes(url).is_err());
-        });
-        with_file_url(&missing_file_path(), |url| {
-            assert!(load_bytes(url).is_err());
-            assert!(load_image_data_url(url).is_err());
-        });
-        with_url("http://127.0.0.1:0/unreachable", |url| {
-            assert!(load_bytes(url).is_err());
-        });
-        with_truncated_http_response(|url| assert!(load_bytes(url).is_err()));
-    }
-
-    fn assert_image_mime_type(path: &str, expected: &str) {
-        with_url(&format!("https://example.test/{path}"), |url| {
-            assert_eq!(image_mime_type(url), expected);
-        });
-    }
-
-    fn with_url(source: &str, assertion: impl FnMut(&Url)) {
-        let parsed = Url::parse(source);
-        assert!(parsed.is_ok(), "fixture URL must be valid: {source}");
-        parsed.iter().for_each(assertion);
-    }
-
-    fn with_file_url(path: &Path, assertion: impl FnMut(&Url)) {
-        let parsed = Url::from_file_path(path);
-        assert!(parsed.is_ok(), "fixture file URL must be valid: {path:?}");
-        parsed.iter().for_each(assertion);
-    }
-
-    fn missing_file_path() -> std::path::PathBuf {
-        std::env::temp_dir().join("krr-html-subresource-missing-file")
-    }
-
-    fn with_truncated_http_response(mut assertion: impl FnMut(&Url)) {
-        let listener = TcpListener::bind("127.0.0.1:0");
-        assert!(listener.is_ok());
-        listener.into_iter().for_each(|listener| {
-            let address = listener.local_addr();
-            assert!(address.is_ok());
-            address.into_iter().for_each(|address| {
-                thread::scope(|scope| {
-                    scope.spawn(|| {
-                        let accepted = listener.accept();
-                        assert!(accepted.is_ok());
-                        accepted.into_iter().for_each(|(mut stream, _)| {
-                            assert!(
-                                stream
-                                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nx")
-                                    .is_ok()
-                            );
-                        });
-                    });
-                    let url = Url::parse(&format!("http://{address}/truncated"));
-                    assert!(url.is_ok());
-                    url.iter().for_each(&mut assertion);
-                });
-            });
-        });
-    }
-}
+#[path = "transport_http_tests.rs"]
+mod http_tests;
+#[cfg(test)]
+#[path = "transport_tests.rs"]
+mod tests;

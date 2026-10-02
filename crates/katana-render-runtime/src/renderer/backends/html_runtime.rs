@@ -1,7 +1,10 @@
 mod bridge;
 mod dom_state;
+mod evaluation;
+mod exception;
 mod execution;
 mod interaction;
+mod promise;
 mod script;
 mod session;
 mod style;

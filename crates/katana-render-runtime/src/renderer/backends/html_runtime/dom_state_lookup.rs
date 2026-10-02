@@ -1,6 +1,7 @@
 use super::{HtmlDomBridgeState, argument, node_id};
 use crate::renderer::backends::html_document::HtmlDocument;
 use crate::renderer::backends::html_runtime::types::DomValue;
+use crate::renderer::backends::html_subresources::HtmlSubresourceLoader;
 
 impl HtmlDomBridgeState {
     pub(crate) fn dispatch(
@@ -72,8 +73,22 @@ impl HtmlDomBridgeState {
         match operation {
             "setEventTarget" => Some(self.set_event_target(arguments)),
             "requestText" => Some(self.request_text(arguments)),
+            "validateImageDataUrl" => Some(self.validate_image_data_url(arguments)),
             _ => None,
         }
+    }
+
+    fn validate_image_data_url(&self, arguments: &[String]) -> Result<DomValue, String> {
+        let source = argument(arguments, 0)?;
+        let cached = self.document.borrow().prevalidated_image_event(source);
+        let event = cached.unwrap_or_else(|| {
+            if HtmlSubresourceLoader::image_data_url_is_decodable(source) {
+                "load"
+            } else {
+                "error"
+            }
+        });
+        Ok(DomValue::String(event.to_string()))
     }
 
     pub(super) fn lookup(&self, operation: &str, arguments: &[String]) -> Result<DomValue, String> {
@@ -174,7 +189,9 @@ fn create_element(document: &mut HtmlDocument, tag_name: &str) -> Result<DomValu
 #[cfg(test)]
 mod tests {
     use super::{DomValue, HtmlDomBridgeState};
+    use crate::renderer::backends::html_browser::{HtmlBrowserError, HtmlBrowserSource};
     use crate::renderer::backends::html_document::HtmlDocument;
+    use crate::renderer::backends::html_subresources::HtmlSubresourceLoader;
 
     #[test]
     fn lookup_element_query_selector_all_routes_to_parent_matches() {
@@ -221,6 +238,57 @@ mod tests {
                 &["999".to_string(), ".item".to_string()],
             ),
             Err(error) if error.contains("HTML node 999")
+        ));
+    }
+
+    #[test]
+    fn loader_image_results_are_reused_by_the_native_bridge_for_exact_sources() {
+        assert!(verify_loader_image_cache("https://example.test/index.html").is_ok());
+        assert!(matches!(
+            verify_loader_image_cache("not-an-origin"),
+            Err(HtmlBrowserError::InvalidOrigin { .. })
+        ));
+    }
+
+    fn verify_loader_image_cache(origin: &str) -> Result<(), HtmlBrowserError> {
+        let valid = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+        let invalid = "data:image/gif;base64,not-valid";
+        let source = HtmlBrowserSource::new(
+            format!("<img src=\"{valid}\"><img src=\"{invalid}\">"),
+            origin,
+        )?;
+        let loader = HtmlSubresourceLoader::new(&source);
+        let mut document = HtmlDocument::parse(&source.raw_html);
+        assert_eq!(document.prevalidated_image_event(valid), None);
+
+        loader.load(&mut document);
+        assert_loader_cache(&document, valid, invalid);
+        let state = HtmlDomBridgeState::new(document);
+
+        assert_image_event(&state, valid, "load");
+        assert_image_event(&state, invalid, "error");
+        assert_image_event(&state, "https://example.test/changed.png", "error");
+
+        let mut document = state.document.borrow_mut();
+        document.clear_prevalidated_image_events();
+        assert_eq!(document.prevalidated_image_event(valid), None);
+
+        Ok(())
+    }
+
+    fn assert_loader_cache(document: &HtmlDocument, valid: &str, invalid: &str) {
+        assert_eq!(document.prevalidated_image_event(valid), Some("load"));
+        assert_eq!(document.prevalidated_image_event(invalid), Some("error"));
+        assert_eq!(
+            document.prevalidated_image_event("https://example.test/changed.png"),
+            None
+        );
+    }
+
+    fn assert_image_event(state: &HtmlDomBridgeState, source: &str, expected: &str) {
+        assert!(matches!(
+            state.dispatch("validateImageDataUrl", &[source.to_string()]),
+            Ok(DomValue::String(event)) if event == expected
         ));
     }
 }
