@@ -165,11 +165,16 @@ def issue_context(root: Path, numbers: list[int]) -> list[dict[str, Any]]:
     elif remote.startswith(prefix):
         repository = remote.removeprefix(prefix).removesuffix(".git")
     elif remote.startswith("ssh://"):
+        if "?" in remote or "#" in remote:
+            raise ReviewError("origin must identify a GitHub repository")
         try:
             parsed = urlsplit(remote)
             port = parsed.port
         except ValueError as error:
             raise ReviewError("origin must identify a GitHub repository") from error
+        authority = parsed.netloc.rsplit("@", 1)[-1]
+        if authority.endswith(":"):
+            raise ReviewError("origin must identify a GitHub repository")
         path = parsed.path.removeprefix("/")
         if (parsed.scheme != "ssh" or parsed.hostname != "github.com" or
                 parsed.username != "git" or parsed.password is not None or

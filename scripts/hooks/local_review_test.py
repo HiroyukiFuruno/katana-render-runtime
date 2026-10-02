@@ -1046,6 +1046,9 @@ class DriverContractTest(unittest.TestCase):
             "ssh://git@github.com:2222/HiroyukiFuruno/katana-render-runtime.git",
             "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git?query=1",
             "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git#fragment",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git?",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git#",
+            "ssh://git@github.com:/HiroyukiFuruno/katana-render-runtime.git",
         )
         for origin in invalid_origins:
             with self.subTest(origin=origin), tempfile.TemporaryDirectory() as temporary:
