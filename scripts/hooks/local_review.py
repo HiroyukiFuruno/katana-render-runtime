@@ -14,6 +14,7 @@ import sys
 import tempfile
 
 from local_review_contract import MODEL, PROMPT, REASONING, receipt_payload, validate_receipt, validate_review
+from local_review_lock import review_lock
 from local_review_state import ReviewError, cache_path, canonical, command, digest, gate_configuration, issue_context
 from local_review_state import repository_root, requirements_context, source_snapshot, strict_json
 
@@ -255,12 +256,7 @@ def atomic_json(path: Path, value: dict) -> None:
 def obtain_receipt(root: Path, args: argparse.Namespace, path: Path, inputs: dict, numbers: list[int]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lock = path.parent / "review.lock"
-    try:
-        descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError as error:
-        raise ReviewError("another local review is active; do not start recursive reviews") from error
-    try:
-        os.close(descriptor)
+    with review_lock(lock):
         with tempfile.TemporaryDirectory(prefix="codex-", dir=path.parent) as directory:
             review = invoke_review(root, Path(directory), inputs)
         if build_inputs(root, args, numbers) != inputs:
@@ -268,8 +264,6 @@ def obtain_receipt(root: Path, args: argparse.Namespace, path: Path, inputs: dic
         atomic_json(path.with_suffix(".review.json"), review)
         atomic_json(path, receipt_payload(inputs, review))
         read_receipt(path, inputs)
-    finally:
-        lock.unlink(missing_ok=True)
 
 
 def run(args: argparse.Namespace) -> int:

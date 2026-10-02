@@ -4,11 +4,13 @@ import copy
 import json
 import os
 from pathlib import Path
+import signal
 import shutil
 import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -17,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import local_review
 from local_review_contract import CHECKS, receipt_payload, validate_receipt
+from local_review_lock import review_lock
 from local_review_state import ReviewError, command, digest, issue_context, source_snapshot, strict_json
 
 
@@ -850,6 +853,9 @@ class DriverContractTest(unittest.TestCase):
                 self.assertTrue((receipt.parent / "last-input.json").is_file())
                 self.assertFalse((receipt.parent / "last-review.json").exists())
                 self.assertIsNone(local_review.retained_inputs(receipt))
+                self.assertTrue((receipt.parent / "review.lock").is_file())
+                with review_lock(receipt.parent / "review.lock"):
+                    pass
 
                 result = review(value)
                 def successful_review(arguments, *_options):
@@ -965,9 +971,87 @@ class DriverContractTest(unittest.TestCase):
                     local_review.obtain_receipt(root, args, receipt, value, [89])
             self.assertFalse(receipt.exists())
             self.assertFalse(receipt.with_suffix(".review.json").exists())
-            self.assertFalse((root / "review.lock").exists())
+            self.assertTrue((root / "review.lock").is_file())
+            with review_lock(root / "review.lock"):
+                pass
             self.assertEqual(json.loads((root / "last-input.json").read_text()), value)
             self.assertEqual((root / "last-codex-stderr.log").read_text(), "partial review; not a PASS")
+
+    def test_review_lock_reuses_existing_empty_persistent_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            lock = Path(temporary) / "review.lock"
+            lock.write_bytes(b"")
+            original_stat = lock.stat()
+            with review_lock(lock):
+                self.assertTrue(lock.is_file())
+            self.assertTrue(lock.is_file())
+            self.assertEqual(lock.stat().st_size, 0)
+            if os.name == "posix":
+                self.assertEqual(lock.stat().st_ino, original_stat.st_ino)
+            with review_lock(lock):
+                self.assertTrue(lock.is_file())
+
+    def test_review_lock_excludes_live_child_and_recovers_after_process_death(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock = root / "review.lock"
+            lock.write_bytes(b"")
+            original_inode = lock.stat().st_ino
+            child_environment = os.environ.copy()
+            child_environment["PYTHONPATH"] = str(Path(__file__).parent)
+            child_code = (
+                "import sys, time\n"
+                "from pathlib import Path\n"
+                "from local_review_lock import review_lock\n"
+                "with review_lock(Path(sys.argv[1])):\n"
+                "    Path(sys.argv[2]).write_text('ready')\n"
+                "    time.sleep(3600)\n"
+            )
+            terminations = ((signal.SIGTERM, "SIGTERM"), (signal.SIGKILL, "SIGKILL")) \
+                if os.name == "posix" else ((None, "terminate"),)
+            for child_signal, label in terminations:
+                with self.subTest(termination=label):
+                    ready = root / f"{label}.ready"
+                    child = subprocess.Popen(
+                        [sys.executable, "-c", child_code, str(lock), str(ready)],
+                        cwd=Path(__file__).parent,
+                        env=child_environment,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    try:
+                        deadline = time.monotonic() + 10
+                        while not ready.exists():
+                            if child.poll() is not None:
+                                _stdout, stderr = child.communicate()
+                                self.fail(f"lock child exited before acquiring lock: {stderr}")
+                            if time.monotonic() >= deadline:
+                                self.fail("lock child did not signal acquisition before deadline")
+                            time.sleep(0.01)
+                        with self.assertRaisesRegex(ReviewError, "another local review is active"):
+                            with review_lock(lock):
+                                pass
+                        if child_signal is None:
+                            child.terminate()
+                        else:
+                            os.kill(child.pid, child_signal)
+                        child.wait(timeout=10)
+                        if child_signal is not None:
+                            self.assertEqual(child.returncode, -child_signal)
+                        self.assertTrue(lock.is_file())
+                        if os.name == "posix":
+                            self.assertEqual(lock.stat().st_ino, original_inode)
+                        with review_lock(lock):
+                            self.assertTrue(lock.is_file())
+                    finally:
+                        if child.poll() is None:
+                            child.kill()
+                            child.wait(timeout=10)
+                        if child.stdout is not None:
+                            child.stdout.close()
+                        if child.stderr is not None:
+                            child.stderr.close()
 
     @unittest.skipUnless(os.name == "posix", "POSIX process groups")
     def test_timeout_kills_review_process_group_and_reaps_wrapper(self) -> None:
