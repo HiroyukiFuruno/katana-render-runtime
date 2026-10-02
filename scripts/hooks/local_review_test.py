@@ -357,6 +357,64 @@ class GitSnapshotTest(unittest.TestCase):
         state = source_snapshot(self.root, self.base)
         self.assertIn("deleted\texample.py", state["index_overrides"])
 
+    def test_matching_multi_issue_receipt_is_reused_for_run_and_check(self) -> None:
+        (self.root / "example.py").write_text("first\n")
+        self.commit("first change Refs #89")
+        (self.root / "example.py").write_text("second\n")
+        self.commit("second change Refs #95")
+        value = inputs()
+        value["issues"].append({"number": 95, "body_sha256": "e" * 64})
+        result = review(value)
+        result["issues"].append({"number": 95, "body_sha256": "e" * 64, "result": "verified",
+                                 "evidence": copy.deepcopy(result["issues"][0]["evidence"])})
+        payload = receipt_payload(value, result)
+        validate_receipt(payload, value)
+        receipt = self.root / "tmp" / "receipt.json"
+        receipt.parent.mkdir()
+        receipt.write_text(json.dumps(payload))
+        receipt.with_suffix(".review.json").write_text(json.dumps(result))
+        args = SimpleNamespace(issue=[], base=self.base, requirements=None, receipt="tmp/receipt.json",
+                               check_receipt=False, print_input=False)
+
+        def git_command(arguments: list[str], root: Path) -> str:
+            return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
+
+        for check_receipt in (False, True):
+            with self.subTest(check_receipt=check_receipt), \
+                    patch.dict(os.environ, {}, clear=True), \
+                    patch.object(local_review, "command", side_effect=git_command), \
+                    patch.object(local_review, "repository_root", return_value=self.root), \
+                    patch.object(local_review, "cache_path", return_value=receipt), \
+                    patch.object(local_review, "build_inputs", return_value=value), \
+                    patch.object(local_review, "invoke_review") as invoke:
+                args.check_receipt = check_receipt
+                self.assertEqual(local_review.run(args), 0)
+                invoke.assert_not_called()
+
+    def test_multi_issue_receipt_mismatch_or_invalid_receipt_requires_explicit_issue(self) -> None:
+        (self.root / "example.py").write_text("first\n")
+        self.commit("first change Refs #89")
+        (self.root / "example.py").write_text("second\n")
+        self.commit("second change Refs #95")
+        args = SimpleNamespace(issue=[], base=self.base)
+
+        def git_command(arguments: list[str], root: Path) -> str:
+            return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
+
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.dict(os.environ, {}, clear=True), \
+                patch.object(local_review, "command", side_effect=git_command):
+            receipt = Path(temporary) / "receipt.json"
+            mismatched = receipt_payload(inputs(), review(inputs()))
+            for contents in (json.dumps(mismatched), "{", "{}"):
+                with self.subTest(contents=contents[:10]):
+                    receipt.write_text(contents)
+                    with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
+                        local_review.issue_numbers(self.root, args, receipt)
+            receipt.unlink()
+            with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
+                local_review.issue_numbers(self.root, args, receipt)
+
 
 class DriverContractTest(unittest.TestCase):
     def test_actual_just_overrides_reach_review_and_quality_runner(self) -> None:

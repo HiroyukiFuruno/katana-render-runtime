@@ -63,7 +63,18 @@ def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[i
         messages = command(["git", "log", "--format=%B", f"{args.base}..HEAD", "--"], root)
         references = {int(number) for number in re.findall(r"\bRefs\s+#([1-9][0-9]*)\b", messages)}
         if len(references) > 1:
-            raise ReviewError("multiple branch Issues; set REVIEW_ISSUE explicitly")
+            receipt_numbers: set[int] | None = None
+            if receipt.exists():
+                try:
+                    stored = strict_json(receipt.read_text())
+                    validate_receipt(stored, stored["inputs"])
+                    stored_issues = stored["inputs"]["issues"]
+                    if isinstance(stored_issues, list):
+                        receipt_numbers = {issue["number"] for issue in stored_issues}
+                except (OSError, ReviewError, KeyError, TypeError):
+                    receipt_numbers = None
+            if receipt_numbers != references:
+                raise ReviewError("multiple branch Issues; set REVIEW_ISSUE explicitly")
         numbers = sorted(references)
     if not numbers:
         retained = retained_inputs(receipt)
