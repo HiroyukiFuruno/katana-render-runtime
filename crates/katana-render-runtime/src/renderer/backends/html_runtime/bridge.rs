@@ -106,9 +106,8 @@ mod tests {
     }
 
     #[test]
-    fn dom_callback_stores_unsupported_operation_error() {
+    fn dom_callback_stores_unsupported_operation_error() -> Result<(), String> {
         DiagramV8Runtime::ensure_initialized();
-
         let state = HtmlDomBridgeState::new(HtmlDocument::parse("<button id=action>Run</button>"));
         let mut isolate = v8::Isolate::new(Default::default());
         isolate.set_slot(state);
@@ -118,10 +117,14 @@ mod tests {
         let context_scope = &mut v8::ContextScope::new(handle_scope, context);
         v8::tc_scope!(let scope, &mut **context_scope);
 
-        let installed = install_dom_bridge(scope, "about:blank");
-        assert!(installed.is_ok(), "{:?}", installed.err());
-        let callback = evaluate_value(scope, "krr-html-dom-callback", "__krr_dom('unsupported');");
-        assert!(callback.is_ok(), "{callback:?}");
+        let callback = v8::Function::new(scope, dom_callback)
+            .ok_or("callback allocation failed".to_string())?;
+        let operation: v8::Local<v8::Value> = v8::String::new(scope, "unsupported")
+            .ok_or("operation allocation failed".to_string())?
+            .into();
+        let receiver = v8::undefined(scope).into();
+        let returned = callback.call(scope, receiver, &[operation]);
+        assert!(returned.is_some_and(|value| value.is_undefined()));
 
         let error = scope
             .get_slot::<HtmlDomBridgeState>()
@@ -130,10 +133,11 @@ mod tests {
             error,
             Some("unsupported DOM operation: unsupported".to_string())
         );
+        Ok(())
     }
 
     #[test]
-    fn dom_callback_without_state_returns_undefined() {
+    fn dom_callback_without_state_returns_undefined() -> Result<(), String> {
         DiagramV8Runtime::ensure_initialized();
 
         let mut isolate = v8::Isolate::new(Default::default());
@@ -142,16 +146,15 @@ mod tests {
         let context_scope = &mut v8::ContextScope::new(handle_scope, context);
         v8::tc_scope!(let scope, &mut **context_scope);
 
-        let installed = install_dom_bridge(scope, "about:blank");
-        assert!(installed.is_ok(), "{:?}", installed.err());
-        assert!(
-            evaluate_value(
-                scope,
-                "krr-html-dom-missing-state",
-                "__krr_dom('unsupported');"
-            )
-            .is_ok_and(|value| value.is_undefined())
-        );
+        let callback = v8::Function::new(scope, dom_callback)
+            .ok_or("callback allocation failed".to_string())?;
+        let operation: v8::Local<v8::Value> = v8::String::new(scope, "unsupported")
+            .ok_or("operation allocation failed".to_string())?
+            .into();
+        let receiver = v8::undefined(scope).into();
+        let returned = callback.call(scope, receiver, &[operation]);
+        assert!(returned.is_some_and(|value| value.is_undefined()));
+        Ok(())
     }
 
     #[test]
