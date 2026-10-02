@@ -42,13 +42,13 @@ review は提案差分の適合を評価する。CI、完全品質検査、merge
 
 ## receipt の拘束と失効
 
-`tmp/local-review/receipt.json` は base commit、source の path/content/mode、隠れ staged 版、Issue 本文、追加要求、model、prompt、schema に結び付く。
+`tmp/local-review/receipt.json` は base commit、source の path/content/mode、working tree と異なる index／HEAD 版、Issue 本文、追加要求、model、prompt、schema に結び付く。
 Justfileの有効coverage閾値、threads、RUSTFLAGS、Cargo command、並列数と、限定したCargo対象・compiler設定も拘束する。
 `just --set` の親有効値を同じshellからreviewと品質laneへ渡すため、レビューだけ既定値へ戻ることはない。
 通常targetとcoverage専用target/build-dirを絶対pathへ正規化する。同じpathの相対／絶対指定は同一入力になる。
 同じ既定値を明示するだけなら再利用でき、実際の値が変われば失効する。全環境変数や認証情報は採取しない。
 tracked／unstaged／untracked／deleted を含み、削除は base のファイル一覧から保持する。
-通常の staging／commit だけで内容が同じ場合は再利用できる。working tree と異なる staged 内容は別に拘束する。
+通常の staging／commit だけで内容が同じ場合は再利用できる。working tree と異なる index／HEAD の内容・mode・削除は固定 base との差分から別に拘束する。
 レビュー開始前後と再利用時に入力を再取得し、source や要求が変われば古い PASS を受け入れない。
 CLI には変更一覧と入力 digest を渡し、全ファイルの hash 一覧を無駄に読み込ませない。
 

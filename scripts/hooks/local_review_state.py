@@ -75,17 +75,23 @@ def source_snapshot(root: Path, base: str) -> dict[str, Any]:
     names = command(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], root)
     baseline = command(["git", "ls-tree", "-r", "--name-only", "-z", base_sha], root)
     index = command(["git", "ls-files", "--stage", "-z"], root)
+    head_sha = command(["git", "rev-parse", "--verify", "HEAD^{commit}"], root).strip()
+    head_tree = command(["git", "ls-tree", "-r", "-z", head_sha], root)
+    head_entries = {entry.split("\t", 1)[1]: entry.split("\t", 1)[0]
+                    for entry in head_tree.split("\0") if entry}
     entries = [entry for entry in index.split("\0") if entry]
     if any(entry.split("\t", 1)[0].split()[-1] != "0" for entry in entries):
         raise ReviewError("unmerged index cannot be reviewed")
-    paths = set(names.split("\0")) | set(baseline.split("\0"))
+    paths = set(names.split("\0")) | set(baseline.split("\0")) | set(head_entries)
     files = {name: file_record(root, name) for name in sorted(paths - {""})}
-    return {"base_sha": base_sha, "files": files, "index_overrides": staged_overrides(root, entries, base_sha)}
+    return {"base_sha": base_sha, "files": files,
+            "index_overrides": staged_overrides(root, entries, base_sha),
+            "head_overrides": head_overrides(root, base_sha, head_sha, head_entries)}
 
 
 def staged_overrides(root: Path, entries: list[str], base_sha: str) -> list[str]:
     overrides = []
-    staged = command(["git", "diff", "--cached", "--name-only", "-z", base_sha, "--"], root)
+    staged = command(["git", "diff", "--cached", "--no-renames", "--name-only", "-z", base_sha, "--"], root)
     indexed = {entry.split("\t", 1)[1]: entry for entry in entries}
     for name in sorted(set(staged.split("\0")) - {""}):
         entry = indexed.get(name)
@@ -94,6 +100,18 @@ def staged_overrides(root: Path, entries: list[str], base_sha: str) -> list[str]
         if indexed_value != current:
             overrides.append(entry if entry is not None else f"deleted\t{name}")
     return sorted(overrides)
+
+
+def head_overrides(root: Path, base_sha: str, head_sha: str, entries: dict[str, str]) -> list[str]:
+    changed = command(["git", "diff", "--no-renames", "--name-only", "-z", base_sha, head_sha, "--"], root)
+    overrides = []
+    for name in sorted(set(changed.split("\0")) - {""}):
+        entry = entries.get(name)
+        fields = None if entry is None else entry.split()
+        value = None if fields is None else f"{fields[0]} {fields[2]}"
+        if value != working_entry(root / name):
+            overrides.append(f"deleted\t{name}" if value is None else f"{value}\t{name}")
+    return overrides
 
 
 def working_entry(path: Path) -> str | None:

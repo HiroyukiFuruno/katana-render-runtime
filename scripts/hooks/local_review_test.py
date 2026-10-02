@@ -138,6 +138,109 @@ class GitSnapshotTest(unittest.TestCase):
         command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
                  "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", message], self.root)
 
+    def test_rename_detection_cannot_hide_index_or_head_deletion(self) -> None:
+        command(["git", "config", "diff.renames", "true"], self.root)
+        (self.root / "new.py").write_bytes((self.root / "example.py").read_bytes())
+        before = source_snapshot(self.root, self.base)
+        command(["git", "rm", "--cached", "example.py"], self.root)
+        command(["git", "add", "new.py"], self.root)
+        staged = source_snapshot(self.root, self.base)
+        self.commit_index("same content rename with restored working files")
+        after = source_snapshot(self.root, self.base)
+        value = {**inputs(), "source": after, "requirements": None, "gate_configuration": {}}
+        compact = local_review.compact_input(self.root, value)
+        observed = {"staged_deleted": "deleted\texample.py" in staged["index_overrides"],
+                    "index_deleted": "deleted\texample.py" in after["index_overrides"],
+                    "head_deleted": "deleted\texample.py" in after["head_overrides"],
+                    "compact_head_deleted": "example.py" in compact["changes"]["head"]}
+        self.assertEqual(observed, {key: True for key in observed})
+        self.assertEqual(before["files"], after["files"])
+        self.assertNotEqual(before, after)
+        prior = {**value, "source": before}
+        with self.assertRaisesRegex(ReviewError, "another input|stale"):
+            validate_receipt(receipt_payload(prior, review(prior)), value)
+
+    def test_compact_input_exposes_head_only_change_after_restoring_working_and_index(self) -> None:
+        (self.root / "example.py").write_text("unreviewed HEAD C\n")
+        command(["git", "add", "example.py"], self.root)
+        self.commit_index("HEAD only change")
+        command(["git", "restore", "--source", self.base, "--staged", "--worktree", "--", "example.py"], self.root)
+        value = {**inputs(), "source": source_snapshot(self.root, self.base),
+                 "requirements": None, "gate_configuration": {}}
+        compact = local_review.compact_input(self.root, value)
+        self.assertEqual(compact["changes"]["head"], ["example.py"])
+        self.assertEqual(compact["changes"]["working"], [])
+        self.assertEqual(compact["changes"]["staged"], [])
+        self.assertTrue(value["source"]["head_overrides"])
+        self.assertIn("git diff base..HEAD", local_review.review_prompt())
+        self.assertIn("実際のHEAD tree", local_review.review_prompt())
+
+    def test_unreviewed_head_with_index_restored_to_base_invalidates_receipt(self) -> None:
+        path = self.root / "example.py"
+        path.write_text("working B\n")
+        before = source_snapshot(self.root, self.base)
+        value = inputs()
+        value["source"] = before
+        receipt = receipt_payload(value, review(value))
+        path.write_text("unreviewed C\n")
+        command(["git", "add", "example.py"], self.root)
+        self.commit_index("unreviewed HEAD")
+        path.write_text("working B\n")
+        command(["git", "restore", "--source", self.base, "--staged", "--", "example.py"], self.root)
+        after = source_snapshot(self.root, self.base)
+        self.assertEqual(before["files"], after["files"])
+        self.assertEqual(before["index_overrides"], after["index_overrides"])
+        self.assertNotEqual(before, after)
+        with self.assertRaisesRegex(ReviewError, "another input|stale"):
+            validate_receipt(receipt, {**value, "source": after})
+
+    def test_head_mode_is_bound_after_index_mode_is_restored_to_base(self) -> None:
+        before = source_snapshot(self.root, self.base)
+        command(["git", "update-index", "--chmod=+x", "example.py"], self.root)
+        self.commit_index("HEAD executable mode")
+        command(["git", "restore", "--source", self.base, "--staged", "--", "example.py"], self.root)
+        after = source_snapshot(self.root, self.base)
+        self.assertNotEqual(before, after)
+        self.assertTrue(after["head_overrides"])
+        self.assertEqual(before["index_overrides"], after["index_overrides"])
+
+    def test_head_deletion_is_bound_after_index_file_is_restored_to_base(self) -> None:
+        before = source_snapshot(self.root, self.base)
+        command(["git", "rm", "--cached", "example.py"], self.root)
+        self.commit_index("HEAD deletion")
+        command(["git", "restore", "--source", self.base, "--staged", "--", "example.py"], self.root)
+        after = source_snapshot(self.root, self.base)
+        self.assertNotEqual(before, after)
+        self.assertIn("deleted\texample.py", after["head_overrides"])
+        self.assertEqual(before["files"], after["files"])
+
+    def test_head_new_file_is_bound_when_index_is_restored_to_base(self) -> None:
+        path = self.root / "new.py"
+        path.write_text("working B\n")
+        before = source_snapshot(self.root, self.base)
+        path.write_text("unreviewed C\n")
+        command(["git", "add", "new.py"], self.root)
+        self.commit_index("HEAD new file")
+        path.write_text("working B\n")
+        command(["git", "restore", "--source", self.base, "--staged", "--", "new.py"], self.root)
+        after = source_snapshot(self.root, self.base)
+        self.assertEqual(before["files"], after["files"])
+        self.assertNotEqual(before, after)
+        self.assertTrue(any(entry.endswith("\tnew.py") for entry in after["head_overrides"]))
+
+    def test_head_tracked_ignored_file_remains_in_snapshot_without_index_entry(self) -> None:
+        (self.root / ".gitignore").write_text("tmp/\nignored.py\n")
+        path = self.root / "ignored.py"
+        path.write_text("committed content\n")
+        before = source_snapshot(self.root, self.base)
+        self.assertNotIn("ignored.py", before["files"])
+        command(["git", "add", "--force", "ignored.py"], self.root)
+        self.commit_index("HEAD tracked ignored file")
+        command(["git", "rm", "--cached", "ignored.py"], self.root)
+        after = source_snapshot(self.root, self.base)
+        self.assertIn("ignored.py", after["files"])
+        self.assertNotEqual(before, after)
+
     def test_committed_index_content_remains_bound_with_different_working_bytes(self) -> None:
         path = self.root / "example.py"
         path.write_text("working B\n")
@@ -152,7 +255,8 @@ class GitSnapshotTest(unittest.TestCase):
         self.commit_index("different index bytes")
         after = source_snapshot(self.root, self.base)
         self.assertEqual(before["files"], after["files"])
-        self.assertEqual(staged, after)
+        self.assertEqual(staged["index_overrides"], after["index_overrides"])
+        self.assertTrue(after["head_overrides"])
         self.assertNotEqual(before, after)
         with self.assertRaisesRegex(ReviewError, "another input|stale"):
             validate_receipt(receipt, {**value, "source": after})
@@ -161,7 +265,9 @@ class GitSnapshotTest(unittest.TestCase):
         command(["git", "update-index", "--chmod=+x", "example.py"], self.root)
         before = source_snapshot(self.root, self.base)
         self.commit_index("index executable bit")
-        self.assertEqual(before, source_snapshot(self.root, self.base))
+        after = source_snapshot(self.root, self.base)
+        self.assertEqual(before["index_overrides"], after["index_overrides"])
+        self.assertTrue(after["head_overrides"])
         self.assertTrue(before["index_overrides"])
 
     def test_committed_deletion_with_restored_file_keeps_index_tombstone(self) -> None:
@@ -169,7 +275,9 @@ class GitSnapshotTest(unittest.TestCase):
         (self.root / "example.py").write_text("restored\n")
         before = source_snapshot(self.root, self.base)
         self.commit_index("delete indexed file")
-        self.assertEqual(before, source_snapshot(self.root, self.base))
+        after = source_snapshot(self.root, self.base)
+        self.assertEqual(before["index_overrides"], after["index_overrides"])
+        self.assertIn("deleted\texample.py", after["head_overrides"])
         self.assertIn("deleted\texample.py", before["index_overrides"])
 
     def test_new_index_file_keeps_distinct_working_content_after_commit(self) -> None:
@@ -179,7 +287,9 @@ class GitSnapshotTest(unittest.TestCase):
         path.write_text("working B\n")
         before = source_snapshot(self.root, self.base)
         self.commit_index("new index file")
-        self.assertEqual(before, source_snapshot(self.root, self.base))
+        after = source_snapshot(self.root, self.base)
+        self.assertEqual(before["index_overrides"], after["index_overrides"])
+        self.assertTrue(any(entry.endswith("\tnew.py") for entry in after["head_overrides"]))
         self.assertTrue(any(entry.endswith("\tnew.py") for entry in before["index_overrides"]))
 
     def test_untracked_deleted_mode_and_hidden_staged_changes_are_bound(self) -> None:

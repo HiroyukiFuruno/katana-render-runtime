@@ -166,8 +166,9 @@ def review_command(root: Path, result: Path) -> list[str]:
 def compact_input(root: Path, inputs: dict) -> dict:
     base = inputs["source"]["base_sha"]
     changes = {}
-    selections = {"working": ["diff", "--name-only", "-z", base, "--"],
-                  "staged": ["diff", "--cached", "--name-only", "-z", base, "--"],
+    selections = {"head": ["diff", "--no-renames", "--name-only", "-z", base, "HEAD", "--"],
+                  "working": ["diff", "--no-renames", "--name-only", "-z", base, "--"],
+                  "staged": ["diff", "--cached", "--no-renames", "--name-only", "-z", base, "--"],
                   "untracked": ["ls-files", "--others", "--exclude-standard", "-z"]}
     for key, selection in selections.items():
         changes[key] = sorted(set(command(["git", *selection], root).split("\0")) - {""})
