@@ -51,7 +51,9 @@ def command(arguments: list[str], root: Path, input_bytes: bytes | None = None) 
     try:
         result = subprocess.run(
             executable, cwd=root, env=environment,
-            capture_output=True, text=input_bytes is None, input=input_bytes,
+            capture_output=True,
+            text=input_bytes is None and not (arguments[0] == "git" and "-z" in arguments),
+            input=input_bytes,
             check=True, timeout=60,
         )
     except (OSError, subprocess.SubprocessError) as error:
@@ -77,13 +79,23 @@ def file_record(root: Path, name: str) -> dict[str, Any]:
         kind = "file"
     else:
         raise ReviewError(f"unsupported source entry: {name}")
-    return {"kind": kind, "executable": bool(mode & 0o111),
+    return {"kind": kind, "executable": bool(mode & stat.S_IXUSR),
             "sha256": hashlib.sha256(content).hexdigest()}
+
+
+def ensure_normal_index_flags(root: Path) -> None:
+    for option in ("-v", "-f"):
+        records = command(["git", "ls-files", option, "-z"], root).split("\0")
+        for record in records:
+            if record and not record.startswith("H "):
+                marker = record[0] if record else "?"
+                raise ReviewError(f"git index has unsupported {option} marker: {marker!r}")
 
 
 def source_snapshot(root: Path, base: str) -> dict[str, Any]:
     base_sha = command(["git", "rev-parse", "--verify", "--end-of-options", f"{base}^{{commit}}"], root).strip()
     head_sha = command(["git", "rev-parse", "--verify", "HEAD^{commit}"], root).strip()
+    ensure_normal_index_flags(root)
     names = command(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], root)
     baseline = command(["git", "ls-tree", "-r", "--name-only", "-z", base_sha], root)
     base_names = set(baseline.split("\0")) - {""}
@@ -145,7 +157,7 @@ def working_entry(root: Path, name: str) -> str | None:
         content = os.fsencode(os.readlink(path))
         file_mode = "120000"
     elif stat.S_ISREG(mode):
-        file_mode = "100755" if mode & 0o111 else "100644"
+        file_mode = "100755" if mode & stat.S_IXUSR else "100644"
         blob = command(["git", "hash-object", f"--path={name}", "--", name], root).strip()
         return f"{file_mode} {blob}"
     else:

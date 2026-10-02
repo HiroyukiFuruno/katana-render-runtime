@@ -7,6 +7,7 @@ from pathlib import Path
 import signal
 import shutil
 import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,16 @@ sys.path.insert(0, str(Path(__file__).parent))
 import local_review
 from local_review_contract import CHECKS, receipt_payload, validate_receipt
 from local_review_lock import review_lock
-from local_review_state import ReviewError, command, digest, issue_context, source_snapshot, strict_json
+from local_review_state import (
+    ReviewError,
+    command,
+    digest,
+    file_record,
+    issue_context,
+    source_snapshot,
+    strict_json,
+    working_entry,
+)
 
 
 def inputs() -> dict:
@@ -139,6 +149,150 @@ class GitSnapshotTest(unittest.TestCase):
         self.assertNotEqual(untracked, staged)
         self.commit("changes")
         self.assertEqual(staged, source_snapshot(self.root, self.base))
+
+    def test_hidden_git_index_flags_reject_review_candidates(self) -> None:
+        flag_cases = (
+            ("assume-unchanged", ("--assume-unchanged",), ("--no-assume-unchanged",), "h", "H"),
+            ("skip-worktree", ("--skip-worktree",), ("--no-skip-worktree",), "S", "S"),
+            ("combined", ("--assume-unchanged", "--skip-worktree"),
+             ("--no-assume-unchanged", "--no-skip-worktree"), "s", "S"),
+        )
+        for label, set_flags, clear_flags, expected_v, expected_f in flag_cases:
+            with self.subTest(flag=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                command(["git", "init", "--quiet"], root)
+                path = root / "tracked.py"
+                path.write_text("base content\n")
+                command(["git", "add", "tracked.py"], root)
+                command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "base"], root)
+                base = command(["git", "rev-parse", "HEAD"], root).strip()
+                original = source_snapshot(root, base)
+                original_value = {**inputs(), "source": original}
+                original_receipt = receipt_payload(original_value, review(original_value))
+
+                for option in set_flags:
+                    command(["git", "update-index", option, "--", "tracked.py"], root)
+                marker_v = command(["git", "ls-files", "-v", "-z"], root).split("\0")[0]
+                marker_f = command(["git", "ls-files", "-f", "-z"], root).split("\0")[0]
+                self.assertEqual(marker_v[0], expected_v)
+                self.assertEqual(marker_f[0], expected_f)
+
+                path.write_text("hidden changed content\n")
+                compact = local_review.compact_input(root, {
+                    **original_value,
+                    "requirements": None,
+                    "gate_configuration": {},
+                })
+                self.assertEqual(compact["changes"]["working"], [])
+                self.assertEqual(compact["changes"]["head"], [])
+                self.assertEqual(command(["git", "diff", "--name-only", "--", "tracked.py"], root), "")
+                with self.assertRaisesRegex(ReviewError, "unsupported .* marker"):
+                    source_snapshot(root, base)
+
+                for option in clear_flags:
+                    command(["git", "update-index", option, "--", "tracked.py"], root)
+                command(["git", "add", "tracked.py"], root)
+                command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "commit after clearing flags"], root)
+                committed = source_snapshot(root, base)
+                with self.assertRaisesRegex(ReviewError, "another input|stale"):
+                    validate_receipt(original_receipt, {**original_value, "source": committed})
+
+    def test_fsmonitor_valid_index_flag_is_rejected_when_git_exposes_it(self) -> None:
+        command(["git", "update-index", "--fsmonitor-valid", "--", "example.py"], self.root)
+        marker = command(["git", "ls-files", "-f", "-z", "--", "example.py"], self.root)
+        if not marker.startswith("h "):
+            self.skipTest("local Git did not expose an fsmonitor-valid marker; update-index left flags unset")
+        with self.assertRaisesRegex(ReviewError, "unsupported .* marker"):
+            source_snapshot(self.root, self.base)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file permission bits are required")
+    def test_owner_group_other_execute_bits_match_git_index_mode(self) -> None:
+        command(["git", "config", "core.filemode", "true"], self.root)
+        path = self.root / "example.py"
+        expected_modes = {
+            0o644: "100644", 0o654: "100644", 0o645: "100644", 0o655: "100644",
+            0o744: "100755", 0o754: "100755", 0o745: "100755", 0o755: "100755",
+        }
+        baseline = source_snapshot(self.root, self.base)
+        for mode, expected_index_mode in expected_modes.items():
+            with self.subTest(mode=oct(mode)):
+                path.chmod(mode)
+                command(["git", "add", "example.py"], self.root)
+                index_record = command(["git", "ls-files", "--stage", "-z", "--", "example.py"], self.root)
+                actual_index_mode = index_record.split(" ", 1)[0]
+                self.assertEqual(actual_index_mode, expected_index_mode)
+                record = file_record(self.root, "example.py")
+                entry = working_entry(self.root, "example.py")
+                owner_executable = bool(mode & stat.S_IXUSR)
+                self.assertEqual(record["executable"], owner_executable)
+                self.assertTrue(entry is not None)
+                self.assertEqual(entry.split(" ", 1)[0], expected_index_mode)
+
+                staged = source_snapshot(self.root, self.base)
+                if owner_executable:
+                    self.assertNotEqual(staged, baseline)
+                else:
+                    self.assertEqual(staged, baseline)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file permission bits are required")
+    def test_owner_execute_change_invalidates_same_bytes_receipt(self) -> None:
+        command(["git", "config", "core.filemode", "true"], self.root)
+        path = self.root / "example.py"
+        path.chmod(0o654)
+        initial = source_snapshot(self.root, self.base)
+        value = {**inputs(), "source": initial}
+        receipt = receipt_payload(value, review(value))
+
+        path.chmod(0o744)
+        command(["git", "add", "example.py"], self.root)
+        updated = source_snapshot(self.root, self.base)
+        self.assertNotEqual(initial, updated)
+        self.assertEqual(file_record(self.root, "example.py")["sha256"], initial["files"]["example.py"]["sha256"])
+        self.assertEqual(working_entry(self.root, "example.py").split(" ", 1)[0], "100755")
+        with self.assertRaisesRegex(ReviewError, "another input|stale"):
+            validate_receipt(receipt, {**value, "source": updated})
+
+    @unittest.skipUnless(os.name == "posix", "POSIX permits CR/LF filenames")
+    def test_crlf_and_lf_paths_remain_distinct_in_snapshot_and_invalidate_receipt(self) -> None:
+        (self.root / "example.py").unlink()
+        lf_name = "same\nname.py"
+        crlf_name = "same\r\nname.py"
+        (self.root / lf_name).write_text("LF path original\n")
+        (self.root / crlf_name).write_text("CRLF path original\n")
+        self.commit("add colliding line-ending paths")
+        base = command(["git", "rev-parse", "HEAD"], self.root).strip()
+        before = source_snapshot(self.root, base)
+        self.assertEqual(set(before["files"]).intersection((lf_name, crlf_name)), {lf_name, crlf_name})
+        value = {**inputs(), "source": before}
+        receipt = receipt_payload(value, review(value))
+
+        (self.root / crlf_name).write_text("CRLF path changed\n")
+        changed = source_snapshot(self.root, base)
+        self.assertEqual(set(changed["files"]).intersection((lf_name, crlf_name)), {lf_name, crlf_name})
+        self.assertEqual(changed["files"][lf_name], before["files"][lf_name])
+        self.assertNotEqual(changed["files"][crlf_name], before["files"][crlf_name])
+        self.assertEqual(changed["index_overrides"], [])
+        compact = local_review.compact_input(self.root, {
+            **value,
+            "requirements": None,
+            "gate_configuration": {},
+        })
+        self.assertEqual(compact["changes"]["working"], [crlf_name])
+        self.assertEqual(compact["changes"]["head"], [])
+        with self.assertRaisesRegex(ReviewError, "another input|stale"):
+            validate_receipt(receipt, {**value, "source": changed})
+
+        command(["git", "add", "--", crlf_name], self.root)
+        staged = source_snapshot(self.root, base)
+        compact = local_review.compact_input(self.root, {
+            **value,
+            "requirements": None,
+            "gate_configuration": {},
+        })
+        self.assertEqual(compact["changes"]["staged"], [crlf_name])
+        self.assertEqual(staged["new_tracked_paths"], [])
 
     def test_resetting_staged_new_file_while_committing_tracked_source_invalidates_receipt(self) -> None:
         tracked = self.root / "example.py"
