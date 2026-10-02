@@ -324,9 +324,21 @@ test("readystatechange listener例外の後も後続listenerとproperty handler�
   const dispatch = new Function(
     "target",
     "__krrEventTargetListeners",
+    "__krrEventHandlers",
+    "__krrLifecyclePropertyOverrides",
+    "__krrLifecycleEventTypes",
+    "__krrElementInstances",
     "__krrSyncEventTarget",
     `${dispatchListenerEntry}\n${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\nreturn __krrDispatchTargetPhase;`,
-  )(target, new WeakMap([[target, new Map([["readystatechange", entries]])]]), () => {});
+  )(
+    target,
+    new WeakMap([[target, new Map([["readystatechange", entries]])]]),
+    new WeakMap(),
+    new WeakMap(),
+    new Set(["load", "error", "readystatechange", "DOMContentLoaded"]),
+    new WeakSet(),
+    () => {},
+  );
 
   expect(() => dispatch(target, { type: "readystatechange" }, false, 2)).toThrow(
     "listener failure",
@@ -364,9 +376,21 @@ test("resource listener例外の後も後続listenerとproperty handlerを呼ぶ
   const dispatch = new Function(
     "target",
     "__krrEventTargetListeners",
+    "__krrEventHandlers",
+    "__krrLifecyclePropertyOverrides",
+    "__krrLifecycleEventTypes",
+    "__krrElementInstances",
     "__krrSyncEventTarget",
     `${dispatchListenerEntry}\n${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\nreturn __krrDispatchTargetPhase;`,
-  )(target, new WeakMap([[target, new Map([["load", entries]])]]), () => {});
+  )(
+    target,
+    new WeakMap([[target, new Map([["load", entries]])]]),
+    new WeakMap(),
+    new WeakMap(),
+    new Set(["load", "error", "readystatechange", "DOMContentLoaded"]),
+    new WeakSet(),
+    () => {},
+  );
 
   expect(() => dispatch(target, { type: "load" }, false, 2)).toThrow("listener failure");
   expect(calls).toEqual(["throwing listener", "following listener", "property"]);
@@ -398,12 +422,93 @@ test("通常イベントのlistener例外はdispatchを中断して呼び出し�
   const dispatch = new Function(
     "target",
     "__krrEventTargetListeners",
+    "__krrEventHandlers",
+    "__krrLifecyclePropertyOverrides",
+    "__krrLifecycleEventTypes",
+    "__krrElementInstances",
     "__krrSyncEventTarget",
     `${dispatchListenerEntry}\n${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\nreturn __krrDispatchTargetPhase;`,
-  )(target, new WeakMap([[target, new Map([["custom", entries]])]]), () => {});
+  )(
+    target,
+    new WeakMap([[target, new Map([["custom", entries]])]]),
+    new WeakMap(),
+    new WeakMap(),
+    new Set(["load", "error", "readystatechange", "DOMContentLoaded"]),
+    new WeakSet(),
+    () => {},
+  );
 
   expect(() => dispatch(target, { type: "custom" }, false, 2)).toThrow("listener failure");
   expect(calls).toEqual(["throwing listener"]);
+});
+
+test("visible propertyをdeleteしてもlifecycle Mapのhandlerをdispatchする", () => {
+  expect(dispatchHandler).toBeDefined();
+
+  const calls = [];
+  const target = {
+    onload() {
+      calls.push("visible shadow");
+    },
+  };
+  const handler = () => calls.push("stored handler");
+  const handlers = new WeakMap([[target, new Map([["load", handler]])]]);
+  const overrides = new WeakMap([[target, new Set(["load"])]]);
+  delete target.onload;
+
+  const dispatch = new Function(
+    "target",
+    "__krrEventHandlers",
+    "__krrLifecyclePropertyOverrides",
+    "__krrLifecycleEventTypes",
+    "__krrElementInstances",
+    `${dispatchHandler}\nreturn __krrDispatchHandler;`,
+  )(
+    target,
+    handlers,
+    overrides,
+    new Set(["load", "error", "readystatechange", "DOMContentLoaded"]),
+    new WeakSet([target]),
+  );
+
+  dispatch(target, { type: "load", cancelable: false });
+  expect(calls).toEqual(["stored handler"]);
+});
+
+test("null-cleared lifecycle handler does not fall through while custom expando still dispatches", () => {
+  expect(dispatchHandler).toBeDefined();
+
+  const calls = [];
+  const target = {
+    onload() {
+      calls.push("shadow");
+    },
+    oncustom() {
+      calls.push("custom expando");
+    },
+  };
+  const handlers = new WeakMap([[target, new Map()]]);
+  const overrides = new WeakMap([[target, new Set(["load"])]]);
+  delete target.onload;
+
+  const dispatch = new Function(
+    "target",
+    "__krrEventHandlers",
+    "__krrLifecyclePropertyOverrides",
+    "__krrLifecycleEventTypes",
+    "__krrElementInstances",
+    `${dispatchHandler}\nreturn __krrDispatchHandler;`,
+  )(
+    target,
+    handlers,
+    overrides,
+    new Set(["load", "error", "readystatechange", "DOMContentLoaded"]),
+    new WeakSet([target]),
+  );
+
+  dispatch(target, { type: "load", cancelable: false });
+  dispatch(target, { type: "custom", cancelable: false });
+  expect(calls).toEqual(["custom expando"]);
 });
 
 test("generic dispatchEventでもcaptureのstopImmediatePropagation後にdeferred lifecycle例外を再送出する", () => {
@@ -431,9 +536,20 @@ test("generic dispatchEventでもcaptureのstopImmediatePropagation後にdeferre
     "Event",
     "__krrEventTargetListeners",
     "__krrEventHandlers",
+    "__krrLifecyclePropertyOverrides",
+    "__krrLifecycleEventTypes",
+    "__krrElementInstances",
     "__krrSyncEventTarget",
     `${listenerOptions}\n${dispatchListenerEntry}\n${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\n${beginDispatch}\n${endDispatch}\n${throwDeferredListenerError}\n${installEventTarget}\nreturn __krrInstallEventTarget({});`,
-  )(LifecycleEvent, listeners, new WeakMap(), () => {});
+  )(
+    LifecycleEvent,
+    listeners,
+    new WeakMap(),
+    new WeakMap(),
+    new Set(["load", "error", "readystatechange", "DOMContentLoaded"]),
+    new WeakSet(),
+    () => {},
+  );
   target.addEventListener(
     "load",
     (event) => {
@@ -1154,6 +1270,10 @@ test("DOMContentLoaded listenerの例外後も後続listenerとproperty handler�
 
   const dispatchTargetPhaseForTest = new Function(
     "__krrEventTargetListeners",
+    "__krrEventHandlers",
+    "__krrLifecyclePropertyOverrides",
+    "__krrLifecycleEventTypes",
+    "__krrElementInstances",
     "__krrSyncEventTarget",
     `${dispatchListenerEntry}\n${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\nreturn __krrDispatchTargetPhase;`,
   );
@@ -1188,7 +1308,14 @@ test("DOMContentLoaded listenerの例外後も後続listenerとproperty handler�
     ],
   ]);
   const eventTargetListeners = new WeakMap([[target, listeners]]);
-  const dispatch = dispatchTargetPhaseForTest(eventTargetListeners, () => {});
+  const dispatch = dispatchTargetPhaseForTest(
+    eventTargetListeners,
+    new WeakMap(),
+    new WeakMap(),
+    new Set(["load", "error", "readystatechange", "DOMContentLoaded"]),
+    new WeakSet(),
+    () => {},
+  );
   const event = { type: "DOMContentLoaded", __krrImmediatePropagationStopped: false };
 
   expect(() => dispatch(target, event, false, 2)).toThrow("listener failure");
@@ -1248,6 +1375,10 @@ test.each(["DOMContentLoaded", "load"])(
       "__krrNativeDom",
       "__krrElement",
       "__krrEventTargetListeners",
+      "__krrEventHandlers",
+      "__krrLifecyclePropertyOverrides",
+      "__krrLifecycleEventTypes",
+      "__krrElementInstances",
       "__krrSyncEventTarget",
       `${dispatchListenerEntry}\n${dispatchListeners}\n${dispatchHandler}\n${dispatchTargetPhase}\n${dispatchElementPhase}\n${beginDispatch}\n${endDispatch}\n${throwDeferredListenerError}\n${dispatchElementEvent}\nreturn __krrDispatchElementEvent;`,
     )(
@@ -1257,6 +1388,10 @@ test.each(["DOMContentLoaded", "load"])(
       (operation, nodeId) => (operation === "eventPath" ? [nodeId] : null),
       (nodeId) => ({ window: pageGlobal, document: pageDocument })[nodeId],
       listeners,
+      new WeakMap(),
+      new WeakMap(),
+      new Set(["load", "error", "readystatechange", "DOMContentLoaded"]),
+      new WeakSet(),
       () => {},
     );
 

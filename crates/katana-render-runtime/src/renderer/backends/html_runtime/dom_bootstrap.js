@@ -205,7 +205,13 @@ const __krrDispatchListeners = (listeners, target, event, capture) => {
 };
 const __krrDispatchHandler = (target, event) => {
   if (event.__krrImmediatePropagationStopped) return;
-  const handler = target[`on${event.type}`];
+  const eventType = String(event.type);
+  const handlers = __krrEventHandlers.get(target);
+  const isManagedLifecycleHandler =
+    (target === globalThis && eventType === "load") ||
+    (target === globalThis.document && eventType === "readystatechange") ||
+    (__krrElementInstances.has(target) && __krrLifecycleEventTypes.has(eventType));
+  const handler = isManagedLifecycleHandler ? handlers?.get(eventType) : target[`on${eventType}`];
   if (typeof handler !== "function") return;
   const result = handler.call(target, event);
   if (result === false && event.cancelable) event.preventDefault();
@@ -723,11 +729,23 @@ globalThis.document = __krrInstallEventTarget({
     return __krrDocumentReadyState;
   },
 });
+const __krrDocumentPrototype = Object.create(Object.getPrototypeOf(globalThis.document));
+Object.defineProperty(__krrDocumentPrototype, "onreadystatechange", {
+  configurable: true,
+  get() {
+    return __krrEventHandlers.get(this)?.get("readystatechange") ?? null;
+  },
+  set(value) {
+    __krrInstallLifecycleProperty(this, "readystatechange", value);
+  },
+});
+Object.setPrototypeOf(globalThis.document, __krrDocumentPrototype);
 for (const eventType of __krrLifecycleEventTypes) {
   Object.defineProperty(__krrElementPrototype, `on${eventType}`, {
     configurable: true,
     get() {
-      if (eventType === "load" && __krrRouteWindowLoadElement(this)) return window.onload;
+      if (eventType === "load" && __krrRouteWindowLoadElement(this))
+        return __krrEventHandlers.get(window)?.get("load") ?? null;
       return __krrEventHandlers.get(this)?.get(eventType) ?? null;
     },
     set(value) {

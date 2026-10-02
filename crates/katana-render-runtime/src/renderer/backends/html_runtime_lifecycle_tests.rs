@@ -102,6 +102,21 @@ document.addEventListener('DOMContentLoaded', { handleEvent(event) { status.text
 }
 
 #[test]
+fn dispatches_custom_property_handlers_through_the_visible_expando() -> TestResult {
+    let output = render(
+        r#"<p id=status></p><div id=target></div><script>
+const status = document.getElementById('status');
+const target = document.getElementById('target');
+target.oncustom = () => { status.textContent = 'custom-property'; };
+target.dispatchEvent(new Event('custom'));
+</script>"#,
+    )?;
+
+    assert!(output.contains(">custom-property</p>"), "{output}");
+    Ok(())
+}
+
+#[test]
 fn lifecycle_handler_properties_receive_browser_state_and_event_target() -> TestResult {
     let output = render(
         r#"<p id=status></p><script>
@@ -122,55 +137,6 @@ status.dataset.nullable = `${nullableOptions.bubbles}:${nullableOptions.cancelab
         output.contains(">interactive:true|complete:true|complete:true:true</p>"),
         "{output}"
     );
-    Ok(())
-}
-
-#[test]
-fn deleting_lifecycle_handler_preserves_the_assigned_handler() -> TestResult {
-    let output = render(
-        r#"<p id=status>unchanged</p><iframe id=frame data-krr-local-frame onload="document.getElementById('status').textContent = 'inline'"></iframe><script>
-const frame = document.getElementById('frame');
-frame.onload = () => { document.getElementById('status').textContent = 'assigned'; };
-delete frame.onload;
-</script>"#,
-    )?;
-
-    assert!(output.contains(">assigned</p>"), "{output}");
-    assert!(!output.contains(">inline</p>"), "{output}");
-    Ok(())
-}
-
-#[test]
-fn deleting_a_lifecycle_shadow_restores_the_assigned_handler() -> TestResult {
-    let output = render(
-        r#"<p id=status>unchanged</p><iframe id=frame data-krr-local-frame onload="document.getElementById('status').textContent = 'inline'"></iframe><script>
-const frame = document.getElementById('frame');
-frame.onload = () => { document.getElementById('status').textContent = 'assigned'; };
-Object.defineProperty(frame, 'onload', { configurable: true, value: () => { document.getElementById('status').textContent = 'shadow'; } });
-delete frame.onload;
-</script>"#,
-    )?;
-
-    assert!(output.contains(">assigned</p>"), "{output}");
-    assert!(!output.contains(">inline</p>"), "{output}");
-    assert!(!output.contains(">shadow</p>"), "{output}");
-    Ok(())
-}
-
-#[test]
-fn deleting_a_lifecycle_shadow_does_not_restore_a_cleared_inline_handler() -> TestResult {
-    let output = render(
-        r#"<p id=status>unchanged</p><iframe id=frame data-krr-local-frame onload="document.getElementById('status').textContent = 'inline'"></iframe><script>
-const frame = document.getElementById('frame');
-frame.onload = null;
-Object.defineProperty(frame, 'onload', { configurable: true, value: () => { document.getElementById('status').textContent = 'shadow'; } });
-delete frame.onload;
-</script>"#,
-    )?;
-
-    assert!(output.contains(">unchanged</p>"), "{output}");
-    assert!(!output.contains(">inline</p>"), "{output}");
-    assert!(!output.contains(">shadow</p>"), "{output}");
     Ok(())
 }
 
