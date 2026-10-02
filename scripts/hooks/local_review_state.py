@@ -256,6 +256,9 @@ def gate_configuration(root: Path) -> dict[str, str]:
     values["RUSTC"] = os.environ.get("RUSTC", "rustc")
     values.update({f"{name}_PRESENT": str(name in os.environ).lower()
                    for name in (*cargo_names, "RUSTC")})
+    for name in ("CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR"):
+        if name in os.environ and not os.environ[name]:
+            raise ReviewError(f"{name} must not be empty")
     if "CARGO_BUILD_TARGET_DIR" in os.environ:
         values["CARGO_BUILD_TARGET_DIR"] = str((root / os.environ["CARGO_BUILD_TARGET_DIR"]).resolve())
     target = os.environ.get("CARGO_TARGET_DIR", values["CARGO_BUILD_TARGET_DIR"] or "target")

@@ -803,7 +803,10 @@ class DriverContractTest(unittest.TestCase):
 
         with patch.dict(os.environ, clean_environment, clear=True):
             absent = gate_configuration(root)
-        empty_environment = {**clean_environment, **{name: "" for name in cargo_names}}
+        empty_environment = {
+            **clean_environment,
+            **{name: "" for name in cargo_names if name != "CARGO_BUILD_TARGET_DIR"},
+        }
         with patch.dict(os.environ, empty_environment, clear=True):
             present_empty = gate_configuration(root)
         nonempty_environment = {
@@ -821,9 +824,9 @@ class DriverContractTest(unittest.TestCase):
                 self.assertIn(f"{name}_PRESENT", absent)
                 self.assertEqual(absent[name], "rustc" if name == "RUSTC" else "")
                 self.assertEqual(absent[f"{name}_PRESENT"], "false")
-                expected_empty = str(root) if name == "CARGO_BUILD_TARGET_DIR" else ""
-                self.assertEqual(present_empty[name], expected_empty)
-                self.assertEqual(present_empty[f"{name}_PRESENT"], "true")
+                self.assertEqual(present_empty[name], "")
+                expected_empty_presence = name != "CARGO_BUILD_TARGET_DIR"
+                self.assertEqual(present_empty[f"{name}_PRESENT"], str(expected_empty_presence).lower())
                 expected_value = (
                     str((root / nonempty_environment[name]).resolve())
                     if name == "CARGO_BUILD_TARGET_DIR"
@@ -844,6 +847,17 @@ class DriverContractTest(unittest.TestCase):
                 validate_receipt(receipt, changed)
         self.assertNotIn("secret-must-not-enter-the-input", json.dumps(nonempty))
         self.assertNotIn("GITHUB_TOKEN", nonempty)
+
+    def test_empty_cargo_target_directories_are_rejected(self) -> None:
+        from local_review_state import gate_configuration
+
+        root = Path(__file__).resolve().parents[2]
+        clean_environment = {"PATH": os.environ["PATH"], "CI": "true"}
+        for name in ("CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR"):
+            with self.subTest(variable=name), patch.dict(
+                os.environ, {**clean_environment, name: ""}, clear=True,
+            ), self.assertRaisesRegex(ReviewError, f"{name} must not be empty"):
+                gate_configuration(root)
 
     def test_cargo_target_directory_direct_alias_and_default_precedence(self) -> None:
         from local_review_state import gate_configuration
