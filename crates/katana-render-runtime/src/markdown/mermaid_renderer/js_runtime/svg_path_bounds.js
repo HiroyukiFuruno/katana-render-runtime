@@ -50,6 +50,8 @@ function katanaPathParser(pathData) {
     y: 0,
     startX: 0,
     startY: 0,
+    curveType: null,
+    curveControl: null,
     points: [],
   };
 }
@@ -79,22 +81,75 @@ function katanaIsPathCommand(token) {
 
 const KATANA_PATH_COMMAND_READERS = {
   A: (parser, relative) => katanaReadPathArcs(parser, relative),
-  C: (parser, relative) => katanaReadPathCoordinateGroups(parser, relative, 3),
+  C: (parser, relative) => katanaReadPathCubics(parser, relative, false),
   H: (parser, relative) => katanaReadPathHorizontalLines(parser, relative),
   L: (parser, relative) => katanaReadPathCoordinateGroups(parser, relative, 1),
   M: (parser, relative) => katanaReadPathMoves(parser, relative),
-  Q: (parser, relative) => katanaReadPathCoordinateGroups(parser, relative, 2),
-  S: (parser, relative) => katanaReadPathCoordinateGroups(parser, relative, 2),
-  T: (parser, relative) => katanaReadPathCoordinateGroups(parser, relative, 1),
+  Q: (parser, relative) => katanaReadPathQuadratics(parser, relative, false),
+  S: (parser, relative) => katanaReadPathCubics(parser, relative, true),
+  T: (parser, relative) => katanaReadPathQuadratics(parser, relative, true),
   V: (parser, relative) => katanaReadPathVerticalLines(parser, relative),
   Z: (parser) => katanaClosePath(parser),
 };
 
+function katanaReadPathQuadratics(parser, relative, smooth) {
+  const numberCount = smooth ? 2 : 4;
+  while (katanaCanReadPathNumbers(parser, numberCount)) {
+    katanaReadPathQuadraticSegment(parser, relative, smooth);
+  }
+}
+
+function katanaReadPathQuadraticSegment(parser, relative, smooth) {
+  const origin = { x: parser.x, y: parser.y };
+  const start = [origin.x, origin.y];
+  const control = smooth
+    ? katanaReflectedPathCurveControl(parser, start, "quadratic")
+    : katanaReadPathPointFromOrigin(parser, relative, origin);
+  const end = katanaReadPathPointFromOrigin(parser, relative, origin);
+  katanaAddQuadraticBezierExtrema(parser.points, start, control, end);
+  katanaSetPathPoint(parser, end);
+  parser.curveType = "quadratic";
+  parser.curveControl = control;
+}
+
+function katanaReadPathCubics(parser, relative, smooth) {
+  const numberCount = smooth ? 4 : 6;
+  while (katanaCanReadPathNumbers(parser, numberCount)) {
+    katanaReadPathCubicSegment(parser, relative, smooth);
+  }
+}
+
+function katanaReadPathCubicSegment(parser, relative, smooth) {
+  const origin = { x: parser.x, y: parser.y };
+  const start = [origin.x, origin.y];
+  const first = smooth
+    ? katanaReflectedPathCurveControl(parser, start, "cubic")
+    : katanaReadPathPointFromOrigin(parser, relative, origin);
+  const second = katanaReadPathPointFromOrigin(parser, relative, origin);
+  const end = katanaReadPathPointFromOrigin(parser, relative, origin);
+  katanaAddCubicBezierExtrema(parser.points, start, first, second, end);
+  katanaSetPathPoint(parser, end);
+  parser.curveType = "cubic";
+  parser.curveControl = second;
+}
+
+function katanaReflectedPathCurveControl(parser, start, curveType) {
+  if (parser.curveType !== curveType || !parser.curveControl) {
+    return start;
+  }
+  return start.map((coordinate, axis) => 2 * coordinate - parser.curveControl[axis]);
+}
+
 function katanaReadPathMoves(parser, relative) {
+  let firstMove = true;
   while (katanaCanReadPathNumbers(parser, 2)) {
     katanaSetPathPoint(parser, katanaReadPathPoint(parser, relative));
-    parser.startX = parser.x;
-    parser.startY = parser.y;
+    if (firstMove) {
+      parser.startX = parser.x;
+      parser.startY = parser.y;
+      parser.command = relative ? "l" : "L";
+      firstMove = false;
+    }
   }
 }
 
@@ -193,6 +248,8 @@ function katanaSetPathPoint(parser, point) {
   parser.x = point[0];
   parser.y = point[1];
   parser.points.push(point[0], point[1]);
+  parser.curveType = null;
+  parser.curveControl = null;
 }
 
 function katanaCanReadPathNumbers(parser, count) {

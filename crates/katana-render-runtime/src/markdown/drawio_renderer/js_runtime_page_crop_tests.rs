@@ -241,3 +241,6 @@ mod page_crop_sketch_tests;
 
 #[path = "js_runtime_page_crop_multipage_tests.rs"]
 mod page_crop_multipage_tests;
+
+#[path = "js_runtime_page_crop_bezier_tests.rs"]
+mod page_crop_bezier_tests;

@@ -33,6 +33,10 @@ export const SharedDomFragments = {
         `${MERMAID_JS_RUNTIME}/dom_computed_style.js`,
       ),
       RuntimeFragmentFactory.verbatim(
+        "svg-path-bezier-bounds.js",
+        `${MERMAID_JS_RUNTIME}/svg_path_bezier_bounds.js`,
+      ),
+      RuntimeFragmentFactory.verbatim(
         "svg-path-bounds.js",
         `${MERMAID_JS_RUNTIME}/svg_path_bounds.js`,
       ),
