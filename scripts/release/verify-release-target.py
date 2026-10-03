@@ -56,6 +56,8 @@ REQUIRED_RELEASE_COMMITS = (
     "780b0ebd2c7cc1d8450089d754e8f3a214448899",  # font-types0.12.6の最新互換依存更新
     "de3e0148158e7899b8fcfbfc6a95f373e08785f3",  # フォント復旧競合の決定的な検証
     "d61ae327d911866cfb1b3fb0667db67708e9da3d",  # cc1.6.0の最新互換依存更新
+    "a10be620949ea3a6578d00013900ac968a953784",  # File世代確認とcmap読込の重複削減
+    "4681663111bbbd9ab04e48a18120c1f32725656b",  # HTML描画内fallback選択の再利用
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -73,7 +75,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "2caf610ce3befccb6f5eab5d185a09875607b007a44e8fe31ed72f6334bc8f32"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "26db3fdf3ceedda02271dda8e2f94afa6fc2bd90270a75d53eab86b9e6d901a0"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
