@@ -123,6 +123,15 @@ pub(super) fn mark_unavailable() {
     });
 }
 
+pub(in super::super) fn memo_usable() -> bool {
+    ACTIVE_BATCH.with(|active| {
+        active
+            .borrow()
+            .as_ref()
+            .is_some_and(|batch| !batch.invalid && !batch.overflow)
+    })
+}
+
 fn validate_batch(batch: Option<StampBatch>) -> bool {
     let Some(batch) = batch else {
         return false;

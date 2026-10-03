@@ -47,7 +47,9 @@ impl HtmlFontDatabaseCache {
 }
 
 pub(in super::super) fn html_rasterizer_options(markup: &str) -> usvg::Options<'static> {
-    super::rasterizer_options_with_font_db(html_font_db_for_markup(markup))
+    let mut options = super::rasterizer_options_with_font_db(html_font_db_for_markup(markup));
+    super::super::text_shaping::install_html_fallback_memo(&mut options);
+    options
 }
 
 pub(in super::super) fn html_font_db_for_markup(markup: &str) -> Arc<usvg::fontdb::Database> {

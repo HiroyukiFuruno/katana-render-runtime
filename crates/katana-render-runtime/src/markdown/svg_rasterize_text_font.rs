@@ -6,9 +6,11 @@ mod file_generation;
 mod glyph_cache;
 #[path = "svg_rasterize_text_stamp_batch.rs"]
 mod stamp_batch;
-pub(super) use file_generation::{FontSourceGeneration, font_source_generation};
+pub(super) use file_generation::{
+    FontSourceGeneration, font_source_generation, observe_file_face_generation,
+};
 pub(super) use glyph_cache::cached_font_has_char_with_generation;
-pub(super) use stamp_batch::with_validated_stamp_batch;
+pub(super) use stamp_batch::{memo_usable, with_validated_stamp_batch};
 #[path = "svg_rasterize_text_font_score.rs"]
 mod score;
 use resvg::usvg;

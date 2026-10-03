@@ -1,5 +1,11 @@
 use resvg::usvg::fontdb::{Database, ID, Source};
 
+pub(in super::super) fn observe_file_face_generation(database: &Database, id: ID) -> bool {
+    /* WHY: 未選択の候補ファイルの変更も描画の選択結果へ影響する。 */
+    let (is_file, stamp, _) = file_source_stamp(database, id);
+    !is_file || stamp.is_some()
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct FileStamp {
     len: u64,

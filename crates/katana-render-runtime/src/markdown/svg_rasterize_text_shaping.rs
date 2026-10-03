@@ -1,3 +1,6 @@
+#[path = "svg_rasterize_text_fallback_memo.rs"]
+mod fallback_memo;
+
 use super::font::html_font_db_for_text;
 use resvg::usvg;
 
@@ -12,6 +15,7 @@ mod weight;
 
 use cache::cached_shaped_run;
 use fallback::html_font_runs;
+pub(super) use fallback_memo::{install as install_html_fallback_memo, with_validated_tree_parse};
 use font::matching_font_face;
 
 struct TextDxState {
