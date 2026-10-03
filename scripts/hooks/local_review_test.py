@@ -226,6 +226,25 @@ class GitSnapshotTest(unittest.TestCase):
         self.assertEqual(staged, committed)
         self.assertEqual(validate_receipt(receipt, {**value, "source": committed})["verdict"], "PASS")
 
+    def test_real_git_reset_only_staged_candidate_then_allow_empty_commit_invalidates_receipt(self) -> None:
+        changed = self.root / "example.py"
+        changed.write_text("staged candidate, later unstaged\n")
+        command(["git", "add", "example.py"], self.root)
+        before = source_snapshot(self.root, self.base)
+        value = {**inputs(), "source": before}
+        receipt = receipt_payload(value, review(value))
+
+        command(["git", "reset", "--quiet", "HEAD", "--", "example.py"], self.root)
+        command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
+                 "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty",
+                 "-m", "empty candidate"], self.root)
+        after = source_snapshot(self.root, self.base)
+
+        self.assertEqual(after["omitted_working_paths"], ["example.py"])
+        self.assertNotEqual(before, after)
+        with self.assertRaisesRegex(ReviewError, "another input|stale"):
+            validate_receipt(receipt, {**value, "source": after})
+
     def test_hidden_git_index_flags_reject_review_candidates(self) -> None:
         flag_cases = (
             ("assume-unchanged", ("--assume-unchanged",), ("--no-assume-unchanged",), "h", "H"),

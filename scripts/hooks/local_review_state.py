@@ -136,7 +136,7 @@ def source_snapshot(root: Path, base: str) -> dict[str, Any]:
     working_blobs = {name: working_entry(root, name) for name in sorted(working_paths)}
     candidate_paths = cached_diff_base_names | head_diff_base_names
     omitted_working_paths = (sorted(working_diff_base_names - candidate_paths)
-                             if candidate_paths else [])
+                             if candidate_paths or head_sha != base_sha else [])
     return {"base_sha": base_sha, "files": files,
             "new_tracked_paths": sorted((cached_diff_base_names | head_diff_base_names) - base_names),
             "index_overrides": staged_overrides(root, entries, base_sha, head_sha),
