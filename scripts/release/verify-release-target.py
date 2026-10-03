@@ -53,6 +53,7 @@ REQUIRED_RELEASE_COMMITS = (
     "7be38b373659fff340aaa7a5a9bb0eec73134368",  # SCP originのホスト名正規化
     "12583c6cc8f74553bb76aedfcc6e21b2dd6697be",  # フォントファイル世代によるglyph cache失効
     "169edd0d61322f838034efcfdb41a02a2dbffdbe",  # 調査したフォント候補世代によるHTML選択失効
+    "780b0ebd2c7cc1d8450089d754e8f3a214448899",  # font-types0.12.6の最新互換依存更新
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -70,7 +71,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "d216b2b093cd0b78f08137ba34140d2c6ae7eaf0f3e18e0b99630e1e17924a5a"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "c3064be3dcfe8d61e8e7294f36438a2a025e9981b227850e19329fde1161c4bc"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
