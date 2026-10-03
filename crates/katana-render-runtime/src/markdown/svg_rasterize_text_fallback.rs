@@ -228,7 +228,7 @@ mod tests {
             html_font_runs(&database, base, "A", 400, false)[0].0,
             file_face
         );
-        std::fs::write(path, replacement)?;
+        write_file_with_new_modified_time(&path, &replacement)?;
         assert_eq!(
             html_font_runs(&database, base, "A", 400, false)[0].0,
             stable_face
@@ -246,7 +246,7 @@ mod tests {
             html_font_runs(&database, base, "A", 400, false)[0].0,
             fallback
         );
-        std::fs::write(path, original)?;
+        write_file_with_new_modified_time(&path, &original)?;
         assert_eq!(html_font_runs(&database, base, "A", 400, false)[0].0, base);
         Ok(())
     }
@@ -278,7 +278,7 @@ mod tests {
         let (database, base, better, lower) =
             better_file_database(face, &original, &unsupported, &path);
         assert_eq!(html_font_runs(&database, base, "A", 400, false)[0].0, lower);
-        std::fs::write(path, original)?;
+        write_file_with_new_modified_time(&path, &original)?;
         assert_eq!(
             html_font_runs(&database, base, "A", 400, false)[0].0,
             better
@@ -394,6 +394,24 @@ mod tests {
         ));
         std::fs::write(&path, bytes)?;
         Ok((path.clone(), TempFontFile(path)))
+    }
+
+    fn write_file_with_new_modified_time(
+        path: &std::path::Path,
+        bytes: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let before = std::fs::metadata(path)?;
+        let replacement_len = u64::try_from(bytes.len())?;
+        assert_eq!(before.len(), replacement_len);
+        let before_modified = before.modified()?;
+        std::fs::write(path, bytes)?;
+        let modified = before_modified + std::time::Duration::from_secs(1);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)?
+            .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+        assert_ne!(std::fs::metadata(path)?.modified()?, before_modified);
+        Ok(())
     }
 
     fn fallback_file_database(

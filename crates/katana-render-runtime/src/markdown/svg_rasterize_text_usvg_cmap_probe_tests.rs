@@ -184,3 +184,48 @@ fn uncached_generation_distinguishes_binary_and_missing_face() -> Result<(), Str
     assert!(!missing.reusable());
     Ok(())
 }
+
+#[test]
+fn binary_font_probe_matches_bundled_font_character_map() -> Result<(), String> {
+    let mut database = Database::new();
+    database.load_font_data(FONT_BYTES.to_vec());
+    let database = Arc::new(database);
+    let face_id = database
+        .faces()
+        .next()
+        .ok_or("binary font face missing")?
+        .id;
+
+    assert_eq!(super::has_char(&database, face_id, 'A'), Ok(true));
+    assert_eq!(super::has_char(&database, face_id, '\u{10ffff}'), Ok(false));
+    Ok(())
+}
+
+#[test]
+fn selector_falls_back_to_stock_when_cached_probe_is_unavailable() -> Result<(), String> {
+    let first_font = TempFont::write(FONT_BYTES)?;
+    let second_font = TempFont::write(FONT_BYTES)?;
+    let mut font_database = Database::new();
+    font_database
+        .load_font_file(&first_font.0)
+        .map_err(|error| error.to_string())?;
+    font_database
+        .load_font_file(&second_font.0)
+        .map_err(|error| error.to_string())?;
+    let database = Arc::new(font_database);
+    let face_ids: Vec<_> = database.faces().map(|face| face.id).collect();
+    let base_face = *face_ids.first().ok_or("base font face missing")?;
+    let fallback_face = *face_ids.get(1).ok_or("fallback font face missing")?;
+
+    assert_eq!(super::has_char(&database, fallback_face, 'A'), Err(()));
+
+    let excluded = [base_face];
+    let stock = resvg::usvg::FontResolver::default_fallback_selector();
+    let cached = super::super::selector::html_selector();
+    let stock_result = stock('A', &excluded, &mut Arc::clone(&database));
+    let cached_result = cached('A', &excluded, &mut Arc::clone(&database));
+
+    assert_eq!(stock_result, Some(fallback_face));
+    assert_eq!(cached_result, stock_result);
+    Ok(())
+}

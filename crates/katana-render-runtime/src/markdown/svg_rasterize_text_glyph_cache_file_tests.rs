@@ -41,7 +41,7 @@ fn changed_file_source_rechecks_glyphs_for_a_new_style() -> Result<(), Box<dyn s
         [(file_id, "A".into())]
     );
 
-    std::fs::write(&path, replacement)?;
+    write_file_with_new_modified_time(&path, &replacement)?;
     assert_eq!(
         html_font_runs(&database, file_id, "A", 700, true),
         [(fallback_id, "A".into())]
@@ -113,6 +113,21 @@ fn file_fixture(prefix: &str) -> FixtureResult<FileFixture> {
     let (path, guard) = temp_font(prefix, &original)?;
     let (database, file_id, fallback_id) = file_and_binary_database(face, original, &path);
     Ok((database, file_id, fallback_id, path, guard, replacement))
+}
+
+fn write_file_with_new_modified_time(path: &std::path::Path, bytes: &[u8]) -> FixtureResult<()> {
+    let before = std::fs::metadata(path)?;
+    let replacement_len = u64::try_from(bytes.len())?;
+    assert_eq!(before.len(), replacement_len);
+    let before_modified = before.modified()?;
+    std::fs::write(path, bytes)?;
+    let modified = before_modified + std::time::Duration::from_secs(1);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)?
+        .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+    assert_ne!(std::fs::metadata(path)?.modified()?, before_modified);
+    Ok(())
 }
 
 fn file_and_binary_database(
