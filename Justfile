@@ -157,7 +157,7 @@ plantuml-runtime-package-check:
 
 # Run TypeScript tests for runtime asset helper scripts
 runtime-asset-script-test:
-    bun test --path-ignore-patterns 'tmp/**' scripts/runtime-assets/runtime-asset-common_test.ts scripts/runtime-assets/update_test.ts scripts/runtime-assets/latest-check_test.ts scripts/runtime-assets/update_zenuml_test.ts scripts/runtime-assets/depends-update-all_test.ts scripts/runtime-assets/runtime-package-asset-compressor_test.ts
+    bun test --path-ignore-patterns 'tmp/**' scripts/runtime-assets/runtime-asset-common_test.ts scripts/runtime-assets/update_test.ts scripts/runtime-assets/latest-check_test.ts scripts/runtime-assets/update_zenuml_test.ts scripts/runtime-assets/depends-update-all_test.ts scripts/runtime-assets/runtime-package-asset-compressor_test.ts scripts/mermaid/official_renderer_i18n_test.ts scripts/mermaid/diagram_update_markdown_assets_test.ts
     bun test --path-ignore-patterns 'tmp/**' scripts/drawio/reference_score_test.ts scripts/drawio/official-runtime-determinism_test.ts scripts/drawio/official-source-fonts_test.ts
 
 [private]
