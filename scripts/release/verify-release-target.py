@@ -50,6 +50,8 @@ REQUIRED_RELEASE_COMMITS = (
     "d72b80e802d9b857eb71503ad1fce6cdf3f5fcf0",  # 非UTF8のGitパスを可逆なレビュー証跡へ保持
     "c8704bf9b2cc26c43f85f0e9dad35f31ee11d4e0",  # 非UTF8のGit名回帰をPOSIX環境へ限定
     "9c0a96d0e83063c148693cce0a531e1a19b99a1a",  # レビュー候補包含とorigin復号境界の拘束
+    "7be38b373659fff340aaa7a5a9bb0eec73134368",  # SCP originのホスト名正規化
+    "12583c6cc8f74553bb76aedfcc6e21b2dd6697be",  # フォントファイル世代によるglyph cache失効
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -67,7 +69,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "6c8ebd95a740b01db0284ab5c60ff858e44cccd3bc29bb970161663e31e5a098"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "f9909bc25dc57b36a010f9d3a205b5629797e7d4eac254c59b0e573728decb01"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
