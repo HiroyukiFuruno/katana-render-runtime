@@ -226,9 +226,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.5.1"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f360145194ee8e21db5ee7f3fcd4fe52210864c75c985dae33218202c8bbe040"
+checksum = "f74872d07caf508b30a21f6836e7d7016a2eaf7d9ff4f48deaa58cd8a0407630"
 dependencies = [
  "find-msvc-tools",
  "shlex 2.0.1",
@@ -588,9 +588,9 @@ checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
 
 [[package]]
 name = "font-types"
-version = "0.12.5"
+version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8eb065f3251655b3c90e22e5e363f310fc5332fb3402e37bbc94752283248f6"
+checksum = "6c92d9081c7ab3bd83ef1eecdfad090f3d966e3ce74106779664114cfe1a6274"
 dependencies = [
  "bytemuck",
 ]
@@ -1146,7 +1146,7 @@ dependencies = [
 
 [[package]]
 name = "katana-render-runtime"
-version = "0.4.22"
+version = "0.4.23"
 dependencies = [
  "anyhow",
  "base64",
@@ -1156,6 +1156,7 @@ dependencies = [
  "image",
  "include_dir",
  "jni",
+ "log",
  "markup5ever",
  "percent-encoding",
  "resvg",
@@ -1163,6 +1164,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "skrifa",
  "taffy",
  "tendril",
  "thiserror",
@@ -1179,7 +1181,7 @@ dependencies = [
 
 [[package]]
 name = "katana-render-runtime-cli"
-version = "0.4.22"
+version = "0.4.23"
 dependencies = [
  "anyhow",
  "clap",
@@ -1190,7 +1192,7 @@ dependencies = [
 
 [[package]]
 name = "kdr-linter"
-version = "0.4.22"
+version = "0.4.23"
 dependencies = [
  "ignore",
  "katana-ast-lint",
@@ -1214,9 +1216,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.189"
+version = "0.2.190"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
 name = "libloading"

@@ -1,3 +1,17 @@
+#[path = "svg_rasterize_text_cmap_cache.rs"]
+mod cmap_cache;
+#[path = "svg_rasterize_text_file_generation.rs"]
+mod file_generation;
+#[path = "svg_rasterize_text_glyph_cache.rs"]
+mod glyph_cache;
+#[path = "svg_rasterize_text_stamp_batch.rs"]
+mod stamp_batch;
+pub(super) use file_generation::{
+    FontSourceGeneration, font_source_generation, font_source_generation_uncached,
+    observe_file_face_generation,
+};
+pub(super) use glyph_cache::cached_font_has_char_with_generation;
+pub(super) use stamp_batch::{memo_usable, with_validated_stamp_batch};
 #[path = "svg_rasterize_text_font_score.rs"]
 mod score;
 use resvg::usvg;
@@ -35,15 +49,22 @@ pub(super) fn font_runs(
     let mut runs: Vec<(usvg::fontdb::ID, String)> = Vec::new();
     for character in text.chars() {
         let face_id = resolved_base_face(database, base_face_id, character);
-        if let Some((run_face_id, run)) = runs.last_mut()
-            && *run_face_id == face_id
-        {
-            run.push(character);
-        } else {
-            runs.push((face_id, character.to_string()));
-        }
+        append_font_run(&mut runs, face_id, character);
     }
     runs
+}
+pub(super) fn append_font_run(
+    runs: &mut Vec<(usvg::fontdb::ID, String)>,
+    face_id: usvg::fontdb::ID,
+    character: char,
+) {
+    if let Some((run_face_id, run)) = runs.last_mut()
+        && *run_face_id == face_id
+    {
+        run.push(character);
+    } else {
+        runs.push((face_id, character.to_string()));
+    }
 }
 #[cfg(test)]
 fn resolved_base_face(
@@ -62,6 +83,7 @@ fn resolved_base_face(
     matching_fallback_face(database, base_face_id, character, weight, italic)
         .unwrap_or(base_face_id)
 }
+#[cfg(test)]
 pub(super) fn matching_fallback_face(
     database: &usvg::fontdb::Database,
     base_face_id: usvg::fontdb::ID,
@@ -69,25 +91,64 @@ pub(super) fn matching_fallback_face(
     requested_weight: u16,
     requested_italic: bool,
 ) -> Option<usvg::fontdb::ID> {
-    database.face(base_face_id)?;
-    let requested_style = requested_font_style(requested_italic);
-    let requested_weight = usvg::fontdb::Weight(requested_weight);
+    matching_fallback_with_probe(
+        database,
+        base_face_id,
+        character,
+        requested_weight,
+        requested_italic,
+        |id, ch| probe_font_has_char(database, id, ch),
+    )
+    .0
+}
+pub(super) fn matching_fallback_with_probe(
+    database: &usvg::fontdb::Database,
+    base_face_id: usvg::fontdb::ID,
+    character: char,
+    requested_weight: u16,
+    requested_italic: bool,
+    probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> (Option<usvg::fontdb::ID>, bool) {
+    if database.face(base_face_id).is_none() {
+        return (None, false);
+    }
+    scan_fallback_faces(
+        database,
+        base_face_id,
+        character,
+        requested_font_style(requested_italic),
+        usvg::fontdb::Weight(requested_weight),
+        probe,
+    )
+}
+
+fn scan_fallback_faces(
+    database: &usvg::fontdb::Database,
+    base_face_id: usvg::fontdb::ID,
+    character: char,
+    requested_style: usvg::fontdb::Style,
+    requested_weight: usvg::fontdb::Weight,
+    mut probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> (Option<usvg::fontdb::ID>, bool) {
     let mut best = None;
+    let mut cacheable = true;
     for face in database.faces().filter(|face| face.id != base_face_id) {
         let score = fallback_face_attribute_score(face, requested_style, requested_weight);
         /* WHY: 同点では先のfaceを保ち、選択結果を改善しないfontのfile解析を省く。 */
         if best.is_some_and(|(best_score, _)| score >= best_score) {
             continue;
         }
-        if font_has_char(database, face.id, character) {
+        let support = probe(face.id, character);
+        cacheable &= support.is_some();
+        if support == Some(true) {
             /* WHY: 全属性一致の最小scoreより良い候補はないため、後続faceの走査を省く。 */
             if score == (0, 0, 0, 0) {
-                return Some(face.id);
+                return (Some(face.id), cacheable);
             }
             best = Some((score, face.id));
         }
     }
-    best.map(|(_, face_id)| face_id)
+    (best.map(|(_, face_id)| face_id), cacheable)
 }
 fn requested_font_style(italic: bool) -> usvg::fontdb::Style {
     if italic {
@@ -96,19 +157,27 @@ fn requested_font_style(italic: bool) -> usvg::fontdb::Style {
         usvg::fontdb::Style::Normal
     }
 }
+#[cfg(test)]
 pub(super) fn font_has_char(
     database: &usvg::fontdb::Database,
     face_id: usvg::fontdb::ID,
     character: char,
 ) -> bool {
+    probe_font_has_char(database, face_id, character).unwrap_or(false)
+}
+fn probe_font_has_char(
+    database: &usvg::fontdb::Database,
+    face_id: usvg::fontdb::ID,
+    character: char,
+) -> Option<bool> {
     database
         .with_face_data(face_id, |data, face_index| {
             /* WHY: glyphの有無だけを調べるため、不要なGSUB/GPOS coverage構築を省く。 */
             rustybuzz::ttf_parser::Face::parse(data, face_index)
                 .ok()
-                .is_some_and(|face| face.glyph_index(character).is_some())
+                .map(|face| face.glyph_index(character).is_some())
         })
-        .unwrap_or(false)
+        .flatten()
 }
 fn css_font_family_names(value: &str) -> Vec<String> {
     value

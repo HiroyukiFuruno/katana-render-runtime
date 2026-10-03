@@ -19,11 +19,11 @@ const ZENUML_RUNTIME_ASSET_ARCHIVE: &[u8] =
 #[cfg(test)]
 include!("generated/zenuml-runtime-assets-index.rs");
 
-pub const MERMAID_JS_VERSION: &str = "12.0.0";
+pub const MERMAID_JS_VERSION: &str = "12.1.0";
 pub const MERMAID_JS_CHECKSUM: &str =
-    "28fca7ae6ebc7ed7bb63bde63136a74bfef14f296a57e403657eeb8b32836073";
+    "6484afc32872a3aa16cac9a76ba1816a1ed4cc870a6593cc2e17757750f518b2";
 pub const MERMAID_DOWNLOAD_URL: &str =
-    "https://cdn.jsdelivr.net/npm/mermaid@12.0.0/dist/mermaid.min.js";
+    "https://cdn.jsdelivr.net/npm/mermaid@12.1.0/dist/mermaid.min.js";
 
 pub const MERMAID_ZENUML_JS_VERSION: &str = "1.0.1";
 pub const MERMAID_ZENUML_JS_CHECKSUM: &str =
@@ -61,7 +61,7 @@ impl RuntimeAsset {
             version: MERMAID_JS_VERSION,
             filename: "mermaid.min.js",
             source: RuntimeAssetSource::Brotli {
-                bytes: include_bytes!("../../vendor/mermaid/12.0.0/mermaid.min.js.br"),
+                bytes: include_bytes!("../../vendor/mermaid/12.1.0/mermaid.min.js.br"),
                 cache: &MERMAID_RUNTIME_ASSET_BYTES,
             },
         }

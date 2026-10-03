@@ -17,8 +17,8 @@ include = [
     "src/markdown/diagram_runtime/generated/*.sha256",
     "vendor/drawio/31.6.1/drawio.min.js.br",
     "vendor/drawio/31.6.1/drawio.min.js.sha256",
-    "vendor/mermaid/12.0.0/mermaid.min.js.br",
-    "vendor/mermaid/12.0.0/mermaid.min.js.sha256",
+    "vendor/mermaid/12.1.0/mermaid.min.js.br",
+    "vendor/mermaid/12.1.0/mermaid.min.js.sha256",
     "vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js.sha256",
     "vendor/plantuml/1.2026.8/plantuml.jar.sha256",
     "vendor/zenuml-core/4.3.0/zenuml.js.sha256",
@@ -41,6 +41,8 @@ markup5ever = { workspace = true }
 tendril = { workspace = true }
 xml5ever = { workspace = true }
 resvg = { workspace = true }
+skrifa = "0.44"
+log = "0.4"
 rustybuzz = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

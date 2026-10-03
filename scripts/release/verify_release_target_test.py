@@ -14,15 +14,27 @@ from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("verify-release-target.py")
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MODULE_SPEC = util.spec_from_file_location("verify_release_target", SCRIPT)
 assert MODULE_SPEC is not None and MODULE_SPEC.loader is not None
 VERIFY_RELEASE_TARGET = util.module_from_spec(MODULE_SPEC)
 sys.modules[MODULE_SPEC.name] = VERIFY_RELEASE_TARGET
 MODULE_SPEC.loader.exec_module(VERIFY_RELEASE_TARGET)
-REQUIRED_SOURCE_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_SOURCE_COMMITS
 REQUIRED_RELEASE_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_COMMITS
 REQUIRED_CANDIDATE_ANCESTORS = (
     VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_CANDIDATE_ANCESTORS
+)
+CURRENT_RELEASE_VALIDATION_SNAPSHOT = "f6bc17870eb7d12d8381e24880877968335dee14"
+PUBLISHED_V0422_SNAPSHOT = "185d056de67282a4056729296e57c164a6a343d6"
+PUBLISHED_V0422_RELEASE_BASE = "7f984d16400fe3e097a3380dd7641d78c5852352"
+PUBLISHED_V0422_RELEASE_MANIFEST = "1ddeddc37c0735a7278755f26f8985aee9176fc978b437766d57be7d0e342d9e"
+PUBLISHED_V0422_REQUIRED_PINS = (
+    "1bc497bdfd3b8c4318e9ee1609d147b6925b43e5",
+    "d0ab9c408e9b876f130dbd5a8f33051cc44b5242",
+    "78ed1b87cc94bcdd158b42e7c00e69e882bbb094",
+    "a8481e9c13ceb43d9e08388958c32f507f9ddb85",
+    "f5ff74ecf7287375bc0e835e8db374766145a55b",
+    "4d1ec0a03c6fd95a8ca9f4c1ad8a30d4ad84f76e",
 )
 
 
@@ -64,46 +76,140 @@ class VerifyReleaseTargetTests(unittest.TestCase):
     def source_git(self, *args: str) -> str:
         return subprocess.run(
             ["git", *args],
-            cwd=SCRIPT.parents[2],
+            cwd=REPOSITORY_ROOT,
             check=True,
             capture_output=True,
             text=True,
             env=isolated_git_environment(),
         ).stdout.strip()
 
-    def test_accepts_v0422_after_published_v0421(self) -> None:
-        result = self.run_check("v0.4.22", "v0.4.21")
+    def historical_v0422_checker(self) -> str:
+        return self.source_git(
+            "show",
+            f"{PUBLISHED_V0422_SNAPSHOT}:scripts/release/verify-release-target.py",
+        )
+
+    def run_historical_check(
+        self,
+        source: str,
+        target: str,
+        latest: str,
+        head_ref: str = PUBLISHED_V0422_SNAPSHOT,
+        cwd: Path = REPOSITORY_ROOT,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                source,
+                "--target-version",
+                target,
+                "--latest-version",
+                latest,
+                "--head-ref",
+                head_ref,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            env=isolated_git_environment(),
+        )
+
+    def test_published_v0422_checker_fixture_preserves_historical_contract(self) -> None:
+        source = self.historical_v0422_checker()
+        self.assertIn(f'REQUIRED_TARGET_RELEASE = "v0.4.22"', source)
+        self.assertIn(f'REQUIRED_RELEASE_BASE = "{PUBLISHED_V0422_RELEASE_BASE}"', source)
+        self.assertIn(
+            f'REQUIRED_RELEASE_MANIFEST_SHA256 = "{PUBLISHED_V0422_RELEASE_MANIFEST}"',
+            source,
+        )
+        for commit in PUBLISHED_V0422_REQUIRED_PINS:
+            self.assertIn(commit, source)
+
+        accepted = self.run_historical_check(source, "v0.4.22", "v0.4.21")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        retry = self.run_historical_check(source, "v0.4.22", "v0.4.22")
+        self.assertEqual(retry.returncode, 0, retry.stderr)
+        for target, latest in (
+            ("v0.4.23", "v0.4.22"),
+            ("v0.4.22", "v0.4.20"),
+            ("v0.5.0", "v0.4.21"),
+        ):
+            rejected = self.run_historical_check(source, target, latest)
+            self.assertNotEqual(rejected.returncode, 0, (target, latest))
+
+        missing_pin_parent = self.source_git(
+            "rev-parse", f"{PUBLISHED_V0422_REQUIRED_PINS[0]}^"
+        )
+        missing_pin = self.run_historical_check(
+            source, "v0.4.22", "v0.4.21", missing_pin_parent
+        )
+        self.assertNotEqual(missing_pin.returncode, 0)
+
+    def test_published_v0422_checker_fixture_prints_its_historical_manifest(self) -> None:
+        source = self.historical_v0422_checker()
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                source,
+                "--target-version",
+                "v0.4.22",
+                "--head-ref",
+                PUBLISHED_V0422_SNAPSHOT,
+                "--print-release-manifest",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=REPOSITORY_ROOT,
+            env=isolated_git_environment(),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), PUBLISHED_V0422_RELEASE_MANIFEST)
+
+    def test_accepts_v0423_after_published_v0422(self) -> None:
+        result = self.run_check(
+            "v0.4.23", "v0.4.22", CURRENT_RELEASE_VALIDATION_SNAPSHOT
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_allows_idempotent_retry_after_v0422(self) -> None:
-        result = self.run_check("v0.4.22", "v0.4.22")
+    def test_allows_idempotent_retry_after_v0423(self) -> None:
+        result = self.run_check(
+            "v0.4.23", "v0.4.23", CURRENT_RELEASE_VALIDATION_SNAPSHOT
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_rejects_v0422_before_v0421_is_published(self) -> None:
-        result = self.run_check("v0.4.22", "v0.4.20")
-        self.assertNotEqual(result.returncode, 0)
-
-    def test_rejects_skipped_target(self) -> None:
+    def test_rejects_v0423_before_v0422_is_published(self) -> None:
         result = self.run_check("v0.4.23", "v0.4.21")
         self.assertNotEqual(result.returncode, 0)
 
-    def test_rejects_old_target(self) -> None:
-        result = self.run_check("v0.4.21", "v0.4.21")
+    def test_rejects_skipped_target(self) -> None:
+        result = self.run_check("v0.4.24", "v0.4.22")
         self.assertNotEqual(result.returncode, 0)
 
-    def test_accepts_head_containing_the_v0422_release_source(self) -> None:
-        result = self.run_check("v0.4.22", "v0.4.21")
+    def test_rejects_old_target(self) -> None:
+        result = self.run_check("v0.4.22", "v0.4.22")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_rejects_published_v0422_as_a_fake_v0423_candidate(self) -> None:
+        result = self.run_check(
+            "v0.4.23", "v0.4.22", PUBLISHED_V0422_SNAPSHOT
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_accepts_the_v0423_release_validation_snapshot(self) -> None:
+        result = self.run_check(
+            "v0.4.23", "v0.4.22", CURRENT_RELEASE_VALIDATION_SNAPSHOT
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_rejects_head_missing_the_v0422_candidate_ancestor(self) -> None:
+    def test_rejects_head_missing_a_v0423_candidate_ancestor(self) -> None:
         for commit in REQUIRED_CANDIDATE_ANCESTORS:
             parent = self.source_git("rev-parse", f"{commit}^")
-            result = self.run_check("v0.4.22", "v0.4.21", parent)
+            result = self.run_check("v0.4.23", "v0.4.22", parent)
             self.assertNotEqual(result.returncode, 0, commit)
-
-    def test_accepts_the_complete_intended_release_head(self) -> None:
-        result = self.run_check("v0.4.22", "v0.4.21")
-        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rejects_reviewed_release_head_missing_the_required_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -128,7 +234,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 ).stdout.strip()
 
             source_repository = self.source_git("rev-parse", "--show-toplevel")
-            git("fetch", "-q", source_repository, "HEAD:refs/heads/release")
+            git(
+                "fetch",
+                "-q",
+                source_repository,
+                f"{self.source_git('rev-parse', 'HEAD')}:refs/heads/release",
+            )
             release_head = git("rev-parse", "refs/heads/release")
             git(
                 "read-tree",
@@ -177,9 +288,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     required_commit,
                 )
 
-            result = self.run_check(
-                "v0.4.22", "v0.4.21", "manifest-mismatch", repository
-            )
+            result = self.run_check("v0.4.23", "v0.4.22", "manifest-mismatch", repository)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("required release content manifest", result.stderr)
 
@@ -189,18 +298,20 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 sys.executable,
                 str(SCRIPT),
                 "--target-version",
-                "v0.4.22",
+                "v0.4.23",
+                "--head-ref",
+                "HEAD",
                 "--print-release-manifest",
             ],
             check=False,
             capture_output=True,
             text=True,
-            cwd=SCRIPT.parents[2],
+            cwd=REPOSITORY_ROOT,
             env=isolated_git_environment(),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            result.stdout.strip(), VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_MANIFEST_SHA256
+            result.stdout.strip(), VERIFY_RELEASE_TARGET.release_manifest_sha256("HEAD")
         )
 
     def test_manifest_rewriter_replaces_only_a_valid_single_declaration(self) -> None:
@@ -213,7 +324,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
             VERIFY_RELEASE_TARGET.rewrite_required_release_manifest(source, "F" * 64)
 
     def test_manifest_update_rejects_a_head_without_the_required_source_commit(self) -> None:
-        parent = self.source_git("rev-parse", f"{REQUIRED_SOURCE_COMMITS[0]}^")
+        parent = self.source_git("rev-parse", f"{REQUIRED_RELEASE_COMMITS[0]}^")
         self.assertEqual(
             self.source_git("merge-base", "--is-ancestor", REQUIRED_CANDIDATE_ANCESTORS[0], parent),
             "",
@@ -223,7 +334,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 sys.executable,
                 str(SCRIPT),
                 "--target-version",
-                "v0.4.22",
+                "v0.4.23",
                 "--head-ref",
                 parent,
                 "--update-release-manifest",
@@ -231,7 +342,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
-            cwd=SCRIPT.parents[2],
+            cwd=REPOSITORY_ROOT,
             env=isolated_git_environment(),
         )
         self.assertNotEqual(result.returncode, 0)
@@ -239,14 +350,14 @@ class VerifyReleaseTargetTests(unittest.TestCase):
 
     def test_rejects_release_candidate_before_the_pr_default_base(self) -> None:
         parent = self.source_git("rev-parse", f"{REQUIRED_CANDIDATE_ANCESTORS[0]}^")
-        result = self.run_check("v0.4.22", "v0.4.21", parent)
+        result = self.run_check("v0.4.23", "v0.4.22", parent)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(REQUIRED_CANDIDATE_ANCESTORS[0], result.stderr)
 
     def test_rejects_head_missing_current_release_candidate_ancestor(self) -> None:
-        required_commit = REQUIRED_CANDIDATE_ANCESTORS[0]
+        required_commit = REQUIRED_RELEASE_COMMITS[0]
         parent = self.source_git("rev-parse", f"{required_commit}^")
-        result = self.run_check("v0.4.22", "v0.4.21", parent)
+        result = self.run_check("v0.4.23", "v0.4.22", parent)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(required_commit, result.stderr)
 
@@ -315,7 +426,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 git("init", "-q")
                 git("config", "user.email", "release-test@example.invalid")
                 git("config", "user.name", "Release Target Test")
-                git("fetch", "-q", str(source_repository), "HEAD:refs/heads/release")
+                git(
+                    "fetch",
+                    "-q",
+                    str(source_repository),
+                    f"{source_head_before}:refs/heads/release",
+                )
                 squash = git(
                     "commit-tree",
                     # Model GitHub's squash merge: the candidate retains the
@@ -368,13 +484,13 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                 )
                 self.assertNotEqual(
                     fresh_git(
-                        "cat-file", "-e", f"{REQUIRED_SOURCE_COMMITS[0]}^{{commit}}"
+                        "cat-file", "-e", f"{REQUIRED_RELEASE_COMMITS[0]}^{{commit}}"
                     ).returncode,
                     0,
                 )
 
                 rejected_squash = self.run_check(
-                    "v0.4.22", "v0.4.21", "HEAD", fresh_repository
+                    "v0.4.23", "v0.4.22", "HEAD", fresh_repository
                 )
                 self.assertNotEqual(rejected_squash.returncode, 0)
                 self.assertIn(REQUIRED_RELEASE_COMMITS[0], rejected_squash.stderr)
@@ -383,12 +499,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     "commit-tree",
                     "release^{tree}",
                     "-p",
-                    VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE,
+                    f"{VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE}^",
                     "-m",
                     "release tree without the reviewed default base",
                 )
                 git("branch", "-f", "invalid", invalid_squash)
-                rejected = self.run_check("v0.4.22", "v0.4.21", "invalid", repository)
+                rejected = self.run_check("v0.4.23", "v0.4.22", "invalid", repository)
                 self.assertNotEqual(rejected.returncode, 0)
                 self.assertIn(REQUIRED_CANDIDATE_ANCESTORS[0], rejected.stderr)
 
@@ -396,7 +512,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     "commit-tree",
                     f"{VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_BASE}^{{tree}}",
                     "-p",
-                    source_head,
+                    "release",
                     "-m",
                     "arbitrary release tree with all required commits",
                 )
@@ -421,7 +537,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                         required_commit,
                     )
                 rejected_manifest = self.run_check(
-                    "v0.4.22", "v0.4.21", "arbitrary-tree", repository
+                    "v0.4.23", "v0.4.22", "arbitrary-tree", repository
                 )
                 self.assertNotEqual(rejected_manifest.returncode, 0)
                 self.assertIn("required release content manifest", rejected_manifest.stderr)

@@ -86,7 +86,6 @@ jobs:
           components: clippy, rustfmt, llvm-tools-preview
 
       - name: Cache Rust build outputs
-        if: matrix.os != 'ubuntu-latest'
         uses: Swatinem/rust-cache@v2.9.2
         with:
           shared-key: ci-v2-${{ matrix.os }}-stable-default
@@ -107,6 +106,16 @@ jobs:
 
       - name: Install just
         uses: taiki-e/install-action@just
+
+      # 正常なUbuntu Rustキャッシュを使い、V8 archive欠落時だけv8を再生成する。
+      - name: Repair cached V8 archive on Ubuntu
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          for target_dir in target target/llvm-cov-target; do
+            if [ ! -s "$target_dir/debug/gn_out/obj/librusty_v8.a" ]; then
+              cargo clean --target-dir "$target_dir" -p v8
+            fi
+          done
 
       # rust-cache は target を復元しても rusty_v8 の静的アーカイブを復元しない場合がある。
       # macOS のリンク実行前に v8 を再構築して、公式アーカイブの取得とリンクを保証する。
@@ -160,6 +169,7 @@ jobs:
         run: just plantuml-install
 
       - name: Run tests
+        if: matrix.os != 'ubuntu-latest'
         timeout-minutes: 45
         run: just unit-test
 
@@ -218,12 +228,11 @@ jobs:
         timeout-minutes: 15
         run: just runtime-package-asset-check
 
-      - name: Free Ubuntu build space before coverage
+      - name: Record Ubuntu build disk usage before coverage
         if: matrix.os == 'ubuntu-latest'
         run: |
-          cargo llvm-cov clean --workspace || true
-          rm -rf target/llvm-cov-target target/debug/deps target/debug/incremental target/debug/build target/debug/examples target/debug/.fingerprint target/package
           df -h .
+          du -sh target 2>/dev/null || true
 
       - name: Run coverage
         if: matrix.os == 'ubuntu-latest'
@@ -242,11 +251,11 @@ jobs:
           echo 'Coverage diagnostic: llvm-cov summary'
           cargo llvm-cov report --summary-only
 
-      - name: Free Ubuntu build space after coverage
+      - name: Record Ubuntu build disk usage after coverage
         if: matrix.os == 'ubuntu-latest' && always()
         run: |
-          cargo llvm-cov clean --workspace || true
-          rm -rf target/llvm-cov-target target/debug/deps target/debug/incremental
+          df -h .
+          du -sh target 2>/dev/null || true
 
       - name: Record immutable PR base evidence
         if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest' && success()

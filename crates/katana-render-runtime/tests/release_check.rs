@@ -3,6 +3,11 @@ use std::{
     process::Command,
 };
 
+const PUBLISHED_V0422_RELEASE_HEAD: &str = "185d056de67282a4056729296e57c164a6a343d6";
+const PUBLISHED_V0422_LEGACY_PIN: &str = "1bc497bdfd3b8c4318e9ee1609d147b6925b43e5";
+const PUBLISHED_V0422_MANIFEST: &str =
+    "1ddeddc37c0735a7278755f26f8985aee9176fc978b437766d57be7d0e342d9e";
+
 #[test]
 fn release_check_requires_all_quality_and_publish_readiness_gates()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -44,25 +49,135 @@ fn release_verify_tests_the_packaged_library_sources() -> Result<(), Box<dyn std
 }
 
 #[test]
-fn release_target_check_requires_v0_4_22_intent() -> Result<(), Box<dyn std::error::Error>> {
+fn release_target_check_requires_v0_4_23_intent() -> Result<(), Box<dyn std::error::Error>> {
     let root = workspace_root()?;
-    assert!(release_target_check(root, "0.4.22", "0.4.21", "HEAD")?);
-    assert!(release_target_check(root, "0.4.22", "0.4.22", "HEAD")?);
-    assert!(!release_target_check(
+    assert_release_target_check(root, "0.4.23", "0.4.22", "missing-release-head", false)?;
+    assert_release_target_check(root, "0.4.23", "0.4.21", "HEAD", false)?;
+    assert_release_target_check(root, "0.4.24", "0.4.22", "HEAD", false)?;
+    assert_release_target_check(
         root,
+        "0.4.23",
         "0.4.22",
-        "0.4.21",
-        "missing-release-head",
-    )?);
-    assert!(!release_target_check(root, "0.4.22", "0.4.20", "HEAD")?);
-    assert!(!release_target_check(root, "0.4.23", "0.4.21", "HEAD")?);
+        "185d056de67282a4056729296e57c164a6a343d6",
+        false,
+    )?;
     for version in [
         "0.3.9", "0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.4.4", "0.4.5", "0.4.6", "0.4.7", "0.4.8",
         "0.4.9", "0.4.10", "0.4.11", "0.4.12", "0.4.13", "0.4.14", "0.4.15", "0.4.16", "0.4.17",
         "0.4.18", "0.4.19", "0.4.20", "0.4.21", "0.5.0", "1.0.0", "2.0.0",
     ] {
-        assert!(!release_target_check(root, version, "0.4.21", "HEAD",)?);
+        assert_release_target_check(root, version, "0.4.22", "HEAD", false)?;
     }
+    Ok(())
+}
+
+#[test]
+fn v0_4_23_validation_snapshot_passes_the_release_contract()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = workspace_root()?;
+    let snapshot = current_release_validation_snapshot(root)?;
+    assert_release_target_check(root, "0.4.23", "0.4.22", &snapshot, true)?;
+    assert_release_target_check(root, "0.4.23", "0.4.23", &snapshot, true)?;
+    Ok(())
+}
+
+#[test]
+fn published_v0_4_22_checker_keeps_its_historical_contract()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = workspace_root()?;
+    let checker = historical_release_target_checker(root)?;
+    assert_historical_v0422_versions(root, &checker)?;
+    assert_historical_v0422_pin(root, &checker)?;
+    assert_historical_v0422_manifest(root, &checker)?;
+    Ok(())
+}
+
+fn assert_historical_v0422_versions(
+    root: &Path,
+    checker: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for (target, latest, expected) in [
+        ("0.4.22", "0.4.21", true),
+        ("0.4.22", "0.4.22", true),
+        ("0.4.23", "0.4.22", false),
+        ("0.4.22", "0.4.20", false),
+        ("0.5.0", "0.4.21", false),
+    ] {
+        assert_eq!(
+            historical_release_target_check(
+                root,
+                checker,
+                target,
+                latest,
+                PUBLISHED_V0422_RELEASE_HEAD,
+            )?,
+            expected,
+            "target={target}, latest={latest}"
+        );
+    }
+    Ok(())
+}
+
+fn assert_historical_v0422_pin(
+    root: &Path,
+    checker: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let parent = Command::new("git")
+        .args(["rev-parse", &format!("{PUBLISHED_V0422_LEGACY_PIN}^")])
+        .current_dir(root)
+        .output()?;
+    if !parent.status.success() {
+        return Err("historical release pin parent is unavailable".into());
+    }
+    let parent = String::from_utf8(parent.stdout)?;
+    assert!(!historical_release_target_check(
+        root,
+        checker,
+        "0.4.22",
+        "0.4.21",
+        parent.trim(),
+    )?);
+    Ok(())
+}
+
+fn assert_historical_v0422_manifest(
+    root: &Path,
+    checker: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let printed_manifest = Command::new("python3")
+        .arg("-c")
+        .arg(checker)
+        .args([
+            "--target-version",
+            "v0.4.22",
+            "--head-ref",
+            PUBLISHED_V0422_RELEASE_HEAD,
+            "--print-release-manifest",
+        ])
+        .current_dir(root)
+        .output()?;
+    if !printed_manifest.status.success() {
+        return Err("historical release manifest command failed".into());
+    }
+    assert_eq!(
+        String::from_utf8(printed_manifest.stdout)?.trim(),
+        PUBLISHED_V0422_MANIFEST
+    );
+    Ok(())
+}
+
+fn assert_release_target_check(
+    root: &Path,
+    target: &str,
+    latest: &str,
+    head_ref: &str,
+    expected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(
+        release_target_check(root, target, latest, head_ref)?,
+        expected,
+        "target={target}, latest={latest}, head={head_ref}"
+    );
     Ok(())
 }
 
@@ -257,7 +372,7 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
 
 fn dependency_update_command_positions(
     commands: &[&str],
-) -> Result<(usize, usize, usize), std::io::Error> {
+) -> Result<(usize, usize, usize, usize), std::io::Error> {
     let broad_upgrade = commands
         .iter()
         .position(|line| line.starts_with("{{CARGO}} upgrade "))
@@ -270,22 +385,57 @@ fn dependency_update_command_positions(
         .iter()
         .position(|line| *line == "{{CARGO}} update")
         .ok_or_else(|| std::io::Error::other("Cargo lockfile update command is missing"))?;
+    let usvg_skrifa_pair_update = commands
+        .iter()
+        .position(|line| line.contains("scripts/release/update_usvg_skrifa_pair.py"))
+        .ok_or_else(|| std::io::Error::other("usvg/skrifa pair update command is missing"))?;
 
-    Ok((broad_upgrade, html_pair_update, lockfile_update))
+    Ok((
+        broad_upgrade,
+        html_pair_update,
+        lockfile_update,
+        usvg_skrifa_pair_update,
+    ))
 }
 
-fn assert_dependency_update_command_order(commands: &[&str], positions: (usize, usize, usize)) {
-    let (broad_upgrade, html_pair_update, lockfile_update) = positions;
+fn assert_dependency_update_command_order(
+    commands: &[&str],
+    positions: (usize, usize, usize, usize),
+) {
+    let (broad_upgrade, html_pair_update, lockfile_update, usvg_skrifa_pair_update) = positions;
     assert_eq!(
         commands[broad_upgrade],
-        "{{CARGO}} upgrade -i allow --pinned allow"
+        "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa"
     );
     assert_eq!(
         commands[html_pair_update],
         "python3 scripts/release/update_html5ever_pair.py --cargo \"{{CARGO}}\""
     );
     assert!(broad_upgrade < html_pair_update && html_pair_update < lockfile_update);
-    assert!(!commands[broad_upgrade].contains("--exclude"));
+    assert_usvg_skrifa_pair_order(commands, lockfile_update, usvg_skrifa_pair_update);
+}
+
+fn assert_usvg_skrifa_pair_order(commands: &[&str], lockfile_update: usize, pair_update: usize) {
+    assert_eq!(
+        commands[pair_update],
+        "python3 scripts/release/update_usvg_skrifa_pair.py --cargo \"{{CARGO}}\""
+    );
+    assert_eq!(
+        commands
+            .iter()
+            .filter(|line| line.contains("scripts/release/update_usvg_skrifa_pair.py"))
+            .count(),
+        1,
+        "usvg/skrifa pair synchronization must run exactly once"
+    );
+    assert!(
+        lockfile_update < pair_update
+            && commands
+                .iter()
+                .position(|line| *line == "bun update --latest")
+                .is_some_and(|bun_update| pair_update < bun_update),
+        "dependency updates must synchronize both Rust pairs around the lockfile update before Bun"
+    );
 }
 
 fn assert_dependency_update_quality_gates(recipe: &str) {
@@ -497,6 +647,93 @@ fn release_target_check(
             target_version,
             "--latest-version",
             latest_version,
+            "--head-ref",
+            head_ref,
+        ])
+        .current_dir(root)
+        .output()?;
+    Ok(output.status.success())
+}
+
+fn current_release_validation_snapshot(root: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let contract =
+        std::fs::read_to_string(root.join("scripts/release/verify_release_target_test.py"))?;
+    let snapshot = parse_release_validation_snapshot(&contract)?;
+    verify_release_validation_snapshot_commit(root, snapshot)?;
+    Ok(snapshot.to_owned())
+}
+
+fn parse_release_validation_snapshot(contract: &str) -> Result<&str, Box<dyn std::error::Error>> {
+    const DECLARATION: &str = "CURRENT_RELEASE_VALIDATION_SNAPSHOT = ";
+    let declarations: Vec<_> = contract
+        .lines()
+        .filter(|line| {
+            line.trim_start()
+                .starts_with("CURRENT_RELEASE_VALIDATION_SNAPSHOT")
+        })
+        .collect();
+    if declarations.len() != 1 {
+        return Err("release validation snapshot declaration must occur exactly once".into());
+    }
+    let snapshot = declarations[0]
+        .trim_start()
+        .strip_prefix(DECLARATION)
+        .and_then(|value| value.strip_prefix('"'))
+        .and_then(|value| value.strip_suffix('"'))
+        .ok_or("release validation snapshot declaration is malformed")?;
+    if snapshot.len() != 40
+        || !snapshot
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err("release validation snapshot must be a lowercase 40-digit SHA".into());
+    }
+    Ok(snapshot)
+}
+
+fn verify_release_validation_snapshot_commit(
+    root: &Path,
+    snapshot: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let resolved = Command::new("git")
+        .args(["rev-parse", "--verify", &format!("{snapshot}^{{commit}}")])
+        .current_dir(root)
+        .output()?;
+    if !resolved.status.success() || String::from_utf8(resolved.stdout)?.trim() != snapshot {
+        return Err("release validation snapshot does not resolve to that commit".into());
+    }
+    Ok(())
+}
+
+fn historical_release_target_checker(root: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let output = Command::new("git")
+        .args([
+            "show",
+            "185d056de67282a4056729296e57c164a6a343d6:scripts/release/verify-release-target.py",
+        ])
+        .current_dir(root)
+        .output()?;
+    if !output.status.success() {
+        return Err("published v0.4.22 release checker is unavailable".into());
+    }
+    Ok(String::from_utf8(output.stdout)?)
+}
+
+fn historical_release_target_check(
+    root: &Path,
+    checker: &str,
+    target: &str,
+    latest: &str,
+    head_ref: &str,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg(checker)
+        .args([
+            "--target-version",
+            target,
+            "--latest-version",
+            latest,
             "--head-ref",
             head_ref,
         ])

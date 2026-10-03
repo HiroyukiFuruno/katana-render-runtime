@@ -28,8 +28,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "mermaid",
     displayName: "Mermaid.js",
-    version: "12.0.0",
-    checksum: "28fca7ae6ebc7ed7bb63bde63136a74bfef14f296a57e403657eeb8b32836073",
+    version: "12.1.0",
+    checksum: "6484afc32872a3aa16cac9a76ba1816a1ed4cc870a6593cc2e17757750f518b2",
     fileName: "mermaid.min.js",
     rustVersionConst: "MERMAID_JS_VERSION",
     rustChecksumConst: "MERMAID_JS_CHECKSUM",

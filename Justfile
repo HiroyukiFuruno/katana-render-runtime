@@ -18,7 +18,7 @@ TAG := "v" + VERSION_BARE
 RELEASE_REPO := env_var_or_default("RELEASE_REPO", "HiroyukiFuruno/katana-render-runtime")
 COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
-MERMAID_JS_VERSION := "12.0.0"
+MERMAID_JS_VERSION := "12.1.0"
 MERMAID_ZENUML_JS_VERSION := "1.0.1"
 DRAWIO_JS_VERSION := "31.6.1"
 MATHJAX_JS_VERSION := "4.1.3"
@@ -185,7 +185,10 @@ automation-contract-test:
 # Run independent local quality-gate lanes concurrently. Cargo and PlantUML
 # work stay in one lane because they share build/cache outputs.
 check:
-    python3 scripts/hooks/run_parallel_checks.py --jobs {{CHECK_JOBS}}
+    @export COVERAGE_MIN_LINES={{quote(COVERAGE_MIN_LINES)}} COVERAGE_MAX_UNCOVERED_LINES={{quote(COVERAGE_MAX_UNCOVERED_LINES)}} \
+      TEST_THREADS={{quote(TEST_THREADS)}} RUSTFLAGS={{quote(RUSTFLAGS)}} CARGO={{quote(CARGO)}} JOBS={{quote(JOBS)}} CHECK_JOBS={{quote(CHECK_JOBS)}}; \
+      python3 scripts/hooks/local_review.py && \
+      python3 scripts/hooks/run_parallel_checks.py --jobs "$CHECK_JOBS"
     @echo "checks passed"
 
 # Cargo operations share target/ and the PlantUML cache, so keep them ordered.
@@ -275,9 +278,10 @@ krr-build:
 
 # Force-update all Rust and JavaScript dependencies plus pinned runtime assets, then run required checks
 depends-update-all:
-    {{CARGO}} upgrade -i allow --pinned allow
+    {{CARGO}} upgrade -i allow --pinned allow --exclude skrifa
     python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"
     {{CARGO}} update
+    python3 scripts/release/update_usvg_skrifa_pair.py --cargo "{{CARGO}}"
     bun update --latest
     bun run scripts/runtime-assets/depends-update-all.ts
     bun run scripts/drawio/resource-update.ts --resources "{{DRAWIO_RESOURCE_DIR}}" --manifest "{{DRAWIO_RESOURCE_MANIFEST}}"

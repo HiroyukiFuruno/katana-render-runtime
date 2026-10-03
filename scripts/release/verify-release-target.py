@@ -14,30 +14,75 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib import error, request
 
-REQUIRED_LATEST_RELEASE = "v0.4.21"
-REQUIRED_TARGET_RELEASE = "v0.4.22"
+PUBLISHED_V0422_SNAPSHOT = "185d056de67282a4056729296e57c164a6a343d6"
+PUBLISHED_V0422_RELEASE_MANIFEST_SHA256 = "1ddeddc37c0735a7278755f26f8985aee9176fc978b437766d57be7d0e342d9e"
+REQUIRED_LATEST_RELEASE = "v0.4.22"
+REQUIRED_TARGET_RELEASE = "v0.4.23"
 REQUIRED_RELEASE_COMMITS = (
-    "1bc497bdfd3b8c4318e9ee1609d147b6925b43e5",  # v0.4.22指定修正
-    "d0ab9c408e9b876f130dbd5a8f33051cc44b5242",  # Issue #95 font探索
-    "78ed1b87cc94bcdd158b42e7c00e69e882bbb094",  # Issue #95 実HTML 60秒検証
-    "a8481e9c13ceb43d9e08388958c32f507f9ddb85",  # Issue #93 body load回帰
-    "f5ff74ecf7287375bc0e835e8db374766145a55b",  # Issue #93 parser実状態
-    "4d1ec0a03c6fd95a8ca9f4c1ad8a30d4ad84f76e",  # Issue #92/#93 image・Promise load
+    "322a85eb75892944c009231b534885601553c488",  # Issue #89のCI品質契約
+    "1410802e9d63c8e1c3347a24dad858de52523612",  # Issue #95のglyph cache修正
+    "cf15441d102924a3b8e254b7ab9fc377a7daade3",  # v0.4.23のversion metadataと固定契約
+    "2e7b5c7312abc72bd7db8fcd8b5fc3c36f5cc079",  # release対象契約の認証harness
+    "7489943dcdc797ba73bbde0fd9b9e348a731127c",  # Issue #89のhook検証契約修正
+    "5df6d489f0f6987e0e91a2bec9c9761c80bdd3e4",  # Issue #89のindex commit alias修正
+    "e77a463e37ae8cea0f4e5d38b53694d1b8aa9b3e",  # Issue #89のhead/index差分検証
+    "c87876eb0c3f8406b1487857e62a30b442f894a4",  # Issue #89のCI環境対応
+    "85df066a5e38395b4a6088b28440c8ec0a4afba1",  # Issue #89の複数Issue証跡再利用
+    "74a974874b3c4f54a2df0993cb6fc6e5ab8b1750",  # Issue #89のレビュー原本照合
+    "4531fdb6bd6a18283886130a9a607305bff38d20",  # Issue #89の全証跡推定原本照合
+    "2a14f27e80d91725d6a24db4b45136f8cf62382a",  # Issue #89のGit変換とobject形式照合
+    "e6b7e0ffaed736b53081d388555ceedef945dc13",  # 最新Mermaid12.1.0の依存更新
+    "45a4952f3ae45c2d05901b160ab638059b56c058",  # Mermaid12.1.0の公式参照・文書同期
+    "0f89e24c6754e57273420670163d59f64f3afb91",  # 新規ファイルのpush包含をレビュー証跡へ固定
+    "676fcb3ede5c1079495f5e90101e7821e072c82a",  # GitHub SSH URIの互換性修正
+    "cdbe8d15af5ee67be2d46868ffc4a8c27b293a56",  # origin制御文字と実Git改行境界の拒否
+    "91ac5111d69e911d2c4d8043d6cfae96f9947b4e",  # SSH originの空delimiterと空portの拒否
+    "d4742624989c4afac1f0a85780fcc591ae5b218d",  # SSH URIのGit互換復号
+    "c406e9eadb4638a413e7b04cc0a9e4f7baeefa6d",  # OS所有のレビュー排他と異常終了回復
+    "d3f04d90618f10869d2a98a31bc6c7392b77fbf0",  # Rollup4.64.0の最新互換依存更新
+    "451573aeb68ad95830ed78c05cc021961bf20a00",  # hidden index・owner execute・Git-zの正確な証跡拘束
+    "7e8c0d2a894512ea0e6e4456ebb7e7abf1faa098",  # Cargo環境のpresence・compiler alias・target優先順の拘束
+    "20b44b2d599be4802c66e2ddab401067e411495b",  # Cargoの空target-dirを証跡正規化前に拒否
+    "63339c19d0963f739c2fb751dcd04d9879168751",  # 作業ツリーのGit clean変換後blobをレビュー証跡へ拘束
+    "652508bd51a8f8dee49d43ccb888a14df2e75630",  # libc0.2.190の最新互換依存更新
+    "27b9272c2d2bee9f14ab6336e3a6fa5d0c4727fa",  # パス種別変更とHTTPS既定ポートのレビュー互換性
+    "73df5c6a934b40cc166d709ceb6b184ea057f10f",  # 一時フォント障害の選択を描画内で再利用
+    "d72b80e802d9b857eb71503ad1fce6cdf3f5fcf0",  # 非UTF8のGitパスを可逆なレビュー証跡へ保持
+    "c8704bf9b2cc26c43f85f0e9dad35f31ee11d4e0",  # 非UTF8のGit名回帰をPOSIX環境へ限定
+    "9c0a96d0e83063c148693cce0a531e1a19b99a1a",  # レビュー候補包含とorigin復号境界の拘束
+    "7be38b373659fff340aaa7a5a9bb0eec73134368",  # SCP originのホスト名正規化
+    "12583c6cc8f74553bb76aedfcc6e21b2dd6697be",  # フォントファイル世代によるglyph cache失効
+    "169edd0d61322f838034efcfdb41a02a2dbffdbe",  # 調査したフォント候補世代によるHTML選択失効
+    "780b0ebd2c7cc1d8450089d754e8f3a214448899",  # font-types0.12.6の最新互換依存更新
+    "de3e0148158e7899b8fcfbfc6a95f373e08785f3",  # フォント復旧競合の決定的な検証
+    "d61ae327d911866cfb1b3fb0667db67708e9da3d",  # cc1.6.0の最新互換依存更新
+    "a10be620949ea3a6578d00013900ac968a953784",  # File世代確認とcmap読込の重複削減
+    "4681663111bbbd9ab04e48a18120c1f32725656b",  # HTML描画内fallback選択の再利用
+    "641a280714a82b29aa3064b72b668a578b09421a",  # Skrifa互換cmapの上限付きFile I/O再利用
+    "24af66400c3995586e6e863a45198045217b21dc",  # usvgとSkrifaの文字対応政策を動的に揃えて更新
+    "dae1c52f64e8212a694c87309174a9fe5e5d7384",  # 依存組更新の全言語契約を同期
+    "d27c602f112503877fe4817075c93d014c49ac1c",  # 選択usvgの互換性を鮮度検査へ拘束
+    "fae7f1d66d1b004b183420ed617c89080bfe3c73",  # 依存更新契約テストの必須整形
+    "0d56c9cb1672f7e8af3492aba119fb2f85b42569",  # フォント世代とcmap回帰のOS非依存化
+    "f6bc17870eb7d12d8381e24880877968335dee14",  # 各Refs句の全Issueを独立レビューへ拘束
 )
-# manifestの更新元と公開candidateの両方に、v0.4.22指定修正とIssue #93/#95
-# 修正を要求する。PR #99のdefault baseと不変manifestもcandidateに要求する。
-REQUIRED_RELEASE_SOURCE_COMMITS = REQUIRED_RELEASE_COMMITS
-REQUIRED_RELEASE_CANDIDATE_ANCESTORS = (
-    "9ad18a07358cf28b742cc00c12c0c9f85956d20a",  # PR #99のdefault base
+# 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
+REQUIRED_RELEASE_SOURCE_COMMITS = (
+    PUBLISHED_V0422_SNAPSHOT,
     *REQUIRED_RELEASE_COMMITS,
 )
-# squash merge 後も default history に残る v0.4.21 の merge commit を、
+REQUIRED_RELEASE_CANDIDATE_ANCESTORS = (
+    PUBLISHED_V0422_SNAPSHOT,
+    *REQUIRED_RELEASE_COMMITS,
+)
+# squash merge 後も default history に残る v0.4.22 release snapshotを、
 # 変更集合の起点として使う。期待値そのものは commit/tree object ではなく、
 # base からの non-gate 差分を表す不変な内容 manifest に固定する。
-REQUIRED_RELEASE_BASE = "7f984d16400fe3e097a3380dd7641d78c5852352"
+REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
-# 自己参照しない。raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "1ddeddc37c0735a7278755f26f8985aee9176fc978b437766d57be7d0e342d9e"
+# 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
+# raw diff は path、file mode、base/target blob を含む。
+REQUIRED_RELEASE_MANIFEST_SHA256 = "27e0ef24af62b830faaeda66d4d7d8cfbb8a5679dfb66d935faf8d91db75b8db"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
