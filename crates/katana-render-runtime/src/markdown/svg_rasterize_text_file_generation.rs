@@ -36,6 +36,15 @@ impl FontSourceGeneration {
         !matches!(self.0, Generation::Unavailable)
     }
 
+    pub(in super::super) fn durable_reusable(&self) -> bool {
+        match &self.0 {
+            Generation::Immutable => true,
+            /* WHY: 非Unixは長さと時刻だけで同tick書換を区別できず、通常probeとは別に描画間保存を止める。 */
+            Generation::File(_) => cfg!(unix),
+            Generation::Unavailable => false,
+        }
+    }
+
     pub(in super::super) fn is_file(&self) -> bool {
         matches!(self.0, Generation::File(_))
     }

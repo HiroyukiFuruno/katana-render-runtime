@@ -27,9 +27,9 @@ pub(super) fn probe_file(
         return ProbeResult::UseOriginal;
     };
 
-    let cached = match cache().lock() {
-        Ok(mut cache) => cache.lookup(database, face_id, face_index, generation),
-        Err(_) => return ProbeResult::UseOriginal,
+    let cached = match cached_file_cmap(database, face_id, face_index, generation) {
+        Ok(cached) => cached,
+        Err(()) => return ProbeResult::UseOriginal,
     };
     if let Some(bytes) = cached {
         return match has_character(&bytes, character) {
@@ -42,6 +42,22 @@ pub(super) fn probe_file(
     }
 
     load_cmap(database, face_id, face_index, generation, character)
+}
+
+fn cached_file_cmap(
+    database: &Arc<Database>,
+    face_id: ID,
+    face_index: u32,
+    generation: &FontSourceGeneration,
+) -> Result<Option<Arc<[u8]>>, ()> {
+    if !generation.durable_reusable() {
+        remove_face(database, face_id);
+        return Ok(None);
+    }
+    cache()
+        .lock()
+        .map(|mut cache| cache.lookup(database, face_id, face_index, generation))
+        .map_err(|_| ())
 }
 
 fn load_cmap(
@@ -102,6 +118,9 @@ fn finish_cmap(
 ) -> ProbeResult {
     let after = file_source_stamp(database, face_id).2;
     if after == *generation && after.is_file() && after.reusable() {
+        if !after.durable_reusable() {
+            return ProbeResult::Complete(Some(supported));
+        }
         let Ok(mut cache) = cache().lock() else {
             return ProbeResult::Complete(Some(supported));
         };

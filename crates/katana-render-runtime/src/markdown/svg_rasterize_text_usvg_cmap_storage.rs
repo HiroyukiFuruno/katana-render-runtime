@@ -37,6 +37,10 @@ pub(super) fn lookup(
     face_index: u32,
     generation: &FontSourceGeneration,
 ) -> Result<Option<CachedCmap>, ()> {
+    if !generation.durable_reusable() {
+        remove_face(database, face_id, face_index);
+        return Ok(None);
+    }
     let mut cache = cache().lock().map_err(|_| ())?;
     purge_dead(&mut cache);
     Ok(cache.entries.iter().find_map(|entry| {
@@ -55,6 +59,10 @@ pub(super) fn insert(
     cmap_sfnt: Vec<u8>,
     mapping: MappingIndex,
 ) -> bool {
+    if !generation.durable_reusable() {
+        remove_face(database, face_id, face_index);
+        return true;
+    }
     if !entry_fits(cmap_sfnt.len()) {
         return false;
     }
@@ -63,7 +71,22 @@ pub(super) fn insert(
     };
     purge_dead(&mut cache);
     remove_matching(&mut cache, database, face_id, face_index);
-    reserve_capacity(&mut cache, cmap_sfnt.len());
+    store_entry(
+        &mut cache, database, face_id, face_index, generation, cmap_sfnt, mapping,
+    );
+    true
+}
+
+fn store_entry(
+    cache: &mut Cache,
+    database: &Arc<Database>,
+    face_id: ID,
+    face_index: u32,
+    generation: FontSourceGeneration,
+    cmap_sfnt: Vec<u8>,
+    mapping: MappingIndex,
+) {
+    reserve_capacity(cache, cmap_sfnt.len());
     let cmap_sfnt: Arc<[u8]> = Arc::from(cmap_sfnt);
     cache.retained_bytes += cmap_sfnt.len();
     cache.entries.push_back(Entry {
@@ -74,7 +97,6 @@ pub(super) fn insert(
         cmap_sfnt,
         mapping,
     });
-    true
 }
 
 pub(super) fn remove_face(database: &Arc<Database>, face_id: ID, face_index: u32) {

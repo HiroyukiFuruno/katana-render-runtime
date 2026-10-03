@@ -188,3 +188,6 @@ fn global_cache_accepts_exact_entry_bound_and_rejects_excess() -> Result<(), Str
     assert_eq!(retained.cmap_sfnt.len(), limit);
     Ok(())
 }
+
+#[path = "svg_rasterize_text_usvg_cmap_storage_generation_tests.rs"]
+mod generation_tests;

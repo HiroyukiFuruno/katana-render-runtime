@@ -267,3 +267,6 @@ fn sfnt_checksum(bytes: &[u8]) -> u32 {
         sum.wrapping_add(u32::from_be_bytes(word))
     })
 }
+
+#[path = "svg_rasterize_text_glyph_cache_generation_tests.rs"]
+mod generation_tests;

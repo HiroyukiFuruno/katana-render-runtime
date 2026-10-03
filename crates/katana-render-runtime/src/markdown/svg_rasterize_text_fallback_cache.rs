@@ -99,7 +99,20 @@ pub(super) fn lookup_cached(
     database: &Arc<usvg::fontdb::Database>,
     key: HtmlFallbackKey,
 ) -> Option<HtmlFallbackSelection> {
-    HTML_FALLBACK_CACHE.with(|cache| lookup_html_face(&mut cache.borrow_mut(), database, key))
+    HTML_FALLBACK_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let selection = lookup_html_face(&mut cache, database, key)?;
+        if selection
+            .dependencies
+            .iter()
+            .all(|(_, generation)| generation.durable_reusable())
+        {
+            Some(selection)
+        } else {
+            remove_html_face(&mut cache, database, key);
+            None
+        }
+    })
 }
 
 pub(super) fn remove_cached(database: &Arc<usvg::fontdb::Database>, key: HtmlFallbackKey) {
@@ -111,7 +124,19 @@ pub(super) fn insert_cached(
     key: HtmlFallbackKey,
     selection: HtmlFallbackSelection,
 ) {
+    if !selection
+        .dependencies
+        .iter()
+        .all(|(_, generation)| generation.durable_reusable())
+    {
+        remove_cached(database, key);
+        return;
+    }
     HTML_FALLBACK_CACHE.with(|cache| {
         insert_html_face(&mut cache.borrow_mut(), database, key, selection);
     });
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_fallback_cache_generation_tests.rs"]
+mod generation_tests;

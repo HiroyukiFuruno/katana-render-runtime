@@ -193,3 +193,6 @@ fn arc_make_mut_weak_dissociation_forces_a_fresh_miss() -> TestResult<()> {
 
 #[path = "svg_rasterize_text_fallback_memo_scope_tests.rs"]
 mod scope_tests;
+
+#[path = "svg_rasterize_text_fallback_generation_tests.rs"]
+mod generation_tests;

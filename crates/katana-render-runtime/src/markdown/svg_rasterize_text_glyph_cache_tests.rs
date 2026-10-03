@@ -47,6 +47,9 @@ fn counted_database(valid: bool) -> Result<CountedDatabase, String> {
 #[test]
 fn valid_positive_and_negative_probes_are_reused_without_reading_bytes() -> Result<(), String> {
     let (database, id, data) = counted_database(true)?;
+    assert!(
+        super::super::file_generation::font_source_generation(&database, id).durable_reusable()
+    );
     for (ch, expected) in [('A', true), ('\u{10ffff}', false)] {
         assert_eq!(cached_font_has_char(&database, id, ch), Some(expected));
         let reads = data.reads.load(Ordering::Relaxed);

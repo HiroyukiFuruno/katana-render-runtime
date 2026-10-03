@@ -104,3 +104,127 @@ fn missing_file_uses_original_probe_without_cache_entry() -> Result<(), String> 
     ));
     Ok(())
 }
+
+#[cfg(windows)]
+#[test]
+fn same_length_same_modified_file_rewrite_does_not_reuse_cached_cmap() -> Result<(), String> {
+    let original = bundled_bytes()?;
+    let replacement = font_with_only_b_cmap(&original)?;
+    let (database, id, guard) = file_database(&original)?;
+    let before = super::super::file_generation::file_source_stamp(&database, id).2;
+    assert!(!before.durable_reusable());
+    assert!(matches!(
+        probe_file(&database, id, &before, 'A'),
+        ProbeResult::Complete(Some(true))
+    ));
+
+    rewrite_with_same_modified_time(&guard.0, &replacement)?;
+    let after = super::super::file_generation::file_source_stamp(&database, id).2;
+
+    assert_eq!(before, after);
+    assert!(matches!(
+        probe_file(&database, id, &after, 'A'),
+        ProbeResult::Complete(Some(false))
+    ));
+    Ok(())
+}
+
+#[cfg(windows)]
+fn rewrite_with_same_modified_time(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    let modified = std::fs::metadata(path)
+        .map_err(|error| error.to_string())?
+        .modified()
+        .map_err(|error| error.to_string())?;
+    std::fs::write(path, bytes).map_err(|error| error.to_string())?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|error| error.to_string())?
+        .set_times(std::fs::FileTimes::new().set_modified(modified))
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+fn font_with_only_b_cmap(font: &[u8]) -> Result<Vec<u8>, String> {
+    let (record, offset, head) = cmap_directory(font)?;
+    let glyph = rustybuzz::ttf_parser::Face::parse(font, 0)
+        .map_err(|_| "font invalid")?
+        .glyph_index('B')
+        .ok_or("B glyph missing")?
+        .0;
+    rewrite_cmap(font, record, offset, head, b_cmap(glyph))
+}
+
+#[cfg(windows)]
+fn cmap_directory(font: &[u8]) -> Result<(usize, usize, usize), String> {
+    let table_count = usize::from(u16::from_be_bytes([font[4], font[5]]));
+    let mut cmap_record = None;
+    let mut head_offset = None;
+    for index in 0..table_count {
+        let record = 12 + index * 16;
+        let tag = font
+            .get(record..record + 4)
+            .ok_or("truncated sfnt directory")?;
+        let offset = u32::from_be_bytes(
+            font.get(record + 8..record + 12)
+                .ok_or("truncated sfnt table record")?
+                .try_into()
+                .map_err(|_| "invalid sfnt table offset")?,
+        ) as usize;
+        if tag == b"cmap" {
+            cmap_record = Some((record, offset));
+        } else if tag == b"head" {
+            head_offset = Some(offset);
+        }
+    }
+    let (record, offset) = cmap_record.ok_or("cmap table missing")?;
+    Ok((record, offset, head_offset.ok_or("head table missing")?))
+}
+
+#[cfg(windows)]
+fn rewrite_cmap(
+    font: &[u8],
+    record: usize,
+    offset: usize,
+    head: usize,
+    cmap: Vec<u8>,
+) -> Result<Vec<u8>, String> {
+    let mut changed = font.to_vec();
+    changed[offset..offset + cmap.len()].copy_from_slice(&cmap);
+    changed[record + 4..record + 8].copy_from_slice(&sfnt_checksum(&cmap).to_be_bytes());
+    let cmap_len = u32::try_from(cmap.len())
+        .map_err(|_| "cmap too large")?
+        .to_be_bytes();
+    changed[record + 12..record + 16].copy_from_slice(&cmap_len);
+    changed[head + 8..head + 12].fill(0);
+    let adjustment = 0xB1B0_AFBA_u32.wrapping_sub(sfnt_checksum(&changed));
+    changed[head + 8..head + 12].copy_from_slice(&adjustment.to_be_bytes());
+    if changed.len() != font.len() {
+        return Err("cmap rewrite changed font length".into());
+    }
+    Ok(changed)
+}
+
+#[cfg(windows)]
+fn b_cmap(glyph: u16) -> Vec<u8> {
+    let mut cmap = Vec::with_capacity(40);
+    cmap.extend_from_slice(&[0, 0, 0, 1, 0, 3, 0, 10, 0, 0, 0, 12]);
+    cmap.extend_from_slice(&12_u16.to_be_bytes());
+    cmap.extend_from_slice(&0_u16.to_be_bytes());
+    cmap.extend_from_slice(&28_u32.to_be_bytes());
+    cmap.extend_from_slice(&0_u32.to_be_bytes());
+    cmap.extend_from_slice(&1_u32.to_be_bytes());
+    cmap.extend_from_slice(&u32::from('B').to_be_bytes());
+    cmap.extend_from_slice(&u32::from('B').to_be_bytes());
+    cmap.extend_from_slice(&u32::from(glyph).to_be_bytes());
+    cmap
+}
+
+#[cfg(windows)]
+fn sfnt_checksum(bytes: &[u8]) -> u32 {
+    bytes.chunks(4).fold(0_u32, |sum, chunk| {
+        let mut word = [0; 4];
+        word[..chunk.len()].copy_from_slice(chunk);
+        sum.wrapping_add(u32::from_be_bytes(word))
+    })
+}

@@ -56,11 +56,13 @@ pub(in super::super) fn cached_font_has_char_with_generation(
 ) -> (Option<bool>, FontSourceGeneration) {
     let key = (id, ch);
     let (is_file, stamp, generation) = file_source_stamp(database, id);
-    if is_file && stamp.is_none() {
+    if is_file && (!generation.durable_reusable() || stamp.is_none()) {
         GLYPH_CACHE.with(|cache| remove_face(&mut cache.borrow_mut(), database, id));
         cmap_cache::remove_face(database, id);
     }
-    if let Some(support) = cached_glyph_support(database, key, is_file, stamp.as_ref()) {
+    if generation.durable_reusable()
+        && let Some(support) = cached_glyph_support(database, key, is_file, stamp.as_ref())
+    {
         return (Some(support), generation);
     }
     /* WHY: file読み込みやfont解析中は借用せず、失敗は復帰後に再検査する。 */
@@ -68,7 +70,7 @@ pub(in super::super) fn cached_font_has_char_with_generation(
     let Some(support) = probe else {
         return (None, generation);
     };
-    if !is_file || stamp.is_some() {
+    if generation.durable_reusable() && (!is_file || stamp.is_some()) {
         GLYPH_CACHE.with(|cache| insert(&mut cache.borrow_mut(), database, key, support, stamp));
     }
     (Some(support), generation)
