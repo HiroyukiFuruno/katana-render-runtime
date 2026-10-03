@@ -20,6 +20,18 @@ export class MarkdownReferenceAssets {
     }
   }
 
+  hasReferences(fixture: Fixture): boolean {
+    return this.outputPaths(fixture).some((outputPath) => fs.existsSync(outputPath));
+  }
+
+  skipFailedFixture(fixture: Fixture, hadReferencesBeforeRender: boolean): boolean {
+    if (hadReferencesBeforeRender) {
+      return false;
+    }
+    this.remove(fixture);
+    return true;
+  }
+
   remove(fixture: Fixture) {
     this.outputPaths(fixture)
       .filter(fs.existsSync)
