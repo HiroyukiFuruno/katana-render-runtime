@@ -72,6 +72,7 @@ REQUIRED_RELEASE_COMMITS = (
     "da8566dbc0c6d2041bd88a7c0d885249ae7d2186",  # 弱いFile世代の正常probeとfault期待の整合
     "f036327b31f369a2762582f5636a604b2c8ee257",  # cmap保存条件と無効世代の除去回帰
     "c22b7044b02fdcb04e4d391aa59e122e42823446",  # stamp欠落時のglyph除去と別face保持の回帰
+    "300eebc376be064571f3496afc7a574dcfe752b4",  # Drawio32.0.1資産・配布・文書同期
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -89,7 +90,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "2d72c2d3c541cb40f5a9d5dab8ff8042c21770019ae8660a29495430168fab00"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "2131b776e65184b6202da7deed7a47e80100dfe443c1c3baea5e5fc151411a35"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
