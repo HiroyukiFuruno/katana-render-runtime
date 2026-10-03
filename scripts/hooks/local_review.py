@@ -17,6 +17,7 @@ from local_review_contract import MODEL, PROMPT, REASONING, receipt_payload, val
 from local_review_lock import review_lock
 from local_review_state import ReviewError, cache_path, canonical, command, digest, gate_configuration, issue_context
 from local_review_state import repository_root, requirements_context, source_snapshot, strict_json
+from verify_push_issue import issue_numbers as referenced_issue_numbers
 
 
 SCHEMA = Path(__file__).with_suffix(".schema.json")
@@ -62,7 +63,7 @@ def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[i
         numbers = [int(number) for number in re.split(r"[ ,]+", configured)]
     if not numbers:
         messages = command(["git", "log", "--format=%B", f"{args.base}..HEAD", "--"], root)
-        references = {int(number) for number in re.findall(r"\bRefs\s+#([1-9][0-9]*)\b", messages)}
+        references = referenced_issue_numbers(messages, "HiroyukiFuruno/katana-render-runtime")
         if len(references) > 1:
             receipt_numbers: set[int] | None = None
             if receipt.exists():

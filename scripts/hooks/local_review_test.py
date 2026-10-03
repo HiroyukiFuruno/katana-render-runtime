@@ -1044,6 +1044,45 @@ class GitSnapshotTest(unittest.TestCase):
             with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
                 local_review.issue_numbers(self.root, args, receipt)
 
+    def test_compact_case_insensitive_refs_require_complete_receipt(self) -> None:
+        (self.root / "example.py").write_text("refs fixture\n")
+        self.commit("rEfS: #89 #95\nrefs #89 #95 https://github.com/other/repo/issues/120")
+        args = SimpleNamespace(issue=[], base=self.base)
+        receipt = self.root / "tmp" / "receipt.json"
+        receipt.parent.mkdir(exist_ok=True)
+
+        def git_command(arguments: list[str], root: Path) -> str:
+            return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
+
+        partial = inputs()
+        partial_payload = receipt_payload(partial, review(partial))
+        receipt.write_text(json.dumps(partial_payload))
+        receipt.with_suffix(".review.json").write_text(json.dumps(partial_payload["review"]))
+
+        with patch.dict(os.environ, {}, clear=True), patch.object(local_review, "command", side_effect=git_command):
+            with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
+                local_review.issue_numbers(self.root, args, receipt)
+            run_args = SimpleNamespace(issue=[], base=self.base, requirements=None, receipt="tmp/receipt.json",
+                                       print_input=False, check_receipt=False)
+            with patch.object(local_review, "repository_root", return_value=self.root), \
+                    patch.object(local_review, "cache_path", return_value=receipt), \
+                    patch.object(local_review, "invoke_review") as invoke:
+                with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
+                    local_review.run(run_args)
+                invoke.assert_not_called()
+
+            complete = inputs()
+            complete["issues"].append({"number": 95, "body_sha256": "e" * 64})
+            complete_review = review(complete)
+            complete_review["issues"].append({
+                "number": 95, "body_sha256": "e" * 64, "result": "verified",
+                "evidence": copy.deepcopy(complete_review["issues"][0]["evidence"]),
+            })
+            complete_payload = receipt_payload(complete, complete_review)
+            receipt.write_text(json.dumps(complete_payload))
+            receipt.with_suffix(".review.json").write_text(json.dumps(complete_review))
+            self.assertEqual(local_review.issue_numbers(self.root, args, receipt), [89, 95])
+
     def test_receipt_only_issue_and_requirements_recovery_validates_original_review(self) -> None:
         requirement = self.root / "requirements.md"
         requirement.write_text("receipt-only requirements\n")
