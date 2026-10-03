@@ -1,5 +1,9 @@
+#[path = "svg_rasterize_text_file_generation.rs"]
+mod file_generation;
 #[path = "svg_rasterize_text_glyph_cache.rs"]
 mod glyph_cache;
+pub(super) use file_generation::{FontSourceGeneration, font_source_generation};
+pub(super) use glyph_cache::cached_font_has_char_with_generation;
 #[path = "svg_rasterize_text_font_score.rs"]
 mod score;
 use resvg::usvg;
@@ -37,15 +41,22 @@ pub(super) fn font_runs(
     let mut runs: Vec<(usvg::fontdb::ID, String)> = Vec::new();
     for character in text.chars() {
         let face_id = resolved_base_face(database, base_face_id, character);
-        if let Some((run_face_id, run)) = runs.last_mut()
-            && *run_face_id == face_id
-        {
-            run.push(character);
-        } else {
-            runs.push((face_id, character.to_string()));
-        }
+        append_font_run(&mut runs, face_id, character);
     }
     runs
+}
+pub(super) fn append_font_run(
+    runs: &mut Vec<(usvg::fontdb::ID, String)>,
+    face_id: usvg::fontdb::ID,
+    character: char,
+) {
+    if let Some((run_face_id, run)) = runs.last_mut()
+        && *run_face_id == face_id
+    {
+        run.push(character);
+    } else {
+        runs.push((face_id, character.to_string()));
+    }
 }
 #[cfg(test)]
 fn resolved_base_face(
@@ -145,13 +156,6 @@ pub(super) fn font_has_char(
     character: char,
 ) -> bool {
     probe_font_has_char(database, face_id, character).unwrap_or(false)
-}
-pub(super) fn cached_font_has_char(
-    database: &std::sync::Arc<usvg::fontdb::Database>,
-    face_id: usvg::fontdb::ID,
-    character: char,
-) -> Option<bool> {
-    glyph_cache::cached_font_has_char(database, face_id, character)
 }
 fn probe_font_has_char(
     database: &usvg::fontdb::Database,

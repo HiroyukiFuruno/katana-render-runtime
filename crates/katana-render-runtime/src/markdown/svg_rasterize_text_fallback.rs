@@ -1,28 +1,18 @@
-use super::font::{cached_font_has_char, matching_fallback_with_probe};
+use super::font::{append_font_run, matching_fallback_with_probe};
+#[path = "svg_rasterize_text_fallback_generation.rs"]
+mod fallback_generation;
+use fallback_generation::{
+    FallbackResolution, FileGenerationDependencies, probe_with_generation, selection_for_cache,
+    selection_is_current,
+};
+#[path = "svg_rasterize_text_fallback_cache.rs"]
+mod fallback_cache;
+use fallback_cache::{HtmlFallbackKey, insert_cached, lookup_cached, remove_cached};
+#[cfg(test)]
+use fallback_generation::{FontSourceGeneration, MAX_FILE_DEPENDENCIES};
 use resvg::usvg;
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Arc, Weak};
-
-const MAX_CACHED_HTML_FALLBACK_DATABASES: usize = 8;
-const MAX_CACHED_HTML_FALLBACK_FACES: usize = 256;
-
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-struct HtmlFallbackKey {
-    base_face_id: usvg::fontdb::ID,
-    character: char,
-    requested_weight: u16,
-    requested_italic: bool,
-}
-
-struct HtmlFallbackCacheEntry {
-    database: Weak<usvg::fontdb::Database>,
-    faces: HashMap<HtmlFallbackKey, usvg::fontdb::ID>,
-}
-
-thread_local! {
-    static HTML_FALLBACK_CACHE: RefCell<Vec<HtmlFallbackCacheEntry>> = const { RefCell::new(Vec::new()) };
-}
+use std::sync::Arc;
 
 pub(super) fn html_font_runs(
     database: &Arc<usvg::fontdb::Database>,
@@ -72,128 +62,80 @@ fn cached_html_face_for_key(
     if let Some(face_id) = render_faces.get(&key) {
         return *face_id;
     }
-    let cached =
-        HTML_FALLBACK_CACHE.with(|cache| lookup_html_face(&mut cache.borrow_mut(), database, key));
-    if let Some(face_id) = cached {
-        render_faces.insert(key, face_id);
-        return face_id;
+    let cached = lookup_cached(database, key);
+    if let Some(selection) = cached {
+        if selection_is_current(database, &selection) {
+            render_faces.insert(key, selection.face_id);
+            return selection.face_id;
+        }
+        remove_cached(database, key);
     }
-    let (face_id, cacheable) = resolve_html_fallback_face(database, key);
-    if cacheable {
-        HTML_FALLBACK_CACHE.with(|cache| {
-            insert_html_face(&mut cache.borrow_mut(), database, key, face_id);
-        });
+    let resolution = resolve_html_fallback_face(database, key);
+    let face_id = resolution.face_id;
+    if let Some(selection) = selection_for_cache(resolution) {
+        insert_cached(database, key, selection);
     }
     render_faces.insert(key, face_id);
     face_id
 }
 
-fn lookup_html_face(
-    entries: &mut Vec<HtmlFallbackCacheEntry>,
-    database: &Arc<usvg::fontdb::Database>,
-    key: HtmlFallbackKey,
-) -> Option<usvg::fontdb::ID> {
-    entries.retain(|entry| entry.database.upgrade().is_some());
-    entries
-        .iter()
-        .find(|entry| same_html_database(entry, database))
-        .and_then(|entry| entry.faces.get(&key).copied())
-}
-
-fn same_html_database(
-    entry: &HtmlFallbackCacheEntry,
-    database: &Arc<usvg::fontdb::Database>,
-) -> bool {
-    entry
-        .database
-        .upgrade()
-        .is_some_and(|cached| Arc::ptr_eq(&cached, database))
-}
-
-fn insert_html_face(
-    entries: &mut Vec<HtmlFallbackCacheEntry>,
-    database: &Arc<usvg::fontdb::Database>,
-    key: HtmlFallbackKey,
-    face_id: usvg::fontdb::ID,
-) {
-    entries.retain(|entry| entry.database.upgrade().is_some());
-    if let Some(entry) = entries
-        .iter_mut()
-        .find(|entry| same_html_database(entry, database))
-    {
-        insert_existing_html_face(entry, key, face_id);
-        return;
-    }
-    if entries.len() == MAX_CACHED_HTML_FALLBACK_DATABASES {
-        entries.remove(0);
-    }
-    entries.push(HtmlFallbackCacheEntry {
-        database: Arc::downgrade(database),
-        faces: HashMap::from([(key, face_id)]),
-    });
-}
-
-fn insert_existing_html_face(
-    entry: &mut HtmlFallbackCacheEntry,
-    key: HtmlFallbackKey,
-    face_id: usvg::fontdb::ID,
-) {
-    if entry.faces.len() >= MAX_CACHED_HTML_FALLBACK_FACES
-        && let Some(evicted_key) = entry.faces.keys().next().copied()
-    {
-        entry.faces.remove(&evicted_key);
-    }
-    entry.faces.insert(key, face_id);
-}
-
 fn resolve_html_fallback_face(
     database: &Arc<usvg::fontdb::Database>,
     key: HtmlFallbackKey,
-) -> (usvg::fontdb::ID, bool) {
-    let support = cached_font_has_char(database, key.base_face_id, key.character);
-    if support == Some(true) {
-        return (key.base_face_id, true);
-    }
-    let (fallback, cacheable) = matching_fallback_with_probe(
-        database,
-        key.base_face_id,
-        key.character,
-        key.requested_weight,
-        key.requested_italic,
-        |id, ch| cached_font_has_char(database, id, ch),
-    );
-    (
-        fallback.unwrap_or(key.base_face_id),
-        support.is_some() && cacheable,
-    )
-}
-
-fn append_font_run(
-    runs: &mut Vec<(usvg::fontdb::ID, String)>,
-    face_id: usvg::fontdb::ID,
-    character: char,
-) {
-    if let Some((run_face_id, run)) = runs.last_mut()
-        && *run_face_id == face_id
-    {
-        run.push(character);
-    } else {
-        runs.push((face_id, character.to_string()));
-    }
+) -> FallbackResolution {
+    let mut dependencies = FileGenerationDependencies::new();
+    let (face_id, cacheable) = {
+        let mut probe = |id, ch| probe_with_generation(database, id, ch, &mut dependencies);
+        let support = probe(key.base_face_id, key.character);
+        if support == Some(true) {
+            (key.base_face_id, true)
+        } else {
+            let (fallback, cacheable) = matching_fallback_with_probe(
+                database,
+                key.base_face_id,
+                key.character,
+                key.requested_weight,
+                key.requested_italic,
+                probe,
+            );
+            (
+                fallback.unwrap_or(key.base_face_id),
+                support.is_some() && cacheable,
+            )
+        }
+    };
+    FallbackResolution::new(face_id, cacheable, dependencies)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::font::{font_has_char, matching_font_face};
+    use super::super::font::{font_has_char, font_source_generation, matching_font_face};
     use super::{
-        HtmlFallbackCacheEntry, HtmlFallbackKey, MAX_CACHED_HTML_FALLBACK_DATABASES,
-        MAX_CACHED_HTML_FALLBACK_FACES, cached_html_face, html_font_runs,
-        insert_existing_html_face, insert_html_face,
+        HtmlFallbackKey, MAX_FILE_DEPENDENCIES, cached_html_face,
+        fallback_cache::{
+            HtmlFallbackCacheEntry, MAX_CACHED_HTML_FALLBACK_DATABASES,
+            MAX_CACHED_HTML_FALLBACK_FACES, insert_existing_html_face, insert_html_face,
+        },
+        fallback_generation::HtmlFallbackSelection,
+        html_font_runs,
     };
     use crate::markdown::svg_rasterize::font::{bundled_font_db, html_font_db_for_text};
     use resvg::usvg;
     use std::collections::{HashMap, HashSet};
-    use std::sync::{Arc, Weak};
+    use std::sync::{
+        Arc, Weak,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    static TEMP_FONT_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    struct TempFontFile(std::path::PathBuf);
+
+    impl Drop for TempFontFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
 
     #[test]
     fn html_font_fallback_is_scoped_to_the_current_database() {
@@ -241,11 +183,316 @@ mod tests {
         let mut render_faces = HashMap::new();
 
         let first = cached_html_face(&database, base_face_id, '日', 400, false, &mut render_faces);
-        let second = cached_html_face(&database, base_face_id, '日', 400, false, &mut render_faces);
+        let mut next_render_faces = HashMap::new();
+        let second = cached_html_face(
+            &database,
+            base_face_id,
+            '日',
+            400,
+            false,
+            &mut next_render_faces,
+        );
 
         assert_eq!(first, second);
         assert_eq!(render_faces.len(), 1);
+        assert_eq!(next_render_faces.len(), 1);
         Ok(())
+    }
+
+    #[test]
+    fn same_style_file_fallback_change_rechecks_the_selected_face()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (face, original, replacement) = cmap_font_fixture()?;
+        let (path, _guard) = temp_font_file("selected", &original)?;
+        let (database, base, file_face, stable_face) =
+            fallback_file_database(face, &original, &replacement, &path);
+        assert_eq!(
+            html_font_runs(&database, base, "A", 400, false)[0].0,
+            file_face
+        );
+        std::fs::write(path, replacement)?;
+        assert_eq!(
+            html_font_runs(&database, base, "A", 400, false)[0].0,
+            stable_face
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn same_style_file_base_change_rechecks_base_support() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let (face, original, replacement) = cmap_font_fixture()?;
+        let (path, _guard) = temp_font_file("base", &replacement)?;
+        let (database, base, fallback) = base_file_database(face, &original, &path);
+        assert_eq!(
+            html_font_runs(&database, base, "A", 400, false)[0].0,
+            fallback
+        );
+        std::fs::write(path, original)?;
+        assert_eq!(html_font_runs(&database, base, "A", 400, false)[0].0, base);
+        Ok(())
+    }
+
+    #[test]
+    fn same_style_missing_selected_file_rechecks_the_fallback()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (face, original, replacement) = cmap_font_fixture()?;
+        let (path, _guard) = temp_font_file("selected-missing", &original)?;
+        let (database, base, file_face, stable_face) =
+            fallback_file_database(face, &original, &replacement, &path);
+        assert_eq!(
+            html_font_runs(&database, base, "A", 400, false)[0].0,
+            file_face
+        );
+        std::fs::remove_file(path)?;
+        assert_eq!(
+            html_font_runs(&database, base, "A", 400, false)[0].0,
+            stable_face
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn same_style_consulted_better_file_change_rechecks_the_winner()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (face, original, unsupported) = cmap_font_fixture()?;
+        let (path, _guard) = temp_font_file("better", &unsupported)?;
+        let (database, base, better, lower) =
+            better_file_database(face, &original, &unsupported, &path);
+        assert_eq!(html_font_runs(&database, base, "A", 400, false)[0].0, lower);
+        std::fs::write(path, original)?;
+        assert_eq!(
+            html_font_runs(&database, base, "A", 400, false)[0].0,
+            better
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unavailable_source_generations_cannot_reuse_fallback_choices()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let empty = usvg::fontdb::Database::new();
+        assert!(!font_source_generation(&empty, usvg::fontdb::ID::default()).reusable());
+        let bundled = bundled_font_db();
+        let mut face = bundled
+            .faces()
+            .next()
+            .ok_or("bundled face missing")?
+            .clone();
+        let mut database = usvg::fontdb::Database::new();
+        let missing = std::env::temp_dir().join(format!(
+            "krr-fallback-missing-generation-{}.ttf",
+            std::process::id()
+        ));
+        face.source = usvg::fontdb::Source::File(missing);
+        let id = database.push_face_info(face);
+        assert!(!font_source_generation(&database, id).reusable());
+        Ok(())
+    }
+
+    #[test]
+    fn consulted_file_generations_are_bounded_and_fit_the_cache_budget()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (path, _guard) = temp_font_file("dependency-bound", b"file stamp")?;
+        let mut face = bundled_font_db()
+            .faces()
+            .next()
+            .ok_or("bundled face missing")?
+            .clone();
+        face.source = usvg::fontdb::Source::File(path);
+        let mut database = usvg::fontdb::Database::new();
+        let ids = (0..=MAX_FILE_DEPENDENCIES)
+            .map(|_| database.push_face_info(face.clone()))
+            .collect::<Vec<_>>();
+        let database = Arc::new(database);
+        let mut dependencies = super::FileGenerationDependencies::new();
+        for id in ids {
+            let generation = font_source_generation(&database, id);
+            dependencies.observe(id, generation.clone(), generation);
+        }
+        assert_eq!(dependencies.entries.len(), MAX_FILE_DEPENDENCIES);
+        assert!(!dependencies.reusable);
+        assert_file_generation_memory_bound();
+        Ok(())
+    }
+
+    fn assert_file_generation_memory_bound() {
+        let dependency_size =
+            std::mem::size_of::<(usvg::fontdb::ID, super::FontSourceGeneration)>();
+        let dependencies = MAX_CACHED_HTML_FALLBACK_DATABASES
+            * MAX_CACHED_HTML_FALLBACK_FACES
+            * MAX_FILE_DEPENDENCIES
+            * dependency_size;
+        let cache_slots = MAX_CACHED_HTML_FALLBACK_DATABASES * MAX_CACHED_HTML_FALLBACK_FACES * 2;
+        let cache_entry_size = std::mem::size_of::<(HtmlFallbackKey, HtmlFallbackSelection)>();
+        let fallback_map = cache_slots * (cache_entry_size + 1 + 16);
+        let glyph_capacity = 65_536 * 4;
+        let glyph_table = MAX_CACHED_HTML_FALLBACK_DATABASES
+            * (glyph_capacity * (std::mem::size_of::<(usvg::fontdb::ID, char, bool)>() + 1)
+                + 16
+                + std::mem::size_of::<HashMap<(usvg::fontdb::ID, char), bool>>());
+        let stamp_capacity = 1_024 * 2;
+        let stamp_table = MAX_CACHED_HTML_FALLBACK_DATABASES
+            * (stamp_capacity * (dependency_size + 1)
+                + 16
+                + std::mem::size_of::<HashMap<usvg::fontdb::ID, super::FontSourceGeneration>>());
+        let total = glyph_table + stamp_table + dependencies + fallback_map;
+        assert!(dependency_size <= 128);
+        assert!(total < 64 * 1024 * 1024);
+    }
+
+    type CmapFontFixture = (usvg::fontdb::FaceInfo, Vec<u8>, Vec<u8>);
+    type FixtureResult<T> = Result<T, Box<dyn std::error::Error>>;
+
+    fn cmap_font_fixture() -> FixtureResult<CmapFontFixture> {
+        let bundled = bundled_font_db();
+        let face = bundled
+            .faces()
+            .next()
+            .ok_or("bundled face missing")?
+            .clone();
+        let original = bundled
+            .with_face_data(face.id, |data, _| data.to_vec())
+            .ok_or("font bytes missing")?;
+        let replacement = font_with_only_b_cmap(&original)?;
+        Ok((face, original, replacement))
+    }
+
+    fn temp_font_file(
+        prefix: &str,
+        bytes: &[u8],
+    ) -> Result<(std::path::PathBuf, TempFontFile), std::io::Error> {
+        let path = std::env::temp_dir().join(format!(
+            "krr-fallback-generation-{prefix}-{}-{}.ttf",
+            std::process::id(),
+            TEMP_FONT_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&path, bytes)?;
+        Ok((path.clone(), TempFontFile(path)))
+    }
+
+    fn fallback_file_database(
+        face: usvg::fontdb::FaceInfo,
+        bytes: &[u8],
+        unsupported_bytes: &[u8],
+        path: &std::path::Path,
+    ) -> (
+        Arc<usvg::fontdb::Database>,
+        usvg::fontdb::ID,
+        usvg::fontdb::ID,
+        usvg::fontdb::ID,
+    ) {
+        let mut base_face = face.clone();
+        base_face.source = usvg::fontdb::Source::Binary(Arc::new(unsupported_bytes.to_vec()));
+        let mut selected_face = face.clone();
+        selected_face.source = usvg::fontdb::Source::File(path.to_path_buf());
+        let mut stable_face = face;
+        stable_face.source = usvg::fontdb::Source::Binary(Arc::new(bytes.to_vec()));
+        let mut database = usvg::fontdb::Database::new();
+        let base = database.push_face_info(base_face);
+        let selected = database.push_face_info(selected_face);
+        let stable = database.push_face_info(stable_face);
+        (Arc::new(database), base, selected, stable)
+    }
+
+    fn base_file_database(
+        face: usvg::fontdb::FaceInfo,
+        bytes: &[u8],
+        path: &std::path::Path,
+    ) -> (
+        Arc<usvg::fontdb::Database>,
+        usvg::fontdb::ID,
+        usvg::fontdb::ID,
+    ) {
+        let mut base_face = face.clone();
+        base_face.source = usvg::fontdb::Source::File(path.to_path_buf());
+        let mut fallback_face = face;
+        fallback_face.source = usvg::fontdb::Source::Binary(Arc::new(bytes.to_vec()));
+        let mut database = usvg::fontdb::Database::new();
+        let base = database.push_face_info(base_face);
+        let fallback = database.push_face_info(fallback_face);
+        (Arc::new(database), base, fallback)
+    }
+
+    fn better_file_database(
+        face: usvg::fontdb::FaceInfo,
+        original: &[u8],
+        unsupported: &[u8],
+        path: &std::path::Path,
+    ) -> (
+        Arc<usvg::fontdb::Database>,
+        usvg::fontdb::ID,
+        usvg::fontdb::ID,
+        usvg::fontdb::ID,
+    ) {
+        let mut base_face = face.clone();
+        base_face.source = usvg::fontdb::Source::Binary(Arc::new(unsupported.to_vec()));
+        let mut better_face = face.clone();
+        better_face.source = usvg::fontdb::Source::File(path.to_path_buf());
+        let mut lower_face = face;
+        lower_face.source = usvg::fontdb::Source::Binary(Arc::new(original.to_vec()));
+        lower_face.weight = usvg::fontdb::Weight(700);
+        let mut database = usvg::fontdb::Database::new();
+        let base = database.push_face_info(base_face);
+        let better = database.push_face_info(better_face);
+        let lower = database.push_face_info(lower_face);
+        (Arc::new(database), base, better, lower)
+    }
+
+    fn font_with_only_b_cmap(font: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let (record, offset) = table_record(font, b"cmap")?;
+        let (_, head) = table_record(font, b"head")?;
+        let glyph = rustybuzz::ttf_parser::Face::parse(font, 0)
+            .map_err(|_| "font invalid")?
+            .glyph_index('B')
+            .ok_or("B glyph missing")?
+            .0;
+        let cmap = b_cmap(glyph);
+        let mut changed = font.to_vec();
+        changed[offset..offset + cmap.len()].copy_from_slice(&cmap);
+        changed[record + 4..record + 8].copy_from_slice(&sfnt_checksum(&cmap).to_be_bytes());
+        changed[record + 12..record + 16].copy_from_slice(&(cmap.len() as u32).to_be_bytes());
+        changed[head + 8..head + 12].fill(0);
+        let adjustment = 0xB1B0_AFBA_u32.wrapping_sub(sfnt_checksum(&changed));
+        changed[head + 8..head + 12].copy_from_slice(&adjustment.to_be_bytes());
+        Ok(changed)
+    }
+
+    fn table_record(
+        font: &[u8],
+        tag: &[u8; 4],
+    ) -> Result<(usize, usize), Box<dyn std::error::Error>> {
+        let table_count = u16::from_be_bytes(font[4..6].try_into()?) as usize;
+        for index in 0..table_count {
+            let record = 12 + index * 16;
+            let offset = u32::from_be_bytes(font[record + 8..record + 12].try_into()?) as usize;
+            if &font[record..record + 4] == tag {
+                return Ok((record, offset));
+            }
+        }
+        Err("font table missing".into())
+    }
+
+    fn b_cmap(glyph: u16) -> Vec<u8> {
+        let mut cmap = Vec::with_capacity(40);
+        cmap.extend_from_slice(&[0, 0, 0, 1, 0, 3, 0, 10, 0, 0, 0, 12]);
+        cmap.extend_from_slice(&12_u16.to_be_bytes());
+        cmap.extend_from_slice(&0_u16.to_be_bytes());
+        cmap.extend_from_slice(&28_u32.to_be_bytes());
+        cmap.extend_from_slice(&0_u32.to_be_bytes());
+        cmap.extend_from_slice(&1_u32.to_be_bytes());
+        cmap.extend_from_slice(&u32::from('B').to_be_bytes());
+        cmap.extend_from_slice(&u32::from('B').to_be_bytes());
+        cmap.extend_from_slice(&u32::from(glyph).to_be_bytes());
+        cmap
+    }
+
+    fn sfnt_checksum(bytes: &[u8]) -> u32 {
+        bytes.chunks(4).fold(0_u32, |sum, chunk| {
+            let mut word = [0; 4];
+            word[..chunk.len()].copy_from_slice(chunk);
+            sum.wrapping_add(u32::from_be_bytes(word))
+        })
     }
 
     type RecoveryFixture = (
@@ -340,15 +587,15 @@ mod tests {
         drop(expired_database);
 
         let database = Arc::new(usvg::fontdb::Database::new());
-        let key = HtmlFallbackKey {
-            base_face_id: usvg::fontdb::ID::default(),
-            character: 'x',
-            requested_weight: 400,
-            requested_italic: false,
-        };
+        let key = fallback_test_key();
         let mut entries = vec![expired_entry];
 
-        insert_html_face(&mut entries, &database, key, key.base_face_id);
+        insert_html_face(
+            &mut entries,
+            &database,
+            key,
+            test_selection(key.base_face_id),
+        );
 
         assert_eq!(entries.len(), 1);
         assert!(
@@ -364,16 +611,16 @@ mod tests {
         let databases = (0..=MAX_CACHED_HTML_FALLBACK_DATABASES)
             .map(|_| Arc::new(usvg::fontdb::Database::new()))
             .collect::<Vec<_>>();
-        let key = HtmlFallbackKey {
-            base_face_id: usvg::fontdb::ID::default(),
-            character: 'x',
-            requested_weight: 400,
-            requested_italic: false,
-        };
+        let key = fallback_test_key();
         let mut entries = Vec::new();
 
         for database in &databases {
-            insert_html_face(&mut entries, database, key, key.base_face_id);
+            insert_html_face(
+                &mut entries,
+                database,
+                key,
+                test_selection(key.base_face_id),
+            );
         }
 
         assert_eq!(entries.len(), MAX_CACHED_HTML_FALLBACK_DATABASES);
@@ -383,6 +630,15 @@ mod tests {
                 .upgrade()
                 .is_some_and(|cached| { Arc::ptr_eq(&cached, &databases[1]) })
         );
+    }
+
+    fn fallback_test_key() -> HtmlFallbackKey {
+        HtmlFallbackKey {
+            base_face_id: usvg::fontdb::ID::default(),
+            character: 'x',
+            requested_weight: 400,
+            requested_italic: false,
+        }
     }
 
     fn full_face_cache() -> HtmlFallbackCacheEntry {
@@ -397,7 +653,7 @@ mod tests {
                             requested_weight: weight as u16,
                             requested_italic: false,
                         },
-                        usvg::fontdb::ID::default(),
+                        test_selection(usvg::fontdb::ID::default()),
                     )
                 })
                 .collect(),
@@ -415,10 +671,17 @@ mod tests {
             requested_italic: false,
         };
 
-        insert_existing_html_face(&mut entry, new_key, new_key.base_face_id);
+        insert_existing_html_face(&mut entry, new_key, test_selection(new_key.base_face_id));
 
         assert_eq!(entry.faces.len(), MAX_CACHED_HTML_FALLBACK_FACES);
         assert!(entry.faces.contains_key(&new_key));
         assert!(entry.faces.keys().any(|key| !original_keys.contains(key)));
+    }
+
+    fn test_selection(face_id: usvg::fontdb::ID) -> HtmlFallbackSelection {
+        HtmlFallbackSelection {
+            face_id,
+            dependencies: Arc::from([]),
+        }
     }
 }

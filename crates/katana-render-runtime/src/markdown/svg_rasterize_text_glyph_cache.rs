@@ -1,5 +1,6 @@
+use super::file_generation::{FileStamp, FontSourceGeneration, file_source_stamp};
 use super::probe_font_has_char;
-use resvg::usvg::fontdb::{Database, ID, Source};
+use resvg::usvg::fontdb::{Database, ID};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
@@ -8,21 +9,6 @@ const MAX_DATABASES: usize = 8;
 const MAX_GLYPHS: usize = 65_536;
 const MAX_FILE_STAMPS: usize = 1_024;
 type GlyphKey = (ID, char);
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct FileStamp {
-    len: u64,
-    modified: Option<std::time::SystemTime>,
-    created: Option<std::time::SystemTime>,
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-    #[cfg(unix)]
-    changed_seconds: i64,
-    #[cfg(unix)]
-    changed_nanoseconds: i64,
-}
 
 struct GlyphCacheEntry {
     database: Weak<Database>,
@@ -34,9 +20,18 @@ thread_local! {
     static GLYPH_CACHE: RefCell<Vec<GlyphCacheEntry>> = const { RefCell::new(Vec::new()) };
 }
 
+#[cfg(test)]
 pub(super) fn cached_font_has_char(database: &Arc<Database>, id: ID, ch: char) -> Option<bool> {
+    cached_font_has_char_with_generation(database, id, ch).0
+}
+
+pub(in super::super) fn cached_font_has_char_with_generation(
+    database: &Arc<Database>,
+    id: ID,
+    ch: char,
+) -> (Option<bool>, FontSourceGeneration) {
     let key = (id, ch);
-    let (is_file, stamp) = file_source_stamp(database, id);
+    let (is_file, stamp, generation) = file_source_stamp(database, id);
     if is_file && stamp.is_none() {
         GLYPH_CACHE.with(|cache| remove_face(&mut cache.borrow_mut(), database, id));
     }
@@ -49,40 +44,16 @@ pub(super) fn cached_font_has_char(database: &Arc<Database>, id: ID, ch: char) -
             stamp.as_ref(),
         )
     }) {
-        return Some(support);
+        return (Some(support), generation);
     }
     /* WHY: file読み込みやfont解析中は借用せず、失敗は復帰後に再検査する。 */
-    let support = probe_font_has_char(database, id, ch)?;
+    let Some(support) = probe_font_has_char(database, id, ch) else {
+        return (None, generation);
+    };
     if !is_file || stamp.is_some() {
         GLYPH_CACHE.with(|cache| insert(&mut cache.borrow_mut(), database, key, support, stamp));
     }
-    Some(support)
-}
-
-fn file_source_stamp(database: &Database, id: ID) -> (bool, Option<FileStamp>) {
-    match database.face_source(id) {
-        Some((Source::File(path), _)) => (true, stamp_path(&path).ok()),
-        _ => (false, None),
-    }
-}
-
-fn stamp_path(path: &std::path::Path) -> Result<FileStamp, ()> {
-    let metadata = std::fs::metadata(path).map_err(|_| ())?;
-    #[cfg(unix)]
-    use std::os::unix::fs::MetadataExt;
-    Ok(FileStamp {
-        len: metadata.len(),
-        modified: metadata.modified().ok(),
-        created: metadata.created().ok(),
-        #[cfg(unix)]
-        device: metadata.dev(),
-        #[cfg(unix)]
-        inode: metadata.ino(),
-        #[cfg(unix)]
-        changed_seconds: metadata.ctime(),
-        #[cfg(unix)]
-        changed_nanoseconds: metadata.ctime_nsec(),
-    })
+    (Some(support), generation)
 }
 
 fn lookup(
