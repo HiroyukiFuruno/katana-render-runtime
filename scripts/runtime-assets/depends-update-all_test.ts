@@ -47,7 +47,9 @@ test("一括更新はRustのmajorとpinned依存を含め、TypeScriptを旧版�
 
   expect(recipe).toContain('python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"');
   expect(recipe).toContain("{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa");
-  expect(recipe).toContain('python3 scripts/release/update_usvg_skrifa_pair.py --cargo "{{CARGO}}"');
+  expect(recipe).toContain(
+    'python3 scripts/release/update_usvg_skrifa_pair.py --cargo "{{CARGO}}"',
+  );
   expect(recipe).toContain("bun update --latest");
   expect(recipe).not.toMatch(/bun add -d typescript@/);
 });
