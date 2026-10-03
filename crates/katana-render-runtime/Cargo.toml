@@ -41,6 +41,8 @@ markup5ever = { workspace = true }
 tendril = { workspace = true }
 xml5ever = { workspace = true }
 resvg = { workspace = true }
+skrifa = "0.44"
+log = "0.4"
 rustybuzz = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

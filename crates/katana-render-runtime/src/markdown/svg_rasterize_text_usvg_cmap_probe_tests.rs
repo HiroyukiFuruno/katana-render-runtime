@@ -1,0 +1,186 @@
+use resvg::usvg::fontdb::{Database, ID};
+use skrifa::{FontRef, charmap::MappingIndex};
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
+
+const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+const CORRUPTED_CMAP_SFNT_BYTES: [u8; 2] = [0, 1];
+const APPENDED_MUTATION_BYTE: u8 = 0;
+static NEXT_TEMP_FILE: AtomicUsize = AtomicUsize::new(0);
+
+struct TempFont(PathBuf);
+
+impl TempFont {
+    fn write(bytes: &[u8]) -> Result<Self, String> {
+        let serial = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "krr-usvg-cmap-probe-{}-{serial}.ttf",
+            std::process::id()
+        ));
+        fs::write(&path, bytes).map_err(|error| error.to_string())?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for TempFont {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+struct FileDatabase {
+    _font: TempFont,
+    database: Arc<Database>,
+    face_id: ID,
+    face_index: u32,
+}
+
+fn file_database() -> Result<FileDatabase, String> {
+    let font = TempFont::write(FONT_BYTES)?;
+    let mut database = Database::new();
+    database
+        .load_font_file(&font.0)
+        .map_err(|error| error.to_string())?;
+    let face = database.faces().next().ok_or("font face missing")?;
+    let face_id = face.id;
+    let face_index = face.index;
+    Ok(FileDatabase {
+        _font: font,
+        database: Arc::new(database),
+        face_id,
+        face_index,
+    })
+}
+
+fn font_mapping(face_index: u32) -> Result<MappingIndex, String> {
+    let font = FontRef::from_index(FONT_BYTES, face_index)
+        .map_err(|error| format!("font parse: {error:?}"))?;
+    Ok(MappingIndex::new(&font))
+}
+
+fn with_validated_scope<T>(operation: impl FnMut() -> T) -> T {
+    super::super::super::with_validated_tree_parse(operation)
+}
+
+fn cache_test_guard() -> Result<
+    (
+        std::sync::MutexGuard<'static, ()>,
+        super::super::storage::tests::CacheResetOnDrop,
+    ),
+    String,
+> {
+    let lock = super::super::storage::tests::begin()?;
+    Ok((lock, super::super::storage::tests::CacheResetOnDrop))
+}
+
+#[test]
+fn corrupt_cached_sfnt_is_removed_after_real_file_probe() -> Result<(), String> {
+    let (_lock, _reset) = cache_test_guard()?;
+    let file = file_database()?;
+    let mut saved_generation = None;
+    let result = with_validated_scope(|| {
+        let generation =
+            super::super::super::font::font_source_generation(&file.database, file.face_id);
+        saved_generation = Some(generation.clone());
+        if !super::super::storage::insert(
+            &file.database,
+            file.face_id,
+            file.face_index,
+            generation,
+            CORRUPTED_CMAP_SFNT_BYTES.to_vec(),
+            font_mapping(file.face_index).map_err(|_| ())?,
+        ) {
+            return Err(());
+        }
+        super::has_char(&file.database, file.face_id, 'A')
+    });
+    assert_eq!(result, Err(()));
+    let generation = saved_generation.ok_or("file generation was not observed")?;
+    assert!(
+        super::super::storage::lookup(&file.database, file.face_id, file.face_index, &generation,)
+            .map_err(|_| "cmap cache lock poisoned")?
+            .is_none()
+    );
+    Ok(())
+}
+
+#[test]
+fn poisoned_cache_rejects_real_file_mapping_insertion() -> Result<(), String> {
+    let (_lock, _reset) = cache_test_guard()?;
+    let file = file_database()?;
+    let result = with_validated_scope(|| {
+        let generation =
+            super::super::super::font::font_source_generation(&file.database, file.face_id);
+        super::super::storage::tests::poison_global_cache().map_err(|_| ())?;
+        super::load_file_mapping(
+            &file.database,
+            file.face_id,
+            file.face_index,
+            &generation,
+            'A',
+        )
+    });
+    assert_eq!(result, Err(()));
+    Ok(())
+}
+
+#[test]
+fn file_probe_is_rejected_outside_validated_batch() -> Result<(), String> {
+    let (_lock, _reset) = cache_test_guard()?;
+    let file = file_database()?;
+    assert_eq!(super::has_char(&file.database, file.face_id, 'A'), Err(()));
+    Ok(())
+}
+
+#[test]
+fn changed_file_fails_private_generation_validation() -> Result<(), String> {
+    let file = file_database()?;
+    let generation =
+        super::super::super::font::font_source_generation(&file.database, file.face_id);
+    let mut append = OpenOptions::new()
+        .append(true)
+        .open(&file._font.0)
+        .map_err(|error| error.to_string())?;
+    append
+        .write_all(&[APPENDED_MUTATION_BYTE])
+        .map_err(|error| error.to_string())?;
+    assert!(super::validate_file_generation(&file.database, file.face_id, &generation).is_err());
+    Ok(())
+}
+
+#[test]
+fn missing_selector_base_face_returns_none() {
+    let selector = super::super::selector::html_selector();
+    let mut database = Arc::new(Database::new());
+    assert!(selector('A', &[ID::dummy()], &mut database).is_none());
+}
+
+#[test]
+fn uncached_generation_distinguishes_binary_and_missing_face() -> Result<(), String> {
+    let mut binary_database = Database::new();
+    binary_database.load_font_data(FONT_BYTES.to_vec());
+    let binary_face = binary_database
+        .faces()
+        .next()
+        .ok_or("binary face missing")?;
+    let binary = super::super::super::font::font_source_generation_uncached(
+        &binary_database,
+        binary_face.id,
+    );
+    assert!(!binary.is_file());
+    assert!(binary.reusable());
+
+    let missing_database = Database::new();
+    let missing =
+        super::super::super::font::font_source_generation_uncached(&missing_database, ID::dummy());
+    assert!(!missing.is_file());
+    assert!(!missing.reusable());
+    Ok(())
+}

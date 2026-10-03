@@ -78,6 +78,21 @@ fn stamp_path(path: &std::path::Path) -> Result<FileStamp, ()> {
     result
 }
 
+pub(in super::super) fn font_source_generation_uncached(
+    database: &Database,
+    id: ID,
+) -> FontSourceGeneration {
+    match database.face_source(id) {
+        Some((Source::File(path), _)) => FontSourceGeneration(
+            stamp_path_uncached(&path)
+                .map(Generation::File)
+                .unwrap_or(Generation::Unavailable),
+        ),
+        Some(_) => FontSourceGeneration(Generation::Immutable),
+        None => FontSourceGeneration(Generation::Unavailable),
+    }
+}
+
 pub(super) fn stamp_path_uncached(path: &std::path::Path) -> Result<FileStamp, ()> {
     let metadata = std::fs::metadata(path).map_err(|_| ())?;
     #[cfg(unix)]

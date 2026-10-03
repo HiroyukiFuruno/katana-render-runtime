@@ -7,7 +7,8 @@ mod glyph_cache;
 #[path = "svg_rasterize_text_stamp_batch.rs"]
 mod stamp_batch;
 pub(super) use file_generation::{
-    FontSourceGeneration, font_source_generation, observe_file_face_generation,
+    FontSourceGeneration, font_source_generation, font_source_generation_uncached,
+    observe_file_face_generation,
 };
 pub(super) use glyph_cache::cached_font_has_char_with_generation;
 pub(super) use stamp_batch::{memo_usable, with_validated_stamp_batch};
