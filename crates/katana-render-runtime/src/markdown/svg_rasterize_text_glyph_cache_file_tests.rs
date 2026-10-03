@@ -1,4 +1,4 @@
-use super::super::{MAX_FILE_STAMPS, cached_font_has_char, file_source_stamp, insert};
+use super::super::{MAX_FILE_STAMPS, cached_font_has_char, file_source_stamp, insert, lookup};
 use crate::markdown::svg_rasterize::font::bundled_font_db;
 use resvg::usvg::fontdb::{Database, Source};
 use std::path::PathBuf;
@@ -104,6 +104,29 @@ fn file_stamp_capacity_evicts_the_matching_glyphs() -> Result<(), Box<dyn std::e
             .glyphs
             .keys()
             .all(|(id, _)| entries[0].file_stamps.contains_key(id))
+    );
+    Ok(())
+}
+
+#[test]
+fn missing_file_stamp_removes_only_that_face_cache() -> Result<(), Box<dyn std::error::Error>> {
+    let (database, file_id, binary_id, _path, _guard, _) = file_fixture("missing-stamp")?;
+    let (is_file, stamp, _) = file_source_stamp(&database, file_id);
+    assert!(is_file);
+    let stamp = stamp.ok_or("file stamp missing")?;
+    let mut entries = Vec::new();
+    insert(&mut entries, &database, (file_id, 'A'), true, Some(stamp));
+    insert(&mut entries, &database, (binary_id, 'A'), true, None);
+
+    assert_eq!(
+        lookup(&mut entries, &database, (file_id, 'A'), true, None),
+        None
+    );
+    assert!(entries[0].glyphs.keys().all(|(id, _)| *id != file_id));
+    assert!(!entries[0].file_stamps.contains_key(&file_id));
+    assert_eq!(
+        lookup(&mut entries, &database, (binary_id, 'A'), false, None),
+        Some(true)
     );
     Ok(())
 }
