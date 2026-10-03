@@ -37,10 +37,10 @@ pub const ZENUML_CORE_JS_CHECKSUM: &str =
 pub const ZENUML_CORE_DOWNLOAD_URL: &str =
     "https://cdn.jsdelivr.net/npm/@zenuml/core@4.3.0/dist/zenuml.js";
 
-pub const DRAWIO_JS_VERSION: &str = "31.6.1";
+pub const DRAWIO_JS_VERSION: &str = "32.0.1";
 pub const DRAWIO_JS_CHECKSUM: &str =
-    "b7ae98ea60cbada18511fe04cd2630ae552e19a36e327327ad7bc03a56cc9eca";
-pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v31.6.1";
+    "5f6f2834000efb8e692da088b5d8d49b26528c8d387dc240320bb86b2ba0c729";
+pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v32.0.1";
 
 pub const MATHJAX_JS_VERSION: &str = "4.1.3";
 pub const MATHJAX_JS_CHECKSUM: &str =
@@ -73,7 +73,7 @@ impl RuntimeAsset {
             version: DRAWIO_JS_VERSION,
             filename: "drawio.min.js",
             source: RuntimeAssetSource::Brotli {
-                bytes: include_bytes!("../../vendor/drawio/31.6.1/drawio.min.js.br"),
+                bytes: include_bytes!("../../vendor/drawio/32.0.1/drawio.min.js.br"),
                 cache: &DRAWIO_RUNTIME_ASSET_BYTES,
             },
         }
