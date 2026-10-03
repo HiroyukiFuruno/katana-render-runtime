@@ -58,6 +58,7 @@ REQUIRED_RELEASE_COMMITS = (
     "d61ae327d911866cfb1b3fb0667db67708e9da3d",  # cc1.6.0の最新互換依存更新
     "a10be620949ea3a6578d00013900ac968a953784",  # File世代確認とcmap読込の重複削減
     "4681663111bbbd9ab04e48a18120c1f32725656b",  # HTML描画内fallback選択の再利用
+    "641a280714a82b29aa3064b72b668a578b09421a",  # Skrifa互換cmapの上限付きFile I/O再利用
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -75,7 +76,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "26db3fdf3ceedda02271dda8e2f94afa6fc2bd90270a75d53eab86b9e6d901a0"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "3f8804dd56c5a3be63ff338bb07702417edfda9801f3e7e48fa4613640f2199f"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
