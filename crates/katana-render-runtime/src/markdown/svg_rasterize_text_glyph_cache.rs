@@ -1,3 +1,4 @@
+use super::cmap_cache;
 #[cfg(not(test))]
 use super::file_generation::file_source_stamp;
 use super::file_generation::{FileStamp, FontSourceGeneration};
@@ -57,26 +58,44 @@ pub(in super::super) fn cached_font_has_char_with_generation(
     let (is_file, stamp, generation) = file_source_stamp(database, id);
     if is_file && stamp.is_none() {
         GLYPH_CACHE.with(|cache| remove_face(&mut cache.borrow_mut(), database, id));
+        cmap_cache::remove_face(database, id);
     }
-    if let Some(support) = GLYPH_CACHE.with(|cache| {
-        lookup(
-            &mut cache.borrow_mut(),
-            database,
-            key,
-            is_file,
-            stamp.as_ref(),
-        )
-    }) {
+    if let Some(support) = cached_glyph_support(database, key, is_file, stamp.as_ref()) {
         return (Some(support), generation);
     }
     /* WHY: file読み込みやfont解析中は借用せず、失敗は復帰後に再検査する。 */
-    let Some(support) = probe_font_has_char(database, id, ch) else {
+    let probe = probe_font_with_cmap(database, id, ch, &generation);
+    let Some(support) = probe else {
         return (None, generation);
     };
     if !is_file || stamp.is_some() {
         GLYPH_CACHE.with(|cache| insert(&mut cache.borrow_mut(), database, key, support, stamp));
     }
     (Some(support), generation)
+}
+
+fn cached_glyph_support(
+    database: &Arc<Database>,
+    key: GlyphKey,
+    is_file: bool,
+    stamp: Option<&FileStamp>,
+) -> Option<bool> {
+    GLYPH_CACHE.with(|cache| lookup(&mut cache.borrow_mut(), database, key, is_file, stamp))
+}
+
+fn probe_font_with_cmap(
+    database: &Arc<Database>,
+    id: ID,
+    character: char,
+    generation: &FontSourceGeneration,
+) -> Option<bool> {
+    if !generation.is_file() {
+        return probe_font_has_char(database, id, character);
+    }
+    match cmap_cache::probe_file(database, id, generation, character) {
+        cmap_cache::ProbeResult::Complete(result) => result,
+        cmap_cache::ProbeResult::UseOriginal => probe_font_has_char(database, id, character),
+    }
 }
 
 fn lookup(

@@ -1,9 +1,14 @@
+#[path = "svg_rasterize_text_cmap_cache.rs"]
+mod cmap_cache;
 #[path = "svg_rasterize_text_file_generation.rs"]
 mod file_generation;
 #[path = "svg_rasterize_text_glyph_cache.rs"]
 mod glyph_cache;
+#[path = "svg_rasterize_text_stamp_batch.rs"]
+mod stamp_batch;
 pub(super) use file_generation::{FontSourceGeneration, font_source_generation};
 pub(super) use glyph_cache::cached_font_has_char_with_generation;
+pub(super) use stamp_batch::with_validated_stamp_batch;
 #[path = "svg_rasterize_text_font_score.rs"]
 mod score;
 use resvg::usvg;

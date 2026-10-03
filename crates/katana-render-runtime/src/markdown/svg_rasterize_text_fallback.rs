@@ -21,6 +21,24 @@ pub(super) fn html_font_runs(
     requested_weight: u16,
     requested_italic: bool,
 ) -> Vec<(usvg::fontdb::ID, String)> {
+    super::font::with_validated_stamp_batch(|| {
+        html_font_runs_without_stamp_batch(
+            database,
+            base_face_id,
+            text,
+            requested_weight,
+            requested_italic,
+        )
+    })
+}
+
+fn html_font_runs_without_stamp_batch(
+    database: &Arc<usvg::fontdb::Database>,
+    base_face_id: usvg::fontdb::ID,
+    text: &str,
+    requested_weight: u16,
+    requested_italic: bool,
+) -> Vec<(usvg::fontdb::ID, String)> {
     let mut runs: Vec<(usvg::fontdb::ID, String)> = Vec::new();
     let mut render_faces = HashMap::new();
     for character in text.chars() {

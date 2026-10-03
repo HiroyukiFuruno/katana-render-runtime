@@ -61,6 +61,18 @@ pub(in super::super) fn font_source_generation(
 }
 
 fn stamp_path(path: &std::path::Path) -> Result<FileStamp, ()> {
+    if let Some(stamp) = super::stamp_batch::cached_stamp(path) {
+        return Ok(stamp);
+    }
+    let result = stamp_path_uncached(path);
+    match &result {
+        Ok(stamp) => super::stamp_batch::remember_stamp(path, stamp.clone()),
+        Err(()) => super::stamp_batch::mark_unavailable(),
+    }
+    result
+}
+
+pub(super) fn stamp_path_uncached(path: &std::path::Path) -> Result<FileStamp, ()> {
     let metadata = std::fs::metadata(path).map_err(|_| ())?;
     #[cfg(unix)]
     use std::os::unix::fs::MetadataExt;
