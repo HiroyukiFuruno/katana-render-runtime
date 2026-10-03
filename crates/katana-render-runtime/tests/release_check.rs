@@ -372,7 +372,7 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
 
 fn dependency_update_command_positions(
     commands: &[&str],
-) -> Result<(usize, usize, usize), std::io::Error> {
+) -> Result<(usize, usize, usize, usize), std::io::Error> {
     let broad_upgrade = commands
         .iter()
         .position(|line| line.starts_with("{{CARGO}} upgrade "))
@@ -385,22 +385,57 @@ fn dependency_update_command_positions(
         .iter()
         .position(|line| *line == "{{CARGO}} update")
         .ok_or_else(|| std::io::Error::other("Cargo lockfile update command is missing"))?;
+    let usvg_skrifa_pair_update = commands
+        .iter()
+        .position(|line| line.contains("scripts/release/update_usvg_skrifa_pair.py"))
+        .ok_or_else(|| std::io::Error::other("usvg/skrifa pair update command is missing"))?;
 
-    Ok((broad_upgrade, html_pair_update, lockfile_update))
+    Ok((
+        broad_upgrade,
+        html_pair_update,
+        lockfile_update,
+        usvg_skrifa_pair_update,
+    ))
 }
 
-fn assert_dependency_update_command_order(commands: &[&str], positions: (usize, usize, usize)) {
-    let (broad_upgrade, html_pair_update, lockfile_update) = positions;
+fn assert_dependency_update_command_order(
+    commands: &[&str],
+    positions: (usize, usize, usize, usize),
+) {
+    let (broad_upgrade, html_pair_update, lockfile_update, usvg_skrifa_pair_update) = positions;
     assert_eq!(
         commands[broad_upgrade],
-        "{{CARGO}} upgrade -i allow --pinned allow"
+        "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa"
     );
     assert_eq!(
         commands[html_pair_update],
         "python3 scripts/release/update_html5ever_pair.py --cargo \"{{CARGO}}\""
     );
     assert!(broad_upgrade < html_pair_update && html_pair_update < lockfile_update);
-    assert!(!commands[broad_upgrade].contains("--exclude"));
+    assert_usvg_skrifa_pair_order(commands, lockfile_update, usvg_skrifa_pair_update);
+}
+
+fn assert_usvg_skrifa_pair_order(commands: &[&str], lockfile_update: usize, pair_update: usize) {
+    assert_eq!(
+        commands[pair_update],
+        "python3 scripts/release/update_usvg_skrifa_pair.py --cargo \"{{CARGO}}\""
+    );
+    assert_eq!(
+        commands
+            .iter()
+            .filter(|line| line.contains("scripts/release/update_usvg_skrifa_pair.py"))
+            .count(),
+        1,
+        "usvg/skrifa pair synchronization must run exactly once"
+    );
+    assert!(
+        lockfile_update < pair_update
+            && commands
+                .iter()
+                .position(|line| *line == "bun update --latest")
+                .is_some_and(|bun_update| pair_update < bun_update),
+        "dependency updates must synchronize both Rust pairs around the lockfile update before Bun"
+    );
 }
 
 fn assert_dependency_update_quality_gates(recipe: &str) {
