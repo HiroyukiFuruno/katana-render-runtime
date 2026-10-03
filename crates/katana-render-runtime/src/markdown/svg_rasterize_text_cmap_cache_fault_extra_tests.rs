@@ -120,10 +120,12 @@ fn assert_poisoned_probe_and_finish(
     if !cache().is_poisoned() {
         return Err("cache was not poisoned for the fault probe".into());
     }
-    assert!(matches!(
-        probe_file(database, face_id, generation, 'A'),
-        ProbeResult::UseOriginal
-    ));
+    let probe = probe_file(database, face_id, generation, 'A');
+    if generation.durable_reusable() {
+        assert!(matches!(probe, ProbeResult::UseOriginal));
+    } else {
+        assert!(matches!(probe, ProbeResult::Complete(Some(value)) if value == supported));
+    }
     assert!(matches!(
         finish_cmap(
             database,

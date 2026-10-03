@@ -97,10 +97,12 @@ fn corrupted_cached_cmap_is_removed_and_reloaded() -> Result<(), String> {
             generation.clone(),
             Arc::from([0_u8, 1]),
         );
-    assert!(matches!(
-        probe_file(&file.database, file.face_id, &generation, 'A'),
-        ProbeResult::UseOriginal
-    ));
+    let first_probe = probe_file(&file.database, file.face_id, &generation, 'A');
+    if generation.durable_reusable() {
+        assert!(matches!(first_probe, ProbeResult::UseOriginal));
+    } else {
+        assert!(matches!(first_probe, ProbeResult::Complete(Some(true))));
+    }
     assert!(matches!(
         probe_file(&file.database, file.face_id, &generation, 'A'),
         ProbeResult::Complete(Some(true))

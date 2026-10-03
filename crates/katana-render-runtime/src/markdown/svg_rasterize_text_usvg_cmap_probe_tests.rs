@@ -80,6 +80,17 @@ fn cache_test_guard() -> Result<
     Ok((lock, super::super::storage::tests::CacheResetOnDrop))
 }
 
+fn assert_corrupt_probe_result(
+    generation: &super::super::super::font::FontSourceGeneration,
+    result: Result<bool, ()>,
+) {
+    if generation.durable_reusable() {
+        assert_eq!(result, Err(()));
+    } else {
+        assert_eq!(result, Ok(true));
+    }
+}
+
 #[test]
 fn corrupt_cached_sfnt_is_removed_after_real_file_probe() -> Result<(), String> {
     let (_lock, _reset) = cache_test_guard()?;
@@ -101,8 +112,8 @@ fn corrupt_cached_sfnt_is_removed_after_real_file_probe() -> Result<(), String> 
         }
         super::has_char(&file.database, file.face_id, 'A')
     });
-    assert_eq!(result, Err(()));
     let generation = saved_generation.ok_or("file generation was not observed")?;
+    assert_corrupt_probe_result(&generation, result);
     assert!(
         super::super::storage::lookup(&file.database, file.face_id, file.face_index, &generation,)
             .map_err(|_| "cmap cache lock poisoned")?
@@ -112,12 +123,12 @@ fn corrupt_cached_sfnt_is_removed_after_real_file_probe() -> Result<(), String> 
 }
 
 #[test]
-fn poisoned_cache_rejects_real_file_mapping_insertion() -> Result<(), String> {
+fn poisoned_cache_preserves_real_file_probe_policy() -> Result<(), String> {
     let (_lock, _reset) = cache_test_guard()?;
     let file = file_database()?;
+    let generation =
+        super::super::super::font::font_source_generation(&file.database, file.face_id);
     let result = with_validated_scope(|| {
-        let generation =
-            super::super::super::font::font_source_generation(&file.database, file.face_id);
         super::super::storage::tests::poison_global_cache().map_err(|_| ())?;
         super::load_file_mapping(
             &file.database,
@@ -127,7 +138,11 @@ fn poisoned_cache_rejects_real_file_mapping_insertion() -> Result<(), String> {
             'A',
         )
     });
-    assert_eq!(result, Err(()));
+    if generation.durable_reusable() {
+        assert_eq!(result, Err(()));
+    } else {
+        assert_eq!(result, Ok(true));
+    }
     Ok(())
 }
 
