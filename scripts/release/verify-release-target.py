@@ -69,6 +69,8 @@ REQUIRED_RELEASE_COMMITS = (
     "6081f03364ff62350b283d9fa069550ea8220887",  # フォント選択のOS非依存な境界回帰
     "5d75fb63b1c9d2b9bc9cb7dd443b617e5a668170",  # 非Unixの弱いFile世代の描画間キャッシュを抑止
     "f47cf564cff8351c9bf53630008ce5425b49cd2a",  # File書換回帰の全OS型検査と実行
+    "da8566dbc0c6d2041bd88a7c0d885249ae7d2186",  # 弱いFile世代の正常probeとfault期待の整合
+    "f036327b31f369a2762582f5636a604b2c8ee257",  # cmap保存条件と無効世代の除去回帰
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -86,7 +88,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "af2e310d4b7ff8b15a215e323a2b31f35e8dd1f635d79251058f398248873011"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "c3e29111129c68d9229301ac6b3e1d8317eed621aea3f72bb851df9d4baab112"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
