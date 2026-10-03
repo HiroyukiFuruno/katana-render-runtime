@@ -358,6 +358,13 @@ mod tests {
         Ok((face, original, replacement))
     }
 
+    #[test]
+    fn cmap_fixture_rejects_a_missing_table_tag() -> FixtureResult<()> {
+        let (_, original, _) = cmap_font_fixture()?;
+        assert!(table_record(&original, b"miss").is_err());
+        Ok(())
+    }
+
     fn temp_font_file(
         prefix: &str,
         bytes: &[u8],

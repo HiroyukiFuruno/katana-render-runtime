@@ -64,6 +64,37 @@ fn missing_file_expires_glyphs_and_valid_replacement_recovers()
 }
 
 #[test]
+fn unavailable_file_restored_after_stamp_is_rechecked_without_caching()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (database, id, path, guard, replacement) = file_recovery_fixture()?;
+    let restore = std::fs::read(&path)?;
+    std::fs::remove_file(&path)?;
+    let restore_path = path.clone();
+    let restored = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let restore_result = restored.clone();
+    super::super::set_after_file_stamp_for_test(move || {
+        *restore_result.borrow_mut() = Some(std::fs::write(&restore_path, &restore));
+    });
+    assert_eq!(cached_font_has_char(&database, id, 'A'), Some(true));
+    restored
+        .borrow_mut()
+        .take()
+        .ok_or("restore hook did not run")??;
+    super::super::GLYPH_CACHE.with(|entries| {
+        assert!(
+            !entries
+                .borrow()
+                .iter()
+                .any(|entry| super::super::same_database(entry, &database))
+        );
+    });
+    std::fs::write(&path, replacement)?;
+    assert_eq!(cached_font_has_char(&database, id, 'A'), Some(false));
+    drop(guard);
+    Ok(())
+}
+
+#[test]
 fn file_stamp_capacity_evicts_the_matching_glyphs() -> Result<(), Box<dyn std::error::Error>> {
     let (entries, _database) = full_stamp_cache()?;
     assert_eq!(entries[0].file_stamps.len(), MAX_FILE_STAMPS);

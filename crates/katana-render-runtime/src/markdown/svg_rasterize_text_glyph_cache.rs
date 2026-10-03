@@ -1,4 +1,6 @@
-use super::file_generation::{FileStamp, FontSourceGeneration, file_source_stamp};
+#[cfg(not(test))]
+use super::file_generation::file_source_stamp;
+use super::file_generation::{FileStamp, FontSourceGeneration};
 use super::probe_font_has_char;
 use resvg::usvg::fontdb::{Database, ID};
 use std::cell::RefCell;
@@ -9,6 +11,8 @@ const MAX_DATABASES: usize = 8;
 const MAX_GLYPHS: usize = 65_536;
 const MAX_FILE_STAMPS: usize = 1_024;
 type GlyphKey = (ID, char);
+#[cfg(test)]
+type FileStampCallback = Box<dyn FnOnce()>;
 
 struct GlyphCacheEntry {
     database: Weak<Database>,
@@ -18,6 +22,25 @@ struct GlyphCacheEntry {
 
 thread_local! {
     static GLYPH_CACHE: RefCell<Vec<GlyphCacheEntry>> = const { RefCell::new(Vec::new()) };
+    #[cfg(test)]
+    static AFTER_FILE_STAMP: RefCell<Option<FileStampCallback>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(super) fn set_after_file_stamp_for_test(callback: impl FnOnce() + 'static) {
+    AFTER_FILE_STAMP.with(|pending| *pending.borrow_mut() = Some(Box::new(callback)));
+}
+
+#[cfg(test)]
+fn file_source_stamp(
+    database: &Database,
+    id: ID,
+) -> (bool, Option<FileStamp>, FontSourceGeneration) {
+    let result = super::file_generation::file_source_stamp(database, id);
+    if let Some(callback) = AFTER_FILE_STAMP.with(|pending| pending.borrow_mut().take()) {
+        callback();
+    }
+    result
 }
 
 #[cfg(test)]
