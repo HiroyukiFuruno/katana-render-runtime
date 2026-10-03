@@ -278,9 +278,10 @@ krr-build:
 
 # Force-update all Rust and JavaScript dependencies plus pinned runtime assets, then run required checks
 depends-update-all:
-    {{CARGO}} upgrade -i allow --pinned allow
+    {{CARGO}} upgrade -i allow --pinned allow --exclude skrifa
     python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"
     {{CARGO}} update
+    python3 scripts/release/update_usvg_skrifa_pair.py --cargo "{{CARGO}}"
     bun update --latest
     bun run scripts/runtime-assets/depends-update-all.ts
     bun run scripts/drawio/resource-update.ts --resources "{{DRAWIO_RESOURCE_DIR}}" --manifest "{{DRAWIO_RESOURCE_MANIFEST}}"
