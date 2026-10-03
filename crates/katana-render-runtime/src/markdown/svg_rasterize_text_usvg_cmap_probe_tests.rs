@@ -229,3 +229,50 @@ fn selector_falls_back_to_stock_when_cached_probe_is_unavailable() -> Result<(),
     assert_eq!(cached_result, stock_result);
     Ok(())
 }
+
+#[test]
+fn stale_excluded_base_face_does_not_fall_back_to_bundled_face() -> Result<(), String> {
+    let mut font_database = Database::new();
+    font_database.load_font_data(FONT_BYTES.to_vec());
+    let database = Arc::new(font_database);
+    let face_id = database
+        .faces()
+        .next()
+        .ok_or("bundled font face missing")?
+        .id;
+    let stale_base = [ID::dummy()];
+    let cached = super::super::selector::html_selector();
+
+    assert!(database.face(face_id).is_some());
+    assert!(database.face(stale_base[0]).is_none());
+    assert_eq!(cached('A', &stale_base, &mut Arc::clone(&database)), None);
+    Ok(())
+}
+
+#[test]
+fn missing_character_in_remaining_bundled_face_returns_none() -> Result<(), String> {
+    let (_lock, _reset) = cache_test_guard()?;
+    let first_font = TempFont::write(FONT_BYTES)?;
+    let second_font = TempFont::write(FONT_BYTES)?;
+    let mut font_database = Database::new();
+    font_database
+        .load_font_file(&first_font.0)
+        .map_err(|error| error.to_string())?;
+    font_database
+        .load_font_file(&second_font.0)
+        .map_err(|error| error.to_string())?;
+    let database = Arc::new(font_database);
+    let face_ids: Vec<_> = database.faces().map(|face| face.id).collect();
+    assert_eq!(face_ids.len(), 2);
+    let base_face = *face_ids.first().ok_or("base font face missing")?;
+    let cached = super::super::selector::html_selector();
+    let stock = resvg::usvg::FontResolver::default_fallback_selector();
+    let missing = '\u{10ffff}';
+
+    let cached_result =
+        with_validated_scope(|| cached(missing, &[base_face], &mut Arc::clone(&database)));
+    let stock_result = stock(missing, &[base_face], &mut Arc::clone(&database));
+    assert_eq!(cached_result, None);
+    assert_eq!(cached_result, stock_result);
+    Ok(())
+}
