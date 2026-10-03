@@ -113,7 +113,6 @@ fn weak_file_generation_never_enters_or_reuses_global_cmap_storage() -> Result<(
     Ok(())
 }
 
-#[cfg(windows)]
 #[test]
 fn same_length_same_modified_rewrite_reprobes_without_stock_fallback() -> Result<(), String> {
     let _lock = begin()?;
@@ -123,7 +122,6 @@ fn same_length_same_modified_rewrite_reprobes_without_stock_fallback() -> Result
     verify_rewrite_reprobes(&database, id, &file.0, &replacement)
 }
 
-#[cfg(windows)]
 fn verify_rewrite_reprobes(
     database: &Arc<Database>,
     id: ID,
@@ -131,24 +129,29 @@ fn verify_rewrite_reprobes(
     replacement: &[u8],
 ) -> Result<(), String> {
     let before = generation(database, id);
-    assert!(!before.durable_reusable());
+    assert_eq!(before.durable_reusable(), cfg!(unix));
     assert_eq!(probe_character(database, id, 'A'), Ok(true));
     rewrite_same_modified_time(path, replacement)?;
+    #[cfg(windows)]
     assert_eq!(before, generation(database, id));
     assert_eq!(probe_character(database, id, 'A'), Ok(false));
     Ok(())
 }
 
-#[cfg(windows)]
 fn probe_character(database: &Arc<Database>, id: ID, character: char) -> Result<bool, String> {
-    super::super::super::with_validated_tree_parse(|| {
-        super::super::probe::has_char(database, id, character)
+    super::super::super::super::with_validated_tree_parse(|| {
+        super::super::super::probe::has_char(database, id, character)
     })
     .map_err(|_| "file cmap probe failed".to_string())
 }
 
-#[cfg(windows)]
 fn rewrite_same_modified_time(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    let original_len = std::fs::metadata(path)
+        .map_err(|error| error.to_string())?
+        .len();
+    if u64::try_from(bytes.len()).map_err(|error| error.to_string())? != original_len {
+        return Err("rewrite changed font length".into());
+    }
     let modified = std::fs::metadata(path)
         .map_err(|error| error.to_string())?
         .modified()
@@ -162,7 +165,6 @@ fn rewrite_same_modified_time(path: &std::path::Path, bytes: &[u8]) -> Result<()
         .map_err(|error| error.to_string())
 }
 
-#[cfg(windows)]
 fn font_with_only_b_cmap(font: &[u8]) -> Result<Vec<u8>, String> {
     let (record, offset, head) = cmap_directory(font)?;
     let glyph = rustybuzz::ttf_parser::Face::parse(font, 0)
@@ -173,7 +175,6 @@ fn font_with_only_b_cmap(font: &[u8]) -> Result<Vec<u8>, String> {
     rewrite_cmap(font, record, offset, head, b_cmap(glyph))
 }
 
-#[cfg(windows)]
 fn cmap_directory(font: &[u8]) -> Result<(usize, usize, usize), String> {
     let mut cmap = None;
     let mut head = None;
@@ -199,7 +200,6 @@ fn cmap_directory(font: &[u8]) -> Result<(usize, usize, usize), String> {
     Ok((record, offset, head.ok_or("head table missing")?))
 }
 
-#[cfg(windows)]
 fn rewrite_cmap(
     font: &[u8],
     record: usize,
@@ -221,7 +221,6 @@ fn rewrite_cmap(
     Ok(changed)
 }
 
-#[cfg(windows)]
 fn b_cmap(glyph: u16) -> Vec<u8> {
     let mut cmap = Vec::with_capacity(40);
     cmap.extend_from_slice(&[0, 0, 0, 1, 0, 3, 0, 10, 0, 0, 0, 12]);
@@ -236,7 +235,6 @@ fn b_cmap(glyph: u16) -> Vec<u8> {
     cmap
 }
 
-#[cfg(windows)]
 fn sfnt_checksum(bytes: &[u8]) -> u32 {
     bytes.chunks(4).fold(0_u32, |sum, chunk| {
         let mut word = [0; 4];

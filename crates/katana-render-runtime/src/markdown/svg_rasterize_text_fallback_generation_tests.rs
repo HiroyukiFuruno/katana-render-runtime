@@ -1,19 +1,14 @@
-#[cfg(windows)]
 use super::{FONT, TestResult};
-#[cfg(windows)]
 use resvg::usvg::fontdb::{Database, ID, Source};
-#[cfg(windows)]
 use std::sync::Arc;
 
-#[cfg(windows)]
+type FallbackFixture = (Arc<Database>, ID, ID, ID);
+
 use std::sync::atomic::{AtomicUsize, Ordering};
-#[cfg(windows)]
 static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);
 
-#[cfg(windows)]
 struct FontFile(std::path::PathBuf);
 
-#[cfg(windows)]
 impl FontFile {
     fn create() -> TestResult<Self> {
         let path = std::env::temp_dir().join(format!(
@@ -26,14 +21,12 @@ impl FontFile {
     }
 }
 
-#[cfg(windows)]
 impl Drop for FontFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
 }
 
-#[cfg(windows)]
 #[test]
 fn same_length_same_modified_rewrite_rechecks_fallback_selection() -> TestResult<()> {
     let original = FONT.to_vec();
@@ -42,29 +35,28 @@ fn same_length_same_modified_rewrite_rechecks_fallback_selection() -> TestResult
     std::fs::write(&file.0, &original)?;
     let (database, base, selected, stable) =
         fallback_file_database(&original, &unsupported, &file.0)?;
-    let before = super::super::font::font_source_generation(&database, selected);
-    assert!(!before.durable_reusable());
+    let before = super::super::super::font::font_source_generation(&database, selected);
+    assert_eq!(before.durable_reusable(), cfg!(unix));
     assert_eq!(select_fallback(&database, base), selected);
     rewrite_same_generation(&file.0, &unsupported)?;
+    #[cfg(windows)]
     assert_eq!(
         before,
-        super::super::font::font_source_generation(&database, selected)
+        super::super::super::font::font_source_generation(&database, selected)
     );
     assert_eq!(select_fallback(&database, base), stable);
     Ok(())
 }
 
-#[cfg(windows)]
 fn select_fallback(database: &Arc<Database>, base: ID) -> ID {
-    super::super::fallback::html_font_runs(database, base, "A", 400, false)[0].0
+    super::super::super::fallback::html_font_runs(database, base, "A", 400, false)[0].0
 }
 
-#[cfg(windows)]
 fn fallback_file_database(
     original: &[u8],
     unsupported: &[u8],
     path: &std::path::Path,
-) -> TestResult<(Arc<Database>, ID, ID, ID)> {
+) -> TestResult<FallbackFixture> {
     let bundled = crate::markdown::svg_rasterize::font::bundled_font_db();
     let mut face = bundled
         .faces()
@@ -81,7 +73,6 @@ fn fallback_file_database(
     Ok((Arc::new(database), base, selected, stable))
 }
 
-#[cfg(windows)]
 fn font_without_a(font: &[u8]) -> TestResult<Vec<u8>> {
     let (record, offset) = table_record(font, b"cmap")?;
     let (_, head) = table_record(font, b"head")?;
@@ -101,7 +92,6 @@ fn font_without_a(font: &[u8]) -> TestResult<Vec<u8>> {
     Ok(changed)
 }
 
-#[cfg(windows)]
 fn table_record(font: &[u8], tag: &[u8; 4]) -> TestResult<(usize, usize)> {
     let table_count = usize::from(u16::from_be_bytes([font[4], font[5]]));
     for index in 0..table_count {
@@ -114,7 +104,6 @@ fn table_record(font: &[u8], tag: &[u8; 4]) -> TestResult<(usize, usize)> {
     Err("font table missing".into())
 }
 
-#[cfg(windows)]
 fn b_cmap(glyph: u16) -> Vec<u8> {
     let mut cmap = Vec::with_capacity(40);
     cmap.extend_from_slice(&[0, 0, 0, 1, 0, 3, 0, 10, 0, 0, 0, 12]);
@@ -129,7 +118,6 @@ fn b_cmap(glyph: u16) -> Vec<u8> {
     cmap
 }
 
-#[cfg(windows)]
 fn sfnt_checksum(bytes: &[u8]) -> u32 {
     bytes.chunks(4).fold(0_u32, |sum, chunk| {
         let mut word = [0; 4];
@@ -138,8 +126,9 @@ fn sfnt_checksum(bytes: &[u8]) -> u32 {
     })
 }
 
-#[cfg(windows)]
 fn rewrite_same_generation(path: &std::path::Path, bytes: &[u8]) -> TestResult<()> {
+    let original_len = std::fs::metadata(path)?.len();
+    assert_eq!(u64::try_from(bytes.len())?, original_len);
     let modified = std::fs::metadata(path)?.modified()?;
     std::fs::write(path, bytes)?;
     std::fs::OpenOptions::new()
