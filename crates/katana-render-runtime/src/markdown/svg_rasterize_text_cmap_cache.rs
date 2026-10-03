@@ -117,10 +117,7 @@ fn finish_cmap(
     bytes: Arc<[u8]>,
 ) -> ProbeResult {
     let after = file_source_stamp(database, face_id).2;
-    if after == *generation && after.is_file() && after.reusable() {
-        if !after.durable_reusable() {
-            return ProbeResult::Complete(Some(supported));
-        }
+    if after == *generation && after.is_file() && after.reusable() && after.durable_reusable() {
         let Ok(mut cache) = cache().lock() else {
             return ProbeResult::Complete(Some(supported));
         };

@@ -105,6 +105,44 @@ fn missing_file_uses_original_probe_without_cache_entry() -> Result<(), String> 
     Ok(())
 }
 
+#[cfg(unix)]
+fn assert_cached_cmap(
+    database: &std::sync::Arc<Database>,
+    id: resvg::usvg::fontdb::ID,
+    generation: &super::super::file_generation::FontSourceGeneration,
+    expected: bool,
+) -> Result<(), String> {
+    let face_index = database
+        .face_source(id)
+        .map(|(_, index)| index)
+        .ok_or("file face missing")?;
+    let cached = super::cached_file_cmap(database, id, face_index, generation)
+        .map_err(|()| "cmap cache lock poisoned")?;
+    assert_eq!(cached.is_some(), expected);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn unavailable_generation_invalidates_existing_durable_cmap_entry() -> Result<(), String> {
+    let bytes = bundled_bytes()?;
+    let (database, id, guard) = file_database(&bytes)?;
+    let durable = super::super::file_generation::file_source_stamp(&database, id).2;
+    assert!(durable.durable_reusable());
+    assert!(matches!(
+        probe_file(&database, id, &durable, 'A'),
+        ProbeResult::Complete(Some(true))
+    ));
+    assert_cached_cmap(&database, id, &durable, true)?;
+    std::fs::remove_file(&guard.0).map_err(|error| error.to_string())?;
+    let unavailable = super::super::file_generation::file_source_stamp(&database, id).2;
+    assert!(!unavailable.reusable());
+    assert!(!unavailable.durable_reusable());
+    assert_cached_cmap(&database, id, &unavailable, false)?;
+    assert_cached_cmap(&database, id, &durable, false)?;
+    Ok(())
+}
+
 #[cfg(windows)]
 #[test]
 fn same_length_same_modified_file_rewrite_does_not_reuse_cached_cmap() -> Result<(), String> {
