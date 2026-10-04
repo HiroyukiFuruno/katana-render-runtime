@@ -101,6 +101,7 @@ REQUIRED_RELEASE_COMMITS = (
     "51d1c83ba94a9f237216d262548f6bda1600ad44",  # SIGHUPでもレビュー子孫を回収
     "10db459396b3d8f84ad9a2760ce271bb728a4403",  # 任意証跡の公式stable Rust照合
     "5ac3a6cb96509f66912ff857474ad714540ab039",  # 実ファイルシステム精度に基づくフォント世代保存
+    "fe7260ef1a79f9f9cbe5dd9c5cb39e3c3bc73317",  # macOS証跡の実ソースとARM対象・OS版を拘束
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -118,7 +119,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "1bf01ee284f165ebad509caceebe3a801d6ef5e5638b0526dbe5c1ddb06c2e46"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "95592468085627452ef6afb42229f55d8fb4ea2c41cf50ec6d2486d4d3660755"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
