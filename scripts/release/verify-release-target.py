@@ -110,6 +110,10 @@ REQUIRED_RELEASE_COMMITS = (
     "2c6d6cf2b11e52973a39c70dfce32cd6d033f1e1",  # Cargo取得元・別lockfileによる証跡混入を拒否
     "e0a30f0aff86f2569fea31a2859f700b27b6b96b",  # マージ済みレビュー文脈の再利用を拒否
     "037e04821414fb5b5e24a1095b78d84b7efc3e5e",  # Linux専用回帰の数値表記を厳格lintへ適合
+    "aef3b250a91e51d728f541fa2e11d8a8b7de5aeb",  # 任意macOS証跡のJava配布元照合
+    "b0a308ca70c620aaa0f9a31e118c5163b7bb7762",  # SIGQUIT時のレビュー子孫回収
+    "08920462fbc8f9387e455350f32f66acd377a9dd",  # 選択GitHub remoteの同値URL正規化
+    "54f5c1dea1a49b9564cd67111a0b1b014f8a0ba1",  # 実dispatchのClippyとrustfmt証跡検証
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -127,7 +131,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "2e031d9e59145bdf6c9e224dbf7c0166727c055b5daa2cbec88ec43e22077806"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "35d4a3b5e12a54c8712518db0c1c11ded0e5c8bd6be0ee165be1dbe7259f34ae"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
