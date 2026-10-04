@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -75,6 +77,69 @@ class RepositoryOriginIdentityTest(unittest.TestCase):
             with self.assertRaisesRegex(ReviewError, "URL does not match"):
                 issue_context(Path("."), [105])
         self.assertEqual(api_calls, [["gh", "api", f"repos/{CANONICAL_REPOSITORY}/issues/105"]])
+
+
+class SelectedRemoteIdentityTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        subprocess.run(["git", "init", "--quiet", str(self.root)], check=True)
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def add_remote(self, name: str, url: str) -> None:
+        subprocess.run(["git", "remote", "add", name, url], cwd=self.root, check=True)
+
+    def test_case_variant_github_host_matches_configured_remote(self) -> None:
+        configured = "git@github.com:HiroyukiFuruno/katana-render-runtime.git"
+        selected = "git@GitHub.com:HiroyukiFuruno/katana-render-runtime.git"
+        self.add_remote("origin", configured)
+        actual_command = local_review_state.command
+        api_calls: list[list[str]] = []
+
+        def track_api(arguments: list[str], root: Path, input_bytes: bytes | None = None) -> str:
+            if arguments[0] == "gh":
+                api_calls.append(arguments)
+                return json.dumps(RepositoryOriginIdentityTest().issue_payload())
+            return actual_command(arguments, root, input_bytes)
+
+        with patch.object(local_review_state, "command", track_api):
+            result = issue_context(self.root, [105], selected)
+
+        self.assertEqual(result[0]["html_url"],
+                         f"https://github.com/{CANONICAL_REPOSITORY}/issues/105")
+        self.assertEqual(api_calls, [["gh", "api", f"repos/{CANONICAL_REPOSITORY}/issues/105"]])
+
+    def test_case_variant_matching_multiple_remotes_remains_ambiguous(self) -> None:
+        configured = "git@github.com:HiroyukiFuruno/katana-render-runtime.git"
+        self.add_remote("origin", configured)
+        self.add_remote("upstream", "https://github.com/hiroyukifuruno/KATANA-RENDER-RUNTIME")
+        selected = "git@GitHub.com:HiroyukiFuruno/katana-render-runtime.git"
+        with self.assertRaisesRegex(ReviewError, "does not identify one configured remote"):
+            local_review_state.resolve_remote_name(self.root, selected)
+
+    def test_malformed_non_github_and_other_repository_selections_fail_closed(self) -> None:
+        self.add_remote("origin", "git@github.com:HiroyukiFuruno/katana-render-runtime.git")
+        selected_urls = (
+            "git@github.com:HiroyukiFuruno/katana-render-runtime%ZZ.git",
+            "https://example.com/HiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com/HiroyukiFuruno/other-repository.git",
+        )
+        actual_command = local_review_state.command
+        api_calls: list[list[str]] = []
+
+        def track_api(arguments: list[str], root: Path, input_bytes: bytes | None = None) -> str:
+            if arguments[0] == "gh":
+                api_calls.append(arguments)
+            return actual_command(arguments, root, input_bytes)
+
+        for selected in selected_urls:
+            with self.subTest(selected=selected), \
+                    patch.object(local_review_state, "command", track_api):
+                with self.assertRaises(ReviewError):
+                    issue_context(self.root, [105], selected)
+        self.assertEqual(api_calls, [])
 
 
 if __name__ == "__main__":

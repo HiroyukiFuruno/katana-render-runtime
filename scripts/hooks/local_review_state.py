@@ -245,10 +245,10 @@ def resolve_remote_name(root: Path, remote_name: str) -> str:
 
 
 def _same_remote_url(left: str, right: str) -> bool:
-    def normalize(value: str) -> str:
-        return value.strip().removesuffix("/").removesuffix(".git")
-
-    return normalize(left) == normalize(right)
+    try:
+        return _github_repository(left).casefold() == _github_repository(right).casefold()
+    except ReviewError:
+        return False
 
 
 def _github_repository(remote: str) -> str:
