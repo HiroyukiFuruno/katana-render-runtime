@@ -43,6 +43,8 @@ def strict_json(raw: str) -> Any:
 
 def command(arguments: list[str], root: Path, input_bytes: bytes | None = None) -> str:
     environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    if arguments[0] == "git":
+        arguments = ["git", "--no-replace-objects", *arguments[1:]]
     rtk = shutil.which("rtk")
     if rtk is None:
         if os.environ.get("CI", "").lower() == "true" or os.environ.get("GITHUB_ACTIONS", "").lower() == "true":

@@ -1007,6 +1007,45 @@ class VerifyPushIssueTest(unittest.TestCase):
             )
             self.assertEqual(result, {65})
 
+    def test_replace_ref_cannot_hide_closed_issue_provenance_or_ancestor_range(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init", "-q", "--initial-branch=main"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
+            (repository / "README.md").write_text("baseline\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
+            baseline = subject._run_git(repository, "rev-parse", "HEAD")
+
+            obsolete_path = repository / "old" / "closed-issue.rs"
+            obsolete_path.parent.mkdir()
+            obsolete_path.write_text("closed issue source\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "closed issue source\n\nRefs #64"], cwd=repository, check=True)
+            issue_commit = subject._run_git(repository, "rev-parse", "HEAD")
+
+            subprocess.run(["git", "switch", "-qc", "replacement", baseline], cwd=repository, check=True)
+            (repository / "foreign.txt").write_text("replacement object\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "unrelated replacement"], cwd=repository, check=True)
+            replacement_commit = subject._run_git(repository, "rev-parse", "HEAD")
+
+            subprocess.run(["git", "switch", "main"], cwd=repository, check=True, capture_output=True)
+            (repository / "src").mkdir()
+            (repository / "src" / "active.rs").write_text("active change\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "active change"], cwd=repository, check=True)
+            head = subject._run_git(repository, "rev-parse", "HEAD")
+            subprocess.run(["git", "replace", issue_commit, replacement_commit], cwd=repository, check=True)
+
+            self.assertEqual(subject._local_commit_paths(repository, issue_commit), ["old/closed-issue.rs"])
+            self.assertTrue(subject._is_ancestor(repository, issue_commit, head))
+            with self.assertRaisesRegex(subject.ContractViolation, "ancestorではありません"):
+                subject._local_surviving_paths_at_head(
+                    repository, replacement_commit, head, ["foreign.txt"], {}
+                )
+
     def test_closed_reference_rejects_issue_content_renamed_to_current_net_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)

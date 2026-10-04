@@ -1874,11 +1874,11 @@ class DriverContractTest(unittest.TestCase):
         with patch("local_review_state.shutil.which", return_value="/bin/rtk"), patch("local_review_state.subprocess.run", return_value=completed) as run:
             with patch.dict(os.environ, {}, clear=True):
                 self.assertEqual(command(["git", "status"], Path.cwd()), "ok\n")
-            self.assertEqual(run.call_args.args[0], ["/bin/rtk", "proxy", "git", "status"])
+            self.assertEqual(run.call_args.args[0], ["/bin/rtk", "proxy", "git", "--no-replace-objects", "status"])
         with patch("local_review_state.shutil.which", return_value=None), patch("local_review_state.subprocess.run", return_value=completed) as run:
             with patch.dict(os.environ, {"CI": "true"}, clear=True):
                 self.assertEqual(command(["git", "status"], Path.cwd()), "ok\n")
-            self.assertEqual(run.call_args.args[0], ["git", "status"])
+            self.assertEqual(run.call_args.args[0], ["git", "--no-replace-objects", "status"])
         with patch("local_review_state.shutil.which", return_value=None), patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(ReviewError, "rtk is required"):
                 command(["git", "status"], Path.cwd())

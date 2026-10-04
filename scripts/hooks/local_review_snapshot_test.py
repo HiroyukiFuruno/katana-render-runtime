@@ -142,5 +142,41 @@ class SelectedRemoteIdentityTest(unittest.TestCase):
         self.assertEqual(api_calls, [])
 
 
+class ReplaceRefSnapshotTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        subprocess.run(["git", "init", "--quiet", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "config", "user.name", "Review Test"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "config", "user.email", "review@example.invalid"], check=True)
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def git(self, *arguments: str) -> str:
+        result = subprocess.run(["git", *arguments], cwd=self.root, check=True,
+                                capture_output=True, text=True)
+        return result.stdout.strip()
+
+    def test_replace_ref_cannot_hide_review_delta_or_reuse_empty_snapshot(self) -> None:
+        (self.root / "review.txt").write_text("base\n")
+        self.git("add", "review.txt")
+        self.git("commit", "-m", "base")
+        base = self.git("rev-parse", "HEAD")
+        (self.root / "review.txt").write_text("head change\n")
+        self.git("commit", "-am", "review change")
+        head = self.git("rev-parse", "HEAD")
+        self.git("replace", base, head)
+
+        self.assertEqual(local_review_state.command(
+            ["git", "diff", "--no-renames", "--name-only", "-z", base, head, "--"], self.root
+        ), "review.txt\0")
+        snapshot = local_review_state.source_snapshot(self.root, base)
+
+        self.assertEqual(snapshot["base_sha"], base)
+        self.assertNotEqual(snapshot["base_sha"], head)
+        self.assertIn("review.txt", snapshot["working_blobs"])
+
+
 if __name__ == "__main__":
     unittest.main()

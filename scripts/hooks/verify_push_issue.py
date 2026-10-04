@@ -1266,7 +1266,7 @@ def _pr_path_edge_records(
 
 def _run_git(repository: Path, *arguments: str) -> str:
     result = subprocess.run(
-        ["git", *arguments],
+        ["git", "--no-replace-objects", *arguments],
         cwd=repository,
         capture_output=True,
         text=True,
@@ -1281,7 +1281,7 @@ def _run_git(repository: Path, *arguments: str) -> str:
 def _is_ancestor(repository: Path, ancestor: str, descendant: str) -> bool:
     """fast-forward関係を判定し、Git実行失敗は拒否する。"""
     result = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        ["git", "--no-replace-objects", "merge-base", "--is-ancestor", ancestor, descendant],
         cwd=repository,
         capture_output=True,
         text=True,
