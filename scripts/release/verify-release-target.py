@@ -95,6 +95,7 @@ REQUIRED_RELEASE_COMMITS = (
     "4899718dd7eb1b1edf581d9fbe7bf2f075a0cc91",  # macOS動作保証対象をApple Siliconへ限定
     "0d8d9378bad199fac12e4711f5adb8fb6d986c11",  # レビュー中断時の子グループ終了と回収
     "f1c30c644a9c6ed23b252b074533204e62520fb2",  # ZenUML Core4.3.1の最新互換更新
+    "9c3cb7613175a2f83018f997636a741aa5912cbb",  # 任意macOS証跡と必須Apple Silicon検査の分岐
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -112,7 +113,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "cc0c65d9108209c85279d111c01422bb118cf153bbeb8d3cb5272795f40404d4"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "ee8551a290725f02c39dc12be8d62ec692a160dbbcb7ee2c347b2c171dfe77b6"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
