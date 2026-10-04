@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -24,6 +25,10 @@ STABLE_RUST = {
     "rustc": "1.99.0 (b940084d7 2026-09-28)",
     "cargo": "0.100.0 (5f94df478 2026-08-27)",
     "cargo_cli": "1.99.0 (5f94df478 2026-08-27)",
+    "clippy": "0.1.99",
+    "clippy_cli": "0.1.99 (b940084d7e 2026-09-28)",
+    "rustfmt": "1.10.0",
+    "rustfmt_cli": "1.10.0-stable (b940084d7e 2026-09-28)",
 }
 
 
@@ -52,6 +57,8 @@ def valid_comment() -> dict[str, object]:
             "macos": "15.0", "architecture": "arm64", "rust_host": "aarch64-apple-darwin",
             "rustc": f"rustc {STABLE_RUST['rustc']}",
             "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12" 2025-01-21', "bun": "1.4.2",
+            "clippy": f"clippy {STABLE_RUST['clippy_cli']}",
+            "rustfmt": f"rustfmt {STABLE_RUST['rustfmt_cli']}",
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
             "java_vendor": "Eclipse Adoptium",
             "just": "just 1.40.0", "brew": "Homebrew 5.0.0", "graphviz": "dot - graphviz version 12",
@@ -645,6 +652,8 @@ class LocalMacosEvidenceTest(unittest.TestCase):
         current = {
             "rustc": f"rustc {STABLE_RUST['rustc']}",
             "cargo": f"cargo {STABLE_RUST['cargo_cli']}",
+            "clippy": f"clippy {STABLE_RUST['clippy_cli']}",
+            "rustfmt": f"rustfmt {STABLE_RUST['rustfmt_cli']}",
         }
         EVIDENCE.validate_stable_rust_tools(current, STABLE_RUST)
         rejected = (
@@ -653,22 +662,53 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             {**current, "rustc": "rustc 1.89.0 (older-stable-hash 2025-08-01)"},
             {**current, "cargo": "cargo 1.98.0 (olderhash1 2026-08-20)"},
             {**current, "cargo": "cargo 0.100.0 (5f94df478 2026-08-27)"},
+            {**current, "clippy": "clippy 0.1.98 (olderhash 2026-08-20)"},
+            {**current, "rustfmt": "rustfmt 1.9.0-stable (olderhash 2026-08-20)"},
         )
         for tools in rejected:
             with self.subTest(tools=tools):
                 with self.assertRaises(EVIDENCE.EvidenceError):
                     EVIDENCE.validate_stable_rust_tools(tools, STABLE_RUST)
 
+    @unittest.skipUnless(os.name == "posix", "Cargo component dispatch fixture requires POSIX executables")
+    def test_cargo_dispatch_probes_path_selected_clippy_and_rustfmt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory)
+            for executable, output in (
+                ("cargo-clippy", "clippy 0.1.98 (stale 2026-08-20)"),
+                ("cargo-fmt", "rustfmt 1.9.0-stable (stale 2026-08-20)"),
+            ):
+                path = bin_dir / executable
+                path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{output}'\n", encoding="utf-8")
+                path.chmod(0o755)
+            environment = {**os.environ, "PATH": f"{directory}{os.pathsep}{os.environ['PATH']}"}
+            selected = EVIDENCE.cargo_component_versions(environment)
+            self.assertEqual(selected["clippy"], "clippy 0.1.98 (stale 2026-08-20)")
+            self.assertEqual(selected["rustfmt"], "rustfmt 1.9.0-stable (stale 2026-08-20)")
+            with self.assertRaises(EVIDENCE.EvidenceError):
+                EVIDENCE.validate_stable_rust_tools({**selected, **{
+                    "rustc": f"rustc {STABLE_RUST['rustc']}", "cargo": f"cargo {STABLE_RUST['cargo_cli']}",
+                }}, STABLE_RUST)
+
     def test_parses_rustc_and_cargo_versions_from_official_channel_fixture(self) -> None:
         fixture = '''\
 [pkg.rustc]
 version = "1.99.0 (b940084d7 2026-09-28)"
+git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
 
 [pkg.rustc.target.aarch64-apple-darwin]
 available = true
 
 [pkg.cargo]
 version = "0.100.0 (5f94df478 2026-08-27)"
+
+[pkg.clippy-preview]
+version = "0.1.99"
+git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
+
+[pkg.rustfmt-preview]
+version = "1.10.0"
+git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
 '''
         self.assertEqual(EVIDENCE.parse_stable_manifest_versions(fixture), STABLE_RUST)
 
@@ -684,12 +724,29 @@ version = "0.100.0 (5f94df478 2026-08-27)"
         fixture = '''\
 [pkg.rustc]
 version = "1.99.0 (b940084d7 2026-09-28)"
+git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
 
 [pkg.cargo]
 version = "0.100.0 (5f94df478 2026-08-27)"
+
+[pkg.clippy-preview]
+version = "0.1.99"
+git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
+
+[pkg.rustfmt-preview]
+version = "1.10.0"
+git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
 '''
         parsed = EVIDENCE.parse_stable_manifest_versions(fixture)
         self.assertEqual(parsed["cargo_cli"], "1.99.0 (5f94df478 2026-08-27)")
+        self.assertEqual(parsed["clippy_cli"], STABLE_RUST["clippy_cli"])
+        self.assertEqual(parsed["rustfmt_cli"], STABLE_RUST["rustfmt_cli"])
+        mismatched_component = fixture.replace(
+            'git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"\n\n[pkg.rustfmt-preview]',
+            'git_commit_hash = "0000000000000000000000000000000000000000"\n\n[pkg.rustfmt-preview]',
+        )
+        with self.assertRaises(EVIDENCE.EvidenceError):
+            EVIDENCE.parse_stable_manifest_versions(mismatched_component)
         for cargo in (
             "cargo 0.100.0 (5f94df478 2026-08-27)",
             "cargo 1.98.0 (5f94df478 2026-08-27)",
@@ -697,7 +754,9 @@ version = "0.100.0 (5f94df478 2026-08-27)"
         ):
             with self.subTest(cargo=cargo), self.assertRaises(EVIDENCE.EvidenceError):
                 EVIDENCE.validate_stable_rust_tools(
-                    {"rustc": "rustc 1.99.0 (b940084d7 2026-09-28)", "cargo": cargo}, parsed
+                    {"rustc": "rustc 1.99.0 (b940084d7 2026-09-28)", "cargo": cargo,
+                     "clippy": f"clippy {STABLE_RUST['clippy_cli']}",
+                     "rustfmt": f"rustfmt {STABLE_RUST['rustfmt_cli']}"}, parsed
                 )
 
     def test_manifest_fetch_failure_falls_back_to_hosted_ci(self) -> None:

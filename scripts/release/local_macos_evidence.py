@@ -423,6 +423,22 @@ def iso_timestamp(value: Any) -> int:
     return int(parsed.timestamp())
 
 
+def cargo_component_versions(environment: dict[str, str]) -> dict[str, str]:
+    found: dict[str, str] = {}
+    for name, command in (
+        ("clippy", ("cargo", "clippy", "--version")),
+        ("rustfmt", ("cargo", "fmt", "--version")),
+    ):
+        result = subprocess.run(
+            command, cwd=ROOT, env=environment, text=True, capture_output=True, check=True,
+        )
+        versions = (result.stdout + result.stderr).strip().splitlines()
+        if not versions or not versions[0].strip():
+            raise EvidenceError(f"tool version is empty: {name}")
+        found[name] = versions[0].strip()
+    return found
+
+
 def tool_versions() -> dict[str, str]:
     environment = command_environment()
     commands = {
@@ -445,6 +461,7 @@ def tool_versions() -> dict[str, str]:
         if not value or not value[0].strip():
             raise EvidenceError(f"tool version is empty: {name}")
         found[name] = value[0].strip()
+    found.update(cargo_component_versions(environment))
     if found["architecture"] != "arm64":
         raise EvidenceError("local proof requires Apple Silicon (arm64)")
     if platform.system() != "Darwin":
@@ -490,20 +507,37 @@ def validate_pinned_tools(versions: Any) -> None:
 def parse_stable_manifest_versions(manifest: str) -> dict[str, str]:
     """Derive stable CLI versions from the official channel manifest."""
     result: dict[str, str] = {}
-    for package in ("rustc", "cargo"):
+    for package in ("rustc", "cargo", "clippy-preview", "rustfmt-preview"):
         section = re.search(
             rf"(?ms)^\[pkg\.{package}\]\s*$\n(?P<body>.*?)(?=^\[|\Z)", manifest
         )
         version = re.search(r'^version\s*=\s*"([^"]+)"\s*$', section["body"], re.MULTILINE) if section else None
         if version is None:
             raise EvidenceError(f"official Rust stable manifest is missing {package} version")
-        result[package] = version.group(1)
+        result[package.removesuffix("-preview")] = version.group(1)
     # Cargo内部版は0.xのため、Rustと同期するCLI版とCargo自身のrevisionを組み合わせる。
     rust_release = re.match(r"^(\d+\.\d+\.\d+)(?: \([^)]*\))?$", result["rustc"])
     cargo_commit = re.fullmatch(r"0\.\d+\.\d+ \(([0-9a-f]{9,40}) (\d{4}-\d{2}-\d{2})\)", result["cargo"])
     if rust_release is None or cargo_commit is None:
         raise EvidenceError("official Rust stable manifest has unsupported tool version metadata")
     result["cargo_cli"] = f"{rust_release.group(1)} ({cargo_commit.group(1)[:9]} {cargo_commit.group(2)})"
+    rustc_revision = re.fullmatch(r"\d+\.\d+\.\d+ \(([0-9a-f]{9,40}) (\d{4}-\d{2}-\d{2})\)", result["rustc"])
+    rustc_section = re.search(r"(?ms)^\[pkg\.rustc\]\s*$\n(?P<body>.*?)(?=^\[|\Z)", manifest)
+    rustc_commit = re.search(r'^git_commit_hash\s*=\s*"([0-9a-f]{40})"\s*$', rustc_section["body"], re.MULTILINE) if rustc_section else None
+    component_commits = []
+    for package in ("clippy-preview", "rustfmt-preview"):
+        section = re.search(rf"(?ms)^\[pkg\.{package}\]\s*$\n(?P<body>.*?)(?=^\[|\Z)", manifest)
+        commit = re.search(r'^git_commit_hash\s*=\s*"([0-9a-f]{40})"\s*$', section["body"], re.MULTILINE) if section else None
+        component_commits.append(commit.group(1) if commit else None)
+    clippy_version = re.fullmatch(r"\d+\.\d+\.\d+", result["clippy"])
+    rustfmt_version = re.fullmatch(r"\d+\.\d+\.\d+", result["rustfmt"])
+    if (rustc_revision is None or rustc_commit is None or clippy_version is None or rustfmt_version is None
+            or rustc_revision.group(1) != rustc_commit.group(1)[:9]
+            or component_commits != [rustc_commit.group(1), rustc_commit.group(1)]):
+        raise EvidenceError("official Rust stable manifest has unsupported component version metadata")
+    revision = f"{rustc_commit.group(1)[:10]} {rustc_revision.group(2)}"
+    result["clippy_cli"] = f"{result['clippy']} ({revision})"
+    result["rustfmt_cli"] = f"{result['rustfmt']}-stable ({revision})"
     return result
 
 
@@ -525,7 +559,10 @@ def fetch_stable_manifest_versions() -> dict[str, str]:
 def validate_stable_rust_tools(tools: Any, stable_versions: Any) -> None:
     if not isinstance(tools, dict) or not isinstance(stable_versions, dict):
         raise EvidenceError("Rust toolchain evidence is invalid")
-    for package, version_key in (("rustc", "rustc"), ("cargo", "cargo_cli")):
+    for package, version_key in (
+        ("rustc", "rustc"), ("cargo", "cargo_cli"),
+        ("clippy", "clippy_cli"), ("rustfmt", "rustfmt_cli"),
+    ):
         expected = stable_versions.get(version_key)
         actual = tools.get(package)
         if not isinstance(expected, str) or not isinstance(actual, str) or actual != f"{package} {expected}":
@@ -586,7 +623,8 @@ def valid_payload(
         return False
     tools = payload.get("tools")
     if not isinstance(tools, dict) or set(tools) != {
-        "macos", "architecture", "rust_host", "rustc", "cargo", "java", "java_home", "java_vendor", "bun", "just", "brew", "graphviz"
+        "macos", "architecture", "rust_host", "rustc", "cargo", "clippy", "rustfmt",
+        "java", "java_home", "java_vendor", "bun", "just", "brew", "graphviz"
     } or any(not isinstance(value, str) or not value.strip() for value in tools.values()):
         return False
     if not Path(tools["java_home"]).is_absolute():
