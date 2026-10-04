@@ -78,6 +78,9 @@ REQUIRED_RELEASE_COMMITS = (
     "dede5dd2cdf205a94c1ac8c2660ceb6878ef00b5",  # Mermaid参照生成の回帰を標準ゲートへ接続
     "5512d3780a9b84f30e4799106706c593c95af3c9",  # Drawio 32.0.2 runtime資産と配布定義を同期
     "0f884a94727b4a736a6ef1b55339954b840782eb",  # 同一描画資産の分割と配布・内部依存契約
+    "92a23c7fb1839a0e20962387190697a7b62b15d7",  # 検証済みHEADのpush拘束と軽量契約先行
+    "551537a5a646d501b0ea1ba566045abe4cf36a53",  # 旧版の実package集合による公開再試行
+    "288307beb032749326ee990fe0ae0793046a8545",  # fallback属性比較のOS共通回帰
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -95,7 +98,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "479aed710af45616b078891c8383046401b2a512886e200d382708b531f8c2dc"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "3605832a0c0c536d3fe15f3f3bf621608091c29c991becc36bb5afcddda817d1"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
