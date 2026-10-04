@@ -36,7 +36,10 @@ fn same_length_same_modified_rewrite_rechecks_fallback_selection() -> TestResult
     let (database, base, selected, stable) =
         fallback_file_database(&original, &unsupported, &file.0)?;
     let before = super::super::super::font::font_source_generation(&database, selected);
-    assert_eq!(before.durable_reusable(), cfg!(unix));
+    assert_eq!(
+        before.durable_reusable(),
+        super::super::super::font::file_stamp_durable_reusable(&file.0)
+    );
     assert_eq!(select_fallback(&database, base), selected);
     rewrite_same_generation(&file.0, &unsupported)?;
     #[cfg(windows)]

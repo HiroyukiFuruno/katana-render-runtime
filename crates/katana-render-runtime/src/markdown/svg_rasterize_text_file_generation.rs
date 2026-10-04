@@ -19,6 +19,13 @@ pub(super) struct FileStamp {
     changed_seconds: i64,
     #[cfg(unix)]
     changed_nanoseconds: i64,
+    pub(super) durable_reusable: bool,
+}
+
+impl FileStamp {
+    pub(in super::super) fn durable_reusable(&self) -> bool {
+        self.durable_reusable
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -39,8 +46,7 @@ impl FontSourceGeneration {
     pub(in super::super) fn durable_reusable(&self) -> bool {
         match &self.0 {
             Generation::Immutable => true,
-            /* WHY: 非Unixは長さと時刻だけで同tick書換を区別できず、通常probeとは別に描画間保存を止める。 */
-            Generation::File(_) => cfg!(unix),
+            Generation::File(stamp) => stamp.durable_reusable,
             Generation::Unavailable => false,
         }
     }
@@ -106,10 +112,15 @@ pub(super) fn stamp_path_uncached(path: &std::path::Path) -> Result<FileStamp, (
     let metadata = std::fs::metadata(path).map_err(|_| ())?;
     #[cfg(unix)]
     use std::os::unix::fs::MetadataExt;
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let durable_reusable = super::filesystem_policy::durable_reusable(path, metadata.ctime_nsec());
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let durable_reusable = false;
     Ok(FileStamp {
         len: metadata.len(),
         modified: metadata.modified().ok(),
         created: metadata.created().ok(),
+        durable_reusable,
         #[cfg(unix)]
         device: metadata.dev(),
         #[cfg(unix)]

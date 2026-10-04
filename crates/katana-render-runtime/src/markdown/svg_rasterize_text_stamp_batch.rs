@@ -104,6 +104,10 @@ pub(super) fn remember_stamp(path: &Path, stamp: FileStamp) {
         let Some(batch) = active.as_mut() else {
             return;
         };
+        if !stamp.durable_reusable() {
+            batch.invalid = true;
+            return;
+        }
         if batch.stamps.contains_key(path) {
             return;
         }
@@ -136,7 +140,8 @@ fn validate_batch(batch: Option<StampBatch>) -> bool {
     let Some(batch) = batch else {
         return false;
     };
-    let mut valid = !batch.invalid && !batch.overflow;
+    let mut valid =
+        !batch.invalid && !batch.overflow && batch.stamps.values().all(FileStamp::durable_reusable);
     /* WHY: 一時共有した結果を採用する前に、処理中のファイル変更を検出する。 */
     for (path, expected) in batch.stamps {
         if stamp_path_uncached(&path).as_ref() != Ok(&expected) {

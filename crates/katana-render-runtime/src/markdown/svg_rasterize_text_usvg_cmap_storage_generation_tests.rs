@@ -129,7 +129,10 @@ fn verify_rewrite_reprobes(
     replacement: &[u8],
 ) -> Result<(), String> {
     let before = generation(database, id);
-    assert_eq!(before.durable_reusable(), cfg!(unix));
+    assert_eq!(
+        before.durable_reusable(),
+        super::super::super::super::font::file_stamp_durable_reusable(path)
+    );
     assert_eq!(probe_character(database, id, 'A'), Ok(true));
     rewrite_same_modified_time(path, replacement)?;
     #[cfg(windows)]

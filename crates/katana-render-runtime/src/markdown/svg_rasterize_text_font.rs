@@ -2,6 +2,9 @@
 mod cmap_cache;
 #[path = "svg_rasterize_text_file_generation.rs"]
 mod file_generation;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[path = "svg_rasterize_text_filesystem_policy.rs"]
+mod filesystem_policy;
 #[path = "svg_rasterize_text_glyph_cache.rs"]
 mod glyph_cache;
 #[path = "svg_rasterize_text_stamp_batch.rs"]
@@ -12,6 +15,10 @@ pub(super) use file_generation::{
 };
 pub(super) use glyph_cache::cached_font_has_char_with_generation;
 pub(super) use stamp_batch::{memo_usable, with_validated_stamp_batch};
+#[cfg(test)]
+pub(super) fn file_stamp_durable_reusable(path: &std::path::Path) -> bool {
+    file_generation::stamp_path_uncached(path).is_ok_and(|stamp| stamp.durable_reusable())
+}
 #[path = "svg_rasterize_text_font_score.rs"]
 mod score;
 use resvg::usvg;

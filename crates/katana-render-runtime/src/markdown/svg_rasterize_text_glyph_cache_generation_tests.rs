@@ -7,10 +7,13 @@ use std::sync::Arc;
 #[cfg(unix)]
 #[test]
 fn unix_file_generation_remains_durable_reusable() -> FixtureResult<()> {
-    let (database, id, _path, _guard, _) = file_recovery_fixture()?;
+    let (database, id, path, _guard, _) = file_recovery_fixture()?;
     let generation = file_generation(&database, id);
     assert!(generation.reusable());
-    assert!(generation.durable_reusable());
+    assert_eq!(
+        generation.durable_reusable(),
+        super::super::super::super::file_stamp_durable_reusable(&path)
+    );
     Ok(())
 }
 

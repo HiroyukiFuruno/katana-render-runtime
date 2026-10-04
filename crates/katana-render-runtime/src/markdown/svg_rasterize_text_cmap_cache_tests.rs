@@ -128,12 +128,13 @@ fn unavailable_generation_invalidates_existing_durable_cmap_entry() -> Result<()
     let bytes = bundled_bytes()?;
     let (database, id, guard) = file_database(&bytes)?;
     let durable = super::super::file_generation::file_source_stamp(&database, id).2;
-    assert!(durable.durable_reusable());
+    let filesystem_is_durable = super::super::file_stamp_durable_reusable(&guard.0);
+    assert_eq!(durable.durable_reusable(), filesystem_is_durable);
     assert!(matches!(
         probe_file(&database, id, &durable, 'A'),
         ProbeResult::Complete(Some(true))
     ));
-    assert_cached_cmap(&database, id, &durable, true)?;
+    assert_cached_cmap(&database, id, &durable, filesystem_is_durable)?;
     std::fs::remove_file(&guard.0).map_err(|error| error.to_string())?;
     let unavailable = super::super::file_generation::file_source_stamp(&database, id).2;
     assert!(!unavailable.reusable());
