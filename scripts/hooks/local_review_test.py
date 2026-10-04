@@ -1078,7 +1078,7 @@ class GitSnapshotTest(unittest.TestCase):
         receipt.write_text(json.dumps(partial_payload))
         receipt.with_suffix(".review.json").write_text(json.dumps(partial_payload["review"]))
 
-        with patch.dict(os.environ, {}, clear=True), patch.object(local_review, "command", side_effect=git_command):
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
             with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
                 local_review.issue_numbers(self.root, args, receipt)
             run_args = SimpleNamespace(issue=[], base=self.base, requirements=None, receipt="tmp/receipt.json",
@@ -1115,6 +1115,10 @@ class GitSnapshotTest(unittest.TestCase):
         receipt.write_text(json.dumps(receipt_payload(value, result)))
         sidecar = receipt.with_suffix(".review.json")
         sidecar.write_text(json.dumps(result))
+        (receipt.parent / "last-input-context.json").write_text(json.dumps({
+            "schema": 1, "branch": command(["git", "symbolic-ref", "--short", "HEAD"], root).strip(),
+            "input_sha256": digest(value),
+        }))
         run_args = SimpleNamespace(issue=[], base=self.base, requirements=None, receipt="tmp/receipt.json",
                                    check_receipt=False, print_input=False)
         requirements_args = SimpleNamespace(requirements=None)
@@ -1154,6 +1158,79 @@ class GitSnapshotTest(unittest.TestCase):
                 with self.assertRaises((OSError, ReviewError)):
                     local_review.run(run_args)
                 invoke.assert_not_called()
+
+
+    def test_retained_diagnostic_issue_is_rejected_after_real_branch_switch(self) -> None:
+        command(["git", "switch", "-c", "release/diagnostic-a"], self.root)
+        (self.root / "example.py").write_text("failed review input\n")
+        requirement = self.root / "requirements.md"
+        requirement.write_text("same task requirement\n")
+        self.commit("failed review without Refs")
+        value = inputs()
+        root = self.root.resolve()
+        value["requirements"] = local_review.requirements_context(root, "requirements.md")
+        receipt = self.root / "tmp" / "receipt.json"
+        receipt.parent.mkdir(exist_ok=True)
+        (receipt.parent / "last-input.json").write_text(json.dumps(value))
+        (receipt.parent / "last-review.json").write_text(json.dumps(review(value)))
+        (receipt.parent / "last-input-context.json").write_text(json.dumps({
+            "schema": 1, "branch": "release/diagnostic-a", "input_sha256": digest(value),
+        }))
+        args = SimpleNamespace(issue=[], base=self.base)
+
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+            self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
+            self.assertEqual(local_review.requirements_path(root, SimpleNamespace(requirements=None), receipt,
+                                                            [89]), "requirements.md")
+        (self.root / "example.py").write_text("same branch iterative fix\n")
+        self.commit("iterative fix without Refs")
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+            self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
+            self.assertEqual(local_review.requirements_path(root, SimpleNamespace(requirements=None), receipt,
+                                                            [89]), "requirements.md")
+        context_path = receipt.parent / "last-input-context.json"
+        context = json.loads(context_path.read_text())
+        context_path.unlink()
+        self.assertIsNone(local_review.retained_inputs(receipt, root=root))
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+            with self.assertRaisesRegex(ReviewError, "set REVIEW_ISSUE or pass --issue"):
+                local_review.issue_numbers(root, args, receipt)
+        context_path.write_text(json.dumps(context))
+        context["input_sha256"] = "0" * 64
+        context_path.write_text(json.dumps(context))
+        self.assertIsNone(local_review.retained_inputs(receipt, root=root))
+        context["input_sha256"] = digest(value)
+        context_path.write_text(json.dumps(context))
+        payload = receipt_payload(value, review(value))
+        receipt.write_text(json.dumps(payload))
+        receipt.with_suffix(".review.json").write_text(json.dumps(payload["review"]))
+        (receipt.parent / "last-input.json").unlink()
+        (receipt.parent / "last-review.json").unlink()
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+            self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
+            self.assertEqual(local_review.requirements_path(root, SimpleNamespace(requirements=None), receipt,
+                                                            [89]), "requirements.md")
+
+        command(["git", "switch", "--detach", "HEAD"], self.root)
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+            with self.assertRaisesRegex(ReviewError, "set REVIEW_ISSUE or pass --issue"):
+                local_review.issue_numbers(root, args, receipt)
+            self.assertIsNone(local_review.requirements_path(root, SimpleNamespace(requirements=None),
+                                                             receipt, [89]))
+
+        command(["git", "switch", "release/diagnostic-a"], self.root)
+
+        command(["git", "switch", "-c", "release/unrelated-b", self.base], self.root)
+        (self.root / "example.py").write_text("unrelated branch\n")
+        self.commit("ordinary check without Refs")
+
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+            with self.assertRaisesRegex(ReviewError, "set REVIEW_ISSUE or pass --issue"):
+                local_review.issue_numbers(root, args, receipt)
+            self.assertIsNone(local_review.requirements_path(root, SimpleNamespace(requirements=None),
+                                                             receipt, [89]))
+            explicit = SimpleNamespace(issue=[120], base=self.base)
+            self.assertEqual(local_review.issue_numbers(root, explicit, receipt), [120])
 
 
 class DriverContractTest(unittest.TestCase):
@@ -1350,8 +1427,13 @@ class DriverContractTest(unittest.TestCase):
             result = review(value)
             receipt.write_text(json.dumps(receipt_payload(value, result)))
             receipt.with_suffix(".review.json").write_text(json.dumps(result))
+            context_path = receipt.parent / "last-input-context.json"
+            context_path.write_text(json.dumps({
+                "schema": 1, "branch": "release/retry", "input_sha256": digest(value),
+            }))
             args = SimpleNamespace(requirements=None)
-            selected = local_review.requirements_path(root, args, receipt, [89])
+            with patch.object(local_review, "branch_identity", return_value="release/retry"):
+                selected = local_review.requirements_path(root, args, receipt, [89])
             self.assertEqual(selected, "requirements.md")
             self.assertEqual(value["requirements"], local_review.requirements_context(root, selected))
             requirement.write_text("changed native requirement\n")
@@ -1363,14 +1445,19 @@ class DriverContractTest(unittest.TestCase):
                 self.assertEqual(local_review.requirements_path(root, args, receipt, [89]), "explicit.md")
             args.requirements = None
             requirement.unlink()
-            with self.assertRaisesRegex(ReviewError, "requirements"):
-                local_review.requirements_path(root, args, receipt, [89])
+            with patch.object(local_review, "branch_identity", return_value="release/retry"):
+                with self.assertRaisesRegex(ReviewError, "requirements"):
+                    local_review.requirements_path(root, args, receipt, [89])
             value["requirements"] = {"content": "lost path", "sha256": "a" * 64}
             result = review(value)
             receipt.write_text(json.dumps(receipt_payload(value, result)))
             receipt.with_suffix(".review.json").write_text(json.dumps(result))
-            with self.assertRaisesRegex(ReviewError, "requirements"):
-                local_review.requirements_path(root, args, receipt, [89])
+            context_path.write_text(json.dumps({
+                "schema": 1, "branch": "release/retry", "input_sha256": digest(value),
+            }))
+            with patch.object(local_review, "branch_identity", return_value="release/retry"):
+                with self.assertRaisesRegex(ReviewError, "requirements"):
+                    local_review.requirements_path(root, args, receipt, [89])
 
     def test_standard_check_reuses_required_input_and_rejects_changed_requirement(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {}, clear=True):
@@ -1386,14 +1473,19 @@ class DriverContractTest(unittest.TestCase):
                 result = review(value)
                 path.write_text(json.dumps(receipt_payload(value, result)))
                 path.with_suffix(".review.json").write_text(json.dumps(result))
+                (path.parent / "last-input-context.json").write_text(json.dumps({
+                    "schema": 1, "branch": "release/check", "input_sha256": digest(value),
+                }))
                 args.requirements = None
-                self.assertEqual(local_review.run(args), 0)
+                with patch.object(local_review, "branch_identity", return_value="release/check"):
+                    self.assertEqual(local_review.run(args), 0)
                 self.assertEqual(args.requirements, "requirements.md")
                 invoke.assert_not_called()
                 requirement.write_text("different requirement\n")
                 args.requirements = None
-                with self.assertRaisesRegex(ReviewError, "receipt rejected"):
-                    local_review.run(args)
+                with patch.object(local_review, "branch_identity", return_value="release/check"):
+                    with self.assertRaisesRegex(ReviewError, "receipt rejected"):
+                        local_review.run(args)
                 invoke.assert_not_called()
 
     def test_ci_and_recursion_do_not_start_codex(self) -> None:
@@ -1438,21 +1530,26 @@ class DriverContractTest(unittest.TestCase):
             def returned(arguments, *_options):
                 Path(arguments[arguments.index("--output-last-message") + 1]).write_text(json.dumps(result))
                 return 0
-            with patch.object(local_review, "compact_input", return_value={}), patch.object(local_review, "run_review_process", side_effect=returned):
+            with patch.object(local_review, "branch_identity", return_value="release/retry"), \
+                    patch.object(local_review, "compact_input", return_value={}), \
+                    patch.object(local_review, "run_review_process", side_effect=returned):
                 with self.assertRaisesRegex(ReviewError, "findings retained"):
                     local_review.invoke_review(root, child, value)
             receipt = root / "receipt.json"
             self.assertFalse(receipt.exists())
             args = SimpleNamespace(issue=[], base="origin/master", requirements=None)
-            self.assertEqual(local_review.requirements_path(root, args, receipt, [89]), "requirements.md")
-            with patch.object(local_review, "command", return_value=""):
+            with patch.object(local_review, "branch_identity", return_value="release/retry"):
+                self.assertEqual(local_review.requirements_path(root, args, receipt, [89]), "requirements.md")
+            with patch.object(local_review, "branch_identity", return_value="release/retry"), \
+                    patch.object(local_review, "command", return_value=""):
                 self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
             with patch.object(local_review, "command", return_value="Refs #120"):
                 self.assertEqual(local_review.issue_numbers(root, args, receipt), [120])
             self.assertIsNone(local_review.requirements_path(root, args, receipt, [120]))
             requirement.unlink()
-            with self.assertRaisesRegex(ReviewError, "requirements"):
-                local_review.requirements_path(root, args, receipt, [89])
+            with patch.object(local_review, "branch_identity", return_value="release/retry"):
+                with self.assertRaisesRegex(ReviewError, "requirements"):
+                    local_review.requirements_path(root, args, receipt, [89])
             value["requirements"]["path"] = "different.md"
             (root / "last-input.json").write_text(json.dumps(value))
             self.assertIsNone(local_review.requirements_path(root, args, receipt, [89]))

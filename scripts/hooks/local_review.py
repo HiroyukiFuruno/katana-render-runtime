@@ -79,14 +79,15 @@ def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[i
                 raise ReviewError("multiple branch Issues; set REVIEW_ISSUE explicitly")
         numbers = sorted(references)
     if not numbers:
-        retained = retained_inputs(receipt)
+        retained = retained_inputs(receipt, root=root)
         if retained is not None:
             numbers = [issue["number"] for issue in retained["issues"]]
     if not numbers and receipt.exists():
         stored = strict_json(receipt.read_text())
         try:
             read_receipt(receipt, stored["inputs"])
-            numbers = [issue["number"] for issue in stored["inputs"]["issues"]]
+            if retained_context_matches(receipt, stored["inputs"], root):
+                numbers = [issue["number"] for issue in stored["inputs"]["issues"]]
         except (KeyError, TypeError) as error:
             raise ReviewError("receipt Issue identity is invalid") from error
     if not numbers or any(type(number) is not int or number < 1 for number in numbers):
@@ -104,7 +105,27 @@ def build_inputs(root: Path, args: argparse.Namespace, numbers: list[int]) -> di
             "prompt_sha256": hashlib.sha256(review_prompt().encode()).hexdigest()}
 
 
-def retained_inputs(receipt: Path, numbers: list[int] | None = None) -> dict | None:
+def branch_identity(root: Path) -> str | None:
+    try:
+        branch = command(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], root).strip()
+    except ReviewError:
+        return None
+    return branch or None
+
+
+def retained_context_matches(receipt: Path, stored: dict, root: Path | None) -> bool:
+    context_path = receipt.parent / "last-input-context.json"
+    if root is None or not context_path.is_file():
+        return False
+    context = strict_json(context_path.read_text())
+    current_branch = branch_identity(root)
+    return (isinstance(context, dict) and context.get("schema") == 1
+            and isinstance(context.get("branch"), str) and bool(context["branch"])
+            and context.get("input_sha256") == digest(stored)
+            and current_branch == context["branch"])
+
+
+def retained_inputs(receipt: Path, numbers: list[int] | None = None, *, root: Path | None = None) -> dict | None:
     path = receipt.parent / "last-input.json"
     if not path.exists():
         return None
@@ -128,6 +149,8 @@ def retained_inputs(receipt: Path, numbers: list[int] | None = None) -> dict | N
     if report.get("input_sha256") != digest(stored):
         # 診断原本は保持するが、別入力の結果を現在のレビュー文脈へ流用しない。
         return None
+    if not retained_context_matches(receipt, stored, root):
+        return None
     if stored.get("model") != MODEL or stored.get("reasoning") != REASONING:
         raise ReviewError("retained input has an unexpected review configuration")
     return stored
@@ -141,7 +164,7 @@ def requirements_path(root: Path, args: argparse.Namespace, receipt: Path, numbe
         if not configured.strip():
             raise ReviewError("REVIEW_REQUIREMENTS must identify a requirements file")
         return configured
-    retained = retained_inputs(receipt, numbers)
+    retained = retained_inputs(receipt, numbers, root=root)
     if retained is not None and sorted(issue["number"] for issue in retained["issues"]) == sorted(numbers):
         stored = retained
     elif receipt.exists():
@@ -149,6 +172,10 @@ def requirements_path(root: Path, args: argparse.Namespace, receipt: Path, numbe
         if not isinstance(payload, dict) or not isinstance(payload.get("inputs"), dict):
             raise ReviewError("stored requirements cannot be recovered from an invalid receipt")
         read_receipt(receipt, payload["inputs"])
+        if sorted(issue["number"] for issue in payload["inputs"]["issues"]) != sorted(numbers):
+            return None
+        if not retained_context_matches(receipt, payload["inputs"], root):
+            return None
         stored = payload["inputs"]
     else:
         return None
@@ -226,6 +253,9 @@ def invoke_review(root: Path, directory: Path, inputs: dict) -> dict:
     prompt = review_prompt() + "\n固定入力:\n" + canonical(payload).decode()
     diagnostic = directory.parent / "last-codex-stderr.log"
     atomic_json(directory.parent / "last-input.json", inputs)
+    atomic_json(directory.parent / "last-input-context.json",
+                {"schema": 1, "branch": branch_identity(root) or "",
+                 "input_sha256": digest(inputs)})
     try:
         returncode = run_review_process(review_command(root, result_path), root, environment, prompt, diagnostic)
     except subprocess.TimeoutExpired as error:
