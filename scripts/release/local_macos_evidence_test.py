@@ -417,6 +417,11 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             ("cargo_home", "config.toml", "[profile.test]\ndebug-assertions = false\n", r"Cargo config profile overrides"),
             ("repo", "config.toml", '[build]\nwarnings = "allow"\n', r"Cargo config build.warnings override"),
             (
+                "absolute_cargo_home", "config.toml",
+                '[resolver]\nlockfile-path = "/tmp/other/Cargo.lock"\n',
+                r"Cargo config resolver\.lockfile-path",
+            ),
+            (
                 "relative_cargo_home", "config",
                 "[target.aarch64-apple-darwin.ring_core_0_17_14_]\n"
                 'rustc-link-lib = ["static=ring_core_0_17_14_"]\n',
@@ -424,6 +429,47 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             ),
         )
         for location, filename, content, expected_error in cases:
+            with self.subTest(location=location), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                root = base / "repository"
+                config_parent = {
+                    "repo": root / ".cargo",
+                    "ancestor": base / ".cargo",
+                    "cargo_home": root / "absolute-cargo-home",
+                    "absolute_cargo_home": root / "other-absolute-cargo-home",
+                    "relative_cargo_home": root / "relative-cargo-home",
+                }[location]
+                config_parent.mkdir(parents=True)
+                (config_parent / filename).write_text(content, encoding="utf-8")
+                cargo_home = {
+                    "repo": str(base / "unused-cargo-home"),
+                    "ancestor": str(base / "unused-cargo-home"),
+                    "cargo_home": str(root / "absolute-cargo-home"),
+                    "absolute_cargo_home": str(root / "other-absolute-cargo-home"),
+                    "relative_cargo_home": "relative-cargo-home",
+                }[location]
+                with patch.object(EVIDENCE, "ROOT", root), patch.dict(EVIDENCE.os.environ, {
+                    "HOME": str(base), "CARGO_HOME": cargo_home, "PATH": "/usr/bin",
+                }, clear=True):
+                    with self.assertRaisesRegex(EVIDENCE.EvidenceError, expected_error):
+                        EVIDENCE.command_environment()
+
+    def test_cargo_source_replacement_rejects_local_and_alternate_registries(self) -> None:
+        local_source = (
+            '[source.crates-io]\nreplace-with = "proof-vendor"\n'
+            '[source.proof-vendor]\ndirectory = "vendor"\n'
+        )
+        alternate_registry = (
+            '[source.crates-io]\nreplace-with = "proof-mirror"\n'
+            '[source.proof-mirror]\nregistry = "sparse+https://example.invalid/index/"\n'
+        )
+        cases = (
+            ("repo", "config.toml", local_source),
+            ("ancestor", "config", alternate_registry),
+            ("cargo_home", "config.toml", local_source),
+            ("relative_cargo_home", "config", alternate_registry),
+        )
+        for location, filename, content in cases:
             with self.subTest(location=location), tempfile.TemporaryDirectory() as directory:
                 base = Path(directory)
                 root = base / "repository"
@@ -444,7 +490,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 with patch.object(EVIDENCE, "ROOT", root), patch.dict(EVIDENCE.os.environ, {
                     "HOME": str(base), "CARGO_HOME": cargo_home, "PATH": "/usr/bin",
                 }, clear=True):
-                    with self.assertRaisesRegex(EVIDENCE.EvidenceError, expected_error):
+                    with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config source replacement"):
                         EVIDENCE.command_environment()
 
     def test_collector_rejects_non_macos_15_before_preparation(self) -> None:

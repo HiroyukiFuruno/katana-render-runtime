@@ -303,6 +303,8 @@ def command_environment() -> dict[str, str]:
             raise EvidenceError("Cargo config cannot be validated") from exc
         if "env" in parsed:
             raise EvidenceError("Cargo config [env] injection is unsupported")
+        if "source" in parsed:
+            raise EvidenceError("Cargo config source replacement is unsupported")
         if parsed.get("paths"):
             raise EvidenceError("Cargo config paths overrides are unsupported")
         if "include" in parsed:
@@ -312,6 +314,9 @@ def command_environment() -> dict[str, str]:
         build_config = parsed.get("build")
         if isinstance(build_config, dict) and "warnings" in build_config:
             raise EvidenceError("Cargo config build.warnings override is unsupported")
+        resolver_config = parsed.get("resolver")
+        if isinstance(resolver_config, dict) and "lockfile-path" in resolver_config:
+            raise EvidenceError("Cargo config resolver.lockfile-path is unsupported")
         target_config = parsed.get("target")
         if isinstance(target_config, dict) and any(
             isinstance(target, dict) and (
