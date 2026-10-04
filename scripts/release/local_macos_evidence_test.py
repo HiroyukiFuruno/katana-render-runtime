@@ -208,23 +208,41 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             config_dir = Path(directory) / ".cargo"
             config_dir.mkdir()
             (config_dir / "config.toml").write_text(
-                '[build]\ntarget = "x86_64-apple-darwin"\n', encoding="utf-8",
+                '[build]\ntarget = "x86_64-apple-darwin"\nrustc = "alternate-rustc"\n'
+                'rustc-wrapper = "compiler-wrapper"\nrustc-workspace-wrapper = "workspace-wrapper"\n'
+                '[target.aarch64-apple-darwin]\nrunner = "/usr/bin/true"\n',
+                encoding="utf-8",
             )
             with patch.dict(EVIDENCE.os.environ, {
+                "CARGO": "true",
                 "CARGO_BUILD_TARGET": "x86_64-apple-darwin",
+                "RTK": "true",
                 "RUSTFLAGS": "--target=x86_64-apple-darwin",
                 "CARGO_ENCODED_RUSTFLAGS": "--target=x86_64-apple-darwin",
                 "CARGO_BUILD_RUSTFLAGS": "--target=x86_64-apple-darwin",
                 "CARGO_TARGET_DIR": "/tmp/cargo-target-cache",
             }, clear=True):
                 environment = EVIDENCE.command_environment()
+            self.assertEqual(environment["CARGO"], "cargo")
+            self.assertEqual(environment["RTK"], "")
             self.assertEqual(environment["CARGO_BUILD_TARGET"], "aarch64-apple-darwin")
-            self.assertEqual(environment["RUSTFLAGS"], "")
-            self.assertEqual(environment["CARGO_ENCODED_RUSTFLAGS"], "")
-            self.assertEqual(environment["CARGO_BUILD_RUSTFLAGS"], "")
+            self.assertEqual(environment["RUSTFLAGS"], "-D warnings")
+            self.assertEqual(environment["CARGO_ENCODED_RUSTFLAGS"], "-D\x1fwarnings")
+            self.assertEqual(environment["CARGO_BUILD_RUSTFLAGS"], "-D warnings")
+            self.assertEqual(environment["RUSTC"], "rustc")
+            self.assertEqual(environment["CARGO_BUILD_RUSTC"], "rustc")
+            self.assertEqual(environment["RUSTC_WRAPPER"], "")
+            self.assertEqual(environment["CARGO_BUILD_RUSTC_WRAPPER"], "")
+            self.assertEqual(environment["RUSTC_WORKSPACE_WRAPPER"], "")
+            self.assertEqual(environment["CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"], "")
+            self.assertEqual(environment["CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER"], "/usr/bin/env")
             self.assertEqual(environment["CARGO_TARGET_DIR"], "/tmp/cargo-target-cache")
             self.assertIn('target = "x86_64-apple-darwin"', (config_dir / "config.toml").read_text())
+            self.assertIn('runner = "/usr/bin/true"', (config_dir / "config.toml").read_text())
             with patch.dict(EVIDENCE.os.environ, {"CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER": "cross-linker"}, clear=True):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "custom Rust compiler or target linker"):
+                    EVIDENCE.command_environment()
+            with patch.dict(EVIDENCE.os.environ, {"CARGO_BUILD_RUSTC_WRAPPER": "compiler-wrapper"}, clear=True):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "custom Rust compiler or target linker"):
                     EVIDENCE.command_environment()
 
@@ -275,6 +293,84 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                         check=True,
                     )
                     tracked.write_text("head\n", encoding="utf-8")
+
+    def test_raw_tracked_bytes_bind_clean_checkout_and_detect_later_source_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+            regular = root / "source.txt"
+            executable = root / "tool.sh"
+            regular.write_bytes(b"HEAD bytes\n")
+            executable.write_bytes(b"#!/bin/sh\nexit 0\n")
+            executable.chmod(0o755)
+            (root / "source-link").symlink_to("source.txt")
+            subprocess.run(["git", "-C", str(root), "add", "source.txt", "tool.sh", "source-link"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "baseline"], check=True)
+            head = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, text=True, capture_output=True,
+            ).stdout.strip()
+            with patch.object(EVIDENCE, "ROOT", root):
+                initial = EVIDENCE.head_worktree_bytes_digest(head)
+                self.assertTrue(initial)
+                regular.write_bytes(b"changed after collection start\n")
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "tracked worktree bytes differ from HEAD"):
+                    EVIDENCE.head_worktree_bytes_digest(head)
+
+    def test_raw_tracked_bytes_reject_clean_smudge_filter_hidden_by_status(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "config", "filter.proof.clean", "sed 's/worktree/blob/g'"], check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(root), "config", "filter.proof.smudge", "sed 's/blob/worktree/g'"], check=True,
+            )
+            (root / ".gitattributes").write_text("filtered.txt filter=proof\n", encoding="utf-8")
+            (root / "filtered.txt").write_text("worktree bytes\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", ".gitattributes", "filtered.txt"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "filtered baseline"], check=True)
+            head = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, text=True, capture_output=True,
+            ).stdout.strip()
+            with patch.object(EVIDENCE, "ROOT", root):
+                self.assertEqual(EVIDENCE.git_status(), "")
+                self.assertEqual(EVIDENCE.run_git("ls-files", "-v"), "H .gitattributes\nH filtered.txt")
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "tracked worktree bytes differ from HEAD"):
+                    EVIDENCE.head_worktree_bytes_digest(head)
+
+    def test_raw_tracked_bytes_reject_gitlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+            tracked = root / "tracked.txt"
+            tracked.write_text("tracked\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "tracked.txt"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "baseline"], check=True)
+            head = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, text=True, capture_output=True,
+            ).stdout.strip()
+            blob = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD:tracked.txt"], check=True, text=True, capture_output=True,
+            ).stdout.strip()
+            subprocess.run(
+                ["git", "-C", str(root), "update-index", "--add", "--cacheinfo", f"160000,{blob},submodule"],
+                check=True,
+            )
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "gitlink"], check=True)
+            gitlink_head = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, text=True, capture_output=True,
+            ).stdout.strip()
+            with patch.object(EVIDENCE, "ROOT", root):
+                self.assertNotEqual(head, gitlink_head)
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "gitlinks or unsupported"):
+                    EVIDENCE.head_worktree_bytes_digest(gitlink_head)
 
     def test_rust_tools_must_match_official_stable_manifest(self) -> None:
         current = {
@@ -444,6 +540,7 @@ version = "0.100.0 (5f94df478 2026-08-27)"
                 ]),
                 patch.object(EVIDENCE, "macos_product_version", return_value="15.0"),
                 patch.object(EVIDENCE, "require_standard_index_flags"),
+                patch.object(EVIDENCE, "head_worktree_bytes_digest", return_value="source-hash"),
                 patch.object(EVIDENCE, "tool_versions", return_value={"macos": "15", "architecture": "arm64"}),
                 patch.object(EVIDENCE, "ROOT", Path(directory)),
                 patch.object(EVIDENCE.subprocess, "run", return_value=subprocess.CompletedProcess([], 9, "", "failed")),
@@ -472,6 +569,7 @@ version = "0.100.0 (5f94df478 2026-08-27)"
                 ]),
                 patch.object(EVIDENCE, "macos_product_version", return_value="15.0"),
                 patch.object(EVIDENCE, "require_standard_index_flags"),
+                patch.object(EVIDENCE, "head_worktree_bytes_digest", return_value="source-hash"),
                 patch.object(EVIDENCE, "tool_versions", return_value=versions),
                 patch.object(EVIDENCE, "fetch_stable_manifest_versions", return_value=STABLE_RUST),
                 patch.object(EVIDENCE, "ROOT", Path(directory)),
@@ -503,6 +601,7 @@ version = "0.100.0 (5f94df478 2026-08-27)"
                 ]),
                 patch.object(EVIDENCE, "macos_product_version", return_value="15.0"),
                 patch.object(EVIDENCE, "require_standard_index_flags"),
+                patch.object(EVIDENCE, "head_worktree_bytes_digest", return_value="source-hash"),
                 patch.object(EVIDENCE, "tool_versions", return_value=versions),
                 patch.object(EVIDENCE, "fetch_stable_manifest_versions", return_value=STABLE_RUST),
                 patch.object(EVIDENCE, "ROOT", Path(directory)),

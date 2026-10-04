@@ -9,6 +9,7 @@ import json
 import os
 import platform
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -54,12 +55,21 @@ COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("runtime-asset-checksums", ("just", "runtime-asset-check")),
 )
 SCOPE_PARAMETERS = {
+    "CARGO": "cargo",
     "CARGO_BUILD_TARGET": "aarch64-apple-darwin",
-    "CARGO_BUILD_RUSTFLAGS": "",
-    "CARGO_ENCODED_RUSTFLAGS": "",
+    "CARGO_BUILD_RUSTFLAGS": "-D warnings",
+    "CARGO_BUILD_RUSTC": "rustc",
+    "CARGO_BUILD_RUSTC_WRAPPER": "",
+    "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER": "",
+    "CARGO_ENCODED_RUSTFLAGS": "-D\x1fwarnings",
     "CARGO_INCREMENTAL": "0",
     "CARGO_TERM_COLOR": "always",
-    "RUSTFLAGS": "",
+    "CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER": "/usr/bin/env",
+    "RTK": "",
+    "RUSTFLAGS": "-D warnings",
+    "RUSTC": "rustc",
+    "RUSTC_WRAPPER": "",
+    "RUSTC_WORKSPACE_WRAPPER": "",
     "TEST_THREADS": "1",
 }
 PREPARATION_COMMANDS = {"bun-install", "graphviz-install", "plantuml-install"}
@@ -156,6 +166,53 @@ def require_standard_index_flags() -> None:
         raise EvidenceError("nonstandard Git index flags invalidate local proof")
 
 
+def head_worktree_bytes_digest(expected_head: str) -> str:
+    object_format = run_git("rev-parse", "--show-object-format")
+    if object_format not in {"sha1", "sha256"}:
+        raise EvidenceError("unsupported Git object format")
+    try:
+        tree = subprocess.run(
+            ["git", "ls-tree", "-r", "-z", "--full-tree", expected_head],
+            cwd=ROOT, check=True, capture_output=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise EvidenceError("cannot read tracked HEAD tree") from exc
+    records: list[bytes] = []
+    for entry in tree.split(b"\0"):
+        if not entry:
+            continue
+        try:
+            metadata, name = entry.split(b"\t", 1)
+            mode_bytes, kind, object_id = metadata.split(b" ", 2)
+            mode = mode_bytes.decode("ascii")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise EvidenceError("HEAD tree entry is malformed") from exc
+        if mode == "160000" or kind != b"blob" or mode not in {"100644", "100755", "120000"}:
+            raise EvidenceError("tracked gitlinks or unsupported tracked file types invalidate local proof")
+        path = ROOT / os.fsdecode(name)
+        try:
+            file_mode = path.lstat().st_mode
+            if stat.S_ISLNK(file_mode):
+                working_mode = "120000"
+                working_bytes = os.fsencode(os.readlink(path))
+            elif stat.S_ISREG(file_mode):
+                working_mode = "100755" if file_mode & stat.S_IXUSR else "100644"
+                working_bytes = path.read_bytes()
+            else:
+                raise EvidenceError(f"unsupported tracked worktree entry: {os.fsdecode(name)}")
+        except OSError as exc:
+            raise EvidenceError(f"tracked worktree entry is unavailable: {os.fsdecode(name)}") from exc
+        digest = hashlib.new(object_format)
+        digest.update(f"blob {len(working_bytes)}\0".encode("ascii"))
+        digest.update(working_bytes)
+        if working_mode != mode or digest.hexdigest().encode("ascii") != object_id:
+            raise EvidenceError(f"tracked worktree bytes differ from HEAD: {os.fsdecode(name)}")
+        records.append(mode_bytes + b" " + object_id + b"\t" + name + b"\0")
+    if run_git("rev-parse", "HEAD") != expected_head:
+        raise EvidenceError("HEAD changed while checking tracked worktree bytes")
+    return sha256_bytes(b"".join(records))
+
+
 def macos_product_version() -> str:
     result = subprocess.run(
         ["sw_vers", "-productVersion"], cwd=ROOT, check=True, text=True, capture_output=True,
@@ -175,6 +232,7 @@ def command_environment() -> dict[str, str]:
     unsupported = {
         name for name in environment
         if name in {"RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"}
+        or name.startswith("CARGO_BUILD_RUSTC")
         or (name.startswith("CARGO_TARGET_") and name != "CARGO_TARGET_DIR")
     }
     if unsupported:
@@ -591,6 +649,7 @@ def collect(repository: str, number: int, publish: bool) -> int:
     if git_status():
         raise EvidenceError("working tree must be clean before collection")
     before_head = run_git("rev-parse", "HEAD")
+    before_source = head_worktree_bytes_digest(before_head)
     if not workflow_scope_supported():
         raise EvidenceError("current workflow contains an unsupported macOS step")
     before_workflow = workflow_digest()
@@ -655,11 +714,13 @@ def collect(repository: str, number: int, publish: bool) -> int:
     (logs_dir / "commands.json").write_bytes(aggregate)
     logs_sha = sha256_bytes(aggregate + b"\n".join((logs_dir / f"{i:02d}-{item['id']}.log").read_bytes() for i, item in enumerate(logs, 1)))
     require_standard_index_flags()
+    after_head = run_git("rev-parse", "HEAD")
+    after_source = head_worktree_bytes_digest(after_head)
     if (
-        git_status() or run_git("rev-parse", "HEAD") != before_head
+        git_status() or after_head != before_head or after_source != before_source
         or workflow_digest() != before_workflow or not workflow_scope_supported()
     ):
-        raise EvidenceError("working tree, HEAD, or workflow changed during collection")
+        raise EvidenceError("working tree bytes, HEAD, or workflow changed during collection")
     pr_final = api_request(token, "GET", pr_path)
     if validate_pr(pr_final, repository, number) != (base_sha, head_sha):
         raise EvidenceError("pull request base or head changed during collection")
