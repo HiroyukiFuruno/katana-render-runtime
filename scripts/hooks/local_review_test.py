@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 import errno
 import io
 import json
@@ -38,6 +38,24 @@ from local_review_state import (
 
 
 TEST_REVIEWED_HEAD_SHA = "f" * 40
+
+
+@contextmanager
+def local_rtk_fixture(environment: dict[str, str]):
+    """Run local-review Git calls through a portable test double for `rtk proxy`."""
+    actual_run = subprocess.run
+
+    def run_with_rtk(arguments, *args, **kwargs):
+        if arguments and arguments[0] == "/test-bin/rtk":
+            if arguments[1:2] != ["proxy"]:
+                raise AssertionError("test RTK invocation must use proxy")
+            arguments = arguments[2:]
+        return actual_run(arguments, *args, **kwargs)
+
+    with patch.dict(os.environ, environment, clear=True), \
+            patch("local_review_state.shutil.which", return_value="/test-bin/rtk"), \
+            patch("local_review_state.subprocess.run", side_effect=run_with_rtk):
+        yield
 
 
 def inputs() -> dict:
@@ -182,7 +200,7 @@ class GitSnapshotTest(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        command(["git", "init", "--quiet"], self.root)
+        command(["git", "init", "--quiet", "--initial-branch=master"], self.root)
         (self.root / ".gitignore").write_text("tmp/\n")
         (self.root / "example.py").write_text("original\n")
         self.commit("initial")
@@ -226,9 +244,9 @@ class GitSnapshotTest(unittest.TestCase):
                                print_input=True)
         test_environment = os.environ.copy()
         for name in ("REVIEW_ISSUE", "REVIEW_REQUIREMENTS", "REVIEW_BASE", "REVIEW_REMOTE",
-                     "REVIEW_REMOTE_URL"):
+                     "REVIEW_REMOTE_URL", "CI", "GITHUB_ACTIONS"):
             test_environment.pop(name, None)
-        with patch.dict(os.environ, test_environment, clear=True), \
+        with local_rtk_fixture(test_environment), \
                 patch.object(local_review_state, "command", side_effect=real_git_mock_gh), \
                 patch.object(local_review, "repository_root", return_value=self.root), \
                 patch.object(local_review, "cache_path", return_value=self.root / "tmp/receipt.json"), \
@@ -330,7 +348,7 @@ class GitSnapshotTest(unittest.TestCase):
             retained_context(value, reviewed_head, "release/retry")
         ))
         args = SimpleNamespace(issue=[], base=self.base, requirements=None)
-        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        with local_rtk_fixture({"PATH": os.environ["PATH"]}):
             self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
             self.assertEqual(
                 local_review.requirements_path(root, args, receipt, [89]), "requirements.md"
@@ -338,7 +356,7 @@ class GitSnapshotTest(unittest.TestCase):
 
         (self.root / "example.py").write_text("descendant fix\n")
         self.commit("fix failed review without issue reference")
-        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        with local_rtk_fixture({"PATH": os.environ["PATH"]}):
             self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
             self.assertEqual(
                 local_review.requirements_path(root, args, receipt, [89]), "requirements.md"
@@ -369,7 +387,7 @@ class GitSnapshotTest(unittest.TestCase):
         command(["git", "branch", "-m", "release/retry"], self.root)
         self.assertEqual(local_review.branch_identity(root), "release/retry")
         args = SimpleNamespace(issue=[], base=self.base, requirements=None)
-        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        with local_rtk_fixture({"PATH": os.environ["PATH"]}):
             self.assertIsNone(local_review.retained_inputs(receipt, root=root))
             with self.assertRaisesRegex(ReviewError, "set REVIEW_ISSUE or pass --issue"):
                 local_review.issue_numbers(root, args, receipt)
@@ -393,7 +411,7 @@ class GitSnapshotTest(unittest.TestCase):
             retained_context(value, reviewed_head, "release/retry")
         ))
         args = SimpleNamespace(issue=[], base="master", requirements=None)
-        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        with local_rtk_fixture({"PATH": os.environ["PATH"]}):
             self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
         real_command = local_review.command
         def fail_base_observation(arguments: list[str], command_root: Path) -> str:
@@ -408,7 +426,7 @@ class GitSnapshotTest(unittest.TestCase):
         command(["git", "switch", "release/retry"], self.root)
         (self.root / "unrelated.py").write_text("unrelated descendant\n")
         self.commit("unrelated descendant after base absorbed failed task")
-        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        with local_rtk_fixture({"PATH": os.environ["PATH"]}):
             self.assertIsNone(local_review.retained_inputs(receipt, root=root, base="master"))
             with self.assertRaisesRegex(ReviewError, "set REVIEW_ISSUE or pass --issue"):
                 local_review.issue_numbers(root, args, receipt)
