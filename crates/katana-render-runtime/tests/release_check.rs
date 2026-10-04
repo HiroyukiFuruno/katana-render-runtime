@@ -320,22 +320,75 @@ fn linux_release_workflows_install_the_runtime_test_prerequisites()
 
 #[test]
 fn pre_push_uses_the_ordered_issue_contract_dispatcher() -> Result<(), Box<dyn std::error::Error>> {
-    let root = workspace_root()?;
-    let lefthook = std::fs::read_to_string(root.join("lefthook.yml"))?;
-    let dispatcher = std::fs::read_to_string(root.join("scripts/hooks/pre-push.sh"))?;
-
+    let (lefthook, dispatcher) = pre_push_sources()?;
     assert!(lefthook.contains("run: bash scripts/hooks/pre-push.sh"));
+    let issue_contract = dispatcher
+        .find("python3 scripts/hooks/verify_push_issue.py")
+        .ok_or("Issue contract is missing from pre-push dispatcher")?;
+    let first_head_guard = dispatcher
+        .find("python3 scripts/hooks/pre_push_head_guard.py \"${reviewed_head}\" <\"${updates}\"")
+        .ok_or("first reviewed-HEAD guard is missing from pre-push dispatcher")?;
     let repository_check = dispatcher
         .find("just check")
         .ok_or("repository check is missing from pre-push dispatcher")?;
+    let second_head_guard = dispatcher
+        .rfind("python3 scripts/hooks/pre_push_head_guard.py \"${reviewed_head}\" <\"${updates}\"")
+        .ok_or("second reviewed-HEAD guard is missing from pre-push dispatcher")?;
+    assert!(
+        issue_contract < first_head_guard,
+        "the cheap Issue contract must run before the first reviewed-HEAD guard"
+    );
+    assert!(
+        first_head_guard < repository_check && repository_check < second_head_guard,
+        "the repository check must run between the reviewed-HEAD guards"
+    );
+    assert_eq!(
+        dispatcher
+            .matches("python3 scripts/hooks/pre_push_head_guard.py")
+            .count(),
+        2,
+        "pre-push must guard the reviewed HEAD both before and after repository checks"
+    );
+    Ok(())
+}
+
+#[test]
+fn pre_push_captures_reviewed_head_and_retains_push_updates()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_, dispatcher) = pre_push_sources()?;
+    let updates_capture = dispatcher
+        .find("cat >\"${updates}\"")
+        .ok_or("push updates are not retained by pre-push dispatcher")?;
+    let reviewed_head_capture = dispatcher
+        .find("reviewed_head=\"$(git rev-parse HEAD)\"")
+        .ok_or("reviewed HEAD is not captured by pre-push dispatcher")?;
     let issue_contract = dispatcher
         .find("python3 scripts/hooks/verify_push_issue.py")
         .ok_or("Issue contract is missing from pre-push dispatcher")?;
     assert!(
-        repository_check < issue_contract,
-        "repository-specific check must run before the Issue contract"
+        updates_capture < reviewed_head_capture && reviewed_head_capture < issue_contract,
+        "push updates and reviewed HEAD must be captured before validation"
+    );
+    assert_eq!(
+        dispatcher
+            .matches("reviewed_head=\"$(git rev-parse HEAD)\"")
+            .count(),
+        1,
+        "the reviewed HEAD must be captured exactly once for both guards"
+    );
+    assert_eq!(
+        dispatcher.matches("<\"${updates}\"").count(),
+        4,
+        "both Issue dispatch branches and both HEAD guards must read retained push updates"
     );
     Ok(())
+}
+
+fn pre_push_sources() -> Result<(String, String), Box<dyn std::error::Error>> {
+    let root = workspace_root()?;
+    let lefthook = std::fs::read_to_string(root.join("lefthook.yml"))?;
+    let dispatcher = std::fs::read_to_string(root.join("scripts/hooks/pre-push.sh"))?;
+    Ok((lefthook, dispatcher))
 }
 
 #[test]

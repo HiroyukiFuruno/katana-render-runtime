@@ -29,7 +29,7 @@ cleanup() {
 trap cleanup EXIT
 
 cat >"${updates}"
-just check
+reviewed_head="$(git rev-parse HEAD)"
 if (($# > 0)); then
   verifier_arguments=(--remote "$1")
   if (($# > 1)); then
@@ -39,3 +39,7 @@ if (($# > 0)); then
 else
   python3 scripts/hooks/verify_push_issue.py <"${updates}"
 fi
+python3 scripts/hooks/pre_push_head_guard.py "${reviewed_head}" <"${updates}"
+just check
+# 品質確認中にcheckoutが切り替わっていないことを確かめ、検証済みHEADとの対応を保つ。
+python3 scripts/hooks/pre_push_head_guard.py "${reviewed_head}" <"${updates}"
