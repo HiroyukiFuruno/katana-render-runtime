@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -92,7 +93,11 @@ def valid_comment() -> dict[str, object]:
             "just_asset_url": "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
             "just_asset_sha256": "a" * 64, "just_binary_sha256": "b" * 64,
             "command_binding": json.dumps({
-                "path": "/trusted/just:/trusted/rust:/trusted/java:/trusted/python:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+                "path": os.pathsep.join((
+                    "/tmp/krr-local-macos-inputs-fixture/trusted-commands",
+                    *EVIDENCE.SYSTEM_COMMAND_PATH,
+                )),
+                "path_policy": EVIDENCE.COMMAND_PATH_POLICY,
                 "executables": {
                     name: [
                         "/tmp/krr-local-macos-inputs-fixture/trusted-just/just" if name == "just" else f"/trusted/{name}",
@@ -207,6 +212,25 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
             fetch=snapshots(good), now=NOW, expected_workflow_digest="f" * 64,
         ))
+
+    def test_rejects_legacy_or_broad_command_path_receipts(self) -> None:
+        good = valid_comment()
+        payload = json.loads(good["body"].split("\n", 1)[1])
+        command = json.loads(payload["tools"]["command_binding"])
+        for changed_binding in (
+            {key: value for key, value in command.items() if key != "path_policy"},
+            {**command, "path_policy": "legacy-broad-install-directories"},
+            {**command, "path": command["path"].replace("/usr/bin", "/opt/homebrew/bin:/usr/bin")},
+            {**command, "path": command["path"] + ":/opt/homebrew/bin"},
+        ):
+            tools = {**payload["tools"], "command_binding": json.dumps(changed_binding)}
+            changed_payload = {**payload, "tools": tools}
+            comment = {**good, "body": EVIDENCE.MARKER + "\n" + json.dumps(changed_payload)}
+            with self.subTest(binding=changed_binding):
+                self.assertFalse(EVIDENCE.verify_from_api(
+                    REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                    fetch=snapshots(comment), now=NOW, expected_workflow_digest="d" * 64,
+                ))
 
     def test_rejects_java_vendor_other_than_temurin_and_java_other_than_21(self) -> None:
         good = valid_comment()
@@ -941,7 +965,14 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{output}'\n", encoding="utf-8")
                 path.chmod(0o755)
             environment = {**os.environ, "PATH": f"{directory}{os.pathsep}{os.environ['PATH']}"}
-            selected = EVIDENCE.cargo_component_versions(environment)
+            binding = EVIDENCE.CommandBinding("/bin", {})
+            just = EVIDENCE.JustBinding(
+                Path("/trusted/just"), "just 1.40.0", "1.40.0", "just-1.40.0-aarch64-apple-darwin.tar.gz",
+                "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
+                "a" * 64, "b" * 64,
+            )
+            with patch.object(EVIDENCE, "assert_command_binding"):
+                selected = EVIDENCE.cargo_component_versions(environment, binding, just)
             self.assertEqual(selected["clippy"], "clippy 0.1.98 (stale 2026-08-20)")
             self.assertEqual(selected["rustfmt"], "rustfmt 1.9.0-stable (stale 2026-08-20)")
             with self.assertRaises(EVIDENCE.EvidenceError):
@@ -1340,12 +1371,147 @@ class TrustedJustTest(unittest.TestCase):
             fetch=snapshots(changed), now=NOW, expected_workflow_digest="d" * 64,
         ))
 
+    @unittest.skipUnless(os.name == "posix", "POSIX production dispatcher fixture is required")
+    def test_production_dispatcher_binds_just_and_blocks_real_grep_and_shasum_shadows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            inputs = root / "krr-local-macos-inputs-fixture"
+            just_dir = inputs / "trusted-just"
+            just_dir.mkdir(parents=True)
+            just_path = just_dir / "just"
+            marker = root / "nested-cargo-ran"
+            just_path.write_text(f"#!/bin/sh\ncargo nested-recipe\n", encoding="utf-8")
+            just_path.chmod(0o755)
+            just_sha = EVIDENCE.sha256_bytes(just_path.read_bytes())
+            just = EVIDENCE.JustBinding(
+                just_path, "just 1.40.0", "1.40.0", "just-1.40.0-aarch64-apple-darwin.tar.gz",
+                "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
+                "a" * 64, just_sha,
+            )
+
+            account = root / "account"
+            rustup_home = account / ".rustup"
+            rust_bin = rustup_home / "toolchains/stable-aarch64-apple-darwin/bin"
+            rust_bin.mkdir(parents=True)
+            rustup = account / ".cargo/bin/rustup"
+            rustup.parent.mkdir(parents=True)
+            rustup.write_text(
+                "#!/bin/sh\nfor name do selected=$name; done\nprintf '%s\\n' '" + str(rust_bin) + "/'\"$selected\"\n",
+                encoding="utf-8",
+            )
+            rustup.chmod(0o755)
+            for name in ("cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt"):
+                tool = rust_bin / name
+                tool.write_text(
+                    f"#!/bin/sh\nprintf '%s\\n' 'rust-{name}' >> '{marker}'\n", encoding="utf-8",
+                )
+                tool.chmod(0o755)
+
+            homebrew = root / "opt-homebrew"
+            brew_bin = homebrew / "bin"
+            brew_bin.mkdir(parents=True)
+            for name in ("brew", "bun", "dot", "bash"):
+                tool = brew_bin / name
+                tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                tool.chmod(0o755)
+            java_root = root / "java-installations"
+            java_home = java_root / "temurin-21.jdk/Contents/Home"
+            java = java_home / "bin/java"
+            java.parent.mkdir(parents=True)
+            java.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            java.chmod(0o755)
+            python_tool = root / "python/bin/python3"
+            python_tool.parent.mkdir(parents=True)
+            python_tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            python_tool.chmod(0o755)
+            os_bin = root / "os-tools"
+            os_bin.mkdir()
+            system_tools = {}
+            for name in ("git", "sw_vers", "uname"):
+                tool = os_bin / name
+                tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                tool.chmod(0o755)
+                system_tools[Path("/usr/bin") / name] = tool
+
+            original_trusted = EVIDENCE.trusted_executable
+
+            def select_executable(path, roots):
+                candidate = Path(path)
+                if candidate in system_tools:
+                    return system_tools[candidate].resolve(strict=True)
+                if candidate == Path(sys.executable):
+                    return python_tool.resolve(strict=True)
+                return original_trusted(candidate, roots)
+
+            original_run = subprocess.run
+
+            def select_java_home(arguments, **kwargs):
+                if tuple(arguments) == ("/usr/libexec/java_home", "-v", "21"):
+                    return subprocess.CompletedProcess(arguments, 0, stdout=str(java_home) + "\n", stderr="")
+                return original_run(arguments, **kwargs)
+
+            with patch.object(EVIDENCE, "account_home", return_value=account), patch.object(
+                EVIDENCE, "HOMEBREW_ROOT", homebrew,
+            ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
+                EVIDENCE, "trusted_executable", side_effect=select_executable,
+            ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
+                binding = EVIDENCE.command_binding({"RUSTUP_HOME": str(rustup_home)}, just)
+
+            environment = {"PATH": binding.path}
+            EVIDENCE.assert_command_binding(binding, just)
+            nested = subprocess.run(
+                EVIDENCE.bind_command(("just", "nested-recipe"), just),
+                env=environment, text=True, capture_output=True, check=False,
+            )
+            EVIDENCE.assert_command_binding(binding, just)
+            self.assertEqual(nested.returncode, 0, nested.stdout + nested.stderr)
+            self.assertEqual(marker.read_text().strip(), "rust-cargo")
+
+            shadow_markers = root / "shadow-executed"
+            (brew_bin / "grep").write_text(
+                f"#!/bin/sh\nprintf '%s\\n' grep >> '{shadow_markers}'\nexit 1\n", encoding="utf-8",
+            )
+            (brew_bin / "grep").chmod(0o755)
+            (brew_bin / "shasum").write_text(
+                f"#!/bin/sh\nprintf '%s\\n' shasum >> '{shadow_markers}'\nexit 0\n", encoding="utf-8",
+            )
+            (brew_bin / "shasum").chmod(0o755)
+            grep_check = ("/bin/sh", "-c", "if printf 'forbidden egui\\n' | grep -E 'forbidden[[:space:]]+egui'; then exit 1; fi")
+            checksums = root / "bad.sha256"
+            (root / "prohibited.txt").write_text("wrong checksum\n", encoding="utf-8")
+            checksums.write_text("0" * 64 + "  prohibited.txt\n", encoding="utf-8")
+            checksum_check = ("shasum", "-a", "256", "-c", str(checksums))
+            old_environment = {"PATH": os.pathsep.join((str(brew_bin), *EVIDENCE.SYSTEM_COMMAND_PATH))}
+            for command in (grep_check, checksum_check):
+                old_result = subprocess.run(command, cwd=root, env=old_environment, text=True, capture_output=True)
+                self.assertEqual(old_result.returncode, 0, old_result.stdout + old_result.stderr)
+            self.assertEqual(shadow_markers.read_text().splitlines(), ["grep", "shasum"])
+            shadow_markers.unlink()
+
+            for command in (grep_check, checksum_check):
+                EVIDENCE.assert_command_binding(binding, just)
+                safe_result = subprocess.run(command, cwd=root, env=environment, text=True, capture_output=True)
+                EVIDENCE.assert_command_binding(binding, just)
+                self.assertNotEqual(safe_result.returncode, 0, safe_result.stdout + safe_result.stderr)
+            self.assertFalse(shadow_markers.exists())
+            EVIDENCE.assert_command_binding(binding, just)
+
+            commands_dir = Path(binding.path.split(os.pathsep)[0])
+            (commands_dir / "grep").symlink_to(brew_bin / "grep")
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "directory changed"):
+                EVIDENCE.assert_command_binding(binding, just)
+
     def test_descendant_tools_resolve_from_one_binding_and_ignore_parent_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            trusted = root / "trusted"
+            inputs = root / "krr-local-macos-inputs-fixture"
+            trusted = inputs / "trusted-tools"
+            trusted_commands = inputs / "trusted-commands"
+            trusted_just = inputs / "trusted-just"
             hostile = root / "hostile"
-            trusted.mkdir()
+            trusted.mkdir(parents=True)
+            trusted_commands.mkdir(mode=0o700)
+            trusted_just.mkdir()
             hostile.mkdir()
             names = (
                 "just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "bun",
@@ -1367,27 +1533,69 @@ class TrustedJustTest(unittest.TestCase):
                     f"#!/bin/sh\nprintf hostile > '{hostile_markers / name}'\nexit 0\n", encoding="utf-8",
                 )
                 hostile_binary.chmod(0o755)
+                if name == "just":
+                    just_binary = trusted_just / "just"
+                    shutil.copyfile(trusted_binary, just_binary)
+                    just_binary.chmod(0o755)
+                    trusted_binary = just_binary
                 entries[name] = (str(trusted_binary), EVIDENCE.sha256_bytes(trusted_binary.read_bytes()))
+                if name != "source_git":
+                    (trusted_commands / name).symlink_to(trusted_binary)
             just_path = Path(entries["just"][0])
             just = EVIDENCE.JustBinding(
                 just_path, "just 1.40.0", "1.40.0", "just-1.40.0-aarch64-apple-darwin.tar.gz",
                 "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
                 "a" * 64, entries["just"][1],
             )
-            binding = EVIDENCE.CommandBinding(str(trusted), entries)
             source_git = Path("/usr/bin/git").resolve(strict=True)
             entries["source_git"] = (str(source_git), EVIDENCE.sha256_bytes(source_git.read_bytes()))
-            binding = EVIDENCE.CommandBinding(str(trusted), entries)
+            path = os.pathsep.join((str(trusted_commands), *EVIDENCE.SYSTEM_COMMAND_PATH))
+            binding = EVIDENCE.CommandBinding(path, entries)
             EVIDENCE.assert_command_binding(binding, just)
-            environment = {"PATH": str(trusted), "HOSTILE_PARENT_PATH": str(hostile)}
+            environment = {"PATH": path, "HOSTILE_PARENT_PATH": str(hostile)}
             result = subprocess.run(
                 ("/bin/sh", "-c", "for tool in cargo rustc bun python3 bash java dot git; do \"$tool\" nested; done"),
                 env=environment, text=True, capture_output=True, check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual({path.name for path in trusted_markers.iterdir()}, set(names) - {"just", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "source_git", "sw_vers", "uname"})
+            self.assertEqual({path.name for path in trusted_markers.iterdir()}, {"cargo", "rustc", "bun", "python3", "bash", "java", "dot", "git"})
             self.assertFalse(any(hostile_markers.iterdir()))
             EVIDENCE.assert_command_binding(binding, just)
+
+            injected = trusted_commands / "grep"
+            injected.symlink_to(hostile / "grep")
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "directory changed"):
+                EVIDENCE.assert_command_binding(binding, just)
+            injected.unlink()
+            (trusted_commands / "cargo").unlink()
+            (trusted_commands / "cargo").symlink_to(trusted / "rustc")
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "alias changed"):
+                EVIDENCE.assert_command_binding(binding, just)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX child shell fixture is required")
+    def test_excluded_homebrew_shadows_cannot_turn_failing_child_check_into_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            commands = root / "trusted-commands"
+            commands.mkdir(mode=0o700)
+            homebrew = root / "opt-homebrew-bin"
+            homebrew.mkdir()
+            markers = root / "shadow-executed"
+            for name in ("grep", "shasum"):
+                shadow = homebrew / name
+                shadow.write_text(
+                    f"#!/bin/sh\nprintf '{name}\\n' >> '{markers}'\nexit 0\n", encoding="utf-8",
+                )
+                shadow.chmod(0o755)
+            input_file = root / "input.txt"
+            input_file.write_text("actual content\n", encoding="utf-8")
+            environment = {"PATH": os.pathsep.join((str(commands), *EVIDENCE.SYSTEM_COMMAND_PATH))}
+            result = subprocess.run(
+                ("/bin/sh", "-c", f"grep required-token '{input_file}' && shasum -a 256 '{input_file}'"),
+                env=environment, text=True, capture_output=True, check=False,
+            )
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(markers.exists())
 
 
 if __name__ == "__main__":

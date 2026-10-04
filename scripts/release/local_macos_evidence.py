@@ -84,6 +84,10 @@ SCOPE_PARAMETERS = {
     "TEST_THREADS": "1",
 }
 JAVA_VENDOR = "Eclipse Adoptium"
+COMMAND_PATH_POLICY = "isolated-bound-symlinks-plus-os-system-directories-v1"
+SYSTEM_COMMAND_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
+HOMEBREW_ROOT = Path("/opt/homebrew")
+JAVA_INSTALL_ROOT = Path("/Library/Java/JavaVirtualMachines")
 PREPARATION_COMMANDS = {"bun-install", "graphviz-install", "plantuml-install"}
 RUST_STABLE_MANIFEST_URL = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
 MAX_RUST_STABLE_MANIFEST_BYTES = 8 * 1024 * 1024
@@ -137,7 +141,10 @@ class CommandBinding(NamedTuple):
     executables: dict[str, tuple[str, str]]
 
     def proof_value(self) -> str:
-        return canonical({"path": self.path, "executables": self.executables}).decode("utf-8")
+        return canonical({
+            "path": self.path, "path_policy": COMMAND_PATH_POLICY,
+            "executables": self.executables,
+        }).decode("utf-8")
 
 
 class EvidenceError(Exception):
@@ -381,10 +388,29 @@ def trusted_executable(path: Path, roots: tuple[Path, ...]) -> Path:
     return resolved
 
 
+def assert_private_command_directory(directory: Path, expected_aliases: set[str]) -> None:
+    try:
+        metadata = directory.lstat()
+        actual_aliases = {entry.name for entry in directory.iterdir()}
+        if (directory.is_symlink() or not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o700
+                or actual_aliases != expected_aliases):
+            raise EvidenceError("isolated trusted command directory changed")
+    except OSError as exc:
+        raise EvidenceError("isolated trusted command directory is unavailable") from exc
+
+
 def command_binding(environment: dict[str, str], just_binding: JustBinding) -> CommandBinding:
     home = account_home()
-    brew_root = Path("/opt/homebrew").resolve(strict=True)
+    brew_root = HOMEBREW_ROOT.resolve(strict=True)
     system_roots = (Path("/usr/bin"), Path("/bin"), Path("/usr/sbin"), Path("/sbin"))
+    commands_dir = just_binding.path.parent.parent / "trusted-commands"
+    try:
+        commands_dir.mkdir(mode=0o700)
+    except OSError as exc:
+        raise EvidenceError("isolated trusted command directory could not be created") from exc
+    assert_private_command_directory(commands_dir, set())
     python_dir = Path(sys.executable).resolve(strict=True).parent
     rustup_home = Path(environment["RUSTUP_HOME"]).resolve(strict=True)
     default_rustup_home = (home / ".rustup").resolve()
@@ -398,10 +424,12 @@ def command_binding(environment: dict[str, str], just_binding: JustBinding) -> C
     rust_root = rust_root.resolve(strict=True)
     rust_paths = {}
     for name in ("cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt"):
+        assert_private_command_directory(commands_dir, set())
         selected = Path(subprocess.run(
             (str(rustup), "which", "--toolchain", "stable-aarch64-apple-darwin", name),
             cwd=ROOT, env=bootstrap_env, text=True, capture_output=True, check=True,
         ).stdout.strip())
+        assert_private_command_directory(commands_dir, set())
         rust_paths[name] = trusted_executable(selected, (rust_root,))
     rust_bin = rust_paths["rustc"].parent
     if any(path.parent != rust_bin for path in rust_paths.values()):
@@ -412,23 +440,20 @@ def command_binding(environment: dict[str, str], just_binding: JustBinding) -> C
     dot_bin = trusted_executable(brew_root / "bin/dot", (brew_root,))
     bash_bin = trusted_executable(brew_root / "bin/bash", (brew_root,))
     python_bin = trusted_executable(Path(sys.executable), (python_dir,))
+    assert_private_command_directory(commands_dir, set())
     java_home_result = subprocess.run(
         ("/usr/libexec/java_home", "-v", "21"), cwd=ROOT, env=bootstrap_env,
         text=True, capture_output=True, check=True,
     )
+    assert_private_command_directory(commands_dir, set())
     java_home = Path(java_home_result.stdout.strip()).resolve(strict=True)
-    java_root = Path("/Library/Java/JavaVirtualMachines").resolve(strict=True)
+    java_root = JAVA_INSTALL_ROOT.resolve(strict=True)
     if java_root not in java_home.parents:
         raise EvidenceError("selected Java installation is outside the trusted system root")
     java_bin = trusted_executable(java_home / "bin/java", (java_root,))
 
-    paths = [str(just_binding.path.parent), str(rust_bin), str(java_home / "bin"), str(python_dir),
-             str(brew_root / "bin"), *(str(root) for root in system_roots)]
-    command_path = os.pathsep.join(dict.fromkeys(paths))
-    git_candidate = shutil.which("git", path=command_path)
-    if git_candidate is None:
-        raise EvidenceError("trusted Git executable is unavailable")
-    git_bin = trusted_executable(Path(git_candidate), (brew_root, *system_roots))
+    # WHY: PATHへbin directoryを追加すると、grepなどの子commandを無関係な実行ファイルがshadowできる。
+    git_bin = trusted_executable(Path("/usr/bin/git"), system_roots)
     source_git = trusted_executable(Path("/usr/bin/git"), system_roots)
     sw_vers_bin = trusted_executable(Path("/usr/bin/sw_vers"), system_roots)
     uname_bin = trusted_executable(Path("/usr/bin/uname"), system_roots)
@@ -450,12 +475,21 @@ def command_binding(environment: dict[str, str], just_binding: JustBinding) -> C
         "sw_vers": (str(sw_vers_bin), sha256_bytes(sw_vers_bin.read_bytes())),
         "uname": (str(uname_bin), sha256_bytes(uname_bin.read_bytes())),
     }
-    return CommandBinding(command_path, executables)
+    try:
+        for name, (target, _digest) in executables.items():
+            if name != "source_git":
+                (commands_dir / name).symlink_to(target)
+    except OSError as exc:
+        raise EvidenceError("isolated trusted command aliases could not be created") from exc
+    command_path = os.pathsep.join((str(commands_dir), *SYSTEM_COMMAND_PATH))
+    binding = CommandBinding(command_path, executables)
+    assert_command_binding(binding, just_binding)
+    return binding
 
 
 def command_environment(
     cargo_target_dir: Path, isolated_cargo_home: Path, bun_cache_dir: Path,
-    binding: CommandBinding | None = None,
+    binding: CommandBinding | None = None, just_binding: JustBinding | None = None,
 ) -> dict[str, str]:
     parent = os.environ
     unsupported = {
@@ -523,12 +557,16 @@ def command_environment(
     if binding is None:
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     else:
+        if just_binding is None:
+            raise EvidenceError("trusted just binding is required for the child command environment")
+        assert_command_binding(binding, just_binding)
         environment["PATH"] = binding.path
         environment["JAVA_HOME"] = str(Path(binding.executables["java"][0]).parent.parent)
         java_version = subprocess.run(
             (binding.executables["java"][0], "-XshowSettings:properties", "-version"),
             cwd=ROOT, env=environment, text=True, capture_output=True, check=True,
         )
+        assert_command_binding(binding, just_binding)
         java_home = java_home_from_settings(java_version.stdout + java_version.stderr)
         if java_home != environment["JAVA_HOME"]:
             raise EvidenceError("JAVA_HOME does not identify the selected runtime")
@@ -740,7 +778,7 @@ def prepare_command_environment(
         bootstrap = command_environment(cargo_target_dir, cargo_home, bun_cache_dir)
         just_binding = download_trusted_just(token, isolated_inputs_dir, bootstrap)
         binding = command_binding(bootstrap, just_binding)
-        environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir, binding)
+        environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir, binding, just_binding)
         return bootstrap, just_binding, binding, environment
     except BaseException:
         shutil.rmtree(isolated_inputs_dir, ignore_errors=True)
@@ -761,13 +799,28 @@ def assert_trusted_just(binding: JustBinding) -> None:
 
 def assert_command_binding(binding: CommandBinding, just_binding: JustBinding) -> None:
     assert_trusted_just(just_binding)
+    expected_directory = just_binding.path.parent.parent / "trusted-commands"
+    expected_path = os.pathsep.join((str(expected_directory), *SYSTEM_COMMAND_PATH))
+    if binding.path != expected_path:
+        raise EvidenceError("trusted command PATH policy changed")
+    assert_private_command_directory(expected_directory, set(binding.executables) - {"source_git"})
     for name, (raw_path, expected_hash) in binding.executables.items():
         path = Path(raw_path)
         try:
-            effective = str(path) if name == "source_git" else shutil.which(name, path=binding.path)
+            if name == "source_git":
+                effective = str(path)
+            else:
+                alias = expected_directory / name
+                alias_info = alias.lstat()
+                effective = shutil.which(name, path=binding.path)
+                if (not stat.S_ISLNK(alias_info.st_mode)
+                        or alias.resolve(strict=True) != path):
+                    raise EvidenceError(f"trusted command alias changed: {name}")
             if (path.resolve(strict=True) != path or not stat.S_ISREG(path.stat().st_mode)
                     or sha256_bytes(path.read_bytes()) != expected_hash
-                    or effective is None or Path(effective).resolve(strict=True) != path):
+                    or effective is None
+                    or (name != "source_git" and Path(effective) != expected_directory / name)
+                    or Path(effective).resolve(strict=True) != path):
                 raise EvidenceError(f"trusted command executable changed: {name}")
         except OSError as exc:
             raise EvidenceError(f"trusted command executable is unavailable: {name}") from exc
@@ -780,15 +833,19 @@ def bind_command(argv: tuple[str, ...], binding: JustBinding) -> list[str]:
     return [str(binding.path), *argv[1:]]
 
 
-def cargo_component_versions(environment: dict[str, str]) -> dict[str, str]:
+def cargo_component_versions(
+    environment: dict[str, str], binding: CommandBinding, just_binding: JustBinding,
+) -> dict[str, str]:
     found: dict[str, str] = {}
     for name, command in (
         ("clippy", ("cargo", "clippy", "--version")),
         ("rustfmt", ("cargo", "fmt", "--version")),
     ):
+        assert_command_binding(binding, just_binding)
         result = subprocess.run(
             command, cwd=ROOT, env=environment, text=True, capture_output=True, check=True,
         )
+        assert_command_binding(binding, just_binding)
         versions = (result.stdout + result.stderr).strip().splitlines()
         if not versions or not versions[0].strip():
             raise EvidenceError(f"tool version is empty: {name}")
@@ -801,7 +858,7 @@ def tool_versions(
     binding: CommandBinding,
 ) -> dict[str, str]:
     assert_command_binding(binding, just_binding)
-    environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir, binding)
+    environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir, binding, just_binding)
     commands = {
         "macos": ("/usr/bin/sw_vers", "-productVersion"),
         "architecture": ("/usr/bin/uname", "-m"),
@@ -815,15 +872,16 @@ def tool_versions(
     }
     found: dict[str, str] = {}
     for name, command in commands.items():
+        assert_command_binding(binding, just_binding)
         result = subprocess.run(
             command, cwd=ROOT, env=environment, text=True, capture_output=True, check=True,
         )
+        assert_command_binding(binding, just_binding)
         value = (result.stdout + result.stderr).strip().splitlines()
         if not value or not value[0].strip():
             raise EvidenceError(f"tool version is empty: {name}")
         found[name] = value[0].strip()
-    found.update(cargo_component_versions(environment))
-    assert_trusted_just(just_binding)
+    found.update(cargo_component_versions(environment, binding, just_binding))
     found.update({
         "just_path": str(just_binding.path),
         "just_release": just_binding.release_tag,
@@ -841,10 +899,12 @@ def tool_versions(
         raise EvidenceError("local proof requires macOS")
     if not is_macos_15(found["macos"]):
         raise EvidenceError("local proof requires macOS 15, matching the hosted macOS runner")
+    assert_command_binding(binding, just_binding)
     rust_verbose = subprocess.run(
         ("rustc", "-vV"), cwd=ROOT, env=environment,
         text=True, capture_output=True, check=True,
     ).stdout
+    assert_command_binding(binding, just_binding)
     host_target = re.search(r"(?m)^host: (\S+)$", rust_verbose)
     if host_target is None or host_target.group(1) != SCOPE_PARAMETERS["CARGO_BUILD_TARGET"]:
         raise EvidenceError("local Rust host target is not native Apple Silicon macOS")
@@ -854,6 +914,7 @@ def tool_versions(
         (str(Path(environment["JAVA_HOME"]) / "bin/java"), "-XshowSettings:properties", "-version"),
         cwd=ROOT, env=environment, text=True, capture_output=True, check=True,
     )
+    assert_command_binding(binding, just_binding)
     found["java_vendor"] = java_vendor_from_settings(java_properties.stdout + java_properties.stderr)
     validate_pinned_tools(found)
     return found
@@ -900,8 +961,9 @@ def validate_pinned_tools(versions: Any) -> None:
         "just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "bun",
         "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname",
     }
-    if (not isinstance(command, dict) or set(command) != {"path", "executables"}
+    if (not isinstance(command, dict) or set(command) != {"path", "path_policy", "executables"}
             or not isinstance(command.get("path"), str) or not command["path"]
+            or command.get("path_policy") != COMMAND_PATH_POLICY
             or not isinstance(command.get("executables"), dict)
             or set(command["executables"]) != required_executables):
         raise EvidenceError("shared command path binding is missing or invalid")
@@ -911,6 +973,10 @@ def validate_pinned_tools(versions: Any) -> None:
             raise EvidenceError(f"shared command executable identity is invalid: {name}")
     if command["executables"]["just"][0] != just_path:
         raise EvidenceError("shared command binding does not identify the authenticated just executable")
+    expected_commands = Path(just_path).parent.parent / "trusted-commands"
+    expected_path = os.pathsep.join((str(expected_commands), *SYSTEM_COMMAND_PATH))
+    if command["path"] != expected_path:
+        raise EvidenceError("shared command PATH does not follow the isolated policy")
 
 
 def validate_just_release_metadata(value: Any) -> dict[str, str]:
