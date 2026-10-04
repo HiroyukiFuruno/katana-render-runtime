@@ -56,3 +56,7 @@ fn preferred_family(face: &fontdb::FaceInfo) -> &(String, fontdb::Language) {
         .find(|family| family.1 == fontdb::Language::English_UnitedStates)
         .unwrap_or(&face.families[0])
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_usvg_cmap_selector_attribute_tests.rs"]
+mod attribute_tests;
