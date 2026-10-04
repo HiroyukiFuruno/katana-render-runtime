@@ -437,8 +437,35 @@ def command_binding(environment: dict[str, str], just_binding: JustBinding) -> C
 
     brew_bin = trusted_executable(brew_root / "bin/brew", (brew_root,))
     bun_bin = trusted_executable(brew_root / "bin/bun", (brew_root,))
-    dot_bin = trusted_executable(brew_root / "bin/dot", (brew_root,))
-    bash_bin = trusted_executable(brew_root / "bin/bash", (brew_root,))
+    dot_candidate = brew_root / "bin/dot"
+    try:
+        dot_candidate.lstat()
+    except FileNotFoundError:
+        brew_environment = dict(environment)
+        brew_environment["PATH"] = os.pathsep.join(SYSTEM_COMMAND_PATH)
+        # WHY: install中の自動更新でBrewの実体が変わると、bootstrap前後のhash拘束が失敗するため無効にする。
+        brew_environment["HOMEBREW_NO_AUTO_UPDATE"] = "1"
+        assert_private_command_directory(commands_dir, set())
+        brew_sha256_before = sha256_bytes(brew_bin.read_bytes())
+        try:
+            install_result = subprocess.run(
+                (str(brew_bin), "install", "graphviz"), cwd=ROOT, env=brew_environment,
+                text=True, capture_output=True, check=False,
+            )
+        except OSError as exc:
+            raise EvidenceError("Homebrew graphviz bootstrap could not run") from exc
+        finally:
+            assert_private_command_directory(commands_dir, set())
+            brew_after = trusted_executable(brew_bin, (brew_root,))
+            if (brew_after != brew_bin
+                    or sha256_bytes(brew_after.read_bytes()) != brew_sha256_before):
+                raise EvidenceError("Homebrew changed during graphviz bootstrap")
+        if install_result.returncode != 0:
+            raise EvidenceError("Homebrew graphviz bootstrap failed")
+        dot_bin = trusted_executable(dot_candidate, (brew_root,))
+    else:
+        dot_bin = trusted_executable(dot_candidate, (brew_root,))
+    bash_bin = trusted_executable(Path("/bin/bash"), system_roots)
     python_bin = trusted_executable(Path(sys.executable), (python_dir,))
     assert_private_command_directory(commands_dir, set())
     java_home_result = subprocess.run(

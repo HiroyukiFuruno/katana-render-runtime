@@ -1410,7 +1410,20 @@ class TrustedJustTest(unittest.TestCase):
             homebrew = root / "opt-homebrew"
             brew_bin = homebrew / "bin"
             brew_bin.mkdir(parents=True)
-            for name in ("brew", "bun", "dot", "bash"):
+            install_marker = root / "brew-install-env"
+            dot_path = brew_bin / "dot"
+            dot_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            dot_path.chmod(0o755)
+            brew_tool = brew_bin / "brew"
+            brew_tool.write_text(
+                "#!/bin/sh\n"
+                f"printf '%s\\n' \"$PATH\" \"$HOMEBREW_NO_AUTO_UPDATE\" \"$*\" > '{install_marker}'\n"
+                f"printf '%s\\n' '#!/bin/sh' 'exit 0' > '{dot_path}'\n"
+                f"/bin/chmod 755 '{dot_path}'\n",
+                encoding="utf-8",
+            )
+            brew_tool.chmod(0o755)
+            for name in ("bun",):
                 tool = brew_bin / name
                 tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
                 tool.chmod(0o755)
@@ -1420,6 +1433,7 @@ class TrustedJustTest(unittest.TestCase):
             java.parent.mkdir(parents=True)
             java.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             java.chmod(0o755)
+            parent_environment = {"RUSTUP_HOME": str(rustup_home), "PATH": str(brew_bin)}
             python_tool = root / "python/bin/python3"
             python_tool.parent.mkdir(parents=True)
             python_tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -1432,6 +1446,7 @@ class TrustedJustTest(unittest.TestCase):
                 tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
                 tool.chmod(0o755)
                 system_tools[Path("/usr/bin") / name] = tool
+            system_tools[Path("/bin/bash")] = Path("/bin/bash").resolve(strict=True)
 
             original_trusted = EVIDENCE.trusted_executable
 
@@ -1455,8 +1470,10 @@ class TrustedJustTest(unittest.TestCase):
             ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
-                binding = EVIDENCE.command_binding({"RUSTUP_HOME": str(rustup_home)}, just)
+                binding = EVIDENCE.command_binding(parent_environment, just)
 
+            self.assertFalse(install_marker.exists(), "existing Graphviz must not trigger Homebrew install")
+            self.assertEqual(binding.executables["bash"][0], str(Path("/bin/bash").resolve(strict=True)))
             environment = {"PATH": binding.path}
             EVIDENCE.assert_command_binding(binding, just)
             nested = subprocess.run(
@@ -1466,6 +1483,13 @@ class TrustedJustTest(unittest.TestCase):
             EVIDENCE.assert_command_binding(binding, just)
             self.assertEqual(nested.returncode, 0, nested.stdout + nested.stderr)
             self.assertEqual(marker.read_text().strip(), "rust-cargo")
+            system_bash = subprocess.run(
+                (binding.executables["bash"][0], "-c", "printf system-bash"),
+                env=environment, text=True, capture_output=True, check=False,
+            )
+            EVIDENCE.assert_command_binding(binding, just)
+            self.assertEqual(system_bash.returncode, 0, system_bash.stderr)
+            self.assertEqual(system_bash.stdout, "system-bash")
 
             shadow_markers = root / "shadow-executed"
             (brew_bin / "grep").write_text(
@@ -1495,6 +1519,96 @@ class TrustedJustTest(unittest.TestCase):
                 self.assertNotEqual(safe_result.returncode, 0, safe_result.stdout + safe_result.stderr)
             self.assertFalse(shadow_markers.exists())
             EVIDENCE.assert_command_binding(binding, just)
+
+            def fixture_just(name: str) -> EVIDENCE.JustBinding:
+                directory = root / name / "trusted-just"
+                directory.mkdir(parents=True)
+                executable = directory / "just"
+                executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                executable.chmod(0o755)
+                return EVIDENCE.JustBinding(
+                    executable, "just 1.40.0", "1.40.0", "just-1.40.0-aarch64-apple-darwin.tar.gz",
+                    "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
+                    "a" * 64, EVIDENCE.sha256_bytes(executable.read_bytes()),
+                )
+
+            dot_path.unlink()
+            provisioned_just = fixture_just("missing-dot-inputs")
+            with patch.object(EVIDENCE, "account_home", return_value=account), patch.object(
+                EVIDENCE, "HOMEBREW_ROOT", homebrew,
+            ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
+                EVIDENCE, "trusted_executable", side_effect=select_executable,
+            ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
+                provisioned = EVIDENCE.command_binding(parent_environment, provisioned_just)
+            self.assertEqual(install_marker.read_text().splitlines(), [
+                os.pathsep.join(EVIDENCE.SYSTEM_COMMAND_PATH), "1", "install graphviz",
+            ])
+            self.assertEqual(
+                Path(provisioned.executables["dot"][0]), dot_path.resolve(strict=True),
+            )
+            EVIDENCE.assert_command_binding(provisioned, provisioned_just)
+
+            install_before_invalid = install_marker.read_bytes()
+            dot_path.unlink()
+            outside_dot = root / "outside-dot"
+            outside_dot.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            outside_dot.chmod(0o755)
+            dot_path.symlink_to(outside_dot)
+            invalid_just = fixture_just("invalid-dot-inputs")
+            with patch.object(EVIDENCE, "account_home", return_value=account), patch.object(
+                EVIDENCE, "HOMEBREW_ROOT", homebrew,
+            ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
+                EVIDENCE, "trusted_executable", side_effect=select_executable,
+            ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
+                with self.assertRaises(EVIDENCE.EvidenceError):
+                    EVIDENCE.command_binding(parent_environment, invalid_just)
+            self.assertEqual(install_marker.read_bytes(), install_before_invalid)
+
+            dot_path.unlink()
+            dot_path.symlink_to(root / "missing-dot-target")
+            broken_just = fixture_just("broken-dot-inputs")
+            with patch.object(EVIDENCE, "account_home", return_value=account), patch.object(
+                EVIDENCE, "HOMEBREW_ROOT", homebrew,
+            ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
+                EVIDENCE, "trusted_executable", side_effect=select_executable,
+            ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
+                with self.assertRaises(EVIDENCE.EvidenceError):
+                    EVIDENCE.command_binding(parent_environment, broken_just)
+            self.assertEqual(install_marker.read_bytes(), install_before_invalid)
+
+            dot_path.unlink()
+            dot_failure_just = fixture_just("dot-install-failure-inputs")
+            brew_tool.write_text("#!/bin/sh\nexit 17\n", encoding="utf-8")
+            brew_tool.chmod(0o755)
+            with patch.object(EVIDENCE, "account_home", return_value=account), patch.object(
+                EVIDENCE, "HOMEBREW_ROOT", homebrew,
+            ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
+                EVIDENCE, "trusted_executable", side_effect=select_executable,
+            ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "bootstrap failed"):
+                    EVIDENCE.command_binding(parent_environment, dot_failure_just)
+
+            dot_missing_after_install_just = fixture_just("dot-install-missing-output-inputs")
+            brew_tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            brew_tool.chmod(0o755)
+            with patch.object(EVIDENCE, "account_home", return_value=account), patch.object(
+                EVIDENCE, "HOMEBREW_ROOT", homebrew,
+            ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
+                EVIDENCE, "trusted_executable", side_effect=select_executable,
+            ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
+                with self.assertRaises(EVIDENCE.EvidenceError):
+                    EVIDENCE.command_binding(parent_environment, dot_missing_after_install_just)
+
+            dot_tamper_just = fixture_just("dot-install-tamper-inputs")
+            brew_tool.write_text("#!/bin/sh\nprintf tampered > \"$0\"\nexit 0\n", encoding="utf-8")
+            brew_tool.chmod(0o755)
+            with patch.object(EVIDENCE, "account_home", return_value=account), patch.object(
+                EVIDENCE, "HOMEBREW_ROOT", homebrew,
+            ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
+                EVIDENCE, "trusted_executable", side_effect=select_executable,
+            ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "changed during"):
+                    EVIDENCE.command_binding(parent_environment, dot_tamper_just)
 
             commands_dir = Path(binding.path.split(os.pathsep)[0])
             (commands_dir / "grep").symlink_to(brew_bin / "grep")
