@@ -265,7 +265,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertLess(public, cleanup)
         conditional = "if: github.event_name == 'pull_request' || inputs.publish_crates == true"
         self.assertGreaterEqual(self.release.count(conditional), 3)
-        self.assertIn("publish_if_needed katana-render-runtime-cli\nwait_for_crate katana-render-runtime-cli", self.publisher)
+        self.assertIn('while IFS= read -r package; do', self.publisher)
+        self.assertIn('publish_if_needed "${package}"\n  wait_for_crate "${package}"', self.publisher)
         cleanup = self.workflow_step(self.release, "Cleanup published release state")
         self.assertNotIn("--delete-remote", cleanup)
 
@@ -283,23 +284,17 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         cleanup_step = self.workflow_step(self.retry, "Cleanup published release state")
         self.assertNotIn("--delete-remote", cleanup_step)
 
-    def test_three_crates_are_published_and_checked_in_dependency_order(self) -> None:
+    def test_release_package_plan_preserves_dependency_order_and_checks(self) -> None:
         packages = (
             "katana-render-runtime-assets",
             "katana-render-runtime",
             "katana-render-runtime-cli",
         )
-        lines = self.publisher.splitlines()
-        publish_positions = [
-            lines.index(f"publish_if_needed {package}") for package in packages
-        ]
-        wait_positions = [
-            lines.index(f"wait_for_crate {package}") for package in packages
-        ]
-        self.assertEqual(publish_positions, sorted(publish_positions))
-        self.assertEqual(wait_positions, sorted(wait_positions))
-        for publish, wait in zip(publish_positions, wait_positions, strict=True):
-            self.assertLess(publish, wait)
+        self.assertIn('required = ["katana-render-runtime", "katana-render-runtime-cli"]', self.publisher)
+        self.assertIn('if parts >= (0, 4, 23):', self.publisher)
+        self.assertIn('required = ["katana-render-runtime-assets", *required]', self.publisher)
+        self.assertIn('for name in required:', self.publisher)
+        self.assertIn('publish_if_needed "${package}"\n  wait_for_crate "${package}"', self.publisher)
 
         unpublished = (
             Path(__file__).parent / "assert-crates-not-published.sh"
