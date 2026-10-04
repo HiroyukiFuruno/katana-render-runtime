@@ -9,6 +9,8 @@ Draftではレビューと修正箇所の静的検査・回帰確認を進め、
 
 アンチパターンは「Draftで完全CI → 指摘修正のたびに同じCI → Readyで再実行」。標準手順は「Draft review → 指摘修正・関連検証 → Ready → 必須CI → merge」。
 
+CIの動作保証対象はLinux x64、Windows x64、macOS Apple Siliconとする。Intel Macは保証対象外であり、必須matrixやrequired status checkへ追加しない。ローカルmacOS証拠の再利用は、保証対象・source・実行条件・検査範囲が一致する部分だけを対象とする。
+
 ## ローカルレビュー
 
 `just check` と pre-push は標準の Rust、assets、automation contract 品質 lane を実行し、ローカル High review は起動しない。初回AIレビューはDraft作成後の `@codex review` に任せる。`just draft-review` は標準品質laneの確認用で、ローカルAIレビューを起動しない。必要時だけ `just local-review` を使う。review receipt が有効でも品質検査は省略しない。

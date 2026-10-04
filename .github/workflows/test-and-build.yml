@@ -58,8 +58,6 @@ jobs:
             platform: linux64
           - os: macos-15
             platform: mac-arm64
-          - os: macos-15-intel
-            platform: mac-x64
           - os: windows-latest
             platform: win64
     runs-on: ${{ matrix.os }}

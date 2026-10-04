@@ -25,6 +25,7 @@
 - Pull Request は必ず Draft として作成する。Ready PR を直接作成してはならない。
 - 初回AIレビューは Draft の `@codex review` で行う。Draft作成前と指摘修正時は自己レビュー・必要な静的検査・関連回帰を行い、ローカルHigh reviewを重複実行しない。必要時だけ `just local-review` を明示する。`just check` と pre-push は標準品質laneを維持する。
 - Draftではremoteの完全CIを実行せず、`ready_for_review` とReady後のpushで必須CIを実行する。DraftのSKIPを品質検証成功として再利用しない。
+- 動作保証のCI対象はLinux x64、Windows x64、macOS Apple Silicon。Intel Macは保証対象外とし、必須matrixとrequired status checkへ戻さない。
 - Draft で最新 HEAD に対する `@codex review` と自己レビューを実施し、GitHub APIで Issue コメント、formal reviews、review threads を全ページ取得する。初回と再レビュー2回を通常目安とする。
 - 各指摘を個別に分類し、P0/P1は必ず修正、P2/P3は要件・互換性・DoDへの影響を根拠付きで判断する。不要な改善は理由を記録し後続patchへ送れる。修正後は自己レビュー、関連する静的検査と回帰確認を行い、push、該当threadへのreply、threadのresolveを個別に完了する。静的解析だけで実動作を保証したとは扱わない。
 - レビュー回数を理由に未解決P0/P1、DoD違反、最新HEADのPR review、個別reply/resolve、required native checks、expected SHA付きprotected mergeを省略しない。
