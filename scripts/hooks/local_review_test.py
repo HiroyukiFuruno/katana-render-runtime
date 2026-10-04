@@ -329,7 +329,7 @@ class GitSnapshotTest(unittest.TestCase):
         (receipt.parent / "last-input-context.json").write_text(json.dumps(
             retained_context(value, reviewed_head, "release/retry")
         ))
-        args = SimpleNamespace(issue=[], base="HEAD", requirements=None)
+        args = SimpleNamespace(issue=[], base=self.base, requirements=None)
         with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
             self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
             self.assertEqual(
@@ -368,9 +368,48 @@ class GitSnapshotTest(unittest.TestCase):
         command(["git", "branch", "-D", "release/retry"], self.root)
         command(["git", "branch", "-m", "release/retry"], self.root)
         self.assertEqual(local_review.branch_identity(root), "release/retry")
-        args = SimpleNamespace(issue=[], base="HEAD", requirements=None)
+        args = SimpleNamespace(issue=[], base=self.base, requirements=None)
         with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
             self.assertIsNone(local_review.retained_inputs(receipt, root=root))
+            with self.assertRaisesRegex(ReviewError, "set REVIEW_ISSUE or pass --issue"):
+                local_review.issue_numbers(root, args, receipt)
+            self.assertIsNone(local_review.requirements_path(root, args, receipt, [89]))
+
+    def test_failed_review_context_is_rejected_when_selected_base_contains_reviewed_head(self) -> None:
+        command(["git", "switch", "-c", "release/retry"], self.root)
+        (self.root / "requirements.md").write_text("required behavior\n")
+        self.commit("failed review input without issue reference")
+        root = self.root.resolve()
+        value = inputs()
+        value["requirements"] = local_review.requirements_context(root, "requirements.md")
+        result = review(value)
+        result["verdict"] = "FAIL"
+        receipt = self.root / "tmp" / "receipt.json"
+        receipt.parent.mkdir()
+        (receipt.parent / "last-input.json").write_text(json.dumps(value))
+        (receipt.parent / "last-review.json").write_text(json.dumps(result))
+        reviewed_head = command(["git", "rev-parse", "HEAD"], root).strip()
+        (receipt.parent / "last-input-context.json").write_text(json.dumps(
+            retained_context(value, reviewed_head, "release/retry")
+        ))
+        args = SimpleNamespace(issue=[], base="master", requirements=None)
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+            self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
+        real_command = local_review.command
+        def fail_base_observation(arguments: list[str], command_root: Path) -> str:
+            if arguments == ["git", "merge-base", reviewed_head, "master"]:
+                raise ReviewError("base observation failed")
+            return real_command(arguments, command_root)
+        with patch.object(local_review, "command", side_effect=fail_base_observation):
+            self.assertIsNone(local_review.retained_inputs(receipt, root=root, base="master"))
+
+        command(["git", "switch", "master"], self.root)
+        command(["git", "merge", "--no-edit", "release/retry"], self.root)
+        command(["git", "switch", "release/retry"], self.root)
+        (self.root / "unrelated.py").write_text("unrelated descendant\n")
+        self.commit("unrelated descendant after base absorbed failed task")
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+            self.assertIsNone(local_review.retained_inputs(receipt, root=root, base="master"))
             with self.assertRaisesRegex(ReviewError, "set REVIEW_ISSUE or pass --issue"):
                 local_review.issue_numbers(root, args, receipt)
             self.assertIsNone(local_review.requirements_path(root, args, receipt, [89]))
@@ -1274,7 +1313,10 @@ class GitSnapshotTest(unittest.TestCase):
                                check_receipt=False, print_input=False)
 
         def git_command(arguments: list[str], root: Path) -> str:
-            return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
+            try:
+                return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
+            except subprocess.CalledProcessError as error:
+                raise ReviewError(error.stderr) from error
 
         for check_receipt in (False, True):
             with self.subTest(check_receipt=check_receipt), \
@@ -1296,7 +1338,10 @@ class GitSnapshotTest(unittest.TestCase):
         args = SimpleNamespace(issue=[], base=self.base)
 
         def git_command(arguments: list[str], root: Path) -> str:
-            return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
+            try:
+                return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
+            except subprocess.CalledProcessError as error:
+                raise ReviewError(error.stderr) from error
 
         receipt = self.root / "tmp" / "receipt.json"
         value = inputs()
@@ -1353,7 +1398,10 @@ class GitSnapshotTest(unittest.TestCase):
         receipt.parent.mkdir(exist_ok=True)
 
         def git_command(arguments: list[str], root: Path) -> str:
-            return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
+            try:
+                return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
+            except subprocess.CalledProcessError as error:
+                raise ReviewError(error.stderr) from error
 
         partial = inputs()
         reviewed_head_sha = command(["git", "rev-parse", "HEAD"], self.root).strip()
@@ -1785,6 +1833,10 @@ class DriverContractTest(unittest.TestCase):
             path.parent.mkdir()
             args = SimpleNamespace(issue=[89], base="origin/master", requirements="requirements.md",
                                    receipt="tmp/receipt.json", print_input=False, check_receipt=True)
+            def command_with_unmerged_reviewed_head(arguments: list[str], _root: Path) -> str:
+                if arguments[:2] == ["git", "merge-base"] and "--is-ancestor" not in arguments:
+                    return "1" * 40
+                return ""
             with patch.object(local_review, "repository_root", return_value=root), patch.object(local_review, "source_snapshot", return_value=inputs()["source"]), patch.object(local_review, "issue_context", return_value=inputs()["issues"]), patch.object(local_review, "gate_configuration", return_value={"TEST_THREADS": "1"}), patch.object(local_review, "invoke_review") as invoke:
                 value = local_review.build_inputs(root, args, [89])
                 result = review(value)
@@ -1794,14 +1846,14 @@ class DriverContractTest(unittest.TestCase):
                     **retained_context(value, TEST_REVIEWED_HEAD_SHA, "release/check")
                 }))
                 args.requirements = None
-                with patch.object(local_review, "command", return_value=""), \
+                with patch.object(local_review, "command", side_effect=command_with_unmerged_reviewed_head), \
                         patch.object(local_review, "branch_identity", return_value="release/check"):
                     self.assertEqual(local_review.run(args), 0)
                 self.assertEqual(args.requirements, "requirements.md")
                 invoke.assert_not_called()
                 requirement.write_text("different requirement\n")
                 args.requirements = None
-                with patch.object(local_review, "command", return_value=""), \
+                with patch.object(local_review, "command", side_effect=command_with_unmerged_reviewed_head), \
                         patch.object(local_review, "branch_identity", return_value="release/check"):
                     with self.assertRaisesRegex(ReviewError, "receipt rejected"):
                         local_review.run(args)
@@ -1858,18 +1910,31 @@ class DriverContractTest(unittest.TestCase):
             receipt = root / "receipt.json"
             self.assertFalse(receipt.exists())
             args = SimpleNamespace(issue=[], base="origin/master", requirements=None)
+            def base_does_not_contain_reviewed_head(arguments: list[str], *_: object) -> str:
+                if arguments[:2] == ["git", "merge-base"] and "--is-ancestor" not in arguments:
+                    return "1" * 40
+                return ""
+            for invalid_merge_sha in ("", "not-a-sha", "a" * 39, "G" * 40):
+                with self.subTest(invalid_merge_sha=invalid_merge_sha):
+                    def invalid_base_merge(arguments: list[str], *_: object) -> str:
+                        if arguments[:2] == ["git", "merge-base"] and "--is-ancestor" not in arguments:
+                            return invalid_merge_sha
+                        return ""
+                    with patch.object(local_review, "branch_identity", return_value="release/retry"), \
+                            patch.object(local_review, "command", side_effect=invalid_base_merge):
+                        self.assertIsNone(local_review.retained_inputs(receipt, root=root, base="origin/master"))
             with patch.object(local_review, "branch_identity", return_value="release/retry"), \
-                    patch.object(local_review, "command", return_value=""):
+                    patch.object(local_review, "command", side_effect=base_does_not_contain_reviewed_head):
                 self.assertEqual(local_review.requirements_path(root, args, receipt, [89]), "requirements.md")
             with patch.object(local_review, "branch_identity", return_value="release/retry"), \
-                    patch.object(local_review, "command", return_value=""):
+                    patch.object(local_review, "command", side_effect=base_does_not_contain_reviewed_head):
                 self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
             with patch.object(local_review, "command", return_value="Refs #120"):
                 self.assertEqual(local_review.issue_numbers(root, args, receipt), [120])
             self.assertIsNone(local_review.requirements_path(root, args, receipt, [120]))
             requirement.unlink()
             with patch.object(local_review, "branch_identity", return_value="release/retry"), \
-                    patch.object(local_review, "command", return_value=""):
+                    patch.object(local_review, "command", side_effect=base_does_not_contain_reviewed_head):
                 with self.assertRaisesRegex(ReviewError, "requirements"):
                     local_review.requirements_path(root, args, receipt, [89])
             value["requirements"]["path"] = "different.md"

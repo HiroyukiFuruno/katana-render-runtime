@@ -82,14 +82,15 @@ def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[i
                 raise ReviewError("multiple branch Issues; set REVIEW_ISSUE explicitly")
         numbers = sorted(references)
     if not numbers:
-        retained = retained_inputs(receipt, root=root)
+        base = getattr(args, "base", None) or os.environ.get("REVIEW_BASE")
+        retained = retained_inputs(receipt, root=root, base=base)
         if retained is not None:
             numbers = [issue["number"] for issue in retained["issues"]]
     if not numbers and receipt.exists():
         stored = strict_json(receipt.read_text())
         try:
             read_receipt(receipt, stored["inputs"], root)
-            if retained_context_matches(receipt, stored["inputs"], root):
+            if retained_context_matches(receipt, stored["inputs"], root, base):
                 numbers = [issue["number"] for issue in stored["inputs"]["issues"]]
         except (KeyError, TypeError) as error:
             raise ReviewError("receipt Issue identity is invalid") from error
@@ -134,7 +135,9 @@ def retained_context_payload(root: Path, inputs: dict, reviewed_head_sha: str) -
     return {**context, "context_sha256": digest(context)}
 
 
-def retained_context_matches(receipt: Path, stored: dict, root: Path | None) -> bool:
+def retained_context_matches(
+    receipt: Path, stored: dict, root: Path | None, base: str | None = None
+) -> bool:
     context_path = receipt.parent / "last-input-context.json"
     if root is None or not context_path.is_file():
         return False
@@ -163,10 +166,25 @@ def retained_context_matches(receipt: Path, stored: dict, root: Path | None) -> 
         command(["git", "merge-base", "--is-ancestor", reviewed_head_sha, "HEAD"], root)
     except ReviewError:
         return False
+    if base is not None:
+        try:
+            command(["git", "rev-parse", "--verify", f"{base}^{{commit}}"], root)
+        except ReviewError:
+            return False
+        try:
+            base_merge_sha = command(["git", "merge-base", reviewed_head_sha, base], root).strip()
+        except ReviewError:
+            return False
+        if re.fullmatch(r"[0-9a-f]{40}", base_merge_sha) is None:
+            return False
+        return base_merge_sha != reviewed_head_sha
     return True
 
 
-def retained_inputs(receipt: Path, numbers: list[int] | None = None, *, root: Path | None = None) -> dict | None:
+def retained_inputs(
+    receipt: Path, numbers: list[int] | None = None, *, root: Path | None = None,
+    base: str | None = None,
+) -> dict | None:
     path = receipt.parent / "last-input.json"
     if not path.exists():
         return None
@@ -190,7 +208,7 @@ def retained_inputs(receipt: Path, numbers: list[int] | None = None, *, root: Pa
     if report.get("input_sha256") != digest(stored):
         # 診断原本は保持するが、別入力の結果を現在のレビュー文脈へ流用しない。
         return None
-    if not retained_context_matches(receipt, stored, root):
+    if not retained_context_matches(receipt, stored, root, base):
         return None
     if stored.get("model") != MODEL or stored.get("reasoning") != REASONING:
         raise ReviewError("retained input has an unexpected review configuration")
@@ -205,7 +223,8 @@ def requirements_path(root: Path, args: argparse.Namespace, receipt: Path, numbe
         if not configured.strip():
             raise ReviewError("REVIEW_REQUIREMENTS must identify a requirements file")
         return configured
-    retained = retained_inputs(receipt, numbers, root=root)
+    base = getattr(args, "base", None) or os.environ.get("REVIEW_BASE")
+    retained = retained_inputs(receipt, numbers, root=root, base=base)
     if retained is not None and sorted(issue["number"] for issue in retained["issues"]) == sorted(numbers):
         stored = retained
     elif receipt.exists():
@@ -215,7 +234,7 @@ def requirements_path(root: Path, args: argparse.Namespace, receipt: Path, numbe
         read_receipt(receipt, payload["inputs"], root)
         if sorted(issue["number"] for issue in payload["inputs"]["issues"]) != sorted(numbers):
             return None
-        if not retained_context_matches(receipt, payload["inputs"], root):
+        if not retained_context_matches(receipt, payload["inputs"], root, base):
             return None
         stored = payload["inputs"]
     else:
