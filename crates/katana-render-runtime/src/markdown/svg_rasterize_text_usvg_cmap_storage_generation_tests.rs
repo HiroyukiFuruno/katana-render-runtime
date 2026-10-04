@@ -8,13 +8,20 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct TestFontFile(std::path::PathBuf);
 
+struct FileDatabase {
+    database: Arc<Database>,
+    base_id: ID,
+    file_id: ID,
+    file: TestFontFile,
+}
+
 impl Drop for TestFontFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
 }
 
-fn file_database(bytes: &[u8]) -> Result<(Arc<Database>, ID, TestFontFile), String> {
+fn file_database(bytes: &[u8]) -> Result<FileDatabase, String> {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let path = std::env::temp_dir().join(format!(
         "krr-usvg-cmap-storage-{}-{}.ttf",
@@ -23,22 +30,35 @@ fn file_database(bytes: &[u8]) -> Result<(Arc<Database>, ID, TestFontFile), Stri
     ));
     std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
     let mut database = Database::new();
+    database.load_font_data(FONT_BYTES.to_vec());
     database.load_font_source(Source::File(path.clone()));
     let database = Arc::new(database);
-    let id = database.faces().next().ok_or("font face missing")?.id;
-    Ok((database, id, TestFontFile(path)))
+    let ids = database.faces().map(|face| face.id).collect::<Vec<_>>();
+    let base_id = *ids.first().ok_or("base font face missing")?;
+    let file_id = ids
+        .into_iter()
+        .find(|id| matches!(database.face_source(*id), Some((Source::File(_), _))))
+        .ok_or("file font face missing")?;
+    Ok(FileDatabase {
+        database,
+        base_id,
+        file_id,
+        file: TestFontFile(path),
+    })
 }
 
 #[test]
 fn unavailable_generation_rejects_global_cmap_storage() -> Result<(), String> {
     let _lock = begin()?;
     let _reset = CacheResetOnDrop;
-    let (database, id, file) = file_database(FONT_BYTES)?;
-    std::fs::remove_file(&file.0).map_err(|error| error.to_string())?;
-    let generation = generation(&database, id);
+    let fixture = file_database(FONT_BYTES)?;
+    std::fs::remove_file(&fixture.file.0).map_err(|error| error.to_string())?;
+    let database = &fixture.database;
+    let id = fixture.file_id;
+    let generation = generation(database, id);
     assert!(!generation.durable_reusable());
-    assert_legacy_entry_is_removed(&database, id, generation.clone())?;
-    assert_insert_is_not_persisted(&database, id, generation)?;
+    assert_legacy_entry_is_removed(database, id, generation.clone())?;
+    assert_insert_is_not_persisted(database, id, generation)?;
     Ok(())
 }
 
@@ -100,13 +120,13 @@ fn assert_insert_is_not_persisted(
 fn weak_file_generation_never_enters_or_reuses_global_cmap_storage() -> Result<(), String> {
     let _lock = begin()?;
     let _reset = CacheResetOnDrop;
-    let (database, id, _file) = file_database(FONT_BYTES)?;
-    let generation = generation(&database, id);
+    let fixture = file_database(FONT_BYTES)?;
+    let generation = generation(&fixture.database, fixture.file_id);
     assert!(generation.reusable());
     assert!(!generation.durable_reusable());
-    assert_insert_is_not_persisted(&database, id, generation.clone())?;
+    assert_insert_is_not_persisted(&fixture.database, fixture.file_id, generation.clone())?;
     assert!(
-        lookup(&database, id, 0, &generation)
+        lookup(&fixture.database, fixture.file_id, 0, &generation)
             .map_err(|_| "cache lookup failed")?
             .is_none()
     );
@@ -114,31 +134,62 @@ fn weak_file_generation_never_enters_or_reuses_global_cmap_storage() -> Result<(
 }
 
 #[test]
-fn same_length_same_modified_rewrite_reprobes_without_stock_fallback() -> Result<(), String> {
+fn same_length_same_modified_rewrite_reprobes_without_stale_cmap_result() -> Result<(), String> {
     let _lock = begin()?;
     let _reset = CacheResetOnDrop;
     let replacement = font_with_only_b_cmap(FONT_BYTES)?;
-    let (database, id, file) = file_database(FONT_BYTES)?;
-    verify_rewrite_reprobes(&database, id, &file.0, &replacement)
+    let fixture = file_database(FONT_BYTES)?;
+    verify_rewrite_reprobes(&fixture, &replacement)
 }
 
-fn verify_rewrite_reprobes(
-    database: &Arc<Database>,
-    id: ID,
-    path: &std::path::Path,
-    replacement: &[u8],
-) -> Result<(), String> {
-    let before = generation(database, id);
+fn verify_rewrite_reprobes(fixture: &FileDatabase, replacement: &[u8]) -> Result<(), String> {
+    let before = generation(&fixture.database, fixture.file_id);
     assert_eq!(
         before.durable_reusable(),
-        super::super::super::super::font::file_stamp_durable_reusable(path)
+        super::super::super::super::font::file_stamp_durable_reusable(&fixture.file.0)
     );
-    assert_eq!(probe_character(database, id, 'A'), Ok(true));
-    rewrite_same_modified_time(path, replacement)?;
+    assert_probe_policy(&fixture.database, fixture.file_id, true);
+    assert_selector_matches_stock(&fixture.database, fixture.base_id, Some(fixture.file_id));
+    rewrite_same_modified_time(&fixture.file.0, replacement)?;
     #[cfg(windows)]
-    assert_eq!(before, generation(database, id));
-    assert_eq!(probe_character(database, id, 'A'), Ok(false));
+    assert_eq!(before, generation(&fixture.database, fixture.file_id));
+    assert_probe_policy(&fixture.database, fixture.file_id, false);
+    assert_selector_matches_stock(&fixture.database, fixture.base_id, None);
     Ok(())
+}
+
+fn assert_probe_policy(database: &Arc<Database>, id: ID, _supported: bool) {
+    #[cfg(windows)]
+    {
+        assert_eq!(
+            probe_character(database, id, 'A'),
+            Err("file cmap probe failed".into())
+        );
+        assert_global_cache_empty();
+    }
+    #[cfg(not(windows))]
+    assert_eq!(probe_character(database, id, 'A'), Ok(_supported));
+}
+
+#[cfg(windows)]
+fn assert_global_cache_empty() {
+    assert!(cache().lock().is_ok_and(|cache| cache.entries.is_empty()));
+}
+
+fn assert_selector_matches_stock(database: &Arc<Database>, base_id: ID, expected: Option<ID>) {
+    let excluded = [base_id];
+    let stock = resvg::usvg::FontResolver::default_fallback_selector();
+    let optimized = super::super::super::selector::html_selector();
+    let (stock_result, optimized_result) =
+        super::super::super::super::with_validated_tree_parse(|| {
+            (
+                stock('A', &excluded, &mut Arc::clone(database)),
+                optimized('A', &excluded, &mut Arc::clone(database)),
+            )
+        });
+    assert_eq!((stock_result, optimized_result), (expected, expected));
+    #[cfg(windows)]
+    assert_global_cache_empty();
 }
 
 fn probe_character(database: &Arc<Database>, id: ID, character: char) -> Result<bool, String> {
