@@ -55,6 +55,8 @@ COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 SCOPE_PARAMETERS = {"CARGO_INCREMENTAL": "0", "CARGO_TERM_COLOR": "always", "TEST_THREADS": "1"}
 PREPARATION_COMMANDS = {"bun-install", "graphviz-install", "plantuml-install"}
+RUST_STABLE_MANIFEST_URL = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
+MAX_RUST_STABLE_MANIFEST_BYTES = 8 * 1024 * 1024
 
 # macOS対象stepを列挙し、workflow全体の固定hashと合わせて未知の変更を拒否する。
 MAC_WORKFLOW_STEP_COMMANDS: dict[str, tuple[str, ...]] = {
@@ -258,6 +260,51 @@ def validate_pinned_tools(versions: Any) -> None:
         raise EvidenceError("local proof requires Bun 1.4.2, matching the macOS CI setup")
 
 
+def parse_stable_manifest_versions(manifest: str) -> dict[str, str]:
+    """Derive stable CLI versions from the official channel manifest."""
+    result: dict[str, str] = {}
+    for package in ("rustc", "cargo"):
+        section = re.search(
+            rf"(?ms)^\[pkg\.{package}\]\s*$\n(?P<body>.*?)(?=^\[|\Z)", manifest
+        )
+        version = re.search(r'^version\s*=\s*"([^"]+)"\s*$', section["body"], re.MULTILINE) if section else None
+        if version is None:
+            raise EvidenceError(f"official Rust stable manifest is missing {package} version")
+        result[package] = version.group(1)
+    # Cargo内部版は0.xのため、Rustと同期するCLI版とCargo自身のrevisionを組み合わせる。
+    rust_release = re.match(r"^(\d+\.\d+\.\d+)(?: \([^)]*\))?$", result["rustc"])
+    cargo_commit = re.fullmatch(r"0\.\d+\.\d+ \(([0-9a-f]{9,40}) (\d{4}-\d{2}-\d{2})\)", result["cargo"])
+    if rust_release is None or cargo_commit is None:
+        raise EvidenceError("official Rust stable manifest has unsupported tool version metadata")
+    result["cargo_cli"] = f"{rust_release.group(1)} ({cargo_commit.group(1)[:9]} {cargo_commit.group(2)})"
+    return result
+
+
+def fetch_stable_manifest_versions() -> dict[str, str]:
+    req = request.Request(
+        RUST_STABLE_MANIFEST_URL,
+        headers={"Accept": "text/plain", "User-Agent": "katana-render-runtime-local-macos-evidence"},
+    )
+    try:
+        with request.urlopen(req, timeout=15) as response:
+            body = response.read(MAX_RUST_STABLE_MANIFEST_BYTES + 1)
+        if not body or len(body) > MAX_RUST_STABLE_MANIFEST_BYTES:
+            raise EvidenceError("official Rust stable manifest is empty or too large")
+        return parse_stable_manifest_versions(body.decode("utf-8"))
+    except (error.URLError, error.HTTPError, TimeoutError, OSError, UnicodeDecodeError) as exc:
+        raise EvidenceError("official Rust stable manifest is unavailable") from exc
+
+
+def validate_stable_rust_tools(tools: Any, stable_versions: Any) -> None:
+    if not isinstance(tools, dict) or not isinstance(stable_versions, dict):
+        raise EvidenceError("Rust toolchain evidence is invalid")
+    for package, version_key in (("rustc", "rustc"), ("cargo", "cargo_cli")):
+        expected = stable_versions.get(version_key)
+        actual = tools.get(package)
+        if not isinstance(expected, str) or not isinstance(actual, str) or actual != f"{package} {expected}":
+            raise EvidenceError(f"local {package} does not match the current official stable channel")
+
+
 def parse_comment(comment: Any) -> dict[str, Any] | None:
     if not isinstance(comment, dict) or not isinstance(comment.get("body"), str):
         return None
@@ -283,6 +330,7 @@ def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 def valid_payload(
     comment: dict[str, Any], payload: dict[str, Any], repository: str, number: int,
     base_sha: str, head_sha: str, expected_workflow_digest: str, now: int, owner_login: str,
+    stable_versions: dict[str, str],
 ) -> bool:
     user, association = comment.get("user"), comment.get("author_association")
     if not isinstance(user, dict) or user.get("login", "").lower() != owner_login.lower() or association != "OWNER":
@@ -317,6 +365,10 @@ def valid_payload(
     if tools.get("architecture") != "arm64" or not isinstance(tools.get("macos"), str) or not tools["macos"].strip():
         return False
     if not java_is_21(tools.get("java")) or tools.get("bun") != "1.4.2":
+        return False
+    try:
+        validate_stable_rust_tools(tools, stable_versions)
+    except EvidenceError:
         return False
     if payload.get("environment") != SCOPE_PARAMETERS:
         return False
@@ -361,7 +413,7 @@ def accepted_comment(comments: Any, *args: Any) -> dict[str, Any] | None:
             marked.append(comment)
     if not marked:
         return None
-    repository, number, base_sha, head_sha, workflow_hash, now, owner_login = args
+    repository, number, base_sha, head_sha, workflow_hash, now, owner_login, stable_versions = args
     current: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for comment in marked:
         payload = parse_comment(comment)
@@ -382,7 +434,7 @@ def accepted_comment(comments: Any, *args: Any) -> dict[str, Any] | None:
         return None
     comment, payload = current[0]
     return comment if valid_payload(
-        comment, payload, repository, number, base_sha, head_sha, workflow_hash, now, owner_login
+        comment, payload, repository, number, base_sha, head_sha, workflow_hash, now, owner_login, stable_versions
     ) else None
 
 
@@ -438,8 +490,32 @@ def verify_from_api(
             return False
         digest = expected_workflow_digest or workflow_digest()
         timestamp = int(time.time()) if now is None else now
-        first = accepted_comment(comments_first, repository, number, base_sha, head_sha, digest, timestamp, owner_login)
-        second = accepted_comment(comments_second, repository, number, base_sha, head_sha, digest, timestamp, owner_login)
+        candidates = []
+        for comment in comments_first:
+            payload = parse_comment(comment)
+            if payload is None:
+                continue
+            if (
+                payload.get("repository", "").lower() == repository.lower()
+                and payload.get("pull_request") == number
+                and payload.get("base_sha") == base_sha
+                and payload.get("head_sha") == head_sha
+                and payload.get("workflow_sha256") == digest
+                and payload.get("scope_sha256") == scope_digest(digest)
+                and not is_expired_receipt(comment, payload, timestamp)
+            ):
+                candidates.append(comment)
+        # Missing, stale, or ambiguous proof should take the hosted path without
+        # waiting on the optional official-manifest lookup.
+        if len(candidates) != 1:
+            return False
+        stable_versions = fetch_stable_manifest_versions()
+        first = accepted_comment(
+            comments_first, repository, number, base_sha, head_sha, digest, timestamp, owner_login, stable_versions
+        )
+        second = accepted_comment(
+            comments_second, repository, number, base_sha, head_sha, digest, timestamp, owner_login, stable_versions
+        )
         return first is not None and second is not None and canonical(first) == canonical(second)
     except Exception:
         return False
@@ -506,14 +582,18 @@ def collect(repository: str, number: int, publish: bool) -> int:
     for command_id, argv_template in COMMANDS:
         if command_id in PREPARATION_COMMANDS:
             run_command(command_id, argv_template)
+    stable_versions_before = fetch_stable_manifest_versions()
     versions_before = tool_versions()
     validate_pinned_tools(versions_before)
+    validate_stable_rust_tools(versions_before, stable_versions_before)
     for command_id, argv_template in COMMANDS:
         if command_id not in PREPARATION_COMMANDS:
             run_command(command_id, argv_template)
+    stable_versions_after = fetch_stable_manifest_versions()
     versions_after = tool_versions()
     validate_pinned_tools(versions_after)
-    if versions_before != versions_after:
+    validate_stable_rust_tools(versions_after, stable_versions_after)
+    if versions_before != versions_after or stable_versions_before != stable_versions_after:
         raise EvidenceError("tool versions changed during local checks")
     versions = versions_before
     completed_at = utc_now()

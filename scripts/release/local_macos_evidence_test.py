@@ -20,6 +20,11 @@ REPOSITORY = "owner/repository"
 BASE = "a" * 40
 HEAD = "b" * 40
 NOW = 1_800_000_000
+STABLE_RUST = {
+    "rustc": "1.99.0 (b940084d7 2026-09-28)",
+    "cargo": "0.100.0 (5f94df478 2026-08-27)",
+    "cargo_cli": "1.99.0 (5f94df478 2026-08-27)",
+}
 
 
 def valid_comment() -> dict[str, object]:
@@ -44,8 +49,8 @@ def valid_comment() -> dict[str, object]:
         "completed_at": "2027-01-15T08:00:00Z",
         "platform": "macos-arm64",
         "tools": {
-            "macos": "15.0", "architecture": "arm64", "rustc": "rustc 1.90.0",
-            "cargo": "cargo 1.90.0", "java": 'openjdk version "21.0.12" 2025-01-21', "bun": "1.4.2",
+            "macos": "15.0", "architecture": "arm64", "rustc": f"rustc {STABLE_RUST['rustc']}",
+            "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12" 2025-01-21', "bun": "1.4.2",
             "just": "just 1.40.0", "brew": "Homebrew 5.0.0", "graphviz": "dot - graphviz version 12",
         },
         "commands": commands,
@@ -96,6 +101,11 @@ def snapshots(comment: object, *, changed_second: bool = False, api_fail: bool =
 
 
 class LocalMacosEvidenceTest(unittest.TestCase):
+    def setUp(self) -> None:
+        patcher = patch.object(EVIDENCE, "fetch_stable_manifest_versions", return_value=STABLE_RUST)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_accepts_current_owner_proof_bound_to_base_head_workflow_and_full_scope(self) -> None:
         self.assertTrue(EVIDENCE.verify_from_api(
             REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
@@ -167,6 +177,72 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             with self.subTest(collection_java=java, collection_bun=bun):
                 with self.assertRaises(EVIDENCE.EvidenceError):
                     EVIDENCE.validate_pinned_tools({"java": java, "bun": bun})
+
+    def test_rust_tools_must_match_official_stable_manifest(self) -> None:
+        current = {
+            "rustc": f"rustc {STABLE_RUST['rustc']}",
+            "cargo": f"cargo {STABLE_RUST['cargo_cli']}",
+        }
+        EVIDENCE.validate_stable_rust_tools(current, STABLE_RUST)
+        rejected = (
+            {**current, "rustc": "rustc 1.91.0-nightly (nightly-hash 2025-09-14)"},
+            {**current, "rustc": "rustc 1.91.0-beta (beta-hash 2025-09-14)"},
+            {**current, "rustc": "rustc 1.89.0 (older-stable-hash 2025-08-01)"},
+            {**current, "cargo": "cargo 1.98.0 (olderhash1 2026-08-20)"},
+            {**current, "cargo": "cargo 0.100.0 (5f94df478 2026-08-27)"},
+        )
+        for tools in rejected:
+            with self.subTest(tools=tools):
+                with self.assertRaises(EVIDENCE.EvidenceError):
+                    EVIDENCE.validate_stable_rust_tools(tools, STABLE_RUST)
+
+    def test_parses_rustc_and_cargo_versions_from_official_channel_fixture(self) -> None:
+        fixture = '''\
+[pkg.rustc]
+version = "1.99.0 (b940084d7 2026-09-28)"
+
+[pkg.rustc.target.aarch64-apple-darwin]
+available = true
+
+[pkg.cargo]
+version = "0.100.0 (5f94df478 2026-08-27)"
+'''
+        self.assertEqual(EVIDENCE.parse_stable_manifest_versions(fixture), STABLE_RUST)
+
+    def test_missing_proof_skips_official_manifest_network_lookup(self) -> None:
+        with patch.object(EVIDENCE, "fetch_stable_manifest_versions") as fetch_manifest:
+            self.assertFalse(EVIDENCE.verify_from_api(
+                REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                fetch=snapshots(None), now=NOW, expected_workflow_digest="d" * 64,
+            ))
+        fetch_manifest.assert_not_called()
+
+    def test_manifest_derives_cli_cargo_version_from_rust_release_not_internal_version(self) -> None:
+        fixture = '''\
+[pkg.rustc]
+version = "1.99.0 (b940084d7 2026-09-28)"
+
+[pkg.cargo]
+version = "0.100.0 (5f94df478 2026-08-27)"
+'''
+        parsed = EVIDENCE.parse_stable_manifest_versions(fixture)
+        self.assertEqual(parsed["cargo_cli"], "1.99.0 (5f94df478 2026-08-27)")
+        for cargo in (
+            "cargo 0.100.0 (5f94df478 2026-08-27)",
+            "cargo 1.98.0 (5f94df478 2026-08-27)",
+            "cargo 1.99.0-nightly (5f94df478 2026-08-27)",
+        ):
+            with self.subTest(cargo=cargo), self.assertRaises(EVIDENCE.EvidenceError):
+                EVIDENCE.validate_stable_rust_tools(
+                    {"rustc": "rustc 1.99.0 (b940084d7 2026-09-28)", "cargo": cargo}, parsed
+                )
+
+    def test_manifest_fetch_failure_falls_back_to_hosted_ci(self) -> None:
+        with patch.object(EVIDENCE, "fetch_stable_manifest_versions", side_effect=EVIDENCE.EvidenceError("offline")):
+            self.assertFalse(EVIDENCE.verify_from_api(
+                REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                fetch=snapshots(valid_comment()), now=NOW, expected_workflow_digest="d" * 64,
+            ))
 
     def test_rejects_expired_or_edited_comment_api_change_or_nonincorporated_base(self) -> None:
         good = valid_comment()
@@ -295,10 +371,40 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                      "head": {"sha": HEAD, "repo": {"full_name": REPOSITORY}}},
                 ]),
                 patch.object(EVIDENCE, "tool_versions", return_value=versions),
+                patch.object(EVIDENCE, "fetch_stable_manifest_versions", return_value=STABLE_RUST),
                 patch.object(EVIDENCE, "ROOT", Path(directory)),
                 patch.object(EVIDENCE.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run,
             ):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "Java 21"):
+                    EVIDENCE.collect(REPOSITORY, 7, publish=True)
+                self.assertEqual(run.call_count, len(EVIDENCE.PREPARATION_COMMANDS))
+
+    def test_collector_rejects_nonstable_rust_before_quality_commands(self) -> None:
+        versions = {
+            "macos": "15.0", "architecture": "arm64",
+            "rustc": "rustc 1.91.0-nightly (nightly-hash 2025-09-14)",
+            "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12"',
+            "bun": "1.4.2", "just": "just 1", "brew": "Homebrew 5", "graphviz": "dot 12",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(EVIDENCE.platform, "system", return_value="Darwin"),
+                patch.object(EVIDENCE.platform, "machine", return_value="arm64"),
+                patch.object(EVIDENCE, "git_status", return_value=""),
+                patch.object(EVIDENCE, "run_git", side_effect=[HEAD, BASE]),
+                patch.object(EVIDENCE, "workflow_digest", return_value="d" * 64),
+                patch.object(EVIDENCE, "gh_token", return_value="existing-token"),
+                patch.object(EVIDENCE, "api_request", side_effect=[
+                    {"full_name": REPOSITORY, "owner": {"login": "owner"}}, {"login": "owner"},
+                    {"number": 7, "state": "open", "base": {"sha": BASE, "ref": "master", "repo": {"full_name": REPOSITORY}},
+                     "head": {"sha": HEAD, "repo": {"full_name": REPOSITORY}}},
+                ]),
+                patch.object(EVIDENCE, "tool_versions", return_value=versions),
+                patch.object(EVIDENCE, "fetch_stable_manifest_versions", return_value=STABLE_RUST),
+                patch.object(EVIDENCE, "ROOT", Path(directory)),
+                patch.object(EVIDENCE.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run,
+            ):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "current official stable channel"):
                     EVIDENCE.collect(REPOSITORY, 7, publish=True)
                 self.assertEqual(run.call_count, len(EVIDENCE.PREPARATION_COMMANDS))
 
