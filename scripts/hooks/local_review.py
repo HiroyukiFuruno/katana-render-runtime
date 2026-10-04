@@ -69,7 +69,7 @@ def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[i
             if receipt.exists():
                 try:
                     stored = strict_json(receipt.read_text())
-                    read_receipt(receipt, stored["inputs"])
+                    read_receipt(receipt, stored["inputs"], root)
                     stored_issues = stored["inputs"]["issues"]
                     if isinstance(stored_issues, list):
                         receipt_numbers = {issue["number"] for issue in stored_issues}
@@ -85,7 +85,7 @@ def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[i
     if not numbers and receipt.exists():
         stored = strict_json(receipt.read_text())
         try:
-            read_receipt(receipt, stored["inputs"])
+            read_receipt(receipt, stored["inputs"], root)
             if retained_context_matches(receipt, stored["inputs"], root):
                 numbers = [issue["number"] for issue in stored["inputs"]["issues"]]
         except (KeyError, TypeError) as error:
@@ -171,7 +171,7 @@ def requirements_path(root: Path, args: argparse.Namespace, receipt: Path, numbe
         payload = strict_json(receipt.read_text())
         if not isinstance(payload, dict) or not isinstance(payload.get("inputs"), dict):
             raise ReviewError("stored requirements cannot be recovered from an invalid receipt")
-        read_receipt(receipt, payload["inputs"])
+        read_receipt(receipt, payload["inputs"], root)
         if sorted(issue["number"] for issue in payload["inputs"]["issues"]) != sorted(numbers):
             return None
         if not retained_context_matches(receipt, payload["inputs"], root):
@@ -191,9 +191,16 @@ def requirements_path(root: Path, args: argparse.Namespace, receipt: Path, numbe
     return path
 
 
-def read_receipt(path: Path, inputs: dict) -> dict:
+def read_receipt(path: Path, inputs: dict, root: Path) -> dict:
     receipt = strict_json(path.read_text())
     result = validate_receipt(receipt, inputs)
+    reviewed_head = receipt["provenance"]["reviewed_head_sha"]
+    try:
+        command(["git", "merge-base", "--is-ancestor", reviewed_head, "HEAD"], root)
+    except ReviewError as error:
+        raise ReviewError(
+            "receipt provenance rejected: reviewed HEAD is not verifiably in current HEAD ancestry"
+        ) from error
     original = strict_json(path.with_suffix(".review.json").read_text())
     if original != result:
         raise ReviewError("receipt differs from the original structured review")
@@ -289,12 +296,20 @@ def obtain_receipt(root: Path, args: argparse.Namespace, path: Path, inputs: dic
     lock = path.parent / "review.lock"
     with review_lock(lock):
         with tempfile.TemporaryDirectory(prefix="codex-", dir=path.parent) as directory:
+            reviewed_head_sha = command(
+                ["git", "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"], root
+            ).strip()
             review = invoke_review(root, Path(directory), inputs)
+        current_head_sha = command(
+            ["git", "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"], root
+        ).strip()
+        if current_head_sha != reviewed_head_sha:
+            raise ReviewError("HEAD changed during review; receipt was not accepted")
         if build_inputs(root, args, numbers) != inputs:
             raise ReviewError("review input changed during review; receipt was not accepted")
         atomic_json(path.with_suffix(".review.json"), review)
-        atomic_json(path, receipt_payload(inputs, review))
-        read_receipt(path, inputs)
+        atomic_json(path, receipt_payload(inputs, review, reviewed_head_sha))
+        read_receipt(path, inputs, root)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -312,7 +327,7 @@ def run(args: argparse.Namespace) -> int:
         print(json.dumps({"input_sha256": digest(inputs), "inputs": inputs}, ensure_ascii=True))
         return 0
     try:
-        read_receipt(path, inputs)
+        read_receipt(path, inputs, root)
         if build_inputs(root, args, numbers) != inputs:
             raise ReviewError("review input changed during receipt reuse")
         print(f"Local review REUSE {digest(inputs)}; full quality gate remains required.")

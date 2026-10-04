@@ -53,6 +53,8 @@ tracked／unstaged／untracked／deleted を含み、削除は base のファイ
 CLI には変更一覧と入力 digest を渡し、全ファイルの hash 一覧を無駄に読み込ませない。
 
 receipt の digest と保存 structured 原本も照合する。破損・別入力・未知の field・重複 JSON key・CLI エラーは拒否する。
+schema v2 は実レビュー開始時の HEAD を `provenance.reviewed_head_sha` に保存し、receipt の整合 digest に含める。再利用と Issue／要求の推定では、その commit が現在の HEAD の祖先であることも検証する。レビュー済み commit を外す reset、未知の commit、provenance の欠落・改変、旧 schema v1 は拒否し、新しいレビューを必要とする。
+レビュー実行中の HEAD 変更も拒否する。source 入力の digest に HEAD 自体を追加せず、同一内容の staging と descendant commit による正当な再利用は維持する。
 FAIL 時の指摘は `tmp/local-review/last-review.json`、対応入力は `last-input.json` に残り、修正へ引き継げる。
 初回FAILでreceiptが作られなくても、structured reviewの入力digestと照合した `last-input.json` から同Issueの要求pathを保持する。
 保存入力を検証できない場合は、要求を黙って除外せず明示設定を求めて拒否する。

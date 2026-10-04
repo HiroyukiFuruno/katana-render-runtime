@@ -36,6 +36,9 @@ from local_review_state import (
 )
 
 
+TEST_REVIEWED_HEAD_SHA = "f" * 40
+
+
 def inputs() -> dict:
     return {"source": {"base_sha": "a" * 40, "files": {"example.py": {"sha256": "b" * 64}}},
             "issues": [{"number": 89, "body_sha256": "c" * 64}],
@@ -54,9 +57,33 @@ def review(value: dict) -> dict:
 
 
 class ReceiptContractTest(unittest.TestCase):
+    def test_v2_provenance_is_integrity_bound_and_rejects_legacy_or_invalid_sha(self) -> None:
+        value = inputs()
+        result = review(value)
+        receipt = receipt_payload(value, result, TEST_REVIEWED_HEAD_SHA)
+        self.assertEqual(receipt["schema"], 2)
+        self.assertEqual(receipt["provenance"]["reviewed_head_sha"], TEST_REVIEWED_HEAD_SHA)
+        validate_receipt(receipt, value)
+
+        changed = copy.deepcopy(receipt)
+        changed["provenance"]["reviewed_head_sha"] = "e" * 40
+        with self.assertRaisesRegex(ReviewError, "integrity"):
+            validate_receipt(changed, value)
+
+        legacy_payload = {"schema": 1, "inputs": value, "review": result}
+        legacy = {**legacy_payload, "sha256": digest(legacy_payload)}
+        with self.assertRaisesRegex(ReviewError, "fields|schema"):
+            validate_receipt(legacy, value)
+
+        for invalid_sha in ("a" * 39, "a" * 41, "g" * 40, "A" * 40, "a" * 63):
+            with self.subTest(invalid_sha=invalid_sha), self.assertRaisesRegex(ReviewError, "reviewed HEAD SHA"):
+                receipt_payload(value, result, invalid_sha)
+        sha256_receipt = receipt_payload(value, result, "a" * 64)
+        self.assertEqual(validate_receipt(sha256_receipt, value)["verdict"], "PASS")
+
     def test_changed_source_invalidates_old_receipt(self) -> None:
         before = inputs()
-        receipt = receipt_payload(before, review(before))
+        receipt = receipt_payload(before, review(before), TEST_REVIEWED_HEAD_SHA)
         after = copy.deepcopy(before)
         after["source"]["files"]["example.py"]["sha256"] = "e" * 64
         with self.assertRaisesRegex(ReviewError, "another input|stale"):
@@ -64,14 +91,14 @@ class ReceiptContractTest(unittest.TestCase):
 
     def test_receipt_integrity_rejects_modified_verdict(self) -> None:
         value = inputs()
-        receipt = receipt_payload(value, review(value))
+        receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
         receipt["review"]["summary"] = "changed after review"
         with self.assertRaisesRegex(ReviewError, "integrity"):
             validate_receipt(receipt, value)
 
     def test_changed_base_issue_model_schema_or_requirements_invalidates_receipt(self) -> None:
         value = inputs()
-        receipt = receipt_payload(value, review(value))
+        receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
         for key, replacement in [("model", "other"), ("reasoning", "low"),
                                  ("schema_sha256", "f" * 64), ("requirements", "changed")]:
             with self.subTest(key=key):
@@ -96,7 +123,7 @@ class ReceiptContractTest(unittest.TestCase):
             else:
                 result["checks"]["specification_and_assertion_oracle"]["result"] = "blocked"
             with self.assertRaises(ReviewError):
-                validate_receipt(receipt_payload(value, result), value)
+                validate_receipt(receipt_payload(value, result, TEST_REVIEWED_HEAD_SHA), value)
 
     def test_priority_triage_blocks_relevant_findings_and_requires_acceptance(self) -> None:
         value = inputs()
@@ -106,21 +133,21 @@ class ReceiptContractTest(unittest.TestCase):
                                   "title": "wrong assertion", "reason": "violates requirement",
                                   "evidence": result["checks"][CHECKS[0]]["evidence"]}]
             with self.subTest(priority=priority), self.assertRaisesRegex(ReviewError, "blocking"):
-                validate_receipt(receipt_payload(value, result), value)
+                validate_receipt(receipt_payload(value, result, TEST_REVIEWED_HEAD_SHA), value)
         result["findings"][0].update(priority="P2", blocking=False, status="accepted",
                                        reason="unrelated to the requirement and compatibility")
-        validate_receipt(receipt_payload(value, result), value)
+        validate_receipt(receipt_payload(value, result, TEST_REVIEWED_HEAD_SHA), value)
         result["findings"][0]["reason"] = ""
         with self.assertRaises(ReviewError):
-            validate_receipt(receipt_payload(value, result), value)
+            validate_receipt(receipt_payload(value, result, TEST_REVIEWED_HEAD_SHA), value)
 
     def test_pending_later_gates_are_allowed_but_not_a_fake_quality_pass(self) -> None:
         value = inputs()
-        validate_receipt(receipt_payload(value, review(value)), value)
+        validate_receipt(receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA), value)
         result = review(value)
         result["full_quality_gate"] = "passed"
         with self.assertRaises(ReviewError):
-            validate_receipt(receipt_payload(value, result), value)
+            validate_receipt(receipt_payload(value, result, TEST_REVIEWED_HEAD_SHA), value)
 
     def test_json_duplicate_fields_are_rejected(self) -> None:
         with self.assertRaisesRegex(ReviewError, "duplicate"):
@@ -169,6 +196,84 @@ class GitSnapshotTest(unittest.TestCase):
         self.commit("changes")
         self.assertEqual(staged, source_snapshot(self.root, self.base))
 
+    def test_reviewed_base_head_remains_reusable_after_staging_and_descendant_commit(self) -> None:
+        path = self.root / "example.py"
+        path.write_text("reviewed working content\n")
+        working = source_snapshot(self.root, self.base)
+        command(["git", "add", "example.py"], self.root)
+        staged = source_snapshot(self.root, self.base)
+        self.assertEqual(working, staged)
+        value = {**inputs(), "source": working}
+        result = review(value)
+        receipt_path = self.root / "tmp" / "receipt.json"
+        receipt_path.parent.mkdir(exist_ok=True)
+        receipt_path.write_text(json.dumps(receipt_payload(value, result, self.base)))
+        receipt_path.with_suffix(".review.json").write_text(json.dumps(result))
+
+        self.commit("commit reviewed working content")
+        self.assertEqual(staged, source_snapshot(self.root, self.base))
+        self.assertEqual(local_review.read_receipt(receipt_path, {**value, "source": staged}, self.root)["verdict"],
+                         "PASS")
+
+    def test_reviewed_commit_then_mixed_reset_rejects_equal_source_snapshot_and_inference(self) -> None:
+        path = self.root / "example.py"
+        path.write_text("reviewed content\n")
+        self.commit("reviewed commit without refs")
+        reviewed_head = command(["git", "rev-parse", "HEAD"], self.root).strip()
+        before = source_snapshot(self.root, self.base)
+        value = {**inputs(), "source": before}
+        result = review(value)
+        receipt_path = self.root / "tmp" / "receipt.json"
+        receipt_path.parent.mkdir(exist_ok=True)
+        receipt_path.write_text(json.dumps(receipt_payload(value, result, reviewed_head)))
+        receipt_path.with_suffix(".review.json").write_text(json.dumps(result))
+
+        command(["git", "reset", "--mixed", self.base], self.root)
+        after = source_snapshot(self.root, self.base)
+        self.assertEqual(before, after)
+        self.assertNotEqual(reviewed_head, command(["git", "rev-parse", "HEAD"], self.root).strip())
+        with self.assertRaisesRegex(ReviewError, "receipt provenance rejected"):
+            local_review.read_receipt(receipt_path, {**value, "source": after}, self.root)
+
+        args = SimpleNamespace(issue=[], base=self.base)
+        with self.assertRaisesRegex(ReviewError, "receipt provenance rejected"):
+            local_review.issue_numbers(self.root, args, receipt_path)
+        with self.assertRaisesRegex(ReviewError, "receipt provenance rejected"):
+            local_review.requirements_path(self.root, SimpleNamespace(requirements=None), receipt_path, [89])
+
+    def test_head_change_during_review_prevents_receipt_creation(self) -> None:
+        args = SimpleNamespace(base=self.base, requirements=None)
+        value = {**inputs(), "source": source_snapshot(self.root, self.base)}
+        path = self.root / "tmp" / "receipt.json"
+
+        def commit_during_review(*_arguments):
+            (self.root / "example.py").write_text("changed while review runs\n")
+            self.commit("concurrent source change")
+            return review(value)
+
+        with patch.object(local_review, "invoke_review", side_effect=commit_during_review):
+            with self.assertRaisesRegex(ReviewError, "HEAD changed during review"):
+                local_review.obtain_receipt(self.root, args, path, value, [89])
+        self.assertFalse(path.exists())
+        self.assertFalse(path.with_suffix(".review.json").exists())
+
+    def test_input_change_during_review_prevents_receipt_creation(self) -> None:
+        args = SimpleNamespace(base=self.base, requirements=None)
+        path = self.root / "tmp" / "receipt.json"
+        with patch.object(local_review, "issue_context", return_value=inputs()["issues"]), \
+                patch.object(local_review, "gate_configuration", return_value={}):
+            value = local_review.build_inputs(self.root, args, [89])
+
+            def edit_source_during_review(*_arguments):
+                (self.root / "example.py").write_text("working tree changed during review\n")
+                return review(value)
+
+            with patch.object(local_review, "invoke_review", side_effect=edit_source_during_review):
+                with self.assertRaisesRegex(ReviewError, "input changed during review"):
+                    local_review.obtain_receipt(self.root, args, path, value, [89])
+        self.assertFalse(path.exists())
+        self.assertFalse(path.with_suffix(".review.json").exists())
+
     @unittest.skipUnless(os.name == "posix", "POSIX file permission bits are required")
     def test_real_git_reset_one_staged_path_then_commit_another_invalidates_receipt(self) -> None:
         for kind in ("modified", "deleted", "executable"):
@@ -195,7 +300,7 @@ class GitSnapshotTest(unittest.TestCase):
                 command(["git", "add", "-A"], root)
                 before = source_snapshot(root, base)
                 value = {**inputs(), "source": before}
-                receipt = receipt_payload(value, review(value))
+                receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
 
                 command(["git", "reset", "--quiet", "--", "first.py"], root)
                 command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
@@ -218,7 +323,7 @@ class GitSnapshotTest(unittest.TestCase):
         command(["git", "add", "-A"], self.root)
         staged = source_snapshot(self.root, self.base)
         value = {**inputs(), "source": staged}
-        receipt = receipt_payload(value, review(value))
+        receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
 
         self.commit("commit all tracked changes")
         committed = source_snapshot(self.root, self.base)
@@ -232,7 +337,7 @@ class GitSnapshotTest(unittest.TestCase):
         command(["git", "add", "example.py"], self.root)
         before = source_snapshot(self.root, self.base)
         value = {**inputs(), "source": before}
-        receipt = receipt_payload(value, review(value))
+        receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
 
         command(["git", "reset", "--quiet", "HEAD", "--", "example.py"], self.root)
         command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
@@ -264,7 +369,7 @@ class GitSnapshotTest(unittest.TestCase):
                 base = command(["git", "rev-parse", "HEAD"], root).strip()
                 original = source_snapshot(root, base)
                 original_value = {**inputs(), "source": original}
-                original_receipt = receipt_payload(original_value, review(original_value))
+                original_receipt = receipt_payload(original_value, review(original_value), TEST_REVIEWED_HEAD_SHA)
 
                 for option in set_flags:
                     command(["git", "update-index", option, "--", "tracked.py"], root)
@@ -338,7 +443,7 @@ class GitSnapshotTest(unittest.TestCase):
         path.chmod(0o654)
         initial = source_snapshot(self.root, self.base)
         value = {**inputs(), "source": initial}
-        receipt = receipt_payload(value, review(value))
+        receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
 
         path.chmod(0o744)
         command(["git", "add", "example.py"], self.root)
@@ -361,7 +466,7 @@ class GitSnapshotTest(unittest.TestCase):
         before = source_snapshot(self.root, base)
         self.assertEqual(set(before["files"]).intersection((lf_name, crlf_name)), {lf_name, crlf_name})
         value = {**inputs(), "source": before}
-        receipt = receipt_payload(value, review(value))
+        receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
 
         (self.root / crlf_name).write_text("CRLF path changed\n")
         changed = source_snapshot(self.root, base)
@@ -417,7 +522,7 @@ class GitSnapshotTest(unittest.TestCase):
         self.assertEqual(len({name for name in snapshot["files"] if name.startswith("bad")}), 2)
         value = {**inputs(), "source": snapshot}
         self.assertEqual(digest(value), digest(json.loads(json.dumps(value))))
-        validate_receipt(receipt_payload(value, review(value)), value)
+        validate_receipt(receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA), value)
 
         # macOS のファイルシステムでは作れない名前でも、Git index は保持できるため、
         # stage から commit まで同じ raw bytes として扱うことを確認する。
@@ -445,14 +550,14 @@ class GitSnapshotTest(unittest.TestCase):
         self.assertEqual(committed_index_paths, {bad_ff, bad_fe})
         self.assertEqual(committed_head_paths, {bad_ff, bad_fe})
         committed_value = {**inputs(), "source": committed}
-        validate_receipt(receipt_payload(committed_value, review(committed_value)), committed_value)
+        validate_receipt(receipt_payload(committed_value, review(committed_value), TEST_REVIEWED_HEAD_SHA), committed_value)
 
         changed_blob = raw(["git", "hash-object", "-w", "--stdin"], b"ff changed\n").strip()
         direct_git(["git", "update-index", "--add", "--cacheinfo",
                     f"100644,{changed_blob.decode()},{os.fsdecode(bad_ff)}"])
         changed = source_snapshot(self.root, self.base)
         with self.assertRaisesRegex(ReviewError, "another input|stale"):
-            validate_receipt(receipt_payload(committed_value, review(committed_value)),
+            validate_receipt(receipt_payload(committed_value, review(committed_value), TEST_REVIEWED_HEAD_SHA),
                              {**committed_value, "source": changed})
 
     @unittest.skipUnless(os.name == "posix", "non-UTF-8 worktree names require POSIX")
@@ -486,7 +591,7 @@ class GitSnapshotTest(unittest.TestCase):
         staged = source_snapshot(self.root, self.base)
         self.assertEqual(staged["files"], untracked["files"])
         staged_value = {**inputs(), "source": staged}
-        staged_receipt = receipt_payload(staged_value, review(staged_value))
+        staged_receipt = receipt_payload(staged_value, review(staged_value), TEST_REVIEWED_HEAD_SHA)
         self.commit("commit non-UTF-8 worktree paths")
         committed = source_snapshot(self.root, self.base)
         self.assertEqual(committed, staged)
@@ -504,7 +609,7 @@ class GitSnapshotTest(unittest.TestCase):
         command(["git", "add", "-A"], self.root)
         reviewed = source_snapshot(self.root, self.base)
         value = {**inputs(), "source": reviewed}
-        receipt = receipt_payload(value, review(value))
+        receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
 
         command(["git", "reset", "--quiet", "HEAD", "--", "new.py"], self.root)
         self.commit_index("commit tracked source only")
@@ -603,7 +708,7 @@ class GitSnapshotTest(unittest.TestCase):
                 self.assertEqual(before["head_overrides"], [])
                 value = {**inputs(), "source": before, "requirements": None,
                          "gate_configuration": {}}
-                receipt = receipt_payload(value, review(value))
+                receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
 
                 if change_clean_filter:
                     command(["git", "config", "filter.review.clean", "sed 's/reviewed/pushed/g'"], root)
@@ -647,7 +752,7 @@ class GitSnapshotTest(unittest.TestCase):
             self.assertEqual(staged["new_tracked_paths"], ["pkg/mod.py"])
             value = {**inputs(), "source": staged, "requirements": None,
                      "gate_configuration": {}}
-            receipt = receipt_payload(value, review(value))
+            receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
 
             command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
                      "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "commit package directory"], root)
@@ -679,7 +784,7 @@ class GitSnapshotTest(unittest.TestCase):
             self.assertEqual(staged["new_tracked_paths"], ["pkg"])
             value = {**inputs(), "source": staged, "requirements": None,
                      "gate_configuration": {}}
-            receipt = receipt_payload(value, review(value))
+            receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
 
             command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
                      "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "commit package leaf"], root)
@@ -724,6 +829,18 @@ class GitSnapshotTest(unittest.TestCase):
             command(["git", "-c", "user.name=Review fixture", "-c", "user.email=review@example.invalid",
                      "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "initial SHA-256 tree"], root)
             base = command(["git", "rev-parse", "HEAD"], root).strip()
+            self.assertEqual(len(base), 64)
+            baseline = source_snapshot(root, base)
+            baseline_value = {**inputs(), "source": baseline}
+            baseline_review = review(baseline_value)
+            receipt_path = root / ".git" / "sha256-receipt.json"
+            receipt_path.write_text(json.dumps(receipt_payload(baseline_value, baseline_review, base)))
+            receipt_path.with_suffix(".review.json").write_text(json.dumps(baseline_review))
+            self.assertEqual(local_review.read_receipt(receipt_path, baseline_value, root)["verdict"], "PASS")
+            unknown_head = receipt_payload(baseline_value, baseline_review, "e" * 64)
+            receipt_path.write_text(json.dumps(unknown_head))
+            with self.assertRaisesRegex(ReviewError, "receipt provenance rejected"):
+                local_review.read_receipt(receipt_path, baseline_value, root)
 
             (root / "example.txt").write_bytes(b"same working bytes\n")
             (root / "link.txt").unlink()
@@ -775,7 +892,7 @@ class GitSnapshotTest(unittest.TestCase):
         self.assertNotEqual(before, after)
         prior = {**value, "source": before}
         with self.assertRaisesRegex(ReviewError, "another input|stale"):
-            validate_receipt(receipt_payload(prior, review(prior)), value)
+            validate_receipt(receipt_payload(prior, review(prior), TEST_REVIEWED_HEAD_SHA), value)
 
     def test_compact_input_exposes_head_only_change_after_restoring_working_and_index(self) -> None:
         (self.root / "example.py").write_text("unreviewed HEAD C\n")
@@ -798,7 +915,7 @@ class GitSnapshotTest(unittest.TestCase):
         before = source_snapshot(self.root, self.base)
         value = inputs()
         value["source"] = before
-        receipt = receipt_payload(value, review(value))
+        receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
         path.write_text("unreviewed C\n")
         command(["git", "add", "example.py"], self.root)
         self.commit_index("unreviewed HEAD")
@@ -879,7 +996,7 @@ class GitSnapshotTest(unittest.TestCase):
                 self.assertTrue(after["index_overrides"])
                 value = {**inputs(), "source": before, "requirements": None, "gate_configuration": {}}
                 with self.assertRaisesRegex(ReviewError, "another input|stale"):
-                    validate_receipt(receipt_payload(value, review(value)), {**value, "source": after})
+                    validate_receipt(receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA), {**value, "source": after})
 
     def test_head_tracked_ignored_file_remains_in_snapshot_without_index_entry(self) -> None:
         (self.root / ".gitignore").write_text("tmp/\nignored.py\n")
@@ -900,7 +1017,7 @@ class GitSnapshotTest(unittest.TestCase):
         before = source_snapshot(self.root, self.base)
         value = inputs()
         value["source"] = before
-        receipt = receipt_payload(value, review(value))
+        receipt = receipt_payload(value, review(value), TEST_REVIEWED_HEAD_SHA)
         path.write_text("commit C\n")
         command(["git", "add", "example.py"], self.root)
         path.write_text("working B\n")
@@ -984,7 +1101,8 @@ class GitSnapshotTest(unittest.TestCase):
         result = review(value)
         result["issues"].append({"number": 95, "body_sha256": "e" * 64, "result": "verified",
                                  "evidence": copy.deepcopy(result["issues"][0]["evidence"])})
-        payload = receipt_payload(value, result)
+        reviewed_head_sha = command(["git", "rev-parse", "HEAD"], self.root).strip()
+        payload = receipt_payload(value, result, reviewed_head_sha)
         validate_receipt(payload, value)
         receipt = self.root / "tmp" / "receipt.json"
         receipt.parent.mkdir()
@@ -1024,7 +1142,8 @@ class GitSnapshotTest(unittest.TestCase):
         result = review(value)
         result["issues"].append({"number": 95, "body_sha256": "e" * 64, "result": "verified",
                                  "evidence": copy.deepcopy(result["issues"][0]["evidence"])})
-        valid_payload = receipt_payload(value, result)
+        reviewed_head_sha = command(["git", "rev-parse", "HEAD"], self.root).strip()
+        valid_payload = receipt_payload(value, result, reviewed_head_sha)
         receipt.parent.mkdir(exist_ok=True)
         receipt.write_text(json.dumps(valid_payload))
         sidecar = receipt.with_suffix(".review.json")
@@ -1048,9 +1167,10 @@ class GitSnapshotTest(unittest.TestCase):
                     local_review.run(run_args)
                 invoke.assert_not_called()
 
-        receipt.write_text(json.dumps(receipt_payload(inputs(), review(inputs()))))
+        empty_payload = receipt_payload(inputs(), review(inputs()), reviewed_head_sha)
+        receipt.write_text(json.dumps(empty_payload))
         sidecar.write_text(json.dumps(review(inputs())))
-        for contents in (json.dumps(receipt_payload(inputs(), review(inputs()))), "{", "{}"):
+        for contents in (json.dumps(empty_payload), "{", "{}"):
             with self.subTest(receipt=contents), \
                     patch.dict(os.environ, {}, clear=True), \
                     patch.object(local_review, "command", side_effect=git_command):
@@ -1074,7 +1194,8 @@ class GitSnapshotTest(unittest.TestCase):
             return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
 
         partial = inputs()
-        partial_payload = receipt_payload(partial, review(partial))
+        reviewed_head_sha = command(["git", "rev-parse", "HEAD"], self.root).strip()
+        partial_payload = receipt_payload(partial, review(partial), reviewed_head_sha)
         receipt.write_text(json.dumps(partial_payload))
         receipt.with_suffix(".review.json").write_text(json.dumps(partial_payload["review"]))
 
@@ -1098,7 +1219,7 @@ class GitSnapshotTest(unittest.TestCase):
                 "number": 95, "body_sha256": "e" * 64, "result": "verified",
                 "evidence": copy.deepcopy(complete_review["issues"][0]["evidence"]),
             })
-            complete_payload = receipt_payload(complete, complete_review)
+            complete_payload = receipt_payload(complete, complete_review, reviewed_head_sha)
             receipt.write_text(json.dumps(complete_payload))
             receipt.with_suffix(".review.json").write_text(json.dumps(complete_review))
             self.assertEqual(local_review.issue_numbers(self.root, args, receipt), [89, 95])
@@ -1113,7 +1234,8 @@ class GitSnapshotTest(unittest.TestCase):
         result = review(value)
         receipt = self.root / "tmp" / "receipt.json"
         receipt.parent.mkdir(exist_ok=True)
-        receipt.write_text(json.dumps(receipt_payload(value, result)))
+        reviewed_head_sha = command(["git", "rev-parse", "HEAD"], root).strip()
+        receipt.write_text(json.dumps(receipt_payload(value, result, reviewed_head_sha)))
         sidecar = receipt.with_suffix(".review.json")
         sidecar.write_text(json.dumps(result))
         (receipt.parent / "last-input-context.json").write_text(json.dumps({
@@ -1212,7 +1334,8 @@ class GitSnapshotTest(unittest.TestCase):
             self.assertIsNone(local_review.retained_inputs(receipt, root=root))
         context["input_sha256"] = digest(value)
         context_path.write_text(json.dumps(context))
-        payload = receipt_payload(value, review(value))
+        reviewed_head_sha = command(["git", "rev-parse", "HEAD"], root).strip()
+        payload = receipt_payload(value, review(value), reviewed_head_sha)
         receipt.write_text(json.dumps(payload))
         receipt.with_suffix(".review.json").write_text(json.dumps(payload["review"]))
         (receipt.parent / "last-input.json").unlink()
@@ -1239,10 +1362,10 @@ class GitSnapshotTest(unittest.TestCase):
 
         with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True), \
                 patch.object(local_review, "command", side_effect=git_command):
-            with self.assertRaisesRegex(ReviewError, "set REVIEW_ISSUE or pass --issue"):
+            with self.assertRaisesRegex(ReviewError, "receipt provenance rejected"):
                 local_review.issue_numbers(root, args, receipt)
-            self.assertIsNone(local_review.requirements_path(root, SimpleNamespace(requirements=None),
-                                                             receipt, [89]))
+            with self.assertRaisesRegex(ReviewError, "receipt provenance rejected"):
+                local_review.requirements_path(root, SimpleNamespace(requirements=None), receipt, [89])
             explicit = SimpleNamespace(issue=[120], base=self.base)
             self.assertEqual(local_review.issue_numbers(root, explicit, receipt), [120])
 
@@ -1296,7 +1419,7 @@ class DriverContractTest(unittest.TestCase):
 
         baseline = {**inputs(), "source": source_snapshot(root, "HEAD"),
                     "requirements": None, "gate_configuration": absent}
-        receipt = receipt_payload(baseline, review(baseline))
+        receipt = receipt_payload(baseline, review(baseline), TEST_REVIEWED_HEAD_SHA)
         empty_inputs = {**baseline, "gate_configuration": present_empty}
         nonempty_inputs = {**baseline, "gate_configuration": nonempty}
         self.assertNotEqual(digest(baseline), digest(empty_inputs))
@@ -1422,7 +1545,7 @@ class DriverContractTest(unittest.TestCase):
                     updated = local_review.build_inputs(root, args, [89])
                     self.assertNotEqual(baseline, updated)
                     with self.assertRaisesRegex(ReviewError, "another input"):
-                        validate_receipt(receipt_payload(baseline, review(baseline)), updated)
+                        validate_receipt(receipt_payload(baseline, review(baseline), TEST_REVIEWED_HEAD_SHA), updated)
             defaults = {"PATH": os.environ["PATH"], "CI": "true", "COVERAGE_MIN_LINES": "100",
                         "COVERAGE_MAX_UNCOVERED_LINES": "0", "TEST_THREADS": "1", "RUSTFLAGS": "-D warnings",
                         "GITHUB_TOKEN": "secret-not-an-input"}
@@ -1439,37 +1562,41 @@ class DriverContractTest(unittest.TestCase):
             value["requirements"] = local_review.requirements_context(root, "requirements.md")
             receipt = root / "receipt.json"
             result = review(value)
-            receipt.write_text(json.dumps(receipt_payload(value, result)))
+            receipt.write_text(json.dumps(receipt_payload(value, result, TEST_REVIEWED_HEAD_SHA)))
             receipt.with_suffix(".review.json").write_text(json.dumps(result))
             context_path = receipt.parent / "last-input-context.json"
             context_path.write_text(json.dumps({
                 "schema": 1, "branch": "release/retry", "input_sha256": digest(value),
             }))
             args = SimpleNamespace(requirements=None)
-            with patch.object(local_review, "branch_identity", return_value="release/retry"):
+            with patch.object(local_review, "command", return_value=""), \
+                    patch.object(local_review, "branch_identity", return_value="release/retry"):
                 selected = local_review.requirements_path(root, args, receipt, [89])
             self.assertEqual(selected, "requirements.md")
             self.assertEqual(value["requirements"], local_review.requirements_context(root, selected))
             requirement.write_text("changed native requirement\n")
             self.assertNotEqual(value["requirements"], local_review.requirements_context(root, selected))
-            self.assertIsNone(local_review.requirements_path(root, args, receipt, [120]))
+            with patch.object(local_review, "command", return_value=""):
+                self.assertIsNone(local_review.requirements_path(root, args, receipt, [120]))
             with patch.dict(os.environ, {"REVIEW_REQUIREMENTS": "environment.md"}):
                 self.assertEqual(local_review.requirements_path(root, args, receipt, [89]), "environment.md")
                 args.requirements = "explicit.md"
                 self.assertEqual(local_review.requirements_path(root, args, receipt, [89]), "explicit.md")
             args.requirements = None
             requirement.unlink()
-            with patch.object(local_review, "branch_identity", return_value="release/retry"):
+            with patch.object(local_review, "command", return_value=""), \
+                    patch.object(local_review, "branch_identity", return_value="release/retry"):
                 with self.assertRaisesRegex(ReviewError, "requirements"):
                     local_review.requirements_path(root, args, receipt, [89])
             value["requirements"] = {"content": "lost path", "sha256": "a" * 64}
             result = review(value)
-            receipt.write_text(json.dumps(receipt_payload(value, result)))
+            receipt.write_text(json.dumps(receipt_payload(value, result, TEST_REVIEWED_HEAD_SHA)))
             receipt.with_suffix(".review.json").write_text(json.dumps(result))
             context_path.write_text(json.dumps({
                 "schema": 1, "branch": "release/retry", "input_sha256": digest(value),
             }))
-            with patch.object(local_review, "branch_identity", return_value="release/retry"):
+            with patch.object(local_review, "command", return_value=""), \
+                    patch.object(local_review, "branch_identity", return_value="release/retry"):
                 with self.assertRaisesRegex(ReviewError, "requirements"):
                     local_review.requirements_path(root, args, receipt, [89])
 
@@ -1485,19 +1612,21 @@ class DriverContractTest(unittest.TestCase):
             with patch.object(local_review, "repository_root", return_value=root), patch.object(local_review, "source_snapshot", return_value=inputs()["source"]), patch.object(local_review, "issue_context", return_value=inputs()["issues"]), patch.object(local_review, "gate_configuration", return_value={"TEST_THREADS": "1"}), patch.object(local_review, "invoke_review") as invoke:
                 value = local_review.build_inputs(root, args, [89])
                 result = review(value)
-                path.write_text(json.dumps(receipt_payload(value, result)))
+                path.write_text(json.dumps(receipt_payload(value, result, TEST_REVIEWED_HEAD_SHA)))
                 path.with_suffix(".review.json").write_text(json.dumps(result))
                 (path.parent / "last-input-context.json").write_text(json.dumps({
                     "schema": 1, "branch": "release/check", "input_sha256": digest(value),
                 }))
                 args.requirements = None
-                with patch.object(local_review, "branch_identity", return_value="release/check"):
+                with patch.object(local_review, "command", return_value=""), \
+                        patch.object(local_review, "branch_identity", return_value="release/check"):
                     self.assertEqual(local_review.run(args), 0)
                 self.assertEqual(args.requirements, "requirements.md")
                 invoke.assert_not_called()
                 requirement.write_text("different requirement\n")
                 args.requirements = None
-                with patch.object(local_review, "branch_identity", return_value="release/check"):
+                with patch.object(local_review, "command", return_value=""), \
+                        patch.object(local_review, "branch_identity", return_value="release/check"):
                     with self.assertRaisesRegex(ReviewError, "receipt rejected"):
                         local_review.run(args)
                 invoke.assert_not_called()
@@ -1584,7 +1713,8 @@ class DriverContractTest(unittest.TestCase):
                 value = local_review.build_inputs(root, args, [89])
                 child = root / "codex-test"
                 child.mkdir(parents=True)
-                with patch.object(local_review, "compact_input", return_value={}), \
+                with patch.object(local_review, "command", return_value=TEST_REVIEWED_HEAD_SHA + "\n"), \
+                        patch.object(local_review, "compact_input", return_value={}), \
                         patch.object(local_review, "run_review_process", return_value=2):
                     with self.assertRaisesRegex(ReviewError, "exit 2"):
                         local_review.obtain_receipt(root, args, receipt, value, [89])
@@ -1601,7 +1731,8 @@ class DriverContractTest(unittest.TestCase):
                     result_path.write_text(json.dumps(result))
                     return 0
 
-                with patch.object(local_review, "compact_input", return_value={}), \
+                with patch.object(local_review, "command", return_value=TEST_REVIEWED_HEAD_SHA + "\n"), \
+                        patch.object(local_review, "compact_input", return_value={}), \
                         patch.object(local_review, "run_review_process", side_effect=successful_review):
                     self.assertEqual(local_review.run(args), 0)
                 self.assertTrue(receipt.is_file())
@@ -1627,7 +1758,8 @@ class DriverContractTest(unittest.TestCase):
                 (receipt.parent / "last-review.json").write_text(json.dumps(review(current)))
                 self.assertIsNone(local_review.retained_inputs(receipt, [89]))
                 fresh = review(current)
-                with patch.object(local_review, "invoke_review", return_value=fresh) as invoke:
+                with patch.object(local_review, "command", return_value=TEST_REVIEWED_HEAD_SHA + "\n"), \
+                        patch.object(local_review, "invoke_review", return_value=fresh) as invoke:
                     self.assertEqual(local_review.run(args), 0)
                 invoke.assert_called_once()
                 self.assertEqual(json.loads(receipt.read_text())["review"], fresh)
@@ -1683,7 +1815,7 @@ class DriverContractTest(unittest.TestCase):
                     after = local_review.build_inputs(root, args, [89])
                 self.assertNotEqual(before["prompt_sha256"], after["prompt_sha256"])
                 with self.assertRaisesRegex(ReviewError, "another input|stale"):
-                    validate_receipt(receipt_payload(before, review(before)), after)
+                    validate_receipt(receipt_payload(before, review(before), TEST_REVIEWED_HEAD_SHA), after)
             prompt = local_review.review_prompt()
             self.assertLess(local_review.REVIEW_ANALYSIS_SECONDS, local_review.REVIEW_TIMEOUT_SECONDS)
             self.assertIn("blocked/FAIL", prompt)
@@ -1704,7 +1836,9 @@ class DriverContractTest(unittest.TestCase):
                 self.assertIn("+00:00", budget["analysis_deadline_utc"])
                 diagnostic.write_text("partial review; not a PASS")
                 raise subprocess.TimeoutExpired(arguments, 1800)
-            with patch.object(local_review, "compact_input", return_value={"input_sha256": digest(value)}), patch.object(local_review, "run_review_process", side_effect=timed_out):
+            with patch.object(local_review, "command", return_value=TEST_REVIEWED_HEAD_SHA + "\n"), \
+                    patch.object(local_review, "compact_input", return_value={"input_sha256": digest(value)}), \
+                    patch.object(local_review, "run_review_process", side_effect=timed_out):
                 with self.assertRaisesRegex(ReviewError, "exceeded 1800s; no receipt accepted; inspect"):
                     local_review.obtain_receipt(root, args, receipt, value, [89])
             self.assertFalse(receipt.exists())
@@ -2114,7 +2248,7 @@ class DriverContractTest(unittest.TestCase):
         args = SimpleNamespace(issue=[], base="origin/master")
         with tempfile.TemporaryDirectory() as temporary:
             receipt = Path(temporary) / "receipt.json"
-            receipt.write_text(json.dumps(receipt_payload(inputs(), review(inputs()))))
+            receipt.write_text(json.dumps(receipt_payload(inputs(), review(inputs()), TEST_REVIEWED_HEAD_SHA)))
             with patch.dict(os.environ, {}, clear=True), patch.object(local_review, "command", return_value="fix\nRefs #120"):
                 self.assertEqual(local_review.issue_numbers(Path.cwd(), args, receipt), [120])
             with patch.dict(os.environ, {}, clear=True), patch.object(local_review, "command", return_value="Refs #120\nRefs #121"):
@@ -2132,12 +2266,16 @@ class DriverContractTest(unittest.TestCase):
         value = inputs()
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "receipt.json"
-            path.write_text(json.dumps(receipt_payload(value, review(value))))
+            root = Path(__file__).resolve().parents[2]
+            reviewed_head_sha = command(
+                ["git", "rev-parse", "--verify", "HEAD^{commit}"], root
+            ).strip()
+            path.write_text(json.dumps(receipt_payload(value, review(value), reviewed_head_sha)))
             original = review(value)
             original["summary"] = "modified original"
             path.with_suffix(".review.json").write_text(json.dumps(original))
             with self.assertRaisesRegex(ReviewError, "original structured"):
-                local_review.read_receipt(path, value)
+                local_review.read_receipt(path, value, root)
 
 
 if __name__ == "__main__":

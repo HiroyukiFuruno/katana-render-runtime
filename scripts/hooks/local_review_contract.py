@@ -135,16 +135,31 @@ def validate_findings(value: Any) -> None:
         evidence_list(finding["evidence"])
 
 
-def receipt_payload(inputs: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
-    payload = {"schema": 1, "inputs": inputs, "review": review}
+def receipt_payload(inputs: dict[str, Any], review: dict[str, Any],
+                    reviewed_head_sha: str) -> dict[str, Any]:
+    provenance = {"reviewed_head_sha": reviewed_head_sha}
+    validate_provenance(provenance)
+    payload = {"schema": 2, "inputs": inputs, "review": review,
+               "provenance": provenance}
     return {**payload, "sha256": digest(payload)}
 
 
+def validate_provenance(value: Any) -> dict[str, str]:
+    provenance = exact_keys(value, {"reviewed_head_sha"}, "receipt provenance")
+    head_sha = provenance["reviewed_head_sha"]
+    if not isinstance(head_sha, str) or len(head_sha) not in (40, 64):
+        raise ReviewError("invalid receipt reviewed HEAD SHA")
+    if any(character not in "0123456789abcdef" for character in head_sha):
+        raise ReviewError("invalid receipt reviewed HEAD SHA")
+    return provenance
+
+
 def validate_receipt(receipt: Any, inputs: dict[str, Any]) -> dict[str, Any]:
-    exact_keys(receipt, {"schema", "inputs", "review", "sha256"}, "receipt")
-    if type(receipt["schema"]) is not int or receipt["schema"] != 1:
+    exact_keys(receipt, {"schema", "inputs", "review", "provenance", "sha256"}, "receipt")
+    if type(receipt["schema"]) is not int or receipt["schema"] != 2:
         raise ReviewError("unsupported receipt schema")
-    payload = {key: receipt[key] for key in ("schema", "inputs", "review")}
+    validate_provenance(receipt["provenance"])
+    payload = {key: receipt[key] for key in ("schema", "inputs", "review", "provenance")}
     if receipt["sha256"] != digest(payload):
         raise ReviewError("receipt integrity check failed")
     if receipt["inputs"] != inputs:
