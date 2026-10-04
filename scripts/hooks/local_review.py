@@ -293,13 +293,14 @@ def run_review_process(arguments: list[str], root: Path, environment: dict, prom
     manage_signals = os.name == "posix" and threading.current_thread() is threading.main_thread()
     previous_signal_mask = None
     if manage_signals:
-        previous_handlers[signal.SIGTERM] = signal.signal(signal.SIGTERM, terminate_parent)
+        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            previous_handlers[signum] = signal.signal(signum, terminate_parent)
     try:
         with diagnostic.open("w") as errors:
             if manage_signals:
                 # 子プロセス生成直後のシグナルを親で受け、必ず子グループの後始末へ進む。
                 previous_signal_mask = signal.pthread_sigmask(
-                    signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM}
+                    signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
                 )
             try:
                 process = subprocess.Popen(

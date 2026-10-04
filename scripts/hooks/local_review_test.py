@@ -2116,11 +2116,24 @@ class DriverContractTest(unittest.TestCase):
         process.__enter__.return_value = process
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            with patch.object(subprocess, "Popen", return_value=process) as launch, patch.object(os, "killpg") as kill:
+            mask_calls = []
+            original_pthread_sigmask = signal.pthread_sigmask
+
+            def record_signal_mask(how, mask):
+                mask_calls.append((how, set(mask)))
+                return original_pthread_sigmask(how, mask)
+
+            with patch.object(subprocess, "Popen", return_value=process) as launch, \
+                    patch.object(os, "killpg") as kill, \
+                    patch.object(local_review.signal, "pthread_sigmask", side_effect=record_signal_mask):
                 with self.assertRaises(subprocess.TimeoutExpired):
                     local_review.run_review_process(["codex"], root, {}, "review", root / "stderr.log")
             self.assertTrue(launch.call_args.kwargs["start_new_session"])
             kill.assert_called_once_with(12345, local_review.signal.SIGKILL)
+            self.assertIn(
+                {signal.SIGINT, signal.SIGTERM, signal.SIGHUP},
+                [mask for how, mask in mask_calls if how == signal.SIG_BLOCK],
+            )
             self.assertEqual(process.communicate.call_count, 2)
 
     def test_real_review_process_timeout_retains_stderr(self) -> None:
@@ -2140,7 +2153,7 @@ class DriverContractTest(unittest.TestCase):
             root = Path(temporary)
             environment = dict(os.environ)
             environment["PYTHONPATH"] = str(hooks)
-            for child_signal in (signal.SIGTERM, signal.SIGINT):
+            for child_signal in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
                 with self.subTest(signal=child_signal.name):
                     lock = root / f"{child_signal.name}.lock"
                     ready = root / f"{child_signal.name}.ready"
@@ -2246,9 +2259,13 @@ class DriverContractTest(unittest.TestCase):
     def test_review_signal_handlers_restore_after_success_and_spawn_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            original_handler = signal.getsignal(signal.SIGTERM)
+            original_handlers = {
+                signum: signal.getsignal(signum)
+                for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+            }
             sentinel = lambda _signum, _frame: None
-            signal.signal(signal.SIGTERM, sentinel)
+            for signum in original_handlers:
+                signal.signal(signum, sentinel)
             try:
                 self.assertEqual(
                     local_review.run_review_process(
@@ -2256,15 +2273,18 @@ class DriverContractTest(unittest.TestCase):
                     ),
                     0,
                 )
-                self.assertIs(signal.getsignal(signal.SIGTERM), sentinel)
+                for signum in original_handlers:
+                    self.assertIs(signal.getsignal(signum), sentinel)
                 with patch.object(subprocess, "Popen", side_effect=OSError("spawn failed")):
                     with self.assertRaisesRegex(OSError, "spawn failed"):
                         local_review.run_review_process(
                             ["missing-reviewer"], root, dict(os.environ), "review", root / "spawn-error.log"
                         )
-                self.assertIs(signal.getsignal(signal.SIGTERM), sentinel)
+                for signum in original_handlers:
+                    self.assertIs(signal.getsignal(signum), sentinel)
             finally:
-                signal.signal(signal.SIGTERM, original_handler)
+                for signum, handler in original_handlers.items():
+                    signal.signal(signum, handler)
 
 
     def test_same_issue_body_does_not_expire_on_comment_timestamp(self) -> None:
