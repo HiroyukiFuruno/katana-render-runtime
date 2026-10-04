@@ -158,9 +158,29 @@ def workflow_scope_supported(path: Path = WORKFLOW) -> bool:
         return False
 
 
+def reject_git_replace_refs() -> None:
+    environment = dict(os.environ)
+    environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+    ref_bases = {"refs/replace/"}
+    configured_base = environment.get("GIT_REPLACE_REF_BASE")
+    if configured_base:
+        ref_bases.add(configured_base.rstrip("/") + "/")
+    for ref_base in ref_bases:
+        result = subprocess.run(
+            ["git", "--no-replace-objects", "for-each-ref", "--format=%(refname)", ref_base],
+            cwd=ROOT, check=True, text=True, capture_output=True, env=environment,
+        )
+        if result.stdout.strip():
+            raise EvidenceError("Git replacement refs invalidate local proof")
+
+
 def run_git(*args: str) -> str:
+    reject_git_replace_refs()
+    environment = dict(os.environ)
+    environment["GIT_NO_REPLACE_OBJECTS"] = "1"
     result = subprocess.run(
-        ["git", *args], cwd=ROOT, check=True, text=True, capture_output=True
+        ["git", "--no-replace-objects", *args], cwd=ROOT, check=True, text=True,
+        capture_output=True, env=environment,
     )
     return result.stdout.strip()
 
@@ -181,9 +201,11 @@ def head_worktree_bytes_digest(expected_head: str) -> str:
     if object_format not in {"sha1", "sha256"}:
         raise EvidenceError("unsupported Git object format")
     try:
+        reject_git_replace_refs()
         tree = subprocess.run(
-            ["git", "ls-tree", "-r", "-z", "--full-tree", expected_head],
+            ["git", "--no-replace-objects", "ls-tree", "-r", "-z", "--full-tree", expected_head],
             cwd=ROOT, check=True, capture_output=True,
+            env={**os.environ, "GIT_NO_REPLACE_OBJECTS": "1"},
         ).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         raise EvidenceError("cannot read tracked HEAD tree") from exc
@@ -321,6 +343,9 @@ def command_environment() -> dict[str, str]:
             raise EvidenceError("Cargo config paths overrides are unsupported")
         if "include" in parsed:
             raise EvidenceError("Cargo config includes are unsupported")
+        aliases = parsed.get("alias")
+        if isinstance(aliases, dict) and any(name in aliases for name in ("clippy", "fmt")):
+            raise EvidenceError("Cargo config aliases for clippy/fmt are unsupported")
         if "profile" in parsed:
             raise EvidenceError("Cargo config profile overrides are unsupported")
         build_config = parsed.get("build")

@@ -338,6 +338,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 "PYTHONPATH": "/wrong/python", "BUN_INSTALL": "/wrong/bun",
                 "NODE_OPTIONS": "--require=/wrong.js", "JOBS": "99", "KRR_BIN": "/wrong/krr",
                 "XDG_CACHE_HOME": "/wrong/cache", "CARGO": "true", "RTK": "true",
+                "CARGO_ALIAS_CLIPPY": "--help", "CARGO_ALIAS_FMT": "--help",
                 "RUSTFLAGS": "--cfg wrong",
             }
             safe = {
@@ -456,6 +457,8 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 'rustc-link-lib = ["static=ring_core_0_17_14_"]\n',
                 r"Cargo config target linker or links override",
             ),
+            ("repo", "config.toml", '[alias]\nclippy = "--help"\n', r"Cargo config aliases for clippy/fmt"),
+            ("cargo_home", "config", '[alias]\nfmt = "--help"\n', r"Cargo config aliases for clippy/fmt"),
         )
         for location, filename, content, expected_error in cases:
             with self.subTest(location=location), tempfile.TemporaryDirectory() as directory:
@@ -482,6 +485,41 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 }, clear=True):
                     with self.assertRaisesRegex(EVIDENCE.EvidenceError, expected_error):
                         EVIDENCE.command_environment()
+
+    def test_real_cargo_alias_redirect_is_rejected_before_evidence_collection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "repository"
+            cargo_home = base / "cargo-home"
+            root.mkdir()
+            cargo_home.mkdir()
+            (cargo_home / "config.toml").write_text(
+                '[alias]\nclippy = "--help"\nfmt = "--help"\n', encoding="utf-8",
+            )
+            environment = {
+                "HOME": str(base), "CARGO_HOME": str(cargo_home),
+                "RUSTUP_HOME": EVIDENCE.os.environ.get("RUSTUP_HOME", str(Path(EVIDENCE.os.environ["HOME"]) / ".rustup")),
+                "PATH": EVIDENCE.os.environ["PATH"],
+            }
+            redirected_commands = (
+                (("clippy", "--version"), "clippy "),
+                (("fmt", "--version"), "rustfmt "),
+                (("clippy", "--", "-D", "warnings"), "clippy "),
+                (("fmt", "--all", "--", "--check"), "rustfmt "),
+            )
+            for arguments, expected_prefix in redirected_commands:
+                dispatched = subprocess.run(
+                    ("cargo", *arguments), cwd=root, env=environment,
+                    text=True, capture_output=True,
+                )
+                if dispatched.returncode == 0:
+                    self.assertTrue(dispatched.stdout.startswith("Rust's package manager"))
+                    self.assertFalse(dispatched.stdout.startswith(expected_prefix))
+                else:
+                    self.assertIn("alias", dispatched.stderr.lower())
+            with patch.object(EVIDENCE, "ROOT", root), patch.dict(EVIDENCE.os.environ, environment, clear=True):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config aliases for clippy/fmt"):
+                    EVIDENCE.command_environment()
 
     def test_cargo_source_replacement_rejects_local_and_alternate_registries(self) -> None:
         local_source = (
@@ -593,6 +631,40 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 regular.write_bytes(b"changed after collection start\n")
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "tracked worktree bytes differ from HEAD"):
                     EVIDENCE.head_worktree_bytes_digest(head)
+
+    def test_git_replace_commit_cannot_change_tree_behind_same_clean_head_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+            tracked = root / "tracked.txt"
+            tracked.write_text("base bytes\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "tracked.txt"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+            base_head = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, text=True, capture_output=True,
+            ).stdout.strip()
+            tracked.write_text("replacement bytes\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "commit", "-qam", "replacement"], check=True)
+            replacement_head = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, text=True, capture_output=True,
+            ).stdout.strip()
+            subprocess.run(["git", "-C", str(root), "replace", base_head, replacement_head], check=True)
+            branch = subprocess.run(
+                ["git", "-C", str(root), "branch", "--show-current"], check=True, text=True, capture_output=True,
+            ).stdout.strip()
+            subprocess.run(["git", "-C", str(root), "update-ref", f"refs/heads/{branch}", base_head], check=True)
+            self.assertEqual(subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, text=True, capture_output=True,
+            ).stdout.strip(), base_head)
+            self.assertEqual(subprocess.run(
+                ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
+                check=True, text=True, capture_output=True,
+            ).stdout, "")
+            with patch.object(EVIDENCE, "ROOT", root):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "Git replacement refs invalidate"):
+                    EVIDENCE.head_worktree_bytes_digest(base_head)
 
     def test_raw_tracked_bytes_reject_clean_smudge_filter_hidden_by_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
