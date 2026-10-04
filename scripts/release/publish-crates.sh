@@ -45,6 +45,8 @@ wait_for_crate() {
   exit 1
 }
 
+publish_if_needed katana-render-runtime-assets
+wait_for_crate katana-render-runtime-assets
 publish_if_needed katana-render-runtime
 wait_for_crate katana-render-runtime
 publish_if_needed katana-render-runtime-cli

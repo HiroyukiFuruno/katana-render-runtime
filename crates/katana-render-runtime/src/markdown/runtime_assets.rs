@@ -73,7 +73,7 @@ impl RuntimeAsset {
             version: DRAWIO_JS_VERSION,
             filename: "drawio.min.js",
             source: RuntimeAssetSource::Brotli {
-                bytes: include_bytes!("../../vendor/drawio/32.0.2/drawio.min.js.br"),
+                bytes: katana_render_runtime_assets::DRAWIO_RUNTIME_BROTLI,
                 cache: &DRAWIO_RUNTIME_ASSET_BYTES,
             },
         }

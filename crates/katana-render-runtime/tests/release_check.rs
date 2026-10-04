@@ -39,12 +39,19 @@ fn release_check_requires_all_quality_and_publish_readiness_gates()
 
 #[test]
 fn release_verify_tests_the_packaged_library_sources() -> Result<(), Box<dyn std::error::Error>> {
-    let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
+    let root = workspace_root()?;
+    let justfile = std::fs::read_to_string(root.join("Justfile"))?;
     let recipe = recipe_body(&justfile, "release-verify")?;
+    let packaged_runtime_test =
+        std::fs::read_to_string(root.join("scripts/release/test_packaged_runtime.py"))?;
 
-    assert!(recipe.contains(
-        "test --manifest-path \"target/package/katana-render-runtime-{{VERSION_BARE}}/Cargo.toml\" --lib --locked{{TEST_THREAD_ARGS}}"
-    ));
+    assert!(recipe.contains("python3 scripts/release/test_packaged_runtime.py"));
+    for required_option in ["\"--lib\"", "\"--locked\"", "\"--offline\""] {
+        assert!(
+            packaged_runtime_test.contains(required_option),
+            "packaged runtime test must retain {required_option}"
+        );
+    }
     Ok(())
 }
 

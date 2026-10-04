@@ -176,6 +176,9 @@ export const RuntimeAssetPaths = {
   },
 
   compressedAssetFile(definition: RuntimeAssetDefinition, version = definition.version): string {
+    if (definition.kind === "drawio") {
+      return path.join("crates", "katana-render-runtime-assets", "assets", "drawio.min.js.br");
+    }
     return `${RuntimeAssetPaths.assetFile(definition, version)}.br`;
   },
 

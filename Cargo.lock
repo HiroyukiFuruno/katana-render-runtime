@@ -1156,6 +1156,7 @@ dependencies = [
  "image",
  "include_dir",
  "jni",
+ "katana-render-runtime-assets",
  "log",
  "markup5ever",
  "percent-encoding",
@@ -1178,6 +1179,10 @@ dependencies = [
  "xml5ever",
  "xmltree",
 ]
+
+[[package]]
+name = "katana-render-runtime-assets"
+version = "0.4.23"
 
 [[package]]
 name = "katana-render-runtime-cli"

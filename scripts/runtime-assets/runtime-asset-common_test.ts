@@ -26,6 +26,12 @@ test("runtime asset path は version を含む", () => {
   expect(RuntimeAssetPaths.assetFile(drawio)).toBe(
     `crates/katana-render-runtime/vendor/drawio/${drawio.version}/drawio.min.js`,
   );
+  expect(RuntimeAssetPaths.compressedAssetFile(drawio)).toBe(
+    "crates/katana-render-runtime-assets/assets/drawio.min.js.br",
+  );
+  expect(RuntimeAssetPaths.compressedAssetFile(drawio, "33.0.0")).toBe(
+    "crates/katana-render-runtime-assets/assets/drawio.min.js.br",
+  );
   expect(RuntimeAssetPaths.assetFile(mathjax)).toBe(
     `crates/katana-render-runtime/vendor/mathjax/${mathjax.version}/tex-svg.js`,
   );

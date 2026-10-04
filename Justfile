@@ -164,9 +164,7 @@ runtime-asset-script-test:
 runtime-package-asset-check:
     bun run scripts/runtime-assets/runtime-package-asset-compressor.ts --check
     @package_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \
-    for kind_file in \
-      "drawio/{{DRAWIO_JS_VERSION}}/drawio.min.js" \
-      "mermaid/{{MERMAID_JS_VERSION}}/mermaid.min.js"; do \
+    for kind_file in "mermaid/{{MERMAID_JS_VERSION}}/mermaid.min.js"; do \
         if ! printf '%s\n' "$package_files" | grep -qx "vendor/$kind_file.br"; then \
           echo "missing compressed runtime package asset: vendor/$kind_file.br" >&2; \
           exit 1; \
@@ -176,6 +174,14 @@ runtime-package-asset-check:
           exit 1; \
         fi; \
       done
+    @runtime_package_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \
+    asset_package_files="$({{CARGO}} package -p katana-render-runtime-assets --locked --allow-dirty --list)"; \
+    if ! printf '%s\n' "$asset_package_files" | grep -qx "assets/drawio.min.js.br"; then \
+      echo "missing compressed Draw.io asset package file" >&2; exit 1; \
+    fi; \
+    if printf '%s\n' "$runtime_package_files" | grep -Eq '^vendor/drawio/{{DRAWIO_JS_VERSION}}/drawio\.min\.js(\.br)?$'; then \
+      echo "Draw.io source and compressed asset belong to the assets package" >&2; exit 1; \
+    fi
 
 # Verify repository hook and release cleanup contracts
 automation-contract-test:
@@ -240,15 +246,26 @@ release-target-manifest:
 release-target-manifest-update:
     python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --head-ref HEAD --update-release-manifest
 
-# Verify package metadata and dry-run the first publishable crate
+# 未公開のworkspace依存を含め、Cargoの検証を通した配布packageを揃える。
 release-verify: release-target-check
     bash scripts/release/verify-version.sh "{{VERSION}}"
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
-    {{CARGO}} package -p katana-render-runtime --locked --allow-dirty
-    {{CARGO}} test --manifest-path "target/package/katana-render-runtime-{{VERSION_BARE}}/Cargo.toml" --lib --locked{{TEST_THREAD_ARGS}}
-    {{CARGO}} package -p katana-render-runtime-cli --locked --allow-dirty --list >/dev/null
+    {{CARGO}} package -p katana-render-runtime-assets -p katana-render-runtime -p katana-render-runtime-cli --locked --allow-dirty
+    python3 scripts/release/test_packaged_runtime.py --version "{{VERSION_BARE}}" --cargo {{quote(CARGO)}} {{if TEST_THREADS == "" { "" } else { "--test-threads " + TEST_THREADS }}}
+    @asset_files="$({{CARGO}} package -p katana-render-runtime-assets --locked --allow-dirty --list)"; \
+    if ! printf '%s\n' "$asset_files" | grep -qx "assets/drawio.min.js.br"; then \
+      echo "missing compressed Draw.io asset from assets crate package" >&2; exit 1; \
+    fi
+    @runtime_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \
+    for file in "vendor/drawio/{{DRAWIO_JS_VERSION}}/drawio.min.js.sha256"; do \
+      if ! printf '%s\n' "$runtime_files" | grep -qx "$file"; then echo "missing runtime source/checksum package file: $file" >&2; exit 1; fi; \
+    done; \
+    if printf '%s\n' "$runtime_files" | grep -Eq '^vendor/drawio/{{DRAWIO_JS_VERSION}}/drawio\.min\.js(\.br)?$'; then \
+      echo "Draw.io source and compressed asset must not be duplicated in the runtime crate" >&2; exit 1; \
+    fi
     bash scripts/release/verify-crate-size.sh katana-render-runtime "{{VERSION}}"
-    {{CARGO}} publish -p katana-render-runtime --dry-run --locked --allow-dirty
+    bash scripts/release/verify-crate-size.sh katana-render-runtime-assets "{{VERSION}}"
+    bash scripts/release/verify-crate-size.sh katana-render-runtime-cli "{{VERSION}}"
 
 # Verify completed OpenSpec changes are archived before release PRs
 release-openspec-archive:

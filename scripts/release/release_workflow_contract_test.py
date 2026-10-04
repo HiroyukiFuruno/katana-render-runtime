@@ -16,6 +16,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.preflight = (root / ".github/workflows/release-preflight.yml").read_text(encoding="utf-8")
         self.retry = (root / ".github/workflows/release-publish-retry.yml").read_text(encoding="utf-8")
         self.publisher = (root / "scripts/release/publish-crates.sh").read_text(encoding="utf-8")
+        self.justfile = (root / "Justfile").read_text(encoding="utf-8")
         self.ci = (root / ".github/workflows/test-and-build.yml").read_text(encoding="utf-8")
 
     def test_ubuntu_coverage_owns_unit_tests_without_manual_cache_purges(self) -> None:
@@ -281,6 +282,151 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("python3 scripts/release/cleanup_release_state.py", self.retry)
         cleanup_step = self.workflow_step(self.retry, "Cleanup published release state")
         self.assertNotIn("--delete-remote", cleanup_step)
+
+    def test_three_crates_are_published_and_checked_in_dependency_order(self) -> None:
+        packages = (
+            "katana-render-runtime-assets",
+            "katana-render-runtime",
+            "katana-render-runtime-cli",
+        )
+        lines = self.publisher.splitlines()
+        publish_positions = [
+            lines.index(f"publish_if_needed {package}") for package in packages
+        ]
+        wait_positions = [
+            lines.index(f"wait_for_crate {package}") for package in packages
+        ]
+        self.assertEqual(publish_positions, sorted(publish_positions))
+        self.assertEqual(wait_positions, sorted(wait_positions))
+        for publish, wait in zip(publish_positions, wait_positions, strict=True):
+            self.assertLess(publish, wait)
+
+        unpublished = (
+            Path(__file__).parent / "assert-crates-not-published.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("packages=(" + " ".join(packages) + ")", unpublished)
+        internal = (
+            Path(__file__).parent / "verify-internal-dependencies.sh"
+        ).read_text(encoding="utf-8")
+        for dependency in packages[:2]:
+            self.assertIn(dependency, internal)
+
+        release_verify = self.justfile[
+            self.justfile.index("release-verify:"):self.justfile.index(
+                "# Verify completed OpenSpec changes"
+            )
+        ]
+        self.assertIn(
+            "package -p " + " -p ".join(packages) + " --locked --allow-dirty",
+            release_verify,
+        )
+        self.assertIn("python3 scripts/release/test_packaged_runtime.py", release_verify)
+        self.assertIn("--version \"{{VERSION_BARE}}\"", release_verify)
+        for package in packages:
+            self.assertIn(f"verify-crate-size.sh {package}", release_verify)
+        self.assertNotIn("publish -p", release_verify)
+
+    def test_internal_dependency_check_rejects_package_version_drift(self) -> None:
+        script = Path(__file__).parent / "verify-internal-dependencies.sh"
+        manifests = {
+            "Cargo.toml": """[workspace]
+members = ["crates/katana-render-runtime-assets", "crates/katana-render-runtime", "crates/katana-render-runtime-cli"]
+
+[workspace.package]
+version = "0.4.23"
+
+[workspace.dependencies]
+katana-render-runtime-assets = { path = "crates/katana-render-runtime-assets", version = "=0.4.23" }
+katana-render-runtime = { path = "crates/katana-render-runtime", version = "0.4.23" }
+""",
+            "crates/katana-render-runtime-assets/Cargo.toml": """[package]
+name = "katana-render-runtime-assets"
+version.workspace = true
+""",
+            "crates/katana-render-runtime/Cargo.toml": """[package]
+name = "katana-render-runtime"
+version.workspace = true
+
+[dependencies]
+katana-render-runtime-assets = { workspace = true }
+""",
+            "crates/katana-render-runtime-cli/Cargo.toml": """[package]
+name = "katana-render-runtime-cli"
+version.workspace = true
+
+[dependencies]
+katana-render-runtime = { workspace = true }
+""",
+        }
+
+        def run_check(
+            package_version_line: str = "version.workspace = true",
+            asset_dependency_requirement: str = "=0.4.23",
+        ) -> subprocess.CompletedProcess[str]:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for relative, content in manifests.items():
+                    path = root / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(content, encoding="utf-8")
+                workspace_manifest = root / "Cargo.toml"
+                workspace_manifest.write_text(
+                    manifests["Cargo.toml"].replace(
+                        'version = "=0.4.23"',
+                        f'version = "{asset_dependency_requirement}"',
+                    ),
+                    encoding="utf-8",
+                )
+                cli_manifest = root / "crates/katana-render-runtime-cli/Cargo.toml"
+                cli_manifest.write_text(
+                    manifests["crates/katana-render-runtime-cli/Cargo.toml"].replace(
+                        "version.workspace = true", package_version_line
+                    ),
+                    encoding="utf-8",
+                )
+                return subprocess.run(
+                    ["bash", str(script), "0.4.23"],
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+        with self.subTest(case="matching workspace version"):
+            passed = run_check("version.workspace = true")
+            self.assertEqual(passed.returncode, 0, passed.stderr)
+        with self.subTest(case="exact assets version requirement"):
+            exact = run_check()
+            self.assertEqual(exact.returncode, 0, exact.stderr)
+        with self.subTest(case="bare caret assets version requirement"):
+            bare_caret = run_check(asset_dependency_requirement="0.4.23")
+            self.assertNotEqual(bare_caret.returncode, 0)
+            self.assertIn("must use exact version =0.4.23", bare_caret.stderr)
+        with self.subTest(case="stale exact assets version requirement"):
+            stale_exact = run_check(asset_dependency_requirement="=0.4.24")
+            self.assertNotEqual(stale_exact.returncode, 0)
+            self.assertIn("must use exact version =0.4.23", stale_exact.stderr)
+        with self.subTest(case="explicit stale package version"):
+            mismatch = run_check(package_version_line='version = "0.4.24"')
+            self.assertNotEqual(mismatch.returncode, 0)
+            self.assertIn("inherit the workspace package version", mismatch.stderr)
+        with self.subTest(case="missing package version"):
+            missing = run_check(package_version_line="")
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("inherit the workspace package version", missing.stderr)
+
+    def test_runtime_package_asset_check_rejects_drawio_source_and_compressed_copy(self) -> None:
+        start = self.justfile.index("runtime-package-asset-check:")
+        end = self.justfile.index("# Verify repository hook and release cleanup contracts", start)
+        recipe = self.justfile[start:end]
+        package_list_line = next(
+            line for line in recipe.splitlines() if "runtime_package_files=" in line
+        )
+        self.assertIn("package -p katana-render-runtime --locked --allow-dirty --list", package_list_line)
+        reject_line = next(line for line in recipe.splitlines() if "grep -Eq" in line)
+        self.assertIn('printf \'%s\\n\' "$runtime_package_files"', reject_line)
+        self.assertIn(r"drawio\.min\.js(\.br)?$", reject_line)
+        self.assertIn('assets/drawio.min.js.br', recipe)
 
     def run_plantuml_install(self, failures: int, checksum: str) -> tuple[subprocess.CompletedProcess[str], Path, int]:
         root = Path(__file__).parents[2]

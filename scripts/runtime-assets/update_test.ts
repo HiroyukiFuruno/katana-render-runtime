@@ -44,6 +44,27 @@ test("Rust runtime asset version const を 1 行形式でも更新できる", ()
   expect(updated).toBe('pub const DRAWIO_JS_VERSION: &str = "30.0.1";\n');
 });
 
+test("Draw.io の静的 assets crate 参照は version 更新で変化しない", () => {
+  const source = "bytes: katana_render_runtime_assets::DRAWIO_RUNTIME_BROTLI,\n";
+  const drawio = {
+    kind: "drawio",
+    displayName: "Draw.io",
+    version: "32.0.2",
+    checksum: "checksum",
+    fileName: "drawio.min.js",
+    rustVersionConst: "DRAWIO_JS_VERSION",
+    rustChecksumConst: "DRAWIO_JS_CHECKSUM",
+    rustDownloadConst: "DRAWIO_DOWNLOAD_URL",
+    latestUrl: "latest",
+    releasePageUrl: (version: string) => version,
+    downloadUrl: (version: string) => version,
+  } as const;
+
+  expect(new RuntimeSourceUpdater().replaceVendorAssetVersion(source, drawio, "32.1.0")).toBe(
+    source,
+  );
+});
+
 test("長い Rust const も rustfmt と同じ 1 行形式で更新する", () => {
   const source = 'pub const PLANTUML_DOWNLOAD_URL: &str = "old";\n';
   const value =
@@ -77,6 +98,30 @@ test("PlantUML package include は checksum manifest だけを更新する", () 
   );
 
   expect(updated).toBe('include = ["vendor/plantuml/1.2026.4/plantuml.jar.sha256",]\n');
+});
+
+test("Draw.io version 更新はruntime checksum pathだけを更新する", () => {
+  const drawio = {
+    kind: "drawio",
+    displayName: "Draw.io",
+    version: "32.0.2",
+    checksum: "checksum",
+    fileName: "drawio.min.js",
+    rustVersionConst: "DRAWIO_JS_VERSION",
+    rustChecksumConst: "DRAWIO_JS_CHECKSUM",
+    rustDownloadConst: "DRAWIO_DOWNLOAD_URL",
+    latestUrl: "latest",
+    releasePageUrl: (version: string) => version,
+    downloadUrl: (version: string) => version,
+  } as const;
+  const source = [
+    '"vendor/drawio/32.0.2/drawio.min.js.sha256",',
+    '"assets/drawio.min.js.br",',
+  ].join("\n");
+
+  const updated = new RuntimeSourceUpdater().replacePackageIncludeVersion(source, drawio, "33.0.0");
+
+  expect(updated).toBe('"vendor/drawio/33.0.0/drawio.min.js.sha256",\n"assets/drawio.min.js.br",');
 });
 
 test("圧縮配布資産の package include は全ファイルを同じ version へ更新する", () => {

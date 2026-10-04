@@ -1,0 +1,13 @@
+[package]
+name = "katana-render-runtime-assets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Static assets for the KatanA diagram render runtime."
+include = ["Cargo.toml", "src/**/*.rs", "assets/drawio.min.js.br"]
+
+[lib]
+path = "src/lib.rs"

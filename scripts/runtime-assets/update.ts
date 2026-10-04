@@ -70,6 +70,7 @@ export class RuntimeSourceUpdater {
     if (
       definition.kind !== "mermaid-zenuml" &&
       definition.kind !== "zenuml-core" &&
+      definition.kind !== "drawio" &&
       definition.kind !== "plantuml" &&
       definition.kind !== "mathjax"
     ) {
@@ -142,6 +143,9 @@ export class RuntimeSourceUpdater {
     definition: RuntimeAssetDefinition,
     version: string,
   ): string {
+    if (definition.kind === "drawio") {
+      return source;
+    }
     const kind = this.escapePattern(definition.kind);
     const fileName = this.escapePattern(definition.fileName);
     const pattern = new RegExp(`(vendor/${kind}/)[^/]+(/${fileName}(?:\\.br)?)`);
