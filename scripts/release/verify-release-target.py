@@ -109,6 +109,7 @@ REQUIRED_RELEASE_COMMITS = (
     "c23f2453266bef3eacbe8269eec89b2f0e2ec1de",  # Cargo設定の依存差替え・検査条件変更・buildscript上書きを拒否
     "2c6d6cf2b11e52973a39c70dfce32cd6d033f1e1",  # Cargo取得元・別lockfileによる証跡混入を拒否
     "e0a30f0aff86f2569fea31a2859f700b27b6b96b",  # マージ済みレビュー文脈の再利用を拒否
+    "037e04821414fb5b5e24a1095b78d84b7efc3e5e",  # Linux専用回帰の数値表記を厳格lintへ適合
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -126,7 +127,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "790b6b3818abae16a0c97f028f4c08a25706689c8222af98522f4219d665bc8a"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "2e031d9e59145bdf6c9e224dbf7c0166727c055b5daa2cbec88ec43e22077806"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
