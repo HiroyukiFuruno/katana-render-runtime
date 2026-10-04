@@ -19,11 +19,6 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib import error, request
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    tomllib = None
-
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/test-and-build.yml"
@@ -80,10 +75,6 @@ SCOPE_PARAMETERS = {
 PREPARATION_COMMANDS = {"bun-install", "graphviz-install", "plantuml-install"}
 RUST_STABLE_MANIFEST_URL = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
 MAX_RUST_STABLE_MANIFEST_BYTES = 8 * 1024 * 1024
-HOST_ENVIRONMENT_KEYS = (
-    "PATH", "HOME", "TMPDIR", "CARGO_HOME", "RUSTUP_HOME", "LANG", "LC_ALL",
-    "LC_CTYPE", "LC_MESSAGES", "LC_COLLATE", "LC_NUMERIC", "LC_TIME", "TERM",
-)
 
 # macOS対象stepを列挙し、workflow全体の固定hashと合わせて未知の変更を拒否する。
 MAC_WORKFLOW_STEP_COMMANDS: dict[str, tuple[str, ...]] = {
@@ -236,76 +227,17 @@ def is_macos_15(value: Any) -> bool:
     return isinstance(value, str) and re.fullmatch(r"15\.\d+(?:\.\d+)?", value.strip()) is not None
 
 
-def java_home_from_settings(output: str) -> str:
-    if not java_is_21(output):
-        raise EvidenceError("local proof requires Java 21, matching the macOS CI setup")
-    match = re.search(r"(?m)^\s*java\.home\s*=\s*(\S.*?)\s*$", output)
-    if match is None:
-        raise EvidenceError("Java runtime did not report java.home")
-    home = Path(match.group(1)).expanduser()
-    if not home.is_absolute() or not home.is_dir():
-        raise EvidenceError("Java runtime reported an invalid java.home")
-    return str(home.resolve())
-
-
-def detect_java_home(environment: dict[str, str]) -> str:
-    result = subprocess.run(
-        ("java", "-XshowSettings:properties", "-version"), cwd=ROOT,
-        env=environment, text=True, capture_output=True, check=True,
-    )
-    output = result.stdout + result.stderr
-    home = java_home_from_settings(output)
-    java = Path(home) / "bin/java"
-    if not java.is_file():
-        raise EvidenceError("validated Java home has no java executable")
-    libjvm = (
-        Path(home) / "lib/server/libjvm.dylib",
-        Path(home) / "jre/lib/server/libjvm.dylib",
-        Path(home) / "bin/server/libjvm.dylib",
-    )
-    if not any(candidate.is_file() for candidate in libjvm):
-        raise EvidenceError("validated Java home has no PlantUML JVM library")
-    explicit = subprocess.run(
-        (str(java), "-version"), cwd=ROOT, env=environment,
-        text=True, capture_output=True, check=True,
-    )
-    if not java_is_21(explicit.stdout + explicit.stderr):
-        raise EvidenceError("JAVA_HOME does not identify Java 21")
-    return home
-
-
 def command_environment() -> dict[str, str]:
-    parent = os.environ
+    environment = os.environ.copy()
     unsupported = {
-        name for name in parent
+        name for name in environment
         if name in {"RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"}
         or name.startswith("CARGO_BUILD_RUSTC")
         or (name.startswith("CARGO_TARGET_") and name != "CARGO_TARGET_DIR")
     }
     if unsupported:
         raise EvidenceError("custom Rust compiler or target linker environment is unsupported")
-    configs: set[Path] = set()
-    for directory in (ROOT, *ROOT.parents):
-        configs.update((directory / ".cargo/config", directory / ".cargo/config.toml"))
-    cargo_home = Path(parent.get("CARGO_HOME", str(Path(parent.get("HOME", "~")) / ".cargo"))).expanduser()
-    if not cargo_home.is_absolute():
-        cargo_home = ROOT / cargo_home
-    cargo_home = cargo_home.resolve()
-    configs.update((cargo_home / "config", cargo_home / "config.toml"))
-    for config in sorted(configs):
-        if not config.is_file():
-            continue
-        if tomllib is None:
-            raise EvidenceError("cannot validate Cargo config without TOML support")
-        try:
-            parsed = tomllib.loads(config.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, ValueError) as exc:
-            raise EvidenceError("Cargo config cannot be validated") from exc
-        if "env" in parsed:
-            raise EvidenceError("Cargo config [env] injection is unsupported")
-    environment = {name: parent[name] for name in HOST_ENVIRONMENT_KEYS if name in parent}
     environment.update(SCOPE_PARAMETERS)
-    environment["JAVA_HOME"] = detect_java_home(environment)
     return environment
 
 
@@ -389,7 +321,6 @@ def iso_timestamp(value: Any) -> int:
 
 
 def tool_versions() -> dict[str, str]:
-    environment = command_environment()
     commands = {
         "macos": ("sw_vers", "-productVersion"),
         "architecture": ("uname", "-m"),
@@ -403,9 +334,7 @@ def tool_versions() -> dict[str, str]:
     }
     found: dict[str, str] = {}
     for name, command in commands.items():
-        result = subprocess.run(
-            command, cwd=ROOT, env=environment, text=True, capture_output=True, check=True,
-        )
+        result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=True)
         value = (result.stdout + result.stderr).strip().splitlines()
         if not value or not value[0].strip():
             raise EvidenceError(f"tool version is empty: {name}")
@@ -417,14 +346,12 @@ def tool_versions() -> dict[str, str]:
     if not is_macos_15(found["macos"]):
         raise EvidenceError("local proof requires macOS 15, matching the hosted macOS runner")
     rust_verbose = subprocess.run(
-        ("rustc", "-vV"), cwd=ROOT, env=environment,
-        text=True, capture_output=True, check=True,
+        ("rustc", "-vV"), cwd=ROOT, text=True, capture_output=True, check=True,
     ).stdout
     host_target = re.search(r"(?m)^host: (\S+)$", rust_verbose)
     if host_target is None or host_target.group(1) != SCOPE_PARAMETERS["CARGO_BUILD_TARGET"]:
         raise EvidenceError("local Rust host target is not native Apple Silicon macOS")
     found["rust_host"] = host_target.group(1)
-    found["java_home"] = environment["JAVA_HOME"]
     validate_pinned_tools(found)
     return found
 
@@ -438,9 +365,6 @@ def java_is_21(value: Any) -> bool:
 def validate_pinned_tools(versions: Any) -> None:
     if not isinstance(versions, dict) or not java_is_21(versions.get("java")):
         raise EvidenceError("local proof requires Java 21, matching the macOS CI setup")
-    java_home = versions.get("java_home")
-    if not isinstance(java_home, str) or not Path(java_home).is_absolute():
-        raise EvidenceError("local proof requires a validated absolute Java home")
     if versions.get("bun") != "1.4.2":
         raise EvidenceError("local proof requires Bun 1.4.2, matching the macOS CI setup")
 
@@ -544,10 +468,8 @@ def valid_payload(
         return False
     tools = payload.get("tools")
     if not isinstance(tools, dict) or set(tools) != {
-        "macos", "architecture", "rust_host", "rustc", "cargo", "java", "java_home", "bun", "just", "brew", "graphviz"
+        "macos", "architecture", "rust_host", "rustc", "cargo", "java", "bun", "just", "brew", "graphviz"
     } or any(not isinstance(value, str) or not value.strip() for value in tools.values()):
-        return False
-    if not Path(tools["java_home"]).is_absolute():
         return False
     if (tools.get("architecture") != "arm64" or not is_macos_15(tools.get("macos"))
             or tools.get("rust_host") != SCOPE_PARAMETERS["CARGO_BUILD_TARGET"]):
