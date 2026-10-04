@@ -49,7 +49,8 @@ def valid_comment() -> dict[str, object]:
         "completed_at": "2027-01-15T08:00:00Z",
         "platform": "macos-arm64",
         "tools": {
-            "macos": "15.0", "architecture": "arm64", "rustc": f"rustc {STABLE_RUST['rustc']}",
+            "macos": "15.0", "architecture": "arm64", "rust_host": "aarch64-apple-darwin",
+            "rustc": f"rustc {STABLE_RUST['rustc']}",
             "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12" 2025-01-21', "bun": "1.4.2",
             "just": "just 1.40.0", "brew": "Homebrew 5.0.0", "graphviz": "dot - graphviz version 12",
         },
@@ -177,6 +178,103 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             with self.subTest(collection_java=java, collection_bun=bun):
                 with self.assertRaises(EVIDENCE.EvidenceError):
                     EVIDENCE.validate_pinned_tools({"java": java, "bun": bun})
+
+    def test_only_macos_15_and_arm64_rust_host_are_accepted(self) -> None:
+        good = valid_comment()
+        payload = json.loads(good["body"].split("\n", 1)[1])
+        for macos, rust_host in (
+            ("13.7.8", "aarch64-apple-darwin"),
+            ("14.7.8", "aarch64-apple-darwin"),
+            ("27.0", "aarch64-apple-darwin"),
+            ("15.foo", "aarch64-apple-darwin"),
+            ("15.7junk", "aarch64-apple-darwin"),
+            ("15.0", "x86_64-apple-darwin"),
+            (None, "aarch64-apple-darwin"),
+            ("15.0", None),
+        ):
+            changed = {
+                **payload,
+                "tools": {**payload["tools"], "macos": macos, "rust_host": rust_host},
+            }
+            comment = {**good, "body": EVIDENCE.MARKER + "\n" + json.dumps(changed)}
+            with self.subTest(macos=macos, rust_host=rust_host):
+                self.assertFalse(EVIDENCE.verify_from_api(
+                    REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                    fetch=snapshots(comment), now=NOW, expected_workflow_digest="d" * 64,
+                ))
+
+    def test_collector_environment_forces_native_target_over_environment_and_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config_dir = Path(directory) / ".cargo"
+            config_dir.mkdir()
+            (config_dir / "config.toml").write_text(
+                '[build]\ntarget = "x86_64-apple-darwin"\n', encoding="utf-8",
+            )
+            with patch.dict(EVIDENCE.os.environ, {
+                "CARGO_BUILD_TARGET": "x86_64-apple-darwin",
+                "RUSTFLAGS": "--target=x86_64-apple-darwin",
+                "CARGO_ENCODED_RUSTFLAGS": "--target=x86_64-apple-darwin",
+                "CARGO_BUILD_RUSTFLAGS": "--target=x86_64-apple-darwin",
+                "CARGO_TARGET_DIR": "/tmp/cargo-target-cache",
+            }, clear=True):
+                environment = EVIDENCE.command_environment()
+            self.assertEqual(environment["CARGO_BUILD_TARGET"], "aarch64-apple-darwin")
+            self.assertEqual(environment["RUSTFLAGS"], "")
+            self.assertEqual(environment["CARGO_ENCODED_RUSTFLAGS"], "")
+            self.assertEqual(environment["CARGO_BUILD_RUSTFLAGS"], "")
+            self.assertEqual(environment["CARGO_TARGET_DIR"], "/tmp/cargo-target-cache")
+            self.assertIn('target = "x86_64-apple-darwin"', (config_dir / "config.toml").read_text())
+            with patch.dict(EVIDENCE.os.environ, {"CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER": "cross-linker"}, clear=True):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "custom Rust compiler or target linker"):
+                    EVIDENCE.command_environment()
+
+    def test_collector_rejects_non_macos_15_before_preparation(self) -> None:
+        with (
+            patch.object(EVIDENCE.platform, "system", return_value="Darwin"),
+            patch.object(EVIDENCE.platform, "machine", return_value="arm64"),
+            patch.object(EVIDENCE, "macos_product_version", return_value="14.7.8"),
+            patch.object(EVIDENCE.subprocess, "run") as run,
+        ):
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "requires macOS 15"):
+                EVIDENCE.collect(REPOSITORY, 7, publish=False)
+        run.assert_not_called()
+
+    def test_rejects_git_assume_unchanged_and_skip_worktree_index_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+            tracked = root / "tracked.txt"
+            tracked.write_text("head\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "tracked.txt"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "baseline"], check=True)
+
+            with patch.object(EVIDENCE, "ROOT", root):
+                for flag_args, status_hidden in (
+                    (("--assume-unchanged",), True),
+                    (("--skip-worktree",), False),
+                ):
+                    tracked.write_text("hidden local change\n", encoding="utf-8")
+                    subprocess.run(["git", "-C", str(root), "update-index", *flag_args, "tracked.txt"], check=True)
+                    if status_hidden:
+                        self.assertEqual(EVIDENCE.git_status(), "")
+                    else:
+                        self.assertNotEqual(EVIDENCE.run_git("ls-files", "-t"), "H tracked.txt")
+                    for checkpoint in ("collection_start", "collection_end"):
+                        with self.subTest(index_flag=flag_args, checkpoint=checkpoint), self.assertRaisesRegex(
+                            EVIDENCE.EvidenceError, "nonstandard Git index flags",
+                        ):
+                            EVIDENCE.require_standard_index_flags()
+                    subprocess.run(
+                        ["git", "-C", str(root), "update-index", "--no-assume-unchanged", "tracked.txt"],
+                        check=True,
+                    )
+                    subprocess.run(
+                        ["git", "-C", str(root), "update-index", "--no-skip-worktree", "tracked.txt"],
+                        check=True,
+                    )
+                    tracked.write_text("head\n", encoding="utf-8")
 
     def test_rust_tools_must_match_official_stable_manifest(self) -> None:
         current = {
@@ -344,6 +442,8 @@ version = "0.100.0 (5f94df478 2026-08-27)"
                     {"number": 7, "state": "open", "base": {"sha": BASE, "ref": "master", "repo": {"full_name": REPOSITORY}},
                      "head": {"sha": HEAD, "repo": {"full_name": REPOSITORY}}},
                 ]),
+                patch.object(EVIDENCE, "macos_product_version", return_value="15.0"),
+                patch.object(EVIDENCE, "require_standard_index_flags"),
                 patch.object(EVIDENCE, "tool_versions", return_value={"macos": "15", "architecture": "arm64"}),
                 patch.object(EVIDENCE, "ROOT", Path(directory)),
                 patch.object(EVIDENCE.subprocess, "run", return_value=subprocess.CompletedProcess([], 9, "", "failed")),
@@ -370,6 +470,8 @@ version = "0.100.0 (5f94df478 2026-08-27)"
                     {"number": 7, "state": "open", "base": {"sha": BASE, "ref": "master", "repo": {"full_name": REPOSITORY}},
                      "head": {"sha": HEAD, "repo": {"full_name": REPOSITORY}}},
                 ]),
+                patch.object(EVIDENCE, "macos_product_version", return_value="15.0"),
+                patch.object(EVIDENCE, "require_standard_index_flags"),
                 patch.object(EVIDENCE, "tool_versions", return_value=versions),
                 patch.object(EVIDENCE, "fetch_stable_manifest_versions", return_value=STABLE_RUST),
                 patch.object(EVIDENCE, "ROOT", Path(directory)),
@@ -399,6 +501,8 @@ version = "0.100.0 (5f94df478 2026-08-27)"
                     {"number": 7, "state": "open", "base": {"sha": BASE, "ref": "master", "repo": {"full_name": REPOSITORY}},
                      "head": {"sha": HEAD, "repo": {"full_name": REPOSITORY}}},
                 ]),
+                patch.object(EVIDENCE, "macos_product_version", return_value="15.0"),
+                patch.object(EVIDENCE, "require_standard_index_flags"),
                 patch.object(EVIDENCE, "tool_versions", return_value=versions),
                 patch.object(EVIDENCE, "fetch_stable_manifest_versions", return_value=STABLE_RUST),
                 patch.object(EVIDENCE, "ROOT", Path(directory)),

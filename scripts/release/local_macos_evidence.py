@@ -53,7 +53,15 @@ COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("typescript-types", ("just", "typecheck")),
     ("runtime-asset-checksums", ("just", "runtime-asset-check")),
 )
-SCOPE_PARAMETERS = {"CARGO_INCREMENTAL": "0", "CARGO_TERM_COLOR": "always", "TEST_THREADS": "1"}
+SCOPE_PARAMETERS = {
+    "CARGO_BUILD_TARGET": "aarch64-apple-darwin",
+    "CARGO_BUILD_RUSTFLAGS": "",
+    "CARGO_ENCODED_RUSTFLAGS": "",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_TERM_COLOR": "always",
+    "RUSTFLAGS": "",
+    "TEST_THREADS": "1",
+}
 PREPARATION_COMMANDS = {"bun-install", "graphviz-install", "plantuml-install"}
 RUST_STABLE_MANIFEST_URL = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
 MAX_RUST_STABLE_MANIFEST_BYTES = 8 * 1024 * 1024
@@ -139,6 +147,40 @@ def run_git(*args: str) -> str:
 
 def git_status() -> str:
     return run_git("status", "--porcelain", "--untracked-files=all")
+
+
+def require_standard_index_flags() -> None:
+    # WHY: Git status は assume-unchanged と skip-worktree の変更を隠す。
+    entries = run_git("ls-files", "-v", "-z").split("\0")
+    if any(entry and entry[0] != "H" for entry in entries):
+        raise EvidenceError("nonstandard Git index flags invalidate local proof")
+
+
+def macos_product_version() -> str:
+    result = subprocess.run(
+        ["sw_vers", "-productVersion"], cwd=ROOT, check=True, text=True, capture_output=True,
+    )
+    version = result.stdout.strip()
+    if not version:
+        raise EvidenceError("macOS product version is unavailable")
+    return version
+
+
+def is_macos_15(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"15\.\d+(?:\.\d+)?", value.strip()) is not None
+
+
+def command_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    unsupported = {
+        name for name in environment
+        if name in {"RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"}
+        or (name.startswith("CARGO_TARGET_") and name != "CARGO_TARGET_DIR")
+    }
+    if unsupported:
+        raise EvidenceError("custom Rust compiler or target linker environment is unsupported")
+    environment.update(SCOPE_PARAMETERS)
+    return environment
 
 
 def gh_token() -> str:
@@ -243,6 +285,15 @@ def tool_versions() -> dict[str, str]:
         raise EvidenceError("local proof requires Apple Silicon (arm64)")
     if platform.system() != "Darwin":
         raise EvidenceError("local proof requires macOS")
+    if not is_macos_15(found["macos"]):
+        raise EvidenceError("local proof requires macOS 15, matching the hosted macOS runner")
+    rust_verbose = subprocess.run(
+        ("rustc", "-vV"), cwd=ROOT, text=True, capture_output=True, check=True,
+    ).stdout
+    host_target = re.search(r"(?m)^host: (\S+)$", rust_verbose)
+    if host_target is None or host_target.group(1) != SCOPE_PARAMETERS["CARGO_BUILD_TARGET"]:
+        raise EvidenceError("local Rust host target is not native Apple Silicon macOS")
+    found["rust_host"] = host_target.group(1)
     validate_pinned_tools(found)
     return found
 
@@ -359,10 +410,11 @@ def valid_payload(
         return False
     tools = payload.get("tools")
     if not isinstance(tools, dict) or set(tools) != {
-        "macos", "architecture", "rustc", "cargo", "java", "bun", "just", "brew", "graphviz"
+        "macos", "architecture", "rust_host", "rustc", "cargo", "java", "bun", "just", "brew", "graphviz"
     } or any(not isinstance(value, str) or not value.strip() for value in tools.values()):
         return False
-    if tools.get("architecture") != "arm64" or not isinstance(tools.get("macos"), str) or not tools["macos"].strip():
+    if (tools.get("architecture") != "arm64" or not is_macos_15(tools.get("macos"))
+            or tools.get("rust_host") != SCOPE_PARAMETERS["CARGO_BUILD_TARGET"]):
         return False
     if not java_is_21(tools.get("java")) or tools.get("bun") != "1.4.2":
         return False
@@ -533,6 +585,9 @@ def output_reuse(value: bool, output_path: str | None) -> None:
 def collect(repository: str, number: int, publish: bool) -> int:
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise EvidenceError("local collection requires macOS Apple Silicon")
+    if not is_macos_15(macos_product_version()):
+        raise EvidenceError("local collection requires macOS 15, matching the hosted macOS runner")
+    require_standard_index_flags()
     if git_status():
         raise EvidenceError("working tree must be clean before collection")
     before_head = run_git("rev-parse", "HEAD")
@@ -560,8 +615,7 @@ def collect(repository: str, number: int, publish: bool) -> int:
     def run_command(command_id: str, argv_template: tuple[str, ...]) -> None:
         argv = [part.format(plantuml_output=smoke_output) for part in argv_template]
         start = time.monotonic()
-        command_env = os.environ.copy()
-        command_env.update(SCOPE_PARAMETERS)
+        command_env = command_environment()
         result = subprocess.run(argv, cwd=ROOT, env=command_env, text=True, capture_output=True)
         duration = int((time.monotonic() - start) * 1000)
         output = result.stdout + result.stderr
@@ -600,6 +654,7 @@ def collect(repository: str, number: int, publish: bool) -> int:
     aggregate = canonical(logs)
     (logs_dir / "commands.json").write_bytes(aggregate)
     logs_sha = sha256_bytes(aggregate + b"\n".join((logs_dir / f"{i:02d}-{item['id']}.log").read_bytes() for i, item in enumerate(logs, 1)))
+    require_standard_index_flags()
     if (
         git_status() or run_git("rev-parse", "HEAD") != before_head
         or workflow_digest() != before_workflow or not workflow_scope_supported()
