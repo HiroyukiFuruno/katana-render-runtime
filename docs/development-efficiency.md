@@ -3,9 +3,15 @@
 高コストな完全検査の前に、提案差分が Issue の要求と一次仕様に合っているかをローカルで確認する。
 テスト成功だけでは assertion の期待値が正しいことを証明できないため、仕様・実際に観測すべき動作・assertion を対照する。
 
+## DraftレビューとReady後のCI
+
+Draftではレビューと修正箇所の静的検査・回帰確認を進め、remoteの完全CIは実行しない。最新HEADのレビューと各threadのreply/resolveが完了したらReadyへ昇格する。`ready_for_review` とReady後のpushで必須CIを起動し、全必須チェックの成功を確認してから保護mergeする。DraftのSKIPをCI成功として再利用しない。
+
+アンチパターンは「Draftで完全CI → 指摘修正のたびに同じCI → Readyで再実行」。標準手順は「Draft review → 指摘修正・関連検証 → Ready → 必須CI → merge」。
+
 ## ローカルレビュー
 
-`just check` と pre-push は標準の Rust、assets、automation contract 品質 lane を実行し、ローカル High review は起動しない。初回 Draft の前に `just draft-review` を使うと、完全なローカルレビューの後に同じ標準品質 lane を実行する。レビュー単独が必要な場合は `just local-review` を使う。review receipt が有効でも品質検査は省略しない。
+`just check` と pre-push は標準の Rust、assets、automation contract 品質 lane を実行し、ローカル High review は起動しない。初回AIレビューはDraft作成後の `@codex review` に任せる。`just draft-review` は標準品質laneの確認用で、ローカルAIレビューを起動しない。必要時だけ `just local-review` を使う。review receipt が有効でも品質検査は省略しない。
 
 ```bash
 rtk proxy env REVIEW_ISSUE=89 just draft-review
@@ -19,9 +25,9 @@ Issue は `--issue`、`REVIEW_ISSUE`、base からの branch commit の一意な
 複数の Issue が推定される場合は黙って古い receipt を選ばず、担当 agent が対象を明示する。
 89を既定値にはしない。Issue 本文・title・state・URL を毎回取得し、コメント時刻だけの変更では失効させない。
 追加の要求ファイルは `--requirements <repo内path>`、`REVIEW_REQUIREMENTS`、同じIssue集合を持つ直近レビュー入力、既存receiptの要求pathの順で解決する。
-`local-review` と `draft-review` は同じ要求を保持し、毎回その内容を読み直す。保存pathの不正・欠落は拒否し、新Issueへ切り替えた際は旧Issueの追加要求を引き継がない。
+明示した `local-review` は要求を保持し、毎回その内容を読み直す。保存pathの不正・欠落は拒否し、新Issueへ切り替えた際は旧Issueの追加要求を引き継がない。
 
-初回または入力変更後は、既存認証の Codex CLI を `gpt-6.1-sol / high`、read-only、structured schema で実行する。
+`just local-review` を明示実行した際の初回または入力変更後は、既存認証の Codex CLI を `gpt-6.1-sol / high`、read-only、structured schema で実行する。
 追加 API key は不要で、商用コード、GitHub、Cargo の操作を review に許可しない。
 子レビューには `KRR_LOCAL_REVIEW_ACTIVE=1` を渡し、再帰的な review/check を拒否する。
 CI=true または GITHUB_ACTIONS=true の環境ではローカル CLI を起動せず SKIP を明示する。

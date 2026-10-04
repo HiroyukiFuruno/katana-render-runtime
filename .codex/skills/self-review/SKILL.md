@@ -75,7 +75,7 @@ OpenSpec change 中なら確認します。
 
 ## 7. PR レビュー接続条件
 
-Draft の最新 HEAD に対して `@codex review` と自己レビューを実施し、GitHub APIで Issueコメント、formal reviews、review threads を全ページ取得する。指摘はP0/P1必須、P2/P3は根拠付きで判断し、各修正後にreply・resolveする。未解決thread 0、Issue/DoD、native required CI checksを確認してReady化する。
+Draft の最新 HEAD に対して `@codex review` と自己レビューを実施し、GitHub APIで Issueコメント、formal reviews、review threads を全ページ取得する。指摘はP0/P1必須、P2/P3は根拠付きで判断し、各修正後にreply・resolveする。未解決thread 0、Issue/DoDを確認してReady化し、そのイベントで起動したnative required CI checksの成功を確認してから保護mergeする。DraftのSKIPは品質成功証拠にしない。
 
 
 

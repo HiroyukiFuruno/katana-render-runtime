@@ -20,7 +20,7 @@ git branch -a
 - commit 済みである。
 - `/self-review` が完了している。
 - `/lint-and-ast-lint` で必要な検証が通っている。
-- 初回Draftの作成前に `just draft-review` でローカルAIレビューと標準品質laneを通す。
+- 初回AIレビューはDraft作成後の `@codex review` に任せる。作成前は自己レビュー・必要な静的検査・関連回帰を確認し、通常pre-pushの品質laneを維持する。
 - 未追跡や他者差分を混ぜていない。
 
 ## 2. base branch を決める
@@ -75,7 +75,7 @@ gh pr view "<pr-number>" --json isDraft --jq '.isDraft'
 
 ## 5. Draft review と指摘対応
 
-1. 初回Draft前の `just draft-review` 結果を確認する。通常の `just check` と pre-push は品質laneを実行し、ローカルHigh reviewを自動で繰り返さない。
+1. Draftではremoteの完全CIを起動しない。通常の `just check` と pre-push は品質laneを維持し、ローカルHigh reviewを自動で繰り返さない。必要時だけ `just local-review` を使う。
 2. Draft の最新 HEAD に対して `@codex review` を依頼し、自己レビューも実施する。初回と再レビュー2回を通常の目安とする。
 3. GitHub APIで Issue コメント、formal reviews、review threads を全ページ取得し、P0/P1/P2/P3に分類する。
 4. 各指摘を個別に修正・検証し、push後に該当threadへreplyしてresolveする。P0/P1は必須対応、P2/P3は要件・互換性・DoDへの影響を根拠付きで判断する。不要な改善は理由を記録して後続patchへ送れる。修正時は自己レビュー、関連する静的検査と回帰確認を行い、静的解析だけで実動作を保証したとは扱わない。
@@ -85,7 +85,7 @@ gh pr view "<pr-number>" --json isDraft --jq '.isDraft'
 
 ## 6. Ready 化と承認依頼
 
-未解決threadが0で、Issue契約、DoD、native required CI checksを確認してから `gh pr ready` を実行する。Ready化後、merge直前にcurrent PRのexpected HEAD SHAとrequired checksを再取得し、protected PR mergeを実行する。人間による直接master更新やadmin bypassは使わない.
+最新HEADのreview取得・各threadへのreply/resolve・未解決thread 0・Issue契約・DoDを確認してから `gh pr ready` を実行する。`ready_for_review` で起動したnative required CI checksの成功を確認し、merge直前にcurrent PRのexpected HEAD SHAとrequired checksを再取得してprotected PR mergeを実行する。DraftでSKIPされたjobは品質成功の証拠にしない。人間による直接master更新やadmin bypassは使わない.
 
 ## 7. Ready 後確認
 

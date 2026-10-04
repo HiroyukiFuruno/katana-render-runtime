@@ -101,6 +101,6 @@ pushまたはPR本文変更後は、最新 HEAD に対して `@codex review` と
 
 ## 6. 完了判定
 
-未解決thread 0、P0/P1対応済み、Issue/DoD、native required CI checksを確認してReady化する。merge直前にexpected HEAD SHAとrequired checksを再取得し、protected PR mergeを実行する。
+最新HEADレビュー、未解決thread 0、P0/P1対応済み、Issue/DoDを確認してReady化する。Readyで起動したnative required CI checksの成功を確認し、DraftのSKIPを品質成功として扱わない。merge直前にexpected HEAD SHAとrequired checksを再取得し、protected PR mergeを実行する。
 
 ## 継続実行と停止条件
