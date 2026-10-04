@@ -9,7 +9,17 @@ Draftではレビューと修正箇所の静的検査・回帰確認を進め、
 
 アンチパターンは「Draftで完全CI → 指摘修正のたびに同じCI → Readyで再実行」。標準手順は「Draft review → 指摘修正・関連検証 → Ready → 必須CI → merge」。
 
-CIの動作保証対象はLinux x64、Windows x64、macOS Apple Siliconとする。Intel Macは保証対象外であり、必須matrixやrequired status checkへ追加しない。ローカルmacOS証拠の再利用は、保証対象・source・実行条件・検査範囲が一致する部分だけを対象とする。
+CIの動作保証対象はLinux x64、Windows x64、macOS Apple Siliconとする。Intel Macは保証対象外であり、必須matrixやrequired status checkへ追加しない。ローカルmacOS検査の証跡提出は任意。有効な保守者証跡が同一PR/base/HEAD・検査範囲を満たす場合だけ再利用する。証跡なし、不一致、期限切れ、取得失敗ではApple SiliconのCIで実検査する。証跡がないことを停止理由にしない。必須macOSチェックは残し、再利用の確認または実検査のどちらかが成功した場合に成功となる。
+
+## 任意のローカルmacOS検査証跡
+
+ローカル検査を実施する場合だけ、以下でCIと同じmacOS検査範囲を実行し、成功後に既存GitHub認証でPRへ添付する。未実施ならこの操作は不要で、Ready後のApple Silicon CIが検査する。
+
+```bash
+rtk proxy python3 scripts/release/local_macos_evidence.py --repo HiroyukiFuruno/katana-render-runtime --pr 105 --publish
+```
+
+PR番号は対象PRに合わせる。`--publish`を省けば検査とローカル保存だけを行う。証跡は保守者本人の検査結果申告であり、暗号学的な実行認証ではない。ログはリポジトリ内の`tmp/local-macos-evidence`へ保存する。CIは投稿者、PR/base/HEAD、base包含、ワークフローと検査範囲、Apple Silicon、全検査成功、24時間以内、取得前後の一致を確認する。不一致・不足・取得失敗では実検査へ戻る。UbuntuのcoverageやWindows検査はこの証跡で省略しない。
 
 ## ローカルレビュー
 
