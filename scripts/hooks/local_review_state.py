@@ -253,6 +253,19 @@ def _same_remote_url(left: str, right: str) -> bool:
 
 def _github_repository(remote: str) -> str:
     failure = "selected remote must identify a GitHub repository"
+
+    def repository_path(path: str) -> str:
+        if path.endswith("/"):
+            path = path[:-1]
+        if path.startswith("/") or path.endswith("/") or path.count("/") != 1 or \
+                "?" in path or "#" in path:
+            raise ReviewError(failure)
+        owner, repository = path.split("/", 1)
+        repository = repository.removesuffix(".git")
+        if not owner or not repository:
+            raise ReviewError(failure)
+        return f"{owner}/{repository}"
+
     if any(ord(character) <= 32 or ord(character) == 127 for character in remote):
         raise ReviewError(failure)
     if "@" in remote and ":" in remote and not remote.startswith(("https://", "ssh://")):
@@ -260,8 +273,8 @@ def _github_repository(remote: str) -> str:
         host, separator, path = authority_path.partition(":")
         if separator != ":" or username != "git" or host.casefold() != "github.com" or "@" in host or not path:
             raise ReviewError(failure)
-        return path.removesuffix(".git")
-    if not remote.startswith(("https://", "ssh://")):
+        return repository_path(path)
+    if not remote.startswith(("http://", "https://", "ssh://")):
         raise ReviewError(failure)
     normalized = normalize_remote_url(remote)
     try:
@@ -271,14 +284,16 @@ def _github_repository(remote: str) -> str:
         raise ReviewError(failure) from error
     authority = parsed.netloc.rsplit("@", 1)[-1]
     path = parsed.path.removeprefix("/")
-    valid = ((parsed.scheme == "https" and parsed.hostname == "github.com" and
+    valid = ((parsed.scheme == "http" and parsed.hostname == "github.com" and
+              parsed.username is None and parsed.password is None and port in (None, 80)) or
+             (parsed.scheme == "https" and parsed.hostname == "github.com" and
               parsed.username is None and parsed.password is None and port in (None, 443)) or
              (parsed.scheme == "ssh" and parsed.hostname == "github.com" and
               parsed.username == "git" and parsed.password is None and port in (None, 22)))
     if (not valid or authority.endswith(":") or parsed.query or parsed.fragment or
-            not path or path.startswith("/") or path.count("/") != 1):
+            not path):
         raise ReviewError(failure)
-    return path.removesuffix(".git")
+    return repository_path(path)
 
 
 def issue_context(root: Path, numbers: list[int], remote_name: str = "origin",

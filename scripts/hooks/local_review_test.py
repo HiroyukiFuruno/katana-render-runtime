@@ -2310,15 +2310,19 @@ class DriverContractTest(unittest.TestCase):
         payload = {"number": 89, "title": "quality", "body": "requirements", "state": "open",
                    "html_url": "https://github.com/HiroyukiFuruno/katana-render-runtime/issues/89"}
         origins = (
+            "http://github.com/HiroyukiFuruno/katana-render-runtime.git/",
             "https://github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git/",
             "https://github.com:443/HiroyukiFuruno/katana-render-runtime.git",
             "https://github.com/%48iroyukiFuruno/katana-render-runtime.git",
             "https://%67ithub.com/HiroyukiFuruno/katana-render-runtime.git",
             "https://%47itHub.com/HiroyukiFuruno/katana-render-runtime.git",
             "https://github.com/HiroyukiFuruno/%6batana-render-runtime.git",
             "git@github.com:HiroyukiFuruno/katana-render-runtime.git",
+            "git@github.com:HiroyukiFuruno/katana-render-runtime.git/",
             "git@GitHub.com:HiroyukiFuruno/katana-render-runtime.git",
             "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git/",
             "ssh://git@github.com:22/HiroyukiFuruno/katana-render-runtime.git",
             "ssh://g%69t@github.com/HiroyukiFuruno/katana-render-runtime.git",
             "ssh://git@github%2ecom/HiroyukiFuruno/katana-render-runtime.git",
@@ -2345,6 +2349,32 @@ class DriverContractTest(unittest.TestCase):
                 self.assertEqual(len(gh_calls), 1)
                 self.assertEqual(gh_calls[0], ["gh", "api", "repos/HiroyukiFuruno/katana-render-runtime/issues/89"])
         self.assertTrue(all(value == observed[0] for value in observed[1:]))
+
+    def test_repository_url_trims_only_one_terminal_slash(self) -> None:
+        valid_origins = (
+            "http://github.com/HiroyukiFuruno/katana-render-runtime.git/",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git/",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git/",
+            "git@github.com:HiroyukiFuruno/katana-render-runtime.git/",
+        )
+        for origin in valid_origins:
+            with self.subTest(origin=origin):
+                self.assertEqual(
+                    local_review_state._github_repository(origin),
+                    "HiroyukiFuruno/katana-render-runtime",
+                )
+
+        invalid_origins = (
+            "http://github.com/HiroyukiFuruno/katana-render-runtime.git//",
+            "https://github.com/HiroyukiFuruno/katana-render-runtime.git//",
+            "ssh://git@github.com/HiroyukiFuruno/katana-render-runtime.git//",
+            "git@github.com:HiroyukiFuruno/katana-render-runtime.git//",
+            "http://github.com/HiroyukiFuruno/nested/katana-render-runtime.git/",
+            "http://example.com/HiroyukiFuruno/katana-render-runtime.git/",
+        )
+        for origin in invalid_origins:
+            with self.subTest(origin=origin), self.assertRaisesRegex(ReviewError, "GitHub repository"):
+                local_review_state._github_repository(origin)
 
     def test_invalid_scp_origins_are_rejected_before_github_api_call(self) -> None:
         invalid_origins = (
