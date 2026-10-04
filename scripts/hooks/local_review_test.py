@@ -2025,6 +2025,139 @@ class DriverContractTest(unittest.TestCase):
                     local_review.run_review_process([sys.executable, "-c", script], root, dict(os.environ), "review", diagnostic)
             self.assertIn("partial review", diagnostic.read_text())
 
+    @unittest.skipUnless(os.name == "posix", "POSIX process groups and signals")
+    def test_signal_cancellation_kills_and_reaps_review_group_before_unlock(self) -> None:
+        hooks = Path(__file__).parent
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            environment = dict(os.environ)
+            environment["PYTHONPATH"] = str(hooks)
+            for child_signal in (signal.SIGTERM, signal.SIGINT):
+                with self.subTest(signal=child_signal.name):
+                    lock = root / f"{child_signal.name}.lock"
+                    ready = root / f"{child_signal.name}.ready"
+                    cleanup = root / f"{child_signal.name}.cleanup"
+                    release = root / f"{child_signal.name}.release"
+                    reviewer_pid = root / f"{child_signal.name}.reviewer-pid"
+                    reviewer_ready = root / f"{child_signal.name}.reviewer-ready"
+                    grandchild_pid = root / f"{child_signal.name}.grandchild-pid"
+                    grandchild_ready = root / f"{child_signal.name}.grandchild-ready"
+                    reviewer_code = (
+                        "import os,subprocess,sys,time\n"
+                        "from pathlib import Path\n"
+                        "grandchild=subprocess.Popen([sys.executable,'-c',\"import os,sys,time; from pathlib import Path; Path(sys.argv[1]).write_text(str(os.getpid())); Path(sys.argv[2]).write_text('ready'); time.sleep(3600)\",sys.argv[3],sys.argv[4]])\n"
+                        "Path(sys.argv[1]).write_text(str(os.getpid()))\n"
+                        "Path(sys.argv[2]).write_text('ready')\n"
+                        "time.sleep(3600)\n"
+                    )
+                    wrapper_code = (
+                        "import os,sys,time\n"
+                        "from pathlib import Path\n"
+                        "from local_review_lock import review_lock\n"
+                        "import local_review\n"
+                        "root,lock,ready,cleanup,release,pid,child_ready,grandchild_pid,grandchild_ready=map(Path,sys.argv[1:10])\n"
+                        "with review_lock(lock):\n"
+                        "    ready.write_text('locked')\n"
+                        "    try:\n"
+                        "        local_review.run_review_process([sys.executable,'-c',sys.argv[10],str(pid),str(child_ready),str(grandchild_pid),str(grandchild_ready)],root,dict(os.environ),'review',root/'stderr.log')\n"
+                        "    except BaseException:\n"
+                        "        cleanup.write_text('cleaned')\n"
+                        "        deadline=time.monotonic()+10\n"
+                        "        while not release.exists() and time.monotonic()<deadline: time.sleep(0.01)\n"
+                        "        if not release.exists(): raise RuntimeError('test did not release lock observer')\n"
+                        "        raise\n"
+                    )
+                    wrapper = subprocess.Popen(
+                        [sys.executable, "-c", wrapper_code, str(root), str(lock), str(ready),
+                         str(cleanup), str(release), str(reviewer_pid), str(reviewer_ready),
+                         str(grandchild_pid), str(grandchild_ready), reviewer_code],
+                        cwd=hooks, env=environment, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, text=True,
+                    )
+
+                    def wait_for(path: Path) -> None:
+                        deadline = time.monotonic() + 10
+                        while not path.exists():
+                            if wrapper.poll() is not None:
+                                out, err = wrapper.communicate()
+                                self.fail(f"review wrapper exited early: {out} {err}")
+                            if time.monotonic() >= deadline:
+                                self.fail(f"timed out waiting for {path.name}")
+                            time.sleep(0.01)
+
+                    try:
+                        wait_for(reviewer_ready)
+                        wait_for(reviewer_pid)
+                        wait_for(grandchild_ready)
+                        wait_for(grandchild_pid)
+                        with self.assertRaisesRegex(ReviewError, "another local review is active"):
+                            with review_lock(lock):
+                                pass
+                        os.kill(wrapper.pid, child_signal)
+                        wait_for(cleanup)
+                        with self.assertRaisesRegex(ReviewError, "another local review is active"):
+                            with review_lock(lock):
+                                pass
+                        release.write_text("checked")
+                        stdout, stderr = wrapper.communicate(timeout=10)
+                        expected = 128 + child_signal
+                        self.assertTrue(
+                            wrapper.returncode == expected
+                            or (child_signal == signal.SIGINT and wrapper.returncode == -child_signal),
+                            f"unexpected wrapper exit {wrapper.returncode}: {stdout} {stderr}",
+                        )
+                        process_group = int(reviewer_pid.read_text())
+                        descendant = int(grandchild_pid.read_text())
+
+                        def running_process_state(pid: int) -> str | None:
+                            probe = subprocess.run(
+                                ["ps", "-o", "stat=", "-p", str(pid)],
+                                capture_output=True, text=True, check=False,
+                            )
+                            state = probe.stdout.strip()
+                            return state if state and not state.startswith("Z") else None
+
+                        deadline = time.monotonic() + 5
+                        while (running_process_state(process_group) or running_process_state(descendant)) and time.monotonic() < deadline:
+                            time.sleep(0.02)
+                        self.assertIsNone(running_process_state(process_group), "reviewer process survived group cancellation")
+                        self.assertIsNone(running_process_state(descendant), "reviewer grandchild survived group cancellation")
+                        with review_lock(lock):
+                            pass
+                    finally:
+                        if wrapper.poll() is None:
+                            wrapper.kill()
+                            wrapper.wait(timeout=10)
+                        if reviewer_pid.exists():
+                            try:
+                                os.killpg(int(reviewer_pid.read_text()), signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signal handlers")
+    def test_review_signal_handlers_restore_after_success_and_spawn_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original_handler = signal.getsignal(signal.SIGTERM)
+            sentinel = lambda _signum, _frame: None
+            signal.signal(signal.SIGTERM, sentinel)
+            try:
+                self.assertEqual(
+                    local_review.run_review_process(
+                        [sys.executable, "-c", "pass"], root, dict(os.environ), "review", root / "success.log"
+                    ),
+                    0,
+                )
+                self.assertIs(signal.getsignal(signal.SIGTERM), sentinel)
+                with patch.object(subprocess, "Popen", side_effect=OSError("spawn failed")):
+                    with self.assertRaisesRegex(OSError, "spawn failed"):
+                        local_review.run_review_process(
+                            ["missing-reviewer"], root, dict(os.environ), "review", root / "spawn-error.log"
+                        )
+                self.assertIs(signal.getsignal(signal.SIGTERM), sentinel)
+            finally:
+                signal.signal(signal.SIGTERM, original_handler)
+
 
     def test_same_issue_body_does_not_expire_on_comment_timestamp(self) -> None:
         payload = {"number": 89, "title": "quality", "body": "requirements", "state": "open",

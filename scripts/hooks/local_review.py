@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 
 from local_review_contract import MODEL, PROMPT, REASONING, receipt_payload, validate_receipt, validate_review
 from local_review_lock import review_lock
@@ -241,21 +242,55 @@ def compact_input(root: Path, inputs: dict) -> dict:
             "model": inputs["model"], "reasoning": inputs["reasoning"]}
 
 
-def run_review_process(arguments: list[str], root: Path, environment: dict, prompt: str, diagnostic: Path) -> int:
-    with diagnostic.open("w") as errors, subprocess.Popen(
-        arguments, cwd=root, env=environment, stdin=subprocess.PIPE, text=True,
-        stdout=subprocess.DEVNULL, stderr=errors, start_new_session=True,
-    ) as process:
+def terminate_review_process(process: subprocess.Popen[str]) -> None:
+    if os.name == "posix":
         try:
-            process.communicate(prompt, timeout=REVIEW_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    elif process.poll() is None:
+        process.kill()
+    process.communicate()
+
+
+def run_review_process(arguments: list[str], root: Path, environment: dict, prompt: str, diagnostic: Path) -> int:
+    process = None
+    previous_handlers = {}
+
+    def terminate_parent(signum: int, _frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    manage_signals = os.name == "posix" and threading.current_thread() is threading.main_thread()
+    previous_signal_mask = None
+    if manage_signals:
+        previous_handlers[signal.SIGTERM] = signal.signal(signal.SIGTERM, terminate_parent)
+    try:
+        with diagnostic.open("w") as errors:
+            if manage_signals:
+                # 子プロセス生成直後のシグナルを親で受け、必ず子グループの後始末へ進む。
+                previous_signal_mask = signal.pthread_sigmask(
+                    signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM}
+                )
             try:
-                os.killpg(process.pid, signal.SIGKILL) if os.name == "posix" else process.kill()
-            except ProcessLookupError:
-                pass
-            process.communicate()
-            raise
-        return process.returncode
+                process = subprocess.Popen(
+                    arguments, cwd=root, env=environment, stdin=subprocess.PIPE, text=True,
+                    stdout=subprocess.DEVNULL, stderr=errors, start_new_session=True,
+                )
+            finally:
+                if manage_signals and previous_signal_mask is not None:
+                    signal.pthread_sigmask(signal.SIG_SETMASK, previous_signal_mask)
+                    previous_signal_mask = None
+            try:
+                process.communicate(prompt, timeout=REVIEW_TIMEOUT_SECONDS)
+            except BaseException:
+                terminate_review_process(process)
+                raise
+            return process.returncode
+    finally:
+        if process is not None and process.returncode is None:
+            terminate_review_process(process)
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
 
 
 def invoke_review(root: Path, directory: Path, inputs: dict) -> dict:
