@@ -120,6 +120,8 @@ REQUIRED_RELEASE_COMMITS = (
     "4f33e16edb1deabea8e9130df9d7b0d2c8401b3a",  # 実行bit非対応filesystemのpre-push照合
     "313c3ba3e3289fd04d943c55462809f1907cdf5f",  # macOS証跡のignored依存を再構築
     "3fc7c0581d5ae4debc3727816bea1eccc6c431b4",  # 任意macOS証跡の成果物・依存キャッシュを隔離
+    "8b7491070182f1a9ff0670c02c3fd08917cc4c63",  # RTKなしCIのレビューfixture契約
+    "e4672623630580c3314df5b1fc2ff1c451c15616",  # 非キャッシュ環境のfont選択回帰契約
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -137,7 +139,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "ea3f412eece0d36e5ba148c2ed5f8a63791d2c05142a1fa1a1e33e942f634f22"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "9be2b31ac2d44862623596ec0b15b94cee51cb7a5e2db66c32f0a1e7e763c6fa"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
