@@ -2195,10 +2195,14 @@ class DriverContractTest(unittest.TestCase):
                     local_review.run_review_process(["codex"], root, {}, "review", root / "stderr.log")
             self.assertTrue(launch.call_args.kwargs["start_new_session"])
             kill.assert_called_once_with(12345, local_review.signal.SIGKILL)
+            blocked_signals = {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
+            if hasattr(signal, "SIGQUIT"):
+                blocked_signals.add(signal.SIGQUIT)
             self.assertIn(
-                {signal.SIGINT, signal.SIGTERM, signal.SIGHUP},
+                blocked_signals,
                 [mask for how, mask in mask_calls if how == signal.SIG_BLOCK],
             )
+            self.assertTrue(any(how == signal.SIG_SETMASK for how, _mask in mask_calls))
             self.assertEqual(process.communicate.call_count, 2)
 
     def test_real_review_process_timeout_retains_stderr(self) -> None:
@@ -2218,7 +2222,10 @@ class DriverContractTest(unittest.TestCase):
             root = Path(temporary)
             environment = dict(os.environ)
             environment["PYTHONPATH"] = str(hooks)
-            for child_signal in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            child_signals = [signal.SIGTERM, signal.SIGINT, signal.SIGHUP]
+            if hasattr(signal, "SIGQUIT"):
+                child_signals.append(signal.SIGQUIT)
+            for child_signal in child_signals:
                 with self.subTest(signal=child_signal.name):
                     lock = root / f"{child_signal.name}.lock"
                     ready = root / f"{child_signal.name}.ready"
@@ -2326,7 +2333,10 @@ class DriverContractTest(unittest.TestCase):
             root = Path(temporary)
             original_handlers = {
                 signum: signal.getsignal(signum)
-                for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+                for signum in (
+                    signal.SIGTERM, signal.SIGINT, signal.SIGHUP,
+                    *((signal.SIGQUIT,) if hasattr(signal, "SIGQUIT") else ()),
+                )
             }
             sentinel = lambda _signum, _frame: None
             for signum in original_handlers:
