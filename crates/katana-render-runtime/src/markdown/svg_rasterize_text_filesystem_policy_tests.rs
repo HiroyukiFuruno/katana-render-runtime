@@ -60,7 +60,7 @@ fn production_filesystem_classifier_accepts_only_allowlisted_linux_types() {
     assert!(supported_filesystem_type(TMPFS_MAGIC));
     #[cfg(not(target_env = "musl"))]
     assert!(supported_filesystem_type(nix::sys::statfs::XFS_SUPER_MAGIC));
-    for unsupported in [0, 0x6969, 0x2011_ba1] {
+    for unsupported in [0, 0x6969, 0x0201_1ba1] {
         assert!(!supported_filesystem_type(FsType(unsupported)));
     }
 }
