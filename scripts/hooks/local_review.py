@@ -124,16 +124,46 @@ def branch_identity(root: Path) -> str | None:
     return branch or None
 
 
+def retained_context_payload(root: Path, inputs: dict, reviewed_head_sha: str) -> dict:
+    context = {
+        "schema": 1,
+        "branch": branch_identity(root) or "",
+        "input_sha256": digest(inputs),
+        "reviewed_head_sha": reviewed_head_sha,
+    }
+    return {**context, "context_sha256": digest(context)}
+
+
 def retained_context_matches(receipt: Path, stored: dict, root: Path | None) -> bool:
     context_path = receipt.parent / "last-input-context.json"
     if root is None or not context_path.is_file():
         return False
     context = strict_json(context_path.read_text())
     current_branch = branch_identity(root)
-    return (isinstance(context, dict) and context.get("schema") == 1
-            and isinstance(context.get("branch"), str) and bool(context["branch"])
-            and context.get("input_sha256") == digest(stored)
-            and current_branch == context["branch"])
+    if not isinstance(context, dict) or set(context) != {
+        "schema", "branch", "input_sha256", "reviewed_head_sha", "context_sha256"
+    }:
+        return False
+    reviewed_head_sha = context.get("reviewed_head_sha")
+    context_body = {key: context[key] for key in (
+        "schema", "branch", "input_sha256", "reviewed_head_sha"
+    )}
+    if (
+        context.get("schema") != 1
+        or not isinstance(context.get("branch"), str)
+        or not context["branch"]
+        or context.get("input_sha256") != digest(stored)
+        or current_branch != context["branch"]
+        or not isinstance(reviewed_head_sha, str)
+        or re.fullmatch(r"[0-9a-f]{40}", reviewed_head_sha) is None
+        or context.get("context_sha256") != digest(context_body)
+    ):
+        return False
+    try:
+        command(["git", "merge-base", "--is-ancestor", reviewed_head_sha, "HEAD"], root)
+    except ReviewError:
+        return False
+    return True
 
 
 def retained_inputs(receipt: Path, numbers: list[int] | None = None, *, root: Path | None = None) -> dict | None:
@@ -304,10 +334,14 @@ def invoke_review(root: Path, directory: Path, inputs: dict) -> dict:
                                 "analysis_deadline_utc": deadline.isoformat()}
     prompt = review_prompt() + "\n固定入力:\n" + canonical(payload).decode()
     diagnostic = directory.parent / "last-codex-stderr.log"
+    reviewed_head_sha = command(
+        ["git", "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"], root
+    ).strip()
     atomic_json(directory.parent / "last-input.json", inputs)
-    atomic_json(directory.parent / "last-input-context.json",
-                {"schema": 1, "branch": branch_identity(root) or "",
-                 "input_sha256": digest(inputs)})
+    atomic_json(
+        directory.parent / "last-input-context.json",
+        retained_context_payload(root, inputs, reviewed_head_sha),
+    )
     try:
         returncode = run_review_process(review_command(root, result_path), root, environment, prompt, diagnostic)
     except subprocess.TimeoutExpired as error:
