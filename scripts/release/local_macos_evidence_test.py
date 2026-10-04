@@ -374,6 +374,39 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config \[env\]"):
                     EVIDENCE.command_environment()
 
+    def test_cargo_target_linker_config_rejects_triple_cfg_ancestor_and_cargo_home(self) -> None:
+        cases = (
+            ("repo", ".cargo/config.toml", '[target.aarch64-apple-darwin]\nlinker = ""\n'),
+            ("ancestor", "../.cargo/config", "[target.'cfg(target_arch = \"aarch64\")']\nlinker = \"custom-linker\"\n"),
+            ("cargo_home", "config.toml", '[target.aarch64-apple-darwin]\nlinker = "custom-linker"\n'),
+            ("relative_cargo_home", "config", "[target.'cfg(target_os = \"macos\")']\nlinker = \"custom-linker\"\n"),
+        )
+        for location, relative_path, content in cases:
+            with self.subTest(location=location, path=relative_path), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                root = base / "repository"
+                if location == "repo":
+                    config_path = root / relative_path
+                elif location == "ancestor":
+                    config_path = base / ".cargo/config"
+                elif location == "cargo_home":
+                    config_path = root / "cargo-home" / relative_path
+                else:
+                    config_path = root / "relative-cargo-home" / relative_path
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+                config_path.write_text(content, encoding="utf-8")
+                cargo_home = {
+                    "repo": str(base / "cargo-home"),
+                    "ancestor": str(base / "cargo-home"),
+                    "cargo_home": str(root / "cargo-home"),
+                    "relative_cargo_home": "relative-cargo-home",
+                }[location]
+                with patch.object(EVIDENCE, "ROOT", root), patch.dict(EVIDENCE.os.environ, {
+                    "HOME": str(base), "CARGO_HOME": cargo_home, "PATH": "/usr/bin",
+                }, clear=True):
+                    with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config target linker"):
+                        EVIDENCE.command_environment()
+
     def test_collector_rejects_non_macos_15_before_preparation(self) -> None:
         with (
             patch.object(EVIDENCE.platform, "system", return_value="Darwin"),
