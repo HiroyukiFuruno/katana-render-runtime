@@ -19,6 +19,7 @@ PUBLISHED_V0422_RELEASE_MANIFEST_SHA256 = "1ddeddc37c0735a7278755f26f8985aee9176
 REQUIRED_LATEST_RELEASE = "v0.4.22"
 REQUIRED_TARGET_RELEASE = "v0.4.23"
 REQUIRED_RELEASE_COMMITS = (
+    "39e8edd9561714c18b3ed12b81c18079e7393d9a",  # macOS証跡の認証dispatcherと共通PATH拘束
     "322a85eb75892944c009231b534885601553c488",  # Issue #89のCI品質契約
     "1410802e9d63c8e1c3347a24dad858de52523612",  # Issue #95のglyph cache修正
     "cf15441d102924a3b8e254b7ab9fc377a7daade3",  # v0.4.23のversion metadataと固定契約
@@ -141,7 +142,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "e4f4c1d7ed1505764ea52f5e940a850cdbb10f449c3ed8f66caa79b3343745e2"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "75d325a668d12ff26bc327db16e5c60b0eb16a64a03b654c917dcf1001a0133c"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
