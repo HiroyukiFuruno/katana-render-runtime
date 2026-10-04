@@ -82,6 +82,10 @@ REQUIRED_RELEASE_COMMITS = (
     "551537a5a646d501b0ea1ba566045abe4cf36a53",  # 旧版の実package集合による公開再試行
     "288307beb032749326ee990fe0ae0793046a8545",  # fallback属性比較のOS共通回帰
     "1f4d7267cd821c30eed2e7c775cf1b94e14bf678",  # 保持レビュー要求のbranchとinput同一性拘束
+    "abaa2a9aa07bb453b3d49e2b76b09553805fb79f",  # RTK有無によらない実Gitレビュー回帰
+    "6e3b951a66bade2419faab37f8a863a6425a2996",  # Mermaid後半失敗時の参照資産復元
+    "9f8cd468826ee3fa389d0ee3c270d0fb316af2e4",  # GitHubリポジトリ名の大小文字正規化
+    "2b3ecb2fd02fc81277b1496631c88ae9be6fa18a",  # レビュー証跡の実HEAD祖先と整合性拘束
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -99,7 +103,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "9028dfb784fe47b09a658ade23482117510f2de7a6fff25b10c65aed703f1825"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "96499ae6c448f8b73c78a5947167309f2bdbcbcd69d2b6c7fd3608cb562b7e2a"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
