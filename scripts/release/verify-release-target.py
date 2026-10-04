@@ -19,6 +19,7 @@ PUBLISHED_V0422_RELEASE_MANIFEST_SHA256 = "1ddeddc37c0735a7278755f26f8985aee9176
 REQUIRED_LATEST_RELEASE = "v0.4.22"
 REQUIRED_TARGET_RELEASE = "v0.4.23"
 REQUIRED_RELEASE_COMMITS = (
+    "3d8974f19f5cf5d5e30bffa70c8c19e6594f9c8d",  # macOS証跡の子コマンドPATH隔離
     "5207512367ca49a3fc1c36ceb4afd9fcb10d6372",  # Windows弱フォント世代の実選択回帰
     "c0634a9fd02b87235be701ea167809ef1176facc",  # Windows Job回収のnative必須CI接続
     "39e8edd9561714c18b3ed12b81c18079e7393d9a",  # macOS証跡の認証dispatcherと共通PATH拘束
@@ -144,7 +145,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "5bc886e1b0f67ce82d4b90dbe74f4ee6de3ac6701f27a722966587211bc5733f"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "4b232c11bc952b1e0c24eefaa0af35e40bae7a7feb90051da9c0b081bdee564e"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
