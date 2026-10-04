@@ -20,6 +20,7 @@ git branch -a
 - commit 済みである。
 - `/self-review` が完了している。
 - `/lint-and-ast-lint` で必要な検証が通っている。
+- 初回Draftの作成前に `just draft-review` でローカルAIレビューと標準品質laneを通す。
 - 未追跡や他者差分を混ぜていない。
 
 ## 2. base branch を決める
@@ -74,10 +75,11 @@ gh pr view "<pr-number>" --json isDraft --jq '.isDraft'
 
 ## 5. Draft review と指摘対応
 
-1. Draft の最新 HEAD に対して `@codex review` を依頼し、自己レビューも実施する。
-2. GitHub APIで Issue コメント、formal reviews、review threads を全ページ取得し、P0/P1/P2/P3に分類する。
-3. 各指摘を個別に修正・検証し、push後に該当threadへreplyしてresolveする。P0/P1は必須対応、P2/P3は要件・互換性・DoDへの影響を根拠付きで判断する。
-4. HEADが変わった場合は最新 HEAD に対してレビューをやり直す。
+1. 初回Draft前の `just draft-review` 結果を確認する。通常の `just check` と pre-push は品質laneを実行し、ローカルHigh reviewを自動で繰り返さない。
+2. Draft の最新 HEAD に対して `@codex review` を依頼し、自己レビューも実施する。初回と再レビュー2回を通常の目安とする。
+3. GitHub APIで Issue コメント、formal reviews、review threads を全ページ取得し、P0/P1/P2/P3に分類する。
+4. 各指摘を個別に修正・検証し、push後に該当threadへreplyしてresolveする。P0/P1は必須対応、P2/P3は要件・互換性・DoDへの影響を根拠付きで判断する。不要な改善は理由を記録して後続patchへ送れる。修正時は自己レビュー、関連する静的検査と回帰確認を行い、静的解析だけで実動作を保証したとは扱わない。
+5. HEADが変わった場合は最新 HEAD に対するPR reviewを取得する。レビュー回数だけを理由に最新HEAD review、未解決P0/P1、DoD違反、各threadのreply/resolve、required native checks、expected SHA付きmerge確認を省略しない。
 
 
 

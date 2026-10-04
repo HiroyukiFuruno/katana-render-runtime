@@ -188,12 +188,21 @@ automation-contract-test:
     python3 -m unittest discover -s scripts/hooks -p '*_test.py'
     python3 -m unittest discover -s scripts/release -p '*_test.py'
 
+# 初回Draft前の要求適合レビューを明示実行し、通常の品質検査とは分離する。
+local-review:
+    @export COVERAGE_MIN_LINES={{quote(COVERAGE_MIN_LINES)}} COVERAGE_MAX_UNCOVERED_LINES={{quote(COVERAGE_MAX_UNCOVERED_LINES)}} \
+      TEST_THREADS={{quote(TEST_THREADS)}} RUSTFLAGS={{quote(RUSTFLAGS)}} CARGO={{quote(CARGO)}} JOBS={{quote(JOBS)}} CHECK_JOBS={{quote(CHECK_JOBS)}}; \
+      python3 scripts/hooks/local_review.py
+
+# 初回Draft前はAIレビューを先に実行し、全品質laneも維持する。
+draft-review: local-review check
+
 # Run independent local quality-gate lanes concurrently. Cargo and PlantUML
 # work stay in one lane because they share build/cache outputs.
+# 指摘修正ごとの重複を避け、AIレビューは専用targetから明示実行する。
 check:
     @export COVERAGE_MIN_LINES={{quote(COVERAGE_MIN_LINES)}} COVERAGE_MAX_UNCOVERED_LINES={{quote(COVERAGE_MAX_UNCOVERED_LINES)}} \
       TEST_THREADS={{quote(TEST_THREADS)}} RUSTFLAGS={{quote(RUSTFLAGS)}} CARGO={{quote(CARGO)}} JOBS={{quote(JOBS)}} CHECK_JOBS={{quote(CHECK_JOBS)}}; \
-      python3 scripts/hooks/local_review.py && \
       python3 scripts/hooks/run_parallel_checks.py --jobs "$CHECK_JOBS"
     @echo "checks passed"
 

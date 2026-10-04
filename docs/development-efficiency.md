@@ -5,11 +5,12 @@
 
 ## ローカルレビュー
 
-`just check` は最初に `scripts/hooks/local_review.py` を実行してから既存の品質 lane を実行する。
-pre-push も `just check` を呼ぶため、この順序を共有する。review receipt が有効でも品質検査は省略しない。
+`just check` と pre-push は標準の Rust、assets、automation contract 品質 lane を実行し、ローカル High review は起動しない。初回 Draft の前に `just draft-review` を使うと、完全なローカルレビューの後に同じ標準品質 lane を実行する。レビュー単独が必要な場合は `just local-review` を使う。review receipt が有効でも品質検査は省略しない。
 
 ```bash
-rtk proxy env REVIEW_ISSUE=89 just check
+rtk proxy env REVIEW_ISSUE=89 just draft-review
+rtk proxy env REVIEW_ISSUE=89 just local-review
+rtk proxy just check
 rtk proxy python3 scripts/hooks/local_review.py --issue 89 --print-input
 rtk proxy python3 scripts/hooks/local_review.py --issue 89 --check-receipt
 ```
@@ -18,7 +19,7 @@ Issue は `--issue`、`REVIEW_ISSUE`、base からの branch commit の一意な
 複数の Issue が推定される場合は黙って古い receipt を選ばず、担当 agent が対象を明示する。
 89を既定値にはしない。Issue 本文・title・state・URL を毎回取得し、コメント時刻だけの変更では失効させない。
 追加の要求ファイルは `--requirements <repo内path>`、`REVIEW_REQUIREMENTS`、同じIssue集合を持つ直近レビュー入力、既存receiptの要求pathの順で解決する。
-標準 `just check` でも同じ要求を保持し、毎回その内容を読み直す。保存pathの不正・欠落は拒否し、新Issueへ切り替えた際は旧Issueの追加要求を引き継がない。
+`local-review` と `draft-review` は同じ要求を保持し、毎回その内容を読み直す。保存pathの不正・欠落は拒否し、新Issueへ切り替えた際は旧Issueの追加要求を引き継がない。
 
 初回または入力変更後は、既存認証の Codex CLI を `gpt-6.1-sol / high`、read-only、structured schema で実行する。
 追加 API key は不要で、商用コード、GitHub、Cargo の操作を review に許可しない。
@@ -83,3 +84,5 @@ rust-analyzer 接続にも help stub があり、完全な影響判定を確認�
 Issue89で導入した同一 repository／PR／base／head／workflow／run／job／step の二読検証は、成功済み CI 品質証跡を release-preflight が再利用する別の仕組みである。
 ローカル review receipt は品質検査済みという証拠ではなく、高コスト検査を始める前のレビュー結果だけを再利用する。
 Draft review、各指摘の修正／reply／resolve、native required checks、保護 merge、公開の手順は変えない。
+
+ローカルHigh reviewは初回Draft前の要求適合確認に使い、`just check` / pre-pushで毎回再実行しない。Draft上の初回PR review後、指摘修正では自己レビューと変更影響に対応する静的検査・回帰確認を行い、最新HEADのPR reviewとrequired native checksを確認する。静的解析だけで実動作を保証したとは扱わず、要求や変更に対応する実行可能な回帰確認を選ぶ。PR reviewは初回と再レビュー2回を通常の目安とし、回数だけで最新HEADのPR review、未解決P0/P1、DoD違反、個別reply/resolve、expected SHA付きmerge確認を省略しない。P2/P3は要件・互換性・DoDへの影響を根拠付きで分類し、不要な改善は理由を記録して後続patchへ送れる。
