@@ -15,6 +15,9 @@ class ReviewError(RuntimeError):
     pass
 
 
+LOCAL_REPOSITORY = "HiroyukiFuruno/katana-render-runtime"
+
+
 def canonical(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
@@ -258,8 +261,10 @@ def issue_context(root: Path, numbers: list[int]) -> list[dict[str, Any]]:
         repository = path.removesuffix(".git")
     else:
         raise ReviewError("origin must identify a GitHub repository")
-    if repository != "HiroyukiFuruno/katana-render-runtime":
+    if repository.casefold() != LOCAL_REPOSITORY.casefold():
         raise ReviewError("local review is scoped to katana-render-runtime")
+    # GitHubが大小文字を区別しないため、APIとURL照合には同じ正規名を使う。
+    repository = LOCAL_REPOSITORY
     issues = []
     for number in sorted(set(numbers)):
         payload = strict_json(command(["gh", "api", f"repos/{repository}/issues/{number}"], root))
