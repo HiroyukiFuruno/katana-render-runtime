@@ -248,6 +248,11 @@ jobs:
         timeout-minutes: 15
         run: just automation-contract-test
 
+      - name: Run Windows review process tree tests
+        if: matrix.os == 'windows-latest'
+        timeout-minutes: 5
+        run: python -m unittest discover -s scripts/hooks -p local_review_windows_job_test.py -v
+
       - name: Run runtime package asset check
         if: matrix.os == 'ubuntu-latest'
         timeout-minutes: 15

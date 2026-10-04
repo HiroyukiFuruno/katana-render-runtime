@@ -42,7 +42,7 @@ def parse_step(lines: list[str]) -> dict[str, str]:
     if marker:
         step[marker.group(1)] = marker.group(2).strip()
     for line in lines:
-        match = re.match(r"\s{8}(name|id|if|continue-on-error):\s*(.*)$", line)
+        match = re.match(r"\s{8}(name|id|if|run|continue-on-error):\s*(.*)$", line)
         if match:
             step[match.group(1)] = match.group(2).strip()
     return step
@@ -132,6 +132,19 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
             for command_id in command_ids
         }
         self.assertEqual(mapped_commands, {command_id for command_id, _ in EVIDENCE.COMMANDS})
+
+    def test_windows_review_process_tree_tests_run_only_on_windows(self) -> None:
+        step = next(
+            step for step in self.steps
+            if step.get("name") == "Run Windows review process tree tests"
+        )
+        self.assertEqual(step.get("if"), "matrix.os == 'windows-latest'")
+        self.assertEqual(
+            step.get("run"),
+            "python -m unittest discover -s scripts/hooks -p local_review_windows_job_test.py -v",
+        )
+        self.assertTrue(eval_step_if(step["if"], "win64", "windows-latest", "failure", "false"))
+        self.assertFalse(eval_step_if(step["if"], "mac-arm64", "macos-15", "failure", "false"))
 
     def test_unknown_mac_quality_step_disables_evidence_scope_reuse(self) -> None:
         self.assertTrue(EVIDENCE.workflow_scope_supported(CI_PATH))

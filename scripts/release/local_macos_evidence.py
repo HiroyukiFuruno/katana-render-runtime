@@ -30,7 +30,7 @@ except ModuleNotFoundError:
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/test-and-build.yml"
-SUPPORTED_WORKFLOW_SHA256 = "8e62fe210cd344e7532d36d1cc2c505873f9a22ed6b6ff40e9c4b3d22c401358"
+SUPPORTED_WORKFLOW_SHA256 = "768c0c48fcb06863ba5c10f6fb52e2b4b180f49a0a4766aa0b38956b5bac743e"
 SCHEMA = 1
 FRESHNESS_SECONDS = 24 * 60 * 60
 MARKER = "<!-- krr-local-macos-evidence:v1 -->"
