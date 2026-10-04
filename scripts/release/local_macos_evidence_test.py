@@ -52,6 +52,7 @@ def valid_comment() -> dict[str, object]:
             "macos": "15.0", "architecture": "arm64", "rust_host": "aarch64-apple-darwin",
             "rustc": f"rustc {STABLE_RUST['rustc']}",
             "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12" 2025-01-21', "bun": "1.4.2",
+            "java_home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
             "just": "just 1.40.0", "brew": "Homebrew 5.0.0", "graphviz": "dot - graphviz version 12",
         },
         "commands": commands,
@@ -168,7 +169,9 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     fetch=snapshots(comment), now=NOW, expected_workflow_digest="d" * 64,
                 ))
 
-        EVIDENCE.validate_pinned_tools({"java": 'java version "21.0.12"', "bun": "1.4.2"})
+        EVIDENCE.validate_pinned_tools({
+            "java": 'java version "21.0.12"', "java_home": "/jdk/21", "bun": "1.4.2",
+        })
         for java, bun in (
             ('java version "17.0.13"', "1.4.2"),
             ('java version "22.0.1"', "1.4.2"),
@@ -177,7 +180,45 @@ class LocalMacosEvidenceTest(unittest.TestCase):
         ):
             with self.subTest(collection_java=java, collection_bun=bun):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.validate_pinned_tools({"java": java, "bun": bun})
+                    EVIDENCE.validate_pinned_tools({"java": java, "java_home": "/jdk/21", "bun": bun})
+
+    def test_java_home_is_derived_from_and_matches_the_java_21_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "jdk-21"
+            (home / "bin").mkdir(parents=True)
+            executable = home / "bin/java"
+            executable.write_text("fixture", encoding="utf-8")
+            libjvm = home / "lib/server/libjvm.dylib"
+            libjvm.parent.mkdir(parents=True)
+            libjvm.write_text("fixture", encoding="utf-8")
+            settings = f'    java.home = {home}\nopenjdk version "21.0.12" 2025-01-21\n'
+            with patch.object(EVIDENCE.subprocess, "run", side_effect=(
+                subprocess.CompletedProcess([], 0, "", settings),
+                subprocess.CompletedProcess([], 0, "", 'openjdk version "21.0.12" 2025-01-21\n'),
+            )) as run:
+                detected = EVIDENCE.detect_java_home({"PATH": "/safe/bin"})
+            self.assertEqual(detected, str(home.resolve()))
+            self.assertEqual(run.call_args_list[1].args[0], (str(executable.resolve()), "-version"))
+            for bad_output in (
+                f"java.home = {home}\nopenjdk version \"17.0.13\"",
+                'openjdk version "21.0.12"',
+                "java.home = relative/home\nopenjdk version \"21.0.12\"",
+            ):
+                with self.subTest(output=bad_output):
+                    with self.assertRaises(EVIDENCE.EvidenceError):
+                        EVIDENCE.java_home_from_settings(bad_output)
+            with patch.object(EVIDENCE.subprocess, "run", side_effect=(
+                subprocess.CompletedProcess([], 0, "", settings),
+                subprocess.CompletedProcess([], 0, "", 'openjdk version "17.0.13"\n'),
+            )):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "JAVA_HOME does not identify Java 21"):
+                    EVIDENCE.detect_java_home({"PATH": "/safe/bin"})
+            libjvm.unlink()
+            with patch.object(EVIDENCE.subprocess, "run", side_effect=(
+                subprocess.CompletedProcess([], 0, "", settings),
+            )):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "no PlantUML JVM library"):
+                    EVIDENCE.detect_java_home({"PATH": "/safe/bin"})
 
     def test_only_macos_15_and_arm64_rust_host_are_accepted(self) -> None:
         good = valid_comment()
@@ -213,7 +254,9 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 '[target.aarch64-apple-darwin]\nrunner = "/usr/bin/true"\n',
                 encoding="utf-8",
             )
-            with patch.dict(EVIDENCE.os.environ, {
+            with patch.object(EVIDENCE, "ROOT", Path(directory)), patch.object(
+                EVIDENCE, "detect_java_home", return_value="/validated/JDK21",
+            ), patch.dict(EVIDENCE.os.environ, {
                 "CARGO": "true",
                 "CARGO_BUILD_TARGET": "x86_64-apple-darwin",
                 "RTK": "true",
@@ -221,6 +264,8 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 "CARGO_ENCODED_RUSTFLAGS": "--target=x86_64-apple-darwin",
                 "CARGO_BUILD_RUSTFLAGS": "--target=x86_64-apple-darwin",
                 "CARGO_TARGET_DIR": "/tmp/cargo-target-cache",
+                "HOME": directory,
+                "CARGO_HOME": str(Path(directory) / "cargo-home"),
             }, clear=True):
                 environment = EVIDENCE.command_environment()
             self.assertEqual(environment["CARGO"], "cargo")
@@ -236,7 +281,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             self.assertEqual(environment["RUSTC_WORKSPACE_WRAPPER"], "")
             self.assertEqual(environment["CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"], "")
             self.assertEqual(environment["CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER"], "/usr/bin/env")
-            self.assertEqual(environment["CARGO_TARGET_DIR"], "/tmp/cargo-target-cache")
+            self.assertNotIn("CARGO_TARGET_DIR", environment)
             self.assertIn('target = "x86_64-apple-darwin"', (config_dir / "config.toml").read_text())
             self.assertIn('runner = "/usr/bin/true"', (config_dir / "config.toml").read_text())
             with patch.dict(EVIDENCE.os.environ, {"CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER": "cross-linker"}, clear=True):
@@ -244,6 +289,89 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     EVIDENCE.command_environment()
             with patch.dict(EVIDENCE.os.environ, {"CARGO_BUILD_RUSTC_WRAPPER": "compiler-wrapper"}, clear=True):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "custom Rust compiler or target linker"):
+                    EVIDENCE.command_environment()
+
+    def test_command_environment_drops_inherited_runtime_overrides_for_child(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            hostile = {
+                "JAVA_HOME": "/wrong/jdk", "JAVA_TOOL_OPTIONS": "-Dwrong=true",
+                "JDK_JAVA_OPTIONS": "-Dwrong=true", "_JAVA_OPTIONS": "-Dwrong=true",
+                "KRR_PLANTUML_JVM": "/wrong/java", "KDR_PLANTUML_JVM": "/wrong/java",
+                "KRR_PLANTUML_JAR": "/wrong/plantuml.jar", "PLANTUML_JAR": "/wrong/plantuml.jar",
+                "KRR_PLANTUML_CACHE_DIR": "/wrong/cache", "KDR_PLANTUML_CACHE_DIR": "/wrong/cache",
+                "MERMAID_JS": "/wrong/mermaid.js", "DRAWIO_JS": "/wrong/drawio.js",
+                "MATHJAX_JS": "/wrong/mathjax.js", "DYLD_LIBRARY_PATH": "/wrong",
+                "DYLD_INSERT_LIBRARIES": "/wrong", "LD_PRELOAD": "/wrong",
+                "LD_LIBRARY_PATH": "/wrong", "BASH_ENV": "/wrong/bashrc", "ENV": "/wrong/env",
+                "PYTHONPATH": "/wrong/python", "BUN_INSTALL": "/wrong/bun",
+                "NODE_OPTIONS": "--require=/wrong.js", "JOBS": "99", "KRR_BIN": "/wrong/krr",
+                "XDG_CACHE_HOME": "/wrong/cache", "CARGO": "true", "RTK": "true",
+                "RUSTFLAGS": "--cfg wrong",
+            }
+            safe = {
+                "PATH": EVIDENCE.os.environ.get("PATH", "/usr/bin"),
+                "HOME": directory, "TMPDIR": directory, "CARGO_HOME": str(Path(directory) / "cargo-home"),
+                "RUSTUP_HOME": str(Path(directory) / "rustup"), "LANG": "C", "TERM": "dumb",
+                **hostile,
+            }
+            with patch.object(EVIDENCE, "ROOT", Path(directory)), patch.object(
+                EVIDENCE, "detect_java_home", return_value="/validated/JDK21",
+            ), patch.dict(EVIDENCE.os.environ, safe, clear=True):
+                environment = EVIDENCE.command_environment()
+            probe = (
+                "import os,json; print(json.dumps({k:v for k,v in os.environ.items() "
+                "if k in ('JAVA_HOME','JAVA_TOOL_OPTIONS','JDK_JAVA_OPTIONS','_JAVA_OPTIONS',"
+                "'KRR_PLANTUML_JVM','KDR_PLANTUML_JVM','MERMAID_JS','DRAWIO_JS','MATHJAX_JS',"
+                "'DYLD_LIBRARY_PATH','LD_PRELOAD','BASH_ENV','ENV','PYTHONPATH','NODE_OPTIONS',"
+                "'CARGO','RTK','RUSTFLAGS','CARGO_BUILD_TARGET')}))"
+            )
+            child = subprocess.run(
+                [EVIDENCE.sys.executable, "-c", probe], env=environment,
+                text=True, capture_output=True, check=True,
+            )
+            observed = json.loads(child.stdout)
+            forced = {
+                "CARGO": "cargo", "RTK": "", "RUSTFLAGS": "-D warnings",
+                "JAVA_HOME": "/validated/JDK21",
+            }
+            for name in hostile.keys() - forced.keys():
+                self.assertNotIn(name, environment, name)
+                self.assertNotIn(name, observed, name)
+            for name, value in forced.items():
+                self.assertEqual(environment[name], value)
+                self.assertEqual(observed[name], value)
+            self.assertEqual(observed["CARGO_BUILD_TARGET"], "aarch64-apple-darwin")
+            self.assertEqual(environment["CARGO_HOME"], safe["CARGO_HOME"])
+
+    def test_cargo_env_config_injection_rejects_local_proof(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_dir = root / ".cargo"
+            config_dir.mkdir()
+            (config_dir / "config.toml").write_text(
+                '[env]\nJAVA_HOME = { value = "/wrong/jdk", force = true }\n'
+                'KRR_PLANTUML_JVM = { value = "/wrong/java", force = true }\n',
+                encoding="utf-8",
+            )
+            with patch.object(EVIDENCE, "ROOT", root), patch.dict(EVIDENCE.os.environ, {
+                "HOME": directory, "CARGO_HOME": str(root / "cargo-home"), "PATH": "/usr/bin",
+            }, clear=True):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config \[env\]"):
+                    EVIDENCE.command_environment()
+
+    def test_relative_cargo_home_config_is_resolved_from_repository_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repository"
+            cargo_home = root / "relative-cargo-home"
+            cargo_home.mkdir(parents=True)
+            (cargo_home / "config.toml").write_text(
+                '[env]\nJAVA_HOME = { value = "/wrong/jdk", force = true }\n',
+                encoding="utf-8",
+            )
+            with patch.object(EVIDENCE, "ROOT", root), patch.dict(EVIDENCE.os.environ, {
+                "HOME": directory, "CARGO_HOME": "relative-cargo-home", "PATH": "/usr/bin",
+            }, clear=True):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config \[env\]"):
                     EVIDENCE.command_environment()
 
     def test_collector_rejects_non_macos_15_before_preparation(self) -> None:
@@ -542,6 +670,7 @@ version = "0.100.0 (5f94df478 2026-08-27)"
                 patch.object(EVIDENCE, "require_standard_index_flags"),
                 patch.object(EVIDENCE, "head_worktree_bytes_digest", return_value="source-hash"),
                 patch.object(EVIDENCE, "tool_versions", return_value={"macos": "15", "architecture": "arm64"}),
+                patch.object(EVIDENCE, "detect_java_home", return_value="/validated/JDK21"),
                 patch.object(EVIDENCE, "ROOT", Path(directory)),
                 patch.object(EVIDENCE.subprocess, "run", return_value=subprocess.CompletedProcess([], 9, "", "failed")),
             ):
@@ -552,6 +681,7 @@ version = "0.100.0 (5f94df478 2026-08-27)"
         versions = {
             "macos": "15.0", "architecture": "arm64", "rustc": "rustc stable",
             "cargo": "cargo stable", "java": 'openjdk version "17.0.13"',
+            "java_home": "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
             "bun": "1.4.2", "just": "just 1", "brew": "Homebrew 5", "graphviz": "dot 12",
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -571,6 +701,7 @@ version = "0.100.0 (5f94df478 2026-08-27)"
                 patch.object(EVIDENCE, "require_standard_index_flags"),
                 patch.object(EVIDENCE, "head_worktree_bytes_digest", return_value="source-hash"),
                 patch.object(EVIDENCE, "tool_versions", return_value=versions),
+                patch.object(EVIDENCE, "detect_java_home", return_value="/validated/JDK21"),
                 patch.object(EVIDENCE, "fetch_stable_manifest_versions", return_value=STABLE_RUST),
                 patch.object(EVIDENCE, "ROOT", Path(directory)),
                 patch.object(EVIDENCE.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run,
@@ -584,6 +715,7 @@ version = "0.100.0 (5f94df478 2026-08-27)"
             "macos": "15.0", "architecture": "arm64",
             "rustc": "rustc 1.91.0-nightly (nightly-hash 2025-09-14)",
             "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12"',
+            "java_home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
             "bun": "1.4.2", "just": "just 1", "brew": "Homebrew 5", "graphviz": "dot 12",
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -603,6 +735,7 @@ version = "0.100.0 (5f94df478 2026-08-27)"
                 patch.object(EVIDENCE, "require_standard_index_flags"),
                 patch.object(EVIDENCE, "head_worktree_bytes_digest", return_value="source-hash"),
                 patch.object(EVIDENCE, "tool_versions", return_value=versions),
+                patch.object(EVIDENCE, "detect_java_home", return_value="/validated/JDK21"),
                 patch.object(EVIDENCE, "fetch_stable_manifest_versions", return_value=STABLE_RUST),
                 patch.object(EVIDENCE, "ROOT", Path(directory)),
                 patch.object(EVIDENCE.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run,
