@@ -77,6 +77,7 @@ SCOPE_PARAMETERS = {
     "RUSTC_WORKSPACE_WRAPPER": "",
     "TEST_THREADS": "1",
 }
+JAVA_VENDOR = "Eclipse Adoptium"
 PREPARATION_COMMANDS = {"bun-install", "graphviz-install", "plantuml-install"}
 RUST_STABLE_MANIFEST_URL = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
 MAX_RUST_STABLE_MANIFEST_BYTES = 8 * 1024 * 1024
@@ -239,6 +240,7 @@ def is_macos_15(value: Any) -> bool:
 def java_home_from_settings(output: str) -> str:
     if not java_is_21(output):
         raise EvidenceError("local proof requires Java 21, matching the macOS CI setup")
+    java_vendor_from_settings(output)
     match = re.search(r"(?m)^\s*java\.home\s*=\s*(\S.*?)\s*$", output)
     if match is None:
         raise EvidenceError("Java runtime did not report java.home")
@@ -246,6 +248,13 @@ def java_home_from_settings(output: str) -> str:
     if not home.is_absolute() or not home.is_dir():
         raise EvidenceError("Java runtime reported an invalid java.home")
     return str(home.resolve())
+
+
+def java_vendor_from_settings(output: str) -> str:
+    vendors = re.findall(r"(?m)^\s*java\.vendor\s*=\s*(.*?)\s*$", output)
+    if vendors != [JAVA_VENDOR]:
+        raise EvidenceError("local proof requires Temurin (Eclipse Adoptium), matching the macOS CI setup")
+    return vendors[0]
 
 
 def detect_java_home(environment: dict[str, str]) -> str:
@@ -266,11 +275,14 @@ def detect_java_home(environment: dict[str, str]) -> str:
     if not any(candidate.is_file() for candidate in libjvm):
         raise EvidenceError("validated Java home has no PlantUML JVM library")
     explicit = subprocess.run(
-        (str(java), "-version"), cwd=ROOT, env=environment,
+        (str(java), "-XshowSettings:properties", "-version"), cwd=ROOT, env=environment,
         text=True, capture_output=True, check=True,
     )
-    if not java_is_21(explicit.stdout + explicit.stderr):
+    explicit_output = explicit.stdout + explicit.stderr
+    if not java_is_21(explicit_output):
         raise EvidenceError("JAVA_HOME does not identify Java 21")
+    if java_home_from_settings(explicit_output) != home:
+        raise EvidenceError("JAVA_HOME does not identify the selected Java runtime")
     return home
 
 
@@ -448,6 +460,11 @@ def tool_versions() -> dict[str, str]:
         raise EvidenceError("local Rust host target is not native Apple Silicon macOS")
     found["rust_host"] = host_target.group(1)
     found["java_home"] = environment["JAVA_HOME"]
+    java_properties = subprocess.run(
+        (str(Path(environment["JAVA_HOME"]) / "bin/java"), "-XshowSettings:properties", "-version"),
+        cwd=ROOT, env=environment, text=True, capture_output=True, check=True,
+    )
+    found["java_vendor"] = java_vendor_from_settings(java_properties.stdout + java_properties.stderr)
     validate_pinned_tools(found)
     return found
 
@@ -461,6 +478,8 @@ def java_is_21(value: Any) -> bool:
 def validate_pinned_tools(versions: Any) -> None:
     if not isinstance(versions, dict) or not java_is_21(versions.get("java")):
         raise EvidenceError("local proof requires Java 21, matching the macOS CI setup")
+    if versions.get("java_vendor") != JAVA_VENDOR:
+        raise EvidenceError("local proof requires Temurin (Eclipse Adoptium), matching the macOS CI setup")
     java_home = versions.get("java_home")
     if not isinstance(java_home, str) or not Path(java_home).is_absolute():
         raise EvidenceError("local proof requires a validated absolute Java home")
@@ -567,7 +586,7 @@ def valid_payload(
         return False
     tools = payload.get("tools")
     if not isinstance(tools, dict) or set(tools) != {
-        "macos", "architecture", "rust_host", "rustc", "cargo", "java", "java_home", "bun", "just", "brew", "graphviz"
+        "macos", "architecture", "rust_host", "rustc", "cargo", "java", "java_home", "java_vendor", "bun", "just", "brew", "graphviz"
     } or any(not isinstance(value, str) or not value.strip() for value in tools.values()):
         return False
     if not Path(tools["java_home"]).is_absolute():
@@ -575,7 +594,8 @@ def valid_payload(
     if (tools.get("architecture") != "arm64" or not is_macos_15(tools.get("macos"))
             or tools.get("rust_host") != SCOPE_PARAMETERS["CARGO_BUILD_TARGET"]):
         return False
-    if not java_is_21(tools.get("java")) or tools.get("bun") != "1.4.2":
+    if (not java_is_21(tools.get("java")) or tools.get("java_vendor") != JAVA_VENDOR
+            or tools.get("bun") != "1.4.2"):
         return False
     try:
         validate_stable_rust_tools(tools, stable_versions)

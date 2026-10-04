@@ -53,6 +53,7 @@ def valid_comment() -> dict[str, object]:
             "rustc": f"rustc {STABLE_RUST['rustc']}",
             "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12" 2025-01-21', "bun": "1.4.2",
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
+            "java_vendor": "Eclipse Adoptium",
             "just": "just 1.40.0", "brew": "Homebrew 5.0.0", "graphviz": "dot - graphviz version 12",
         },
         "commands": commands,
@@ -152,7 +153,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             fetch=snapshots(good), now=NOW, expected_workflow_digest="f" * 64,
         ))
 
-    def test_rejects_java_other_than_21_and_bun_other_than_1_4_2(self) -> None:
+    def test_rejects_java_vendor_other_than_temurin_and_java_other_than_21(self) -> None:
         good = valid_comment()
         payload = json.loads(good["body"].split("\n", 1)[1])
         for java, bun in (
@@ -169,8 +170,18 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     fetch=snapshots(comment), now=NOW, expected_workflow_digest="d" * 64,
                 ))
 
+        for vendor in ("Oracle Corporation", "Azul Systems, Inc.", "", None):
+            changed = {**payload, "tools": {**payload["tools"], "java_vendor": vendor}}
+            comment = {**good, "body": EVIDENCE.MARKER + "\n" + json.dumps(changed)}
+            with self.subTest(vendor=vendor):
+                self.assertFalse(EVIDENCE.verify_from_api(
+                    REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                    fetch=snapshots(comment), now=NOW, expected_workflow_digest="d" * 64,
+                ))
+
         EVIDENCE.validate_pinned_tools({
-            "java": 'java version "21.0.12"', "java_home": "/jdk/21", "bun": "1.4.2",
+            "java": 'java version "21.0.12"', "java_home": "/jdk/21",
+            "java_vendor": "Eclipse Adoptium", "bun": "1.4.2",
         })
         for java, bun in (
             ('java version "17.0.13"', "1.4.2"),
@@ -180,7 +191,16 @@ class LocalMacosEvidenceTest(unittest.TestCase):
         ):
             with self.subTest(collection_java=java, collection_bun=bun):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.validate_pinned_tools({"java": java, "java_home": "/jdk/21", "bun": bun})
+                    EVIDENCE.validate_pinned_tools({
+                        "java": java, "java_home": "/jdk/21", "java_vendor": "Eclipse Adoptium", "bun": bun,
+                    })
+        for vendor in ("Oracle Corporation", "", None):
+            with self.subTest(collection_vendor=vendor):
+                with self.assertRaises(EVIDENCE.EvidenceError):
+                    EVIDENCE.validate_pinned_tools({
+                        "java": 'java version "21.0.12"', "java_home": "/jdk/21",
+                        "java_vendor": vendor, "bun": "1.4.2",
+                    })
 
     def test_java_home_is_derived_from_and_matches_the_java_21_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -191,25 +211,27 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             libjvm = home / "lib/server/libjvm.dylib"
             libjvm.parent.mkdir(parents=True)
             libjvm.write_text("fixture", encoding="utf-8")
-            settings = f'    java.home = {home}\nopenjdk version "21.0.12" 2025-01-21\n'
+            settings = f'    java.home = {home}\n    java.vendor = Eclipse Adoptium\nopenjdk version "21.0.12" 2025-01-21\n'
             with patch.object(EVIDENCE.subprocess, "run", side_effect=(
                 subprocess.CompletedProcess([], 0, "", settings),
-                subprocess.CompletedProcess([], 0, "", 'openjdk version "21.0.12" 2025-01-21\n'),
+                subprocess.CompletedProcess([], 0, "", settings),
             )) as run:
                 detected = EVIDENCE.detect_java_home({"PATH": "/safe/bin"})
             self.assertEqual(detected, str(home.resolve()))
-            self.assertEqual(run.call_args_list[1].args[0], (str(executable.resolve()), "-version"))
+            self.assertEqual(run.call_args_list[1].args[0], (str(executable.resolve()), "-XshowSettings:properties", "-version"))
             for bad_output in (
-                f"java.home = {home}\nopenjdk version \"17.0.13\"",
+                f"java.home = {home}\njava.vendor = Eclipse Adoptium\nopenjdk version \"17.0.13\"",
+                'java.home = /jdk/21\njava.vendor = Oracle Corporation\nopenjdk version "21.0.12"',
+                f"java.home = {home}\njava.vendor = Eclipse Adoptium\njava.vendor = Oracle Corporation\nopenjdk version \"21.0.12\"",
                 'openjdk version "21.0.12"',
-                "java.home = relative/home\nopenjdk version \"21.0.12\"",
+                "java.home = relative/home\njava.vendor = Eclipse Adoptium\nopenjdk version \"21.0.12\"",
             ):
                 with self.subTest(output=bad_output):
                     with self.assertRaises(EVIDENCE.EvidenceError):
                         EVIDENCE.java_home_from_settings(bad_output)
             with patch.object(EVIDENCE.subprocess, "run", side_effect=(
                 subprocess.CompletedProcess([], 0, "", settings),
-                subprocess.CompletedProcess([], 0, "", 'openjdk version "17.0.13"\n'),
+                subprocess.CompletedProcess([], 0, "", 'java.home = /jdk/21\njava.vendor = Eclipse Adoptium\nopenjdk version "17.0.13"\n'),
             )):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "JAVA_HOME does not identify Java 21"):
                     EVIDENCE.detect_java_home({"PATH": "/safe/bin"})
@@ -801,6 +823,7 @@ version = "0.100.0 (5f94df478 2026-08-27)"
             "macos": "15.0", "architecture": "arm64", "rustc": "rustc stable",
             "cargo": "cargo stable", "java": 'openjdk version "17.0.13"',
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
+            "java_vendor": "Eclipse Adoptium",
             "bun": "1.4.2", "just": "just 1", "brew": "Homebrew 5", "graphviz": "dot 12",
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -835,6 +858,7 @@ version = "0.100.0 (5f94df478 2026-08-27)"
             "rustc": "rustc 1.91.0-nightly (nightly-hash 2025-09-14)",
             "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12"',
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
+            "java_vendor": "Eclipse Adoptium",
             "bun": "1.4.2", "just": "just 1", "brew": "Homebrew 5", "graphviz": "dot 12",
         }
         with tempfile.TemporaryDirectory() as directory:
