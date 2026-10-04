@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -16,6 +17,15 @@ SPEC = importlib.util.spec_from_file_location("local_macos_evidence", MODULE_PAT
 assert SPEC and SPEC.loader
 EVIDENCE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(EVIDENCE)
+
+
+def collector_environment(cargo_target_dir: Path) -> dict[str, str]:
+    return EVIDENCE.command_environment(
+        cargo_target_dir,
+        cargo_target_dir.parent / "evidence-cargo-home",
+        cargo_target_dir.parent / "evidence-bun-cache",
+    )
+
 
 REPOSITORY = "owner/repository"
 BASE = "a" * 40
@@ -296,10 +306,12 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 "CARGO_ENCODED_RUSTFLAGS": "--target=x86_64-apple-darwin",
                 "CARGO_BUILD_RUSTFLAGS": "--target=x86_64-apple-darwin",
                 "CARGO_TARGET_DIR": "/tmp/cargo-target-cache",
+                "BUN_INSTALL_CACHE_DIR": "/tmp/bun-cache",
                 "HOME": directory,
                 "CARGO_HOME": str(Path(directory) / "cargo-home"),
             }, clear=True):
-                environment = EVIDENCE.command_environment()
+                cargo_target_dir = Path(directory) / "isolated-cargo-target"
+                environment = collector_environment(cargo_target_dir)
             self.assertEqual(environment["CARGO"], "cargo")
             self.assertEqual(environment["RTK"], "")
             self.assertEqual(environment["CARGO_BUILD_TARGET"], "aarch64-apple-darwin")
@@ -313,15 +325,17 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             self.assertEqual(environment["RUSTC_WORKSPACE_WRAPPER"], "")
             self.assertEqual(environment["CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"], "")
             self.assertEqual(environment["CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER"], "/usr/bin/env")
-            self.assertNotIn("CARGO_TARGET_DIR", environment)
+            self.assertEqual(environment["CARGO_TARGET_DIR"], str(cargo_target_dir))
+            self.assertEqual(environment["CARGO_HOME"], str(Path(directory) / "evidence-cargo-home"))
+            self.assertEqual(environment["BUN_INSTALL_CACHE_DIR"], str(Path(directory) / "evidence-bun-cache"))
             self.assertIn('target = "x86_64-apple-darwin"', (config_dir / "config.toml").read_text())
             self.assertIn('runner = "/usr/bin/true"', (config_dir / "config.toml").read_text())
             with patch.dict(EVIDENCE.os.environ, {"CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER": "cross-linker"}, clear=True):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "custom Rust compiler or target linker"):
-                    EVIDENCE.command_environment()
+                    collector_environment(Path(directory) / "isolated-cargo-target")
             with patch.dict(EVIDENCE.os.environ, {"CARGO_BUILD_RUSTC_WRAPPER": "compiler-wrapper"}, clear=True):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "custom Rust compiler or target linker"):
-                    EVIDENCE.command_environment()
+                    collector_environment(Path(directory) / "isolated-cargo-target")
 
     def test_command_environment_drops_inherited_runtime_overrides_for_child(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -336,6 +350,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 "DYLD_INSERT_LIBRARIES": "/wrong", "LD_PRELOAD": "/wrong",
                 "LD_LIBRARY_PATH": "/wrong", "BASH_ENV": "/wrong/bashrc", "ENV": "/wrong/env",
                 "PYTHONPATH": "/wrong/python", "BUN_INSTALL": "/wrong/bun",
+                "BUN_INSTALL_CACHE_DIR": "/wrong/bun-cache",
                 "NODE_OPTIONS": "--require=/wrong.js", "JOBS": "99", "KRR_BIN": "/wrong/krr",
                 "XDG_CACHE_HOME": "/wrong/cache", "CARGO": "true", "RTK": "true",
                 "CARGO_ALIAS_CLIPPY": "--help", "CARGO_ALIAS_FMT": "--help",
@@ -350,13 +365,14 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             with patch.object(EVIDENCE, "ROOT", Path(directory)), patch.object(
                 EVIDENCE, "detect_java_home", return_value="/validated/JDK21",
             ), patch.dict(EVIDENCE.os.environ, safe, clear=True):
-                environment = EVIDENCE.command_environment()
+                environment = collector_environment(Path(directory) / "isolated-cargo-target")
             probe = (
                 "import os,json; print(json.dumps({k:v for k,v in os.environ.items() "
                 "if k in ('JAVA_HOME','JAVA_TOOL_OPTIONS','JDK_JAVA_OPTIONS','_JAVA_OPTIONS',"
                 "'KRR_PLANTUML_JVM','KDR_PLANTUML_JVM','MERMAID_JS','DRAWIO_JS','MATHJAX_JS',"
                 "'DYLD_LIBRARY_PATH','LD_PRELOAD','BASH_ENV','ENV','PYTHONPATH','NODE_OPTIONS',"
-                "'CARGO','RTK','RUSTFLAGS','CARGO_BUILD_TARGET')}))"
+                "'CARGO','RTK','RUSTFLAGS','CARGO_BUILD_TARGET','CARGO_TARGET_DIR','CARGO_HOME',"
+                "'BUN_INSTALL_CACHE_DIR')}))"
             )
             child = subprocess.run(
                 [EVIDENCE.sys.executable, "-c", probe], env=environment,
@@ -366,6 +382,9 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             forced = {
                 "CARGO": "cargo", "RTK": "", "RUSTFLAGS": "-D warnings",
                 "JAVA_HOME": "/validated/JDK21",
+                "CARGO_TARGET_DIR": str(Path(directory) / "isolated-cargo-target"),
+                "CARGO_HOME": str(Path(directory) / "evidence-cargo-home"),
+                "BUN_INSTALL_CACHE_DIR": str(Path(directory) / "evidence-bun-cache"),
             }
             for name in hostile.keys() - forced.keys():
                 self.assertNotIn(name, environment, name)
@@ -374,7 +393,84 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 self.assertEqual(environment[name], value)
                 self.assertEqual(observed[name], value)
             self.assertEqual(observed["CARGO_BUILD_TARGET"], "aarch64-apple-darwin")
-            self.assertEqual(environment["CARGO_HOME"], safe["CARGO_HOME"])
+            self.assertEqual(environment["CARGO_HOME"], str(Path(directory) / "evidence-cargo-home"))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX test executable fixture is required")
+    def test_fresh_cargo_target_rebuilds_instead_of_reusing_tampered_test_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "repository"
+            (root / "src").mkdir(parents=True)
+            (root / "Cargo.toml").write_text(
+                '[package]\nname = "fixture"\nversion = "0.1.0"\nedition = "2021"\n',
+                encoding="utf-8",
+            )
+            (root / "src/lib.rs").write_text(
+                '#[test]\nfn actual_failure() { assert!(false); }\n', encoding="utf-8",
+            )
+            old_target = root / "target"
+            environment = {
+                "HOME": str(base), "CARGO_HOME": str(base / "cargo-home"),
+                "RUSTUP_HOME": EVIDENCE.os.environ.get("RUSTUP_HOME", str(Path(EVIDENCE.os.environ["HOME"]) / ".rustup")),
+                "PATH": EVIDENCE.os.environ["PATH"],
+            }
+            rust_verbose = subprocess.run(
+                ("rustc", "-vV"), env={**os.environ, **environment},
+                text=True, capture_output=True, check=True,
+            ).stdout
+            rust_host = next(line.removeprefix("host: ") for line in rust_verbose.splitlines() if line.startswith("host: "))
+            with patch.object(EVIDENCE, "ROOT", root), patch.object(
+                EVIDENCE, "detect_java_home", return_value="/validated/JDK21",
+            ), patch.dict(EVIDENCE.SCOPE_PARAMETERS, {"CARGO_BUILD_TARGET": rust_host}), patch.dict(
+                EVIDENCE.os.environ, environment, clear=True,
+            ):
+                reused_environment = collector_environment(old_target)
+                build = subprocess.run(
+                    ("cargo", "test", "--no-run", "--lib", "--manifest-path", str(root / "Cargo.toml")),
+                    cwd=root, env=reused_environment, text=True, capture_output=True,
+                )
+                self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
+                test_binaries = [
+                    path for path in old_target.rglob("fixture-*")
+                    if path.name.startswith("fixture-") and path.is_file() and path.suffix == ""
+                ]
+                self.assertEqual(len(test_binaries), 1)
+                shutil.copyfile("/usr/bin/true", test_binaries[0])
+                test_binaries[0].chmod(0o755)
+                reused = subprocess.run(
+                    ("cargo", "test", "--lib", "--manifest-path", str(root / "Cargo.toml")),
+                    cwd=root, env=reused_environment, text=True, capture_output=True,
+                )
+                self.assertEqual(reused.returncode, 0, reused.stdout + reused.stderr)
+                self.assertIn("unittests src/lib.rs", reused.stdout + reused.stderr)
+                self.assertNotIn("actual_failure", reused.stdout + reused.stderr)
+
+                isolated_target = base / "fresh-cargo-target"
+                isolated_environment = collector_environment(isolated_target)
+                self.assertFalse(isolated_target.exists())
+                isolated = subprocess.run(
+                    ("cargo", "test", "--lib", "--manifest-path", str(root / "Cargo.toml")),
+                    cwd=root, env=isolated_environment, text=True, capture_output=True,
+                )
+                self.assertNotEqual(isolated.returncode, 0)
+                self.assertIn("actual_failure ... FAILED", isolated.stdout + isolated.stderr)
+
+                passing_root = base / "passing"
+                (passing_root / "src").mkdir(parents=True)
+                (passing_root / "Cargo.toml").write_text(
+                    '[package]\nname = "passing"\nversion = "0.1.0"\nedition = "2021"\n',
+                    encoding="utf-8",
+                )
+                (passing_root / "src/lib.rs").write_text(
+                    '#[test]\nfn actual_success() { assert!(true); }\n', encoding="utf-8",
+                )
+                positive_environment = collector_environment(base / "positive-cargo-target")
+                positive = subprocess.run(
+                    ("cargo", "test", "--lib", "--manifest-path", str(passing_root / "Cargo.toml")),
+                    cwd=passing_root, env=positive_environment, text=True, capture_output=True,
+                )
+                self.assertEqual(positive.returncode, 0, positive.stdout + positive.stderr)
+                self.assertIn("actual_success ... ok", positive.stdout + positive.stderr)
 
     def test_cargo_env_config_injection_rejects_local_proof(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -390,7 +486,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 "HOME": directory, "CARGO_HOME": str(root / "cargo-home"), "PATH": "/usr/bin",
             }, clear=True):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config \[env\]"):
-                    EVIDENCE.command_environment()
+                    collector_environment(Path(directory) / "isolated-cargo-target")
 
     def test_relative_cargo_home_config_is_resolved_from_repository_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -405,7 +501,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 "HOME": directory, "CARGO_HOME": "relative-cargo-home", "PATH": "/usr/bin",
             }, clear=True):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config \[env\]"):
-                    EVIDENCE.command_environment()
+                    collector_environment(Path(directory) / "isolated-cargo-target")
 
     def test_cargo_target_linker_config_rejects_triple_cfg_ancestor_and_cargo_home(self) -> None:
         cases = (
@@ -438,7 +534,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     "HOME": str(base), "CARGO_HOME": cargo_home, "PATH": "/usr/bin",
                 }, clear=True):
                     with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config target linker"):
-                        EVIDENCE.command_environment()
+                        collector_environment(Path(directory) / "isolated-cargo-target")
 
     def test_cargo_config_paths_include_profiles_and_links_overrides_reject(self) -> None:
         cases = (
@@ -484,7 +580,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     "HOME": str(base), "CARGO_HOME": cargo_home, "PATH": "/usr/bin",
                 }, clear=True):
                     with self.assertRaisesRegex(EVIDENCE.EvidenceError, expected_error):
-                        EVIDENCE.command_environment()
+                        collector_environment(Path(directory) / "isolated-cargo-target")
 
     def test_real_cargo_alias_redirect_is_rejected_before_evidence_collection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -519,7 +615,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     self.assertIn("alias", dispatched.stderr.lower())
             with patch.object(EVIDENCE, "ROOT", root), patch.dict(EVIDENCE.os.environ, environment, clear=True):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config aliases for clippy/fmt"):
-                    EVIDENCE.command_environment()
+                    collector_environment(Path(directory) / "isolated-cargo-target")
 
     def test_clean_node_modules_repairs_tampered_dependency_before_frozen_install(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -539,9 +635,18 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            with patch.object(EVIDENCE, "ROOT", root), patch.object(
+                EVIDENCE, "detect_java_home", return_value="/validated/JDK21",
+            ), patch.dict(EVIDENCE.os.environ, {
+                "HOME": str(base), "CARGO_HOME": str(base / "parent-cargo-home"),
+                "PATH": EVIDENCE.os.environ["PATH"],
+            }, clear=True):
+                environment = collector_environment(base / "isolated-cargo-target")
+
             def bun_install(*args: str) -> subprocess.CompletedProcess[str]:
                 return subprocess.run(
-                    ("bun", "install", *args), cwd=root, text=True, capture_output=True,
+                    ("bun", "install", *args), cwd=root, env=environment,
+                    text=True, capture_output=True,
                 )
 
             initial = bun_install()
@@ -596,7 +701,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     "HOME": str(base), "CARGO_HOME": cargo_home, "PATH": "/usr/bin",
                 }, clear=True):
                     with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config source replacement"):
-                        EVIDENCE.command_environment()
+                        collector_environment(Path(directory) / "isolated-cargo-target")
 
     def test_collector_rejects_non_macos_15_before_preparation(self) -> None:
         with (

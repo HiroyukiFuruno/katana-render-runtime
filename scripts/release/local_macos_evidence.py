@@ -67,8 +67,10 @@ SCOPE_PARAMETERS = {
     "CARGO_BUILD_RUSTC": "rustc",
     "CARGO_BUILD_RUSTC_WRAPPER": "",
     "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER": "",
+    "CARGO_HOME": "<fresh-empty-directory-per-collection>",
     "CARGO_ENCODED_RUSTFLAGS": "-D\x1fwarnings",
     "CARGO_INCREMENTAL": "0",
+    "CARGO_TARGET_DIR": "<fresh-empty-directory-per-collection>",
     "CARGO_TERM_COLOR": "always",
     "CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER": "/usr/bin/env",
     "RTK": "",
@@ -76,6 +78,7 @@ SCOPE_PARAMETERS = {
     "RUSTC": "rustc",
     "RUSTC_WRAPPER": "",
     "RUSTC_WORKSPACE_WRAPPER": "",
+    "BUN_INSTALL_CACHE_DIR": "<fresh-empty-directory-per-collection>",
     "TEST_THREADS": "1",
 }
 JAVA_VENDOR = "Eclipse Adoptium"
@@ -324,7 +327,9 @@ def detect_java_home(environment: dict[str, str]) -> str:
     return home
 
 
-def command_environment() -> dict[str, str]:
+def command_environment(
+    cargo_target_dir: Path, isolated_cargo_home: Path, bun_cache_dir: Path,
+) -> dict[str, str]:
     parent = os.environ
     unsupported = {
         name for name in parent
@@ -337,11 +342,11 @@ def command_environment() -> dict[str, str]:
     configs: set[Path] = set()
     for directory in (ROOT, *ROOT.parents):
         configs.update((directory / ".cargo/config", directory / ".cargo/config.toml"))
-    cargo_home = Path(parent.get("CARGO_HOME", str(Path(parent.get("HOME", "~")) / ".cargo"))).expanduser()
-    if not cargo_home.is_absolute():
-        cargo_home = ROOT / cargo_home
-    cargo_home = cargo_home.resolve()
-    configs.update((cargo_home / "config", cargo_home / "config.toml"))
+    parent_cargo_home = Path(parent.get("CARGO_HOME", str(Path(parent.get("HOME", "~")) / ".cargo"))).expanduser()
+    if not parent_cargo_home.is_absolute():
+        parent_cargo_home = ROOT / parent_cargo_home
+    parent_cargo_home = parent_cargo_home.resolve()
+    configs.update((parent_cargo_home / "config", parent_cargo_home / "config.toml"))
     for config in sorted(configs):
         if not config.is_file():
             continue
@@ -381,6 +386,9 @@ def command_environment() -> dict[str, str]:
             raise EvidenceError("Cargo config target linker or links override is unsupported")
     environment = {name: parent[name] for name in HOST_ENVIRONMENT_KEYS if name in parent}
     environment.update(SCOPE_PARAMETERS)
+    environment["CARGO_HOME"] = str(isolated_cargo_home)
+    environment["CARGO_TARGET_DIR"] = str(cargo_target_dir)
+    environment["BUN_INSTALL_CACHE_DIR"] = str(bun_cache_dir)
     environment["JAVA_HOME"] = detect_java_home(environment)
     return environment
 
@@ -480,8 +488,8 @@ def cargo_component_versions(environment: dict[str, str]) -> dict[str, str]:
     return found
 
 
-def tool_versions() -> dict[str, str]:
-    environment = command_environment()
+def tool_versions(cargo_target_dir: Path, cargo_home: Path, bun_cache_dir: Path) -> dict[str, str]:
+    environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir)
     commands = {
         "macos": ("sw_vers", "-productVersion"),
         "architecture": ("uname", "-m"),
@@ -868,13 +876,20 @@ def collect(repository: str, number: int, publish: bool) -> int:
 
     logs_dir = ROOT / "tmp/local-macos-evidence" / f"{number}-{head_sha[:12]}-{int(time.time())}"
     logs_dir.mkdir(parents=True, exist_ok=False)
+    isolated_inputs_dir = Path(tempfile.mkdtemp(prefix="krr-local-macos-inputs-"))
+    cargo_home = isolated_inputs_dir / "cargo-home"
+    cargo_home.mkdir()
+    cargo_target_dir = isolated_inputs_dir / "cargo-target"
+    cargo_target_dir.mkdir()
+    bun_cache_dir = isolated_inputs_dir / "bun-cache"
+    bun_cache_dir.mkdir()
     logs: list[dict[str, Any]] = []
     smoke_output = str(logs_dir / "plantuml-sequence.svg")
 
     def run_command(command_id: str, argv_template: tuple[str, ...]) -> None:
         argv = [part.format(plantuml_output=smoke_output) for part in argv_template]
         start = time.monotonic()
-        command_env = command_environment()
+        command_env = command_environment(cargo_target_dir, cargo_home, bun_cache_dir)
         result = subprocess.run(argv, cwd=ROOT, env=command_env, text=True, capture_output=True)
         duration = int((time.monotonic() - start) * 1000)
         output = result.stdout + result.stderr
@@ -892,25 +907,28 @@ def collect(repository: str, number: int, publish: bool) -> int:
         if result.returncode != 0:
             raise EvidenceError(f"local command failed: {command_id}; log: {log_path}")
 
-    for command_id, argv_template in COMMANDS:
-        if command_id in PREPARATION_COMMANDS:
-            if command_id == "bun-install":
-                # ignoredな既存依存ファイルを検査対象へ持ち越さないよう、install前に再構築する。
-                clean_existing_node_modules()
-            run_command(command_id, argv_template)
-    stable_versions_before = fetch_stable_manifest_versions()
-    versions_before = tool_versions()
-    validate_pinned_tools(versions_before)
-    validate_stable_rust_tools(versions_before, stable_versions_before)
-    for command_id, argv_template in COMMANDS:
-        if command_id not in PREPARATION_COMMANDS:
-            run_command(command_id, argv_template)
-    stable_versions_after = fetch_stable_manifest_versions()
-    versions_after = tool_versions()
-    validate_pinned_tools(versions_after)
-    validate_stable_rust_tools(versions_after, stable_versions_after)
-    if versions_before != versions_after or stable_versions_before != stable_versions_after:
-        raise EvidenceError("tool versions changed during local checks")
+    try:
+        for command_id, argv_template in COMMANDS:
+            if command_id in PREPARATION_COMMANDS:
+                if command_id == "bun-install":
+                    # ignoredな既存依存ファイルを検査対象へ持ち越さないよう、install前に再構築する。
+                    clean_existing_node_modules()
+                run_command(command_id, argv_template)
+        stable_versions_before = fetch_stable_manifest_versions()
+        versions_before = tool_versions(cargo_target_dir, cargo_home, bun_cache_dir)
+        validate_pinned_tools(versions_before)
+        validate_stable_rust_tools(versions_before, stable_versions_before)
+        for command_id, argv_template in COMMANDS:
+            if command_id not in PREPARATION_COMMANDS:
+                run_command(command_id, argv_template)
+        stable_versions_after = fetch_stable_manifest_versions()
+        versions_after = tool_versions(cargo_target_dir, cargo_home, bun_cache_dir)
+        validate_pinned_tools(versions_after)
+        validate_stable_rust_tools(versions_after, stable_versions_after)
+        if versions_before != versions_after or stable_versions_before != stable_versions_after:
+            raise EvidenceError("tool versions changed during local checks")
+    finally:
+        shutil.rmtree(isolated_inputs_dir)
     versions = versions_before
     completed_at = utc_now()
     aggregate = canonical(logs)
