@@ -241,7 +241,21 @@ def tool_versions() -> dict[str, str]:
         raise EvidenceError("local proof requires Apple Silicon (arm64)")
     if platform.system() != "Darwin":
         raise EvidenceError("local proof requires macOS")
+    validate_pinned_tools(found)
     return found
+
+
+def java_is_21(value: Any) -> bool:
+    return isinstance(value, str) and re.search(
+        r'\bversion\s+["\']?21(?:[.+"\'\s]|$)', value, re.IGNORECASE
+    ) is not None
+
+
+def validate_pinned_tools(versions: Any) -> None:
+    if not isinstance(versions, dict) or not java_is_21(versions.get("java")):
+        raise EvidenceError("local proof requires Java 21, matching the macOS CI setup")
+    if versions.get("bun") != "1.4.2":
+        raise EvidenceError("local proof requires Bun 1.4.2, matching the macOS CI setup")
 
 
 def parse_comment(comment: Any) -> dict[str, Any] | None:
@@ -301,6 +315,8 @@ def valid_payload(
     } or any(not isinstance(value, str) or not value.strip() for value in tools.values()):
         return False
     if tools.get("architecture") != "arm64" or not isinstance(tools.get("macos"), str) or not tools["macos"].strip():
+        return False
+    if not java_is_21(tools.get("java")) or tools.get("bun") != "1.4.2":
         return False
     if payload.get("environment") != SCOPE_PARAMETERS:
         return False
@@ -491,10 +507,12 @@ def collect(repository: str, number: int, publish: bool) -> int:
         if command_id in PREPARATION_COMMANDS:
             run_command(command_id, argv_template)
     versions_before = tool_versions()
+    validate_pinned_tools(versions_before)
     for command_id, argv_template in COMMANDS:
         if command_id not in PREPARATION_COMMANDS:
             run_command(command_id, argv_template)
     versions_after = tool_versions()
+    validate_pinned_tools(versions_after)
     if versions_before != versions_after:
         raise EvidenceError("tool versions changed during local checks")
     versions = versions_before

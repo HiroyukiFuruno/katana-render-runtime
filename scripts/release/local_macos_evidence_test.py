@@ -45,7 +45,7 @@ def valid_comment() -> dict[str, object]:
         "platform": "macos-arm64",
         "tools": {
             "macos": "15.0", "architecture": "arm64", "rustc": "rustc 1.90.0",
-            "cargo": "cargo 1.90.0", "java": "openjdk 21", "bun": "1.4.2",
+            "cargo": "cargo 1.90.0", "java": 'openjdk version "21.0.12" 2025-01-21', "bun": "1.4.2",
             "just": "just 1.40.0", "brew": "Homebrew 5.0.0", "graphviz": "dot - graphviz version 12",
         },
         "commands": commands,
@@ -139,6 +139,34 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
             fetch=snapshots(good), now=NOW, expected_workflow_digest="f" * 64,
         ))
+
+    def test_rejects_java_other_than_21_and_bun_other_than_1_4_2(self) -> None:
+        good = valid_comment()
+        payload = json.loads(good["body"].split("\n", 1)[1])
+        for java, bun in (
+            ('openjdk version "17.0.13" 2024-10-15', "1.4.2"),
+            ('openjdk version "22.0.1" 2024-10-15', "1.4.2"),
+            ("Java runtime unknown", "1.4.2"),
+            ('openjdk version "21.0.12" 2025-01-21', "1.4.1"),
+        ):
+            changed = {**payload, "tools": {**payload["tools"], "java": java, "bun": bun}}
+            comment = {**good, "body": EVIDENCE.MARKER + "\n" + json.dumps(changed)}
+            with self.subTest(java=java, bun=bun):
+                self.assertFalse(EVIDENCE.verify_from_api(
+                    REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                    fetch=snapshots(comment), now=NOW, expected_workflow_digest="d" * 64,
+                ))
+
+        EVIDENCE.validate_pinned_tools({"java": 'java version "21.0.12"', "bun": "1.4.2"})
+        for java, bun in (
+            ('java version "17.0.13"', "1.4.2"),
+            ('java version "22.0.1"', "1.4.2"),
+            ("unparseable", "1.4.2"),
+            ('java version "21.0.12"', "1.4.1"),
+        ):
+            with self.subTest(collection_java=java, collection_bun=bun):
+                with self.assertRaises(EVIDENCE.EvidenceError):
+                    EVIDENCE.validate_pinned_tools({"java": java, "bun": bun})
 
     def test_rejects_expired_or_edited_comment_api_change_or_nonincorporated_base(self) -> None:
         good = valid_comment()
@@ -241,11 +269,38 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                      "head": {"sha": HEAD, "repo": {"full_name": REPOSITORY}}},
                 ]),
                 patch.object(EVIDENCE, "tool_versions", return_value={"macos": "15", "architecture": "arm64"}),
-                patch.object(EVIDENCE.Path, "home", return_value=Path(directory)),
+                patch.object(EVIDENCE, "ROOT", Path(directory)),
                 patch.object(EVIDENCE.subprocess, "run", return_value=subprocess.CompletedProcess([], 9, "", "failed")),
             ):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "local command failed"):
                     EVIDENCE.collect(REPOSITORY, 7, publish=True)
+
+    def test_collector_rejects_wrong_java_before_quality_commands(self) -> None:
+        versions = {
+            "macos": "15.0", "architecture": "arm64", "rustc": "rustc stable",
+            "cargo": "cargo stable", "java": 'openjdk version "17.0.13"',
+            "bun": "1.4.2", "just": "just 1", "brew": "Homebrew 5", "graphviz": "dot 12",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(EVIDENCE.platform, "system", return_value="Darwin"),
+                patch.object(EVIDENCE.platform, "machine", return_value="arm64"),
+                patch.object(EVIDENCE, "git_status", return_value=""),
+                patch.object(EVIDENCE, "run_git", side_effect=[HEAD, BASE]),
+                patch.object(EVIDENCE, "workflow_digest", return_value="d" * 64),
+                patch.object(EVIDENCE, "gh_token", return_value="existing-token"),
+                patch.object(EVIDENCE, "api_request", side_effect=[
+                    {"full_name": REPOSITORY, "owner": {"login": "owner"}}, {"login": "owner"},
+                    {"number": 7, "state": "open", "base": {"sha": BASE, "ref": "master", "repo": {"full_name": REPOSITORY}},
+                     "head": {"sha": HEAD, "repo": {"full_name": REPOSITORY}}},
+                ]),
+                patch.object(EVIDENCE, "tool_versions", return_value=versions),
+                patch.object(EVIDENCE, "ROOT", Path(directory)),
+                patch.object(EVIDENCE.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run,
+            ):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "Java 21"):
+                    EVIDENCE.collect(REPOSITORY, 7, publish=True)
+                self.assertEqual(run.call_count, len(EVIDENCE.PREPARATION_COMMANDS))
 
 
 if __name__ == "__main__":
