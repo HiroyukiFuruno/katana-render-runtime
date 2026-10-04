@@ -1541,7 +1541,7 @@ class DriverContractTest(unittest.TestCase):
         self.assertEqual(absolute_alias, alias)
         self.assertEqual(absolute_direct, direct)
 
-    def test_actual_just_overrides_reach_review_and_quality_runner(self) -> None:
+    def test_actual_just_overrides_reach_explicit_local_review_and_quality_runner(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         names = ("COVERAGE_MIN_LINES", "COVERAGE_MAX_UNCOVERED_LINES", "TEST_THREADS",
                  "RUSTFLAGS", "CARGO", "JOBS", "CHECK_JOBS")
@@ -1555,28 +1555,38 @@ class DriverContractTest(unittest.TestCase):
             cache_script.parent.mkdir()
             cache_script.write_text((repository / "scripts/plantuml/cache-dir.sh").read_text())
             common = f"import json,sys\nfrom pathlib import Path\nsys.path.insert(0, {str(repository / 'scripts/hooks')!r})\nfrom local_review_state import gate_configuration\n"
-            (hooks / "local_review.py").write_text(common + "Path('review.json').write_text(json.dumps(gate_configuration(Path.cwd())))\n")
+            (hooks / "local_review.py").write_text(
+                common + "Path('review.json').write_text(json.dumps(gate_configuration(Path.cwd())))\n"
+                + "Path('review-invocations.log').open('a').write('invoked\\n')\n"
+            )
             (hooks / "run_parallel_checks.py").write_text(common + "Path('runner.json').write_text(json.dumps({'config':gate_configuration(Path.cwd()),'jobs':sys.argv[-1]}))\n")
-            def run(overrides):
+            def run_local_review(overrides):
+                command(["just", "--justfile", str(root / "Justfile"), *overrides, "local-review"], root)
+                return json.loads((root / "review.json").read_text())
+            def run_quality_check(overrides):
+                invocation_count = len((root / "review-invocations.log").read_text().splitlines())
                 command(["just", "--justfile", str(root / "Justfile"), *overrides, "check"], root)
-                reviewed = json.loads((root / "review.json").read_text())
+                self.assertEqual(len((root / "review-invocations.log").read_text().splitlines()), invocation_count)
                 executed = json.loads((root / "runner.json").read_text())
-                self.assertEqual(reviewed, executed["config"])
-                self.assertEqual(reviewed["CHECK_JOBS"], executed["jobs"])
-                return reviewed
-            baseline = run([])
+                self.assertEqual(executed["config"]["CHECK_JOBS"], executed["jobs"])
+                return executed["config"]
+            baseline = run_local_review([])
+            self.assertEqual(baseline, run_quality_check([]))
             self.assertEqual(baseline, local_review.gate_configuration(root))
             explicit = [argument for name in names if name != "RUSTFLAGS" for argument in ("--set", name, baseline[name])]
             explicit.append(f"RUSTFLAGS={baseline['RUSTFLAGS']}")
-            self.assertEqual(baseline, run(explicit))
+            self.assertEqual(baseline, run_local_review(explicit))
+            self.assertEqual(baseline, run_quality_check(explicit))
             for name, changed in [("CHECK_JOBS", "1"), ("TEST_THREADS", "2"), ("CARGO", "cargo --offline"),
                                   ("JOBS", "4"), ("RUSTFLAGS", "-D warnings -C opt-level=1"),
                                   ("COVERAGE_MIN_LINES", "100.0"), ("COVERAGE_MAX_UNCOVERED_LINES", "00")]:
                 with self.subTest(name=name):
                     override = [f"RUSTFLAGS={changed}"] if name == "RUSTFLAGS" else ["--set", name, changed]
-                    value = run(override)
-                    self.assertEqual(value[name], changed)
-                    self.assertNotEqual(digest(baseline), digest(value))
+                    review_value = run_local_review(override)
+                    quality_value = run_quality_check(override)
+                    self.assertEqual(review_value, quality_value)
+                    self.assertEqual(review_value[name], changed)
+                    self.assertNotEqual(digest(baseline), digest(review_value))
 
     def test_coverage_target_paths_are_effective_and_normalized(self) -> None:
         from local_review_state import gate_configuration
@@ -2305,7 +2315,7 @@ class DriverContractTest(unittest.TestCase):
                         issue_context(root, [89])
                 self.assertFalse(gh_calls)
 
-    def test_codex_is_read_only_high_and_precedes_quality_lanes(self) -> None:
+    def test_codex_is_read_only_high_and_separate_from_quality_lanes(self) -> None:
         arguments = local_review.review_command(Path.cwd(), Path("result.json"))
         self.assertIn("read-only", arguments)
         self.assertIn("gpt-6.1-sol", arguments)
@@ -2314,7 +2324,10 @@ class DriverContractTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         justfile = (root / "Justfile").read_text()
         section = justfile.split("\ncheck:\n", 1)[1].split("\n\n", 1)[0]
-        self.assertLess(section.index("scripts/hooks/local_review.py"), section.index("run_parallel_checks.py"))
+        self.assertNotIn("scripts/hooks/local_review.py", section)
+        self.assertIn("run_parallel_checks.py", section)
+        local_review_section = justfile.split("\nlocal-review:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("scripts/hooks/local_review.py", local_review_section)
 
     def test_new_branch_issue_precedes_old_receipt_and_ambiguous_refs_reject(self) -> None:
         args = SimpleNamespace(issue=[], base="origin/master")
