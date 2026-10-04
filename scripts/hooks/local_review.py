@@ -306,10 +306,29 @@ def terminate_review_process(process: subprocess.Popen[str]) -> None:
 def run_review_process(arguments: list[str], root: Path, environment: dict, prompt: str, diagnostic: Path) -> int:
     process = None
     process_group_cleaned = False
+    cleanup_in_progress = False
     previous_handlers = {}
+    deferred_cleanup_signals = []
 
     def terminate_parent(signum: int, _frame: object) -> None:
+        if cleanup_in_progress:
+            deferred_cleanup_signals.append(signum)
+            return
         raise SystemExit(128 + signum)
+
+    def cleanup_process() -> None:
+        nonlocal cleanup_in_progress, process_group_cleaned
+        if process is None or process_group_cleaned:
+            return
+        # cleanup中の再signalでwrapperのreapが中断されないよう、元のキャンセルを記録する。
+        cleanup_in_progress = True
+        try:
+            terminate_review_process(process)
+            process_group_cleaned = True
+        finally:
+            cleanup_in_progress = False
+        if deferred_cleanup_signals and sys.exc_info()[0] is None:
+            raise SystemExit(128 + deferred_cleanup_signals[0])
 
     manage_signals = os.name == "posix" and threading.current_thread() is threading.main_thread()
     managed_signals = []
@@ -343,14 +362,12 @@ def run_review_process(arguments: list[str], root: Path, environment: dict, prom
             try:
                 process.communicate(prompt, timeout=REVIEW_TIMEOUT_SECONDS)
             except BaseException:
-                process_group_cleaned = True
-                terminate_review_process(process)
+                cleanup_process()
                 raise
             return process.returncode
     finally:
         try:
-            if process is not None and not process_group_cleaned:
-                terminate_review_process(process)
+            cleanup_process()
         finally:
             for signum, handler in previous_handlers.items():
                 signal.signal(signum, handler)

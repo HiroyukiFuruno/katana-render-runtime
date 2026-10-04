@@ -2386,6 +2386,12 @@ class DriverContractTest(unittest.TestCase):
                         "from pathlib import Path\n"
                         "from local_review_lock import review_lock\n"
                         "import local_review\n"
+                        "original_killpg=os.killpg\n"
+                        "def killpg_then_signal(pid, signum):\n"
+                        "    original_killpg(pid,signum)\n"
+                        "    os.kill(os.getpid(),signal.SIGINT)\n"
+                        "import signal\n"
+                        "os.killpg=killpg_then_signal\n"
                         "root,lock,ready,cleanup,release,pid,child_ready,grandchild_pid,grandchild_ready=map(Path,sys.argv[1:10])\n"
                         "with review_lock(lock):\n"
                         "    ready.write_text('locked')\n"
@@ -2453,6 +2459,13 @@ class DriverContractTest(unittest.TestCase):
                             time.sleep(0.02)
                         self.assertIsNone(running_process_state(process_group), "reviewer process survived group cancellation")
                         self.assertIsNone(running_process_state(descendant), "reviewer grandchild survived group cancellation")
+                        self.assertFalse(
+                            subprocess.run(
+                                ["ps", "-o", "stat=", "-p", str(process_group)],
+                                capture_output=True, text=True, check=False,
+                            ).stdout.strip(),
+                            "direct reviewer was killed but not reaped before the lock was released",
+                        )
                         with review_lock(lock):
                             pass
                     finally:
