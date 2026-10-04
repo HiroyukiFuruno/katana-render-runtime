@@ -24,20 +24,28 @@ export class MarkdownReferenceAssets {
     return this.outputPaths(fixture).some((outputPath) => fs.existsSync(outputPath));
   }
 
-  skipFailedFixture(fixture: Fixture, hadReferencesBeforeRender: boolean): boolean {
-    if (hadReferencesBeforeRender) {
-      return false;
+  capture(fixture: Fixture): ReferenceAssetsSnapshot {
+    const files = new Map<string, Buffer>();
+    for (const outputPath of this.outputPaths(fixture)) {
+      if (fs.existsSync(outputPath)) {
+        files.set(outputPath, fs.readFileSync(outputPath));
+      }
     }
-    this.remove(fixture);
-    return true;
+    return { files };
   }
 
-  remove(fixture: Fixture) {
-    this.outputPaths(fixture)
-      .filter(fs.existsSync)
-      .forEach((outputPath) => {
-        fs.unlinkSync(outputPath);
-      });
+  skipFailedFixture(fixture: Fixture, snapshot: ReferenceAssetsSnapshot): boolean {
+    for (const outputPath of this.outputPaths(fixture)) {
+      const previousContent = snapshot.files.get(outputPath);
+      if (previousContent === undefined) {
+        if (fs.existsSync(outputPath)) {
+          fs.unlinkSync(outputPath);
+        }
+        continue;
+      }
+      fs.writeFileSync(outputPath, previousContent);
+    }
+    return snapshot.files.size === 0;
   }
 
   private outputPaths(fixture: Fixture): string[] {
@@ -63,4 +71,8 @@ export class MarkdownReferenceAssets {
 interface ImagePathPair {
   source: string;
   target: string;
+}
+
+export interface ReferenceAssetsSnapshot {
+  files: Map<string, Buffer>;
 }
