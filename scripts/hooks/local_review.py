@@ -16,7 +16,7 @@ import tempfile
 from local_review_contract import MODEL, PROMPT, REASONING, receipt_payload, validate_receipt, validate_review
 from local_review_lock import review_lock
 from local_review_state import ReviewError, cache_path, canonical, command, digest, gate_configuration, issue_context
-from local_review_state import repository_root, requirements_context, source_snapshot, strict_json
+from local_review_state import repository_root, requirements_context, resolve_remote_name, source_snapshot, strict_json
 from verify_push_issue import issue_numbers as referenced_issue_numbers
 
 
@@ -45,7 +45,9 @@ def review_prompt() -> str:
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Review exact local changes before the full quality gate.")
     parser.add_argument("--issue", type=int, action="append", default=[])
-    parser.add_argument("--base", default="origin/master")
+    parser.add_argument("--base")
+    parser.add_argument("--remote", default=os.environ.get("REVIEW_REMOTE"))
+    parser.add_argument("--remote-url", default=os.environ.get("REVIEW_REMOTE_URL"))
     parser.add_argument("--requirements")
     parser.add_argument("--receipt", default="tmp/local-review/receipt.json")
     mode = parser.add_mutually_exclusive_group()
@@ -96,8 +98,16 @@ def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[i
 
 
 def build_inputs(root: Path, args: argparse.Namespace, numbers: list[int]) -> dict:
+    remote = getattr(args, "remote", None) or os.environ.get("REVIEW_REMOTE") or "origin"
+    remote_name = resolve_remote_name(root, remote)
+    base = getattr(args, "base", None) or os.environ.get("REVIEW_BASE") or f"{remote_name}/master"
+    remote_url = getattr(args, "remote_url", None) or os.environ.get("REVIEW_REMOTE_URL")
+    selected_url = remote_url or (remote if remote.startswith(("git@", "ssh://", "https://", "http://")) else None)
     return {"schema": 1, "repository": "HiroyukiFuruno/katana-render-runtime",
-            "source": source_snapshot(root, args.base), "issues": issue_context(root, numbers),
+            "review_remote": remote_name,
+            "review_remote_url_sha256": hashlib.sha256(selected_url.encode()).hexdigest() if selected_url else None,
+            "source": source_snapshot(root, base),
+            "issues": issue_context(root, numbers, remote, selected_url),
             "requirements": requirements_context(root, args.requirements),
             "gate_configuration": gate_configuration(root),
             "model": MODEL, "reasoning": REASONING,
@@ -319,6 +329,10 @@ def run(args: argparse.Namespace) -> int:
         print("Local review SKIP in CI: existing cloud/native quality gates remain required.")
         return 0
     root = repository_root()
+    remote = getattr(args, "remote", None) or os.environ.get("REVIEW_REMOTE") or "origin"
+    remote_name = resolve_remote_name(root, remote)
+    if not getattr(args, "base", None):
+        args.base = os.environ.get("REVIEW_BASE") or f"{remote_name}/master"
     path = cache_path(root, args.receipt)
     numbers = issue_numbers(root, args, path)
     args.requirements = requirements_path(root, args, path, numbers)

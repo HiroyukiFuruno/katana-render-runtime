@@ -22,6 +22,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).parent))
 
 import local_review
+import local_review_state
 from local_review_contract import CHECKS, receipt_payload, validate_receipt
 from local_review_lock import review_lock
 from local_review_state import (
@@ -195,6 +196,67 @@ class GitSnapshotTest(unittest.TestCase):
         self.assertNotEqual(untracked, staged)
         self.commit("changes")
         self.assertEqual(staged, source_snapshot(self.root, self.base))
+
+    def test_print_input_uses_selected_renamed_remote_for_issue_and_base(self) -> None:
+        url = "https://github.com/HiroyukiFuruno/katana-render-runtime.git"
+        command(["git", "remote", "add", "origin", url], self.root)
+        command(["git", "remote", "rename", "origin", "upstream"], self.root)
+        command(["git", "update-ref", "refs/remotes/upstream/master", self.base], self.root)
+        (self.root / "example.py").write_text("issue work\n")
+        self.commit("work\n\nRefs: #89")
+        api_calls = []
+        issue = {"number": 89, "title": "quality", "body": "requirements", "state": "open",
+                 "html_url": "https://github.com/HiroyukiFuruno/katana-render-runtime/issues/89"}
+
+        def real_git_mock_gh(arguments, root, input_bytes=None):
+            if arguments[0] == "gh":
+                api_calls.append(arguments)
+                return json.dumps(issue)
+            return command(arguments, root, input_bytes)
+
+        output = io.StringIO()
+        args = SimpleNamespace(issue=[], base=None, remote="upstream", requirements=None,
+                               receipt=str(self.root / "tmp/receipt.json"), check_receipt=False,
+                               print_input=True)
+        test_environment = os.environ.copy()
+        for name in ("REVIEW_ISSUE", "REVIEW_REQUIREMENTS", "REVIEW_BASE", "REVIEW_REMOTE",
+                     "REVIEW_REMOTE_URL"):
+            test_environment.pop(name, None)
+        with patch.dict(os.environ, test_environment, clear=True), \
+                patch.object(local_review_state, "command", side_effect=real_git_mock_gh), \
+                patch.object(local_review, "repository_root", return_value=self.root), \
+                patch.object(local_review, "cache_path", return_value=self.root / "tmp/receipt.json"), \
+                patch.object(local_review, "requirements_path", return_value=None), \
+                patch.object(local_review, "gate_configuration", return_value={}), \
+                redirect_stdout(output):
+            self.assertEqual(local_review.run(args), 0)
+
+        printed = json.loads(output.getvalue())
+        self.assertEqual(printed["inputs"]["review_remote"], "upstream")
+        self.assertEqual(printed["inputs"]["source"]["base_sha"], self.base)
+        self.assertEqual(api_calls, [["gh", "api", "repos/HiroyukiFuruno/katana-render-runtime/issues/89"]])
+
+    def test_wrong_selected_remote_host_is_rejected_without_origin_fallback(self) -> None:
+        command(["git", "remote", "add", "origin",
+                 "https://github.com/HiroyukiFuruno/katana-render-runtime.git"], self.root)
+        command(["git", "remote", "add", "upstream", "https://example.com/other/repo.git"], self.root)
+        with self.assertRaises(ReviewError):
+            issue_context(self.root, [89], "upstream")
+
+    def test_url_selection_matching_multiple_remotes_fails_closed(self) -> None:
+        url = "https://github.com/HiroyukiFuruno/katana-render-runtime.git"
+        command(["git", "remote", "add", "origin", url], self.root)
+        command(["git", "remote", "add", "upstream", url], self.root)
+        with self.assertRaisesRegex(ReviewError, "does not identify one configured remote"):
+            issue_context(self.root, [89], url)
+
+    def test_selected_push_url_with_different_fetch_repository_fails_closed(self) -> None:
+        fetch_url = "https://github.com/HiroyukiFuruno/katana-render-runtime.git"
+        push_url = "https://github.com/another-owner/other-repo.git"
+        command(["git", "remote", "add", "origin", fetch_url], self.root)
+        command(["git", "remote", "set-url", "--push", "origin", push_url], self.root)
+        with self.assertRaisesRegex(ReviewError, "different repositories"):
+            issue_context(self.root, [89], "origin", push_url)
 
     def test_reviewed_base_head_remains_reusable_after_staging_and_descendant_commit(self) -> None:
         path = self.root / "example.py"
@@ -1958,12 +2020,19 @@ class DriverContractTest(unittest.TestCase):
         payload = {"number": 89, "title": "quality", "body": "requirements", "state": "open",
                    "html_url": "https://github.com/HiroyukiFuruno/katana-render-runtime/issues/89",
                    "updated_at": "before"}
-        responses = ["git@github.com:HiroyukiFuruno/katana-render-runtime.git", json.dumps(payload)]
-        with patch("local_review_state.command", side_effect=responses):
+        remote_url = "git@github.com:HiroyukiFuruno/katana-render-runtime.git"
+
+        def fake_command(arguments, root, input_bytes=None):
+            if arguments[:3] == ["git", "remote", "get-url"]:
+                return remote_url
+            if arguments[0] == "gh":
+                return json.dumps(payload)
+            return command(arguments, root, input_bytes)
+
+        with patch("local_review_state.command", side_effect=fake_command):
             before = issue_context(Path.cwd(), [89])
         payload["updated_at"] = "after comment"
-        responses[-1] = json.dumps(payload)
-        with patch("local_review_state.command", side_effect=responses):
+        with patch("local_review_state.command", side_effect=fake_command):
             self.assertEqual(before, issue_context(Path.cwd(), [89]))
 
     def test_github_origin_url_forms_share_the_same_issue_context(self) -> None:

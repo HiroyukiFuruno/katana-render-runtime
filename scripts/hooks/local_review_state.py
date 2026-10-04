@@ -227,40 +227,80 @@ def normalize_remote_url(remote: str) -> str:
     return normalized
 
 
-def issue_context(root: Path, numbers: list[int]) -> list[dict[str, Any]]:
-    remote = command(["git", "remote", "get-url", "origin"], root, input_bytes=b"").removesuffix("\n")
+def resolve_remote_name(root: Path, remote_name: str) -> str:
+    if remote_name.startswith(("git@", "ssh://", "https://", "http://")):
+        remotes = command(["git", "remote"], root).splitlines()
+        matches = []
+        for candidate in remotes:
+            urls = command(["git", "remote", "get-url", "--push", "--all", candidate], root).splitlines()
+            urls += [command(["git", "remote", "get-url", candidate], root).removesuffix("\n")]
+            if any(_same_remote_url(remote_name, url) for url in urls):
+                matches.append(candidate)
+        if len(matches) != 1:
+            raise ReviewError("selected push URL does not identify one configured remote")
+        remote_name = matches[0]
+    if not remote_name or remote_name.startswith("-"):
+        raise ReviewError("selected review remote is invalid")
+    return remote_name
+
+
+def _same_remote_url(left: str, right: str) -> bool:
+    def normalize(value: str) -> str:
+        return value.strip().removesuffix("/").removesuffix(".git")
+
+    return normalize(left) == normalize(right)
+
+
+def _github_repository(remote: str) -> str:
+    failure = "selected remote must identify a GitHub repository"
     if any(ord(character) <= 32 or ord(character) == 127 for character in remote):
-        raise ReviewError("origin must identify a GitHub repository")
-    elif "@" in remote and ":" in remote and not remote.startswith(("https://", "ssh://")):
+        raise ReviewError(failure)
+    if "@" in remote and ":" in remote and not remote.startswith(("https://", "ssh://")):
         username, separator, authority_path = remote.partition("@")
         host, separator, path = authority_path.partition(":")
-        if (separator != ":" or username != "git" or host.casefold() != "github.com" or
-                "@" in host or not path):
-            raise ReviewError("origin must identify a GitHub repository")
-        repository = path.removesuffix(".git")
-    elif remote.startswith(("https://", "ssh://")):
-        remote = normalize_remote_url(remote)
-        try:
-            parsed = urlsplit(remote)
-            port = parsed.port
-        except ValueError as error:
-            raise ReviewError("origin must identify a GitHub repository") from error
-        authority = parsed.netloc.rsplit("@", 1)[-1]
-        if authority.endswith(":"):
-            raise ReviewError("origin must identify a GitHub repository")
-        path = parsed.path.removeprefix("/")
-        if parsed.scheme == "https":
-            valid = (parsed.hostname == "github.com" and parsed.username is None and
-                     parsed.password is None and port in (None, 443))
-        else:
-            valid = (parsed.hostname == "github.com" and parsed.username == "git" and
-                     parsed.password is None and port in (None, 22))
-        if (not valid or parsed.query or parsed.fragment or
-                not path or path.startswith("/") or path.count("/") != 1):
-            raise ReviewError("origin must identify a GitHub repository")
-        repository = path.removesuffix(".git")
+        if separator != ":" or username != "git" or host.casefold() != "github.com" or "@" in host or not path:
+            raise ReviewError(failure)
+        return path.removesuffix(".git")
+    if not remote.startswith(("https://", "ssh://")):
+        raise ReviewError(failure)
+    normalized = normalize_remote_url(remote)
+    try:
+        parsed = urlsplit(normalized)
+        port = parsed.port
+    except ValueError as error:
+        raise ReviewError(failure) from error
+    authority = parsed.netloc.rsplit("@", 1)[-1]
+    path = parsed.path.removeprefix("/")
+    valid = ((parsed.scheme == "https" and parsed.hostname == "github.com" and
+              parsed.username is None and parsed.password is None and port in (None, 443)) or
+             (parsed.scheme == "ssh" and parsed.hostname == "github.com" and
+              parsed.username == "git" and parsed.password is None and port in (None, 22)))
+    if (not valid or authority.endswith(":") or parsed.query or parsed.fragment or
+            not path or path.startswith("/") or path.count("/") != 1):
+        raise ReviewError(failure)
+    return path.removesuffix(".git")
+
+
+def issue_context(root: Path, numbers: list[int], remote_name: str = "origin",
+                  remote_url: str | None = None) -> list[dict[str, Any]]:
+    selected_url = remote_url or (remote_name if remote_name.startswith(
+        ("git@", "ssh://", "https://", "http://")) else None)
+    remote_name = resolve_remote_name(root, remote_name)
+    fetch_url = command(["git", "remote", "get-url", remote_name], root,
+                        input_bytes=b"").removesuffix("\n")
+    if selected_url is None:
+        remote = command(["git", "remote", "get-url", remote_name], root,
+                         input_bytes=b"").removesuffix("\n")
     else:
-        raise ReviewError("origin must identify a GitHub repository")
+        configured_urls = command(["git", "remote", "get-url", "--push", "--all", remote_name], root).splitlines()
+        if not configured_urls:
+            configured_urls = [fetch_url]
+        if not any(_same_remote_url(selected_url, url) for url in configured_urls):
+            raise ReviewError("selected push URL does not match its configured remote")
+        remote = selected_url
+    repository = _github_repository(remote)
+    if selected_url is not None and _github_repository(fetch_url).casefold() != repository.casefold():
+        raise ReviewError("selected push URL and remote fetch URL identify different repositories")
     if repository.casefold() != LOCAL_REPOSITORY.casefold():
         raise ReviewError("local review is scoped to katana-render-runtime")
     # GitHubが大小文字を区別しないため、APIとURL照合には同じ正規名を使う。

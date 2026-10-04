@@ -31,12 +31,20 @@ trap cleanup EXIT
 cat >"${updates}"
 reviewed_head="$(git rev-parse HEAD)"
 if (($# > 0)); then
+  export REVIEW_REMOTE="$1"
+  if (($# > 1)); then
+    export REVIEW_REMOTE_URL="$2"
+  else
+    unset REVIEW_REMOTE_URL
+  fi
   verifier_arguments=(--remote "$1")
   if (($# > 1)); then
     verifier_arguments+=(--remote-url "$2")
   fi
   python3 scripts/hooks/verify_push_issue.py "${verifier_arguments[@]}" <"${updates}"
 else
+  export REVIEW_REMOTE=origin
+  unset REVIEW_REMOTE_URL
   python3 scripts/hooks/verify_push_issue.py <"${updates}"
 fi
 python3 scripts/hooks/pre_push_head_guard.py "${reviewed_head}" <"${updates}"

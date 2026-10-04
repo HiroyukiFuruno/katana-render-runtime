@@ -21,6 +21,8 @@ class PrePushDispatcherTest(unittest.TestCase):
         self.log = self.root / "order.log"
         self.issue_stdin = self.root / "issue-stdin.log"
         self.issue_arguments = self.root / "issue-arguments.log"
+        self.remote_log = self.root / "review-remote.log"
+        self.remote_url_log = self.root / "review-remote-url.log"
         self.repository.mkdir()
         self.bin_directory.mkdir()
         subprocess.run(
@@ -50,6 +52,8 @@ class PrePushDispatcherTest(unittest.TestCase):
         self.write_executable(
             "just",
             '#!/bin/sh\nprintf "check:%s:%s\\n" "${GIT_DIR-unset}" "${GIT_WORK_TREE-unset}" >> "$ORDER_LOG"\n'
+            'printf "%s\\n" "${REVIEW_REMOTE-unset}" > "$REVIEW_REMOTE_LOG"\n'
+            'printf "%s\\n" "${REVIEW_REMOTE_URL-unset}" > "$REVIEW_REMOTE_URL_LOG"\n'
             'if [ "${JUST_CONSUME_STDIN:-0}" = "1" ]; then cat >/dev/null; fi\n'
             'exit "${JUST_EXIT:-0}"\n',
         )
@@ -86,6 +90,8 @@ class PrePushDispatcherTest(unittest.TestCase):
         environment["ORDER_LOG"] = str(self.log)
         environment["ISSUE_STDIN_LOG"] = str(self.issue_stdin)
         environment["ISSUE_ARGUMENTS_LOG"] = str(self.issue_arguments)
+        environment["REVIEW_REMOTE_LOG"] = str(self.remote_log)
+        environment["REVIEW_REMOTE_URL_LOG"] = str(self.remote_url_log)
         environment["JUST_EXIT"] = str(just_exit)
         environment["JUST_CONSUME_STDIN"] = "1" if just_consume_stdin else "0"
         return subprocess.run(
@@ -170,6 +176,9 @@ class PrePushDispatcherTest(unittest.TestCase):
             self.issue_arguments.read_text(encoding="utf-8"),
             "scripts/hooks/verify_push_issue.py --remote upstream --remote-url https://example.test/repo.git\n",
         )
+        self.assertEqual(self.remote_log.read_text(encoding="utf-8"), "upstream\n")
+        self.assertEqual(self.remote_url_log.read_text(encoding="utf-8"),
+                         "https://example.test/repo.git\n")
 
     def test_url_push_forwards_url_as_both_remote_arguments(self) -> None:
         url = "https://example.test/repo.git"
