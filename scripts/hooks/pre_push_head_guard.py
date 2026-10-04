@@ -43,6 +43,181 @@ def _supports_worktree_executable_mode(repository: Path) -> bool:
     return configured.strip() == b"true"
 
 
+def _checkout_configuration(repository: Path) -> dict[str, str]:
+    arguments = [
+        "git",
+        "--no-replace-objects",
+        "config",
+        "--type=bool-or-str",
+        "--null",
+        "--get-regexp",
+        r"^core\.(autocrlf|eol)$",
+    ]
+    result = subprocess.run(
+        arguments,
+        cwd=repository,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode == 1:
+        return {}
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode, arguments, output=result.stdout, stderr=result.stderr
+        )
+    configuration: dict[str, str] = {}
+    for record in result.stdout.split(b"\0"):
+        if not record:
+            continue
+        key, separator, value = record.partition(b"\n")
+        if not separator:
+            raise ContractViolation("Git checkout設定を確認できません")
+        try:
+            configuration[key.decode("ascii").lower()] = value.decode("ascii").lower()
+        except UnicodeDecodeError as error:
+            raise ContractViolation("Git checkout設定を確認できません") from error
+    return configuration
+
+
+def _cached_checkout_attributes(
+    repository: Path, names: list[str]
+) -> dict[str, dict[str, str]]:
+    attributes = ("text", "eol", "filter", "working-tree-encoding")
+    name_set = set(names)
+    arguments = [
+        "git",
+        "--no-replace-objects",
+        "check-attr",
+        "--cached",
+        "-z",
+        "--stdin",
+        *attributes,
+    ]
+    input_bytes = b"".join(os.fsencode(name) + b"\0" for name in names)
+    result = subprocess.run(
+        arguments,
+        cwd=repository,
+        check=True,
+        capture_output=True,
+        input=input_bytes,
+    )
+    fields = result.stdout.split(b"\0")
+    if fields and fields[-1] == b"":
+        fields.pop()
+    expected_fields = len(names) * len(attributes) * 3
+    if len(fields) != expected_fields:
+        raise ContractViolation("Git checkout属性を確認できません")
+    values: dict[str, dict[str, str]] = {}
+    for offset in range(0, len(fields), 3):
+        name, attribute, value = fields[offset:offset + 3]
+        try:
+            decoded_name = os.fsdecode(name)
+            decoded_attribute = attribute.decode("ascii")
+            decoded_value = value.decode("ascii").lower()
+        except UnicodeDecodeError as error:
+            raise ContractViolation("Git checkout属性を確認できません") from error
+        if decoded_attribute not in attributes or decoded_name not in name_set:
+            raise ContractViolation("Git checkout属性を確認できません")
+        values.setdefault(decoded_name, {})[decoded_attribute] = decoded_value
+    if set(values) != set(names) or any(
+        set(values[name]) != set(attributes) for name in names
+    ):
+        raise ContractViolation("Git checkout属性を確認できません")
+    return values
+
+
+def _index_eol_classifications(repository: Path) -> dict[str, str]:
+    result = subprocess.run(
+        ["git", "--no-replace-objects", "ls-files", "--eol", "-z"],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+    )
+    classifications: dict[str, str] = {}
+    for record in result.stdout.split(b"\0"):
+        if not record:
+            continue
+        metadata, separator, raw_name = record.partition(b"\t")
+        fields = metadata.split()
+        if not separator or not fields:
+            raise ContractViolation("Git index EOL属性を確認できません")
+        try:
+            name = os.fsdecode(raw_name)
+            index_class = fields[0].decode("ascii")
+        except UnicodeDecodeError as error:
+            raise ContractViolation("Git index EOL属性を確認できません") from error
+        classifications[name] = index_class
+    return classifications
+
+
+def _is_builtin_crlf_materialization(
+    committed: bytes,
+    actual: bytes,
+    attributes: dict[str, str],
+    configuration: dict[str, str],
+    index_eol: str | None,
+) -> bool:
+    if not committed or b"\0" in committed or b"\r" in committed or b"\n" not in committed:
+        return False
+    if actual != committed.replace(b"\n", b"\r\n"):
+        return False
+    if attributes.get("filter") not in ("unspecified", "unset"):
+        return False
+    if attributes.get("working-tree-encoding") not in ("unspecified", "unset"):
+        return False
+
+    text = attributes.get("text")
+    eol = attributes.get("eol")
+    autocrlf = configuration.get("core.autocrlf")
+    core_eol = configuration.get("core.eol")
+    if text not in ("set", "auto", "unspecified"):
+        return False
+    if eol not in ("crlf", "lf", "input", "unspecified"):
+        return False
+    if autocrlf not in (
+        None,
+        "true",
+        "yes",
+        "on",
+        "1",
+        "false",
+        "no",
+        "off",
+        "0",
+        "input",
+    ):
+        return False
+    if core_eol not in (None, "crlf", "lf", "native"):
+        return False
+    if eol in ("lf", "input") or text == "unset":
+        return False
+
+    if text == "unspecified":
+        if eol == "crlf":
+            auto_text = False
+        elif autocrlf == "true":
+            auto_text = True
+        else:
+            return False
+    else:
+        auto_text = text == "auto"
+
+    if auto_text and index_eol != "i/lf":
+        return False
+    if eol == "crlf":
+        return True
+    if autocrlf == "input":
+        return False
+    if autocrlf == "true":
+        return True
+    effective_core_eol = core_eol or "native"
+    if effective_core_eol == "crlf":
+        return True
+    if effective_core_eol == "native":
+        return os.linesep == "\r\n"
+    return False
+
+
 def _assert_checkout_matches_head(repository: Path, reviewed_head: str) -> None:
     tree_records = _git_bytes(
         repository, "ls-tree", "-r", "-z", "--full-tree", reviewed_head
@@ -135,9 +310,25 @@ def _assert_checkout_matches_head(repository: Path, reviewed_head: str) -> None:
             committed_blobs[object_id] = batch[start:end]
             offset = end + 1
 
-        for name, (_mode, object_id) in tree.items():
-            if tracked_contents[name] != committed_blobs[object_id]:
-                raise ContractViolation(f"HEADと一致しません: {name}")
+        mismatched = {
+            name: (mode, committed_blobs[object_id], tracked_contents[name])
+            for name, (mode, object_id) in tree.items()
+            if tracked_contents[name] != committed_blobs[object_id]
+        }
+        if mismatched:
+            names = sorted(mismatched)
+            configuration = _checkout_configuration(repository)
+            attributes = _cached_checkout_attributes(repository, names)
+            index_eol = _index_eol_classifications(repository)
+            for name, (mode, committed, actual) in mismatched.items():
+                if not _is_builtin_crlf_materialization(
+                    committed,
+                    actual,
+                    attributes[name] if mode in ("100644", "100755") else {},
+                    configuration,
+                    index_eol.get(name),
+                ):
+                    raise ContractViolation(f"HEADと一致しません: {name}")
 
     current_head = _git_head(repository)
     if current_head != reviewed_head:

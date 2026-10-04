@@ -20,7 +20,9 @@ class PrePushHeadGuardTest(unittest.TestCase):
         self.repository = Path(self.temporary_directory.name) / "repository"
         self.repository.mkdir()
         self.git("init", "--initial-branch=master")
-        (self.repository / "tracked.txt").write_text("first\n", encoding="utf-8")
+        self.git("config", "core.autocrlf", "false")
+        self.git("config", "core.eol", "lf")
+        (self.repository / "tracked.txt").write_bytes(b"first\n")
         self.git("add", "tracked.txt")
         self.git(
             "-c",
@@ -32,6 +34,39 @@ class PrePushHeadGuardTest(unittest.TestCase):
             "first",
         )
         self.head = self.git("rev-parse", "HEAD")
+
+    def commit(self, message: str) -> None:
+        self.git(
+            "-c",
+            "user.name=Hook test",
+            "-c",
+            "user.email=hook@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            message,
+        )
+
+    def materialize_fresh_checkout(self) -> str:
+        head = self.git("rev-parse", "HEAD")
+        self.git("branch", "crlf-source", head)
+        self.git("switch", "-c", "crlf-empty")
+        self.git("rm", "--quiet", "tracked.txt")
+        self.commit("remove tracked source")
+        self.git("switch", "--force", "crlf-source")
+        self.assert_clean_crlf_checkout(head)
+        return head
+
+    def assert_clean_crlf_checkout(self, head: str) -> None:
+        committed = subprocess.run(
+            ["git", "--no-replace-objects", "show", f"{head}:tracked.txt"],
+            cwd=self.repository,
+            check=True,
+            capture_output=True,
+        ).stdout
+        self.assertEqual(committed, b"first\n")
+        self.assertEqual((self.repository / "tracked.txt").read_bytes(), b"first\r\n")
+        self.assertEqual(self.git("status", "--porcelain"), "")
 
     def git(self, *arguments: str) -> str:
         result = subprocess.run(
@@ -195,6 +230,201 @@ class PrePushHeadGuardTest(unittest.TestCase):
         (self.repository / "tracked.txt").unlink()
         self.git("checkout", "--force", "HEAD", "--", "tracked.txt")
         self.assertEqual((self.repository / "tracked.txt").read_text(), "good\n")
+
+        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(
+                self.update(local_sha=current_head), current_head, self.repository
+            )
+
+    def test_accepts_fresh_checkout_materialized_by_core_autocrlf_true(self) -> None:
+        self.git("config", "core.autocrlf", "true")
+        current_head = self.materialize_fresh_checkout()
+
+        subject.validate_push_head(
+            self.update(local_sha=current_head), current_head, self.repository
+        )
+
+    def test_accepts_fresh_checkout_materialized_by_bare_core_autocrlf_true(self) -> None:
+        with (self.repository / ".git" / "config").open("ab") as config:
+            config.write(b"\n[core]\nautocrlf\n")
+        current_head = self.materialize_fresh_checkout()
+
+        subject.validate_push_head(
+            self.update(local_sha=current_head), current_head, self.repository
+        )
+
+    def test_rejects_manual_crlf_for_empty_core_autocrlf(self) -> None:
+        self.git("config", "core.autocrlf", "")
+        current_head = self.git("rev-parse", "HEAD")
+        (self.repository / "tracked.txt").write_bytes(b"first\r\n")
+
+        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(
+                self.update(local_sha=current_head), current_head, self.repository
+            )
+
+    def test_accepts_fresh_checkout_materialized_by_core_autocrlf_yes(self) -> None:
+        self.git("config", "core.autocrlf", "yes")
+        current_head = self.materialize_fresh_checkout()
+
+        subject.validate_push_head(
+            self.update(local_sha=current_head), current_head, self.repository
+        )
+
+    def test_accepts_fresh_checkout_with_explicit_text_eol_crlf(self) -> None:
+        (self.repository / ".gitattributes").write_bytes(b"tracked.txt text eol=crlf\n")
+        self.git("add", ".gitattributes")
+        self.commit("declare CRLF checkout")
+        self.git("config", "core.autocrlf", "input")
+        current_head = self.materialize_fresh_checkout()
+
+        subject.validate_push_head(
+            self.update(local_sha=current_head), current_head, self.repository
+        )
+
+    def test_accepts_fresh_checkout_with_core_eol_crlf_and_text_attribute(self) -> None:
+        (self.repository / ".gitattributes").write_bytes(b"tracked.txt text\n")
+        self.git("add", ".gitattributes")
+        self.commit("declare text checkout")
+        self.git("config", "core.eol", "crlf")
+        current_head = self.materialize_fresh_checkout()
+
+        subject.validate_push_head(
+            self.update(local_sha=current_head), current_head, self.repository
+        )
+
+    def test_rejects_modified_crlf_checkout_bytes(self) -> None:
+        self.git("config", "core.autocrlf", "true")
+        current_head = self.materialize_fresh_checkout()
+        (self.repository / "tracked.txt").write_bytes(b"modified\r\n")
+
+        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(
+                self.update(local_sha=current_head), current_head, self.repository
+            )
+
+    def test_rejects_manual_crlf_without_configured_eol_conversion(self) -> None:
+        (self.repository / ".gitattributes").write_bytes(b"tracked.txt text\n")
+        self.git("add", ".gitattributes")
+        self.commit("mark text without CRLF conversion")
+        current_head = self.git("rev-parse", "HEAD")
+        (self.repository / "tracked.txt").write_bytes(b"first\r\n")
+
+        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(
+                self.update(local_sha=current_head), current_head, self.repository
+            )
+
+    def test_rejects_manual_crlf_for_text_unset(self) -> None:
+        (self.repository / ".gitattributes").write_bytes(b"tracked.txt -text\n")
+        self.git("add", ".")
+        self.commit("mark binary content")
+        current_head = self.git("rev-parse", "HEAD")
+        (self.repository / "tracked.txt").write_bytes(b"first\r\n")
+
+        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(
+                self.update(local_sha=current_head), current_head, self.repository
+            )
+
+    def test_rejects_manual_crlf_for_core_autocrlf_input_without_eol_attribute(self) -> None:
+        self.git("config", "core.autocrlf", "input")
+        current_head = self.git("rev-parse", "HEAD")
+        (self.repository / "tracked.txt").write_bytes(b"first\r\n")
+
+        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(
+                self.update(local_sha=current_head), current_head, self.repository
+            )
+
+    def test_rejects_crlf_for_control_heavy_text_auto_blob(self) -> None:
+        content = bytes(range(1, 32)) + b"\ntext\n"
+        (self.repository / "tracked.txt").write_bytes(content)
+        self.git("add", "tracked.txt")
+        self.commit("store control-heavy content")
+        self.git("config", "core.autocrlf", "true")
+        current_head = self.git("rev-parse", "HEAD")
+        eol = self.git("ls-files", "--eol", "-z")
+        self.assertIn("i/-text", eol)
+        (self.repository / "tracked.txt").write_bytes(content.replace(b"\n", b"\r\n"))
+
+        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(
+                self.update(local_sha=current_head), current_head, self.repository
+            )
+
+    def test_accepts_text_auto_when_git_classifies_blob_as_text(self) -> None:
+        (self.repository / ".gitattributes").write_bytes(b"tracked.txt text=auto\n")
+        self.git("add", ".gitattributes")
+        self.commit("declare text auto checkout")
+        self.git("config", "core.eol", "crlf")
+        current_head = self.materialize_fresh_checkout()
+
+        subject.validate_push_head(
+            self.update(local_sha=current_head), current_head, self.repository
+        )
+
+    def test_rejects_text_auto_eol_crlf_when_git_classifies_blob_as_binary(self) -> None:
+        content = bytes(range(1, 32)) + b"\ntext\n"
+        (self.repository / "tracked.txt").write_bytes(content)
+        (self.repository / ".gitattributes").write_bytes(
+            b"tracked.txt text=auto eol=crlf\n"
+        )
+        self.git("add", ".")
+        self.commit("declare automatic CRLF checkout for control data")
+        current_head = self.git("rev-parse", "HEAD")
+        eol = self.git("ls-files", "--eol", "-z")
+        self.assertIn("i/-text", eol)
+        (self.repository / "tracked.txt").write_bytes(content.replace(b"\n", b"\r\n"))
+
+        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(
+                self.update(local_sha=current_head), current_head, self.repository
+            )
+
+    @unittest.skipUnless(os.linesep == "\r\n", "native CRLF requires Windows")
+    def test_accepts_fresh_checkout_with_native_core_eol_on_windows(self) -> None:
+        (self.repository / ".gitattributes").write_bytes(b"tracked.txt text\n")
+        self.git("add", ".gitattributes")
+        self.commit("declare native text checkout")
+        self.git("config", "core.eol", "native")
+        current_head = self.materialize_fresh_checkout()
+
+        subject.validate_push_head(
+            self.update(local_sha=current_head), current_head, self.repository
+        )
+
+    def test_rejects_manual_crlf_for_binary_blob(self) -> None:
+        (self.repository / "tracked.txt").write_bytes(b"first\x00\n")
+        self.git("add", "tracked.txt")
+        self.commit("store binary content")
+        current_head = self.git("rev-parse", "HEAD")
+        (self.repository / "tracked.txt").write_bytes(b"first\x00\r\n")
+
+        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(
+                self.update(local_sha=current_head), current_head, self.repository
+            )
+
+    def test_rejects_eol_input_attribute(self) -> None:
+        (self.repository / ".gitattributes").write_bytes(b"tracked.txt text eol=input\n")
+        self.git("add", ".gitattributes")
+        self.commit("declare input line endings")
+        current_head = self.git("rev-parse", "HEAD")
+        (self.repository / "tracked.txt").write_bytes(b"first\r\n")
+
+        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(
+                self.update(local_sha=current_head), current_head, self.repository
+            )
+
+    def test_rejects_manual_crlf_when_core_eol_is_lf(self) -> None:
+        (self.repository / ".gitattributes").write_bytes(b"tracked.txt text\n")
+        self.git("add", ".gitattributes")
+        self.commit("mark text with LF checkout")
+        self.git("config", "core.eol", "lf")
+        current_head = self.git("rev-parse", "HEAD")
+        (self.repository / "tracked.txt").write_bytes(b"first\r\n")
 
         with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
             subject.validate_push_head(
