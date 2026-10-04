@@ -123,6 +123,7 @@ REQUIRED_RELEASE_COMMITS = (
     "8b7491070182f1a9ff0670c02c3fd08917cc4c63",  # RTKなしCIのレビューfixture契約
     "e4672623630580c3314df5b1fc2ff1c451c15616",  # 非キャッシュ環境のfont選択回帰契約
     "1b444141e38cf6dc592ce6e26c232f733ba218e5",  # Git標準CRLF checkoutのpush照合
+    "da50738f7079c980ea52b2dc75cfad04d4136737",  # Windowsレビューの子孫回収と排他維持
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -140,7 +141,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "7f4596f73b82fb9192a6c30bba56a9207460df8e1c410318658462590dee63b7"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "e4f4c1d7ed1505764ea52f5e940a850cdbb10f449c3ed8f66caa79b3343745e2"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
