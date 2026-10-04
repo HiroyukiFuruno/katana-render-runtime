@@ -102,6 +102,8 @@ REQUIRED_RELEASE_COMMITS = (
     "10db459396b3d8f84ad9a2760ce271bb728a4403",  # 任意証跡の公式stable Rust照合
     "5ac3a6cb96509f66912ff857474ad714540ab039",  # 実ファイルシステム精度に基づくフォント世代保存
     "fe7260ef1a79f9f9cbe5dd9c5cb39e3c3bc73317",  # macOS証跡の実ソースとARM対象・OS版を拘束
+    "e296ba8292ac87294435f809204a4750b549901a",  # GitHub remoteの正当な末尾スラッシュを解析
+    "d52468dfd4fa1705f7ace80afa1cd1a0cbbf6023",  # 証跡をGitフィルター非依存の実バイトと実行環境へ拘束
 )
 # 公開snapshotと#89/#95および正式metadata commitをsource/candidate両方で要求する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -119,7 +121,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "95592468085627452ef6afb42229f55d8fb4ea2c41cf50ec6d2486d4d3660755"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "81c4ab6bbafa3bb9ba05d10703e45882f3b95b3edcbe8d2f7abc5ee123beb931"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
