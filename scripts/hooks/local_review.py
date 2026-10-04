@@ -305,6 +305,7 @@ def terminate_review_process(process: subprocess.Popen[str]) -> None:
 
 def run_review_process(arguments: list[str], root: Path, environment: dict, prompt: str, diagnostic: Path) -> int:
     process = None
+    process_group_cleaned = False
     previous_handlers = {}
 
     def terminate_parent(signum: int, _frame: object) -> None:
@@ -342,14 +343,17 @@ def run_review_process(arguments: list[str], root: Path, environment: dict, prom
             try:
                 process.communicate(prompt, timeout=REVIEW_TIMEOUT_SECONDS)
             except BaseException:
+                process_group_cleaned = True
                 terminate_review_process(process)
                 raise
             return process.returncode
     finally:
-        if process is not None and process.returncode is None:
-            terminate_review_process(process)
-        for signum, handler in previous_handlers.items():
-            signal.signal(signum, handler)
+        try:
+            if process is not None and not process_group_cleaned:
+                terminate_review_process(process)
+        finally:
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
 
 
 def invoke_review(root: Path, directory: Path, inputs: dict) -> dict:

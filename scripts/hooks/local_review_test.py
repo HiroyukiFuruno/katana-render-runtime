@@ -2248,6 +2248,111 @@ class DriverContractTest(unittest.TestCase):
                     local_review.run_review_process([sys.executable, "-c", script], root, dict(os.environ), "review", diagnostic)
             self.assertIn("partial review", diagnostic.read_text())
 
+    @unittest.skipUnless(os.name == "posix", "POSIX process groups and flock")
+    def test_success_cleans_review_group_before_unlock_and_reaps_wrapper(self) -> None:
+        hooks = Path(__file__).parent
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock = root / "review.lock"
+            lock.write_bytes(b"")
+            ready = root / "ready"
+            finished = root / "finished"
+            release = root / "release"
+            reviewer_pid = root / "reviewer.pid"
+            helper_pid = root / "helper.pid"
+            diagnostic = root / "stderr.log"
+            environment = dict(os.environ)
+            environment["PYTHONPATH"] = str(hooks)
+            helper_code = (
+                "import os,sys,time\n"
+                "from pathlib import Path\n"
+                "Path(sys.argv[1]).write_text(str(os.getpid()))\n"
+                "time.sleep(3600)\n"
+            )
+            reviewer_code = (
+                "import os,subprocess,sys,time\n"
+                "from pathlib import Path\n"
+                "Path(sys.argv[1]).write_text(str(os.getpid()))\n"
+                "subprocess.Popen([sys.executable,'-c',sys.argv[2],sys.argv[3]])\n"
+                "deadline=time.monotonic()+10\n"
+                "while not Path(sys.argv[3]).exists() and time.monotonic()<deadline: time.sleep(0.01)\n"
+                "if not Path(sys.argv[3]).exists(): raise RuntimeError('helper did not start')\n"
+                "print('review complete',file=sys.stderr,flush=True)\n"
+            )
+            wrapper_code = (
+                "import os,sys,time\n"
+                "from pathlib import Path\n"
+                "from local_review_lock import review_lock\n"
+                "import local_review\n"
+                "root,lock,ready,finished,release,reviewer_pid,helper_pid,diagnostic=map(Path,sys.argv[1:9])\n"
+                "with review_lock(lock):\n"
+                "    ready.write_text('locked')\n"
+                "    result=local_review.run_review_process([sys.executable,'-c',sys.argv[9],str(reviewer_pid),sys.argv[10],str(helper_pid)],root,dict(os.environ),'review',diagnostic)\n"
+                "    (root/'result').write_text(str(result))\n"
+                "    finished.write_text('cleaned')\n"
+                "    deadline=time.monotonic()+10\n"
+                "    while not release.exists() and time.monotonic()<deadline: time.sleep(0.01)\n"
+                "    if not release.exists(): raise RuntimeError('test did not release lock observer')\n"
+            )
+            wrapper = subprocess.Popen(
+                [sys.executable, "-c", wrapper_code, str(root), str(lock), str(ready),
+                 str(finished), str(release), str(reviewer_pid), str(helper_pid),
+                 str(diagnostic), reviewer_code, helper_code],
+                cwd=hooks, env=environment, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            def wait_for(path: Path) -> None:
+                deadline = time.monotonic() + 10
+                while not path.exists():
+                    if wrapper.poll() is not None:
+                        self.fail(f"review wrapper exited early with {wrapper.returncode}")
+                    if time.monotonic() >= deadline:
+                        self.fail(f"timed out waiting for {path.name}")
+                    time.sleep(0.01)
+
+            try:
+                wait_for(ready)
+                wait_for(finished)
+                self.assertEqual((root / "result").read_text(), "0")
+                self.assertIn("review complete", diagnostic.read_text())
+                with self.assertRaisesRegex(ReviewError, "another local review is active"):
+                    with review_lock(lock):
+                        pass
+
+                reviewer = int(reviewer_pid.read_text())
+                helper = int(helper_pid.read_text())
+
+                def process_state(pid: int) -> str | None:
+                    probe = subprocess.run(
+                        ["ps", "-o", "stat=", "-p", str(pid)],
+                        capture_output=True, text=True, check=False,
+                    )
+                    state = probe.stdout.strip()
+                    return state or None
+
+                deadline = time.monotonic() + 5
+                while process_state(helper) not in (None, "") and not process_state(helper).startswith("Z") and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertIsNone(process_state(reviewer), "direct reviewer was not reaped")
+                helper_state = process_state(helper)
+                self.assertTrue(helper_state is None or helper_state.startswith("Z"),
+                                f"review helper survived cleanup in state {helper_state}")
+                release.write_text("checked")
+                wrapper.wait(timeout=10)
+                self.assertEqual(wrapper.returncode, 0)
+                with review_lock(lock):
+                    pass
+            finally:
+                if wrapper.poll() is None:
+                    wrapper.kill()
+                    wrapper.wait(timeout=10)
+                if reviewer_pid.exists():
+                    try:
+                        os.killpg(int(reviewer_pid.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
     @unittest.skipUnless(os.name == "posix", "POSIX process groups and signals")
     def test_signal_cancellation_kills_and_reaps_review_group_before_unlock(self) -> None:
         hooks = Path(__file__).parent
