@@ -1078,7 +1078,8 @@ class GitSnapshotTest(unittest.TestCase):
         receipt.write_text(json.dumps(partial_payload))
         receipt.with_suffix(".review.json").write_text(json.dumps(partial_payload["review"]))
 
-        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True), \
+                patch.object(local_review, "command", side_effect=git_command):
             with self.assertRaisesRegex(ReviewError, "multiple branch Issues"):
                 local_review.issue_numbers(self.root, args, receipt)
             run_args = SimpleNamespace(issue=[], base=self.base, requirements=None, receipt="tmp/receipt.json",
@@ -1178,13 +1179,21 @@ class GitSnapshotTest(unittest.TestCase):
         }))
         args = SimpleNamespace(issue=[], base=self.base)
 
-        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        def git_command(arguments: list[str], root: Path) -> str:
+            try:
+                return subprocess.run(arguments, cwd=root, check=True, capture_output=True, text=True).stdout
+            except subprocess.CalledProcessError as error:
+                raise ReviewError(f"read-only command failed: {arguments[0]}") from error
+
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True), \
+                patch.object(local_review, "command", side_effect=git_command):
             self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
             self.assertEqual(local_review.requirements_path(root, SimpleNamespace(requirements=None), receipt,
                                                             [89]), "requirements.md")
         (self.root / "example.py").write_text("same branch iterative fix\n")
         self.commit("iterative fix without Refs")
-        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True), \
+                patch.object(local_review, "command", side_effect=git_command):
             self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
             self.assertEqual(local_review.requirements_path(root, SimpleNamespace(requirements=None), receipt,
                                                             [89]), "requirements.md")
@@ -1192,13 +1201,15 @@ class GitSnapshotTest(unittest.TestCase):
         context = json.loads(context_path.read_text())
         context_path.unlink()
         self.assertIsNone(local_review.retained_inputs(receipt, root=root))
-        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True), \
+                patch.object(local_review, "command", side_effect=git_command):
             with self.assertRaisesRegex(ReviewError, "set REVIEW_ISSUE or pass --issue"):
                 local_review.issue_numbers(root, args, receipt)
         context_path.write_text(json.dumps(context))
         context["input_sha256"] = "0" * 64
         context_path.write_text(json.dumps(context))
-        self.assertIsNone(local_review.retained_inputs(receipt, root=root))
+        with patch.object(local_review, "command", side_effect=git_command):
+            self.assertIsNone(local_review.retained_inputs(receipt, root=root))
         context["input_sha256"] = digest(value)
         context_path.write_text(json.dumps(context))
         payload = receipt_payload(value, review(value))
@@ -1206,13 +1217,15 @@ class GitSnapshotTest(unittest.TestCase):
         receipt.with_suffix(".review.json").write_text(json.dumps(payload["review"]))
         (receipt.parent / "last-input.json").unlink()
         (receipt.parent / "last-review.json").unlink()
-        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True), \
+                patch.object(local_review, "command", side_effect=git_command):
             self.assertEqual(local_review.issue_numbers(root, args, receipt), [89])
             self.assertEqual(local_review.requirements_path(root, SimpleNamespace(requirements=None), receipt,
                                                             [89]), "requirements.md")
 
         command(["git", "switch", "--detach", "HEAD"], self.root)
-        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True), \
+                patch.object(local_review, "command", side_effect=git_command):
             with self.assertRaisesRegex(ReviewError, "set REVIEW_ISSUE or pass --issue"):
                 local_review.issue_numbers(root, args, receipt)
             self.assertIsNone(local_review.requirements_path(root, SimpleNamespace(requirements=None),
@@ -1224,7 +1237,8 @@ class GitSnapshotTest(unittest.TestCase):
         (self.root / "example.py").write_text("unrelated branch\n")
         self.commit("ordinary check without Refs")
 
-        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+        with patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True), \
+                patch.object(local_review, "command", side_effect=git_command):
             with self.assertRaisesRegex(ReviewError, "set REVIEW_ISSUE or pass --issue"):
                 local_review.issue_numbers(root, args, receipt)
             self.assertIsNone(local_review.requirements_path(root, SimpleNamespace(requirements=None),
