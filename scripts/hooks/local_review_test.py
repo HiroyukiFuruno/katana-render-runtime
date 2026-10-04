@@ -236,10 +236,13 @@ class GitSnapshotTest(unittest.TestCase):
             local_review.read_receipt(receipt_path, {**value, "source": after}, self.root)
 
         args = SimpleNamespace(issue=[], base=self.base)
-        with self.assertRaisesRegex(ReviewError, "receipt provenance rejected"):
-            local_review.issue_numbers(self.root, args, receipt_path)
-        with self.assertRaisesRegex(ReviewError, "receipt provenance rejected"):
-            local_review.requirements_path(self.root, SimpleNamespace(requirements=None), receipt_path, [89])
+        with patch.dict(os.environ):
+            os.environ.pop("REVIEW_ISSUE", None)
+            os.environ.pop("REVIEW_REQUIREMENTS", None)
+            with self.assertRaisesRegex(ReviewError, "receipt provenance rejected"):
+                local_review.issue_numbers(self.root, args, receipt_path)
+            with self.assertRaisesRegex(ReviewError, "receipt provenance rejected"):
+                local_review.requirements_path(self.root, SimpleNamespace(requirements=None), receipt_path, [89])
 
     def test_head_change_during_review_prevents_receipt_creation(self) -> None:
         args = SimpleNamespace(base=self.base, requirements=None)
