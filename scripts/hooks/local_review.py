@@ -16,6 +16,7 @@ import threading
 
 from local_review_contract import MODEL, PROMPT, REASONING, receipt_payload, validate_receipt, validate_review
 from local_review_lock import review_lock
+from local_review_windows_job import run_review_process as run_windows_review_process
 from local_review_state import ReviewError, cache_path, canonical, command, digest, gate_configuration, issue_context
 from local_review_state import repository_root, requirements_context, resolve_remote_name, source_snapshot, strict_json
 from verify_push_issue import issue_numbers as referenced_issue_numbers
@@ -319,6 +320,10 @@ def run_review_process(arguments: list[str], root: Path, environment: dict, prom
         for signum in managed_signals:
             previous_handlers[signum] = signal.signal(signum, terminate_parent)
     try:
+        if os.name == "nt":
+            return run_windows_review_process(
+                arguments, root, environment, prompt, diagnostic, REVIEW_TIMEOUT_SECONDS
+            )
         with diagnostic.open("w") as errors:
             if manage_signals:
                 # 子プロセス生成直後のシグナルを親で受け、必ず子グループの後始末へ進む。

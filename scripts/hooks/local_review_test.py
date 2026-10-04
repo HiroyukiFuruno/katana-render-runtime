@@ -2191,6 +2191,21 @@ class DriverContractTest(unittest.TestCase):
                         if child.stderr is not None:
                             child.stderr.close()
 
+    def test_windows_review_process_uses_job_supervisor(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            diagnostic = root / "stderr.log"
+            with patch.object(local_review.os, "name", "nt"), \
+                    patch.object(local_review, "run_windows_review_process", return_value=17) as windows:
+                result = local_review.run_review_process(
+                    ["codex", "exec"], root, {"SAFE": "1"}, "review prompt", diagnostic
+                )
+            self.assertEqual(result, 17)
+            windows.assert_called_once_with(
+                ["codex", "exec"], root, {"SAFE": "1"}, "review prompt", diagnostic,
+                local_review.REVIEW_TIMEOUT_SECONDS,
+            )
+
     @unittest.skipUnless(os.name == "posix", "POSIX process groups")
     def test_timeout_kills_review_process_group_and_reaps_wrapper(self) -> None:
         process = unittest.mock.MagicMock()
