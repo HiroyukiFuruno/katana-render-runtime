@@ -27,6 +27,7 @@ on:
       - "vendor/**"
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -44,10 +45,11 @@ jobs:
   test:
     name: Test and Build
     if: >-
-      github.event_name != 'push' || (
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'push' || (
         !startsWith(github.event.head_commit.message, 'Merge pull request ') &&
         !contains(github.event.head_commit.message, '(#')
-      )
+      ))
     strategy:
       fail-fast: false
       matrix:

@@ -3,6 +3,7 @@ name: release-preflight
 on:
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
     inputs:
       version:
@@ -25,6 +26,7 @@ jobs:
     name: reusable Ubuntu CI evidence
     if: >-
       github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.head_ref, 'release/v')
     runs-on: ubuntu-latest
@@ -69,6 +71,7 @@ jobs:
     if: >-
       always() && (github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.head_ref, 'release/v') &&
       needs.evidence.result == 'success'))
