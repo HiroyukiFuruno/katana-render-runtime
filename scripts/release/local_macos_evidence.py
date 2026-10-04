@@ -303,13 +303,24 @@ def command_environment() -> dict[str, str]:
             raise EvidenceError("Cargo config cannot be validated") from exc
         if "env" in parsed:
             raise EvidenceError("Cargo config [env] injection is unsupported")
+        if parsed.get("paths"):
+            raise EvidenceError("Cargo config paths overrides are unsupported")
+        if "include" in parsed:
+            raise EvidenceError("Cargo config includes are unsupported")
+        if "profile" in parsed:
+            raise EvidenceError("Cargo config profile overrides are unsupported")
+        build_config = parsed.get("build")
+        if isinstance(build_config, dict) and "warnings" in build_config:
+            raise EvidenceError("Cargo config build.warnings override is unsupported")
         target_config = parsed.get("target")
         if isinstance(target_config, dict) and any(
-            isinstance(target, dict) and "linker" in target
+            isinstance(target, dict) and (
+                "linker" in target or any(isinstance(value, dict) for value in target.values())
+            )
             for target in target_config.values()
         ):
-            # WHY: cfg式がnative targetに一致する設定を見落とさないよう、linker指定は全て拒否する。
-            raise EvidenceError("Cargo config target linker is unsupported")
+            # WHY: cfg式やlinks設定がnative targetの実行内容を変える経路を見落とさない。
+            raise EvidenceError("Cargo config target linker or links override is unsupported")
     environment = {name: parent[name] for name in HOST_ENVIRONMENT_KEYS if name in parent}
     environment.update(SCOPE_PARAMETERS)
     environment["JAVA_HOME"] = detect_java_home(environment)

@@ -249,9 +249,12 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             config_dir = Path(directory) / ".cargo"
             config_dir.mkdir()
             (config_dir / "config.toml").write_text(
-                '[build]\ntarget = "x86_64-apple-darwin"\nrustc = "alternate-rustc"\n'
+                'paths = []\n'
+                '[build]\njobs = 2\ntarget-dir = "target-cache"\n'
+                'target = "x86_64-apple-darwin"\nrustc = "alternate-rustc"\n'
                 'rustc-wrapper = "compiler-wrapper"\nrustc-workspace-wrapper = "workspace-wrapper"\n'
-                '[target.aarch64-apple-darwin]\nrunner = "/usr/bin/true"\n',
+                '[target.aarch64-apple-darwin]\nrunner = "/usr/bin/true"\n'
+                'rustflags = ["--cfg", "local_config"]\n',
                 encoding="utf-8",
             )
             with patch.object(EVIDENCE, "ROOT", Path(directory)), patch.object(
@@ -405,6 +408,43 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     "HOME": str(base), "CARGO_HOME": cargo_home, "PATH": "/usr/bin",
                 }, clear=True):
                     with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config target linker"):
+                        EVIDENCE.command_environment()
+
+    def test_cargo_config_paths_include_profiles_and_links_overrides_reject(self) -> None:
+        cases = (
+            ("repo", "config.toml", 'paths = ["/tmp/modified-serde"]\n', r"Cargo config paths overrides"),
+            ("ancestor", "config", "include = []\n", r"Cargo config includes"),
+            ("cargo_home", "config.toml", "[profile.test]\ndebug-assertions = false\n", r"Cargo config profile overrides"),
+            ("repo", "config.toml", '[build]\nwarnings = "allow"\n', r"Cargo config build.warnings override"),
+            (
+                "relative_cargo_home", "config",
+                "[target.aarch64-apple-darwin.ring_core_0_17_14_]\n"
+                'rustc-link-lib = ["static=ring_core_0_17_14_"]\n',
+                r"Cargo config target linker or links override",
+            ),
+        )
+        for location, filename, content, expected_error in cases:
+            with self.subTest(location=location), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                root = base / "repository"
+                config_parent = {
+                    "repo": root / ".cargo",
+                    "ancestor": base / ".cargo",
+                    "cargo_home": root / "absolute-cargo-home",
+                    "relative_cargo_home": root / "relative-cargo-home",
+                }[location]
+                config_parent.mkdir(parents=True)
+                (config_parent / filename).write_text(content, encoding="utf-8")
+                cargo_home = {
+                    "repo": str(base / "unused-cargo-home"),
+                    "ancestor": str(base / "unused-cargo-home"),
+                    "cargo_home": str(root / "absolute-cargo-home"),
+                    "relative_cargo_home": "relative-cargo-home",
+                }[location]
+                with patch.object(EVIDENCE, "ROOT", root), patch.dict(EVIDENCE.os.environ, {
+                    "HOME": str(base), "CARGO_HOME": cargo_home, "PATH": "/usr/bin",
+                }, clear=True):
+                    with self.assertRaisesRegex(EVIDENCE.EvidenceError, expected_error):
                         EVIDENCE.command_environment()
 
     def test_collector_rejects_non_macos_15_before_preparation(self) -> None:
