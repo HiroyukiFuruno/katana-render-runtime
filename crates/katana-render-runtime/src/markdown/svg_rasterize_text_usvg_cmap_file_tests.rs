@@ -5,7 +5,7 @@ use super::{
         format4_mapping,
     },
 };
-use resvg::usvg::fontdb::{Database, ID};
+use resvg::usvg::fontdb::{Database, ID, Source};
 use std::{path::Path, sync::Arc};
 
 const SFNT_TABLE_COUNT_OFFSET: usize = 4;
@@ -64,18 +64,24 @@ impl Drop for TempFont {
     }
 }
 
-fn file_database(path: &Path) -> Result<(Arc<Database>, resvg::usvg::fontdb::ID), String> {
+fn file_database(path: &Path) -> Result<(Arc<Database>, ID, ID), String> {
     let mut database = Database::new();
+    database.load_font_data(FONT_BYTES.to_vec());
     database
         .load_font_file(path)
         .map_err(|error| error.to_string())?;
     let database = Arc::new(database);
-    let id = database
+    let base_id = database
         .faces()
         .next()
-        .map(|face| face.id)
-        .ok_or("font face missing")?;
-    Ok((database, id))
+        .ok_or("binary base face missing")?
+        .id;
+    let file_id = database
+        .faces()
+        .find(|face| matches!(database.face_source(face.id), Some((Source::File(_), _))))
+        .ok_or("file face missing")?
+        .id;
+    Ok((database, base_id, file_id))
 }
 
 pub(super) fn with_cache_scope<T>(operation: impl FnMut() -> T) -> T {
@@ -95,9 +101,53 @@ fn has_char_twice(
     })
 }
 
+fn assert_selector_matches_stock(database: &Arc<Database>, base_face_id: ID, expected: Option<ID>) {
+    let excluded = [base_face_id];
+    let stock = resvg::usvg::FontResolver::default_fallback_selector();
+    let optimized = super::super::html_selector();
+    let (stock_result, optimized_result) = with_cache_scope(|| {
+        (
+            stock('A', &excluded, &mut Arc::clone(database)),
+            optimized('A', &excluded, &mut Arc::clone(database)),
+        )
+    });
+    assert_eq!(stock_result, expected);
+    assert_eq!(optimized_result, stock_result);
+}
+
+fn assert_file_generation_changes_are_not_reused(
+    font: &TempFont,
+    database: &Arc<Database>,
+    base_id: ID,
+    face_id: ID,
+    replacement_font: &[u8],
+) -> Result<(), String> {
+    let durable = super::super::super::font::file_stamp_durable_reusable(&font.0);
+    let expected_probe = durable.then_some(true).ok_or(());
+    assert_eq!(
+        has_char_twice(database, face_id, 'A'),
+        (expected_probe, expected_probe)
+    );
+    assert_selector_matches_stock(database, base_id, Some(face_id));
+    let replacement = font.0.with_extension("replacement.ttf");
+    std::fs::write(&replacement, replacement_font).map_err(|error| error.to_string())?;
+    std::fs::rename(&replacement, &font.0).map_err(|error| error.to_string())?;
+    let durable = super::super::super::font::file_stamp_durable_reusable(&font.0);
+    let expected_probe = durable.then_some(false).ok_or(());
+    assert_eq!(
+        has_char_twice(database, face_id, 'A'),
+        (expected_probe, expected_probe)
+    );
+    assert_selector_matches_stock(database, base_id, None);
+    std::fs::remove_file(&font.0).map_err(|error| error.to_string())?;
+    assert!(with_cache_scope(|| super::super::has_char(database, face_id, 'A')).is_err());
+    assert_selector_matches_stock(database, base_id, None);
+    Ok(())
+}
+
 #[test]
 fn file_generation_change_and_missing_path_never_reuse_old_result() -> Result<(), String> {
-    let no_a = replace_cmap_table(
+    let replacement_font = replace_cmap_table(
         FONT_BYTES,
         &cmap_with_records(&[(
             PLATFORM_MICROSOFT,
@@ -106,19 +156,12 @@ fn file_generation_change_and_missing_path_never_reuse_old_result() -> Result<()
         )]),
     )?;
     let font = TempFont::write(FONT_BYTES)?;
-    let (database, face_id) = file_database(&font.0)?;
-    assert_eq!(
-        has_char_twice(&database, face_id, 'A'),
-        (Ok(true), Ok(true))
-    );
-    let replacement = font.0.with_extension("replacement.ttf");
-    std::fs::write(&replacement, no_a).map_err(|error| error.to_string())?;
-    std::fs::rename(&replacement, &font.0).map_err(|error| error.to_string())?;
-    assert_eq!(
-        has_char_twice(&database, face_id, 'A'),
-        (Ok(false), Ok(false))
-    );
-    std::fs::remove_file(&font.0).map_err(|error| error.to_string())?;
-    assert!(with_cache_scope(|| super::super::has_char(&database, face_id, 'A')).is_err());
-    Ok(())
+    let (database, base_id, face_id) = file_database(&font.0)?;
+    assert_file_generation_changes_are_not_reused(
+        &font,
+        &database,
+        base_id,
+        face_id,
+        &replacement_font,
+    )
 }

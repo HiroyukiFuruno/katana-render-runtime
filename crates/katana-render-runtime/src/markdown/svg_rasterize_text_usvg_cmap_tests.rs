@@ -58,27 +58,37 @@ fn compare_file_probe(path: &std::path::Path) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     let database = std::sync::Arc::new(database);
     let face_id = database.faces().next().ok_or("font face missing")?.id;
+    let durable = super::super::font::file_stamp_durable_reusable(path);
     for character in ['A', 'é', '中', '\u{10ffff}'] {
-        let expected = database
-            .with_face_data(face_id, |data, index| {
-                let font = FontRef::from_index(data, index).ok()?;
-                Some(
-                    skrifa::charmap::Charmap::new(&font)
-                        .map(character)
-                        .is_some(),
-                )
-            })
-            .flatten()
-            .ok_or("stock probe could not read font")?;
+        let expected = stock_file_probe(&database, face_id, character)?;
+        let expected_probe = durable.then_some(expected).ok_or(());
         let actual = super::super::with_validated_tree_parse(|| {
             (
                 has_char(&database, face_id, character),
                 has_char(&database, face_id, character),
             )
         });
-        assert_eq!(actual, (Ok(expected), Ok(expected)));
+        assert_eq!(actual, (expected_probe, expected_probe));
     }
     Ok(())
+}
+
+fn stock_file_probe(
+    database: &Database,
+    face_id: resvg::usvg::fontdb::ID,
+    character: char,
+) -> Result<bool, String> {
+    Ok(database
+        .with_face_data(face_id, |data, index| {
+            let font = FontRef::from_index(data, index).ok()?;
+            Some(
+                skrifa::charmap::Charmap::new(&font)
+                    .map(character)
+                    .is_some(),
+            )
+        })
+        .flatten()
+        .ok_or("stock probe could not read font")?)
 }
 
 #[path = "svg_rasterize_text_usvg_cmap_file_tests.rs"]

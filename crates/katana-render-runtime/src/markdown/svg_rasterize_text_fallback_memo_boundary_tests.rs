@@ -143,6 +143,7 @@ fn two_face_file_database() -> TestResult<(FontDirectory, std::path::PathBuf, Ar
 #[test]
 fn multiple_faces_from_one_file_share_one_generation_and_retry_as_a_unit() -> TestResult<()> {
     let (_directory, path, database) = two_face_file_database()?;
+    let expected_calls = super::retry_selector_calls(&path);
     let faces: Vec<_> = database.faces().collect();
     assert_eq!(faces.len(), 2);
     assert!(
@@ -167,6 +168,6 @@ fn multiple_faces_from_one_file_share_one_generation_and_retry_as_a_unit() -> Te
     mutation?;
     assert_eq!(attempts.load(Ordering::Relaxed), 2);
     assert_eq!(result.0, result.1);
-    assert_eq!(calls.load(Ordering::Relaxed), 3);
+    assert_eq!(calls.load(Ordering::Relaxed), expected_calls);
     Ok(())
 }

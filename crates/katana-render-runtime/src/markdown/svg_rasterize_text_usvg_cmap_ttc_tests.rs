@@ -126,13 +126,7 @@ fn assert_ttc_faces(
             database.face_source(face.id).map(|(_, index)| index),
             Some(face.index)
         );
-        let stock = database
-            .with_face_data(face.id, |data, index| {
-                let font = FontRef::from_index(data, index).ok()?;
-                Some(skrifa::charmap::Charmap::new(&font).map('A').is_some())
-            })
-            .flatten()
-            .ok_or("stock TTC face probe failed")?;
+        let stock = stock_ttc_probe(database, face.id)?;
         assert_eq!(stock, expected);
         let probes = with_cache_scope(|| {
             (
@@ -140,9 +134,21 @@ fn assert_ttc_faces(
                 super::super::has_char(database, face.id, 'A'),
             )
         });
-        assert_eq!(probes, (Ok(expected), Ok(expected)));
+        let generation = super::super::super::font::font_source_generation(database, face.id);
+        let expected_probe = generation.durable_reusable().then_some(expected).ok_or(());
+        assert_eq!(probes, (expected_probe, expected_probe));
     }
     Ok(())
+}
+
+fn stock_ttc_probe(database: &Database, face_id: resvg::usvg::fontdb::ID) -> Result<bool, String> {
+    Ok(database
+        .with_face_data(face_id, |data, index| {
+            let font = FontRef::from_index(data, index).ok()?;
+            Some(skrifa::charmap::Charmap::new(&font).map('A').is_some())
+        })
+        .flatten()
+        .ok_or("stock TTC face probe failed")?)
 }
 
 fn font_without_a() -> Result<Vec<u8>, String> {

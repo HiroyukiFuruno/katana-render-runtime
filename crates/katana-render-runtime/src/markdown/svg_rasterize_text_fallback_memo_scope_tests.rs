@@ -9,6 +9,15 @@ fn mutate_file(path: &std::path::Path, delete: bool) -> std::io::Result<()> {
     }
 }
 
+const REUSABLE_FILE_SELECTOR_CALLS: usize = 3;
+
+fn retry_selector_calls(path: &std::path::Path) -> usize {
+    REUSABLE_FILE_SELECTOR_CALLS
+        + usize::from(!super::super::super::font::file_stamp_durable_reusable(
+            path,
+        ))
+}
+
 fn default_selector_matches_uncached_result() -> TestResult<()> {
     let database = binary_database();
     let excluded = [first_face(&database)?];
@@ -27,6 +36,7 @@ fn default_selector_matches_uncached_result() -> TestResult<()> {
 
 fn assert_file_change_retries(delete: bool) -> TestResult<()> {
     let file = FontFile::create()?;
+    let expected_calls = retry_selector_calls(&file.0);
     let database = file_database(&file.0);
     let calls = Arc::new(AtomicUsize::new(0));
     let mut options = counted_options(Arc::clone(&calls));
@@ -44,7 +54,7 @@ fn assert_file_change_retries(delete: bool) -> TestResult<()> {
     mutation?;
     assert_eq!(attempts.load(Ordering::Relaxed), 2);
     assert_eq!(result.0, result.1);
-    assert_eq!(calls.load(Ordering::Relaxed), 3);
+    assert_eq!(calls.load(Ordering::Relaxed), expected_calls);
     Ok(())
 }
 

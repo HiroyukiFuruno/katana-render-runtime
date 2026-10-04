@@ -80,17 +80,6 @@ fn cache_test_guard() -> Result<
     Ok((lock, super::super::storage::tests::CacheResetOnDrop))
 }
 
-fn assert_corrupt_probe_result(
-    generation: &super::super::super::font::FontSourceGeneration,
-    result: Result<bool, ()>,
-) {
-    if generation.durable_reusable() {
-        assert_eq!(result, Err(()));
-    } else {
-        assert_eq!(result, Ok(true));
-    }
-}
-
 #[test]
 fn corrupt_cached_sfnt_is_removed_after_real_file_probe() -> Result<(), String> {
     let (_lock, _reset) = cache_test_guard()?;
@@ -113,7 +102,7 @@ fn corrupt_cached_sfnt_is_removed_after_real_file_probe() -> Result<(), String> 
         super::has_char(&file.database, file.face_id, 'A')
     });
     let generation = saved_generation.ok_or("file generation was not observed")?;
-    assert_corrupt_probe_result(&generation, result);
+    assert_eq!(result, Err(()));
     assert!(
         super::super::storage::lookup(&file.database, file.face_id, file.face_index, &generation,)
             .map_err(|_| "cmap cache lock poisoned")?
@@ -216,30 +205,45 @@ fn binary_font_probe_matches_bundled_font_character_map() -> Result<(), String> 
     Ok(())
 }
 
-#[test]
-fn selector_falls_back_to_stock_when_cached_probe_is_unavailable() -> Result<(), String> {
-    let first_font = TempFont::write(FONT_BYTES)?;
-    let second_font = TempFont::write(FONT_BYTES)?;
+fn database_with_two_file_fonts(
+    first_font: &TempFont,
+    second_font: &TempFont,
+) -> Result<(Arc<Database>, ID, ID), String> {
     let mut font_database = Database::new();
-    font_database
-        .load_font_file(&first_font.0)
-        .map_err(|error| error.to_string())?;
-    font_database
-        .load_font_file(&second_font.0)
-        .map_err(|error| error.to_string())?;
+    for font in [first_font, second_font] {
+        font_database
+            .load_font_file(&font.0)
+            .map_err(|error| error.to_string())?;
+    }
     let database = Arc::new(font_database);
     let face_ids: Vec<_> = database.faces().map(|face| face.id).collect();
     let base_face = *face_ids.first().ok_or("base font face missing")?;
     let fallback_face = *face_ids.get(1).ok_or("fallback font face missing")?;
+    Ok((database, base_face, fallback_face))
+}
 
+#[test]
+fn selector_falls_back_to_stock_when_cached_probe_is_unavailable() -> Result<(), String> {
+    let first_font = TempFont::write(FONT_BYTES)?;
+    let second_font = TempFont::write(FONT_BYTES)?;
+    let (database, base_face, fallback_face) =
+        database_with_two_file_fonts(&first_font, &second_font)?;
     assert_eq!(super::has_char(&database, fallback_face, 'A'), Err(()));
+    let durable = super::super::super::font::file_stamp_durable_reusable(&second_font.0);
+    assert_eq!(
+        with_validated_scope(|| super::has_char(&database, fallback_face, 'A')),
+        durable.then_some(true).ok_or(())
+    );
 
     let excluded = [base_face];
     let stock = resvg::usvg::FontResolver::default_fallback_selector();
     let cached = super::super::selector::html_selector();
-    let stock_result = stock('A', &excluded, &mut Arc::clone(&database));
-    let cached_result = cached('A', &excluded, &mut Arc::clone(&database));
-
+    let (stock_result, cached_result) = with_validated_scope(|| {
+        (
+            stock('A', &excluded, &mut Arc::clone(&database)),
+            cached('A', &excluded, &mut Arc::clone(&database)),
+        )
+    });
     assert_eq!(stock_result, Some(fallback_face));
     assert_eq!(cached_result, stock_result);
     Ok(())
