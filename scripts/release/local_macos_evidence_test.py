@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 MODULE_PATH = Path(__file__).with_name("local_macos_evidence.py")
@@ -24,6 +24,21 @@ def collector_environment(cargo_target_dir: Path) -> dict[str, str]:
         cargo_target_dir,
         cargo_target_dir.parent / "evidence-cargo-home",
         cargo_target_dir.parent / "evidence-bun-cache",
+    )
+
+
+def collector_binding_patches():
+    fake_just = EVIDENCE.JustBinding(
+        Path("/trusted-just/just"), "just 1.40.0", "1.40.0", "just-1.40.0-aarch64-apple-darwin.tar.gz",
+        "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz", "a" * 64, "b" * 64,
+    )
+    return patch.multiple(
+        EVIDENCE,
+        download_trusted_just=Mock(return_value=fake_just),
+        command_binding=Mock(return_value=EVIDENCE.CommandBinding("/bin", {})),
+        command_environment=Mock(return_value={"PATH": "/bin", "JAVA_HOME": "/java"}),
+        assert_command_binding=Mock(),
+        bind_command=Mock(side_effect=lambda argv, _binding: list(argv)),
     )
 
 
@@ -72,6 +87,20 @@ def valid_comment() -> dict[str, object]:
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
             "java_vendor": "Eclipse Adoptium",
             "just": "just 1.40.0", "brew": "Homebrew 5.0.0", "graphviz": "dot - graphviz version 12",
+            "just_path": "/tmp/krr-local-macos-inputs-fixture/trusted-just/just",
+            "just_release": "1.40.0", "just_asset": "just-1.40.0-aarch64-apple-darwin.tar.gz",
+            "just_asset_url": "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
+            "just_asset_sha256": "a" * 64, "just_binary_sha256": "b" * 64,
+            "command_binding": json.dumps({
+                "path": "/trusted/just:/trusted/rust:/trusted/java:/trusted/python:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+                "executables": {
+                    name: [
+                        "/tmp/krr-local-macos-inputs-fixture/trusted-just/just" if name == "just" else f"/trusted/{name}",
+                        "c" * 64,
+                    ]
+                    for name in ("just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "bun", "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname")
+                },
+            }, sort_keys=True, separators=(",", ":")),
         },
         "commands": commands,
         "environment": EVIDENCE.SCOPE_PARAMETERS,
@@ -111,6 +140,15 @@ def snapshots(comment: object, *, changed_second: bool = False, api_fail: bool =
             return value
         if path == f"repos/{REPOSITORY}/compare/{BASE}...{HEAD}":
             return compare
+        if path == f"repos/{EVIDENCE.JUST_RELEASE_REPOSITORY}/releases/latest":
+            return {
+                "tag_name": "1.40.0", "draft": False, "prerelease": False,
+                "assets": [{
+                    "name": "just-1.40.0-aarch64-apple-darwin.tar.gz",
+                    "browser_download_url": "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
+                    "digest": "sha256:" + "a" * 64, "size": 123,
+                }],
+            }
         if path.startswith(f"repos/{REPOSITORY}/issues/7/comments?"):
             if isinstance(comment, list):
                 return copy.deepcopy(comment)
@@ -196,7 +234,8 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     fetch=snapshots(comment), now=NOW, expected_workflow_digest="d" * 64,
                 ))
 
-        EVIDENCE.validate_pinned_tools({
+        valid_tools = json.loads(valid_comment()["body"].split("\n", 1)[1])["tools"]
+        EVIDENCE.validate_pinned_tools({**valid_tools,
             "java": 'java version "21.0.12"', "java_home": "/jdk/21",
             "java_vendor": "Eclipse Adoptium", "bun": "1.4.2",
         })
@@ -381,7 +420,6 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             observed = json.loads(child.stdout)
             forced = {
                 "CARGO": "cargo", "RTK": "", "RUSTFLAGS": "-D warnings",
-                "JAVA_HOME": "/validated/JDK21",
                 "CARGO_TARGET_DIR": str(Path(directory) / "isolated-cargo-target"),
                 "CARGO_HOME": str(Path(directory) / "evidence-cargo-home"),
                 "BUN_INSTALL_CACHE_DIR": str(Path(directory) / "evidence-bun-cache"),
@@ -392,6 +430,8 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             for name, value in forced.items():
                 self.assertEqual(environment[name], value)
                 self.assertEqual(observed[name], value)
+            self.assertNotIn("JAVA_HOME", environment)
+            self.assertNotIn("JAVA_HOME", observed)
             self.assertEqual(observed["CARGO_BUILD_TARGET"], "aarch64-apple-darwin")
             self.assertEqual(environment["CARGO_HOME"], str(Path(directory) / "evidence-cargo-home"))
 
@@ -425,6 +465,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 EVIDENCE.os.environ, environment, clear=True,
             ):
                 reused_environment = collector_environment(old_target)
+                reused_environment["PATH"] = environment["PATH"]
                 build = subprocess.run(
                     ("cargo", "test", "--no-run", "--lib", "--manifest-path", str(root / "Cargo.toml")),
                     cwd=root, env=reused_environment, text=True, capture_output=True,
@@ -447,6 +488,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
 
                 isolated_target = base / "fresh-cargo-target"
                 isolated_environment = collector_environment(isolated_target)
+                isolated_environment["PATH"] = environment["PATH"]
                 self.assertFalse(isolated_target.exists())
                 isolated = subprocess.run(
                     ("cargo", "test", "--lib", "--manifest-path", str(root / "Cargo.toml")),
@@ -465,6 +507,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     '#[test]\nfn actual_success() { assert!(true); }\n', encoding="utf-8",
                 )
                 positive_environment = collector_environment(base / "positive-cargo-target")
+                positive_environment["PATH"] = environment["PATH"]
                 positive = subprocess.run(
                     ("cargo", "test", "--lib", "--manifest-path", str(passing_root / "Cargo.toml")),
                     cwd=passing_root, env=positive_environment, text=True, capture_output=True,
@@ -642,6 +685,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 "PATH": EVIDENCE.os.environ["PATH"],
             }, clear=True):
                 environment = collector_environment(base / "isolated-cargo-target")
+                environment["PATH"] = EVIDENCE.os.environ["PATH"]
 
             def bun_install(*args: str) -> subprocess.CompletedProcess[str]:
                 return subprocess.run(
@@ -1076,6 +1120,7 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
                 patch.object(EVIDENCE, "run_git", side_effect=[HEAD, BASE]),
                 patch.object(EVIDENCE, "workflow_digest", return_value="d" * 64),
                 patch.object(EVIDENCE, "gh_token", return_value="existing-token"),
+                collector_binding_patches(),
                 patch.object(EVIDENCE, "api_request", side_effect=[
                     {"full_name": REPOSITORY, "owner": {"login": "owner"}}, {"login": "owner"},
                     {"number": 7, "state": "open", "base": {"sha": BASE, "ref": "master", "repo": {"full_name": REPOSITORY}},
@@ -1093,12 +1138,13 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
                     EVIDENCE.collect(REPOSITORY, 7, publish=True)
 
     def test_collector_rejects_wrong_java_before_quality_commands(self) -> None:
-        versions = {
+        valid_tools = json.loads(valid_comment()["body"].split("\n", 1)[1])["tools"]
+        versions = {**valid_tools,
             "macos": "15.0", "architecture": "arm64", "rustc": "rustc stable",
             "cargo": "cargo stable", "java": 'openjdk version "17.0.13"',
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
             "java_vendor": "Eclipse Adoptium",
-            "bun": "1.4.2", "just": "just 1", "brew": "Homebrew 5", "graphviz": "dot 12",
+            "bun": "1.4.2", "just": "just 1.40.0", "brew": "Homebrew 5", "graphviz": "dot 12",
         }
         with tempfile.TemporaryDirectory() as directory:
             with (
@@ -1108,6 +1154,7 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
                 patch.object(EVIDENCE, "run_git", side_effect=[HEAD, BASE]),
                 patch.object(EVIDENCE, "workflow_digest", return_value="d" * 64),
                 patch.object(EVIDENCE, "gh_token", return_value="existing-token"),
+                collector_binding_patches(),
                 patch.object(EVIDENCE, "api_request", side_effect=[
                     {"full_name": REPOSITORY, "owner": {"login": "owner"}}, {"login": "owner"},
                     {"number": 7, "state": "open", "base": {"sha": BASE, "ref": "master", "repo": {"full_name": REPOSITORY}},
@@ -1127,13 +1174,14 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
                 self.assertEqual(run.call_count, len(EVIDENCE.PREPARATION_COMMANDS))
 
     def test_collector_rejects_nonstable_rust_before_quality_commands(self) -> None:
-        versions = {
+        valid_tools = json.loads(valid_comment()["body"].split("\n", 1)[1])["tools"]
+        versions = {**valid_tools,
             "macos": "15.0", "architecture": "arm64",
             "rustc": "rustc 1.91.0-nightly (nightly-hash 2025-09-14)",
             "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12"',
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
             "java_vendor": "Eclipse Adoptium",
-            "bun": "1.4.2", "just": "just 1", "brew": "Homebrew 5", "graphviz": "dot 12",
+            "bun": "1.4.2", "just": "just 1.40.0", "brew": "Homebrew 5", "graphviz": "dot 12",
         }
         with tempfile.TemporaryDirectory() as directory:
             with (
@@ -1143,6 +1191,7 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
                 patch.object(EVIDENCE, "run_git", side_effect=[HEAD, BASE]),
                 patch.object(EVIDENCE, "workflow_digest", return_value="d" * 64),
                 patch.object(EVIDENCE, "gh_token", return_value="existing-token"),
+                collector_binding_patches(),
                 patch.object(EVIDENCE, "api_request", side_effect=[
                     {"full_name": REPOSITORY, "owner": {"login": "owner"}}, {"login": "owner"},
                     {"number": 7, "state": "open", "base": {"sha": BASE, "ref": "master", "repo": {"full_name": REPOSITORY}},
@@ -1160,6 +1209,185 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "current official stable channel"):
                     EVIDENCE.collect(REPOSITORY, 7, publish=True)
                 self.assertEqual(run.call_count, len(EVIDENCE.PREPARATION_COMMANDS))
+
+
+
+
+class TrustedJustTest(unittest.TestCase):
+    @staticmethod
+    def archive_for(binary: bytes) -> bytes:
+        import io
+        import tarfile
+
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w:gz") as output:
+            info = tarfile.TarInfo("just")
+            info.size = len(binary)
+            output.addfile(info, io.BytesIO(binary))
+        return archive.getvalue()
+
+    @staticmethod
+    def release_for(version: str, archive: bytes) -> dict[str, object]:
+        import hashlib
+
+        asset_name = f"just-{version}-aarch64-apple-darwin.tar.gz"
+        return {
+            "tag_name": version,
+            "draft": False,
+            "prerelease": False,
+            "assets": [{
+                "name": asset_name,
+                "browser_download_url": f"https://github.com/casey/just/releases/download/{version}/{asset_name}",
+                "digest": f"sha256:{hashlib.sha256(archive).hexdigest()}",
+                "size": len(archive),
+            }],
+        }
+
+    def test_path_shim_with_plausible_version_and_zero_exit_is_never_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            hostile_bin = root / "hostile-bin"
+            hostile_bin.mkdir()
+            hostile_marker = root / "hostile-ran"
+            trusted_marker = root / "trusted-ran"
+            shim = hostile_bin / "just"
+            shim.write_text(
+                f"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'just 1.40.0'; "
+                f"else echo hostile >> '{hostile_marker}'; fi\nexit 0\n",
+                encoding="utf-8",
+            )
+            shim.chmod(0o755)
+            trusted_binary = (
+                "#!/bin/sh\n"
+                "if [ \"$1\" = \"--version\" ]; then echo 'just 1.40.0'; "
+                f"else echo trusted >> '{trusted_marker}'; fi\nexit 0\n"
+            ).encode()
+            archive = self.archive_for(trusted_binary)
+            binding = EVIDENCE.materialize_trusted_just(
+                self.release_for("1.40.0", archive), archive, root / "trusted", {"PATH": str(hostile_bin)}
+            )
+            for _command_id, argv in EVIDENCE.COMMANDS:
+                bound = EVIDENCE.bind_command(argv, binding)
+                if argv[0] == "just":
+                    self.assertEqual(bound[0], str(binding.path))
+            result = subprocess.run(
+                EVIDENCE.bind_command(("just", "fmt-check"), binding),
+                env={"PATH": str(hostile_bin), "JUST_TRUSTED_MARKER": str(trusted_marker)},
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertTrue(trusted_marker.is_file())
+            self.assertFalse(hostile_marker.exists())
+            EVIDENCE.assert_trusted_just(binding)
+
+    def test_trusted_just_rejects_digest_asset_and_path_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            binary = b"#!/bin/sh\necho 'just 1.40.0'\n"
+            archive = self.archive_for(binary)
+            release = self.release_for("1.40.0", archive)
+            wrong_digest = copy.deepcopy(release)
+            wrong_digest["assets"][0]["digest"] = "sha256:" + "f" * 64
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "digest"):
+                EVIDENCE.materialize_trusted_just(wrong_digest, archive, root / "wrong-digest", {})
+            wrong_asset = copy.deepcopy(release)
+            wrong_asset["assets"][0]["browser_download_url"] = "https://example.invalid/just"
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "official release asset"):
+                EVIDENCE.materialize_trusted_just(wrong_asset, archive, root / "wrong-asset", {})
+            binding = EVIDENCE.materialize_trusted_just(release, archive, root / "tool", {})
+            binding.path.write_bytes(b"#!/bin/sh\necho 'just 1.40.0 changed'\n")
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "changed"):
+                EVIDENCE.assert_trusted_just(binding)
+
+    def test_trusted_just_download_network_errors_fail_closed(self) -> None:
+        archive = self.archive_for(b"just-placeholder")
+        release = self.release_for("1.40.0", archive)
+        failures = (
+            EVIDENCE.error.URLError("offline"),
+            EVIDENCE.error.HTTPError("https://github.com", 503, "unavailable", {}, None),
+            TimeoutError("timed out"),
+        )
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__), patch.object(
+                EVIDENCE, "api_request", return_value=release,
+            ), patch.object(EVIDENCE.request, "urlopen", side_effect=failure):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "asset download failed"):
+                    EVIDENCE.download_trusted_just("token", Path("/tmp/unused"), {"PATH": "/usr/bin"})
+
+    def test_failed_binding_setup_removes_fresh_inputs_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            inputs = root / "krr-local-macos-inputs-failed"
+            inputs.mkdir()
+            cargo_home = inputs / "cargo-home"; cargo_home.mkdir()
+            cargo_target = inputs / "cargo-target"; cargo_target.mkdir()
+            bun_cache = inputs / "bun-cache"; bun_cache.mkdir()
+            with patch.object(EVIDENCE, "command_environment", return_value={"PATH": "/usr/bin:/bin"}), patch.object(
+                EVIDENCE, "download_trusted_just", side_effect=EVIDENCE.EvidenceError("offline"),
+            ):
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "offline"):
+                    EVIDENCE.prepare_command_environment("token", inputs, cargo_target, cargo_home, bun_cache)
+            self.assertFalse(inputs.exists())
+
+    def test_version_only_just_proof_is_rejected(self) -> None:
+        good = valid_comment()
+        payload = json.loads(good["body"].split("\n", 1)[1])
+        for key in ("just_release", "just_asset", "just_asset_sha256", "just_binary_sha256", "just_path", "command_binding"):
+            payload["tools"].pop(key, None)
+        changed = {**good, "body": EVIDENCE.MARKER + "\n" + json.dumps(payload)}
+        self.assertFalse(EVIDENCE.verify_from_api(
+            REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+            fetch=snapshots(changed), now=NOW, expected_workflow_digest="d" * 64,
+        ))
+
+    def test_descendant_tools_resolve_from_one_binding_and_ignore_parent_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            trusted = root / "trusted"
+            hostile = root / "hostile"
+            trusted.mkdir()
+            hostile.mkdir()
+            names = (
+                "just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "bun",
+                "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname",
+            )
+            trusted_markers = root / "trusted-markers"
+            hostile_markers = root / "hostile-markers"
+            trusted_markers.mkdir()
+            hostile_markers.mkdir()
+            entries = {}
+            for name in names:
+                trusted_binary = trusted / name
+                trusted_binary.write_text(
+                    f"#!/bin/sh\nprintf trusted > '{trusted_markers / name}'\nexit 0\n", encoding="utf-8",
+                )
+                trusted_binary.chmod(0o755)
+                hostile_binary = hostile / name
+                hostile_binary.write_text(
+                    f"#!/bin/sh\nprintf hostile > '{hostile_markers / name}'\nexit 0\n", encoding="utf-8",
+                )
+                hostile_binary.chmod(0o755)
+                entries[name] = (str(trusted_binary), EVIDENCE.sha256_bytes(trusted_binary.read_bytes()))
+            just_path = Path(entries["just"][0])
+            just = EVIDENCE.JustBinding(
+                just_path, "just 1.40.0", "1.40.0", "just-1.40.0-aarch64-apple-darwin.tar.gz",
+                "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
+                "a" * 64, entries["just"][1],
+            )
+            binding = EVIDENCE.CommandBinding(str(trusted), entries)
+            source_git = Path("/usr/bin/git").resolve(strict=True)
+            entries["source_git"] = (str(source_git), EVIDENCE.sha256_bytes(source_git.read_bytes()))
+            binding = EVIDENCE.CommandBinding(str(trusted), entries)
+            EVIDENCE.assert_command_binding(binding, just)
+            environment = {"PATH": str(trusted), "HOSTILE_PARENT_PATH": str(hostile)}
+            result = subprocess.run(
+                ("/bin/sh", "-c", "for tool in cargo rustc bun python3 bash java dot git; do \"$tool\" nested; done"),
+                env=environment, text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual({path.name for path in trusted_markers.iterdir()}, set(names) - {"just", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "source_git", "sw_vers", "uname"})
+            self.assertFalse(any(hostile_markers.iterdir()))
+            EVIDENCE.assert_command_binding(binding, just)
 
 
 if __name__ == "__main__":

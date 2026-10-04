@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import platform
@@ -13,11 +14,12 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Callable
+from pathlib import Path, PurePosixPath
+from typing import Any, Callable, NamedTuple
 from urllib import error, request
 
 try:
@@ -85,6 +87,11 @@ JAVA_VENDOR = "Eclipse Adoptium"
 PREPARATION_COMMANDS = {"bun-install", "graphviz-install", "plantuml-install"}
 RUST_STABLE_MANIFEST_URL = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
 MAX_RUST_STABLE_MANIFEST_BYTES = 8 * 1024 * 1024
+JUST_RELEASE_REPOSITORY = "casey/just"
+MAX_JUST_ASSET_BYTES = 8 * 1024 * 1024
+MAX_JUST_BINARY_BYTES = 32 * 1024 * 1024
+MAX_JUST_ARCHIVE_ENTRIES = 128
+MAX_JUST_ARCHIVE_CONTENT_BYTES = 16 * 1024 * 1024
 HOST_ENVIRONMENT_KEYS = (
     "PATH", "HOME", "TMPDIR", "CARGO_HOME", "RUSTUP_HOME", "LANG", "LC_ALL",
     "LC_CTYPE", "LC_MESSAGES", "LC_COLLATE", "LC_NUMERIC", "LC_TIME", "TERM",
@@ -115,6 +122,24 @@ MAC_WORKFLOW_STEP_COMMANDS: dict[str, tuple[str, ...]] = {
     "Check TypeScript types": ("typescript-types",),
     "Check runtime asset checksums": ("runtime-asset-checksums",),
 }
+class JustBinding(NamedTuple):
+    path: Path
+    version: str
+    release_tag: str
+    asset_name: str
+    asset_url: str
+    asset_sha256: str
+    binary_sha256: str
+
+
+class CommandBinding(NamedTuple):
+    path: str
+    executables: dict[str, tuple[str, str]]
+
+    def proof_value(self) -> str:
+        return canonical({"path": self.path, "executables": self.executables}).decode("utf-8")
+
+
 class EvidenceError(Exception):
     pass
 
@@ -186,7 +211,7 @@ def reject_git_replace_refs() -> None:
         ref_bases.add(configured_base.rstrip("/") + "/")
     for ref_base in ref_bases:
         result = subprocess.run(
-            ["git", "--no-replace-objects", "for-each-ref", "--format=%(refname)", ref_base],
+            [git_program(), "--no-replace-objects", "for-each-ref", "--format=%(refname)", ref_base],
             cwd=ROOT, check=True, text=True, capture_output=True, env=environment,
         )
         if result.stdout.strip():
@@ -198,10 +223,14 @@ def run_git(*args: str) -> str:
     environment = dict(os.environ)
     environment["GIT_NO_REPLACE_OBJECTS"] = "1"
     result = subprocess.run(
-        ["git", "--no-replace-objects", *args], cwd=ROOT, check=True, text=True,
+        [git_program(), "--no-replace-objects", *args], cwd=ROOT, check=True, text=True,
         capture_output=True, env=environment,
     )
     return result.stdout.strip()
+
+
+def git_program() -> str:
+    return "/usr/bin/git" if platform.system() == "Darwin" else "git"
 
 
 def git_status() -> str:
@@ -266,7 +295,7 @@ def head_worktree_bytes_digest(expected_head: str) -> str:
 
 def macos_product_version() -> str:
     result = subprocess.run(
-        ["sw_vers", "-productVersion"], cwd=ROOT, check=True, text=True, capture_output=True,
+        ["/usr/bin/sw_vers", "-productVersion"], cwd=ROOT, check=True, text=True, capture_output=True,
     )
     version = result.stdout.strip()
     if not version:
@@ -327,8 +356,106 @@ def detect_java_home(environment: dict[str, str]) -> str:
     return home
 
 
+def account_home() -> Path:
+    try:
+        import pwd
+
+        home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve(strict=True)
+    except (KeyError, OSError) as exc:
+        raise EvidenceError("OS account home is unavailable") from exc
+    if not home.is_dir():
+        raise EvidenceError("OS account home is invalid")
+    return home
+
+
+def trusted_executable(path: Path, roots: tuple[Path, ...]) -> Path:
+    try:
+        resolved = path.resolve(strict=True)
+        metadata = resolved.stat()
+    except OSError as exc:
+        raise EvidenceError(f"trusted tool is unavailable: {path.name}") from exc
+    if (not stat.S_ISREG(metadata.st_mode) or not os.access(resolved, os.X_OK)
+            or not any(resolved == root or root in resolved.parents for root in roots)
+            or ROOT == resolved or ROOT in resolved.parents):
+        raise EvidenceError(f"tool is outside the trusted installation roots: {path.name}")
+    return resolved
+
+
+def command_binding(environment: dict[str, str], just_binding: JustBinding) -> CommandBinding:
+    home = account_home()
+    brew_root = Path("/opt/homebrew").resolve(strict=True)
+    system_roots = (Path("/usr/bin"), Path("/bin"), Path("/usr/sbin"), Path("/sbin"))
+    python_dir = Path(sys.executable).resolve(strict=True).parent
+    rustup_home = Path(environment["RUSTUP_HOME"]).resolve(strict=True)
+    default_rustup_home = (home / ".rustup").resolve()
+    if rustup_home != default_rustup_home and default_rustup_home not in rustup_home.parents:
+        raise EvidenceError("custom RUSTUP_HOME is outside the account installation")
+    rustup = trusted_executable(home / ".cargo/bin/rustup", (home / ".cargo/bin",))
+    bootstrap_env = dict(environment)
+    bootstrap_env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    bootstrap_env["RUSTUP_HOME"] = str(rustup_home)
+    rust_root = rustup_home / "toolchains/stable-aarch64-apple-darwin"
+    rust_root = rust_root.resolve(strict=True)
+    rust_paths = {}
+    for name in ("cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt"):
+        selected = Path(subprocess.run(
+            (str(rustup), "which", "--toolchain", "stable-aarch64-apple-darwin", name),
+            cwd=ROOT, env=bootstrap_env, text=True, capture_output=True, check=True,
+        ).stdout.strip())
+        rust_paths[name] = trusted_executable(selected, (rust_root,))
+    rust_bin = rust_paths["rustc"].parent
+    if any(path.parent != rust_bin for path in rust_paths.values()):
+        raise EvidenceError("stable Rust components do not share one toolchain directory")
+
+    brew_bin = trusted_executable(brew_root / "bin/brew", (brew_root,))
+    bun_bin = trusted_executable(brew_root / "bin/bun", (brew_root,))
+    dot_bin = trusted_executable(brew_root / "bin/dot", (brew_root,))
+    bash_bin = trusted_executable(brew_root / "bin/bash", (brew_root,))
+    python_bin = trusted_executable(Path(sys.executable), (python_dir,))
+    java_home_result = subprocess.run(
+        ("/usr/libexec/java_home", "-v", "21"), cwd=ROOT, env=bootstrap_env,
+        text=True, capture_output=True, check=True,
+    )
+    java_home = Path(java_home_result.stdout.strip()).resolve(strict=True)
+    java_root = Path("/Library/Java/JavaVirtualMachines").resolve(strict=True)
+    if java_root not in java_home.parents:
+        raise EvidenceError("selected Java installation is outside the trusted system root")
+    java_bin = trusted_executable(java_home / "bin/java", (java_root,))
+
+    paths = [str(just_binding.path.parent), str(rust_bin), str(java_home / "bin"), str(python_dir),
+             str(brew_root / "bin"), *(str(root) for root in system_roots)]
+    command_path = os.pathsep.join(dict.fromkeys(paths))
+    git_candidate = shutil.which("git", path=command_path)
+    if git_candidate is None:
+        raise EvidenceError("trusted Git executable is unavailable")
+    git_bin = trusted_executable(Path(git_candidate), (brew_root, *system_roots))
+    source_git = trusted_executable(Path("/usr/bin/git"), system_roots)
+    sw_vers_bin = trusted_executable(Path("/usr/bin/sw_vers"), system_roots)
+    uname_bin = trusted_executable(Path("/usr/bin/uname"), system_roots)
+    executables = {
+        "just": (str(just_binding.path.resolve(strict=True)), just_binding.binary_sha256),
+        "cargo": (str(rust_paths["cargo"]), sha256_bytes(rust_paths["cargo"].read_bytes())),
+        "rustc": (str(rust_paths["rustc"]), sha256_bytes(rust_paths["rustc"].read_bytes())),
+        "cargo-clippy": (str(rust_paths["cargo-clippy"]), sha256_bytes(rust_paths["cargo-clippy"].read_bytes())),
+        "clippy-driver": (str(rust_paths["clippy-driver"]), sha256_bytes(rust_paths["clippy-driver"].read_bytes())),
+        "rustfmt": (str(rust_paths["rustfmt"]), sha256_bytes(rust_paths["rustfmt"].read_bytes())),
+        "brew": (str(brew_bin), sha256_bytes(brew_bin.read_bytes())),
+        "bun": (str(bun_bin), sha256_bytes(bun_bin.read_bytes())),
+        "dot": (str(dot_bin), sha256_bytes(dot_bin.read_bytes())),
+        "bash": (str(bash_bin), sha256_bytes(bash_bin.read_bytes())),
+        "python3": (str(python_bin), sha256_bytes(python_bin.read_bytes())),
+        "java": (str(java_bin), sha256_bytes(java_bin.read_bytes())),
+        "git": (str(git_bin), sha256_bytes(git_bin.read_bytes())),
+        "source_git": (str(source_git), sha256_bytes(source_git.read_bytes())),
+        "sw_vers": (str(sw_vers_bin), sha256_bytes(sw_vers_bin.read_bytes())),
+        "uname": (str(uname_bin), sha256_bytes(uname_bin.read_bytes())),
+    }
+    return CommandBinding(command_path, executables)
+
+
 def command_environment(
     cargo_target_dir: Path, isolated_cargo_home: Path, bun_cache_dir: Path,
+    binding: CommandBinding | None = None,
 ) -> dict[str, str]:
     parent = os.environ
     unsupported = {
@@ -384,12 +511,27 @@ def command_environment(
         ):
             # WHY: cfg式やlinks設定がnative targetの実行内容を変える経路を見落とさない。
             raise EvidenceError("Cargo config target linker or links override is unsupported")
-    environment = {name: parent[name] for name in HOST_ENVIRONMENT_KEYS if name in parent}
+    home = account_home()
+    environment = {name: parent[name] for name in HOST_ENVIRONMENT_KEYS if name in parent
+                   and name in {"TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LC_COLLATE", "LC_NUMERIC", "LC_TIME", "TERM"}}
+    environment["HOME"] = str(home)
+    environment["RUSTUP_HOME"] = str(home / ".rustup")
     environment.update(SCOPE_PARAMETERS)
     environment["CARGO_HOME"] = str(isolated_cargo_home)
     environment["CARGO_TARGET_DIR"] = str(cargo_target_dir)
     environment["BUN_INSTALL_CACHE_DIR"] = str(bun_cache_dir)
-    environment["JAVA_HOME"] = detect_java_home(environment)
+    if binding is None:
+        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    else:
+        environment["PATH"] = binding.path
+        environment["JAVA_HOME"] = str(Path(binding.executables["java"][0]).parent.parent)
+        java_version = subprocess.run(
+            (binding.executables["java"][0], "-XshowSettings:properties", "-version"),
+            cwd=ROOT, env=environment, text=True, capture_output=True, check=True,
+        )
+        java_home = java_home_from_settings(java_version.stdout + java_version.stderr)
+        if java_home != environment["JAVA_HOME"]:
+            raise EvidenceError("JAVA_HOME does not identify the selected runtime")
     return environment
 
 
@@ -472,6 +614,172 @@ def iso_timestamp(value: Any) -> int:
     return int(parsed.timestamp())
 
 
+def materialize_trusted_just(
+    release: Any, archive: bytes, destination: Path, environment: dict[str, str],
+) -> JustBinding:
+    if not isinstance(release, dict):
+        raise EvidenceError("official just release metadata is invalid")
+    tag = release.get("tag_name")
+    if (not isinstance(tag, str) or re.fullmatch(r"\d+\.\d+\.\d+", tag) is None
+            or release.get("draft") is not False or release.get("prerelease") is not False):
+        raise EvidenceError("official just release identity is invalid")
+    asset_name = f"just-{tag}-aarch64-apple-darwin.tar.gz"
+    asset_url = f"https://github.com/{JUST_RELEASE_REPOSITORY}/releases/download/{tag}/{asset_name}"
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        raise EvidenceError("official just release assets are missing")
+    matches = [asset for asset in assets if isinstance(asset, dict) and asset.get("name") == asset_name]
+    if len(matches) != 1:
+        raise EvidenceError("official release asset is missing or ambiguous")
+    asset = matches[0]
+    digest = asset.get("digest")
+    size = asset.get("size")
+    if (asset.get("browser_download_url") != asset_url
+            or not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+            or type(size) is not int or size < 1 or size > MAX_JUST_ASSET_BYTES
+            or len(archive) != size):
+        raise EvidenceError("official release asset metadata is invalid")
+    asset_sha256 = sha256_bytes(archive)
+    if digest != f"sha256:{asset_sha256}":
+        raise EvidenceError("official just asset digest does not match the downloaded bytes")
+    try:
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as bundle:
+            members = bundle.getmembers()
+            if not members or len(members) > MAX_JUST_ARCHIVE_ENTRIES:
+                raise EvidenceError("official just archive entry count is invalid")
+            total_size = 0
+            just_members = []
+            names = set()
+            for item in members:
+                member_path = PurePosixPath(item.name)
+                if (not item.name or member_path.is_absolute() or ".." in member_path.parts
+                        or member_path.as_posix() != item.name
+                        or item.name in names or not (item.isfile() or item.isdir())):
+                    raise EvidenceError("official just archive contains an unsafe member")
+                names.add(item.name)
+                if item.isfile():
+                    if item.size < 0 or item.size > MAX_JUST_BINARY_BYTES:
+                        raise EvidenceError("official just archive member size is invalid")
+                    total_size += item.size
+                    if item.name == "just":
+                        just_members.append(item)
+            if total_size > MAX_JUST_ARCHIVE_CONTENT_BYTES or len(just_members) != 1:
+                raise EvidenceError("official just archive does not contain one regular just binary")
+            member = just_members[0]
+            if member.size < 1 or member.size > MAX_JUST_BINARY_BYTES:
+                raise EvidenceError("official just binary size is invalid")
+            stream = bundle.extractfile(member)
+            if stream is None:
+                raise EvidenceError("official just binary cannot be read")
+            binary = stream.read(MAX_JUST_BINARY_BYTES + 1)
+    except (OSError, tarfile.TarError) as exc:
+        raise EvidenceError("official just archive is invalid") from exc
+    if len(binary) != member.size:
+        raise EvidenceError("official just binary is truncated")
+
+    tool_directory = destination / "trusted-just"
+    destination.mkdir(parents=True, exist_ok=True)
+    tool_directory.mkdir(mode=0o700)
+    executable = tool_directory / "just"
+    executable.write_bytes(binary)
+    executable.chmod(0o700)
+    result = subprocess.run(
+        [str(executable), "--version"], env=environment,
+        text=True, capture_output=True, check=True,
+    )
+    versions = (result.stdout + result.stderr).strip().splitlines()
+    expected_version = f"just {tag}"
+    if versions != [expected_version]:
+        raise EvidenceError("official just binary version does not match its release tag")
+    return JustBinding(
+        path=executable.resolve(), version=expected_version, release_tag=tag,
+        asset_name=asset_name, asset_url=asset_url, asset_sha256=asset_sha256,
+        binary_sha256=sha256_bytes(binary),
+    )
+
+
+def download_trusted_just(
+    token: str, destination: Path, environment: dict[str, str],
+) -> JustBinding:
+    release = api_request(token, "GET", f"repos/{JUST_RELEASE_REPOSITORY}/releases/latest")
+    if not isinstance(release, dict) or not isinstance(release.get("assets"), list):
+        raise EvidenceError("official just release metadata is invalid")
+    tag = release.get("tag_name")
+    if not isinstance(tag, str) or re.fullmatch(r"\d+\.\d+\.\d+", tag) is None:
+        raise EvidenceError("official just release tag is invalid")
+    asset_name = f"just-{tag}-aarch64-apple-darwin.tar.gz"
+    matches = [asset for asset in release["assets"] if isinstance(asset, dict) and asset.get("name") == asset_name]
+    if len(matches) != 1:
+        raise EvidenceError("official just Apple Silicon release asset is missing or ambiguous")
+    asset = matches[0]
+    asset_url = f"https://github.com/{JUST_RELEASE_REPOSITORY}/releases/download/{tag}/{asset_name}"
+    if asset.get("browser_download_url") != asset_url:
+        raise EvidenceError("official just asset URL is invalid")
+    try:
+        req = request.Request(asset_url, headers={"Accept": "application/octet-stream", "User-Agent": "katana-render-runtime-local-macos-evidence"})
+        with request.urlopen(req, timeout=60) as response:
+            final_url = response.geturl()
+            final_host = request.urlparse(final_url).hostname
+            if final_host not in {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}:
+                raise EvidenceError("official just asset redirected to an untrusted host")
+            archive = response.read(MAX_JUST_ASSET_BYTES + 1)
+    except EvidenceError:
+        raise
+    except (error.URLError, error.HTTPError, TimeoutError, OSError) as exc:
+        raise EvidenceError("official just asset download failed") from exc
+    if len(archive) > MAX_JUST_ASSET_BYTES:
+        raise EvidenceError("official just asset exceeds its size limit")
+    return materialize_trusted_just(release, archive, destination, environment)
+
+
+def prepare_command_environment(
+    token: str, isolated_inputs_dir: Path, cargo_target_dir: Path, cargo_home: Path,
+    bun_cache_dir: Path,
+) -> tuple[dict[str, str], JustBinding, CommandBinding, dict[str, str]]:
+    try:
+        bootstrap = command_environment(cargo_target_dir, cargo_home, bun_cache_dir)
+        just_binding = download_trusted_just(token, isolated_inputs_dir, bootstrap)
+        binding = command_binding(bootstrap, just_binding)
+        environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir, binding)
+        return bootstrap, just_binding, binding, environment
+    except BaseException:
+        shutil.rmtree(isolated_inputs_dir, ignore_errors=True)
+        raise
+
+
+def assert_trusted_just(binding: JustBinding) -> None:
+    try:
+        path = binding.path
+        metadata = path.lstat()
+        if (path.is_symlink() or not stat.S_ISREG(metadata.st_mode)
+                or path.resolve(strict=True) != path
+                or sha256_bytes(path.read_bytes()) != binding.binary_sha256):
+            raise EvidenceError("trusted just executable changed after authentication")
+    except OSError as error:
+        raise EvidenceError("trusted just executable path is unavailable") from error
+
+
+def assert_command_binding(binding: CommandBinding, just_binding: JustBinding) -> None:
+    assert_trusted_just(just_binding)
+    for name, (raw_path, expected_hash) in binding.executables.items():
+        path = Path(raw_path)
+        try:
+            effective = str(path) if name == "source_git" else shutil.which(name, path=binding.path)
+            if (path.resolve(strict=True) != path or not stat.S_ISREG(path.stat().st_mode)
+                    or sha256_bytes(path.read_bytes()) != expected_hash
+                    or effective is None or Path(effective).resolve(strict=True) != path):
+                raise EvidenceError(f"trusted command executable changed: {name}")
+        except OSError as exc:
+            raise EvidenceError(f"trusted command executable is unavailable: {name}") from exc
+
+
+def bind_command(argv: tuple[str, ...], binding: JustBinding) -> list[str]:
+    if argv[0] != "just":
+        return list(argv)
+    assert_trusted_just(binding)
+    return [str(binding.path), *argv[1:]]
+
+
 def cargo_component_versions(environment: dict[str, str]) -> dict[str, str]:
     found: dict[str, str] = {}
     for name, command in (
@@ -488,16 +796,20 @@ def cargo_component_versions(environment: dict[str, str]) -> dict[str, str]:
     return found
 
 
-def tool_versions(cargo_target_dir: Path, cargo_home: Path, bun_cache_dir: Path) -> dict[str, str]:
-    environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir)
+def tool_versions(
+    cargo_target_dir: Path, cargo_home: Path, bun_cache_dir: Path, just_binding: JustBinding,
+    binding: CommandBinding,
+) -> dict[str, str]:
+    assert_command_binding(binding, just_binding)
+    environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir, binding)
     commands = {
-        "macos": ("sw_vers", "-productVersion"),
-        "architecture": ("uname", "-m"),
+        "macos": ("/usr/bin/sw_vers", "-productVersion"),
+        "architecture": ("/usr/bin/uname", "-m"),
         "rustc": ("rustc", "--version"),
         "cargo": ("cargo", "--version"),
         "java": ("java", "-version"),
         "bun": ("bun", "--version"),
-        "just": ("just", "--version"),
+        "just": (str(just_binding.path), "--version"),
         "brew": ("brew", "--version"),
         "graphviz": ("dot", "-V"),
     }
@@ -511,6 +823,18 @@ def tool_versions(cargo_target_dir: Path, cargo_home: Path, bun_cache_dir: Path)
             raise EvidenceError(f"tool version is empty: {name}")
         found[name] = value[0].strip()
     found.update(cargo_component_versions(environment))
+    assert_trusted_just(just_binding)
+    found.update({
+        "just_path": str(just_binding.path),
+        "just_release": just_binding.release_tag,
+        "just_asset": just_binding.asset_name,
+        "just_asset_url": just_binding.asset_url,
+        "just_asset_sha256": just_binding.asset_sha256,
+        "just_binary_sha256": just_binding.binary_sha256,
+        "command_binding": binding.proof_value(),
+    })
+    if found["just"] != just_binding.version:
+        raise EvidenceError("trusted just version changed during collection")
     if found["architecture"] != "arm64":
         raise EvidenceError("local proof requires Apple Silicon (arm64)")
     if platform.system() != "Darwin":
@@ -551,6 +875,64 @@ def validate_pinned_tools(versions: Any) -> None:
         raise EvidenceError("local proof requires a validated absolute Java home")
     if versions.get("bun") != "1.4.2":
         raise EvidenceError("local proof requires Bun 1.4.2, matching the macOS CI setup")
+    just = versions.get("just")
+    version = re.fullmatch(r"just (\d+\.\d+\.\d+)", just) if isinstance(just, str) else None
+    if version is None:
+        raise EvidenceError("local proof requires an authenticated just release")
+    tag = version.group(1)
+    asset_name = f"just-{tag}-aarch64-apple-darwin.tar.gz"
+    if (versions.get("just_release") != tag or versions.get("just_asset") != asset_name
+            or versions.get("just_asset_url") != f"https://github.com/{JUST_RELEASE_REPOSITORY}/releases/download/{tag}/{asset_name}"
+            or not is_sha256(versions.get("just_asset_sha256"))
+            or not is_sha256(versions.get("just_binary_sha256"))):
+        raise EvidenceError("just release digest or asset identity is invalid")
+    just_path = versions.get("just_path")
+    if (not isinstance(just_path, str) or not Path(just_path).is_absolute()
+            or Path(just_path).name != "just" or Path(just_path).parent.name != "trusted-just"
+            or not any(part.startswith("krr-local-macos-inputs-") for part in Path(just_path).parts)):
+        raise EvidenceError("just executable path is not the isolated authenticated tool")
+    raw_binding = versions.get("command_binding")
+    try:
+        command = json.loads(raw_binding) if isinstance(raw_binding, str) else None
+    except json.JSONDecodeError:
+        command = None
+    required_executables = {
+        "just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "bun",
+        "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname",
+    }
+    if (not isinstance(command, dict) or set(command) != {"path", "executables"}
+            or not isinstance(command.get("path"), str) or not command["path"]
+            or not isinstance(command.get("executables"), dict)
+            or set(command["executables"]) != required_executables):
+        raise EvidenceError("shared command path binding is missing or invalid")
+    for name, entry in command["executables"].items():
+        if (not isinstance(entry, list) or len(entry) != 2 or not isinstance(entry[0], str)
+                or not Path(entry[0]).is_absolute() or not is_sha256(entry[1])):
+            raise EvidenceError(f"shared command executable identity is invalid: {name}")
+    if command["executables"]["just"][0] != just_path:
+        raise EvidenceError("shared command binding does not identify the authenticated just executable")
+
+
+def validate_just_release_metadata(value: Any) -> dict[str, str]:
+    if (not isinstance(value, dict) or not isinstance(value.get("tag_name"), str)
+            or re.fullmatch(r"\d+\.\d+\.\d+", value["tag_name"]) is None
+            or value.get("draft") is not False or value.get("prerelease") is not False
+            or not isinstance(value.get("assets"), list)):
+        raise EvidenceError("official just latest release metadata is invalid")
+    tag = value["tag_name"]
+    asset_name = f"just-{tag}-aarch64-apple-darwin.tar.gz"
+    assets = [asset for asset in value["assets"] if isinstance(asset, dict) and asset.get("name") == asset_name]
+    if len(assets) != 1:
+        raise EvidenceError("official just latest Apple Silicon asset is missing or ambiguous")
+    asset = assets[0]
+    digest = asset.get("digest")
+    size = asset.get("size")
+    asset_url = f"https://github.com/{JUST_RELEASE_REPOSITORY}/releases/download/{tag}/{asset_name}"
+    if (asset.get("browser_download_url") != asset_url
+            or not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+            or type(size) is not int or size < 1 or size > MAX_JUST_ASSET_BYTES):
+        raise EvidenceError("official just latest asset identity is invalid")
+    return {"tag": tag, "asset": asset_name, "url": asset_url, "sha256": digest.removeprefix("sha256:")}
 
 
 def parse_stable_manifest_versions(manifest: str) -> dict[str, str]:
@@ -643,7 +1025,7 @@ def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 def valid_payload(
     comment: dict[str, Any], payload: dict[str, Any], repository: str, number: int,
     base_sha: str, head_sha: str, expected_workflow_digest: str, now: int, owner_login: str,
-    stable_versions: dict[str, str],
+    stable_versions: dict[str, str], just_release_metadata: dict[str, str],
 ) -> bool:
     user, association = comment.get("user"), comment.get("author_association")
     if not isinstance(user, dict) or user.get("login", "").lower() != owner_login.lower() or association != "OWNER":
@@ -673,7 +1055,8 @@ def valid_payload(
     tools = payload.get("tools")
     if not isinstance(tools, dict) or set(tools) != {
         "macos", "architecture", "rust_host", "rustc", "cargo", "clippy", "rustfmt",
-        "java", "java_home", "java_vendor", "bun", "just", "brew", "graphviz"
+        "java", "java_home", "java_vendor", "bun", "just", "just_path", "just_release",
+        "just_asset", "just_asset_url", "just_asset_sha256", "just_binary_sha256", "command_binding", "brew", "graphviz"
     } or any(not isinstance(value, str) or not value.strip() for value in tools.values()):
         return False
     if not Path(tools["java_home"]).is_absolute():
@@ -686,7 +1069,13 @@ def valid_payload(
         return False
     try:
         validate_stable_rust_tools(tools, stable_versions)
+        validate_pinned_tools(tools)
     except EvidenceError:
+        return False
+    if (tools.get("just_release") != just_release_metadata.get("tag")
+            or tools.get("just_asset") != just_release_metadata.get("asset")
+            or tools.get("just_asset_url") != just_release_metadata.get("url")
+            or tools.get("just_asset_sha256") != just_release_metadata.get("sha256")):
         return False
     if payload.get("environment") != SCOPE_PARAMETERS:
         return False
@@ -731,7 +1120,7 @@ def accepted_comment(comments: Any, *args: Any) -> dict[str, Any] | None:
             marked.append(comment)
     if not marked:
         return None
-    repository, number, base_sha, head_sha, workflow_hash, now, owner_login, stable_versions = args
+    repository, number, base_sha, head_sha, workflow_hash, now, owner_login, stable_versions, just_release_metadata = args
     current: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for comment in marked:
         payload = parse_comment(comment)
@@ -752,7 +1141,8 @@ def accepted_comment(comments: Any, *args: Any) -> dict[str, Any] | None:
         return None
     comment, payload = current[0]
     return comment if valid_payload(
-        comment, payload, repository, number, base_sha, head_sha, workflow_hash, now, owner_login, stable_versions
+        comment, payload, repository, number, base_sha, head_sha, workflow_hash, now, owner_login,
+        stable_versions, just_release_metadata,
     ) else None
 
 
@@ -828,11 +1218,16 @@ def verify_from_api(
         if len(candidates) != 1:
             return False
         stable_versions = fetch_stable_manifest_versions()
+        just_release_metadata = validate_just_release_metadata(
+            fetch(f"repos/{JUST_RELEASE_REPOSITORY}/releases/latest")
+        )
         first = accepted_comment(
-            comments_first, repository, number, base_sha, head_sha, digest, timestamp, owner_login, stable_versions
+            comments_first, repository, number, base_sha, head_sha, digest, timestamp, owner_login,
+            stable_versions, just_release_metadata,
         )
         second = accepted_comment(
-            comments_second, repository, number, base_sha, head_sha, digest, timestamp, owner_login, stable_versions
+            comments_second, repository, number, base_sha, head_sha, digest, timestamp, owner_login,
+            stable_versions, just_release_metadata,
         )
         return first is not None and second is not None and canonical(first) == canonical(second)
     except Exception:
@@ -885,12 +1280,18 @@ def collect(repository: str, number: int, publish: bool) -> int:
     bun_cache_dir.mkdir()
     logs: list[dict[str, Any]] = []
     smoke_output = str(logs_dir / "plantuml-sequence.svg")
+    bootstrap_env, just_binding, binding, command_env = prepare_command_environment(
+        token, isolated_inputs_dir, cargo_target_dir, cargo_home, bun_cache_dir,
+    )
 
     def run_command(command_id: str, argv_template: tuple[str, ...]) -> None:
-        argv = [part.format(plantuml_output=smoke_output) for part in argv_template]
+        assert_command_binding(binding, just_binding)
+        argv = bind_command(
+            tuple(part.format(plantuml_output=smoke_output) for part in argv_template), just_binding
+        )
         start = time.monotonic()
-        command_env = command_environment(cargo_target_dir, cargo_home, bun_cache_dir)
         result = subprocess.run(argv, cwd=ROOT, env=command_env, text=True, capture_output=True)
+        assert_command_binding(binding, just_binding)
         duration = int((time.monotonic() - start) * 1000)
         output = result.stdout + result.stderr
         if command_id == "plantuml-render" and result.returncode == 0:
@@ -915,14 +1316,14 @@ def collect(repository: str, number: int, publish: bool) -> int:
                     clean_existing_node_modules()
                 run_command(command_id, argv_template)
         stable_versions_before = fetch_stable_manifest_versions()
-        versions_before = tool_versions(cargo_target_dir, cargo_home, bun_cache_dir)
+        versions_before = tool_versions(cargo_target_dir, cargo_home, bun_cache_dir, just_binding, binding)
         validate_pinned_tools(versions_before)
         validate_stable_rust_tools(versions_before, stable_versions_before)
         for command_id, argv_template in COMMANDS:
             if command_id not in PREPARATION_COMMANDS:
                 run_command(command_id, argv_template)
         stable_versions_after = fetch_stable_manifest_versions()
-        versions_after = tool_versions(cargo_target_dir, cargo_home, bun_cache_dir)
+        versions_after = tool_versions(cargo_target_dir, cargo_home, bun_cache_dir, just_binding, binding)
         validate_pinned_tools(versions_after)
         validate_stable_rust_tools(versions_after, stable_versions_after)
         if versions_before != versions_after or stable_versions_before != stable_versions_after:
