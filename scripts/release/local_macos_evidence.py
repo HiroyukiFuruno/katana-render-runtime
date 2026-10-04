@@ -257,10 +257,12 @@ def head_worktree_bytes_digest(expected_head: str) -> str:
         raise EvidenceError("unsupported Git object format")
     try:
         reject_git_replace_refs()
+        environment = dict(os.environ)
+        environment["GIT_NO_REPLACE_OBJECTS"] = "1"
         tree = subprocess.run(
-            ["git", "--no-replace-objects", "ls-tree", "-r", "-z", "--full-tree", expected_head],
+            [git_program(), "--no-replace-objects", "ls-tree", "-r", "-z", "--full-tree", expected_head],
             cwd=ROOT, check=True, capture_output=True,
-            env={**os.environ, "GIT_NO_REPLACE_OBJECTS": "1"},
+            env=environment,
         ).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         raise EvidenceError("cannot read tracked HEAD tree") from exc

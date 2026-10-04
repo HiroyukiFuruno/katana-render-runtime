@@ -843,6 +843,76 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "tracked worktree bytes differ from HEAD"):
                     EVIDENCE.head_worktree_bytes_digest(head)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX Git filter fixture requires executable scripts")
+    def test_raw_tree_digest_uses_bound_git_against_path_shadow_and_clean_smudge_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "repository"
+            fake_bin = base / "fake-bin"
+            root.mkdir()
+            fake_bin.mkdir()
+            real_git = Path("/usr/bin/git")
+
+            def git(*arguments: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    (str(real_git), "-C", str(root), *arguments),
+                    check=True, text=True, capture_output=True,
+                )
+
+            subprocess.run((str(real_git), "init", "-q", str(root)), check=True)
+            git("config", "user.name", "Filter fixture")
+            git("config", "user.email", "filter@example.invalid")
+            clean_filter = base / "clean-filter.sh"
+            smudge_filter = base / "smudge-filter.sh"
+            clean_filter.write_text("#!/bin/sh\nprintf 'normalized HEAD blob\\n'\n", encoding="utf-8")
+            smudge_filter.write_text("#!/bin/sh\nprintf 'raw worktree bytes\\n'\n", encoding="utf-8")
+            clean_filter.chmod(0o755)
+            smudge_filter.chmod(0o755)
+            git("config", "filter.rawcheck.clean", str(clean_filter))
+            git("config", "filter.rawcheck.smudge", str(smudge_filter))
+            git("config", "filter.rawcheck.required", "true")
+            attributes = root / ".gitattributes"
+            attributes.write_text("source.txt filter=rawcheck\n", encoding="utf-8")
+            git("add", ".gitattributes")
+            git("commit", "-qm", "configure raw tree filter")
+            tracked = root / "source.txt"
+            tracked.write_bytes(b"raw worktree bytes\n")
+            git("add", "source.txt")
+            git("commit", "-qm", "add filtered source")
+            head = git("rev-parse", "HEAD").stdout.strip()
+            tracked.unlink()
+            git("restore", "--source=HEAD", "--worktree", "--", "source.txt")
+            self.assertEqual(tracked.read_bytes(), b"raw worktree bytes\n")
+            self.assertEqual(git("status", "--porcelain", "--untracked-files=all").stdout, "")
+            stored_blob = git("cat-file", "blob", "HEAD:source.txt").stdout.encode()
+            self.assertEqual(stored_blob, b"normalized HEAD blob\n")
+            self.assertNotEqual(stored_blob, tracked.read_bytes())
+
+            fake_git_marker = base / "fake-git-ran"
+            fake_git = fake_bin / "git"
+            fake_git.write_text(
+                "#!/bin/sh\n"
+                f"if [ \"$1\" = \"--no-replace-objects\" ] && [ \"$2\" = \"ls-tree\" ]; then printf called > '{fake_git_marker}'; exit 0; fi\n"
+                f"exec '{real_git}' \"$@\"\n",
+                encoding="utf-8",
+            )
+            fake_git.chmod(0o755)
+            shadow_environment = {
+                **os.environ,
+                "PATH": os.pathsep.join((str(fake_bin), "/usr/bin", "/bin", "/usr/sbin", "/sbin")),
+            }
+            with patch.object(EVIDENCE, "ROOT", root), patch.object(
+                EVIDENCE.platform, "system", return_value="Darwin",
+            ), patch.dict(EVIDENCE.os.environ, shadow_environment, clear=True):
+                try:
+                    EVIDENCE.head_worktree_bytes_digest(head)
+                except EVIDENCE.EvidenceError as error:
+                    self.assertRegex(str(error), "tracked worktree bytes differ from HEAD")
+                else:
+                    self.assertTrue(fake_git_marker.exists(), "legacy raw-tree Git should be shadowed in this fixture")
+                    self.fail("raw tree digest accepted worktree bytes that differ from the clean-filtered HEAD blob")
+            self.assertFalse(fake_git_marker.exists(), "raw tree must use the bound system Git executable")
+
     def test_git_replace_commit_cannot_change_tree_behind_same_clean_head_sha(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
