@@ -70,10 +70,41 @@ class PrePushHeadGuardTest(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "POSIX file modes are required")
     def test_rejects_worktree_mode_that_differs_from_head(self) -> None:
+        self.git("config", "core.fileMode", "true")
         tracked = self.repository / "tracked.txt"
         tracked.chmod(tracked.stat().st_mode | stat.S_IXUSR)
 
         with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(self.update(), self.head, self.repository)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file modes are required")
+    def test_accepts_checkout_mode_difference_when_core_filemode_is_false(self) -> None:
+        executable = self.repository / "tool.sh"
+        executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+        self.git("add", "tool.sh")
+        self.git(
+            "-c",
+            "user.name=Hook test",
+            "-c",
+            "user.email=hook@example.test",
+            "commit",
+            "-m",
+            "executable",
+        )
+        current_head = self.git("rev-parse", "HEAD")
+        self.git("config", "core.fileMode", "false")
+        executable.chmod(executable.stat().st_mode & ~0o111)
+
+        subject.validate_push_head(
+            self.update(local_sha=current_head), current_head, self.repository
+        )
+
+    def test_rejects_index_tree_mode_difference_when_core_filemode_is_false(self) -> None:
+        self.git("config", "core.fileMode", "false")
+        self.git("update-index", "--chmod=+x", "tracked.txt")
+
+        with self.assertRaisesRegex(ContractViolation, "indexがHEADと一致しません"):
             subject.validate_push_head(self.update(), self.head, self.repository)
 
     def test_rejects_skip_worktree_index_flag(self) -> None:

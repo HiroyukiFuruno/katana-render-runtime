@@ -31,6 +31,18 @@ def _git_bytes(repository: Path, *arguments: str) -> bytes:
     return result.stdout
 
 
+def _supports_worktree_executable_mode(repository: Path) -> bool:
+    if os.name != "posix":
+        return False
+    try:
+        configured = _git_bytes(repository, "config", "--bool", "--get", "core.filemode")
+    except subprocess.CalledProcessError as error:
+        if error.returncode != 1:
+            raise
+        return True
+    return configured.strip() == b"true"
+
+
 def _assert_checkout_matches_head(repository: Path, reviewed_head: str) -> None:
     tree_records = _git_bytes(
         repository, "ls-tree", "-r", "-z", "--full-tree", reviewed_head
@@ -72,6 +84,7 @@ def _assert_checkout_matches_head(repository: Path, reviewed_head: str) -> None:
     if any(untracked):
         raise ContractViolation("未追跡ファイルが品質確認対象に含まれます")
 
+    compare_executable_mode = _supports_worktree_executable_mode(repository)
     tracked_contents: dict[str, bytes] = {}
     for name, (expected_mode, object_id) in tree.items():
         path = repository / name
@@ -88,7 +101,7 @@ def _assert_checkout_matches_head(repository: Path, reviewed_head: str) -> None:
             if not stat.S_ISREG(actual_mode):
                 raise ContractViolation(f"HEADと一致しません: {name}")
             executable = bool(actual_mode & 0o111)
-            if executable != (expected_mode == "100755"):
+            if compare_executable_mode and executable != (expected_mode == "100755"):
                 raise ContractViolation(f"HEADと一致しません: {name}")
             actual_bytes = path.read_bytes()
         else:
