@@ -521,6 +521,44 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, r"Cargo config aliases for clippy/fmt"):
                     EVIDENCE.command_environment()
 
+    def test_clean_node_modules_repairs_tampered_dependency_before_frozen_install(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "repository"
+            dependency = base / "fixture-dependency"
+            root.mkdir()
+            dependency.mkdir()
+            (dependency / "package.json").write_text(
+                '{"name":"fixture-dependency","version":"1.0.0","main":"index.js"}', encoding="utf-8",
+            )
+            trusted_bytes = "trusted dependency bytes\n"
+            (dependency / "index.js").write_text(trusted_bytes, encoding="utf-8")
+            (root / "package.json").write_text(
+                '{"name":"fixture-root","version":"1.0.0",'
+                '"dependencies":{"fixture-dependency":"file:../fixture-dependency"}}',
+                encoding="utf-8",
+            )
+
+            def bun_install(*args: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    ("bun", "install", *args), cwd=root, text=True, capture_output=True,
+                )
+
+            initial = bun_install()
+            self.assertEqual(initial.returncode, 0, initial.stdout + initial.stderr)
+            installed_file = root / "node_modules/fixture-dependency/index.js"
+            self.assertEqual(installed_file.read_text(encoding="utf-8"), trusted_bytes)
+            installed_file.unlink()
+            installed_file.write_text("tampered ignored dependency bytes\n", encoding="utf-8")
+            self.assertEqual((dependency / "index.js").read_text(encoding="utf-8"), trusted_bytes)
+
+            with patch.object(EVIDENCE, "ROOT", root):
+                EVIDENCE.clean_existing_node_modules()
+            self.assertFalse((root / "node_modules").exists())
+            frozen_clean = bun_install("--frozen-lockfile")
+            self.assertEqual(frozen_clean.returncode, 0, frozen_clean.stdout + frozen_clean.stderr)
+            self.assertEqual(installed_file.read_text(encoding="utf-8"), trusted_bytes)
+
     def test_cargo_source_replacement_rejects_local_and_alternate_registries(self) -> None:
         local_source = (
             '[source.crates-io]\nreplace-with = "proof-vendor"\n'

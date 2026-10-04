@@ -9,6 +9,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -156,6 +157,21 @@ def workflow_scope_supported(path: Path = WORKFLOW) -> bool:
         return sha256_bytes(path.read_bytes()) == SUPPORTED_WORKFLOW_SHA256
     except OSError:
         return False
+
+
+def clean_existing_node_modules() -> None:
+    node_modules = ROOT / "node_modules"
+    try:
+        mode = node_modules.lstat().st_mode
+    except FileNotFoundError:
+        return
+    try:
+        if stat.S_ISDIR(mode) and not stat.S_ISLNK(mode):
+            shutil.rmtree(node_modules)
+        else:
+            node_modules.unlink()
+    except OSError as exc:
+        raise EvidenceError("cannot remove ignored node_modules before dependency install") from exc
 
 
 def reject_git_replace_refs() -> None:
@@ -878,6 +894,9 @@ def collect(repository: str, number: int, publish: bool) -> int:
 
     for command_id, argv_template in COMMANDS:
         if command_id in PREPARATION_COMMANDS:
+            if command_id == "bun-install":
+                # ignoredな既存依存ファイルを検査対象へ持ち越さないよう、install前に再構築する。
+                clean_existing_node_modules()
             run_command(command_id, argv_template)
     stable_versions_before = fetch_stable_manifest_versions()
     versions_before = tool_versions()
