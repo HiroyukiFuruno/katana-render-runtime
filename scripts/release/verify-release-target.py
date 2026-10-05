@@ -19,6 +19,7 @@ PUBLISHED_V0422_RELEASE_MANIFEST_SHA256 = "1ddeddc37c0735a7278755f26f8985aee9176
 REQUIRED_LATEST_RELEASE = "v0.4.22"
 REQUIRED_TARGET_RELEASE = "v0.4.23"
 REQUIRED_RELEASE_COMMITS = (
+    "290c79b39451b4c70f595d23abf7d535a3755e66",  # Windows weak stamp fixtureのwrite handle同期
     "409f8ee281c7169d3ffb480b742918e896acdd6c",  # 弱いfont世代の不要な2回parseを除去
     "7526e8910b078304a3ee4ed6d34731b45e6d82a3",  # 公開済み正当prefixからのrelease retry
     "ffba9ebfa0f45f21516a84bba71aabd46da4253f",  # Issue APIのgithub.com host固定
@@ -153,7 +154,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "8c0558fc55455ddb6136573263cd7ac84e763f9f0ab0102cbd83ae434804a945"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "908465902e4dc51df152827df99f2d14c998b6d9912a92504c80d111a3e35fa0"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
