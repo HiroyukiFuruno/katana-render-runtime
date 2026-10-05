@@ -21,7 +21,9 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, NamedTuple
-from urllib import error, request
+from urllib import error, parse, request
+
+import local_macos_tool_provenance as TOOL_PROVENANCE
 
 try:
     import tomllib
@@ -85,7 +87,7 @@ SCOPE_PARAMETERS = {
     "TEST_THREADS": "1",
 }
 JAVA_VENDOR = "Eclipse Adoptium"
-COMMAND_PATH_POLICY = "isolated-bound-symlinks-plus-os-system-directories-v1"
+COMMAND_PATH_POLICY = "isolated-bound-symlinks-plus-os-system-directories-v2"
 SYSTEM_COMMAND_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
 HOMEBREW_ROOT = Path("/opt/homebrew")
 JAVA_INSTALL_ROOT = Path("/Library/Java/JavaVirtualMachines")
@@ -177,12 +179,14 @@ class CommandBinding(NamedTuple):
     executables: dict[str, tuple[str, str]]
     rust_files: dict[str, tuple[int, str]]
     rust_components: dict[str, str]
+    host_tool_proof: TOOL_PROVENANCE.HostToolProof
 
     def proof_value(self) -> str:
         return canonical({
             "path": self.path, "path_policy": COMMAND_PATH_POLICY,
             "executables": self.executables,
             "rust_components": self.rust_components,
+            "host_tool_provenance": TOOL_PROVENANCE.serialized_host_tool_proof(self.host_tool_proof),
         }).decode("utf-8")
 
 
@@ -208,6 +212,22 @@ def canonical(value: Any) -> bytes:
 
 def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def fetch_official_host_tool_proof(macos_version: str) -> TOOL_PROVENANCE.HostToolProof:
+    try:
+        return TOOL_PROVENANCE.fetch_official_host_tool_proof(macos_version)
+    except TOOL_PROVENANCE.ProvenanceError as exc:
+        raise EvidenceError("official native tool provenance is unavailable") from exc
+
+
+def verify_installed_host_tools(
+    proof: TOOL_PROVENANCE.HostToolProof, java_home: Path,
+) -> None:
+    try:
+        TOOL_PROVENANCE.verify_installed_host_tools(proof, java_home)
+    except TOOL_PROVENANCE.ProvenanceError as exc:
+        raise EvidenceError("installed Graphviz or Temurin files do not match official artifacts") from exc
 
 
 def scope_digest(workflow_sha: str | None = None) -> str:
@@ -457,6 +477,7 @@ def assert_private_command_directory(directory: Path, expected_aliases: set[str]
 def command_binding(
     environment: dict[str, str], just_binding: JustBinding,
     bun_binary_sha256: str, rust_proof: RustComponentProof,
+    host_tool_proof: TOOL_PROVENANCE.HostToolProof,
 ) -> CommandBinding:
     home = account_home()
     brew_root = HOMEBREW_ROOT.resolve(strict=True)
@@ -467,27 +488,17 @@ def command_binding(
     except OSError as exc:
         raise EvidenceError("isolated trusted command directory could not be created") from exc
     assert_private_command_directory(commands_dir, set())
+    # WHY: このPythonはcollector自身のTCBなので、子commandにも同じ実体だけを公開する。
     python_dir = Path(sys.executable).resolve(strict=True).parent
-    rustup_home = Path(environment["RUSTUP_HOME"]).resolve(strict=True)
-    default_rustup_home = (home / ".rustup").resolve()
-    if rustup_home != default_rustup_home and default_rustup_home not in rustup_home.parents:
-        raise EvidenceError("custom RUSTUP_HOME is outside the account installation")
-    rustup = trusted_executable(home / ".cargo/bin/rustup", (home / ".cargo/bin",))
+    rustup_home = (home / ".rustup").resolve(strict=True)
     bootstrap_env = dict(environment)
     bootstrap_env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     bootstrap_env["RUSTUP_HOME"] = str(rustup_home)
     rust_root = (rustup_home / "toolchains/stable-aarch64-apple-darwin").resolve(strict=True)
     verify_installed_rust_components(rust_root, rust_proof)
     rust_paths = {}
-    for name in ("cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt"):
-        assert_private_command_directory(commands_dir, set())
-        selected = Path(subprocess.run(
-            (str(rustup), "which", "--toolchain", "stable-aarch64-apple-darwin", name),
-            cwd=ROOT, env=bootstrap_env, text=True, capture_output=True, check=True,
-        ).stdout.strip())
-        assert_private_command_directory(commands_dir, set())
-        rust_paths[name] = trusted_executable(selected, (rust_root,))
-        relative_path = rust_paths[name].relative_to(rust_root).as_posix()
+    for name, relative_path in RUST_EXECUTABLE_PATHS.items():
+        rust_paths[name] = trusted_executable(rust_root / relative_path, (rust_root,))
         expected_sha256 = rust_proof.files.get(relative_path)
         if expected_sha256 is None or sha256_bytes(rust_paths[name].read_bytes()) != expected_sha256[1]:
             raise EvidenceError(f"selected Rust executable is not an official component file: {name}")
@@ -495,38 +506,8 @@ def command_binding(
     if any(path.parent != rust_bin for path in rust_paths.values()):
         raise EvidenceError("stable Rust components do not share one toolchain directory")
 
-    brew_bin = trusted_executable(brew_root / "bin/brew", (brew_root,))
     bun_bin = trusted_executable(brew_root / "bin/bun", (brew_root,))
     assert_official_bun_binary(bun_bin, bun_binary_sha256)
-    bun_sha256 = bun_binary_sha256
-    dot_candidate = brew_root / "bin/dot"
-    try:
-        dot_candidate.lstat()
-    except FileNotFoundError:
-        brew_environment = dict(environment)
-        brew_environment["PATH"] = os.pathsep.join(SYSTEM_COMMAND_PATH)
-        # WHY: install中の自動更新でBrewの実体が変わると、bootstrap前後のhash拘束が失敗するため無効にする。
-        brew_environment["HOMEBREW_NO_AUTO_UPDATE"] = "1"
-        assert_private_command_directory(commands_dir, set())
-        brew_sha256_before = sha256_bytes(brew_bin.read_bytes())
-        try:
-            install_result = subprocess.run(
-                (str(brew_bin), "install", "graphviz"), cwd=ROOT, env=brew_environment,
-                text=True, capture_output=True, check=False,
-            )
-        except OSError as exc:
-            raise EvidenceError("Homebrew graphviz bootstrap could not run") from exc
-        finally:
-            assert_private_command_directory(commands_dir, set())
-            brew_after = trusted_executable(brew_bin, (brew_root,))
-            if (brew_after != brew_bin
-                    or sha256_bytes(brew_after.read_bytes()) != brew_sha256_before):
-                raise EvidenceError("Homebrew changed during graphviz bootstrap")
-        if install_result.returncode != 0:
-            raise EvidenceError("Homebrew graphviz bootstrap failed")
-        dot_bin = trusted_executable(dot_candidate, (brew_root,))
-    else:
-        dot_bin = trusted_executable(dot_candidate, (brew_root,))
     bash_bin = trusted_executable(Path("/bin/bash"), system_roots)
     python_bin = trusted_executable(Path(sys.executable), (python_dir,))
     assert_private_command_directory(commands_dir, set())
@@ -539,6 +520,8 @@ def command_binding(
     java_root = JAVA_INSTALL_ROOT.resolve(strict=True)
     if java_root not in java_home.parents:
         raise EvidenceError("selected Java installation is outside the trusted system root")
+    verify_installed_host_tools(host_tool_proof, java_home)
+    dot_bin = trusted_executable(Path(host_tool_proof.dot_path), (brew_root,))
     java_bin = trusted_executable(java_home / "bin/java", (java_root,))
 
     # WHY: PATHへbin directoryを追加すると、grepなどの子commandを無関係な実行ファイルがshadowできる。
@@ -553,8 +536,7 @@ def command_binding(
         "cargo-clippy": (str(rust_paths["cargo-clippy"]), sha256_bytes(rust_paths["cargo-clippy"].read_bytes())),
         "clippy-driver": (str(rust_paths["clippy-driver"]), sha256_bytes(rust_paths["clippy-driver"].read_bytes())),
         "rustfmt": (str(rust_paths["rustfmt"]), sha256_bytes(rust_paths["rustfmt"].read_bytes())),
-        "brew": (str(brew_bin), sha256_bytes(brew_bin.read_bytes())),
-        "bun": (str(bun_bin), bun_binary_sha256 or bun_sha256),
+        "bun": (str(bun_bin), bun_binary_sha256),
         "dot": (str(dot_bin), sha256_bytes(dot_bin.read_bytes())),
         "bash": (str(bash_bin), sha256_bytes(bash_bin.read_bytes())),
         "python3": (str(python_bin), sha256_bytes(python_bin.read_bytes())),
@@ -571,7 +553,9 @@ def command_binding(
     except OSError as exc:
         raise EvidenceError("isolated trusted command aliases could not be created") from exc
     command_path = os.pathsep.join((str(commands_dir), *SYSTEM_COMMAND_PATH))
-    binding = CommandBinding(command_path, executables, rust_proof.files, rust_proof.components)
+    binding = CommandBinding(
+        command_path, executables, rust_proof.files, rust_proof.components, host_tool_proof,
+    )
     assert_command_binding(binding, just_binding)
     return binding
 
@@ -1008,7 +992,10 @@ def prepare_command_environment(
         just_binding = download_trusted_just(token, isolated_inputs_dir, bootstrap)
         bun_binding = download_trusted_bun(token)
         rust_proof = fetch_official_rust_component_proof()
-        binding = command_binding(bootstrap, just_binding, bun_binding.binary_sha256, rust_proof)
+        host_tool_proof = fetch_official_host_tool_proof(macos_product_version())
+        binding = command_binding(
+            bootstrap, just_binding, bun_binding.binary_sha256, rust_proof, host_tool_proof,
+        )
         environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir, binding, just_binding)
         return bootstrap, just_binding, bun_binding, binding, environment
     except BaseException:
@@ -1034,6 +1021,9 @@ def assert_command_binding(binding: CommandBinding, just_binding: JustBinding) -
     verify_installed_rust_components(rust_root, RustComponentProof(
         binding.rust_files, binding.rust_components, {},
     ))
+    verify_installed_host_tools(
+        binding.host_tool_proof, Path(binding.executables["java"][0]).parent.parent,
+    )
     expected_directory = just_binding.path.parent.parent / "trusted-commands"
     expected_path = os.pathsep.join((str(expected_directory), *SYSTEM_COMMAND_PATH))
     if binding.path != expected_path:
@@ -1102,7 +1092,6 @@ def tool_versions(
         "java": ("java", "-version"),
         "bun": ("bun", "--version"),
         "just": (str(just_binding.path), "--version"),
-        "brew": ("brew", "--version"),
         "graphviz": ("dot", "-V"),
     }
     found: dict[str, str] = {}
@@ -1167,7 +1156,18 @@ def java_is_21(value: Any) -> bool:
 
 
 def validate_pinned_tools(versions: Any) -> None:
-    if not isinstance(versions, dict) or not java_is_21(versions.get("java")):
+    if not isinstance(versions, dict) or set(versions) != {
+        "macos", "architecture", "rust_host", "rustc", "cargo", "clippy", "rustfmt",
+        "java", "java_home", "java_vendor", "bun", "just", "just_path", "just_release",
+        "just_asset", "just_asset_url", "just_asset_sha256", "just_binary_sha256",
+        "bun_release", "bun_asset", "bun_asset_url", "bun_asset_sha256", "bun_binary_sha256",
+        "command_binding", "graphviz",
+    }:
+        raise EvidenceError("local proof tool inventory is incomplete or unsupported")
+    if (not is_macos_15(versions.get("macos")) or versions.get("architecture") != "arm64"
+            or versions.get("rust_host") != SCOPE_PARAMETERS["CARGO_BUILD_TARGET"]):
+        raise EvidenceError("local proof host does not match the Apple Silicon CI platform")
+    if not java_is_21(versions.get("java")):
         raise EvidenceError("local proof requires Java 21, matching the macOS CI setup")
     if versions.get("java_vendor") != JAVA_VENDOR:
         raise EvidenceError("local proof requires Temurin (Eclipse Adoptium), matching the macOS CI setup")
@@ -1209,11 +1209,11 @@ def validate_pinned_tools(versions: Any) -> None:
     except json.JSONDecodeError:
         command = None
     required_executables = {
-        "just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "bun",
+        "just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "bun",
         "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname",
     }
     if (not isinstance(command, dict) or set(command) != {
-            "path", "path_policy", "executables", "rust_components",
+            "path", "path_policy", "executables", "rust_components", "host_tool_provenance",
     }
             or not isinstance(command.get("path"), str) or not command["path"]
             or command.get("path_policy") != COMMAND_PATH_POLICY
@@ -1223,6 +1223,70 @@ def validate_pinned_tools(versions: Any) -> None:
             or not isinstance(command.get("executables"), dict)
             or set(command["executables"]) != required_executables):
         raise EvidenceError("shared command path binding is missing or invalid")
+    if (not isinstance(command.get("host_tool_provenance"), dict)
+            or command["host_tool_provenance"].get("policy") != TOOL_PROVENANCE.TOOL_PROVENANCE_POLICY):
+        raise EvidenceError("shared native tool provenance is missing or unsupported")
+    host_tools = command["host_tool_provenance"]
+    identities = host_tools.get("identities")
+    formulae = identities.get("graphviz") if isinstance(identities, dict) else None
+    java_identity = identities.get("java") if isinstance(identities, dict) else None
+    expected_tag = "arm64_sequoia" if str(versions.get("macos", "")).startswith("15.") else "arm64_tahoe"
+    if (set(host_tools) != {
+            "policy", "identities", "graphviz_inventory_sha256", "java_inventory_sha256", "dot_path",
+    }
+            or not isinstance(identities, dict)
+            or set(identities) != {"graphviz", "java", "host_tcb"}
+            or identities.get("host_tcb") != TOOL_PROVENANCE.HOST_TCB_POLICY
+            or not isinstance(formulae, list) or not 1 <= len(formulae) <= 96
+            or not isinstance(java_identity, dict)
+            or set(java_identity) != {"release", "asset", "url", "sha256"}
+            or not is_sha256(host_tools.get("graphviz_inventory_sha256"))
+            or not is_sha256(host_tools.get("java_inventory_sha256"))):
+        raise EvidenceError("shared native tool provenance metadata is malformed")
+    graphviz_identities: dict[str, dict[str, Any]] = {}
+    for identity in formulae:
+        if (not isinstance(identity, dict)
+                or set(identity) != {"name", "version", "bottle_tag", "url", "sha256"}
+                or not isinstance(identity.get("name"), str)
+                or not re.fullmatch(r"[a-z0-9][a-z0-9+@._-]{0,79}", identity["name"])
+                or not isinstance(identity.get("version"), str)
+                or not re.fullmatch(r"[0-9][A-Za-z0-9.+_-]{0,79}", identity["version"])
+                or identity.get("bottle_tag") != expected_tag
+                or not is_sha256(identity.get("sha256"))
+                or identity.get("url") != (
+                    "https://ghcr.io/v2/homebrew/core/" + identity["name"].replace("@", "/")
+                    + "/blobs/sha256:" + identity["sha256"]
+                )
+                or identity["name"] in graphviz_identities):
+            raise EvidenceError("official Graphviz dependency identity is malformed")
+        graphviz_identities[identity["name"]] = identity
+    graphviz_identity = graphviz_identities.get("graphviz")
+    java_release = java_identity.get("release")
+    if (graphviz_identity is None or not isinstance(host_tools.get("dot_path"), str)
+            or host_tools["dot_path"] != (
+                "/opt/homebrew/Cellar/graphviz/" + graphviz_identity["version"] + "/bin/dot"
+            )
+            or not isinstance(java_release, str)
+            or re.fullmatch(r"jdk-21\.\d+\.\d+(?:\.\d+)?\+\d+", java_release) is None
+            or java_identity.get("asset") != (
+                "OpenJDK21U-jdk_aarch64_mac_hotspot_" + java_release.removeprefix("jdk-").replace("+", "_") + ".tar.gz"
+            )
+            or java_identity.get("url") != (
+                "https://github.com/adoptium/temurin21-binaries/releases/download/"
+                + parse.quote(java_release, safe="") + "/" + str(java_identity.get("asset"))
+            )
+            or not is_sha256(java_identity.get("sha256"))):
+        raise EvidenceError("official Graphviz or Temurin release identity is malformed")
+    java_path = Path(command["executables"]["java"][0])
+    if (command["executables"]["dot"][0] != host_tools["dot_path"]
+            or not java_path.is_relative_to(Path(versions["java_home"]))):
+        raise EvidenceError("selected Graphviz or Java path does not identify the authenticated installation")
+    graphviz_output = versions.get("graphviz")
+    output_version = re.search(
+        r"graphviz version\s+(\d+(?:\.\d+)+)", graphviz_output,
+    ) if isinstance(graphviz_output, str) else None
+    if output_version is None or output_version.group(1) != graphviz_identity["version"].split("_", 1)[0]:
+        raise EvidenceError("Graphviz version output does not match the authenticated formula")
     for name, entry in command["executables"].items():
         if (not isinstance(entry, list) or len(entry) != 2 or not isinstance(entry[0], str)
                 or not Path(entry[0]).is_absolute() or not is_sha256(entry[1])):
@@ -1554,6 +1618,7 @@ def valid_payload(
     base_sha: str, head_sha: str, expected_workflow_digest: str, now: int, owner_login: str,
     stable_versions: dict[str, str], just_release_metadata: dict[str, str],
     bun_binding: BunBinding, rust_proof: RustComponentProof,
+    host_tool_proof: TOOL_PROVENANCE.HostToolProof,
 ) -> bool:
     user, association = comment.get("user"), comment.get("author_association")
     if not isinstance(user, dict) or user.get("login", "").lower() != owner_login.lower() or association != "OWNER":
@@ -1586,7 +1651,7 @@ def valid_payload(
         "java", "java_home", "java_vendor", "bun", "just", "just_path", "just_release",
         "just_asset", "just_asset_url", "just_asset_sha256", "just_binary_sha256",
         "bun_release", "bun_asset", "bun_asset_url", "bun_asset_sha256", "bun_binary_sha256",
-        "command_binding", "brew", "graphviz"
+        "command_binding", "graphviz"
     } or any(not isinstance(value, str) or not value.strip() for value in tools.values()):
         return False
     if not Path(tools["java_home"]).is_absolute():
@@ -1617,6 +1682,17 @@ def valid_payload(
         return False
     try:
         command_binding = json.loads(tools["command_binding"])
+        if command_binding["host_tool_provenance"] != TOOL_PROVENANCE.serialized_host_tool_proof(host_tool_proof):
+            return False
+        dot_identity = host_tool_proof.graphviz_files.get(host_tool_proof.dot_path)
+        java_binary_path = TOOL_PROVENANCE.resolve_inventory_path(host_tool_proof.java_files, "bin/java")
+        java_identity = host_tool_proof.java_files.get(java_binary_path)
+        if (dot_identity is None or dot_identity.kind != "file"
+                or java_identity is None or java_identity.kind != "file"
+                or command_binding["executables"]["java"][0] != str(Path(tools["java_home"]) / java_binary_path)
+                or command_binding["executables"]["dot"][1] != dot_identity.value
+                or command_binding["executables"]["java"][1] != java_identity.value):
+            return False
         if command_binding["executables"]["bun"][1] != bun_binding.binary_sha256:
             return False
         if command_binding["rust_components"] != rust_proof.components:
@@ -1671,7 +1747,7 @@ def accepted_comment(comments: Any, *args: Any) -> dict[str, Any] | None:
         return None
     (
         repository, number, base_sha, head_sha, workflow_hash, now, owner_login,
-        stable_versions, just_release_metadata, bun_binding, rust_proof,
+        stable_versions, just_release_metadata, bun_binding, rust_proof, host_tool_proof,
     ) = args
     current: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for comment in marked:
@@ -1695,7 +1771,7 @@ def accepted_comment(comments: Any, *args: Any) -> dict[str, Any] | None:
     return comment if valid_payload(
         comment, payload, repository, number, base_sha, head_sha, workflow_hash, now, owner_login,
         stable_versions, just_release_metadata, bun_binding,
-        rust_proof,
+        rust_proof, host_tool_proof,
     ) else None
 
 
@@ -1770,8 +1846,19 @@ def verify_from_api(
         # waiting on the optional official-manifest lookup.
         if len(candidates) != 1:
             return False
+        candidate_payload = parse_comment(candidates[0])
+        if candidate_payload is None or not isinstance(candidate_payload.get("tools"), dict):
+            return False
+        try:
+            validate_pinned_tools(candidate_payload["tools"])
+        except EvidenceError:
+            return False
+        macos_version = candidate_payload["tools"].get("macos")
+        if not isinstance(macos_version, str):
+            return False
         stable_versions = fetch_stable_manifest_versions()
         rust_proof = fetch_official_rust_component_proof()
+        host_tool_proof = fetch_official_host_tool_proof(macos_version)
         just_release_metadata = validate_just_release_metadata(
             fetch(f"repos/{JUST_RELEASE_REPOSITORY}/releases/latest")
         )
@@ -1782,11 +1869,11 @@ def verify_from_api(
         bun_binding = materialize_trusted_bun(bun_release, download_bun_asset(bun_metadata))
         first = accepted_comment(
             comments_first, repository, number, base_sha, head_sha, digest, timestamp, owner_login,
-            stable_versions, just_release_metadata, bun_binding, rust_proof,
+            stable_versions, just_release_metadata, bun_binding, rust_proof, host_tool_proof,
         )
         second = accepted_comment(
             comments_second, repository, number, base_sha, head_sha, digest, timestamp, owner_login,
-            stable_versions, just_release_metadata, bun_binding, rust_proof,
+            stable_versions, just_release_metadata, bun_binding, rust_proof, host_tool_proof,
         )
         return first is not None and second is not None and canonical(first) == canonical(second)
     except Exception:
@@ -1849,7 +1936,13 @@ def collect(repository: str, number: int, publish: bool) -> int:
             tuple(part.format(plantuml_output=smoke_output) for part in argv_template), just_binding
         )
         start = time.monotonic()
-        result = subprocess.run(argv, cwd=ROOT, env=command_env, text=True, capture_output=True)
+        if command_id == "graphviz-install":
+            # WHY: 任意のHomebrewを実行せず、公式bottleと導入済み実体の一致でCI準備stepを確認する。
+            result = subprocess.CompletedProcess(
+                argv, 0, "", "Preinstalled Graphviz matches the official bottle and runtime closure.\n",
+            )
+        else:
+            result = subprocess.run(argv, cwd=ROOT, env=command_env, text=True, capture_output=True)
         assert_command_binding(binding, just_binding)
         duration = int((time.monotonic() - start) * 1000)
         output = result.stdout + result.stderr

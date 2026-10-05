@@ -42,7 +42,9 @@ def collector_binding_patches():
         EVIDENCE,
         download_trusted_just=Mock(return_value=fake_just),
         download_trusted_bun=Mock(return_value=fake_bun),
-        command_binding=Mock(return_value=EVIDENCE.CommandBinding("/bin", {}, {}, RUST_COMPONENT_DIGESTS)),
+        command_binding=Mock(return_value=EVIDENCE.CommandBinding(
+            "/bin", {}, {}, RUST_COMPONENT_DIGESTS, fixture_host_tool_proof(),
+        )),
         fetch_official_rust_component_proof=Mock(return_value=fixture_rust_proof()),
         command_environment=Mock(return_value={"PATH": "/bin", "JAVA_HOME": "/java"}),
         assert_command_binding=Mock(),
@@ -103,6 +105,31 @@ RUST_COMPONENT_DIGESTS = {
 RUST_EXECUTABLE_DIGESTS = {
     name: f"{index + 1:x}" * 64 for index, name in enumerate(EVIDENCE.RUST_EXECUTABLE_PATHS)
 }
+
+
+def fixture_host_tool_proof():
+    dot_path = "/opt/homebrew/Cellar/graphviz/12.0.0/bin/dot"
+    return EVIDENCE.TOOL_PROVENANCE.HostToolProof(
+        {
+            dot_path: EVIDENCE.TOOL_PROVENANCE.InventoryEntry("file", 0o111, "c" * 64),
+        },
+        {
+            "bin/java": EVIDENCE.TOOL_PROVENANCE.InventoryEntry("file", 0o111, "d" * 64),
+        }, {
+            "graphviz": [{
+                "name": "graphviz", "version": "12.0.0", "bottle_tag": "arm64_sequoia",
+                "url": "https://ghcr.io/v2/homebrew/core/graphviz/blobs/sha256:" + "a" * 64,
+                "sha256": "a" * 64,
+            }],
+            "java": {
+                "release": "jdk-21.0.12+7", "asset": "OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.12_7.tar.gz",
+                "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12%2B7/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.12_7.tar.gz",
+                "sha256": "b" * 64,
+            },
+            "host_tcb": EVIDENCE.TOOL_PROVENANCE.HOST_TCB_POLICY,
+        },
+        dot_path,
+    )
 
 
 def fixture_rust_proof():
@@ -218,7 +245,7 @@ def valid_comment() -> dict[str, object]:
             "rustfmt": f"rustfmt {STABLE_RUST['rustfmt_cli']}",
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
             "java_vendor": "Eclipse Adoptium",
-            "just": "just 1.40.0", "brew": "Homebrew 5.0.0", "graphviz": "dot - graphviz version 12",
+            "just": "just 1.40.0", "graphviz": "dot - graphviz version 12.0.0",
             "just_path": "/tmp/krr-local-macos-inputs-fixture/trusted-just/just",
             "just_release": "1.40.0", "just_asset": "just-1.40.0-aarch64-apple-darwin.tar.gz",
             "just_asset_url": "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
@@ -237,12 +264,19 @@ def valid_comment() -> dict[str, object]:
                 "executables": {
                     name: [
                         "/tmp/krr-local-macos-inputs-fixture/trusted-just/just" if name == "just"
-                        else "/opt/homebrew/bin/bun" if name == "bun" else f"/trusted/{name}",
-                        BUN_BINARY_SHA256 if name == "bun" else RUST_EXECUTABLE_DIGESTS.get(name, "c" * 64),
+                        else "/opt/homebrew/bin/bun" if name == "bun"
+                        else fixture_host_tool_proof().dot_path if name == "dot"
+                        else "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java" if name == "java"
+                        else f"/trusted/{name}",
+                        BUN_BINARY_SHA256 if name == "bun"
+                        else fixture_host_tool_proof().graphviz_files[fixture_host_tool_proof().dot_path].value if name == "dot"
+                        else fixture_host_tool_proof().java_files["bin/java"].value if name == "java"
+                        else RUST_EXECUTABLE_DIGESTS.get(name, "c" * 64),
                     ]
-                    for name in ("just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "bun", "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname")
+                    for name in ("just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "bun", "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname")
                 },
                 "rust_components": RUST_COMPONENT_DIGESTS,
+                "host_tool_provenance": EVIDENCE.TOOL_PROVENANCE.serialized_host_tool_proof(fixture_host_tool_proof()),
             }, sort_keys=True, separators=(",", ":")),
         },
         "commands": commands,
@@ -323,6 +357,26 @@ class LocalMacosEvidenceTest(unittest.TestCase):
         )
         rust_proof_patcher.start()
         self.addCleanup(rust_proof_patcher.stop)
+        host_tool_patcher = patch.object(
+            EVIDENCE, "fetch_official_host_tool_proof", return_value=fixture_host_tool_proof(),
+        )
+        host_tool_patcher.start()
+        self.addCleanup(host_tool_patcher.stop)
+        verify_host_tools_patcher = patch.object(EVIDENCE, "verify_installed_host_tools")
+        verify_host_tools_patcher.start()
+        self.addCleanup(verify_host_tools_patcher.stop)
+
+    def test_graphviz_workflow_step_is_satisfied_by_authenticated_preinstalled_tree(self) -> None:
+        self.assertTrue(EVIDENCE.workflow_scope_supported())
+        self.assertEqual(
+            EVIDENCE.MAC_WORKFLOW_STEP_COMMANDS[
+                "Install Graphviz for PlantUML on macOS"
+            ],
+            ("graphviz-install",),
+        )
+        self.assertIn(
+            ("graphviz-install", ("brew", "install", "graphviz")), EVIDENCE.COMMANDS,
+        )
 
     def test_prepare_binds_homebrew_bun_to_official_binary_sha(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -340,7 +394,9 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
                 "a" * 64, "b" * 64,
             )
-            command_binding = EVIDENCE.CommandBinding("/bin", {}, {}, RUST_COMPONENT_DIGESTS)
+            command_binding = EVIDENCE.CommandBinding(
+                "/bin", {}, {}, RUST_COMPONENT_DIGESTS, fixture_host_tool_proof(),
+            )
             with (
                 patch.object(
                     EVIDENCE, "command_environment",
@@ -363,6 +419,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             ))
             command_binding_mock.assert_called_once_with(
                 {"PATH": "/bin"}, just, BUN_BINARY_SHA256, fixture_rust_proof(),
+                fixture_host_tool_proof(),
             )
 
     def test_accepts_current_owner_proof_bound_to_base_head_workflow_and_full_scope(self) -> None:
@@ -454,6 +511,22 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     fetch=snapshots(comment), now=NOW, expected_workflow_digest="d" * 64,
                 ))
 
+    def test_old_policy_and_missing_candidates_skip_native_archive_fetch(self) -> None:
+        good = valid_comment()
+        payload = json.loads(good["body"].split("\n", 1)[1])
+        command = json.loads(payload["tools"]["command_binding"])
+        command["path_policy"] = "isolated-bound-symlinks-plus-os-system-directories-v1"
+        old_policy = {**good, "body": EVIDENCE.MARKER + "\n" + json.dumps({
+            **payload, "tools": {**payload["tools"], "command_binding": json.dumps(command)},
+        })}
+        for comment in (None, old_policy):
+            with patch.object(EVIDENCE, "fetch_official_host_tool_proof") as fetch_host_tools:
+                self.assertFalse(EVIDENCE.verify_from_api(
+                    REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                    fetch=snapshots(comment), now=NOW, expected_workflow_digest="d" * 64,
+                ))
+                fetch_host_tools.assert_not_called()
+
     def test_rejects_java_vendor_other_than_temurin_and_java_other_than_21(self) -> None:
         good = valid_comment()
         payload = json.loads(good["body"].split("\n", 1)[1])
@@ -481,9 +554,12 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 ))
 
         valid_tools = json.loads(valid_comment()["body"].split("\n", 1)[1])["tools"]
+        command = json.loads(valid_tools["command_binding"])
+        command["executables"]["java"][0] = "/jdk/21/bin/java"
         EVIDENCE.validate_pinned_tools({**valid_tools,
             "java": 'java version "21.0.12"', "java_home": "/jdk/21",
             "java_vendor": "Eclipse Adoptium", "bun": "1.4.2",
+            "command_binding": json.dumps(command),
         })
         for java, bun in (
             ('java version "17.0.13"', "1.4.2"),
@@ -1257,7 +1333,9 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{output}'\n", encoding="utf-8")
                 path.chmod(0o755)
             environment = {**os.environ, "PATH": f"{directory}{os.pathsep}{os.environ['PATH']}"}
-            binding = EVIDENCE.CommandBinding("/bin", {}, {}, RUST_COMPONENT_DIGESTS)
+            binding = EVIDENCE.CommandBinding(
+                "/bin", {}, {}, RUST_COMPONENT_DIGESTS, fixture_host_tool_proof(),
+            )
             just = EVIDENCE.JustBinding(
                 Path("/trusted/just"), "just 1.40.0", "1.40.0", "just-1.40.0-aarch64-apple-darwin.tar.gz",
                 "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
@@ -1647,7 +1725,7 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
             "cargo": "cargo stable", "java": 'openjdk version "17.0.13"',
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
             "java_vendor": "Eclipse Adoptium",
-            "bun": "1.4.2", "just": "just 1.40.0", "brew": "Homebrew 5", "graphviz": "dot 12",
+            "bun": "1.4.2", "just": "just 1.40.0", "graphviz": "dot - graphviz version 12.0.0",
         }
         with tempfile.TemporaryDirectory() as directory:
             with (
@@ -1674,7 +1752,7 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
             ):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "Java 21"):
                     EVIDENCE.collect(REPOSITORY, 7, publish=True)
-                self.assertEqual(run.call_count, len(EVIDENCE.PREPARATION_COMMANDS))
+                self.assertEqual(run.call_count, len(EVIDENCE.PREPARATION_COMMANDS) - 1)
 
     def test_collector_rejects_nonstable_rust_before_quality_commands(self) -> None:
         valid_tools = json.loads(valid_comment()["body"].split("\n", 1)[1])["tools"]
@@ -1684,7 +1762,7 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
             "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12"',
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
             "java_vendor": "Eclipse Adoptium",
-            "bun": "1.4.2", "just": "just 1.40.0", "brew": "Homebrew 5", "graphviz": "dot 12",
+            "bun": "1.4.2", "just": "just 1.40.0", "graphviz": "dot - graphviz version 12.0.0",
         }
         with tempfile.TemporaryDirectory() as directory:
             with (
@@ -1711,7 +1789,7 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
             ):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "current official stable channel"):
                     EVIDENCE.collect(REPOSITORY, 7, publish=True)
-                self.assertEqual(run.call_count, len(EVIDENCE.PREPARATION_COMMANDS))
+                self.assertEqual(run.call_count, len(EVIDENCE.PREPARATION_COMMANDS) - 1)
 
 
 
@@ -1954,8 +2032,41 @@ class TrustedJustTest(unittest.TestCase):
             java_home = java_root / "temurin-21.jdk/Contents/Home"
             java = java_home / "bin/java"
             java.parent.mkdir(parents=True)
-            java.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            java_bytes = b"#!/bin/sh\n# authenticated Java fixture\nexit 0\n"
+            java.write_bytes(java_bytes)
             java.chmod(0o755)
+            java_library = java_home / "lib/server/libjvm.dylib"
+            java_library.parent.mkdir(parents=True)
+            java_library.write_bytes(b"authenticated-jvm-fixture")
+            graphviz_library = root / "opt-homebrew/Cellar/graphviz/12.0.0/lib/libgvc.dylib"
+            graphviz_library.parent.mkdir(parents=True)
+            graphviz_library.write_bytes(b"authenticated-graphviz-library-fixture")
+            official_dot = (
+                b"#!/bin/sh\n"
+                b"echo 'dot - graphviz version 12.0.0' >&2\n"
+                b"exit 0\n"
+            )
+            host_proof = fixture_host_tool_proof()
+            host_proof = EVIDENCE.TOOL_PROVENANCE.HostToolProof(
+                {
+                    str(dot_path): EVIDENCE.TOOL_PROVENANCE.InventoryEntry(
+                        "file", 0o111, EVIDENCE.sha256_bytes(official_dot),
+                    ),
+                    str(graphviz_library): EVIDENCE.TOOL_PROVENANCE.InventoryEntry(
+                        "file", 0, EVIDENCE.sha256_bytes(graphviz_library.read_bytes()),
+                    ),
+                },
+                {
+                    "bin/java": EVIDENCE.TOOL_PROVENANCE.InventoryEntry(
+                        "file", 0o111, EVIDENCE.sha256_bytes(java_bytes),
+                    ),
+                    "lib/server/libjvm.dylib": EVIDENCE.TOOL_PROVENANCE.InventoryEntry(
+                        "file", 0, EVIDENCE.sha256_bytes(java_library.read_bytes()),
+                    ),
+                },
+                fixture_host_tool_proof().identities,
+                str(dot_path),
+            )
             parent_environment = {"RUSTUP_HOME": str(rustup_home), "PATH": str(brew_bin)}
             python_tool = root / "python/bin/python3"
             python_tool.parent.mkdir(parents=True)
@@ -1983,6 +2094,31 @@ class TrustedJustTest(unittest.TestCase):
 
             original_run = subprocess.run
 
+            def verify_fixture_host_tools(proof, selected_java_home):
+                self.assertEqual(proof, host_proof)
+                for raw_path, identity in proof.graphviz_files.items():
+                    path = Path(raw_path)
+                    if (not path.is_file() or path.is_symlink()
+                            or stat.S_IMODE(path.stat().st_mode) & 0o111 != identity.mode
+                            or EVIDENCE.sha256_bytes(path.read_bytes()) != identity.value):
+                        raise EVIDENCE.EvidenceError(
+                            "installed Graphviz fixture differs from authenticated artifact",
+                        )
+                for relative_path, identity in proof.java_files.items():
+                    path = selected_java_home / relative_path
+                    if (not path.is_file() or path.is_symlink()
+                            or stat.S_IMODE(path.stat().st_mode) & 0o111 != identity.mode
+                            or EVIDENCE.sha256_bytes(path.read_bytes()) != identity.value):
+                        raise EVIDENCE.EvidenceError(
+                            "installed Java fixture differs from authenticated artifact",
+                        )
+
+            host_tools_patcher = patch.object(
+                EVIDENCE, "verify_installed_host_tools", side_effect=verify_fixture_host_tools,
+            )
+            host_tools_patcher.start()
+            self.addCleanup(host_tools_patcher.stop)
+
             def select_java_home(arguments, **kwargs):
                 if tuple(arguments) == ("/usr/libexec/java_home", "-v", "21"):
                     return subprocess.CompletedProcess(arguments, 0, stdout=str(java_home) + "\n", stderr="")
@@ -1993,7 +2129,21 @@ class TrustedJustTest(unittest.TestCase):
             ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
-                binding = EVIDENCE.command_binding(parent_environment, just, BUN_BINARY_SHA256, rust_proof)
+                with self.assertRaises(EVIDENCE.EvidenceError):
+                    EVIDENCE.command_binding(parent_environment, just, BUN_BINARY_SHA256, rust_proof, host_proof)
+                self.assertFalse(install_marker.exists(), "an unauthenticated Homebrew bootstrap must not run")
+                shutil.rmtree(just_dir.parent / "trusted-commands")
+                dot_path.write_bytes(official_dot)
+                dot_path.chmod(0o755)
+                binding = EVIDENCE.command_binding(parent_environment, just, BUN_BINARY_SHA256, rust_proof, host_proof)
+                graphviz_library.write_bytes(b"tampered-graphviz-library")
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "authenticated artifact"):
+                    EVIDENCE.assert_command_binding(binding, just)
+                graphviz_library.write_bytes(b"authenticated-graphviz-library-fixture")
+                java_library.write_bytes(b"tampered-jvm-fixture")
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "authenticated artifact"):
+                    EVIDENCE.assert_command_binding(binding, just)
+                java_library.write_bytes(b"authenticated-jvm-fixture")
                 standard_library.write_bytes(b"tampered-stdlib-fixture")
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "differs from official"):
                     EVIDENCE.assert_command_binding(binding, just)
@@ -2014,7 +2164,7 @@ class TrustedJustTest(unittest.TestCase):
                     just.asset_url, just.asset_sha256, just.binary_sha256,
                 )
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "official Bun release"):
-                    EVIDENCE.command_binding(parent_environment, alternate_just, BUN_BINARY_SHA256, rust_proof)
+                    EVIDENCE.command_binding(parent_environment, alternate_just, BUN_BINARY_SHA256, rust_proof, fixture_host_tool_proof())
                 (brew_bin / "bun").write_bytes(BUN_BINARY)
                 wrapper_version = original_run(
                     (str(brew_bin / "bun"), "--version"), capture_output=True, text=True, check=False,
@@ -2094,17 +2244,12 @@ class TrustedJustTest(unittest.TestCase):
             ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
-                provisioned = EVIDENCE.command_binding(parent_environment, provisioned_just, BUN_BINARY_SHA256, rust_proof)
-            self.assertEqual(install_marker.read_text().splitlines(), [
-                os.pathsep.join(EVIDENCE.SYSTEM_COMMAND_PATH), "1", "install graphviz",
-            ])
-            self.assertEqual(
-                Path(provisioned.executables["dot"][0]), dot_path.resolve(strict=True),
-            )
-            EVIDENCE.assert_command_binding(provisioned, provisioned_just)
+                with self.assertRaises(EVIDENCE.EvidenceError):
+                    EVIDENCE.command_binding(
+                        parent_environment, provisioned_just, BUN_BINARY_SHA256, rust_proof, host_proof,
+                    )
+            self.assertFalse(install_marker.exists(), "missing Graphviz must not run Homebrew")
 
-            install_before_invalid = install_marker.read_bytes()
-            dot_path.unlink()
             outside_dot = root / "outside-dot"
             outside_dot.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             outside_dot.chmod(0o755)
@@ -2116,8 +2261,8 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.command_binding(parent_environment, invalid_just, BUN_BINARY_SHA256, rust_proof)
-            self.assertEqual(install_marker.read_bytes(), install_before_invalid)
+                    EVIDENCE.command_binding(parent_environment, invalid_just, BUN_BINARY_SHA256, rust_proof, host_proof)
+            self.assertFalse(install_marker.exists())
 
             dot_path.unlink()
             dot_path.symlink_to(root / "missing-dot-target")
@@ -2128,46 +2273,14 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.command_binding(parent_environment, broken_just, BUN_BINARY_SHA256, rust_proof)
-            self.assertEqual(install_marker.read_bytes(), install_before_invalid)
+                    EVIDENCE.command_binding(parent_environment, broken_just, BUN_BINARY_SHA256, rust_proof, host_proof)
+            self.assertFalse(install_marker.exists())
 
-            dot_path.unlink()
-            dot_failure_just = fixture_just("dot-install-failure-inputs")
-            brew_tool.write_text("#!/bin/sh\nexit 17\n", encoding="utf-8")
-            brew_tool.chmod(0o755)
-            with patch.object(EVIDENCE, "account_home", return_value=account), patch.object(
-                EVIDENCE, "HOMEBREW_ROOT", homebrew,
-            ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
-                EVIDENCE, "trusted_executable", side_effect=select_executable,
-            ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
-                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "bootstrap failed"):
-                    EVIDENCE.command_binding(parent_environment, dot_failure_just, BUN_BINARY_SHA256, rust_proof)
-
-            dot_missing_after_install_just = fixture_just("dot-install-missing-output-inputs")
-            brew_tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            brew_tool.chmod(0o755)
-            with patch.object(EVIDENCE, "account_home", return_value=account), patch.object(
-                EVIDENCE, "HOMEBREW_ROOT", homebrew,
-            ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
-                EVIDENCE, "trusted_executable", side_effect=select_executable,
-            ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
-                with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.command_binding(parent_environment, dot_missing_after_install_just, BUN_BINARY_SHA256, rust_proof)
-
-            dot_tamper_just = fixture_just("dot-install-tamper-inputs")
-            brew_tool.write_text("#!/bin/sh\nprintf tampered > \"$0\"\nexit 0\n", encoding="utf-8")
-            brew_tool.chmod(0o755)
-            with patch.object(EVIDENCE, "account_home", return_value=account), patch.object(
-                EVIDENCE, "HOMEBREW_ROOT", homebrew,
-            ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
-                EVIDENCE, "trusted_executable", side_effect=select_executable,
-            ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
-                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "changed during"):
-                    EVIDENCE.command_binding(parent_environment, dot_tamper_just, BUN_BINARY_SHA256, rust_proof)
+            self.assertFalse(install_marker.exists())
 
             commands_dir = Path(binding.path.split(os.pathsep)[0])
             (commands_dir / "grep").symlink_to(brew_bin / "grep")
-            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "directory changed"):
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "authenticated artifact|directory changed"):
                 EVIDENCE.assert_command_binding(binding, just)
 
     def test_descendant_tools_resolve_from_one_binding_and_ignore_parent_path(self) -> None:
@@ -2183,7 +2296,7 @@ class TrustedJustTest(unittest.TestCase):
             trusted_just.mkdir()
             hostile.mkdir()
             names = (
-                "just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "bun",
+                "just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "bun",
                 "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname",
             )
             trusted_markers = root / "trusted-markers"
@@ -2219,7 +2332,12 @@ class TrustedJustTest(unittest.TestCase):
             source_git = Path("/usr/bin/git").resolve(strict=True)
             entries["source_git"] = (str(source_git), EVIDENCE.sha256_bytes(source_git.read_bytes()))
             path = os.pathsep.join((str(trusted_commands), *EVIDENCE.SYSTEM_COMMAND_PATH))
-            binding = EVIDENCE.CommandBinding(path, entries, {}, RUST_COMPONENT_DIGESTS)
+            binding = EVIDENCE.CommandBinding(
+                path, entries, {}, RUST_COMPONENT_DIGESTS, fixture_host_tool_proof(),
+            )
+            host_tools_patcher = patch.object(EVIDENCE, "verify_installed_host_tools")
+            host_tools_patcher.start()
+            self.addCleanup(host_tools_patcher.stop)
             EVIDENCE.assert_command_binding(binding, just)
             environment = {"PATH": path, "HOSTILE_PARENT_PATH": str(hostile)}
             result = subprocess.run(
