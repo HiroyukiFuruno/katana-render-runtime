@@ -1,7 +1,7 @@
 #[cfg(test)]
 pub(super) const ZENUML_CORE_ASSET_OFFSET: usize = 0;
 #[cfg(test)]
-pub(super) const ZENUML_CORE_ASSET_LENGTH: usize = 3304251;
-pub(super) const MERMAID_ZENUML_ASSET_OFFSET: usize = 3304251;
+pub(super) const ZENUML_CORE_ASSET_LENGTH: usize = 3314424;
+pub(super) const MERMAID_ZENUML_ASSET_OFFSET: usize = 3314424;
 pub(super) const MERMAID_ZENUML_ASSET_LENGTH: usize = 3292004;
-pub(super) const ZENUML_RUNTIME_ASSETS_UNCOMPRESSED_LENGTH: usize = 6596255;
+pub(super) const ZENUML_RUNTIME_ASSETS_UNCOMPRESSED_LENGTH: usize = 6606428;
