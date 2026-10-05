@@ -43,6 +43,18 @@ def _supports_worktree_executable_mode(repository: Path) -> bool:
     return configured.strip() == b"true"
 
 
+def _core_symlinks_disabled(repository: Path) -> bool:
+    try:
+        configured = _git_bytes(
+            repository, "config", "--bool", "--get", "core.symlinks"
+        )
+    except subprocess.CalledProcessError as error:
+        if error.returncode != 1:
+            raise
+        return False
+    return configured.strip() == b"false"
+
+
 def _checkout_configuration(repository: Path) -> dict[str, str]:
     arguments = [
         "git",
@@ -269,9 +281,13 @@ def _assert_checkout_matches_head(repository: Path, reviewed_head: str) -> None:
             raise ContractViolation(f"HEADと一致しません: {name}") from error
 
         if expected_mode == "120000":
-            if not stat.S_ISLNK(actual_mode):
+            if stat.S_ISLNK(actual_mode):
+                actual_bytes = os.fsencode(os.readlink(path))
+            elif stat.S_ISREG(actual_mode) and _core_symlinks_disabled(repository):
+                # symlink無効checkoutはリンク先文字列を通常ファイルへ展開するため、HEAD blobとの完全一致で検証する。
+                actual_bytes = path.read_bytes()
+            else:
                 raise ContractViolation(f"HEADと一致しません: {name}")
-            actual_bytes = os.fsencode(os.readlink(path))
         elif expected_mode in ("100644", "100755"):
             if not stat.S_ISREG(actual_mode):
                 raise ContractViolation(f"HEADと一致しません: {name}")

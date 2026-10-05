@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 import pre_push_head_guard as subject
@@ -67,6 +68,18 @@ class PrePushHeadGuardTest(unittest.TestCase):
         self.assertEqual(committed, b"first\n")
         self.assertEqual((self.repository / "tracked.txt").read_bytes(), b"first\r\n")
         self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def commit_symlink_blob(self) -> tuple[Path, str]:
+        blob = subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"],
+            cwd=self.repository,
+            check=True,
+            capture_output=True,
+            input=b"first-target",
+        ).stdout.decode("ascii").strip()
+        self.git("update-index", "--add", "--cacheinfo", "120000", blob, "link.txt")
+        self.commit("symlink")
+        return self.repository / "link.txt", self.git("rev-parse", "HEAD")
 
     def git(self, *arguments: str) -> str:
         result = subprocess.run(
@@ -171,6 +184,54 @@ class PrePushHeadGuardTest(unittest.TestCase):
         current_head = self.git("rev-parse", "HEAD")
         tracked.unlink()
         tracked.symlink_to("second-target")
+
+        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(
+                self.update(local_sha=current_head), current_head, self.repository
+            )
+
+    def test_accepts_git_materialized_symlink_when_core_symlinks_is_false(self) -> None:
+        tracked, current_head = self.commit_symlink_blob()
+        self.git("config", "core.symlinks", "false")
+        self.git("checkout-index", "--force", "--", "link.txt")
+        self.assertTrue(stat.S_ISREG(tracked.lstat().st_mode))
+        self.assertEqual(tracked.read_bytes(), b"first-target")
+
+        subject.validate_push_head(
+            self.update(local_sha=current_head), current_head, self.repository
+        )
+
+    def test_rejects_regular_symlink_placeholder_when_core_symlinks_is_true(self) -> None:
+        tracked, current_head = self.commit_symlink_blob()
+        self.git("config", "core.symlinks", "true")
+        tracked.write_bytes(b"first-target")
+
+        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+            subject.validate_push_head(
+                self.update(local_sha=current_head), current_head, self.repository
+            )
+
+    def test_rejects_regular_symlink_placeholder_when_core_symlinks_is_unset(self) -> None:
+        tracked, current_head = self.commit_symlink_blob()
+        with patch.dict(
+            os.environ,
+            {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
+        ):
+            self.git("config", "core.symlinks", "true")
+            self.git("config", "--unset", "core.symlinks")
+            tracked.write_bytes(b"first-target")
+
+            with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
+                subject.validate_push_head(
+                    self.update(local_sha=current_head), current_head, self.repository
+                )
+
+    def test_rejects_modified_regular_symlink_placeholder_when_core_symlinks_is_false(
+        self,
+    ) -> None:
+        tracked, current_head = self.commit_symlink_blob()
+        self.git("config", "core.symlinks", "false")
+        tracked.write_bytes(b"tampered-target")
 
         with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
             subject.validate_push_head(
