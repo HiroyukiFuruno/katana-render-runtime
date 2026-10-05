@@ -18,11 +18,11 @@ TAG := "v" + VERSION_BARE
 RELEASE_REPO := env_var_or_default("RELEASE_REPO", "HiroyukiFuruno/katana-render-runtime")
 COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
-MERMAID_JS_VERSION := "12.0.0"
+MERMAID_JS_VERSION := "12.1.0"
 MERMAID_ZENUML_JS_VERSION := "1.0.1"
-DRAWIO_JS_VERSION := "31.6.1"
+DRAWIO_JS_VERSION := "32.0.2"
 MATHJAX_JS_VERSION := "4.1.3"
-ZENUML_CORE_JS_VERSION := "4.3.0"
+ZENUML_CORE_JS_VERSION := "4.4.1"
 PLANTUML_JAR_VERSION := "1.2026.8"
 PLANTUML_JAR_CHECKSUM := "1057dd8b346bed26a48ffebe6054e16fc785dda7c91f37f6c19030a4aab8a942"
 PLAYWRIGHT_VERSION := "1.60.0"
@@ -157,16 +157,14 @@ plantuml-runtime-package-check:
 
 # Run TypeScript tests for runtime asset helper scripts
 runtime-asset-script-test:
-    bun test --path-ignore-patterns 'tmp/**' scripts/runtime-assets/runtime-asset-common_test.ts scripts/runtime-assets/update_test.ts scripts/runtime-assets/latest-check_test.ts scripts/runtime-assets/update_zenuml_test.ts scripts/runtime-assets/depends-update-all_test.ts scripts/runtime-assets/runtime-package-asset-compressor_test.ts
+    bun test --path-ignore-patterns 'tmp/**' scripts/runtime-assets/runtime-asset-common_test.ts scripts/runtime-assets/update_test.ts scripts/runtime-assets/latest-check_test.ts scripts/runtime-assets/update_zenuml_test.ts scripts/runtime-assets/depends-update-all_test.ts scripts/runtime-assets/runtime-package-asset-compressor_test.ts scripts/mermaid/official_renderer_i18n_test.ts scripts/mermaid/diagram_update_markdown_assets_test.ts
     bun test --path-ignore-patterns 'tmp/**' scripts/drawio/reference_score_test.ts scripts/drawio/official-runtime-determinism_test.ts scripts/drawio/official-source-fonts_test.ts
 
 [private]
 runtime-package-asset-check:
     bun run scripts/runtime-assets/runtime-package-asset-compressor.ts --check
     @package_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \
-    for kind_file in \
-      "drawio/{{DRAWIO_JS_VERSION}}/drawio.min.js" \
-      "mermaid/{{MERMAID_JS_VERSION}}/mermaid.min.js"; do \
+    for kind_file in "mermaid/{{MERMAID_JS_VERSION}}/mermaid.min.js"; do \
         if ! printf '%s\n' "$package_files" | grep -qx "vendor/$kind_file.br"; then \
           echo "missing compressed runtime package asset: vendor/$kind_file.br" >&2; \
           exit 1; \
@@ -176,16 +174,36 @@ runtime-package-asset-check:
           exit 1; \
         fi; \
       done
+    @runtime_package_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \
+    asset_package_files="$({{CARGO}} package -p katana-render-runtime-assets --locked --allow-dirty --list)"; \
+    if ! printf '%s\n' "$asset_package_files" | grep -qx "assets/drawio.min.js.br"; then \
+      echo "missing compressed Draw.io asset package file" >&2; exit 1; \
+    fi; \
+    if printf '%s\n' "$runtime_package_files" | grep -Eq '^vendor/drawio/{{DRAWIO_JS_VERSION}}/drawio\.min\.js(\.br)?$'; then \
+      echo "Draw.io source and compressed asset belong to the assets package" >&2; exit 1; \
+    fi
 
 # Verify repository hook and release cleanup contracts
 automation-contract-test:
     python3 -m unittest discover -s scripts/hooks -p '*_test.py'
     python3 -m unittest discover -s scripts/release -p '*_test.py'
 
+# 必要時の要求適合レビューを明示実行し、DraftのPRレビューとの重複を避ける。
+local-review:
+    @export COVERAGE_MIN_LINES={{quote(COVERAGE_MIN_LINES)}} COVERAGE_MAX_UNCOVERED_LINES={{quote(COVERAGE_MAX_UNCOVERED_LINES)}} \
+      TEST_THREADS={{quote(TEST_THREADS)}} RUSTFLAGS={{quote(RUSTFLAGS)}} CARGO={{quote(CARGO)}} JOBS={{quote(JOBS)}} CHECK_JOBS={{quote(CHECK_JOBS)}}; \
+      python3 scripts/hooks/local_review.py
+
+# Draft前後の品質確認は維持し、初回AIレビューはDraftのPR上で実行する。
+draft-review: check
+
 # Run independent local quality-gate lanes concurrently. Cargo and PlantUML
 # work stay in one lane because they share build/cache outputs.
+# 指摘修正ごとの重複を避け、AIレビューは専用targetから明示実行する。
 check:
-    python3 scripts/hooks/run_parallel_checks.py --jobs {{CHECK_JOBS}}
+    @export COVERAGE_MIN_LINES={{quote(COVERAGE_MIN_LINES)}} COVERAGE_MAX_UNCOVERED_LINES={{quote(COVERAGE_MAX_UNCOVERED_LINES)}} \
+      TEST_THREADS={{quote(TEST_THREADS)}} RUSTFLAGS={{quote(RUSTFLAGS)}} CARGO={{quote(CARGO)}} JOBS={{quote(JOBS)}} CHECK_JOBS={{quote(CHECK_JOBS)}}; \
+      python3 scripts/hooks/run_parallel_checks.py --jobs "$CHECK_JOBS"
     @echo "checks passed"
 
 # Cargo operations share target/ and the PlantUML cache, so keep them ordered.
@@ -237,15 +255,26 @@ release-target-manifest:
 release-target-manifest-update:
     python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --head-ref HEAD --update-release-manifest
 
-# Verify package metadata and dry-run the first publishable crate
+# 未公開のworkspace依存を含め、Cargoの検証を通した配布packageを揃える。
 release-verify: release-target-check
     bash scripts/release/verify-version.sh "{{VERSION}}"
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
-    {{CARGO}} package -p katana-render-runtime --locked --allow-dirty
-    {{CARGO}} test --manifest-path "target/package/katana-render-runtime-{{VERSION_BARE}}/Cargo.toml" --lib --locked{{TEST_THREAD_ARGS}}
-    {{CARGO}} package -p katana-render-runtime-cli --locked --allow-dirty --list >/dev/null
+    {{CARGO}} package -p katana-render-runtime-assets -p katana-render-runtime -p katana-render-runtime-cli --locked --allow-dirty
+    python3 scripts/release/test_packaged_runtime.py --version "{{VERSION_BARE}}" --cargo {{quote(CARGO)}} {{if TEST_THREADS == "" { "" } else { "--test-threads " + TEST_THREADS }}}
+    @asset_files="$({{CARGO}} package -p katana-render-runtime-assets --locked --allow-dirty --list)"; \
+    if ! printf '%s\n' "$asset_files" | grep -qx "assets/drawio.min.js.br"; then \
+      echo "missing compressed Draw.io asset from assets crate package" >&2; exit 1; \
+    fi
+    @runtime_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \
+    for file in "vendor/drawio/{{DRAWIO_JS_VERSION}}/drawio.min.js.sha256"; do \
+      if ! printf '%s\n' "$runtime_files" | grep -qx "$file"; then echo "missing runtime source/checksum package file: $file" >&2; exit 1; fi; \
+    done; \
+    if printf '%s\n' "$runtime_files" | grep -Eq '^vendor/drawio/{{DRAWIO_JS_VERSION}}/drawio\.min\.js(\.br)?$'; then \
+      echo "Draw.io source and compressed asset must not be duplicated in the runtime crate" >&2; exit 1; \
+    fi
     bash scripts/release/verify-crate-size.sh katana-render-runtime "{{VERSION}}"
-    {{CARGO}} publish -p katana-render-runtime --dry-run --locked --allow-dirty
+    bash scripts/release/verify-crate-size.sh katana-render-runtime-assets "{{VERSION}}"
+    bash scripts/release/verify-crate-size.sh katana-render-runtime-cli "{{VERSION}}"
 
 # Verify completed OpenSpec changes are archived before release PRs
 release-openspec-archive:
@@ -275,9 +304,10 @@ krr-build:
 
 # Force-update all Rust and JavaScript dependencies plus pinned runtime assets, then run required checks
 depends-update-all:
-    {{CARGO}} upgrade -i allow --pinned allow
+    {{CARGO}} upgrade -i allow --pinned allow --exclude skrifa
     python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"
     {{CARGO}} update
+    python3 scripts/release/update_usvg_skrifa_pair.py --cargo "{{CARGO}}"
     bun update --latest
     bun run scripts/runtime-assets/depends-update-all.ts
     bun run scripts/drawio/resource-update.ts --resources "{{DRAWIO_RESOURCE_DIR}}" --manifest "{{DRAWIO_RESOURCE_MANIFEST}}"

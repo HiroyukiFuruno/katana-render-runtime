@@ -21,6 +21,8 @@ class PrePushDispatcherTest(unittest.TestCase):
         self.log = self.root / "order.log"
         self.issue_stdin = self.root / "issue-stdin.log"
         self.issue_arguments = self.root / "issue-arguments.log"
+        self.remote_log = self.root / "review-remote.log"
+        self.remote_url_log = self.root / "review-remote-url.log"
         self.repository.mkdir()
         self.bin_directory.mkdir()
         subprocess.run(
@@ -30,17 +32,41 @@ class PrePushDispatcherTest(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Hook test",
+                "-c",
+                "user.email=hook@example.test",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
+            cwd=self.repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         self.write_executable(
             "just",
             '#!/bin/sh\nprintf "check:%s:%s\\n" "${GIT_DIR-unset}" "${GIT_WORK_TREE-unset}" >> "$ORDER_LOG"\n'
+            'printf "%s\\n" "${REVIEW_REMOTE-unset}" > "$REVIEW_REMOTE_LOG"\n'
+            'printf "%s\\n" "${REVIEW_REMOTE_URL-unset}" > "$REVIEW_REMOTE_URL_LOG"\n'
             'if [ "${JUST_CONSUME_STDIN:-0}" = "1" ]; then cat >/dev/null; fi\n'
             'exit "${JUST_EXIT:-0}"\n',
         )
         self.write_executable(
             "python3",
-            '#!/bin/sh\nprintf "issue\\n" >> "$ORDER_LOG"\n'
-            'printf "%s\\n" "$*" > "$ISSUE_ARGUMENTS_LOG"\n'
-            'cat > "$ISSUE_STDIN_LOG"\nexit 0\n',
+            '#!/bin/sh\n'
+            'case "$1" in\n'
+            '  scripts/hooks/verify_push_issue.py) printf "issue\\n" >> "$ORDER_LOG"; '
+            'printf "%s\\n" "$*" > "$ISSUE_ARGUMENTS_LOG"; cat > "$ISSUE_STDIN_LOG" ;;\n'
+            '  scripts/hooks/pre_push_head_guard.py) printf "head-guard\\n" >> "$ORDER_LOG"; '
+            'cat >/dev/null ;;\n'
+            '  *) exit 2 ;;\n'
+            'esac\nexit 0\n',
         )
 
     def tearDown(self) -> None:
@@ -64,6 +90,8 @@ class PrePushDispatcherTest(unittest.TestCase):
         environment["ORDER_LOG"] = str(self.log)
         environment["ISSUE_STDIN_LOG"] = str(self.issue_stdin)
         environment["ISSUE_ARGUMENTS_LOG"] = str(self.issue_arguments)
+        environment["REVIEW_REMOTE_LOG"] = str(self.remote_log)
+        environment["REVIEW_REMOTE_URL_LOG"] = str(self.remote_url_log)
         environment["JUST_EXIT"] = str(just_exit)
         environment["JUST_CONSUME_STDIN"] = "1" if just_consume_stdin else "0"
         return subprocess.run(
@@ -76,10 +104,13 @@ class PrePushDispatcherTest(unittest.TestCase):
             check=False,
         )
 
-    def test_repository_check_runs_before_issue_contract(self) -> None:
+    def test_issue_contract_and_head_binding_run_before_and_after_repository_check(self) -> None:
         result = self.run_dispatcher()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), ["check:unset:unset", "issue"])
+        self.assertEqual(
+            self.log.read_text(encoding="utf-8").splitlines(),
+            ["issue", "head-guard", "check:unset:unset", "head-guard"],
+        )
 
     def test_python_selection_supports_both_homebrew_macos_prefixes(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
@@ -88,7 +119,10 @@ class PrePushDispatcherTest(unittest.TestCase):
     def test_test_python_override_is_preserved(self) -> None:
         result = self.run_dispatcher()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), ["check:unset:unset", "issue"])
+        self.assertEqual(
+            self.log.read_text(encoding="utf-8").splitlines(),
+            ["issue", "head-guard", "check:unset:unset", "head-guard"],
+        )
 
     def test_repository_check_scrubs_the_calling_hook_git_state(self) -> None:
         with mock.patch.dict(
@@ -101,12 +135,18 @@ class PrePushDispatcherTest(unittest.TestCase):
         ):
             result = self.run_dispatcher()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), ["check:unset:unset", "issue"])
+        self.assertEqual(
+            self.log.read_text(encoding="utf-8").splitlines(),
+            ["issue", "head-guard", "check:unset:unset", "head-guard"],
+        )
 
-    def test_issue_contract_does_not_run_when_repository_check_fails(self) -> None:
+    def test_repository_check_failure_stops_after_precheck(self) -> None:
         result = self.run_dispatcher(just_exit=19)
         self.assertEqual(result.returncode, 19)
-        self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), ["check:unset:unset"])
+        self.assertEqual(
+            self.log.read_text(encoding="utf-8").splitlines(),
+            ["issue", "head-guard", "check:unset:unset"],
+        )
 
     def test_push_updates_survive_repository_check_stdin_consumption(self) -> None:
         update = (
@@ -122,14 +162,23 @@ class PrePushDispatcherTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.issue_stdin.read_text(encoding="utf-8"), update)
+        self.assertEqual(
+            self.log.read_text(encoding="utf-8").splitlines(),
+            ["issue", "head-guard", "check:unset:unset", "head-guard"],
+        )
 
     def test_remote_name_is_forwarded_to_issue_contract(self) -> None:
-        result = self.run_dispatcher(dispatcher_arguments=("upstream", "https://example.test/repo.git"))
+        result = self.run_dispatcher(
+            dispatcher_arguments=("upstream", "https://example.test/repo.git")
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             self.issue_arguments.read_text(encoding="utf-8"),
             "scripts/hooks/verify_push_issue.py --remote upstream --remote-url https://example.test/repo.git\n",
         )
+        self.assertEqual(self.remote_log.read_text(encoding="utf-8"), "upstream\n")
+        self.assertEqual(self.remote_url_log.read_text(encoding="utf-8"),
+                         "https://example.test/repo.git\n")
 
     def test_url_push_forwards_url_as_both_remote_arguments(self) -> None:
         url = "https://example.test/repo.git"

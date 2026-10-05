@@ -141,10 +141,13 @@ class MermaidDiagramUpdate {
     writer: MarkdownReferenceWriter,
     fixture: Fixture,
   ) {
+    const referencesBeforeRender = this.markdownAssets.capture(fixture);
     try {
       await this.renderRequiredFixture(renderer, writer, fixture);
     } catch (error) {
-      this.markdownAssets.remove(fixture);
+      if (!this.markdownAssets.skipFailedFixture(fixture, referencesBeforeRender)) {
+        throw error;
+      }
       this.skippedReport.add(fixture, ErrorSummary.fromString(String(error)));
     }
   }

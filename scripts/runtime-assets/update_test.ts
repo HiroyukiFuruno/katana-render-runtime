@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DrawioWarExtractor } from "./drawio-war-extractor";
-import { RuntimeAssetChecksum } from "./runtime-asset-common";
+import { RuntimeAssetCatalog, RuntimeAssetChecksum } from "./runtime-asset-common";
 import { RuntimeSourceUpdater } from "./update";
 
 test("Draw.io WAR から 1MiB を超える viewer.min.js を展開できる", () => {
@@ -44,6 +44,27 @@ test("Rust runtime asset version const を 1 行形式でも更新できる", ()
   expect(updated).toBe('pub const DRAWIO_JS_VERSION: &str = "30.0.1";\n');
 });
 
+test("Draw.io の静的 assets crate 参照は version 更新で変化しない", () => {
+  const source = "bytes: katana_render_runtime_assets::DRAWIO_RUNTIME_BROTLI,\n";
+  const drawio = {
+    kind: "drawio",
+    displayName: "Draw.io",
+    version: "32.0.2",
+    checksum: "checksum",
+    fileName: "drawio.min.js",
+    rustVersionConst: "DRAWIO_JS_VERSION",
+    rustChecksumConst: "DRAWIO_JS_CHECKSUM",
+    rustDownloadConst: "DRAWIO_DOWNLOAD_URL",
+    latestUrl: "latest",
+    releasePageUrl: (version: string) => version,
+    downloadUrl: (version: string) => version,
+  } as const;
+
+  expect(new RuntimeSourceUpdater().replaceVendorAssetVersion(source, drawio, "32.1.0")).toBe(
+    source,
+  );
+});
+
 test("長い Rust const も rustfmt と同じ 1 行形式で更新する", () => {
   const source = 'pub const PLANTUML_DOWNLOAD_URL: &str = "old";\n';
   const value =
@@ -79,6 +100,30 @@ test("PlantUML package include は checksum manifest だけを更新する", () 
   expect(updated).toBe('include = ["vendor/plantuml/1.2026.4/plantuml.jar.sha256",]\n');
 });
 
+test("Draw.io version 更新はruntime checksum pathだけを更新する", () => {
+  const drawio = {
+    kind: "drawio",
+    displayName: "Draw.io",
+    version: "32.0.2",
+    checksum: "checksum",
+    fileName: "drawio.min.js",
+    rustVersionConst: "DRAWIO_JS_VERSION",
+    rustChecksumConst: "DRAWIO_JS_CHECKSUM",
+    rustDownloadConst: "DRAWIO_DOWNLOAD_URL",
+    latestUrl: "latest",
+    releasePageUrl: (version: string) => version,
+    downloadUrl: (version: string) => version,
+  } as const;
+  const source = [
+    '"vendor/drawio/32.0.2/drawio.min.js.sha256",',
+    '"assets/drawio.min.js.br",',
+  ].join("\n");
+
+  const updated = new RuntimeSourceUpdater().replacePackageIncludeVersion(source, drawio, "33.0.0");
+
+  expect(updated).toBe('"vendor/drawio/33.0.0/drawio.min.js.sha256",\n"assets/drawio.min.js.br",');
+});
+
 test("圧縮配布資産の package include は全ファイルを同じ version へ更新する", () => {
   const mermaid = {
     kind: "mermaid",
@@ -109,4 +154,61 @@ test("圧縮配布資産の package include は全ファイルを同じ version 
   expect(updated).toContain('"vendor/mermaid/11.18.0/mermaid.min.js.br",');
   expect(updated).toContain('"vendor/mermaid/11.18.0/mermaid.min.js.sha256",');
   expect(updated).not.toContain("11.17.2");
+});
+
+test("runtime asset documentation は version、path、checksum を catalog から同期する", () => {
+  const zenumlCore = RuntimeAssetCatalog.byKind("zenuml-core");
+  const plantuml = RuntimeAssetCatalog.byKind("plantuml");
+  const source = [
+    "| runtime | version | file | sha256 |",
+    "| --- | --- | --- | --- |",
+    "| ZenUML Core | 4.4.0 | `crates/katana-render-runtime/vendor/zenuml-core/4.4.0/zenuml.js` | `old-core` |",
+    "| PlantUML | 1.2026.8 | `crates/katana-render-runtime/vendor/plantuml/1.2026.8/plantuml.jar.sha256` | `old-plantuml` |",
+    "| Mermaid.js | 12.1.0 | `crates/katana-render-runtime/vendor/mermaid/12.1.0/mermaid.min.js` | `keep-mermaid` |",
+  ].join("\n");
+  const updater = new RuntimeSourceUpdater();
+
+  const coreUpdated = updater.replaceRuntimeAssetDocumentation(
+    source,
+    zenumlCore,
+    "4.4.1",
+    "new-core-checksum",
+  );
+  const updated = updater.replaceRuntimeAssetDocumentation(
+    coreUpdated,
+    plantuml,
+    "1.2026.9",
+    "new-plantuml-checksum",
+  );
+
+  expect(updated).toContain(
+    "| ZenUML Core | 4.4.1 | `crates/katana-render-runtime/vendor/zenuml-core/4.4.1/zenuml.js` | `new-core-checksum` |",
+  );
+  expect(updated).toContain(
+    "| PlantUML | 1.2026.9 | `crates/katana-render-runtime/vendor/plantuml/1.2026.9/plantuml.jar.sha256` | `new-plantuml-checksum` |",
+  );
+  expect(updated).toContain(
+    "| Mermaid.js | 12.1.0 | `crates/katana-render-runtime/vendor/mermaid/12.1.0/mermaid.min.js` | `keep-mermaid` |",
+  );
+  expect(
+    updater.replaceRuntimeAssetDocumentation(updated, zenumlCore, "4.4.1", "new-core-checksum"),
+  ).toBe(updated);
+});
+
+test("runtime asset documentation は欠落・重複した row を拒否する", () => {
+  const zenumlCore = RuntimeAssetCatalog.byKind("zenuml-core");
+  const updater = new RuntimeSourceUpdater();
+  const row = "| ZenUML Core | 4.4.0 | `old-path` | `old-checksum` |";
+
+  expect(() =>
+    updater.replaceRuntimeAssetDocumentation(
+      "| runtime | version | file | sha256 |",
+      zenumlCore,
+      "4.4.1",
+      "new",
+    ),
+  ).toThrow("Runtime asset documentation row must be unique: ZenUML Core");
+  expect(() =>
+    updater.replaceRuntimeAssetDocumentation(`${row}\n${row}`, zenumlCore, "4.4.1", "new"),
+  ).toThrow("Runtime asset documentation row must be unique: ZenUML Core");
 });

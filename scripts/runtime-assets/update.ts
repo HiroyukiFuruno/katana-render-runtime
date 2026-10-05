@@ -45,6 +45,15 @@ class RuntimeAssetDownloader {
 
 export class RuntimeSourceUpdater {
   update(definition: RuntimeAssetDefinition, version: string, checksum: string) {
+    const documentationPath = "docs/runtime-assets.md";
+    const documentation = fs.readFileSync(documentationPath, "utf8");
+    const updatedDocumentation = this.replaceRuntimeAssetDocumentation(
+      documentation,
+      definition,
+      version,
+      checksum,
+    );
+
     this.updateRust(definition, version, checksum);
     this.updateMermaidZenumlReferences(definition, version);
     if (definition.kind !== "mathjax") {
@@ -52,6 +61,34 @@ export class RuntimeSourceUpdater {
     }
     this.updateJustfile(definition, version, checksum);
     this.updateScriptCatalog(definition, version, checksum);
+    fs.writeFileSync(documentationPath, updatedDocumentation, "utf8");
+  }
+
+  replaceRuntimeAssetDocumentation(
+    source: string,
+    definition: RuntimeAssetDefinition,
+    version: string,
+    checksum: string,
+  ): string {
+    const displayName = definition.kind === "plantuml" ? "PlantUML" : definition.displayName;
+    const assetPath =
+      definition.kind === "plantuml"
+        ? RuntimeAssetPaths.checksumFile(definition, version)
+        : RuntimeAssetPaths.assetFile(definition, version);
+    const portableAssetPath = assetPath.replaceAll("\\", "/");
+    const lines = source.split("\n");
+    const rowIndexes = lines.flatMap((line, index) => {
+      const columns = line.split("|");
+      return columns[1]?.trim() === displayName ? [index] : [];
+    });
+    const rowIndex = rowIndexes[0];
+    if (rowIndexes.length !== 1 || rowIndex === undefined) {
+      throw new Error(`Runtime asset documentation row must be unique: ${displayName}`);
+    }
+
+    lines[rowIndex] =
+      `| ${displayName} | ${version} | \`${portableAssetPath}\` | \`${checksum}\` |`;
+    return lines.join("\n");
   }
 
   private updateRust(definition: RuntimeAssetDefinition, version: string, checksum: string) {
@@ -70,6 +107,7 @@ export class RuntimeSourceUpdater {
     if (
       definition.kind !== "mermaid-zenuml" &&
       definition.kind !== "zenuml-core" &&
+      definition.kind !== "drawio" &&
       definition.kind !== "plantuml" &&
       definition.kind !== "mathjax"
     ) {
@@ -142,6 +180,9 @@ export class RuntimeSourceUpdater {
     definition: RuntimeAssetDefinition,
     version: string,
   ): string {
+    if (definition.kind === "drawio") {
+      return source;
+    }
     const kind = this.escapePattern(definition.kind);
     const fileName = this.escapePattern(definition.fileName);
     const pattern = new RegExp(`(vendor/${kind}/)[^/]+(/${fileName}(?:\\.br)?)`);

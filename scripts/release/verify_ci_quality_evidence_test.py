@@ -781,6 +781,21 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", preflight_job)
         self.assertIn('startsWith(github.head_ref, \'release/v\')', evidence_job)
 
+    def test_release_preflight_cancels_older_runs_for_the_same_pull_request(self) -> None:
+        workflow = (self.ROOT / ".github/workflows/release-preflight.yml").read_text(encoding="utf-8")
+        self.assertIn("concurrency:\n", workflow)
+        concurrency = workflow[workflow.index("concurrency:\n") : workflow.index("\npermissions:")]
+        group_expression = "${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}"
+        cancel_expression = "${{ github.event_name == 'pull_request' }}"
+
+        # Draft 化runでも既存runを止めるには、jobではなくworkflowのtriggerがcancelを所有する必要がある。
+        self.assertLess(workflow.index("concurrency:\n"), workflow.index("jobs:\n"))
+        self.assertIn(f"group: {group_expression}", concurrency)
+        self.assertIn(f"cancel-in-progress: {cancel_expression}", concurrency)
+        pull_request_trigger = workflow[workflow.index("  pull_request:\n") : workflow.index("  workflow_dispatch:")]
+        for event_type in ("synchronize", "ready_for_review", "converted_to_draft"):
+            self.assertIn(event_type, pull_request_trigger)
+
     def test_local_release_check_keeps_full_quality_gate(self) -> None:
         justfile = (self.ROOT / "Justfile").read_text(encoding="utf-8")
         self.assertIn("release-check: release-quality release-specific", justfile)

@@ -4,11 +4,11 @@
 
 | runtime | version | file | sha256 |
 | --- | --- | --- | --- |
-| Mermaid.js | 12.0.0 | `crates/katana-render-runtime/vendor/mermaid/12.0.0/mermaid.min.js` | `28fca7ae6ebc7ed7bb63bde63136a74bfef14f296a57e403657eeb8b32836073` |
+| Mermaid.js | 12.1.0 | `crates/katana-render-runtime/vendor/mermaid/12.1.0/mermaid.min.js` | `6484afc32872a3aa16cac9a76ba1816a1ed4cc870a6593cc2e17757750f518b2` |
 | Mermaid ZenUML | 1.0.1 | `crates/katana-render-runtime/vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js` | `f75662869d22aac58870e52370fe4c46b89b9710bf4b03df93b3227b5e18e730` |
-| Draw.io | 31.5.3 | `crates/katana-render-runtime/vendor/drawio/31.5.3/drawio.min.js` | `f2593147a978f978fc1fe4d8192f407dbf59c239e091adc84519738b95766f39` |
+| Draw.io | 32.0.2 | `crates/katana-render-runtime/vendor/drawio/32.0.2/drawio.min.js` | `21c390edd6aff2aa527596c0cddb90a3059dc40f39104c0df85790252608dcca` |
 | MathJax | 4.1.3 | `crates/katana-render-runtime/vendor/mathjax/4.1.3/tex-svg.js` | `23c036deccc0f2374834a47e4032e452419f3ac027bf17e17c104e2746b19f4c` |
-| ZenUML Core | 4.3.0 | `crates/katana-render-runtime/vendor/zenuml-core/4.3.0/zenuml.js` | `7e48bc62d5ef65d2f30747da6dc7da01b7175ff9c637dda066a4b92c2d8bdf4d` |
+| ZenUML Core | 4.4.1 | `crates/katana-render-runtime/vendor/zenuml-core/4.4.1/zenuml.js` | `9b0465fca4a804ab19965296f6567fd8cd9f797eee0af6c2daf7472b0191cd53` |
 | PlantUML | 1.2026.8 | `crates/katana-render-runtime/vendor/plantuml/1.2026.8/plantuml.jar.sha256` | `1057dd8b346bed26a48ffebe6054e16fc785dda7c91f37f6c19030a4aab8a942` |
 
 MathJax は公式配布の JavaScript asset を repository 上で checksum 管理し、実行に使う自己完結 bundle は

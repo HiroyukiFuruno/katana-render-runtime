@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" style="background: transparent; background-color: transparent;" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="1110px" height="734px" viewBox="0 0 1110 734" id="ge-svg-stvYPtCz7GPSBeprOCMs"><style type="text/css">@supports (color: light-dark(#000, #fff)) { #ge-svg-stvYPtCz7GPSBeprOCMs { --ge-adaptive-bg: light-dark(#ffffff, var(--ge-dark-color, #121212)); } }</style><defs><symbol id="mx-symbol-l9r8kh" viewBox="0 0 20 20" preserveAspectRatio="none" style="color-scheme: light dark;">
-	<style type="text/css">#mx-symbol-l9r8kh .mx-symbol-l9r8kh-st0{ fill: var(--mx-r0); }#mx-symbol-l9r8kh .mx-symbol-l9r8kh-st1{ fill: var(--mx-r1); }#mx-symbol-l9r8kh .mx-symbol-l9r8kh-st2{ fill: var(--mx-r2); }
-</style>
+	<style type="text/css">#mx-symbol-l9r8kh .mx-symbol-l9r8kh-st0 { fill: var(--mx-r0); }
+#mx-symbol-l9r8kh .mx-symbol-l9r8kh-st1 { fill: var(--mx-r1); }
+#mx-symbol-l9r8kh .mx-symbol-l9r8kh-st2 { fill: var(--mx-r2); }</style>
 	<path class="mx-symbol-l9r8kh-st1" d="M16 10h2v4h-2zm-7 0h2v4H9zm-7 0h2v4H2z"></path>
 	<path class="mx-symbol-l9r8kh-st0" d="M9 5h2v4H9z"></path>
 	<path class="mx-symbol-l9r8kh-st1" d="M2 9h16v2H2z"></path>
@@ -11,8 +12,10 @@
 	<path class="mx-symbol-l9r8kh-st2" d="M7 14h6v6H7z"></path>
 	<path class="mx-symbol-l9r8kh-st1" d="M10 14h3v6h-3zm7 0h3v6h-3z"></path>
 </symbol><symbol id="mx-symbol-b6lsbj" viewBox="0 0 20 20" preserveAspectRatio="none" style="color-scheme: light dark;">
-	<style type="text/css">#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st0{ fill: var(--mx-r0); }#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st1{ fill: var(--mx-r1); }#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st2{ fill: var(--mx-r2); }#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st3{ fill: var(--mx-r3); }
-</style>
+	<style type="text/css">#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st0 { fill: var(--mx-r0); }
+#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st1 { fill: var(--mx-r1); }
+#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st2 { fill: var(--mx-r2); }
+#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st3 { fill: var(--mx-r3); }</style>
 	<path class="mx-symbol-b6lsbj-st0" d="M9 6h2v10H9z"></path>
 	<path class="mx-symbol-b6lsbj-st1" d="M20 17H0v2h20z"></path>
 	<path class="mx-symbol-b6lsbj-st2" d="M12 16H8v4h4zM0 0h20v6H0z"></path>
@@ -22,15 +25,18 @@
 	<path class="mx-symbol-b6lsbj-st1" d="M10 8h10v6H10z"></path>
 	<path class="mx-symbol-b6lsbj-st3" d="M2 10h2v2H2z"></path>
 </symbol><symbol id="mx-symbol-1rjjz77" viewBox="8.940696716308594e-8 0 20 16.020000457763672" preserveAspectRatio="none" fill-rule="evenodd" style="color-scheme: light dark;">
-	<style type="text/css">#mx-symbol-1rjjz77 .mx-symbol-1rjjz77-st0{ fill: var(--mx-r0); }#mx-symbol-1rjjz77 .mx-symbol-1rjjz77-st1{ fill: var(--mx-r1); }#mx-symbol-1rjjz77 .mx-symbol-1rjjz77-st2{ fill: var(--mx-r2); }
-</style>
+	<style type="text/css">#mx-symbol-1rjjz77 .mx-symbol-1rjjz77-st0 { fill: var(--mx-r0); }
+#mx-symbol-1rjjz77 .mx-symbol-1rjjz77-st1 { fill: var(--mx-r1); }
+#mx-symbol-1rjjz77 .mx-symbol-1rjjz77-st2 { fill: var(--mx-r2); }</style>
 	<path class="mx-symbol-1rjjz77-st0" d="M12.3 7.26l-1.22 1.22A1.71 1.71 0 0 1 10 11.49a1.74 1.74 0 0 1-1.33-.64l-1.22 1.22a3.43 3.43 0 0 0 5.984-1.381A3.43 3.43 0 0 0 12.3 7.26z"></path>
 	<path class="mx-symbol-1rjjz77-st1" d="M10 3.52a6.25 6.25 0 0 0 0 12.5 6.25 6.25 0 0 0 0-12.5m0 10.74a4.45 4.45 0 0 1-3.157-7.597A4.45 4.45 0 0 1 14.44 9.82 4.44 4.44 0 0 1 10 14.26"></path>
 	<path class="mx-symbol-1rjjz77-st2" d="M19.62 9.16l-2.56-.81a7.1 7.1 0 0 1 .17 1.53 7.62 7.62 0 0 1-.08 1.08h2.47a.44.44 0 0 0 .38-.42v-1a.44.44 0 0 0-.38-.42M10 2.78a7.48 7.48 0 0 1 1.5.15L10.58.38c-.07-.22-.21-.38-.42-.38h-.38a.45.45 0 0 0-.42.38l-.8 2.54A7.64 7.64 0 0 1 10 2.78m-7.23 7.1a7.1 7.1 0 0 1 .17-1.53l-2.56.81a.44.44 0 0 0-.38.42v1a.44.44 0 0 0 .38.42h2.47a7.62 7.62 0 0 1-.08-1.08"></path>
 	<path class="mx-symbol-1rjjz77-st1" d="M10 7.26a2.5 2.5 0 1 0 0 5 2.5 2.5 0 1 0 0-5zm0 3.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 1.25 1.25A1.25 1.25 0 0 1 10 11.02z"></path>
 </symbol><symbol id="mx-symbol-rh39ix" viewBox="0 0 20 16" preserveAspectRatio="none" style="color-scheme: light dark;">
-	<style type="text/css">#mx-symbol-rh39ix .mx-symbol-rh39ix-st0{ fill: var(--mx-r0); }#mx-symbol-rh39ix .mx-symbol-rh39ix-st1{ fill: var(--mx-r1); }#mx-symbol-rh39ix .mx-symbol-rh39ix-st2{ fill: var(--mx-r2); }#mx-symbol-rh39ix .mx-symbol-rh39ix-st3{ fill: var(--mx-r3); }
-</style>
+	<style type="text/css">#mx-symbol-rh39ix .mx-symbol-rh39ix-st0 { fill: var(--mx-r0); }
+#mx-symbol-rh39ix .mx-symbol-rh39ix-st1 { fill: var(--mx-r1); }
+#mx-symbol-rh39ix .mx-symbol-rh39ix-st2 { fill: var(--mx-r2); }
+#mx-symbol-rh39ix .mx-symbol-rh39ix-st3 { fill: var(--mx-r3); }</style>
 	<path class="mx-symbol-rh39ix-st2" d="M0 0h20v7H0z"></path>
 	<path class="mx-symbol-rh39ix-st1" d="M18 0h2v7h-2z"></path>
 	<path class="mx-symbol-rh39ix-st0" d="M18 7l2-7h-2z"></path>
@@ -48,10 +54,10 @@
 		<rect x="13" y="11" width="3" height="3" rx="1.5"></rect>
 	</g>
 </symbol><symbol id="mx-symbol-1b4go1v" viewBox="0 0 14.65999984741211 20" preserveAspectRatio="none" style="color-scheme: light dark;">
-	<style type="text/css">#mx-symbol-1b4go1v .mx-symbol-1b4go1v-st0{ fill: var(--mx-r0); }#mx-symbol-1b4go1v .mx-symbol-1b4go1v-st1{ fill: var(--mx-r1); }#mx-symbol-1b4go1v .mx-symbol-1b4go1v-st2{ fill: var(--mx-r2); }
-</style>
-	<style>#mx-symbol-1b4go1v .mx-symbol-1b4go1v-D{ fill-rule: evenodd; }
-</style>
+	<style type="text/css">#mx-symbol-1b4go1v .mx-symbol-1b4go1v-st0 { fill: var(--mx-r0); }
+#mx-symbol-1b4go1v .mx-symbol-1b4go1v-st1 { fill: var(--mx-r1); }
+#mx-symbol-1b4go1v .mx-symbol-1b4go1v-st2 { fill: var(--mx-r2); }</style>
+	<style>#mx-symbol-1b4go1v .mx-symbol-1b4go1v-D { fill-rule: evenodd; }</style>
 	<path d="M7.33 15.35v-3.01L0 8.44v3.01zm0 4.65v-3.01L0 13.09v3.01z" class="mx-symbol-1b4go1v-st2 mx-symbol-1b4go1v-D"></path>
 	<path d="M14.66 8.44l-7.33 3.9v3.01l7.33-3.9zm0 4.65l-7.33 3.9V20l7.33-3.9z" class="mx-symbol-1b4go1v-st1 mx-symbol-1b4go1v-D"></path>
 	<path d="M7.33 0v3.01l7.33 3.9V3.9z" class="mx-symbol-1b4go1v-st0 mx-symbol-1b4go1v-D"></path>
@@ -59,8 +65,10 @@
 	<path d="M7.33 10.79V7.77L0 3.87v3.02z" class="mx-symbol-1b4go1v-D mx-symbol-1b4go1v-st2"></path>
 	<path d="M14.66 3.87l-7.33 3.9v3.02l7.33-3.9z" class="mx-symbol-1b4go1v-D mx-symbol-1b4go1v-st1"></path>
 </symbol><symbol id="mx-symbol-1p9jxe6" viewBox="0 0 30 21" preserveAspectRatio="none" style="color-scheme: light dark;">
-	<style type="text/css">#mx-symbol-1p9jxe6 .mx-symbol-1p9jxe6-st0{ fill: var(--mx-r0); }#mx-symbol-1p9jxe6 .mx-symbol-1p9jxe6-st1{ fill: var(--mx-r1); }#mx-symbol-1p9jxe6 .mx-symbol-1p9jxe6-st2{ fill: var(--mx-r2); }#mx-symbol-1p9jxe6 .mx-symbol-1p9jxe6-st3{ fill: var(--mx-r3); }
-</style>
+	<style type="text/css">#mx-symbol-1p9jxe6 .mx-symbol-1p9jxe6-st0 { fill: var(--mx-r0); }
+#mx-symbol-1p9jxe6 .mx-symbol-1p9jxe6-st1 { fill: var(--mx-r1); }
+#mx-symbol-1p9jxe6 .mx-symbol-1p9jxe6-st2 { fill: var(--mx-r2); }
+#mx-symbol-1p9jxe6 .mx-symbol-1p9jxe6-st3 { fill: var(--mx-r3); }</style>
 	<path d="M0 0l1.5 1.5h6L9 0z" class="mx-symbol-1p9jxe6-st2"></path>
 	<path d="M9 9V0L7.5 1.5v6z" class="mx-symbol-1p9jxe6-st1"></path>
 	<path d="M0 9l1.5-1.5v-6L0 0z" class="mx-symbol-1p9jxe6-st2"></path>

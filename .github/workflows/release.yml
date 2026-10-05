@@ -67,6 +67,7 @@ jobs:
       - name: Release target check
         env:
           GH_TOKEN: ${{ github.token }}
+          ALLOW_PUBLISHED_PREFIX: "true"
         run: just VERSION="${{ steps.version.outputs.version }}" release-target-check
 
   release:
@@ -108,6 +109,7 @@ jobs:
       - name: Verify release package
         env:
           GH_TOKEN: ${{ github.token }}
+          ALLOW_PUBLISHED_PREFIX: "true"
         run: just VERSION="${{ needs.release-context.outputs.version }}" release-verify
 
       - name: Create release tag
@@ -133,7 +135,7 @@ jobs:
         run: bash scripts/release/publish-crates.sh "${{ needs.release-context.outputs.version }}"
 
       # Keep a failed publication recoverable: a public GitHub Release is
-      # evidence that both crates are already visible in the registry.
+      # evidence that all three crates are already visible in the registry.
       - name: Publish complete GitHub Release
         if: github.event_name == 'pull_request' || inputs.publish_crates == true
         env:

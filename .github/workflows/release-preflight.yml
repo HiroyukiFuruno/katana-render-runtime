@@ -3,12 +3,17 @@ name: release-preflight
 on:
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
     inputs:
       version:
         description: "Release version, for example v0.1.0. Defaults to Cargo.toml version."
         required: false
         type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   actions: read
@@ -25,6 +30,7 @@ jobs:
     name: reusable Ubuntu CI evidence
     if: >-
       github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.head_ref, 'release/v')
     runs-on: ubuntu-latest
@@ -69,6 +75,7 @@ jobs:
     if: >-
       always() && (github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.head_ref, 'release/v') &&
       needs.evidence.result == 'success'))

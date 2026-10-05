@@ -19,11 +19,11 @@ const ZENUML_RUNTIME_ASSET_ARCHIVE: &[u8] =
 #[cfg(test)]
 include!("generated/zenuml-runtime-assets-index.rs");
 
-pub const MERMAID_JS_VERSION: &str = "12.0.0";
+pub const MERMAID_JS_VERSION: &str = "12.1.0";
 pub const MERMAID_JS_CHECKSUM: &str =
-    "28fca7ae6ebc7ed7bb63bde63136a74bfef14f296a57e403657eeb8b32836073";
+    "6484afc32872a3aa16cac9a76ba1816a1ed4cc870a6593cc2e17757750f518b2";
 pub const MERMAID_DOWNLOAD_URL: &str =
-    "https://cdn.jsdelivr.net/npm/mermaid@12.0.0/dist/mermaid.min.js";
+    "https://cdn.jsdelivr.net/npm/mermaid@12.1.0/dist/mermaid.min.js";
 
 pub const MERMAID_ZENUML_JS_VERSION: &str = "1.0.1";
 pub const MERMAID_ZENUML_JS_CHECKSUM: &str =
@@ -31,16 +31,16 @@ pub const MERMAID_ZENUML_JS_CHECKSUM: &str =
 pub const MERMAID_ZENUML_DOWNLOAD_URL: &str =
     "https://cdn.jsdelivr.net/npm/@mermaid-js/mermaid-zenuml@1.0.1/dist/mermaid-zenuml.min.js";
 
-pub const ZENUML_CORE_JS_VERSION: &str = "4.3.0";
+pub const ZENUML_CORE_JS_VERSION: &str = "4.4.1";
 pub const ZENUML_CORE_JS_CHECKSUM: &str =
-    "7e48bc62d5ef65d2f30747da6dc7da01b7175ff9c637dda066a4b92c2d8bdf4d";
+    "9b0465fca4a804ab19965296f6567fd8cd9f797eee0af6c2daf7472b0191cd53";
 pub const ZENUML_CORE_DOWNLOAD_URL: &str =
-    "https://cdn.jsdelivr.net/npm/@zenuml/core@4.3.0/dist/zenuml.js";
+    "https://cdn.jsdelivr.net/npm/@zenuml/core@4.4.1/dist/zenuml.js";
 
-pub const DRAWIO_JS_VERSION: &str = "31.6.1";
+pub const DRAWIO_JS_VERSION: &str = "32.0.2";
 pub const DRAWIO_JS_CHECKSUM: &str =
-    "b7ae98ea60cbada18511fe04cd2630ae552e19a36e327327ad7bc03a56cc9eca";
-pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v31.6.1";
+    "21c390edd6aff2aa527596c0cddb90a3059dc40f39104c0df85790252608dcca";
+pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v32.0.2";
 
 pub const MATHJAX_JS_VERSION: &str = "4.1.3";
 pub const MATHJAX_JS_CHECKSUM: &str =
@@ -61,7 +61,7 @@ impl RuntimeAsset {
             version: MERMAID_JS_VERSION,
             filename: "mermaid.min.js",
             source: RuntimeAssetSource::Brotli {
-                bytes: include_bytes!("../../vendor/mermaid/12.0.0/mermaid.min.js.br"),
+                bytes: include_bytes!("../../vendor/mermaid/12.1.0/mermaid.min.js.br"),
                 cache: &MERMAID_RUNTIME_ASSET_BYTES,
             },
         }
@@ -73,7 +73,7 @@ impl RuntimeAsset {
             version: DRAWIO_JS_VERSION,
             filename: "drawio.min.js",
             source: RuntimeAssetSource::Brotli {
-                bytes: include_bytes!("../../vendor/drawio/31.6.1/drawio.min.js.br"),
+                bytes: katana_render_runtime_assets::DRAWIO_RUNTIME_BROTLI,
                 cache: &DRAWIO_RUNTIME_ASSET_BYTES,
             },
         }

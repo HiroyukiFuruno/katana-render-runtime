@@ -6,6 +6,7 @@ const RUNTIME_SCRIPTS = [
   "dom_text_metrics.js",
   "browser_text_measure.js",
   "svg_bounds_attrs.js",
+  "svg_path_bezier_bounds.js",
   "svg_path_bounds.js",
   "svg_bounds.js",
   "svg_text_bounds.js",

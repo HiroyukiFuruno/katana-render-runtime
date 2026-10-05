@@ -72,10 +72,12 @@ class UpdateHtml5everPairTest(unittest.TestCase):
         broad_upgrade_index = next(index for index, line in enumerate(commands) if "{{CARGO}} upgrade " in line)
         pair_update_index = next(index for index, line in enumerate(commands) if "update_html5ever_pair.py" in line)
         lock_update_index = next(index for index, line in enumerate(commands) if line == "{{CARGO}} update")
-        self.assertEqual(commands[broad_upgrade_index], "{{CARGO}} upgrade -i allow --pinned allow")
+        self.assertEqual(commands[broad_upgrade_index], "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa")
+        self.assertEqual(sum("{{CARGO}} upgrade " in line for line in commands), 1)
+        self.assertEqual(sum("update_html5ever_pair.py" in line for line in commands), 1)
+        self.assertEqual(sum(line == "{{CARGO}} update" for line in commands), 1)
         self.assertLess(broad_upgrade_index, pair_update_index)
         self.assertLess(pair_update_index, lock_update_index)
-        self.assertNotIn("--exclude", commands[broad_upgrade_index])
         self.assertNotIn("markup5ever_rcdom", commands[broad_upgrade_index])
 
 

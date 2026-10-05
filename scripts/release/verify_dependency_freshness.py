@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -16,6 +17,13 @@ from dataclasses import dataclass
 from functools import total_ordering
 from pathlib import Path
 from urllib import error, parse, request
+
+USVG_SKRIFA_PAIR_PATH = Path(__file__).with_name("update_usvg_skrifa_pair.py")
+USVG_SKRIFA_PAIR_SPEC = importlib.util.spec_from_file_location("_krr_usvg_skrifa_pair", USVG_SKRIFA_PAIR_PATH)
+if USVG_SKRIFA_PAIR_SPEC is None or USVG_SKRIFA_PAIR_SPEC.loader is None:
+    raise ImportError(f"cannot load selected usvg/Skrifa compatibility rules: {USVG_SKRIFA_PAIR_PATH}")
+usvg_skrifa_pair = importlib.util.module_from_spec(USVG_SKRIFA_PAIR_SPEC)
+USVG_SKRIFA_PAIR_SPEC.loader.exec_module(usvg_skrifa_pair)
 
 try:
     import tomllib
@@ -34,6 +42,8 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
 TIMEOUT_SECONDS = 15
 MAX_RESPONSE_BYTES = 1_000_000
 RUNTIME_CATALOG = Path("scripts/runtime-assets/runtime-asset-common.ts")
+NON_RELEASE_CARGO_MANIFEST_PARTS = {"target", "vendor", ".git", ".worktrees", "tmp"}
+KRR_SKRIFA_MANIFEST = Path("crates/katana-render-runtime/Cargo.toml")
 
 
 class _StripAuthorizationRedirectHandler(request.HTTPRedirectHandler):
@@ -368,8 +378,30 @@ def cargo_metadata(root: Path) -> dict[str, object]:
     return payload
 
 
-def rust_packages(root: Path) -> list[Package]:
-    metadata = cargo_metadata(root)
+def verified_krr_usvg_skrifa_manifest(root: Path, metadata: dict[str, object]) -> Path | None:
+    """Return KRR's paired direct dependency manifest after strict graph validation."""
+    manifest = root / KRR_SKRIFA_MANIFEST
+    if not manifest.is_file():
+        return None
+    runtime, _, usvg, _ = usvg_skrifa_pair.select_usvg_package(metadata)
+    metadata_manifest = runtime.get("manifest_path")
+    if not isinstance(metadata_manifest, str) or Path(metadata_manifest).resolve() != manifest.resolve():
+        raise ValueError("resolved KRR package does not match the expected runtime manifest")
+    requirement = usvg_skrifa_pair.skrifa_requirement(usvg)
+    try:
+        manifest_text = manifest.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise ValueError(f"failed to read paired KRR manifest {manifest}: {error}") from error
+    _, requires_sync = usvg_skrifa_pair.sync_manifest_text(manifest_text, requirement)
+    if requires_sync:
+        raise ValueError("KRR direct skrifa requirement does not match selected usvg")
+    usvg_skrifa_pair.validate_resolution(metadata, requirement)
+    return manifest.resolve()
+
+
+def rust_packages(root: Path, metadata: dict[str, object] | None = None) -> list[Package]:
+    if metadata is None:
+        metadata = cargo_metadata(root)
     packages = metadata.get("packages")
     workspace_members = metadata.get("workspace_members")
     resolve = metadata.get("resolve")
@@ -451,34 +483,40 @@ def _load_manifest_payload(root: Path, manifest: Path) -> dict[str, object]:
     return payload
 
 
-def rust_manifest_dependencies(root: Path) -> list[Package]:
+def rust_manifest_dependencies(root: Path, coupled_skrifa_manifest: Path | None = None) -> list[Package]:
     """Return direct registry requirements updated by ``cargo upgrade``."""
     dependencies_by_version: dict[tuple[str, str, int | None, str | None, str | None], Package] = {}
 
-    def dependency_tables(payload: dict[str, object]) -> list[object]:
+    def dependency_tables(payload: dict[str, object]) -> list[tuple[str, object]]:
         sections = ("dependencies", "dev-dependencies", "build-dependencies")
-        tables = [payload.get(section) for section in sections]
+        tables = [(section, payload.get(section)) for section in sections]
         target = payload.get("target")
         if isinstance(target, dict):
             for target_config in target.values():
                 if not isinstance(target_config, dict):
                     continue
-                tables.extend(target_config.get(section) for section in sections)
+                tables.extend((f"target.{section}", target_config.get(section)) for section in sections)
         workspace = payload.get("workspace")
         if isinstance(workspace, dict):
-            tables.append(workspace.get("dependencies"))
+            tables.append(("workspace.dependencies", workspace.get("dependencies")))
         return tables
 
-    for manifest in sorted(root.glob("**/Cargo.toml")):
-        if any(part in {"target", "vendor", ".git", ".worktrees"} for part in manifest.relative_to(root).parts):
-            continue
+    coupled_manifest = coupled_skrifa_manifest.resolve() if coupled_skrifa_manifest is not None else None
+    for manifest in release_cargo_manifests(root):
         payload = _load_manifest_payload(root, manifest)
-        for dependencies in dependency_tables(payload):
+        for scope, dependencies in dependency_tables(payload):
             if not isinstance(dependencies, dict):
                 continue
             for declared_name, declaration in dependencies.items():
                 if not isinstance(declared_name, str):
                     raise ValueError(f"invalid Rust dependency name in {manifest}")
+                if (
+                    coupled_manifest is not None
+                    and manifest.resolve() == coupled_manifest
+                    and scope == "dependencies"
+                    and declared_name == "skrifa"
+                ):
+                    continue
                 version: object | None = declaration
                 package_name = declared_name
                 if isinstance(declaration, dict):
@@ -519,9 +557,7 @@ def rust_manifest_dependencies(root: Path) -> list[Package]:
 def rust_alternate_registry_dependencies(root: Path) -> list[AlternateRegistryDependency]:
     """Return direct requirements resolved through named Cargo registries."""
     dependencies: dict[tuple[str, str, str, int | None, str | None, str | None], AlternateRegistryDependency] = {}
-    for manifest in sorted(root.glob("**/Cargo.toml")):
-        if any(part in {"target", "vendor", ".git", ".worktrees"} for part in manifest.relative_to(root).parts):
-            continue
+    for manifest in release_cargo_manifests(root):
         payload = _load_manifest_payload(root, manifest)
         sections = ("dependencies", "dev-dependencies", "build-dependencies")
         tables: list[object] = [payload.get(section) for section in sections]
@@ -623,6 +659,15 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
     # Cargo omits the Locking line when the existing lockfile already resolves
     # every compatible dependency; a successful dry-run is then the no-update result.
     return match is None or match.group(1) == "0"
+
+
+def release_cargo_manifests(root: Path) -> list[Path]:
+    """List product manifests while excluding generated and diagnostic trees."""
+    return [
+        manifest
+        for manifest in sorted(root.glob("**/Cargo.toml"))
+        if not any(part in NON_RELEASE_CARGO_MANIFEST_PARTS for part in manifest.relative_to(root).parts)
+    ]
 
 
 def js_packages(root: Path) -> list[Package]:
@@ -794,7 +839,9 @@ def is_stale(package: Package, resolved_version: str) -> bool:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args() if argv is None else argparse.Namespace(root=Path(argv[0]))
     try:
-        rust = rust_packages(args.root)
+        metadata = cargo_metadata(args.root)
+        rust = rust_packages(args.root, metadata)
+        coupled_skrifa_manifest = verified_krr_usvg_skrifa_manifest(args.root, metadata)
         if not rust_lock_is_latest_compatible(args.root):
             print("Dependency freshness check rejected this release:", file=sys.stderr)
             print("Rust Cargo.lock is not at the latest compatible resolution.", file=sys.stderr)
@@ -805,7 +852,7 @@ def main(argv: list[str] | None = None) -> int:
             print("A Cargo alternate-registry dependency has an incompatible update available.", file=sys.stderr)
             print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
             return 1
-        rust_manifest = rust_manifest_dependencies(args.root)
+        rust_manifest = rust_manifest_dependencies(args.root, coupled_skrifa_manifest)
         javascript = js_packages(args.root)
         if not js_lock_is_latest_compatible(args.root):
             print("Dependency freshness check rejected this release:", file=sys.stderr)

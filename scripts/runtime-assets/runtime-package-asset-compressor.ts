@@ -259,7 +259,9 @@ export class RuntimePackageAssetCompressor {
   write(definition: RuntimeAssetDefinition, version = definition.version): void {
     this.assertSupported(definition);
     const compressed = this.compressedBytes(definition, version);
-    fs.writeFileSync(RuntimeAssetPaths.compressedAssetFile(definition, version), compressed);
+    const target = RuntimeAssetPaths.compressedAssetFile(definition, version);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, compressed);
   }
 
   check(definition: RuntimeAssetDefinition, version = definition.version): void {

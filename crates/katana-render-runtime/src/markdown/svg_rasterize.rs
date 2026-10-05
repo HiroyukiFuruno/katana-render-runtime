@@ -86,8 +86,10 @@ impl SvgRasterizeOps {
         options: &usvg::Options<'_>,
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
         let compatible_svg = Self::preprocess_for_rasterizer(svg_text);
-        let tree = usvg::Tree::from_str(&compatible_svg, options)
-            .map_err(|e| SvgRasterizeError::ParseFailed(e.to_string()))?;
+        let tree = text_shaping::with_validated_tree_parse(|| {
+            usvg::Tree::from_str(&compatible_svg, options)
+        })
+        .map_err(|e| SvgRasterizeError::ParseFailed(e.to_string()))?;
         let raster = RasterTarget::new(tree.size(), scale);
         let pixmap = raster.render(&tree)?;
         Ok(RasterizedSvg {

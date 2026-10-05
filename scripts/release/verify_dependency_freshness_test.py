@@ -282,6 +282,168 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertEqual(result, 0, stderr)
         self.assertIn("passed (3 resolved dependencies and pinned runtime assets)", stdout)
 
+    @staticmethod
+    def metadata_for_krr_usvg_skrifa(root: Path) -> dict[str, object]:
+        registry = "registry+https://github.com/rust-lang/crates.io-index"
+        runtime_id = "path+file:///workspace/crates/katana-render-runtime#katana-render-runtime@0.1.0"
+        resvg_id = f"{registry}#resvg@0.48.1"
+        usvg_id = f"{registry}#usvg@0.48.1"
+        skrifa_id = f"{registry}#skrifa@0.44.0"
+        return {
+            "workspace_members": [runtime_id],
+            "packages": [
+                {
+                    "id": runtime_id,
+                    "name": "katana-render-runtime",
+                    "version": "0.1.0",
+                    "source": None,
+                    "manifest_path": str(root / "crates/katana-render-runtime/Cargo.toml"),
+                    "dependencies": [
+                        {"name": "resvg", "source": registry, "req": "^0.48", "kind": None},
+                        {"name": "skrifa", "source": registry, "req": "^0.44", "kind": None},
+                    ],
+                },
+                {
+                    "id": resvg_id,
+                    "name": "resvg",
+                    "version": "0.48.1",
+                    "source": registry,
+                    "manifest_path": "/registry/resvg/Cargo.toml",
+                    "dependencies": [{"name": "usvg", "source": registry, "req": "^0.48", "kind": None}],
+                },
+                {
+                    "id": usvg_id,
+                    "name": "usvg",
+                    "version": "0.48.1",
+                    "source": registry,
+                    "manifest_path": "/registry/usvg/Cargo.toml",
+                    "dependencies": [
+                        {"name": "skrifa", "source": registry, "req": "^0.44", "kind": None}
+                    ],
+                },
+                {
+                    "id": skrifa_id,
+                    "name": "skrifa",
+                    "version": "0.44.0",
+                    "source": registry,
+                    "manifest_path": "/registry/skrifa/Cargo.toml",
+                    "dependencies": [],
+                },
+            ],
+            "resolve": {
+                "nodes": [
+                    {
+                        "id": runtime_id,
+                        "deps": [
+                            {"name": "resvg", "pkg": resvg_id, "dep_kinds": [{"kind": None}]},
+                            {"name": "skrifa", "pkg": skrifa_id, "dep_kinds": [{"kind": None}]},
+                        ],
+                    },
+                    {
+                        "id": resvg_id,
+                        "deps": [{"name": "usvg", "pkg": usvg_id, "dep_kinds": [{"kind": None}]}],
+                    },
+                    {
+                        "id": usvg_id,
+                        "deps": [{"name": "skrifa", "pkg": skrifa_id, "dep_kinds": [{"kind": None}]}],
+                    },
+                    {"id": skrifa_id, "deps": []},
+                ]
+            },
+        }
+
+    def test_verified_krr_pair_skips_only_its_direct_skrifa_requirement(self) -> None:
+        krr_manifest = self.write_krr_skrifa_manifest("0.44")
+        other_manifest = self.root / "crates/other/Cargo.toml"
+        other_manifest.parent.mkdir(parents=True)
+        other_manifest.write_text(
+            '[package]\nname = "other"\nversion = "0.1.0"\n'
+            '[dependencies]\nskrifa = "=0.44"\nusvg = "=0.48.1"\n',
+            encoding="utf-8",
+        )
+        diagnostic_manifest = self.root / "tmp/diagnostic/Cargo.toml"
+        diagnostic_manifest.parent.mkdir(parents=True)
+        diagnostic_manifest.write_text(
+            '[package]\nname = "diagnostic"\nversion = "0.1.0"\n'
+            '[dependencies]\nskrifa = "=0.44"\n',
+            encoding="utf-8",
+        )
+
+        metadata = self.metadata_for_krr_usvg_skrifa(self.root)
+        coupled_manifest = freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+        self.assertEqual(coupled_manifest, krr_manifest.resolve())
+        dependencies = freshness.rust_manifest_dependencies(self.root, coupled_manifest)
+        self.assertEqual(
+            [(dependency.name, dependency.current, dependency.requirement_operator) for dependency in dependencies],
+            [("serde", "1.0.0", None), ("skrifa", "0.44.0", "="), ("usvg", "0.48.1", "=")],
+        )
+
+    def write_krr_skrifa_manifest(self, requirement: str) -> Path:
+        krr_manifest = self.root / "crates/katana-render-runtime/Cargo.toml"
+        krr_manifest.parent.mkdir(parents=True)
+        krr_manifest.write_text(
+            '[package]\nname = "katana-render-runtime"\nversion = "0.1.0"\n'
+            f'[dependencies]\nskrifa = "{requirement}"\n',
+            encoding="utf-8",
+        )
+        return krr_manifest
+
+    def test_non_krr_fixture_does_not_require_a_skrifa_pair(self) -> None:
+        self.assertIsNone(freshness.verified_krr_usvg_skrifa_manifest(self.root, self.metadata_for_direct_serde()))
+
+    def test_krr_pair_resolution_mismatch_fails_closed(self) -> None:
+        self.write_krr_skrifa_manifest("0.44")
+        metadata = self.metadata_for_krr_usvg_skrifa(self.root)
+        old_id = "registry+https://github.com/rust-lang/crates.io-index#skrifa@0.48.0"
+        metadata["packages"].append(
+            {"id": old_id, "name": "skrifa", "version": "0.48.0", "source": "registry+https://github.com/rust-lang/crates.io-index"}
+        )
+        metadata["resolve"]["nodes"].append({"id": old_id, "deps": []})
+        metadata["resolve"]["nodes"][0]["deps"][1]["pkg"] = old_id
+        with self.assertRaisesRegex(ValueError, "different package versions"):
+            freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+
+    def test_krr_pair_missing_or_ambiguous_usvg_fails_closed(self) -> None:
+        self.write_krr_skrifa_manifest("0.44")
+        metadata = self.metadata_for_krr_usvg_skrifa(self.root)
+        metadata["resolve"]["nodes"][1]["deps"] = []
+        with self.assertRaisesRegex(ValueError, "expected one resolved usvg"):
+            freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+
+        metadata = self.metadata_for_krr_usvg_skrifa(self.root)
+        extra_id = "registry+https://github.com/rust-lang/crates.io-index#usvg@0.49.0"
+        metadata["packages"].append(
+            {"id": extra_id, "name": "usvg", "version": "0.49.0", "source": "registry+https://github.com/rust-lang/crates.io-index"}
+        )
+        metadata["resolve"]["nodes"].append({"id": extra_id, "deps": []})
+        metadata["resolve"]["nodes"][1]["deps"].append(
+            {"name": "usvg", "pkg": extra_id, "dep_kinds": [{"kind": None}]}
+        )
+        with self.assertRaisesRegex(ValueError, "expected one resolved usvg"):
+            freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+
+    def test_krr_pair_requirement_and_registry_mismatch_fail_closed(self) -> None:
+        self.write_krr_skrifa_manifest("0.44")
+        metadata = self.metadata_for_krr_usvg_skrifa(self.root)
+        metadata["packages"][0]["dependencies"][1]["req"] = "^0.48"
+        with self.assertRaisesRegex(ValueError, "KRR direct skrifa requirement"):
+            freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+
+        metadata = self.metadata_for_krr_usvg_skrifa(self.root)
+        metadata["packages"][0]["dependencies"][1]["source"] = "registry+https://private.example/index"
+        with self.assertRaisesRegex(ValueError, "KRR's skrifa dependency uses a different registry"):
+            freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+
+        metadata = self.metadata_for_krr_usvg_skrifa(self.root)
+        metadata["packages"][2]["dependencies"][0]["source"] = "registry+https://private.example/index"
+        with self.assertRaisesRegex(ValueError, "different registry"):
+            freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+
+        metadata = self.metadata_for_krr_usvg_skrifa(self.root)
+        metadata["packages"][2]["dependencies"] = []
+        with self.assertRaisesRegex(ValueError, "expected one normal registry skrifa dependency"):
+            freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+
     def test_stale_direct_rust_manifest_dependency_rejects_release(self) -> None:
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n[workspace.dependencies]\nserde = \"=1.0.0\"\n",

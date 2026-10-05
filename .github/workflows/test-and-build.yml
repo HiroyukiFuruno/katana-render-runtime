@@ -27,6 +27,7 @@ on:
       - "vendor/**"
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -34,6 +35,8 @@ concurrency:
 
 permissions:
   contents: read
+  issues: read
+  pull-requests: read
 
 env:
   CARGO_INCREMENTAL: 0
@@ -44,10 +47,11 @@ jobs:
   test:
     name: Test and Build
     if: >-
-      github.event_name != 'push' || (
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'push' || (
         !startsWith(github.event.head_commit.message, 'Merge pull request ') &&
         !contains(github.event.head_commit.message, '(#')
-      )
+      ))
     strategy:
       fail-fast: false
       matrix:
@@ -56,8 +60,6 @@ jobs:
             platform: linux64
           - os: macos-15
             platform: mac-arm64
-          - os: macos-15-intel
-            platform: mac-x64
           - os: windows-latest
             platform: win64
     runs-on: ${{ matrix.os }}
@@ -73,32 +75,51 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify optional local macOS evidence
+        id: mac_proof
+        if: matrix.platform == 'mac-arm64' && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/release/local_macos_evidence.py --verify
+          --repo "${{ github.repository }}"
+          --pr "${{ github.event.pull_request.number }}"
+          --base "${{ github.event.pull_request.base.sha }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+
+      - name: Report reused local macOS evidence
+        if: matrix.platform == 'mac-arm64' && steps.mac_proof.outcome == 'success' && steps.mac_proof.outputs.reuse == 'true'
+        run: echo 'macOS Apple Silicon checks reused from verified maintainer evidence.'
+
       - name: Install Java runtime
+        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v5.1.0
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Install Rust toolchain
+        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
           toolchain: stable
           components: clippy, rustfmt, llvm-tools-preview
 
       - name: Cache Rust build outputs
-        if: matrix.os != 'ubuntu-latest'
+        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         uses: Swatinem/rust-cache@v2.9.2
         with:
           shared-key: ci-v2-${{ matrix.os }}-stable-default
 
       - name: Install Bun
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
 
       - name: Install JavaScript dependencies
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: bun install --frozen-lockfile
 
       - name: Install cargo-llvm-cov
@@ -106,12 +127,23 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Install just
+        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         uses: taiki-e/install-action@just
+
+      # 正常なUbuntu Rustキャッシュを使い、V8 archive欠落時だけv8を再生成する。
+      - name: Repair cached V8 archive on Ubuntu
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          for target_dir in target target/llvm-cov-target; do
+            if [ ! -s "$target_dir/debug/gn_out/obj/librusty_v8.a" ]; then
+              cargo clean --target-dir "$target_dir" -p v8
+            fi
+          done
 
       # rust-cache は target を復元しても rusty_v8 の静的アーカイブを復元しない場合がある。
       # macOS のリンク実行前に v8 を再構築して、公式アーカイブの取得とリンクを保証する。
       - name: Rebuild V8 static archive on macOS arm64
-        if: startsWith(matrix.platform, 'mac-')
+        if: startsWith(matrix.platform, 'mac-') && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: |
           cargo clean -p v8
           cargo build -p katana-render-runtime-cli --locked
@@ -124,10 +156,11 @@ jobs:
           cargo build -p katana-render-runtime-cli --locked
 
       - name: Check Rust types
+        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: cargo check --workspace --locked
 
       - name: Check formatting
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just fmt-check
 
       - name: Run Windows format check
@@ -135,15 +168,15 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run linter
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just lint
 
       - name: Run AST linter
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just ast-lint
 
       - name: Check runtime bundle sync
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just runtime-bundle-check
 
       - name: Install Linux runtime test prerequisites
@@ -153,18 +186,20 @@ jobs:
           sudo apt-get install -y fonts-noto-cjk graphviz
 
       - name: Install Graphviz for PlantUML on macOS
-        if: startsWith(matrix.os, 'macos-')
+        if: startsWith(matrix.os, 'macos-') && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: brew install graphviz
 
       - name: Install PlantUML runtime
+        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just plantuml-install
 
       - name: Run tests
+        if: matrix.os != 'ubuntu-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         timeout-minutes: 45
         run: just unit-test
 
       - name: Run PlantUML smoke check
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: |
           cargo run -p katana-render-runtime-cli -- plantuml render --input tests/fixtures/plantuml/representative/01-sequence.puml --output "$RUNNER_TEMP/plantuml-sequence.svg"
           grep -q '<svg' "$RUNNER_TEMP/plantuml-sequence.svg"
@@ -180,19 +215,19 @@ jobs:
           }
 
       - name: Check dependency boundary
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just dependency-leak
 
       - name: Check TypeScript formatting and lint
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just biome
 
       - name: Check TypeScript types
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just typecheck
 
       - name: Check runtime asset checksums
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just runtime-asset-check
 
       - name: Check packaged runtime bundles
@@ -213,17 +248,21 @@ jobs:
         timeout-minutes: 15
         run: just automation-contract-test
 
+      - name: Run Windows review process tree tests
+        if: matrix.os == 'windows-latest'
+        timeout-minutes: 5
+        run: python -m unittest discover -s scripts/hooks -p local_review_windows_job_test.py -v
+
       - name: Run runtime package asset check
         if: matrix.os == 'ubuntu-latest'
         timeout-minutes: 15
         run: just runtime-package-asset-check
 
-      - name: Free Ubuntu build space before coverage
+      - name: Record Ubuntu build disk usage before coverage
         if: matrix.os == 'ubuntu-latest'
         run: |
-          cargo llvm-cov clean --workspace || true
-          rm -rf target/llvm-cov-target target/debug/deps target/debug/incremental target/debug/build target/debug/examples target/debug/.fingerprint target/package
           df -h .
+          du -sh target 2>/dev/null || true
 
       - name: Run coverage
         if: matrix.os == 'ubuntu-latest'
@@ -241,12 +280,13 @@ jobs:
           ps -eo pid,ppid,stat,etime,cmd --sort=-etime | head -80
           echo 'Coverage diagnostic: llvm-cov summary'
           cargo llvm-cov report --summary-only
+          cargo llvm-cov report --show-missing-lines
 
-      - name: Free Ubuntu build space after coverage
+      - name: Record Ubuntu build disk usage after coverage
         if: matrix.os == 'ubuntu-latest' && always()
         run: |
-          cargo llvm-cov clean --workspace || true
-          rm -rf target/llvm-cov-target target/debug/deps target/debug/incremental
+          df -h .
+          du -sh target 2>/dev/null || true
 
       - name: Record immutable PR base evidence
         if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest' && success()

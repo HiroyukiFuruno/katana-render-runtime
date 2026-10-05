@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" style="background: transparent; background-color: transparent;" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="680px" height="734px" viewBox="0 0 680 734" id="ge-svg-stvYPtCz7GPSBeprOCMs"><style type="text/css">@supports (color: light-dark(#000, #fff)) { #ge-svg-stvYPtCz7GPSBeprOCMs { --ge-adaptive-bg: light-dark(#ffffff, var(--ge-dark-color, #121212)); } }</style><defs><symbol id="mx-symbol-5xjm9q" viewBox="0 0 20 20" preserveAspectRatio="none" style="color-scheme: light dark;">
-	<style type="text/css">#mx-symbol-5xjm9q .mx-symbol-5xjm9q-st0{ fill: var(--mx-r0); }#mx-symbol-5xjm9q .mx-symbol-5xjm9q-st1{ fill: var(--mx-r1); }#mx-symbol-5xjm9q .mx-symbol-5xjm9q-st2{ fill: var(--mx-r2); }
-</style>
+	<style type="text/css">#mx-symbol-5xjm9q .mx-symbol-5xjm9q-st0 { fill: var(--mx-r0); }
+#mx-symbol-5xjm9q .mx-symbol-5xjm9q-st1 { fill: var(--mx-r1); }
+#mx-symbol-5xjm9q .mx-symbol-5xjm9q-st2 { fill: var(--mx-r2); }</style>
 	<path class="mx-symbol-5xjm9q-st2" d="M7 7h6v6H7z"></path>
 	<path class="mx-symbol-5xjm9q-st1" d="M9 0h2v4H9zM5 0h2v4H5zm8 0h2v4h-2z"></path>
 	<path class="mx-symbol-5xjm9q-st0" d="M9 16h2v4H9zm-4 0h2v4H5zm8 0h2v4h-2zm3-5V9h4v2zm0 4v-2h4v2zm0-8V5h4v2z"></path>

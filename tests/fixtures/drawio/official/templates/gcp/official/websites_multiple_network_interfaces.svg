@@ -1,13 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" style="background: transparent; background-color: transparent;" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="730px" height="364px" viewBox="0 0 730 364" id="ge-svg-stvYPtCz7GPSBeprOCMs"><style type="text/css">@supports (color: light-dark(#000, #fff)) { #ge-svg-stvYPtCz7GPSBeprOCMs { --ge-adaptive-bg: light-dark(#ffffff, var(--ge-dark-color, #121212)); } }</style><defs><symbol id="mx-symbol-w5w7ap" viewBox="0 0 20 20" preserveAspectRatio="none" style="color-scheme: light dark;">
-	<style type="text/css">#mx-symbol-w5w7ap .mx-symbol-w5w7ap-st0{ fill: var(--mx-r0); }#mx-symbol-w5w7ap .mx-symbol-w5w7ap-st1{ fill: var(--mx-r1); }#mx-symbol-w5w7ap .mx-symbol-w5w7ap-st2{ fill: var(--mx-r2); }
-</style>
+	<style type="text/css">#mx-symbol-w5w7ap .mx-symbol-w5w7ap-st0 { fill: var(--mx-r0); }
+#mx-symbol-w5w7ap .mx-symbol-w5w7ap-st1 { fill: var(--mx-r1); }
+#mx-symbol-w5w7ap .mx-symbol-w5w7ap-st2 { fill: var(--mx-r2); }</style>
 	<path class="mx-symbol-w5w7ap-st1" d="M13.13 5.63V3.21L10 0v2.41zm3.75 7.5L20 10h-2.5l-3.12 3.13zm-13.75 0L0 10h2.5l3.13 3.13zm10 1.25v2.41L10 20v-2.41z" fill-rule="evenodd"></path>
 	<path class="mx-symbol-w5w7ap-st2" d="M6.88 5.63L10 2.41V0L6.88 3.21zM17.5 10H20l-3.12-3.12h-2.5zm-15 0H0l3.13-3.12h2.5zm4.38 4.38L10 17.59V20l-3.12-3.21zm0-7.5h6.25v6.25H6.88z" fill-rule="evenodd"></path>
 	<path class="mx-symbol-w5w7ap-st1" d="M6.88 13.13l6.25-6.25v6.25z" fill-rule="evenodd"></path>
 	<path class="mx-symbol-w5w7ap-st0" d="M10 10l3.13-3.12v6.25z" fill-rule="evenodd"></path>
 </symbol><symbol id="mx-symbol-5xjm9q" viewBox="0 0 20 20" preserveAspectRatio="none" style="color-scheme: light dark;">
-	<style type="text/css">#mx-symbol-5xjm9q .mx-symbol-5xjm9q-st0{ fill: var(--mx-r0); }#mx-symbol-5xjm9q .mx-symbol-5xjm9q-st1{ fill: var(--mx-r1); }#mx-symbol-5xjm9q .mx-symbol-5xjm9q-st2{ fill: var(--mx-r2); }
-</style>
+	<style type="text/css">#mx-symbol-5xjm9q .mx-symbol-5xjm9q-st0 { fill: var(--mx-r0); }
+#mx-symbol-5xjm9q .mx-symbol-5xjm9q-st1 { fill: var(--mx-r1); }
+#mx-symbol-5xjm9q .mx-symbol-5xjm9q-st2 { fill: var(--mx-r2); }</style>
 	<path class="mx-symbol-5xjm9q-st2" d="M7 7h6v6H7z"></path>
 	<path class="mx-symbol-5xjm9q-st1" d="M9 0h2v4H9zM5 0h2v4H5zm8 0h2v4h-2z"></path>
 	<path class="mx-symbol-5xjm9q-st0" d="M9 16h2v4H9zm-4 0h2v4H5zm8 0h2v4h-2zm3-5V9h4v2zm0 4v-2h4v2zm0-8V5h4v2z"></path>

@@ -71,7 +71,7 @@ Draft PRを作成し、最新 HEAD に対して `@codex review` と自己レビ�
 
 ## Phase 6: Ready 化と merge 承認
 
-未解決thread 0、Issue契約、DoD、required CI checksを確認してReady化する。Ready化後、merge直前にcurrent PRのexpected HEAD SHAとrequired checksを再取得し、protected PR mergeを実行する。人間による直接master更新やadmin bypassは使わない。
+最新HEADレビュー、未解決thread 0、Issue契約、DoDを確認してReady化する。Readyで起動したrequired CI checksの成功を確認し、DraftのSKIPを品質成功として扱わない。Ready化後、merge直前にcurrent PRのexpected HEAD SHAとrequired checksを再取得し、protected PR mergeを実行する。人間による直接master更新やadmin bypassは使わない。
 
 ## Phase 7: merge と自動リリース
 
