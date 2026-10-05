@@ -1,5 +1,5 @@
 use super::*;
-use std::fs::{self, File, FileTimes, OpenOptions};
+use std::fs::{self, FileTimes, OpenOptions};
 
 const BYTE_INVERSION_MASK: u8 = 0xff;
 
@@ -67,11 +67,10 @@ fn replace_file_preserving_size_and_mtime(path: &std::path::Path) -> TestResult<
     replacement[0] ^= BYTE_INVERSION_MASK;
     let replacement_path = path.with_extension("replacement.ttf");
     fs::write(&replacement_path, replacement)?;
-    OpenOptions::new()
-        .write(true)
-        .open(&replacement_path)?
-        .set_times(FileTimes::new().set_modified(modified))?;
-    File::open(&replacement_path)?.sync_all()?;
+    let replacement_file = OpenOptions::new().write(true).open(&replacement_path)?;
+    replacement_file.set_times(FileTimes::new().set_modified(modified))?;
+    replacement_file.sync_all()?;
+    drop(replacement_file);
     fs::rename(replacement_path, path)?;
     Ok(())
 }
