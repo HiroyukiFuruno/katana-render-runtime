@@ -7,6 +7,7 @@ const BYTE_INVERSION_MASK: u8 = 0xff;
 fn weak_file_stamp_is_not_memoized_and_disables_memo_without_retry() -> TestResult<()> {
     let fixture = FontFileFixture::create()?;
     let original = stamp_path_uncached(&fixture.path).map_err(|_| "fixture stamp unavailable")?;
+    let original_contents = fs::read(&fixture.path)?;
     let mut weak = original.clone();
     weak.durable_reusable = false;
     let mut calls = 0;
@@ -15,13 +16,7 @@ fn weak_file_stamp_is_not_memoized_and_disables_memo_without_retry() -> TestResu
         remember_stamp(&fixture.path, weak.clone());
         assert!(cached_stamp(&fixture.path).is_none());
         assert!(!memo_usable());
-        replace_file_preserving_size_and_mtime(&fixture.path)?;
-        let current = fixture_stamp(&fixture).ok_or("replacement stamp unavailable")?;
-        assert_ne!(current, original);
-        assert_eq!(
-            current,
-            stamp_path_uncached(&fixture.path).map_err(|_| "uncached stamp unavailable")?
-        );
+        replace_and_validate_changed_contents(&fixture, &original_contents)?;
         assert!(cached_stamp(&fixture.path).is_none());
         Ok(true)
     });
@@ -30,6 +25,27 @@ fn weak_file_stamp_is_not_memoized_and_disables_memo_without_retry() -> TestResu
     let next_scope = with_validated_stamp_batch(memo_usable);
     assert!(next_scope);
     assert!(cached_stamp(&fixture.path).is_none());
+    Ok(())
+}
+
+fn replace_and_validate_changed_contents(
+    fixture: &FontFileFixture,
+    original_contents: &[u8],
+) -> TestResult<()> {
+    let original_metadata = fs::metadata(&fixture.path)?;
+    let original_len = original_metadata.len();
+    let original_modified = original_metadata.modified()?;
+    replace_file_preserving_size_and_mtime(&fixture.path)?;
+    let current = fixture_stamp(fixture).ok_or("replacement stamp unavailable")?;
+    let current_contents = fs::read(&fixture.path)?;
+    let current_metadata = fs::metadata(&fixture.path)?;
+    assert_ne!(current_contents, original_contents);
+    assert_eq!(current_metadata.len(), original_len);
+    assert_eq!(current_metadata.modified()?, original_modified);
+    assert_eq!(
+        current,
+        stamp_path_uncached(&fixture.path).map_err(|_| "uncached stamp unavailable")?
+    );
     Ok(())
 }
 
