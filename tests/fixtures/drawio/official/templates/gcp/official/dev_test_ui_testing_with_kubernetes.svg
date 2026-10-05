@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" style="background: transparent; background-color: transparent;" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="1051px" height="454px" viewBox="0 0 1051 454" id="ge-svg-stvYPtCz7GPSBeprOCMs"><style type="text/css">@supports (color: light-dark(#000, #fff)) { #ge-svg-stvYPtCz7GPSBeprOCMs { --ge-adaptive-bg: light-dark(#ffffff, var(--ge-dark-color, #121212)); } }</style><defs><symbol id="mx-symbol-197ue6f" viewBox="0 0 87.29299926757812 100.08799743652344" preserveAspectRatio="none" style="color-scheme: light dark;">
-<style type="text/css">#mx-symbol-197ue6f .mx-symbol-197ue6f-st0{ fill: var(--mx-r0); }#mx-symbol-197ue6f .mx-symbol-197ue6f-st1{ fill: var(--mx-r1); }#mx-symbol-197ue6f .mx-symbol-197ue6f-st2{ fill: var(--mx-r2); }
-</style>
+<style type="text/css">#mx-symbol-197ue6f .mx-symbol-197ue6f-st0 { fill: var(--mx-r0); }
+#mx-symbol-197ue6f .mx-symbol-197ue6f-st1 { fill: var(--mx-r1); }
+#mx-symbol-197ue6f .mx-symbol-197ue6f-st2 { fill: var(--mx-r2); }</style>
 	<path class="mx-symbol-197ue6f-st0" d="M43.751 0L0 25.465v2.588 46.92l43.752 25.115 43.541-25.121V25.473zm2.438 11.853l32.103 18.782V69.77L43.739 89.705 9 69.762V30.641l32.19-18.736v14.154L24.503 36.153l19.172 11.502 18.886-11.554-16.372-10.024z"></path>
 	<path class="mx-symbol-197ue6f-st1" d="M22.025 40.496l.166 19.143-13.247 7.33v2.742l2.637 1.514 12.648-6.999 16.961 10.602V51.993z"></path>
 	<path class="mx-symbol-197ue6f-st2" d="M65.344 40.26L46.189 51.979v22.847l16.899-10.576 12.539 6.974 2.609-1.505v-2.765l-12.784-7.112z"></path>

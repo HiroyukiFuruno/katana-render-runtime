@@ -1,6 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" style="background: transparent; background-color: transparent;" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="760px" height="334px" viewBox="0 0 760 334" id="ge-svg-stvYPtCz7GPSBeprOCMs"><style type="text/css">@supports (color: light-dark(#000, #fff)) { #ge-svg-stvYPtCz7GPSBeprOCMs { --ge-adaptive-bg: light-dark(#ffffff, var(--ge-dark-color, #121212)); } }</style><defs><symbol id="mx-symbol-rh39ix" viewBox="0 0 20 16" preserveAspectRatio="none" style="color-scheme: light dark;">
-	<style type="text/css">#mx-symbol-rh39ix .mx-symbol-rh39ix-st0{ fill: var(--mx-r0); }#mx-symbol-rh39ix .mx-symbol-rh39ix-st1{ fill: var(--mx-r1); }#mx-symbol-rh39ix .mx-symbol-rh39ix-st2{ fill: var(--mx-r2); }#mx-symbol-rh39ix .mx-symbol-rh39ix-st3{ fill: var(--mx-r3); }
-</style>
+	<style type="text/css">#mx-symbol-rh39ix .mx-symbol-rh39ix-st0 { fill: var(--mx-r0); }
+#mx-symbol-rh39ix .mx-symbol-rh39ix-st1 { fill: var(--mx-r1); }
+#mx-symbol-rh39ix .mx-symbol-rh39ix-st2 { fill: var(--mx-r2); }
+#mx-symbol-rh39ix .mx-symbol-rh39ix-st3 { fill: var(--mx-r3); }</style>
 	<path class="mx-symbol-rh39ix-st2" d="M0 0h20v7H0z"></path>
 	<path class="mx-symbol-rh39ix-st1" d="M18 0h2v7h-2z"></path>
 	<path class="mx-symbol-rh39ix-st0" d="M18 7l2-7h-2z"></path>
@@ -18,8 +20,10 @@
 		<rect x="13" y="11" width="3" height="3" rx="1.5"></rect>
 	</g>
 </symbol><symbol id="mx-symbol-b6lsbj" viewBox="0 0 20 20" preserveAspectRatio="none" style="color-scheme: light dark;">
-	<style type="text/css">#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st0{ fill: var(--mx-r0); }#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st1{ fill: var(--mx-r1); }#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st2{ fill: var(--mx-r2); }#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st3{ fill: var(--mx-r3); }
-</style>
+	<style type="text/css">#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st0 { fill: var(--mx-r0); }
+#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st1 { fill: var(--mx-r1); }
+#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st2 { fill: var(--mx-r2); }
+#mx-symbol-b6lsbj .mx-symbol-b6lsbj-st3 { fill: var(--mx-r3); }</style>
 	<path class="mx-symbol-b6lsbj-st0" d="M9 6h2v10H9z"></path>
 	<path class="mx-symbol-b6lsbj-st1" d="M20 17H0v2h20z"></path>
 	<path class="mx-symbol-b6lsbj-st2" d="M12 16H8v4h4zM0 0h20v6H0z"></path>
