@@ -324,6 +324,87 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn(f"verify-crate-size.sh {package}", release_verify)
         self.assertNotIn("publish -p", release_verify)
 
+    def test_post_merge_release_check_allows_only_a_published_package_prefix(self) -> None:
+        target_check = self.workflow_step(self.release, "Release target check")
+        self.assertIn('ALLOW_PUBLISHED_PREFIX: "true"', target_check)
+        self.assertIn(
+            'bash scripts/release/assert-crates-not-published.sh "{{VERSION}}"',
+            self.justfile,
+        )
+
+        guard = Path(__file__).parent / "assert-crates-not-published.sh"
+        packages = [
+            "katana-render-runtime-assets",
+            "katana-render-runtime",
+            "katana-render-runtime-cli",
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scripts = root / "scripts/release"
+            scripts.mkdir(parents=True)
+            (scripts / guard.name).write_bytes(guard.read_bytes())
+            (scripts / "verify-version.sh").write_text(
+                '#!/usr/bin/env bash\necho "version_bare=${1#v}"\n',
+                encoding="utf-8",
+            )
+            cargo_bin = root / "bin"
+            cargo_bin.mkdir()
+            cargo = cargo_bin / "cargo"
+            cargo.write_text(
+                "#!/usr/bin/env python3\n"
+                "import os, sys\n"
+                "package = sys.argv[2].split('@')[0]\n"
+                "published = os.environ.get('PUBLISHED', '').split(',')\n"
+                "failed = os.environ.get('REGISTRY_FAILURE', '').split(',')\n"
+                "if package in failed:\n"
+                " print('error: registry request failed', file=sys.stderr); sys.exit(101)\n"
+                "if package in published:\n"
+                " sys.exit(0)\n"
+                "print('error: could not find package in registry', file=sys.stderr); sys.exit(101)\n",
+                encoding="utf-8",
+            )
+            cargo.chmod(0o755)
+
+            def run(published: list[str], *, allow_prefix: bool = True,
+                    registry_failure: list[str] | None = None) -> subprocess.CompletedProcess[str]:
+                environment = os.environ.copy()
+                environment.update({
+                    "PATH": f"{cargo_bin}:{environment['PATH']}",
+                    "PUBLISHED": ",".join(published),
+                    "REGISTRY_FAILURE": ",".join(registry_failure or []),
+                })
+                if allow_prefix:
+                    environment["ALLOW_PUBLISHED_PREFIX"] = "true"
+                else:
+                    environment.pop("ALLOW_PUBLISHED_PREFIX", None)
+                return subprocess.run(
+                    ["bash", str(scripts / guard.name), "v0.4.23"],
+                    cwd=root, env=environment, capture_output=True, text=True, check=False,
+                )
+
+            for prefix_length in range(4):
+                with self.subTest(prefix_length=prefix_length):
+                    result = run(packages[:prefix_length])
+                    self.assertEqual(result.returncode, 0, result.stderr)
+            for gap in (
+                [packages[1]],
+                [packages[2]],
+                [packages[0], packages[2]],
+                packages[1:],
+            ):
+                with self.subTest(gap=gap):
+                    result = run(gap)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("already published", result.stderr)
+            strict = run([packages[0]], allow_prefix=False)
+            self.assertNotEqual(strict.returncode, 0)
+            self.assertIn("already published", strict.stderr)
+            for package in packages:
+                with self.subTest(registry_failure=package):
+                    registry_error = run([], registry_failure=[package])
+                    self.assertNotEqual(registry_error.returncode, 0)
+                    self.assertIn("Could not determine", registry_error.stderr)
+
     def test_internal_dependency_check_rejects_package_version_drift(self) -> None:
         script = Path(__file__).parent / "verify-internal-dependencies.sh"
         manifests = {
