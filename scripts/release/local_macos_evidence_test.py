@@ -409,11 +409,20 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 patch.object(
                     EVIDENCE, "command_binding", return_value=command_binding,
                 ) as command_binding_mock,
+                patch.object(
+                    EVIDENCE, "macos_product_version", return_value="15.0",
+                ) as macos_version_mock,
+                patch.object(
+                    EVIDENCE.subprocess, "run",
+                    side_effect=AssertionError("preparation must not invoke host subprocesses"),
+                ) as subprocess_run_mock,
             ):
                 prepared = EVIDENCE.prepare_command_environment(
                     "token", isolated, cargo_target, cargo_home, bun_cache,
                 )
 
+            macos_version_mock.assert_called_once_with()
+            subprocess_run_mock.assert_not_called()
             self.assertEqual(prepared, (
                 {"PATH": "/bin"}, just, fixture_bun_binding(), command_binding, {"PATH": "/bin"},
             ))
