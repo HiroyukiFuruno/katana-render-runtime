@@ -15,6 +15,15 @@ CIの動作保証対象はLinux x64、Windows x64、macOS Apple Siliconとする
 
 ローカル検査を実施する場合だけ、以下でCIと同じmacOS検査範囲を実行し、成功後に既存GitHub認証でPRへ添付する。未実施ならこの操作は不要で、Ready後のApple Silicon CIが検査する。
 
+証跡collectorは `/opt/homebrew/bin/bun` を検証し、Bun `1.4.2` を要求する。Homebrew管理のBunがない場合は [BunのHomebrew手順](https://bun.sh/docs/installation)に沿って準備し、選択済みHomebrewとBunのversionを確認する。
+
+```bash
+rtk proxy /opt/homebrew/bin/brew install oven-sh/bun/bun
+rtk proxy /opt/homebrew/bin/bun --version
+```
+
+version出力は `1.4.2` が必要。公式installerが配置する `~/.bun/bin/bun` はcollectorの信頼済みHomebrew root外にあるため、証跡には使えない。Bunのversionを合わせられない場合は証跡を省略し、Apple Silicon CIで検査する。
+
 ```bash
 rtk proxy python3 scripts/release/local_macos_evidence.py --repo HiroyukiFuruno/katana-render-runtime --pr 105 --publish
 ```
