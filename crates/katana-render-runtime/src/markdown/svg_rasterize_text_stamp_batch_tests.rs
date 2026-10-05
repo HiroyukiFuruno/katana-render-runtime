@@ -70,20 +70,21 @@ fn fixture_stamp(fixture: &FontFileFixture) -> Option<FileStamp> {
 }
 
 #[test]
-fn changed_file_invalidates_batch_and_retry_uses_new_stamp() -> TestResult<()> {
+fn changed_durable_file_invalidates_batch_and_retry_uses_new_stamp() -> TestResult<()> {
     let fixture = FontFileFixture::create()?;
+    let fixture_is_durable = super::super::file_stamp_durable_reusable(&fixture.path);
     let mut calls = 0;
     let mut write_result = Ok(());
     let result = with_validated_stamp_batch(|| {
         calls += 1;
         let first = fixture_stamp(&fixture);
-        if calls == 1 {
+        if calls == 1 && fixture_is_durable {
             write_result = std::fs::write(&fixture.path, b"replacement font payload");
         }
         first
     });
     write_result?;
-    assert_eq!(calls, 2);
+    assert_eq!(calls, if fixture_is_durable { 2 } else { 1 });
     assert_eq!(result, fixture_stamp(&fixture));
     Ok(())
 }
@@ -128,7 +129,7 @@ fn nested_scope_skips_memo_and_preserves_outer_snapshot() -> TestResult<()> {
         calls += 1;
         nested_scope_snapshot(&outer, &inner)
     });
-    assert_eq!(calls, 1 + usize::from(!outer_is_durable));
+    assert_eq!(calls, 1);
     assert_nested_scope_expectations(&result, outer_is_durable);
     assert!(cached_stamp(&inner.path).is_none());
     Ok(())
@@ -182,7 +183,7 @@ fn panic_unwind_restores_batch_tls_for_nested_and_top_level_scopes() -> TestResu
             memo_usable(),
         )
     });
-    assert_eq!(calls, if fixture_is_durable { 1 } else { 2 });
+    assert_eq!(calls, 1);
     assert!(completed.0 && completed.1);
     assert_eq!(completed.2, fixture_is_durable);
     assert_eq!(completed.3, fixture_is_durable);
@@ -239,35 +240,6 @@ fn unavailable_file_within_scope_retries_without_memo() -> TestResult<()> {
 }
 
 #[test]
-fn weak_file_stamp_is_not_memoized_and_forces_unshared_retry() -> TestResult<()> {
-    let fixture = FontFileFixture::create()?;
-    let mut calls = 0;
-    let mut retry_memo_usable = true;
-    let mut retry_cache_empty = false;
-    let result = with_validated_stamp_batch(|| {
-        calls += 1;
-        if calls == 1 {
-            let mut weak_stamp =
-                stamp_path_uncached(&fixture.path).map_err(|_| "fixture stamp unavailable")?;
-            weak_stamp.durable_reusable = false;
-            remember_stamp(&fixture.path, weak_stamp);
-            assert!(cached_stamp(&fixture.path).is_none());
-            assert!(!memo_usable());
-            Ok::<_, Box<dyn std::error::Error>>(true)
-        } else {
-            retry_memo_usable = memo_usable();
-            retry_cache_empty = cached_stamp(&fixture.path).is_none();
-            Ok(true)
-        }
-    });
-    assert_eq!(calls, 2);
-    assert!(result?);
-    assert!(!retry_memo_usable);
-    assert!(retry_cache_empty);
-    Ok(())
-}
-
-#[test]
 fn missing_batch_state_never_accepts_memoized_result() {
     let mut calls = 0;
     let result = with_validated_stamp_batch(|| {
@@ -284,7 +256,6 @@ fn missing_batch_state_never_accepts_memoized_result() {
 #[test]
 fn duplicate_path_retains_stamp_only_on_durable_filesystems() -> TestResult<()> {
     let fixture = FontFileFixture::create()?;
-    let fixture_is_durable = super::super::file_stamp_durable_reusable(&fixture.path);
     let mut calls = 0;
     let result = with_validated_stamp_batch(|| {
         calls += 1;
@@ -294,7 +265,10 @@ fn duplicate_path_retains_stamp_only_on_durable_filesystems() -> TestResult<()> 
         }
         stamp
     });
-    assert_eq!(calls, if fixture_is_durable { 1 } else { 2 });
+    assert_eq!(calls, 1);
     assert_eq!(result, fixture_stamp(&fixture));
     Ok(())
 }
+
+#[path = "svg_rasterize_text_stamp_batch_weak_tests.rs"]
+mod weak_tests;

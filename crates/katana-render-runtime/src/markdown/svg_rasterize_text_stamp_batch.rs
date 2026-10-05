@@ -12,6 +12,7 @@ struct StampBatch {
     stamps: HashMap<PathBuf, FileStamp>,
     invalid: bool,
     overflow: bool,
+    memo_disabled: bool,
 }
 
 thread_local! {
@@ -94,6 +95,7 @@ pub(super) fn cached_stamp(path: &Path) -> Option<FileStamp> {
         active
             .borrow()
             .as_ref()
+            .filter(|batch| !batch.memo_disabled)
             .and_then(|batch| batch.stamps.get(path).cloned())
     })
 }
@@ -104,8 +106,11 @@ pub(super) fn remember_stamp(path: &Path, stamp: FileStamp) {
         let Some(batch) = active.as_mut() else {
             return;
         };
+        if batch.memo_disabled {
+            return;
+        }
         if !stamp.durable_reusable() {
-            batch.invalid = true;
+            batch.memo_disabled = true;
             return;
         }
         if batch.stamps.contains_key(path) {
@@ -132,7 +137,7 @@ pub(in super::super) fn memo_usable() -> bool {
         active
             .borrow()
             .as_ref()
-            .is_some_and(|batch| !batch.invalid && !batch.overflow)
+            .is_some_and(|batch| !batch.invalid && !batch.overflow && !batch.memo_disabled)
     })
 }
 
