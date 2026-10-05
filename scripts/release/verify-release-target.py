@@ -19,6 +19,7 @@ PUBLISHED_V0422_RELEASE_MANIFEST_SHA256 = "1ddeddc37c0735a7278755f26f8985aee9176
 REQUIRED_LATEST_RELEASE = "v0.4.22"
 REQUIRED_TARGET_RELEASE = "v0.4.23"
 REQUIRED_RELEASE_COMMITS = (
+    "0acd1e31a3a77271f502fae2074eb4bbcd9c5a84",  # 任意macOS証跡のRust component実bytes認証
     "256eaf53fc2d21507bc856cb847f076bc19b74bf",  # ZenUML 4.4.1の公開資産一覧を同期
     "4421dd8e2c97b2b9d5886c816bcf75835c25710e",  # ZenUML Core 4.4.0への依存更新
     "f1ac35a9352a15b77e4fab9fa318affda3140c4b",  # 任意macOS証跡の公式Bun binary認証
@@ -162,7 +163,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "6863c20fc46e3bd6bcfb300994a5d4e1040e290e73e23cf3d918a1e703d95c67"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "a0f4cc663533a8e96cc4277bf67a12f97601e0d1be86ffe1a90b5c43e72eedf0"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
