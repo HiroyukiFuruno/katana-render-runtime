@@ -405,6 +405,65 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                     self.assertNotEqual(registry_error.returncode, 0)
                     self.assertIn("Could not determine", registry_error.stderr)
 
+    def test_release_package_verification_propagates_prefix_mode_to_nested_target_check(self) -> None:
+        package_verification = self.workflow_step(self.release, "Verify release package")
+        self.assertIn('ALLOW_PUBLISHED_PREFIX: "true"', package_verification)
+        self.assertIn(
+            'run: just VERSION="${{ needs.release-context.outputs.version }}" release-verify',
+            package_verification,
+        )
+        self.assertRegex(self.justfile, r"(?m)^release-verify: release-target-check$")
+
+        for name in ("Release check", "Release preflight checks"):
+            premerge_step = self.workflow_step(self.preflight, name)
+            self.assertNotIn("ALLOW_PUBLISHED_PREFIX", premerge_step)
+
+        # 配布検証の依存recipeでも再試行モードが伝わり、既定の未公開要求が残ることを確認する。
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scripts = root / "scripts/release"
+            scripts.mkdir(parents=True)
+            guard = Path(__file__).parent / "assert-crates-not-published.sh"
+            (scripts / guard.name).write_bytes(guard.read_bytes())
+            (scripts / "verify-version.sh").write_text(
+                '#!/usr/bin/env bash\necho "version_bare=${1#v}"\n',
+                encoding="utf-8",
+            )
+            cargo_bin = root / "bin"
+            cargo_bin.mkdir()
+            cargo = cargo_bin / "cargo"
+            cargo.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "package = sys.argv[2].split('@')[0]\n"
+                "if package == 'katana-render-runtime-assets': sys.exit(0)\n"
+                "print('error: could not find package in registry', file=sys.stderr); sys.exit(101)\n",
+                encoding="utf-8",
+            )
+            cargo.chmod(0o755)
+            justfile = root / "Justfile"
+            justfile.write_text(
+                'release-verify: release-target-check\n\n'
+                'release-target-check:\n'
+                '\tbash scripts/release/assert-crates-not-published.sh v0.4.23\n',
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment["PATH"] = f"{cargo_bin}:{environment['PATH']}"
+            environment["ALLOW_PUBLISHED_PREFIX"] = "true"
+            nested_retry = subprocess.run(
+                ["just", "--justfile", str(justfile), "release-verify"],
+                cwd=root, env=environment, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(nested_retry.returncode, 0, nested_retry.stderr)
+            environment.pop("ALLOW_PUBLISHED_PREFIX")
+            nested_strict = subprocess.run(
+                ["just", "--justfile", str(justfile), "release-verify"],
+                cwd=root, env=environment, capture_output=True, text=True, check=False,
+            )
+            self.assertNotEqual(nested_strict.returncode, 0)
+            self.assertIn("already published", nested_strict.stderr)
+
     def test_internal_dependency_check_rejects_package_version_drift(self) -> None:
         script = Path(__file__).parent / "verify-internal-dependencies.sh"
         manifests = {
