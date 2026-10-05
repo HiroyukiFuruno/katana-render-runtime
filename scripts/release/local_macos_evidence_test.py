@@ -175,6 +175,32 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             fetch=snapshots(valid_comment()), now=NOW, expected_workflow_digest="d" * 64,
         ))
 
+    def test_gh_token_pins_public_github_when_gh_host_targets_enterprise(self) -> None:
+        result = subprocess.CompletedProcess(
+            ["gh", "auth", "token", "--hostname", "github.com"], 0, "public-token\n", "",
+        )
+        with patch.dict(EVIDENCE.os.environ, {"GH_HOST": "enterprise.example"}), patch.object(
+            EVIDENCE.subprocess, "run", return_value=result,
+        ) as run:
+            token = EVIDENCE.gh_token()
+
+        self.assertEqual(token, "public-token")
+        self.assertEqual(run.call_args.args[0], ["gh", "auth", "token", "--hostname", "github.com"])
+
+    def test_attestation_publication_pins_github_api_host_when_gh_host_targets_enterprise(self) -> None:
+        result = subprocess.CompletedProcess(["gh", "api"], 0, '{"id": 1}', "")
+        body_path = Path("/tmp/local-macos-evidence-body.json")
+        with patch.dict(EVIDENCE.os.environ, {"GH_HOST": "enterprise.example"}), patch.object(
+            EVIDENCE.subprocess, "run", return_value=result,
+        ) as run:
+            posted = EVIDENCE.publish_attestation_comment(REPOSITORY, 7, body_path)
+
+        self.assertEqual(posted.stdout, '{"id": 1}')
+        self.assertEqual(run.call_args.args[0], [
+            "gh", "api", "--hostname", "github.com", f"repos/{REPOSITORY}/issues/7/comments",
+            "--method", "POST", "--input", str(body_path),
+        ])
+
     def test_rejects_missing_malformed_duplicate_and_non_owner_comments(self) -> None:
         good = valid_comment()
         malformed = {**good, "body": EVIDENCE.MARKER + "\n{"}

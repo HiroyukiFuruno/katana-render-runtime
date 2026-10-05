@@ -603,11 +603,24 @@ def command_environment(
 
 
 def gh_token() -> str:
-    result = subprocess.run(["gh", "auth", "token"], check=True, text=True, capture_output=True)
+    # GH_HOSTの既定値に左右されず、公開GitHubの認証を使う。
+    result = subprocess.run(
+        ["gh", "auth", "token", "--hostname", "github.com"],
+        check=True, text=True, capture_output=True,
+    )
     token = result.stdout.strip()
     if not token:
         raise EvidenceError("gh auth token returned an empty token")
     return token
+
+
+def publish_attestation_comment(repository: str, number: int, body_path: Path) -> subprocess.CompletedProcess[str]:
+    # GH_HOSTの既定値に左右されず、検証済みの公開GitHubへ証跡を投稿する。
+    return subprocess.run(
+        ["gh", "api", "--hostname", "github.com", f"repos/{repository}/issues/{number}/comments",
+         "--method", "POST", "--input", str(body_path)],
+        cwd=ROOT, check=True, text=True, capture_output=True,
+    )
 
 
 def api_request(token: str, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
@@ -1486,10 +1499,7 @@ def collect(repository: str, number: int, publish: bool) -> int:
             json.dump({"body": MARKER + "\n" + canonical(payload).decode()}, body_file, separators=(",", ":"))
             body_path = Path(body_file.name)
         try:
-            result = subprocess.run(
-                ["gh", "api", f"repos/{repository}/issues/{number}/comments", "--method", "POST", "--input", str(body_path)],
-                cwd=ROOT, check=True, text=True, capture_output=True,
-            )
+            result = publish_attestation_comment(repository, number, body_path)
         finally:
             body_path.unlink(missing_ok=True)
         posted = json.loads(result.stdout)
