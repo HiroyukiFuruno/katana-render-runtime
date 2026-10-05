@@ -19,6 +19,8 @@ PUBLISHED_V0422_RELEASE_MANIFEST_SHA256 = "1ddeddc37c0735a7278755f26f8985aee9176
 REQUIRED_LATEST_RELEASE = "v0.4.22"
 REQUIRED_TARGET_RELEASE = "v0.4.23"
 REQUIRED_RELEASE_COMMITS = (
+    "7e1055f4dbc18d6ab3fc811eb89918479faf8542",  # 任意macOS証跡のBun導入条件
+    "6a91e84cf2c9cfb830234ce9774adb0d0588f4a3",  # macOS証跡の公開GitHub認証と投稿先固定
     "55dc46586b618ff95d8ca1c38b5184286098e720",  # 配布検証への公開prefix再試行設定の伝搬
     "290c79b39451b4c70f595d23abf7d535a3755e66",  # Windows weak stamp fixtureのwrite handle同期
     "409f8ee281c7169d3ffb480b742918e896acdd6c",  # 弱いfont世代の不要な2回parseを除去
@@ -155,7 +157,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "c751f3f2fd4fe611572f9c9ff7efdefab4910445f10daac23d3df1ea7d48b4fe"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "05b048f7c17c5d174524b5a0ff8edfa4e867ee18d57da73e448abec7168832f4"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
