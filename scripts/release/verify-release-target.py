@@ -19,6 +19,7 @@ PUBLISHED_V0422_RELEASE_MANIFEST_SHA256 = "1ddeddc37c0735a7278755f26f8985aee9176
 REQUIRED_LATEST_RELEASE = "v0.4.22"
 REQUIRED_TARGET_RELEASE = "v0.4.23"
 REQUIRED_RELEASE_COMMITS = (
+    "003bf56fea5529b0f1d3e7a6c7fe4578865012a2",  # Windows弱いフォントstampの実内容変更回帰
     "162bd4ce6143ab6e1e8818c6e0f82c67de024b1d",  # macOS証跡unit準備のOS境界回帰
     "a1351815539eef55d4d81b6c0ac2606778f29429",  # 任意macOS証跡のGraphviz依存closureとJNI実体の公式認証
     "0acd1e31a3a77271f502fae2074eb4bbcd9c5a84",  # 任意macOS証跡のRust component実bytes認証
@@ -165,7 +166,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "1e1503fd672a87e11f2e2c3b095cd3f6d1e28765bd443beba52fe042e7e161a9"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "b0a3d39c53fbad398bac2a087c9119d40e1ec96c7e92cb7ce65c1ae8771f4965"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
