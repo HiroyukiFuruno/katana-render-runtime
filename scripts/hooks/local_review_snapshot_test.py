@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -49,7 +50,33 @@ class RepositoryOriginIdentityTest(unittest.TestCase):
 
                 self.assertEqual(result[0]["html_url"],
                                  f"https://github.com/{CANONICAL_REPOSITORY}/issues/105")
-                self.assertEqual(api_calls, [["gh", "api", f"repos/{CANONICAL_REPOSITORY}/issues/105"]])
+                self.assertEqual(api_calls, [["gh", "api", "--hostname", "github.com",
+                                              f"repos/{CANONICAL_REPOSITORY}/issues/105"]])
+
+    def test_issue_api_pins_github_host_when_gh_host_environment_targets_enterprise(self) -> None:
+        invocations: list[tuple[list[str], dict[str, object]]] = []
+
+        def fake_run(arguments: list[str], **options: object) -> SimpleNamespace:
+            invocations.append((arguments, options))
+            if arguments[2] == "git":
+                return SimpleNamespace(stdout="https://github.com/HiroyukiFuruno/katana-render-runtime.git\n")
+            if arguments[2] == "gh":
+                return SimpleNamespace(stdout=json.dumps(self.issue_payload()))
+            raise AssertionError(f"unexpected executable: {arguments}")
+
+        with patch.dict("os.environ", {"GH_HOST": "enterprise.example"}), \
+                patch.object(local_review_state.shutil, "which", return_value="/test-bin/rtk"), \
+                patch.object(local_review_state.subprocess, "run", side_effect=fake_run):
+            result = issue_context(Path("."), [105])
+
+        api_arguments, api_options = invocations[-1]
+        self.assertEqual(
+            api_arguments,
+            ["/test-bin/rtk", "proxy", "gh", "api", "--hostname", "github.com",
+             f"repos/{CANONICAL_REPOSITORY}/issues/105"],
+        )
+        self.assertEqual(api_options["env"]["GH_HOST"], "enterprise.example")
+        self.assertEqual(result[0]["html_url"], f"https://github.com/{CANONICAL_REPOSITORY}/issues/105")
 
     def test_non_github_and_different_repository_origins_are_rejected(self) -> None:
         origins = (
@@ -76,7 +103,8 @@ class RepositoryOriginIdentityTest(unittest.TestCase):
         with patch.object(local_review_state, "command", fake_command):
             with self.assertRaisesRegex(ReviewError, "URL does not match"):
                 issue_context(Path("."), [105])
-        self.assertEqual(api_calls, [["gh", "api", f"repos/{CANONICAL_REPOSITORY}/issues/105"]])
+        self.assertEqual(api_calls, [["gh", "api", "--hostname", "github.com",
+                                      f"repos/{CANONICAL_REPOSITORY}/issues/105"]])
 
 
 class SelectedRemoteIdentityTest(unittest.TestCase):
@@ -109,7 +137,8 @@ class SelectedRemoteIdentityTest(unittest.TestCase):
 
         self.assertEqual(result[0]["html_url"],
                          f"https://github.com/{CANONICAL_REPOSITORY}/issues/105")
-        self.assertEqual(api_calls, [["gh", "api", f"repos/{CANONICAL_REPOSITORY}/issues/105"]])
+        self.assertEqual(api_calls, [["gh", "api", "--hostname", "github.com",
+                                      f"repos/{CANONICAL_REPOSITORY}/issues/105"]])
 
     def test_case_variant_matching_multiple_remotes_remains_ambiguous(self) -> None:
         configured = "git@github.com:HiroyukiFuruno/katana-render-runtime.git"

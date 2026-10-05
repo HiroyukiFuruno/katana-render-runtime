@@ -324,7 +324,9 @@ def issue_context(root: Path, numbers: list[int], remote_name: str = "origin",
     repository = LOCAL_REPOSITORY
     issues = []
     for number in sorted(set(numbers)):
-        payload = strict_json(command(["gh", "api", f"repos/{repository}/issues/{number}"], root))
+        # GH_HOSTの設定に左右されず、検証済みの正規GitHubからIssueを取得する。
+        payload = strict_json(command(
+            ["gh", "api", "--hostname", "github.com", f"repos/{repository}/issues/{number}"], root))
         if not isinstance(payload, dict) or payload.get("number") != number or "pull_request" in payload:
             raise ReviewError("Issue response does not identify the requested Issue")
         fields = ("title", "body", "state", "html_url")

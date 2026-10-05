@@ -258,7 +258,7 @@ class GitSnapshotTest(unittest.TestCase):
         printed = json.loads(output.getvalue())
         self.assertEqual(printed["inputs"]["review_remote"], "upstream")
         self.assertEqual(printed["inputs"]["source"]["base_sha"], self.base)
-        self.assertEqual(api_calls, [["gh", "api", "repos/HiroyukiFuruno/katana-render-runtime/issues/89"]])
+        self.assertEqual(api_calls, [["gh", "api", "--hostname", "github.com", "repos/HiroyukiFuruno/katana-render-runtime/issues/89"]])
 
     def test_wrong_selected_remote_host_is_rejected_without_origin_fallback(self) -> None:
         command(["git", "remote", "add", "origin",
@@ -2573,7 +2573,7 @@ class DriverContractTest(unittest.TestCase):
                 with patch("local_review_state.command", side_effect=real_git_mock_gh):
                     observed.append(issue_context(root, [89]))
                 self.assertEqual(len(gh_calls), 1)
-                self.assertEqual(gh_calls[0], ["gh", "api", "repos/HiroyukiFuruno/katana-render-runtime/issues/89"])
+                self.assertEqual(gh_calls[0], ["gh", "api", "--hostname", "github.com", "repos/HiroyukiFuruno/katana-render-runtime/issues/89"])
         self.assertTrue(all(value == observed[0] for value in observed[1:]))
 
     def test_repository_url_trims_only_one_terminal_slash(self) -> None:
