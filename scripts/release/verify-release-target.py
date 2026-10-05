@@ -19,6 +19,9 @@ PUBLISHED_V0422_RELEASE_MANIFEST_SHA256 = "1ddeddc37c0735a7278755f26f8985aee9176
 REQUIRED_LATEST_RELEASE = "v0.4.22"
 REQUIRED_TARGET_RELEASE = "v0.4.23"
 REQUIRED_RELEASE_COMMITS = (
+    "409f8ee281c7169d3ffb480b742918e896acdd6c",  # 弱いfont世代の不要な2回parseを除去
+    "7526e8910b078304a3ee4ed6d34731b45e6d82a3",  # 公開済み正当prefixからのrelease retry
+    "ffba9ebfa0f45f21516a84bba71aabd46da4253f",  # Issue APIのgithub.com host固定
     "f0870093d5d94847690cf63f47c2e2432e082962",  # POSIXレビュー回収中の連続signalを遅延
     "4895aafb21ce915e4111ac2f8c6982a0412c97de",  # Draft化したPRの旧preflight停止
     "a8e412795efc1e40ee9ccdba4391b1e004ca345e",  # macOS raw tree照合のsource Git固定
@@ -150,7 +153,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0422_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "da020f2e85fb265a2d261290a2ff39a2635751e3d8b1a2208f331263063fbf8f"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "8c0558fc55455ddb6136573263cd7ac84e763f9f0ab0102cbd83ae434804a945"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
