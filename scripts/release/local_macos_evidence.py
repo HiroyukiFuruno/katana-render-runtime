@@ -17,6 +17,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, NamedTuple
@@ -96,6 +97,12 @@ MAX_JUST_ASSET_BYTES = 8 * 1024 * 1024
 MAX_JUST_BINARY_BYTES = 32 * 1024 * 1024
 MAX_JUST_ARCHIVE_ENTRIES = 128
 MAX_JUST_ARCHIVE_CONTENT_BYTES = 16 * 1024 * 1024
+BUN_RELEASE_REPOSITORY = "oven-sh/bun"
+BUN_RELEASE_TAG = "bun-v1.4.2"
+BUN_VERSION = "1.4.2"
+BUN_ASSET_NAME = "bun-darwin-aarch64.zip"
+MAX_BUN_ASSET_BYTES = 32 * 1024 * 1024
+MAX_BUN_BINARY_BYTES = 80 * 1024 * 1024
 HOST_ENVIRONMENT_KEYS = (
     "PATH", "HOME", "TMPDIR", "CARGO_HOME", "RUSTUP_HOME", "LANG", "LC_ALL",
     "LC_CTYPE", "LC_MESSAGES", "LC_COLLATE", "LC_NUMERIC", "LC_TIME", "TERM",
@@ -129,6 +136,14 @@ MAC_WORKFLOW_STEP_COMMANDS: dict[str, tuple[str, ...]] = {
 class JustBinding(NamedTuple):
     path: Path
     version: str
+    release_tag: str
+    asset_name: str
+    asset_url: str
+    asset_sha256: str
+    binary_sha256: str
+
+
+class BunBinding(NamedTuple):
     release_tag: str
     asset_name: str
     asset_url: str
@@ -403,7 +418,10 @@ def assert_private_command_directory(directory: Path, expected_aliases: set[str]
         raise EvidenceError("isolated trusted command directory is unavailable") from exc
 
 
-def command_binding(environment: dict[str, str], just_binding: JustBinding) -> CommandBinding:
+def command_binding(
+    environment: dict[str, str], just_binding: JustBinding,
+    bun_binary_sha256: str,
+) -> CommandBinding:
     home = account_home()
     brew_root = HOMEBREW_ROOT.resolve(strict=True)
     system_roots = (Path("/usr/bin"), Path("/bin"), Path("/usr/sbin"), Path("/sbin"))
@@ -439,6 +457,8 @@ def command_binding(environment: dict[str, str], just_binding: JustBinding) -> C
 
     brew_bin = trusted_executable(brew_root / "bin/brew", (brew_root,))
     bun_bin = trusted_executable(brew_root / "bin/bun", (brew_root,))
+    assert_official_bun_binary(bun_bin, bun_binary_sha256)
+    bun_sha256 = bun_binary_sha256
     dot_candidate = brew_root / "bin/dot"
     try:
         dot_candidate.lstat()
@@ -494,7 +514,7 @@ def command_binding(environment: dict[str, str], just_binding: JustBinding) -> C
         "clippy-driver": (str(rust_paths["clippy-driver"]), sha256_bytes(rust_paths["clippy-driver"].read_bytes())),
         "rustfmt": (str(rust_paths["rustfmt"]), sha256_bytes(rust_paths["rustfmt"].read_bytes())),
         "brew": (str(brew_bin), sha256_bytes(brew_bin.read_bytes())),
-        "bun": (str(bun_bin), sha256_bytes(bun_bin.read_bytes())),
+        "bun": (str(bun_bin), bun_binary_sha256 or bun_sha256),
         "dot": (str(dot_bin), sha256_bytes(dot_bin.read_bytes())),
         "bash": (str(bash_bin), sha256_bytes(bash_bin.read_bytes())),
         "python3": (str(python_bin), sha256_bytes(python_bin.read_bytes())),
@@ -812,16 +832,144 @@ def download_trusted_just(
     return materialize_trusted_just(release, archive, destination, environment)
 
 
+def validate_bun_release_metadata(value: Any) -> dict[str, str]:
+    if (
+        not isinstance(value, dict)
+        or value.get("tag_name") != BUN_RELEASE_TAG
+        or value.get("draft") is not False
+        or value.get("prerelease") is not False
+        or not isinstance(value.get("assets"), list)
+    ):
+        raise EvidenceError("official Bun release metadata is invalid")
+    asset_name = BUN_ASSET_NAME
+    asset_url = (
+        f"https://github.com/{BUN_RELEASE_REPOSITORY}/releases/download/"
+        f"{BUN_RELEASE_TAG}/{asset_name}"
+    )
+    matches = [
+        asset for asset in value["assets"]
+        if isinstance(asset, dict) and asset.get("name") == asset_name
+    ]
+    if len(matches) != 1:
+        raise EvidenceError("official Bun Apple Silicon asset is missing or ambiguous")
+    asset = matches[0]
+    digest, size = asset.get("digest"), asset.get("size")
+    if (
+        asset.get("browser_download_url") != asset_url
+        or not isinstance(digest, str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+        or type(size) is not int
+        or size < 1
+        or size > MAX_BUN_ASSET_BYTES
+    ):
+        raise EvidenceError("official Bun asset metadata is invalid")
+    return {
+        "tag": BUN_RELEASE_TAG,
+        "asset": asset_name,
+        "url": asset_url,
+        "sha256": digest.removeprefix("sha256:"),
+        "size": str(size),
+    }
+
+
+def materialize_trusted_bun(release: Any, archive: bytes) -> BunBinding:
+    metadata = validate_bun_release_metadata(release)
+    if (
+        len(archive) != int(metadata["size"])
+        or sha256_bytes(archive) != metadata["sha256"]
+    ):
+        raise EvidenceError("official Bun asset digest does not match downloaded bytes")
+
+    binary_path = "bun-darwin-aarch64/bun"
+    directory_path = "bun-darwin-aarch64/"
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            members = bundle.infolist()
+            if len(members) != 2 or {member.filename for member in members} != {
+                directory_path, binary_path,
+            }:
+                raise EvidenceError("official Bun archive entries are invalid")
+            binary_member = next(member for member in members if member.filename == binary_path)
+            directory_member = next(member for member in members if member.filename == directory_path)
+            binary_mode = binary_member.external_attr >> 16
+            directory_mode = directory_member.external_attr >> 16
+            if (
+                not stat.S_ISREG(binary_mode)
+                or not directory_member.is_dir()
+                or not stat.S_ISDIR(directory_mode)
+                or binary_member.flag_bits & 1
+                or binary_member.file_size < 1
+                or binary_member.file_size > MAX_BUN_BINARY_BYTES
+                or binary_member.compress_size > MAX_BUN_ASSET_BYTES
+                or binary_member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+            ):
+                raise EvidenceError("official Bun archive binary metadata is invalid")
+            with bundle.open(binary_member) as stream:
+                binary = stream.read(MAX_BUN_BINARY_BYTES + 1)
+    except EvidenceError:
+        raise
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError) as exc:
+        raise EvidenceError("official Bun archive is invalid") from exc
+    if len(binary) != binary_member.file_size:
+        raise EvidenceError("official Bun archive binary is truncated")
+    return BunBinding(
+        release_tag=metadata["tag"],
+        asset_name=metadata["asset"],
+        asset_url=metadata["url"],
+        asset_sha256=metadata["sha256"],
+        binary_sha256=sha256_bytes(binary),
+    )
+
+
+def download_bun_asset(metadata: dict[str, str]) -> bytes:
+    try:
+        req = request.Request(
+            metadata["url"],
+            headers={"Accept": "application/octet-stream", "User-Agent": "katana-render-runtime-local-macos-evidence"},
+        )
+        with request.urlopen(req, timeout=60) as response:
+            final_host = request.urlparse(response.geturl()).hostname
+            if final_host not in {
+                "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com",
+            }:
+                raise EvidenceError("official Bun asset redirected to an untrusted host")
+            archive = response.read(MAX_BUN_ASSET_BYTES + 1)
+    except EvidenceError:
+        raise
+    except (error.URLError, error.HTTPError, TimeoutError, OSError) as exc:
+        raise EvidenceError("official Bun asset download failed") from exc
+    if len(archive) > MAX_BUN_ASSET_BYTES:
+        raise EvidenceError("official Bun asset exceeds its size limit")
+    return archive
+
+
+def download_trusted_bun(token: str) -> BunBinding:
+    release = api_request(
+        token, "GET", f"repos/{BUN_RELEASE_REPOSITORY}/releases/tags/{BUN_RELEASE_TAG}"
+    )
+    metadata = validate_bun_release_metadata(release)
+    return materialize_trusted_bun(release, download_bun_asset(metadata))
+
+
+def assert_official_bun_binary(path: Path, expected_sha256: str) -> None:
+    try:
+        if sha256_bytes(path.read_bytes()) != expected_sha256:
+            raise EvidenceError("Homebrew Bun binary does not match the official Bun release")
+    except OSError as exc:
+        raise EvidenceError("Homebrew Bun binary is unavailable") from exc
+
+
 def prepare_command_environment(
     token: str, isolated_inputs_dir: Path, cargo_target_dir: Path, cargo_home: Path,
     bun_cache_dir: Path,
-) -> tuple[dict[str, str], JustBinding, CommandBinding, dict[str, str]]:
+) -> tuple[dict[str, str], JustBinding, BunBinding, CommandBinding, dict[str, str]]:
     try:
         bootstrap = command_environment(cargo_target_dir, cargo_home, bun_cache_dir)
         just_binding = download_trusted_just(token, isolated_inputs_dir, bootstrap)
-        binding = command_binding(bootstrap, just_binding)
+        bun_binding = download_trusted_bun(token)
+        binding = command_binding(bootstrap, just_binding, bun_binding.binary_sha256)
         environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir, binding, just_binding)
-        return bootstrap, just_binding, binding, environment
+        return bootstrap, just_binding, bun_binding, binding, environment
     except BaseException:
         shutil.rmtree(isolated_inputs_dir, ignore_errors=True)
         raise
@@ -897,7 +1045,7 @@ def cargo_component_versions(
 
 def tool_versions(
     cargo_target_dir: Path, cargo_home: Path, bun_cache_dir: Path, just_binding: JustBinding,
-    binding: CommandBinding,
+    bun_binding: BunBinding, binding: CommandBinding,
 ) -> dict[str, str]:
     assert_command_binding(binding, just_binding)
     environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir, binding, just_binding)
@@ -931,6 +1079,11 @@ def tool_versions(
         "just_asset_url": just_binding.asset_url,
         "just_asset_sha256": just_binding.asset_sha256,
         "just_binary_sha256": just_binding.binary_sha256,
+        "bun_release": bun_binding.release_tag,
+        "bun_asset": bun_binding.asset_name,
+        "bun_asset_url": bun_binding.asset_url,
+        "bun_asset_sha256": bun_binding.asset_sha256,
+        "bun_binary_sha256": bun_binding.binary_sha256,
         "command_binding": binding.proof_value(),
     })
     if found["just"] != just_binding.version:
@@ -976,8 +1129,19 @@ def validate_pinned_tools(versions: Any) -> None:
     java_home = versions.get("java_home")
     if not isinstance(java_home, str) or not Path(java_home).is_absolute():
         raise EvidenceError("local proof requires a validated absolute Java home")
-    if versions.get("bun") != "1.4.2":
+    if versions.get("bun") != BUN_VERSION:
         raise EvidenceError("local proof requires Bun 1.4.2, matching the macOS CI setup")
+    if (
+        versions.get("bun_release") != BUN_RELEASE_TAG
+        or versions.get("bun_asset") != BUN_ASSET_NAME
+        or versions.get("bun_asset_url") != (
+            f"https://github.com/{BUN_RELEASE_REPOSITORY}/releases/download/"
+            f"{BUN_RELEASE_TAG}/{BUN_ASSET_NAME}"
+        )
+        or not is_sha256(versions.get("bun_asset_sha256"))
+        or not is_sha256(versions.get("bun_binary_sha256"))
+    ):
+        raise EvidenceError("official Bun release identity or digest is invalid")
     just = versions.get("just")
     version = re.fullmatch(r"just (\d+\.\d+\.\d+)", just) if isinstance(just, str) else None
     if version is None:
@@ -1015,6 +1179,8 @@ def validate_pinned_tools(versions: Any) -> None:
             raise EvidenceError(f"shared command executable identity is invalid: {name}")
     if command["executables"]["just"][0] != just_path:
         raise EvidenceError("shared command binding does not identify the authenticated just executable")
+    if command["executables"]["bun"][1] != versions["bun_binary_sha256"]:
+        raise EvidenceError("shared command binding does not identify the authenticated Bun binary")
     expected_commands = Path(just_path).parent.parent / "trusted-commands"
     expected_path = os.pathsep.join((str(expected_commands), *SYSTEM_COMMAND_PATH))
     if command["path"] != expected_path:
@@ -1134,6 +1300,7 @@ def valid_payload(
     comment: dict[str, Any], payload: dict[str, Any], repository: str, number: int,
     base_sha: str, head_sha: str, expected_workflow_digest: str, now: int, owner_login: str,
     stable_versions: dict[str, str], just_release_metadata: dict[str, str],
+    bun_binding: BunBinding,
 ) -> bool:
     user, association = comment.get("user"), comment.get("author_association")
     if not isinstance(user, dict) or user.get("login", "").lower() != owner_login.lower() or association != "OWNER":
@@ -1164,7 +1331,9 @@ def valid_payload(
     if not isinstance(tools, dict) or set(tools) != {
         "macos", "architecture", "rust_host", "rustc", "cargo", "clippy", "rustfmt",
         "java", "java_home", "java_vendor", "bun", "just", "just_path", "just_release",
-        "just_asset", "just_asset_url", "just_asset_sha256", "just_binary_sha256", "command_binding", "brew", "graphviz"
+        "just_asset", "just_asset_url", "just_asset_sha256", "just_binary_sha256",
+        "bun_release", "bun_asset", "bun_asset_url", "bun_asset_sha256", "bun_binary_sha256",
+        "command_binding", "brew", "graphviz"
     } or any(not isinstance(value, str) or not value.strip() for value in tools.values()):
         return False
     if not Path(tools["java_home"]).is_absolute():
@@ -1173,7 +1342,7 @@ def valid_payload(
             or tools.get("rust_host") != SCOPE_PARAMETERS["CARGO_BUILD_TARGET"]):
         return False
     if (not java_is_21(tools.get("java")) or tools.get("java_vendor") != JAVA_VENDOR
-            or tools.get("bun") != "1.4.2"):
+            or tools.get("bun") != BUN_VERSION):
         return False
     try:
         validate_stable_rust_tools(tools, stable_versions)
@@ -1184,6 +1353,20 @@ def valid_payload(
             or tools.get("just_asset") != just_release_metadata.get("asset")
             or tools.get("just_asset_url") != just_release_metadata.get("url")
             or tools.get("just_asset_sha256") != just_release_metadata.get("sha256")):
+        return False
+    if (
+        tools.get("bun_release") != bun_binding.release_tag
+        or tools.get("bun_asset") != bun_binding.asset_name
+        or tools.get("bun_asset_url") != bun_binding.asset_url
+        or tools.get("bun_asset_sha256") != bun_binding.asset_sha256
+        or tools.get("bun_binary_sha256") != bun_binding.binary_sha256
+    ):
+        return False
+    try:
+        command_binding = json.loads(tools["command_binding"])
+        if command_binding["executables"]["bun"][1] != bun_binding.binary_sha256:
+            return False
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError):
         return False
     if payload.get("environment") != SCOPE_PARAMETERS:
         return False
@@ -1228,7 +1411,10 @@ def accepted_comment(comments: Any, *args: Any) -> dict[str, Any] | None:
             marked.append(comment)
     if not marked:
         return None
-    repository, number, base_sha, head_sha, workflow_hash, now, owner_login, stable_versions, just_release_metadata = args
+    (
+        repository, number, base_sha, head_sha, workflow_hash, now, owner_login,
+        stable_versions, just_release_metadata, bun_binding,
+    ) = args
     current: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for comment in marked:
         payload = parse_comment(comment)
@@ -1250,7 +1436,7 @@ def accepted_comment(comments: Any, *args: Any) -> dict[str, Any] | None:
     comment, payload = current[0]
     return comment if valid_payload(
         comment, payload, repository, number, base_sha, head_sha, workflow_hash, now, owner_login,
-        stable_versions, just_release_metadata,
+        stable_versions, just_release_metadata, bun_binding,
     ) else None
 
 
@@ -1329,13 +1515,18 @@ def verify_from_api(
         just_release_metadata = validate_just_release_metadata(
             fetch(f"repos/{JUST_RELEASE_REPOSITORY}/releases/latest")
         )
+        bun_release = fetch(
+            f"repos/{BUN_RELEASE_REPOSITORY}/releases/tags/{BUN_RELEASE_TAG}"
+        )
+        bun_metadata = validate_bun_release_metadata(bun_release)
+        bun_binding = materialize_trusted_bun(bun_release, download_bun_asset(bun_metadata))
         first = accepted_comment(
             comments_first, repository, number, base_sha, head_sha, digest, timestamp, owner_login,
-            stable_versions, just_release_metadata,
+            stable_versions, just_release_metadata, bun_binding,
         )
         second = accepted_comment(
             comments_second, repository, number, base_sha, head_sha, digest, timestamp, owner_login,
-            stable_versions, just_release_metadata,
+            stable_versions, just_release_metadata, bun_binding,
         )
         return first is not None and second is not None and canonical(first) == canonical(second)
     except Exception:
@@ -1388,7 +1579,7 @@ def collect(repository: str, number: int, publish: bool) -> int:
     bun_cache_dir.mkdir()
     logs: list[dict[str, Any]] = []
     smoke_output = str(logs_dir / "plantuml-sequence.svg")
-    bootstrap_env, just_binding, binding, command_env = prepare_command_environment(
+    bootstrap_env, just_binding, bun_binding, binding, command_env = prepare_command_environment(
         token, isolated_inputs_dir, cargo_target_dir, cargo_home, bun_cache_dir,
     )
 
@@ -1424,14 +1615,18 @@ def collect(repository: str, number: int, publish: bool) -> int:
                     clean_existing_node_modules()
                 run_command(command_id, argv_template)
         stable_versions_before = fetch_stable_manifest_versions()
-        versions_before = tool_versions(cargo_target_dir, cargo_home, bun_cache_dir, just_binding, binding)
+        versions_before = tool_versions(
+            cargo_target_dir, cargo_home, bun_cache_dir, just_binding, bun_binding, binding,
+        )
         validate_pinned_tools(versions_before)
         validate_stable_rust_tools(versions_before, stable_versions_before)
         for command_id, argv_template in COMMANDS:
             if command_id not in PREPARATION_COMMANDS:
                 run_command(command_id, argv_template)
         stable_versions_after = fetch_stable_manifest_versions()
-        versions_after = tool_versions(cargo_target_dir, cargo_home, bun_cache_dir, just_binding, binding)
+        versions_after = tool_versions(
+            cargo_target_dir, cargo_home, bun_cache_dir, just_binding, bun_binding, binding,
+        )
         validate_pinned_tools(versions_after)
         validate_stable_rust_tools(versions_after, stable_versions_after)
         if versions_before != versions_after or stable_versions_before != stable_versions_after:

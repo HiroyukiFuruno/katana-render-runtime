@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import io
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -33,9 +36,11 @@ def collector_binding_patches():
         Path("/trusted-just/just"), "just 1.40.0", "1.40.0", "just-1.40.0-aarch64-apple-darwin.tar.gz",
         "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz", "a" * 64, "b" * 64,
     )
+    fake_bun = fixture_bun_binding()
     return patch.multiple(
         EVIDENCE,
         download_trusted_just=Mock(return_value=fake_just),
+        download_trusted_bun=Mock(return_value=fake_bun),
         command_binding=Mock(return_value=EVIDENCE.CommandBinding("/bin", {})),
         command_environment=Mock(return_value={"PATH": "/bin", "JAVA_HOME": "/java"}),
         assert_command_binding=Mock(),
@@ -56,6 +61,65 @@ STABLE_RUST = {
     "rustfmt": "1.10.0",
     "rustfmt_cli": "1.10.0-stable (b940084d7e 2026-09-28)",
 }
+
+BUN_BINARY = b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.4.2; else exit 0; fi\n"
+
+
+def fixture_bun_archive(binary: bytes = BUN_BINARY) -> bytes:
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as output:
+        directory = zipfile.ZipInfo("bun-darwin-aarch64/")
+        directory.external_attr = (stat.S_IFDIR | 0o755) << 16 | 0x10
+        output.writestr(directory, b"")
+        executable = zipfile.ZipInfo("bun-darwin-aarch64/bun")
+        executable.external_attr = (stat.S_IFREG | 0o755) << 16
+        output.writestr(executable, binary)
+    return archive.getvalue()
+
+
+BUN_ARCHIVE = fixture_bun_archive()
+BUN_ARCHIVE_SHA256 = EVIDENCE.sha256_bytes(BUN_ARCHIVE)
+BUN_BINARY_SHA256 = EVIDENCE.sha256_bytes(BUN_BINARY)
+BUN_ASSET_URL = (
+    f"https://github.com/{EVIDENCE.BUN_RELEASE_REPOSITORY}/releases/download/"
+    f"{EVIDENCE.BUN_RELEASE_TAG}/{EVIDENCE.BUN_ASSET_NAME}"
+)
+BUN_RELEASE = {
+    "tag_name": EVIDENCE.BUN_RELEASE_TAG,
+    "draft": False,
+    "prerelease": False,
+    "assets": [{
+        "name": EVIDENCE.BUN_ASSET_NAME,
+        "browser_download_url": BUN_ASSET_URL,
+        "digest": f"sha256:{BUN_ARCHIVE_SHA256}",
+        "size": len(BUN_ARCHIVE),
+    }],
+}
+
+
+def fixture_bun_binding():
+    return EVIDENCE.BunBinding(
+        EVIDENCE.BUN_RELEASE_TAG, EVIDENCE.BUN_ASSET_NAME, BUN_ASSET_URL,
+        BUN_ARCHIVE_SHA256, BUN_BINARY_SHA256,
+    )
+
+
+class FixtureDownloadResponse:
+    def __init__(self, archive: bytes = BUN_ARCHIVE, url: str = BUN_ASSET_URL) -> None:
+        self.archive = archive
+        self.url = url
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _type, _value, _traceback):
+        return False
+
+    def geturl(self) -> str:
+        return self.url
+
+    def read(self, _size: int = -1) -> bytes:
+        return self.archive if _size < 0 else self.archive[:_size]
 
 
 def valid_comment() -> dict[str, object]:
@@ -92,6 +156,11 @@ def valid_comment() -> dict[str, object]:
             "just_release": "1.40.0", "just_asset": "just-1.40.0-aarch64-apple-darwin.tar.gz",
             "just_asset_url": "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
             "just_asset_sha256": "a" * 64, "just_binary_sha256": "b" * 64,
+            "bun_release": EVIDENCE.BUN_RELEASE_TAG,
+            "bun_asset": EVIDENCE.BUN_ASSET_NAME,
+            "bun_asset_url": BUN_ASSET_URL,
+            "bun_asset_sha256": BUN_ARCHIVE_SHA256,
+            "bun_binary_sha256": BUN_BINARY_SHA256,
             "command_binding": json.dumps({
                 "path": os.pathsep.join((
                     "/tmp/krr-local-macos-inputs-fixture/trusted-commands",
@@ -100,8 +169,9 @@ def valid_comment() -> dict[str, object]:
                 "path_policy": EVIDENCE.COMMAND_PATH_POLICY,
                 "executables": {
                     name: [
-                        "/tmp/krr-local-macos-inputs-fixture/trusted-just/just" if name == "just" else f"/trusted/{name}",
-                        "c" * 64,
+                        "/tmp/krr-local-macos-inputs-fixture/trusted-just/just" if name == "just"
+                        else "/opt/homebrew/bin/bun" if name == "bun" else f"/trusted/{name}",
+                        BUN_BINARY_SHA256 if name == "bun" else "c" * 64,
                     ]
                     for name in ("just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "bun", "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname")
                 },
@@ -121,7 +191,10 @@ def valid_comment() -> dict[str, object]:
     }
 
 
-def snapshots(comment: object, *, changed_second: bool = False, api_fail: bool = False):
+def snapshots(
+    comment: object, *, changed_second: bool = False, api_fail: bool = False,
+    bun_release: object | None = None, bun_api_fail: bool = False,
+):
     pr = {
         "number": 7,
         "state": "open",
@@ -154,6 +227,10 @@ def snapshots(comment: object, *, changed_second: bool = False, api_fail: bool =
                     "digest": "sha256:" + "a" * 64, "size": 123,
                 }],
             }
+        if path == f"repos/{EVIDENCE.BUN_RELEASE_REPOSITORY}/releases/tags/{EVIDENCE.BUN_RELEASE_TAG}":
+            if bun_api_fail:
+                raise RuntimeError("Bun release metadata unavailable")
+            return copy.deepcopy(BUN_RELEASE if bun_release is None else bun_release)
         if path.startswith(f"repos/{REPOSITORY}/issues/7/comments?"):
             if isinstance(comment, list):
                 return copy.deepcopy(comment)
@@ -168,6 +245,52 @@ class LocalMacosEvidenceTest(unittest.TestCase):
         patcher = patch.object(EVIDENCE, "fetch_stable_manifest_versions", return_value=STABLE_RUST)
         patcher.start()
         self.addCleanup(patcher.stop)
+        bun_asset_patcher = patch.object(
+            EVIDENCE.request, "urlopen", return_value=FixtureDownloadResponse(),
+        )
+        bun_asset_patcher.start()
+        self.addCleanup(bun_asset_patcher.stop)
+
+    def test_prepare_binds_homebrew_bun_to_official_binary_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            isolated = Path(temporary) / "krr-local-macos-inputs-fixture"
+            isolated.mkdir()
+            cargo_home = isolated / "cargo-home"
+            cargo_home.mkdir()
+            cargo_target = isolated / "cargo-target"
+            cargo_target.mkdir()
+            bun_cache = isolated / "bun-cache"
+            bun_cache.mkdir()
+            just = EVIDENCE.JustBinding(
+                Path("/trusted-just/just"), "just 1.40.0", "1.40.0",
+                "just-1.40.0-aarch64-apple-darwin.tar.gz",
+                "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
+                "a" * 64, "b" * 64,
+            )
+            command_binding = EVIDENCE.CommandBinding("/bin", {})
+            with (
+                patch.object(
+                    EVIDENCE, "command_environment",
+                    side_effect=[{"PATH": "/bin"}, {"PATH": "/bin"}],
+                ),
+                patch.object(EVIDENCE, "download_trusted_just", return_value=just),
+                patch.object(
+                    EVIDENCE, "download_trusted_bun", return_value=fixture_bun_binding(),
+                ),
+                patch.object(
+                    EVIDENCE, "command_binding", return_value=command_binding,
+                ) as command_binding_mock,
+            ):
+                prepared = EVIDENCE.prepare_command_environment(
+                    "token", isolated, cargo_target, cargo_home, bun_cache,
+                )
+
+            self.assertEqual(prepared, (
+                {"PATH": "/bin"}, just, fixture_bun_binding(), command_binding, {"PATH": "/bin"},
+            ))
+            command_binding_mock.assert_called_once_with(
+                {"PATH": "/bin"}, just, BUN_BINARY_SHA256,
+            )
 
     def test_accepts_current_owner_proof_bound_to_base_head_workflow_and_full_scope(self) -> None:
         self.assertTrue(EVIDENCE.verify_from_api(
@@ -1172,6 +1295,52 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
     def test_api_failure_is_a_fallback_result(self) -> None:
         self.assertFalse(EVIDENCE.verify_from_api(REPOSITORY, 7, fetch=snapshots(None, api_fail=True)))
 
+    def test_fresh_bun_release_metadata_and_archive_fail_closed_to_hosted_ci(self) -> None:
+        good = valid_comment()
+        bad_release = copy.deepcopy(BUN_RELEASE)
+        bad_release["tag_name"] = "bun-v1.4.1"
+        with self.subTest(reason="release metadata mismatch"):
+            self.assertFalse(EVIDENCE.verify_from_api(
+                REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                fetch=snapshots(good, bun_release=bad_release), now=NOW,
+                expected_workflow_digest="d" * 64,
+            ))
+        with self.subTest(reason="release API unavailable"):
+            self.assertFalse(EVIDENCE.verify_from_api(
+                REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                fetch=snapshots(good, bun_api_fail=True), now=NOW,
+                expected_workflow_digest="d" * 64,
+            ))
+        with self.subTest(reason="archive download unavailable"), patch.object(
+            EVIDENCE.request, "urlopen", side_effect=EVIDENCE.error.URLError("offline"),
+        ):
+            self.assertFalse(EVIDENCE.verify_from_api(
+                REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                fetch=snapshots(good), now=NOW, expected_workflow_digest="d" * 64,
+            ))
+        with self.subTest(reason="downloaded archive bytes mismatch"), patch.object(
+            EVIDENCE.request, "urlopen", return_value=FixtureDownloadResponse(BUN_ARCHIVE + b"tampered"),
+        ):
+            self.assertFalse(EVIDENCE.verify_from_api(
+                REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                fetch=snapshots(good), now=NOW, expected_workflow_digest="d" * 64,
+            ))
+
+    def test_receipt_bun_hash_must_match_fresh_official_archive_bytes(self) -> None:
+        good = valid_comment()
+        payload = json.loads(good["body"].split("\n", 1)[1])
+        command = json.loads(payload["tools"]["command_binding"])
+        command["executables"]["bun"][1] = "f" * 64
+        tools = {
+            **payload["tools"], "bun_binary_sha256": "f" * 64,
+            "command_binding": json.dumps(command),
+        }
+        changed = {**good, "body": EVIDENCE.MARKER + "\n" + json.dumps({**payload, "tools": tools})}
+        self.assertFalse(EVIDENCE.verify_from_api(
+            REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+            fetch=snapshots(changed), now=NOW, expected_workflow_digest="d" * 64,
+        ))
+
     def test_reads_all_comment_pages_and_rejects_mutation_between_reads(self) -> None:
         good = valid_comment()
         pages: dict[str, int] = {}
@@ -1338,6 +1507,53 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
                 self.assertEqual(run.call_count, len(EVIDENCE.PREPARATION_COMMANDS))
 
 
+
+
+class TrustedBunTest(unittest.TestCase):
+    def test_official_bun_archive_requires_exact_asset_and_safe_regular_binary(self) -> None:
+        binding = EVIDENCE.materialize_trusted_bun(BUN_RELEASE, BUN_ARCHIVE)
+        self.assertEqual(binding, fixture_bun_binding())
+
+        wrong_digest = copy.deepcopy(BUN_RELEASE)
+        wrong_digest["assets"][0]["digest"] = "sha256:" + "f" * 64
+        with self.assertRaisesRegex(EVIDENCE.EvidenceError, "digest"):
+            EVIDENCE.materialize_trusted_bun(wrong_digest, BUN_ARCHIVE)
+
+        unsafe_archive = io.BytesIO()
+        with zipfile.ZipFile(unsafe_archive, "w", compression=zipfile.ZIP_STORED) as output:
+            directory = zipfile.ZipInfo("bun-darwin-aarch64/")
+            directory.external_attr = (stat.S_IFDIR | 0o755) << 16 | 0x10
+            output.writestr(directory, b"")
+            executable = zipfile.ZipInfo("../bun")
+            executable.external_attr = (stat.S_IFREG | 0o755) << 16
+            output.writestr(executable, BUN_BINARY)
+        archive = unsafe_archive.getvalue()
+        changed_release = copy.deepcopy(BUN_RELEASE)
+        changed_release["assets"][0]["size"] = len(archive)
+        changed_release["assets"][0]["digest"] = "sha256:" + EVIDENCE.sha256_bytes(archive)
+        with self.assertRaisesRegex(EVIDENCE.EvidenceError, "entries"):
+            EVIDENCE.materialize_trusted_bun(changed_release, archive)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX child executable fixture is required")
+    def test_real_noop_bun_wrapper_cannot_match_official_release_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            wrapper = Path(temporary) / "bun"
+            wrapper.write_text(
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.4.2; fi\nexit 0\n",
+                encoding="utf-8",
+            )
+            wrapper.chmod(0o755)
+            version = subprocess.run(
+                (str(wrapper), "--version"), capture_output=True, text=True, check=False,
+            )
+            install = subprocess.run(
+                (str(wrapper), "install", "--frozen-lockfile"),
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual((version.returncode, version.stdout.strip()), (0, "1.4.2"))
+            self.assertEqual(install.returncode, 0)
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "official Bun release"):
+                EVIDENCE.assert_official_bun_binary(wrapper, BUN_BINARY_SHA256)
 
 
 class TrustedJustTest(unittest.TestCase):
@@ -1521,7 +1737,7 @@ class TrustedJustTest(unittest.TestCase):
             brew_tool.chmod(0o755)
             for name in ("bun",):
                 tool = brew_bin / name
-                tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                tool.write_bytes(BUN_BINARY)
                 tool.chmod(0o755)
             java_root = root / "java-installations"
             java_home = java_root / "temurin-21.jdk/Contents/Home"
@@ -1566,7 +1782,34 @@ class TrustedJustTest(unittest.TestCase):
             ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
-                binding = EVIDENCE.command_binding(parent_environment, just)
+                binding = EVIDENCE.command_binding(parent_environment, just, BUN_BINARY_SHA256)
+                wrapper = (
+                    b"#!/bin/sh\n# no-op wrapper with a different digest\n"
+                    b"if [ \"$1\" = \"--version\" ]; then echo 1.4.2; fi\nexit 0\n"
+                )
+                (brew_bin / "bun").write_bytes(wrapper)
+                alternate_just_dir = inputs / "recheck/trusted-just"
+                alternate_just_dir.mkdir(parents=True)
+                alternate_just_path = alternate_just_dir / "just"
+                shutil.copyfile(just_path, alternate_just_path)
+                alternate_just_path.chmod(0o755)
+                alternate_just = EVIDENCE.JustBinding(
+                    alternate_just_path, just.version, just.release_tag, just.asset_name,
+                    just.asset_url, just.asset_sha256, just.binary_sha256,
+                )
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "official Bun release"):
+                    EVIDENCE.command_binding(parent_environment, alternate_just, BUN_BINARY_SHA256)
+                (brew_bin / "bun").write_bytes(BUN_BINARY)
+                wrapper_version = original_run(
+                    (str(brew_bin / "bun"), "--version"), capture_output=True, text=True, check=False,
+                )
+                wrapper_install = original_run(
+                    (str(brew_bin / "bun"), "install", "--frozen-lockfile"),
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual((wrapper_version.returncode, wrapper_version.stdout.strip()), (0, "1.4.2"))
+                self.assertEqual(wrapper_install.returncode, 0)
+                self.assertEqual(binding.executables["bun"][1], BUN_BINARY_SHA256)
 
             self.assertFalse(install_marker.exists(), "existing Graphviz must not trigger Homebrew install")
             self.assertEqual(binding.executables["bash"][0], str(Path("/bin/bash").resolve(strict=True)))
@@ -1635,7 +1878,7 @@ class TrustedJustTest(unittest.TestCase):
             ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
-                provisioned = EVIDENCE.command_binding(parent_environment, provisioned_just)
+                provisioned = EVIDENCE.command_binding(parent_environment, provisioned_just, BUN_BINARY_SHA256)
             self.assertEqual(install_marker.read_text().splitlines(), [
                 os.pathsep.join(EVIDENCE.SYSTEM_COMMAND_PATH), "1", "install graphviz",
             ])
@@ -1657,7 +1900,7 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.command_binding(parent_environment, invalid_just)
+                    EVIDENCE.command_binding(parent_environment, invalid_just, BUN_BINARY_SHA256)
             self.assertEqual(install_marker.read_bytes(), install_before_invalid)
 
             dot_path.unlink()
@@ -1669,7 +1912,7 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.command_binding(parent_environment, broken_just)
+                    EVIDENCE.command_binding(parent_environment, broken_just, BUN_BINARY_SHA256)
             self.assertEqual(install_marker.read_bytes(), install_before_invalid)
 
             dot_path.unlink()
@@ -1682,7 +1925,7 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "bootstrap failed"):
-                    EVIDENCE.command_binding(parent_environment, dot_failure_just)
+                    EVIDENCE.command_binding(parent_environment, dot_failure_just, BUN_BINARY_SHA256)
 
             dot_missing_after_install_just = fixture_just("dot-install-missing-output-inputs")
             brew_tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -1693,7 +1936,7 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.command_binding(parent_environment, dot_missing_after_install_just)
+                    EVIDENCE.command_binding(parent_environment, dot_missing_after_install_just, BUN_BINARY_SHA256)
 
             dot_tamper_just = fixture_just("dot-install-tamper-inputs")
             brew_tool.write_text("#!/bin/sh\nprintf tampered > \"$0\"\nexit 0\n", encoding="utf-8")
@@ -1704,7 +1947,7 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "changed during"):
-                    EVIDENCE.command_binding(parent_environment, dot_tamper_just)
+                    EVIDENCE.command_binding(parent_environment, dot_tamper_just, BUN_BINARY_SHA256)
 
             commands_dir = Path(binding.path.split(os.pathsep)[0])
             (commands_dir / "grep").symlink_to(brew_bin / "grep")
