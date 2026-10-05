@@ -28,6 +28,21 @@ impl Drop for FontDirectory {
     }
 }
 
+fn database_with_257_file_paths(
+    directory: &FontDirectory,
+) -> TestResult<(std::path::PathBuf, Arc<Database>)> {
+    let first_path = directory.font_path(0);
+    std::fs::write(&first_path, FONT)?;
+    let mut database = Database::new();
+    database.load_font_source(Source::File(first_path.clone()));
+    for index in 1..257 {
+        let path = directory.font_path(index);
+        std::fs::hard_link(&first_path, &path)?;
+        database.load_font_source(Source::File(path));
+    }
+    Ok((first_path, Arc::new(database)))
+}
+
 fn selector_database_limit_bypasses_ninth_database() -> TestResult<()> {
     let calls = Arc::new(AtomicUsize::new(0));
     let mut options = counted_options(Arc::clone(&calls));
@@ -68,19 +83,16 @@ fn key_byte_limit_bypasses_oversized_keys_but_keeps_small_keys() -> TestResult<(
 }
 
 #[test]
-fn two_hundred_fifty_seven_file_paths_retry_the_entire_parse_without_memo() -> TestResult<()> {
+fn two_hundred_fifty_seven_paths_retry_durable_parse_and_keep_weak_parse_uncached() -> TestResult<()>
+{
     let directory = FontDirectory::create()?;
-    let first_path = directory.font_path(0);
-    std::fs::write(&first_path, FONT)?;
-    let mut database = Database::new();
-    database.load_font_source(Source::File(first_path.clone()));
-    for index in 1..257 {
-        let path = directory.font_path(index);
-        std::fs::hard_link(&first_path, &path)?;
-        database.load_font_source(Source::File(path));
-    }
-    let database = Arc::new(database);
+    let (first_path, database) = database_with_257_file_paths(&directory)?;
     assert_eq!(database.faces().count(), 257);
+    let file_is_durable =
+        super::super::super::super::font::file_stamp_durable_reusable(&first_path);
+    let expected_attempts = if file_is_durable { 2 } else { 1 };
+    let expected_calls = if file_is_durable { 4 } else { 2 };
+    let first_face_id = first_face(&database)?;
     let calls = Arc::new(AtomicUsize::new(0));
     let mut options = counted_options(Arc::clone(&calls));
     let attempts = AtomicUsize::new(0);
@@ -90,9 +102,10 @@ fn two_hundred_fifty_seven_file_paths_retry_the_entire_parse_without_memo() -> T
         let repeated = select(&mut options, &database, 'x', &[]);
         (first, repeated)
     });
-    assert_eq!(attempts.load(Ordering::Relaxed), 2);
+    assert_eq!(attempts.load(Ordering::Relaxed), expected_attempts);
     assert_eq!(result.0, result.1);
-    assert_eq!(calls.load(Ordering::Relaxed), 4);
+    assert_eq!(result.0, Some(first_face_id));
+    assert_eq!(calls.load(Ordering::Relaxed), expected_calls);
     Ok(())
 }
 
@@ -140,34 +153,86 @@ fn two_face_file_database() -> TestResult<(FontDirectory, std::path::PathBuf, Ar
     Ok((directory, path, Arc::new(font_database)))
 }
 
-#[test]
-fn multiple_faces_from_one_file_share_one_generation_and_retry_as_a_unit() -> TestResult<()> {
-    let (_directory, path, database) = two_face_file_database()?;
-    let expected_calls = super::retry_selector_calls(&path);
+fn assert_two_faces_from_path(database: &Database, path: &std::path::Path) -> ID {
     let faces: Vec<_> = database.faces().collect();
     assert_eq!(faces.len(), 2);
     assert!(
         faces
             .iter()
-            .all(|face| { matches!(&face.source, Source::File(face_path) if face_path == &path) })
+            .all(|face| { matches!(&face.source, Source::File(face_path) if face_path == path) })
     );
+    faces[0].id
+}
 
-    let calls = Arc::new(AtomicUsize::new(0));
-    let mut options = counted_options(Arc::clone(&calls));
+type TwoFaceSelection = (Option<ID>, Option<ID>);
+type TwoFaceSelectionOutcome = (TwoFaceSelection, usize, usize);
+
+fn run_two_face_mutating_selection(
+    path: &std::path::Path,
+    options: &mut usvg::Options<'_>,
+    database: &Arc<Database>,
+    calls: &Arc<AtomicUsize>,
+) -> TestResult<TwoFaceSelectionOutcome> {
     let attempts = AtomicUsize::new(0);
     let mut mutation = Ok(());
     let result = super::super::super::super::with_validated_tree_parse(|| {
         attempts.fetch_add(1, Ordering::Relaxed);
-        let first = select(&mut options, &database, 'x', &[]);
-        let repeated = select(&mut options, &database, 'x', &[]);
+        let first = select(options, database, 'x', &[]);
+        let repeated = select(options, database, 'x', &[]);
         if attempts.load(Ordering::Relaxed) == 1 {
-            mutation = std::fs::write(&path, b"changed collection generation");
+            mutation = std::fs::write(path, b"changed collection generation");
         }
         (first, repeated)
     });
     mutation?;
-    assert_eq!(attempts.load(Ordering::Relaxed), 2);
-    assert_eq!(result.0, result.1);
-    assert_eq!(calls.load(Ordering::Relaxed), expected_calls);
+    Ok((
+        result,
+        calls.load(Ordering::Relaxed),
+        attempts.load(Ordering::Relaxed),
+    ))
+}
+
+#[test]
+fn multiple_faces_keep_one_generation_with_durable_retry_or_weak_uncached_parse() -> TestResult<()>
+{
+    let (_directory, path, database) = two_face_file_database()?;
+    let file_is_durable = super::file_is_durable(&path);
+    let expected_attempts = if file_is_durable { 2 } else { 1 };
+    let expected_calls = super::selector_calls_for_file(&path);
+    let first_face_id = assert_two_faces_from_path(&database, &path);
+    let generation_before =
+        super::super::super::super::font::font_source_generation(&database, first_face_id);
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut options = counted_options(Arc::clone(&calls));
+    let (result, selector_calls, attempts) =
+        run_two_face_mutating_selection(&path, &mut options, &database, &calls)?;
+    assert_two_face_selection(
+        &result,
+        selector_calls,
+        attempts,
+        expected_calls,
+        expected_attempts,
+        first_face_id,
+    );
+    let generation_after =
+        super::super::super::super::font::font_source_generation(&database, first_face_id);
+    assert!(generation_after.is_file());
+    assert!(generation_after.reusable());
+    assert_ne!(generation_before, generation_after);
     Ok(())
+}
+
+fn assert_two_face_selection(
+    result: &TwoFaceSelection,
+    selector_calls: usize,
+    attempts: usize,
+    expected_calls: usize,
+    expected_attempts: usize,
+    expected_face: ID,
+) {
+    assert_eq!(selector_calls, expected_calls);
+    assert_eq!(result.0, result.1);
+    assert_eq!(result.0, Some(expected_face));
+    assert_eq!(attempts, expected_attempts);
 }

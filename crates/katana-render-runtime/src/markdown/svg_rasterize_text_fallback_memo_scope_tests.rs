@@ -10,12 +10,32 @@ fn mutate_file(path: &std::path::Path, delete: bool) -> std::io::Result<()> {
 }
 
 const REUSABLE_FILE_SELECTOR_CALLS: usize = 3;
+const WEAK_FILE_SELECTOR_CALLS: usize = 2;
 
-fn retry_selector_calls(path: &std::path::Path) -> usize {
-    REUSABLE_FILE_SELECTOR_CALLS
-        + usize::from(!super::super::super::font::file_stamp_durable_reusable(
-            path,
-        ))
+fn file_is_durable(path: &std::path::Path) -> bool {
+    super::super::super::font::file_stamp_durable_reusable(path)
+}
+
+fn selector_calls_for_file(path: &std::path::Path) -> usize {
+    if file_is_durable(path) {
+        REUSABLE_FILE_SELECTOR_CALLS
+    } else {
+        WEAK_FILE_SELECTOR_CALLS
+    }
+}
+
+fn assert_fresh_file_generation(
+    database: &Arc<Database>,
+    face_id: ID,
+    before: &super::super::super::font::FontSourceGeneration,
+    deleted: bool,
+) {
+    let after = super::super::super::font::font_source_generation(database, face_id);
+    assert_eq!(after.is_file(), !deleted);
+    assert_eq!(after.reusable(), !deleted);
+    if !deleted {
+        assert_ne!(before, &after);
+    }
 }
 
 fn default_selector_matches_uncached_result() -> TestResult<()> {
@@ -36,8 +56,12 @@ fn default_selector_matches_uncached_result() -> TestResult<()> {
 
 fn assert_file_change_retries(delete: bool) -> TestResult<()> {
     let file = FontFile::create()?;
-    let expected_calls = retry_selector_calls(&file.0);
+    let is_durable = file_is_durable(&file.0);
+    let expected_attempts = 1 + usize::from(is_durable);
+    let expected_calls = selector_calls_for_file(&file.0);
     let database = file_database(&file.0);
+    let face_id = first_face(&database)?;
+    let generation_before = super::super::super::font::font_source_generation(&database, face_id);
     let calls = Arc::new(AtomicUsize::new(0));
     let mut options = counted_options(Arc::clone(&calls));
     let attempts = AtomicUsize::new(0);
@@ -52,19 +76,21 @@ fn assert_file_change_retries(delete: bool) -> TestResult<()> {
         (first, repeated)
     });
     mutation?;
-    assert_eq!(attempts.load(Ordering::Relaxed), 2);
+    assert_eq!(attempts.load(Ordering::Relaxed), expected_attempts);
     assert_eq!(result.0, result.1);
+    assert_eq!(result.0, Some(face_id));
     assert_eq!(calls.load(Ordering::Relaxed), expected_calls);
+    assert_fresh_file_generation(&database, face_id, &generation_before, delete);
     Ok(())
 }
 
 #[test]
-fn changed_file_retries_whole_parse_uncached() -> TestResult<()> {
+fn changed_file_retries_durable_parse_and_keeps_weak_parse_uncached() -> TestResult<()> {
     assert_file_change_retries(false)
 }
 
 #[test]
-fn missing_file_retries_whole_parse_uncached() -> TestResult<()> {
+fn missing_file_retries_durable_parse_and_keeps_weak_parse_uncached() -> TestResult<()> {
     assert_file_change_retries(true)
 }
 

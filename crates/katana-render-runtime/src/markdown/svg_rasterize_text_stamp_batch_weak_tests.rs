@@ -61,6 +61,54 @@ fn durable_stamp_collected_before_weak_stamp_is_still_validated() -> TestResult<
     Ok(())
 }
 
+#[test]
+fn overflow_at_257_paths_retries_durable_batch_and_keeps_weak_batch_uncached() -> TestResult<()> {
+    let directory = TempDirectory::create()?;
+    let paths = (0..=MAX_BATCH_PATHS)
+        .map(|index| directory.0.join(format!("fixture-{index}.dat")))
+        .collect::<Vec<_>>();
+    for path in &paths {
+        fs::write(path, b"fixture")?;
+    }
+    let filesystem_is_durable = super::super::super::file_stamp_durable_reusable(&paths[0]);
+    let mut calls = 0;
+    let mut first_cached_stamp = None;
+    let mut first_memo_usable = None;
+    let complete = with_validated_stamp_batch(|| {
+        calls += 1;
+        stamp_all_paths(
+            &paths,
+            calls == 1,
+            &mut first_cached_stamp,
+            &mut first_memo_usable,
+        )
+    });
+    assert!(complete);
+    assert_eq!(calls, if filesystem_is_durable { 2 } else { 1 });
+    assert_eq!(first_cached_stamp.is_some(), filesystem_is_durable);
+    assert_eq!(first_memo_usable, Some(filesystem_is_durable));
+    Ok(())
+}
+
+fn stamp_all_paths(
+    paths: &[PathBuf],
+    record_first_observation: bool,
+    first_cached_stamp: &mut Option<FileStamp>,
+    first_memo_usable: &mut Option<bool>,
+) -> bool {
+    for (index, path) in paths.iter().enumerate() {
+        let Ok(stamp) = stamp_path_uncached(path) else {
+            return false;
+        };
+        remember_stamp(path, stamp);
+        if record_first_observation && index == 0 {
+            *first_cached_stamp = cached_stamp(path);
+            *first_memo_usable = Some(memo_usable());
+        }
+    }
+    true
+}
+
 fn replace_file_preserving_size_and_mtime(path: &std::path::Path) -> TestResult<()> {
     let modified = fs::metadata(path)?.modified()?;
     let mut replacement = fs::read(path)?;

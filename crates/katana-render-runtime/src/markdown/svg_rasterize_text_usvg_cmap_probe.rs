@@ -19,7 +19,7 @@ fn probe_file(
     character: char,
 ) -> Result<bool, ()> {
     let generation = font_source_generation(database, face_id);
-    if !generation.is_file() || !generation.reusable() {
+    if !generation.is_file() || !generation.durable_reusable() {
         super::storage::remove_face(database, face_id, face_index);
         return Err(());
     }

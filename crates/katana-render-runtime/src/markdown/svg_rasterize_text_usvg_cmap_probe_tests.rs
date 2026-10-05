@@ -3,7 +3,7 @@ use skrifa::{FontRef, charmap::MappingIndex};
 use std::{
     fs::{self, OpenOptions},
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -223,33 +223,6 @@ fn database_with_two_file_fonts(
 }
 
 #[test]
-fn selector_falls_back_to_stock_when_cached_probe_is_unavailable() -> Result<(), String> {
-    let first_font = TempFont::write(FONT_BYTES)?;
-    let second_font = TempFont::write(FONT_BYTES)?;
-    let (database, base_face, fallback_face) =
-        database_with_two_file_fonts(&first_font, &second_font)?;
-    assert_eq!(super::has_char(&database, fallback_face, 'A'), Err(()));
-    let durable = super::super::super::font::file_stamp_durable_reusable(&second_font.0);
-    assert_eq!(
-        with_validated_scope(|| super::has_char(&database, fallback_face, 'A')),
-        durable.then_some(true).ok_or(())
-    );
-
-    let excluded = [base_face];
-    let stock = resvg::usvg::FontResolver::default_fallback_selector();
-    let cached = super::super::selector::html_selector();
-    let (stock_result, cached_result) = with_validated_scope(|| {
-        (
-            stock('A', &excluded, &mut Arc::clone(&database)),
-            cached('A', &excluded, &mut Arc::clone(&database)),
-        )
-    });
-    assert_eq!(stock_result, Some(fallback_face));
-    assert_eq!(cached_result, stock_result);
-    Ok(())
-}
-
-#[test]
 fn stale_excluded_base_face_does_not_fall_back_to_bundled_face() -> Result<(), String> {
     let mut font_database = Database::new();
     font_database.load_font_data(FONT_BYTES.to_vec());
@@ -295,3 +268,6 @@ fn missing_character_in_remaining_bundled_face_returns_none() -> Result<(), Stri
     assert_eq!(cached_result, stock_result);
     Ok(())
 }
+
+#[path = "svg_rasterize_text_usvg_cmap_probe_selector_tests.rs"]
+mod selector_tests;

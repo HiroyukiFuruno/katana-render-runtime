@@ -90,22 +90,60 @@ fn changed_durable_file_invalidates_batch_and_retry_uses_new_stamp() -> TestResu
 }
 
 #[test]
-fn deleted_file_invalidates_batch_and_retry_returns_unavailable() -> TestResult<()> {
+fn deleted_file_retries_durable_batch_and_keeps_weak_batch_uncached() -> TestResult<()> {
     let fixture = FontFileFixture::create()?;
+    let fixture_is_durable = super::super::file_stamp_durable_reusable(&fixture.path);
+    let observation = delete_file_during_batch(&fixture)?;
+    assert_eq!(fixture_stamp(&fixture), None);
+    assert_deleted_file_result(observation, fixture_is_durable);
+    Ok(())
+}
+
+struct DeletedFileObservation {
+    result: Option<FileStamp>,
+    first_stamp: Option<FileStamp>,
+    first_cache: Option<FileStamp>,
+    first_memo_usable: bool,
+    calls: usize,
+}
+
+fn delete_file_during_batch(fixture: &FontFileFixture) -> TestResult<DeletedFileObservation> {
     let mut calls = 0;
     let mut remove_result = Ok(());
+    let mut first_stamp = None;
+    let mut first_cache = None;
+    let mut first_memo_usable = true;
     let result = with_validated_stamp_batch(|| {
         calls += 1;
-        let stamp = fixture_stamp(&fixture);
+        let stamp = fixture_stamp(fixture);
         if calls == 1 {
+            first_stamp = stamp.clone();
+            first_cache = cached_stamp(&fixture.path);
+            first_memo_usable = memo_usable();
             remove_result = std::fs::remove_file(&fixture.path);
         }
         stamp
     });
     remove_result?;
-    assert_eq!(calls, 2);
-    assert_eq!(result, None);
-    Ok(())
+    Ok(DeletedFileObservation {
+        result,
+        first_stamp,
+        first_cache,
+        first_memo_usable,
+        calls,
+    })
+}
+
+fn assert_deleted_file_result(observation: DeletedFileObservation, fixture_is_durable: bool) {
+    assert_eq!(observation.calls, if fixture_is_durable { 2 } else { 1 });
+    if fixture_is_durable {
+        assert_eq!(observation.result, None);
+    } else {
+        assert!(observation.result.is_some());
+        assert_eq!(observation.result, observation.first_stamp);
+        assert!(observation.first_cache.is_none());
+        assert!(!observation.first_memo_usable);
+    }
 }
 
 #[test]
@@ -193,35 +231,6 @@ fn panic_unwind_restores_batch_tls_for_nested_and_top_level_scopes() -> TestResu
     assert!(top_level.is_err());
     assert!(ACTIVE_BATCH.with(|active| active.borrow().is_none()));
     Ok(())
-}
-
-#[test]
-fn overflow_at_257_actual_paths_invalidates_and_retries_without_memo() -> TestResult<()> {
-    let directory = TempDirectory::create()?;
-    let paths = (0..=MAX_BATCH_PATHS)
-        .map(|index| directory.0.join(format!("fixture-{index}.dat")))
-        .collect::<Vec<_>>();
-    for path in &paths {
-        std::fs::write(path, b"fixture")?;
-    }
-    let mut calls = 0;
-    let complete = with_validated_stamp_batch(|| {
-        calls += 1;
-        stamp_all_paths(&paths)
-    });
-    assert!(complete);
-    assert_eq!(calls, 2);
-    Ok(())
-}
-
-fn stamp_all_paths(paths: &[PathBuf]) -> bool {
-    for path in paths {
-        let Ok(stamp) = stamp_path_uncached(path) else {
-            return false;
-        };
-        remember_stamp(path, stamp);
-    }
-    true
 }
 
 #[test]
