@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DrawioWarExtractor } from "./drawio-war-extractor";
-import { RuntimeAssetChecksum } from "./runtime-asset-common";
+import { RuntimeAssetCatalog, RuntimeAssetChecksum } from "./runtime-asset-common";
 import { RuntimeSourceUpdater } from "./update";
 
 test("Draw.io WAR から 1MiB を超える viewer.min.js を展開できる", () => {
@@ -154,4 +154,61 @@ test("圧縮配布資産の package include は全ファイルを同じ version 
   expect(updated).toContain('"vendor/mermaid/11.18.0/mermaid.min.js.br",');
   expect(updated).toContain('"vendor/mermaid/11.18.0/mermaid.min.js.sha256",');
   expect(updated).not.toContain("11.17.2");
+});
+
+test("runtime asset documentation は version、path、checksum を catalog から同期する", () => {
+  const zenumlCore = RuntimeAssetCatalog.byKind("zenuml-core");
+  const plantuml = RuntimeAssetCatalog.byKind("plantuml");
+  const source = [
+    "| runtime | version | file | sha256 |",
+    "| --- | --- | --- | --- |",
+    "| ZenUML Core | 4.4.0 | `crates/katana-render-runtime/vendor/zenuml-core/4.4.0/zenuml.js` | `old-core` |",
+    "| PlantUML | 1.2026.8 | `crates/katana-render-runtime/vendor/plantuml/1.2026.8/plantuml.jar.sha256` | `old-plantuml` |",
+    "| Mermaid.js | 12.1.0 | `crates/katana-render-runtime/vendor/mermaid/12.1.0/mermaid.min.js` | `keep-mermaid` |",
+  ].join("\n");
+  const updater = new RuntimeSourceUpdater();
+
+  const coreUpdated = updater.replaceRuntimeAssetDocumentation(
+    source,
+    zenumlCore,
+    "4.4.1",
+    "new-core-checksum",
+  );
+  const updated = updater.replaceRuntimeAssetDocumentation(
+    coreUpdated,
+    plantuml,
+    "1.2026.9",
+    "new-plantuml-checksum",
+  );
+
+  expect(updated).toContain(
+    "| ZenUML Core | 4.4.1 | `crates/katana-render-runtime/vendor/zenuml-core/4.4.1/zenuml.js` | `new-core-checksum` |",
+  );
+  expect(updated).toContain(
+    "| PlantUML | 1.2026.9 | `crates/katana-render-runtime/vendor/plantuml/1.2026.9/plantuml.jar.sha256` | `new-plantuml-checksum` |",
+  );
+  expect(updated).toContain(
+    "| Mermaid.js | 12.1.0 | `crates/katana-render-runtime/vendor/mermaid/12.1.0/mermaid.min.js` | `keep-mermaid` |",
+  );
+  expect(
+    updater.replaceRuntimeAssetDocumentation(updated, zenumlCore, "4.4.1", "new-core-checksum"),
+  ).toBe(updated);
+});
+
+test("runtime asset documentation は欠落・重複した row を拒否する", () => {
+  const zenumlCore = RuntimeAssetCatalog.byKind("zenuml-core");
+  const updater = new RuntimeSourceUpdater();
+  const row = "| ZenUML Core | 4.4.0 | `old-path` | `old-checksum` |";
+
+  expect(() =>
+    updater.replaceRuntimeAssetDocumentation(
+      "| runtime | version | file | sha256 |",
+      zenumlCore,
+      "4.4.1",
+      "new",
+    ),
+  ).toThrow("Runtime asset documentation row must be unique: ZenUML Core");
+  expect(() =>
+    updater.replaceRuntimeAssetDocumentation(`${row}\n${row}`, zenumlCore, "4.4.1", "new"),
+  ).toThrow("Runtime asset documentation row must be unique: ZenUML Core");
 });
