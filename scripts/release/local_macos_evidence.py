@@ -92,6 +92,27 @@ JAVA_INSTALL_ROOT = Path("/Library/Java/JavaVirtualMachines")
 PREPARATION_COMMANDS = {"bun-install", "graphviz-install", "plantuml-install"}
 RUST_STABLE_MANIFEST_URL = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
 MAX_RUST_STABLE_MANIFEST_BYTES = 8 * 1024 * 1024
+MAX_RUST_COMPONENT_ARCHIVE_BYTES = 128 * 1024 * 1024
+MAX_RUST_COMPONENT_ENTRIES = 100_000
+MAX_RUST_COMPONENT_FILE_BYTES = 512 * 1024 * 1024
+MAX_RUST_COMPONENT_CONTENT_BYTES = 2 * 1024 * 1024 * 1024
+RUST_HOST = "aarch64-apple-darwin"
+RUST_COMPONENT_PACKAGES = {
+    "rustc": "rustc", "cargo": "cargo", "clippy": "clippy-preview",
+    "rustfmt": "rustfmt-preview", "rust-std": "rust-std",
+}
+RUST_COMPONENT_ARCHIVE_DIRS = {
+    "rustc": "rustc", "cargo": "cargo", "clippy": "clippy-preview",
+    "rustfmt": "rustfmt-preview", "rust-std": f"rust-std-{RUST_HOST}",
+}
+RUST_COMPONENT_ARCHIVE_NAMES = {
+    "rustc": "rustc", "cargo": "cargo", "clippy": "clippy",
+    "rustfmt": "rustfmt", "rust-std": "rust-std",
+}
+RUST_EXECUTABLE_PATHS = {
+    "cargo": "bin/cargo", "rustc": "bin/rustc", "cargo-clippy": "bin/cargo-clippy",
+    "clippy-driver": "bin/clippy-driver", "rustfmt": "bin/rustfmt",
+}
 JUST_RELEASE_REPOSITORY = "casey/just"
 MAX_JUST_ASSET_BYTES = 8 * 1024 * 1024
 MAX_JUST_BINARY_BYTES = 32 * 1024 * 1024
@@ -154,12 +175,27 @@ class BunBinding(NamedTuple):
 class CommandBinding(NamedTuple):
     path: str
     executables: dict[str, tuple[str, str]]
+    rust_files: dict[str, tuple[int, str]]
+    rust_components: dict[str, str]
 
     def proof_value(self) -> str:
         return canonical({
             "path": self.path, "path_policy": COMMAND_PATH_POLICY,
             "executables": self.executables,
+            "rust_components": self.rust_components,
         }).decode("utf-8")
+
+
+class RustComponent(NamedTuple):
+    name: str
+    url: str
+    xz_sha256: str
+
+
+class RustComponentProof(NamedTuple):
+    files: dict[str, tuple[int, str]]
+    components: dict[str, str]
+    executables: dict[str, str]
 
 
 class EvidenceError(Exception):
@@ -420,7 +456,7 @@ def assert_private_command_directory(directory: Path, expected_aliases: set[str]
 
 def command_binding(
     environment: dict[str, str], just_binding: JustBinding,
-    bun_binary_sha256: str,
+    bun_binary_sha256: str, rust_proof: RustComponentProof,
 ) -> CommandBinding:
     home = account_home()
     brew_root = HOMEBREW_ROOT.resolve(strict=True)
@@ -440,8 +476,8 @@ def command_binding(
     bootstrap_env = dict(environment)
     bootstrap_env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     bootstrap_env["RUSTUP_HOME"] = str(rustup_home)
-    rust_root = rustup_home / "toolchains/stable-aarch64-apple-darwin"
-    rust_root = rust_root.resolve(strict=True)
+    rust_root = (rustup_home / "toolchains/stable-aarch64-apple-darwin").resolve(strict=True)
+    verify_installed_rust_components(rust_root, rust_proof)
     rust_paths = {}
     for name in ("cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt"):
         assert_private_command_directory(commands_dir, set())
@@ -451,6 +487,10 @@ def command_binding(
         ).stdout.strip())
         assert_private_command_directory(commands_dir, set())
         rust_paths[name] = trusted_executable(selected, (rust_root,))
+        relative_path = rust_paths[name].relative_to(rust_root).as_posix()
+        expected_sha256 = rust_proof.files.get(relative_path)
+        if expected_sha256 is None or sha256_bytes(rust_paths[name].read_bytes()) != expected_sha256[1]:
+            raise EvidenceError(f"selected Rust executable is not an official component file: {name}")
     rust_bin = rust_paths["rustc"].parent
     if any(path.parent != rust_bin for path in rust_paths.values()):
         raise EvidenceError("stable Rust components do not share one toolchain directory")
@@ -531,7 +571,7 @@ def command_binding(
     except OSError as exc:
         raise EvidenceError("isolated trusted command aliases could not be created") from exc
     command_path = os.pathsep.join((str(commands_dir), *SYSTEM_COMMAND_PATH))
-    binding = CommandBinding(command_path, executables)
+    binding = CommandBinding(command_path, executables, rust_proof.files, rust_proof.components)
     assert_command_binding(binding, just_binding)
     return binding
 
@@ -967,7 +1007,8 @@ def prepare_command_environment(
         bootstrap = command_environment(cargo_target_dir, cargo_home, bun_cache_dir)
         just_binding = download_trusted_just(token, isolated_inputs_dir, bootstrap)
         bun_binding = download_trusted_bun(token)
-        binding = command_binding(bootstrap, just_binding, bun_binding.binary_sha256)
+        rust_proof = fetch_official_rust_component_proof()
+        binding = command_binding(bootstrap, just_binding, bun_binding.binary_sha256, rust_proof)
         environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir, binding, just_binding)
         return bootstrap, just_binding, bun_binding, binding, environment
     except BaseException:
@@ -989,6 +1030,10 @@ def assert_trusted_just(binding: JustBinding) -> None:
 
 def assert_command_binding(binding: CommandBinding, just_binding: JustBinding) -> None:
     assert_trusted_just(just_binding)
+    rust_root = Path(binding.executables["rustc"][0]).parent.parent
+    verify_installed_rust_components(rust_root, RustComponentProof(
+        binding.rust_files, binding.rust_components, {},
+    ))
     expected_directory = just_binding.path.parent.parent / "trusted-commands"
     expected_path = os.pathsep.join((str(expected_directory), *SYSTEM_COMMAND_PATH))
     if binding.path != expected_path:
@@ -1167,9 +1212,14 @@ def validate_pinned_tools(versions: Any) -> None:
         "just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "bun",
         "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname",
     }
-    if (not isinstance(command, dict) or set(command) != {"path", "path_policy", "executables"}
+    if (not isinstance(command, dict) or set(command) != {
+            "path", "path_policy", "executables", "rust_components",
+    }
             or not isinstance(command.get("path"), str) or not command["path"]
             or command.get("path_policy") != COMMAND_PATH_POLICY
+            or not isinstance(command.get("rust_components"), dict)
+            or set(command["rust_components"]) != set(RUST_COMPONENT_PACKAGES)
+            or any(not is_sha256(value) for value in command["rust_components"].values())
             or not isinstance(command.get("executables"), dict)
             or set(command["executables"]) != required_executables):
         raise EvidenceError("shared command path binding is missing or invalid")
@@ -1261,6 +1311,209 @@ def fetch_stable_manifest_versions() -> dict[str, str]:
         raise EvidenceError("official Rust stable manifest is unavailable") from exc
 
 
+def parse_stable_rust_components(manifest: str) -> tuple[RustComponent, ...]:
+    if tomllib is None:
+        raise EvidenceError("Python TOML support is unavailable")
+    try:
+        document = tomllib.loads(manifest)
+        date = document["date"]
+        datetime.strptime(date, "%Y-%m-%d")
+        packages = document["pkg"]
+        release = packages["rustc"]["version"].split(" ", 1)[0]
+        if re.fullmatch(r"\d+\.\d+\.\d+", release) is None:
+            raise EvidenceError("official Rust release version is invalid")
+        components = []
+        for name, package in RUST_COMPONENT_PACKAGES.items():
+            target = packages[package]["target"][RUST_HOST]
+            url = target["xz_url"]
+            digest = target["xz_hash"]
+            filename = f"{RUST_COMPONENT_ARCHIVE_NAMES[name]}-{release}-{RUST_HOST}.tar.xz"
+            expected_url = f"https://static.rust-lang.org/dist/{date}/{filename}"
+            if url != expected_url or not is_sha256(digest):
+                raise EvidenceError("official Rust component package identity is invalid")
+            components.append(RustComponent(name, url, digest))
+        if len({component.url for component in components}) != len(components):
+            raise EvidenceError("official Rust component package URLs are ambiguous")
+        return tuple(components)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise EvidenceError("official Rust stable manifest component data is invalid") from exc
+
+
+def download_rust_component(component: RustComponent) -> bytes:
+    if not isinstance(component, RustComponent) or component.name not in RUST_COMPONENT_PACKAGES:
+        raise EvidenceError("official Rust component identity is invalid")
+    filename = re.escape(RUST_COMPONENT_ARCHIVE_NAMES[component.name])
+    expected_url = re.fullmatch(
+        rf"https://static\.rust-lang\.org/dist/\d{{4}}-\d{{2}}-\d{{2}}/"
+        rf"{filename}-\d+\.\d+\.\d+-{re.escape(RUST_HOST)}\.tar\.xz", component.url,
+    )
+    if expected_url is None or not is_sha256(component.xz_sha256):
+        raise EvidenceError("official Rust component identity is invalid")
+    req = request.Request(component.url, headers={
+        "Accept": "application/x-xz", "User-Agent": "katana-render-runtime-local-macos-evidence",
+    })
+    try:
+        with request.urlopen(req, timeout=30) as response:
+            if response.geturl() != component.url:
+                raise EvidenceError("official Rust component redirected to an untrusted URL")
+            archive = response.read(MAX_RUST_COMPONENT_ARCHIVE_BYTES + 1)
+    except (error.URLError, error.HTTPError, TimeoutError, OSError) as exc:
+        raise EvidenceError("official Rust component archive is unavailable") from exc
+    if (not archive or len(archive) > MAX_RUST_COMPONENT_ARCHIVE_BYTES
+            or sha256_bytes(archive) != component.xz_sha256):
+        raise EvidenceError("official Rust component archive digest is invalid")
+    return archive
+
+
+def derive_rust_component_proof(
+    components: tuple[RustComponent, ...], archives: dict[str, bytes],
+) -> RustComponentProof:
+    """Derive installed Rust file digests only from manifest-authenticated archives."""
+    if (len(components) != len(RUST_COMPONENT_PACKAGES)
+            or {item.name for item in components} != set(RUST_COMPONENT_PACKAGES)
+            or set(archives) != set(RUST_COMPONENT_PACKAGES)):
+        raise EvidenceError("official Rust component set is incomplete")
+    releases = set()
+    for component in components:
+        filename = re.escape(RUST_COMPONENT_ARCHIVE_NAMES[component.name])
+        match = re.fullmatch(
+            rf"https://static\.rust-lang\.org/dist/(\d{{4}}-\d{{2}}-\d{{2}})/"
+            rf"{filename}-(\d+\.\d+\.\d+)-{re.escape(RUST_HOST)}\.tar\.xz",
+            component.url,
+        )
+        if match is None or not is_sha256(component.xz_sha256):
+            raise EvidenceError("official Rust component identity is invalid")
+        releases.add((match.group(1), match.group(2)))
+    if len(releases) != 1:
+        raise EvidenceError("official Rust component set mixes channel releases")
+    all_files: dict[str, tuple[int, str]] = {}
+    component_digests: dict[str, str] = {}
+    total_content_size = 0
+    for component in components:
+        archive = archives[component.name]
+        if (len(archive) > MAX_RUST_COMPONENT_ARCHIVE_BYTES
+                or sha256_bytes(archive) != component.xz_sha256):
+            raise EvidenceError("official Rust component archive digest is invalid")
+        try:
+            with tarfile.open(fileobj=io.BytesIO(archive), mode="r:xz") as bundle:
+                members = []
+                for member in bundle:
+                    if len(members) >= MAX_RUST_COMPONENT_ENTRIES:
+                        raise EvidenceError("official Rust component entry count is invalid")
+                    members.append(member)
+                if not members:
+                    raise EvidenceError("official Rust component entry count is invalid")
+                seen: set[str] = set()
+                payload: dict[str, tuple[int, str]] = {}
+                manifest_member = None
+                total_size = 0
+                top = members[0].name.rstrip("/")
+                if not top or "/" in top:
+                    raise EvidenceError("official Rust component archive root is invalid")
+                package = RUST_COMPONENT_ARCHIVE_DIRS[component.name]
+                package_root = f"{top}/{package}"
+                for member in members:
+                    member_path = PurePosixPath(member.name)
+                    if (not member.name or member_path.is_absolute() or ".." in member_path.parts
+                            or member_path.as_posix() != member.name.rstrip("/")
+                            or member_path.parts[0] != top
+                            or member.name.rstrip("/") in seen
+                            or not (member.isfile() or member.isdir())):
+                        raise EvidenceError("official Rust component archive contains an unsafe member")
+                    name = member.name.rstrip("/")
+                    seen.add(name)
+                    if member.isfile():
+                        if member.size < 0 or member.size > MAX_RUST_COMPONENT_FILE_BYTES:
+                            raise EvidenceError("official Rust component file size is invalid")
+                        total_size += member.size
+                        total_content_size += member.size
+                        if (total_size > MAX_RUST_COMPONENT_CONTENT_BYTES
+                                or total_content_size > MAX_RUST_COMPONENT_CONTENT_BYTES):
+                            raise EvidenceError("official Rust component expanded size is too large")
+                        if name == f"{package_root}/manifest.in":
+                            manifest_member = member
+                        elif name.startswith(package_root + "/"):
+                            relative = name[len(package_root) + 1:]
+                            stream = bundle.extractfile(member)
+                            if stream is None:
+                                raise EvidenceError("official Rust component file cannot be read")
+                            content = stream.read(MAX_RUST_COMPONENT_FILE_BYTES + 1)
+                            if len(content) != member.size:
+                                raise EvidenceError("official Rust component file is truncated")
+                            payload[relative] = (member.mode & 0o111, sha256_bytes(content))
+                if manifest_member is None:
+                    raise EvidenceError("official Rust component installer manifest is missing")
+                stream = bundle.extractfile(manifest_member)
+                if stream is None:
+                    raise EvidenceError("official Rust component installer manifest cannot be read")
+                installer_manifest = stream.read(4 * 1024 * 1024 + 1)
+                if len(installer_manifest) != manifest_member.size or len(installer_manifest) > 4 * 1024 * 1024:
+                    raise EvidenceError("official Rust component installer manifest is invalid")
+        except (OSError, tarfile.TarError) as exc:
+            raise EvidenceError("official Rust component archive is invalid") from exc
+        try:
+            listed = set()
+            for line in installer_manifest.decode("utf-8").splitlines():
+                if line.startswith("file:"):
+                    path = line[5:]
+                    safe = PurePosixPath(path)
+                    if not path or safe.is_absolute() or ".." in safe.parts or safe.as_posix() != path:
+                        raise EvidenceError("official Rust component inventory path is unsafe")
+                    if path in listed:
+                        raise EvidenceError("official Rust component inventory repeats a file")
+                    listed.add(path)
+            if not listed or listed != set(payload):
+                raise EvidenceError("official Rust component inventory does not match its archive")
+        except UnicodeDecodeError as exc:
+            raise EvidenceError("official Rust component installer manifest is not UTF-8") from exc
+        for path, identity in payload.items():
+            previous = all_files.get(path)
+            if previous is not None and previous != identity:
+                raise EvidenceError("official Rust components disagree about an installed file")
+            all_files[path] = identity
+        component_digests[component.name] = sha256_bytes(canonical({
+            path: list(identity) for path, identity in sorted(payload.items())
+        }))
+    executable_hashes = {}
+    for name, path in RUST_EXECUTABLE_PATHS.items():
+        identity = all_files.get(path)
+        if identity is None or identity[0] == 0:
+            raise EvidenceError(f"official Rust archives are missing executable {name}")
+        executable_hashes[name] = identity[1]
+    return RustComponentProof(all_files, component_digests, executable_hashes)
+
+
+def fetch_official_rust_component_proof() -> RustComponentProof:
+    req = request.Request(
+        RUST_STABLE_MANIFEST_URL,
+        headers={"Accept": "text/plain", "User-Agent": "katana-render-runtime-local-macos-evidence"},
+    )
+    try:
+        with request.urlopen(req, timeout=15) as response:
+            if response.geturl() != RUST_STABLE_MANIFEST_URL:
+                raise EvidenceError("official Rust manifest redirected to an untrusted URL")
+            body = response.read(MAX_RUST_STABLE_MANIFEST_BYTES + 1)
+        if not body or len(body) > MAX_RUST_STABLE_MANIFEST_BYTES:
+            raise EvidenceError("official Rust stable manifest is empty or too large")
+        components = parse_stable_rust_components(body.decode("utf-8"))
+        archives = {component.name: download_rust_component(component) for component in components}
+        return derive_rust_component_proof(components, archives)
+    except (error.URLError, error.HTTPError, TimeoutError, OSError, UnicodeDecodeError) as exc:
+        raise EvidenceError("official Rust stable component metadata is unavailable") from exc
+
+
+def verify_installed_rust_components(rust_root: Path, proof: RustComponentProof) -> None:
+    for relative, (executable_bits, expected_sha256) in proof.files.items():
+        path = rust_root / relative
+        try:
+            metadata = path.lstat()
+            if (not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o111 != executable_bits
+                    or sha256_bytes(path.read_bytes()) != expected_sha256):
+                raise EvidenceError("installed Rust component differs from official archive bytes")
+        except OSError as exc:
+            raise EvidenceError("installed Rust component file is unavailable") from exc
+
+
 def validate_stable_rust_tools(tools: Any, stable_versions: Any) -> None:
     if not isinstance(tools, dict) or not isinstance(stable_versions, dict):
         raise EvidenceError("Rust toolchain evidence is invalid")
@@ -1300,7 +1553,7 @@ def valid_payload(
     comment: dict[str, Any], payload: dict[str, Any], repository: str, number: int,
     base_sha: str, head_sha: str, expected_workflow_digest: str, now: int, owner_login: str,
     stable_versions: dict[str, str], just_release_metadata: dict[str, str],
-    bun_binding: BunBinding,
+    bun_binding: BunBinding, rust_proof: RustComponentProof,
 ) -> bool:
     user, association = comment.get("user"), comment.get("author_association")
     if not isinstance(user, dict) or user.get("login", "").lower() != owner_login.lower() or association != "OWNER":
@@ -1366,6 +1619,11 @@ def valid_payload(
         command_binding = json.loads(tools["command_binding"])
         if command_binding["executables"]["bun"][1] != bun_binding.binary_sha256:
             return False
+        if command_binding["rust_components"] != rust_proof.components:
+            return False
+        if any(command_binding["executables"][name][1] != digest
+               for name, digest in rust_proof.executables.items()):
+            return False
     except (KeyError, IndexError, TypeError, json.JSONDecodeError):
         return False
     if payload.get("environment") != SCOPE_PARAMETERS:
@@ -1413,7 +1671,7 @@ def accepted_comment(comments: Any, *args: Any) -> dict[str, Any] | None:
         return None
     (
         repository, number, base_sha, head_sha, workflow_hash, now, owner_login,
-        stable_versions, just_release_metadata, bun_binding,
+        stable_versions, just_release_metadata, bun_binding, rust_proof,
     ) = args
     current: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for comment in marked:
@@ -1437,6 +1695,7 @@ def accepted_comment(comments: Any, *args: Any) -> dict[str, Any] | None:
     return comment if valid_payload(
         comment, payload, repository, number, base_sha, head_sha, workflow_hash, now, owner_login,
         stable_versions, just_release_metadata, bun_binding,
+        rust_proof,
     ) else None
 
 
@@ -1512,6 +1771,7 @@ def verify_from_api(
         if len(candidates) != 1:
             return False
         stable_versions = fetch_stable_manifest_versions()
+        rust_proof = fetch_official_rust_component_proof()
         just_release_metadata = validate_just_release_metadata(
             fetch(f"repos/{JUST_RELEASE_REPOSITORY}/releases/latest")
         )
@@ -1522,11 +1782,11 @@ def verify_from_api(
         bun_binding = materialize_trusted_bun(bun_release, download_bun_asset(bun_metadata))
         first = accepted_comment(
             comments_first, repository, number, base_sha, head_sha, digest, timestamp, owner_login,
-            stable_versions, just_release_metadata, bun_binding,
+            stable_versions, just_release_metadata, bun_binding, rust_proof,
         )
         second = accepted_comment(
             comments_second, repository, number, base_sha, head_sha, digest, timestamp, owner_login,
-            stable_versions, just_release_metadata, bun_binding,
+            stable_versions, just_release_metadata, bun_binding, rust_proof,
         )
         return first is not None and second is not None and canonical(first) == canonical(second)
     except Exception:
@@ -1623,6 +1883,10 @@ def collect(repository: str, number: int, publish: bool) -> int:
         for command_id, argv_template in COMMANDS:
             if command_id not in PREPARATION_COMMANDS:
                 run_command(command_id, argv_template)
+        verify_installed_rust_components(
+            Path(binding.executables["rustc"][0]).parent.parent,
+            RustComponentProof(binding.rust_files, binding.rust_components, {}),
+        )
         stable_versions_after = fetch_stable_manifest_versions()
         versions_after = tool_versions(
             cargo_target_dir, cargo_home, bun_cache_dir, just_binding, bun_binding, binding,

@@ -9,6 +9,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -41,7 +42,8 @@ def collector_binding_patches():
         EVIDENCE,
         download_trusted_just=Mock(return_value=fake_just),
         download_trusted_bun=Mock(return_value=fake_bun),
-        command_binding=Mock(return_value=EVIDENCE.CommandBinding("/bin", {})),
+        command_binding=Mock(return_value=EVIDENCE.CommandBinding("/bin", {}, {}, RUST_COMPONENT_DIGESTS)),
+        fetch_official_rust_component_proof=Mock(return_value=fixture_rust_proof()),
         command_environment=Mock(return_value={"PATH": "/bin", "JAVA_HOME": "/java"}),
         assert_command_binding=Mock(),
         bind_command=Mock(side_effect=lambda argv, _binding: list(argv)),
@@ -95,6 +97,71 @@ BUN_RELEASE = {
         "size": len(BUN_ARCHIVE),
     }],
 }
+RUST_COMPONENT_DIGESTS = {
+    name: f"{index:x}" * 64 for index, name in enumerate(EVIDENCE.RUST_COMPONENT_PACKAGES)
+}
+RUST_EXECUTABLE_DIGESTS = {
+    name: f"{index + 1:x}" * 64 for index, name in enumerate(EVIDENCE.RUST_EXECUTABLE_PATHS)
+}
+
+
+def fixture_rust_proof():
+    return EVIDENCE.RustComponentProof({}, RUST_COMPONENT_DIGESTS, RUST_EXECUTABLE_DIGESTS)
+
+
+def fixture_installed_rust_proof(rust_root: Path):
+    files = {}
+    executables = {}
+    for name, relative in EVIDENCE.RUST_EXECUTABLE_PATHS.items():
+        path = rust_root / relative
+        identity = (stat.S_IMODE(path.stat().st_mode) & 0o111, EVIDENCE.sha256_bytes(path.read_bytes()))
+        files[relative] = identity
+        executables[name] = identity[1]
+    standard_library = rust_root / "lib/rustlib/aarch64-apple-darwin/lib/libstd.rlib"
+    files[standard_library.relative_to(rust_root).as_posix()] = (
+        stat.S_IMODE(standard_library.stat().st_mode) & 0o111,
+        EVIDENCE.sha256_bytes(standard_library.read_bytes()),
+    )
+    return EVIDENCE.RustComponentProof(files, RUST_COMPONENT_DIGESTS, executables)
+
+
+def fixture_rust_archives():
+    components = []
+    archives = {}
+    tool_files = {
+        "rustc": {"bin/rustc": b"official-rustc"},
+        "cargo": {"bin/cargo": b"official-cargo"},
+        "clippy": {"bin/cargo-clippy": b"official-cargo-clippy", "bin/clippy-driver": b"official-clippy-driver"},
+        "rustfmt": {"bin/rustfmt": b"official-rustfmt"},
+        "rust-std": {"lib/rustlib/aarch64-apple-darwin/lib/libstd.rlib": b"official-std"},
+    }
+    for name, package_dir in EVIDENCE.RUST_COMPONENT_ARCHIVE_DIRS.items():
+        top = f"{package_dir}-1.99.0-{EVIDENCE.RUST_HOST}"
+        files = tool_files[name]
+        manifest = "".join(f"file:{path}\n" for path in files)
+        output = io.BytesIO()
+        with tarfile.open(fileobj=output, mode="w:xz") as bundle:
+            for directory in (top, f"{top}/{package_dir}"):
+                member = tarfile.TarInfo(directory)
+                member.type = tarfile.DIRTYPE
+                bundle.addfile(member)
+            metadata = tarfile.TarInfo(f"{top}/{package_dir}/manifest.in")
+            metadata.size = len(manifest.encode())
+            bundle.addfile(metadata, io.BytesIO(manifest.encode()))
+            for path, data in files.items():
+                member = tarfile.TarInfo(f"{top}/{package_dir}/{path}")
+                member.mode = 0o755
+                member.size = len(data)
+                bundle.addfile(member, io.BytesIO(data))
+        archive = output.getvalue()
+        digest = EVIDENCE.sha256_bytes(archive)
+        components.append(EVIDENCE.RustComponent(
+            name, f"https://static.rust-lang.org/dist/2026-10-01/"
+                 f"{EVIDENCE.RUST_COMPONENT_ARCHIVE_NAMES[name]}-1.99.0-{EVIDENCE.RUST_HOST}.tar.xz",
+            digest,
+        ))
+        archives[name] = archive
+    return tuple(components), archives
 
 
 def fixture_bun_binding():
@@ -171,10 +238,11 @@ def valid_comment() -> dict[str, object]:
                     name: [
                         "/tmp/krr-local-macos-inputs-fixture/trusted-just/just" if name == "just"
                         else "/opt/homebrew/bin/bun" if name == "bun" else f"/trusted/{name}",
-                        BUN_BINARY_SHA256 if name == "bun" else "c" * 64,
+                        BUN_BINARY_SHA256 if name == "bun" else RUST_EXECUTABLE_DIGESTS.get(name, "c" * 64),
                     ]
                     for name in ("just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "brew", "bun", "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname")
                 },
+                "rust_components": RUST_COMPONENT_DIGESTS,
             }, sort_keys=True, separators=(",", ":")),
         },
         "commands": commands,
@@ -250,6 +318,11 @@ class LocalMacosEvidenceTest(unittest.TestCase):
         )
         bun_asset_patcher.start()
         self.addCleanup(bun_asset_patcher.stop)
+        rust_proof_patcher = patch.object(
+            EVIDENCE, "fetch_official_rust_component_proof", return_value=fixture_rust_proof(),
+        )
+        rust_proof_patcher.start()
+        self.addCleanup(rust_proof_patcher.stop)
 
     def test_prepare_binds_homebrew_bun_to_official_binary_sha(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -267,7 +340,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
                 "a" * 64, "b" * 64,
             )
-            command_binding = EVIDENCE.CommandBinding("/bin", {})
+            command_binding = EVIDENCE.CommandBinding("/bin", {}, {}, RUST_COMPONENT_DIGESTS)
             with (
                 patch.object(
                     EVIDENCE, "command_environment",
@@ -289,7 +362,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 {"PATH": "/bin"}, just, fixture_bun_binding(), command_binding, {"PATH": "/bin"},
             ))
             command_binding_mock.assert_called_once_with(
-                {"PATH": "/bin"}, just, BUN_BINARY_SHA256,
+                {"PATH": "/bin"}, just, BUN_BINARY_SHA256, fixture_rust_proof(),
             )
 
     def test_accepts_current_owner_proof_bound_to_base_head_workflow_and_full_scope(self) -> None:
@@ -1184,7 +1257,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{output}'\n", encoding="utf-8")
                 path.chmod(0o755)
             environment = {**os.environ, "PATH": f"{directory}{os.pathsep}{os.environ['PATH']}"}
-            binding = EVIDENCE.CommandBinding("/bin", {})
+            binding = EVIDENCE.CommandBinding("/bin", {}, {}, RUST_COMPONENT_DIGESTS)
             just = EVIDENCE.JustBinding(
                 Path("/trusted/just"), "just 1.40.0", "1.40.0", "just-1.40.0-aarch64-apple-darwin.tar.gz",
                 "https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-aarch64-apple-darwin.tar.gz",
@@ -1268,8 +1341,125 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
                      "rustfmt": f"rustfmt {STABLE_RUST['rustfmt_cli']}"}, parsed
                 )
 
+    def test_official_rust_archives_bind_installed_tool_bytes_and_component_tree(self) -> None:
+        components, archives = fixture_rust_archives()
+        proof = EVIDENCE.derive_rust_component_proof(components, archives)
+        self.assertEqual(set(proof.components), set(EVIDENCE.RUST_COMPONENT_PACKAGES))
+        self.assertEqual(set(proof.executables), set(EVIDENCE.RUST_EXECUTABLE_PATHS))
+        with tempfile.TemporaryDirectory() as temporary:
+            rust_root = Path(temporary)
+            for relative, (executable_bits, _digest) in proof.files.items():
+                path = rust_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                data = next(
+                    content for name, files in {
+                        "rustc": {"bin/rustc": b"official-rustc"},
+                        "cargo": {"bin/cargo": b"official-cargo"},
+                        "clippy": {"bin/cargo-clippy": b"official-cargo-clippy", "bin/clippy-driver": b"official-clippy-driver"},
+                        "rustfmt": {"bin/rustfmt": b"official-rustfmt"},
+                        "rust-std": {"lib/rustlib/aarch64-apple-darwin/lib/libstd.rlib": b"official-std"},
+                    }.items() for candidate, content in files.items() if candidate == relative
+                )
+                path.write_bytes(data)
+                path.chmod(0o644 | executable_bits)
+            EVIDENCE.verify_installed_rust_components(rust_root, proof)
+            (rust_root / "bin/cargo").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "differs from official"):
+                EVIDENCE.verify_installed_rust_components(rust_root, proof)
+
+    def test_stable_manifest_binds_exact_component_archives_for_native_target(self) -> None:
+        components, _archives = fixture_rust_archives()
+        by_name = {component.name: component for component in components}
+        rows = ['date = "2026-10-01"', "[pkg.rustc]", 'version = "1.99.0 (b940084d7 2026-09-28)"']
+        for name, package in EVIDENCE.RUST_COMPONENT_PACKAGES.items():
+            component = by_name[name]
+            rows.extend((
+                f"[pkg.{package}.target.{EVIDENCE.RUST_HOST}]",
+                f'xz_url = "{component.url}"',
+                f'xz_hash = "{component.xz_sha256}"',
+            ))
+        parsed = EVIDENCE.parse_stable_rust_components("\n".join(rows))
+        self.assertEqual(parsed, components)
+        invalid = "\n".join(rows).replace("static.rust-lang.org", "attacker.example", 1)
+        with self.assertRaises(EVIDENCE.EvidenceError):
+            EVIDENCE.parse_stable_rust_components(invalid)
+
+    def test_official_rust_component_archive_digest_and_inventory_fail_closed(self) -> None:
+        components, archives = fixture_rust_archives()
+        corrupted = dict(archives)
+        corrupted["cargo"] = corrupted["cargo"][:-1] + bytes([corrupted["cargo"][-1] ^ 1])
+        with self.assertRaisesRegex(EVIDENCE.EvidenceError, "archive digest"):
+            EVIDENCE.derive_rust_component_proof(components, corrupted)
+        duplicate = dict(archives)
+        component = next(item for item in components if item.name == "cargo")
+        package_dir = EVIDENCE.RUST_COMPONENT_ARCHIVE_DIRS["cargo"]
+        top = f"{package_dir}-1.99.0-{EVIDENCE.RUST_HOST}"
+        output = io.BytesIO()
+        with tarfile.open(fileobj=output, mode="w:xz") as bundle:
+            for directory in (top, f"{top}/{package_dir}"):
+                member = tarfile.TarInfo(directory)
+                member.type = tarfile.DIRTYPE
+                bundle.addfile(member)
+            manifest = b"file:bin/cargo\nfile:bin/cargo\n"
+            member = tarfile.TarInfo(f"{top}/{package_dir}/manifest.in")
+            member.size = len(manifest)
+            bundle.addfile(member, io.BytesIO(manifest))
+            data = b"official-cargo"
+            member = tarfile.TarInfo(f"{top}/{package_dir}/bin/cargo")
+            member.mode = 0o755
+            member.size = len(data)
+            bundle.addfile(member, io.BytesIO(data))
+        duplicate["cargo"] = output.getvalue()
+        replacement = tuple(
+            EVIDENCE.RustComponent(item.name, item.url,
+                                   EVIDENCE.sha256_bytes(duplicate["cargo"]) if item.name == "cargo" else item.xz_sha256)
+            for item in components
+        )
+        with self.assertRaisesRegex(EVIDENCE.EvidenceError, "repeats a file"):
+            EVIDENCE.derive_rust_component_proof(replacement, duplicate)
+        for unsafe_member in (f"{top}/../escape", f"{top}/{package_dir}/bin/cargo-link"):
+            unsafe = io.BytesIO()
+            with tarfile.open(fileobj=unsafe, mode="w:xz") as bundle:
+                for directory in (top, f"{top}/{package_dir}"):
+                    member = tarfile.TarInfo(directory)
+                    member.type = tarfile.DIRTYPE
+                    bundle.addfile(member)
+                manifest = b"file:bin/cargo\n"
+                member = tarfile.TarInfo(f"{top}/{package_dir}/manifest.in")
+                member.size = len(manifest)
+                bundle.addfile(member, io.BytesIO(manifest))
+                member = tarfile.TarInfo(f"{top}/{package_dir}/bin/cargo")
+                member.mode = 0o755
+                member.size = len(data)
+                bundle.addfile(member, io.BytesIO(data))
+                member = tarfile.TarInfo(unsafe_member)
+                member.type = tarfile.SYMTYPE
+                member.linkname = "/tmp/untrusted"
+                bundle.addfile(member)
+            unsafe_archives = dict(archives)
+            unsafe_archives["cargo"] = unsafe.getvalue()
+            unsafe_components = tuple(
+                EVIDENCE.RustComponent(item.name, item.url,
+                    EVIDENCE.sha256_bytes(unsafe_archives["cargo"]) if item.name == "cargo" else item.xz_sha256)
+                for item in components
+            )
+            with self.subTest(member=unsafe_member), self.assertRaisesRegex(
+                EVIDENCE.EvidenceError, "unsafe member",
+            ):
+                EVIDENCE.derive_rust_component_proof(unsafe_components, unsafe_archives)
+
     def test_manifest_fetch_failure_falls_back_to_hosted_ci(self) -> None:
         with patch.object(EVIDENCE, "fetch_stable_manifest_versions", side_effect=EVIDENCE.EvidenceError("offline")):
+            self.assertFalse(EVIDENCE.verify_from_api(
+                REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                fetch=snapshots(valid_comment()), now=NOW, expected_workflow_digest="d" * 64,
+            ))
+
+    def test_rust_component_archive_failure_falls_back_to_hosted_ci(self) -> None:
+        with patch.object(
+            EVIDENCE, "fetch_official_rust_component_proof",
+            side_effect=EVIDENCE.EvidenceError("official Rust archive unavailable"),
+        ):
             self.assertFalse(EVIDENCE.verify_from_api(
                 REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
                 fetch=snapshots(valid_comment()), now=NOW, expected_workflow_digest="d" * 64,
@@ -1340,6 +1530,23 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
             REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
             fetch=snapshots(changed), now=NOW, expected_workflow_digest="d" * 64,
         ))
+
+    def test_receipt_rust_tree_and_executable_hashes_must_match_fresh_official_archives(self) -> None:
+        original = valid_comment()
+        payload = json.loads(original["body"].split("\n", 1)[1])
+        for target in ("rust_components", "rustc"):
+            command = json.loads(payload["tools"]["command_binding"])
+            if target == "rust_components":
+                command["rust_components"]["rustc"] = "f" * 64
+            else:
+                command["executables"]["rustc"][1] = "f" * 64
+            tools = {**payload["tools"], "command_binding": json.dumps(command)}
+            changed = {**original, "body": EVIDENCE.MARKER + "\n" + json.dumps({**payload, "tools": tools})}
+            with self.subTest(target=target):
+                self.assertFalse(EVIDENCE.verify_from_api(
+                    REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                    fetch=snapshots(changed), now=NOW, expected_workflow_digest="d" * 64,
+                ))
 
     def test_reads_all_comment_pages_and_rejects_mutation_between_reads(self) -> None:
         good = valid_comment()
@@ -1718,6 +1925,10 @@ class TrustedJustTest(unittest.TestCase):
                     f"#!/bin/sh\nprintf '%s\\n' 'rust-{name}' >> '{marker}'\n", encoding="utf-8",
                 )
                 tool.chmod(0o755)
+            standard_library = rust_bin.parent / "lib/rustlib/aarch64-apple-darwin/lib/libstd.rlib"
+            standard_library.parent.mkdir(parents=True)
+            standard_library.write_bytes(b"official-stdlib-fixture")
+            rust_proof = fixture_installed_rust_proof(rust_bin.parent)
 
             homebrew = root / "opt-homebrew"
             brew_bin = homebrew / "bin"
@@ -1782,7 +1993,12 @@ class TrustedJustTest(unittest.TestCase):
             ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
-                binding = EVIDENCE.command_binding(parent_environment, just, BUN_BINARY_SHA256)
+                binding = EVIDENCE.command_binding(parent_environment, just, BUN_BINARY_SHA256, rust_proof)
+                standard_library.write_bytes(b"tampered-stdlib-fixture")
+                with self.assertRaisesRegex(EVIDENCE.EvidenceError, "differs from official"):
+                    EVIDENCE.assert_command_binding(binding, just)
+                standard_library.write_bytes(b"official-stdlib-fixture")
+                EVIDENCE.assert_command_binding(binding, just)
                 wrapper = (
                     b"#!/bin/sh\n# no-op wrapper with a different digest\n"
                     b"if [ \"$1\" = \"--version\" ]; then echo 1.4.2; fi\nexit 0\n"
@@ -1798,7 +2014,7 @@ class TrustedJustTest(unittest.TestCase):
                     just.asset_url, just.asset_sha256, just.binary_sha256,
                 )
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "official Bun release"):
-                    EVIDENCE.command_binding(parent_environment, alternate_just, BUN_BINARY_SHA256)
+                    EVIDENCE.command_binding(parent_environment, alternate_just, BUN_BINARY_SHA256, rust_proof)
                 (brew_bin / "bun").write_bytes(BUN_BINARY)
                 wrapper_version = original_run(
                     (str(brew_bin / "bun"), "--version"), capture_output=True, text=True, check=False,
@@ -1878,7 +2094,7 @@ class TrustedJustTest(unittest.TestCase):
             ), patch.object(EVIDENCE, "JAVA_INSTALL_ROOT", java_root), patch.object(
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
-                provisioned = EVIDENCE.command_binding(parent_environment, provisioned_just, BUN_BINARY_SHA256)
+                provisioned = EVIDENCE.command_binding(parent_environment, provisioned_just, BUN_BINARY_SHA256, rust_proof)
             self.assertEqual(install_marker.read_text().splitlines(), [
                 os.pathsep.join(EVIDENCE.SYSTEM_COMMAND_PATH), "1", "install graphviz",
             ])
@@ -1900,7 +2116,7 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.command_binding(parent_environment, invalid_just, BUN_BINARY_SHA256)
+                    EVIDENCE.command_binding(parent_environment, invalid_just, BUN_BINARY_SHA256, rust_proof)
             self.assertEqual(install_marker.read_bytes(), install_before_invalid)
 
             dot_path.unlink()
@@ -1912,7 +2128,7 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.command_binding(parent_environment, broken_just, BUN_BINARY_SHA256)
+                    EVIDENCE.command_binding(parent_environment, broken_just, BUN_BINARY_SHA256, rust_proof)
             self.assertEqual(install_marker.read_bytes(), install_before_invalid)
 
             dot_path.unlink()
@@ -1925,7 +2141,7 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "bootstrap failed"):
-                    EVIDENCE.command_binding(parent_environment, dot_failure_just, BUN_BINARY_SHA256)
+                    EVIDENCE.command_binding(parent_environment, dot_failure_just, BUN_BINARY_SHA256, rust_proof)
 
             dot_missing_after_install_just = fixture_just("dot-install-missing-output-inputs")
             brew_tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -1936,7 +2152,7 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.command_binding(parent_environment, dot_missing_after_install_just, BUN_BINARY_SHA256)
+                    EVIDENCE.command_binding(parent_environment, dot_missing_after_install_just, BUN_BINARY_SHA256, rust_proof)
 
             dot_tamper_just = fixture_just("dot-install-tamper-inputs")
             brew_tool.write_text("#!/bin/sh\nprintf tampered > \"$0\"\nexit 0\n", encoding="utf-8")
@@ -1947,7 +2163,7 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE, "trusted_executable", side_effect=select_executable,
             ), patch.object(EVIDENCE.subprocess, "run", side_effect=select_java_home):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "changed during"):
-                    EVIDENCE.command_binding(parent_environment, dot_tamper_just, BUN_BINARY_SHA256)
+                    EVIDENCE.command_binding(parent_environment, dot_tamper_just, BUN_BINARY_SHA256, rust_proof)
 
             commands_dir = Path(binding.path.split(os.pathsep)[0])
             (commands_dir / "grep").symlink_to(brew_bin / "grep")
@@ -2003,7 +2219,7 @@ class TrustedJustTest(unittest.TestCase):
             source_git = Path("/usr/bin/git").resolve(strict=True)
             entries["source_git"] = (str(source_git), EVIDENCE.sha256_bytes(source_git.read_bytes()))
             path = os.pathsep.join((str(trusted_commands), *EVIDENCE.SYSTEM_COMMAND_PATH))
-            binding = EVIDENCE.CommandBinding(path, entries)
+            binding = EVIDENCE.CommandBinding(path, entries, {}, RUST_COMPONENT_DIGESTS)
             EVIDENCE.assert_command_binding(binding, just)
             environment = {"PATH": path, "HOSTILE_PARENT_PATH": str(hostile)}
             result = subprocess.run(
