@@ -158,6 +158,7 @@ fn runtime_option_validation_and_renderer_selection_cover_all_kinds() {
 #[test]
 fn plantuml_render_rejects_runtime_and_cache_conflict_before_reading_input() {
     let result = DiagramCommand::new(DiagramKind::PlantUml).run(DiagramAction::Render {
+        source_options: crate::commands::DiagramSourceOptions::default(),
         input: "input-is-not-read.puml".into(),
         output: None,
         runtime: Some("runtime.jar".into()),
@@ -178,6 +179,7 @@ fn render_rejects_theme_options_for_non_plantuml_after_reading_input()
     let input = std::env::temp_dir().join(format!("krr-cli-mermaid-{}.mmd", std::process::id()));
     std::fs::write(&input, "graph TD; A --> B")?;
     let result = DiagramCommand::new(DiagramKind::Mermaid).run(DiagramAction::Render {
+        source_options: crate::commands::DiagramSourceOptions::default(),
         input: input.clone(),
         output: None,
         runtime: Some("runtime.js".into()),
@@ -208,6 +210,7 @@ fn plantuml_render_reaches_config_validation_after_input_loading()
     let input = std::env::temp_dir().join(format!("krr-cli-plantuml-{}.puml", std::process::id()));
     std::fs::write(&input, "@startuml\nAlice -> Bob\n@enduml")?;
     let result = DiagramCommand::new(DiagramKind::PlantUml).run(DiagramAction::Render {
+        source_options: crate::commands::DiagramSourceOptions::default(),
         input,
         output: None,
         runtime: Some("missing-plantuml.jar".into()),
@@ -229,6 +232,7 @@ fn mermaid_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Er
 
     std::fs::write(&input, "```mermaid\ngraph TD; A-->B\n```\n")?;
     let result = DiagramCommand::new(DiagramKind::Mermaid).run(DiagramAction::Render {
+        source_options: crate::commands::DiagramSourceOptions::default(),
         input: input.clone(),
         output: Some(output),
         runtime: Some(runtime),
@@ -251,6 +255,7 @@ fn drawio_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Err
 
     std::fs::write(&input, "<mxGraphModel />")?;
     let result = DiagramCommand::new(DiagramKind::Drawio).run(DiagramAction::Render {
+        source_options: crate::commands::DiagramSourceOptions::default(),
         input: input.clone(),
         output: Some(output),
         runtime: Some(runtime),

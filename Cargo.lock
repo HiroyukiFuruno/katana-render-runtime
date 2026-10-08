@@ -1199,6 +1199,7 @@ dependencies = [
  "clap",
  "katana-render-runtime",
  "serde_json",
+ "sha2",
  "tracing",
 ]
 

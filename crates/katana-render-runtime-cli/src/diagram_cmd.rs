@@ -1,4 +1,4 @@
-use crate::commands::{DiagramAction, ThemeModeArg};
+use crate::commands::{DiagramAction, DiagramInputFormat, DiagramSourceOptions, ThemeModeArg};
 use crate::diagram_source::DiagramSourceOps;
 #[cfg(test)]
 pub(crate) use crate::diagram_source::MermaidMarkdownOps;
@@ -11,7 +11,10 @@ use katana_render_runtime::{
 use render_input::RenderInputFactory;
 use std::path::PathBuf;
 
+#[path = "render_attestation.rs"]
+mod render_attestation;
 mod render_input;
+use render_attestation::{AttestationPaths, RenderAttestation};
 
 pub(crate) struct DiagramCommand {
     kind: DiagramKind,
@@ -32,6 +35,7 @@ impl DiagramCommand {
                 theme_from,
                 theme_mode,
                 cache_dir,
+                source_options,
             } => self.render(DiagramRenderRequest {
                 input_path: input,
                 output_path: output,
@@ -40,10 +44,9 @@ impl DiagramCommand {
                 theme_from,
                 theme_mode,
                 cache_dir,
+                source_options,
             }),
-            DiagramAction::ReferenceUpdate { fixtures } => {
-                ReferenceCommand::update(self.kind, fixtures)
-            }
+            DiagramAction::ReferenceUpdate { fixtures } => self.update_reference(fixtures),
             DiagramAction::Compare {
                 fixtures,
                 min_score,
@@ -52,14 +55,74 @@ impl DiagramCommand {
         }
     }
 
+    fn update_reference(self, fixtures: PathBuf) -> anyhow::Result<()> {
+        ReferenceCommand::update(self.kind, fixtures)
+    }
+
     fn render(self, request: DiagramRenderRequest) -> anyhow::Result<()> {
+        self.validate_input_options(&request)?;
         let runtime_path = self.resolve_runtime_path(&request)?;
         let source = Self::read_source(&request.input_path)?;
+        let attestation = Self::attestation(&request, &runtime_path, &source)?;
         let vendor_config = Self::vendor_config(self.kind, &request)?;
-        let source = DiagramSourceOps::prepare(self.kind, source);
+        let source = Self::prepare_source(self.kind, source, request.source_options.input_format);
         let input = RenderInputFactory::create(self.kind, source, vendor_config);
+        if let Some(attestation) = &attestation {
+            attestation.capture_input(&input)?;
+        }
         let output = self.render_with_runtime(runtime_path, &input)?;
-        Self::write_render_output(request.output_path, &output)
+        match attestation {
+            Some(attestation) => attestation.complete(&input, &output),
+            None => Self::write_render_output(request.output_path, &output),
+        }
+    }
+
+    fn attestation(
+        request: &DiagramRenderRequest,
+        runtime: &std::path::Path,
+        source: &str,
+    ) -> anyhow::Result<Option<RenderAttestation>> {
+        request
+            .source_options
+            .render_attestation
+            .as_ref()
+            .map(|receipt| {
+                RenderAttestation::begin(
+                    AttestationPaths {
+                        input: &request.input_path,
+                        output: request.output_path.as_deref(),
+                        runtime,
+                        receipt,
+                    },
+                    request.source_options.attempt_token.as_deref(),
+                    request.source_options.input_format,
+                    source.as_bytes(),
+                )
+            })
+            .transpose()
+    }
+
+    fn prepare_source(kind: DiagramKind, source: String, format: DiagramInputFormat) -> String {
+        match format {
+            DiagramInputFormat::Auto => DiagramSourceOps::prepare(kind, source),
+            DiagramInputFormat::DiagramSource => source,
+        }
+    }
+
+    fn validate_input_options(&self, request: &DiagramRenderRequest) -> anyhow::Result<()> {
+        if self.kind != DiagramKind::Mermaid
+            && (request.source_options.input_format != DiagramInputFormat::Auto
+                || request.source_options.render_attestation.is_some()
+                || request.source_options.attempt_token.is_some())
+        {
+            anyhow::bail!("--input-format and render attestation are supported only for mermaid");
+        }
+        if request.source_options.render_attestation.is_none()
+            && request.source_options.attempt_token.is_some()
+        {
+            anyhow::bail!("--attempt-token requires --render-attestation");
+        }
+        Ok(())
     }
 
     fn resolve_runtime_path(&self, request: &DiagramRenderRequest) -> anyhow::Result<PathBuf> {
@@ -146,6 +209,7 @@ struct DiagramRenderRequest {
     theme_from: Option<String>,
     theme_mode: Option<ThemeModeArg>,
     cache_dir: Option<PathBuf>,
+    source_options: DiagramSourceOptions,
 }
 
 #[cfg(test)]
