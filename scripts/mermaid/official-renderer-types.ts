@@ -44,11 +44,26 @@ export interface MermaidConfig {
 
 export interface MermaidRenderResult {
   svg: string;
+  diagramType: string;
+}
+
+export interface MermaidSvgStages {
+  diagramType: string;
+  rawSvg: string;
+  restoredSvg: string;
+  normalizedSvg: string;
+  originalSource: string;
+  preprocessedSource: string;
+  renderSource: string;
+  replacements: MermaidI18nReplacement[];
+  mermaidVersion: string | null;
 }
 
 export interface MermaidGlobal {
+  version?: string;
   initialize(config: MermaidConfig): void;
   registerExternalDiagrams(diagrams: object[]): Promise<void>;
+  detectType(source: string): string;
   render(id: string, source: string): Promise<MermaidRenderResult>;
 }
 
@@ -67,6 +82,8 @@ export interface MermaidI18nNormalizeResult {
 }
 
 export interface MermaidI18nWindow extends MermaidWindow {
+  "mermaid-zenuml"?: object;
+  __katanaOfficialReference?: boolean;
   __katanaMermaidZenuml?: object;
   katanaMermaidDiagramType?: (source: string) => string;
   katanaNormalizeMermaidSourceI18n?: (source: string) => MermaidI18nNormalizeResult;

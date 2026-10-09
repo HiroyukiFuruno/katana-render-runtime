@@ -5,6 +5,7 @@ import { type Fixture, FixtureRepository } from "./diagram_update_fixtures";
 import { MarkdownReferenceAssets } from "./diagram_update_markdown_assets";
 import { MarkdownReferenceWriter } from "./diagram_update_markdown_reference";
 import { SkippedFixtureReport } from "./diagram_update_skipped_report";
+import { assertReferenceScope, referenceMode } from "./official-reference-mode";
 import { expandHome, OfficialMermaidRenderer, type RendererOptions } from "./official-renderer";
 
 interface CliParsedOptions extends RendererOptions {
@@ -23,6 +24,12 @@ const CliOptions = {
     const outputDir = path.resolve(
       CliOptions.get(argv, "--output", path.join(fixturesDir, "official")),
     );
+    const mode = referenceMode(CliOptions.get(argv, "--reference-mode", "strictVendorOriginal"));
+    const referenceScope = CliOptions.get(argv, "--reference-scope", "formal");
+    if (referenceScope !== "formal" && referenceScope !== "diagnostic") {
+      throw new Error(`Unsupported reference scope: ${referenceScope}`);
+    }
+    assertReferenceScope(mode, referenceScope);
     return {
       fixturesDir,
       outputDir,
@@ -46,8 +53,10 @@ const CliOptions = {
           ),
         ),
       ),
-      writeMarkdown: !argv.includes("--no-write-md"),
+      writeMarkdown: mode === "legacyNormalized" && !argv.includes("--no-write-md"),
       skipErrors: argv.includes("--skip-errors"),
+      referenceMode: mode,
+      referenceScope,
       theme: CliOptions.theme(argv),
     };
   },
@@ -64,7 +73,7 @@ const CliOptions = {
   exitIfHelp(argv: string[]) {
     if (argv.includes("--help")) {
       console.log(
-        "Usage: bun run scripts/mermaid/diagram-update.ts [--fixtures DIR] [--output DIR] [--markdown-output DIR] [--theme dark|light] [--mermaid-js FILE] [--mermaid-zenuml-js FILE]",
+        "Usage: bun run scripts/mermaid/diagram-update.ts [--fixtures DIR] [--output DIR] [--markdown-output DIR] [--theme dark|light] [--reference-mode strictVendorOriginal|legacyNormalized] [--reference-scope formal|diagnostic] [--mermaid-js FILE] [--mermaid-zenuml-js FILE]",
       );
       process.exit(0);
     }
@@ -129,6 +138,16 @@ class MermaidDiagramUpdate {
     writer: MarkdownReferenceWriter,
     fixture: Fixture,
   ) {
+    if (
+      this.options.referenceMode === "strictVendorOriginal" &&
+      (fixture.originalFenceSource ?? "").trim() === ""
+    ) {
+      this.skippedReport.add(
+        fixture,
+        "empty captured fence body; excluded by fixture inventory contract",
+      );
+      return;
+    }
     if (this.options.skipErrors) {
       await this.renderOptionalFixture(renderer, writer, fixture);
       return;
@@ -183,6 +202,14 @@ class MermaidDiagramUpdate {
   }
 
   private validate() {
+    assertReferenceScope(this.options.referenceMode, this.options.referenceScope);
+    if (
+      this.options.referenceMode === "strictVendorOriginal" &&
+      this.options.referenceScope === "formal" &&
+      this.options.skipErrors
+    ) {
+      throw new Error("strictVendorOriginal formal reference generation cannot use --skip-errors");
+    }
     if (!fs.existsSync(this.options.mermaidJs)) {
       throw new Error(`mermaid.min.js not found: ${this.options.mermaidJs}`);
     }
