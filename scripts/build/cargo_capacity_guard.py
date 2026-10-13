@@ -1,0 +1,804 @@
+#!/usr/bin/env python3
+"""Run a Cargo command while guarding the repository's real target directory.
+
+The guard records one successful build's target size and only removes rebuild
+state after the measured target exceeds the configured multiple of that fixed
+baseline.  It never follows a symlink target and refuses to clean while a
+process appears to use the target.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import math
+import subprocess
+import shutil
+import stat
+import sys
+import time
+from pathlib import Path
+from collections.abc import Mapping
+from types import FunctionType, ModuleType
+from typing import cast
+
+from cargo_capacity_guard_lock import (GuardLock, ProfileLocks, busy_processes,
+                                       evict_artifacts, is_successful_build, retained_profile_paths)
+
+DEFAULT_FACTOR = 2.0
+COVERAGE_DOMAINS = ("root", "performance-baseline", "performance-candidate")
+CAPACITY_METRIC = "unique-inode-allocated-bytes"
+CAPACITY_METRIC_VERSION = 1
+JsonObject = dict[str, object]
+
+
+def _object(value: object, label: str) -> JsonObject:
+    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+        raise RuntimeError(f"{label} must be a JSON object")
+    return cast(JsonObject, value)
+
+
+def _array(value: object, label: str) -> list[object]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"{label} must be a JSON array")
+    return cast(list[object], value)
+
+
+def _text(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise RuntimeError(f"{label} must be a string")
+    return value
+
+
+def _number(value: object, label: str) -> int | float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise RuntimeError(f"{label} must be a finite number")
+    return value
+
+
+def _integer(value: object, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuntimeError(f"{label} must be an integer")
+    return value
+
+
+def _root() -> Path:
+    return Path(os.environ.get("CARGO_CAPACITY_GUARD_ROOT", Path(__file__).resolve().parents[2])).resolve()
+
+
+def resolve_target(root: Path, value: str | None = None, incremental_prefixes: list[str] | None = None,
+                   inactive_prefixes: list[str] | None = None, build_metadata: JsonObject | None = None) -> Path:
+    env_target = os.environ.get("CARGO_TARGET_DIR")
+    if value is None and env_target is not None and not Path(env_target).is_absolute():
+        raise RuntimeError("CARGO_TARGET_DIR must be absolute")
+    configured = value or env_target
+    if configured is None:
+        manifest = root / "Cargo.toml"
+        metadata = subprocess.run(["cargo", "metadata", "--no-deps", "--format-version", "1", "--manifest-path", str(manifest)], cwd=root, text=True, capture_output=True, check=False)
+        if metadata.returncode != 0:
+            raise RuntimeError("cargo metadata failed while resolving target")
+        try:
+            metadata_value = _object(json.loads(metadata.stdout), "cargo metadata")
+            configured = _text(metadata_value["target_directory"], "cargo target directory")
+        except (KeyError, json.JSONDecodeError) as exc:
+            raise RuntimeError("cargo metadata returned no target directory") from exc
+    raw = Path(configured)
+    target = raw if raw.is_absolute() else root / raw
+    root_real = root.resolve()
+    # The target itself is checked before resolution; ancestor links are
+    # covered by the resolved containment check below (a link escaping the
+    # repository can never produce an in-repository resolved target).
+    if target.is_symlink():
+        raise RuntimeError(f"refusing symlink target component: {target}")
+    lexical = Path(os.path.abspath(str(target)))
+    try:
+        relative_lexical = lexical.relative_to(root_real)
+    except ValueError:
+        relative_lexical = None
+    if relative_lexical is not None:
+        cursor = root_real
+        for part in relative_lexical.parts:
+            cursor /= part
+            if cursor.is_symlink():
+                raise RuntimeError(f"refusing symlink target component: {cursor}")
+    if target == root_real:
+        raise RuntimeError("target must be a child of repository root")
+    if target.exists():
+        for child in target.rglob("*"):
+            if child.is_symlink():
+                raise RuntimeError(f"refusing symlink inside target: {child}")
+    target = target.resolve()
+    try:
+        target.relative_to(root_real)
+    except ValueError as exc:
+        raise RuntimeError(f"target escapes repository: {target}") from exc
+    manifest = root_real / "Cargo.toml"
+    if manifest.exists():
+        metadata = subprocess.run(
+            ["cargo", "metadata", "--no-deps", "--format-version", "1", "--manifest-path", str(manifest)],
+            cwd=root_real, text=True, capture_output=True, check=False,
+        )
+        if metadata.returncode != 0:
+            raise RuntimeError("cargo metadata failed while validating target")
+        metadata_value = _object(json.loads(metadata.stdout), "cargo metadata")
+        if build_metadata is not None:
+            build_metadata.update(metadata_value)
+        expected = Path(_text(metadata_value["target_directory"], "cargo target directory")).resolve()
+        if expected != target:
+            raise RuntimeError(f"target differs from cargo metadata: {target} != {expected}")
+        if incremental_prefixes is not None:
+            incremental_prefixes.extend(runtime_incremental_prefixes(root_real, metadata_value))
+        if inactive_prefixes is not None:
+            inactive_prefixes.extend(workspace_incremental_prefixes(root_real, metadata_value))
+    return target
+
+
+def _incremental_names(package: JsonObject, scope: str) -> list[str]:
+    names = []
+    for item in _array(package["targets"], f"{scope} targets"):
+        target = _object(item, f"{scope} target")
+        kinds = [_text(kind, f"{scope} target kind")
+                 for kind in _array(target["kind"], f"{scope} target kinds")]
+        if "custom-build" in kinds:
+            continue
+        name = target["name"]
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name):
+            raise RuntimeError(f"{scope} target crate name is invalid")
+        names.append(name.replace("-", "_") + "-")
+    return names
+
+
+def runtime_incremental_prefixes(root: Path, metadata: object) -> list[str]:
+    value = _object(metadata, "cargo metadata")
+    manifest = str(root / "crates/katana-render-runtime/Cargo.toml")
+    packages = [_object(package, "cargo package")
+                for package in _array(value.get("packages", []), "cargo packages")]
+    packages = [package for package in packages
+                if package.get("manifest_path") == manifest]
+    if not packages:
+        return []
+    if len(packages) != 1:
+        raise RuntimeError("runtime package metadata is not unique")
+    return sorted(set(_incremental_names(packages[0], "runtime")))
+
+
+def cargo_configuration_paths(root: Path, environment: Mapping[str, str]) -> list[Path]:
+    home = Path(environment.get("CARGO_HOME", str(Path.home() / ".cargo")))
+    if not home.is_absolute():
+        raise RuntimeError("retained build profile requires absolute CARGO_HOME")
+    bases = [directory / ".cargo" for directory in (root, *root.parents)] + [home]
+    paths = []
+    for base in dict.fromkeys(bases):
+        for name in ("config", "config.toml"):
+            path = base / name
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise RuntimeError("Cargo configuration selection is unavailable") from exc
+            paths.append(path)
+            break
+    return paths
+
+
+def _cargo_configuration(path: Path) -> JsonObject:
+    parser_root = Path(__file__).resolve().parents[1] / "release"
+    cached = sys.modules.get("toml_loader")
+    if cached is not None:
+        if type(cached) is not ModuleType or "__getattr__" in vars(cached):
+            raise ImportError("Cargo configuration parser cache has an unsupported module")
+        factory = vars(cached).get("load_toml_parser")
+        if not isinstance(factory, FunctionType) or Path(factory.__code__.co_filename).resolve() != parser_root / "toml_loader.py":
+            raise ImportError("Cargo configuration parser cache has a foreign origin")
+    # build CLI からも検証済みの共有 parser を使い、探索範囲を残さない。
+    sys.path.insert(0, str(parser_root))
+    try:
+        from toml_loader import load_toml_parser
+    finally:
+        sys.path.remove(str(parser_root))
+    if not isinstance(load_toml_parser, FunctionType) or Path(load_toml_parser.__code__.co_filename).resolve() != parser_root / "toml_loader.py":
+        raise ImportError("Cargo configuration parser has a foreign origin")
+    return _object(load_toml_parser().loads(path.read_text(encoding="utf-8")), "Cargo configuration")
+
+
+def validate_build_selection(root: Path, environment: Mapping[str, str] | None = None) -> None:
+    environment = os.environ if environment is None else environment
+    if "CARGO_BUILD_TARGET" in environment:
+        raise RuntimeError("retained build profile does not support environment target selection")
+    for path in cargo_configuration_paths(root, environment):
+        try:
+            config = _cargo_configuration(path)
+        except (ImportError, OSError, ValueError) as exc:
+            raise RuntimeError("Cargo target selection cannot be verified") from exc
+        build = config.get("build", {})
+        unstable = config.get("unstable", {})
+        if not isinstance(unstable, dict) or unstable:
+            raise RuntimeError("retained build profile does not support unstable Cargo configuration")
+        if not isinstance(build, dict) or "include" in config or "target" in build:
+            raise RuntimeError("retained build profile does not support configured or unknown target selection")
+
+
+def validate_build_profile(profile: str, command: list[str]) -> None:
+    if not is_successful_build(command) or Path(command[0]).name not in {"cargo", "rtk"}:
+        raise RuntimeError("retained build profile requires direct Cargo build in the guard environment")
+    if any(part.startswith("+") or (part.startswith("-") and not part.startswith("--")
+                                    and "Z" in part[1:]) for part in command):
+        raise RuntimeError("retained build profile does not support child toolchain or unstable options")
+    if any(part in {"--profile", "--target", "--target-dir", "--config", "--manifest-path", "-C"}
+           or part.startswith(("--profile=", "--target=", "--target-dir=", "--config=", "--manifest-path=", "-C="))
+           or (part.startswith("-") and not part.startswith("--")
+               and len(part) > 2 and ("r" in part[1:] or part.startswith("-C"))) for part in command):
+        raise RuntimeError("retained build profile does not support child profile/directory/config overrides")
+    release = "--release" in command or "-r" in command
+    if release != (profile == "release"):
+        raise RuntimeError("retained build profile differs from child Cargo build")
+
+
+def validate_build_executable(root: Path, command: list[str]) -> None:
+    index = 0 if Path(command[0]).name == "cargo" else (2 if command[1] == "proxy" else 1)
+    search_path = os.pathsep.join(str(Path(part) if Path(part).is_absolute() else root / part)
+                                  for part in os.get_exec_path())
+    token = command[index]
+    has_directory = os.sep in token or (os.altsep is not None and os.altsep in token)
+    if Path(token).is_absolute():
+        value = str(Path(token))
+    elif has_directory:
+        value = str(root / token)
+    else:
+        value = token
+    expected = shutil.which("cargo", path=search_path)
+    actual = shutil.which(value, path=search_path)
+    try:
+        if expected is None or actual is None or Path(expected).resolve(strict=True) != Path(actual).resolve(strict=True):
+            raise RuntimeError("retained build profile Cargo executable differs from metadata")
+    except OSError as exc:
+        raise RuntimeError("retained build profile Cargo executable cannot be verified") from exc
+
+
+def current_build_profiles(target: Path, metadata: object, profile: str) -> tuple[Path, ...]:
+    metadata = _object(metadata, "cargo metadata")
+    if "target_directory" not in metadata:
+        raise RuntimeError("retained build profile requires Cargo metadata")
+    values = []
+    for value in (metadata["target_directory"], metadata.get("build_directory", metadata["target_directory"])):
+        base = Path(_text(value, "cargo build directory"))
+        if not base.is_absolute():
+            raise RuntimeError("Cargo metadata build directory must be absolute")
+        path = base / profile
+        try:
+            parts = path.relative_to(target).parts
+        except ValueError as exc:
+            raise RuntimeError("Cargo metadata build profile escapes target") from exc
+        if (not parts or ".." in parts or len(parts) > 3
+                or (len(parts) == 3 and parts[1] != "build")):
+            raise RuntimeError("Cargo metadata build profile is outside known profile scope")
+        if path.exists() or path.is_symlink():
+            values.append(path)
+    return retained_profile_paths(target, values)
+
+
+def workspace_incremental_prefixes(root: Path, metadata: object) -> list[str]:
+    value = _object(metadata, "cargo metadata")
+    members = {_text(member, "cargo workspace member")
+               for member in _array(value.get("workspace_members", []), "cargo workspace members")}
+    names = []
+    for item in _array(value.get("packages", []), "cargo packages"):
+        package = _object(item, "cargo package")
+        package_id = package.get("id")
+        if package_id is not None:
+            package_id = _text(package_id, "cargo package id")
+        if package_id not in members:
+            continue
+        manifest = Path(_text(package["manifest_path"], "workspace manifest"))
+        if not manifest.is_absolute() or manifest.resolve() != manifest:
+            raise RuntimeError("workspace manifest must be canonical and absolute")
+        if not manifest.is_relative_to(root):
+            continue
+        names.extend(_incremental_names(package, "workspace"))
+    return sorted(set(names))
+
+
+def size_bytes(target: Path) -> int | None:
+    if not target.exists():
+        return 0
+    seen: set[tuple[int, int]] = set()
+    total = 0
+    for path in target.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        stat = path.stat()
+        identity = (stat.st_dev, stat.st_ino)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        if not hasattr(stat, "st_blocks"):
+            return None
+        total += stat.st_blocks * 512
+    return total
+
+
+def load_state(path: Path, expected_sha256: str | None = None) -> JsonObject:
+    if expected_sha256 is not None:
+        if not re.fullmatch(r"[a-f0-9]{64}", expected_sha256):
+            raise RuntimeError("expected capacity state SHA256 is invalid")
+        if path.is_symlink():
+            raise RuntimeError("refusing symlink expected capacity state")
+        try:
+            raw = path.read_bytes()
+        except OSError as error:
+            raise RuntimeError("expected capacity state is unavailable") from error
+        if hashlib.sha256(raw).hexdigest() != expected_sha256:
+            raise RuntimeError("capacity state SHA256 differs")
+        try:
+            return _object(json.loads(raw), "capacity state")
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise RuntimeError("expected capacity state is not valid JSON") from error
+    try:
+        return _object(json.loads(path.read_text()), "capacity state")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_state(path: Path, state: JsonObject) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+    os.replace(temporary, path)
+
+
+def inspect(root: Path, target: Path, state_path: Path, factor: float,
+            expected_state_sha256: str | None = None) -> JsonObject:
+    state = load_state(state_path, expected_state_sha256)
+    recorded_target = state.get("target")
+    if "baseline_bytes" in state and not isinstance(recorded_target, str):
+        raise RuntimeError("capacity baseline requires its recorded target")
+    if "baseline_bytes" in state and (
+        state.get("metric") != CAPACITY_METRIC or state.get("metric_version") != CAPACITY_METRIC_VERSION
+    ):
+        raise RuntimeError("capacity baseline metric is missing or obsolete")
+    if recorded_target and Path(_text(recorded_target, "capacity target")).resolve() != target:
+        raise RuntimeError("capacity state belongs to a different target")
+    baseline = state.get("baseline_bytes")
+    if baseline is not None and (isinstance(baseline, bool) or not isinstance(baseline, (int, float))
+                                 or not math.isfinite(baseline) or baseline <= 0):
+        raise RuntimeError("capacity baseline must be a finite positive number")
+    current = size_bytes(target)
+    if current is None:
+        return {"target": str(target), "metric": CAPACITY_METRIC, "metric_version": CAPACITY_METRIC_VERSION, "metric_available": False, "current_bytes": None, "baseline_bytes": baseline, "factor": factor, "threshold_bytes": None, "over_capacity": False, "state": str(state_path)}
+    threshold = baseline * factor if isinstance(baseline, (int, float)) else None
+    return {"target": str(target), "metric": CAPACITY_METRIC, "metric_version": CAPACITY_METRIC_VERSION, "current_bytes": current, "baseline_bytes": baseline, "factor": factor, "threshold_bytes": threshold, "over_capacity": threshold is not None and current > threshold, "state": str(state_path)}
+
+
+def record_cleanup_result(report: object, target: Path, code: int, output: str, dry_run: bool) -> None:
+    """Record measured cleanup attempts instead of inferring them from sweep output."""
+    report = _object(report, "capacity report")
+    current = _integer(report["current_bytes"], "current bytes")
+    before_value = report.get("post_clean_bytes", current)
+    before_clean = None if before_value is None else _integer(before_value, "pre-clean bytes")
+    threshold_value = report["threshold_bytes"]
+    threshold = None if threshold_value is None else _number(threshold_value, "threshold bytes")
+    maximum_value = report.get("active_sweep_maxsize_bytes", threshold)
+    maximum = None if maximum_value is None else _number(maximum_value, "sweep maximum bytes")
+    attempts = _array(report.get("cleanup_attempts", []), "cleanup attempts")
+    for item in attempts:
+        previous = _object(item, "cleanup attempt")
+        for field in ("attempt", "exit_code", "actual_removed_bytes"):
+            _integer(previous[field], f"cleanup attempt {field}")
+        for field in ("pre_clean_bytes", "post_clean_bytes"):
+            if previous[field] is not None:
+                _integer(previous[field], f"cleanup attempt {field}")
+        if previous["maxsize_bytes"] is not None:
+            _number(previous["maxsize_bytes"], "cleanup attempt maximum bytes")
+        _text(previous["output"], "cleanup attempt output")
+        if not isinstance(previous["dry_run"], bool):
+            raise RuntimeError("cleanup attempt dry_run must be a boolean")
+    report["clean_exitcode"] = code
+    post_clean = size_bytes(target)
+    attempt_removed = max(before_clean - post_clean, 0) if before_clean is not None and post_clean is not None else 0
+    report["cleanup_attempts"] = attempts
+    attempts.append({
+        "attempt": len(attempts) + 1,
+        "maxsize_bytes": maximum,
+        "exit_code": code,
+        "output": output,
+        "pre_clean_bytes": before_clean,
+        "post_clean_bytes": post_clean,
+        "actual_removed_bytes": attempt_removed,
+        "dry_run": dry_run,
+    })
+    report["clean_output"] = "\n".join(
+        f"attempt {attempt['attempt']} ({attempt['maxsize_bytes']}B): {attempt['output']}"
+        for item in attempts for attempt in [_object(item, "cleanup attempt")]
+    )
+    report["post_clean_bytes"] = post_clean
+    report["actual_removed_bytes"] = max(current - post_clean, 0) if post_clean is not None else 0
+    report["remaining_over_capacity"] = threshold is not None and (
+        post_clean is None or post_clean > threshold
+    )
+    if code != 0:
+        report["cleanup_status"] = "failed"
+    elif dry_run:
+        report["cleanup_status"] = "dry-run"
+    elif post_clean is None:
+        report["cleanup_status"] = "metric-unavailable"
+    elif report["remaining_over_capacity"]:
+        report["cleanup_status"] = "incomplete"
+    else:
+        report["cleanup_status"] = "completed"
+
+
+def collect_protected_references(cli_refs: object, environment_value: str | None,
+                                 *, allow_empty_environment: bool = False) -> list[str]:
+    """Validate and combine every declared Cargo consumer reference."""
+    if cli_refs is None:
+        cli_refs = []
+    if not isinstance(cli_refs, list):
+        raise RuntimeError("--protected-ref values must be a list of absolute paths")
+
+    sources = [("--protected-ref", _array(cli_refs, "--protected-ref values"))]
+    if environment_value is not None:
+        try:
+            environment_refs: object = json.loads(environment_value)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(
+                "CARGO_CAPACITY_PROTECTED_REFS must be a JSON list of absolute paths"
+            ) from error
+        if not isinstance(environment_refs, list) or (not environment_refs and not allow_empty_environment):
+            raise RuntimeError("CARGO_CAPACITY_PROTECTED_REFS must be a JSON list of absolute paths")
+        sources.append(("CARGO_CAPACITY_PROTECTED_REFS", _array(environment_refs, "protected references")))
+
+    validated = []
+    for source_name, references in sources:
+        for reference in references:
+            if not isinstance(reference, (str, os.PathLike)):
+                raise RuntimeError(f"{source_name} values must be absolute paths")
+            value = os.fspath(reference)
+            if not isinstance(value, str) or not Path(value).is_absolute():
+                raise RuntimeError(f"{source_name} values must be absolute paths")
+            validated.append(value)
+    return list(dict.fromkeys(validated))
+
+
+def coverage_selection(root: Path, target: Path, domain: str, command: list[str],
+                       environment: Mapping[str, str]) -> tuple[str, Path]:
+    if domain not in COVERAGE_DOMAINS or target != root / "target":
+        raise RuntimeError("coverage domain requires the canonical aggregate target")
+    selected = target / ("llvm-cov-target" if domain == "root" else f"llvm-cov-{domain}")
+    if (environment.get("CARGO_TARGET_DIR") != str(target)
+            or environment.get("CARGO_LLVM_COV_TARGET_DIR") != str(selected)):
+        raise RuntimeError("coverage target environment differs from its fixed domain")
+    if any(name in environment for name in ("CARGO_LLVM_COV_BUILD_DIR", "CARGO_BUILD_BUILD_DIR",
+                                            "LLVM_PROFILE_FILE_NAME")):
+        raise RuntimeError("coverage directory/profile overrides are unsupported")
+    words = list(command)
+    if words and Path(words[0]).name == "rtk":
+        words.pop(0)
+        if words and words[0] == "proxy":
+            words.pop(0)
+    if len(words) < 2 or Path(words[0]).name != "cargo" or words[1] != "llvm-cov":
+        raise RuntimeError("coverage domain requires the fixed Cargo llvm-cov caller")
+    words = words[2:]
+    action = "clean" if words[:1] == ["clean"] else "test"
+    if action == "clean":
+        words = words[1:]
+    if "--" in words:
+        boundary = words.index("--")
+        threads = words[boundary + 1:]
+        value = (threads[0].split("=", 1)[1] if len(threads) == 1
+                 and threads[0].startswith("--test-threads=") else
+                 threads[1] if len(threads) == 2 and threads[0] == "--test-threads" else "")
+        if action != "test" or not value.isdecimal() or int(value) < 1:
+            raise RuntimeError("unsupported coverage test arguments")
+        words = words[:boundary]
+    switches = {"--workspace", "--locked"} if action == "clean" else {
+        "--workspace", "--locked", "--all-targets", "--all-features", "--no-default-features",
+        "--summary-only", "--json",
+    }
+    values = {"--manifest-path"} if action == "clean" else {
+        "--manifest-path", "--features", "--fail-under-lines", "--fail-uncovered-lines",
+        "--output-path", "--jobs", "-j",
+    }
+    options: dict[str, str] = {}
+    index = 0
+    while index < len(words):
+        word = words[index]
+        key = "--jobs" if word == "-j" else word
+        if key in options or word not in switches | values:
+            raise RuntimeError("unknown or repeated coverage option")
+        value = ""
+        if word in values:
+            index += 1
+            if index >= len(words):
+                raise RuntimeError("missing coverage option value")
+            value = words[index]
+        options[key] = value
+        index += 1
+    manifest = root / ("Cargo.toml" if domain == "root" else "scripts/html/performance-harness/Cargo.toml")
+    manifest_value = options.get("--manifest-path")
+    if manifest_value is not None and manifest_value not in {str(manifest), str(manifest.relative_to(root))}:
+        raise RuntimeError("coverage manifest differs from its fixed domain")
+    required = {"--workspace"}
+    if domain != "root":
+        required |= {"--manifest-path", "--locked"}
+    if action == "test":
+        required |= {"--locked", "--all-targets", "--fail-under-lines", "--fail-uncovered-lines"}
+        if options.get("--fail-under-lines") != "100" or options.get("--fail-uncovered-lines") != "0":
+            raise RuntimeError("coverage thresholds must remain 100/0")
+        if domain == "root":
+            required.add("--all-features")
+            if "--features" in options or "--no-default-features" in options:
+                raise RuntimeError("root coverage feature selection differs")
+        else:
+            required |= {"--no-default-features", "--features"}
+            if "--all-features" in options or options.get("--features") != domain.removeprefix("performance-"):
+                raise RuntimeError("coverage arm feature selection differs")
+        jobs = options.get("--jobs", "1")
+        if not jobs.isdecimal() or int(jobs) < 1:
+            raise RuntimeError("coverage jobs must be positive")
+        if "--output-path" in options:
+            output = root / "tmp/quality/standalone-performance-coverage" / f"{domain.removeprefix('performance-')}.json"
+            if options["--output-path"] not in {str(output), str(output.relative_to(root))}:
+                raise RuntimeError("coverage report differs from its fixed domain")
+    if not required.issubset(options):
+        raise RuntimeError("coverage command omits required domain options")
+    _coverage_stamp(manifest, regular=True)
+    for config_path in cargo_configuration_paths(root, environment):
+        _coverage_stamp(config_path, regular=True)
+    validate_build_selection(root, environment)
+    for config_path in cargo_configuration_paths(root, environment):
+        config = _cargo_configuration(config_path)
+        build = _object(config.get("build", {}), "Cargo build configuration")
+        configured_env = _object(config.get("env", {}), "Cargo environment configuration")
+        if "build-dir" in build or any(name in configured_env for name in (
+                "CARGO_TARGET_DIR", "CARGO_LLVM_COV_TARGET_DIR", "CARGO_LLVM_COV_BUILD_DIR",
+                "CARGO_BUILD_BUILD_DIR", "LLVM_PROFILE_FILE_NAME")):
+            raise RuntimeError("configured coverage directory/profile overrides are unsupported")
+    return action, selected
+
+
+def _coverage_stamp(path: Path, regular: bool = False) -> tuple[int, int, int, int, int, int]:
+    cursor = Path(path.anchor)
+    for part in path.parts[1:]:
+        cursor /= part
+        if stat.S_ISLNK(cursor.lstat().st_mode):
+            raise RuntimeError("coverage protection path contains a symlink")
+    value = path.lstat()
+    if not stat.S_ISREG(value.st_mode) and (regular or not stat.S_ISDIR(value.st_mode)):
+        raise RuntimeError("coverage protection path has an unknown kind")
+    return value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+
+
+def coverage_cleanup_preflight(root: Path, target: Path, selected: Path,
+                               protected_refs: list[str]) -> None:
+    references = {Path(name): _coverage_stamp(Path(name), regular=True) for name in protected_refs}
+    protected = {value[:2] for value in references.values()}
+    # 公式0.9.1のworkspace cleanとrunの暗黙cleanはmetadata targetの共有出力も消す。
+    footprint = (selected, target / "llvm-cov/html", target / "llvm-cov/text", target / "ui",
+                 target / "tests/trybuild", target / "tests/target")
+    for reference in references:
+        if any(reference == path or path in reference.parents for path in footprint):
+            raise RuntimeError("coverage cleanup intersects a protected consumer path")
+    def visit(path: Path) -> None:
+        try:
+            value = _coverage_stamp(path)
+        except FileNotFoundError:
+            return
+        if value[0] != target.lstat().st_dev:
+            raise RuntimeError("coverage cleanup crosses a device boundary")
+        if value[:2] in protected:
+            raise RuntimeError("coverage cleanup intersects a protected consumer inode")
+        if stat.S_ISDIR(value[2]):
+            for child in path.iterdir():
+                visit(child)
+    if busy_processes(target, root):
+        raise RuntimeError("coverage cleanup target is in use or inspection is unavailable")
+    try:
+        with ProfileLocks(target) as epoch:
+            if busy_processes(target, root):
+                raise RuntimeError("coverage cleanup target became busy")
+            for path in footprint:
+                visit(path)
+            for reference, value in references.items():
+                if _coverage_stamp(reference, regular=True) != value:
+                    raise RuntimeError("coverage protected consumer changed during inspection")
+            epoch.verify()
+    except BlockingIOError as error:
+        raise RuntimeError("coverage cleanup Cargo lock is busy") from error
+    # Cargoが同lockを取得するのでProfileLocksは子の起動前に解放し、外側GuardLockは維持する。
+    for reference, value in references.items():
+        if _coverage_stamp(reference, regular=True) != value:
+            raise RuntimeError("coverage protected consumer changed before execution")
+
+
+def coverage_tool_version(root: Path, command: list[str]) -> JsonObject:
+    query = command[:command.index("llvm-cov") + 1] + ["--version"]
+    evidence: JsonObject = {"argv": query, "stdout_hex": "", "stderr_hex": "", "exit": None}
+    try:
+        result = subprocess.run(query, cwd=root, env=os.environ.copy(), capture_output=True,
+                                timeout=30, check=False)
+        evidence.update(stdout_hex=result.stdout.hex(), stderr_hex=result.stderr.hex(), exit=result.returncode)
+        if result.returncode != 0 or result.stdout.strip() != b"cargo-llvm-cov 0.9.1":
+            raise RuntimeError("coverage cleanup requires admitted cargo-llvm-cov 0.9.1")
+    except subprocess.TimeoutExpired as error:
+        evidence["failure"] = "timeout"
+        for name, value in (("stdout_hex", error.stdout), ("stderr_hex", error.stderr)):
+            if isinstance(value, bytes):
+                evidence[name] = value.hex()
+        raise RuntimeError("coverage tool version query timed out") from error
+    except OSError as error:
+        evidence["failure"] = str(error)
+        raise RuntimeError("coverage tool version query is unavailable") from error
+    finally:
+        # queryの失敗もcallerのraw logへ残し、version不明を成功にしない。
+        print(json.dumps({"coverage_tool_query": evidence}, sort_keys=True), file=sys.stderr)
+    return evidence
+
+
+def run(args: argparse.Namespace) -> int:
+    coverage_value: object = getattr(args, "coverage_domain", None)
+    expected_value: object = getattr(args, "expected_state_sha256", None)
+    if coverage_value is not None:
+        expected_environment = os.environ.get("CARGO_CAPACITY_EXPECTED_STATE_SHA256")
+        if expected_environment is not None:
+            if not re.fullmatch(r"[a-f0-9]{64}", expected_environment):
+                raise RuntimeError("coverage expected state environment SHA256 is invalid")
+            if expected_value is not None and expected_value != expected_environment:
+                raise RuntimeError("coverage expected state CLI/environment SHA256 conflict")
+            expected_value = expected_environment
+    expected_state_sha256 = None if expected_value is None else _text(expected_value, "expected capacity state SHA256")
+    protected_refs = collect_protected_references(
+        getattr(args, "protected_ref", []),
+        os.environ.get("CARGO_CAPACITY_PROTECTED_REFS"),
+        allow_empty_environment=coverage_value is not None,
+    )
+    root = _root()
+    if args.target and args.target_dir:
+        raise RuntimeError("--target and --target-dir cannot be combined")
+    incremental_prefixes: list[str] = []
+    retained_args = getattr(args, "retain_profile", [])
+    build_profile = getattr(args, "retain_build_profile", None)
+    if build_profile is not None:
+        validate_build_profile(build_profile, args.command)
+        validate_build_selection(root)
+        validate_build_executable(root, args.command)
+    inactive_prefixes: list[str] | None = [] if retained_args or build_profile is not None else None
+    build_metadata: JsonObject | None = {} if build_profile is not None else None
+    target = resolve_target(root, args.target_dir or args.target, incremental_prefixes, inactive_prefixes, build_metadata)
+    retained_profiles = retained_profile_paths(target, retained_args)
+    if build_profile is not None:
+        retained_profiles += current_build_profiles(target, build_metadata, build_profile)
+        retained_profiles = tuple(dict.fromkeys(retained_profiles))
+    state_path = Path(args.state or root / "tmp/.cargo-capacity-guard.json")
+    if state_path.is_symlink():
+        raise RuntimeError(f"refusing symlink state: {state_path}")
+    factor = float(os.environ.get("CARGO_CAPACITY_FACTOR", args.factor))
+    if not math.isfinite(factor) or factor <= 1.0:
+        raise RuntimeError("capacity factor must be finite and greater than 1")
+    coverage = None if coverage_value is None else coverage_selection(
+        root, target, _text(coverage_value, "coverage domain"), args.command, os.environ,
+    )
+    if coverage is not None and (state_path != root / "tmp/.cargo-capacity-guard.json" or factor != DEFAULT_FACTOR):
+        raise RuntimeError("coverage requires the canonical state and existing capacity factor")
+    lock_path = root / "tmp/.cargo-capacity-guard.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with GuardLock(lock_path):
+        report = inspect(root, target, state_path, factor, expected_state_sha256)
+        if coverage is not None and (report.get("metric_available", True) is not True
+                                     or report["baseline_bytes"] is None):
+            raise RuntimeError("coverage capacity admission requires a measured canonical baseline")
+        if coverage is not None:
+            report["coverage_inputs"] = {"domain": coverage_value, "action": coverage[0],
+                                         "target": str(coverage[1]), "protected_references": protected_refs}
+        baseline_eligible = (
+            report.get("metric_available", True) is True and report.get("current_bytes") == 0
+        )
+        report["baseline_eligible"] = baseline_eligible
+        removed: list[str] = []
+        if report["over_capacity"]:
+            busy = busy_processes(target, root)
+            if busy:
+                report["clean_skipped"] = "busy"
+                report["busy_processes"] = busy
+            else:
+                try:
+                    with ProfileLocks(target) as epoch:
+                        busy = busy_processes(target, root)
+                        if busy:
+                            report["clean_skipped"] = "busy"
+                            report["busy_processes"] = busy
+                        else:
+                            if expected_state_sha256 is not None:
+                                load_state(state_path, expected_state_sha256)
+                            code, details = evict_artifacts(
+                                target, int(_number(report["threshold_bytes"], "threshold bytes")),
+                                _integer(report["current_bytes"], "current bytes"), args.dry_run,
+                                protected_refs, epoch, incremental_prefixes=incremental_prefixes,
+                                inactive_prefixes=inactive_prefixes or (), retained_profiles=retained_profiles,
+                            )
+                            report["finite_cleanup"] = details
+                            record_cleanup_result(
+                                report, target, code, "finite artifact eviction", args.dry_run,
+                            )
+                            epoch.verify()
+                except BlockingIOError as error:
+                    report["clean_skipped"] = "cargo-lock-busy"
+                    report["busy_lock"] = str(error)
+                if (
+                    not args.dry_run
+                    and report.get("cleanup_status") == "completed"
+                    and report.get("cleanup_attempts")
+                ):
+                    removed = ["finite artifact eviction"]
+        if "cleanup_status" not in report:
+            report["post_clean_bytes"] = None
+            report["actual_removed_bytes"] = 0
+            report["remaining_over_capacity"] = report["over_capacity"]
+            if not report.get("metric_available", True):
+                report["cleanup_status"] = "metric-unavailable"
+            elif report["baseline_bytes"] is None:
+                report["cleanup_status"] = "uncalibrated"
+            else:
+                report["cleanup_status"] = "not-needed" if not report["over_capacity"] else "skipped"
+        report["removed"] = removed
+        if args.print_json:
+            print(json.dumps(report, indent=2, sort_keys=True))
+        else:
+            print(json.dumps(report, sort_keys=True, separators=(",", ":")), file=sys.stderr)
+        if args.dry_run or not args.command:
+            if expected_state_sha256 is not None:
+                load_state(state_path, expected_state_sha256)
+            return 1 if report["cleanup_status"] in {"incomplete", "failed"} else 0
+        if report["over_capacity"] and report["cleanup_status"] != "completed":
+            return 1
+        if expected_state_sha256 is not None:
+            load_state(state_path, expected_state_sha256)
+        if coverage is not None:
+            coverage_tool_version(root, args.command)
+            coverage_cleanup_preflight(root, target, coverage[1], protected_refs)
+            if expected_state_sha256 is not None:
+                load_state(state_path, expected_state_sha256)
+        completed = subprocess.run(args.command, cwd=root, env=os.environ.copy(), check=False)
+        if expected_state_sha256 is not None:
+            load_state(state_path, expected_state_sha256)
+        is_build = is_successful_build(args.command)
+        used = size_bytes(target)
+        if expected_state_sha256 is None and completed.returncode == 0 and is_build and baseline_eligible and used is not None and used > 0 and "baseline_bytes" not in load_state(state_path):
+            state: JsonObject = {"baseline_bytes": size_bytes(target), "baseline_observed_at": time.time(), "target": str(target), "factor": factor, "metric": CAPACITY_METRIC, "metric_version": CAPACITY_METRIC_VERSION}
+            save_state(state_path, state)
+        return completed.returncode
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--target")
+    parser.add_argument("--target-dir")
+    parser.add_argument("--root")
+    parser.add_argument("--state")
+    parser.add_argument("--expected-state-sha256")
+    parser.add_argument("--coverage-domain", choices=COVERAGE_DOMAINS)
+    parser.add_argument("--factor", type=float, default=DEFAULT_FACTOR)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--print-json", action="store_true")
+    parser.add_argument("--protected-ref", action="append", default=[])
+    parser.add_argument("--retain-profile", action="append", default=[],
+                        help="retain active Cargo output/build profile; authorize inactive workspace incremental closure")
+    parser.add_argument("--retain-build-profile", choices=("debug", "release"),
+                        help="retain existing metadata output/build profiles for a same-environment Cargo build")
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    if args.root:
+        os.environ["CARGO_CAPACITY_GUARD_ROOT"] = args.root
+    if args.command and args.command[0] == "--":
+        args.command = args.command[1:]
+    try:
+        return run(args)
+    except RuntimeError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
