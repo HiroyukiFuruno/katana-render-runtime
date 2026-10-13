@@ -14,7 +14,7 @@ import uuid
 from collections import Counter, defaultdict
 import subprocess
 from pathlib import Path
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from typing import TYPE_CHECKING, Protocol, TextIO, TypedDict, runtime_checkable
 
@@ -134,7 +134,7 @@ class GuardLock:
 
 
 class ProfileLocks:
-    def __init__(self, target: Path) -> None:
+    def __init__(self, target: Path, input_check: Callable[[], None] | None = None) -> None:
         names = (".cargo-lock", ".cargo-build-lock", ".cargo-artifact-lock")
         paths = [target / name for name in names]
         if target.exists():
@@ -145,6 +145,7 @@ class ProfileLocks:
         self.target = target
         self.target_identity: _Identity | None = None
         self.ancestors: list[_Held] = []
+        self.input_check = input_check
 
     def __enter__(self) -> ProfileLocks:
         try:
@@ -186,6 +187,8 @@ class ProfileLocks:
         return self
 
     def verify(self) -> None:
+        if self.input_check is not None:
+            self.input_check()
         for path, descriptor, identity in self.ancestors:
             if (_identity(path.lstat()) != identity
                     or _identity(os.fstat(descriptor)) != identity):
@@ -554,6 +557,8 @@ def evict_artifacts(
     incremental_prefixes: Sequence[str] = (), inactive_prefixes: Sequence[str] = (),
     retained_profiles: Sequence[_PathValue] = (),
     auxiliary_only_profiles: Sequence[_PathValue] = (),
+    unselected_incremental_prefixes: Sequence[str] = (),
+    selected_package_profiles: Sequence[_PathValue] = (),
 ) -> tuple[int, EvictionReport]:
     """Invalidate fingerprints before one finite eviction of managed cache files."""
     report: EvictionReport = {"candidate_paths": [], "staged_paths": [], "invalidated_profiles": [],
@@ -607,6 +612,17 @@ def evict_artifacts(
         device = target.lstat().st_dev
         retained_profiles = retained_profile_paths(target, retained_profiles)
         auxiliary_only_profiles = retained_profile_paths(target, auxiliary_only_profiles)
+        selected_package_profiles = retained_profile_paths(target, selected_package_profiles)
+        if "build_script_build-" in unselected_incremental_prefixes:
+            raise RuntimeError("custom-build incremental namespace must remain retained")
+        if selected_package_profiles and (
+            not unselected_incremental_prefixes
+            or not set(selected_package_profiles).issubset(retained_profiles)
+            or epoch is None or epoch.input_check is None
+        ):
+            raise RuntimeError("selected package cleanup requires bound metadata inputs and retained profiles")
+        if unselected_incremental_prefixes and not selected_package_profiles:
+            raise RuntimeError("unselected namespaces require verified selected package profiles")
         if auxiliary_only_profiles:
             if protected_refs:
                 raise RuntimeError("auxiliary-only cleanup requires an empty protected reference set")
@@ -614,11 +630,12 @@ def evict_artifacts(
                 raise RuntimeError("auxiliary-only profiles must be validated retained build profiles")
             # 手動指定では許可せず、入口で検証したビルド情報だけを補助キャッシュ整理の根拠にする。
             retained_profiles = auxiliary_only_profiles
+        auxiliary_profiles = selected_package_profiles or auxiliary_only_profiles
         if retained_profiles:
             report["retained_profiles"] = [str(path.relative_to(target)) for path in retained_profiles]
-        if not protected_refs and not auxiliary_only_profiles:
+        if not protected_refs and not auxiliary_profiles:
             raise RuntimeError("exact protected consumer references are required; artifacts retained")
-        profile_paths = list(auxiliary_only_profiles) if auxiliary_only_profiles else _profiles(target)
+        profile_paths = list(auxiliary_profiles) if auxiliary_profiles else _profiles(target)
         protected: set[_Inode] = set()
         protected_snapshots: list[_File] = []
         for reference in protected_refs:
@@ -633,7 +650,7 @@ def evict_artifacts(
         incremental_indexes: defaultdict[Path, dict[str, _Candidate]] = defaultdict(dict)
         incremental_members: defaultdict[Path, list[_Candidate]] = defaultdict(list)
         if any(not isinstance(prefix, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*-", prefix)
-               for prefix in (*incremental_prefixes, *inactive_prefixes)):
+               for prefix in (*incremental_prefixes, *inactive_prefixes, *unselected_incremental_prefixes)):
             raise RuntimeError("invalid incremental crate prefix")
         for profile in profile_paths:
             descriptor = os.open(profile, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -648,7 +665,7 @@ def evict_artifacts(
                 raise RuntimeError("interrupted fingerprint invalidation requires bounded recovery; artifacts retained")
             fp_files, fp_dirs = _fingerprint_files(fp, device)
             fingerprints.append((profile, fp, fp_files, fp_dirs))
-            if not auxiliary_only_profiles:
+            if not auxiliary_profiles:
                 for name in ("deps", "examples"):
                     directory = profile / name
                     if not directory.exists():
@@ -677,6 +694,8 @@ def evict_artifacts(
             profile_prefixes = tuple(incremental_prefixes)
             if retained_profiles and profile not in retained_profiles:
                 profile_prefixes += tuple(inactive_prefixes)
+            if profile in selected_package_profiles:
+                profile_prefixes += tuple(unselected_incremental_prefixes)
             if profile_prefixes:
                 incremental = profile / "incremental"
                 if incremental.exists():
@@ -702,6 +721,11 @@ def evict_artifacts(
                         names = sorted(os.listdir(descriptor))
                         namespaces.append((path, names))
                         if retained_profiles and owner in retained_profiles and path.parent == incremental_root:
+                            unselected_owner = (
+                                owner in selected_package_profiles
+                                and any(re.fullmatch(re.escape(prefix) + r"[0-9a-z]{13}", path.name)
+                                        for prefix in unselected_incremental_prefixes)
+                            )
                             lock_prefix_counts = Counter(
                                 lock_name for name in names
                                 if (lock_name := _rust_session_lock_name(name)) is not None
@@ -730,6 +754,8 @@ def evict_artifacts(
                                     continue
                                 eligible = (timestamp < latest_finalized if finalized
                                             else now_micros - timestamp > 10_000_000)
+                                if unselected_owner:
+                                    eligible = finalized
                                 if not eligible:
                                     continue
                                 lock = _acquire_incremental_session_lock(
@@ -800,7 +826,19 @@ def evict_artifacts(
                                 or names != sorted(os.listdir(descriptor))):
                             raise RuntimeError("incremental changed during selection")
                     for filename in root_names:
-                        if any(filename.startswith(prefix) for prefix in profile_prefixes):
+                        known_unselected = any(
+                            re.fullmatch(re.escape(prefix) + r"[0-9a-z]{13}", filename)
+                            for prefix in unselected_incremental_prefixes
+                        ) if profile in selected_package_profiles else False
+                        existing_prefixes = tuple(incremental_prefixes) + (
+                            tuple(inactive_prefixes) if retained_profiles and profile not in retained_profiles else ()
+                        )
+                        known_existing = any(
+                            re.fullmatch(re.escape(prefix) + r"[0-9a-z]{13}", filename)
+                            if profile in selected_package_profiles else filename.startswith(prefix)
+                            for prefix in existing_prefixes
+                        )
+                        if known_unselected or known_existing:
                             visit_incremental(incremental / filename, root_fd)
                         else:
                             report["retained_unknown_entries"] += 1
@@ -842,8 +880,8 @@ def evict_artifacts(
         selected.sort(key=lambda row: 0 if row[1] in incremental_sessions
                       and row[1].name in INCREMENTAL_INDEX_NAMES else 1)
         report["candidate_paths"] = [str(row[1].relative_to(target)) for row in selected]
-        if auxiliary_only_profiles and any(
-            row[0] not in auxiliary_only_profiles or row[1] not in retained_session_files
+        if auxiliary_profiles and any(
+            row[0] not in auxiliary_profiles or row[1] not in retained_session_files
             for row in selected
         ):
             raise RuntimeError("auxiliary-only selection escaped verified closed incremental sessions")
@@ -852,7 +890,7 @@ def evict_artifacts(
         selected_incremental_files = {row[1] for row in selected} & retained_session_files
         selected_sessions = {retained_session_for_file[path] for path in selected_incremental_files}
         affected = {row[0] for row in selected if row[1] not in retained_session_files}
-        if auxiliary_only_profiles and affected:
+        if auxiliary_profiles and affected:
             raise RuntimeError("auxiliary-only selection cannot invalidate profile fingerprints")
         fp_aliases = Counter((value.st_dev, value.st_ino)
                              for profile, _, files, _ in fingerprints if profile in affected

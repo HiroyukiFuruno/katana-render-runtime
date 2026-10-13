@@ -26,6 +26,11 @@ from cargo_capacity_guard import (
     resolve_target,
     runtime_incremental_prefixes,
     workspace_incremental_prefixes,
+    selected_package_incremental_prefixes,
+    selected_package_cleanup,
+    _selected_input_check,
+    _object,
+    _array,
     run as run_guard,
     size_bytes,
 )
@@ -1310,12 +1315,16 @@ class GuardTests(unittest.TestCase):
                 inactive_prefixes: Sequence[str] = (),
                 retained_profiles: Sequence[str | Path] = (),
                 auxiliary_only_profiles: Sequence[str | Path] = (),
+                unselected_incremental_prefixes: Sequence[str] = (),
+                selected_package_profiles: Sequence[str | Path] = (),
             ) -> tuple[int, EvictionReport]:
                 authorized.append(tuple(Path(path) for path in auxiliary_only_profiles))
                 return real_evict(
                     selected_target, threshold, current_bytes, dry_run, protected_refs, epoch,
                     incremental_prefixes=incremental_prefixes, inactive_prefixes=inactive_prefixes,
                     retained_profiles=retained_profiles, auxiliary_only_profiles=auxiliary_only_profiles,
+                    unselected_incremental_prefixes=unselected_incremental_prefixes,
+                    selected_package_profiles=selected_package_profiles,
                 )
 
             output = io.StringIO()
@@ -1891,6 +1900,339 @@ class GuardTests(unittest.TestCase):
                 self.assertTrue(artifact.exists())
                 self.assertTrue(bulk.exists())
                 self.assertEqual(state.read_text(), state_contents)
+
+
+
+    @staticmethod
+    def selected_metadata(root: Path) -> dict[str, object]:
+        packages = []
+        for identity, name, target in (("selected", "kdr-linter", "mathjax_consumer_facts"),
+                                       ("unselected", "runtime", "unselected"),
+                                       ("external", "external", "external")):
+            manifest = root / ("crates/kdr-linter/Cargo.toml" if identity == "selected"
+                               else f"crates/{name}/Cargo.toml")
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_text('[package]\nname = "' + name + '"\n')
+            packages.append({"id": identity, "name": name, "manifest_path": str(manifest),
+                             "targets": [{"name": target, "kind": ["bin"]}]})
+        (root / "Cargo.toml").write_text('[workspace]\n')
+        (root / "Cargo.lock").write_text('# locked\n')
+        return {"packages": packages, "workspace_members": ["selected", "unselected"],
+                "target_directory": str(root / "target"), "build_directory": str(root / "target"),
+                "resolve": {"nodes": [{"id": "selected", "deps": [{"pkg": "external"}]},
+                                      {"id": "unselected", "deps": []},
+                                      {"id": "external", "deps": []}]}}
+
+    def test_selected_graph_baseline_and_transitive_collision_invalid_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            baseline = self.selected_metadata(root)
+            self.assertEqual(selected_package_incremental_prefixes(root, baseline), ["unselected-"])
+            for mutation in ("transitive", "collision", "numeric-external", "custom-build", "missing",
+                             "duplicate", "dangling", "foreign", "missing-bin", "duplicate-bin"):
+                with self.subTest(mutation=mutation):
+                    value = json.loads(json.dumps(baseline))
+                    self.assertEqual(selected_package_incremental_prefixes(root, value), ["unselected-"])
+                    if mutation == "transitive":
+                        value["resolve"]["nodes"][2]["deps"] = [{"pkg": "unselected"}]
+                        self.assertEqual(selected_package_incremental_prefixes(root, value), [])
+                    elif mutation == "collision":
+                        value["packages"][2]["targets"][0]["name"] = "unselected"
+                        self.assertEqual(selected_package_incremental_prefixes(root, value), [])
+                    elif mutation == "numeric-external":
+                        value["packages"][2]["targets"][0]["name"] = "01_quick"
+                        self.assertEqual(selected_package_incremental_prefixes(root, value), ["unselected-"])
+                    elif mutation == "custom-build":
+                        value["packages"][1]["targets"][0]["kind"] = ["custom-build"]
+                        self.assertEqual(selected_package_incremental_prefixes(root, value), [])
+                    else:
+                        if mutation == "missing":
+                            value["resolve"]["nodes"].pop()
+                        elif mutation == "duplicate":
+                            value["resolve"]["nodes"].append(value["resolve"]["nodes"][0])
+                        elif mutation == "dangling":
+                            value["resolve"]["nodes"][0]["deps"] = [{"pkg": "unknown"}]
+                        elif mutation == "missing-bin":
+                            value["packages"][0]["targets"][0]["kind"] = ["lib"]
+                        elif mutation == "duplicate-bin":
+                            value["packages"][0]["targets"].append(value["packages"][0]["targets"][0])
+                        else:
+                            value["packages"][1]["manifest_path"] = str(root.parent / "Cargo.toml")
+                        with self.assertRaises(RuntimeError):
+                            selected_package_incremental_prefixes(root, value)
+
+    @unittest.skipIf(os.name == "nt", "POSIX rustc session lock fixture")
+    def test_custom_build_namespace_collision_retains_whole_selected_owner(self) -> None:
+        for custom_name, ordinary_name in (("build-script-build", "unselected"),
+                                           ("build-script-build", "build-script-build"),
+                                           ("build_script_build", "build_script_build"),
+                                           ("build-script-build", "build-script_build"),
+                                           ("host-custom", "host-custom"),
+                                           (None, "build-script-build")):
+            with self.subTest(custom_name=custom_name, ordinary_name=ordinary_name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                target, profile, _fp, artifact, old, latest, working = self.retained_incremental_fixture(directory)
+                unselected = old.parent.with_name("unselected-0000000000001")
+                old.parent.rename(unselected)
+                old, latest, working = (unselected / path.name for path in (old, latest, working))
+                custom = unselected.with_name("build_script_build-0000000000002")
+                custom.mkdir()
+                for path in unselected.iterdir():
+                    destination = custom / path.name
+                    if path.is_dir():
+                        destination.mkdir()
+                        for member in path.iterdir():
+                            (destination / member.name).write_bytes(member.read_bytes())
+                    else:
+                        destination.write_bytes(path.read_bytes())
+                metadata = self.selected_metadata(root)
+                packages = _array(metadata["packages"], "fixture packages")
+                if custom_name is not None:
+                    selected = _object(packages[0], "fixture selected package")
+                    _array(selected["targets"], "fixture selected targets").append({"name": custom_name, "kind": ["custom-build"]})
+                protected = [target / "debug/app", artifact, profile / "examples/fixture-example-1234567890abcdef"]
+                for index in range(34):
+                    reference = root / "frozen" / str(index)
+                    reference.parent.mkdir(exist_ok=True)
+                    reference.write_bytes(f"custom-build protected {index}".encode())
+                    protected.append(reference)
+                identities = [(path, path.stat().st_ino, path.read_bytes()) for path in protected]
+                custom_before = self.file_tree_bytes(custom)
+                verify = _selected_input_check(root, metadata)
+                verify()
+                baseline = selected_package_incremental_prefixes(root, metadata)
+                self.assertEqual(baseline, ["unselected-"])
+                needed = sum(path.stat().st_blocks * 512 for session in (old, latest) for path in session.iterdir())
+                current = self.measured_size(target)
+                with ProfileLocks(target, verify) as epoch:
+                    baseline_code, preview = evict_artifacts(
+                        target, current - needed, current, True, protected, epoch,
+                        retained_profiles=[profile], unselected_incremental_prefixes=baseline,
+                        selected_package_profiles=[profile],
+                    )
+                self.assertEqual(baseline_code, 0, preview)
+                self.assertEqual(len(preview["candidate_paths"]), 7)
+                self.assertTrue(all(path.startswith("debug/incremental/unselected-") for path in preview["candidate_paths"]))
+                unselected_package = _object(packages[1], "fixture unselected package")
+                ordinary = _object(_array(unselected_package["targets"], "fixture unselected targets")[0], "fixture ordinary target")
+                ordinary["name"] = ordinary_name
+                prefixes = selected_package_incremental_prefixes(root, metadata)
+                self.assertEqual(prefixes, baseline if ordinary_name == "unselected" else [])
+                with ProfileLocks(target, verify) as epoch:
+                    code, report = evict_artifacts(
+                        target, current - needed, current, False, protected, epoch,
+                        retained_profiles=[profile], unselected_incremental_prefixes=prefixes,
+                        selected_package_profiles=[profile],
+                    )
+                self.assertEqual(self.file_tree_bytes(custom), custom_before)
+                self.assertEqual(report["invalidated_profiles"], [])
+                self.assertTrue(working.exists())
+                for path, inode, data in identities:
+                    self.assertEqual(path.stat().st_ino, inode)
+                    self.assertEqual(path.read_bytes(), data)
+                if ordinary_name == "unselected":
+                    self.assertEqual(code, 0, report)
+                    self.assertEqual(report["deleted_files"], 7)
+                    self.assertFalse(latest.exists())
+                else:
+                    self.assertEqual(code, 1, report)
+                    self.assertEqual(report["deleted_files"], 0)
+                    self.assertTrue(latest.exists())
+                with ProfileLocks(target, verify) as epoch:
+                    code, report = evict_artifacts(
+                        target, current - needed, current, False, protected, epoch,
+                        retained_profiles=[profile], unselected_incremental_prefixes=["build_script_build-"],
+                        selected_package_profiles=[profile],
+                    )
+                self.assertEqual(code, 1, report)
+                self.assertIn("custom-build incremental namespace", report["error"])
+                self.assertEqual(report["deleted_files"], 0)
+                self.assertEqual(self.file_tree_bytes(custom), custom_before)
+
+    def test_custom_build_incomplete_metadata_fails_closed_from_valid_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            baseline = self.selected_metadata(root)
+            selected = _object(_array(baseline["packages"], "fixture packages")[0], "fixture selected package")
+            _array(selected["targets"], "fixture selected targets").append({"name": "build-script-build", "kind": ["custom-build"]})
+            same_package = _object(json.loads(json.dumps(baseline)), "fixture metadata")
+            self.assertEqual(selected_package_incremental_prefixes(root, same_package), ["unselected-"])
+            unselected = _object(_array(same_package["packages"], "fixture packages")[1], "fixture unselected package")
+            _array(unselected["targets"], "fixture unselected targets").append({"name": "unselected", "kind": ["custom-build"]})
+            self.assertEqual(selected_package_incremental_prefixes(root, same_package), [])
+            for mutation in ("missing-targets", "empty-targets", "missing-kind", "empty-kind", "unknown-kind", "missing-name"):
+                with self.subTest(mutation=mutation):
+                    value = _object(json.loads(json.dumps(baseline)), "fixture metadata")
+                    self.assertEqual(selected_package_incremental_prefixes(root, value), ["unselected-"])
+                    package = _object(_array(value["packages"], "fixture packages")[0], "fixture selected package")
+                    custom_target = _object(_array(package["targets"], "fixture selected targets")[1], "fixture custom target")
+                    if mutation == "missing-targets":
+                        del package["targets"]
+                    elif mutation == "empty-targets":
+                        package["targets"] = []
+                    elif mutation == "missing-kind":
+                        del custom_target["kind"]
+                    elif mutation == "empty-kind":
+                        custom_target["kind"] = []
+                    elif mutation == "unknown-kind":
+                        custom_target["kind"] = ["unknown-builder"]
+                    else:
+                        del custom_target["name"]
+                    with self.assertRaises(RuntimeError):
+                        selected_package_incremental_prefixes(root, value)
+
+    def test_selected_input_baseline_then_manifest_lock_config_environment_drift(self) -> None:
+        for mutation in ("manifest", "lock", "config", "environment", "workspace-add"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                value = self.selected_metadata(root)
+                verify = _selected_input_check(root, value)
+                verify()
+                with patch.dict(os.environ, os.environ.copy(), clear=True):
+                    if mutation == "manifest":
+                        (root / "crates/runtime/Cargo.toml").write_text('[dependencies]\nkdr = "1"\n')
+                    elif mutation == "lock":
+                        (root / "Cargo.lock").write_text('# changed\n')
+                    elif mutation == "config":
+                        (root / ".cargo").mkdir()
+                        (root / ".cargo/config.toml").write_text('[build]\n')
+                    elif mutation == "workspace-add":
+                        (root / "crates/new-package").mkdir()
+                    else:
+                        os.environ["RUSTFLAGS"] = os.environ.get("RUSTFLAGS", "") + " --cfg input_mutation"
+                    with self.assertRaisesRegex(RuntimeError, "selected metadata inputs changed"):
+                        verify()
+
+    def test_canonical_command_only_and_same_input_metadata_epoch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            full = self.selected_metadata(root)
+            initial = json.loads(json.dumps(full))
+            initial["packages"] = initial["packages"][:2]
+            command = ["cargo", "build", "--offline", "--locked", "-p", "kdr-linter", "--bin", "mathjax_consumer_facts"]
+            result = subprocess.CompletedProcess(command, 0, json.dumps(full), "")
+            with patch("cargo_capacity_guard.subprocess.run", return_value=result) as query:
+                prefixes, verify = selected_package_cleanup(root, root / "target", command, initial)
+                self.assertEqual(prefixes, ["unselected-"])
+                self.assertIsNotNone(verify)
+                if verify is not None:
+                    verify()
+                for tail in (["--workspace"], ["-p", "runtime"], ["--features", "anything"], ["--release"]):
+                    self.assertEqual(selected_package_cleanup(root, root / "target", command + tail, initial), ([], None))
+                for key, value in (("RUSTC_WRAPPER", "/unknown/wrapper"), ("RUSTFLAGS", "--crate-name unselected"),
+                                   ("CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS", "--crate-name unselected")):
+                    with patch.dict(os.environ, {key: value}):
+                        self.assertEqual(selected_package_cleanup(root, root / "target", command, initial), ([], None))
+                self.assertEqual(query.call_count, 1)
+            def drift(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+                (root / "Cargo.lock").write_text('# changed during metadata\n')
+                return result
+            with patch("cargo_capacity_guard.subprocess.run", side_effect=drift):
+                with self.assertRaisesRegex(RuntimeError, "selected metadata inputs changed"):
+                    selected_package_cleanup(root, root / "target", command, initial)
+
+    @unittest.skipIf(os.name == "nt", "POSIX rustc session lock fixture")
+    def test_selected_package_latest_whole_session_and_retained_outputs(self) -> None:
+        for mutation in ("positive", "dry-run", "metadata", "outside-alias", "protected", "protected-lock",
+                         "shared-lock", "duplicate-prefix", "unknown-owner", "input-drift", "input-drift-late"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                target, profile, _fp, _artifact, old, latest, working = self.retained_incremental_fixture(directory)
+                owner = old.parent
+                renamed = owner.with_name("unselected-0000000000001")
+                owner.rename(renamed)
+                old, latest, working = (renamed / path.name for path in (old, latest, working))
+                root = Path(directory).resolve()
+                metadata = self.selected_metadata(root)
+                selected_owner = renamed.with_name("mathjax_consumer_facts-0000000000002")
+                selected_owner.mkdir()
+                for session in (old, latest, working):
+                    selected_session = selected_owner / session.name
+                    selected_session.mkdir()
+                    for path in session.iterdir():
+                        (selected_session / path.name).write_bytes(path.read_bytes())
+                protected = [target / "debug/app", _artifact, profile / "examples/fixture-example-1234567890abcdef"]
+                for index in range(34):
+                    reference = root / "frozen" / str(index)
+                    reference.parent.mkdir(exist_ok=True)
+                    reference.write_bytes(f"immutable consumer {index}".encode())
+                    protected.append(reference)
+                self.assertEqual(len(protected), 37)
+                protected_before = [(path, path.stat().st_ino, path.read_bytes()) for path in protected]
+                before = self.file_tree_bytes(target)
+                prefixes = selected_package_incremental_prefixes(root, metadata)
+                self.assertEqual(prefixes, ["unselected-"])
+                verify = _selected_input_check(root, metadata)
+                verify()
+                needed = sum(path.stat().st_blocks * 512 for path in latest.iterdir())
+                lock_path = latest.parent / ("-".join(latest.name.split("-")[:3]) + ".lock")
+                if mutation == "metadata":
+                    (latest / "metadata.rmeta").write_bytes(b"retain whole session")
+                elif mutation == "outside-alias":
+                    os.link(latest / "dep-graph.bin", profile / "deps/alias-1111111111111111.rmeta")
+                elif mutation == "protected":
+                    protected.append(latest / "query-cache.bin")
+                elif mutation == "protected-lock":
+                    protected.append(lock_path)
+                elif mutation == "duplicate-prefix":
+                    (latest.parent / ("-".join(latest.name.split("-")[:3]) + "-unknown")).write_bytes(b"ambiguous")
+                elif mutation == "unknown-owner":
+                    unknown = renamed.with_name("unselected-malformed")
+                    renamed.rename(unknown)
+                    old, latest, working = (unknown / path.name for path in (old, latest, working))
+                elif mutation == "input-drift":
+                    (root / "crates/runtime/Cargo.toml").write_text('[dependencies]\nnew = "1"\n')
+                # 最新 session だけで到達できる境界を使い、部分削除を成功扱いしない。
+                old_bytes = sum(path.stat().st_blocks * 512 for path in old.iterdir())
+                current = self.measured_size(target)
+                verification_count = 0
+                def verify_during_cleanup(
+                    selected_mutation: str = mutation, selected_root: Path = root,
+                    selected_verify: Callable[[], None] = verify,
+                ) -> None:
+                    nonlocal verification_count
+                    verification_count += 1
+                    if selected_mutation == "input-drift-late" and verification_count == 2:
+                        (selected_root / "Cargo.lock").write_text('# changed after selection\n')
+                    selected_verify()
+                with contextlib.ExitStack() as stack:
+                    if mutation == "shared-lock":
+                        child_stdout = stack.enter_context(incremental_session_lock_holder(lock_path, "shared"))
+                        self.assertEqual(child_stdout.readline().strip(), "ready")
+                    epoch = stack.enter_context(ProfileLocks(target, verify_during_cleanup))
+                    code, report = evict_artifacts(
+                        target, current - old_bytes - needed, current, mutation == "dry-run", protected, epoch,
+                        retained_profiles=[profile], unselected_incremental_prefixes=prefixes,
+                        selected_package_profiles=[profile],
+                    )
+                self.assertEqual(report["invalidated_profiles"], [])
+                for path, inode, data in protected_before:
+                    self.assertEqual(path.stat().st_ino, inode)
+                    self.assertEqual(path.read_bytes(), data)
+                if mutation == "dry-run":
+                    self.assertEqual(code, 0, report)
+                    self.assertEqual(report["deleted_files"], 0)
+                    self.assertEqual({name: data for name, data in self.file_tree_bytes(target).items()
+                                      if not name.endswith(".cargo-lock")}, before)
+                elif mutation == "positive":
+                    self.assertEqual(code, 0, report)
+                    self.assertFalse(latest.exists())
+                    self.assertFalse(old.exists())
+                    self.assertTrue(working.exists())
+                    self.assertEqual(self.file_tree_bytes(selected_owner), {
+                        name.removeprefix(str(selected_owner.relative_to(target)) + "/"): data
+                        for name, data in before.items()
+                        if name.startswith(str(selected_owner.relative_to(target)) + "/")
+                    })
+                    after = self.file_tree_bytes(target)
+                    for name, data in before.items():
+                        if not name.startswith("debug/incremental/") and not name.endswith(".cargo-lock"):
+                            self.assertEqual(after[name], data)
+                else:
+                    self.assertEqual(code, 1, report)
+                    self.assertEqual(report["deleted_files"], 0)
+                    self.assertTrue(latest.exists())
+                    self.assertTrue(old.exists())
+
 
 class GuardJsonBoundaryUnitTests(unittest.TestCase):
     def test_metadata_shapes_fail_closed_without_path_or_kind_coercion(self) -> None:

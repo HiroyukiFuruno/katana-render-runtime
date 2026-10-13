@@ -20,7 +20,7 @@ import stat
 import sys
 import time
 from pathlib import Path
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from types import FunctionType, ModuleType
 from typing import cast
 
@@ -135,18 +135,30 @@ def resolve_target(root: Path, value: str | None = None, incremental_prefixes: l
     return target
 
 
-def _incremental_names(package: JsonObject, scope: str) -> list[str]:
+def _incremental_names(package: JsonObject, scope: str, inventory: bool = False) -> list[str]:
     names = []
-    for item in _array(package["targets"], f"{scope} targets"):
+    targets = _array(package.get("targets"), f"{scope} targets")
+    if inventory and not targets:
+        raise RuntimeError(f"{scope} targets are incomplete")
+    for item in targets:
         target = _object(item, f"{scope} target")
         kinds = [_text(kind, f"{scope} target kind")
-                 for kind in _array(target["kind"], f"{scope} target kinds")]
-        if "custom-build" in kinds:
+                 for kind in _array(target.get("kind"), f"{scope} target kinds")]
+        if inventory and (not kinds or not set(kinds).issubset({
+            "bin", "lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro",
+            "example", "test", "bench", "custom-build",
+        })):
+            raise RuntimeError(f"{scope} target kinds are incomplete or unknown")
+        if "custom-build" in kinds and not inventory:
             continue
-        name = target["name"]
-        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name):
+        name = target.get("name")
+        pattern = r"[A-Za-z0-9_][A-Za-z0-9_-]*" if inventory else r"[A-Za-z_][A-Za-z0-9_-]*"
+        if not isinstance(name, str) or not re.fullmatch(pattern, name):
             raise RuntimeError(f"{scope} target crate name is invalid")
         names.append(name.replace("-", "_") + "-")
+        if inventory and "custom-build" in kinds:
+            # Cargo の汎用 build script 名は metadata target 名にかかわらず保護する。
+            names.append("build_script_build-")
     return names
 
 
@@ -182,6 +194,163 @@ def cargo_configuration_paths(root: Path, environment: Mapping[str, str]) -> lis
             paths.append(path)
             break
     return paths
+
+
+def selected_package_incremental_prefixes(root: Path, metadata: object) -> list[str]:
+    value = _object(metadata, "selected package metadata")
+    members = {_text(item, "workspace member")
+               for item in _array(value["workspace_members"], "workspace members")}
+    packages: dict[str, JsonObject] = {}
+    namespaces: dict[str, set[str]] = {}
+    custom_names = {"build_script_build-"}
+    for item in _array(value["packages"], "selected packages"):
+        package = _object(item, "selected package")
+        identity = _text(package["id"], "package id")
+        if identity in packages:
+            raise RuntimeError("duplicate selected package metadata")
+        packages[identity] = package
+        for name in _incremental_names(package, "selected package", inventory=True):
+            namespaces.setdefault(name, set()).add(identity)
+        for target in _array(package["targets"], "inventory targets"):
+            if "custom-build" in _array(_object(target, "inventory target")["kind"], "inventory target kinds"):
+                custom_names.update(_incremental_names({"targets": [target]}, "custom-build", inventory=True))
+    if not members.issubset(packages):
+        raise RuntimeError("workspace package metadata is incomplete")
+    selected = [identity for identity in members
+                if packages[identity].get("manifest_path") == str(root / "crates/kdr-linter/Cargo.toml")
+                and packages[identity].get("name") == "kdr-linter"]
+    if len(selected) != 1 or sum(
+        _object(item, "selected target").get("name") == "mathjax_consumer_facts"
+        and _object(item, "selected target").get("kind") == ["bin"]
+        for item in _array(packages[selected[0]]["targets"], "selected targets")
+    ) != 1:
+        raise RuntimeError("canonical selected host package is missing")
+    resolve = _object(value["resolve"], "selected resolve")
+    edges: dict[str, list[str]] = {}
+    for item in _array(resolve["nodes"], "resolve nodes"):
+        node = _object(item, "resolve node")
+        identity = _text(node["id"], "resolve id")
+        if identity in edges or identity not in packages:
+            raise RuntimeError("duplicate or unknown resolve node")
+        edges[identity] = [_text(_object(dep, "resolve dependency")["pkg"], "dependency package")
+                           for dep in _array(node["deps"], "resolve dependencies")]
+    if set(edges) != set(packages) or any(dep not in edges for deps in edges.values() for dep in deps):
+        raise RuntimeError("selected dependency graph is incomplete")
+    closure: set[str] = set()
+    pending = selected.copy()
+    while pending:
+        identity = pending.pop()
+        if identity not in closure:
+            closure.add(identity)
+            pending.extend(edges[identity])
+    eligible: set[str] = set()
+    for identity in members - closure:
+        manifest = Path(_text(packages[identity]["manifest_path"], "workspace manifest"))
+        if not manifest.is_absolute() or manifest.resolve() != manifest or not manifest.is_relative_to(root):
+            raise RuntimeError("workspace manifest is not canonical and contained")
+        eligible.update(name for name in _incremental_names(packages[identity], "unselected workspace")
+                        if name not in custom_names and namespaces[name] == {identity})
+    return sorted(eligible)
+
+
+def _selected_input_check(root: Path, metadata: JsonObject) -> Callable[[], None]:
+    environment = os.environ.copy()
+    configurations = cargo_configuration_paths(root, environment)
+    members = {_text(item, "workspace member")
+               for item in _array(metadata["workspace_members"], "workspace members")}
+    manifests = [root / "Cargo.toml", root / "Cargo.lock"]
+    for item in _array(metadata["packages"], "cargo packages"):
+        package = _object(item, "cargo package")
+        if package.get("id") in members:
+            manifest = Path(_text(package["manifest_path"], "workspace manifest"))
+            if not manifest.is_absolute() or manifest.resolve() != manifest or not manifest.is_relative_to(root):
+                raise RuntimeError("workspace manifest is not canonical and contained")
+            manifests.append(manifest)
+    # glob workspace と config の追加も入力変更として検出し、metadata 後の依存追加を見逃さない。
+    directories = {parent for path in manifests for parent in (path.parent, *path.parents)
+                   if parent.is_relative_to(root)}
+    config_bases = {directory / ".cargo" for directory in (root, *root.parents)}
+    config_bases.add(Path(environment.get("CARGO_HOME", str(Path.home() / ".cargo"))))
+    paths = sorted(set(manifests + configurations))
+
+    def stamp(value: os.stat_result) -> tuple[int, ...]:
+        return (value.st_dev, value.st_ino, value.st_mode, value.st_nlink,
+                value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+
+    def snapshot() -> tuple[list[tuple[Path, tuple[int, ...], str]], dict[Path, list[str]], dict[Path, list[str] | None]]:
+        files = []
+        for path in paths:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                before = os.fstat(descriptor)
+                if not stat.S_ISREG(before.st_mode):
+                    raise RuntimeError("selected metadata input is not a regular file")
+                with os.fdopen(os.dup(descriptor), "rb") as handle:
+                    digest = hashlib.sha256(handle.read()).hexdigest()
+                after = os.fstat(descriptor)
+                if stamp(before) != stamp(after) or stamp(path.lstat()) != stamp(after):
+                    raise RuntimeError("selected metadata input changed while reading")
+                files.append((path, stamp(after), digest))
+            finally:
+                os.close(descriptor)
+        return (files, {path: sorted(os.listdir(path)) for path in directories},
+                {path: sorted(os.listdir(path)) if path.exists() else None for path in config_bases})
+
+    initial = snapshot()
+
+    def verify() -> None:
+        if (os.environ.copy() != environment or cargo_configuration_paths(root, environment) != configurations
+                or snapshot() != initial):
+            raise RuntimeError("selected metadata inputs changed; artifacts retained")
+
+    return verify
+
+
+def selected_package_cleanup(
+    root: Path, target: Path, command: list[str], metadata: JsonObject,
+) -> tuple[list[str], Callable[[], None] | None]:
+    cargo = command[2:] if command[:2] == ["rtk", "proxy"] else command[1:] if command[:1] == ["rtk"] else command
+    if (not cargo or Path(cargo[0]).name != "cargo" or cargo[1:] not in (
+        ["build", "--locked", "-p", "kdr-linter", "--bin", "mathjax_consumer_facts"],
+        ["build", "--offline", "--locked", "-p", "kdr-linter", "--bin", "mathjax_consumer_facts"],
+    )):
+        return [], None
+    verify = _selected_input_check(root, metadata)
+    verify()
+    # crate 名を変える wrapper/flags の下では Cargo target 名による namespace 証明を使わない。
+    if (any(os.environ.get(key) for key in ("RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "RUSTC_BOOTSTRAP", "CARGO_ENCODED_RUSTFLAGS"))
+            or any(value for key, value in os.environ.items()
+                   if key.startswith("CARGO_BUILD_RUST") or key.startswith("CARGO_TARGET_") and key.endswith("_RUSTFLAGS"))
+            or os.environ.get("RUSTFLAGS", "") not in ("", "-D warnings")):
+        return [], None
+    for path in cargo_configuration_paths(root, os.environ):
+        configuration = _cargo_configuration(path)
+        build = _object(configuration.get("build", {}), "Cargo build configuration")
+        if (any(key in build for key in ("rustc", "rustc-wrapper", "rustc-workspace-wrapper", "rustflags"))
+                or "target" in configuration):
+            return [], None
+    verify()
+    result = subprocess.run(
+        [cargo[0], "metadata", "--offline", "--locked", "--all-features", "--format-version", "1",
+         "--manifest-path", str(root / "Cargo.toml")],
+        cwd=root, env=os.environ.copy(), text=True, capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("selected dependency metadata is unavailable; artifacts retained")
+    full = _object(json.loads(result.stdout), "selected dependency metadata")
+    if (full.get("target_directory") != str(target) or full.get("build_directory") != metadata.get("build_directory")
+            or full.get("workspace_members") != metadata.get("workspace_members")
+            or sorted((_text(_object(item, "package")["id"], "package id"),
+                       _text(_object(item, "package")["manifest_path"], "manifest path"))
+                      for item in _array(full["packages"], "packages")
+                      if _object(item, "package")["id"] in _array(full["workspace_members"], "workspace members"))
+            != sorted((_text(_object(item, "package")["id"], "package id"),
+                       _text(_object(item, "package")["manifest_path"], "manifest path"))
+                      for item in _array(metadata["packages"], "packages"))):
+        raise RuntimeError("selected dependency metadata differs from retained build inputs")
+    prefixes = selected_package_incremental_prefixes(root, full)
+    verify()
+    return prefixes, verify
 
 
 def _cargo_configuration(path: Path) -> JsonObject:
@@ -678,6 +847,13 @@ def run(args: argparse.Namespace) -> int:
         if verified_build_profiles and not protected_refs and coverage_value is None
         else ()
     )
+    unselected_prefixes: list[str] = []
+    selected_input_check: Callable[[], None] | None = None
+    if verified_build_profiles and build_profile == "debug" and coverage_value is None:
+        unselected_prefixes, selected_input_check = selected_package_cleanup(
+            root, target, args.command, _object(build_metadata, "retained build metadata"),
+        )
+    selected_package_profiles = verified_build_profiles if unselected_prefixes else ()
     state_path = Path(args.state or root / "tmp/.cargo-capacity-guard.json")
     if state_path.is_symlink():
         raise RuntimeError(f"refusing symlink state: {state_path}")
@@ -712,6 +888,7 @@ def run(args: argparse.Namespace) -> int:
             else:
                 try:
                     with ProfileLocks(target) as epoch:
+                        epoch.input_check = selected_input_check
                         busy = busy_processes(target, root)
                         if busy:
                             report["clean_skipped"] = "busy"
@@ -725,6 +902,8 @@ def run(args: argparse.Namespace) -> int:
                                 protected_refs, epoch, incremental_prefixes=incremental_prefixes,
                                 inactive_prefixes=inactive_prefixes or (), retained_profiles=retained_profiles,
                                 auxiliary_only_profiles=auxiliary_only_profiles,
+                                unselected_incremental_prefixes=unselected_prefixes,
+                                selected_package_profiles=selected_package_profiles,
                             )
                             report["finite_cleanup"] = details
                             record_cleanup_result(
