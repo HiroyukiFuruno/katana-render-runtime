@@ -660,6 +660,7 @@ def run(args: argparse.Namespace) -> int:
     incremental_prefixes: list[str] = []
     retained_args = getattr(args, "retain_profile", [])
     build_profile = getattr(args, "retain_build_profile", None)
+    verified_build_profiles: tuple[Path, ...] = ()
     if build_profile is not None:
         validate_build_profile(build_profile, args.command)
         validate_build_selection(root)
@@ -669,8 +670,14 @@ def run(args: argparse.Namespace) -> int:
     target = resolve_target(root, args.target_dir or args.target, incremental_prefixes, inactive_prefixes, build_metadata)
     retained_profiles = retained_profile_paths(target, retained_args)
     if build_profile is not None:
-        retained_profiles += current_build_profiles(target, build_metadata, build_profile)
+        verified_build_profiles = current_build_profiles(target, build_metadata, build_profile)
+        retained_profiles += verified_build_profiles
         retained_profiles = tuple(dict.fromkeys(retained_profiles))
+    auxiliary_only_profiles = (
+        verified_build_profiles
+        if verified_build_profiles and not protected_refs and coverage_value is None
+        else ()
+    )
     state_path = Path(args.state or root / "tmp/.cargo-capacity-guard.json")
     if state_path.is_symlink():
         raise RuntimeError(f"refusing symlink state: {state_path}")
@@ -717,6 +724,7 @@ def run(args: argparse.Namespace) -> int:
                                 _integer(report["current_bytes"], "current bytes"), args.dry_run,
                                 protected_refs, epoch, incremental_prefixes=incremental_prefixes,
                                 inactive_prefixes=inactive_prefixes or (), retained_profiles=retained_profiles,
+                                auxiliary_only_profiles=auxiliary_only_profiles,
                             )
                             report["finite_cleanup"] = details
                             record_cleanup_result(

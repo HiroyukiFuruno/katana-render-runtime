@@ -14,9 +14,9 @@ import time
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from types import SimpleNamespace
-from typing import Literal, TextIO
+from typing import IO, Literal, TextIO
 
 from cargo_capacity_guard import inspect as inspect_capacity
 from cargo_capacity_guard import (
@@ -78,6 +78,49 @@ def windows_lock_fixture(
             patch("cargo_capacity_guard_lock.Path", native_path), \
             patch.object(Path, "open", open_guard), patch.object(os, "fdopen", open_profile):
         yield module, handles, descriptors
+
+
+@contextlib.contextmanager
+def incremental_session_lock_holder(
+    lock_path: Path, mode: Literal["shared", "exclusive"],
+) -> Iterator[IO[str]]:
+    operation = "LOCK_SH" if mode == "shared" else "LOCK_EX"
+    if sys.platform.startswith("linux"):
+        lock_call = f"fcntl.flock(h.fileno(),fcntl.{operation})"
+    else:
+        lock_call = f"fcntl.lockf(h.fileno(),fcntl.{operation})"
+    child_code = (
+        "import fcntl,sys; h=open(sys.argv[1],'r+'); "
+        + lock_call
+        + "; print('ready',flush=True); sys.stdin.read()"
+    )
+    child = subprocess.Popen(
+        [sys.executable, "-c", child_code, str(lock_path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        child_stdout = child.stdout
+        if child_stdout is None:
+            raise AssertionError("session lock holder stdout pipe was not created")
+        yield child_stdout
+    finally:
+        if child.stdin is not None:
+            try:
+                child.stdin.close()
+            except BrokenPipeError:
+                pass
+        try:
+            child.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.terminate()
+            try:
+                child.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.communicate()
 
 
 class GuardTests(unittest.TestCase):
@@ -1069,6 +1112,237 @@ class GuardTests(unittest.TestCase):
                 incremental_prefixes=["fixture-"], retained_profiles=[profile],
             )
 
+    def auxiliary_incremental_evict(
+        self, target: Path, current_bytes: int, threshold: int, dry_run: bool = False,
+        profiles: list[Path] | None = None, auxiliary_profiles: list[Path] | None = None,
+    ) -> tuple[int, EvictionReport]:
+        verified = [target / "debug"] if auxiliary_profiles is None else auxiliary_profiles
+        retained = verified if profiles is None else profiles
+        with ProfileLocks(target) as epoch:
+            return evict_artifacts(
+                target, threshold, current_bytes, dry_run, [], epoch,
+                incremental_prefixes=["fixture-"], inactive_prefixes=["other-"],
+                retained_profiles=retained, auxiliary_only_profiles=verified,
+            )
+
+    @staticmethod
+    def file_tree_identity_bytes(root: Path) -> dict[str, tuple[int, int, int, bytes]]:
+        return {
+            path.relative_to(root).as_posix(): (
+                path.stat().st_dev, path.stat().st_ino, path.stat().st_size, path.read_bytes(),
+            )
+            for path in sorted(root.rglob("*")) if path.is_file() and path.name != ".cargo-lock"
+        }
+
+    @unittest.skipIf(os.name == "nt", "POSIX rustc session lock fixture")
+    def test_verified_auxiliary_mode_dry_run_and_cleanup_preserve_build_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target, profile, fp, artifact, old, latest, working = self.retained_incremental_fixture(directory)
+            build = profile / "build/fixture/out/product.o"
+            example = profile / "examples/fixture-example-1234567890abcdef"
+            release = target / "release"
+            (release / "deps").mkdir(parents=True)
+            (release / ".fingerprint/release-fixture-1111111111111111").mkdir(parents=True)
+            release_artifact = release / "deps/librelease-fixture-1111111111111111.rlib"
+            release_artifact.write_bytes(b"preserve other build profile")
+            inactive = profile / "incremental/other-package-123456/s-unselected-entry"
+            inactive.mkdir(parents=True)
+            (inactive / "unknown.bin").write_bytes(b"preserve outside runtime prefix")
+            available_files = [*old.iterdir(), working / "dep-graph.part.bin"]
+            available = sum(path.stat().st_blocks * 512 for path in available_files)
+            before = self.file_tree_identity_bytes(target)
+            fingerprint_before = self.file_tree_bytes(fp)
+            removed_paths = set(available_files)
+            removed_paths.update(
+                session.parent / ("-".join(session.name.split("-")[:3]) + ".lock")
+                for session in (old, working)
+            )
+            removed_names = {path.relative_to(target).as_posix() for path in removed_paths}
+            preserved = {name: value for name, value in before.items() if name not in removed_names}
+
+            code, preview = self.auxiliary_incremental_evict(
+                target, available + 1, 1, dry_run=True, profiles=[profile, release],
+            )
+            expected = {str(path.relative_to(target)) for path in available_files}
+            self.assertEqual(code, 0, preview)
+            self.assertEqual(set(preview["candidate_paths"]), expected)
+            self.assertEqual(preview["invalidated_profiles"], [])
+            self.assertTrue(all("/deps/" not in path and "/examples/" not in path
+                                and "/.fingerprint/" not in path and not path.startswith("release/")
+                                for path in preview["candidate_paths"]))
+            self.assertEqual(self.file_tree_identity_bytes(target), before)
+
+            code, report = self.auxiliary_incremental_evict(
+                target, available + 1, 1, profiles=[profile, release],
+            )
+            self.assertEqual(code, 0, report)
+            self.assertEqual(report["deleted_files"], len(available_files))
+            self.assertEqual(report["invalidated_profiles"], [])
+            self.assertEqual(report.get("removed_incremental_sessions"), 2)
+            self.assertFalse(old.exists())
+            self.assertFalse(working.exists())
+            self.assertTrue(latest.exists())
+            self.assertTrue((latest.parent / ("-".join(latest.name.split("-")[:3]) + ".lock")).exists())
+            self.assertFalse((old.parent / ("-".join(old.name.split("-")[:3]) + ".lock")).exists())
+            self.assertFalse((working.parent / ("-".join(working.name.split("-")[:3]) + ".lock")).exists())
+            self.assertTrue(release_artifact.exists())
+            after = self.file_tree_identity_bytes(target)
+            self.assertEqual({name: after[name] for name in preserved}, preserved)
+            self.assertEqual(self.file_tree_bytes(fp), fingerprint_before)
+            self.assertEqual(artifact.read_bytes(), before["debug/deps/libfixture-2222222222222222.rlib"][3])
+            self.assertEqual(build.read_bytes(), before["debug/build/fixture/out/product.o"][3])
+            self.assertEqual(example.read_bytes(), before["debug/examples/fixture-example-1234567890abcdef"][3])
+
+    @unittest.skipIf(os.name == "nt", "POSIX rustc session lock fixture")
+    def test_verified_auxiliary_mode_shortfall_deletes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target, profile, _fp, _artifact, old, _latest, working = self.retained_incremental_fixture(directory)
+            available_files = [*old.iterdir(), working / "dep-graph.part.bin"]
+            available = sum(path.stat().st_blocks * 512 for path in available_files)
+            before = self.file_tree_identity_bytes(target)
+            code, report = self.auxiliary_incremental_evict(
+                target, available + 2, 1, profiles=[profile],
+            )
+            self.assertEqual(code, 1, report)
+            self.assertIn("insufficient", report["error"])
+            self.assertEqual(report["deleted_files"], 0)
+            self.assertEqual(report["staged_paths"], [])
+            self.assertEqual(self.file_tree_identity_bytes(target), before)
+
+    def test_unverified_profile_or_non_build_cannot_authorize_auxiliary_cleanup(self) -> None:
+        for label, manual_profile, command, build_profile in (
+            ("manual-retention", True, [sys.executable, "-c", "raise SystemExit(0)"], None),
+            ("cargo-command-without-verified-retention", False, ["cargo", "build"], None),
+        ):
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                target, profile, _fp, _artifact = self.artifact_fixture(directory)
+                state = root / "state.json"
+                state.write_text(json.dumps({
+                    "baseline_bytes": 1, "metric": "unique-inode-allocated-bytes",
+                    "metric_version": 1, "target": str(target),
+                }))
+                marker = root / "command-ran"
+                child = [*command]
+                if child[0] == sys.executable:
+                    child[-1] = f"open({str(marker)!r}, 'w').close()"
+                args = argparse.Namespace(
+                    target=str(target), target_dir=None, state=str(state), factor=2.0,
+                    dry_run=False, print_json=True, protected_ref=[],
+                    retain_profile=[str(profile)] if manual_profile else [],
+                    retain_build_profile=build_profile, coverage_domain=None,
+                    expected_state_sha256=None, command=child,
+                )
+                output = io.StringIO()
+                environment = os.environ.copy()
+                environment.pop("CARGO_CAPACITY_PROTECTED_REFS", None)
+                environment.pop("CARGO_CAPACITY_FACTOR", None)
+                with patch("cargo_capacity_guard._root", return_value=root), \
+                        patch("cargo_capacity_guard.busy_processes", return_value=[]), \
+                        patch.dict(os.environ, environment, clear=True), \
+                        contextlib.redirect_stdout(output):
+                    result = run_guard(args)
+                report = json.loads(output.getvalue())
+                self.assertEqual(result, 1)
+                self.assertIn("exact protected consumer references", report["finite_cleanup"]["error"])
+                self.assertFalse(marker.exists())
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            target, _profile, _fp, _artifact = self.artifact_fixture(directory)
+            args = argparse.Namespace(
+                target=str(target), target_dir=None, state=None, factor=2.0,
+                dry_run=False, print_json=True, protected_ref=[], retain_profile=[],
+                retain_build_profile="debug", coverage_domain=None,
+                expected_state_sha256=None, command=[sys.executable, "-c", "pass"],
+            )
+            with patch("cargo_capacity_guard._root", return_value=root):
+                with self.assertRaisesRegex(RuntimeError, "direct Cargo build"):
+                    run_guard(args)
+
+    @unittest.skipIf(os.name == "nt", "POSIX rustc session lock fixture")
+    def test_verified_build_metadata_alone_authorizes_scoped_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            target, profile, _fp, _artifact, old, _latest, working = self.retained_incremental_fixture(directory)
+            release = target / "release"
+            (release / "deps").mkdir(parents=True)
+            (release / ".fingerprint/release-fixture-1111111111111111").mkdir(parents=True)
+            (release / "deps/librelease-fixture-1111111111111111.rlib").write_bytes(b"other profile")
+            available_files = [*old.iterdir(), working / "dep-graph.part.bin"]
+            available = sum(path.stat().st_blocks * 512 for path in available_files)
+            current = self.measured_size(target)
+            needed = max(512, available // 2)
+            baseline = (current - needed) / 2
+            state = root / "state.json"
+            state.write_text(json.dumps({
+                "baseline_bytes": baseline, "factor": 2.0,
+                "metric": "unique-inode-allocated-bytes", "metric_version": 1,
+                "target": str(target),
+            }))
+            state_before = state.read_bytes()
+            args = argparse.Namespace(
+                target=str(target), target_dir=None, state=str(state), factor=2.0,
+                dry_run=True, print_json=True, protected_ref=[],
+                retain_profile=[str(release)], retain_build_profile="debug",
+                coverage_domain=None, expected_state_sha256=None, command=["cargo", "build"],
+            )
+
+            def resolve_with_metadata(
+                selected_root: Path, value: str | None = None,
+                incremental_prefixes: list[str] | None = None,
+                inactive_prefixes: list[str] | None = None,
+                build_metadata: dict[str, object] | None = None,
+            ) -> Path:
+                if build_metadata is not None:
+                    build_metadata.update({"target_directory": str(target), "build_directory": str(target)})
+                if incremental_prefixes is not None:
+                    incremental_prefixes.append("fixture-")
+                return target
+
+            authorized: list[tuple[Path, ...]] = []
+            real_evict = evict_artifacts
+
+            def record_authorization(
+                selected_target: Path, threshold: int, current_bytes: int, dry_run: bool,
+                protected_refs: Sequence[str | Path] = (), epoch: ProfileLocks | None = None,
+                *, incremental_prefixes: Sequence[str] = (),
+                inactive_prefixes: Sequence[str] = (),
+                retained_profiles: Sequence[str | Path] = (),
+                auxiliary_only_profiles: Sequence[str | Path] = (),
+            ) -> tuple[int, EvictionReport]:
+                authorized.append(tuple(Path(path) for path in auxiliary_only_profiles))
+                return real_evict(
+                    selected_target, threshold, current_bytes, dry_run, protected_refs, epoch,
+                    incremental_prefixes=incremental_prefixes, inactive_prefixes=inactive_prefixes,
+                    retained_profiles=retained_profiles, auxiliary_only_profiles=auxiliary_only_profiles,
+                )
+
+            output = io.StringIO()
+            environment = os.environ.copy()
+            environment.pop("CARGO_CAPACITY_PROTECTED_REFS", None)
+            environment.pop("CARGO_CAPACITY_FACTOR", None)
+            with patch("cargo_capacity_guard._root", return_value=root), \
+                    patch("cargo_capacity_guard.resolve_target", side_effect=resolve_with_metadata), \
+                    patch("cargo_capacity_guard.busy_processes", return_value=[]), \
+                    patch("cargo_capacity_guard.evict_artifacts", side_effect=record_authorization), \
+                    patch.dict(os.environ, environment, clear=True), \
+                    contextlib.redirect_stdout(output):
+                result = run_guard(args)
+            report = json.loads(output.getvalue())
+            self.assertEqual(result, 0, report)
+            self.assertEqual(authorized, [(profile,)])
+            self.assertEqual(state.read_bytes(), state_before)
+            self.assertEqual(report["metric"], "unique-inode-allocated-bytes")
+            self.assertEqual(report["metric_version"], 1)
+            self.assertEqual(report["factor"], 2.0)
+            self.assertEqual(report["threshold_bytes"], baseline * 2)
+            self.assertEqual(report["finite_cleanup"]["invalidated_profiles"], [])
+            self.assertTrue(report["finite_cleanup"]["candidate_paths"])
+            self.assertTrue(all(path.startswith("debug/incremental/fixture-owner-123456/")
+                                for path in report["finite_cleanup"]["candidate_paths"]))
+            self.assertTrue((release / "deps/librelease-fixture-1111111111111111.rlib").exists())
+
     @unittest.skipIf(os.name == "nt", "POSIX rustc session lock fixture")
     def test_retained_profile_removes_only_closed_old_and_stale_working_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1306,30 +1580,13 @@ class GuardTests(unittest.TestCase):
             target, _profile, _fp, _artifact, old, _latest, _working = self.retained_incremental_fixture(directory)
             match = old.name.split("-")
             lock_path = old.parent / f"s-{match[1]}-{match[2]}.lock"
-            if sys.platform.startswith("linux"):
-                lock_code = "fcntl.flock(h.fileno(), fcntl.LOCK_SH)"
-            else:
-                lock_code = "fcntl.lockf(h.fileno(), fcntl.LOCK_SH)"
-            child = subprocess.Popen(
-                [sys.executable, "-c",
-                 "import fcntl,os,time; h=open(os.environ['SESSION_LOCK'],'r+'); "
-                 + lock_code + "; print('ready',flush=True); time.sleep(10)"],
-                env={**os.environ, "SESSION_LOCK": str(lock_path)},
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            )
-            try:
-                child_stdout = child.stdout
-                if child_stdout is None:
-                    raise AssertionError("session lock holder stdout pipe was not created")
+            with incremental_session_lock_holder(lock_path, "shared") as child_stdout:
                 self.assertEqual(child_stdout.readline().strip(), "ready")
                 old_bytes = sum(path.stat().st_blocks * 512 for path in old.iterdir())
                 code, report = self.retained_incremental_evict(target, old_bytes + 1, 1, dry_run=True)
                 self.assertEqual(code, 1, report)
                 self.assertFalse(any(str(old.relative_to(target)) in path for path in report["candidate_paths"]))
                 self.assertTrue(old.exists())
-            finally:
-                child.terminate()
-                child.communicate(timeout=5)
 
     @unittest.skipIf(os.name == "nt", "POSIX rustc session lock fixture")
     def test_retained_profile_active_working_lock_blocks_removal(self) -> None:
@@ -1337,21 +1594,7 @@ class GuardTests(unittest.TestCase):
             target, _profile, _fp, _artifact, _old, _latest, working = self.retained_incremental_fixture(directory)
             match = working.name.split("-")
             lock_path = working.parent / f"s-{match[1]}-{match[2]}.lock"
-            if sys.platform.startswith("linux"):
-                lock_code = "fcntl.flock(h.fileno(), fcntl.LOCK_EX)"
-            else:
-                lock_code = "fcntl.lockf(h.fileno(), fcntl.LOCK_EX)"
-            child = subprocess.Popen(
-                [sys.executable, "-c",
-                 "import fcntl,os,time; h=open(os.environ['SESSION_LOCK'],'r+'); "
-                 + lock_code + "; print('ready',flush=True); time.sleep(10)"],
-                env={**os.environ, "SESSION_LOCK": str(lock_path)},
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            )
-            try:
-                child_stdout = child.stdout
-                if child_stdout is None:
-                    raise AssertionError("session lock holder stdout pipe was not created")
+            with incremental_session_lock_holder(lock_path, "exclusive") as child_stdout:
                 self.assertEqual(child_stdout.readline().strip(), "ready")
                 working_file = working / "dep-graph.part.bin"
                 old_capacity = sum(path.stat().st_blocks * 512 for path in _old.iterdir())
@@ -1362,9 +1605,6 @@ class GuardTests(unittest.TestCase):
                 self.assertEqual(code, 1, report)
                 self.assertNotIn(str(working_file.relative_to(target)), report["candidate_paths"])
                 self.assertTrue(working.exists())
-            finally:
-                child.terminate()
-                child.communicate(timeout=5)
 
     @unittest.skipIf(os.name == 'nt', 'POSIX native no-follow eviction fixture')
     def test_incremental_finite_suffix_scope_and_profile_invalidation(self) -> None:

@@ -553,6 +553,7 @@ def evict_artifacts(
     protected_refs: Sequence[_PathValue] = (), epoch: ProfileLocks | None = None,
     incremental_prefixes: Sequence[str] = (), inactive_prefixes: Sequence[str] = (),
     retained_profiles: Sequence[_PathValue] = (),
+    auxiliary_only_profiles: Sequence[_PathValue] = (),
 ) -> tuple[int, EvictionReport]:
     """Invalidate fingerprints before one finite eviction of managed cache files."""
     report: EvictionReport = {"candidate_paths": [], "staged_paths": [], "invalidated_profiles": [],
@@ -605,10 +606,19 @@ def evict_artifacts(
     try:
         device = target.lstat().st_dev
         retained_profiles = retained_profile_paths(target, retained_profiles)
+        auxiliary_only_profiles = retained_profile_paths(target, auxiliary_only_profiles)
+        if auxiliary_only_profiles:
+            if protected_refs:
+                raise RuntimeError("auxiliary-only cleanup requires an empty protected reference set")
+            if not set(auxiliary_only_profiles).issubset(retained_profiles):
+                raise RuntimeError("auxiliary-only profiles must be validated retained build profiles")
+            # 手動指定では許可せず、入口で検証したビルド情報だけを補助キャッシュ整理の根拠にする。
+            retained_profiles = auxiliary_only_profiles
         if retained_profiles:
             report["retained_profiles"] = [str(path.relative_to(target)) for path in retained_profiles]
-        if not protected_refs:
+        if not protected_refs and not auxiliary_only_profiles:
             raise RuntimeError("exact protected consumer references are required; artifacts retained")
+        profile_paths = list(auxiliary_only_profiles) if auxiliary_only_profiles else _profiles(target)
         protected: set[_Inode] = set()
         protected_snapshots: list[_File] = []
         for reference in protected_refs:
@@ -625,7 +635,7 @@ def evict_artifacts(
         if any(not isinstance(prefix, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*-", prefix)
                for prefix in (*incremental_prefixes, *inactive_prefixes)):
             raise RuntimeError("invalid incremental crate prefix")
-        for profile in _profiles(target):
+        for profile in profile_paths:
             descriptor = os.open(profile, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             held.append((profile, descriptor, _identity(os.fstat(descriptor))))
             if os.fstat(descriptor).st_dev != device:
@@ -638,31 +648,32 @@ def evict_artifacts(
                 raise RuntimeError("interrupted fingerprint invalidation requires bounded recovery; artifacts retained")
             fp_files, fp_dirs = _fingerprint_files(fp, device)
             fingerprints.append((profile, fp, fp_files, fp_dirs))
-            for name in ("deps", "examples"):
-                directory = profile / name
-                if not directory.exists():
-                    continue
-                descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-                held.append((directory, descriptor, _identity(os.fstat(descriptor))))
-                if os.fstat(descriptor).st_dev != device:
-                    raise RuntimeError("artifact device boundary")
-                names = sorted(os.listdir(descriptor))
-                namespaces.append((directory, names))
-                for filename in names:
-                    # Cargoの管理namespaceにある既知形式だけを扱い、名前からfingerprint hashを結合しない。
-                    if not re.search(r"-[0-9a-f]{16}(?:\.|$)", filename):
-                        report["retained_unknown_entries"] += 1
+            if not auxiliary_only_profiles:
+                for name in ("deps", "examples"):
+                    directory = profile / name
+                    if not directory.exists():
                         continue
-                    suffix = Path(filename).suffix
-                    if suffix not in {"", ".rlib", ".rmeta", ".so", ".dylib", ".dll", ".lib", ".a",
-                                      ".exe", ".d", ".o", ".obj", ".dwo", ".dwp", ".pdb"}:
-                        report["retained_unknown_entries"] += 1
-                        continue
-                    path = directory / filename
-                    if not stat.S_ISREG(os.stat(filename, dir_fd=descriptor, follow_symlinks=False).st_mode):
-                        report["retained_unknown_entries"] += 1
-                        continue
-                    candidates.append((profile, path, _metadata_at(descriptor, filename, device)))
+                    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    held.append((directory, descriptor, _identity(os.fstat(descriptor))))
+                    if os.fstat(descriptor).st_dev != device:
+                        raise RuntimeError("artifact device boundary")
+                    names = sorted(os.listdir(descriptor))
+                    namespaces.append((directory, names))
+                    for filename in names:
+                        # Cargoの管理namespaceにある既知形式だけを扱い、名前からfingerprint hashを結合しない。
+                        if not re.search(r"-[0-9a-f]{16}(?:\.|$)", filename):
+                            report["retained_unknown_entries"] += 1
+                            continue
+                        suffix = Path(filename).suffix
+                        if suffix not in {"", ".rlib", ".rmeta", ".so", ".dylib", ".dll", ".lib", ".a",
+                                          ".exe", ".d", ".o", ".obj", ".dwo", ".dwp", ".pdb"}:
+                            report["retained_unknown_entries"] += 1
+                            continue
+                        path = directory / filename
+                        if not stat.S_ISREG(os.stat(filename, dir_fd=descriptor, follow_symlinks=False).st_mode):
+                            report["retained_unknown_entries"] += 1
+                            continue
+                        candidates.append((profile, path, _metadata_at(descriptor, filename, device)))
             profile_prefixes = tuple(incremental_prefixes)
             if retained_profiles and profile not in retained_profiles:
                 profile_prefixes += tuple(inactive_prefixes)
@@ -831,11 +842,18 @@ def evict_artifacts(
         selected.sort(key=lambda row: 0 if row[1] in incremental_sessions
                       and row[1].name in INCREMENTAL_INDEX_NAMES else 1)
         report["candidate_paths"] = [str(row[1].relative_to(target)) for row in selected]
+        if auxiliary_only_profiles and any(
+            row[0] not in auxiliary_only_profiles or row[1] not in retained_session_files
+            for row in selected
+        ):
+            raise RuntimeError("auxiliary-only selection escaped verified closed incremental sessions")
         if retained_profiles and report["estimated_candidate_bytes"] < needed:
             raise RuntimeError("insufficient closed inactive artifact capacity; active profiles retained")
         selected_incremental_files = {row[1] for row in selected} & retained_session_files
         selected_sessions = {retained_session_for_file[path] for path in selected_incremental_files}
         affected = {row[0] for row in selected if row[1] not in retained_session_files}
+        if auxiliary_only_profiles and affected:
+            raise RuntimeError("auxiliary-only selection cannot invalidate profile fingerprints")
         fp_aliases = Counter((value.st_dev, value.st_ino)
                              for profile, _, files, _ in fingerprints if profile in affected
                              for _, value in files)
