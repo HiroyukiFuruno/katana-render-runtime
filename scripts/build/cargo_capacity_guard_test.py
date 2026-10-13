@@ -7,6 +7,8 @@ import contextlib
 import io
 import json
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -2227,11 +2229,263 @@ class GuardTests(unittest.TestCase):
                     for name, data in before.items():
                         if not name.startswith("debug/incremental/") and not name.endswith(".cargo-lock"):
                             self.assertEqual(after[name], data)
+                elif mutation == "metadata":
+                    self.assertEqual(code, 0, report)
+                    self.assertTrue(latest.is_dir())
+                    self.assertEqual((latest / "metadata.rmeta").read_bytes(), b"retain whole session")
+                    self.assertTrue(lock_path.exists())
+                    self.assertFalse(any((latest / name).exists() for name in (
+                        "dep-graph.bin", "query-cache.bin", "work-products.bin",
+                    )))
                 else:
                     self.assertEqual(code, 1, report)
                     self.assertEqual(report["deleted_files"], 0)
                     self.assertTrue(latest.exists())
                     self.assertTrue(old.exists())
+
+
+    def metadata_leaf_fixture(self, directory: str) -> tuple[Path, Path, list[Path], list[Path]]:
+        target, profile, _fp, artifact, old, latest, _working = self.retained_incremental_fixture(directory)
+        owner = old.parent.with_name("unselected-0000000000001")
+        old.parent.rename(owner)
+        sessions = [owner / old.name, owner / latest.name]
+        for index, session in enumerate(sessions):
+            metadata = session / "metadata.rmeta"
+            metadata.write_bytes(b"published metadata" * 1024)
+            os.link(metadata, profile / "deps" / f"libunselected-{index:016x}.rmeta")
+        root = Path(directory).resolve()
+        selected = owner.with_name("mathjax_consumer_facts-0000000000002")
+        selected.mkdir()
+        for session in sessions:
+            copy = selected / session.name
+            copy.mkdir()
+            for path in session.iterdir():
+                (copy / path.name).write_bytes(path.read_bytes())
+        protected = [target / "debug/app", artifact, profile / "examples/fixture-example-1234567890abcdef"]
+        for index in range(34):
+            copy = root / "frozen" / str(index)
+            copy.parent.mkdir(exist_ok=True)
+            copy.write_bytes(f"protected copy {index}".encode())
+            protected.append(copy)
+        return root, target, sessions, protected
+
+    def metadata_leaf_evict(
+        self, root: Path, target: Path, protected: list[Path], needed: int, dry_run: bool = False,
+    ) -> tuple[int, EvictionReport]:
+        metadata = self.selected_metadata(root)
+        with ProfileLocks(target, _selected_input_check(root, metadata)) as epoch:
+            current = self.measured_size(target)
+            return evict_artifacts(
+                target, current - needed, current, dry_run, protected, epoch,
+                retained_profiles=[target / "debug"], selected_package_profiles=[target / "debug"],
+                unselected_incremental_prefixes=selected_package_incremental_prefixes(root, metadata),
+            )
+
+    @unittest.skipIf(os.name == "nt", "POSIX metadata cache leaf fixture")
+    def test_nonselected_metadata_cache_leaves_preserve_all_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root, target, sessions, protected = self.metadata_leaf_fixture(directory)
+            leaves = [session / name for session in sessions
+                      for name in ("dep-graph.bin", "query-cache.bin", "work-products.bin")]
+            available = sum(path.stat().st_blocks * 512 for path in leaves)
+            before = self.file_tree_identity_bytes(root)
+            code, preview = self.metadata_leaf_evict(root, target, protected, available, True)
+            self.assertEqual(code, 0, preview)
+            self.assertEqual(set(preview["candidate_paths"]), {str(path.relative_to(target)) for path in leaves})
+            self.assertEqual(self.file_tree_identity_bytes(target), {
+                name.removeprefix("target/"): value for name, value in before.items() if name.startswith("target/")
+            })
+            code, report = self.metadata_leaf_evict(root, target, protected, available)
+            self.assertEqual(code, 0, report)
+            self.assertEqual(report["invalidated_profiles"], [])
+            self.assertEqual(report.get("trimmed_incremental_sessions"), 2)
+            self.assertTrue(all(session.is_dir() for session in sessions))
+            removed = {str(path.relative_to(root)) for path in leaves}
+            after = self.file_tree_identity_bytes(root)
+            for name, value in before.items():
+                if name not in removed:
+                    self.assertEqual(after[name], value, name)
+            self.assertFalse(any(path.exists() for path in leaves))
+
+    @unittest.skipIf(os.name == "nt", "POSIX metadata cache leaf fixture")
+    def test_metadata_cache_leaf_unsafe_sessions_are_retained(self) -> None:
+        for mutation in ("selected", "unknown-owner", "unknown-session", "unknown-member", "outside-alias",
+                         "published-alias", "protected-leaf", "protected-lock", "missing-lock", "ambiguous-lock",
+                         "metadata-symlink", "missing-index", "shared-lock", "insufficient"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                root, target, sessions, protected = self.metadata_leaf_fixture(directory)
+                latest = sessions[-1]
+                graph = latest / "dep-graph.bin"
+                needed = sum((session / name).stat().st_blocks * 512 for session in sessions
+                             for name in ("dep-graph.bin", "query-cache.bin", "work-products.bin"))
+                lock = latest.parent / ("-".join(latest.name.split("-")[:3]) + ".lock")
+                if mutation in ("selected", "unknown-owner"):
+                    latest.parent.rename(latest.parent.with_name(
+                        "mathjax_consumer_facts-0000000000003" if mutation == "selected" else "unselected-malformed",
+                    ))
+                elif mutation == "unknown-session":
+                    latest.rename(latest.with_name("unknown-session"))
+                elif mutation == "unknown-member":
+                    (latest / "unknown.bin").write_bytes(b"keep")
+                elif mutation in ("outside-alias", "published-alias"):
+                    alias = (root / "unmanaged-cache-link" if mutation == "outside-alias"
+                             else target / "debug/deps/libpublished-4444444444444444.rmeta")
+                    os.link(graph, alias)
+                elif mutation == "protected-leaf":
+                    protected.append(graph)
+                elif mutation == "protected-lock":
+                    protected.append(lock)
+                elif mutation == "missing-lock":
+                    lock.unlink()
+                elif mutation == "ambiguous-lock":
+                    (latest.parent / (lock.stem + "-unknown")).write_bytes(b"keep")
+                elif mutation == "metadata-symlink":
+                    metadata = latest / "metadata.rmeta"
+                    metadata.unlink()
+                    metadata.symlink_to(target / "debug/deps/libunselected-0000000000000001.rmeta")
+                elif mutation == "missing-index":
+                    (latest / "query-cache.bin").unlink()
+                elif mutation == "insufficient":
+                    needed += 1
+                before = self.file_tree_identity_bytes(target)
+                with contextlib.ExitStack() as stack:
+                    if mutation == "shared-lock":
+                        stdout = stack.enter_context(incremental_session_lock_holder(lock, "shared"))
+                        self.assertEqual(stdout.readline().strip(), "ready")
+                    code, report = self.metadata_leaf_evict(root, target, protected, needed)
+                self.assertEqual(code, 1, report)
+                self.assertEqual(report["deleted_files"], 0)
+                self.assertEqual(self.file_tree_identity_bytes(target), before)
+
+    @unittest.skipUnless(hasattr(os, "chflags"), "native BSD immutable flag fixture")
+    def test_metadata_cache_leaf_immutable_files_are_retained(self) -> None:
+        for kind in ("leaf", "directory", "lock", "metadata", "protected"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root, target, sessions, protected = self.metadata_leaf_fixture(directory)
+                session = sessions[-1]
+                flagged = (session if kind == "directory" else protected[-1] if kind == "protected"
+                           else session.parent / ("-".join(session.name.split("-")[:3]) + ".lock") if kind == "lock"
+                           else session / ("metadata.rmeta" if kind == "metadata" else "query-cache.bin"))
+                needed = sum((item / name).stat().st_blocks * 512 for item in sessions
+                             for name in ("dep-graph.bin", "query-cache.bin", "work-products.bin"))
+                os.chflags(flagged, stat.UF_IMMUTABLE)
+                try:
+                    before = self.file_tree_identity_bytes(target)
+                    code, report = self.metadata_leaf_evict(root, target, protected, needed)
+                    self.assertEqual(code, 0 if kind in ("metadata", "protected") else 1, report)
+                    self.assertEqual(flagged.stat().st_flags, stat.UF_IMMUTABLE)
+                    if kind not in ("metadata", "protected"):
+                        self.assertEqual(report["deleted_files"], 0)
+                        self.assertEqual(self.file_tree_identity_bytes(target), before)
+                finally:
+                    os.chflags(flagged, 0)
+
+    @unittest.skipIf(os.name == "nt", "POSIX metadata cache leaf fixture")
+    def test_metadata_cache_leaf_interruption_is_graph_first_and_retryable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root, target, sessions, protected = self.metadata_leaf_fixture(directory)
+            leaves = [session / name for session in sessions
+                      for name in ("dep-graph.bin", "query-cache.bin", "work-products.bin")]
+            needed = sum(path.stat().st_blocks * 512 for path in leaves)
+            before = self.file_tree_identity_bytes(target)
+            original_unlink = os.unlink
+            attempts: list[str] = []
+            def interrupt(name: str, *, dir_fd: int | None = None) -> None:
+                attempts.append(name)
+                if len(attempts) == 2:
+                    raise OSError("interrupted after first graph")
+                original_unlink(name, dir_fd=dir_fd)
+            with patch("cargo_capacity_guard_lock.os.unlink", side_effect=interrupt):
+                code, report = self.metadata_leaf_evict(root, target, protected, needed)
+            self.assertEqual(code, 1, report)
+            self.assertEqual(attempts, ["dep-graph.bin", "dep-graph.bin"])
+            self.assertEqual(report["deleted_files"], 1)
+            removed = {str(path.relative_to(target)) for path in leaves if not path.exists()}
+            self.assertEqual(len(removed), 1)
+            after = self.file_tree_identity_bytes(target)
+            self.assertEqual(after, {name: value for name, value in before.items() if name not in removed})
+            remaining = [path for path in leaves if path.exists()]
+            needed = sum(path.stat().st_blocks * 512 for path in remaining)
+            code, report = self.metadata_leaf_evict(root, target, protected, needed)
+            self.assertEqual(code, 0, report)
+            self.assertEqual(report["deleted_files"], 5)
+            self.assertEqual(report.get("trimmed_incremental_sessions"), 2)
+            self.assertTrue(all(session.is_dir() for session in sessions))
+
+    @unittest.skipIf(os.name == "nt", "POSIX metadata cache leaf fixture")
+    def test_metadata_cache_leaf_preserved_output_changes_block_unlink(self) -> None:
+        for mutation in ("metadata", "input", "namespace", "lock", "metadata-alias"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                root, target, sessions, protected = self.metadata_leaf_fixture(directory)
+                metadata = self.selected_metadata(root)
+                verify = _selected_input_check(root, metadata)
+                needed = sum((session / name).stat().st_blocks * 512 for session in sessions
+                             for name in ("dep-graph.bin", "query-cache.bin", "work-products.bin"))
+                count = 0
+                def change_metadata(
+                    selected: str = mutation, selected_root: Path = root, selected_session: Path = sessions[-1],
+                    selected_verify: Callable[[], None] = verify,
+                ) -> None:
+                    nonlocal count
+                    count += 1
+                    if count == 2:
+                        if selected == "input":
+                            (selected_root / "Cargo.lock").write_text("changed\n")
+                        elif selected == "namespace":
+                            (selected_session / "unknown.bin").write_bytes(b"keep")
+                        elif selected == "lock":
+                            lock = selected_session.parent / ("-".join(selected_session.name.split("-")[:3]) + ".lock")
+                            lock.unlink()
+                            lock.write_bytes(b"replacement")
+                        elif selected == "metadata-alias":
+                            os.link(selected_session / "metadata.rmeta", selected_root / "new-metadata-alias")
+                        else:
+                            (selected_session / "metadata.rmeta").write_bytes(b"changed by another writer")
+                    selected_verify()
+                with ProfileLocks(target, change_metadata) as epoch:
+                    current = self.measured_size(target)
+                    code, report = evict_artifacts(
+                        target, current - needed, current, False, protected, epoch,
+                        retained_profiles=[target / "debug"], selected_package_profiles=[target / "debug"],
+                        unselected_incremental_prefixes=selected_package_incremental_prefixes(root, metadata),
+                    )
+                self.assertEqual(code, 1, report)
+                self.assertEqual(report["deleted_files"], 0)
+                self.assertTrue(report.get("error"), report)
+
+    @unittest.skipIf(os.name == "nt", "POSIX actual rustc incremental fixture")
+    def test_actual_rustc_rebuilds_after_metadata_cache_leaf_trim(self) -> None:
+        rustc = shutil.which("rustc")
+        if rustc is None:
+            self.skipTest("rustc unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            target, profile, _fp, artifact = self.artifact_fixture(directory)
+            root = Path(directory).resolve()
+            source = root / "fixture.rs"
+            source.write_text("pub fn value() -> u32 { 7 }\n")
+            output = profile / "deps/libunselected-5555555555555555.rmeta"
+            command = [rustc, "--crate-name", "unselected", "--crate-type", "lib", "--emit=metadata",
+                       "-C", f"incremental={profile / 'incremental'}", "-o", str(output), str(source)]
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            caches = list((profile / "incremental").glob("unselected-*/*/metadata.rmeta"))
+            self.assertEqual(len(caches), 1)
+            metadata = caches[0]
+            self.assertEqual(metadata.stat().st_ino, output.stat().st_ino)
+            leaves = [metadata.parent / name for name in ("dep-graph.bin", "query-cache.bin", "work-products.bin")]
+            needed = sum(path.stat().st_blocks * 512 for path in leaves)
+            before = self.file_tree_identity_bytes(target)
+            code, report = self.metadata_leaf_evict(root, target, [artifact, output], needed)
+            self.assertEqual(code, 0, report)
+            removed = {str(path.relative_to(target)) for path in leaves}
+            self.assertEqual(self.file_tree_identity_bytes(target), {
+                name: value for name, value in before.items() if name not in removed
+            })
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            consumer = root / "consumer.rs"
+            consumer.write_text("pub fn check() -> u32 { unselected::value() }\n")
+            subprocess.run([rustc, "--crate-type", "lib", "--emit=metadata", "--extern", f"unselected={output}",
+                            "-o", str(root / "consumer.rmeta"), str(consumer)],
+                           check=True, capture_output=True, text=True)
 
 
 class GuardJsonBoundaryUnitTests(unittest.TestCase):

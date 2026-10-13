@@ -47,6 +47,7 @@ class EvictionReport(_EvictionReportFields, total=False):
     recovery_required_profile: str
     retained_active_closures: int
     removed_incremental_sessions: int
+    trimmed_incremental_sessions: int
     error: str
 
 
@@ -491,16 +492,22 @@ def _acquire_incremental_session_lock(
 
 
 def _known_session_members(
-    session_fd: int, names: list[str], finalized: bool,
+    session_fd: int, names: list[str], finalized: bool, cache_leaves_only: bool = False,
 ) -> bool:
     if finalized:
-        if not INCREMENTAL_INDEX_NAMES.issubset(names):
+        indexes = INCREMENTAL_INDEX_NAMES.intersection(names)
+        if cache_leaves_only:
+            # graph欠落後の残cacheも再回収できるが、graphがある不完全な組は保持する。
+            if "metadata.rmeta" not in names or ("dep-graph.bin" in indexes and indexes != INCREMENTAL_INDEX_NAMES):
+                return False
+        elif indexes != INCREMENTAL_INDEX_NAMES:
             return False
     else:
         if names != [_WORKING_SESSION_FILE]:
             return False
     for name in names:
-        known = (name in INCREMENTAL_INDEX_NAMES or Path(name).suffix == ".o") if finalized else name == _WORKING_SESSION_FILE
+        known = (name in INCREMENTAL_INDEX_NAMES or Path(name).suffix == ".o"
+                 or cache_leaves_only and name == "metadata.rmeta") if finalized else name == _WORKING_SESSION_FILE
         if not known:
             return False
         try:
@@ -508,6 +515,10 @@ def _known_session_members(
         except OSError:
             return False
         if not stat.S_ISREG(value.st_mode):
+            return False
+        if cache_leaves_only and name in INCREMENTAL_INDEX_NAMES and (
+            value.st_nlink != 1 or getattr(value, "st_flags", 0) != 0
+        ):
             return False
     return True
 
@@ -524,7 +535,7 @@ def _incremental_session(path: Path, profile: Path) -> Path | None:
 def _incremental_index_closure(
     rows: Sequence[_Candidate], aliases: dict[_Inode, list[_Candidate]], sessions: dict[Path, Path],
     indexes: dict[Path, dict[str, _Candidate]], members: dict[Path, list[_Candidate]],
-    protected: set[_Inode],
+    protected: set[_Inode], cache_leaf_sessions: set[Path] | None = None,
 ) -> dict[_Inode, list[_Candidate]] | None:
     pending = list(rows)
     closure: dict[_Inode, list[_Candidate]] = {}
@@ -542,7 +553,7 @@ def _incremental_index_closure(
             session = sessions.get(path)
             if session is not None:
                 index_rows = indexes[session]
-                if set(index_rows) != INCREMENTAL_INDEX_NAMES:
+                if (cache_leaf_sessions is None or session not in cache_leaf_sessions) and set(index_rows) != INCREMENTAL_INDEX_NAMES:
                     return None
                 if session not in expanded_sessions:
                     expanded_sessions.add(session)
@@ -574,6 +585,8 @@ def evict_artifacts(
     retained_session_files: set[Path] = set()
     retained_working_sessions: set[Path] = set()
     retained_session_for_file: dict[Path, Path] = {}
+    retained_cache_files: dict[Path, list[_File]] = {}
+    removed_cache_leaves: set[Path] = set()
     removed_session_locks: set[Path] = set()
     def verify_session_lock(session: Path) -> None:
         lock_path, lock_fd, lock_identity = retained_session_locks[session]
@@ -582,6 +595,8 @@ def evict_artifacts(
         if (_identity(os.fstat(lock_fd)) != lock_identity
                 or _identity(lock_value) != lock_identity or lock_value.st_nlink != 1):
             raise RuntimeError("incremental session lock changed")
+        if session in retained_cache_files and getattr(lock_value, "st_flags", 0) != 0:
+            raise RuntimeError("incremental cache lock flags changed")
     def verify_session_locks() -> None:
         for session in retained_session_locks:
             if session not in removed_session_locks:
@@ -608,6 +623,18 @@ def evict_artifacts(
                     or _identity(named) != identity):
                 raise RuntimeError("cache root identity changed")
         verify_session_locks()
+        for session, files in retained_cache_files.items():
+            expected_names = sorted(name for name in retained_session_names[session]
+                                    if session / name not in removed_cache_leaves)
+            if sorted(os.listdir(descriptors[session])) != expected_names:
+                raise RuntimeError("incremental cache namespace changed")
+            if getattr(os.fstat(descriptors[session]), "st_flags", 0) != 0:
+                raise RuntimeError("incremental cache directory flags changed")
+            for path, value in files:
+                actual = _metadata_at(descriptors[session], path.name, device)
+                if (_stamp(actual) != _stamp(value)
+                        or getattr(actual, "st_flags", 0) != getattr(value, "st_flags", 0)):
+                    raise RuntimeError("retained incremental output changed")
     try:
         device = target.lstat().st_dev
         retained_profiles = retained_profile_paths(target, retained_profiles)
@@ -771,25 +798,39 @@ def evict_artifacts(
                                     session_value = os.fstat(session_fd)
                                     named_value = os.stat(child_name, dir_fd=descriptor, follow_symlinks=False)
                                     session_names = sorted(os.listdir(session_fd))
+                                    cache_leaves_only = unselected_owner and finalized and "metadata.rmeta" in session_names
                                     if (_identity(session_value) != _identity(named_value)
                                             or session_value.st_dev != device
-                                            or not _known_session_members(session_fd, session_names, finalized)):
+                                            or not _known_session_members(session_fd, session_names, finalized, cache_leaves_only)
+                                            or cache_leaves_only and (
+                                                getattr(session_value, "st_flags", 0) != 0
+                                                or getattr(os.fstat(lock_fd), "st_flags", 0) != 0
+                                                or not os.access(session_path, os.W_OK | os.X_OK, effective_ids=True)
+                                            )):
                                         os.close(session_fd)
                                         session_fd = None
                                         os.close(lock_fd)
                                         continue
+                                    preserved_cache_files = [
+                                        (session_path / name, _metadata_at(session_fd, name, device))
+                                        for name in session_names if cache_leaves_only and name not in INCREMENTAL_INDEX_NAMES
+                                    ]
                                     retained_session_locks[session_path] = (lock_path, lock_fd, lock_identity)
                                     retained_session_dirs[session_path] = _identity(session_value)
                                     retained_session_names[session_path] = session_names
-                                    retained_session_files.update(session_path / filename for filename in session_names)
+                                    candidate_names = (sorted(INCREMENTAL_INDEX_NAMES.intersection(session_names))
+                                                       if cache_leaves_only else session_names)
+                                    if cache_leaves_only:
+                                        retained_cache_files[session_path] = preserved_cache_files
+                                    retained_session_files.update(session_path / filename for filename in candidate_names)
                                     if not finalized:
                                         retained_working_sessions.add(session_path)
                                     retained_session_for_file.update(
-                                        (session_path / filename, session_path) for filename in session_names
+                                        (session_path / filename, session_path) for filename in candidate_names
                                     )
                                     os.close(session_fd)
                                     session_fd = None
-                                except OSError:
+                                except (OSError, RuntimeError):
                                     if session_fd is not None:
                                         os.close(session_fd)
                                     os.close(lock_fd)
@@ -816,6 +857,8 @@ def evict_artifacts(
                                         incremental_indexes[session][filename] = row
                                 elif working_session is not None:
                                     candidates.append((owner, child, _metadata_at(descriptor, filename, device)))
+                                elif session in retained_cache_files:
+                                    pass
                                 elif retained_profile and session is not None:
                                     report["retained_unknown_entries"] += 1
                                 else:
@@ -859,6 +902,7 @@ def evict_artifacts(
             elif report["estimated_candidate_bytes"] < needed:
                 closure = _incremental_index_closure(
                     rows, aliases, incremental_sessions, incremental_indexes, incremental_members, protected,
+                    set(retained_cache_files),
                 )
                 if closure is None:
                     report["retained_unknown_entries"] += len(rows)
@@ -877,8 +921,8 @@ def evict_artifacts(
                         selected.extend(closed_rows)
                         report["estimated_candidate_bytes"] += closed_rows[0][2].st_blocks * 512
         # 欠落objectを指す旧indexを先に外し、中断時も残indexからの再利用を防ぐ。
-        selected.sort(key=lambda row: 0 if row[1] in incremental_sessions
-                      and row[1].name in INCREMENTAL_INDEX_NAMES else 1)
+        selected.sort(key=lambda row: 0 if row[1] in incremental_sessions and row[1].name == "dep-graph.bin"
+                      else 1 if row[1] in incremental_sessions and row[1].name in INCREMENTAL_INDEX_NAMES else 2)
         report["candidate_paths"] = [str(row[1].relative_to(target)) for row in selected]
         if auxiliary_profiles and any(
             row[0] not in auxiliary_profiles or row[1] not in retained_session_files
@@ -995,6 +1039,8 @@ def evict_artifacts(
                     if session is not None:
                         verify_session_lock(session)
                     os.unlink(path.name, dir_fd=descriptors[path.parent])
+                    if session in retained_cache_files:
+                        removed_cache_leaves.add(path)
                     if artifacts:
                         report["deleted_files"] += 1
                     if index + 1 < len(paths):
@@ -1036,6 +1082,14 @@ def evict_artifacts(
                 owner_fd = descriptors[session.parent]
                 session_identity = retained_session_dirs[session]
                 named_session = os.stat(session.name, dir_fd=owner_fd, follow_symlinks=False)
+                if session in retained_cache_files:
+                    expected_remaining = sorted(name for name in retained_session_names[session]
+                                                if session / name not in rows_by_path)
+                    if sorted(os.listdir(session_fd)) != expected_remaining:
+                        raise RuntimeError("incremental cache namespace changed after trimming")
+                    verify_roots((session,))
+                    report["trimmed_incremental_sessions"] = report.get("trimmed_incremental_sessions", 0) + 1
+                    continue
                 if (_identity(os.fstat(session_fd)) != session_identity
                         or _identity(named_session) != session_identity
                         or os.listdir(session_fd)):
