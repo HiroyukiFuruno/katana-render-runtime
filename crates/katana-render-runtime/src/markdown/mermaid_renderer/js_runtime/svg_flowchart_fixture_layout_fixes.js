@@ -47,11 +47,14 @@ function katanaReplaceFlowchartNodeGeometry(svg, layout) {
       rectIndex += 1;
       return rect ?? match;
     })
-    .replace(/<polygon points="[^"]+" class="label-container" transform="translate\([^)]+\)">/g, (match) => {
-      const polygon = layout.nodePolygons[polygonIndex];
-      polygonIndex += 1;
-      return polygon ?? match;
-    });
+    .replace(
+      /<polygon points="[^"]+" class="label-container" transform="translate\([^)]+\)">/g,
+      (match) => {
+        const polygon = layout.nodePolygons[polygonIndex];
+        polygonIndex += 1;
+        return polygon ?? match;
+      },
+    );
 }
 
 function katanaReplaceFlowchartEdgeLabelGeometry(svg, layout) {
@@ -61,11 +64,14 @@ function katanaReplaceFlowchartEdgeLabelGeometry(svg, layout) {
       /(<g class="label" data-id="L_[^"]+" transform="translate\(0, )[^)]+(\)")/g,
       "$1-10.5$2",
     )
-    .replace(/<rect class="background" style="" x="[^"]+" y="[^"]+" width="[^"]+" height="[^"]+">/g, (match) => {
-      const rect = layout.edgeLabelRects[rectIndex];
-      rectIndex += 1;
-      return rect ?? match;
-    });
+    .replace(
+      /<rect class="background" style="" x="[^"]+" y="[^"]+" width="[^"]+" height="[^"]+">/g,
+      (match) => {
+        const rect = layout.edgeLabelRects[rectIndex];
+        rectIndex += 1;
+        return rect ?? match;
+      },
+    );
 }
 
 function katanaReplaceFlowchartFixtureEdgePaths(svg, layout) {

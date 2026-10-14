@@ -13,18 +13,6 @@ function katanaNormalizeTreeViewSvg(svg, request) {
       "</style>",
       `.treeView-node-label{fill:${request.text}!important;}.treeView-node-line{stroke:${request.arrow}!important;}</style>`,
     );
-  if (/"ルート"[\s\S]*"ラスタライズ"/.test(request.source)) {
-    return katanaSetSvgMaxWidth(
-      katanaSetSvgViewBox(normalized, "-0.5 0 150.203125 232"),
-      "150.203125",
-    );
-  }
-  if (/"docs"[\s\S]*"各種ファイル"/.test(request.source)) {
-    return katanaSetSvgMaxWidth(
-      katanaSetSvgViewBox(normalized, "-0.5 0 165.203125 319"),
-      "165.203125",
-    );
-  }
   return normalized;
 }
 
@@ -39,12 +27,11 @@ function katanaNormalizeArchitectureSvg(svg, request) {
   if (!svg.includes('aria-roledescription="architecture"')) {
     return svg;
   }
-  const svgWithIcons = katanaInsertArchitectureGroupIcons(katanaInsertArchitectureServiceIcons(svg, request));
-  const svgWithRows = katanaNormalizeArchitectureTextOuterRows(svgWithIcons);
-  return katanaNormalizeArchitectureReferenceBounds(
-    katanaNormalizeArchitectureRendererCoordinates(svgWithRows, request.source),
-    request.source,
+  const svgWithIcons = katanaInsertArchitectureGroupIcons(
+    katanaInsertArchitectureServiceIcons(svg, request),
   );
+  const svgWithRows = katanaNormalizeArchitectureTextOuterRows(svgWithIcons);
+  return svgWithRows;
 }
 
 function katanaNormalizeArchitectureReferenceBounds(svg, source) {
@@ -94,31 +81,28 @@ function katanaShiftArchitectureTagNumber(tag, name, shift) {
 }
 
 function katanaShiftRendererArchitectureCoordinates(svg, shift) {
-  return (
-    katanaShiftRendererArchitectureEdges(svg, shift)
-      .replace(/transform="translate\((-?\d+(?:\.\d+)?),17\)"/g, (_match, x) =>
-        `transform="translate(${katanaShiftCoordinate(String(x), shift)},17)"`,
-      )
-      .replace(
-        /(<rect[^>]*class="node-bkg"[^>]*x=")(-?\d+(?:\.\d+)?)(")/g,
-        (_match, before, x, after) =>
-          `${before}${katanaShiftCoordinate(String(x), shift)}${after}`,
-      )
-      .replace(
-        /(<g [^>]*class="architecture-groups"[\s\S]*?<rect[^>]*class="node-bkg"[^>]*width=")(-?\d+(?:\.\d+)?)(")/g,
-        (_match, before, width, after) =>
-          `${before}${katanaShiftCoordinate(String(width), shift * 2)}${after}`,
-      )
-      .replace(
-        /(<g class="architecture-groups">[\s\S]*?<g[^>]*transform="translate\()(-?\d+(?:\.\d+)?)(,\s*-?\d+(?:\.\d+)?\)")/g,
-        (_match, before, x, after) =>
-          `${before}${katanaShiftCoordinate(String(x), shift)}${after}`,
-      )
-      .replace(
-        /(<g class="architecture-groups">[\s\S]*?<g[^>]*text-anchor="start"[^>]*transform="translate\()(-?\d+(?:\.\d+)?)(,\s*-?\d+(?:\.\d+)?\)"[\s\S]*?>)/g,
-        (_match, before, x, after) => `${before}${katanaShiftCoordinate(String(x), shift)}${after}`,
-      )
-  );
+  return katanaShiftRendererArchitectureEdges(svg, shift)
+    .replace(
+      /transform="translate\((-?\d+(?:\.\d+)?),17\)"/g,
+      (_match, x) => `transform="translate(${katanaShiftCoordinate(String(x), shift)},17)"`,
+    )
+    .replace(
+      /(<rect[^>]*class="node-bkg"[^>]*x=")(-?\d+(?:\.\d+)?)(")/g,
+      (_match, before, x, after) => `${before}${katanaShiftCoordinate(String(x), shift)}${after}`,
+    )
+    .replace(
+      /(<g [^>]*class="architecture-groups"[\s\S]*?<rect[^>]*class="node-bkg"[^>]*width=")(-?\d+(?:\.\d+)?)(")/g,
+      (_match, before, width, after) =>
+        `${before}${katanaShiftCoordinate(String(width), shift * 2)}${after}`,
+    )
+    .replace(
+      /(<g class="architecture-groups">[\s\S]*?<g[^>]*transform="translate\()(-?\d+(?:\.\d+)?)(,\s*-?\d+(?:\.\d+)?\)")/g,
+      (_match, before, x, after) => `${before}${katanaShiftCoordinate(String(x), shift)}${after}`,
+    )
+    .replace(
+      /(<g class="architecture-groups">[\s\S]*?<g[^>]*text-anchor="start"[^>]*transform="translate\()(-?\d+(?:\.\d+)?)(,\s*-?\d+(?:\.\d+)?\)"[\s\S]*?>)/g,
+      (_match, before, x, after) => `${before}${katanaShiftCoordinate(String(x), shift)}${after}`,
+    );
 }
 
 function katanaShiftRendererArchitectureEdges(svg, shift) {
@@ -222,9 +206,7 @@ function katanaNormalizeMindmapSvg(svg) {
   if (!katanaIsMindmapSvg(svg)) {
     return svg;
   }
-  return katanaNormalizeMindmapFixtureLayout(
-    katanaNormalizeMindmapViewBox(svg, katanaReadViewBox(svg)),
-  );
+  return katanaNormalizeMindmapViewBox(svg, katanaReadViewBox(svg));
 }
 
 function katanaIsMindmapSvg(svg) {
@@ -298,10 +280,7 @@ function katanaFormatSvgNumber(value) {
 }
 
 function katanaNormalizeBlockSvg(svg) {
-  if (!svg.includes('aria-roledescription="block"')) {
-    return svg;
-  }
-  return katanaNormalizeBlockFixtureLayout(svg.replace(/&(?:amp;)?nbsp;/g, "&#160;"));
+  return svg;
 }
 
 function katanaNormalizeIshikawaSvg(svg) {

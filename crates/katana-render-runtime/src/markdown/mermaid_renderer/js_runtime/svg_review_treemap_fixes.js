@@ -2,9 +2,7 @@ function katanaNormalizeTreemapReviewSvg(svg) {
   if (!svg.includes('aria-roledescription="treemap"')) {
     return svg;
   }
-  return katanaNormalizeTreemapCacheText(
-    katanaNormalizeTreemapValueText(katanaNormalizeTreemapViewBox(svg)),
-  );
+  return katanaNormalizeTreemapValueText(svg);
 }
 
 function katanaNormalizeTreemapViewBox(svg) {
@@ -20,11 +18,10 @@ function katanaTreemapViewBoxConfig(svg) {
 }
 
 function katanaNormalizeTreemapValueText(svg) {
-  return svg.replace(/<text\b([^>]*class="treemapValue"[^>]*)>([^<]*)<\/text>/g, (
-    _match,
-    attributes,
-    text,
-  ) => `<text${katanaTreemapValueAttributes(attributes)}>${text}</text>`);
+  return svg.replace(
+    /<text\b([^>]*class="treemapValue"[^>]*)>([^<]*)<\/text>/g,
+    (_match, attributes, text) => `<text${katanaTreemapValueAttributes(attributes)}>${text}</text>`,
+  );
 }
 
 function katanaTreemapValueAttributes(attributes) {

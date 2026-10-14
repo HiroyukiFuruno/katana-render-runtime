@@ -1,16 +1,12 @@
 function katanaNormalizeReviewFeedbackSvg(svg, request) {
   let normalized = svg;
-  normalized = katanaNormalizeErReviewSvg(normalized);
   normalized = katanaNormalizeJourneyReviewSvg(normalized, request);
   normalized = katanaNormalizeGanttReviewSvg(normalized, request);
   normalized = katanaNormalizeSequenceRuntimeReviewSvg(normalized);
-  normalized = katanaNormalizePieReviewSvg(normalized);
   normalized = katanaNormalizeQuadrantReviewSvg(normalized, request);
   normalized = katanaNormalizeC4RuntimeContainerReviewSvg(normalized, request);
   normalized = katanaNormalizeC4ReviewSvg(normalized, request);
-  normalized = katanaNormalizeTimelineReviewSvg(normalized);
   normalized = katanaNormalizeIshikawaReviewSvg(normalized);
-  normalized = katanaNormalizeVennReviewSvg(normalized, request);
   normalized = katanaNormalizeTreemapReviewSvg(normalized);
   return normalized;
 }
@@ -84,9 +80,7 @@ function katanaNormalizeC4RuntimeContainerReviewSvg(svg, request) {
     return svg;
   }
   return katanaAlignC4ContainerReviewSvg(
-    katanaNormalizeC4ContainerText(
-      katanaShiftC4ContainerY(katanaShortenC4ContainerViewBox(svg)),
-    ),
+    katanaNormalizeC4ContainerText(katanaShiftC4ContainerY(katanaShortenC4ContainerViewBox(svg))),
   );
 }
 
@@ -116,19 +110,14 @@ function katanaExpandC4ContainerViewBox(svg) {
 function katanaAlignC4ContainerNodes(svg) {
   return svg.replace(
     /(<g transform="translate\((?:-?\d+(?:\.\d+)?),\s*)(-?\d+(?:\.\d+)?)(\)">\s*<g class="node c4-shape)/g,
-    (_match, prefix, y, suffix) =>
-      `${prefix}${katanaFormatSvgNumber(Number(y) - 0.18)}${suffix}`,
+    (_match, prefix, y, suffix) => `${prefix}${katanaFormatSvgNumber(Number(y) - 0.18)}${suffix}`,
   );
 }
 
 function katanaAlignC4ContainerBoundary(svg) {
   return svg
     .replace(/<rect\b[^>]*fill="none" stroke="#AAAAAA"[^>]*>/g, (tag) =>
-      katanaShiftTagNumberAttr(
-        katanaShiftTagNumberAttr(tag, "y", 2.34),
-        "height",
-        -0.184565,
-      ),
+      katanaShiftTagNumberAttr(katanaShiftTagNumberAttr(tag, "y", 2.34), "height", -0.184565),
     )
     .replace(/<text\b[^>]*font-size: 16px[^>]*>/g, (tag) =>
       katanaShiftTagNumberAttr(tag, "y", 2.34),
@@ -144,9 +133,7 @@ function katanaAlignC4ContainerRelations(svg) {
       katanaShiftTagNumberAttr(katanaShiftTagNumberAttr(tag, "y1", 3.34), "y2", 2.84),
     )
     .replace(/<path\b[^>]*stroke="#AAAAAA"[^>]*>/g, (tag) =>
-      tag.replace(/d="([^"]+)"/, (_match, path) =>
-        `d="${katanaShiftC4RelationPathY(path, 2.82)}"`,
-      ),
+      tag.replace(/d="([^"]+)"/, (_match, path) => `d="${katanaShiftC4RelationPathY(path, 2.82)}"`),
     )
     .replace(/<text\b[^>]*font-size: 12px[^>]*>/g, (tag) =>
       katanaShiftTagNumberAttr(tag, "y", 2.82),
@@ -184,9 +171,7 @@ function katanaAlignC4ContainerDatabase(svg) {
 function katanaAlignC4ContextFullReviewSvg(svg) {
   return katanaAlignC4ContainerDatabase(
     katanaAlignC4ContainerTypeLabels(
-      katanaAlignC4ContextRelations(
-        katanaAlignC4ContextBoundaries(katanaAlignC4ContextNodes(svg)),
-      ),
+      katanaAlignC4ContextBoundaries(katanaAlignC4ContextNodes(svg)),
     ),
   );
 }
@@ -255,11 +240,7 @@ function katanaShiftC4ContextBoundaryText(tag, additionalShift) {
   if (y === null) {
     return tag;
   }
-  return katanaShiftTagNumberAttr(
-    tag,
-    "y",
-    katanaC4ContextBoundaryShifts(y)[0] + additionalShift,
-  );
+  return katanaShiftTagNumberAttr(tag, "y", katanaC4ContextBoundaryShifts(y)[0] + additionalShift);
 }
 
 function katanaAlignC4ContextRelations(svg) {
@@ -271,8 +252,9 @@ function katanaAlignC4ContextRelations(svg) {
     .replace(/<path\b[^>]*stroke="#AAAAAA"[^>]*>/g, (tag) => {
       const shifts = KATANA_C4_CONTEXT_RELATION_PATH_Y_SHIFTS[pathIndex] ?? [0, 0, 0];
       pathIndex += 1;
-      return tag.replace(/d="([^"]+)"/, (_match, path) =>
-        `d="${katanaShiftC4ContextRelationPath(path, shifts)}"`,
+      return tag.replace(
+        /d="([^"]+)"/,
+        (_match, path) => `d="${katanaShiftC4ContextRelationPath(path, shifts)}"`,
       );
     })
     .replace(/<text\b[^>]*font-size: 12px[^>]*>/g, (tag) => {
@@ -318,18 +300,17 @@ function katanaShortenC4ContainerViewBox(svg) {
 function katanaShiftC4ContainerY(svg) {
   const runtimeShift = Number(katanaIsRuntimeSvg(svg));
   return svg
-    .replace(/\b(y|y1|y2)="(-?\d+(?:\.\d+)?)"/g, (_match, name, y) =>
-      `${name}="${katanaC4ShiftedY(Number(y), runtimeShift)}"`,
+    .replace(
+      /\b(y|y1|y2)="(-?\d+(?:\.\d+)?)"/g,
+      (_match, name, y) => `${name}="${katanaC4ShiftedY(Number(y), runtimeShift)}"`,
     )
     .replace(/d="([^"]+)"/g, (_match, path) => `d="${katanaShiftC4PathY(path, runtimeShift)}"`)
-    .replace(
-      /transform="translate\((-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)"/g,
-      (_match, x, y) =>
-        Number(y) > 100
-          ? `transform="translate(${x}, ${katanaFormatSvgNumber(
-              Number(y) - runtimeShift - Number(runtimeShift > 0 && Number(y) > 300),
-            )})"`
-          : _match,
+    .replace(/transform="translate\((-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)"/g, (_match, x, y) =>
+      Number(y) > 100
+        ? `transform="translate(${x}, ${katanaFormatSvgNumber(
+            Number(y) - runtimeShift - Number(runtimeShift > 0 && Number(y) > 300),
+          )})"`
+        : _match,
     );
 }
 
@@ -340,26 +321,12 @@ function katanaShiftC4PathY(path, runtimeShift) {
   );
 }
 
-function katanaShiftC4DeploymentYTag(tag, attrName, runtimeShift) {
-  const y = katanaTagNumberAttr(tag, attrName);
-  if (y === null) {
-    return tag;
-  }
-  return katanaShiftTagNumberAttr(tag, attrName, katanaC4DeploymentShiftedY(y, runtimeShift) - y);
-}
-
-function katanaC4DeploymentShiftedY(y, runtimeShift) {
-  if (y > 100 && (y === 157 || y === 287)) {
-    return katanaFormatSvgNumber(y - 2 - runtimeShift * 2);
-  }
-  if (y > 100) {
-    return katanaFormatSvgNumber(y - 1 - runtimeShift);
-  }
-  return katanaFormatSvgNumber(y);
-}
-
 function katanaShiftC4DynamicRelationLine(tag, xShift) {
-  return katanaShiftTagYAttrs(katanaShiftTagYAttrs(tag, ["x1", "x2"], xShift), ["y1"], -0.627358).replace(
+  return katanaShiftTagYAttrs(
+    katanaShiftTagYAttrs(tag, ["x1", "x2"], xShift),
+    ["y1"],
+    -0.627358,
+  ).replace(
     /y2="(-?\d+(?:\.\d+)?)"/g,
     (_match, y2) => `y2="${katanaFormatSvgNumber(Number(y2) - 0.759615)}"`,
   );
@@ -384,48 +351,7 @@ function katanaC4ShiftedY(y, runtimeShift) {
 }
 
 function katanaNormalizeC4ContainerText(svg) {
-  return svg
-    .replace(/font-size: (\d+);/g, "font-size: $1px;")
-    .replace(/\bheight="105"/g, 'height="104"')
-    .replace(/\bheight="76"/g, 'height="75"')
-    .replace(/\bheight="226"/g, 'height="225"')
-    .replace(/l0,76/g, "l0,75")
-    .replace(/l0,-76/g, "l0,-75")
-    .replace(/font-size: 14px;([^"]*)"([^>]*\by=")(\d+(?:\.\d+)?)/g, (_match, rest, beforeY, y) =>
-      `font-size: 14px;${rest}"${beforeY}${katanaFormatSvgNumber(Number(y) - 1)}`,
-    )
-    .replace(
-      /textLength="48" x="234" y="187">(&lt;&lt;person&gt;&gt;)/,
-      'textLength="50" x="233" y="187">$1',
-    )
-    .replace(/x="311\.0465656118247" y="374\.5"/g, 'x="312.48650310486755" y="374.5"')
-    .replace(/x="316\.0465656118247" y="391\.5"/g, 'x="318.48650310486755" y="391.5"')
-    .replace(/x="469\.63105959938974" y="374\.5"/g, 'x="471.18537804047133" y="374.5"')
-    .replace(/x="474\.63105959938974" y="391\.5"/g, 'x="477.18537804047133" y="391.5"')
-    .replace(/y="378\.5"/g, 'y="378"')
-    .replace(/y="386\.5"/g, 'y="386"')
-    .replace(/y="410\.5"/g, 'y="409"')
-    .replace(/y="540"/g, 'y="539"')
-    .replace(/x="691\.5" y="522\.689004"/g, 'x="690.5" y="522.1009903032805"')
-    .replace(/x="691\.5" y="539\.689004"/g, 'x="690.5" y="539.1009903032805"')
-    .replace(/x="849\.5" y="530\.705007"/g, 'x="848.5" y="530.0115203193034"')
-    .replace(/x="849\.5" y="547\.705007"/g, 'x="848.5" y="547.0115203193034"')
-    .replace(
-      /x1="281\.63247863247864" y1="272" x2="316\.4606525911708" y2="478"/g,
-      'x1="281.57532281205164" y1="271" x2="316.3976833976834" y2="478"',
-    )
-    .replace(
-      /M328\.8974358974359,272 Q393\.2642477484128,374\.5 586\.3646833013436,478/g,
-      "M328.725968436155,271 Q393.2056732383131,374.5 586.6447876447877,478",
-    )
-    .replace(
-      /M416,521\.545946 Q520,522\.689004 832,523\.832061/g,
-      "M416,520.972972972973 Q520,522.1009903032805 832,523.2290076335878",
-    )
-    .replace(
-      /M732,525\.679245 Q757,530\.705007 832,535\.730769/g,
-      "M732,525.0518867924528 Q757,530.0115203193034 832,534.9711538461538",
-    );
+  return svg.replace(/font-size: (\d+);/g, "font-size: $1px;");
 }
 
 function katanaShiftTagYAttrs(tag, names, shift) {
@@ -434,7 +360,10 @@ function katanaShiftTagYAttrs(tag, names, shift) {
 
 function katanaShiftTagNumberAttr(tag, name, shift) {
   const pattern = new RegExp(`\\b${name}="(-?\\d+(?:\\.\\d+)?)"`);
-  return tag.replace(pattern, (_match, value) => `${name}="${katanaFormatSvgNumber(Number(value) + shift)}"`);
+  return tag.replace(
+    pattern,
+    (_match, value) => `${name}="${katanaFormatSvgNumber(Number(value) + shift)}"`,
+  );
 }
 
 function katanaTagNumberAttr(tag, name) {
@@ -537,56 +466,10 @@ function katanaNormalizeC4ReviewSvg(svg, request) {
 }
 
 function katanaNormalizeC4ReviewSvgBySource(svg, source) {
-  if (katanaReviewIsC4DeploymentSource(source)) {
-    return katanaNormalizeC4DeploymentReviewSvg(svg);
-  }
   if (katanaReviewIsC4DynamicSource(source)) {
-    return katanaNormalizeC4DynamicReviewSvg(svg, source);
-  }
-  if (katanaReviewIsC4ComponentSource(source)) {
-    return katanaNormalizeC4ComponentReviewSvg(svg);
+    return svg;
   }
   return svg;
-}
-
-function katanaNormalizeC4DeploymentReviewSvg(svg) {
-  const runtimeShift = Number(katanaIsRuntimeSvg(svg));
-  const normalized = svg
-    .replace(/<rect\b[^>]*>/g, (tag) => katanaShiftC4DeploymentYTag(tag, "y", runtimeShift))
-    .replace(/<text\b[^>]*>/g, (tag) => katanaShiftC4DeploymentYTag(tag, "y", runtimeShift));
-  return runtimeShift === 0
-    ? normalized
-    : normalized
-        .replace(/<text\b[^>]*style="[^"]*font-size: 14px[^"]*"[^>]*>/g, (tag) =>
-          katanaShiftTagNumberAttr(tag, "y", -1),
-        )
-        .replace(
-        /transform="translate\((-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)"/g,
-        (_match, x, y) =>
-          Number(y) > 100
-            ? `transform="translate(${x}, ${katanaFormatSvgNumber(Number(y) - 1)})"`
-            : _match,
-        );
-}
-
-function katanaNormalizeC4ComponentReviewSvg(svg) {
-  return svg
-    .replace(/<rect\b[^>]*fill="none" stroke="#AAAAAA"[^>]*>/g, (tag) =>
-      katanaShiftTagNumberAttr(
-        katanaShiftTagNumberAttr(tag, "y", -0.06),
-        "height",
-        0.072,
-      ),
-    )
-    .replace(/<text\b[^>]*font-size: 16px[^>]*>/g, (tag) =>
-      katanaShiftTagNumberAttr(tag, "y", -0.06),
-    )
-    .replace(/<text\b[^>]*font-size: 14px[^>]*>/g, (tag) =>
-      katanaShiftTagNumberAttr(tag, "y", -1.06),
-    )
-    .replace(/<text\b[^>]*font-size: 12px[^>]*>/g, (tag) =>
-      katanaShiftTagNumberAttr(tag, "y", 0.44),
-    );
 }
 
 function katanaNormalizeC4DynamicReviewSvg(svg, source) {
@@ -595,59 +478,50 @@ function katanaNormalizeC4DynamicReviewSvg(svg, source) {
   const label1XShift = isJaSource ? 1.5 : 1.5 + xShift;
   const label2XShift = 4 + xShift;
   const relationPattern =
-    /(<line\b[^>]*marker-end="[^\"]*"[^>]*>)([\s\S]*?)(<text\b[^>]*>[\s\S]*?<\/text>)([\s\S]*?)(<text\b[^>]*>[\s\S]*?<\/text>)/;
-  return svg.replace(relationPattern, (_match, line, sep1, label1, sep2, label2) => {
-    const shiftedLine = katanaShiftC4DynamicRelationLine(line, xShift);
-    const shiftedLabel1 = katanaShiftC4DynamicRelationText(label1, label1XShift, -0.693487);
-    const shiftedLabel2 = katanaShiftC4DynamicRelationText(label2, label2XShift, -0.693487);
-    return `${shiftedLine}${sep1}${shiftedLabel1}${sep2}${shiftedLabel2}`;
-  }).replace(
-    /(<text x="\d+(?:\.\d+)?" y=")(\d+(?:\.\d+)?)(" dominant-baseline="middle" fill="#FFFFFF" font-style="italic")/g,
-    (_match, prefix, y, suffix) => `${prefix}${katanaFormatSvgNumber(Number(y) - 1)}${suffix}`,
-  ).replace(
-    isJaSource ? /(<rect\b[^>]*\bx="150"[^>]*\b)width="257"/ : /$^/,
-    '$1width="259"',
-  ).replace(
-    isJaSource ? /(<rect\b[^>]*\b)x="507"([^>]*\bwidth="216"[^>]*>)/ : /$^/,
-    '$1x="509"$2',
-  ).replace(
-    isJaSource ? /(<text\b[^>]*\bx=")278\.5(" y="205")/ : /$^/,
-    '$1279.5$2',
-  ).replace(
-    isJaSource ? /(<text\b[^>]*\bx=")278\.5(" y="228")/ : /$^/,
-    '$1279.5$2',
-  ).replace(
-    isJaSource ? /(<text\b[^>]*\bx=")615(" y="205")/ : /$^/,
-    '$1617$2',
-  ).replace(
-    isJaSource ? /(<text\b[^>]*\bx=")615(" y="228")/ : /$^/,
-    '$1617$2',
-  ).replace(
-    isJaSource
-      ? /(<text\b[^>]*\bx=")186\.5(" y="20"[^>]*>APIアプリケーションのダイナミック図<\/text>)/ : /$^/,
-    (_match, prefix, suffix) => `${prefix}187.5${suffix}`,
-  ).replace(
-    isJaSource
-      ? /(<text\b[^>]*\bx=")247(" y="187"[^>]*>)(?:&lt;&lt;container&gt;&gt;)(<\/text>)/ : /$^/,
-    (_match, prefix, middle, suffix) => `${prefix}248${middle}&lt;&lt;container&gt;&gt;${suffix}`,
-  ).replace(
-    isJaSource
-      ? /(<text\b[^>]*\bx=")583\.5(" y="187"[^>]*>)(?:&lt;&lt;container&gt;&gt;)(<\/text>)/ : /$^/,
-    (_match, prefix, middle, suffix) => `${prefix}585.5${middle}&lt;&lt;container&gt;&gt;${suffix}`,
-  );
+    /(<line\b[^>]*marker-end="[^"]*"[^>]*>)([\s\S]*?)(<text\b[^>]*>[\s\S]*?<\/text>)([\s\S]*?)(<text\b[^>]*>[\s\S]*?<\/text>)/;
+  return svg
+    .replace(relationPattern, (_match, line, sep1, label1, sep2, label2) => {
+      const shiftedLine = katanaShiftC4DynamicRelationLine(line, xShift);
+      const shiftedLabel1 = katanaShiftC4DynamicRelationText(label1, label1XShift, -0.693487);
+      const shiftedLabel2 = katanaShiftC4DynamicRelationText(label2, label2XShift, -0.693487);
+      return `${shiftedLine}${sep1}${shiftedLabel1}${sep2}${shiftedLabel2}`;
+    })
+    .replace(
+      /(<text x="\d+(?:\.\d+)?" y=")(\d+(?:\.\d+)?)(" dominant-baseline="middle" fill="#FFFFFF" font-style="italic")/g,
+      (_match, prefix, y, suffix) => `${prefix}${katanaFormatSvgNumber(Number(y) - 1)}${suffix}`,
+    )
+    .replace(isJaSource ? /(<rect\b[^>]*\bx="150"[^>]*\b)width="257"/ : /$^/, '$1width="259"')
+    .replace(isJaSource ? /(<rect\b[^>]*\b)x="507"([^>]*\bwidth="216"[^>]*>)/ : /$^/, '$1x="509"$2')
+    .replace(isJaSource ? /(<text\b[^>]*\bx=")278\.5(" y="205")/ : /$^/, "$1279.5$2")
+    .replace(isJaSource ? /(<text\b[^>]*\bx=")278\.5(" y="228")/ : /$^/, "$1279.5$2")
+    .replace(isJaSource ? /(<text\b[^>]*\bx=")615(" y="205")/ : /$^/, "$1617$2")
+    .replace(isJaSource ? /(<text\b[^>]*\bx=")615(" y="228")/ : /$^/, "$1617$2")
+    .replace(
+      isJaSource
+        ? /(<text\b[^>]*\bx=")186\.5(" y="20"[^>]*>APIアプリケーションのダイナミック図<\/text>)/
+        : /$^/,
+      (_match, prefix, suffix) => `${prefix}187.5${suffix}`,
+    )
+    .replace(
+      isJaSource
+        ? /(<text\b[^>]*\bx=")247(" y="187"[^>]*>)(?:&lt;&lt;container&gt;&gt;)(<\/text>)/
+        : /$^/,
+      (_match, prefix, middle, suffix) => `${prefix}248${middle}&lt;&lt;container&gt;&gt;${suffix}`,
+    )
+    .replace(
+      isJaSource
+        ? /(<text\b[^>]*\bx=")583\.5(" y="187"[^>]*>)(?:&lt;&lt;container&gt;&gt;)(<\/text>)/
+        : /$^/,
+      (_match, prefix, middle, suffix) =>
+        `${prefix}585.5${middle}&lt;&lt;container&gt;&gt;${suffix}`,
+    );
 }
 
-function katanaNormalizeC4ReviewSvgInternal(svg, request) {
+function katanaNormalizeC4ReviewSvgInternal(svg, _request) {
   if (!svg.includes('aria-roledescription="c4"')) {
     return null;
   }
-  const bounded = katanaNormalizeKnownC4ReviewBounds(svg, request.source);
-  if (bounded !== null) {
-    return bounded;
-  }
-  return katanaReviewIsC4ContextSource(request.source)
-    ? katanaNormalizeC4ReviewSvgInternalWithBoundary(svg, request.source)
-    : null;
+  return katanaNormalizeC4ContainerText(svg);
 }
 
 function katanaNormalizeKnownC4ReviewBounds(svg, source) {
@@ -679,16 +553,17 @@ function katanaNormalizeKnownC4ReviewBounds(svg, source) {
   }
   return bounds
     ? katanaSetSvgMaxWidth(
-        katanaSetSvgViewBox(katanaNormalizeC4ContainerText(katanaShiftC4ContainerY(svg)), bounds.viewBox),
+        katanaSetSvgViewBox(
+          katanaNormalizeC4ContainerText(katanaShiftC4ContainerY(svg)),
+          bounds.viewBox,
+        ),
         bounds.maxWidth,
       )
     : null;
 }
 
 function katanaAlignC4ContextReviewBySource(svg, source) {
-  return katanaReviewIsC4ContextFullSource(source)
-    ? katanaNormalizeC4ContextFullFixtureLayout(katanaAlignC4ContextFullReviewSvg(svg), source)
-    : svg;
+  return katanaReviewIsC4ContextFullSource(source) ? katanaAlignC4ContextFullReviewSvg(svg) : svg;
 }
 
 const KATANA_C4_REVIEW_BOUNDS = [
@@ -709,26 +584,8 @@ const KATANA_C4_REVIEW_BOUNDS = [
   { source: /\bC4Deployment\b/, maxWidth: "616", viewBox: "0 -70 616 519" },
 ];
 
-function katanaNormalizeC4ReviewSvgInternalWithBoundary(svg, source) {
-  if (!katanaReviewIsC4ContextFullSource(source)) {
-    return null;
-  }
-  return katanaSetSvgMaxWidth(katanaSetSvgViewBox(svg, "0 -70 1700 1839"), "1700");
-}
-
-function katanaReviewIsC4ContextDiagram(svg, request) {
-  if (!svg.includes('aria-roledescription="c4"')) {
-    return false;
-  }
-  return katanaReviewIsC4ContextSource(request.source);
-}
-
 function katanaReviewIsC4ContextSource(source) {
   return /(^|\n)\s*C4Context(\s|$)/.test(source);
-}
-
-function katanaReviewIsC4DeploymentSource(source) {
-  return /(^|\n)\s*C4Deployment(\s|$)/.test(source);
 }
 
 function katanaReviewIsC4DynamicSource(source) {
@@ -740,7 +597,9 @@ function katanaReviewIsC4ComponentSource(source) {
 }
 
 function katanaReviewIsC4DynamicJaSource(source) {
-  return katanaReviewIsC4DynamicSource(source) && /APIアプリケーションのダイナミック図/.test(source);
+  return (
+    katanaReviewIsC4DynamicSource(source) && /APIアプリケーションのダイナミック図/.test(source)
+  );
 }
 
 function katanaReviewIsC4ContextFullSource(source) {

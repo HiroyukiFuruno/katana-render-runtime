@@ -104,18 +104,7 @@ function katanaNormalizeRequirementEdgeLabelSvg(svg) {
   if (!svg.includes('aria-roledescription="requirement"')) {
     return svg;
   }
-  const normalized = katanaNormalizeRequirementViewBox(svg)
-    .replace(/(<g class="label" data-id="[^"]+" transform="translate\(0, )5\.76(\)")/g, "$1-10.5$2")
-    .replace(/(<g class="label" data-id="[^"]+" transform="translate\(0, )-9\.5(\)")/g, "$1-10.5$2")
-    .replace(
-      /<rect class="background" style="" x="-54" y="-17\.36" width="108" height="23\.2"><\/rect>/g,
-      '<rect class="background" style="" x="-48" y="-1" width="96" height="23"></rect>',
-    )
-    .replace(
-      /<rect class="background" style="" x="-47\.75500000000001" y="-2" width="95\.51000000000002" height="23"><\/rect>/g,
-      '<rect class="background" style="" x="-47.7578125" y="-1" width="95.515625" height="23"></rect>',
-    );
-  return katanaNormalizeRequirementLocalizedSvg(normalized);
+  return katanaNormalizeRequirementViewBox(svg);
 }
 
 function katanaNormalizeRequirementViewBox(svg) {
@@ -234,8 +223,8 @@ function katanaPieMaxLegendTextLength(svg) {
 }
 
 function katanaPieHasNonAsciiLegend(svg) {
-  return Array.from(svg.matchAll(/<g class="legend"[\s\S]*?<text\b[^>]*>([^<]*)<\/text>/g)).some((match) =>
-    /[^\x00-\x7F]/.test(match[1] ?? ""),
+  return Array.from(svg.matchAll(/<g class="legend"[\s\S]*?<text\b[^>]*>([^<]*)<\/text>/g)).some(
+    (match) => /\P{ASCII}/u.test(match[1] ?? ""),
   );
 }
 

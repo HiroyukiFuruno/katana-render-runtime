@@ -19,11 +19,7 @@ function katanaPostprocessDrawioSvg(svg) {
   }
   const pageSourceOriginAligned = katanaAlignDrawioPageSvgToSourceOrigin(svg);
   katanaAlignDrawioElevatedSourceCrop(svg, contentCropApplied);
-  katanaAlignDrawioUnmeasuredLeftPaint(
-    svg,
-    contentCropApplied,
-    stackedSketchSwimlaneCropApplied,
-  );
+  katanaAlignDrawioUnmeasuredLeftPaint(svg, contentCropApplied, stackedSketchSwimlaneCropApplied);
   katanaNormalizeDrawioArrowComparisonOrigin(svg);
   katanaAlignDrawioDisabledPageInfographicTop(svg);
   katanaNormalizeDrawioMultiPageCanvas(svg);
@@ -89,9 +85,7 @@ function katanaNormalizeDrawioMultiPageCanvas(svg) {
     katanaSetDrawioCanvasHeight(svg, box, box.height - 2);
     return;
   }
-  const isDeviceSource = /<mxfile\b[^>]*\btype="device"/.test(
-    katanaDrawioRawRequestSource(),
-  );
+  const isDeviceSource = /<mxfile\b[^>]*\btype="device"/.test(katanaDrawioRawRequestSource());
   if (
     [
       isDeviceSource,
@@ -113,10 +107,7 @@ function katanaSetDrawioCanvasHeight(svg, box, height) {
 
 function katanaNormalizeDrawioI18nCanvas(svg) {
   const source = katanaDrawioRequestSource();
-  if (
-    !source.includes("Language&#xa;Typeface") ||
-    !source.includes("Chinese&#xa;ideograph")
-  ) {
+  if (!source.includes("Language&#xa;Typeface") || !source.includes("Chinese&#xa;ideograph")) {
     return;
   }
   svg.setAttribute("viewBox", "0 0 2591 827");
@@ -162,10 +153,7 @@ function katanaShouldCropDrawioSvgToContent(svg) {
     katanaDrawioUsesDevicePageContentCrop(),
     !katanaDrawioContentFillsPageCanvas(katanaDrawioContentBox(svg), katanaDrawioSvgBox(svg)),
   ].every(Boolean);
-  if (
-    rawSourceIsAwsFragment ||
-    awsDeviceTemplateNeedsCrop
-  ) {
+  if (rawSourceIsAwsFragment || awsDeviceTemplateNeedsCrop) {
     return true;
   }
   if (katanaDrawioPageBoundsNeedContentCrop(svg)) {
@@ -255,10 +243,9 @@ function katanaDrawioDisabledPageBoundsNeedCrop(svg) {
   return [
     katanaDrawioSourceModelCount() === 1,
     sourceBox,
-    [
-      svgBox.width > sourceBox?.width * 1.25,
-      svgBox.height > sourceBox?.height * 1.25,
-    ].some(Boolean),
+    [svgBox.width > sourceBox?.width * 1.25, svgBox.height > sourceBox?.height * 1.25].some(
+      Boolean,
+    ),
   ].every(Boolean);
 }
 
@@ -283,10 +270,9 @@ function katanaDrawioPageBoundsNeedContentCrop(svg) {
 }
 
 function katanaDrawioContentFillsPageCanvas(contentBox, svgBox) {
-  return [
-    contentBox.width >= svgBox.width * 0.95,
-    contentBox.height >= svgBox.height * 0.95,
-  ].every(Boolean);
+  return [contentBox.width >= svgBox.width * 0.95, contentBox.height >= svgBox.height * 0.95].every(
+    Boolean,
+  );
 }
 
 function katanaDrawioSourceHasRotatedShapes() {
@@ -316,18 +302,14 @@ function katanaPadDrawioSvgForSourceLabelOverflow(svg) {
   const useRenderedOverflow = [
     !katanaDrawioRawRequestSource().includes("<mxfile"),
     katanaDrawioSourceDisablesPageBounds(),
-    /<mxGraphModel\b[^>]*\bpageScale="(?!1(?:\.0+)?")[^"]+"/.test(
-      katanaDrawioRequestSource(),
-    ),
+    /<mxGraphModel\b[^>]*\bpageScale="(?!1(?:\.0+)?")[^"]+"/.test(katanaDrawioRequestSource()),
   ].some(Boolean);
   const leftPadding = Math.max(
     [sourcePadding > 0, contentBox.x < sourcePadding / 2].every(Boolean) ? sourcePadding : 0,
     useRenderedOverflow ? katanaDrawioSignificantOverflow(box.x - overflowBox.x) : 0,
   );
   const rightPadding = useRenderedOverflow
-    ? katanaDrawioSignificantOverflow(
-        katanaDrawioBoxRight(overflowBox) - katanaDrawioBoxRight(box),
-      )
+    ? katanaDrawioSignificantOverflow(katanaDrawioBoxRight(overflowBox) - katanaDrawioBoxRight(box))
     : 0;
   if ([leftPadding, rightPadding].some((padding) => padding > 0)) {
     katanaApplyDrawioHorizontalPadding(svg, leftPadding, rightPadding);
@@ -409,9 +391,12 @@ function katanaDrawioIsLeftSourceLabel(entry) {
 
 function katanaDrawioSourceLabelWidth(entry) {
   const fontSize = katanaDrawioFontSize(entry.style);
-  return Math.max(0, ...katanaDrawioTextLines(entry.label).map((line) => {
-    return String(line).trim().length * fontSize * 0.5;
-  }));
+  return Math.max(
+    0,
+    ...katanaDrawioTextLines(entry.label).map((line) => {
+      return String(line).trim().length * fontSize * 0.5;
+    }),
+  );
 }
 
 function katanaApplyDrawioLeftPadding(svg, padding) {
@@ -443,7 +428,8 @@ function katanaPadDrawioSvgForExportTopPadding(svg, contentCropApplied) {
   ].every(Boolean)
     ? katanaDrawioSignificantOverflow(box.y - katanaDrawioContentBox(svg).y)
     : 0;
-  const padding = overflowPadding ||
+  const padding =
+    overflowPadding ||
     (katanaDrawioNeedsExportTopPadding(svg) ? KATANA_DRAWIO_EXPORT_TOP_PADDING : 0);
   if (padding <= 0) {
     return;
@@ -452,10 +438,7 @@ function katanaPadDrawioSvgForExportTopPadding(svg, contentCropApplied) {
     katanaTranslateDrawioContent(svg, { x: 0, y: -overflowPadding });
   }
   const viewBoxY = overflowPadding > 0 ? box.y : box.y - padding;
-  svg.setAttribute(
-    "viewBox",
-    `${box.x} ${viewBoxY} ${box.width} ${box.height + padding}`,
-  );
+  svg.setAttribute("viewBox", `${box.x} ${viewBoxY} ${box.width} ${box.height + padding}`);
   svg.setAttribute("height", `${box.height + padding}px`);
 }
 
@@ -501,11 +484,7 @@ function katanaNormalizeDrawioNetworkStencilCanvas(svg) {
   const box = katanaDrawioSvgBox(svg);
   const renderedBottom = Math.ceil(katanaDrawioBoxBottom(katanaDrawioContentBox(svg)) - box.y);
   const denseExportEdge = Number(katanaDrawioSourceCellCount() >= 100);
-  katanaSetDrawioCanvasHeight(
-    svg,
-    box,
-    Math.min(box.height - denseExportEdge, renderedBottom),
-  );
+  katanaSetDrawioCanvasHeight(svg, box, Math.min(box.height - denseExportEdge, renderedBottom));
 }
 
 function katanaDrawioSourceCellCount() {
@@ -536,10 +515,9 @@ function katanaNormalizeDrawioAwsTemplateCanvas(svg) {
 function katanaDrawioNeedsExportTopPadding(svg) {
   return [
     katanaDrawioContentBox(svg).y <= 1,
-    [
-      katanaDrawioHasPositiveInfographicDisabledPageTop(),
-      katanaDrawioHasDarkCubePageTop(),
-    ].some(Boolean),
+    [katanaDrawioHasPositiveInfographicDisabledPageTop(), katanaDrawioHasDarkCubePageTop()].some(
+      Boolean,
+    ),
   ].every(Boolean);
 }
 
@@ -556,8 +534,7 @@ function katanaAlignDrawioScaledFullPageBottom(svg) {
       katanaDrawioSourcePageScale() > 1,
       sourcePaintBox.y > 0,
       Math.abs(sourcePaintBox.x - box.x) <= Number.EPSILON,
-      Math.abs(katanaDrawioBoxRight(sourcePaintBox) - katanaDrawioBoxRight(box)) <=
-        Number.EPSILON,
+      Math.abs(katanaDrawioBoxRight(sourcePaintBox) - katanaDrawioBoxRight(box)) <= Number.EPSILON,
       Math.abs(katanaDrawioBoxBottom(sourcePaintBox) - katanaDrawioBoxBottom(box)) <=
         Number.EPSILON,
     ].every(Boolean)
@@ -637,13 +614,9 @@ function katanaAlignDrawioUnmeasuredLeftPaint(
   const svgBox = katanaDrawioSvgBox(svg);
   const contentBox = katanaDrawioContentBox(svg);
   if (
-    [
-      !contentCropApplied,
-      !sourceBox,
-      svgBox.x === 0,
-      contentBox.x < 0,
-      contentBox.x >= -1,
-    ].every(Boolean)
+    [!contentCropApplied, !sourceBox, svgBox.x === 0, contentBox.x < 0, contentBox.x >= -1].every(
+      Boolean,
+    )
   ) {
     katanaTranslateDrawioContent(svg, { x: contentBox.x, y: 0 });
   }
@@ -692,9 +665,7 @@ function katanaPadDrawioSvgForTextBottomOverflow(svg, pageSourceOriginAligned) {
   const bottom = Math.ceil(
     Math.max(
       box.y + box.height,
-      katanaDrawioRequestSource().includes("mxgraph.cisco")
-        ? renderedBottom
-        : box.y + box.height,
+      katanaDrawioRequestSource().includes("mxgraph.cisco") ? renderedBottom : box.y + box.height,
       ...katanaDrawioTextBottomEstimates(svg),
       ...katanaDrawioHtmlTextBottomEstimates(svg),
     ),
@@ -766,10 +737,10 @@ function katanaDrawioHtmlTextBottomEstimate(foreignObject) {
 }
 
 function katanaDrawioHtmlTextOuterTop(foreignObject) {
-  return [
-    ...Array.from(foreignObject.querySelectorAll("div")),
-  ]
-    .map((div) => katanaDrawioStylePropertyValue(String(div.getAttribute("style") ?? ""), "padding-top"))
+  return [...Array.from(foreignObject.querySelectorAll("div"))]
+    .map((div) =>
+      katanaDrawioStylePropertyValue(String(div.getAttribute("style") ?? ""), "padding-top"),
+    )
     .filter(Boolean)
     .map(katanaDrawioCssPixels)
     .filter(Number.isFinite)
@@ -777,11 +748,11 @@ function katanaDrawioHtmlTextOuterTop(foreignObject) {
 }
 
 function katanaDrawioHtmlTextContentFontSize(foreignObject) {
-  return [
-    ...Array.from(foreignObject.querySelectorAll("div")),
-  ]
+  return [...Array.from(foreignObject.querySelectorAll("div"))]
     .filter((div) => div.getAttribute("data-katana-drawio-html-text") === "content")
-    .map((div) => katanaDrawioStylePropertyValue(String(div.getAttribute("style") ?? ""), "font-size"))
+    .map((div) =>
+      katanaDrawioStylePropertyValue(String(div.getAttribute("style") ?? ""), "font-size"),
+    )
     .filter(Boolean)
     .map(katanaDrawioCssPixels)
     .filter(Number.isFinite)

@@ -36,9 +36,7 @@ function katanaNormalizeGitGraphSvg(svg) {
   if (!svg.includes('aria-roledescription="gitGraph"')) {
     return svg;
   }
-  return katanaNormalizeKnownGitGraphViewBox(
-    katanaNormalizeGitGraphViewBox(svg, katanaReadViewBox(svg), katanaContentBox(svg)),
-  );
+  return katanaNormalizeGitGraphViewBox(svg, katanaReadViewBox(svg), katanaContentBox(svg));
 }
 
 function katanaNormalizeKnownGitGraphViewBox(svg) {

@@ -27,9 +27,7 @@ function katanaReplaceBlockNodeTransforms(svg, layout) {
     }
     const transform = layout.nodeTransforms[index];
     index += 1;
-    return transform
-      ? tag.replace(transformAttribute, 'transform="translate(' + transform + ')"')
-      : tag;
+    return transform ? tag.replace(transformAttribute, `transform="translate(${transform})"`) : tag;
   });
 }
 

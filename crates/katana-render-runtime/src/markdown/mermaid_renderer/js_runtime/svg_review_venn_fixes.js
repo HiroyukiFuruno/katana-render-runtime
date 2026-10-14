@@ -11,10 +11,9 @@ function katanaShouldNormalizeVennReviewSvg(svg) {
 }
 
 function katanaIsRendererScopeVenn(svg) {
-  return [
-    svg.includes('data-venn-sets="official"'),
-    svg.includes('data-venn-sets="rust"'),
-  ].every(Boolean);
+  return [svg.includes('data-venn-sets="official"'), svg.includes('data-venn-sets="rust"')].every(
+    Boolean,
+  );
 }
 
 function katanaNormalizeVennReviewPaths(svg) {
@@ -35,11 +34,7 @@ function katanaNormalizeVennReviewTheme(svg, request) {
 function katanaNormalizeVennReviewTextColors(svg) {
   return katanaVennTextColor(
     katanaVennTextColor(
-      katanaVennTextColor(
-        katanaVennTitleColor(svg),
-        "venn-set-0",
-        "rgb(198, 198, 198)",
-      ),
+      katanaVennTextColor(katanaVennTitleColor(svg), "venn-set-0", "rgb(198, 198, 198)"),
       "venn-set-1",
       "rgb(255, 62, 62)",
     ),
@@ -49,8 +44,10 @@ function katanaNormalizeVennReviewTextColors(svg) {
 }
 
 function katanaVennTitleColor(svg) {
-  return svg.replace(/<text class="venn-title"([^>]*)>/, (_match, attributes) =>
-    `<text class="venn-title"${attributes.replace(/\sstyle="[^"]*"/, "")} style="fill: rgb(224, 224, 224);">`,
+  return svg.replace(
+    /<text class="venn-title"([^>]*)>/,
+    (_match, attributes) =>
+      `<text class="venn-title"${attributes.replace(/\sstyle="[^"]*"/, "")} style="fill: rgb(224, 224, 224);">`,
   );
 }
 
@@ -58,8 +55,10 @@ function katanaVennTextColor(svg, className, color) {
   const pattern = new RegExp(
     `(<g class="venn-area [^"]*${className}[^"]*"[\\s\\S]*?<text class="label")([^>]*)(>)`,
   );
-  return svg.replace(pattern, (_match, start, attributes, end) =>
-    `${start}${attributes.replace(/\sstyle="[^"]*"/, "")} style="fill: ${color}; font-size: 24px;"${end}`,
+  return svg.replace(
+    pattern,
+    (_match, start, attributes, end) =>
+      `${start}${attributes.replace(/\sstyle="[^"]*"/, "")} style="fill: ${color}; font-size: 24px;"${end}`,
   );
 }
 

@@ -135,7 +135,7 @@ function katanaApplyIshikawaViewBox(context) {
     katanaSetSvgViewBox(context.svg, normalized.join(" ")),
     normalized[2],
   );
-  return katanaNormalizeIshikawaFixtureViewBox(svg);
+  return svg;
 }
 
 function katanaNormalizeIshikawaFixtureViewBox(svg) {
@@ -152,15 +152,13 @@ function katanaNormalizeIshikawaFixtureViewBox(svg) {
 }
 
 function katanaNormalizeShiftedIshikawaPair(svg, shiftedPair) {
-  const normalized = katanaRewriteBalancedGroups(
-    svg,
-    /<g class="ishikawa-pair">/g,
-    (group) =>
-      group.includes(shiftedPair.marker)
-        ? group.replace(/\b(x|x1|x2)="(-?\d+(?:\.\d+)?)"/g, (_match, name, value) =>
-            `${name}="${Number(value) + shiftedPair.delta}"`,
-          )
-        : group,
+  const normalized = katanaRewriteBalancedGroups(svg, /<g class="ishikawa-pair">/g, (group) =>
+    group.includes(shiftedPair.marker)
+      ? group.replace(
+          /\b(x|x1|x2)="(-?\d+(?:\.\d+)?)"/g,
+          (_match, name, value) => `${name}="${Number(value) + shiftedPair.delta}"`,
+        )
+      : group,
   );
   return normalized.replace(
     /(<line class="ishikawa-spine" x1=")[^"]+(")/,

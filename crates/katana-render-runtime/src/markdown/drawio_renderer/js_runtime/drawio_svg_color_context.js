@@ -36,7 +36,13 @@ function katanaDrawioForcedAttributeColor(element, name, value) {
 
 function katanaNormalizeDrawioAndroidDeviceScreens(svg) {
   Array.from(svg.querySelectorAll("path"))
-    .filter((path) => katanaDrawioIsAndroidDeviceScreenFill(path, "fill", katanaDrawioColorKey(path.getAttribute("fill"))))
+    .filter((path) =>
+      katanaDrawioIsAndroidDeviceScreenFill(
+        path,
+        "fill",
+        katanaDrawioColorKey(path.getAttribute("fill")),
+      ),
+    )
     .forEach((path) => {
       path.setAttribute("fill", "transparent");
     });
@@ -138,8 +144,11 @@ function katanaDrawioPathDataArea(element) {
   if (coordinates.length < 8) {
     return 0;
   }
-  const axisCoordinates = (offset) => coordinates.filter((_coordinate, index) => index % 2 === offset);
-  return katanaDrawioCoordinateSpan(axisCoordinates(0)) * katanaDrawioCoordinateSpan(axisCoordinates(1));
+  const axisCoordinates = (offset) =>
+    coordinates.filter((_coordinate, index) => index % 2 === offset);
+  return (
+    katanaDrawioCoordinateSpan(axisCoordinates(0)) * katanaDrawioCoordinateSpan(axisCoordinates(1))
+  );
 }
 
 function katanaDrawioCoordinateSpan(coordinates) {
