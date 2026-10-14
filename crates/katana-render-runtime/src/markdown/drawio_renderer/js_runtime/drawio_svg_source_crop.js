@@ -186,11 +186,6 @@ function katanaDrawioSourceCropBox(svg, entries) {
 function katanaDrawioSourceCropOffset(svg, entries) {
   return katanaDrawioMedianOffset(katanaDrawioSourceCropOffsets(svg, entries));
 }
-function katanaDrawioPreciseSourceCropOffset(svg, entries) {
-  return katanaDrawioMedianOffset(
-    entries.map((entry) => katanaDrawioPreciseSourceCellOffset(svg, entry)).filter(Boolean),
-  );
-}
 function katanaDrawioPreciseSourceCellOffset(svg, entry) {
   const group = katanaDrawioCellGroup(svg, entry.id);
   const box = group ? katanaDrawioPreciseCellShapeBox(group) : null;

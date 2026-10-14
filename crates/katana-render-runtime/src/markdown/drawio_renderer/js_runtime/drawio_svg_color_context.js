@@ -1,12 +1,5 @@
 const KATANA_DRAWIO_LARGE_WHITE_PATH_AREA = 10000;
 const KATANA_DRAWIO_ANDROID_DEVICE_SCREEN_PATH_AREA = 10000;
-const KATANA_DRAWIO_AWS_SHAPE_PREFIXES = [
-  "mxgraph.aws.",
-  "mxgraph.aws2.",
-  "mxgraph.aws3.",
-  "mxgraph.aws4.",
-  "mxgraph.aws3d.",
-];
 const KATANA_DRAWIO_AZURE_SHAPE_PREFIXES = ["mxgraph.azure.", "mxgraph.mscae.", "mxgraph.office."];
 const KATANA_DRAWIO_VISUAL_SHAPE_TAGS = new Set([
   "circle",
@@ -29,10 +22,6 @@ const KATANA_DRAWIO_ANDROID_DEVICE_SCREEN_COLORS = new Set([
   "rgb(237, 237, 237)",
   "rgb(32, 32, 32)",
 ]);
-
-function katanaDrawioForcedAttributeColor(element, name, value) {
-  return katanaDrawioAndroidDeviceScreenFillColor(element, name, value);
-}
 
 function katanaNormalizeDrawioAndroidDeviceScreens(svg) {
   Array.from(svg.querySelectorAll("path"))

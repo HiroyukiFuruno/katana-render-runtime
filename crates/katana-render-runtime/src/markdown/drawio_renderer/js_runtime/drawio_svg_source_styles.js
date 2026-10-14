@@ -71,12 +71,6 @@ function katanaDrawioSourceStyleForElement(element) {
   return KATANA_DRAWIO_SOURCE_CELL_STYLE_CACHE.get(katanaDrawioElementCellId(element)) ?? new Map();
 }
 
-function katanaDrawioHasSourceShadowStyle() {
-  return Array.from(KATANA_DRAWIO_SOURCE_CELL_STYLE_CACHE.values()).some(
-    katanaDrawioSourceStyleHasShadow,
-  );
-}
-
 function katanaDrawioSourceStyleHasShadow(style) {
   return [
     katanaDrawioSourceStyleExplicitShadow(style),

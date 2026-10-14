@@ -243,26 +243,6 @@ function katanaShiftC4ContextBoundaryText(tag, additionalShift) {
   return katanaShiftTagNumberAttr(tag, "y", katanaC4ContextBoundaryShifts(y)[0] + additionalShift);
 }
 
-function katanaAlignC4ContextRelations(svg) {
-  let pathIndex = 0;
-  return svg
-    .replace(/<line\b[^>]*marker-end="[^"]+"[^>]*>/g, (tag) =>
-      katanaShiftTagNumberAttr(katanaShiftTagNumberAttr(tag, "y1", -0.15), "y2", -0.15),
-    )
-    .replace(/<path\b[^>]*stroke="#AAAAAA"[^>]*>/g, (tag) => {
-      const shifts = KATANA_C4_CONTEXT_RELATION_PATH_Y_SHIFTS[pathIndex] ?? [0, 0, 0];
-      pathIndex += 1;
-      return tag.replace(
-        /d="([^"]+)"/,
-        (_match, path) => `d="${katanaShiftC4ContextRelationPath(path, shifts)}"`,
-      );
-    })
-    .replace(/<text\b[^>]*font-size: 12px[^>]*>/g, (tag) => {
-      const y = katanaTagNumberAttr(tag, "y");
-      return y === null ? tag : katanaShiftTagNumberAttr(tag, "y", y < 500 ? -0.16 : -0.636);
-    });
-}
-
 const KATANA_C4_CONTEXT_RELATION_PATH_Y_SHIFTS = [
   [-0.15, -0.636, -1.135],
   [-0.15, -0.636, -1.135],
@@ -375,33 +355,6 @@ function katanaIsRuntimeSvg(svg) {
   return svg.includes('id="katana-mermaid-svg-');
 }
 
-function katanaNormalizeErReviewSvg(svg) {
-  if (!svg.includes('aria-roledescription="er"')) {
-    return svg;
-  }
-  return svg
-    .replace(
-      /(data-id="id_entity-[^"]+" transform="translate\(0, )5\.76(\)")/g,
-      "$1-9.000000476837158$2",
-    )
-    .replace(
-      /<rect class="background" style="" x="([^"]+)" y="-17\.36" width="([^"]+)" height="23\.2"><\/rect>/g,
-      '<rect class="background" style="" x="$1" y="-1" width="$2" height="23"></rect>',
-    )
-    .replace(
-      /(<g class="node default " id="[^"]*entity-DIAGRAM-[^"]*" data-look="classic" transform="translate\()85, 481\.70000000000005(\)">)/g,
-      "$178.265625, 480$2",
-    )
-    .replace(
-      /<rect class="basic label-container" style="" x="-50" y="-39\.6" width="100" height="79\.2">/g,
-      '<rect class="basic label-container" style="" x="-52.3125" y="-39.5" width="104.625" height="79">',
-    )
-    .replace(
-      /(<g class="node default " id="[^"]*entity-DIAGRAM-[^"]*"[\s\S]*?<rect class="background" style="stroke: none"><\/rect>)<text[\s\S]*?<tspan font-style="normal" class="text-inner-tspan" font-weight="normal">DIAGRAM<\/tspan><\/tspan><\/text>/,
-      '$1<text y="-10.1" style="" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">DIAGRAM</tspan></tspan></text>',
-    );
-}
-
 function katanaNormalizeJourneyReviewSvg(svg, request) {
   if (!svg.includes('aria-roledescription="journey"')) {
     return svg;
@@ -440,23 +393,6 @@ function katanaNormalizeGanttReviewTheme(svg, request) {
   return katanaInsertSvgBackground(svg, "#1e1e1e");
 }
 
-function katanaNormalizePieReviewSvg(svg) {
-  if (!svg.includes('aria-roledescription="pie"')) {
-    return svg;
-  }
-  if (svg.includes(">レンダリング所有権</text>")) {
-    return katanaSetSvgDimension(
-      katanaSetSvgMaxWidth(katanaSetSvgViewBox(svg, "0 0 695.9 450"), "696"),
-      "width",
-      "696",
-    );
-  }
-  return svg
-    .replace(/width="512"/, 'width="641"')
-    .replace(/viewBox="0 0 512 450"/, 'viewBox="0 0 640.5 450"')
-    .replace(/max-width:\s*512px/, "max-width: 640.5px");
-}
-
 function katanaNormalizeC4ReviewSvg(svg, request) {
   const normalized = katanaNormalizeC4ReviewSvgInternal(svg, request);
   if (normalized === null) {
@@ -472,94 +408,11 @@ function katanaNormalizeC4ReviewSvgBySource(svg, source) {
   return svg;
 }
 
-function katanaNormalizeC4DynamicReviewSvg(svg, source) {
-  const isJaSource = katanaReviewIsC4DynamicJaSource(source);
-  const xShift = isJaSource ? 2 : 0;
-  const label1XShift = isJaSource ? 1.5 : 1.5 + xShift;
-  const label2XShift = 4 + xShift;
-  const relationPattern =
-    /(<line\b[^>]*marker-end="[^"]*"[^>]*>)([\s\S]*?)(<text\b[^>]*>[\s\S]*?<\/text>)([\s\S]*?)(<text\b[^>]*>[\s\S]*?<\/text>)/;
-  return svg
-    .replace(relationPattern, (_match, line, sep1, label1, sep2, label2) => {
-      const shiftedLine = katanaShiftC4DynamicRelationLine(line, xShift);
-      const shiftedLabel1 = katanaShiftC4DynamicRelationText(label1, label1XShift, -0.693487);
-      const shiftedLabel2 = katanaShiftC4DynamicRelationText(label2, label2XShift, -0.693487);
-      return `${shiftedLine}${sep1}${shiftedLabel1}${sep2}${shiftedLabel2}`;
-    })
-    .replace(
-      /(<text x="\d+(?:\.\d+)?" y=")(\d+(?:\.\d+)?)(" dominant-baseline="middle" fill="#FFFFFF" font-style="italic")/g,
-      (_match, prefix, y, suffix) => `${prefix}${katanaFormatSvgNumber(Number(y) - 1)}${suffix}`,
-    )
-    .replace(isJaSource ? /(<rect\b[^>]*\bx="150"[^>]*\b)width="257"/ : /$^/, '$1width="259"')
-    .replace(isJaSource ? /(<rect\b[^>]*\b)x="507"([^>]*\bwidth="216"[^>]*>)/ : /$^/, '$1x="509"$2')
-    .replace(isJaSource ? /(<text\b[^>]*\bx=")278\.5(" y="205")/ : /$^/, "$1279.5$2")
-    .replace(isJaSource ? /(<text\b[^>]*\bx=")278\.5(" y="228")/ : /$^/, "$1279.5$2")
-    .replace(isJaSource ? /(<text\b[^>]*\bx=")615(" y="205")/ : /$^/, "$1617$2")
-    .replace(isJaSource ? /(<text\b[^>]*\bx=")615(" y="228")/ : /$^/, "$1617$2")
-    .replace(
-      isJaSource
-        ? /(<text\b[^>]*\bx=")186\.5(" y="20"[^>]*>APIアプリケーションのダイナミック図<\/text>)/
-        : /$^/,
-      (_match, prefix, suffix) => `${prefix}187.5${suffix}`,
-    )
-    .replace(
-      isJaSource
-        ? /(<text\b[^>]*\bx=")247(" y="187"[^>]*>)(?:&lt;&lt;container&gt;&gt;)(<\/text>)/
-        : /$^/,
-      (_match, prefix, middle, suffix) => `${prefix}248${middle}&lt;&lt;container&gt;&gt;${suffix}`,
-    )
-    .replace(
-      isJaSource
-        ? /(<text\b[^>]*\bx=")583\.5(" y="187"[^>]*>)(?:&lt;&lt;container&gt;&gt;)(<\/text>)/
-        : /$^/,
-      (_match, prefix, middle, suffix) =>
-        `${prefix}585.5${middle}&lt;&lt;container&gt;&gt;${suffix}`,
-    );
-}
-
 function katanaNormalizeC4ReviewSvgInternal(svg, _request) {
   if (!svg.includes('aria-roledescription="c4"')) {
     return null;
   }
   return katanaNormalizeC4ContainerText(svg);
-}
-
-function katanaNormalizeKnownC4ReviewBounds(svg, source) {
-  const bounds = KATANA_C4_REVIEW_BOUNDS.find((it) => it.source.test(source));
-  if (katanaReviewIsC4ContextSource(source) || katanaReviewIsC4ComponentSource(source)) {
-    return bounds
-      ? katanaAlignC4ContextReviewBySource(
-          katanaSetSvgMaxWidth(
-            katanaSetSvgViewBox(
-              katanaNormalizeC4ContainerText(katanaShiftC4ContainerY(svg)),
-              bounds.viewBox,
-            ),
-            bounds.maxWidth,
-          ),
-          source,
-        )
-      : null;
-  }
-  if (katanaReviewIsC4DynamicSource(source)) {
-    return bounds
-      ? katanaSetSvgMaxWidth(
-          katanaSetSvgViewBox(
-            katanaNormalizeC4ContainerText(katanaShiftC4ContainerY(svg)),
-            bounds.viewBox,
-          ),
-          bounds.maxWidth,
-        )
-      : null;
-  }
-  return bounds
-    ? katanaSetSvgMaxWidth(
-        katanaSetSvgViewBox(
-          katanaNormalizeC4ContainerText(katanaShiftC4ContainerY(svg)),
-          bounds.viewBox,
-        ),
-        bounds.maxWidth,
-      )
-    : null;
 }
 
 function katanaAlignC4ContextReviewBySource(svg, source) {
@@ -616,16 +469,6 @@ function katanaNormalizeQuadrantReviewSvg(svg, request) {
       `fill="${request.text}" stroke="${request.text}"`,
     )
     .replace(/style="stroke-width: 2"/g, 'style="stroke: rgb(136, 136, 136); stroke-width: 2;"');
-}
-
-function katanaNormalizeTimelineReviewSvg(svg) {
-  const config = katanaTimelineReviewConfigFromSvg(svg);
-  return config === null
-    ? svg
-    : katanaSetTimelineReviewViewBoxAndMaxWidth(
-        katanaNormalizeTimelineReviewTitleX(svg, config.titleX, config.baselineX2),
-        config,
-      );
 }
 
 function katanaTimelineReviewConfigFromSvg(svg) {
@@ -718,8 +561,4 @@ function katanaReviewPathAttrs(attributes, color, opacity) {
     attributes,
   );
   return `${cleaned} fill="${color}" stroke="${color}" fill-opacity="${opacity}" stroke-opacity="0.95" style="stroke-width: 2.5;"`;
-}
-
-function katanaSetSvgAttr(attributes, name, value) {
-  return `${katanaRemoveSvgAttr(attributes, name)} ${name}="${value}"`;
 }

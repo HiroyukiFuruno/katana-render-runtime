@@ -1,13 +1,3 @@
-function katanaNormalizeFlowchartFixtureLayout(svg) {
-  const layout = KATANA_FLOWCHART_FIXTURE_LAYOUTS.find((candidate) =>
-    candidate.markers.every((marker) => svg.includes(marker)),
-  );
-  if (!layout) {
-    return svg;
-  }
-  return katanaApplyFlowchartFixtureLayout(svg, layout);
-}
-
 function katanaApplyFlowchartFixtureLayout(svg, layout) {
   const sized = katanaSetSvgViewBox(
     katanaSetSvgDimension(

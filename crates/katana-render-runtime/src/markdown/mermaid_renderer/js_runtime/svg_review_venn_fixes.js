@@ -1,9 +1,3 @@
-function katanaNormalizeVennReviewSvg(svg, request) {
-  return katanaShouldNormalizeVennReviewSvg(svg)
-    ? katanaNormalizeVennReviewTheme(katanaNormalizeVennReviewPaths(svg), request)
-    : svg;
-}
-
 function katanaShouldNormalizeVennReviewSvg(svg) {
   return [svg.includes('aria-roledescription="venn"'), katanaIsRendererScopeVenn(svg)].every(
     Boolean,

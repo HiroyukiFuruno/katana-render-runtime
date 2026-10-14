@@ -1,13 +1,3 @@
-function katanaNormalizeErFixtureLayout(svg) {
-  const layout = KATANA_ER_FIXTURE_LAYOUTS.find((candidate) =>
-    candidate.markers.every((marker) => svg.includes(marker)),
-  );
-  if (!layout) {
-    return svg;
-  }
-  return katanaApplyErFixtureLayout(svg, layout);
-}
-
 function katanaApplyErFixtureLayout(svg, layout) {
   const sized = katanaSetSvgMaxWidth(katanaSetSvgViewBox(svg, layout.viewBox), layout.maxWidth);
   return katanaReplaceErFixtureNodeTransforms(

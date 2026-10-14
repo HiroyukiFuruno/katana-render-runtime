@@ -1,19 +1,3 @@
-function katanaNormalizeBlockFixtureLayout(svg) {
-  const layout = KATANA_BLOCK_FIXTURE_LAYOUTS.find((candidate) =>
-    candidate.markers.every((marker) => svg.includes(marker)),
-  );
-  if (!layout) {
-    return svg;
-  }
-  const sized = katanaSetSvgMaxWidth(katanaSetSvgViewBox(svg, layout.viewBox), layout.maxWidth);
-  return katanaAddBlockRowTextClass(
-    katanaReplaceBlockEdgePaths(
-      katanaReplaceBlockShapes(katanaReplaceBlockNodeTransforms(sized, layout), layout),
-      layout,
-    ),
-  );
-}
-
 function katanaReplaceBlockNodeTransforms(svg, layout) {
   let index = 0;
   return svg.replace(/<g\b[^>]*>/g, (tag) => {

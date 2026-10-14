@@ -5,11 +5,6 @@ function katanaNormalizeTreemapReviewSvg(svg) {
   return katanaNormalizeTreemapValueText(svg);
 }
 
-function katanaNormalizeTreemapViewBox(svg) {
-  const config = katanaTreemapViewBoxConfig(svg);
-  return katanaSetSvgMaxWidth(katanaSetSvgViewBox(svg, config.viewBox), config.maxWidth);
-}
-
 function katanaTreemapViewBoxConfig(svg) {
   if (svg.includes('class="treemapSection section1"')) {
     return { viewBox: "2 27 996 371", maxWidth: "996" };
@@ -28,23 +23,6 @@ function katanaTreemapValueAttributes(attributes) {
   return attributes
     .replace(/font-size:\s*[\d.]+px/g, "font-size: 23px")
     .replace(/fill:\s*lightgrey/g, "fill: lightgrey");
-}
-
-function katanaNormalizeTreemapCacheText(svg) {
-  const hasJapaneseCacheLabel = svg.includes(">キャッシュ</text>");
-  return svg
-    .replace(
-      /<text\b([^>]*class="treemapLabel"[^>]*)>Cache<\/text>/g,
-      katanaTreemapCacheLabelReplacement,
-    )
-    .replace(
-      /<text\b([^>]*class="treemapLabel"[^>]*)>キャッシュ<\/text>/g,
-      katanaTreemapJapaneseCacheLabelReplacement,
-    )
-    .replace(
-      /<text\b([^>]*class="treemapValue"[^>]*x="44\.5"[^>]*)>10<\/text>/g,
-      (_match, attributes) => katanaTreemapCacheValueReplacement(attributes, hasJapaneseCacheLabel),
-    );
 }
 
 function katanaTreemapCacheLabelReplacement(_match, attributes) {

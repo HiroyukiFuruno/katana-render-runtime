@@ -18,14 +18,6 @@ function katanaValidViewBoxValues(values) {
   return [values.length === 4, values.every((value) => Number.isFinite(value))].every(Boolean);
 }
 
-function katanaNormalizedSvgDimensions(svg) {
-  const viewBox = katanaReadViewBox(svg);
-  if (!viewBox) {
-    return null;
-  }
-  return katanaPickSvgDimensions(viewBox, katanaContentBox(svg), svg);
-}
-
 function katanaPickSvgDimensions(viewBox, contentBox, svg) {
   if (!katanaUseContentBox(viewBox, contentBox, svg)) {
     return viewBox;

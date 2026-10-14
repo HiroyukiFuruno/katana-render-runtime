@@ -1,17 +1,3 @@
-function katanaNormalizeC4ContextFullFixtureLayout(svg, source) {
-  if (!katanaIsRuntimeSvg(svg) || !katanaReviewIsC4ContextFullSource(source)) {
-    return svg;
-  }
-  const layout = /[\u3040-\u30ff\u3400-\u9fff]/.test(source)
-    ? KATANA_C4_CONTEXT_FULL_JA_LAYOUT
-    : KATANA_C4_CONTEXT_FULL_EN_LAYOUT;
-  return Object.entries(layout).reduce(
-    (current, [selector, replacements]) =>
-      katanaApplyC4ContextFullFixtureAttribute(current, selector, replacements),
-    svg,
-  );
-}
-
 function katanaApplyC4ContextFullFixtureAttribute(svg, selector, replacements) {
   const [tagName, attributeName] = selector.split(".");
   const values = new Map(replacements);

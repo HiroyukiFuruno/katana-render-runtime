@@ -15,7 +15,8 @@ function katanaPostprocessDrawioSvg(svg) {
   const contentCropApplied = katanaShouldCropDrawioSvgToContent(svg);
   let stackedSketchSwimlaneCropApplied = false;
   if (contentCropApplied) {
-    stackedSketchSwimlaneCropApplied = katanaCropDrawioSvgToContent(svg);
+    // crop helper の大域定義を保ち、描画ごとの関数生成を防ぐ。
+    stackedSketchSwimlaneCropApplied = /*@__NOINLINE__*/ katanaCropDrawioSvgToContent(svg);
   }
   const pageSourceOriginAligned = katanaAlignDrawioPageSvgToSourceOrigin(svg);
   katanaAlignDrawioElevatedSourceCrop(svg, contentCropApplied);
@@ -397,10 +398,6 @@ function katanaDrawioSourceLabelWidth(entry) {
       return String(line).trim().length * fontSize * 0.5;
     }),
   );
-}
-
-function katanaApplyDrawioLeftPadding(svg, padding) {
-  katanaApplyDrawioHorizontalPadding(svg, padding, 0);
 }
 
 function katanaApplyDrawioHorizontalPadding(svg, leftPadding, rightPadding) {

@@ -1,10 +1,3 @@
-function katanaNormalizeMindmapFixtureLayout(svg) {
-  if (!svg.includes('aria-roledescription="mindmap"')) {
-    return svg;
-  }
-  return KATANA_MINDMAP_LAYOUTS.reduce(katanaApplyMindmapFixtureLayout, svg);
-}
-
 function katanaApplyMindmapFixtureLayout(svg, layout) {
   if (!layout.markers.every((marker) => svg.includes(marker))) {
     return svg;

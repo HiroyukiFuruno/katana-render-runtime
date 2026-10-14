@@ -180,10 +180,6 @@ function katanaHasPieViewBoxContext(context) {
   return [context.viewBox, context.contentBox].every(Boolean);
 }
 
-function katanaNeedsPieViewBoxWidth(context) {
-  return katanaPieViewBoxWidth(context.viewBox, context.contentBox) > context.viewBox[2];
-}
-
 function katanaApplyPieViewBox(context) {
   const width = katanaNormalizedPieViewBoxWidth(context.svg, context.viewBox, context.contentBox);
   return katanaSetNormalizedSvgSize(context.svg, [

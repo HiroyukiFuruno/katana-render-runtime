@@ -39,16 +39,6 @@ function katanaNormalizeGitGraphSvg(svg) {
   return katanaNormalizeGitGraphViewBox(svg, katanaReadViewBox(svg), katanaContentBox(svg));
 }
 
-function katanaNormalizeKnownGitGraphViewBox(svg) {
-  const reference = KATANA_GIT_GRAPH_REFERENCE_BOUNDS.find((it) =>
-    it.markers.every((marker) => svg.includes(marker)),
-  );
-  if (!reference) {
-    return svg;
-  }
-  return katanaSetGitGraphReferenceSvgSize(svg, reference.viewBox, reference.maxWidth);
-}
-
 const KATANA_GIT_GRAPH_REFERENCE_BOUNDS = [
   {
     markers: ['class="commit base commit0"', 'class="commit rust-js commit1"'],

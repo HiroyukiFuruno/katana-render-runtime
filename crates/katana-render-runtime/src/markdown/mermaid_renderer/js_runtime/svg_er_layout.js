@@ -108,29 +108,6 @@ function katanaErAttributeBaseX(kind, layout) {
   return layout.right;
 }
 
-function katanaReadErLabelText(node, kind) {
-  const pattern = new RegExp(
-    `<g class="label ${kind}"[\\s\\S]*?<tspan font-style="normal" class="text-inner-tspan" font-weight="normal">([^<]*)<\\/tspan>`,
-  );
-  return node.match(pattern)?.[1] ?? "";
-}
-
-function katanaErTextWidth(text) {
-  const exact = {
-    CUSTOMER: 76.0625,
-    DIAGRAM: 64.625,
-    DOCUMENT: 79.96875,
-    ORDER: 47.796875,
-    ORDER_ITEM: 89.84375,
-    PRODUCT: 68.0625,
-    SECTION: 60.578125,
-  };
-  if (Object.hasOwn(exact, text)) {
-    return exact[text];
-  }
-  return Math.max(1, katanaEstimatedErTextWidth(text));
-}
-
 function katanaEstimatedErTextWidth(text) {
   if (typeof katanaTextWidth === "function") {
     return katanaTextWidth(text) * 1.25;

@@ -1,10 +1,3 @@
-function katanaNormalizeRequirementLocalizedSvg(svg) {
-  if (!katanaIsRequirementLocalizedSvg(svg)) {
-    return svg;
-  }
-  return KATANA_REQUIREMENT_LOCALIZED_LAYOUTS.reduce(katanaApplyRequirementLayoutRule, svg);
-}
-
 function katanaIsRequirementLocalizedSvg(svg) {
   return svg.includes('aria-roledescription="requirement"');
 }

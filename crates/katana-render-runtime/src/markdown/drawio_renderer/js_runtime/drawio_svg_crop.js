@@ -151,13 +151,6 @@ function katanaDrawioCropBoxContainsContent(cropBox, contentBox) {
   ].every(Boolean);
 }
 
-function katanaDrawioCropContentBox(svg) {
-  const boxes = katanaDrawioCropContentElements(svg)
-    .map(katanaDrawioElementBox)
-    .filter(katanaDrawioHasArea);
-  return katanaDrawioUnionBox(boxes) ?? katanaDrawioEmptyContentBox();
-}
-
 function katanaDrawioStackedSketchSwimlaneCropContentBox(
   svg,
   boundaryPaintContext,
@@ -559,19 +552,6 @@ function katanaDrawioTransformPoint(point, matrix) {
     x: a * point.x + c * point.y + e,
     y: b * point.x + d * point.y + f,
   };
-}
-
-function katanaDrawioTranslatedBox(box, translate) {
-  return {
-    x: box.x + translate.x,
-    y: box.y + translate.y,
-    width: box.width,
-    height: box.height,
-  };
-}
-
-function katanaDrawioTranslate(element) {
-  return katanaDrawioParentTranslate(element.parentNode);
 }
 
 function katanaDrawioParentTranslate(node) {

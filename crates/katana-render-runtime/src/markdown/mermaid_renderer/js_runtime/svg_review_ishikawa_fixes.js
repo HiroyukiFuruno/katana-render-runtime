@@ -138,19 +138,6 @@ function katanaApplyIshikawaViewBox(context) {
   return svg;
 }
 
-function katanaNormalizeIshikawaFixtureViewBox(svg) {
-  const fixture = KATANA_ISHIKAWA_FIXTURE_VIEWBOXES.find((candidate) =>
-    candidate.markers.every((marker) => svg.includes(marker)),
-  );
-  if (!fixture) {
-    return svg;
-  }
-  const sized = katanaSetSvgMaxWidth(katanaSetSvgViewBox(svg, fixture.viewBox), fixture.maxWidth);
-  return fixture.shiftedPair && katanaIsRuntimeSvg(svg)
-    ? katanaNormalizeShiftedIshikawaPair(sized, fixture.shiftedPair)
-    : sized;
-}
-
 function katanaNormalizeShiftedIshikawaPair(svg, shiftedPair) {
   const normalized = katanaRewriteBalancedGroups(svg, /<g class="ishikawa-pair">/g, (group) =>
     group.includes(shiftedPair.marker)

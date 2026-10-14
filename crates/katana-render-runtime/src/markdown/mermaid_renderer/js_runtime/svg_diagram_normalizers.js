@@ -34,28 +34,8 @@ function katanaNormalizeArchitectureSvg(svg, request) {
   return svgWithRows;
 }
 
-function katanaNormalizeArchitectureReferenceBounds(svg, source) {
-  const bounds = KATANA_ARCHITECTURE_REFERENCE_BOUNDS.find((it) => it.source.test(source));
-  return bounds
-    ? katanaSetSvgMaxWidth(katanaSetSvgViewBox(svg, bounds.viewBox), bounds.maxWidth)
-    : svg;
-}
-
 function katanaNormalizeArchitectureTextOuterRows(svg) {
   return svg.replace(/class="text-outer-tspan(?! row)"/g, 'class="text-outer-tspan row"');
-}
-
-function katanaNormalizeArchitectureRendererCoordinates(svg, source) {
-  if (/\bservice\s+renderer\(server\)\[(Renderer)\]/.test(source)) {
-    const runtime = svg.includes('id="katana-mermaid-svg-');
-    const shift = runtime ? -0.5 : -0.25;
-    const normalized = katanaShiftRendererArchitectureCoordinates(svg, shift);
-    return runtime ? katanaNormalizeRuntimeArchitectureGroupBox(normalized) : normalized;
-  }
-  if (/\bservice\s+renderer\(server\)\[(レンダラー)\]/.test(source)) {
-    return svg;
-  }
-  return svg;
 }
 
 function katanaNormalizeRuntimeArchitectureGroupBox(svg) {
