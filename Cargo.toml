@@ -47,6 +47,6 @@ xml5ever = "0.40"
 xmltree = "0.12"
 percent-encoding = "2.3"
 cssparser = "0.38"
-taffy = { version = "0.14.0", default-features = false, features = ["std", "taffy_tree", "block_layout", "flexbox", "grid", "content_size", "parse"] }
+taffy = { version = "0.15.0", default-features = false, features = ["std", "taffy_tree", "block_layout", "flexbox", "grid", "content_size", "parse"] }
 unicode-linebreak = "0.1.5"
 unicode-width = "0.2.2"
