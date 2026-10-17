@@ -11,16 +11,19 @@ include = [
     "Cargo.toml",
     "build.rs",
     "assets/fonts/**",
+    "assets/test-fixtures/font-probes/**",
     "src/**/*.rs",
     "src/renderer/backends/html_runtime/*.js",
     "src/markdown/diagram_runtime/generated/*.js",
     "src/markdown/diagram_runtime/generated/*.sha256",
-    "vendor/drawio/32.0.2/drawio.min.js.sha256",
-    "vendor/mermaid/12.1.0/mermaid.min.js.br",
-    "vendor/mermaid/12.1.0/mermaid.min.js.sha256",
+    "vendor/drawio/32.4.1/drawio.min.js.sha256",
+    "vendor/drawio/32.4.1/LICENSE",
+    "vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js.br",
+    "vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js.sha256",
+    "vendor/mermaid/12.2.0-krr.pr6823.1/LICENSE",
     "vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js.sha256",
     "vendor/plantuml/1.2026.8/plantuml.jar.sha256",
-    "vendor/zenuml-core/4.4.1/zenuml.js.sha256",
+    "vendor/zenuml-core/4.7.2/zenuml.js.sha256",
     "src/markdown/generated/zenuml-runtime-assets.bin.br",
     "src/markdown/drawio_renderer/generated/drawio-resources.bin.br",
 ]
@@ -41,9 +44,11 @@ markup5ever = { workspace = true }
 tendril = { workspace = true }
 xml5ever = { workspace = true }
 resvg = { workspace = true }
-skrifa = "0.44"
+skrifa = "^0.44"
 log = "0.4"
 rustybuzz = { workspace = true }
+harfrust = { workspace = true }
+read-fonts = { version = "=0.45.1", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -57,13 +62,22 @@ xmltree = { workspace = true }
 percent-encoding = { workspace = true }
 taffy = { workspace = true }
 cssparser = { workspace = true }
+svgtypes = "=0.16.1"
 unicode-linebreak = { workspace = true }
 unicode-width = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { version = "0.31.3", default-features = false, features = ["fs"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+fontique = { version = "=0.12.0", default-features = false, features = ["std"] }
+
 [build-dependencies]
 brotli-decompressor = { workspace = true }
 
 [dev-dependencies]
+xml = "=1.4.0"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+core-foundation = "=0.10.1"
+core-text = "=22.0.0"
