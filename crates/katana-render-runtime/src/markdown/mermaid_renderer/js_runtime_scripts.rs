@@ -1511,6 +1511,76 @@ globalThis.mermaid = {
     ];
 
     #[test]
+    fn synthetic_geometry_helpers_reject_malformed_inputs() -> Result<(), String> {
+        assert_malformed_state_helpers();
+        assert_malformed_svg_attributes()?;
+        assert_malformed_svg_geometry()
+    }
+
+    fn assert_malformed_state_helpers() {
+        let malformed_state_cases = [
+            (
+                "missing state geometry",
+                assert_state_attributes_preserved("", "0 0 1 1", "1", "translate(0, 0)"),
+            ),
+            (
+                "missing state anchor",
+                assert_state_anchor_preserved("<text/>", Some("start")),
+            ),
+            (
+                "added state anchor",
+                assert_state_anchor_preserved(r#"<text text-anchor="start"/>"#, None),
+            ),
+        ];
+        for (name, result) in malformed_state_cases {
+            assert!(result.is_err(), "{name} should be rejected");
+        }
+    }
+
+    fn assert_malformed_svg_attributes() -> Result<(), String> {
+        let namespaced = synthetic_root_attributes(r#"<svg xmlns:x="urn:test" x:data="value"/>"#)?;
+        assert_eq!(namespaced.get("{urn:test}data"), Some(&"value".to_owned()));
+
+        let malformed_style = {
+            let mut attributes = SyntheticRootAttributes::new();
+            attributes.insert("style".into(), "width: 1px;".into());
+            resize_synthetic_root_attributes(&mut attributes, [0.0, 0.0, 12.0, 13.0])
+        };
+        assert!(malformed_style.is_err());
+
+        let mut valid_style = SyntheticRootAttributes::new();
+        valid_style.insert("style".into(), "max-width: 12px;".into());
+        resize_synthetic_root_attributes(&mut valid_style, [0.0, 0.0, 12.0, 13.0])?;
+        assert_eq!(
+            valid_style.get("style"),
+            Some(&"max-width: 12px;".to_owned())
+        );
+
+        assert!(expected_synthetic_root_attributes("<svg/>").is_err());
+        assert!(synthetic_root_attributes("<g/>").is_err());
+        Ok(())
+    }
+
+    fn assert_malformed_svg_geometry() -> Result<(), String> {
+        assert!(synthetic_er_bottom("<svg/>").is_err());
+        assert!(
+            synthetic_er_bottom(r#"<svg><g class="node default " id="entity-a"/></svg>"#).is_err()
+        );
+
+        let path_document = resvg::usvg::roxmltree::Document::parse(r#"<path d="M0,0 L1,1"/>"#)
+            .map_err(|error| error.to_string())?;
+        assert!(synthetic_er_path_bottom(path_document.root_element()).is_err());
+        let empty_entity_document =
+            resvg::usvg::roxmltree::Document::parse("<g/>").map_err(|error| error.to_string())?;
+        assert!(synthetic_er_local_bottom(empty_entity_document.root_element()).is_err());
+
+        assert!(original_synthetic_svg("return { svg: `<svg>${value}</svg>` };").is_err());
+        assert!(vary_synthetic_child_geometry("<svg/>".into()).is_err());
+        assert!(parse_view_box("0 0 NaN 1").is_err());
+        Ok(())
+    }
+
+    #[test]
     fn removed_fixture_geometry_corrections_preserve_synthetic_svg_geometry() -> Result<(), String>
     {
         for (raw, sources) in FIXTURE_SENSITIVE_GEOMETRY_CASES {

@@ -187,8 +187,14 @@ fn render_and_validate_attestation(
     output: &Path,
     receipt_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let temp_root = output
+        .parent()
+        .ok_or("attestation output parent is missing")?;
     let result = Command::new(env!("CARGO_BIN_EXE_krr"))
         .env_remove("MERMAID_JS")
+        .env("TMPDIR", temp_root)
+        .env("TMP", temp_root)
+        .env("TEMP", temp_root)
         .args(["mermaid", "render", "--input"])
         .arg(input)
         .arg("--output")

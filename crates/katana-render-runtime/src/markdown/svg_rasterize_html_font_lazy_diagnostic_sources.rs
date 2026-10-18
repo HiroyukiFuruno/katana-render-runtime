@@ -22,18 +22,24 @@ pub(in super::super) struct FaceSource {
     pub(in super::super) monospaced: bool,
 }
 pub(super) fn source_record(face: &FaceInfo, mode: Mode) -> Option<(FaceSource, Option<ByteWeak>)> {
-    let (kind, path, weak) = source_metadata(&face.source);
-    let (stamp, bytes_sha256) = if matches!(mode, Mode::Audit) {
-        audited_source(face)?
-    } else {
-        (None, None)
-    };
-    Some((
+    let (mut record, owner) = measured_source_record(face);
+    if matches!(mode, Mode::Audit) {
+        let (stamp, bytes_sha256) = audited_source(face)?;
+        record.stamp = stamp;
+        record.bytes_sha256 = bytes_sha256;
+    }
+    Some((record, owner))
+}
+
+pub(super) fn measured_source_record(face: &FaceInfo) -> (FaceSource, Option<ByteWeak>) {
+    let (kind, path, owner) = source_metadata(&face.source);
+    /* 測定記録は全Sourceのメタデータから構成でき、物理検証だけが失敗し得る。 */
+    (
         FaceSource {
             kind,
             path,
-            stamp,
-            bytes_sha256,
+            stamp: None,
+            bytes_sha256: None,
             index: face.index,
             families: face.families.iter().map(|(name, _)| name.clone()).collect(),
             post_script_name: face.post_script_name.clone(),
@@ -42,8 +48,8 @@ pub(super) fn source_record(face: &FaceInfo, mode: Mode) -> Option<(FaceSource, 
             stretch: format!("{:?}", face.stretch),
             monospaced: face.monospaced,
         },
-        weak,
-    ))
+        owner,
+    )
 }
 fn source_metadata(source: &Source) -> (String, Option<PathBuf>, Option<ByteWeak>) {
     match source {
