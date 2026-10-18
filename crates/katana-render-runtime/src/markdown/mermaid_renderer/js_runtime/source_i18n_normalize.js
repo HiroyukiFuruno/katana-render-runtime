@@ -13,7 +13,6 @@ const KATANA_I18N_SOURCE_NORMALIZERS = {
   erDiagram: katanaNormalizeErSourceI18n,
   quadrantChart: katanaNormalizeQuadrantSourceI18n,
   "architecture-beta": katanaNormalizeBracketLabelSourceI18n,
-  "ishikawa-beta": katanaNormalizeIshikawaSourceI18n,
 };
 
 function katanaNormalizeErSourceI18n(context, source) {

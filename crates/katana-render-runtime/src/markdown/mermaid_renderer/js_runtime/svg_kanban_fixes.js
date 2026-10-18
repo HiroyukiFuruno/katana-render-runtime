@@ -1,14 +1,6 @@
 function katanaNormalizeKanbanLayoutSvg(svg, request) {
-  const layout = katanaKanbanLayoutState(svg);
-  const withNodes = katanaRewriteBalancedGroups(svg, /<g class="node undefined "[^>]*>/g, (group) =>
-    katanaNormalizeKanbanNodeGroup(group, layout),
-  );
-  const withLabels = katanaNormalizeKanbanClusterLabels(withNodes);
-  const withViewBox = katanaNormalizeKanbanViewBox(
-    katanaNormalizeKanbanSectionGroups(withLabels, layout),
-    layout,
-  );
-  return katanaNormalizeKanbanReadableTextSvg(withViewBox, request);
+  // vendor geometryを保持し、既存のlightテーマ配色だけを適用する。
+  return katanaNormalizeKanbanReadableTextSvg(svg, request);
 }
 
 function katanaNormalizeKanbanReadableTextSvg(svg, request) {

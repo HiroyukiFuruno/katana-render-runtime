@@ -60,10 +60,8 @@ function katanaSvgDimensionScale() {
 
 function katanaNormalizeFinalSvg(svg, request) {
   return katanaNormalizeErViewBox(
-    katanaNormalizeIshikawaSvg(
-      katanaEscapeTextMarkers(
-        katanaNormalizeEmptyTextFill(katanaNormalizeFontFamilyAttributes(svg), request),
-      ),
+    katanaEscapeTextMarkers(
+      katanaNormalizeEmptyTextFill(katanaNormalizeFontFamilyAttributes(svg), request),
     ),
   );
 }
@@ -88,7 +86,6 @@ function katanaNormalizeDiagramSpecificSvg(svg, request) {
   normalized = katanaNormalizeSankeySvg(normalized);
   normalized = katanaNormalizeBlockSvg(normalized);
   normalized = katanaNormalizeWardleySvg(normalized, request);
-  normalized = katanaNormalizeIshikawaSvg(normalized);
   normalized = katanaNormalizeZenumlRuntimeSvg(normalized, request);
   // review 補正 helper の大域定義を保ち、描画ごとの関数生成を防ぐ。
   normalized = /*@__NOINLINE__*/ katanaNormalizeReviewFeedbackSvg(normalized, request);

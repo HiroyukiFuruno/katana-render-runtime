@@ -4,7 +4,6 @@ function katanaNormalizeReviewFeedbackSvg(svg, request) {
   normalized = katanaNormalizeGanttReviewSvg(normalized, request);
   normalized = katanaNormalizeQuadrantReviewSvg(normalized, request);
   normalized = katanaNormalizeC4ReviewSvg(normalized, request);
-  normalized = katanaNormalizeIshikawaReviewSvg(normalized);
   normalized = katanaNormalizeTreemapReviewSvg(normalized);
   return normalized;
 }
