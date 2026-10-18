@@ -16,7 +16,9 @@ function parseInnerHtml(source, xmlMode = false) {
 }
 
 function katanaHtmlWithoutComments(source) {
-  return String(source).replace(/<!-->/g, "").replace(/<!--[\s\S]*?-->/g, "");
+  return String(source)
+    .replace(/<!-->/g, "")
+    .replace(/<!--[\s\S]*?-->/g, "");
 }
 
 function appendHtmlToken(stack, match, xmlMode) {
@@ -87,44 +89,38 @@ function parseAttributes(source) {
 }
 
 function decodeHtmlEntities(value) {
-  if (globalThis.__katanaMermaidDiagramType === "block") {
-    return katanaDecodeHtmlEntitiesForBlock(value);
-  }
-  const decoded = String(value)
-    .replace(/&amp;nbsp;/g, "\u00A0")
-    .replace(/&nbsp;/g, "\u00A0")
-    .replace(/&#xa;/gi, "\n")
-    .replace(/&#10;/g, "\n")
-    .replace(/&#160;/g, "\u00A0")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-  return katanaDecodeRemainingHtmlEntities(decoded);
+  return katanaDecodeRemainingHtmlEntities(value);
 }
 
 function katanaDecodeRemainingHtmlEntities(value) {
-  return String(value)
-    .replace(/&#x([0-9a-f]+);/gi, (_match, codePoint) => {
-      return katanaHtmlCodePoint(codePoint, 16, _match);
-    })
-    .replace(/&#([0-9]+);/g, (_match, codePoint) => {
-      return katanaHtmlCodePoint(codePoint, 10, _match);
-    })
-    .replace(/&([a-z][a-z0-9]+);/gi, (match, name) => {
-      return KATANA_HTML_NAMED_ENTITIES[name] ?? match;
-    });
+  return String(value).replace(
+    /&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z][a-z0-9]+));/gi,
+    (match, hexCodePoint, decimalCodePoint, name) => {
+      if (hexCodePoint !== undefined) {
+        return katanaHtmlCodePoint(hexCodePoint, 16, match);
+      }
+      if (decimalCodePoint !== undefined) {
+        return katanaHtmlCodePoint(decimalCodePoint, 10, match);
+      }
+      return Object.hasOwn(KATANA_HTML_NAMED_ENTITIES, name)
+        ? KATANA_HTML_NAMED_ENTITIES[name]
+        : match;
+    },
+  );
 }
 
 function katanaHtmlCodePoint(value, radix, fallback) {
   const codePoint = Number.parseInt(value, radix);
-  return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10FFFF
+  return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
     ? String.fromCodePoint(codePoint)
     : fallback;
 }
 
 const KATANA_HTML_NAMED_ENTITIES = {
+  amp: "&",
+  gt: ">",
+  lt: "<",
+  quot: '"',
   Igrave: "\u00CC",
   Ugrave: "\u00D9",
   Zeta: "\u0396",
@@ -168,18 +164,6 @@ const KATANA_HTML_NAMED_ENTITIES = {
   xi: "\u03BE",
   zwnj: "\u200C",
 };
-
-function katanaDecodeHtmlEntitiesForBlock(value) {
-  return String(value)
-    .replace(/&amp;nbsp;/g, "&nbsp;")
-    .replace(/&#xa;/gi, "\n")
-    .replace(/&#10;/g, "\n")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
 
 class KatanaTextNode extends KatanaNode {
   constructor(value) {

@@ -41,20 +41,27 @@ function katanaIsCssStyleNode(node) {
 }
 
 function katanaCssRuleValue(cssText, node, name) {
-  return (
-    Array.from(cssText.matchAll(/([^{}]+)\{([^{}]+)\}/g))
-      .map((rule) => katanaCssRuleDeclarationValue(rule, node, name))
-      .filter(Boolean)
-      .at(-1) ?? ""
-  );
+  return katanaCssRuleDeclaration(cssText, node, name)?.value ?? "";
 }
 
-function katanaCssRuleDeclarationValue(rule, node, name) {
-  return (
-    [rule]
-      .filter((it) => katanaCssRuleMatchesNode(it[1], node))
-      .map((it) => katanaCssDeclarationValue(it[2], name))[0] ?? ""
-  );
+function katanaCssRuleDeclaration(cssText, node, name) {
+  let selected;
+  for (const rule of cssText.matchAll(/([^{}]+)\{([^{}]+)\}/g)) {
+    if (!katanaCssRuleMatchesNode(rule[1], node)) continue;
+    const declaration = katanaCssDeclaration(rule[2], name);
+    if (declaration && (declaration.priority || !selected?.priority)) selected = declaration;
+  }
+  return selected;
+}
+
+function katanaCascadedStyleValue(node, name, cssText) {
+  const inline = node?.style?.getPropertyValue?.(name) ?? "";
+  if (inline && node?.style?.getPropertyPriority?.(name) === "important") return inline;
+  const declaration = katanaCssRuleDeclaration(cssText, node, name);
+  if (declaration?.priority && node?.style?.getPropertyPriority?.(name) !== "important") {
+    return declaration.value;
+  }
+  return inline || declaration?.value || "";
 }
 
 const KATANA_CSS_ROOT_READERS = [
@@ -63,9 +70,7 @@ const KATANA_CSS_ROOT_READERS = [
 ];
 
 function katanaCssRuleMatchesNode(selectorText, node) {
-  return selectorText
-    .split(",")
-    .some((selector) => katanaCssSelectorMatchesNode(node, selector));
+  return selectorText.split(",").some((selector) => katanaCssSelectorMatchesNode(node, selector));
 }
 
 function katanaCssSelectorMatchesNode(node, selector) {
@@ -113,7 +118,9 @@ function katanaCssSimpleSelectorMatches(node, selector) {
 }
 
 function katanaCssSimpleSelector(selector) {
-  return String(selector).trim().replace(/:{1,2}(?!root\b)[a-zA-Z-]+(?:\([^)]*\))?/g, "");
+  return String(selector)
+    .trim()
+    .replace(/:{1,2}(?!root\b)[a-zA-Z-]+(?:\([^)]*\))?/g, "");
 }
 
 function katanaCssSelectorTagMatches(node, selector) {
@@ -127,7 +134,9 @@ function katanaCssSelectorIdMatches(node, selector) {
 }
 
 function katanaCssSelectorClassesMatch(node, selector) {
-  const classNames = String(node.className ?? "").split(/\s+/).filter(Boolean);
+  const classNames = String(node.className ?? "")
+    .split(/\s+/)
+    .filter(Boolean);
   return Array.from(selector.matchAll(/\.([a-zA-Z0-9_-]+)/g))
     .map((match) => match[1])
     .every((className) => classNames.includes(className));
@@ -144,19 +153,155 @@ function katanaCssSelectorAttributeMatches(node, name, value) {
   return value === undefined ? actual !== null : actual === value;
 }
 
-function katanaCssDeclarationValue(declarations, name) {
-  return (
-    String(declarations)
-      .split(";")
-      .map((declaration) => katanaCssDeclarationEntry(declaration))
-      .find((entry) => entry.name === name)?.value ?? ""
-  );
+function katanaCssDeclaration(declarations, name) {
+  let selected;
+  for (const entry of katanaCssEntries(declarations)) {
+    if (entry.name !== name) continue;
+    if (entry.priority || !selected?.priority) selected = entry;
+  }
+  return selected;
 }
 
-function katanaCssDeclarationEntry(declaration) {
-  const parts = String(declaration).split(":");
-  return {
-    name: String(parts.shift() ?? "").trim(),
-    value: parts.join(":").trim(),
+function katanaOwnCustomPropertyValue(node, name, css) {
+  const inline = node?.style?.getPropertyValue?.(name) ?? "";
+  const priority = node?.style?.getPropertyPriority?.(name);
+  if (inline && priority === "important") return inline;
+  const declaration = katanaCssRuleDeclaration(css, node, name);
+  if (declaration?.priority && priority !== "important") return declaration.value;
+  return inline || declaration?.value;
+}
+
+function katanaCloseCssVariableComponent(state, property, references, stack, active) {
+  const component = [];
+  let member;
+  do {
+    member = stack.pop();
+    active.delete(member);
+    state.checked.add(member);
+    component.push(member);
+  } while (member !== property);
+  if (component.length > 1 || references?.includes(property)) {
+    for (const cyclic of component) state.cyclic.add(cyclic);
+  }
+}
+
+function katanaVisitCssVariableGraph(
+  state,
+  element,
+  css,
+  property,
+  indices,
+  lowLinks,
+  stack,
+  active,
+) {
+  const index = indices.size;
+  indices.set(property, index);
+  lowLinks.set(property, index);
+  stack.push(property);
+  active.add(property);
+  const specified = katanaOwnCustomPropertyValue(element, property, css);
+  state.declarations.set(property, specified);
+  const keyword = globalThis.katanaCssWideKeyword(specified);
+  const references =
+    specified === undefined ||
+    ["initial", "inherit", "unset", "revert", "revert-layer"].includes(keyword)
+      ? []
+      : globalThis.katanaCssVariableReferences(specified);
+  state.dependencies.set(property, references);
+  for (const dependency of references ?? []) {
+    if (state.checked.has(dependency)) continue;
+    if (!indices.has(dependency)) {
+      katanaVisitCssVariableGraph(
+        state,
+        element,
+        css,
+        dependency,
+        indices,
+        lowLinks,
+        stack,
+        active,
+      );
+      lowLinks.set(property, Math.min(lowLinks.get(property), lowLinks.get(dependency)));
+    } else if (active.has(dependency)) {
+      lowLinks.set(property, Math.min(lowLinks.get(property), indices.get(dependency)));
+    }
+  }
+  if (lowLinks.get(property) !== index) return;
+  katanaCloseCssVariableComponent(state, property, references, stack, active);
+}
+
+function katanaResolvedCssVariableValue(node, value, css) {
+  const states = new Map();
+  const read = (element, name) => {
+    if (!element) return undefined;
+    let state = states.get(element);
+    if (!state) {
+      state = {
+        values: new Map(),
+        declarations: new Map(),
+        dependencies: new Map(),
+        checked: new Set(),
+        cyclic: new Set(),
+      };
+      states.set(element, state);
+    }
+    if (state.values.has(name)) return state.values.get(name);
+    if (!state.checked.has(name)) {
+      /* WHY: 値を確定する前に強連結成分全体を無効化し、重なる循環を途中のcacheで切らない。 */
+      const indices = new Map();
+      const lowLinks = new Map();
+      const stack = [];
+      const active = new Set();
+      katanaVisitCssVariableGraph(state, element, css, name, indices, lowLinks, stack, active);
+    }
+    const specified = state.declarations.get(name);
+    const keyword = globalThis.katanaCssWideKeyword(specified);
+    if (
+      specified === undefined ||
+      ["inherit", "unset", "revert", "revert-layer"].includes(keyword)
+    ) {
+      const inherited = read(element.parentNode, name);
+      state.values.set(name, inherited);
+      return inherited;
+    }
+    const computed =
+      keyword === "initial" || state.cyclic.has(name) || !state.dependencies.get(name)
+        ? undefined
+        : globalThis.katanaSubstituteCssVariables(specified, (dependency) =>
+            read(element, dependency),
+          );
+    state.values.set(name, computed);
+    return computed;
   };
+  return globalThis.katanaSubstituteCssVariables(value, (name) => read(node, name));
+}
+
+function katanaResolvedTextFamilyValue(node, value, css) {
+  if (!/var\s*\(/i.test(value) && !value.includes("\\")) return value;
+  /* WHY: custom property は宣言された要素で計算してから継承し、子の変数で親の値を再解釈しない。 */
+  const resolved = katanaResolvedCssVariableValue(node, value, css);
+  if (resolved === undefined || !globalThis.katanaValidCssFontFamily(resolved)) return "";
+  return globalThis.katanaCssWideKeyword(resolved) ?? resolved;
+}
+
+function katanaResolvedNodeTextFamily(node) {
+  const chain = [];
+  for (let current = node; current; current = current.parentNode) chain.push(current);
+  const css = katanaCssText(node);
+  return chain
+    .reverse()
+    .reduce(
+      (family, element) =>
+        katanaInheritedTextValue(
+          katanaResolvedTextFamilyValue(
+            element,
+            katanaOwnTextFontValue(element, "font-family", css),
+            css,
+          ),
+          family,
+          KATANA_DEFAULT_TEXT_FONT.family,
+        ),
+      KATANA_DEFAULT_TEXT_FONT.family,
+    );
 }

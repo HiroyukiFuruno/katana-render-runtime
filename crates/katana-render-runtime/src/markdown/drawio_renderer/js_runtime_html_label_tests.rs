@@ -1,4 +1,5 @@
 use super::DrawioJsRuntimeOps;
+use super::test_support::{assert_render_contains, fake_html_label_bundle, temp_runtime_path};
 use crate::markdown::color_preset::DiagramColorPreset;
 
 #[test]
@@ -9,11 +10,11 @@ fn fake_bundle_applies_html_label_spacing() {
     let source = r#"<mxGraphModel><root><mxCell id="right" value="Right" style="align=right;verticalAlign=top;html=1;fontSize=12;spacing=10;spacingLeft=0;spacingRight=70;" vertex="1" /><mxCell id="left" value="Left" style="align=left;verticalAlign=top;html=1;fontSize=12;spacing=10;spacingLeft=70;" vertex="1" /></root></mxGraphModel>"#;
     let rendered = DrawioJsRuntimeOps::render(source, &path, DiagramColorPreset::light());
 
-    assert_rendered_contains(&rendered, "width: 224px");
-    assert_rendered_contains(&rendered, "padding-top: 160px");
-    assert_rendered_contains(&rendered, "margin-left: 42px");
-    assert_rendered_contains(&rendered, "width: 242px");
-    assert_rendered_contains(&rendered, "margin-left: 616px");
+    assert_render_contains(&rendered, "width: 224px");
+    assert_render_contains(&rendered, "padding-top: 160px");
+    assert_render_contains(&rendered, "margin-left: 42px");
+    assert_render_contains(&rendered, "width: 242px");
+    assert_render_contains(&rendered, "margin-left: 616px");
 }
 
 #[test]
@@ -103,10 +104,10 @@ fn fake_bundle_positions_bottom_uml_actor_html_label_like_drawio() {
     let source = r#"<mxGraphModel><root><mxCell id="actor" value="Third-party payment &lt;br&gt;verification service" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontSize=12;align=center;" vertex="1" /></root></mxGraphModel>"#;
     let rendered = DrawioJsRuntimeOps::render(source, &path, DiagramColorPreset::dark());
 
-    assert_rendered_contains(&rendered, "width: 1px");
-    assert_rendered_contains(&rendered, "padding-top: 67px");
-    assert_rendered_contains(&rendered, "margin-left: 15px");
-    assert_rendered_contains(&rendered, "white-space: nowrap");
+    assert_render_contains(&rendered, "width: 1px");
+    assert_render_contains(&rendered, "padding-top: 67px");
+    assert_render_contains(&rendered, "margin-left: 15px");
+    assert_render_contains(&rendered, "white-space: nowrap");
 }
 
 #[test]
@@ -153,50 +154,20 @@ fn fake_bundle_positions_explicit_left_html_label_like_drawio() {
     );
 }
 
-fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("{prefix}-{}.js", std::process::id()))
+fn fake_bundle() -> String {
+    fake_html_label_bundle("900", "400", FAKE_BUNDLE_BODY, FAKE_BUNDLE_TAIL)
 }
 
-fn assert_rendered_contains(rendered: &Result<String, String>, needle: &str) {
-    assert!(
-        rendered.as_ref().is_ok_and(|svg| svg.contains(needle)),
-        "{rendered:?}"
-    );
-}
-
-fn fake_bundle() -> &'static str {
-    FAKE_BUNDLE
-}
-
-const FAKE_BUNDLE: &str = r#"
-function Graph() {}
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "900");
-  svg.setAttribute("height", "400");
-  svg.setAttribute("viewBox", "0 0 900 400");
-  svg.appendChild(createGroup("right", 34, 145, 312, 95));
+pub(super) const FAKE_BUNDLE_BODY: &str = r#"  svg.appendChild(createGroup("right", 34, 145, 312, 95));
   svg.appendChild(createGroup("left", 536, 265, 330, 95));
   svg.appendChild(createGroup("text", 10, 10, 100, 40));
   svg.appendChild(createGroup("card", 100, 100, 140, 80));
   svg.appendChild(createGroup("actor", 0, 0, 30, 60));
   svg.appendChild(createGroup("math", 250, 100, 220, 120));
   svg.appendChild(createGroup("package", 100, 0, 450, 280));
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-function createGroup(id, x, y, width, height) {
+"#;
+
+pub(super) const FAKE_BUNDLE_TAIL: &str = r#"function createGroup(id, x, y, width, height) {
   const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
   group.setAttribute("data-cell-id", id);
   const shape = document.createElementNS("http://www.w3.org/2000/svg", "g");

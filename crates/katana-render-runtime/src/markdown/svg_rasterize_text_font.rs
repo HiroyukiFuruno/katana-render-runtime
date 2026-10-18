@@ -9,12 +9,20 @@ mod filesystem_policy;
 mod glyph_cache;
 #[path = "svg_rasterize_text_stamp_batch.rs"]
 mod stamp_batch;
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use file_generation::{
+    FileStamp, observe_path_stamp, stamp_path_uncached,
+};
 pub(super) use file_generation::{
     FontSourceGeneration, font_source_generation, font_source_generation_uncached,
     observe_file_face_generation,
 };
 pub(super) use glyph_cache::cached_font_has_char_with_generation;
-pub(super) use stamp_batch::{memo_usable, with_validated_stamp_batch};
+pub(super) use stamp_batch::{memo_usable, with_reusable_stamp_batch, with_validated_stamp_batch};
+
+pub(super) fn with_render_scoped_stamp_batch<T>(operation: impl FnMut() -> T) -> T {
+    stamp_batch::with_render_scoped_stamp_batch(operation)
+}
 #[cfg(test)]
 pub(super) fn file_stamp_durable_reusable(path: &std::path::Path) -> bool {
     file_generation::stamp_path_uncached(path).is_ok_and(|stamp| stamp.durable_reusable())
@@ -34,7 +42,7 @@ pub(super) fn matching_font_face(
     let names = css_font_family_names(font_family);
     let families = names
         .iter()
-        .map(|name| fontdb_family(name))
+        .map(|name| fontdb_family_for_database(database, name))
         .collect::<Vec<_>>();
     database.query(&usvg::fontdb::Query {
         families: &families,
@@ -46,6 +54,21 @@ pub(super) fn matching_font_face(
             usvg::fontdb::Style::Normal
         },
     })
+}
+
+fn fontdb_family_for_database<'a>(
+    database: &'a usvg::fontdb::Database,
+    name: &'a str,
+) -> usvg::fontdb::Family<'a> {
+    let family = fontdb_family(name);
+    let usvg::fontdb::Family::Name(requested) = family else {
+        return family;
+    };
+    database
+        .faces()
+        .flat_map(|face| face.families.iter())
+        .find(|(actual, _)| actual.eq_ignore_ascii_case(requested))
+        .map_or(family, |(actual, _)| usvg::fontdb::Family::Name(actual))
 }
 #[cfg(test)]
 pub(super) fn font_runs(
@@ -186,7 +209,7 @@ fn probe_font_has_char(
         })
         .flatten()
 }
-fn css_font_family_names(value: &str) -> Vec<String> {
+pub(super) fn css_font_family_names(value: &str) -> Vec<String> {
     value
         .split(',')
         .map(str::trim)
@@ -197,13 +220,28 @@ fn css_font_family_names(value: &str) -> Vec<String> {
 pub(super) fn fontdb_family(name: &str) -> usvg::fontdb::Family<'_> {
     match name.to_ascii_lowercase().as_str() {
         "serif" => usvg::fontdb::Family::Serif,
-        "sans-serif" | "system-ui" => usvg::fontdb::Family::SansSerif,
+        "sans-serif" => usvg::fontdb::Family::SansSerif,
+        "system-ui" | "-apple-system" | "blinkmacsystemfont" => system_font_family(),
         "cursive" => usvg::fontdb::Family::Cursive,
         "fantasy" => usvg::fontdb::Family::Fantasy,
         "monospace" => usvg::fontdb::Family::Monospace,
         _ => usvg::fontdb::Family::Name(name),
     }
 }
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn system_font_family() -> usvg::fontdb::Family<'static> {
+    usvg::fontdb::Family::Name("System Font")
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+fn system_font_family() -> usvg::fontdb::Family<'static> {
+    usvg::fontdb::Family::SansSerif
+}
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_font_db_token_tests.rs"]
+mod db_token_tests;
 
 #[cfg(test)]
 mod tests {
@@ -216,6 +254,17 @@ mod tests {
     use resvg::usvg::fontdb::{Database, ID, Source, Stretch, Style, Weight};
     use std::sync::Arc;
 
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[test]
+    fn macos_system_aliases_query_the_system_font_family() {
+        for alias in ["system-ui", "-apple-system", "BlinkMacSystemFont"] {
+            assert!(matches!(
+                super::fontdb_family(alias),
+                usvg::fontdb::Family::Name("System Font")
+            ));
+        }
+    }
+
     fn shaping_face_has_char(database: &Database, face_id: ID, character: char) -> bool {
         database
             .with_face_data(face_id, |data, face_index| {
@@ -223,6 +272,22 @@ mod tests {
                     .is_some_and(|face| face.glyph_index(character).is_some())
             })
             .unwrap_or(false)
+    }
+
+    #[test]
+    fn named_font_lookup_is_case_insensitive() -> Result<(), String> {
+        let database = bundled_font_db();
+        let face_id = super::matching_font_face(&database, "noto sans", 700, false)
+            .ok_or("bundled family must match case-insensitively")?;
+        let face = database
+            .face(face_id)
+            .ok_or_else(|| "matched face is missing from the database".to_owned())?;
+        assert!(
+            face.families
+                .iter()
+                .any(|(family, _)| family.eq_ignore_ascii_case("noto sans"))
+        );
+        Ok(())
     }
 
     fn full_scan_shaping_fallback(

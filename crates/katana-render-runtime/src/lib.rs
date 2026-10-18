@@ -11,20 +11,24 @@
 
 extern crate self as markup5ever_rcdom;
 
+mod css_parser_shared;
 mod html_dom;
 pub mod markdown;
 pub mod renderer;
 mod system;
+mod v8_script;
 
 pub use html_dom::{Handle, Node, NodeData, RcDom, SerializableHandle, WeakHandle};
 pub use markdown::plantuml_renderer::{
     PLANTUML_DOWNLOAD_URL, PLANTUML_JAR_CHECKSUM, PLANTUML_JAR_VERSION, PlantUmlThemeCatalog,
 };
 pub use renderer::{
-    DiagramKind, DrawioRenderer, HTML_BROWSER_MAX_SOURCE_BYTES, HtmlBrowserError, HtmlBrowserFrame,
+    DiagramKind, DrawioRenderer, HTML_BROWSER_MAX_SOURCE_BYTES, HtmlArtifactError,
+    HtmlArtifactProvenance, HtmlArtifactStore, HtmlBrowserError, HtmlBrowserFrame,
     HtmlBrowserInput, HtmlBrowserNavigation, HtmlBrowserNavigationEvent, HtmlBrowserOrigin,
-    HtmlBrowserPixelFormat, HtmlBrowserSession, HtmlBrowserSessionState, HtmlBrowserSource,
-    HtmlBrowserViewport, HtmlRenderInput, HtmlRenderOutput, HtmlRenderer, HtmlRuntime,
+    HtmlBrowserOverflowPolicy, HtmlBrowserPixelFormat, HtmlBrowserScrollMetrics,
+    HtmlBrowserSession, HtmlBrowserSessionState, HtmlBrowserSource, HtmlBrowserViewport,
+    HtmlFrameArtifact, HtmlRenderInput, HtmlRenderOutput, HtmlRenderer, HtmlRuntime,
     HtmlRuntimeError, HtmlRuntimeSession, MathJaxRenderer, MermaidRenderer, PlantUmlRenderer,
     RenderConfig, RenderContext, RenderDiagnostics, RenderError, RenderInput, RenderKind,
     RenderOutput, RenderPolicy, RenderThemeMode, RenderThemeSnapshot, Renderer, RendererProfile,

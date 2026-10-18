@@ -64,13 +64,9 @@ fn assert_runtime_error(
 #[test]
 fn exception_message_reports_empty_try_catch() {
     let _ = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed("init.js", "'ok'")]);
-    let mut isolate = v8::Isolate::new(Default::default());
-    v8::scope!(let handle_scope, &mut isolate);
-    let context = v8::Context::new(handle_scope, Default::default());
-    let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-    v8::tc_scope!(let scope, &mut **context_scope);
-
-    assert_eq!(exception_message(scope), "unknown V8 exception");
+    DiagramV8Runtime::with_empty_try_catch(|scope| {
+        assert_eq!(exception_message(scope), "unknown V8 exception");
+    });
 }
 
 #[test]

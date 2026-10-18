@@ -3,11 +3,14 @@ use katana_render_runtime::markdown::mermaid_renderer;
 use katana_render_runtime::markdown::svg_rasterize::SvgRasterizeOps;
 use katana_render_runtime::markdown::{DiagramBlock, DiagramKind, DiagramResult};
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+#[path = "support/katana_transfer.rs"]
+mod katana_transfer;
+use katana_transfer::{TestResult, env_guard, missing_runtime_path, test_error};
+#[path = "support/katana_env_override.rs"]
+mod katana_env_override;
+use katana_env_override::EnvOverride;
 use std::thread;
 
-type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
-static ENV_LOCK: Mutex<()> = Mutex::new(());
 const RUST_MANAGED_GANTT_MAX_WIDTH: u32 = 1800;
 const JAPANESE_FLOWCHART_SOURCE: &str =
     "flowchart TD\n    A[\u{958b}\u{59cb}] --> B{\u{78ba}\u{8a8d}}\n    B --> C[\u{5b8c}\u{4e86}]";
@@ -205,35 +208,4 @@ fn render_svg(source: String) -> TestResult<String> {
 fn rasterized_dimensions(svg: &str) -> TestResult<(u32, u32)> {
     let image = SvgRasterizeOps::rasterize_svg(svg, 1.0)?;
     Ok((image.width, image.height))
-}
-
-fn missing_runtime_path(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("kdr-{name}-missing-{}.js", std::process::id()))
-}
-
-fn env_guard() -> TestResult<MutexGuard<'static, ()>> {
-    ENV_LOCK
-        .lock()
-        .map_err(|error| test_error(format!("environment lock is poisoned: {error}")))
-}
-
-struct EnvOverride {
-    key: &'static str,
-}
-
-impl EnvOverride {
-    fn set(key: &'static str, value: &std::path::Path) -> Self {
-        unsafe { std::env::set_var(key, value) };
-        Self { key }
-    }
-}
-
-impl Drop for EnvOverride {
-    fn drop(&mut self) {
-        unsafe { std::env::remove_var(self.key) };
-    }
-}
-
-fn test_error(message: impl Into<String>) -> Box<dyn std::error::Error + Send + Sync> {
-    Box::new(std::io::Error::other(message.into()))
 }

@@ -1,7 +1,9 @@
 use super::super::html_document::HtmlDocumentNode;
 use super::constants::MIN_LAYOUT_WIDTH;
 use super::layout::HtmlLayoutRenderer;
-use super::layout_flow_measure::{assign_leaf_height, item_style, leaf_style, measured_widths};
+use super::layout_flow_measure::{
+    assign_leaf_height, item_style, leaf_style_for_flow, measured_widths,
+};
 use super::style::CssStyle;
 use super::types::{DetailsContext, LayoutContext};
 use taffy::prelude::{Display, TaffyTree};
@@ -55,6 +57,7 @@ impl HtmlLayoutRenderer {
             return Ok(y);
         }
         let mut tree = TaffyTree::<()>::new();
+        tree.disable_rounding();
         let nodes = self.build_flow_nodes(&mut tree, &items, width, style, details)?;
         let root = compute_flow_layout(&mut tree, &nodes, style, width, available_height)?;
         self.remeasure_flow_heights(&mut tree, &nodes, &items, width, style, details)?;
@@ -79,7 +82,13 @@ impl HtmlLayoutRenderer {
         for ((item, item_style), measure_width) in items.iter().zip(item_styles).zip(widths) {
             let height = self.measure_flow_node_height(item, measure_width, style, details)?;
             let node = tree
-                .new_leaf(leaf_style(item_style, measure_width, height, width))
+                .new_leaf(leaf_style_for_flow(
+                    item_style,
+                    measure_width,
+                    height,
+                    width,
+                    style,
+                ))
                 .map_err(layout_error)?;
             nodes.push(node);
         }

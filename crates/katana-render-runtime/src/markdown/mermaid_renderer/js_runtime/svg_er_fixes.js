@@ -2,11 +2,11 @@ function katanaNormalizeErSvg(svg) {
   if (!svg.includes('aria-roledescription="er"')) {
     return svg;
   }
-  return katanaNormalizeErFixtureLayout(katanaNormalizeErEdgeLabels(
+  return katanaNormalizeErEdgeLabels(
     katanaCenterErStandaloneLabels(
       katanaCenterErHeaderLabels(katanaMoveErRowsBehindLabels(katanaNormalizeErNodes(svg))),
     ),
-  ));
+  );
 }
 
 function katanaNormalizeErEdgeLabels(svg) {

@@ -211,9 +211,15 @@ function katanaIsRoundSvgShape(node) {
 }
 
 function katanaNodeTranslate(node) {
-  const match = katanaTransformValue(node).match(/translate\(([-\d.]+)[,\s]+([-\d.]+)\)/);
+  const number = "[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][-+]?\\d+)?";
+  const match = katanaTransformValue(node).match(
+    new RegExp(`translate\\(\\s*(${number})(?:[,\\s]+(${number}))?\\s*\\)`),
+  );
   if (match) {
-    return [Number(match[1]), Number(match[2])];
+    const values = [Number(match[1]), Number(match[2] ?? 0)];
+    if (values.every(Number.isFinite)) {
+      return values;
+    }
   }
   return [0, 0];
 }

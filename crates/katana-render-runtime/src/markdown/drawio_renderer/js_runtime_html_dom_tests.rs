@@ -168,22 +168,50 @@ fn fake_bundle_ignores_html_comments_in_labels() {
     );
 }
 
-#[test]
-fn fake_bundle_decodes_double_encoded_named_html_entities() {
-    let path = temp_runtime_path("kdr-drawio-html-entity-unit");
-    let bundle = FAKE_BUNDLE_WITH_FOREIGN_OBJECT.replace(
-        r#"div.textContent = "html label";"#,
+const HTML_ENTITY_SINGLE_DECODE_CASES: [(&str, &str, &str); 3] = [
+    (
         r#"div.innerHTML = "zw&amp;ouml;lf &amp;mdash; &amp;Zeta;&amp;alpha;";"#,
-    );
-    assert!(std::fs::write(&path, bundle).is_ok());
+        "zw&ouml;lf &mdash; &Zeta;&alpha;",
+        "zw&amp;ouml;lf &amp;mdash; &amp;Zeta;&amp;alpha;",
+    ),
+    (
+        r#"div.innerHTML = "zw&ouml;lf &mdash; &Zeta;&alpha;";"#,
+        "zwölf — Ζα",
+        "zwölf — Ζα",
+    ),
+    (
+        r#"div.textContent = "zw&ouml;lf &mdash; &Zeta;&alpha;";"#,
+        "zw&ouml;lf &mdash; &Zeta;&alpha;",
+        "zw&amp;ouml;lf &amp;mdash; &amp;Zeta;&amp;alpha;",
+    ),
+];
 
-    let rendered =
-        DrawioJsRuntimeOps::render("<mxGraphModel />", &path, DiagramColorPreset::light());
+#[test]
+fn fake_bundle_decodes_double_encoded_named_html_entities() -> Result<(), String> {
+    for (case, (assignment, text, serialized)) in
+        HTML_ENTITY_SINGLE_DECODE_CASES.into_iter().enumerate()
+    {
+        let path = temp_runtime_path(&format!("kdr-drawio-html-entity-unit-{case}"));
+        let expected_text = serde_json::to_string(text).map_err(|error| error.to_string())?;
+        let setup = format!(
+            r#"{assignment}
+if (div.textContent !== {expected_text}) throw new Error("HTML entity text mismatch");
+div.setAttribute("data-entity-text", div.textContent);"#,
+        );
+        let bundle =
+            FAKE_BUNDLE_WITH_FOREIGN_OBJECT.replace(r#"div.textContent = "html label";"#, &setup);
+        assert!(std::fs::write(&path, bundle).is_ok());
 
-    assert!(
-        rendered
-            .as_ref()
-            .is_ok_and(|svg| svg.contains("zwölf — Ζα") && !svg.contains("&amp;ouml;")),
-        "{rendered:?}"
-    );
+        let rendered =
+            DrawioJsRuntimeOps::render("<mxGraphModel />", &path, DiagramColorPreset::light());
+        let expected_attribute = format!(r#"data-entity-text="{serialized}""#);
+        let expected_body = format!(">{serialized}<br/>");
+        assert!(
+            rendered.as_ref().is_ok_and(|svg| {
+                svg.contains(&expected_attribute) && svg.contains(&expected_body)
+            }),
+            "assignment={assignment}: {rendered:?}"
+        );
+    }
+    Ok(())
 }

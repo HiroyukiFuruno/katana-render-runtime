@@ -28,10 +28,17 @@ impl InteractiveElementProjection<'_> {
         host_node_id: u64,
         pseudo_element: CssPseudoElement,
         hovered: bool,
+        focused: bool,
+        focus_visible: bool,
         inheritance_ancestors: &[CssAncestor],
     ) -> Option<HtmlDocumentNode> {
-        let (attributes, content) =
-            self.resolve_pseudo_style(pseudo_element, hovered, inheritance_ancestors)?;
+        let (attributes, content) = self.resolve_pseudo_style(
+            pseudo_element,
+            hovered,
+            focused,
+            focus_visible,
+            inheritance_ancestors,
+        )?;
         let slot = self.pseudo_slot(pseudo_element);
         Some(projected_pseudo_node(
             host_node_id,
@@ -46,6 +53,8 @@ impl InteractiveElementProjection<'_> {
         &self,
         pseudo_element: CssPseudoElement,
         hovered: bool,
+        focused: bool,
+        focus_visible: bool,
         inheritance_ancestors: &[CssAncestor],
     ) -> Option<(HtmlAttributes, CssGeneratedContent)> {
         let CssPseudoStyle {
@@ -57,7 +66,11 @@ impl InteractiveElementProjection<'_> {
             ancestors: self.ancestors,
             inheritance_ancestors,
             sibling_index: self.sibling_index,
+            sibling_type_index: self.sibling_type_index,
+            sibling_type_count: self.sibling_type_count,
             hovered,
+            focused,
+            focus_visible,
             pseudo_element,
         })?;
         Some((attributes, content))

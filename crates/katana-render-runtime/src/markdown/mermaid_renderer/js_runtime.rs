@@ -2,14 +2,12 @@ use super::diagram_type::MermaidDiagramType;
 use super::js_runtime_scripts::MermaidRuntimeScripts;
 use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
+use crate::markdown::runtime_assets::{RuntimeBundleCache, RuntimeBundleGuard};
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-
-type RuntimeBundleCache = Mutex<HashMap<PathBuf, Arc<str>>>;
-type RuntimeBundleGuard<'a> = MutexGuard<'a, HashMap<PathBuf, Arc<str>>>;
+use std::path::Path;
+use std::sync::{Arc, Mutex, OnceLock};
 
 static BUNDLE_CACHE: OnceLock<RuntimeBundleCache> = OnceLock::new();
 
@@ -25,6 +23,13 @@ impl MermaidJsRuntimeOps {
         let bundle = read_mermaid_bundle(mermaid_js)?;
         let request_json = request.to_json_value().to_string();
         let scripts = MermaidRuntimeScripts::build(&bundle, &request_json, request.diagram_type);
+        tracing::event!(
+            target: "katana_render_runtime::mermaid_classic_capture",
+            tracing::Level::TRACE,
+            phase = "request",
+            request_json = request_json.as_str(),
+            script_count = scripts.len(),
+        );
         let svg = DiagramV8Runtime::render(&scripts)?;
         rendered_svg(svg)
     }
@@ -60,13 +65,7 @@ impl<'a> MermaidRenderRequest<'a> {
     fn svg_id(source: &str, preset: &DiagramColorPreset) -> String {
         let mut hasher = DefaultHasher::new();
         "mermaid-svg-id-v1".hash(&mut hasher);
-        source.hash(&mut hasher);
-        preset.mermaid_theme.hash(&mut hasher);
-        preset.background.hash(&mut hasher);
-        preset.text.hash(&mut hasher);
-        preset.fill.hash(&mut hasher);
-        preset.stroke.hash(&mut hasher);
-        preset.arrow.hash(&mut hasher);
+        super::hash_mermaid_source_and_preset(&mut hasher, source, preset);
         format!("katana-mermaid-svg-{:016x}", hasher.finish())
     }
 
@@ -116,8 +115,15 @@ fn rendered_svg(svg: String) -> Result<String, String> {
 }
 
 #[cfg(test)]
+#[path = "js_runtime_native_width_tests.rs"]
+mod native_width_tests;
+#[cfg(test)]
 #[path = "js_runtime_reference_score_tests.rs"]
 mod reference_score_tests;
 #[cfg(test)]
 #[path = "js_runtime_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "js_runtime_geometry_contract.rs"]
+mod geometry_contract;

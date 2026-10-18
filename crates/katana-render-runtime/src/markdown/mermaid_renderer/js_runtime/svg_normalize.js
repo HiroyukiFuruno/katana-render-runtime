@@ -86,12 +86,12 @@ function katanaNormalizeDiagramSpecificSvg(svg, request) {
   normalized = katanaNormalizeGitGraphSvg(normalized);
   normalized = katanaNormalizeKanbanSvg(normalized, request);
   normalized = katanaNormalizeSankeySvg(normalized);
-  normalized = katanaNormalizeMindmapSvg(normalized);
   normalized = katanaNormalizeBlockSvg(normalized);
   normalized = katanaNormalizeWardleySvg(normalized, request);
   normalized = katanaNormalizeIshikawaSvg(normalized);
   normalized = katanaNormalizeZenumlRuntimeSvg(normalized, request);
-  normalized = katanaNormalizeReviewFeedbackSvg(normalized, request);
+  // review 補正 helper の大域定義を保ち、描画ごとの関数生成を防ぐ。
+  normalized = /*@__NOINLINE__*/ katanaNormalizeReviewFeedbackSvg(normalized, request);
   return normalized;
 }
 

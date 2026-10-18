@@ -18,22 +18,21 @@ impl StaticHtmlRuntime {
         body_onload_source: Option<&str>,
         document_url: &str,
     ) -> Result<v8::Global<v8::Context>, HtmlRuntimeError> {
-        v8::scope!(let handle_scope, isolate);
-        let context = v8::Context::new(handle_scope, Default::default());
-        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        v8::tc_scope!(let scope, &mut **context_scope);
-        let installer = install_dom_bridge(scope, document_url)?;
-        let mut execute_script =
-            |name: &str, script: &str| evaluate_static_script(scope, name, script, &installer);
-        Self::run_static_scripts(
-            scripts,
-            body_onload_script_index,
-            body_onload_source,
-            ("krr-html-dom-content-loaded", DOM_CONTENT_LOADED_DISPATCH),
-            ("krr-html-window-load", WINDOW_LOAD_DISPATCH),
-            &mut execute_script,
-        )?;
-        Ok(v8::Global::new(scope, context))
+        Self::with_new_context(isolate, |context_scope, context| {
+            v8::tc_scope!(let scope, &mut **context_scope);
+            let installer = install_dom_bridge(scope, document_url)?;
+            let mut execute_script =
+                |name: &str, script: &str| evaluate_static_script(scope, name, script, &installer);
+            Self::run_static_scripts(
+                scripts,
+                body_onload_script_index,
+                body_onload_source,
+                ("krr-html-dom-content-loaded", DOM_CONTENT_LOADED_DISPATCH),
+                ("krr-html-window-load", WINDOW_LOAD_DISPATCH),
+                &mut execute_script,
+            )?;
+            Ok(v8::Global::new(scope, context))
+        })
     }
 
     fn run_static_scripts(

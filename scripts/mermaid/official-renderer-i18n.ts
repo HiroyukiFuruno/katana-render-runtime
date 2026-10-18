@@ -19,7 +19,6 @@ const RUNTIME_SCRIPTS = [
   "svg_er_fixes.js",
   "svg_er_fixture_layout_fixes.js",
   "svg_er_viewbox_fixes.js",
-  "svg_class_layout_fixes.js",
   "svg_class_fixes.js",
   "svg_requirement_localized_fixes.js",
   "svg_visual_fixes.js",

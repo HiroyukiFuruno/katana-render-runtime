@@ -42,12 +42,30 @@ fn measure_samples(
         "sample_count": samples.len(),
         "source_sha256": source_hash,
         "operation_plan_sha256": hex_digest(&fs::read(&options.operation_plan_path)?),
-        "operation": &options.operation_plan.operation,
-        "expected_dom_state_sha256": &options.operation_plan.expected_dom_state_sha256,
+        "operation": options.operation_plan.operation(),
+        "expected_dom_state_sha256": options.operation_plan.expected_dom_state_sha256(),
+        "catalog_condition": catalog_condition(&options.operation_plan),
         "viewport": {"width": viewport.width, "height": viewport.height, "scale": viewport.device_scale_factor},
         "provenance": provenance()?,
         "samples": samples,
     }))
+}
+
+fn catalog_condition(operation_plan: &options::OperationPlan) -> serde_json::Value {
+    match operation_plan {
+        options::OperationPlan::Legacy(_) => serde_json::Value::Null,
+        options::OperationPlan::Catalog(plan) => serde_json::json!({
+            "profile": plan.profile,
+            "condition_id": plan.condition_id,
+            "case_id": plan.case_id,
+            "state": plan.state,
+            "operation_kind": plan.operation_kind,
+            "target_selector": plan.target_selector,
+            "operation_evidence_path": plan.operation_evidence_path,
+            "operation_evidence_sha256": plan.operation_evidence_sha256,
+            "evidence_binary_sha256": plan.evidence_binary_sha256,
+        }),
+    }
 }
 
 fn measure_sample_worker(

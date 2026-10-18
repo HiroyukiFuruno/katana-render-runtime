@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { FixtureRepository } from "./diagram_update_fixtures";
 import {
   type JsonValue,
@@ -13,12 +14,17 @@ import {
   requireNativeRenderInventory,
   type VerifiedNativeRenderBinding,
 } from "./native-render-provenance";
+import { RasterComparisonBinding } from "./raster-comparison-binding";
+import type { JsonInput } from "./raster-json-input";
+import type { RasterPairObservation, RasterRole } from "./raster-production-binding";
 import type { CliParsedOptions } from "./reference_compare_options";
 
 export interface ReferencePair {
   slug: string;
   officialPath: string;
   katanaPath: string;
+  officialSvgPath: string;
+  katanaSvgPath: string;
 }
 
 export interface MermaidFixtureInventory {
@@ -30,6 +36,8 @@ export interface MermaidFixtureInventory {
 
 export class ReferencePairRepository {
   private nativeBindings = new Map<string, VerifiedNativeRenderBinding>();
+  private rasterBinding: RasterComparisonBinding | null = null;
+  private rasterInventory: string[] = [];
 
   constructor(private options: CliParsedOptions) {}
 
@@ -40,9 +48,131 @@ export class ReferencePairRepository {
       this.loadNativeBindings(inventory.expected);
     }
     const pairs = inventory.expected.map((slug) => this.buildPair(`${slug}.png`));
-    for (const pair of pairs) this.validatePair(pair);
+    const verified = pairs.map((pair) => this.validatePair(pair));
+    if (this.options.referenceMode === "strictVendorOriginal") {
+      this.validateRasterProduction(inventory.expected, verified);
+    }
     if (pairs.length === 0) throw new Error("Mermaid comparison has no expected nonempty fixtures");
     return pairs;
+  }
+
+  assertRasterInputsUnchanged() {
+    if (this.options.referenceMode !== "strictVendorOriginal") return;
+    if (this.rasterBinding === null) throw new Error("Strict raster binding was not verified");
+    this.rasterBinding.assertUnchanged();
+    if (!isDeepStrictEqual(this.inventory().expected, this.rasterInventory)) {
+      throw new Error("Strict raster source inventory changed during comparison");
+    }
+    this.assertExactPairInventory(this.options.officialDir, this.rasterInventory, "official");
+    this.assertExactPairInventory(this.options.katanaDir, this.rasterInventory, "candidate");
+  }
+
+  private validateRasterProduction(
+    inventory: string[],
+    verified: Array<{
+      official: ReturnType<typeof verifyMermaidPair>;
+      candidate: ReturnType<typeof verifyMermaidPair>;
+    }>,
+  ) {
+    const configPath = this.options.rasterBindingConfigPath;
+    const configSha256 = this.options.rasterBindingConfigSha256;
+    if (configPath === undefined || configSha256 === undefined) {
+      throw new Error("Strict comparison has no externally pinned raster production bindings");
+    }
+    for (const directory of [
+      this.options.officialDir,
+      this.options.katanaDir,
+      this.options.katanaSvgDir ?? this.options.katanaDir,
+    ]) {
+      const relative = path.relative(fs.realpathSync(directory), fs.realpathSync(configPath));
+      if (
+        relative === "" ||
+        (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+      ) {
+        throw new Error(
+          "Trusted raster comparison config must be outside producer output directories",
+        );
+      }
+    }
+    const binding = RasterComparisonBinding.read(configPath, configSha256, inventory);
+    binding.requireRepositoryRoot(fs.realpathSync(process.cwd()));
+    const svgDirectory = this.options.katanaSvgDir ?? this.options.katanaDir;
+    binding.readObservedFile(path.join(svgDirectory, "render-bindings.json"));
+    for (const role of ["official", "candidate"] as const) {
+      const directory = role === "official" ? this.options.officialDir : this.options.katanaDir;
+      const observations = inventory.map((slug, index) =>
+        this.readRasterObservation(
+          binding,
+          role,
+          slug,
+          verified[index]?.[role],
+          directory,
+          svgDirectory,
+        ),
+      );
+      binding.verifyRole(role, observations);
+    }
+    this.rasterBinding = binding;
+    this.rasterInventory = [...inventory];
+    this.assertRasterInputsUnchanged();
+  }
+
+  private readRasterObservation(
+    binding: RasterComparisonBinding,
+    role: RasterRole,
+    slug: string,
+    manifest: ReturnType<typeof verifyMermaidPair> | undefined,
+    directory: string,
+    svgDirectory: string,
+  ): RasterPairObservation {
+    if (manifest === undefined) throw new Error(`Missing verified raster pair ${slug}`);
+    const publishedManifest = JSON.parse(
+      binding
+        .readPairManifest(role, slug, path.join(directory, `${slug}.pair.json`))
+        .toString("utf8"),
+    ) as JsonInput;
+    if (!isDeepStrictEqual(publishedManifest, manifest))
+      throw new Error(`Raster pair manifest changed: ${role}/${slug}`);
+    for (const asset of manifest.runtimeAssets) {
+      const assetPath = binding.resolveRuntimeAsset(asset.path);
+      if (sha256(binding.readObservedFile(assetPath)) !== asset.sha256) {
+        throw new Error(`Raster runtime asset differs from manifest: ${asset.path}`);
+      }
+    }
+    const sourceSvg = binding.readObservedFile(path.join(directory, `${slug}.svg`));
+    const renderedSvg = binding.readObservedFile(path.join(directory, `${slug}.rendered.svg`));
+    const png = binding.readObservedFile(path.join(directory, `${slug}.png`));
+    if (role === "candidate") binding.readObservedFile(path.join(svgDirectory, `${slug}.svg`));
+    if (this.options.fixturesDir !== undefined)
+      binding.readObservedFile(path.join(this.options.fixturesDir, `${slug}.md`));
+    const capture = binding.captureObservation(role, slug);
+    const config = recordValue(manifest.config, "raster config");
+    const rawSvgSha256 = rawRasterSvgSha(manifest, role);
+    return {
+      slug,
+      role,
+      sourceSvg,
+      renderedSvg,
+      png,
+      publishedPng: binding.readObservedFile(path.join(directory, `${slug}.png`)),
+      pngDimensions: manifest.png,
+      config: manifest.config,
+      manifest: {
+        sourceSvgSha256: manifest.sourceSvgSha256,
+        renderedSvgSha256: manifest.renderedSvgSha256,
+        pngSha256: manifest.pngSha256,
+        configSha256: manifest.configSha256,
+      },
+      rawSvgSha256,
+      stageSvgSha256: manifest.renderedSvgSha256,
+      canonicalSourceSha256: stringValue(
+        config.canonicalSourceSha256,
+        "canonical raster source SHA",
+      ),
+      provenanceSha256: manifest.provenance.sha256,
+      loadedSvgSha256: capture.loadedSvgSha256,
+      capture: capture.capture,
+    };
   }
 
   inventory(): MermaidFixtureInventory {
@@ -90,10 +220,13 @@ export class ReferencePairRepository {
   }
 
   private buildPair(fileName: string): ReferencePair {
+    const slug = path.basename(fileName, ".png");
     return {
-      slug: path.basename(fileName, ".png"),
+      slug,
       officialPath: path.join(this.options.officialDir, fileName),
       katanaPath: path.join(this.options.katanaDir, fileName),
+      officialSvgPath: path.join(this.options.officialDir, `${slug}.svg`),
+      katanaSvgPath: path.join(this.options.katanaSvgDir ?? this.options.katanaDir, `${slug}.svg`),
     };
   }
 
@@ -128,10 +261,7 @@ export class ReferencePairRepository {
       this.validateCanonicalSourceBinding(pair.slug, official, candidate);
       this.validateCaptureContext(pair.slug, official.config, candidate.config);
     }
-    const candidateSvgPath = path.join(
-      this.options.katanaSvgDir ?? this.options.katanaDir,
-      `${pair.slug}.svg`,
-    );
+    const candidateSvgPath = pair.katanaSvgPath;
     if (!fs.existsSync(candidateSvgPath) || fs.lstatSync(candidateSvgPath).isSymbolicLink()) {
       throw new Error(
         `Mermaid fixture inventory missing or unsafe candidate SVG: ${candidateSvgPath}`,
@@ -143,6 +273,7 @@ export class ReferencePairRepository {
     if (candidateSvgSha !== candidate.sourceSvgSha256) {
       throw new Error(`Mermaid candidate SVG differs from rasterized source for ${pair.slug}`);
     }
+    return { official, candidate };
   }
 
   private validateCanonicalSourceBinding(
@@ -261,6 +392,14 @@ export class ReferencePairRepository {
       }
     }
   }
+}
+
+function rawRasterSvgSha(manifest: ReturnType<typeof verifyMermaidPair>, role: RasterRole): string {
+  if (role === "candidate") return manifest.sourceSvgSha256;
+  const document = recordValue(manifest.provenance.document, "raster provenance");
+  const stages = recordValue(document.stages ?? null, "raster stages");
+  const raw = recordValue(stages.rawMermaid ?? null, "raw raster stage");
+  return stringValue(raw.sha256, "raw raster stage SHA");
 }
 
 export function validateStrictOfficialSourceProvenance(input: {

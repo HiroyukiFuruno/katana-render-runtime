@@ -17,7 +17,7 @@ pub(super) fn serialize_embedded_svg(node: &Handle, root_style: Option<&str>) ->
 
 fn serialize_svg_node(node: &Handle, output: &mut String, root: bool, root_style: Option<&str>) {
     match &node.data {
-        NodeData::Text { contents } => output.push_str(&escape_xml(&contents.borrow())),
+        NodeData::Text { contents } => output.push_str(&escape_xml_text(&contents.borrow())),
         NodeData::Element { name, attrs, .. } => {
             let tag = name.local.to_string();
             output.push('<');
@@ -85,10 +85,15 @@ fn matches_ignore_ascii_case(value: &str, expected: &[&str]) -> bool {
 }
 
 fn qualified_attribute_name(attribute: &Attribute) -> String {
-    attribute.name.prefix.as_ref().map_or_else(
-        || attribute.name.local.to_string(),
-        |prefix| format!("{prefix}:{}", attribute.name.local),
-    )
+    attribute
+        .name
+        .prefix
+        .as_ref()
+        .filter(|prefix| !prefix.is_empty())
+        .map_or_else(
+            || attribute.name.local.to_string(),
+            |prefix| format!("{prefix}:{}", attribute.name.local),
+        )
 }
 
 fn push_svg_attribute(output: &mut String, name: &str, value: &str) {
@@ -99,11 +104,16 @@ fn push_svg_attribute(output: &mut String, name: &str, value: &str) {
     output.push('"');
 }
 
-fn escape_xml(value: &str) -> String {
+fn escape_xml_text(value: &str) -> String {
+    /* WHY: XML本文では引用符を実体参照にせず、CSSの文字列表現と復号値を揃える。 */
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+fn escape_xml(value: &str) -> String {
+    escape_xml_text(value)
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
 }
@@ -139,3 +149,7 @@ mod tests {
         assert!(output.contains(format!("x=\"{}\"", EMBEDDED_SVG_X_PLACEHOLDER).as_str()));
     }
 }
+
+#[cfg(test)]
+#[path = "html_document_svg_quoted_style_tests.rs"]
+mod quoted_style_tests;

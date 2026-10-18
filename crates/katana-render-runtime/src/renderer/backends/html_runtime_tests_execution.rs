@@ -30,9 +30,28 @@ fn keeps_unrestricted_host_io_capabilities_unavailable_to_html_scripts() {
     assert_eq!(output.as_deref(), Ok("<p>visible</p>"));
     for binding in ["fetch", "WebSocket", "require", "process", "Deno", "Bun"] {
         assert!(
-            !HTML_RUNTIME_HOST_BINDING_SOURCE.contains(binding),
+            !contains_host_binding_identifier(HTML_RUNTIME_HOST_BINDING_SOURCE, binding),
             "HTML runtime source exposes host binding: {binding}"
         );
+    }
+}
+
+fn contains_host_binding_identifier(source: &str, binding: &str) -> bool {
+    /* WHY: DOMの要件を示すrequires等の文言を、requireのホスト公開と混同しない。 */
+    source
+        .split(|character: char| {
+            !character.is_alphanumeric() && character != '_' && character != '$'
+        })
+        .any(|identifier| identifier == binding)
+}
+
+#[test]
+fn host_binding_source_check_uses_complete_identifiers() {
+    for source in ["requires", "required", "_require", "$require", "require_"] {
+        assert!(!contains_host_binding_identifier(source, "require"));
+    }
+    for source in ["require", "globalThis.require", "'require'", "require()"] {
+        assert!(contains_host_binding_identifier(source, "require"));
     }
 }
 

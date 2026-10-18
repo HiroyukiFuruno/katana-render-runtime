@@ -45,6 +45,20 @@ impl Fixture {
         self.begin_with_format(source, DiagramInputFormat::DiagramSource, "contract-test")
     }
 
+    fn begin_with_captured_input(
+        &self,
+        source: &str,
+    ) -> anyhow::Result<(RenderAttestation, katana_render_runtime::RenderInput)> {
+        let attestation = self.begin(source)?;
+        let input = RenderInputFactory::create(
+            DiagramKind::Mermaid,
+            source.into(),
+            serde_json::Value::Null,
+        );
+        attestation.capture_input(&input)?;
+        Ok((attestation, input))
+    }
+
     fn begin_with_format(
         &self,
         source: &str,
@@ -93,10 +107,7 @@ fn unit_output() -> RenderOutput {
 fn receipt_binds_actual_input_output_files_and_needs_external_exit() -> anyhow::Result<()> {
     let source = "\nclassDiagram\r\n class 動物  \r\n";
     let fixture = Fixture::new(source)?;
-    let attestation = fixture.begin(source)?;
-    let input =
-        RenderInputFactory::create(DiagramKind::Mermaid, source.into(), serde_json::Value::Null);
-    attestation.capture_input(&input)?;
+    let (attestation, input) = fixture.begin_with_captured_input(source)?;
     attestation.complete(&input, &unit_output())?;
     let receipt: serde_json::Value = serde_json::from_slice(&fs::read(&fixture.receipt)?)?;
     assert_receipt_identity(&receipt, source);
@@ -154,13 +165,7 @@ fn stale_read_and_existing_destinations_fail_without_overwrite() -> anyhow::Resu
 #[test]
 fn runtime_drift_prevents_output_and_success_receipt() -> anyhow::Result<()> {
     let fixture = Fixture::new("classDiagram")?;
-    let attestation = fixture.begin("classDiagram")?;
-    let input = RenderInputFactory::create(
-        DiagramKind::Mermaid,
-        "classDiagram".into(),
-        serde_json::Value::Null,
-    );
-    attestation.capture_input(&input)?;
+    let (attestation, input) = fixture.begin_with_captured_input("classDiagram")?;
     fs::write(&fixture.runtime, b"different unit runtime")?;
     assert!(attestation.complete(&input, &unit_output()).is_err());
     assert!(!fixture.output.exists());
@@ -172,13 +177,7 @@ fn runtime_drift_prevents_output_and_success_receipt() -> anyhow::Result<()> {
 #[test]
 fn changed_render_input_snapshot_is_rejected() -> anyhow::Result<()> {
     let fixture = Fixture::new("classDiagram")?;
-    let attestation = fixture.begin("classDiagram")?;
-    let input = RenderInputFactory::create(
-        DiagramKind::Mermaid,
-        "classDiagram".into(),
-        serde_json::Value::Null,
-    );
-    attestation.capture_input(&input)?;
+    let (attestation, input) = fixture.begin_with_captured_input("classDiagram")?;
     fs::write(
         fixture
             .receipt
@@ -195,13 +194,7 @@ fn changed_render_input_snapshot_is_rejected() -> anyhow::Result<()> {
 #[test]
 fn receipt_write_failure_retains_output_and_cannot_claim_completion() -> anyhow::Result<()> {
     let fixture = Fixture::new("classDiagram")?;
-    let attestation = fixture.begin("classDiagram")?;
-    let input = RenderInputFactory::create(
-        DiagramKind::Mermaid,
-        "classDiagram".into(),
-        serde_json::Value::Null,
-    );
-    attestation.capture_input(&input)?;
+    let (attestation, input) = fixture.begin_with_captured_input("classDiagram")?;
     fs::write(&fixture.receipt, b"protected old receipt")?;
     assert!(attestation.complete(&input, &unit_output()).is_err());
     assert_eq!(fs::read(&fixture.receipt)?, b"protected old receipt");
@@ -240,3 +233,59 @@ fn sha256_matches_standard_known_answer() {
 
 #[path = "render_attestation_option_tests.rs"]
 mod option_tests;
+
+#[test]
+fn file_record_rejects_non_regular_and_noncanonical_paths() -> anyhow::Result<()> {
+    let fixture = Fixture::new("path validation")?;
+    let directory_error = match super::FileRecord::read(&fixture.root) {
+        Err(error) => error,
+        Ok(_) => anyhow::bail!("directory accepted as regular file"),
+    };
+    assert!(
+        directory_error
+            .to_string()
+            .contains("attestation requires regular files")
+    );
+
+    let child = fixture.root.join("child");
+    fs::create_dir(&child)?;
+    let noncanonical = child.join("..").join("input.mmd");
+    assert!(noncanonical.is_absolute());
+    assert_ne!(fs::canonicalize(&noncanonical)?, noncanonical);
+    let path_error = match super::FileRecord::read(&noncanonical) {
+        Err(error) => error,
+        Ok(_) => anyhow::bail!("noncanonical file path was accepted"),
+    };
+    assert!(
+        path_error
+            .to_string()
+            .contains("attestation path must be canonical")
+    );
+    Ok(())
+}
+
+#[test]
+fn destination_propagates_other_metadata_errors_and_artifact_directory_must_be_fresh()
+-> anyhow::Result<()> {
+    let fixture = Fixture::new("destination validation")?;
+    let oversized_name = fixture.root.join("x".repeat(300));
+    let metadata_error = match super::validate_destination(&oversized_name) {
+        Err(error) => error,
+        Ok(()) => anyhow::bail!("overlong destination name was accepted"),
+    };
+    assert!(metadata_error.downcast_ref::<std::io::Error>().is_some());
+
+    let artifacts = super::create_artifacts(&fixture.receipt, b"raw source")?;
+    assert_eq!(fs::read(artifacts.join("raw-input.bin"))?, b"raw source");
+    let duplicate_error = match super::create_artifacts(&fixture.receipt, b"replacement") {
+        Err(error) => error,
+        Ok(_) => anyhow::bail!("existing artifact directory was accepted"),
+    };
+    assert!(
+        duplicate_error
+            .to_string()
+            .contains("attestation artifacts must be fresh")
+    );
+    assert_eq!(fs::read(artifacts.join("raw-input.bin"))?, b"raw source");
+    Ok(())
+}

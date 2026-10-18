@@ -1,3 +1,4 @@
+/** @param {string} tag @returns {[number, number]} */
 function katanaTranslate(tag) {
   const match = tag.match(/transform="translate\(([-\d.]+)[,\s]+([-\d.]+)\)/);
   if (match) {
@@ -6,6 +7,7 @@ function katanaTranslate(tag) {
   return [0, 0];
 }
 
+/** @param {string} tag @param {string} name @returns {number | null} */
 function katanaAttrNumber(tag, name) {
   const match = tag.match(new RegExp(`(?:^|\\s)${name}="([^"]+)"`));
   if (!match) {
@@ -14,6 +16,7 @@ function katanaAttrNumber(tag, name) {
   return katanaFiniteAttrNumber(Number(match[1]));
 }
 
+/** @param {number} value @returns {number | null} */
 function katanaFiniteAttrNumber(value) {
   if (Number.isFinite(value)) {
     return value;
@@ -21,6 +24,7 @@ function katanaFiniteAttrNumber(value) {
   return null;
 }
 
+/** @param {string} tag @param {string} name @returns {string | null} */
 function katanaAttrText(tag, name) {
   return tag.match(new RegExp(`(?:^|\\s)${name}="([^"]+)"`))?.[1] ?? null;
 }

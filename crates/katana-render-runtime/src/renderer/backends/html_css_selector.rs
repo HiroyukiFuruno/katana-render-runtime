@@ -1,9 +1,19 @@
 use super::html_css::HtmlAttributes;
 
+#[path = "html_css_selector_attribute.rs"]
+mod attribute;
+#[path = "html_css_selector_compound.rs"]
+mod compound;
 #[path = "html_css_selector_match.rs"]
 mod matching;
+#[path = "html_css_selector_nth.rs"]
+mod nth;
 #[path = "html_css_selector_parse.rs"]
 mod parse;
+
+#[cfg(test)]
+#[path = "html_css_selector_focus_tests.rs"]
+mod focus_tests;
 
 const CLASS_SPECIFICITY: u16 = 10;
 const ID_SPECIFICITY: u16 = 100;
@@ -14,12 +24,23 @@ pub(super) enum CssPseudoElement {
     After,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct CssInteractionState {
+    pub(super) hovered: bool,
+    pub(super) focused: bool,
+    pub(super) focus_visible: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct CssAncestor {
     tag: String,
     attributes: HtmlAttributes,
     sibling_index: usize,
+    sibling_type_index: usize,
+    sibling_type_count: usize,
     hovered: bool,
+    focused: bool,
+    focus_visible: bool,
 }
 
 impl CssAncestor {
@@ -28,22 +49,74 @@ impl CssAncestor {
         Self::new_at(tag, attributes, 1)
     }
 
+    #[cfg(test)]
     pub(super) fn new_at(tag: &str, attributes: &HtmlAttributes, sibling_index: usize) -> Self {
         Self::new_at_state(tag, attributes, sibling_index, false)
     }
 
+    #[cfg(test)]
     pub(super) fn new_at_state(
         tag: &str,
         attributes: &HtmlAttributes,
         sibling_index: usize,
         hovered: bool,
     ) -> Self {
+        Self::new_at_state_with_type(
+            tag,
+            attributes,
+            sibling_index,
+            sibling_index,
+            sibling_index,
+            hovered,
+        )
+    }
+
+    pub(super) fn new_at_state_with_type(
+        tag: &str,
+        attributes: &HtmlAttributes,
+        sibling_index: usize,
+        sibling_type_index: usize,
+        sibling_type_count: usize,
+        hovered: bool,
+    ) -> Self {
         Self {
             tag: tag.to_string(),
             attributes: attributes.clone(),
             sibling_index,
+            sibling_type_index,
+            sibling_type_count,
             hovered,
+            focused: false,
+            focus_visible: false,
         }
+    }
+
+    pub(super) fn new_with_interaction_state(
+        tag: &str,
+        attributes: &HtmlAttributes,
+        sibling_index: usize,
+        sibling_type_index: usize,
+        sibling_type_count: usize,
+        state: CssInteractionState,
+    ) -> Self {
+        Self {
+            tag: tag.to_string(),
+            attributes: attributes.clone(),
+            sibling_index,
+            sibling_type_index,
+            sibling_type_count,
+            hovered: state.hovered,
+            focused: state.focused,
+            focus_visible: state.focus_visible,
+        }
+    }
+
+    pub(super) fn focused(&self) -> bool {
+        self.focused
+    }
+
+    pub(super) fn focus_visible(&self) -> bool {
+        self.focus_visible
     }
 
     pub(super) fn attributes(&self) -> &HtmlAttributes {
@@ -66,17 +139,32 @@ struct CssCompoundSelector {
     attributes: Vec<CssAttributeSelector>,
     root: bool,
     hovered: bool,
+    focused: bool,
+    focus_visible: bool,
     disabled: bool,
     not_disabled: bool,
     checked: bool,
     nth_child: Option<CssNthExpression>,
+    first_of_type: bool,
+    last_of_type: bool,
+    only_of_type: bool,
+    first_child: bool,
+    last_child: bool,
+    only_child: bool,
     pseudo_element: Option<CssPseudoElement>,
 }
 
 #[derive(Debug)]
 struct CssAttributeSelector {
     name: String,
-    value: Option<String>,
+    matching: CssAttributeMatch,
+}
+
+#[derive(Debug)]
+enum CssAttributeMatch {
+    Exists,
+    Equals(String),
+    Prefix(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,50 +222,26 @@ impl CssSelector {
 
 impl CssCompoundSelector {
     fn specificity(&self) -> u16 {
+        let class_specificity = (self.classes.len()
+            + self.attributes.len()
+            + usize::from(self.root)
+            + usize::from(self.hovered)
+            + usize::from(self.focused)
+            + usize::from(self.focus_visible)
+            + usize::from(self.disabled)
+            + usize::from(self.not_disabled)
+            + usize::from(self.checked)
+            + usize::from(self.nth_child.is_some())
+            + usize::from(self.first_of_type)
+            + usize::from(self.last_of_type)
+            + usize::from(self.only_of_type)) as u16
+            + (usize::from(self.first_child)
+                + usize::from(self.last_child)
+                + usize::from(self.only_child)) as u16;
         self.tag.iter().count() as u16
-            + (self.classes.len()
-                + self.attributes.len()
-                + usize::from(self.root)
-                + usize::from(self.hovered)
-                + usize::from(self.disabled)
-                + usize::from(self.not_disabled)
-                + usize::from(self.checked)
-                + usize::from(self.nth_child.is_some())) as u16
-                * CLASS_SPECIFICITY
+            + class_specificity * CLASS_SPECIFICITY
             + self.pseudo_element.iter().count() as u16
             + self.id.iter().count() as u16 * ID_SPECIFICITY
-    }
-}
-
-impl CssNthExpression {
-    fn parse(source: &str) -> Option<Self> {
-        let normalized = source
-            .chars()
-            .filter(|character| !character.is_ascii_whitespace())
-            .collect::<String>()
-            .to_ascii_lowercase();
-        match normalized.as_str() {
-            "odd" => return Some(Self { step: 2, offset: 1 }),
-            "even" => return Some(Self { step: 2, offset: 0 }),
-            _ => {}
-        }
-        let Some((step, offset)) = normalized.split_once('n') else {
-            return normalized
-                .parse::<i32>()
-                .ok()
-                .map(|offset| Self { step: 0, offset });
-        };
-        let step = match step {
-            "" | "+" => 1,
-            "-" => -1,
-            value => value.parse().ok()?,
-        };
-        let offset = if offset.is_empty() {
-            0
-        } else {
-            offset.parse().ok()?
-        };
-        Some(Self { step, offset })
     }
 }
 
@@ -207,6 +271,8 @@ mod tests {
     fn bare_dynamic_pseudo_selectors_parse_without_a_tag_or_class() {
         for source in [
             ":hover",
+            ":focus",
+            ":focus-visible",
             ":disabled",
             ":not(:disabled)",
             ":checked",
@@ -232,13 +298,20 @@ mod tests {
 
     #[test]
     fn selector_parser_rejects_invalid_suffixes_and_attributes() {
-        assert!(CssSelector::parse(".bad!").is_none());
-        assert!(CssSelector::parse("bad!").is_none());
-        assert!(CssSelector::parse("a:focus").is_none());
-        assert!(CssSelector::parse("li:nth-child(broken)").is_none());
-        assert!(CssSelector::parse("li:nth-child(2):nth-child(3)").is_none());
-        assert!(CssSelector::parse("[data-state").is_none());
-        assert!(CssSelector::parse("[data!=ready]").is_none());
+        for selector in [
+            ".bad!",
+            "bad!",
+            "li:nth-child(broken)",
+            "li:nth-child(2):nth-child(3)",
+            "[data-state",
+            "[data!=ready]",
+            "[href^]",
+            "[href^='value' extra]",
+            "[href~='value']",
+            "[href$='value']",
+        ] {
+            assert!(CssSelector::parse(selector).is_none(), "{selector}");
+        }
     }
 
     #[test]
@@ -332,6 +405,20 @@ mod tests {
     }
 
     #[test]
+    fn type_pseudo_classes_use_same_tag_sibling_positions() -> Result<(), String> {
+        let first = CssSelector::parse("span:first-of-type").ok_or("first selector")?;
+        let last = CssSelector::parse("span:last-of-type").ok_or("last selector")?;
+        let only = CssSelector::parse("span:only-of-type").ok_or("only selector")?;
+        assert!(first.matches_at_with_type("span", &Vec::new(), &[], 2, 1, 2));
+        assert!(!first.matches_at_with_type("span", &Vec::new(), &[], 1, 2, 2));
+        assert!(last.matches_at_with_type("span", &Vec::new(), &[], 1, 2, 2));
+        assert!(only.matches_at_with_type("span", &Vec::new(), &[], 1, 1, 1));
+        assert!(!only.matches_at_with_type("span", &Vec::new(), &[], 1, 1, 2));
+        assert_eq!(first.specificity(), 11);
+        Ok(())
+    }
+
+    #[test]
     fn attribute_selector_with_scheme_url_matches_stylesheet_selector() -> Result<(), String> {
         let selector = CssSelector::parse("[href=\"https://example.com\"]")
             .ok_or("attribute selector must parse")?;
@@ -349,6 +436,43 @@ mod tests {
         let attributes = attributes(&[("href", "https://example.com")]);
 
         assert!(selector.matches("a", &attributes, &ancestors));
+        Ok(())
+    }
+
+    #[test]
+    fn attribute_prefix_selector_matches_nonempty_decoded_prefix_only() -> Result<(), String> {
+        let selector =
+            CssSelector::parse("a[href^='#']").ok_or("prefix attribute selector must parse")?;
+        assert!(selector.matches("a", &attributes(&[("href", "#section")]), &[]));
+        assert!(!selector.matches("a", &attributes(&[("href", "section#")]), &[]));
+        assert!(!selector.matches("a", &attributes(&[]), &[]));
+
+        let empty = CssSelector::parse("a[href^='']").ok_or("empty prefix selector must parse")?;
+        assert!(!empty.matches("a", &attributes(&[("href", "section")]), &[]));
+        assert!(!empty.matches("a", &attributes(&[("href", "")]), &[]));
+
+        let escaped_close =
+            CssSelector::parse(r"a[href^='a\]b']").ok_or("quoted closing bracket must parse")?;
+        assert!(escaped_close.matches("a", &attributes(&[("href", "a]bc")]), &[]));
+        let escaped_value =
+            CssSelector::parse(r"a[href^='a\62 ']").ok_or("escaped prefix value must parse")?;
+        assert!(escaped_value.matches("a", &attributes(&[("href", "abc")]), &[]));
+        Ok(())
+    }
+
+    #[test]
+    fn navigation_toc_prefix_selector_matches_descendant_link() -> Result<(), String> {
+        let selector = CssSelector::parse(".sidebar .toc-item[href^='#']")
+            .ok_or("TOC attribute prefix selector must parse")?;
+        let sidebar = [ancestor("nav", &[("class", "sidebar")])];
+        let link = attributes(&[("class", "toc-item"), ("href", "#section")]);
+
+        assert!(selector.matches("a", &link, &sidebar));
+        assert!(!selector.matches(
+            "a",
+            &attributes(&[("class", "toc-item"), ("href", "section")]),
+            &sidebar
+        ));
         Ok(())
     }
 

@@ -151,3 +151,48 @@ fn observed_auto_parser_source_diff_is_kept_in_attestation() -> anyhow::Result<(
     );
     Ok(())
 }
+
+#[test]
+fn attempt_token_without_attestation_is_rejected_before_input_read() {
+    let result = DiagramCommand::new(DiagramKind::Mermaid).run(DiagramAction::Render {
+        source_options: DiagramSourceOptions {
+            attempt_token: Some("coverage-contract".to_string()),
+            ..DiagramSourceOptions::default()
+        },
+        input: PathBuf::from("missing-input-for-attempt-token.mmd"),
+        output: Some(PathBuf::from("unused-output.svg")),
+        runtime: None,
+        theme: None,
+        theme_from: None,
+        theme_mode: None,
+        cache_dir: None,
+    });
+
+    assert!(
+        matches!(result, Err(error) if error.to_string() == "--attempt-token requires --render-attestation")
+    );
+}
+
+#[test]
+fn capture_input_rejects_existing_request_source_without_replacing_it() -> anyhow::Result<()> {
+    let source = "classDiagram";
+    let fixture = Fixture::new(source)?;
+    let attestation = fixture.begin(source)?;
+    let artifacts = fixture.receipt.with_extension("artifacts");
+    let request_source = artifacts.join("request-source.mmd");
+    let protected = b"previous request source";
+    fs::write(&request_source, protected)?;
+    let input =
+        RenderInputFactory::create(DiagramKind::Mermaid, source.into(), serde_json::Value::Null);
+
+    let result = attestation.capture_input(&input);
+    assert!(result.as_ref().err().is_some_and(|error| {
+        error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io_error| io_error.kind() == std::io::ErrorKind::AlreadyExists)
+    }));
+    assert_eq!(fs::read(&request_source)?, protected);
+    assert!(!artifacts.join("render-input.json").exists());
+    fs::remove_dir_all(fixture.root)?;
+    Ok(())
+}

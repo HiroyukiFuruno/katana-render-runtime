@@ -3,6 +3,24 @@ use markup5ever_rcdom::{Handle, NodeData};
 use std::rc::Rc;
 
 impl HtmlDocument {
+    pub(crate) fn element_children(&mut self, node_id: u64) -> Result<Vec<u64>, String> {
+        let node = self.node(node_id)?;
+        if !matches!(node.data, NodeData::Element { .. }) {
+            return Err("element child target is not an element".to_string());
+        }
+        let children = node
+            .children
+            .borrow()
+            .iter()
+            .filter(|child| matches!(child.data, NodeData::Element { .. }))
+            .cloned()
+            .collect::<Vec<_>>();
+        Ok(children
+            .iter()
+            .map(|child| self.register_node(child))
+            .collect())
+    }
+
     pub(crate) fn element_child(
         &mut self,
         node_id: u64,
@@ -56,6 +74,10 @@ impl HtmlDocument {
             .ok_or_else(|| format!("HTML node {node_id} does not exist"))
     }
 
+    pub(in crate::renderer::backends) fn node_id_for_handle(&self, node: &Handle) -> Option<u64> {
+        self.node_ids.get(&(Rc::as_ptr(node) as usize)).copied()
+    }
+
     pub(crate) fn event_path(&self, node_id: u64) -> Result<Vec<u64>, String> {
         let mut current = Some(self.node(node_id)?);
         let mut path = Vec::new();
@@ -72,8 +94,17 @@ impl HtmlDocument {
     }
 
     pub(crate) fn register_subtree(&mut self, node: &Handle) -> u64 {
+        let node_id = self.register_node(node);
+        let children = node.children.borrow().clone();
+        for child in children {
+            self.register_subtree(&child);
+        }
+        node_id
+    }
+
+    fn register_node(&mut self, node: &Handle) -> u64 {
         let pointer = Rc::as_ptr(node) as usize;
-        let node_id = match self.node_ids.get(&pointer) {
+        match self.node_ids.get(&pointer) {
             Some(node_id) => *node_id,
             None => {
                 let node_id = self.next_node_id;
@@ -82,12 +113,7 @@ impl HtmlDocument {
                 self.nodes.insert(node_id, node.clone());
                 node_id
             }
-        };
-        let children = node.children.borrow().clone();
-        for child in children {
-            self.register_subtree(&child);
         }
-        node_id
     }
 }
 

@@ -16,7 +16,11 @@ function katanaVisibleMeasuredBoxAccurate(node) {
 }
 
 function katanaTextElementMeasuredBox(node) {
-  if (node.localName === "text") {
+  // Native class の tspan も自身の font と子 run を解決し、他図の owner 補正は維持する。
+  if (
+    node.localName === "text" ||
+    (node.localName === "tspan" && katanaCanMergeNativeTextOwners())
+  ) {
     return katanaTextElementBox(node);
   }
   return null;
@@ -35,8 +39,15 @@ function katanaDirectMeasuredBox(node) {
 
 function katanaChildTextBox(node) {
   const childBox = katanaUnionBox(katanaVisibleChildBoxes(node));
+  if (katanaIsMermaidClassDiagram() && (node.children ?? []).length > 0) {
+    return childBox;
+  }
   const text = katanaMeasuredNodeText(node, childBox);
   return katanaUnionBox([childBox, katanaOptionalTextBox(node, text)].filter(katanaHasArea));
+}
+
+function katanaIsMermaidClassDiagram() {
+  return ["class", "classdiagram"].includes(globalThis.__katanaMermaidDiagramType);
 }
 
 function katanaOptionalTextBox(node, text) {
@@ -123,9 +134,10 @@ function katanaTextLineValues(node, text, lines) {
 }
 
 function katanaTextLineBox(node, line, index) {
+  if (line.parts?.[0]?.font) return katanaPositionedTextLineBox(line);
   const x = katanaLineValueOrDefault(line.x, katanaNumberAttrOrDefault(node, "x", 0));
   const y = katanaLineValueOrDefault(line.y, katanaTextLineFallbackY(node, index));
-  return katanaAnchoredTextNodeBox(line.node ?? node, line.text, x, y);
+  return katanaAnchoredTextNodeBox(line.node ?? node, line.text, x, y, line.parts);
 }
 
 function katanaLineValueOrDefault(value, fallback) {

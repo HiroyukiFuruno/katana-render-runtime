@@ -16,7 +16,10 @@ function katanaKanbanWrappedLabelLines(labelGroup) {
   if (!katanaKanbanNeedsI18nWrap(text)) {
     return katanaKanbanAsciiLayoutLineCount(text);
   }
-  return Math.max(katanaKanbanOuterLineCount(labelGroup), katanaKanbanMeasuredLineCount(labelGroup));
+  return Math.max(
+    katanaKanbanOuterLineCount(labelGroup),
+    katanaKanbanMeasuredLineCount(labelGroup),
+  );
 }
 
 function katanaNormalizeKanbanLabelGroups(group) {

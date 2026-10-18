@@ -8,6 +8,7 @@ use crate::renderer::backends::html_interactive::types::LayoutResult;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
 };
@@ -108,11 +109,12 @@ fn viewport_report(width: u32, height: u32, scale: f32, entries: Vec<Value>) -> 
 fn capture_entry(source: &HtmlBrowserSource, context: CaptureContext<'_>) -> TestResult<Value> {
     let mut session =
         HtmlInteractiveSession::start(source.clone(), context.viewport).map_err(to_string)?;
-    let (pointer_x, pointer_y) = click_entry(&mut session, context.entry)?;
+    let (pointer_x, pointer_y, pointer_trace) = click_entry(&mut session, context.entry)?;
     assert_fragment(&session, &context.entry.hash)?;
     let prepared = prepare_capture(&mut session, context.entry, context.height)?;
     let mut capture = write_capture(&prepared.frame, &prepared.layout.svg, &context)?;
     capture["pointer"] = json!({ "x": pointer_x, "y": pointer_y });
+    capture["pointerTrace"] = json!(pointer_trace);
     capture["targetTop"] = json!(prepared.target.1 - prepared.frame.scroll_y);
     capture["targetHeight"] = json!(prepared.target.3);
     Ok(capture)
@@ -236,8 +238,8 @@ fn assert_session_layout_state(
     layout: &LayoutResult,
     state: &FrameState,
 ) {
-    assert!((session.scroll_y - state.scroll_y).abs() < 0.01);
-    assert!((session.content_height - state.content_height).abs() < 0.01);
+    assert!((session.scroll_geometry.scroll_y - state.scroll_y).abs() < 0.01);
+    assert!((session.scroll_geometry.content_height - state.content_height).abs() < 0.01);
     assert!((layout.content_height - state.content_height).abs() < 0.01);
     assert_eq!(session.viewport, state.viewport);
 }
@@ -267,12 +269,17 @@ fn write_capture(
 ) -> TestResult<Value> {
     let capture_path = capture_path(context);
     write_png(frame, &capture_path, context)?;
+    let capture_sha256 = Sha256::digest(fs::read(&capture_path).map_err(to_string)?)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let svg_path = capture_path.with_extension("svg");
     let svg_sha256 = write_svg(svg, &svg_path)?;
     Ok(capture_report(
         frame,
         context,
         capture_path,
+        capture_sha256,
         svg_path,
         svg_sha256,
     ))
@@ -309,6 +316,7 @@ fn capture_report(
     frame: &HtmlBrowserFrame,
     context: &CaptureContext<'_>,
     capture_path: PathBuf,
+    capture_sha256: String,
     svg_path: PathBuf,
     svg_sha256: String,
 ) -> Value {
@@ -317,13 +325,17 @@ fn capture_report(
         "hash": format!("#{}", context.entry.hash),
         "scrollY": frame.scroll_y,
         "capturePath": capture_path,
+        "captureSha256": capture_sha256,
         "targetVisible": true,
         "svgPath": svg_path,
         "svgSha256": svg_sha256
     })
 }
 
-fn click_entry(session: &mut HtmlInteractiveSession, entry: &TocEntry) -> TestResult<(f32, f32)> {
+fn click_entry(
+    session: &mut HtmlInteractiveSession,
+    entry: &TocEntry,
+) -> TestResult<(f32, f32, Vec<Value>)> {
     let click = session
         .hit_targets
         .iter()
@@ -331,15 +343,145 @@ fn click_entry(session: &mut HtmlInteractiveSession, entry: &TocEntry) -> TestRe
         .cloned()
         .ok_or_else(|| format!("missing hit target for #{}", entry.hash))?;
     let x = (click.x + click.width / 2.0).max(1.0);
-    let y = (click.y + click.height / 2.0 - session.scroll_y).max(1.0);
-    for input in [
-        HtmlBrowserInput::PointerMove { x, y },
-        HtmlBrowserInput::PointerDown { x, y, button: 0 },
-        HtmlBrowserInput::PointerUp { x, y, button: 0 },
+    let y = (click.y + click.height / 2.0 - session.scroll_geometry.scroll_y).max(1.0);
+    let mut trace = Vec::new();
+    for (kind, input) in [
+        ("move", HtmlBrowserInput::PointerMove { x, y }),
+        ("down", HtmlBrowserInput::PointerDown { x, y, button: 0 }),
+        ("up", HtmlBrowserInput::PointerUp { x, y, button: 0 }),
     ] {
+        let pre = session.latest_frame().ok_or("missing pre-pointer frame")?;
+        let pre_frame = json!({"generation":pre.generation,"scrollY":pre.scroll_y});
         session.dispatch_input(input).map_err(to_string)?;
+        let post = session.latest_frame().ok_or("missing post-pointer frame")?;
+        trace.push(json!({"kind":kind,"targetNodeId":entry.node_id,"x":x,"y":y,"preFrame":pre_frame,"postFrame":{"generation":post.generation,"scrollY":post.scroll_y}}));
     }
-    Ok((x, y))
+    Ok((x, y, trace))
+}
+
+pub(super) fn capture_catalog_all_toc_links(
+    session: &mut HtmlInteractiveSession,
+    output: &Path,
+    width: u32,
+    height: u32,
+    scale: f32,
+) -> TestResult<Vec<Value>> {
+    fs::create_dir_all(output).map_err(to_string)?;
+    let entries = toc_entries(session, width as f32)?;
+    validate_catalog_toc_request(session, &entries, width, height, scale)?;
+    let source = session.source.clone();
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            capture_catalog_toc_link(session, output, width, height, index, entry, &source)
+        })
+        .collect()
+}
+
+fn validate_catalog_toc_request(
+    session: &HtmlInteractiveSession,
+    entries: &[TocEntry],
+    width: u32,
+    height: u32,
+    scale: f32,
+) -> TestResult {
+    let expected = ["a", "b", "c"];
+    if entries.len() != expected.len()
+        || entries
+            .iter()
+            .zip(expected)
+            .any(|(entry, wanted)| entry.hash != wanted)
+    {
+        return Err("catalog all-TOC target inventory differs from #a, #b, #c".into());
+    }
+    let viewport = session.viewport;
+    if viewport.width != width || viewport.height != height || viewport.device_scale_factor != scale
+    {
+        return Err("all-TOC capture viewport differs from the catalog condition".into());
+    }
+    Ok(())
+}
+
+struct CatalogTocClick {
+    hash_before: String,
+    pointer_trace: Vec<Value>,
+    prepared: PreparedCapture,
+}
+
+fn prepare_catalog_toc_click(
+    session: &mut HtmlInteractiveSession,
+    entry: &TocEntry,
+    height: u32,
+) -> TestResult<CatalogTocClick> {
+    let hash_before = current_location_hash(session);
+    let (_, _, pointer_trace) = click_entry(session, entry)?;
+    assert_fragment(session, &entry.hash)?;
+    let prepared = prepare_capture(session, entry, height)?;
+    Ok(CatalogTocClick {
+        hash_before,
+        pointer_trace,
+        prepared,
+    })
+}
+
+fn capture_catalog_toc_link(
+    session: &mut HtmlInteractiveSession,
+    output: &Path,
+    width: u32,
+    height: u32,
+    index: usize,
+    entry: &TocEntry,
+    source: &HtmlBrowserSource,
+) -> TestResult<Value> {
+    let click = prepare_catalog_toc_click(session, entry, height)?;
+    let context = CaptureContext {
+        output,
+        viewport: session.viewport,
+        width,
+        height,
+        index,
+        entry,
+    };
+    let mut record = write_capture(&click.prepared.frame, &click.prepared.layout.svg, &context)?;
+    attach_catalog_toc_evidence(
+        &mut record,
+        &click.prepared.frame,
+        &click.pointer_trace,
+        &click.hash_before,
+        entry,
+        source,
+    );
+    Ok(record)
+}
+
+fn attach_catalog_toc_evidence(
+    record: &mut Value,
+    frame: &HtmlBrowserFrame,
+    pointer_trace: &[Value],
+    hash_before: &str,
+    entry: &TocEntry,
+    source: &HtmlBrowserSource,
+) {
+    record["destination"] = json!(format!("#{}", entry.hash));
+    record["hashBefore"] = json!(hash_before);
+    record["hashAfter"] = json!(format!("#{}", entry.hash));
+    record["scrollY"] = json!(frame.scroll_y);
+    record["frame"] = json!({"generation":frame.generation,"contentHeight":frame.content_height,"scrollY":frame.scroll_y});
+    record["pointerTrace"] = json!(pointer_trace);
+    record["sourceSha256"] = json!(
+        Sha256::digest(source.raw_html.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
+}
+
+fn current_location_hash(session: &HtmlInteractiveSession) -> String {
+    match session.source.origin.url().fragment() {
+        Some(fragment) => format!("#{fragment}"),
+        None => String::new(),
+    }
 }
 
 fn diagnostic_dimension(name: &str, default: u32) -> TestResult<u32> {
@@ -357,9 +499,15 @@ struct TocEntry {
 }
 
 fn toc_entries(session: &mut HtmlInteractiveSession, width: f32) -> TestResult<Vec<TocEntry>> {
+    let no_focused_nodes = HashSet::new();
     let nodes = session
         .runtime
-        .interactive_nodes_at_width_with_hover(width, &session.hovered_nodes)
+        .interactive_nodes_at_width_with_focus(
+            width,
+            &session.hovered_nodes,
+            &no_focused_nodes,
+            &no_focused_nodes,
+        )
         .map_err(to_string)?;
     let mut entries = Vec::new();
     for node in &nodes {

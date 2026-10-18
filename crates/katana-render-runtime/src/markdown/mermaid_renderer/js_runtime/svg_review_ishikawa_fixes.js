@@ -138,39 +138,6 @@ function katanaApplyIshikawaViewBox(context) {
   return svg;
 }
 
-function katanaNormalizeShiftedIshikawaPair(svg, shiftedPair) {
-  const normalized = katanaRewriteBalancedGroups(svg, /<g class="ishikawa-pair">/g, (group) =>
-    group.includes(shiftedPair.marker)
-      ? group.replace(
-          /\b(x|x1|x2)="(-?\d+(?:\.\d+)?)"/g,
-          (_match, name, value) => `${name}="${Number(value) + shiftedPair.delta}"`,
-        )
-      : group,
-  );
-  return normalized.replace(
-    /(<line class="ishikawa-spine" x1=")[^"]+(")/,
-    `$1${shiftedPair.spineX}$2`,
-  );
-}
-
-const KATANA_ISHIKAWA_FIXTURE_VIEWBOXES = [
-  {
-    markers: [">Diagram</tspan>", ">Runtime</tspan>", ">Color</tspan>"],
-    maxWidth: "404.555",
-    viewBox: "-303.555 -40.569 404.555 580.569",
-  },
-  {
-    markers: [">図表品質</tspan>", ">ランタイム</tspan>", ">カラー</tspan>"],
-    maxWidth: "343.402",
-    viewBox: "-259.402 -40.569 343.402 580.569",
-    shiftedPair: {
-      marker: ">カラー</tspan>",
-      delta: 0.87587786363006,
-      spineX: "-239.40158081054688",
-    },
-  },
-];
-
 function katanaIshikawaViewBox(viewBox, contentBox) {
   const left = Math.min(viewBox[0], contentBox[0]);
   const top = Math.min(viewBox[1], contentBox[1] - 2);

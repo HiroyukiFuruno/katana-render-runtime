@@ -8,29 +8,26 @@ const FULL_ROTATION_DEGREES: f32 = 360.0;
 pub(super) struct HtmlLayoutMetrics {
     viewport_width: f32,
     viewport_height: f32,
+    scroll_x: f32,
     scroll_y: f32,
     boxes: HashMap<u64, HtmlLayoutBox>,
 }
 
-#[derive(Clone)]
-struct HtmlLayoutBox {
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    rotation_degrees: f32,
-    intersection_metadata: Option<String>,
-}
-
-impl HtmlDomBridgeState {
-    pub(crate) fn set_layout_metrics(
-        &self,
+impl HtmlLayoutMetrics {
+    fn update_viewport_and_scroll(
+        &mut self,
         viewport_width: f32,
         viewport_height: f32,
-        scroll_y: f32,
-        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
+        scroll_offset: (f32, f32),
     ) {
-        let boxes = boxes
+        self.viewport_width = viewport_width;
+        self.viewport_height = viewport_height;
+        self.scroll_x = scroll_offset.0;
+        self.scroll_y = scroll_offset.1;
+    }
+
+    fn replace_boxes(&mut self, boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>) {
+        self.boxes = boxes
             .into_iter()
             .map(|(node_id, x, y, width, height, rotation_degrees)| {
                 (
@@ -46,12 +43,41 @@ impl HtmlDomBridgeState {
                 )
             })
             .collect();
-        *self.layout_metrics.borrow_mut() = HtmlLayoutMetrics {
-            viewport_width,
-            viewport_height,
-            scroll_y,
-            boxes,
-        };
+    }
+}
+
+#[derive(Clone)]
+struct HtmlLayoutBox {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    rotation_degrees: f32,
+    intersection_metadata: Option<String>,
+}
+
+impl HtmlDomBridgeState {
+    #[cfg(test)]
+    pub(crate) fn set_layout_metrics(
+        &self,
+        viewport_width: f32,
+        viewport_height: f32,
+        scroll_y: f32,
+        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
+    ) {
+        self.set_layout_metrics_xy(viewport_width, viewport_height, (0.0, scroll_y), boxes);
+    }
+
+    pub(crate) fn set_layout_metrics_xy(
+        &self,
+        viewport_width: f32,
+        viewport_height: f32,
+        scroll_offset: (f32, f32),
+        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
+    ) {
+        let mut metrics = self.layout_metrics.borrow_mut();
+        metrics.update_viewport_and_scroll(viewport_width, viewport_height, scroll_offset);
+        metrics.replace_boxes(boxes);
     }
 
     pub(crate) fn set_intersection_metadata(
@@ -69,9 +95,10 @@ impl HtmlDomBridgeState {
     pub(super) fn layout_metrics_json(&self) -> String {
         let metrics = self.layout_metrics.borrow();
         format!(
-            "{{\"width\":{},\"height\":{},\"scrollY\":{}}}",
+            "{{\"width\":{},\"height\":{},\"scrollX\":{},\"scrollY\":{}}}",
             json_number(metrics.viewport_width),
             json_number(metrics.viewport_height),
+            json_number(metrics.scroll_x),
             json_number(metrics.scroll_y),
         )
     }
@@ -82,7 +109,7 @@ impl HtmlDomBridgeState {
             return empty_rect_json();
         };
         let rect = rect.clone().rotated_axis_aligned();
-        let left = rect.x;
+        let left = rect.x - metrics.scroll_x;
         let top = rect.y - metrics.scroll_y;
         let right = left + rect.width;
         let bottom = top + rect.height;
@@ -157,8 +184,7 @@ mod tests {
     use super::{HtmlDomBridgeState, json_number};
     use crate::renderer::backends::html_document::HtmlDocument;
 
-    #[test]
-    fn geometry_is_viewport_relative_and_uses_layout_boxes() {
+    fn geometry_fixture(scroll_y: f32, rotation_degrees: f32) -> (HtmlDomBridgeState, u64) {
         let state = HtmlDomBridgeState::new(HtmlDocument::parse("<p id=target>text</p>"));
         let target = state.document.borrow_mut().get_element_by_id("target");
         assert!(target.is_some());
@@ -167,13 +193,19 @@ mod tests {
         state.set_layout_metrics(
             320.0,
             240.0,
-            80.0,
-            [(node_id, 10.0, 100.0, 40.0, 20.0, 0.0)],
+            scroll_y,
+            [(node_id, 10.0, 100.0, 40.0, 20.0, rotation_degrees)],
         );
+        (state, node_id)
+    }
+
+    #[test]
+    fn geometry_is_viewport_relative_and_uses_layout_boxes() {
+        let (state, node_id) = geometry_fixture(80.0, 0.0);
 
         assert_eq!(
             state.layout_metrics_json(),
-            r#"{"width":320,"height":240,"scrollY":80}"#
+            r#"{"width":320,"height":240,"scrollX":0,"scrollY":80}"#
         );
         assert_eq!(
             state.bounding_client_rect_json(node_id),
@@ -188,17 +220,7 @@ mod tests {
 
     #[test]
     fn rotated_layout_box_uses_an_axis_aligned_client_rectangle() {
-        let state = HtmlDomBridgeState::new(HtmlDocument::parse("<p id=target>text</p>"));
-        let target = state.document.borrow_mut().get_element_by_id("target");
-        assert!(target.is_some());
-        let mut node_ids = target.into_iter().collect::<Vec<_>>();
-        let node_id = node_ids.remove(0);
-        state.set_layout_metrics(
-            320.0,
-            240.0,
-            80.0,
-            [(node_id, 10.0, 100.0, 40.0, 20.0, 90.0)],
-        );
+        let (state, node_id) = geometry_fixture(80.0, 90.0);
 
         assert_eq!(
             state.bounding_client_rect_json(node_id),
@@ -208,21 +230,37 @@ mod tests {
 
     #[test]
     fn half_turn_layout_box_removes_trigonometric_noise() {
-        let state = HtmlDomBridgeState::new(HtmlDocument::parse("<p id=target>text</p>"));
-        let target = state.document.borrow_mut().get_element_by_id("target");
-        assert!(target.is_some());
-        let mut node_ids = target.into_iter().collect::<Vec<_>>();
-        let node_id = node_ids.remove(0);
-        state.set_layout_metrics(
-            320.0,
-            240.0,
-            0.0,
-            [(node_id, 10.0, 100.0, 40.0, 20.0, 180.0)],
-        );
+        let (state, node_id) = geometry_fixture(0.0, 180.0);
 
         assert_eq!(
             state.bounding_client_rect_json(node_id),
             r#"{"x":10,"y":100,"width":40,"height":20,"top":100,"right":50,"bottom":120,"left":10}"#
         );
+    }
+
+    #[test]
+    fn horizontal_scroll_is_applied_once_to_client_geometry_and_metrics() -> Result<(), String> {
+        let state = HtmlDomBridgeState::new(HtmlDocument::parse("<p id=target>text</p>"));
+        let target = state.document.borrow_mut().get_element_by_id("target");
+        let node_id = target
+            .into_iter()
+            .next()
+            .ok_or_else(|| "target node missing".to_string())?;
+        state.set_layout_metrics_xy(
+            320.0,
+            240.0,
+            (30.0, 80.0),
+            [(node_id, 100.0, 100.0, 40.0, 20.0, 0.0)],
+        );
+
+        assert_eq!(
+            state.layout_metrics_json(),
+            r#"{"width":320,"height":240,"scrollX":30,"scrollY":80}"#
+        );
+        assert_eq!(
+            state.bounding_client_rect_json(node_id),
+            r#"{"x":70,"y":20,"width":40,"height":20,"top":20,"right":110,"bottom":40,"left":70}"#
+        );
+        Ok(())
     }
 }

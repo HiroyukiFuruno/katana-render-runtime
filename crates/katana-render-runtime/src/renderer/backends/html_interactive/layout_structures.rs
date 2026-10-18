@@ -30,10 +30,15 @@ impl HtmlLayoutRenderer {
         if style.list_style_none {
             return self.render_container(children, x, y, width, style, DetailsContext::NONE);
         }
-        let current = y + style.margin_top;
-        let x = x + style.margin_left;
-        let width = (width - style.margin_left - style.margin_right).max(MIN_LAYOUT_WIDTH);
-        self.render_list_children(children, x, current, width, style, ordered) + style.margin_bottom
+        let current = y + style.margin_top + style.padding_top + style.border_top_width();
+        let x = x + style.margin_left + style.padding_left + style.border_left_width()
+            - LIST_MARKER_WIDTH;
+        let outer = width - style.margin_left - style.margin_right;
+        let width = (style.content_width(outer) + LIST_MARKER_WIDTH).max(MIN_LAYOUT_WIDTH);
+        self.render_list_children(children, x, current, width, style, ordered)
+            + style.padding_bottom
+            + style.border_bottom_width()
+            + style.margin_bottom
     }
 
     fn render_list_children(
@@ -48,7 +53,8 @@ impl HtmlLayoutRenderer {
         let mut index = 1usize;
         for child in children {
             if let Some((attributes, items)) = list_item(child) {
-                let item_style = CssStyle::from_element("li", attributes, style);
+                let mut item_style = CssStyle::from_element("li", attributes, style);
+                item_style.resolve_text_line_height(items);
                 current = self.render_list_item_contents(
                     items,
                     x,
@@ -209,6 +215,22 @@ mod tests {
         renderer.render_list(&nodes, 0.0, 0.0, 160.0, &style, false);
 
         assert!(!renderer.svg.contains("•"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn list_items_resolve_normal_height_for_their_actual_fonts() {
+        let mut style = CssStyle::browser_default();
+        style.font_family = "-apple-system, Hiragino Sans, sans-serif".to_string();
+        let nodes = [HtmlDocumentNode::Element {
+            node_id: 1,
+            tag: "li".to_string(),
+            attributes: Vec::new(),
+            children: vec![HtmlDocumentNode::Text("日本語".to_string())],
+        }];
+        let mut renderer = HtmlLayoutRenderer::new(viewport(), 0.0, &HashMap::new(), None);
+        let bottom = renderer.render_list(&nodes, 0.0, 0.0, 160.0, &style, true);
+        assert_eq!(bottom, 24.0);
     }
 
     #[test]

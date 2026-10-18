@@ -4,6 +4,8 @@ use katana_render_runtime::{RenderInput, RenderOutput};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
+#[path = "render_attestation_classic.rs"]
+mod classic;
 #[path = "render_attestation_files.rs"]
 mod files;
 #[path = "render_attestation_receipt.rs"]
@@ -57,6 +59,7 @@ pub(super) struct RenderAttestation {
     input_before: FileRecord,
     runtime_before: FileRecord,
     executable_before: FileRecord,
+    classic: Option<classic::ClassicCapture>,
 }
 
 impl RenderAttestation {
@@ -86,6 +89,7 @@ impl RenderAttestation {
             input_before,
             runtime_before,
             executable_before,
+            classic: None,
         })
     }
 
@@ -100,6 +104,20 @@ impl RenderAttestation {
         )
     }
 
+    pub(super) fn capture_render(
+        &mut self,
+        source: &str,
+        render: impl FnOnce() -> anyhow::Result<RenderOutput>,
+    ) -> anyhow::Result<RenderOutput> {
+        ensure!(
+            self.classic.is_none(),
+            "classic render was already captured"
+        );
+        let (output, capture) = classic::capture(&self.artifacts, source, render)?;
+        self.classic = Some(capture);
+        Ok(output)
+    }
+
     pub(super) fn complete(self, input: &RenderInput, output: &RenderOutput) -> anyhow::Result<()> {
         ensure!(
             output.diagnostics.errors.is_empty() && output.diagnostics.warnings.is_empty(),
@@ -111,6 +129,9 @@ impl RenderAttestation {
         );
         self.verify_bindings()?;
         let mut artifacts = input_snapshots(&self.artifacts, input, &self.input_before.sha256)?;
+        if let Some(capture) = &self.classic {
+            artifacts["classicCapture"] = capture.verify()?;
+        }
         write_new(&self.output, output.svg.as_bytes())?;
         let written_output = FileRecord::read(&self.output)?;
         ensure!(

@@ -111,13 +111,7 @@ impl MermaidRenderOps {
         zenuml_plugin_key.hash(&mut hasher);
         mermaid_js.hash(&mut hasher);
         mode.mermaid_cache_profile().hash(&mut hasher);
-        source.hash(&mut hasher);
-        preset.mermaid_theme.hash(&mut hasher);
-        preset.background.hash(&mut hasher);
-        preset.text.hash(&mut hasher);
-        preset.fill.hash(&mut hasher);
-        preset.stroke.hash(&mut hasher);
-        preset.arrow.hash(&mut hasher);
+        super::hash_mermaid_source_and_preset(&mut hasher, source, preset);
         preset.dark_mode.hash(&mut hasher);
         std::env::temp_dir()
             .join("katana_mermaid_cache")

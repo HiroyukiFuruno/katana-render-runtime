@@ -1,29 +1,22 @@
 use super::{
     HtmlBrowserError, HtmlBrowserFrame, HtmlBrowserInput, HtmlBrowserNavigation,
-    HtmlBrowserNavigationEvent, HtmlBrowserSource, HtmlBrowserViewport,
+    HtmlBrowserNavigationEvent, HtmlBrowserScrollMetrics, HtmlBrowserSource, HtmlBrowserViewport,
 };
 use crate::renderer::backends::html_interactive::HtmlInteractiveSession;
+use std::time::Duration;
 
+#[path = "session_types.rs"]
+mod types;
+pub use types::{HtmlBrowserSession, HtmlBrowserSessionState};
+
+const MILLIS_PER_SECOND: f64 = 1_000.0;
+
+#[path = "session_frame_commit.rs"]
+mod frame_commit;
 #[path = "session_shutdown.rs"]
 mod shutdown;
 #[path = "session_sync.rs"]
 mod sync;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HtmlBrowserSessionState {
-    Active,
-    Closed,
-}
-
-pub struct HtmlBrowserSession {
-    source: HtmlBrowserSource,
-    viewport: HtmlBrowserViewport,
-    state: HtmlBrowserSessionState,
-    latest_frame: Option<HtmlBrowserFrame>,
-    frame_update_pending: bool,
-    pending_navigation: Option<HtmlBrowserNavigationEvent>,
-    interactive: Option<HtmlInteractiveSession>,
-}
 
 impl std::fmt::Debug for HtmlBrowserSession {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -50,6 +43,7 @@ impl HtmlBrowserSession {
             viewport,
             state: HtmlBrowserSessionState::Active,
             latest_frame: None,
+            latest_scroll_metrics: None,
             frame_update_pending: false,
             pending_navigation: None,
             interactive: Some(interactive),
@@ -77,12 +71,36 @@ impl HtmlBrowserSession {
     pub fn latest_frame(&self) -> Option<&HtmlBrowserFrame> {
         self.latest_frame.as_ref()
     }
+    /// 最後に公開したframeと同じ世代の論理寸法・スクロール量を返す。
+    pub fn latest_scroll_metrics(&self) -> Option<&HtmlBrowserScrollMetrics> {
+        self.latest_scroll_metrics.as_ref()
+    }
+    /// 画素と同じ世代のmetricsを借用し、更新の未取得状態は変更しない。
+    pub fn latest_frame_with_metrics(
+        &self,
+    ) -> Option<(&HtmlBrowserFrame, &HtmlBrowserScrollMetrics)> {
+        let (frame, metrics) = (
+            self.latest_frame.as_ref()?,
+            self.latest_scroll_metrics.as_ref()?,
+        );
+        (frame.generation == metrics.generation).then_some((frame, metrics))
+    }
     pub fn take_frame_update(&mut self) -> Option<&HtmlBrowserFrame> {
         if !self.frame_update_pending {
             return None;
         }
         self.frame_update_pending = false;
         self.latest_frame.as_ref()
+    }
+    /// 未取得のframe/metricsを一緒に取得する。frame単独の取得と消費状態を共有する。
+    pub fn take_frame_update_with_metrics(
+        &mut self,
+    ) -> Option<(&HtmlBrowserFrame, &HtmlBrowserScrollMetrics)> {
+        if !self.frame_update_pending || self.latest_frame_with_metrics().is_none() {
+            return None;
+        }
+        self.frame_update_pending = false;
+        self.latest_frame_with_metrics()
     }
     pub fn take_navigation(&mut self) -> Option<HtmlBrowserNavigationEvent> {
         self.pending_navigation.take()
@@ -96,27 +114,29 @@ impl HtmlBrowserSession {
         navigation.source.validate()?;
         self.source = navigation.source;
         self.latest_frame = None;
+        self.latest_scroll_metrics = None;
         self.frame_update_pending = false;
         self.pending_navigation = None;
         /* WHY: A replacement session must be the sole owner of its V8 isolate. */
         self.interactive = None;
-        self.interactive = Some(HtmlInteractiveSession::start(
-            self.source.clone(),
-            self.viewport,
-        )?);
-        self.sync_interactive_state()
+        let result = (|| {
+            self.interactive = Some(HtmlInteractiveSession::start(
+                self.source.clone(),
+                self.viewport,
+            )?);
+            self.sync_interactive_state()
+        })();
+        self.close_on_failure(result)
     }
 
+    /// ビューポートを変更して、新しいフレーム状態を公開する。
+    ///
+    /// 有効なビューポートで描画または同期が失敗した場合、古いフレームと入力状態の
+    /// 不一致を避けるためセッションを閉じる。無効なビューポートは変更せず、Activeを保つ。
     pub fn resize(&mut self, viewport: HtmlBrowserViewport) -> Result<(), HtmlBrowserError> {
         self.ensure_active()?;
         viewport.validate()?;
-        let interactive = self
-            .interactive
-            .as_mut()
-            .ok_or(HtmlBrowserError::RuntimeNotStarted)?;
-        interactive.resize(viewport)?;
-        self.viewport = viewport;
-        self.sync_interactive_state()
+        self.resize_or_close_on_failure(viewport)
     }
 
     pub fn refresh_frame(&mut self) -> Result<(), HtmlBrowserError> {
@@ -126,6 +146,19 @@ impl HtmlBrowserSession {
             .as_mut()
             .ok_or(HtmlBrowserError::RuntimeNotStarted)?;
         interactive.refresh_frame()?;
+        self.sync_interactive_state()
+    }
+
+    /// Advances the deterministic HTML timer clock and publishes the resulting frame.
+    ///
+    /// The host owns wall-clock policy; this method never starts a background timer thread.
+    pub fn advance_time(&mut self, elapsed: Duration) -> Result<(), HtmlBrowserError> {
+        self.ensure_active()?;
+        let interactive = self
+            .interactive
+            .as_mut()
+            .ok_or(HtmlBrowserError::RuntimeNotStarted)?;
+        interactive.advance_time(elapsed.as_secs_f64() * MILLIS_PER_SECOND)?;
         self.sync_interactive_state()
     }
 
@@ -141,22 +174,14 @@ impl HtmlBrowserSession {
     }
 
     fn accept_frame(&mut self, frame: HtmlBrowserFrame) -> Result<(), HtmlBrowserError> {
-        self.ensure_active()?;
-        if frame.origin != self.source.origin {
-            return Err(HtmlBrowserError::FrameOriginMismatch {
-                expected: self.source.origin.as_str().to_owned(),
-                actual: frame.origin.as_str().to_owned(),
-            });
-        }
-        if let Some(latest) = &self.latest_frame
-            && frame.generation <= latest.generation
-        {
-            return Err(HtmlBrowserError::StaleFrameGeneration {
-                latest: latest.generation,
-                received: frame.generation,
-            });
-        }
+        Self::validate_frame(
+            self.state,
+            &self.source.origin,
+            self.latest_frame.as_ref(),
+            &frame,
+        )?;
         self.latest_frame = Some(frame);
+        self.latest_scroll_metrics = None;
         self.frame_update_pending = true;
         Ok(())
     }
@@ -169,8 +194,52 @@ impl HtmlBrowserSession {
 }
 
 #[cfg(test)]
+mod shared_input_test_support {
+    use super::{HtmlBrowserInput, HtmlBrowserSession};
+
+    pub(super) fn dispatch_primary_click(
+        session: &mut HtmlBrowserSession,
+        coordinate: f32,
+    ) -> Result<(), String> {
+        for input in [
+            HtmlBrowserInput::PointerDown {
+                x: coordinate,
+                y: coordinate,
+                button: 0,
+            },
+            HtmlBrowserInput::PointerUp {
+                x: coordinate,
+                y: coordinate,
+                button: 0,
+            },
+        ] {
+            session
+                .dispatch_input(input)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
 #[path = "session_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "session_scroll_metrics_tests.rs"]
+mod scroll_metrics_tests;
+
+#[cfg(test)]
+#[path = "session_scroll_axis_clip_tests.rs"]
+mod scroll_axis_clip_tests;
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "session_input_font_tests.rs"]
+mod input_font_tests;
+
+#[cfg(test)]
+#[path = "session_timer_tests.rs"]
+mod timer_tests;
 
 #[cfg(test)]
 #[path = "session_requirements_tests.rs"]
@@ -183,3 +252,27 @@ mod fragment_tests;
 #[cfg(test)]
 #[path = "session_state_tests.rs"]
 mod state_tests;
+
+#[cfg(test)]
+#[path = "session_table_layout_tests.rs"]
+mod table_layout_tests;
+
+#[cfg(test)]
+#[path = "session_flex_cross_size_tests.rs"]
+mod flex_cross_size_tests;
+
+#[cfg(test)]
+#[path = "session_svg_style_tests.rs"]
+mod svg_style_tests;
+
+#[cfg(test)]
+#[path = "session_frame_clone_tests.rs"]
+mod frame_clone_tests;
+
+#[cfg(test)]
+#[path = "session_frame_reuse_tests.rs"]
+mod frame_reuse_tests;
+
+#[cfg(test)]
+#[path = "session_resize_failure_tests.rs"]
+mod resize_failure_tests;

@@ -84,6 +84,7 @@ mod tests {
     use super::{DiagramV8Runtime, HtmlDocument, StaticHtmlRuntime};
     use crate::renderer::backends::HtmlBrowserSource;
     use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
+    use crate::renderer::backends::html_runtime_lifecycle_tests::LATER_BODY_ONLOAD_CASES;
 
     fn must_result<T, E>(result: Result<T, E>) -> T {
         assert!(result.is_ok());
@@ -157,49 +158,6 @@ mod tests {
         );
     }
 
-    const LATER_BODY_ONLOAD_CASES: &[(&str, &str, &str)] = &[
-        (
-            r#""#,
-            r#"<body onload="document.getElementById('status').textContent = 'second'">"#,
-            "first",
-        ),
-        (
-            r#"window.onload = () => document.getElementById('status').textContent = 'author';"#,
-            r#"<body onload="document.getElementById('status').textContent = 'first'">"#,
-            "author",
-        ),
-        (
-            r#"document.body.removeAttribute('onload');"#,
-            r#"<body onload="document.getElementById('status').textContent = 'second'"><script>document.body.removeAttribute('onload');</script><body onload="document.getElementById('status').textContent = 'third'">"#,
-            "third",
-        ),
-        (
-            r#"document.body.removeAttribute('onload');"#,
-            r#"<template><body onload="document.getElementById('status').textContent = 'second'"></template><select><body onload="document.getElementById('status').textContent = 'second'"></select>"#,
-            "Waiting",
-        ),
-        (
-            r#"document.body.removeAttribute('onload'); document.body.getAttribute = () => 'spoof'; document.body.setAttribute = () => {}; Object.defineProperty(document, 'body', { get: () => null }); document.querySelector = () => null; globalThis.__krr_dom = () => null;"#,
-            r#"<body onload="document.getElementById('status').textContent = 'second'">"#,
-            "second",
-        ),
-        (
-            r#"const savedFunction = Function; const savedString = String; const savedApply = Reflect.apply; const statusCaptured = document.getElementById('status'); document.body.removeAttribute('onload'); globalThis.__krrInstallStaticBodyLoadHandler = () => {}; globalThis.Function = () => null; globalThis.String = () => 'spoof'; Reflect.apply = () => null;"#,
-            r#"<body onload="statusCaptured.textContent = 'second'"><script>globalThis.Function = savedFunction; globalThis.String = savedString; Reflect.apply = savedApply;</script>"#,
-            "second",
-        ),
-        (
-            r#"const savedMapGet = Map.prototype.get; const savedMapSet = Map.prototype.set; const savedMapDelete = Map.prototype.delete; const savedWeakGet = WeakMap.prototype.get; const savedWeakSet = WeakMap.prototype.set; const statusCaptured = document.getElementById('status'); document.body.removeAttribute('onload'); Map.prototype.get = () => undefined; Map.prototype.set = () => {}; Map.prototype.delete = () => {}; WeakMap.prototype.get = () => undefined; WeakMap.prototype.set = () => {};"#,
-            r#"<body onload="statusCaptured.textContent = 'second'"><script>Map.prototype.get = savedMapGet; Map.prototype.set = savedMapSet; Map.prototype.delete = savedMapDelete; WeakMap.prototype.get = savedWeakGet; WeakMap.prototype.set = savedWeakSet;</script>"#,
-            "second",
-        ),
-        (
-            r#"document.body.removeAttribute('onload'); window.authorCalls = 0; globalThis.__krrInstallStaticBodyLoadHandler = () => { window.authorCalls += 1; };"#,
-            r#"<body onload="document.getElementById('status').textContent = `second:${window.authorCalls}`"><script>__krrInstallStaticBodyLoadHandler('author-source', true);</script>"#,
-            "second:1",
-        ),
-    ];
-
     #[test]
     fn interactive_later_duplicate_body_onload_preserves_live_parser_state() {
         let first = "document.getElementById('status').textContent = 'first'";
@@ -236,6 +194,30 @@ mod tests {
     fn scriptless_image_onerror_uses_the_runtime_lifecycle_dispatch() {
         let snapshot = must_result(StaticHtmlRuntime.render(
             r#"<p id=status>Waiting</p><img src="data:image/png;base64,!" onerror="document.getElementById('status').textContent = 'Ready'">"#,
+        ));
+
+        assert!(
+            snapshot.contains(r#"<p id="status">Ready</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn image_lifecycle_callback_can_add_an_iframe_for_the_same_window_load() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<p id=status>Waiting</p><img id=image src="data:image/png;base64,!" onerror="const frame = document.createElement('iframe'); frame.setAttribute('data-krr-local-frame', ''); frame.onload = () => document.getElementById('status').textContent = 'Ready'; document.body.appendChild(frame)">"#,
+        ));
+
+        assert!(
+            snapshot.contains(r#"<p id="status">Ready</p>"#),
+            "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn iframe_lifecycle_callback_can_add_an_image_for_the_same_window_load() {
+        let snapshot = must_result(StaticHtmlRuntime.render(
+            r#"<p id=status>Waiting</p><iframe id=frame data-krr-local-frame onload="const image = document.createElement('img'); image.src = 'data:image/png;base64,!'; image.onerror = () => document.getElementById('status').textContent = 'Ready'; document.body.appendChild(image)"></iframe>"#,
         ));
 
         assert!(
@@ -423,6 +405,33 @@ mod tests {
             Err(HtmlRuntimeError::DomBridge(message))
                 if message.starts_with("invalid document URL:")
         ));
+    }
+
+    #[test]
+    fn public_xhr_rejections_report_completed_status() {
+        let snapshot = must_result(
+            must_result(StaticHtmlRuntime.start(
+            r#"<p id=post></p><p id=get></p><script>
+              function probe(method, id) {
+                const request = new XMLHttpRequest();
+                request.open(method, 'https://example.test/data.txt');
+                request.send();
+                document.getElementById(id).textContent = `${request.status}:${request.statusText}:${request.readyState}`;
+              }
+              probe('POST', 'post');
+              probe('GET', 'get');
+            </script>"#,
+            ))
+            .snapshot(),
+        );
+        assert!(
+            snapshot.contains("0:dynamic request method is not allowed: POST:4"),
+            "{snapshot}"
+        );
+        assert!(
+            snapshot.contains("0:dynamic requests require an interactive session:4"),
+            "{snapshot}"
+        );
     }
 
     #[test]

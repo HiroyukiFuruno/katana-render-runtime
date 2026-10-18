@@ -1,3 +1,4 @@
+pub use super::scroll_metrics::{HtmlBrowserOverflowPolicy, HtmlBrowserScrollMetrics};
 use super::{HtmlBrowserError, HtmlBrowserOrigin, HtmlBrowserViewport};
 use serde::{Deserialize, Serialize};
 
@@ -60,9 +61,10 @@ impl HtmlBrowserFrame {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{HtmlBrowserOrigin, HtmlBrowserPixelFormat, HtmlBrowserViewport};
-
+    use super::{
+        HtmlBrowserError, HtmlBrowserFrame, HtmlBrowserOrigin, HtmlBrowserOverflowPolicy,
+        HtmlBrowserPixelFormat, HtmlBrowserScrollMetrics, HtmlBrowserViewport,
+    };
     #[test]
     fn frame_rejects_invalid_buffer_sizes() {
         let origin = origin();
@@ -139,6 +141,75 @@ mod tests {
     }
 
     #[test]
+    fn scroll_metrics_round_content_for_maximum_offsets_and_scrollbars() {
+        let metrics = metrics(
+            2.0,
+            (80.6, 60.4),
+            (10.0, 5.0),
+            (
+                HtmlBrowserOverflowPolicy::Auto,
+                HtmlBrowserOverflowPolicy::Scroll,
+            ),
+        );
+
+        assert_eq!(metrics.viewport_width, 50.0);
+        assert_eq!(metrics.viewport_height, 40.0);
+        assert_eq!(metrics.max_scroll_x(), 31.0);
+        assert_eq!(metrics.max_scroll_y(), 20.0);
+        assert!(metrics.horizontal_scrollbar_visible());
+        assert!(metrics.vertical_scrollbar_visible());
+    }
+
+    #[test]
+    fn clipped_axis_has_no_range_or_scrollbar() {
+        let metrics = metrics(
+            1.0,
+            (200.0, 160.0),
+            (0.0, 0.0),
+            (
+                HtmlBrowserOverflowPolicy::Clip,
+                HtmlBrowserOverflowPolicy::Hidden,
+            ),
+        );
+
+        assert_eq!(metrics.max_scroll_x(), 0.0);
+        assert_eq!(metrics.max_scroll_y(), 80.0);
+        assert!(!metrics.horizontal_scrollbar_visible());
+        assert!(!metrics.vertical_scrollbar_visible());
+    }
+
+    #[test]
+    fn scroll_metrics_reject_nonfinite_and_inconsistent_values() {
+        let viewport = must(HtmlBrowserViewport::new(100, 80, 1.0));
+        assert_eq!(
+            HtmlBrowserScrollMetrics::new(
+                1,
+                viewport,
+                (f32::NAN, 80.0),
+                (0.0, 0.0),
+                (
+                    HtmlBrowserOverflowPolicy::Auto,
+                    HtmlBrowserOverflowPolicy::Auto,
+                ),
+            ),
+            Err(HtmlBrowserError::InvalidViewport)
+        );
+        assert_eq!(
+            HtmlBrowserScrollMetrics::new(
+                1,
+                viewport,
+                (100.0, 80.0),
+                (101.0, 0.0),
+                (
+                    HtmlBrowserOverflowPolicy::Auto,
+                    HtmlBrowserOverflowPolicy::Auto,
+                ),
+            ),
+            Err(HtmlBrowserError::InvalidInputCoordinates)
+        );
+    }
+
+    #[test]
     #[should_panic(
         expected = "unexpected test error: browser viewport dimensions must be non-zero"
     )]
@@ -159,5 +230,20 @@ mod tests {
 
     fn fail(message: String) -> ! {
         std::panic::resume_unwind(Box::new(message))
+    }
+
+    fn metrics(
+        device_scale_factor: f32,
+        content: (f32, f32),
+        offset: (f32, f32),
+        overflow: (HtmlBrowserOverflowPolicy, HtmlBrowserOverflowPolicy),
+    ) -> HtmlBrowserScrollMetrics {
+        must(HtmlBrowserScrollMetrics::new(
+            7,
+            must(HtmlBrowserViewport::new(100, 80, device_scale_factor)),
+            content,
+            offset,
+            overflow,
+        ))
     }
 }

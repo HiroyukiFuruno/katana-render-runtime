@@ -49,7 +49,24 @@ fn install_location(
     evaluate(
         scope,
         "krr-html-location",
-        &format!("globalThis.location = Object.freeze({location});"),
+        &format!(
+            "let __krrLocationValue = {location};
+            globalThis.location = Object.freeze(Object.defineProperties({{}},
+                Object.fromEntries(Object.keys(__krrLocationValue).map(key =>
+                    [key, {{enumerable:true, get:() => __krrLocationValue[key]}}]))));"
+        ),
+    )
+}
+
+pub(super) fn update_location(
+    scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>,
+    document_url: &str,
+) -> Result<(), HtmlRuntimeError> {
+    let location = location_value(document_url)?;
+    evaluate(
+        scope,
+        "krr-html-location-update",
+        &format!("__krrLocationValue = {location};"),
     )
 }
 

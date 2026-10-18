@@ -101,6 +101,9 @@ fn is_html_tag(node: &Handle, expected: &str) -> bool {
 }
 
 fn load_script(loader: &HtmlSubresourceLoader, node: &Handle) -> Option<String> {
+    if !crate::renderer::backends::html_dom_helpers::script_is_executable(node) {
+        return None;
+    }
     attribute(node, "src")
         .map(|reference| load_text(loader, "script", reference).map(|(_, source)| source))
         .unwrap_or_else(|| Some(text_content(node)))
@@ -123,10 +126,12 @@ mod tests {
         values.remove(0)
     }
 
-    #[test]
-    fn body_onload_after_an_inline_iframe_keeps_the_iframe_script_before_it() {
+    fn inline_frame_scripts(
+        html: &str,
+        child_html: &str,
+    ) -> (Vec<HtmlDocumentScript>, Option<usize>) {
         let source = must_result(HtmlBrowserSource::new(
-            r#"<iframe id=frame data-krr-local-frame></iframe><body></body><body onload="window.onload = parent">"#,
+            html,
             "https://example.test/index.html",
         ));
         let loader = HtmlSubresourceLoader::new(&source);
@@ -137,7 +142,7 @@ mod tests {
                 .ok_or("frame must exist"),
         );
         let frame = must_result(document.node(frame));
-        let mut child = HtmlDocument::parse(r#"<script id=child>window.onload = child;</script>"#);
+        let mut child = HtmlDocument::parse(child_html);
         let child_script = must_result(
             child
                 .get_element_by_id("child")
@@ -146,7 +151,15 @@ mod tests {
         let child_script = must_result(child.node(child_script));
         frame.children.borrow_mut().push(child_script);
 
-        let (scripts, body_onload_script_index) = load_scripts(&loader, &document);
+        load_scripts(&loader, &document)
+    }
+
+    #[test]
+    fn body_onload_after_an_inline_iframe_keeps_the_iframe_script_before_it() {
+        let (scripts, body_onload_script_index) = inline_frame_scripts(
+            r#"<iframe id=frame data-krr-local-frame></iframe><body></body><body onload="window.onload = parent">"#,
+            r#"<script id=child>window.onload = child;</script>"#,
+        );
 
         assert_eq!(script_sources(&scripts), ["window.onload = child;"]);
         assert_eq!(body_onload_script_index, Some(1));
@@ -154,28 +167,10 @@ mod tests {
 
     #[test]
     fn body_onload_before_an_inline_iframe_runs_before_the_iframe_script() {
-        let source = must_result(HtmlBrowserSource::new(
+        let (scripts, body_onload_script_index) = inline_frame_scripts(
             r#"<body onload="window.onload = body"><iframe id=frame data-krr-local-frame></iframe>"#,
-            "https://example.test/index.html",
-        ));
-        let loader = HtmlSubresourceLoader::new(&source);
-        let mut document = HtmlDocument::parse(&source.raw_html);
-        let frame = must_result(
-            document
-                .get_element_by_id("frame")
-                .ok_or("frame must exist"),
+            r#"<script id=child>window.onload = child;</script>"#,
         );
-        let frame = must_result(document.node(frame));
-        let mut child = HtmlDocument::parse(r#"<script id=child>window.onload = child;</script>"#);
-        let child_script = must_result(
-            child
-                .get_element_by_id("child")
-                .ok_or("child script must exist"),
-        );
-        let child_script = must_result(child.node(child_script));
-        frame.children.borrow_mut().push(child_script);
-
-        let (scripts, body_onload_script_index) = load_scripts(&loader, &document);
 
         assert_eq!(script_sources(&scripts), ["window.onload = child;"]);
         assert_eq!(body_onload_script_index, Some(0));
@@ -198,28 +193,10 @@ mod tests {
 
     #[test]
     fn foster_parented_iframe_keeps_parser_position_for_body_onload() {
-        let source = must_result(HtmlBrowserSource::new(
+        let (scripts, body_onload_script_index) = inline_frame_scripts(
             r#"<table><script>before</script><body onload="body"><iframe id=frame data-krr-local-frame></iframe></table>"#,
-            "https://example.test/index.html",
-        ));
-        let loader = HtmlSubresourceLoader::new(&source);
-        let mut document = HtmlDocument::parse(&source.raw_html);
-        let frame = must_result(
-            document
-                .get_element_by_id("frame")
-                .ok_or("frame must exist"),
+            r#"<script id=child>frame</script>"#,
         );
-        let frame = must_result(document.node(frame));
-        let mut child = HtmlDocument::parse(r#"<script id=child>frame</script>"#);
-        let child_script = must_result(
-            child
-                .get_element_by_id("child")
-                .ok_or("child script must exist"),
-        );
-        let child_script = must_result(child.node(child_script));
-        frame.children.borrow_mut().push(child_script);
-
-        let (scripts, body_onload_script_index) = load_scripts(&loader, &document);
 
         assert_eq!(script_sources(&scripts), ["before", "frame"]);
         assert_eq!(body_onload_script_index, Some(1));

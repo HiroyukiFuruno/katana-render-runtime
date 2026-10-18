@@ -186,26 +186,7 @@ function katanaDrawioSourceCropBox(svg, entries) {
 function katanaDrawioSourceCropOffset(svg, entries) {
   return katanaDrawioMedianOffset(katanaDrawioSourceCropOffsets(svg, entries));
 }
-function katanaDrawioPreciseSourceCellOffset(svg, entry) {
-  const group = katanaDrawioCellGroup(svg, entry.id);
-  const box = group ? katanaDrawioPreciseCellShapeBox(group) : null;
-  return box && katanaDrawioSimilarSourceBox(box, entry)
-    ? { x: box.x - entry.x, y: box.y - entry.y }
-    : null;
-}
-function katanaDrawioPreciseCellShapeBox(group) {
-  const boxes = katanaDrawioCellShapeElements(group)
-    .map(katanaDrawioElementBoxWithoutCrispTranslate)
-    .filter(katanaDrawioHasArea);
-  if (boxes.length === 0) {
-    return null;
-  }
-  const left = Math.min(...boxes.map((box) => box.x));
-  const top = Math.min(...boxes.map((box) => box.y));
-  const right = Math.max(...boxes.map(katanaDrawioBoxRight));
-  const bottom = Math.max(...boxes.map(katanaDrawioBoxBottom));
-  return { x: left, y: top, width: right - left, height: bottom - top };
-}
+
 function katanaDrawioElementBoxWithoutCrispTranslate(element) {
   const box = katanaDrawioElementBox(element);
   const crisp = katanaDrawioElementAncestors(element)

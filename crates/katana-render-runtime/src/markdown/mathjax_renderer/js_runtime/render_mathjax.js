@@ -11,8 +11,10 @@ const tex = new TeX({ packages: ["base"] });
 const svg = new SVG({ fontCache: "none" });
 const html = mathjax.document("", { InputJax: tex, OutputJax: svg });
 
+/** @param {MathJaxRuntimeRequest} request @returns {string} */
 globalThis.katanaRunMathJaxRuntime = function katanaRunMathJaxRuntime(request) {
   try {
+    /** @type {import("@mathjax/src/mjs/adaptors/lite/Element.js").LiteElement} */
     const node = html.convert(request.source, {
       display: request.display === true,
       em: 16,
@@ -31,11 +33,15 @@ globalThis.katanaRunMathJaxRuntime = function katanaRunMathJaxRuntime(request) {
   } catch (error) {
     return JSON.stringify({
       kind: "error",
-      message: error && error.stack ? error.stack : String(error),
+      message:
+        error && /** @type {{readonly stack?: unknown}} */ (error).stack
+          ? /** @type {{readonly stack?: unknown}} */ (error).stack
+          : String(error),
     });
   }
 };
 
+/** @param {string} output @returns {string} */
 function katanaMathJaxError(output) {
   if (output.includes("data-mjx-error") || output.includes("merror")) {
     return "MathJax failed to render TeX";
@@ -43,6 +49,8 @@ function katanaMathJaxError(output) {
   return "";
 }
 
+/** @param {import("@mathjax/src/mjs/adaptors/lite/Element.js").LiteElement} node
+ * @param {MathJaxRuntimeRequest} request @returns {string} */
 function katanaMathJaxSvg(node, request) {
   const svgNodes = adaptor.tags(node, "svg");
   const svgNode = svgNodes[0];
@@ -52,6 +60,7 @@ function katanaMathJaxSvg(node, request) {
   return katanaApplyMathJaxTheme(adaptor.outerHTML(svgNode), request);
 }
 
+/** @param {string} output @param {MathJaxRuntimeRequest} request @returns {string} */
 function katanaApplyMathJaxTheme(output, request) {
   const style = `color: ${request.text}; background: transparent;`;
   if (output.includes(" style=")) {

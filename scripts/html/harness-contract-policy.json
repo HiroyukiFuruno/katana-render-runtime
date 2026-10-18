@@ -1,0 +1,89 @@
+{
+  "schema": 1,
+  "codeRoots": [
+    "scripts/",
+    "crates/"
+  ],
+  "localRecipes": [
+    "check"
+  ],
+  "localBridge": {
+    "recipe": "check",
+    "source": "scripts/hooks/run_parallel_checks.py"
+  },
+  "ciWorkflow": ".github/workflows/test-and-build.yml",
+  "moon": {
+    "workspace": ".moon/workspace.yml",
+    "config": "moon.yml",
+    "project": "krr",
+    "entry": "coverage",
+    "barrier": "static",
+    "ciJob": "static-quality",
+    "ciEntry": "source-static",
+    "downstreamJob": "test",
+    "ciRequiredStatic": [
+      "runtime-bundle-check",
+      "runtime-asset-check",
+      "biome",
+      "typecheck",
+      "python-lint",
+      "python-typecheck",
+      "duplication-check",
+      "html-harness-contract-check",
+      "owned-validation-contract-check",
+      "fmt-check",
+      "capacity-admission",
+      "rust-facts-host-prebuild"
+    ],
+    "ciBeforeHeavy": [
+      "fmt-check",
+      "lint",
+      "ast-lint",
+      "dependency-leak"
+    ],
+    "requiredStatic": [
+      "fmt-check",
+      "lint",
+      "ast-lint",
+      "dependency-leak",
+      "runtime-bundle-check",
+      "runtime-asset-check",
+      "biome",
+      "typecheck",
+      "python-lint",
+      "python-typecheck",
+      "duplication-check",
+      "html-harness-contract-check",
+      "owned-validation-contract-check",
+      "capacity-admission",
+      "rust-facts-host-prebuild"
+    ],
+    "requiredHeavy": [
+      "mathjax-owned-evidence",
+      "unit-test",
+      "runtime-asset-script-test",
+      "automation-contract-test",
+      "build-capacity-check",
+      "coverage"
+    ]
+  },
+  "python": {
+    "lintRecipe": "python-lint",
+    "typeRecipe": "python-typecheck",
+    "ruff": "0.16.10",
+    "mypy": "2.4.0"
+  },
+  "rust": {
+    "lintRecipe": "lint",
+    "workspace": "Cargo.toml"
+  },
+  "recipeDispatch": {
+    "html-release-fidelity-check": {
+      "source": "scripts/release/html_fidelity_policy.py",
+      "recipes": [
+        "html-fidelity-check",
+        "html-fidelity-interim-check"
+      ]
+    }
+  }
+}

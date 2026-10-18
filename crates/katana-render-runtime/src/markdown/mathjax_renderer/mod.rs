@@ -4,6 +4,7 @@ pub mod types;
 
 use crate::markdown::DiagramBlock;
 use crate::markdown::color_preset::DiagramColorPreset;
+use crate::markdown::runtime_assets::RuntimeAsset;
 use js_runtime::MathJaxJsRuntimeOps;
 use js_runtime_scripts::MathJaxRuntimeScripts;
 use std::path::{Path, PathBuf};
@@ -84,11 +85,9 @@ impl MathJaxGeneratedRuntimeAsset {
     }
 
     fn exists_with_same_bytes(path: &Path) -> Result<bool, String> {
-        match std::fs::read(path) {
-            Ok(existing) => Ok(existing == MathJaxRuntimeScripts::runtime_source().as_bytes()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(runtime_asset_error(error)),
-        }
+        RuntimeAsset::exists_with_matching_bytes(path, |existing| {
+            Ok(existing == MathJaxRuntimeScripts::runtime_source().as_bytes())
+        })
     }
 }
 

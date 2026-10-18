@@ -1,5 +1,9 @@
-function katanaAnchoredTextNodeBox(node, text, x, y) {
-  const width = Math.max(1, katanaTextNodeWidth(node, text));
+function katanaAnchoredTextNodeBox(node, text, x, y, parts) {
+  if (!parts?.length) {
+    const metrics = katanaNativeSvgRunMetrics(node, text);
+    if (metrics !== null) return katanaSvgRawMetricCell(metrics, x, y, katanaTextAnchor(node));
+  }
+  const width = Math.max(1, katanaTextLineWidth(node, text, parts));
   const height = katanaLineHeight(node);
   return katanaBox(
     katanaAnchoredTextLeft(katanaTextAnchor(node), x, width),
@@ -7,6 +11,16 @@ function katanaAnchoredTextNodeBox(node, text, x, y) {
     width,
     height,
   );
+}
+
+function katanaTextLineWidth(node, text, parts) {
+  const runs = parts?.length ? parts : [{ node, text }];
+  return runs
+    .map((run) => {
+      const width = run.width ?? katanaTextNodeWidth(run.node ?? node, run.text, run.font);
+      return katanaRunLayoutAdvance(run, width);
+    })
+    .reduce((sum, width) => sum + width, 0);
 }
 
 function katanaAnchoredTextLeft(anchor, x, width) {
@@ -90,7 +104,9 @@ function katanaInheritedFontSize(node) {
   if (!value) {
     return katanaInheritedFontSize(node.parentNode);
   }
-  const match = String(value).trim().match(/^(-?\d+(?:\.\d+)?)(em|px)?$/);
+  const match = String(value)
+    .trim()
+    .match(/^(-?\d+(?:\.\d+)?)(em|px)?$/);
   if (!match) {
     return katanaInheritedFontSize(node.parentNode);
   }
@@ -105,11 +121,50 @@ function katanaFiniteFontSize(fontSize) {
   return 16;
 }
 
-function katanaTextNodeWidth(node, text) {
+function katanaTextNodeWidth(node, text, font) {
+  const svgMetrics = katanaNativeSvgRunMetrics(node, text, font);
+  if (svgMetrics !== null) return svgMetrics.advance;
+  const nativeWidth = katanaNativeTextWidth(node, text, font);
+  if (nativeWidth !== null) {
+    return nativeWidth;
+  }
   if (katanaIsC4Diagram()) {
     return katanaC4TextWidth(node, text);
   }
   return katanaTextWidth(text) * katanaTextWidthScale(node);
+}
+
+function katanaNativeTextWidth(node, text, font) {
+  if (
+    typeof globalThis.__katanaMeasureText !== "function" ||
+    !katanaMermaidNativeAdvanceRuntime()
+  ) {
+    return null;
+  }
+  const resolved = font ?? katanaResolvedNodeTextFont(node);
+  if (!katanaIsMermaidClassDiagram() && !resolved.nativeAdvanceEligible) {
+    return null;
+  }
+  const measured = Number(
+    globalThis.__katanaMeasureText(
+      String(text),
+      resolved.family,
+      resolved.size,
+      resolved.weight,
+      resolved.italic,
+    ),
+  );
+  return Number.isFinite(measured) && measured >= 0 ? measured : null;
+}
+
+function katanaMermaidNativeAdvanceRuntime() {
+  const type = globalThis.__katanaMermaidDiagramType;
+  return (
+    typeof type === "string" &&
+    type.length > 0 &&
+    type !== "zenuml" &&
+    globalThis.__katanaDrawioRequest === undefined
+  );
 }
 
 function katanaC4TextWidth(node, text) {
@@ -153,11 +208,11 @@ function katanaC4KerningPairWidth(left, right) {
 }
 
 const KATANA_C4_WIDE_KERNING_PAIRS = {
-  "ナル": -0.796875,
-  "タベ": -0.46875,
-  "ベー": -0.625,
-  "ース": -1.783482142857143,
-  "スキ": -0.46875,
+  ナル: -0.796875,
+  タベ: -0.46875,
+  ベー: -0.625,
+  ース: -1.783482142857143,
+  スキ: -0.46875,
 };
 
 const KATANA_C4_NORMAL_ASCII_WIDTH_SCALE = 1;
@@ -216,8 +271,10 @@ function katanaTextWeightValues(node) {
 }
 
 function katanaIsBoldTextWeight(value) {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  return normalized === "bold" || Number(normalized) >= 600;
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  return normalized === "bold" || normalized === "bolder" || Number(normalized) >= 600;
 }
 
 function katanaTextWidth(text) {
@@ -229,10 +286,7 @@ function katanaTextWidth(text) {
 }
 
 function katanaMeasuredTextValue(text) {
-  if (globalThis.__katanaMermaidDiagramType === "block") {
-    return String(text);
-  }
-  return String(text).replace(/&(?:amp;)?nbsp;|&#160;/g, "\u00A0");
+  return String(text);
 }
 
 function katanaTextKerningWidth(chars) {
@@ -332,13 +386,92 @@ function katanaIsRequirementDiagram() {
 }
 
 KatanaNode.prototype.getComputedTextLength = function getComputedTextLength() {
-  const lines = katanaComputedTextLines(this);
-  return Math.max(1, ...lines.map((line) => katanaTextNodeWidth(this, line)));
+  let width;
+  if (
+    this.localName === "text" ||
+    (this.localName === "tspan" &&
+      !katanaIsMermaidClassDiagram() &&
+      katanaMermaidNativeAdvanceRuntime() &&
+      (!katanaIsBlockDiagram() || katanaCanMergeNativeTextOwners(this)))
+  ) {
+    const lines = katanaTextLines(this);
+    width = Math.max(1, ...lines.map((line) => katanaTextLineWidth(this, line.text, line.parts)));
+  } else {
+    width = Math.max(1, katanaTextNodeWidth(this, katanaTextContent(this)));
+  }
+  return katanaNativeSvgComputedLength(this, width);
 };
 
-function katanaComputedTextLines(node) {
-  if (node.localName === "text") {
-    return katanaTextLines(node).map((line) => line.text);
+function katanaNativeSvgComputedLength(node, width) {
+  if (node?.namespaceURI !== "http://www.w3.org/2000/svg" || !katanaMermaidNativeAdvanceRuntime()) {
+    return width;
   }
-  return [katanaTextContent(node)];
+  const resolved = katanaResolvedNodeTextFont(node);
+  return resolved.nativeAdvanceEligible && resolved.size !== 0 ? katanaSvgAdvance(width) : width;
+}
+
+function katanaNativeSvgRunMetrics(node, text, font) {
+  if (
+    node?.namespaceURI !== "http://www.w3.org/2000/svg" ||
+    !katanaMermaidNativeAdvanceRuntime() ||
+    typeof globalThis.__katanaMeasureSvgTextMetrics !== "function"
+  )
+    return null;
+  const resolved = font ?? katanaResolvedNodeTextFont(node);
+  if (!resolved.nativeAdvanceEligible || resolved.size === 0) return null;
+  const measured = globalThis.__katanaMeasureSvgTextMetrics(
+    String(text),
+    resolved.family,
+    resolved.size,
+    resolved.weight,
+    resolved.italic,
+  );
+  const valid =
+    measured &&
+    [measured.advance, measured.ascent, measured.descent].every(Number.isFinite) &&
+    (!Object.hasOwn(measured, "layoutAscent") ||
+      (Number.isFinite(measured.layoutAscent) && measured.layoutAscent >= 0)) &&
+    measured.advance >= 0 &&
+    measured.ascent + measured.descent >= 0 &&
+    (String(text).length === 0 || measured.ascent + measured.descent > 0);
+  if (!valid) throw new Error("native SVG font metrics are invalid");
+  const ink = [measured.inkLeft, measured.inkTop, measured.inkRight, measured.inkBottom];
+  if (
+    ink.some((value) => value !== undefined) &&
+    (!ink.every(Number.isFinite) || ink[0] > ink[2] || ink[1] > ink[3])
+  )
+    throw new Error("native SVG glyph bounds are invalid");
+  return measured;
+}
+
+function katanaSvgRawMetricCell(metrics, x, y, anchor) {
+  // 字形が行領域や送り幅からはみ出す部分も、同じshape結果の境界として含める。
+  const advance = katanaSvgAdvance(metrics.advance);
+  const left = Math.min(0, metrics.inkLeft ?? 0);
+  const right = Math.max(advance, metrics.inkRight ?? 0);
+  const hasLayoutAscent = Object.hasOwn(metrics, "layoutAscent");
+  const layoutAscent = hasLayoutAscent ? metrics.layoutAscent : Math.round(metrics.ascent);
+  if (!Number.isFinite(layoutAscent) || layoutAscent < 0) {
+    throw new Error("native SVG layout ascent is invalid");
+  }
+  const top = Math.min(-layoutAscent, metrics.inkTop ?? 0);
+  const bottom = Math.max(Math.round(metrics.descent), metrics.inkBottom ?? 0);
+  return katanaBox(
+    katanaAnchoredTextLeft(anchor, x, advance) + left,
+    y + top,
+    right - left,
+    bottom - top,
+  );
+}
+
+function katanaSvgAdvance(value) {
+  return Math.ceil(value * 64) / 64;
+}
+
+function katanaRunLayoutAdvance(run, width = run.width) {
+  return run.svgMetrics ? katanaSvgAdvance(width) : width;
+}
+
+function katanaSvgRawPositionedRunCell(run, anchorOffset) {
+  return katanaSvgRawMetricCell(run.svgMetrics, run.x + anchorOffset, run.y, "start");
 }

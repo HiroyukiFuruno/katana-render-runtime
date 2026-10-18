@@ -1,15 +1,23 @@
-use super::constants::{
-    DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, FONT_WEIGHT_NORMAL, MONOSPACE_CHARACTER_WIDTH_FACTOR,
-    TEXT_CHARACTER_WIDTH_FACTOR,
-};
+use super::constants::{DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, FONT_WEIGHT_NORMAL};
 use super::document::attribute;
-use crate::renderer::backends::html_css_rule::parse_declarations;
+use std::borrow::Cow;
 use taffy::style::{Display, FlexDirection, FlexWrap};
 
+#[path = "style_border_radius.rs"]
+mod border_radius;
+#[path = "style_columns_declaration.rs"]
+mod columns_declaration;
 #[path = "style_declaration.rs"]
 mod declaration;
+#[path = "style_declaration_element.rs"]
+mod declaration_element;
 #[path = "style_dimension_declaration.rs"]
 mod dimension_declaration;
+#[cfg(test)]
+#[path = "style_property_case_tests.rs"]
+mod property_case_tests;
+#[path = "style_rotation.rs"]
+mod rotation;
 #[path = "style_border_declaration.rs"]
 mod style_border_declaration;
 #[path = "style_box.rs"]
@@ -24,20 +32,39 @@ mod style_shadow_declaration;
 mod style_typography_declaration;
 #[path = "style_tag_defaults.rs"]
 mod tag_defaults;
+#[cfg(test)]
+#[path = "style_text_defaults_tests.rs"]
+mod text_defaults_tests;
+#[path = "style_text_metrics.rs"]
+mod text_metrics;
+#[path = "style_text_transform.rs"]
+mod text_transform;
 #[path = "style_types.rs"]
 mod types;
 #[path = "style_value.rs"]
 mod value;
 
 pub(super) use types::{
-    CssBoxShadow, CssBoxSizing, CssFloat, CssGridTrack, CssGridTrackBreadth, CssLength,
-    CssOverflow, CssPosition, CssStyle, CssTextAlign, CssTextTransform, CssWhiteSpace,
+    CssBorderStyle, CssBoxShadow, CssBoxSizing, CssFloat, CssGridTrack, CssGridTrackBreadth,
+    CssLength, CssOverflow, CssOverflowAxis, CssPosition, CssStyle, CssTextAlign, CssTextTransform,
+    CssVerticalAlign, CssWhiteSpace,
 };
 
+#[cfg(test)]
 const DEFAULT_STYLE_VIEWPORT_WIDTH: f32 = 1_024.0;
+#[cfg(test)]
 const DEFAULT_STYLE_VIEWPORT_HEIGHT: f32 = 768.0;
 
+pub(super) fn normalized_property_name(name: &str) -> Cow<'_, str> {
+    if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        Cow::Owned(name.to_ascii_lowercase())
+    } else {
+        Cow::Borrowed(name)
+    }
+}
+
 impl CssStyle {
+    #[cfg(test)]
     pub(super) fn browser_default() -> Self {
         Self::browser_default_for_viewport(
             DEFAULT_STYLE_VIEWPORT_WIDTH,
@@ -46,13 +73,28 @@ impl CssStyle {
     }
 
     pub(super) fn browser_default_for_viewport(viewport_width: f32, viewport_height: f32) -> Self {
-        Self {
-            color: "#1f2328".to_string(),
+        Self::default_with_text_defaults(
+            viewport_width,
+            viewport_height,
+            "#000000".to_string(),
+            "serif".to_string(),
+        )
+    }
+
+    fn default_with_text_defaults(
+        viewport_width: f32,
+        viewport_height: f32,
+        color: String,
+        font_family: String,
+    ) -> Self {
+        let mut style = Self {
+            color,
             opacity: 1.0,
             font_size: DEFAULT_FONT_SIZE,
             line_height: DEFAULT_LINE_HEIGHT,
             line_height_factor: Some(DEFAULT_LINE_HEIGHT / DEFAULT_FONT_SIZE),
-            font_family: "Noto Sans, sans-serif".to_string(),
+            normal_line_height: true,
+            font_family,
             font_weight: FONT_WEIGHT_NORMAL,
             display: Display::Block,
             inline_block: false,
@@ -64,7 +106,9 @@ impl CssStyle {
             viewport_width,
             viewport_height,
             ..<Self as Default>::default()
-        }
+        };
+        style.column_gap = style.font_size;
+        style
     }
 
     #[cfg(test)]
@@ -85,9 +129,27 @@ impl CssStyle {
         attributes: &[(String, String)],
         inherited: &Self,
     ) -> Self {
+        let started = super::text_measurement_diagnostic::start_style_timing();
+        let style = Self::from_element_attributes_body(tag, attributes, inherited);
+        super::text_measurement_diagnostic::record_style_timing(started);
+        style
+    }
+
+    fn from_element_attributes_body(
+        tag: Option<&str>,
+        attributes: &[(String, String)],
+        inherited: &Self,
+    ) -> Self {
         let mut style = inherited.element_defaults();
         if let Some(tag) = tag {
             style.apply_tag_metrics(tag);
+            if tag == "tr" || tag == "td" || tag == "th" {
+                style.vertical_align = inherited.vertical_align;
+            }
+            /* WHY: Chromium のフォーム部品は既定で border-box として寸法を解決する。 */
+            if tag == "input" || tag == "textarea" {
+                style.box_sizing = CssBoxSizing::BorderBox;
+            }
         }
         if attribute(attributes, "hidden").is_some() {
             style.display = Display::None;
@@ -95,31 +157,25 @@ impl CssStyle {
         let Some(source) = attribute(attributes, "style") else {
             return style;
         };
-        let declarations = parse_declarations(source);
-        let mut line_heights = Vec::new();
-        for declaration in &declarations {
-            if declaration.name.eq_ignore_ascii_case("line-height") {
-                line_heights.push(declaration.value.as_str());
-            } else {
-                style.apply(&declaration.name, &declaration.value);
-            }
-        }
-        style.resolve_inherited_line_height();
-        for line_height in line_heights {
-            style.apply_line_height(line_height);
-        }
+        style.apply_element_declarations(
+            source,
+            inherited.font_size,
+            inherited.vertical_align,
+            tag,
+        );
         style
     }
 
     fn element_defaults(&self) -> Self {
         Self {
-            color: self.color.clone(),
             font_size: self.font_size,
             line_height: self.line_height,
             line_height_factor: self.line_height_factor,
-            font_family: self.font_family.clone(),
+            normal_line_height: self.normal_line_height,
+            explicit_typography: false,
             font_feature_settings: self.font_feature_settings.clone(),
             font_weight: self.font_weight,
+            column_gap: self.font_size,
             italic: self.italic,
             underline: self.underline,
             text_align: self.text_align,
@@ -130,7 +186,12 @@ impl CssStyle {
             viewport_width: self.viewport_width,
             viewport_height: self.viewport_height,
             percentage_height_basis: self.percentage_height_basis,
-            ..Self::browser_default()
+            ..Self::default_with_text_defaults(
+                self.viewport_width,
+                self.viewport_height,
+                self.color.clone(),
+                self.font_family.clone(),
+            )
         }
     }
 
@@ -138,48 +199,68 @@ impl CssStyle {
         self.element_defaults()
     }
 
-    fn resolve_inherited_line_height(&mut self) {
+    pub(super) fn resolve_inherited_line_height(&mut self) {
         if let Some(factor) = self.line_height_factor {
             self.line_height = self.font_size * factor;
-        }
-    }
-
-    pub(super) fn text_character_width_factor(&self) -> f32 {
-        if self.font_family.to_ascii_lowercase().contains("mono") {
-            MONOSPACE_CHARACTER_WIDTH_FACTOR
-        } else {
-            TEXT_CHARACTER_WIDTH_FACTOR
-        }
-    }
-
-    pub(super) fn transformed_text<'a>(&self, text: &'a str) -> std::borrow::Cow<'a, str> {
-        match self.text_transform {
-            CssTextTransform::None => std::borrow::Cow::Borrowed(text),
-            CssTextTransform::Uppercase => std::borrow::Cow::Owned(text.to_uppercase()),
-            CssTextTransform::Lowercase => std::borrow::Cow::Owned(text.to_lowercase()),
-            CssTextTransform::Capitalize => {
-                let mut word_start = true;
-                let mut transformed = String::with_capacity(text.len());
-                for character in text.chars() {
-                    if word_start && character.is_alphabetic() {
-                        transformed.extend(character.to_uppercase());
-                    } else {
-                        transformed.push(character);
-                    }
-                    word_start = !character.is_alphanumeric();
-                }
-                std::borrow::Cow::Owned(transformed)
-            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn paragraph_default_margins_are_one_em_and_author_reset_wins() {
+        let mut inherited = CssStyle::browser_default();
+        inherited.font_size = 20.0;
+        let style = CssStyle::from_element("p", &[], &inherited);
+        assert_eq!((style.margin_top, style.margin_bottom), (20.0, 20.0));
+        let style = CssStyle::from_element(
+            "p",
+            &[("style".to_string(), "margin:0".to_string())],
+            &inherited,
+        );
+        assert_eq!((style.margin_top, style.margin_bottom), (0.0, 0.0));
+    }
+
+    #[test]
+    fn code_user_agent_font_applies_before_author_typography() {
+        let inherited = CssStyle::browser_default();
+        let default_style = CssStyle::from_element("code", &[], &inherited);
+        assert_eq!(default_style.font_family, "monospace");
+        let authored = CssStyle::from_element(
+            "code",
+            &[("style".to_string(), "font-family: Helvetica".to_string())],
+            &inherited,
+        );
+        assert_eq!(authored.font_family, "Helvetica");
+        let boxed = CssStyle::from_element(
+            "code",
+            &[(
+                "style".to_string(),
+                "background:#eee;padding:2px".to_string(),
+            )],
+            &inherited,
+        );
+        assert_eq!(boxed.font_family, "monospace");
+    }
+    #[test]
+    fn normal_line_height_uses_font_metrics_and_preserves_explicit_values() {
+        use crate::renderer::backends::html_document::HtmlDocumentNode;
+        let children = vec![HtmlDocumentNode::Text("日本語".to_string())];
+        let mut style = CssStyle::browser_default();
+        style.font_family = "Hiragino Sans, sans-serif".to_string();
+        style.resolve_text_line_height(&children);
+        assert!(style.line_height >= style.font_size);
+        style.apply_line_height("1.65");
+        style.resolve_text_line_height(&children);
+        assert_eq!(style.line_height, 26.390625);
+        style.apply_line_height("normal");
+        assert!(style.normal_line_height);
+    }
     use super::super::constants::LINE_HEIGHT_FACTOR;
     use super::{
         CssBoxSizing, CssGridTrack, CssLength, CssOverflow, CssStyle, CssTextAlign,
-        DEFAULT_FONT_SIZE,
+        CssVerticalAlign, DEFAULT_FONT_SIZE,
     };
 
     fn parsed_flow_style() -> CssStyle {
@@ -246,12 +327,73 @@ mod tests {
 
         assert_eq!(style.display, taffy::style::Display::Grid);
         assert_eq!(style.gap, 12.0);
+        assert_eq!(style.row_gap, Some(12.0));
+        assert_eq!(style.flow_column_gap, Some(12.0));
         assert_eq!(
             style.grid_template_columns,
             vec![CssGridTrack::Fraction(1.0); 3]
         );
         assert_eq!(style.flex_direction, taffy::style::FlexDirection::Column);
         assert_eq!(style.flex_wrap, taffy::style::FlexWrap::Wrap);
+    }
+
+    #[test]
+    fn gap_shorthand_expands_two_values_and_longhands_follow_source_order() {
+        let style = CssStyle::from_attributes(
+            &[(
+                "style".to_string(),
+                "gap: 6px 20px; row-gap: 8px; column-gap: 24px".to_string(),
+            )],
+            &CssStyle::browser_default(),
+        );
+        assert_eq!(style.gap, 6.0);
+        assert_eq!(style.row_gap, Some(8.0));
+        assert_eq!(style.flow_column_gap, Some(24.0));
+        assert_eq!(style.column_gap, 24.0);
+    }
+
+    #[test]
+    fn invalid_gap_values_do_not_erase_valid_values() {
+        let style = CssStyle::from_attributes(
+            &[(
+                "style".to_string(),
+                "gap: 6px 20px; gap: -1px; gap: 1px 2px 3px; row-gap: nope".to_string(),
+            )],
+            &CssStyle::browser_default(),
+        );
+        assert_eq!(style.gap, 6.0);
+        assert_eq!(style.row_gap, Some(6.0));
+        assert_eq!(style.flow_column_gap, Some(20.0));
+    }
+
+    #[test]
+    fn normal_multicolumn_gap_is_one_em_while_flow_gap_is_zero() {
+        let style = CssStyle::from_attributes(
+            &[(
+                "style".to_string(),
+                "display:grid;font-size:20px".to_string(),
+            )],
+            &CssStyle::browser_default(),
+        );
+        assert_eq!(style.column_gap, 20.0);
+        assert_eq!(style.row_gap, None);
+        assert_eq!(style.flow_column_gap, None);
+        assert_eq!(style.gap, 0.0);
+    }
+
+    #[test]
+    fn normal_gap_values_use_zero_for_flow_and_one_em_for_multicolumn() {
+        let style = CssStyle::from_attributes(
+            &[(
+                "style".to_string(),
+                "display:flex;font-size:20px;gap:normal;column-gap:normal".to_string(),
+            )],
+            &CssStyle::browser_default(),
+        );
+        assert_eq!(style.gap, 0.0);
+        assert_eq!(style.row_gap, Some(0.0));
+        assert_eq!(style.flow_column_gap, Some(0.0));
+        assert_eq!(style.column_gap, 20.0);
     }
 
     #[test]
@@ -351,6 +493,44 @@ mod tests {
         assert_eq!(style.line_height, 30.0);
         assert_eq!(style.padding_top, 12.0);
         assert_eq!(style.margin_top, -16.0);
+    }
+
+    #[test]
+    fn heading_em_font_size_uses_parent_size_instead_of_user_agent_heading_size() {
+        let mut parent = CssStyle::browser_default();
+        parent.font_size = 14.0;
+        let style = CssStyle::from_element(
+            "h1",
+            &[("style".to_string(), "font-size: 1.45em".to_string())],
+            &parent,
+        );
+        assert!((style.font_size - 20.3).abs() < 0.01, "{}", style.font_size);
+    }
+
+    #[test]
+    fn heading_defaults_use_chromium_em_metrics_and_author_overrides() {
+        let mut inherited = CssStyle::browser_default();
+        inherited.font_size = 20.0;
+        let expected = [
+            ("h1", 40.0, 26.8),
+            ("h2", 30.0, 24.9),
+            ("h3", 23.4, 23.4),
+            ("h4", 20.0, 26.6),
+            ("h5", 16.6, 27.722),
+            ("h6", 13.4, 31.222),
+        ];
+        for (tag, font_size, margin) in expected {
+            let style = CssStyle::from_element(tag, &[], &inherited);
+            assert!((style.font_size - font_size).abs() < 0.001, "{tag}");
+            assert!((style.margin_top - margin).abs() < 0.001, "{tag}");
+        }
+        let authored = CssStyle::from_element(
+            "h1",
+            &[("style".to_string(), "font-size:24px;margin:0".to_string())],
+            &inherited,
+        );
+        assert_eq!(authored.font_size, 24.0);
+        assert_eq!((authored.margin_top, authored.margin_bottom), (0.0, 0.0));
     }
 
     #[test]
@@ -542,11 +722,75 @@ mod tests {
     fn typed_border_box_dimensions_preserve_browser_box_model() {
         let attributes = vec![(
             "style".to_string(),
-            "box-sizing: border-box; width: 100px; padding: 10px; border-width: 2px".to_string(),
+            "box-sizing: border-box; width: 100px; padding: 10px; border-width: 2px; border-style: solid".to_string(),
         )];
         let border_box = CssStyle::from_attributes(&attributes, &CssStyle::browser_default());
         assert_eq!(border_box.box_sizing, CssBoxSizing::BorderBox);
         assert_eq!(border_box.explicit_width(300.0), Some(100.0));
         assert_eq!(border_box.content_width(100.0), 76.0);
+    }
+
+    #[test]
+    fn vertical_align_uses_css_initial_and_html_table_ua_values() {
+        let initial = CssStyle::browser_default();
+        assert_eq!(initial.vertical_align, CssVerticalAlign::Baseline);
+
+        let group = CssStyle::from_element("tbody", &[], &initial);
+        assert_eq!(group.vertical_align, CssVerticalAlign::Middle);
+        let row = CssStyle::from_element("tr", &[], &group);
+        assert_eq!(row.vertical_align, CssVerticalAlign::Middle);
+        let cell = CssStyle::from_element("td", &[], &row);
+        assert_eq!(cell.vertical_align, CssVerticalAlign::Middle);
+    }
+
+    #[test]
+    fn vertical_align_row_and_cell_follow_author_group_override() {
+        let group = CssStyle::from_element(
+            "tbody",
+            &[("style".to_string(), "vertical-align: top".to_string())],
+            &CssStyle::browser_default(),
+        );
+        let row = CssStyle::from_element("tr", &[], &group);
+        let cell = CssStyle::from_element("td", &[], &row);
+        assert_eq!(group.vertical_align, CssVerticalAlign::Top);
+        assert_eq!(row.vertical_align, CssVerticalAlign::Top);
+        assert_eq!(cell.vertical_align, CssVerticalAlign::Top);
+    }
+
+    #[test]
+    fn generic_parent_keeps_css_initial_vertical_align() {
+        let parent = CssStyle::browser_default();
+        let child = CssStyle::from_element("div", &[], &parent);
+        assert_eq!(parent.vertical_align, CssVerticalAlign::Baseline);
+        assert_eq!(child.vertical_align, CssVerticalAlign::Baseline);
+    }
+
+    #[test]
+    fn vertical_align_author_values_support_inherit_initial_and_invalid_preservation() {
+        let group = CssStyle::from_element("tbody", &[], &CssStyle::browser_default());
+        let row = CssStyle::from_element("tr", &[], &group);
+        assert_eq!(group.vertical_align, CssVerticalAlign::Middle);
+        assert_eq!(row.vertical_align, CssVerticalAlign::Middle);
+
+        let inherit = CssStyle::from_attributes(
+            &[("style".to_string(), "vertical-align: inherit".to_string())],
+            &row,
+        );
+        assert_eq!(inherit.vertical_align, CssVerticalAlign::Middle);
+
+        let initial = CssStyle::from_attributes(
+            &[("style".to_string(), "vertical-align: initial".to_string())],
+            &row,
+        );
+        assert_eq!(initial.vertical_align, CssVerticalAlign::Baseline);
+
+        let invalid = CssStyle::from_attributes(
+            &[(
+                "style".to_string(),
+                "vertical-align: top; vertical-align: unsupported".to_string(),
+            )],
+            &row,
+        );
+        assert_eq!(invalid.vertical_align, CssVerticalAlign::Top);
     }
 }

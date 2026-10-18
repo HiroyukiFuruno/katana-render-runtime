@@ -1,3 +1,8 @@
+#[cfg(test)]
+mod chrome_font_identity_probe_tests;
+#[cfg(test)]
+mod js_runtime_cache_test_support;
+
 pub mod color_preset;
 pub(crate) mod diagram_js_runtime;
 pub(crate) mod diagram_runtime;

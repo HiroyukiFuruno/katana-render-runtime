@@ -5,6 +5,33 @@ use crate::renderer::backends::html_browser::{
 };
 use crate::renderer::backends::html_document::HtmlDocumentNode;
 
+macro_rules! two_card_document {
+    ($main_style:literal, $card_style:literal) => {
+        concat!(
+            "<style>\nmain { ",
+            $main_style,
+            " }\n.card { ",
+            $card_style,
+            " }\n#first { background: #ef4444; }\n#second { background: #3b82f6; }\n</style>\n",
+            "<main><section id=first class=card>First</section><section id=second class=card>Second</section></main>"
+        )
+    };
+}
+
+macro_rules! hidden_card_document {
+    ($main_style:literal, $item_size:literal) => {
+        concat!(
+            "<main style=\"",
+            $main_style,
+            "\">\n<section hidden style=\"",
+            $item_size,
+            " background:#ef4444\">Hidden</section>\n<section style=\"",
+            $item_size,
+            " background:#3b82f6\">Visible</section>\n</main>"
+        )
+    };
+}
+
 const TEST_VIEWPORT_WIDTH: u32 = 320;
 const TEST_VIEWPORT_HEIGHT: u32 = 240;
 const STRUCTURED_CASCADE_DOCUMENT: &str = r#"<style>
@@ -133,7 +160,11 @@ fn body_layout_rules_do_not_expand_descendant_boxes() -> TestResult {
         .ok_or_else(|| "body layout frame must exist".to_string())?;
 
     assert!(frame_contains_rgb(frame, [239, 68, 68]));
-    assert!(session.content_height < 800.0, "{}", session.content_height);
+    assert!(
+        session.scroll_geometry.content_height < 800.0,
+        "{}",
+        session.scroll_geometry.content_height
+    );
     Ok(())
 }
 
@@ -176,8 +207,9 @@ new IntersectionObserver((entries) => {
 }
 
 fn assert_ancestor_rotation_geometry(snapshot: &str) -> TestResult {
+    // 指定幅100pxの回転中心は(50, 60)で、viewport幅16pxには縮めない。
     assert!(
-        snapshot.contains(r#"data-rect="18:52:10:16""#),
+        snapshot.contains(r#"data-rect="60:10:10:20""#),
         "{snapshot}"
     );
     assert!(
@@ -404,8 +436,9 @@ fn absolute_checkbox_with_vertical_auto_margins_centers_in_its_relative_containe
         .find(|element| element.node_id == node_id)
         .ok_or_else(|| "choice layout box is missing".to_string())?;
 
-    assert!((element.y - 20.0).abs() < 0.01, "{element:?}");
-    assert!((element.height - 20.0).abs() < 0.01, "{element:?}");
+    assert!((element.y - 0.0).abs() < 0.01, "{element:?}");
+    assert!((element.width - 20.0).abs() < 0.01, "{element:?}");
+    assert!((element.height - 60.0).abs() < 0.01, "{element:?}");
     Ok(())
 }
 
@@ -607,7 +640,7 @@ fn author_body_margin_and_background_own_the_complete_viewport() -> TestResult {
 fn typed_box_model_overflow_and_typography_reach_layout_and_paint() -> TestResult {
     let mut session = start(BOX_MODEL_DOCUMENT)?;
     let layout = session.layout().map_err(to_string)?;
-    assert_box_model_svg(&layout.svg);
+    assert_box_model_svg(&layout.svg)?;
     Ok(())
 }
 
@@ -622,7 +655,7 @@ fn assert_structured_cascade_svg(svg: &str) {
     );
 }
 
-fn assert_box_model_svg(svg: &str) {
+fn assert_box_model_svg(svg: &str) -> TestResult {
     assert!(svg.contains(r##"<rect x="0" y="0" width="124" height="44" fill="#abcdef"/>"##));
     assert!(svg.contains(
         r##"<rect x="0" y="44" width="100" height="40" rx="6" ry="6" fill="#fedcba"/>"##
@@ -630,13 +663,56 @@ fn assert_box_model_svg(svg: &str) {
     for expected in [
         r#"<clipPath id="krr-clip-0">"#,
         r#"<rect x="2" y="46" width="96" height="36" rx="4" ry="4"/>"#,
-        r#"font-family="Inter, sans-serif""#,
         r#"font-style="italic""#,
         r#"letter-spacing="2""#,
         r#"lengthAdjust="spacingAndGlyphs""#,
     ] {
         assert!(svg.contains(expected), "{svg}");
     }
+    assert_box_model_font_family(svg)?;
+    Ok(())
+}
+
+fn assert_box_model_font_family(svg: &str) -> TestResult {
+    let font_runs = crate::markdown::svg_rasterize::SvgRasterizeOps::html_text_font_runs(
+        "Clipped",
+        "Inter, sans-serif",
+        crate::renderer::backends::html_interactive::constants::FONT_WEIGHT_NORMAL,
+        true,
+    )
+    .ok_or_else(|| "box-model font stack did not resolve to a system face".to_string())?;
+    let resolved_family = font_runs
+        .first()
+        .map(|(family, _)| family)
+        .ok_or_else(|| "box-model font resolver returned no runs".to_string())?;
+    let root = xmltree::Element::parse(svg.as_bytes()).map_err(to_string)?;
+    let expected_family = format!("\"{resolved_family}\"");
+    assert!(
+        xml_element_has_attribute_value(&root, "font-family", &expected_family),
+        "{svg}"
+    );
+    Ok(())
+}
+
+fn xml_element_has_attribute_value(
+    element: &xmltree::Element,
+    attribute: &str,
+    expected: &str,
+) -> bool {
+    if element
+        .attributes
+        .get(attribute)
+        .is_some_and(|value| value == expected)
+    {
+        return true;
+    }
+    element.children.iter().any(|child| {
+        if let xmltree::XMLNode::Element(element) = child {
+            xml_element_has_attribute_value(element, attribute, expected)
+        } else {
+            false
+        }
+    })
 }
 
 #[test]
@@ -659,14 +735,14 @@ a[href="https://example.com"] { background: #35a853; padding: 4px; }
 #[test]
 fn four_value_box_shorthands_control_painted_geometry() -> TestResult {
     let mut session = start(
-        r#"<main style="background: #123456; margin: 2px 4px 6px 8px; padding: 10px 12px 14px 16px"><p>Box model</p></main>"#,
+        r#"<main style="background: #123456; line-height:22px; margin: 2px 4px 6px 8px; padding: 10px 12px 14px 16px"><p>Box model</p></main>"#,
     )?;
     let layout = session.layout().map_err(to_string)?;
 
     assert!(
         layout
             .svg
-            .contains(r##"<rect x="16" y="10" width="292" height="56" fill="#123456"/>"##),
+            .contains(r##"<rect x="16" y="8" width="292" height="78" fill="#123456"/>"##),
         "{}",
         layout.svg
     );
@@ -690,15 +766,10 @@ div { padding: 0; }
 
 #[test]
 fn flex_flow_positions_items_with_css_gap() -> TestResult {
-    let mut session = start(
-        r#"<style>
-main { display: flex; gap: 10px; width: 280px; }
-.card { width: 100px; height: 40px; }
-#first { background: #ef4444; }
-#second { background: #3b82f6; }
-</style>
-<main><section id=first class=card>First</section><section id=second class=card>Second</section></main>"#,
-    )?;
+    let mut session = start(two_card_document!(
+        "display: flex; gap: 10px; width: 280px;",
+        "width: 100px; height: 40px;"
+    ))?;
     let layout = session.layout().map_err(to_string)?;
 
     assert!(
@@ -806,80 +877,62 @@ fn flex_flow_paints_a_direct_text_node() -> TestResult {
     Ok(())
 }
 
+fn assert_hidden_card_paint(svg: &str, expected_rect: &str) {
+    assert!(svg.contains(expected_rect), "{svg}");
+    assert!(!svg.contains("Hidden"), "{svg}");
+}
+
 #[test]
 fn hidden_flex_item_does_not_consume_width_or_gap() -> TestResult {
-    let mut session = start(
-        r#"<main style="display:flex; gap:10px; width:280px">
-<section hidden style="width:100px; height:40px; background:#ef4444">Hidden</section>
-<section style="width:100px; height:40px; background:#3b82f6">Visible</section>
-</main>"#,
-    )?;
+    let mut session = start(hidden_card_document!(
+        "display:flex; gap:10px; width:280px",
+        "width:100px; height:40px;"
+    ))?;
     let layout = session.layout().map_err(to_string)?;
 
-    assert!(
-        layout
-            .svg
-            .contains(r##"<rect x="8" y="8" width="100" height="40" fill="#3b82f6"/>"##),
-        "{}",
-        layout.svg
+    assert_hidden_card_paint(
+        &layout.svg,
+        r##"<rect x="8" y="8" width="100" height="40" fill="#3b82f6"/>"##,
     );
-    assert!(!layout.svg.contains("Hidden"), "{}", layout.svg);
     Ok(())
 }
 
 #[test]
 fn hidden_grid_item_does_not_consume_a_track_or_gap() -> TestResult {
-    let mut session = start(
-        r#"<main style="display:grid; grid-template-columns:100px 100px; gap:10px; width:280px">
-<section hidden style="height:40px; background:#ef4444">Hidden</section>
-<section style="height:40px; background:#3b82f6">Visible</section>
-</main>"#,
-    )?;
+    let mut session = start(hidden_card_document!(
+        "display:grid; grid-template-columns:100px 100px; gap:10px; width:280px",
+        "height:40px;"
+    ))?;
     let layout = session.layout().map_err(to_string)?;
 
-    assert!(
-        layout
-            .svg
-            .contains(r##"<rect x="8" y="8" width="100" height="40" fill="#3b82f6"/>"##),
-        "{}",
-        layout.svg
+    assert_hidden_card_paint(
+        &layout.svg,
+        r##"<rect x="8" y="8" width="100" height="40" fill="#3b82f6"/>"##,
     );
-    assert!(!layout.svg.contains("Hidden"), "{}", layout.svg);
     Ok(())
 }
 
 #[test]
 fn hidden_grid_item_preserves_first_track_position_for_following_items() -> TestResult {
-    let mut session = start(
-        r#"<main style="display:grid; grid-template-columns:70px 150px; gap:10px; width:280px">
-<section hidden style="height:40px; background:#ef4444">Hidden</section>
-<section style="height:40px; background:#3b82f6">Visible</section>
-</main>"#,
-    )?;
+    let mut session = start(hidden_card_document!(
+        "display:grid; grid-template-columns:70px 150px; gap:10px; width:280px",
+        "height:40px;"
+    ))?;
     let layout = session.layout().map_err(to_string)?;
 
-    assert!(
-        layout
-            .svg
-            .contains(r##"<rect x="8" y="8" width="70" height="40" fill="#3b82f6"/>"##),
-        "{}",
-        layout.svg
+    assert_hidden_card_paint(
+        &layout.svg,
+        r##"<rect x="8" y="8" width="70" height="40" fill="#3b82f6"/>"##,
     );
-    assert!(!layout.svg.contains("Hidden"), "{}", layout.svg);
     Ok(())
 }
 
 #[test]
 fn grid_flow_positions_items_in_declared_columns() -> TestResult {
-    let mut session = start(
-        r#"<style>
-main { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; width: 280px; }
-.card { height: 40px; }
-#first { background: #ef4444; }
-#second { background: #3b82f6; }
-</style>
-<main><section id=first class=card>First</section><section id=second class=card>Second</section></main>"#,
-    )?;
+    let mut session = start(two_card_document!(
+        "display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; width: 280px;",
+        "height: 40px;"
+    ))?;
     let layout = session.layout().map_err(to_string)?;
 
     assert!(
@@ -923,15 +976,10 @@ fn grid_default_alignment_stretches_each_item_to_its_own_row_height() -> TestRes
 
 #[test]
 fn grid_flow_preserves_fixed_and_fractional_track_sizes() -> TestResult {
-    let mut session = start(
-        r#"<style>
-main { display: grid; grid-template-columns: 100px 1fr; gap: 12px; width: 280px; }
-.card { height: 40px; }
-#first { background: #ef4444; }
-#second { background: #3b82f6; }
-</style>
-<main><section id=first class=card>First</section><section id=second class=card>Second</section></main>"#,
-    )?;
+    let mut session = start(two_card_document!(
+        "display: grid; grid-template-columns: 100px 1fr; gap: 12px; width: 280px;",
+        "height: 40px;"
+    ))?;
     let layout = session.layout().map_err(to_string)?;
 
     assert!(
@@ -953,28 +1001,24 @@ main { display: grid; grid-template-columns: 100px 1fr; gap: 12px; width: 280px;
 
 #[test]
 fn grid_flow_positions_minmax_fraction_tracks_in_columns() -> TestResult {
-    let mut session = start(
-        r#"<style>
-main { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(120px, 1fr); gap: 10px; width: 310px; }
-.card { height: 40px; }
-#first { background: #ef4444; }
-#second { background: #3b82f6; }
-</style>
-<main><section id=first class=card>First</section><section id=second class=card>Second</section></main>"#,
-    )?;
+    let mut session = start(two_card_document!(
+        "display: grid; grid-template-columns: minmax(80px, 1fr) minmax(120px, 1fr); gap: 10px; width: 310px;",
+        "height: 40px;"
+    ))?;
     let layout = session.layout().map_err(to_string)?;
 
+    // 指定幅310pxからgap10pxを引いた300pxを、2本の1frに等分する。
     assert!(
         layout
             .svg
-            .contains(r##"<rect x="8" y="8" width="147" height="40" fill="#ef4444"/>"##),
+            .contains(r##"<rect x="8" y="8" width="150" height="40" fill="#ef4444"/>"##),
         "{}",
         layout.svg
     );
     assert!(
         layout
             .svg
-            .contains(r##"<rect x="165" y="8" width="147" height="40" fill="#3b82f6"/>"##),
+            .contains(r##"<rect x="168" y="8" width="150" height="40" fill="#3b82f6"/>"##),
         "{}",
         layout.svg
     );
@@ -1070,7 +1114,7 @@ html, body { margin: 0; }
     let text_y = text_baseline_for(&layout.svg, "1")?;
 
     assert!((text_x - 17.4375).abs() <= 1.5, "{}", layout.svg);
-    assert!((text_y - 28.0).abs() <= 2.0, "{}", layout.svg);
+    assert!((text_y - 29.5).abs() <= 0.1, "{}", layout.svg);
     Ok(())
 }
 
@@ -1106,9 +1150,79 @@ button {
 }
 
 #[test]
+fn parsed_flex_button_safety_preserves_text_coordinates() -> TestResult {
+    let alignment_groups: [(&[&str], bool); 2] = [
+        (&["center", "unsafe center"], true),
+        (
+            &[
+                "safe center",
+                "end",
+                "unsafe end",
+                "safe end",
+                "flex-end",
+                "unsafe flex-end",
+                "safe flex-end",
+            ],
+            false,
+        ),
+    ];
+    for direction in ["row", "row-reverse", "column", "column-reverse"] {
+        assert_parsed_button_safety_case(direction, alignment_groups)?;
+    }
+    Ok(())
+}
+
+fn assert_parsed_button_safety_case(
+    direction: &str,
+    alignment_groups: [(&[&str], bool); 2],
+) -> TestResult {
+    let default_coordinates = parsed_button_text_coordinates(direction, None)?;
+    let centered_coordinates = parsed_button_text_coordinates(direction, Some("center"))?;
+    assert_ne!(default_coordinates.0, centered_coordinates.0);
+    assert_ne!(default_coordinates.1, centered_coordinates.1);
+    for (alignments, centered) in alignment_groups {
+        let expected = if centered {
+            centered_coordinates
+        } else {
+            default_coordinates
+        };
+        for alignment in alignments {
+            let coordinates = parsed_button_text_coordinates(direction, Some(alignment))?;
+            assert_eq!(coordinates, expected, "{direction} {alignment}");
+        }
+    }
+    Ok(())
+}
+
+fn parsed_button_text_coordinates(
+    direction: &str,
+    alignment: Option<&str>,
+) -> TestResult<(f32, f32)> {
+    let alignment_style = match alignment {
+        Some(value) => format!("align-items:{value};justify-content:{value};"),
+        None => String::new(),
+    };
+    let mut session = start(&format!(
+        "<style>html,body{{margin:0}}button{{box-sizing:border-box;width:80px;height:60px;border:1px solid;padding:2px 7px 6px 3px;font-family:Arial;font-size:18px;display:flex;flex-direction:{direction};{alignment_style}}}</style><button>ABC</button>"
+    ))?;
+    let layout = session.layout().map_err(to_string)?;
+    assert_eq!(layout.hit_targets.len(), 1, "{}", layout.svg);
+    assert_eq!(
+        [layout.hit_targets[0].width, layout.hit_targets[0].height],
+        [80.0, 60.0],
+        "{}",
+        layout.svg
+    );
+    Ok((
+        text_x_for(&layout.svg, "ABC")?,
+        text_baseline_for(&layout.svg, "ABC")?,
+    ))
+}
+
+#[test]
 fn styled_inline_text_can_fragment_across_browser_line_boundaries() -> TestResult {
     let mut session = start_with_viewport(
-        r#"<main style='width:220px;font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic",Meiryo,system-ui,sans-serif;font-size:19px;line-height:1.65;font-feature-settings:"palt" 1'>選択 ON で検索できることを確認したのち、選択 OFF で同じツールを呼び出すと <em style="color:#2c4ac6;font-style:normal;font-weight:600">MCP Hub がツール呼び出しを拒否</em> する様子を見せる（動的ツール制御の実演）</main>"#,
+        r#"<main style='width:220px;font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic",Meiryo,system-ui,sans-serif;font-size:19px;line-height:1.65;font-feature-settings:"palt" 1'>分類 ON で候補を表示できることを確認したのち、分類 OFF で同じ資料を開くと <em style="color:#2c4ac6;font-style:normal;font-weight:600">Local Index が分類候補の表示を停止</em> する様子を確認する（架空資料の分類操作例）</main>"#,
         1230,
         867,
     )?;
@@ -1118,7 +1232,7 @@ fn styled_inline_text_can_fragment_across_browser_line_boundaries() -> TestResul
     assert!(emphasized.len() >= 2, "{}", layout.svg);
     assert_eq!(
         emphasized.concat(),
-        "MCP Hub がツール呼び出しを拒否",
+        "Local Index が分類候補の表示を停止",
         "{}",
         layout.svg
     );
@@ -1210,14 +1324,16 @@ fn markerless_flex_list_applies_its_declared_column_gap() -> TestResult {
 #[test]
 fn anonymous_flex_text_uses_its_intrinsic_width_when_space_is_available() -> TestResult {
     let mut session = start(
-        r#"<div style="display:flex;align-items:baseline;gap:10px;width:300px;font-size:16px">
+        r#"<div style="display:flex;align-items:baseline;gap:10px;width:300px;font-size:16px;font-family:Noto Sans,sans-serif">
 <span style="font-size:20px">①</span>OSS fork の upstream 追従運用
 </div>"#,
     )?;
     let layout = session.layout().map_err(to_string)?;
 
+    let contents = svg_text_contents(&layout.svg).join("");
     assert!(
-        layout.svg.contains(">OSS fork の upstream 追従運用</text>"),
+        contents.contains("OSS fork の upstream 追従運用")
+            && layout.svg.matches("<tspan x=").count() >= 2,
         "{}",
         layout.svg
     );
@@ -1336,12 +1452,9 @@ body { margin: 0; }
     )?;
     let layout = session.layout().map_err(to_string)?;
 
-    assert!(
-        layout.svg.contains(r#"width="82" height="80""#),
-        "{}",
-        layout.svg
-    );
-    assert!((82.0_f32 / 80.0 - 100.0 / 98.0).abs() < 0.005);
+    let (width, height) = first_image_dimensions(&layout.svg)?;
+    assert!((height - 80.0).abs() < 0.001, "{}", layout.svg);
+    assert!((width / height - 100.0 / 98.0).abs() < 0.00001);
     Ok(())
 }
 
@@ -1403,18 +1516,27 @@ fn slide_heading_wraps_with_browser_font_shaping_at_the_declared_content_width()
 fn list_style_none_suppresses_markers_and_keeps_flex_item_children_aligned() -> TestResult {
     let mut session = start(
         r#"<ul style="list-style:none;width:280px">
-<li style="display:flex;gap:14px"><span>①</span><span>Summary text</span></li>
+<li style="display:flex;gap:14px"><span id="digit">①</span><span id="summary">Summary text</span></li>
 </ul>"#,
     )?;
     let layout = session.layout().map_err(to_string)?;
 
     assert!(!layout.svg.contains(">•</text>"), "{}", layout.svg);
-    assert_eq!(
-        text_baseline_for(&layout.svg, "①")?,
-        text_baseline_for(&layout.svg, "Summary text")?,
-        "{}",
-        layout.svg
-    );
+    let mut tops = Vec::new();
+    for id in ["digit", "summary"] {
+        let node = session
+            .runtime
+            .node_for_element_id(id)
+            .ok_or_else(|| format!("missing {id}"))?
+            .0;
+        let element = layout
+            .element_boxes
+            .iter()
+            .find(|element| element.node_id == node)
+            .ok_or_else(|| format!("missing {id} box"))?;
+        tops.push(element.y);
+    }
+    assert_eq!(tops[0], tops[1]);
     Ok(())
 }
 
@@ -1509,23 +1631,7 @@ fn text_transform_and_font_features_reach_the_painted_svg() -> TestResult {
 }
 
 fn rect_y_for_fill(svg: &str, fill: &str) -> TestResult<f32> {
-    let marker = format!(r#" fill="{fill}""#);
-    let marker_start = svg
-        .find(&marker)
-        .ok_or_else(|| format!("missing fill {fill}: {svg}"))?;
-    let rect_start = svg[..marker_start]
-        .rfind("<rect ")
-        .ok_or_else(|| format!("missing rect for {fill}: {svg}"))?;
-    let element = &svg[rect_start..marker_start];
-    let y_start = element
-        .find(" y=\"")
-        .ok_or_else(|| format!("missing y for {fill}: {element}"))?
-        + 4;
-    let y_end = element[y_start..]
-        .find('"')
-        .ok_or_else(|| format!("unterminated y for {fill}: {element}"))?
-        + y_start;
-    element[y_start..y_end].parse::<f32>().map_err(to_string)
+    rect_attribute_for_fill(svg, fill, "y")
 }
 
 fn text_fragments_for_fill(svg: &str, fill: &str) -> TestResult<Vec<String>> {
@@ -1611,26 +1717,14 @@ fn rect_attribute_for_fill(svg: &str, fill: &str, attribute: &str) -> TestResult
 }
 
 fn text_baseline_for(svg: &str, text: &str) -> TestResult<f32> {
-    let marker = format!(">{text}</text>");
-    let marker_start = svg
-        .find(&marker)
-        .ok_or_else(|| format!("missing text marker {marker}: {svg}"))?;
-    let text_start = svg[..marker_start]
-        .rfind("<text ")
-        .ok_or_else(|| format!("missing text element for {text}: {svg}"))?;
-    let element = &svg[text_start..marker_start];
-    let y_start = element
-        .find(" y=\"")
-        .ok_or_else(|| format!("missing y attribute for {text}: {element}"))?
-        + 4;
-    let y_end = element[y_start..]
-        .find('"')
-        .ok_or_else(|| format!("unterminated y attribute for {text}: {element}"))?
-        + y_start;
-    element[y_start..y_end].parse::<f32>().map_err(to_string)
+    text_attribute_for(svg, text, "y")
 }
 
 fn text_x_for(svg: &str, text: &str) -> TestResult<f32> {
+    text_attribute_for(svg, text, "x")
+}
+
+fn text_attribute_for(svg: &str, text: &str, attribute: &str) -> TestResult<f32> {
     let marker = format!(">{text}</text>");
     let marker_start = svg
         .find(&marker)
@@ -1639,15 +1733,18 @@ fn text_x_for(svg: &str, text: &str) -> TestResult<f32> {
         .rfind("<text ")
         .ok_or_else(|| format!("missing text element for {text}: {svg}"))?;
     let element = &svg[text_start..marker_start];
-    let x_start = element
-        .find(" x=\"")
-        .ok_or_else(|| format!("missing x attribute for {text}: {element}"))?
-        + 4;
-    let x_end = element[x_start..]
+    let attribute_marker = format!(r#" {attribute}=""#);
+    let value_start = element
+        .find(&attribute_marker)
+        .ok_or_else(|| format!("missing {attribute} attribute for {text}: {element}"))?
+        + attribute_marker.len();
+    let value_end = element[value_start..]
         .find('"')
-        .ok_or_else(|| format!("unterminated x attribute for {text}: {element}"))?
-        + x_start;
-    element[x_start..x_end].parse::<f32>().map_err(to_string)
+        .ok_or_else(|| format!("unterminated {attribute} attribute for {text}: {element}"))?
+        + value_start;
+    element[value_start..value_end]
+        .parse::<f32>()
+        .map_err(to_string)
 }
 
 fn svg_text_contents(svg: &str) -> Vec<String> {
@@ -1755,7 +1852,7 @@ fn high_density_viewport_uses_logical_css_layout_and_physical_frame() -> TestRes
     assert!(
         layout
             .svg
-            .starts_with(r#"<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 320 240">"#),
+            .starts_with(r#"<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="640" height="480" viewBox="0 0 320 240">"#),
         "{}",
         layout.svg
     );
@@ -1855,4 +1952,83 @@ fn element_box_for_id(
         .find(|element| element.node_id == node_id)
         .cloned()
         .ok_or_else(|| format!("{id} layout box is missing"))
+}
+
+#[test]
+fn responsive_anonymized_sidebar_keeps_its_declared_width() -> TestResult {
+    let html = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/html/anonymized-requirements.html"
+    ));
+    assert!(
+        start_with_viewport(html, 620, 900).is_ok_and(|mut session| {
+            element_box_for_id(&mut session, "sidebar").is_ok_and(|sidebar| {
+                session
+                    .runtime
+                    .query_feature_node("main")
+                    .is_some_and(|main_node_id| {
+                        session
+                            .element_boxes
+                            .iter()
+                            .find(|element| element.node_id == main_node_id.0)
+                            .is_some_and(|main| {
+                                (sidebar.width - 620.0).abs() < 1.0 && main.y > sidebar.y
+                            })
+                    })
+            })
+        }),
+        "responsive flex column must retain the sidebar width and stack main content"
+    );
+    Ok(())
+}
+
+#[test]
+fn multicolumn_paragraph_boxes_follow_chrome_column_geometry() -> TestResult {
+    let html = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/html/library-reservation-fidelity.html"
+    ));
+    let mut session = start_with_viewport(html, 1280, 900)?;
+    let first = element_box_for_id(&mut session, "column-p1")?;
+    let second = element_box_for_id(&mut session, "column-p2")?;
+    let fourth = element_box_for_id(&mut session, "column-p4")?;
+    assert_wide_column_geometry(&first, &second, &fourth);
+
+    let mut narrow = start_with_viewport(html, 620, 900)?;
+    let narrow_first = element_box_for_id(&mut narrow, "column-p1")?;
+    let narrow_fourth = element_box_for_id(&mut narrow, "column-p4")?;
+    assert!((narrow_fourth.x - narrow_first.x).abs() < 1.0);
+    Ok(())
+}
+
+fn assert_wide_column_geometry(
+    first: &super::super::types::ElementBox,
+    second: &super::super::types::ElementBox,
+    fourth: &super::super::types::ElementBox,
+) {
+    assert!(first.width > 400.0 && first.height > 70.0);
+    assert!(second.y > first.y);
+    assert!((fourth.x - first.x) > 400.0);
+    assert!((fourth.y - first.y).abs() < 1.0);
+    assert!((fourth.height - first.height).abs() < 1.0);
+}
+
+fn first_image_dimensions(svg: &str) -> TestResult<(f32, f32)> {
+    let document = xmltree::Element::parse(svg.as_bytes()).map_err(to_string)?;
+    let image = document
+        .get_child("image")
+        .ok_or_else(|| "missing image".to_string())?;
+    let width = image
+        .attributes
+        .get("width")
+        .ok_or("missing width")?
+        .parse::<f32>()
+        .map_err(to_string)?;
+    let height = image
+        .attributes
+        .get("height")
+        .ok_or("missing height")?
+        .parse::<f32>()
+        .map_err(to_string)?;
+    Ok((width, height))
 }

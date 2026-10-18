@@ -107,10 +107,3 @@ function katanaErAttributeBaseX(kind, layout) {
   }
   return layout.right;
 }
-
-function katanaEstimatedErTextWidth(text) {
-  if (typeof katanaTextWidth === "function") {
-    return katanaTextWidth(text) * 1.25;
-  }
-  return String(text).length * 10;
-}

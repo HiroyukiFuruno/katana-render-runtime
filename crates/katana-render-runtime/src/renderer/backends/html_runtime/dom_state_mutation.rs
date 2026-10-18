@@ -11,28 +11,8 @@ impl HtmlDomBridgeState {
         arguments: &[String],
     ) -> Result<DomValue, String> {
         let mut document = self.document.borrow_mut();
-        match operation {
-            "appendChild" => {
-                let parent = node_id(argument(arguments, 0)?)?;
-                let child = node_id(argument(arguments, 1)?)?;
-                document.append_child(parent, child)?;
-                Ok(DomValue::Undefined)
-            }
-            "remove" => {
-                document.remove(node_id(argument(arguments, 0)?)?)?;
-                Ok(DomValue::Undefined)
-            }
-            "insertAdjacentHTML" => {
-                let target = node_id(argument(arguments, 0)?)?;
-                document.insert_adjacent_html(
-                    target,
-                    argument(arguments, 1)?,
-                    argument(arguments, 2)?,
-                )?;
-                Ok(DomValue::Undefined)
-            }
-            _ => Err(format!("unsupported HTML mutation operation: {operation}")),
-        }
+        apply_tree_mutation(&mut document, operation, arguments)?;
+        Ok(DomValue::Undefined)
     }
 
     pub(super) fn mutate_content(
@@ -70,6 +50,15 @@ impl HtmlDomBridgeState {
         Ok(DomValue::Undefined)
     }
 
+    pub(super) fn set_select_value(&self, arguments: &[String]) -> Result<DomValue, String> {
+        let node_id = node_id(argument(arguments, 0)?)?;
+        let value = argument(arguments, 1)?;
+        self.document
+            .borrow_mut()
+            .set_select_value(node_id, value)?;
+        Ok(DomValue::Undefined)
+    }
+
     pub(super) fn style(&self, operation: &str, arguments: &[String]) -> Result<DomValue, String> {
         let mut document = self.document.borrow_mut();
         match operation {
@@ -95,5 +84,66 @@ impl HtmlDomBridgeState {
             }
             _ => Err(format!("unsupported HTML style operation: {operation}")),
         }
+    }
+}
+
+fn apply_tree_mutation(
+    document: &mut crate::renderer::backends::html_document::HtmlDocument,
+    operation: &str,
+    arguments: &[String],
+) -> Result<(), String> {
+    match operation {
+        "appendText" => {
+            document.append_text(node_id(argument(arguments, 0)?)?, argument(arguments, 1)?)?
+        }
+        "appendChild" => {
+            let parent = node_id(argument(arguments, 0)?)?;
+            let child = node_id(argument(arguments, 1)?)?;
+            document.append_child(parent, child)?;
+        }
+        "remove" => document.remove(node_id(argument(arguments, 0)?)?)?,
+        "insertAdjacentHTML" | "insertAdjacentText" => {
+            apply_adjacent_mutation(document, operation, arguments)?
+        }
+        _ => return Err(format!("unsupported HTML mutation operation: {operation}")),
+    }
+    Ok(())
+}
+
+fn apply_adjacent_mutation(
+    document: &mut crate::renderer::backends::html_document::HtmlDocument,
+    operation: &str,
+    arguments: &[String],
+) -> Result<(), String> {
+    let target = node_id(argument(arguments, 0)?)?;
+    let position = argument(arguments, 1)?;
+    let value = argument(arguments, 2)?;
+    match operation {
+        "insertAdjacentHTML" => document.insert_adjacent_html(target, position, value),
+        "insertAdjacentText" => document.insert_adjacent_text(target, position, value),
+        _ => Err(format!(
+            "unsupported adjacent mutation operation: {operation}"
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_adjacent_mutation;
+    use crate::renderer::backends::html_document::HtmlDocument;
+
+    #[test]
+    fn adjacent_mutation_rejects_unknown_operation_after_validating_arguments() {
+        let mut document = HtmlDocument::parse("<main>text</main>");
+        let result = apply_adjacent_mutation(
+            &mut document,
+            "unsupportedAdjacentOperation",
+            &[
+                "1".to_string(),
+                "beforebegin".to_string(),
+                "value".to_string(),
+            ],
+        );
+        assert!(matches!(result, Err(error) if error.contains("unsupported adjacent mutation")));
     }
 }

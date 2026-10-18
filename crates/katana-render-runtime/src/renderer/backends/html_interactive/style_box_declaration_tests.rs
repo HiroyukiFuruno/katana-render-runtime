@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::renderer::backends::html_interactive::style::{
-        CssBoxSizing, CssLength, CssOverflow, CssStyle,
+        CssBoxSizing, CssLength, CssOverflow, CssOverflowAxis, CssStyle,
     };
 
     const PADDING_TOP_DEFAULT: f32 = 1.0;
@@ -47,6 +47,66 @@ mod tests {
 
         style.apply_box_property("overflow", "unsupported");
         assert_eq!(style.overflow, CssOverflow::Visible);
+    }
+
+    #[test]
+    fn overflow_shorthand_preserves_specified_axes_and_resolves_visible_axis() {
+        let mut style = CssStyle::browser_default();
+
+        style.apply_box_property("overflow", "ScRoLl ClIp");
+
+        assert_eq!(
+            style.specified_overflow_axes(),
+            (CssOverflowAxis::Scroll, CssOverflowAxis::Clip)
+        );
+        assert_eq!(
+            style.computed_overflow_axes(),
+            (CssOverflowAxis::Scroll, CssOverflowAxis::Hidden)
+        );
+
+        style.apply_box_property("overflow", "hidden");
+        assert_eq!(
+            style.specified_overflow_axes(),
+            (CssOverflowAxis::Hidden, CssOverflowAxis::Hidden)
+        );
+    }
+
+    #[test]
+    fn overflow_axis_longhands_are_independent_and_apply_computed_rules() {
+        let mut style = CssStyle::browser_default();
+
+        style.apply_box_property("overflow-x", "clip");
+        style.apply_box_property("overflow-y", "auto");
+
+        assert_eq!(
+            style.computed_overflow_axes(),
+            (CssOverflowAxis::Hidden, CssOverflowAxis::Auto)
+        );
+        assert!(style.clips_overflow());
+    }
+
+    #[test]
+    fn invalid_overflow_values_leave_specified_axes_unchanged() {
+        let mut style = CssStyle::browser_default();
+        style.apply_box_property("overflow", "auto hidden");
+        let before = style.specified_overflow_axes();
+
+        style.apply_box_property("overflow", "auto hidden clip");
+        style.apply_box_property("overflow-x", "invalid");
+
+        assert_eq!(style.specified_overflow_axes(), before);
+    }
+
+    #[test]
+    fn legacy_clip_projection_keeps_direct_internal_assignments_compatible() {
+        let mut style = CssStyle::browser_default();
+        style.overflow = CssOverflow::Clip;
+
+        assert_eq!(
+            style.computed_overflow_axes(),
+            (CssOverflowAxis::Clip, CssOverflowAxis::Clip)
+        );
+        assert!(style.clips_overflow());
     }
 
     #[test]

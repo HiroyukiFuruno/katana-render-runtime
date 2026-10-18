@@ -41,25 +41,49 @@ impl HtmlLayoutRenderer {
         layout: LayoutContext<'_>,
         assigned_height: Option<f32>,
     ) -> f32 {
-        let mut style = CssStyle::from_element(element.tag, element.attributes, layout.style);
-        style.assign_outer_width(layout.width);
-        if let Some(height) = assigned_height {
-            style.assign_margin_box_height(height);
-        }
-        let sticky_y = if style.position == super::style::CssPosition::Sticky {
-            self.sticky_y(&style, layout.y)
-        } else {
-            layout.y
-        };
+        let style = self.prepare_flow_style(element, layout, assigned_height);
+        let (sticky_x, sticky_y) = self.flow_element_position(&style, layout);
+        let scope = self.begin_element_paint_scope(element.node_id, &style);
         let bottom = self.render_styled_element(
             element,
             LayoutContext {
                 style: &style,
+                x: sticky_x,
                 y: sticky_y,
                 ..layout
             },
         );
+        self.finish_element_paint_scope(scope, element.node_id, &style);
         layout.y + (bottom - sticky_y)
+    }
+
+    fn prepare_flow_style(
+        &self,
+        element: ElementRenderContext<'_>,
+        layout: LayoutContext<'_>,
+        assigned_height: Option<f32>,
+    ) -> CssStyle {
+        let mut style = CssStyle::from_element(element.tag, element.attributes, layout.style);
+        style.resolve_text_line_height(element.children);
+        style.assign_outer_width(layout.width);
+        if let Some(height) = assigned_height {
+            style.assign_margin_box_height(height);
+        }
+        style
+    }
+
+    fn flow_element_position(&self, style: &CssStyle, layout: LayoutContext<'_>) -> (f32, f32) {
+        let sticky_y = if style.position == super::style::CssPosition::Sticky {
+            self.sticky_y(style, layout.y)
+        } else {
+            layout.y
+        };
+        let sticky_x = if style.position == super::style::CssPosition::Sticky {
+            self.sticky_x(style, layout.x, layout.width)
+        } else {
+            layout.x
+        };
+        (sticky_x, sticky_y)
     }
 
     pub(super) fn measure_flow_node_height(

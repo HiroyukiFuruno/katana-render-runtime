@@ -40,10 +40,8 @@ function katanaErEntityBounds(svg) {
 
 function katanaErEntityBoxes(svg) {
   const boxes = [];
-  katanaRewriteBalancedGroups(
-    svg,
-    /<g class="node default " id="[^"]*entity-[^"]*"/g,
-    (node) => katanaCollectErEntityBox(node, boxes),
+  katanaRewriteBalancedGroups(svg, /<g class="node default " id="[^"]*entity-[^"]*"/g, (node) =>
+    katanaCollectErEntityBox(node, boxes),
   );
   return boxes;
 }
@@ -71,7 +69,9 @@ function katanaErEntityBox(node) {
 }
 
 function katanaErEntityOrigin(node) {
-  const match = node.match(/<g class="node default "[^>]*transform="translate\(([-\d.]+),\s*([-\d.]+)\)"/);
+  const match = node.match(
+    /<g class="node default "[^>]*transform="translate\(([-\d.]+),\s*([-\d.]+)\)"/,
+  );
   if (!match) {
     return null;
   }
@@ -83,9 +83,7 @@ function katanaErEntityLocalBox(node) {
 }
 
 function katanaErEntityOuterPathBox(node) {
-  const match = node.match(
-    /<path d="M([-\d.]+) ([-\d.]+) L([-\d.]+) [-\d.]+ L[-\d.]+ ([-\d.]+) L/,
-  );
+  const match = node.match(/<path d="M([-\d.]+) ([-\d.]+) L([-\d.]+) [-\d.]+ L[-\d.]+ ([-\d.]+) L/);
   if (!match) {
     return null;
   }

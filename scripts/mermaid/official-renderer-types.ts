@@ -1,14 +1,24 @@
 import type { MermaidThemeName, MermaidThemeVariables } from "./diagram_theme";
+import type { MermaidZenumlBrowserGlobals } from "./official-renderer-browser-globals.d.ts";
+import type { JsonInput } from "./raster-json-input";
 
 export interface BrowserLauncher {
   launch(options: { headless: boolean }): Promise<BrowserHandle>;
+  executablePath?(): string;
 }
 
 export interface PlaywrightModule {
   chromium: BrowserLauncher;
 }
 
+export interface BrowserIdentityCDPSession {
+  send(method: "SystemInfo.getProcessInfo"): Promise<JsonInput>;
+  detach(): Promise<void>;
+}
+
 export interface BrowserHandle {
+  newBrowserCDPSession?(): Promise<BrowserIdentityCDPSession>;
+  version?(): string;
   newPage(options: {
     viewport: { width: number; height: number };
     deviceScaleFactor: number;
@@ -29,7 +39,7 @@ export interface PageHandle {
 }
 
 export interface LocatorHandle {
-  screenshot(options: { path: string; omitBackground: boolean }): Promise<undefined | object>;
+  screenshot(options: { path: string; omitBackground: boolean }): Promise<Buffer>;
 }
 
 export interface MermaidConfig {
@@ -81,10 +91,8 @@ export interface MermaidI18nNormalizeResult {
   replacements: MermaidI18nReplacement[];
 }
 
-export interface MermaidI18nWindow extends MermaidWindow {
-  "mermaid-zenuml"?: object;
+export interface MermaidI18nWindow extends MermaidWindow, MermaidZenumlBrowserGlobals {
   __katanaOfficialReference?: boolean;
-  __katanaMermaidZenuml?: object;
   katanaMermaidDiagramType?: (source: string) => string;
   katanaNormalizeMermaidSourceI18n?: (source: string) => MermaidI18nNormalizeResult;
   katanaRestoreMermaidI18nText?: (svg: string, replacements: MermaidI18nReplacement[]) => string;

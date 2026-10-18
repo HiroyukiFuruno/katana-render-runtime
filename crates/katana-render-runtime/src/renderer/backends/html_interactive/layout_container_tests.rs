@@ -40,6 +40,28 @@ fn inline_container_width_includes_margins_exactly_once() {
 }
 
 #[test]
+fn inline_container_auto_width_includes_border_box_padding() {
+    let children = [HtmlDocumentNode::Text("要件仕様 v1".to_string())];
+    let mut style = CssStyle::browser_default();
+    style.inline_block = true;
+    style.padding_left = 10.0;
+    style.padding_right = 10.0;
+    style.border_width = 1.0;
+    style.apply("border-style", "solid");
+
+    let mut content_style = style.clone();
+    content_style.padding_left = 0.0;
+    content_style.padding_right = 0.0;
+    content_style.border_width = 0.0;
+    let content_width = inline_container_width(&children, 300.0, &content_style);
+
+    assert_eq!(
+        inline_container_width(&children, 300.0, &style),
+        content_width + 22.0
+    );
+}
+
+#[test]
 fn container_height_is_clamped_by_max_height() {
     let mut style = CssStyle::browser_default();
     style.max_height = Some(20.0);
@@ -55,4 +77,58 @@ fn horizontal_auto_margins_center_a_constrained_box() {
     style.margin_right_auto = true;
 
     assert_eq!(horizontal_box_geometry(0.0, 320.0, &style), (110.0, 100.0));
+}
+
+#[test]
+fn fixed_widths_overflow_narrow_containers_with_both_box_sizings() {
+    let content_box = CssStyle::from_attributes(
+        &[(
+            "style".to_string(),
+            "width:60px;padding:5px;border:1px solid".to_string(),
+        )],
+        &CssStyle::browser_default(),
+    );
+    let border_box = CssStyle::from_attributes(
+        &[(
+            "style".to_string(),
+            "width:60px;box-sizing:border-box;padding:5px;border:1px solid".to_string(),
+        )],
+        &CssStyle::browser_default(),
+    );
+
+    assert_eq!(
+        horizontal_box_geometry(0.0, 45.0, &content_box),
+        (0.0, 72.0)
+    );
+    assert_eq!(horizontal_box_geometry(0.0, 45.0, &border_box), (0.0, 60.0));
+}
+
+#[test]
+fn percentage_and_min_widths_can_overflow_narrow_containers() {
+    let percentage = CssStyle::from_attributes(
+        &[("style".to_string(), "width:150%".to_string())],
+        &CssStyle::browser_default(),
+    );
+    let minimum = CssStyle::from_attributes(
+        &[("style".to_string(), "min-width:60px".to_string())],
+        &CssStyle::browser_default(),
+    );
+
+    assert_eq!(horizontal_box_geometry(0.0, 45.0, &percentage), (0.0, 67.5));
+    assert_eq!(horizontal_box_geometry(0.0, 45.0, &minimum), (0.0, 60.0));
+}
+
+#[test]
+fn max_width_still_bounds_fixed_width_and_auto_width_still_fits() {
+    let fixed = CssStyle::from_attributes(
+        &[("style".to_string(), "width:60px;max-width:50px".to_string())],
+        &CssStyle::browser_default(),
+    );
+    let automatic = CssStyle::from_attributes(
+        &[("style".to_string(), "max-width:80px".to_string())],
+        &CssStyle::browser_default(),
+    );
+
+    assert_eq!(horizontal_box_geometry(0.0, 45.0, &fixed), (0.0, 50.0));
+    assert_eq!(horizontal_box_geometry(0.0, 45.0, &automatic), (0.0, 45.0));
 }

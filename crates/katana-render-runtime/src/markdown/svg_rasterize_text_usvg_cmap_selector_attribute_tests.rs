@@ -2,6 +2,143 @@ use super::super::tests::FONT_BYTES;
 use super::same_fallback_attributes;
 use resvg::usvg::fontdb::{Database, FaceInfo, Stretch, Style, Weight};
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[test]
+fn browser_system_font_aliases_select_the_registered_system_face()
+-> Result<(), Box<dyn std::error::Error>> {
+    let database = system_alias_database()?;
+    for (family, style) in [
+        ("system-ui", "normal"),
+        ("-apple-system", "italic"),
+        ("BlinkMacSystemFont", "oblique"),
+    ] {
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="30"><text y="20" font-family="{family}" font-style="{style}">AV</text></svg>"#
+        );
+        let mut options = resvg::usvg::Options {
+            fontdb: std::sync::Arc::clone(&database),
+            ..resvg::usvg::Options::default()
+        };
+        options.font_resolver.select_font = super::html_font_selector();
+        let tree = resvg::usvg::Tree::from_str(&svg, &options)?;
+        assert!(!tree.root().children().is_empty(), "{family}/{style}");
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn system_alias_database() -> Result<std::sync::Arc<Database>, String> {
+    let mut database = Database::new();
+    for style in [Style::Normal, Style::Italic, Style::Oblique] {
+        let mut face = bundled_face()?;
+        face.style = style;
+        face.families = vec![(
+            "System Font".to_string(),
+            resvg::usvg::fontdb::Language::English_UnitedStates,
+        )];
+        database.push_face_info(face);
+    }
+    Ok(std::sync::Arc::new(database))
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[test]
+fn system_alias_preserves_author_family_order_and_stretch() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut database = system_alias_database()?;
+    std::sync::Arc::make_mut(&mut database).load_font_data(FONT_BYTES.to_vec());
+    for stretch in [
+        "ultra-condensed",
+        "extra-condensed",
+        "condensed",
+        "semi-condensed",
+        "normal",
+        "semi-expanded",
+        "expanded",
+        "extra-expanded",
+        "ultra-expanded",
+    ] {
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="30"><text y="20" font-family="Noto Sans,serif,sans-serif,cursive,fantasy,monospace,system-ui" font-stretch="{stretch}">AV</text></svg>"#
+        );
+        let mut options = resvg::usvg::Options {
+            fontdb: std::sync::Arc::clone(&database),
+            ..resvg::usvg::Options::default()
+        };
+        options.font_resolver.select_font = super::html_font_selector();
+        let tree = resvg::usvg::Tree::from_str(&svg, &options)?;
+        assert!(!tree.root().children().is_empty(), "{stretch}");
+        assert_selected_family(&tree, "Noto Sans")?;
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn assert_selected_family(tree: &resvg::usvg::Tree, expected: &str) -> Result<(), String> {
+    let mut count = 0;
+    for node in tree.root().children() {
+        let resvg::usvg::Node::Text(text) = node else {
+            continue;
+        };
+        for span in text.layouted() {
+            for glyph in &span.positioned_glyphs {
+                let face = tree
+                    .fontdb()
+                    .face(glyph.font)
+                    .ok_or("selected font missing")?;
+                assert!(face.families.iter().any(|(name, _)| name == expected));
+                count += 1;
+            }
+        }
+    }
+    assert!(count > 0);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn mixed_face_tspans_keep_latin_on_the_requested_face() -> Result<(), Box<dyn std::error::Error>> {
+    let family = "Helvetica Neue, Hiragino Kaku Gothic ProN";
+    let database = super::super::super::html_font_db_for_text(family, "AV日本");
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="30"><text x="0" y="20" font-size="16"><tspan x="0" font-family="Helvetica Neue">AV</tspan><tspan x="22" font-family="Hiragino Kaku Gothic ProN">日本</tspan></text></svg>"#;
+    let options = resvg::usvg::Options {
+        fontdb: database,
+        ..resvg::usvg::Options::default()
+    };
+    let tree = resvg::usvg::Tree::from_str(svg, &options)?;
+    for node in tree.root().children() {
+        let resvg::usvg::Node::Text(text) = node else {
+            continue;
+        };
+        for span in text.layouted() {
+            for glyph in &span.positioned_glyphs {
+                assert_latin_face(&tree, glyph.font, &glyph.text)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn assert_latin_face(
+    tree: &resvg::usvg::Tree,
+    font: resvg::usvg::fontdb::ID,
+    text: &str,
+) -> Result<(), String> {
+    if !text.is_ascii() {
+        return Ok(());
+    }
+    let face = tree.fontdb().face(font).ok_or("font missing")?;
+    assert!(
+        face.families
+            .iter()
+            .any(|(name, _)| name == "Helvetica Neue"),
+        "{text} {:?}",
+        face.families
+    );
+    Ok(())
+}
+
 fn bundled_face() -> Result<FaceInfo, String> {
     let mut database = Database::new();
     database.load_font_data(FONT_BYTES.to_vec());
@@ -27,6 +164,15 @@ fn face_with_attributes(
     face.weight = weight;
     face.stretch = stretch;
     face
+}
+
+#[test]
+fn fallback_selection_rejects_a_base_face_missing_from_the_database() {
+    let database = std::sync::Arc::new(Database::new());
+    assert_eq!(
+        super::select_cached('A', &[resvg::usvg::fontdb::ID::dummy()], &database),
+        Ok(None)
+    );
 }
 
 #[test]

@@ -1,6 +1,7 @@
 use super::{DiagramCommand, DiagramSourceOps, MermaidMarkdownOps, RenderInputFactory};
 use crate::commands::{DiagramAction, ThemeModeArg};
 use katana_render_runtime::DiagramKind;
+use std::path::PathBuf;
 
 #[test]
 fn extracts_mermaid_fence_from_markdown() {
@@ -224,14 +225,13 @@ fn plantuml_render_reaches_config_validation_after_input_loading()
     Ok(())
 }
 
-#[test]
-fn mermaid_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Error>> {
-    let input = std::env::temp_dir().join(format!("krr-cli-mmd-{}.md", std::process::id()));
-    let output = std::env::temp_dir().join(format!("krr-cli-mmd-{}.svg", std::process::id()));
-    let runtime = std::env::temp_dir().join("missing-krr-mermaid-runtime.js");
-
-    std::fs::write(&input, "```mermaid\ngraph TD; A-->B\n```\n")?;
-    let result = DiagramCommand::new(DiagramKind::Mermaid).run(DiagramAction::Render {
+fn assert_missing_runtime_render(
+    kind: DiagramKind,
+    input: PathBuf,
+    output: PathBuf,
+    runtime: PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let result = DiagramCommand::new(kind).run(DiagramAction::Render {
         source_options: crate::commands::DiagramSourceOptions::default(),
         input: input.clone(),
         output: Some(output),
@@ -248,24 +248,21 @@ fn mermaid_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Er
 }
 
 #[test]
+fn mermaid_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Error>> {
+    let input = std::env::temp_dir().join(format!("krr-cli-mmd-{}.md", std::process::id()));
+    let output = std::env::temp_dir().join(format!("krr-cli-mmd-{}.svg", std::process::id()));
+    let runtime = std::env::temp_dir().join("missing-krr-mermaid-runtime.js");
+
+    std::fs::write(&input, "```mermaid\ngraph TD; A-->B\n```\n")?;
+    assert_missing_runtime_render(DiagramKind::Mermaid, input, output, runtime)
+}
+
+#[test]
 fn drawio_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Error>> {
     let input = std::env::temp_dir().join(format!("krr-cli-drawio-{}.drawio", std::process::id()));
     let output = std::env::temp_dir().join(format!("krr-cli-drawio-{}.svg", std::process::id()));
     let runtime = std::env::temp_dir().join("missing-krr-drawio-runtime.js");
 
     std::fs::write(&input, "<mxGraphModel />")?;
-    let result = DiagramCommand::new(DiagramKind::Drawio).run(DiagramAction::Render {
-        source_options: crate::commands::DiagramSourceOptions::default(),
-        input: input.clone(),
-        output: Some(output),
-        runtime: Some(runtime),
-        theme: None,
-        theme_from: None,
-        theme_mode: None,
-        cache_dir: None,
-    });
-
-    assert!(result.is_err());
-    std::fs::remove_file(input)?;
-    Ok(())
+    assert_missing_runtime_render(DiagramKind::Drawio, input, output, runtime)
 }

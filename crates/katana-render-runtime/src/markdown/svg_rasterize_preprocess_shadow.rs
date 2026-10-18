@@ -1,0 +1,153 @@
+use std::ops::Range;
+
+use resvg::usvg::roxmltree::{Document, Node};
+
+#[path = "svg_rasterize_preprocess_shadow_css.rs"]
+mod css;
+
+const DROP_SHADOW: &str = "drop-shadow(";
+const RGBA: &str = "rgba(";
+
+pub(super) fn normalize_filter_shadow_colors(svg_text: &str) -> String {
+    if !contains_ascii_case_insensitive(svg_text, DROP_SHADOW)
+        || !contains_ascii_case_insensitive(svg_text, RGBA)
+    {
+        return svg_text.to_owned();
+    }
+    let Ok(document) = Document::parse(svg_text) else {
+        return svg_text.to_owned();
+    };
+    let mut edits = Vec::new();
+    for node in document.descendants().filter(|node| node.is_element()) {
+        collect_node_edits(node, svg_text, &mut edits);
+    }
+    apply_source_edits(svg_text, edits)
+}
+
+fn contains_ascii_case_insensitive(source: &str, needle: &str) -> bool {
+    source
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+fn collect_node_edits(node: Node<'_, '_>, source: &str, edits: &mut Vec<SourceEdit>) {
+    collect_style_attribute_edits(node, source, edits);
+    if node.tag_name().name() == "style" {
+        collect_style_element_edits(node, source, edits);
+    }
+}
+
+fn collect_style_attribute_edits(node: Node<'_, '_>, source: &str, edits: &mut Vec<SourceEdit>) {
+    for attribute in node
+        .attributes()
+        .filter(|attribute| attribute.name() == "style" && attribute.namespace().is_none())
+    {
+        let range = attribute.range_value();
+        if source.get(range.clone()) != Some(attribute.value()) {
+            continue;
+        }
+        let Some(replacement) = css::normalize_inline_style(attribute.value()) else {
+            continue;
+        };
+        push_changed_edit(edits, range, attribute.value(), replacement);
+    }
+}
+
+fn collect_style_element_edits(node: Node<'_, '_>, source: &str, edits: &mut Vec<SourceEdit>) {
+    for child in node.children().filter(|child| child.is_text()) {
+        let Some(text) = child.text() else {
+            continue;
+        };
+        let range = child.range();
+        if source.get(range.clone()) != Some(text) {
+            continue;
+        }
+        let Some(replacement) = css::normalize_stylesheet(text) else {
+            continue;
+        };
+        push_changed_edit(edits, range, text, replacement);
+    }
+}
+
+fn push_changed_edit(
+    edits: &mut Vec<SourceEdit>,
+    range: Range<usize>,
+    source: &str,
+    replacement: String,
+) {
+    if replacement != source {
+        edits.push(SourceEdit { range, replacement });
+    }
+}
+
+struct SourceEdit {
+    range: Range<usize>,
+    replacement: String,
+}
+
+fn apply_source_edits(source: &str, mut edits: Vec<SourceEdit>) -> String {
+    edits.sort_by_key(|edit| edit.range.start);
+    if edits
+        .iter()
+        .any(|edit| !valid_source_range(source, &edit.range))
+        || edits
+            .windows(2)
+            .any(|pair| pair[0].range.end > pair[1].range.start)
+    {
+        return source.to_owned();
+    }
+    let mut output = source.to_owned();
+    for edit in edits.into_iter().rev() {
+        output.replace_range(edit.range, &edit.replacement);
+    }
+    output
+}
+
+fn valid_source_range(source: &str, range: &Range<usize>) -> bool {
+    range.start < range.end && source.get(range.clone()).is_some()
+}
+
+#[cfg(test)]
+#[path = "svg_rasterize_preprocess_shadow_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "svg_rasterize_preprocess_shadow_natural_tests.rs"]
+mod natural_tests;
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::{SourceEdit, apply_source_edits, normalize_filter_shadow_colors};
+
+    #[test]
+    fn malformed_shadow_xml_preserves_original_source() {
+        let source = "<svg><style>g{filter:drop-shadow(1px 2px rgba(0,0,0,.5))}</svg>";
+        assert_eq!(normalize_filter_shadow_colors(source), source);
+    }
+
+    #[test]
+    fn invalid_and_overlapping_shadow_edits_preserve_original_bytes() {
+        let invalid = vec![SourceEdit {
+            range: 0..1,
+            replacement: "x".to_owned(),
+        }];
+        assert_eq!(apply_source_edits("é", invalid), "é");
+        let overlapping = vec![
+            SourceEdit {
+                range: 0..2,
+                replacement: "x".to_owned(),
+            },
+            SourceEdit {
+                range: 1..3,
+                replacement: "y".to_owned(),
+            },
+        ];
+        assert_eq!(apply_source_edits("abc", overlapping), "abc");
+        let valid = vec![SourceEdit {
+            range: 0..1,
+            replacement: "x".to_owned(),
+        }];
+        assert_eq!(apply_source_edits("a", valid), "x");
+    }
+}

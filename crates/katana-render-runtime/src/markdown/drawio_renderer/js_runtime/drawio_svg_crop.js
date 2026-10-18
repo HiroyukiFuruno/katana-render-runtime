@@ -554,33 +554,6 @@ function katanaDrawioTransformPoint(point, matrix) {
   };
 }
 
-function katanaDrawioParentTranslate(node) {
-  return node
-    ? katanaDrawioAddTranslate(katanaDrawioParentTranslate(node.parentNode), node)
-    : { x: 0, y: 0 };
-}
-
-function katanaDrawioAddTranslate(translate, node) {
-  const next = katanaDrawioNodeTranslate(node);
-  return { x: translate.x + next.x, y: translate.y + next.y };
-}
-
-function katanaDrawioNodeTranslate(node) {
-  return katanaDrawioTranslateMatch(String(node?.getAttribute?.("transform") ?? ""));
-}
-
-function katanaDrawioTranslateMatch(transform) {
-  const match = transform.match(/translate\(([-\d.]+)(?:[,\s]+([-\d.]+))?\)/);
-  return [match]
-    .filter(Boolean)
-    .map(katanaDrawioTranslateFromMatch)
-    .concat([{ x: 0, y: 0 }])[0];
-}
-
-function katanaDrawioTranslateFromMatch(match) {
-  return { x: Number(match[1]), y: Number(match[2] ?? 0) };
-}
-
 function katanaDrawioUnionBox(boxes) {
   return boxes.length === 0 ? null : katanaDrawioUnionNonEmptyBox(boxes);
 }

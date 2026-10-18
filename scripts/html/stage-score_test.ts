@@ -8,6 +8,7 @@ import type { AnonymousDocumentExpectations } from "./stage-score";
 import {
   assertAnonymousFidelityResults,
   assertStage90Manifest,
+  assertStrictHtml84ChromeReceipt,
   assertStrictStage90Manifest,
   collectAnonymousFidelityFailures,
   loadCanonicalTrustedExpectations,
@@ -514,7 +515,118 @@ describe("stage score contract", () => {
       fs.rmSync(temporary, { recursive: true, force: true });
     }
   });
+
+  test("strict Chrome receipt validates optional CoreText path and axis evidence", () => {
+    const fixture = strictChromeReceiptFixture();
+    try {
+      expect(() =>
+        assertStrictHtml84ChromeReceipt(
+          fixture.receiptPath,
+          sha256File(fixture.receiptPath),
+          fixture.expected,
+        ),
+      ).not.toThrow();
+      const face = fixture.receipt.fontProvenance[0];
+      if (!face?.coreTextDescriptor) throw new Error("missing fixture descriptor");
+      face.selectedNodeId = null;
+      fs.writeFileSync(fixture.receiptPath, JSON.stringify(fixture.receipt));
+      expect(() =>
+        assertStrictHtml84ChromeReceipt(
+          fixture.receiptPath,
+          sha256File(fixture.receiptPath),
+          fixture.expected,
+        ),
+      ).not.toThrow();
+      face.scope = "node";
+      fs.writeFileSync(fixture.receiptPath, JSON.stringify(fixture.receipt));
+      expect(() =>
+        assertStrictHtml84ChromeReceipt(
+          fixture.receiptPath,
+          sha256File(fixture.receiptPath),
+          fixture.expected,
+        ),
+      ).toThrow();
+      face.scope = "capture";
+      const coordinate = face.coreTextDescriptor.variationCoordinates[0];
+      if (!coordinate) throw new Error("missing fixture variation coordinate");
+      coordinate.value = 901;
+      fs.writeFileSync(fixture.receiptPath, JSON.stringify(fixture.receipt));
+      expect(() =>
+        assertStrictHtml84ChromeReceipt(
+          fixture.receiptPath,
+          sha256File(fixture.receiptPath),
+          fixture.expected,
+        ),
+      ).toThrow();
+    } finally {
+      fs.rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  });
 });
+
+function strictChromeReceiptFixture() {
+  const directory = fs.mkdtempSync(path.resolve("tmp/coretext-chrome-receipt-"));
+  const fontPath = path.join(directory, "font.bin");
+  const capturePath = path.join(directory, "capture.png");
+  fs.writeFileSync(fontPath, "font bytes");
+  fs.writeFileSync(capturePath, "capture bytes");
+  const canonicalFontPath = fs.realpathSync(fontPath);
+  const receiptPath = path.join(directory, "receipt.json");
+  const receipt = {
+    schema: "krr-html84-chrome-condition-v1",
+    status: "observed",
+    conditionId: "fixture/1280x900@1",
+    caseId: "fixture",
+    boundaryState: "initial",
+    operationKind: "load",
+    sourceSha256: "a".repeat(64),
+    binarySha256: "b".repeat(64),
+    viewport: { width: 1280, height: 900, scale: 1 },
+    browserExecutablePath: process.execPath,
+    browserExecutableSha256: sha256File(process.execPath),
+    capturePath,
+    captureSha256: sha256File(capturePath),
+    state: { ready: true },
+    boundary: { state: "initial" },
+    resourceProvenance: { inventoryComplete: true, requests: [] },
+    fontProvenance: [
+      {
+        scope: "capture",
+        family: "Fixture Sans",
+        source: "system",
+        filePath: canonicalFontPath,
+        fileSha256: sha256File(fontPath),
+        faceIndex: 0,
+        selectedNodeId: null,
+        selected: true,
+        fileBytesVerified: true,
+        coreTextDescriptor: {
+          urlPath: canonicalFontPath,
+          postScriptName: "Fixture-Regular",
+          variationAxes: [
+            { identifier: 2_003_265_652, minimumValue: 100, maximumValue: 900, defaultValue: 400 },
+          ],
+          variationCoordinates: [{ identifier: 2_003_265_652, value: 400 }],
+        },
+      },
+    ],
+  };
+  fs.writeFileSync(receiptPath, JSON.stringify(receipt));
+  return {
+    directory,
+    receiptPath,
+    receipt,
+    expected: {
+      conditionId: "fixture/1280x900@1",
+      caseId: "fixture",
+      state: "initial",
+      operationKind: "load",
+      viewport: { width: 1280, height: 900, scale: 1 },
+      sourceSha256: "a".repeat(64),
+      binarySha256: "b".repeat(64),
+    },
+  };
+}
 
 function strictPerformance() {
   return {

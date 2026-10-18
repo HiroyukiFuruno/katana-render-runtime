@@ -77,6 +77,7 @@ pub(super) struct ControlLayout<'a> {
 
 #[derive(Clone, Copy)]
 pub(super) struct TableCellLayout<'a> {
+    pub(super) previous_bottom_border: f32,
     pub(super) row_index: usize,
     pub(super) x: f32,
     pub(super) y: f32,
@@ -111,8 +112,8 @@ pub(super) struct ElementBox {
     /// 開始時点のDOM祖先。絶対配置要素へ適用する overflow clip を判定する。
     pub(super) ancestor_node_ids: Vec<u64>,
     pub(super) overflow_clips: Vec<OverflowClip>,
-    /// 自身が overflow clip を持つか。element root の基準矩形に使う。
-    pub(super) clips_overflow: bool,
+    /// 計算済みの両軸のoverflow clip。viewportへ伝播した要素では両方false。
+    pub(super) overflow_clip_axes: (bool, bool),
     /// overflow clip を持つ IntersectionObserver の element root は padding edge を基準にする。
     pub(super) padding_edge: OverflowClip,
     pub(super) inline_fragments: Vec<InlineFragment>,
@@ -121,14 +122,13 @@ pub(super) struct ElementBox {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct OverflowClip {
     pub(super) owner_node_id: u64,
+    pub(super) active_axes: (bool, bool),
     pub(super) x: f32,
     pub(super) y: f32,
     pub(super) width: f32,
     pub(super) height: f32,
     /// 回転後も clip の実形状を保つための四隅。x/y/width/height は AABB を保持する。
     pub(super) transformed_corners: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
-    pub(super) radius_x: f32,
-    pub(super) radius_y: f32,
     /// 内側の角丸半径を左上、右上、右下、左下の順で保持する。
     pub(super) corner_radii: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
 }
@@ -145,15 +145,19 @@ impl OverflowClip {
     ) -> Self {
         Self {
             owner_node_id,
+            active_axes: (true, true),
             x,
             y,
             width,
             height,
             transformed_corners: ElementBox::rectangle_corners(x, y, width, height),
-            radius_x,
-            radius_y,
             corner_radii: [(radius_x, radius_y); ELEMENT_BOX_CORNER_COUNT],
         }
+    }
+
+    pub(super) fn with_active_axes(mut self, active_axes: (bool, bool)) -> Self {
+        self.active_axes = active_axes;
+        self
     }
 
     pub(super) fn with_corner_radii(
@@ -161,15 +165,15 @@ impl OverflowClip {
         corner_radii: [(f32, f32); ELEMENT_BOX_CORNER_COUNT],
     ) -> Self {
         self.corner_radii = corner_radii;
-        self.radius_x = corner_radii
-            .iter()
-            .map(|(radius_x, _)| *radius_x)
-            .fold(0.0, f32::max);
-        self.radius_y = corner_radii
-            .iter()
-            .map(|(_, radius_y)| *radius_y)
-            .fold(0.0, f32::max);
         self
+    }
+
+    pub(super) fn maximum_radii(&self) -> (f32, f32) {
+        self.corner_radii
+            .iter()
+            .fold((0.0_f32, 0.0_f32), |radii, corner| {
+                (radii.0.max(corner.0), radii.1.max(corner.1))
+            })
     }
 }
 
@@ -186,5 +190,10 @@ pub(super) struct LayoutResult {
     pub(super) hit_targets: Vec<HitTarget>,
     pub(super) element_boxes: Vec<ElementBox>,
     pub(super) anchor_positions: HashMap<String, f32>,
+    pub(super) content_width: f32,
     pub(super) content_height: f32,
+    pub(super) viewport_overflow: (
+        super::super::html_browser::HtmlBrowserOverflowPolicy,
+        super::super::html_browser::HtmlBrowserOverflowPolicy,
+    ),
 }

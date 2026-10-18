@@ -1,26 +1,34 @@
-use super::super::html_browser::{HtmlBrowserFrame, HtmlBrowserPixelFormat};
-use super::super::html_document::HtmlDocumentNode;
-use super::document::seed_input_values;
-use super::layout::HtmlLayoutRenderer;
+use super::super::html_browser::{
+    HtmlBrowserFrame, HtmlBrowserPixelFormat, HtmlBrowserScrollMetrics,
+};
 use super::session::HtmlInteractiveSession;
+use super::session_geometry::max_scroll_for;
 use super::types::LayoutResult;
 use super::{HtmlBrowserError, runtime_failure};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
-use std::collections::HashSet;
 
 impl HtmlInteractiveSession {
     pub(super) fn render_frame(&mut self) -> Result<(), HtmlBrowserError> {
+        self.render_frame_with_resize_resolution(false)
+    }
+
+    pub(super) fn render_resize_frame(&mut self) -> Result<(), HtmlBrowserError> {
+        self.render_frame_with_resize_resolution(true)
+    }
+
+    fn render_frame_with_resize_resolution(
+        &mut self,
+        resolve_resize_scroll: bool,
+    ) -> Result<(), HtmlBrowserError> {
+        #[cfg(all(test, target_os = "macos"))]
+        let _font_observer =
+            crate::markdown::svg_rasterize::SvgRasterizeOps::font_work_frame_scope();
+        let _style_declaration_scope = super::style_declaration_cache::Scope::enter();
         let generation = self.generation + 1;
         let total_started = self.trace.start();
-        let mut render = self.traced_layout(generation)?;
-        for _ in 0..2 {
-            self.update_scroll(&render);
-            if !self.sync_intersection_geometry(&render)? {
-                break;
-            }
-            render = self.traced_layout(generation)?;
-        }
-        let pixels = self.traced_rasterize(generation, &render.svg)?;
+        let (render, pixels) = SvgRasterizeOps::with_html_font_face_cache_scope(|| {
+            self.render_frame_layout_and_rasterize(generation, resolve_resize_scroll)
+        })?;
         let started = self.trace.start();
         let result = self.store_frame(render, pixels);
         self.trace.finish(generation, "frame_store", started, &[]);
@@ -29,115 +37,48 @@ impl HtmlInteractiveSession {
         result
     }
 
-    pub(super) fn layout(&mut self) -> Result<LayoutResult, HtmlBrowserError> {
-        self.traced_layout(self.generation + 1)
-    }
-
-    fn traced_layout(&mut self, generation: u64) -> Result<LayoutResult, HtmlBrowserError> {
-        let total_started = self.trace.start();
-        let started = self.trace.start();
-        let nodes = self.project_nodes()?;
-        let node_count = traced_node_count(&self.trace, &nodes);
-        self.trace.finish(
-            generation,
-            "dom_css_projection",
-            started,
-            &[("nodes", node_count)],
-        );
-        let clickable_nodes = self.clickable_nodes(generation)?;
-        let rendered = self.render_layout_svg(generation, &nodes, &clickable_nodes)?;
-        self.trace_layout_total(generation, total_started, &rendered);
-        Ok(rendered)
-    }
-
-    fn render_layout_svg(
+    fn render_frame_layout_and_rasterize(
         &mut self,
         generation: u64,
-        nodes: &[HtmlDocumentNode],
-        clickable_nodes: &HashSet<u64>,
-    ) -> Result<LayoutResult, HtmlBrowserError> {
-        self.input_values.clear();
-        seed_input_values(nodes, &mut self.input_values);
-        let started = self.trace.start();
-        let rendered = HtmlLayoutRenderer::render_with_clickable_nodes(
-            nodes,
-            self.viewport,
-            self.scroll_y,
-            &self.input_values,
-            self.focused_input,
-            clickable_nodes,
-        )
-        .map_err(runtime_failure)?;
-        self.trace.finish(
-            generation,
-            "layout_svg",
-            started,
-            &[("svg_bytes", rendered.svg.len())],
-        );
-        Ok(rendered)
+        resolve_resize_scroll: bool,
+    ) -> Result<(LayoutResult, Vec<u8>), HtmlBrowserError> {
+        let mut render = if resolve_resize_scroll {
+            self.layout_resize_frame(generation)?
+        } else {
+            self.traced_layout(generation)?
+        };
+        for _ in 0..2 {
+            if self.update_scroll(&render) {
+                render = self.traced_layout(generation)?;
+            }
+            if !self.sync_intersection_geometry(&render)? {
+                break;
+            }
+            render = self.traced_layout(generation)?;
+        }
+        let pixels = self.traced_rasterize(generation, &render.svg)?;
+        Ok((render, pixels))
     }
 
-    fn project_nodes(&self) -> Result<Vec<HtmlDocumentNode>, HtmlBrowserError> {
-        self.runtime
-            .interactive_nodes_at_width_with_hover(
-                self.viewport.logical_width(),
-                &self.hovered_nodes,
-            )
-            .map_err(runtime_failure)
+    fn layout_resize_frame(&mut self, generation: u64) -> Result<LayoutResult, HtmlBrowserError> {
+        let layout = self.traced_layout(generation)?;
+        let previous_scroll = self.scroll_geometry.scroll_y;
+        let anchor_scroll = self
+            .resize_anchor
+            .as_ref()
+            .and_then(|anchor| layout.anchor_positions.get(anchor))
+            .copied()
+            .unwrap_or(previous_scroll);
+        self.scroll_geometry.scroll_y =
+            anchor_scroll.clamp(0.0, max_scroll_for(&layout, self.viewport));
+        if self.scroll_geometry.scroll_y == previous_scroll {
+            return Ok(layout);
+        }
+        self.traced_layout(generation)
     }
 
-    fn clickable_nodes(&self, generation: u64) -> Result<HashSet<u64>, HtmlBrowserError> {
-        let started = self.trace.start();
-        let nodes = self
-            .runtime
-            .event_target_ids("click")
-            .map_err(runtime_failure)?;
-        self.trace.finish(
-            generation,
-            "event_targets",
-            started,
-            &[("clickable_nodes", nodes.len())],
-        );
-        Ok(nodes)
-    }
-
-    fn trace_layout_total(
-        &self,
-        generation: u64,
-        started: Option<std::time::Instant>,
-        render: &LayoutResult,
-    ) {
-        self.trace.finish(
-            generation,
-            "layout_total",
-            started,
-            &[
-                ("svg_bytes", render.svg.len()),
-                ("hit_targets", render.hit_targets.len()),
-                ("element_boxes", render.element_boxes.len()),
-                ("viewport_width", self.viewport.width as usize),
-                ("viewport_height", self.viewport.height as usize),
-            ],
-        );
-    }
-
-    fn traced_rasterize(&self, generation: u64, svg: &str) -> Result<Vec<u8>, HtmlBrowserError> {
-        let started = self.trace.start();
-        let raster = SvgRasterizeOps::rasterize_html_svg(svg, 1.0)
-            .map_err(|error| runtime_failure(error.to_string()))?;
-        self.validate_raster_dimensions(raster.width, raster.height)?;
-        self.trace.finish(
-            generation,
-            "svg_rasterize",
-            started,
-            &[("rgba_bytes", raster.rgba.len())],
-        );
-        Ok(raster.rgba)
-    }
-
-    #[cfg(test)]
-    pub(super) fn rasterize(&self, svg: &str) -> Result<Vec<u8>, HtmlBrowserError> {
-        self.traced_rasterize(self.generation + 1, svg)
+    pub(super) fn layout(&mut self) -> Result<LayoutResult, HtmlBrowserError> {
+        self.traced_layout(self.generation + 1)
     }
 
     pub(super) fn validate_raster_dimensions(
@@ -159,63 +100,44 @@ impl HtmlInteractiveSession {
         render: LayoutResult,
         pixels: Vec<u8>,
     ) -> Result<(), HtmlBrowserError> {
-        self.generation += 1;
-        self.latest_frame = Some(
-            HtmlBrowserFrame::new(
-                self.generation,
-                self.source.origin.clone(),
-                self.viewport,
-                HtmlBrowserPixelFormat::Rgba8,
-                pixels,
-            )
-            .map_err(|error| runtime_failure(error.to_string()))?
-            .with_layout_metrics(self.scroll_y, render.content_height),
+        let generation = self.generation + 1;
+        let metrics = HtmlBrowserScrollMetrics::new(
+            generation,
+            self.viewport,
+            (render.content_width, render.content_height),
+            (self.scroll_geometry.scroll_x, self.scroll_geometry.scroll_y),
+            render.viewport_overflow,
+        )?;
+        let frame = self.raster_frame(pixels, render.content_height)?;
+        self.generation = generation;
+        self.latest_frame = Some(frame);
+        self.latest_scroll_metrics = Some(metrics);
+        #[cfg(all(test, target_os = "macos"))]
+        crate::markdown::svg_rasterize::SvgRasterizeOps::observe_font_frame(
+            self.latest_frame.as_ref(),
+            &self.source,
         );
         self.hit_targets = render.hit_targets;
         self.element_boxes = render.element_boxes;
-        self.content_height = render.content_height;
+        self.scroll_geometry.content_height = render.content_height;
+        self.scroll_geometry.content_width = render.content_width;
+        self.scroll_geometry.viewport_overflow = render.viewport_overflow;
         Ok(())
     }
-}
 
-fn node_count(nodes: &[HtmlDocumentNode]) -> usize {
-    nodes
-        .iter()
-        .map(|node| match node {
-            HtmlDocumentNode::Element { children, .. } => 1 + node_count(children),
-            HtmlDocumentNode::Text(_) => 1,
-        })
-        .sum()
-}
-
-fn traced_node_count(
-    trace: &super::super::html_debug_trace::HtmlDebugTrace,
-    nodes: &[HtmlDocumentNode],
-) -> usize {
-    if trace.enabled() {
-        return node_count(nodes);
-    }
-    0
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{HtmlDocumentNode, traced_node_count};
-    use crate::renderer::backends::html_debug_trace::HtmlDebugTrace;
-
-    #[test]
-    fn debug_node_metric_counts_elements_and_text_recursively() {
-        let nodes = vec![HtmlDocumentNode::Element {
-            node_id: 1,
-            tag: "p".to_string(),
-            attributes: Vec::new(),
-            children: vec![HtmlDocumentNode::Text("visible".to_string())],
-        }];
-
-        assert_eq!(
-            traced_node_count(&HtmlDebugTrace::enabled_for_test(), &nodes),
-            2
-        );
-        assert_eq!(traced_node_count(&HtmlDebugTrace::disabled(), &nodes), 0);
+    fn raster_frame(
+        &self,
+        pixels: Vec<u8>,
+        content_height: f32,
+    ) -> Result<HtmlBrowserFrame, HtmlBrowserError> {
+        HtmlBrowserFrame::new(
+            self.generation + 1,
+            self.source.origin.clone(),
+            self.viewport,
+            HtmlBrowserPixelFormat::Rgba8,
+            pixels,
+        )
+        .map_err(|error| runtime_failure(error.to_string()))
+        .map(|frame| frame.with_layout_metrics(self.scroll_geometry.scroll_y, content_height))
     }
 }

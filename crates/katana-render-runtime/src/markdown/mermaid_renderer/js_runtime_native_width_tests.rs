@@ -1,0 +1,155 @@
+#[path = "js_runtime_native_width_helpers.rs"]
+mod helpers;
+#[path = "js_runtime_native_width_oracle.rs"]
+mod oracle;
+#[path = "js_runtime_native_width_oracle_boundary_tests.rs"]
+mod oracle_boundary_tests;
+use crate::markdown::svg_rasterize::SvgRasterizeOps;
+use helpers::render_fixture;
+use oracle::{
+    assert_bridge_widths_match_rust, assert_inherited_cjk, call_text, call_weight, rounded_width,
+};
+use serde_json::Value;
+
+const FLOWCHART_SOURCE: &str = r#"%%{init: {"themeVariables": {"fontFamily": "Noto Sans"}}}%%
+flowchart LR
+  parent["日本語 AV"]
+  bold["太字 日本語"]
+  parent --> bold
+  style parent font-weight:400
+  style bold font-weight:700"#;
+const STRONG_FLOWCHART_SOURCE: &str = r#"%%{init: {"themeVariables": {"fontFamily": "Noto Sans"}}}%%
+flowchart LR
+  parent["日本語 AV"]
+  bold["`**太字 日本語**`"]
+  parent --> bold
+  style parent font-weight:400
+  style bold font-weight:700"#;
+const ARCHITECTURE_SOURCE: &str = r#"architecture-beta
+group app(cloud)[KatanA]
+service markdown(server)[Markdown] in app
+service renderer(server)[Renderer] in app
+service svg(database)[SVG cache] in app
+markdown:R -- L:renderer
+renderer:R -- L:svg"#;
+const C4_SOURCE: &str = r#"C4Dynamic
+title Runtime width probe
+Container(spa, "Single Page Application", "javascript and react")
+Container(api, "API Application", "Java and Spring Boot")
+Rel(spa, api, "Uses", "JSON/HTTPS")"#;
+
+#[test]
+fn nonclass_flowchart_uses_native_advance_for_noto_and_weighted_cjk_runs() -> Result<(), String> {
+    let plain = render_fixture(FLOWCHART_SOURCE)?;
+    assert_label_run_weights(&plain.calls, 400);
+    assert_bridge_widths_match_rust(&plain.calls)?;
+    /* WHY: Mermaidは単語ごとにtspanを生成し、通常ラベルには子のnormal指定を付ける。 */
+    /* WHY: 明示的なMarkdown太字で、分割後の各runが実Rust境界へ700で渡ることを確認する。 */
+    let result = render_fixture(STRONG_FLOWCHART_SOURCE)?;
+    assert_label_run_weights(&result.calls, 700);
+    assert!(
+        result
+            .calls
+            .iter()
+            .any(|call| call_text(call) == "日本語" && call_weight(call) == Some(400))
+    );
+    assert_bridge_widths_match_rust(&result.calls)
+}
+
+fn assert_label_run_weights(actual: &[Value], weight: u64) {
+    for text in ["太字", " 日本語"] {
+        let calls: Vec<_> = actual
+            .iter()
+            .filter(|call| call_text(call) == text)
+            .collect();
+        assert!(
+            !calls.is_empty() && calls.iter().all(|call| call_weight(call) == Some(weight)),
+            "Mermaid run {text:?} did not consistently enter native bridge at {weight}: {actual:?}"
+        );
+    }
+}
+
+#[test]
+fn nonclass_architecture_uses_native_advance() -> Result<(), String> {
+    let result = render_fixture(ARCHITECTURE_SOURCE)?;
+    assert!(
+        result
+            .calls
+            .iter()
+            .any(|call| call_text(call).contains("Markdown")),
+        "actual architecture did not invoke native bridge"
+    );
+    assert_bridge_widths_match_rust(&result.calls)
+}
+
+#[test]
+fn nonclass_c4_uses_native_advance_for_svg_text() -> Result<(), String> {
+    let result = render_fixture(C4_SOURCE)?;
+    assert!(
+        result
+            .calls
+            .iter()
+            .any(|call| call_text(call).contains("Application")),
+        "actual C4 SVG text did not invoke native bridge"
+    );
+    assert_bridge_widths_match_rust(&result.calls)
+}
+
+#[test]
+fn native_noto_and_inherited_cjk_probes_match_rust_boundary() -> Result<(), String> {
+    let result = render_fixture(FLOWCHART_SOURCE)?;
+    let width = result
+        .probes
+        .get("noto")
+        .and_then(Value::as_f64)
+        .ok_or("Noto sample missing")?;
+    let expected =
+        SvgRasterizeOps::measure_html_text("AV", "Noto Sans", 16.0, 400, false, 0.0, None)
+            .map_err(|error| format!("Noto boundary failed: {error:?}"))?;
+    assert_eq!(width, rounded_width(expected));
+    assert_inherited_cjk(result.probes.get("inherited").ok_or("CJK probe missing")?)
+}
+
+#[test]
+fn nondefault_spacing_features_and_axes_do_not_enter_nonclass_bridge() -> Result<(), String> {
+    let result = render_fixture(FLOWCHART_SOURCE)?;
+    assert_eq!(
+        result.probes.get("skipped").and_then(Value::as_bool),
+        Some(true)
+    );
+    Ok(())
+}
+
+#[test]
+fn nondefault_font_properties_inherit_and_initial_restores_eligibility() -> Result<(), String> {
+    let result = render_fixture(FLOWCHART_SOURCE)?;
+    assert_eq!(
+        result.probes.get("eligibility"),
+        Some(&serde_json::json!([false, true]))
+    );
+    Ok(())
+}
+
+#[test]
+fn class_nondefault_properties_preserve_css_width_and_distinct_runs() -> Result<(), String> {
+    let result = render_fixture(FLOWCHART_SOURCE)?;
+    assert_eq!(
+        result
+            .probes
+            .get("classCompatible")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    Ok(())
+}
+
+#[test]
+fn native_width_oracle_accepts_raw_css_and_svg_calls_and_rejects_corruption() -> Result<(), String>
+{
+    let calls = oracle_boundary_tests::actual_v8_calls("native-width-raw-bridge-contract.js")?;
+
+    let mut corrupted = calls;
+    corrupted[0]["args"][2] = Value::Null;
+    assert!(assert_bridge_widths_match_rust(&corrupted).is_err());
+    Ok(())
+}

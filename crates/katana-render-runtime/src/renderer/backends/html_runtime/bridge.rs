@@ -10,6 +10,9 @@ struct HostOperationGuard {
     was_active: bool,
 }
 
+const NATIVE_DOM_ERROR_NAME: &str = "KrrNativeDomError";
+const NATIVE_DOM_ERROR_PRIVATE_KEY: &str = "KatanA#NativeDomBridgeError";
+
 impl HostOperationGuard {
     fn enter(active: Arc<AtomicBool>) -> Self {
         let was_active = active.swap(true, Ordering::SeqCst);
@@ -55,10 +58,65 @@ fn set_bridge_error(
     return_value: &mut v8::ReturnValue<v8::Value>,
     error: String,
 ) {
-    if let Some(state) = scope.get_slot::<HtmlDomBridgeState>() {
-        let _previous_error = state.error.replace(Some(error));
+    let Some(state) = scope.get_slot::<HtmlDomBridgeState>() else {
+        return_value.set(v8::undefined(scope).into());
+        return;
+    };
+    let _previous_error = state.error.replace(Some(error.clone()));
+    let Some(message) = v8::String::new(scope, &error) else {
+        return_value.set(v8::undefined(scope).into());
+        return;
+    };
+    let exception = v8::Exception::error(scope, message);
+    mark_native_dom_error(scope, exception);
+    return_value.set(scope.throw_exception(exception));
+}
+
+fn native_dom_error_key<'scope>(
+    scope: &mut v8::PinScope<'scope, '_>,
+) -> Option<v8::Local<'scope, v8::Private>> {
+    let name = v8::String::new(scope, NATIVE_DOM_ERROR_PRIVATE_KEY)?;
+    Some(v8::Private::for_api(scope, Some(name)))
+}
+
+fn mark_native_dom_error(scope: &mut v8::PinScope, exception: v8::Local<v8::Value>) {
+    let (Some(property), Some(name), Some(object)) = (
+        v8::String::new(scope, "name"),
+        v8::String::new(scope, NATIVE_DOM_ERROR_NAME),
+        exception.to_object(scope),
+    ) else {
+        return;
+    };
+    let _named = object.define_own_property(
+        scope,
+        property.into(),
+        name.into(),
+        v8::PropertyAttribute::NONE,
+    );
+    if let Some(key) = native_dom_error_key(scope) {
+        let marker = v8::Boolean::new(scope, true);
+        /* WHY: 印の設定に失敗しても例外はthrowし、非公開の印を確認できない例外はJS例外に留める。 */
+        let _marked = object.set_private(scope, key, marker.into());
     }
-    return_value.set(v8::undefined(scope).into());
+}
+
+pub(super) fn uncaught_dom_error(
+    scope: &mut super::script::HtmlTryCatchScope<'_, '_, '_, '_>,
+) -> Option<String> {
+    let property = v8::String::new(scope, "name")?;
+    let expected = v8::String::new(scope, NATIVE_DOM_ERROR_NAME)?;
+    let exception = scope.exception()?.to_object(scope)?;
+    let name = exception.get(scope, property.into())?;
+    if !name.strict_equals(expected.into()) {
+        return None;
+    }
+    let key = native_dom_error_key(scope)?;
+    if !exception.get_private(scope, key)?.is_true() {
+        return None;
+    }
+    scope
+        .get_slot::<HtmlDomBridgeState>()
+        .and_then(|state| state.error.borrow_mut().take())
 }
 
 fn dom_value<'scope>(
@@ -98,62 +156,135 @@ mod tests {
     use super::*;
     use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
     use crate::renderer::backends::html_document::HtmlDocument;
+    use crate::renderer::backends::html_runtime::script::HtmlTryCatchScope;
+    use crate::renderer::backends::html_runtime::script::check_bridge_error;
     use crate::renderer::backends::html_runtime::script::{evaluate_value, install_dom_bridge};
+
+    macro_rules! with_v8_context {
+        ($isolate:ident, $scope:ident, [$($prepare:stmt;)*], [$($setup:expr;)*], $body:block $(,)?) => {{
+            DiagramV8Runtime::ensure_initialized();
+            $($prepare)*
+            let mut $isolate = v8::Isolate::new(Default::default());
+            $(let _ = $setup;)*
+            v8::scope!(let handle_scope, &mut $isolate);
+            let context = v8::Context::new(handle_scope, Default::default());
+            let context_scope = &mut v8::ContextScope::new(handle_scope, context);
+            v8::tc_scope!(let $scope, &mut **context_scope);
+            $body
+        }};
+    }
+
+    fn call_unsupported_dom_callback(
+        scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>,
+    ) -> Result<(bool, Option<String>), String> {
+        let callback = v8::Function::new(scope, dom_callback)
+            .ok_or("callback allocation failed".to_string())?;
+        let operation: v8::Local<v8::Value> = v8::String::new(scope, "unsupported")
+            .ok_or("operation allocation failed".to_string())?
+            .into();
+        let receiver = v8::undefined(scope).into();
+        let returned = callback.call(scope, receiver, &[operation]);
+        let exception_name = scope.exception().and_then(|exception| {
+            let property = v8::String::new(scope, "name")?;
+            exception
+                .to_object(scope)?
+                .get(scope, property.into())
+                .map(|name| name.to_rust_string_lossy(scope))
+        });
+        Ok((
+            returned.is_some_and(|value| value.is_undefined()),
+            exception_name,
+        ))
+    }
 
     #[test]
     fn missing_dom_state_error_preserves_contract_message() {
         assert_eq!(MISSING_DOM_STATE_ERROR, "HTML DOM state is unavailable");
     }
 
+    fn assert_unsupported_operation_error(
+        returned_undefined: bool,
+        exception_name: Option<String>,
+        stored_error: Option<String>,
+        runtime_error: Result<(), crate::renderer::backends::html_runtime::types::HtmlRuntimeError>,
+    ) {
+        assert!(!returned_undefined);
+        assert_eq!(exception_name.as_deref(), Some(NATIVE_DOM_ERROR_NAME));
+        assert_eq!(
+            stored_error.as_deref(),
+            Some("unsupported DOM operation: unsupported")
+        );
+        assert!(matches!(
+            runtime_error,
+            Err(crate::renderer::backends::html_runtime::types::HtmlRuntimeError::DomBridge(
+                message
+            )) if message == "unsupported DOM operation: unsupported"
+        ));
+    }
+
     #[test]
     fn dom_callback_stores_unsupported_operation_error() -> Result<(), String> {
-        DiagramV8Runtime::ensure_initialized();
-        let state = HtmlDomBridgeState::new(HtmlDocument::parse("<button id=action>Run</button>"));
-        let mut isolate = v8::Isolate::new(Default::default());
-        isolate.set_slot(state);
-
-        v8::scope!(let handle_scope, &mut isolate);
-        let context = v8::Context::new(handle_scope, Default::default());
-        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        v8::tc_scope!(let scope, &mut **context_scope);
-
-        let callback = v8::Function::new(scope, dom_callback)
-            .ok_or("callback allocation failed".to_string())?;
-        let operation: v8::Local<v8::Value> = v8::String::new(scope, "unsupported")
-            .ok_or("operation allocation failed".to_string())?
-            .into();
-        let receiver = v8::undefined(scope).into();
-        let returned = callback.call(scope, receiver, &[operation]);
-        assert!(returned.is_some_and(|value| value.is_undefined()));
-
-        let error = scope
-            .get_slot::<HtmlDomBridgeState>()
-            .and_then(|state| state.error.borrow().clone());
-        assert_eq!(
+        let error = with_v8_context!(
+            isolate,
+            scope,
+            [let state = HtmlDomBridgeState::new(HtmlDocument::parse("<button id=action>Run</button>"));],
+            [isolate.set_slot(state);],
+            {
+                let (returned_undefined, exception_name) =
+                    call_unsupported_dom_callback(scope)?;
+                let error = scope
+                    .get_slot::<HtmlDomBridgeState>()
+                    .and_then(|state| state.error.borrow().clone());
+                let runtime_error = check_bridge_error(scope);
+                Ok::<_, String>((returned_undefined, exception_name, error, runtime_error))
+            }
+        );
+        let (returned_undefined, exception_name, error, runtime_error) = error?;
+        assert_unsupported_operation_error(
+            returned_undefined,
+            exception_name,
             error,
-            Some("unsupported DOM operation: unsupported".to_string())
+            runtime_error,
         );
         Ok(())
     }
 
     #[test]
+    fn failed_native_attribute_mutation_does_not_create_observer_record() -> Result<(), String> {
+        let outcome = with_v8_context!(
+            isolate,
+            scope,
+            [let state = HtmlDomBridgeState::new(HtmlDocument::parse("<button id=action>Run</button>"));],
+            [isolate.set_slot(state);],
+            {
+                install_dom_bridge(scope, "about:blank").map_err(|error| error.to_string())?;
+                let result = evaluate_value(
+                    scope,
+                    "failed-native-attribute-mutation",
+                    "(() => { const target = document.getElementById('action'); const observer = new MutationObserver(() => {}); observer.observe(target, { attributes: true }); const returned = target.setAttribute('', 'x'); return returned === undefined && observer.takeRecords().length === 0; })()",
+                )
+                .map_err(|error| error.to_string())?
+                .is_true();
+                Ok::<_, String>((result, check_bridge_error(scope)))
+            }
+        )?;
+        assert!(outcome.0);
+        assert!(matches!(
+            outcome.1,
+            Err(crate::renderer::backends::html_runtime::types::HtmlRuntimeError::DomBridge(
+                message
+            )) if message == "attribute name is empty"
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn dom_callback_without_state_returns_undefined() -> Result<(), String> {
-        DiagramV8Runtime::ensure_initialized();
-
-        let mut isolate = v8::Isolate::new(Default::default());
-        v8::scope!(let handle_scope, &mut isolate);
-        let context = v8::Context::new(handle_scope, Default::default());
-        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        v8::tc_scope!(let scope, &mut **context_scope);
-
-        let callback = v8::Function::new(scope, dom_callback)
-            .ok_or("callback allocation failed".to_string())?;
-        let operation: v8::Local<v8::Value> = v8::String::new(scope, "unsupported")
-            .ok_or("operation allocation failed".to_string())?
-            .into();
-        let receiver = v8::undefined(scope).into();
-        let returned = callback.call(scope, receiver, &[operation]);
-        assert!(returned.is_some_and(|value| value.is_undefined()));
+        with_v8_context!(isolate, scope, [], [], {
+            let (returned_undefined, exception_name) = call_unsupported_dom_callback(scope)?;
+            assert!(returned_undefined);
+            assert_eq!(exception_name, None);
+        });
         Ok(())
     }
 
@@ -169,6 +300,60 @@ mod tests {
     }
 
     #[test]
+    fn uncaught_bridge_and_javascript_errors_keep_distinct_types() -> Result<(), String> {
+        for (source, native) in [
+            ("__krr_dom('unsupported');", true),
+            ("throw new Error('ordinary');", false),
+            (
+                "try { __krr_dom('unsupported'); } catch (error) { if (error.name !== 'KrrNativeDomError') throw error; } throw new Error('ordinary');",
+                false,
+            ),
+            (
+                "const error = new Error('ordinary'); error.name = 'KrrNativeDomError'; throw error;",
+                false,
+            ),
+            (
+                "try { __krr_dom('unsupported'); } catch (native) { const error = new Error('ordinary'); error.name = 'KrrNativeDomError'; throw error; }",
+                false,
+            ),
+            (
+                "try { __krr_dom('unsupported'); } catch (native) { throw native; }",
+                true,
+            ),
+        ] {
+            assert_script_error_classification(source, native)?;
+        }
+        Ok(())
+    }
+
+    fn assert_script_error_classification(source: &str, native: bool) -> Result<(), String> {
+        with_v8_context!(
+            isolate,
+            scope,
+            [],
+            [isolate.set_slot(HtmlDomBridgeState::new(HtmlDocument::parse("<p>Test</p>")));],
+            {
+                install_dom_bridge(scope, "about:blank").map_err(|error| error.to_string())?;
+                let result = evaluate_value(scope, "bridge-error-classification", source);
+                if native {
+                    assert!(matches!(
+                        result,
+                        Err(super::super::types::HtmlRuntimeError::DomBridge(message))
+                            if message == "unsupported DOM operation: unsupported"
+                    ));
+                } else {
+                    assert!(matches!(
+                        result,
+                        Err(super::super::types::HtmlRuntimeError::JavaScriptException(message))
+                            if message.contains("ordinary")
+                    ));
+                }
+                Ok(())
+            },
+        )
+    }
+
+    #[test]
     fn callback_coercion_cannot_use_host_timeout_allowance() -> Result<(), String> {
         for expression in [
             "__krr_dom({toString(){const end = Date.now() + 750; while(Date.now() < end) {} return 'unsupported';}})",
@@ -180,31 +365,34 @@ mod tests {
     }
 
     fn assert_callback_coercion(expression: &str, expect_timeout: bool) -> Result<(), String> {
-        DiagramV8Runtime::ensure_initialized();
-        let mut isolate = v8::Isolate::new(Default::default());
-        isolate.set_slot(HtmlDomBridgeState::new(HtmlDocument::parse("<p>Test</p>")));
-        v8::scope!(let handle_scope, &mut isolate);
-        let context = v8::Context::new(handle_scope, Default::default());
-        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        v8::tc_scope!(let scope, &mut **context_scope);
-        assert!(install_dom_bridge(scope, "about:blank").is_ok());
-        install_host_activity_probe(scope)?;
-        let source = format!("let active = true; {expression}; active");
-        let result = evaluate_value(scope, "bridge-coercion-budget", &source);
-        let timed_out = matches!(
-            result,
-            Err(super::super::types::HtmlRuntimeError::ExecutionTimeout)
-        );
-        assert_eq!(timed_out, expect_timeout, "{result:?}");
-        if !expect_timeout {
-            assert!(result.is_ok_and(|value| value.is_false()));
-        }
-        assert!(
-            scope
-                .get_slot::<HtmlDomBridgeState>()
-                .is_some_and(|state| !state.host_io_active().load(Ordering::SeqCst))
-        );
-        Ok(())
+        with_v8_context!(
+            isolate,
+            scope,
+            [],
+            [isolate.set_slot(HtmlDomBridgeState::new(HtmlDocument::parse("<p>Test</p>")));],
+            {
+                assert!(install_dom_bridge(scope, "about:blank").is_ok());
+                install_host_activity_probe(scope)?;
+                let source = format!(
+                    "let active = true; let nativeError = false; try {{ {expression}; }} catch (error) {{ if (error.name !== '{NATIVE_DOM_ERROR_NAME}') throw error; nativeError = true; }} if (!nativeError) throw new Error('missing native error'); active"
+                );
+                let result = evaluate_value(scope, "bridge-coercion-budget", &source);
+                let timed_out = matches!(
+                    result,
+                    Err(super::super::types::HtmlRuntimeError::ExecutionTimeout)
+                );
+                assert_eq!(timed_out, expect_timeout, "{result:?}");
+                if !expect_timeout {
+                    assert!(result.is_ok_and(|value| value.is_false()));
+                }
+                assert!(
+                    scope
+                        .get_slot::<HtmlDomBridgeState>()
+                        .is_some_and(|state| !state.host_io_active().load(Ordering::SeqCst))
+                );
+                Ok(())
+            },
+        )
     }
 
     fn install_host_activity_probe(scope: &mut v8::PinScope) -> Result<(), String> {

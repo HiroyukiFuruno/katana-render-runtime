@@ -9,6 +9,7 @@ use super::{
     read_drawio_bundle, read_drawio_bundle_with_cache, rendered_svg,
 };
 use crate::markdown::color_preset::DiagramColorPreset;
+use crate::markdown::js_runtime_cache_test_support::with_poisoned_runtime_bundle_cache;
 use crate::markdown::runtime_assets::RuntimeAsset;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -281,19 +282,8 @@ fn rendered_svg_rejects_plain_text_from_runtime() {
 
 #[test]
 fn poisoned_cache_reports_lock_error() {
-    let cache: RuntimeBundleCache = Mutex::new(HashMap::new());
-    let poison = std::panic::catch_unwind(|| poison_cache(&cache));
-
-    assert!(poison.is_err());
-    assert!(lock_cache(&cache).is_err());
-    assert!(read_drawio_bundle_with_cache(std::path::Path::new("drawio.js"), &cache).is_err());
-    poison_cache(&cache);
-}
-
-fn poison_cache(cache: &RuntimeBundleCache) {
-    let _guard = match cache.lock() {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-    std::panic::resume_unwind(Box::new("poison drawio cache"));
+    with_poisoned_runtime_bundle_cache("poison drawio cache", |cache| {
+        assert!(lock_cache(cache).is_err());
+        assert!(read_drawio_bundle_with_cache(std::path::Path::new("drawio.js"), cache).is_err());
+    });
 }

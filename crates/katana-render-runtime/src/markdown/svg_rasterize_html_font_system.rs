@@ -4,23 +4,44 @@ use std::{collections::BTreeSet, path::PathBuf};
 /* WHY: 任意のHTMLが大量のfamilyを指定しても、同期したfontconfig探索は描画ごとに1回・有限件にする。 */
 const MAX_SYSTEM_FONT_FAMILIES_PER_REQUEST: usize = 16;
 
+#[cfg(test)]
 pub(super) fn load_requested_system_font_families<'a>(
     database: &mut usvg::fontdb::Database,
     families: impl IntoIterator<Item = &'a str>,
+) {
+    let mut loaded_paths = BTreeSet::new();
+    load_requested_system_font_families_once(database, families, &mut loaded_paths);
+}
+
+pub(super) fn load_requested_system_font_families_once<'a>(
+    database: &mut usvg::fontdb::Database,
+    families: impl IntoIterator<Item = &'a str>,
+    loaded_paths: &mut BTreeSet<PathBuf>,
 ) {
     let families = requested_system_font_families(families);
     if families.is_empty() {
         return;
     }
-    load_system_font_paths(database, requested_system_font_paths(&families));
+    load_system_font_paths(
+        database,
+        requested_system_font_paths(&families),
+        loaded_paths,
+    );
 }
 
 fn load_system_font_paths(
     database: &mut usvg::fontdb::Database,
     paths: impl IntoIterator<Item = PathBuf>,
+    loaded_paths: &mut BTreeSet<PathBuf>,
 ) {
     for path in paths {
-        database.load_font_source(usvg::fontdb::Source::File(path));
+        let should_load = match super::sources::canonical_font_source_path(&path) {
+            Ok(identity) => loaded_paths.insert(identity),
+            Err(_) => true,
+        };
+        if should_load {
+            database.load_font_source(usvg::fontdb::Source::File(path));
+        }
     }
 }
 
@@ -154,6 +175,7 @@ mod tests {
     };
     use resvg::usvg;
     use std::{
+        collections::BTreeSet,
         path::PathBuf,
         process::{ExitStatus, Output},
     };
@@ -233,7 +255,8 @@ mod tests {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
         let mut database = usvg::fontdb::Database::new();
 
-        load_system_font_paths(&mut database, [font]);
+        let mut loaded_paths = BTreeSet::new();
+        load_system_font_paths(&mut database, [font], &mut loaded_paths);
 
         assert!(database.faces().next().is_some());
     }

@@ -1,8 +1,9 @@
 use super::{CssDeclaration, CssRule, declarations_for};
+use crate::css_parser_shared::CssParserShared;
 use crate::renderer::backends::html_css_selector::CssSelector;
 use cssparser::{
     AtRuleParser, BasicParseErrorKind, CowRcStr, DeclarationParser, ParseError, Parser,
-    ParserState, QualifiedRuleParser, RuleBodyItemParser, RuleBodyParser, StyleSheetParser, Token,
+    ParserState, QualifiedRuleParser, RuleBodyItemParser, RuleBodyParser, StyleSheetParser,
 };
 
 #[path = "html_css_parser_value.rs"]
@@ -57,6 +58,7 @@ impl<'i> QualifiedRuleParser<'i> for StylesheetRuleParser {
             return Ok(Vec::new());
         }
         Ok(vec![CssRule {
+            user_agent: false,
             selectors,
             declarations,
             media: self.media.clone(),
@@ -149,19 +151,7 @@ fn consume_source<'i>(input: &mut Parser<'i>) -> &'i str {
 }
 
 fn consume_nested(input: &mut Parser<'_>) -> Result<(), ParseError<()>> {
-    while !input.is_exhausted() {
-        let token = input.next_including_whitespace_and_comments()?.clone();
-        if matches!(
-            token,
-            Token::Function(_)
-                | Token::ParenthesisBlock
-                | Token::SquareBracketBlock
-                | Token::CurlyBracketBlock
-        ) {
-            input.parse_nested_block(consume_nested)?;
-        }
-    }
-    Ok(())
+    CssParserShared::consume_nested(input)
 }
 
 #[cfg(test)]

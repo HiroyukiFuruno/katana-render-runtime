@@ -1,13 +1,23 @@
 use super::DrawioJsRuntimeOps;
+use super::test_support::{
+    assert_render_contains, assert_render_not_contains, fake_html_text_color_bundle,
+};
 use crate::markdown::color_preset::DiagramColorPreset;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static TEMP_RUNTIME_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-const FAKE_BUNDLE_TEMPLATE: &str = r##"
-function Graph() {}
-var mxUtils = {
-  getLightDarkColor(value) {
+const COLOR_HELPER_TEMPLATE: &str = "var mxUtils = {\n{color_helper}\n};\n";
+
+const HTML_TEXT_BODY_TEMPLATE: &str = r##"  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  group.setAttribute("data-cell-id", "cell");
+  const foreignObject = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+{html_text_node}
+  group.appendChild(foreignObject);
+  svg.appendChild(group);
+"##;
+
+const DIRECT_COLOR_HELPER: &str = r##"  getLightDarkColor(value) {
     const key = String(value).toLowerCase();
     const dark = key === "#7bac36" ? "#507a14" : "#121212";
     return {
@@ -15,82 +25,29 @@ var mxUtils = {
       dark,
       cssText: `light-dark(${{value}}, ${{dark}})`,
     };
-  },
-};
-var Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "80");
-  svg.setAttribute("height", "30");
-  svg.setAttribute("viewBox", "0 0 80 30");
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("data-cell-id", "cell");
-  const foreignObject = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
-  const div = document.createElement("div");
-  div.setAttribute("data-katana-drawio-html-text", "content");
-  div.setAttribute("style", "font-size: 12px; color: {wrong_color}");
-  div.textContent = "Label";
-  foreignObject.appendChild(div);
-  group.appendChild(foreignObject);
-  svg.appendChild(group);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-"##;
+  },"##;
 
-const FAKE_NESTED_BUNDLE: &str = r##"
-function Graph() {}
-var mxUtils = {
-  getLightDarkColor(value) {
+const NESTED_COLOR_HELPER: &str = r##"  getLightDarkColor(value) {
     return {
       light: value,
       dark: "#121212",
       cssText: `light-dark(${value}, #121212)`,
     };
-  },
-};
-var Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "80");
-  svg.setAttribute("height", "30");
-  svg.setAttribute("viewBox", "0 0 80 30");
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("data-cell-id", "cell");
-  const foreignObject = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
-  const root = document.createElement("div");
+  },"##;
+
+const DIRECT_HTML_TEXT_NODE: &str = r##"  const div = document.createElement("div");
+  div.setAttribute("data-katana-drawio-html-text", "content");
+  div.setAttribute("style", "font-size: 12px; color: {wrong_color}");
+  div.textContent = "Label";
+  foreignObject.appendChild(div);"##;
+
+const NESTED_HTML_TEXT_NODE: &str = r##"  const root = document.createElement("div");
   root.setAttribute("data-katana-drawio-html-text", "content");
   root.setAttribute("style", "font-size: 12px; color: #121212");
   const nested = document.createElement("div");
   nested.textContent = "Label";
   root.appendChild(nested);
-  foreignObject.appendChild(root);
-  group.appendChild(foreignObject);
-  svg.appendChild(group);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-"##;
+  foreignObject.appendChild(root);"##;
 
 #[test]
 fn fake_bundle_restores_explicit_black_html_text_source_color() {
@@ -175,23 +132,18 @@ fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
 }
 
 fn fake_bundle(wrong_color: &str) -> String {
-    FAKE_BUNDLE_TEMPLATE.replace("{wrong_color}", wrong_color)
+    fake_bundle_with_content(
+        DIRECT_COLOR_HELPER,
+        &DIRECT_HTML_TEXT_NODE.replace("{wrong_color}", wrong_color),
+    )
 }
 
-fn fake_nested_bundle() -> &'static str {
-    FAKE_NESTED_BUNDLE
+fn fake_nested_bundle() -> String {
+    fake_bundle_with_content(NESTED_COLOR_HELPER, NESTED_HTML_TEXT_NODE)
 }
 
-fn assert_render_contains(rendered: &Result<String, String>, marker: &str) {
-    assert!(
-        rendered.as_ref().is_ok_and(|svg| svg.contains(marker)),
-        "{rendered:?}"
-    );
-}
-
-fn assert_render_not_contains(rendered: &Result<String, String>, marker: &str) {
-    assert!(
-        rendered.as_ref().is_ok_and(|svg| !svg.contains(marker)),
-        "{rendered:?}"
-    );
+fn fake_bundle_with_content(color_helper: &str, html_text_node: &str) -> String {
+    fake_html_text_color_bundle(COLOR_HELPER_TEMPLATE, HTML_TEXT_BODY_TEMPLATE)
+        .replace("{color_helper}", color_helper)
+        .replace("{html_text_node}", html_text_node)
 }

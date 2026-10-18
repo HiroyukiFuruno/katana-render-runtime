@@ -1,3 +1,4 @@
+use super::tests::{test_source, viewport};
 use super::*;
 
 type TestResult<T = ()> = Result<T, String>;
@@ -7,9 +8,11 @@ const TEST_POINTER_COORDINATE: f32 = 20.0;
 
 #[test]
 fn session_rejects_invalid_input_and_out_of_order_internal_frames() -> TestResult {
-    let mut session =
-        HtmlBrowserSession::new(test_source("https://example.test/a.html")?, viewport()?)
-            .map_err(|error| error.to_string())?;
+    let mut session = HtmlBrowserSession::new(
+        test_source("https://example.test/a.html")?,
+        viewport(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT)?,
+    )
+    .map_err(|error| error.to_string())?;
     assert_validation_errors(&mut session);
     assert_sync_rejects_out_of_order_frame(&mut session)?;
     assert_missing_runtime_and_closed_state(&mut session)?;
@@ -78,12 +81,27 @@ fn assert_missing_runtime_and_closed_state(session: &mut HtmlBrowserSession) -> 
     Ok(())
 }
 
-fn test_source(origin: &str) -> TestResult<HtmlBrowserSource> {
-    HtmlBrowserSource::new("<button id=action>Run</button>", origin)
-        .map_err(|error| error.to_string())
-}
+#[test]
+fn close_releases_owned_source_frame_and_pending_navigation() -> TestResult {
+    let mut session = HtmlBrowserSession::new(
+        test_source("https://example.test/close.html")?,
+        viewport(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT)?,
+    )
+    .map_err(|error| error.to_string())?;
+    assert!(!session.source().raw_html.is_empty());
+    assert!(session.latest_frame().is_some());
+    session.pending_navigation = Some(
+        HtmlBrowserNavigationEvent::new("https://example.test/next.html")
+            .map_err(|error| error.to_string())?,
+    );
 
-fn viewport() -> TestResult<HtmlBrowserViewport> {
-    HtmlBrowserViewport::new(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())
+    session.close().map_err(|error| error.to_string())?;
+
+    assert!(session.source().raw_html.is_empty());
+    assert_eq!(session.source().raw_html.capacity(), 0);
+    assert!(session.latest_frame().is_none());
+    assert!(session.take_frame_update().is_none());
+    assert!(session.take_navigation().is_none());
+    session.close().map_err(|error| error.to_string())?;
+    Ok(())
 }

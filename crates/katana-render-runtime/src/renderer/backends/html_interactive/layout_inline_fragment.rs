@@ -13,7 +13,7 @@ pub(super) fn inline_flow_style(
         node_id,
         tag,
         attributes,
-        ..
+        children,
     } = node
     else {
         return None;
@@ -24,7 +24,10 @@ pub(super) fn inline_flow_style(
     {
         return None;
     }
-    let style = CssStyle::from_element(tag, attributes, inherited);
+    let mut style = CssStyle::from_element(tag, attributes, inherited);
+    if style.differs_in_inline_metrics(inherited) || style.has_inline_metric_change(children) {
+        style.resolve_text_line_height(children);
+    }
     (style.inline_block && !style.inline_atomic && unboxed_inline_style(&style)).then_some(style)
 }
 
@@ -90,16 +93,17 @@ pub(super) fn advance_inline_text(
 ) {
     inline.bottom = inline
         .bottom
-        .max(initial_y + lines.len() as f32 * style.line_height);
+        .max(initial_y + inline.line_advance(lines.len(), style));
     if lines.len() == 1 {
         inline.cursor_x += InlineMeasurement::text_width(text, style).min(remaining_width);
     } else {
-        inline.y = initial_y + (lines.len() - 1) as f32 * style.line_height;
+        inline.y = initial_y + inline.line_advance(lines.len() - 1, style);
         inline.cursor_x = inline.x
             + lines
                 .last()
                 .map(|line| InlineMeasurement::text_width(line, style))
                 .unwrap_or(0.0);
+        inline.advance_line_index(lines.len() - 1);
     }
 }
 

@@ -1,11 +1,18 @@
 use super::MAX_RASTERIZED_SVG_EDGE;
 
+#[path = "svg_rasterize_preprocess_marker.rs"]
+mod marker;
+#[path = "svg_rasterize_preprocess_shadow.rs"]
+mod shadow;
+
 const LIGHT_DARK_FUNCTION: &str = "light-dark(";
 
 pub(super) fn preprocess_for_rasterizer(svg_text: &str) -> String {
     let with_xml_entities = normalize_html_entities_for_xml(svg_text);
     let without_foreign_objects = strip_foreign_objects(&with_xml_entities);
-    resolve_light_dark_functions(&without_foreign_objects)
+    let with_resolved_colors = resolve_light_dark_functions(&without_foreign_objects);
+    let with_normalized_shadows = shadow::normalize_filter_shadow_colors(&with_resolved_colors);
+    marker::normalize_marker_selectors(with_normalized_shadows)
 }
 
 fn normalize_html_entities_for_xml(svg_text: &str) -> String {

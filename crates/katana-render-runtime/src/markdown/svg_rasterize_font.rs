@@ -1,12 +1,22 @@
+#[cfg(all(test, target_os = "macos"))]
+pub(super) use html::raster_observer as observation;
 use resvg::usvg;
 #[path = "svg_rasterize_html_font.rs"]
 mod html;
+
+pub(super) use html::{
+    DatabaseKey, DiscoveryMode, html_font_db_for_measured_text, measured_database,
+};
+
+pub(super) use html::HtmlFontRequest;
+#[cfg(test)]
+pub(super) use html::html_font_db_for_text;
+pub(super) use html::html_rasterizer_options;
 #[cfg(test)]
 pub(super) use html::{
     HtmlFontMemorySnapshot, current_process_rss_kib, html_font_db_for_markup,
     html_font_memory_snapshot,
 };
-pub(super) use html::{html_font_db_for_text, html_rasterizer_options};
 
 const BUNDLED_SANS_SERIF_FONT: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const SANS_SERIF_FAMILIES: &[&str] = &[
@@ -99,6 +109,9 @@ fn font_family_is_available(database: &usvg::fontdb::Database, family: &str) -> 
         .faces()
         .any(|face| face.families.iter().any(|name| name.0 == family))
 }
+
+#[cfg(target_os = "macos")]
+pub(super) use html::rasterize_html_known_or_eager;
 
 #[cfg(test)]
 mod tests {

@@ -1,11 +1,10 @@
 use super::{
-    MermaidJsRuntimeOps, MermaidRenderRequest, RuntimeBundleCache, ensure_svg, lock_cache,
-    read_mermaid_bundle, rendered_svg,
+    MermaidJsRuntimeOps, MermaidRenderRequest, ensure_svg, lock_cache, read_mermaid_bundle,
+    rendered_svg,
 };
 use crate::markdown::color_preset::DiagramColorPreset;
+use crate::markdown::js_runtime_cache_test_support::with_poisoned_runtime_bundle_cache;
 use crate::markdown::runtime_assets::RuntimeAsset;
-use std::collections::HashMap;
-use std::sync::Mutex;
 
 #[test]
 fn fake_bundle_renders_svg_and_rejects_non_svg_output() {
@@ -71,7 +70,7 @@ fn runtime_keeps_ascii_kanban_overflow_at_reference_height() {
 }
 
 #[test]
-fn runtime_normalizes_treemap_value_metrics() {
+fn runtime_normalizes_treemap_value_metrics() -> Result<(), String> {
     let mermaid = RuntimeAsset::mermaid();
     let rendered = mermaid
         .materialize_at(mermaid.materialized_path())
@@ -83,64 +82,25 @@ fn runtime_normalizes_treemap_value_metrics() {
             )
         });
 
-    assert!(
-        rendered
-            .as_ref()
-            .is_ok_and(|svg| svg.contains("viewBox=\"2 -2.34375 996 430.34375\"")),
-        "{rendered:?}"
-    );
+    let svg = rendered.as_ref().map_err(|error| error.to_owned())?;
+    super::geometry_contract::GeometryContract::treemap(svg)?;
     assert!(
         rendered
             .as_ref()
             .is_ok_and(|svg| svg.contains("font-size: 23px") && svg.contains("fill: lightgrey")),
         "{rendered:?}"
     );
+    for label in ["Mermaid", "DOM shim", "Rasterize", "Cache"] {
+        assert!(
+            rendered.as_ref().is_ok_and(|svg| svg.contains(label)),
+            "missing treemap value {label:?}: {rendered:?}"
+        );
+    }
+    Ok(())
 }
 
-#[test]
-fn runtime_normalizes_block_nbsp_arrow_width() {
-    let mermaid = RuntimeAsset::mermaid();
-    let rendered = mermaid
-        .materialize_at(mermaid.materialized_path())
-        .and_then(|mermaid_js| {
-            MermaidJsRuntimeOps::render(
-                block_nbsp_arrow_source(),
-                &mermaid_js,
-                DiagramColorPreset::dark(),
-            )
-        });
-
-    assert_block_nbsp_arrow_svg(&rendered);
-}
-
-fn block_nbsp_arrow_source() -> &'static str {
-    "block-beta\ncolumns 1\n  db((\"DB\"))\n  blockArrowId6<[\"&nbsp;&nbsp;&nbsp;\"]>(down)\n  block:ID\n    A\n    B[\"A wide one in the middle\"]\n    C\n  end\n  space\n  D\n  ID --> D\n  C --> D\n  style B fill:#969,stroke:#333,stroke-width:4px"
-}
-
-fn assert_block_nbsp_arrow_svg(rendered: &Result<String, String>) {
-    assert!(
-        rendered
-            .as_ref()
-            .is_ok_and(|svg| svg.contains("viewBox=\"-5 -136.4375 675.234375 284.9375\"")),
-        "{rendered:?}"
-    );
-    assert!(
-        rendered.as_ref().is_ok_and(|svg| {
-            svg.contains("data-look=\"classic\" transform=\"translate(332.6171875, -118)\"")
-        }),
-        "{rendered:?}"
-    );
-    assert!(
-        rendered
-            .as_ref()
-            .is_ok_and(|svg| svg.contains("id=\"katana-mermaid-svg")
-                && svg.contains("-blockArrowId6\"")
-                && svg.contains(
-                    "points=\"96.828125,0 0,-4 17.5,-4 17.5,-31 176.15625,-31 176.15625,-4 193.65625,-4\""
-                )),
-        "{rendered:?}"
-    );
-}
+#[path = "js_runtime_tests_block_geometry.rs"]
+mod block_geometry;
 
 fn assert_zenuml_v8_svg(rendered: &Result<String, String>) {
     assert!(
@@ -181,20 +141,9 @@ fn rendered_svg_rejects_plain_text_from_runtime() {
 
 #[test]
 fn poisoned_cache_reports_lock_error() {
-    let cache: RuntimeBundleCache = Mutex::new(HashMap::new());
-    let poison = std::panic::catch_unwind(|| poison_cache(&cache));
-
-    assert!(poison.is_err());
-    assert!(lock_cache(&cache).is_err());
-    poison_cache(&cache);
-}
-
-fn poison_cache(cache: &RuntimeBundleCache) {
-    let _guard = match cache.lock() {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-    std::panic::resume_unwind(Box::new("poison mermaid cache"));
+    with_poisoned_runtime_bundle_cache("poison mermaid cache", |cache| {
+        assert!(lock_cache(cache).is_err());
+    });
 }
 
 #[test]

@@ -1,3 +1,11 @@
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_font_lazy_diagnostic.rs"]
+mod lazy_diagnostic;
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_font_lazy_parse.rs"]
+mod lazy_parse;
+#[cfg(target_os = "macos")]
+pub(in super::super) use lazy_parse::rasterize as rasterize_html_known_or_eager;
 #[path = "svg_rasterize_html_font_entities.rs"]
 mod entities;
 #[path = "svg_rasterize_html_font_request.rs"]
@@ -7,11 +15,27 @@ mod sources;
 #[path = "svg_rasterize_html_font_system.rs"]
 mod system;
 
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_font_known_admission.rs"]
+mod admission;
+#[path = "svg_rasterize_html_font_discovery.rs"]
+mod discovery;
+#[path = "svg_rasterize_html_font_discovery_cache.rs"]
+mod discovery_cache;
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_font_creation_proof.rs"]
+mod proof;
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_font_shared_raster.rs"]
+mod shared_raster;
+use discovery::CacheValue;
+pub(in super::super) use discovery::{DatabaseKey, DiscoveryMode, MeasuredDatabase};
+pub(in super::super) use discovery_cache::{html_font_db_for_measured_text, measured_database};
 #[cfg(test)]
 #[path = "svg_rasterize_html_font_request_tests.rs"]
 mod request_tests;
 
-use request::HtmlFontRequest;
+pub(in super::super) use request::HtmlFontRequest;
 use resvg::usvg;
 use std::{
     collections::VecDeque,
@@ -21,28 +45,12 @@ use std::{
 const MAX_CACHED_HTML_FONT_DATABASES: usize = 8;
 
 struct HtmlFontDatabaseCache {
-    entries: VecDeque<(HtmlFontRequest, Arc<usvg::fontdb::Database>)>,
+    entries: VecDeque<(DatabaseKey, CacheValue)>,
 }
 
 impl HtmlFontDatabaseCache {
     fn get_or_load(&mut self, request: HtmlFontRequest) -> Arc<usvg::fontdb::Database> {
-        if let Some(index) = self
-            .entries
-            .iter()
-            .position(|(cached_request, _)| cached_request == &request)
-            && let Some(entry) = self.entries.remove(index)
-        {
-            let database = Arc::clone(&entry.1);
-            self.entries.push_back(entry);
-            return database;
-        }
-
-        let database = Arc::new(sources::build_html_font_db(&request));
-        self.entries.push_back((request, Arc::clone(&database)));
-        if self.entries.len() > MAX_CACHED_HTML_FONT_DATABASES {
-            self.entries.pop_front();
-        }
-        database
+        self.get_mode(DatabaseKey::eager(request)).database
     }
 }
 
@@ -186,5 +194,42 @@ mod tests {
         );
         assert!(database.faces().next().is_some());
         Ok(())
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_font_decision_observer.rs"]
+mod decision_observer;
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_font_raster_observer.rs"]
+pub(in crate::markdown::svg_rasterize) mod raster_observer;
+
+#[cfg(test)]
+mod diagnostic_binary_fixture {
+    #[cfg(target_os = "macos")]
+    type RealDatabase = (
+        std::sync::Arc<resvg::usvg::fontdb::Database>,
+        resvg::usvg::fontdb::ID,
+        std::sync::Weak<dyn AsRef<[u8]> + Send + Sync>,
+    );
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn real_database(source_error: &'static str) -> Result<RealDatabase, String> {
+        let mut database = resvg::usvg::fontdb::Database::new();
+        database.load_font_data(super::super::BUNDLED_SANS_SERIF_FONT.to_vec());
+        let face = database.faces().next().ok_or("real Noto face missing")?;
+        let id = face.id;
+        let resvg::usvg::fontdb::Source::Binary(bytes) = &face.source else {
+            return Err(source_error.into());
+        };
+        let bytes = std::sync::Arc::downgrade(bytes);
+        assert_eq!(
+            database.with_face_data(id, |data, _| {
+                data == super::super::BUNDLED_SANS_SERIF_FONT
+            }),
+            Some(true)
+        );
+        Ok((std::sync::Arc::new(database), id, bytes))
     }
 }

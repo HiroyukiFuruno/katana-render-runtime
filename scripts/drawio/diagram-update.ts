@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { getOptionValue, printHelpIfRequested } from "./cli-options";
 import {
   type DrawioRendererOptions,
   type DrawioRenderFixture,
@@ -14,16 +15,23 @@ interface CliParsedOptions extends DrawioRendererOptions {
 
 const CliOptions = {
   parse(argv: string[]): CliParsedOptions {
-    CliOptions.exitIfHelp(argv);
+    if (
+      printHelpIfRequested(
+        argv,
+        "Usage: bun run scripts/drawio/diagram-update.ts [--fixtures DIR] [--output DIR] [--drawio-js FILE]",
+      )
+    ) {
+      process.exit(0);
+    }
     const fixturesDir = path.resolve(
-      CliOptions.get(argv, "--fixtures", "tests/fixtures/drawio/basic"),
+      getOptionValue(argv, "--fixtures", "tests/fixtures/drawio/basic"),
     );
     return {
       fixturesDir,
-      outputDir: path.resolve(CliOptions.get(argv, "--output", path.join(fixturesDir, "official"))),
+      outputDir: path.resolve(getOptionValue(argv, "--output", path.join(fixturesDir, "official"))),
       drawioJs: path.resolve(
         expandHome(
-          CliOptions.get(
+          getOptionValue(
             argv,
             "--drawio-js",
             process.env.DRAWIO_JS || "~/.local/katana/drawio.min.js",
@@ -31,34 +39,20 @@ const CliOptions = {
         ),
       ),
       resourcesDir: path.resolve(
-        CliOptions.get(
+        getOptionValue(
           argv,
           "--resources",
           "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources",
         ),
       ),
       resourceManifest: path.resolve(
-        CliOptions.get(
+        getOptionValue(
           argv,
           "--resource-manifest",
           "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources/drawio-resource-manifest.json",
         ),
       ),
     };
-  },
-
-  get(argv: string[], name: string, fallback: string): string {
-    const index = argv.indexOf(name);
-    return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
-  },
-
-  exitIfHelp(argv: string[]) {
-    if (argv.includes("--help")) {
-      console.log(
-        "Usage: bun run scripts/drawio/diagram-update.ts [--fixtures DIR] [--output DIR] [--drawio-js FILE]",
-      );
-      process.exit(0);
-    }
   },
 };
 

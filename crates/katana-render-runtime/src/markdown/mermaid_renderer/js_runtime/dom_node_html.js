@@ -45,10 +45,11 @@ KatanaNode.prototype.getContext = function getContext() {
 Object.defineProperty(KatanaNode.prototype, "innerHTML", {
   configurable: true,
   get() {
-    if (this.children.length === 0) {
-      return this.textContent;
-    }
-    return this.children.map((child) => child.outerHTML ?? child.textContent ?? "").join("");
+    const ownText = katanaEscapeSvgText(katanaOwnText(this));
+    const children = this.children
+      .map((child) => child.outerHTML ?? child.textContent ?? "")
+      .join("");
+    return `${ownText}${children}`;
   },
   set(value) {
     katanaClearInnerHtml(this);

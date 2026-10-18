@@ -11,9 +11,11 @@ use resvg::usvg::fontdb::{Database, ID};
 use std::sync::Arc;
 
 const MAX_ENTRY_BYTES: usize = 1024 * 1024;
+pub(super) use selector::html_font_selector;
 pub(super) use selector::html_selector;
 
 pub(in super::super) fn install(options: &mut resvg::usvg::Options<'static>) {
+    options.font_resolver.select_font = html_font_selector();
     options.font_resolver.select_fallback = html_selector();
     super::install_html_fallback_memo(options);
 }

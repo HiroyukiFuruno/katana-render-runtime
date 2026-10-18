@@ -3,13 +3,13 @@
 ~~~mermaid
 wardley-beta
     title レンダラー導入
-    anchor ユーザー [0.95, 0.62]
-    component プレビュー [0.78, 0.55]
-    component MermaidJS [0.62, 0.42]
-    component DOMShim [0.38, 0.35]
-    ユーザー->プレビュー
-    プレビュー->MermaidJS
-    MermaidJS->DOMShim
+    anchor "ユーザー" [0.95, 0.62]
+    component "プレビュー" [0.78, 0.55]
+    component "MermaidJS" [0.62, 0.42]
+    component "DOMShim" [0.38, 0.35]
+    "ユーザー"->"プレビュー"
+    "プレビュー"->"MermaidJS"
+    "MermaidJS"->"DOMShim"
 ~~~
 
 <!-- katana-mermaid-official:start -->

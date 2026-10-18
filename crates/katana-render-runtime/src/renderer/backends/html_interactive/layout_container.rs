@@ -7,6 +7,8 @@ use std::rc::Rc;
 
 #[path = "layout_container_helpers.rs"]
 mod helpers;
+#[path = "layout_multicolumn.rs"]
+mod multicolumn;
 #[path = "layout_container_tests.rs"]
 #[cfg(test)]
 mod tests;
@@ -45,10 +47,20 @@ impl HtmlLayoutRenderer {
         if containing_block.is_some() {
             self.pop_containing_block();
         }
-        let height = container_height(bottom, geometry.start, style);
+        let height = self.resolve_container_height(bottom, geometry.start, style);
         self.record_overflow_clip(descendant_box_start, &geometry, height, style);
         self.paint_container_box(box_start, content_start, &geometry, height, style);
         geometry.start + height + style.margin_bottom
+    }
+
+    fn resolve_container_height(&self, bottom: f32, start: f32, style: &CssStyle) -> f32 {
+        let trailing_margin = self
+            .ownership
+            .trailing_child_margins
+            .last()
+            .copied()
+            .unwrap_or(0.0);
+        container_height(bottom - trailing_margin, start, style)
     }
 
     fn resolve_container_containing_block(
@@ -92,9 +104,13 @@ impl HtmlLayoutRenderer {
         let Some(owner_node_id) = self.current_element_owner() else {
             return;
         };
+        if !self.clips_element_overflow(owner_node_id, style) {
+            return;
+        }
         let (x, y, width, height) = overflow_clip_geometry(geometry, height, style);
         let corner_radii = overflow_clip_radius(geometry, height, style);
         let clip = OverflowClip::new(owner_node_id, x, y, width, height, 0.0, 0.0)
+            .with_active_axes(self.element_overflow_clip_axes(owner_node_id, style))
             .with_corner_radii(corner_radii);
         for element_box in &mut self.element_boxes[descendant_box_start..] {
             if overflow_clip_applies_to(element_box, owner_node_id) {
@@ -176,11 +192,8 @@ impl HtmlLayoutRenderer {
         height: f32,
         style: &CssStyle,
     ) {
-        if style.clips_overflow() {
-            let (x, y, width, height) = overflow_clip_geometry(geometry, height, style);
-            let corner_radii = overflow_clip_radius(geometry, height, style);
-            self.clip_painted_range(content_start, x, y, width, height, corner_radii);
-        }
+        self.paint_container_overflow(content_start, geometry, height, style);
+        let before_background = self.svg.len();
         self.insert_box(
             box_start,
             geometry.box_x,
@@ -189,6 +202,35 @@ impl HtmlLayoutRenderer {
             height,
             style,
         );
+        self.record_stacking_background(self.svg.len() - before_background);
+    }
+
+    fn paint_container_overflow(
+        &mut self,
+        content_start: usize,
+        geometry: &ContainerGeometry,
+        height: f32,
+        style: &CssStyle,
+    ) {
+        self.capture_stacking_context_children();
+        if style.clips_overflow()
+            && self
+                .current_element_owner()
+                .is_none_or(|owner| self.clips_element_overflow(owner, style))
+        {
+            let source_owner = (geometry.box_x, geometry.start, geometry.box_width, height);
+            let (x, y, width, height) = overflow_clip_geometry(geometry, height, style);
+            let corner_radii = overflow_clip_radius(geometry, height, style);
+            let Some(owner_node_id) = self.current_element_owner() else {
+                self.layout_error = Some("overflow paint clip has no owner".to_string());
+                return;
+            };
+            let clip = OverflowClip::new(owner_node_id, x, y, width, height, 0.0, 0.0)
+                .with_active_axes(self.element_overflow_clip_axes(owner_node_id, style))
+                .with_corner_radii(corner_radii);
+            let clip_id = self.clip_painted_range(content_start, clip, source_owner);
+            self.clip_deferred_paint(owner_node_id, clip_id);
+        }
     }
 
     fn render_container_children(
@@ -201,18 +243,32 @@ impl HtmlLayoutRenderer {
         let mut child_style = style.clone();
         let available_height = style.children_height();
         child_style.percentage_height_basis = available_height;
-        let result = self.render_flow_children(
-            children,
-            LayoutContext::new(
-                geometry.inner_x,
-                geometry.start + style.border_top_width() + style.padding_top,
-                geometry.inner_width,
-                &child_style,
-                details,
-            ),
-            available_height,
-        );
+        let result = if style.column_count.is_some() || style.column_width.is_some() {
+            self.render_multicolumn_children(children, geometry, style, details)
+        } else {
+            self.render_flow_children(
+                children,
+                LayoutContext::new(
+                    geometry.inner_x,
+                    self.container_content_start(geometry, style),
+                    geometry.inner_width,
+                    &child_style,
+                    details,
+                ),
+                available_height,
+            )
+        };
         accept_flow_result(&mut self.layout_error, result, geometry.start)
+    }
+
+    fn container_content_start(&self, geometry: &ContainerGeometry, style: &CssStyle) -> f32 {
+        let leading_margin = self
+            .ownership
+            .leading_child_margins
+            .last()
+            .copied()
+            .unwrap_or(0.0);
+        geometry.start + style.border_top_width() + style.padding_top - leading_margin
     }
 }
 
@@ -377,7 +433,7 @@ mod container_contract_tests {
             participates_in_flow: false,
             ancestor_node_ids: Vec::new(),
             overflow_clips: Vec::new(),
-            clips_overflow: false,
+            overflow_clip_axes: (false, false),
             padding_edge: OverflowClip::new(1, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
             inline_fragments: Vec::new(),
         }

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { DiagramTheme, type DiagramThemeName } from "./diagram_theme";
 import { type Fixture, FixtureRepository } from "./diagram_update_fixtures";
@@ -6,7 +7,9 @@ import { MarkdownReferenceAssets } from "./diagram_update_markdown_assets";
 import { MarkdownReferenceWriter } from "./diagram_update_markdown_reference";
 import { SkippedFixtureReport } from "./diagram_update_skipped_report";
 import { assertReferenceScope, referenceMode } from "./official-reference-mode";
-import { expandHome, OfficialMermaidRenderer, type RendererOptions } from "./official-renderer";
+import { OfficialMermaidRenderer, type RendererOptions } from "./official-renderer";
+import { resolveOfficialRendererAssetInputs } from "./official-renderer-asset-inputs";
+import { RasterProductionSession } from "./raster-production-session";
 
 interface CliParsedOptions extends RendererOptions {
   fixturesDir: string;
@@ -18,6 +21,12 @@ interface CliParsedOptions extends RendererOptions {
 const CliOptions = {
   parse(argv: string[]): CliParsedOptions {
     CliOptions.exitIfHelp(argv);
+    const assetInputs = resolveOfficialRendererAssetInputs(
+      argv,
+      { ...process.env },
+      process.cwd(),
+      os.homedir(),
+    );
     const fixturesDir = path.resolve(
       CliOptions.get(argv, "--fixtures", "tests/fixtures/mermaid/en"),
     );
@@ -34,30 +43,14 @@ const CliOptions = {
       fixturesDir,
       outputDir,
       markdownOutputDir: path.resolve(CliOptions.get(argv, "--markdown-output", outputDir)),
-      mermaidJs: path.resolve(
-        expandHome(
-          CliOptions.get(
-            argv,
-            "--mermaid-js",
-            process.env.MERMAID_JS || "~/.local/katana/mermaid.min.js",
-          ),
-        ),
-      ),
-      mermaidZenumlJs: path.resolve(
-        expandHome(
-          CliOptions.get(
-            argv,
-            "--mermaid-zenuml-js",
-            process.env.MERMAID_ZENUML_JS ||
-              "crates/katana-render-runtime/vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js",
-          ),
-        ),
-      ),
+      ...assetInputs,
       writeMarkdown: mode === "legacyNormalized" && !argv.includes("--no-write-md"),
       skipErrors: argv.includes("--skip-errors"),
       referenceMode: mode,
       referenceScope,
       theme: CliOptions.theme(argv),
+      rasterSessionConfigPath: CliOptions.get(argv, "--raster-session-config", ""),
+      rasterSessionConfigSha256: CliOptions.get(argv, "--raster-session-config-sha", ""),
     };
   },
 
@@ -80,7 +73,7 @@ const CliOptions = {
   },
 };
 
-class MermaidDiagramUpdate {
+export class MermaidDiagramUpdate {
   private options: CliParsedOptions;
   private markdownAssets: MarkdownReferenceAssets;
   private skippedReport: SkippedFixtureReport;
@@ -96,6 +89,19 @@ class MermaidDiagramUpdate {
     this.validate();
     this.prepareOutputDirs();
     const fixtures = new FixtureRepository(this.options.fixturesDir).list();
+    if (
+      this.options.referenceMode === "strictVendorOriginal" &&
+      this.options.rasterSession === undefined
+    ) {
+      if (!this.options.rasterSessionConfigPath || !this.options.rasterSessionConfigSha256)
+        throw new Error(
+          "Strict official raster producer requires external session config path and SHA",
+        );
+      this.options.rasterSession = RasterProductionSession.fromPinnedConfig(
+        this.options.rasterSessionConfigPath,
+        this.options.rasterSessionConfigSha256,
+      );
+    }
     const renderer = new OfficialMermaidRenderer(this.options);
     const writer = new MarkdownReferenceWriter(this.options.markdownOutputDir);
     await this.renderAll(renderer, writer, fixtures);
@@ -104,6 +110,13 @@ class MermaidDiagramUpdate {
   }
 
   private prepareOutputDirs() {
+    if (
+      this.options.referenceMode === "strictVendorOriginal" &&
+      fs.existsSync(this.options.outputDir) &&
+      fs.readdirSync(this.options.outputDir).length > 0
+    ) {
+      throw new Error("Strict official raster production requires a fresh output directory");
+    }
     fs.mkdirSync(this.options.outputDir, { recursive: true });
     if (this.options.writeMarkdown) {
       this.markdownAssets.prepare();
@@ -115,12 +128,14 @@ class MermaidDiagramUpdate {
     writer: MarkdownReferenceWriter,
     fixtures: Fixture[],
   ) {
+    renderer.prepareRasterInputs(fixtures);
     await renderer.start();
     try {
       await this.renderFixtures(renderer, writer, fixtures);
     } finally {
       await renderer.stop();
     }
+    renderer.finishRasterReceipt();
   }
 
   private async renderFixtures(
@@ -229,7 +244,8 @@ const ErrorSummary = {
   },
 };
 
-new MermaidDiagramUpdate(CliOptions.parse(process.argv.slice(2))).run().catch((error: Error) => {
-  console.error(error.message);
-  process.exit(1);
-});
+if (import.meta.main)
+  new MermaidDiagramUpdate(CliOptions.parse(process.argv.slice(2))).run().catch((error: Error) => {
+    console.error(error.message);
+    process.exit(1);
+  });

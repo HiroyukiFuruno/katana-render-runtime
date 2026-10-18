@@ -1,7 +1,5 @@
-import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { validateGeneratedClassReference } from "./class-reference-gate";
 import { DiagramTheme, type DiagramThemeName, type MermaidThemeName } from "./diagram_theme";
 import {
@@ -34,32 +32,20 @@ import type {
 } from "./official-renderer-types";
 import { OfficialSourceNormalizer } from "./official-source-normalizer";
 import {
-  assertLoadedSvgExternalImages,
-  strictSvgExternalImageUrls,
-} from "./strict-svg-external-images";
+  assignStrictSvg,
+  closeCaptureObservation,
+  type LoadedSvgObservation,
+  observeCaptureSnapshot,
+  resizeSvgCapture,
+} from "./raster-capture-observation";
+import type { RasterProductionSession } from "./raster-production-session";
+import { waitForStrictSvgExternalImages } from "./strict-svg-external-images";
 
 export { expandHome } from "./official-renderer-i18n";
 
 export class PlaywrightLoader {
   async load(): Promise<PlaywrightModule> {
-    try {
-      return (await import("playwright")) as PlaywrightModule;
-    } catch {
-      const cliPath = this.findPlaywrightCli();
-      const realPath = fs.realpathSync(cliPath);
-      const modulePath = path.join(path.dirname(realPath), "index.mjs");
-      return import(pathToFileURL(modulePath).href) as Promise<PlaywrightModule>;
-    }
-  }
-
-  findPlaywrightCli() {
-    try {
-      return execSync("which playwright", { encoding: "utf8" }).trim();
-    } catch {
-      throw new Error(
-        "playwright command not found. Install it, then run `just mermaid-diagram-browser-install`.",
-      );
-    }
+    return (await import("playwright")) as PlaywrightModule;
   }
 }
 
@@ -90,27 +76,89 @@ export interface RendererOptions {
   theme: DiagramThemeName;
   referenceMode: OfficialReferenceMode;
   referenceScope: "formal" | "diagnostic";
+  rasterSession?: RasterProductionSession;
+  rasterSessionConfigPath?: string;
+  rasterSessionConfigSha256?: string;
 }
 
 export class OfficialMermaidRenderer {
   private browser: BrowserHandle | null = null;
   private options: RendererOptions;
   private theme: DiagramTheme;
+  private rasterInventory: string[] | null = null;
 
   constructor(options: RendererOptions) {
     this.options = options;
     this.theme = DiagramTheme.parse(options.theme);
   }
 
+  prepareRasterInputs(
+    fixtures: Array<{
+      slug: string;
+      filePath: string;
+      markdown: string;
+      originalFenceSource?: string;
+    }>,
+  ) {
+    if (!this.isStrictMode()) return;
+    const session = this.requireRasterSession();
+    this.rasterInventory = fixtures
+      .filter((fixture) => (fixture.originalFenceSource ?? "").trim() !== "")
+      .map((fixture) => fixture.slug)
+      .sort();
+    for (const fixture of fixtures)
+      session.pinInput(path.resolve(fixture.filePath), Buffer.from(fixture.markdown));
+  }
+
+  finishRasterReceipt() {
+    if (this.isStrictMode()) return this.requireRasterSession().finish();
+  }
+
+  private requireRasterSession() {
+    if (this.options.rasterSession === undefined)
+      throw new Error("Strict official producer requires externally orchestrated raster session");
+    return this.options.rasterSession;
+  }
+
   async start() {
+    if (this.isStrictMode()) {
+      if (this.rasterInventory === null)
+        throw new Error("Strict official raster source inventory is not prepared");
+      this.requireRasterSession().requireReady(
+        "official",
+        this.options.outputDir,
+        this.rasterInventory,
+      );
+      for (const filePath of [
+        this.options.mermaidJs,
+        this.options.mermaidZenumlJs,
+        ...this.configSourcePaths(true),
+      ]) {
+        this.requireRasterSession().pinInput(path.resolve(filePath), fs.readFileSync(filePath));
+      }
+    }
     const { chromium } = await new PlaywrightLoader().load();
     this.browser = await chromium
       .launch({ headless: true })
       .catch((error) => this.rethrowLaunchError(error));
+    if (this.isStrictMode()) {
+      try {
+        await this.requireRasterSession().observeBrowserBefore(this.browser);
+      } catch (error) {
+        await this.browser.close();
+        throw error;
+      }
+    }
   }
 
   async stop() {
-    await this.browser?.close();
+    if (this.browser === null) return;
+    try {
+      if (this.isStrictMode()) await this.requireRasterSession().observeBrowserEnd(this.browser);
+    } finally {
+      await this.browser.close();
+      if (this.isStrictMode()) this.requireRasterSession().markBrowserClosed();
+    }
   }
 
   async render(fixture: RenderFixture) {
@@ -158,7 +206,13 @@ export class OfficialMermaidRenderer {
         ? stages.rawSvg
         : primarySvgForStages(stages);
     const provenancePath = this.writeRenderProvenance(fixture, stages, strict);
-    await this.setPrimarySvg(page, primarySvg);
+    let loadedSvg: LoadedSvgObservation | null;
+    if (strict) {
+      loadedSvg = await assignStrictSvg(page, primarySvg);
+    } else {
+      await this.setPrimarySvg(page, primarySvg);
+      loadedSvg = null;
+    }
     await this.capture(
       page,
       fixture,
@@ -166,6 +220,7 @@ export class OfficialMermaidRenderer {
       strict || this.isClassDiagram(stages.diagramType),
       provenancePath,
       strict,
+      loadedSvg,
     );
   }
 
@@ -307,6 +362,7 @@ export class OfficialMermaidRenderer {
     preserveSvgBytes: boolean,
     provenancePath: string,
     strict: boolean,
+    loadedSvg: LoadedSvgObservation | null,
   ) {
     const attemptDir = fs.mkdtempSync(
       path.join(this.options.outputDir, `.capture-${fixture.slug}-`),
@@ -317,56 +373,49 @@ export class OfficialMermaidRenderer {
       await this.resizeCapture(page, strict);
       if (strict) await this.waitForSvgImages(page);
       await page.evaluate(() => (document as FontReadyDocument).fonts.ready);
-      await page.locator("#capture").screenshot({
+      const before = strict ? await observeCaptureSnapshot(page) : null;
+      const screenshot = await page.locator("#capture").screenshot({
         path: pngPath,
         omitBackground: false,
       });
+      const after = strict ? await observeCaptureSnapshot(page) : null;
       const sourceSvg = Buffer.from(preserveSvgBytes ? svg : svg.replace(/[ \t]+$/gm, ""), "utf8");
       const renderedSvg = Buffer.from(svg, "utf8");
       const provenanceDocument = parseJsonValue(
         fs.readFileSync(provenancePath, "utf8"),
         "official renderer provenance",
       );
-      publishMermaidPair({
+      const manifest = publishMermaidPair({
         directory: this.options.outputDir,
         attemptDirectory: attemptDir,
         slug: fixture.slug,
         role: "official",
         sourceSvg,
         renderedSvg,
-        png: fs.readFileSync(pngPath),
+        png: screenshot,
         provenance: {
           path: "embedded:official-renderer-provenance",
           sha256: sha256(Buffer.from(JSON.stringify(provenanceDocument))),
           document: provenanceDocument,
         },
-        config: {
-          theme: this.theme.name,
-          viewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
-          captureResize: strict
-            ? "capture-box-only-raw-svg-v1"
-            : "svg-viewbox-or-dimensions-ceil-plus-24px-padding-v1",
-          sourceFontUrls: strict ? [] : null,
-          preserveSvgBytes,
-          externalImageWaitPolicy: strict
-            ? "svg-image-load-decode-positive-dimensions-and-frame-v2"
-            : null,
-          referenceMode: this.options.referenceMode,
-          referenceScope: this.options.referenceScope,
-          originalFenceLanguage: fixture.fenceLanguage ?? null,
-          originalFenceSourceSha256: sha256(
-            Buffer.from(fixture.originalFenceSource ?? fixture.source, "utf8"),
-          ),
-          canonicalSourceSha256: sha256(
-            Buffer.from(fixture.canonicalSource ?? fixture.source, "utf8"),
-          ),
-          sourceAdapterPolicy:
-            fixture.fenceLanguage === "zenuml" ? "zenuml-prefix-v1" : "mermaid-fence-lines-v1",
-          sourceMarkdownSha256:
-            fixture.markdown === undefined ? null : sha256(Buffer.from(fixture.markdown, "utf8")),
-        },
+        config: this.captureConfig(fixture, preserveSvgBytes, strict),
         runtimeAssets: officialRuntimeAssets(provenanceDocument),
       });
+      if (strict) {
+        if (before === null || after === null || loadedSvg === null)
+          throw new Error("Actual official capture observation missing");
+        this.requireRasterSession().recordPublishedPair({
+          manifest,
+          sourceSvg,
+          renderedSvg,
+          screenshot,
+          attemptPng: fs.readFileSync(pngPath),
+          publishedPng: fs.readFileSync(path.join(this.options.outputDir, `${fixture.slug}.png`)),
+          capture: closeCaptureObservation(sourceSvg, loadedSvg, before, after),
+          rawSvgSha256: sha256(sourceSvg),
+          canonicalSourceSha256: sha256(Buffer.from(fixture.canonicalSource ?? "")),
+        });
+      }
       published = true;
     } catch (error) {
       const detail = error instanceof Error ? error.message : "unclassified capture failure";
@@ -374,6 +423,32 @@ export class OfficialMermaidRenderer {
     } finally {
       if (published) fs.rmSync(attemptDir, { recursive: true, force: true });
     }
+  }
+
+  private captureConfig(fixture: RenderFixture, preserveSvgBytes: boolean, strict: boolean) {
+    return {
+      theme: this.theme.name,
+      viewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
+      captureResize: strict
+        ? "capture-box-only-raw-svg-v1"
+        : "svg-viewbox-or-dimensions-ceil-plus-24px-padding-v1",
+      sourceFontUrls: strict ? [] : null,
+      preserveSvgBytes,
+      externalImageWaitPolicy: strict
+        ? "svg-image-load-decode-positive-dimensions-and-frame-v2"
+        : null,
+      referenceMode: this.options.referenceMode,
+      referenceScope: this.options.referenceScope,
+      originalFenceLanguage: fixture.fenceLanguage ?? null,
+      originalFenceSourceSha256: sha256(
+        Buffer.from(fixture.originalFenceSource ?? fixture.source, "utf8"),
+      ),
+      canonicalSourceSha256: sha256(Buffer.from(fixture.canonicalSource ?? fixture.source, "utf8")),
+      sourceAdapterPolicy:
+        fixture.fenceLanguage === "zenuml" ? "zenuml-prefix-v1" : "mermaid-fence-lines-v1",
+      sourceMarkdownSha256:
+        fixture.markdown === undefined ? null : sha256(Buffer.from(fixture.markdown, "utf8")),
+    };
   }
 
   private renderSvg(page: PageHandle, fixture: RenderFixture): Promise<MermaidSvgStages> {
@@ -495,7 +570,7 @@ export class OfficialMermaidRenderer {
   }
 
   private async setPrimarySvg(page: PageHandle, svg: string) {
-    await page.evaluate(
+    return page.evaluate(
       ({ value }) => {
         const diagramElement = document.getElementById("diagram") as HTMLElement;
         diagramElement.innerHTML = value;
@@ -529,95 +604,11 @@ export class OfficialMermaidRenderer {
   }
 
   private resizeCapture(page: PageHandle, strict: boolean): Promise<void> {
-    return page.evaluate(
-      ({ strict }) => {
-        const svgElement = document.querySelector("#diagram svg") as SVGSVGElement;
-        const viewBox = String(svgElement.getAttribute("viewBox") ?? "")
-          .split(/\s+/)
-          .map((value) => Number(value));
-        const dimensionAt = (values: number[], index: number): number => {
-          const value = values.at(index);
-          return value === undefined || !Number.isFinite(value) ? 0 : value;
-        };
-        const attributeDimension = (name: string): number => {
-          const value = String(svgElement.getAttribute(name) ?? "").replace(/px$/, "");
-          const parsed = Number(value);
-          return Number.isFinite(parsed) ? parsed : 0;
-        };
-        const box = svgElement.getBoundingClientRect();
-        const positiveDimension = (values: number[]): number =>
-          values.find((value) => value > 0) ?? 1;
-        const width = Math.ceil(
-          positiveDimension([dimensionAt(viewBox, 2), attributeDimension("width"), box.width]),
-        );
-        const height = Math.ceil(
-          positiveDimension([dimensionAt(viewBox, 3), attributeDimension("height"), box.height]),
-        );
-        if (!strict) {
-          svgElement.setAttribute("width", String(width));
-          svgElement.setAttribute("height", String(height));
-          svgElement.style.maxWidth = `${width}px`;
-        }
-        const capture = document.getElementById("capture") as HTMLElement;
-        capture.style.width = `${width + 24}px`;
-        capture.style.height = `${height + 24}px`;
-      },
-      { strict },
-    );
+    return resizeSvgCapture(page, strict, "officialFallback");
   }
 
   private waitForSvgImages(page: PageHandle): Promise<void> {
-    return (async () => {
-      const references = await page.evaluate(() => {
-        const namespace = "http://www.w3.org/1999/xlink";
-        return Array.from(document.querySelectorAll("#diagram image")).map((image) => ({
-          href: image.getAttribute("href"),
-          xlinkHref: image.getAttributeNS(namespace, "href") ?? image.getAttribute("xlink:href"),
-        }));
-      });
-      const urls = strictSvgExternalImageUrls(references);
-      const loaded = await page.evaluate(async (imageUrls) => {
-        const loadAndDecode = (url: string) =>
-          new Promise<{
-            url: string;
-            complete: boolean;
-            naturalWidth: number;
-            naturalHeight: number;
-            decoded: boolean;
-          }>((resolve, reject) => {
-            const image = new Image();
-            let decoding = false;
-            const fail = () => reject(new Error(`Strict SVG image failed to load: ${url}`));
-            const decodeIfComplete = () => {
-              if (!image.complete || decoding) return;
-              decoding = true;
-              if (image.naturalWidth <= 0 || image.naturalHeight <= 0) {
-                fail();
-                return;
-              }
-              image.decode().then(
-                () =>
-                  resolve({
-                    url,
-                    complete: image.complete,
-                    naturalWidth: image.naturalWidth,
-                    naturalHeight: image.naturalHeight,
-                    decoded: true,
-                  }),
-                fail,
-              );
-            };
-            image.addEventListener("load", decodeIfComplete, { once: true });
-            image.addEventListener("error", fail, { once: true });
-            image.src = url;
-            decodeIfComplete();
-          });
-        const images = await Promise.all(imageUrls.map(loadAndDecode));
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        return images;
-      }, urls);
-      assertLoadedSvgExternalImages(loaded);
-    })();
+    return waitForStrictSvgExternalImages(page);
   }
 
   private currentBrowser(): BrowserHandle {

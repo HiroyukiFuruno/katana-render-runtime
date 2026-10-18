@@ -63,26 +63,14 @@ fn dispatches_error_for_png_with_empty_inflated_scanlines() -> TestResult {
         PNG_SINGLE_PIXEL_DIMENSION,
         PNG_SINGLE_PIXEL_DIMENSION,
     ));
-    let output = render(&format!(
-        r#"<p id=status></p><img src="data:image/png;base64,{payload}" onload="document.getElementById('status').textContent = 'load'" onerror="document.getElementById('status').textContent = 'error'">"#
-    ))?;
-
-    assert!(output.contains(">error</p>"), "{output}");
-    assert!(!output.contains(">load</p>"), "{output}");
-    Ok(())
+    assert_png_data_url_error(&payload)
 }
 
 #[test]
 fn dispatches_error_for_highly_compressible_png_over_the_shared_decoder_limit() -> TestResult {
     let payload =
         base64::engine::general_purpose::STANDARD.encode(highly_compressible_16k_1bit_png()?);
-    let output = render(&format!(
-        r#"<p id=status></p><img src="data:image/png;base64,{payload}" onload="document.getElementById('status').textContent = 'load'" onerror="document.getElementById('status').textContent = 'error'">"#
-    ))?;
-
-    assert!(output.contains(">error</p>"), "{output}");
-    assert!(!output.contains(">load</p>"), "{output}");
-    Ok(())
+    assert_png_data_url_error(&payload)
 }
 
 #[test]
@@ -93,6 +81,16 @@ fn dispatches_load_for_large_single_idat_png_data_urls() -> TestResult {
     ))?;
 
     assert!(output.contains(">load</p>"), "{output}");
+    Ok(())
+}
+
+fn assert_png_data_url_error(payload: &str) -> TestResult {
+    let output = render(&format!(
+        r#"<p id=status></p><img src="data:image/png;base64,{payload}" onload="document.getElementById('status').textContent = 'load'" onerror="document.getElementById('status').textContent = 'error'">"#
+    ))?;
+
+    assert!(output.contains(">error</p>"), "{output}");
+    assert!(!output.contains(">load</p>"), "{output}");
     Ok(())
 }
 

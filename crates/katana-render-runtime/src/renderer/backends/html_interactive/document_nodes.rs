@@ -1,57 +1,9 @@
 use super::super::super::html_document::HtmlDocumentNode;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
-pub(in crate::renderer::backends::html_interactive) struct TableCell {
-    pub(in crate::renderer::backends::html_interactive) tag: String,
-    pub(in crate::renderer::backends::html_interactive) attributes: Vec<(String, String)>,
-    pub(in crate::renderer::backends::html_interactive) children: Vec<HtmlDocumentNode>,
-}
-
-pub(in crate::renderer::backends::html_interactive) fn table_rows(
-    nodes: &[HtmlDocumentNode],
-) -> Vec<Vec<TableCell>> {
-    let mut rows = Vec::new();
-    collect_table_rows(nodes, &mut rows);
-    rows
-}
-
-fn collect_table_rows(nodes: &[HtmlDocumentNode], rows: &mut Vec<Vec<TableCell>>) {
-    for node in nodes {
-        let HtmlDocumentNode::Element { tag, children, .. } = node else {
-            continue;
-        };
-        if tag == "tr" {
-            push_table_row(children, rows);
-            continue;
-        }
-        collect_table_rows(children, rows);
-    }
-}
-
-fn push_table_row(children: &[HtmlDocumentNode], rows: &mut Vec<Vec<TableCell>>) {
-    let cells = children.iter().filter_map(table_cell).collect::<Vec<_>>();
-    if !cells.is_empty() {
-        rows.push(cells);
-    }
-}
-
-fn table_cell(node: &HtmlDocumentNode) -> Option<TableCell> {
-    let HtmlDocumentNode::Element {
-        tag,
-        attributes,
-        children,
-        ..
-    } = node
-    else {
-        return None;
-    };
-    (tag == "th" || tag == "td").then(|| TableCell {
-        tag: tag.clone(),
-        attributes: attributes.clone(),
-        children: children.clone(),
-    })
-}
+#[path = "document_table.rs"]
+mod table;
+pub(in crate::renderer::backends::html_interactive) use table::{TableCell, table_rows};
 
 pub(in crate::renderer::backends::html_interactive) fn attribute<'a>(
     attributes: &'a [(String, String)],

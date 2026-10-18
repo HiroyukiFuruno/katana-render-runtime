@@ -1,13 +1,12 @@
+import { MERMAID_RUNTIME_ENTRYPOINT } from "#mermaid/runtime_entrypoint";
 import { SharedDomFragments } from "#shared/dom_fragments";
 import {
   RuntimeBundleDefinition,
   type RuntimeFragment,
   RuntimeFragmentFactory,
 } from "#shared/runtime_bundle";
-import { MERMAID_RUNTIME_ENTRYPOINT } from "#mermaid/runtime_entrypoint";
 
-const MERMAID_JS_RUNTIME =
-  "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime";
+const MERMAID_JS_RUNTIME = "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime";
 
 export const MermaidRuntimeBundleDefinition = {
   create(): RuntimeBundleDefinition {
@@ -60,10 +59,6 @@ function mermaidRuntimeFragments(): RuntimeFragment[] {
     RuntimeFragmentFactory.verbatim(
       "svg-er-viewbox-fixes.js",
       `${MERMAID_JS_RUNTIME}/svg_er_viewbox_fixes.js`,
-    ),
-    RuntimeFragmentFactory.verbatim(
-      "svg-class-layout-fixes.js",
-      `${MERMAID_JS_RUNTIME}/svg_class_layout_fixes.js`,
     ),
     RuntimeFragmentFactory.verbatim(
       "svg-class-fixes.js",

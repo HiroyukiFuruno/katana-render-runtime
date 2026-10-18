@@ -39,12 +39,15 @@ impl HtmlInteractiveSession {
         let (next_scroll, resize_anchor) = match fragment.as_deref() {
             None | Some("") => (0.0, None),
             Some(fragment) => match self.layout()?.anchor_positions.get(fragment).copied() {
-                Some(position) => (position, Some(fragment.to_string())),
-                None => (self.scroll_y, None),
+                Some(position) => (position.round(), Some(fragment.to_string())),
+                None => (self.scroll_geometry.scroll_y, None),
             },
         };
+        self.runtime
+            .update_document_url(url.as_str())
+            .map_err(runtime_failure)?;
         self.source.origin = url;
-        self.scroll_y = next_scroll.clamp(0.0, self.max_scroll());
+        self.scroll_geometry.scroll_y = next_scroll.clamp(0.0, self.max_scroll());
         self.resize_anchor = resize_anchor;
         Ok(())
     }

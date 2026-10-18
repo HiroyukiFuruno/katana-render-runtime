@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { validateFontProvenance } from "./coretext-font-provenance";
+import { readKrrDynamicCapture } from "./dynamic-fidelity";
 import { assertExpectedStateMatches, type JsonValue } from "./dynamic-state";
 import { assertCatalogComplete, type FeatureCatalog, loadFeatureCatalog } from "./feature-catalog";
 import { compareImages, sha256File } from "./reference-capture";
@@ -11,6 +13,116 @@ export interface StageViewport {
   width: number;
   height: number;
   scale: number;
+}
+
+export interface Html84ConditionIdentity {
+  conditionId: string;
+  caseId: string;
+  state: string;
+  operationKind: string;
+  targetSelector?: string;
+  viewport: StageViewport;
+  sourceSha256: string;
+  binarySha256: string;
+}
+
+export function assertStrictHtml84KrrReceipt(
+  reportPathValue: string,
+  reportSha256: string,
+  expected: Html84ConditionIdentity,
+): { capturePath: string; captureSha256: string; state: JsonValue; executionNonce: string } {
+  const reportPath = strictPath(reportPathValue, "KRR raw condition report");
+  if (sha256File(reportPath) !== reportSha256)
+    throw new Error("KRR raw condition report SHA differs");
+  const report = strictRecord(
+    JSON.parse(fs.readFileSync(reportPath, "utf8")),
+    "KRR raw condition report",
+  );
+  const nonce = strictText(report.executionNonce, "KRR execution nonce");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(nonce))
+    throw new Error("KRR execution nonce is not a UUID v4");
+  const capture = readKrrDynamicCapture(reportPath, {
+    ...expected,
+    nonce,
+  });
+  if (capture.status !== "observed")
+    throw new Error(`KRR raw condition is unknown: ${expected.conditionId}`);
+  return {
+    capturePath: capture.capturePath,
+    captureSha256: capture.captureSha256,
+    state: capture.stateValue,
+    executionNonce: capture.executionNonce,
+  };
+}
+
+export function assertStrictHtml84ChromeReceipt(
+  receiptPathValue: string,
+  receiptSha256: string,
+  expected: Html84ConditionIdentity,
+): { capturePath: string; captureSha256: string; state: JsonValue } {
+  const receiptPath = strictPath(receiptPathValue, "independent Chrome raw receipt");
+  if (sha256File(receiptPath) !== receiptSha256) throw new Error("Chrome raw receipt SHA differs");
+  const receipt = strictRecord(
+    JSON.parse(fs.readFileSync(receiptPath, "utf8")),
+    "Chrome raw receipt",
+  );
+  assertOnlyStrictKeys(
+    receipt,
+    [
+      "schema",
+      "status",
+      "conditionId",
+      "caseId",
+      "boundaryState",
+      "operationKind",
+      "sourceSha256",
+      "binarySha256",
+      "viewport",
+      "browserExecutablePath",
+      "browserExecutableSha256",
+      "capturePath",
+      "captureSha256",
+      "state",
+      "boundary",
+      "resourceProvenance",
+      "fontProvenance",
+      "unknownReason",
+    ],
+    "Chrome raw receipt",
+  );
+  if (
+    receipt.schema !== "krr-html84-chrome-condition-v1" ||
+    receipt.status !== "observed" ||
+    receipt.conditionId !== expected.conditionId ||
+    receipt.caseId !== expected.caseId ||
+    receipt.boundaryState !== expected.state ||
+    receipt.operationKind !== expected.operationKind ||
+    receipt.sourceSha256 !== expected.sourceSha256 ||
+    receipt.binarySha256 !== expected.binarySha256 ||
+    !sameViewport(receipt.viewport, expected.viewport as unknown as JsonValue)
+  )
+    throw new Error(`Independent Chrome raw receipt identity differs: ${expected.conditionId}`);
+  const browserPath = strictPath(
+    strictText(receipt.browserExecutablePath, "Chrome executable"),
+    "Chrome executable",
+  );
+  if (
+    sha256File(browserPath) !== strictText(receipt.browserExecutableSha256, "Chrome executable SHA")
+  )
+    throw new Error("Chrome executable byte SHA differs");
+  assertStrictReceiptResourceProvenance(receipt.resourceProvenance);
+  assertStrictReceiptFontProvenance(receipt.fontProvenance);
+  const capturePath = strictPath(
+    strictText(receipt.capturePath, "Chrome capture PNG"),
+    "Chrome capture PNG",
+  );
+  const captureSha256 = strictText(receipt.captureSha256, "Chrome capture SHA");
+  if (sha256File(capturePath) !== captureSha256) throw new Error("Chrome capture PNG SHA differs");
+  return {
+    capturePath,
+    captureSha256,
+    state: strictJsonValue(receipt.state, "Chrome actual state"),
+  };
 }
 export interface TrustedImageExpectation {
   key: string;
@@ -293,6 +405,44 @@ function sameViewport(left: JsonValue | undefined, right: JsonValue | undefined)
   return left.width === right.width && left.height === right.height && left.scale === right.scale;
 }
 
+function assertStrictReceiptResourceProvenance(value: JsonValue | undefined): void {
+  const inventory = strictRecord(value, "resource provenance");
+  assertOnlyStrictKeys(inventory, ["inventoryComplete", "requests"], "resource inventory");
+  if (inventory.inventoryComplete !== true) throw new Error("resource inventory is incomplete");
+  const requests = strictArray(inventory.requests, "resource requests");
+  for (const request of requests) {
+    assertOnlyStrictKeys(request, ["url", "bodyPath", "bytesSha256", "loaded"], "resource request");
+    const bodyPath = strictPath(
+      strictText(request.bodyPath, "resource body path"),
+      "resource body",
+    );
+    if (
+      strictText(request.url, "resource URL").length === 0 ||
+      request.loaded !== true ||
+      sha256File(bodyPath) !== strictText(request.bytesSha256, "resource body SHA")
+    )
+      throw new Error("resource body identity is not physically verified");
+  }
+}
+
+function assertStrictReceiptFontProvenance(value: JsonValue | undefined): void {
+  const faces = validateFontProvenance(value);
+  for (const face of faces) {
+    strictPath(face.filePath, "font file");
+    if (face.scope === "node" && positiveNumber(face.selectedNodeId, "selected font node") <= 0)
+      throw new Error("selected font node identity is invalid");
+  }
+}
+
+export function assertOnlyStrictKeys(
+  value: { [key: string]: JsonValue },
+  keys: string[],
+  name: string,
+): void {
+  const unknown = Object.keys(value).filter((key) => !keys.includes(key));
+  if (unknown.length > 0) throw new Error(`unknown ${name} fields: ${unknown.join(", ")}`);
+}
+
 function assertReportedScore(image: { [key: string]: JsonValue }, rmse: number, mae: number): void {
   const reportedRmse = finite(image.rmseScore, "reported RMSE score");
   const reportedMae = finite(image.maeScore, "reported MAE score");
@@ -316,6 +466,11 @@ function hasSymlinkAncestor(file: string): boolean {
     current = path.dirname(current);
   }
   return false;
+}
+
+function strictJsonValue(value: JsonValue | undefined, name: string): JsonValue {
+  if (value === undefined) throw new Error(`missing ${name}`);
+  return value;
 }
 
 function strictRecord(value: JsonValue | undefined, name: string): { [key: string]: JsonValue } {

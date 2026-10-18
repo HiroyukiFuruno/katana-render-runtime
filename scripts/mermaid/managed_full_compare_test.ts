@@ -1,0 +1,631 @@
+import { expect, test } from "bun:test";
+import fs from "node:fs";
+import path from "node:path";
+import { assertCallerSourceBinding } from "./managed-full-compare";
+import {
+  assertManagedOutputRoot,
+  captureCanonicalFixtureSources,
+  parseManagedFullCompareRequest,
+} from "./managed-full-compare-input";
+import { candidateFixtureArgumentPairs } from "./managed-full-compare-language";
+import {
+  type ManagedCommandResult,
+  parseChildJson,
+  requireScoreProcessOutcome,
+  runManagedCommand,
+} from "./managed-full-compare-process";
+import {
+  type FullScoreAcceptance,
+  requireFullScoreAcceptance,
+  validateLanguageScoreEvidence,
+} from "./managed-full-compare-results";
+import { fileSha256 } from "./mermaid-pair-manifest";
+import { digestFileRecords } from "./native-build-receipt";
+import { ReferenceScorePolicy } from "./reference_score_policy";
+
+test("managed full aggregation requires exactly EN59 and JA58 strict scores at least 99", () => {
+  for (const [language, count] of [
+    ["en", 59],
+    ["ja", 58],
+  ] as const) {
+    const expected = slugs(count);
+    const evidence = validEvidence(expected);
+    const result = validateLanguageScoreEvidence(
+      language,
+      expected,
+      evidence.scores,
+      evidence.inventory,
+      evidence.context,
+    );
+    expect(result.fixtureCount).toBe(count);
+    expect(result.minimumScore).toBe(99);
+  }
+});
+
+test("managed build binds source records and digest, not source-manifest serialization", () => {
+  const sourceFiles = [
+    { path: "/repo/crates/one.rs", sha256: "a".repeat(64), size: 10 },
+    { path: "/repo/crates/two.rs", sha256: "b".repeat(64), size: 20 },
+  ];
+  const sourceDigest = digestFileRecords(sourceFiles);
+  const callerManifestSha256 = "c".repeat(64);
+  const summary = {
+    sourceManifestSha256: "d".repeat(64),
+    sourceDigest,
+    sourceFiles,
+  };
+
+  expect(summary.sourceManifestSha256).not.toBe(callerManifestSha256);
+  expect(() => assertCallerSourceBinding(summary, sourceDigest, sourceFiles)).not.toThrow();
+
+  const [firstSourceFile, secondSourceFile] = sourceFiles;
+  if (firstSourceFile === undefined || secondSourceFile === undefined) {
+    throw new Error("Test source fixture is incomplete");
+  }
+  const changedFiles = [{ ...firstSourceFile, sha256: "e".repeat(64) }, secondSourceFile];
+  const rejected = [
+    { ...summary, sourceDigest: digestFileRecords(changedFiles), sourceFiles: changedFiles },
+    { ...summary, sourceDigest: "f".repeat(64) },
+    { ...summary, sourceFiles: changedFiles },
+  ];
+  for (const value of rejected) {
+    expect(() => assertCallerSourceBinding(value, sourceDigest, sourceFiles)).toThrow();
+  }
+});
+
+test("managed native render and raster use the same copied nonempty fixtures", () => {
+  const candidateFixtures = path.resolve(
+    process.cwd(),
+    "tmp/managed-language-test/canonical-nonempty-fixtures",
+  );
+  const argumentsByProducer = candidateFixtureArgumentPairs(candidateFixtures);
+
+  expect(argumentsByProducer.nativeRender).toEqual(["--fixtures-dir", candidateFixtures]);
+  expect(argumentsByProducer.rasterProcess).toEqual(["--fixtures", candidateFixtures]);
+  expect(argumentsByProducer.nativeRender[1]).toBe(argumentsByProducer.rasterProcess[1]);
+});
+
+test("managed full acceptance rejects partial inventory or any score below 99", () => {
+  const en: FullScoreAcceptance = {
+    language: "en",
+    fixtureCount: 59,
+    minimumScore: 99,
+    accepted: true,
+  };
+  const ja: FullScoreAcceptance = {
+    language: "ja",
+    fixtureCount: 58,
+    minimumScore: 99,
+    accepted: true,
+  };
+  expect(() => requireFullScoreAcceptance([en, ja])).not.toThrow();
+  expect(() => requireFullScoreAcceptance([{ ...en, fixtureCount: 55 }, ja])).toThrow();
+  expect(() => requireFullScoreAcceptance([en, { ...ja, minimumScore: 98.999 }])).toThrow();
+  expect(() => requireFullScoreAcceptance([en, { ...ja, accepted: false }])).toThrow();
+  expect(() => requireFullScoreAcceptance([ja, en])).toThrow();
+});
+
+test("managed full request accepts only official templates and official pins", () => {
+  const request = validRequest();
+  expect(() => parseManagedFullCompareRequest(request)).not.toThrow();
+  const languageWithOldCandidateBinding = {
+    ...request,
+    languages: {
+      ...request.languages,
+      en: {
+        ...request.languages.en,
+        candidateBinding: { path: "/repo/old-candidate.json", sha256: "b".repeat(64) },
+      },
+    },
+  };
+  expect(() => parseManagedFullCompareRequest(languageWithOldCandidateBinding)).toThrow();
+});
+
+test("managed full input pins canonical fixture bytes and ignored output roots", () => {
+  const repositoryRoot = path.resolve(process.cwd());
+  for (const [language, count] of [
+    ["en", 59],
+    ["ja", 58],
+  ] as const) {
+    const inventory = captureCanonicalFixtureSources(repositoryRoot, language);
+    expect(inventory.slugs).toHaveLength(count);
+    expect(inventory.sources).toHaveLength(count + 1);
+    expect(inventory.sources.filter((source) => source.empty)).toHaveLength(1);
+    expect(
+      inventory.sources.every(
+        (source) =>
+          /^[a-f0-9]{64}$/.test(source.markdownSha256) &&
+          /^[a-f0-9]{64}$/.test(source.originalFenceSourceSha256) &&
+          /^[a-f0-9]{64}$/.test(source.canonicalSourceSha256),
+      ),
+    ).toBe(true);
+  }
+
+  const tempParent = fs.mkdtempSync(path.join(repositoryRoot, "tmp", "managed-output-validation-"));
+  try {
+    expect(() =>
+      assertManagedOutputRoot(path.join(tempParent, "run"), repositoryRoot),
+    ).not.toThrow();
+    expect(() =>
+      assertManagedOutputRoot(path.join(repositoryRoot, "outside-tmp"), repositoryRoot),
+    ).toThrow();
+    expect(() =>
+      assertManagedOutputRoot(path.join(repositoryRoot, "tmp"), repositoryRoot),
+    ).toThrow();
+  } finally {
+    fs.rmSync(tempParent, { recursive: true, force: true });
+  }
+});
+
+test("managed full aggregation rejects missing, duplicate, weak, and nonformal score evidence", () => {
+  const expected = slugs(59);
+  const valid = validEvidence(expected);
+  const invalidCases = [
+    { scores: valid.scores.slice(1), inventory: valid.inventory, context: valid.context },
+    {
+      scores: [valid.scores[0], ...valid.scores.slice(1, -1), valid.scores[0]],
+      inventory: valid.inventory,
+      context: valid.context,
+    },
+    {
+      scores: valid.scores.map((row, index) => (index === 0 ? { ...row, score: 98.999 } : row)),
+      inventory: valid.inventory,
+      context: valid.context,
+    },
+    {
+      scores: valid.scores.map((row, index) =>
+        index === 0 ? { ...row, contentRmseScore: 80 } : row,
+      ),
+      inventory: valid.inventory,
+      context: valid.context,
+    },
+    {
+      scores: valid.scores,
+      inventory: { ...valid.inventory, skippedEmpty: [{ slug: "skipped", reason: "empty" }] },
+      context: valid.context,
+    },
+    {
+      scores: valid.scores,
+      inventory: valid.inventory,
+      context: { ...valid.context, formalAccepted: true },
+    },
+  ];
+  for (const value of invalidCases) {
+    expect(() =>
+      validateLanguageScoreEvidence("en", expected, value.scores, value.inventory, value.context),
+    ).toThrow();
+  }
+  const belowGate = valid.scores.map((row, index) =>
+    index === 0
+      ? {
+          ...row,
+          score: 98.999,
+          rgbScore: 98.999,
+          canvasRmseScore: 98.999,
+          canvasMaeScore: 98.999,
+          contentRmseScore: 98.999,
+          contentMaeScore: 98.999,
+          passed: false,
+        }
+      : row,
+  );
+  const miss = validateLanguageScoreEvidence(
+    "en",
+    expected,
+    belowGate,
+    valid.inventory,
+    valid.context,
+  );
+  expect(miss.accepted).toBe(false);
+  expect(miss.minimumScore).toBe(98.999);
+  expect(miss.scores[0]?.passed).toBe(false);
+});
+
+test("managed full aggregation rejects incomplete inventories and lowered score thresholds", () => {
+  const expected = slugs(59);
+  const valid = validEvidence(expected);
+  expect(() =>
+    validateLanguageScoreEvidence(
+      "en",
+      expected.slice(0, -1),
+      valid.scores,
+      valid.inventory,
+      valid.context,
+    ),
+  ).toThrow();
+  expect(() =>
+    validateLanguageScoreEvidence(
+      "en",
+      expected,
+      valid.scores.map((row) => ({ ...row, minScore: 98 })),
+      valid.inventory,
+      valid.context,
+    ),
+  ).toThrow();
+});
+
+test("managed projected-reference semantics bind four projected metrics and preserve RGB separately", () => {
+  const expected = slugs(59);
+  expected[0] = "08-04-c4-component";
+  const evidence = validGeometryEvidence(expected);
+  const accepted = validateLanguageScoreEvidence(
+    "en",
+    expected,
+    evidence.scores,
+    evidence.inventory,
+    evidence.context,
+    evidence.geometry,
+  );
+  expect(accepted.accepted).toBe(true);
+  expect(accepted.scores[0]).toMatchObject({
+    score: 99,
+    rgbScore: 80,
+    scoreSemantics: "paint-projected-reference-v1",
+  });
+
+  const wrongMetrics = {
+    ...evidence.geometry,
+    pairs: evidence.geometry.pairs.map((pair) => ({
+      ...pair,
+      projectedMetrics: { ...pair.projectedMetrics, contentMaeScore: 80, score: 80 },
+    })),
+  };
+  expect(() =>
+    validateLanguageScoreEvidence(
+      "en",
+      expected,
+      evidence.scores,
+      evidence.inventory,
+      evidence.context,
+      wrongMetrics,
+    ),
+  ).toThrow();
+
+  const belowProjectedThreshold = {
+    ...evidence.geometry,
+    pairs: evidence.geometry.pairs.map((pair) => ({
+      ...pair,
+      projectedMetrics: { ...pair.projectedMetrics, contentMaeScore: 98.5, score: 98.5 },
+    })),
+  };
+  const belowProjectedScores = evidence.scores.map((row, index) => {
+    if (index !== 0) return row;
+    if (row.scoreSemantics !== "paint-projected-reference-v1") {
+      throw new Error("Projected reference score semantics are missing");
+    }
+    const projected = row.paintProjectedReference;
+    if (projected === undefined) throw new Error("Projected reference score is missing");
+    return {
+      ...row,
+      score: 98.5,
+      passed: false,
+      paintProjectedReference: { ...projected, contentMaeScore: 98.5, score: 98.5 },
+    };
+  });
+  const rejected = validateLanguageScoreEvidence(
+    "en",
+    expected,
+    belowProjectedScores,
+    evidence.inventory,
+    evidence.context,
+    belowProjectedThreshold,
+  );
+  expect(rejected.accepted).toBe(false);
+  expect(rejected.minimumScore).toBe(98.5);
+
+  const legacyNeutralEvidence = {
+    ...evidence.geometry,
+    schema: "krr-mermaid-neutral-geometry-evidence-v1",
+    policy: "neutral-svg-geometry-v1",
+  };
+  expect(() =>
+    validateLanguageScoreEvidence(
+      "en",
+      expected,
+      evidence.scores,
+      evidence.inventory,
+      evidence.context,
+      legacyNeutralEvidence,
+    ),
+  ).toThrow();
+});
+
+test("managed geometry evidence keeps structural mismatches as failed scores", () => {
+  const expected = slugs(59);
+  expected[0] = "08-04-c4-component";
+  const evidence = validGeometryEvidence(expected, false);
+  const result = validateLanguageScoreEvidence(
+    "en",
+    expected,
+    evidence.scores,
+    evidence.inventory,
+    evidence.context,
+    evidence.geometry,
+  );
+  expect(result.accepted).toBe(false);
+  expect(result.minimumScore).toBe(99);
+  expect(result.scores[0]?.passed).toBe(false);
+});
+
+test("managed Python route pins the resolved tool and preserves raw logs", () => {
+  const root = fs.mkdtempSync(path.join(process.cwd(), "tmp", "managed-python-route-"));
+  const outputRoot = path.join(root, "run");
+  fs.mkdirSync(outputRoot, { mode: 0o700 });
+  try {
+    const resolvedPython = Bun.which("python3");
+    if (resolvedPython === null) throw new Error("test requires the standard python3 tool");
+    const pythonPath = fs.realpathSync(resolvedPython);
+    const tool = { kind: "python3" as const, path: pythonPath, sha256: fileSha256(pythonPath) };
+    const child = runManagedCommand(
+      outputRoot,
+      "python-usage",
+      [pythonPath, "scripts/mermaid/produce_raster_process_evidence.py"],
+      process.cwd(),
+      tool,
+    );
+    expect(child.exitCode).toBe(2);
+    expect(fs.readFileSync(child.stderrPath, "utf8")).toContain("usage:");
+    expect(child.argv[0]).toBe("python3");
+    expect(() => parseChildJson(child, "Python usage child")).toThrow();
+    const command = JSON.parse(
+      fs.readFileSync(path.join(outputRoot, "logs", "python-usage.command.json"), "utf8"),
+    ) as { executable: string; resolvedExecutablePath: string; resolvedExecutableSha256: string };
+    expect(command).toMatchObject({
+      argv: ["python3", "scripts/mermaid/produce_raster_process_evidence.py"],
+      executable: "python3",
+      resolvedExecutablePath: pythonPath,
+      resolvedExecutableSha256: tool.sha256,
+    });
+    expectManagedToolRejections(outputRoot, root, tool);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("managed Bun route uses the pinned literal script invocation", () => {
+  const root = fs.mkdtempSync(path.join(process.cwd(), "tmp", "managed-bun-route-"));
+  const outputRoot = path.join(root, "run");
+  fs.mkdirSync(outputRoot, { mode: 0o700 });
+  try {
+    const resolvedBun = Bun.which("bun");
+    if (resolvedBun === null) throw new Error("test requires the standard bun tool");
+    const bunPath = fs.realpathSync(resolvedBun);
+    const tool = { kind: "bun" as const, path: bunPath, sha256: fileSha256(bunPath) };
+    const child = runManagedCommand(
+      outputRoot,
+      "bun-help",
+      [bunPath, "run", "scripts/mermaid/raster-production-session.ts", "--help"],
+      process.cwd(),
+      tool,
+    );
+    expect(child.exitCode).toBe(0);
+    expect(fs.readFileSync(child.stdoutPath, "utf8")).toContain("--seed-official");
+    const command = JSON.parse(
+      fs.readFileSync(path.join(outputRoot, "logs", "bun-help.command.json"), "utf8"),
+    ) as { argv: string[]; executable: string; resolvedExecutableSha256: string };
+    expect(command).toMatchObject({
+      argv: ["bun", "run", "scripts/mermaid/raster-production-session.ts", "--help"],
+      executable: "bun",
+      resolvedExecutableSha256: tool.sha256,
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("score process exit must match complete score evidence", () => {
+  const failed: ManagedCommandResult = {
+    label: "score",
+    argv: ["bun", "run", "scripts/mermaid/reference-compare.ts"],
+    cwd: process.cwd(),
+    stdoutPath: "stdout",
+    stderrPath: "stderr",
+    exitPath: "exit",
+    exitCode: 1,
+    signal: null,
+    spawnError: null,
+  };
+  expect(() => requireScoreProcessOutcome(failed, false)).not.toThrow();
+  expect(() => requireScoreProcessOutcome(failed, true)).toThrow();
+  expect(() => requireScoreProcessOutcome({ ...failed, exitCode: 2 }, false)).toThrow();
+});
+
+function expectManagedToolRejections(
+  outputRoot: string,
+  cwd: string,
+  tool: { kind: "bun" | "python3"; path: string; sha256: string },
+): void {
+  const args = [tool.path, "scripts/mermaid/produce_raster_process_evidence.py"];
+  expect(() =>
+    runManagedCommand(outputRoot, "wrong-hash", args, cwd, { ...tool, sha256: "0".repeat(64) }),
+  ).toThrow();
+  expect(() =>
+    runManagedCommand(outputRoot, "wrong-role", args, cwd, { ...tool, kind: "bun" }),
+  ).toThrow();
+  expect(() =>
+    runManagedCommand(outputRoot, "unknown-script", [tool.path, "scripts/unknown.py"], cwd, tool),
+  ).toThrow();
+  expect(() =>
+    runManagedCommand(outputRoot, "wrong-executable", ["/bin/false", ...args.slice(1)], cwd, tool),
+  ).toThrow();
+}
+
+function slugs(count: number): string[] {
+  const values = Array.from(
+    { length: count },
+    (_, index) => `fixture-${String(index + 1).padStart(2, "0")}`,
+  );
+  values[0] = "20-02-sankey-beta";
+  return values;
+}
+
+function validEvidence(expected: string[]) {
+  const policy = new ReferenceScorePolicy(99);
+  return {
+    scores: expected.map((slug) => {
+      const threshold = policy.thresholdFor(slug);
+      return {
+        slug,
+        score: Math.max(99, threshold.minScore),
+        rgbScore: Math.max(99, threshold.minScore),
+        scoreSemantics: "rgb-v1" as const,
+        canvasRmseScore: Math.max(99, threshold.minScore),
+        canvasMaeScore: Math.max(99, threshold.minScore),
+        contentRmseScore: Math.max(99, threshold.minScore),
+        contentMaeScore: Math.max(99, threshold.minScore),
+        minScore: threshold.minScore,
+        exceptionReason: threshold.reason,
+        passed: true,
+      };
+    }),
+    inventory: {
+      contract: "explicit-fixture-directory-and-glob",
+      expected,
+      scored: expected,
+      skippedEmpty: [],
+    },
+    context: {
+      mode: "strictVendorOriginal",
+      scope: "formal",
+      expectedSlugCount: expected.length,
+      emptySlugCount: 0,
+      scoreThreshold: 99,
+      formalAccepted: false,
+      independentGold: false,
+      scoreSemantics: "rgb-v1",
+    },
+  };
+}
+
+function validGeometryEvidence(expected: string[], accepted = true) {
+  const base = validEvidence(expected),
+    slug = expected[0] ?? "08-04-c4-component",
+    evidenceSha256 = "b".repeat(64),
+    score = 99,
+    roi = { x: 10, y: 10, width: 300, height: 200 };
+  const scores = base.scores.map((row, index) =>
+    index === 0
+      ? {
+          ...row,
+          score,
+          rgbScore: 80,
+          scoreSemantics: "paint-projected-reference-v1" as const,
+          canvasRmseScore: 80,
+          canvasMaeScore: 80,
+          contentRmseScore: 80,
+          contentMaeScore: 80,
+          passed: accepted,
+          paintProjectedReference: {
+            policy: "raw-svg-geometry-candidate-computed-paint-v1" as const,
+            score,
+            structuralIntegrityAccepted: accepted,
+            reasons: accepted ? [] : ["$svg:transform"],
+            maxTransformDelta: accepted ? 0 : 0.00002,
+            fullCanvasRmseScore: 99,
+            fullCanvasMaeScore: 99,
+            contentRmseScore: 99,
+            contentMaeScore: 99,
+            width: 320,
+            height: 220,
+            evidenceSha256,
+            roi,
+          },
+        }
+      : row,
+  );
+  const record = (role: "official" | "candidate") => ({
+    svgPath: `/repo/${role}/${slug}.svg`,
+    svgSha256: "a".repeat(64),
+    sourcePngPath: `/repo/${role}/${slug}.png`,
+    sourcePngSha256: "a".repeat(64),
+  });
+  const projectedReference = {
+    svgPath: `/repo/paint-projected-reference/${slug}-reference.svg`,
+    svgSha256: "b".repeat(64),
+    pngPath: `/repo/paint-projected-reference/${slug}-reference.png`,
+    pngSha256: "c".repeat(64),
+    width: 320,
+    height: 220,
+    graphicsElementCount: 8,
+    paintVisibilitySha256: "d".repeat(64),
+  };
+  const projectedMetrics = {
+    fullCanvasRmseScore: 99,
+    fullCanvasMaeScore: 99,
+    contentRmseScore: 99,
+    contentMaeScore: 99,
+    score: 99,
+    roi,
+    width: 320,
+    height: 220,
+  };
+  return {
+    scores,
+    inventory: base.inventory,
+    context: {
+      ...base.context,
+      scoreSemantics: "rgb-v1+paint-projected-reference-v1",
+      paintProjectedReferenceEvidence: {
+        path: "paint-projected-reference-evidence.json",
+        sha256: evidenceSha256,
+      },
+    },
+    geometry: {
+      schema: "krr-mermaid-paint-projected-reference-evidence-v1",
+      policy: "raw-svg-geometry-candidate-computed-paint-v1",
+      structuralPolicy: "ordered-svg-tree-and-nonpaint-plus-computed-paint-visibility-v2",
+      renderer: "pinned-playwright-chromium-svg-capture-v1",
+      host: { platform: "darwin", arch: "arm64" },
+      browser: {
+        version: "Chromium 156",
+        executablePath: "/repo/chromium",
+        executableSha256: "a".repeat(64),
+        viewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
+      },
+      pairs: [
+        {
+          slug,
+          structuralIntegrity: {
+            accepted,
+            reasons: accepted ? [] : ["$svg:transform"],
+            maxTransformDelta: accepted ? 0 : 0.00002,
+            signatureSha256: "c".repeat(64),
+          },
+          official: record("official"),
+          candidate: record("candidate"),
+          projectedReference,
+          projectedMetrics,
+        },
+      ],
+    },
+  };
+}
+
+function validRequest() {
+  const pin = (name: string) => ({ path: `/repo/${name}`, sha256: "a".repeat(64) });
+  const language = (code: string) => ({
+    fixtures: `/repo/fixtures/${code}`,
+    officialTemplate: pin(`official-${code}.json`),
+    officialReceipt: pin(`official-${code}-receipt.json`),
+    officialProcessEvidence: pin(`official-${code}-process.json`),
+    officialPairDirectory: `/repo/pairs/${code}`,
+  });
+  return {
+    schema: "krr-mermaid-managed-full-run-request-v1",
+    repositoryRoot: "/repo",
+    outputRoot: "/repo/tmp/managed-run",
+    sourceManifest: pin("source.json"),
+    protectedRegistry: pin("protected.json"),
+    binary: "/repo/target/debug/krr",
+    runtime: pin("mermaid.js"),
+    tools: {
+      cargo: pin("cargo"),
+      rustc: pin("rustc"),
+      python: pin("python"),
+      bun: pin("bun"),
+      mermaidJs: pin("mermaid-vendor.js"),
+      mermaidZenUmlJs: pin("zenuml-vendor.js"),
+    },
+    languages: { en: language("en"), ja: language("ja") },
+  };
+}

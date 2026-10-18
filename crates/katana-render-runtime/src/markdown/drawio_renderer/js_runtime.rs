@@ -2,12 +2,10 @@ use super::js_runtime_resources::{DrawioResource, DrawioResourceCatalog};
 use super::js_runtime_scripts::DrawioRuntimeScripts;
 use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
+use crate::markdown::runtime_assets::{RuntimeBundleCache, RuntimeBundleGuard};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-
-type RuntimeBundleCache = Mutex<HashMap<PathBuf, Arc<str>>>;
-type RuntimeBundleGuard<'a> = MutexGuard<'a, HashMap<PathBuf, Arc<str>>>;
+use std::path::Path;
+use std::sync::{Arc, Mutex, OnceLock};
 
 static BUNDLE_CACHE: OnceLock<RuntimeBundleCache> = OnceLock::new();
 

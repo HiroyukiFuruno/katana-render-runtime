@@ -1,7 +1,79 @@
 use super::super::html_css_selector::CssSelector;
-use super::{HtmlDocument, selector};
+use super::{HtmlDocument, form, selector};
+use markup5ever_rcdom::{Handle, NodeData};
 
 impl HtmlDocument {
+    pub(crate) fn tag_name(&self, node_id: u64) -> Result<String, String> {
+        let node = self.node(node_id)?;
+        match &node.data {
+            markup5ever_rcdom::NodeData::Element { name, .. } => {
+                let local_name = name.local.to_string();
+                if form::is_html_element(name) {
+                    Ok(local_name.to_ascii_uppercase())
+                } else {
+                    Ok(local_name)
+                }
+            }
+            _ => Err("tagName target is not an element".to_string()),
+        }
+    }
+
+    pub(crate) fn hidden_property(&self, node_id: u64) -> Result<Option<bool>, String> {
+        let node = self.node(node_id)?;
+        let NodeData::Element { name, attrs, .. } = &node.data else {
+            return Err("hidden target is not an element".to_string());
+        };
+        if !form::is_html_element(name) {
+            return Ok(None);
+        }
+        Ok(Some(attrs.borrow().iter().any(|attribute| {
+            attribute.name.local.as_str() == "hidden"
+        })))
+    }
+
+    pub(crate) fn is_connected(&self, node_id: u64) -> bool {
+        let Some(mut node) = self.nodes.get(&node_id).cloned() else {
+            return false;
+        };
+        loop {
+            if std::rc::Rc::ptr_eq(&node, &self.document) {
+                return true;
+            }
+            let parent = node.parent.take();
+            node.parent.set(parent.clone());
+            let Some(parent) = parent.and_then(|parent| parent.upgrade()) else {
+                return false;
+            };
+            node = parent;
+        }
+    }
+
+    pub(in crate::renderer::backends) fn resource_element_presence(&self) -> (bool, bool) {
+        fn visit(node: &Handle, images: &mut bool, frames: &mut bool) {
+            if let NodeData::Element { name, .. } = &node.data {
+                match name.local.as_ref() {
+                    "img" => *images = true,
+                    "iframe" => *frames = true,
+                    _ => {}
+                }
+            }
+            if *images && *frames {
+                return;
+            }
+            for child in node.children.borrow().iter() {
+                visit(child, images, frames);
+                if *images && *frames {
+                    return;
+                }
+            }
+        }
+
+        let mut images = false;
+        let mut frames = false;
+        visit(&self.document, &mut images, &mut frames);
+        (images, frames)
+    }
+
     pub(crate) fn get_element_by_id(&mut self, id: &str) -> Option<u64> {
         let handle =
             super::super::html_dom_helpers::find_element(&self.document, |tag, attributes| {
@@ -75,5 +147,22 @@ mod tests {
         assert!(document.query_selector_from(node, "main +")?.is_none());
         assert!(document.query_selector_all("main +").is_empty());
         Ok(())
+    }
+
+    #[test]
+    fn element_only_dom_operations_reject_document_root() {
+        let mut document = HtmlDocument::parse("<p>Original</p>");
+        assert_eq!(
+            document.tag_name(1),
+            Err("tagName target is not an element".into())
+        );
+        assert_eq!(
+            document.insert_adjacent_text(1, "beforeend", "text"),
+            Err("insertAdjacentText target is not an element".into())
+        );
+        assert_eq!(
+            document.insert_adjacent_html(1, "beforeend", "<b>text</b>"),
+            Err("insertAdjacentHTML target is not an element".into())
+        );
     }
 }

@@ -6,6 +6,9 @@ mod theme;
 mod theme_catalog;
 pub mod types;
 
+#[cfg(test)]
+mod test_support;
+
 pub use asset::{PLANTUML_DOWNLOAD_URL, PLANTUML_JAR_CHECKSUM, PLANTUML_JAR_VERSION};
 pub(crate) use config::PlantUmlRuntimeConfig;
 pub(crate) use theme::PlantUmlThemeConfig;

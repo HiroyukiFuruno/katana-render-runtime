@@ -1,6 +1,11 @@
 use std::borrow::Cow;
 use std::sync::OnceLock;
 
+use crate::v8_script::ScriptCompiler;
+
+#[path = "diagram_font_bridge.rs"]
+mod diagram_font_bridge;
+
 static V8_INIT: OnceLock<()> = OnceLock::new();
 const SOURCE_ALLOC_ERR: &str = "source allocation failed";
 const FILENAME_ALLOC_ERR: &str = "filename allocation failed";
@@ -31,6 +36,20 @@ impl<'a> DiagramRuntimeScript<'a> {
 pub(crate) struct DiagramV8Runtime;
 
 impl DiagramV8Runtime {
+    #[cfg(test)]
+    pub(crate) fn with_empty_try_catch(
+        assert_empty: impl for<'pin, 'scope, 'object, 'isolate> FnOnce(
+            &mut DiagramTryCatchScope<'pin, 'scope, 'object, 'isolate>,
+        ),
+    ) {
+        let mut isolate = v8::Isolate::new(Default::default());
+        v8::scope!(let handle_scope, &mut isolate);
+        let context = v8::Context::new(handle_scope, Default::default());
+        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
+        v8::tc_scope!(let scope, &mut **context_scope);
+        assert_empty(scope);
+    }
+
     pub(crate) fn render(scripts: &[DiagramRuntimeScript<'_>]) -> Result<String, String> {
         Self::ensure_initialized();
 
@@ -39,6 +58,7 @@ impl DiagramV8Runtime {
         let context = v8::Context::new(handle_scope, Default::default());
         let context_scope = &mut v8::ContextScope::new(handle_scope, context);
         v8::tc_scope!(let scope, &mut **context_scope);
+        diagram_font_bridge::install(scope)?;
 
         let mut rendered = String::new();
         for script in scripts {
@@ -61,25 +81,25 @@ fn evaluate(
     script: &DiagramRuntimeScript<'_>,
 ) -> Result<String, String> {
     let script_code = script.code.as_ref();
+    tracing::event!(
+        target: "katana_render_runtime::mermaid_classic_capture",
+        tracing::Level::TRACE,
+        phase = "script",
+        name = script.name,
+        code = script_code,
+    );
     let source = required(v8::String::new(scope, script_code), SOURCE_ALLOC_ERR)?;
     let origin_name = required(v8::String::new(scope, script.name), FILENAME_ALLOC_ERR)?;
-    let origin = v8::ScriptOrigin::new(
-        scope,
-        origin_name.into(),
-        0,
-        0,
-        false,
-        0,
-        Some(origin_name.into()),
-        false,
-        false,
-        false,
-        None,
-    );
-    let script = v8::Script::compile(scope, source, Some(&origin))
+    let script = ScriptCompiler::compile_with_origin(scope, source, origin_name)
         .ok_or_else(|| exception_message(scope))?;
     let value = script.run(scope).ok_or_else(|| exception_message(scope))?;
-    resolve_value(scope, value)
+    let resolved = resolve_value(scope, value)?;
+    tracing::event!(
+        target: "katana_render_runtime::mermaid_classic_capture",
+        tracing::Level::TRACE,
+        phase = "complete",
+    );
+    Ok(resolved)
 }
 
 fn resolve_value(

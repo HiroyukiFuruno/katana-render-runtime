@@ -1,5 +1,5 @@
 use super::html_css::HtmlAttributes;
-use super::html_css_selector::{CssAncestor, CssPseudoElement, CssSelector};
+use super::html_css_selector::{CssAncestor, CssInteractionState, CssPseudoElement, CssSelector};
 #[path = "html_css_shorthand.rs"]
 mod html_css_shorthand;
 #[path = "html_css_parser.rs"]
@@ -8,6 +8,7 @@ use html_css_shorthand::expand_box_shorthand;
 
 #[derive(Debug)]
 pub(super) struct CssRule {
+    pub(super) user_agent: bool,
     selectors: Vec<CssSelector>,
     pub(super) declarations: Vec<CssDeclaration>,
     media: Vec<String>,
@@ -19,16 +20,22 @@ pub(super) struct CssRuleMatchState<'a> {
     pub(super) attributes: &'a HtmlAttributes,
     pub(super) ancestors: &'a [CssAncestor],
     pub(super) sibling_index: usize,
+    pub(super) sibling_type_index: usize,
+    pub(super) sibling_type_count: usize,
     pub(super) hovered: bool,
+    pub(super) focused: bool,
+    pub(super) focus_visible: bool,
     pub(super) pseudo_element: Option<CssPseudoElement>,
 }
 
 impl<'a> CssRuleMatchState<'a> {
-    pub(super) fn element(
+    pub(super) fn element_with_type(
         tag: &'a str,
         attributes: &'a HtmlAttributes,
         ancestors: &'a [CssAncestor],
         sibling_index: usize,
+        sibling_type_index: usize,
+        sibling_type_count: usize,
         hovered: bool,
     ) -> Self {
         Self {
@@ -36,8 +43,36 @@ impl<'a> CssRuleMatchState<'a> {
             attributes,
             ancestors,
             sibling_index,
+            sibling_type_index,
+            sibling_type_count,
             hovered,
+            focused: false,
+            focus_visible: false,
             pseudo_element: None,
+        }
+    }
+
+    pub(super) fn element_with_interaction_state(
+        tag: &'a str,
+        attributes: &'a HtmlAttributes,
+        ancestors: &'a [CssAncestor],
+        sibling_index: usize,
+        sibling_type_index: usize,
+        sibling_type_count: usize,
+        interaction: CssInteractionState,
+    ) -> Self {
+        Self {
+            focused: interaction.focused,
+            focus_visible: interaction.focus_visible,
+            ..Self::element_with_type(
+                tag,
+                attributes,
+                ancestors,
+                sibling_index,
+                sibling_type_index,
+                sibling_type_count,
+                interaction.hovered,
+            )
         }
     }
 
@@ -69,7 +104,15 @@ impl CssRule {
         viewport_width: f32,
     ) -> Option<u16> {
         self.matches_state(
-            CssRuleMatchState::element(tag, attributes, ancestors, sibling_index, false),
+            CssRuleMatchState::element_with_type(
+                tag,
+                attributes,
+                ancestors,
+                sibling_index,
+                sibling_index,
+                sibling_index,
+                false,
+            ),
             viewport_width,
         )
     }
@@ -88,16 +131,7 @@ impl CssRule {
         }
         self.selectors
             .iter()
-            .filter(|selector| {
-                selector.matches_at_pseudo_state(
-                    state.tag,
-                    state.attributes,
-                    state.ancestors,
-                    state.sibling_index,
-                    state.hovered,
-                    state.pseudo_element,
-                )
-            })
+            .filter(|selector| selector.matches_at_pseudo_state(state))
             .map(CssSelector::specificity)
             .max()
     }

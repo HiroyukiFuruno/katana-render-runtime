@@ -9,6 +9,7 @@ import { type RawSourceMap, SourceMapConsumer, SourceMapGenerator } from "source
 import { z } from "zod";
 import { RuntimeBundleDefinition } from "#shared/runtime_bundle";
 import { runtimeBundleChecksum } from "./runtime-bundle-checksum";
+import { parseRuntimeBundleMode, parseRuntimeBundleOptions } from "./runtime-bundle-cli";
 import { runtimeBundleDefinitions } from "./runtime-bundle-definitions";
 import {
   type ClassicGenerationEvidence,
@@ -27,6 +28,57 @@ import {
 } from "./runtime-rollup-bundler";
 
 type SourceInventory = { sources: string[]; sourcesContent: string[] };
+type BundleEvidenceRow = {
+  definition: { name: string; outputFile: string };
+  classicGeneration?: unknown;
+};
+const classicBundleNames = ["drawio", "mermaid", "zenuml"];
+function requireCompleteClassicBundles<T extends BundleEvidenceRow>(bundles: readonly T[]): T[] {
+  const classicBundles = bundles.filter((bundle) => bundle.classicGeneration !== undefined);
+  const names = classicBundles.map((bundle) => bundle.definition.name).sort();
+  if (JSON.stringify(names) !== JSON.stringify(classicBundleNames))
+    throw new Error("actual completed evidence must include all three classic bundles");
+  return classicBundles;
+}
+
+test("runtime bundle CLI keeps legacy mode parsing and accepts evidence only with check", () => {
+  expect(parseRuntimeBundleMode(["--check"])).toBe("check");
+  expect(parseRuntimeBundleMode(["--write"])).toBe("write");
+  expect(() => parseRuntimeBundleMode(["--check", "--write"])).toThrow();
+  expect(parseRuntimeBundleOptions(["--check"])).toEqual({
+    mode: "check",
+    classicGenerationEvidence: false,
+  });
+  expect(parseRuntimeBundleOptions(["--check", "--classic-generation-evidence"])).toEqual({
+    mode: "check",
+    classicGenerationEvidence: true,
+  });
+});
+const invalidCliArguments: Array<[string[], string]> = [
+  [[], "missing mode"],
+  [["--classic-generation-evidence"], "evidence without mode"],
+  [["--write", "--classic-generation-evidence"], "evidence with write"],
+  [["--check", "--check"], "duplicate mode"],
+  [["--check", "--write"], "conflicting modes"],
+  [["--check", "--classic-generation-evidence", "--classic-generation-evidence"], "duplicate flag"],
+  [["--check", "--unexpected"], "unknown argument"],
+];
+for (const [argv, label] of invalidCliArguments)
+  test(`runtime bundle CLI rejects ${label}`, () => {
+    expect(() => parseRuntimeBundleOptions(argv)).toThrow();
+  });
+const completeEvidenceRows = classicBundleNames.map((name) => ({
+  definition: { name, outputFile: `${name}.js` },
+  classicGeneration: {},
+}));
+for (const missingName of classicBundleNames)
+  test(`actual completed evidence rejects missing ${missingName} classic bundle`, () => {
+    const rows = completeEvidenceRows.filter((bundle) => bundle.definition.name !== missingName);
+    expect(() => requireCompleteClassicBundles(rows)).toThrow(
+      "actual completed evidence must include all three classic bundles",
+    );
+  });
+
 test.each([
   "if(/^\\u00a0+$/.test(text))return",
   "const value='\\u{1F600}'; /*😀é*/",
@@ -131,7 +183,25 @@ test.each(["regular", "absolute", "traversal", "outside", "symlink", "parent sym
     }
   },
 );
-function drawioCropAnnotation(source: string): Comment {
+const allocationContracts = [
+  {
+    realm: "drawio",
+    sourcePath:
+      "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/drawio_svg_postprocess.js",
+    owner: "katanaPostprocessDrawioSvg",
+    callee: "katanaCropDrawioSvgToContent",
+  },
+  {
+    realm: "mermaid",
+    sourcePath:
+      "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_normalize.js",
+    owner: "katanaNormalizeDiagramSpecificSvg",
+    callee: "katanaNormalizeReviewFeedbackSvg",
+  },
+] as const;
+type AllocationContract = (typeof allocationContracts)[number];
+
+function calleeAnnotation(source: string, contract: AllocationContract): Comment {
   const comments: Comment[] = [];
   const script = parse(source, {
     ecmaVersion: "latest",
@@ -139,20 +209,21 @@ function drawioCropAnnotation(source: string): Comment {
     onComment: comments,
   });
   const owner = script.body.find(
-    (node) => node.type === "FunctionDeclaration" && node.id?.name === "katanaPostprocessDrawioSvg",
+    (node) => node.type === "FunctionDeclaration" && node.id?.name === contract.owner,
   );
   if (owner?.type !== "FunctionDeclaration")
-    throw new Error("Actual Drawio postprocess owner missing");
+    throw new Error(`Actual ${contract.realm} owner missing`);
   const calls: CallExpression[] = [];
   full(owner, (node) => {
     if (
       node.type === "CallExpression" &&
       node.callee.type === "Identifier" &&
-      node.callee.name === "katanaCropDrawioSvgToContent"
+      node.callee.name === contract.callee
     )
       calls.push(node);
   });
-  if (calls.length !== 1 || !calls[0]) throw new Error("Actual Drawio crop call is not unique");
+  if (calls.length !== 1 || !calls[0])
+    throw new Error(`Actual ${contract.realm} helper call is not unique`);
   const call = calls[0];
   const annotation = comments.find(
     (comment) =>
@@ -161,27 +232,26 @@ function drawioCropAnnotation(source: string): Comment {
       comment.end <= call.start &&
       source.slice(comment.end, call.start).trim() === "",
   );
-  if (!annotation) throw new Error("Actual Drawio crop call lacks the supported Terser annotation");
+  if (!annotation)
+    throw new Error(`Actual ${contract.realm} helper call lacks the supported Terser annotation`);
   return annotation;
 }
 
-function drawioCropPlacement(source: string) {
+function calleePlacement(source: string, contract: AllocationContract) {
   const script = parse(source, { ecmaVersion: "latest", sourceType: "script" });
   const global = script.body.filter(
-    (node) =>
-      node.type === "FunctionDeclaration" && node.id?.name === "katanaCropDrawioSvgToContent",
+    (node) => node.type === "FunctionDeclaration" && node.id?.name === contract.callee,
   ).length;
   let perRender = 0;
   fullAncestor(script, (node, _state, ancestors) => {
-    if (node.type !== "FunctionExpression" || node.id?.name !== "katanaCropDrawioSvgToContent")
-      return;
+    if (node.type !== "FunctionExpression" || node.id?.name !== contract.callee) return;
     if (
       ancestors
         .slice(0, -1)
         .some(
           (ancestor) =>
             (ancestor.type === "FunctionDeclaration" || ancestor.type === "FunctionExpression") &&
-            ancestor.id?.name === "katanaPostprocessDrawioSvg",
+            ancestor.id?.name === contract.owner,
         )
     )
       perRender += 1;
@@ -189,22 +259,28 @@ function drawioCropPlacement(source: string) {
   return { global, perRender };
 }
 
-test.each([
+const annotationCases = [
   ["supported", "/*@__NOINLINE__*/", true],
   ["missing", "", false],
   ["malformed", "/*__NOINLINE__*/", false],
-] as const)(
-  "actual Drawio producer keeps global crop allocation only with %s annotation",
-  async (_name, marker, retained) => {
+] as const;
+test.each(
+  allocationContracts.flatMap((contract) =>
+    annotationCases.map(
+      ([name, marker, retained]) => [contract.realm, name, contract, marker, retained] as const,
+    ),
+  ),
+)(
+  "actual %s producer keeps global helper allocation only with %s annotation",
+  async (_realm, _name, contract, marker, retained) => {
     const root = path.resolve(import.meta.dir, "../..");
-    const definition = runtimeBundleDefinitions().find((item) => item.name === "drawio");
+    const definition = runtimeBundleDefinitions().find((item) => item.name === contract.realm);
     if (!definition || definition.bundledEntryPath !== null)
-      throw new Error("Actual classic Drawio definition missing");
-    const postprocessPath =
-      "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/drawio_svg_postprocess.js";
-    const original = fs.readFileSync(path.join(root, postprocessPath));
+      throw new Error(`Actual classic ${contract.realm} definition missing`);
+    const sourcePath = contract.sourcePath;
+    const original = fs.readFileSync(path.join(root, sourcePath));
     const source = original.toString("utf8");
-    const annotation = drawioCropAnnotation(source);
+    const annotation = calleeAnnotation(source, contract);
     const generatedPath = path.join(
       root,
       "crates/katana-render-runtime/src/markdown/diagram_runtime/generated",
@@ -213,14 +289,16 @@ test.each([
     const generated = fs.readFileSync(generatedPath);
     const baseline = generated.toString("utf8");
     const baselineInner = classicEvalLiteral(baseline);
-    expect(drawioCropPlacement(baselineInner)).toEqual({ global: 1, perRender: 0 });
-    const directory = fs.mkdtempSync(path.join(root, "tmp", "drawio-noinline-generation-test-"));
+    expect(calleePlacement(baselineInner, contract)).toEqual({ global: 1, perRender: 0 });
+    const directory = fs.mkdtempSync(
+      path.join(root, "tmp", `${contract.realm}-noinline-generation-test-`),
+    );
     try {
-      const candidatePath = path.join(directory, "drawio_svg_postprocess.js");
+      const candidatePath = path.join(directory, path.basename(sourcePath));
       const candidate = `${source.slice(0, annotation.start)}${marker}${source.slice(annotation.end)}`;
       fs.writeFileSync(candidatePath, candidate);
       const fragments = definition.fragments.map((fragment) =>
-        fragment.sourcePath === postprocessPath
+        fragment.sourcePath === sourcePath
           ? { ...fragment, sourcePath: path.relative(root, candidatePath) }
           : fragment,
       );
@@ -238,7 +316,7 @@ test.each([
         (generation) => observed.push(generation),
       );
       if (observed.length !== 1 || !observed[0])
-        throw new Error("Actual Drawio generation evidence missing");
+        throw new Error(`Actual ${contract.realm} generation evidence missing`);
       const generation = observed[0];
       const header = `// @generated by scripts/runtime-bundles/bundle-runtime.ts\n// bundle: ${definition.name}\n`;
       expect(Buffer.from(`${header}\n${body}\n`).equals(generated)).toBe(retained);
@@ -246,13 +324,13 @@ test.each([
       expect(generation.normalized.code.includes(marker || "/*@__NOINLINE__*/")).toBe(
         marker !== "",
       );
-      expect(drawioCropPlacement(generation.inner.code)).toEqual(
+      expect(calleePlacement(generation.inner.code, contract)).toEqual(
         retained ? { global: 1, perRender: 0 } : { global: 0, perRender: 1 },
       );
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }
-    expect(fs.readFileSync(path.join(root, postprocessPath))).toEqual(original);
+    expect(fs.readFileSync(path.join(root, sourcePath))).toEqual(original);
     expect(fs.readFileSync(generatedPath)).toEqual(generated);
   },
 );
@@ -282,7 +360,7 @@ if (evidencePath === undefined) {
     for (const bundle of bundles)
       expect(runtimeBundleChecksum(bundle.content)).toBe(bundle.checksum);
   });
-  for (const bundle of bundles.filter((value) => value.classicGeneration !== undefined)) {
+  for (const bundle of requireCompleteClassicBundles(bundles)) {
     test(`actual completed ${bundle.definition.name} evidence verifies same-pass maps and decoded bytes`, async () => {
       const evidence = classicGenerationEvidenceSchema.parse(bundle.classicGeneration);
       const pins = z
@@ -330,9 +408,12 @@ if (evidencePath === undefined) {
   };
   const cases: Array<[string, (value: ClassicGenerationEvidence) => void]> = [
     ...Object.entries(setters),
-    ...["runtime-unused-origin.ts", "native-build-receipt.ts"].map<
-      [string, (v: ClassicGenerationEvidence) => void]
-    >((name) => [
+    ...[
+      "runtime-unused-origin.ts",
+      "native-build-receipt.ts",
+      "bundle-runtime.ts",
+      "runtime-bundle-cli.ts",
+    ].map<[string, (v: ClassicGenerationEvidence) => void]>((name) => [
       `stale guard source pin ${name}`,
       (value) => {
         const pins = JSON.parse(value.inputPins ?? "null") as Array<{

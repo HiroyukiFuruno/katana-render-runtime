@@ -49,7 +49,8 @@ impl InlineMeasurement {
         inherited: &CssStyle,
         available: f32,
     ) -> Option<f32> {
-        let style = CssStyle::from_element(tag, attributes, inherited);
+        let mut style = CssStyle::from_element(tag, attributes, inherited);
+        style.resolve_text_line_height(children);
         if !style.inline_block || style.display == taffy::style::Display::None {
             return None;
         }
@@ -79,16 +80,19 @@ impl InlineMeasurement {
                     })
                 })
                 .sum::<f32>();
-            style.outer_width(content)
+            style.intrinsic_outer_width(content)
         }
     }
 
     pub(super) fn text_width(text: &str, style: &CssStyle) -> f32 {
-        text_width(text, style)
+        text_width(
+            &super::super::layout_text::collapsed_inline_whitespace(text),
+            style,
+        )
     }
 
     pub(super) fn visible_line<'a>(line: &'a str, style: &CssStyle) -> (f32, &'a str) {
-        let visible = line.trim_start_matches(char::is_whitespace);
+        let visible = line.trim_start_matches(super::super::layout_text::is_css_whitespace);
         let leading = &line[..line.len() - visible.len()];
         (text_width(leading, style), visible)
     }
@@ -97,6 +101,34 @@ impl InlineMeasurement {
 #[cfg(test)]
 mod tests {
     use super::{CssStyle, CssTextAlign, HtmlDocumentNode, InlineMeasurement};
+
+    #[test]
+    fn border_box_auto_inline_size_keeps_padding_but_explicit_size_is_outer() {
+        let inherited = CssStyle::browser_default();
+        let auto = CssStyle::from_attributes(
+            &[(
+                "style".to_string(),
+                "display:inline-block;box-sizing:border-box;padding:4px 10px".to_string(),
+            )],
+            &inherited,
+        );
+        assert_eq!(
+            InlineMeasurement::content_box_width(&[], &auto, 200.0),
+            20.0
+        );
+        let explicit = CssStyle::from_attributes(
+            &[(
+                "style".to_string(),
+                "display:inline-block;box-sizing:border-box;padding:4px 10px;width:80px"
+                    .to_string(),
+            )],
+            &inherited,
+        );
+        assert_eq!(
+            InlineMeasurement::content_box_width(&[], &explicit, 200.0),
+            80.0
+        );
+    }
 
     #[test]
     fn end_aligned_inline_run_starts_after_available_space() {

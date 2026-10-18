@@ -1,8 +1,11 @@
+#[cfg(test)]
+#[path = "svg_rasterize_html_font_lazy_final_glyphs.rs"]
+mod final_glyphs;
 #[path = "svg_rasterize_html_font_lazy_diagnostic_routes.rs"]
 mod routes;
 #[path = "svg_rasterize_html_font_lazy_diagnostic_sources.rs"]
 mod sources;
-use resvg::usvg::fontdb::Database;
+use resvg::usvg::fontdb::{Database, ID};
 pub(super) use routes::{record_selected_face, select_database};
 pub(super) use sources::FaceSource;
 use std::{
@@ -31,21 +34,40 @@ pub(super) struct Capture {
     pub(super) shared_byte_owners: Vec<Weak<dyn AsRef<[u8]> + Send + Sync>>,
     pub(super) errors: Vec<String>,
     pub(super) dropped: usize,
+    #[cfg(test)]
+    final_glyph_trees: Vec<final_glyphs::FinalGlyphTree>,
+    #[cfg(test)]
+    final_glyph_errors: Vec<final_glyphs::FinalGlyphError>,
+    #[cfg(test)]
+    final_glyph_dropped: usize,
+    #[cfg(test)]
+    final_glyph_paint_calls: u64,
+    #[cfg(test)]
+    final_glyph_record_count: usize,
+    #[cfg(test)]
+    final_glyph_shared_byte_owners: Vec<sources::ByteWeak>,
+    #[cfg(test)]
+    html_font_markups: Vec<serde_json::Value>,
+    #[cfg(test)]
+    html_font_markups_dropped: usize,
 }
 thread_local! {
     static ROUTE: Cell<Option<SourceRoute>> = const { Cell::new(None) };
     static MODE: Cell<Mode> = const { Cell::new(Mode::Measure) };
+    static PASSIVE_AUDIT: Cell<bool> = const { Cell::new(false) };
     static ACTIVE: RefCell<Option<Capture>> = const { RefCell::new(None) };
 }
 struct Restore {
     route: Option<SourceRoute>,
     mode: Mode,
+    passive_audit: bool,
     capture: Option<Capture>,
 }
 impl Drop for Restore {
     fn drop(&mut self) {
         ROUTE.with(|value| value.set(self.route));
         MODE.with(|value| value.set(self.mode));
+        PASSIVE_AUDIT.with(|value| value.set(self.passive_audit));
         ACTIVE.with(|value| {
             value.replace(self.capture.take());
         });
@@ -58,10 +80,12 @@ pub(super) fn with_route<T>(
 ) -> (T, Capture) {
     let old_route = ROUTE.with(|value| value.replace(Some(route)));
     let old_mode = MODE.with(|value| value.replace(mode));
+    let old_passive_audit = PASSIVE_AUDIT.with(Cell::get);
     let old_capture = ACTIVE.with(|value| value.replace(Some(Capture::default())));
     let restore = Restore {
         route: old_route,
         mode: old_mode,
+        passive_audit: old_passive_audit,
         capture: old_capture,
     };
     let result = operation();
@@ -77,6 +101,140 @@ pub(super) fn with_route<T>(
 }
 pub(super) fn active() -> bool {
     ROUTE.with(|value| value.get().is_some())
+}
+
+pub(super) fn with_actual_route<T>(operation: impl FnOnce() -> T) -> (T, Capture) {
+    let old_route = ROUTE.with(|value| value.replace(None));
+    let old_mode = MODE.with(|value| value.replace(Mode::Audit));
+    let old_passive_audit = PASSIVE_AUDIT.with(|value| value.replace(true));
+    let old_capture = ACTIVE.with(|value| value.replace(Some(Capture::default())));
+    let restore = Restore {
+        route: old_route,
+        mode: old_mode,
+        passive_audit: old_passive_audit,
+        capture: old_capture,
+    };
+    let result = operation();
+    let capture = ACTIVE.with(|value| {
+        value.borrow().as_ref().cloned().unwrap_or_else(|| Capture {
+            errors: vec!["actual font audit scope missing after operation".into()],
+            ..Capture::default()
+        })
+    });
+    drop(restore);
+    (result, capture)
+}
+
+impl crate::markdown::svg_rasterize::SvgRasterizeOps {
+    pub(crate) fn with_actual_font_source_audit<T>(
+        operation: impl FnOnce() -> T,
+    ) -> Result<(T, serde_json::Value), serde_json::Error> {
+        let (result, capture) = with_actual_route(operation);
+        let faces = serde_json::to_value(&capture.faces)?;
+        let errors = serde_json::to_value(&capture.errors)?;
+        #[cfg(test)]
+        let final_glyph_trees = serde_json::to_value(&capture.final_glyph_trees)?;
+        #[cfg(test)]
+        let final_glyph_errors = serde_json::to_value(&capture.final_glyph_errors)?;
+        Ok((
+            result,
+            serde_json::json!({
+                "faces": faces,
+                "errors": errors,
+                "dropped": capture.dropped,
+                "route": "actual-current-route",
+                "finalGlyphTrees": final_glyph_trees,
+                "finalGlyphErrors": final_glyph_errors,
+                "finalGlyphDropped": capture.final_glyph_dropped,
+                "finalGlyphPaintCalls": capture.final_glyph_paint_calls,
+                "htmlFontMarkups": capture.html_font_markups,
+                "htmlFontMarkupsDropped": capture.html_font_markups_dropped,
+            }),
+        ))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_actual_html_font_markup(
+        computed_family: &str,
+        computed_weight: u16,
+        run_families: Option<&[String]>,
+        svg_attributes: &str,
+    ) {
+        ACTIVE.with(|active| {
+            let mut active = active.borrow_mut();
+            let Some(capture) = active.as_mut() else {
+                return;
+            };
+            if capture.html_font_markups.len() >= MAX_CAPTURED_RECORDS {
+                capture.html_font_markups_dropped += 1;
+                return;
+            }
+            capture.html_font_markups.push(serde_json::json!({
+                "computedFamily": computed_family,
+                "computedWeight": computed_weight,
+                "effectiveSvgWeight": computed_weight,
+                "resolvedRunStatus": match run_families {
+                    None => "unresolved",
+                    Some([]) => "empty",
+                    Some(_) => "resolved",
+                },
+                "runFamilies": run_families,
+                "svgAttributes": svg_attributes,
+            }));
+        });
+    }
+}
+
+#[cfg(test)]
+pub(super) fn begin_final_glyph_paint_call() -> Option<u64> {
+    if !PASSIVE_AUDIT.with(Cell::get) {
+        return None;
+    }
+    let mut paint_call = None;
+    update(0, |capture| {
+        capture.final_glyph_paint_calls = capture.final_glyph_paint_calls.saturating_add(1);
+        paint_call = Some(capture.final_glyph_paint_calls);
+    });
+    paint_call
+}
+
+#[cfg(test)]
+pub(super) fn record_final_glyph_tree(
+    tree: &resvg::usvg::Tree,
+    source_svg: &str,
+    paint_call: Option<u64>,
+) {
+    if !PASSIVE_AUDIT.with(Cell::get) {
+        return;
+    }
+    final_glyphs::record(tree, source_svg, paint_call);
+}
+
+pub(super) fn record_actual_selected_face(db: &Database, id: Option<ID>) {
+    if !PASSIVE_AUDIT.with(Cell::get) {
+        return;
+    }
+    let Some(face) = id.and_then(|id| db.face(id)) else {
+        return;
+    };
+    let (record, weak) = match sources::source_record(face, Mode::Audit) {
+        Some((record, weak)) => (record, weak),
+        None => {
+            error("selected font source bytes or stable physical stamp could not be audited");
+            let Some(record) = sources::source_record(face, Mode::Measure) else {
+                error("selected font face metadata could not be recorded");
+                return;
+            };
+            record
+        }
+    };
+    let cost = if weak.is_some() { 2 } else { 1 };
+    update(cost, |capture| {
+        capture.faces.push(record);
+        if let Some(weak) = weak {
+            capture.shared_byte_owners.push(weak);
+        }
+    });
 }
 pub(super) fn measure<T>(name: &'static str, operation: impl FnOnce() -> T) -> T {
     if !active() || matches!(MODE.with(Cell::get), Mode::Audit) {
@@ -114,3 +272,99 @@ fn error(message: &str) {
 #[cfg(test)]
 #[path = "svg_rasterize_html_font_lazy_diagnostic_boundary_tests.rs"]
 mod boundary_tests;
+
+#[cfg(test)]
+mod passive_actual_route_tests {
+    use super::{MODE, Mode, ROUTE, active};
+    use std::cell::Cell;
+
+    #[test]
+    fn passive_source_audit_preserves_normal_raster_route_and_pixels() -> Result<(), String> {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="160" height="32"><text x="2" y="24" font-family="Arial" font-size="20">actual route</text></svg>"#;
+        let baseline = rasterize_normally(svg)?;
+        let (audited, audit) = rasterize_with_audit(svg)?;
+        assert_normal_route_is_restored();
+        assert_same_raster(&baseline, &audited);
+        assert_audit_contains_font_evidence(&audit);
+        assert_final_glyph_evidence(&audit, svg)?;
+        Ok(())
+    }
+
+    fn rasterize_normally(
+        svg: &str,
+    ) -> Result<crate::markdown::svg_rasterize::RasterizedSvg, String> {
+        crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_html_svg(svg, 1.0)
+            .map_err(|error| error.to_string())
+    }
+
+    fn rasterize_with_audit(
+        svg: &str,
+    ) -> Result<
+        (
+            crate::markdown::svg_rasterize::RasterizedSvg,
+            serde_json::Value,
+        ),
+        String,
+    > {
+        let (audited, audit) =
+            crate::markdown::svg_rasterize::SvgRasterizeOps::with_actual_font_source_audit(|| {
+                assert!(!active());
+                assert_eq!(ROUTE.with(Cell::get), None);
+                assert!(matches!(MODE.with(Cell::get), Mode::Audit));
+                crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_html_svg(svg, 1.0)
+            })
+            .map_err(|error| error.to_string())?;
+        Ok((audited.map_err(|error| error.to_string())?, audit))
+    }
+
+    fn assert_normal_route_is_restored() {
+        assert!(!active());
+        assert_eq!(ROUTE.with(Cell::get), None);
+    }
+
+    fn assert_same_raster(
+        baseline: &crate::markdown::svg_rasterize::RasterizedSvg,
+        audited: &crate::markdown::svg_rasterize::RasterizedSvg,
+    ) {
+        assert_eq!(
+            (baseline.width, baseline.height),
+            (audited.width, audited.height)
+        );
+        assert_eq!(baseline.rgba, audited.rgba);
+    }
+
+    fn assert_audit_contains_font_evidence(audit: &serde_json::Value) {
+        assert!(
+            audit["faces"]
+                .as_array()
+                .is_some_and(|faces| !faces.is_empty())
+                || audit["errors"]
+                    .as_array()
+                    .is_some_and(|errors| !errors.is_empty())
+        );
+        assert_eq!(audit["dropped"], 0);
+    }
+
+    fn assert_final_glyph_evidence(audit: &serde_json::Value, svg: &str) -> Result<(), String> {
+        use sha2::{Digest, Sha256};
+        let expected_sha = Sha256::digest(svg.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let trees = audit["finalGlyphTrees"]
+            .as_array()
+            .ok_or_else(|| "final glyph tree evidence is absent".to_owned())?;
+        assert_eq!(trees.len(), 1);
+        assert_eq!(trees[0]["paintCall"], 1);
+        assert_eq!(trees[0]["treePath"], "root");
+        assert_eq!(trees[0]["sourceSvgSha256"], expected_sha);
+        assert!(
+            trees[0]["faces"]
+                .as_array()
+                .is_some_and(|faces| !faces.is_empty())
+        );
+        assert!(audit["finalGlyphErrors"].is_array());
+        assert_eq!(audit["finalGlyphDropped"], 0);
+        Ok(())
+    }
+}

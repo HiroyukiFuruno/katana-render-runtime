@@ -93,7 +93,7 @@ fn embedded_svg_without_serialized_markup_does_not_emit_svg_content() -> TestRes
 }
 
 #[test]
-fn embedded_svg_sizing_preserves_view_box_ratio_and_css_constraints() {
+fn embedded_svg_sizing_keeps_explicit_height_when_width_is_constrained() {
     let attributes = vec![
         ("width".to_string(), "400".to_string()),
         ("height".to_string(), "200".to_string()),
@@ -106,6 +106,29 @@ fn embedded_svg_sizing_preserves_view_box_ratio_and_css_constraints() {
         &unconstrained,
     );
 
+    assert_eq!(
+        embedded_svg_size(&attributes, 300.0, &unconstrained),
+        (300.0, 200.0)
+    );
+    /* WHY: SVG2のheight属性はpresentation hintであり、max-widthでは変更されない。 */
+    assert_eq!(
+        embedded_svg_size(&attributes, 300.0, &constrained),
+        (120.0, 200.0)
+    );
+}
+
+#[test]
+fn embedded_svg_auto_height_preserves_view_box_ratio_and_css_constraints() {
+    let unconstrained =
+        crate::renderer::backends::html_interactive::style::CssStyle::browser_default();
+    let constrained = crate::renderer::backends::html_interactive::style::CssStyle::from_attributes(
+        &[("style".to_string(), "max-width: 120px".to_string())],
+        &unconstrained,
+    );
+    let attributes = vec![
+        ("width".to_string(), "400".to_string()),
+        ("viewbox".to_string(), "0 0 400 200".to_string()),
+    ];
     assert_eq!(
         embedded_svg_size(&attributes, 300.0, &unconstrained),
         (300.0, 150.0)

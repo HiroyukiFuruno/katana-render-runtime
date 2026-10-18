@@ -31,7 +31,9 @@ impl HtmlDocument {
             later_body_onload_tokens,
             nodes: HashMap::new(),
             node_ids: HashMap::new(),
+            select_value_empty_overrides: Default::default(),
             next_node_id: 1,
+            tree_revision: 0,
             prevalidated_image_events: HashMap::new(),
         };
         document.register_subtree(&document.document.clone());
@@ -97,6 +99,7 @@ fn parse_with_source_order(source: &str) -> ParsedSourceOrder {
 #[cfg(test)]
 mod tests {
     use super::HtmlDocument;
+    use super::HtmlDocumentScript;
     use markup5ever_rcdom::{Handle, NodeData};
     use std::rc::Rc;
 
@@ -123,6 +126,21 @@ mod tests {
             "<svg><select><foreignObject><iframe id=real></iframe></foreignObject></select></svg>",
         ),
     ];
+
+    #[test]
+    fn inline_scripts_keep_executable_types_and_reject_external_sources() -> Result<(), String> {
+        let document = HtmlDocument::parse(
+            "<script type=application/json>ignored()</script><script>run()</script>",
+        );
+        let scripts = document.inline_scripts()?;
+        assert!(matches!(
+            scripts.as_slice(),
+            [HtmlDocumentScript::Source(source)] if source == "run()"
+        ));
+        let external = HtmlDocument::parse("<script src=\"https://example.test/app.js\"></script>");
+        assert!(external.inline_scripts().is_err());
+        Ok(())
+    }
 
     #[test]
     fn duplicate_body_token_retains_its_parser_observed_onload_source() {
@@ -351,6 +369,19 @@ mod tests {
         }
     }
 
+    fn assert_following_real_iframe_order(document: &mut HtmlDocument) -> Result<(), String> {
+        let real = actual_element(document, "real")?;
+        assert_html_iframe(&real, "after select");
+        assert!(!has_html_select_ancestor(&real));
+        let real_index = document
+            .source_order
+            .iter()
+            .position(|node| Rc::ptr_eq(node, &real));
+        assert_eq!(document.body_onload_source_order_index, Some(1));
+        assert_eq!(real_index, Some(1));
+        Ok(())
+    }
+
     #[test]
     fn iframe_after_ignored_select_iframe_keeps_parser_order() -> Result<(), String> {
         let mut document = HtmlDocument::parse(
@@ -366,16 +397,7 @@ mod tests {
                 .iter()
                 .any(|node| Rc::ptr_eq(node, &hidden))
         );
-        let real = actual_element(&mut document, "real")?;
-        assert_html_iframe(&real, "after select");
-        assert!(!has_html_select_ancestor(&real));
-        let real_index = document
-            .source_order
-            .iter()
-            .position(|node| Rc::ptr_eq(node, &real));
-        assert_eq!(document.body_onload_source_order_index, Some(1));
-        assert_eq!(real_index, Some(1));
-        Ok(())
+        assert_following_real_iframe_order(&mut document)
     }
 
     #[test]
@@ -395,16 +417,7 @@ mod tests {
                     .any(|node| Rc::ptr_eq(node, &hidden))
             );
         }
-        let real = actual_element(&mut document, "real")?;
-        assert_html_iframe(&real, "after select");
-        assert!(!has_html_select_ancestor(&real));
-        let real_index = document
-            .source_order
-            .iter()
-            .position(|node| Rc::ptr_eq(node, &real));
-        assert_eq!(document.body_onload_source_order_index, Some(1));
-        assert_eq!(real_index, Some(1));
-        Ok(())
+        assert_following_real_iframe_order(&mut document)
     }
 
     #[test]

@@ -1,5 +1,130 @@
-const __krrNativeDom = globalThis.__krr_dom;
+const __krrNativeDomRaw = globalThis.__krr_dom;
+const __krrNativeBridgeErrorName = "KrrNativeDomError";
+let __krrNativeDomBridgeFailed = false;
+let __krrHasMutationObservers = false;
+const __krrCallNativeDomRaw = (...args) => {
+  __krrNativeDomBridgeFailed = false;
+  try {
+    return __krrNativeDomRaw(...args);
+  } catch (error) {
+    if (error?.name !== __krrNativeBridgeErrorName) throw error;
+    __krrNativeDomBridgeFailed = true;
+    return undefined;
+  }
+};
+const __krrMutationTypeForOperation = (operation) => {
+  switch (operation) {
+    case "setAttribute":
+    case "removeAttribute":
+    case "styleSet":
+      return "attributes";
+    case "appendChild":
+    case "appendText":
+    case "insertAdjacentHTML":
+    case "insertAdjacentText":
+    case "remove":
+    case "setTextContent":
+    case "setInnerHTML":
+      return "childList";
+    default:
+      return null;
+  }
+};
+const __krrCaptureMutationPath = (nodeId) => {
+  const path = __krrCallNativeDomRaw("eventPath", nodeId);
+  if (__krrNativeDomBridgeFailed || !Array.isArray(path) || path.length === 0) return null;
+  return path.map(String);
+};
+const __krrIsAdjacentSiblingInsertion = (operation, position) =>
+  (operation === "insertAdjacentHTML" || operation === "insertAdjacentText") &&
+  (position === "beforebegin" || position === "afterend");
+const __krrMutationAttributeName = (args, operation, mutationType) => {
+  if (mutationType !== "attributes") return null;
+  if (operation === "styleSet") return "style";
+  return typeof args[2] === "string"
+    ? args[2].trim().replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+    : null;
+};
+const __krrMutationRecord = (mutationType, operation, nodeId, path, position, attributeName) => {
+  const useParent = operation === "remove" || __krrIsAdjacentSiblingInsertion(operation, position);
+  return {
+    type: mutationType,
+    target: useParent ? (path[1] ?? nodeId) : nodeId,
+    path: useParent ? path.slice(1) : path,
+    attributeName,
+  };
+};
+let __krrQueueMutation = () => {};
+const __krrDispatchNativeMutation = (args, operation, mutationType) => {
+  if (!__krrHasMutationObservers) return __krrCallNativeDomRaw(...args);
+
+  const nodeId = args[1];
+  if (typeof nodeId !== "string") return __krrCallNativeDomRaw(...args);
+  const attributeName = __krrMutationAttributeName(args, operation, mutationType);
+  const adjacentPosition =
+    operation === "insertAdjacentHTML" || operation === "insertAdjacentText" ? args[2] : "";
+  const previousPath = __krrCaptureMutationPath(nodeId);
+  if (!previousPath) return undefined;
+  const result = __krrCallNativeDomRaw(...args);
+  if (__krrNativeDomBridgeFailed) return undefined;
+  if (mutationType === "attributes" && attributeName === null) return result;
+  __krrQueueMutation(
+    __krrMutationRecord(
+      mutationType,
+      operation,
+      nodeId,
+      previousPath,
+      adjacentPosition,
+      attributeName,
+    ),
+  );
+  return result;
+};
+const __krrNativeDom = (...args) => {
+  const operation = typeof args[0] === "string" ? args[0] : String(args[0]);
+  const mutationType = __krrMutationTypeForOperation(operation);
+  if (!mutationType) return __krrCallNativeDomRaw(...args);
+  return __krrDispatchNativeMutation(args, operation, mutationType);
+};
 const __krrLifecycleCheckpoint = Promise.resolve.bind(Promise);
+const __krrTimerQueue = [];
+let __krrTimerId = 0;
+let __krrTimerClock = 0;
+globalThis.setTimeout = (callback, delay = 0, ...args) => {
+  if (typeof callback !== "function") throw new TypeError("setTimeout callback must be callable");
+  const id = ++__krrTimerId;
+  const normalizedDelay = Number.isFinite(Number(delay)) ? Math.max(0, Number(delay)) : 0;
+  __krrTimerQueue.push({ id, callback, args, due: __krrTimerClock + normalizedDelay });
+  return id;
+};
+globalThis.clearTimeout = (id) => {
+  const index = __krrTimerQueue.findIndex((timer) => timer.id === Number(id));
+  if (index >= 0) __krrTimerQueue.splice(index, 1);
+};
+globalThis.__krrRunTimers = (elapsed = 0) => {
+  __krrTimerClock += Math.max(0, Number(elapsed) || 0);
+  let ran = false;
+  while (true) {
+    let index = -1;
+    for (let candidate = 0; candidate < __krrTimerQueue.length; candidate += 1) {
+      const timer = __krrTimerQueue[candidate];
+      if (timer.due > __krrTimerClock) continue;
+      const selected = __krrTimerQueue[index];
+      if (
+        index < 0 ||
+        timer.due < selected.due ||
+        (timer.due === selected.due && timer.id < selected.id)
+      ) {
+        index = candidate;
+      }
+    }
+    if (index < 0) break;
+    const [timer] = __krrTimerQueue.splice(index, 1);
+    ran = true;
+    timer.callback(...timer.args);
+  }
+  return ran;
+};
 class __KrrEvent {
   constructor(...args) {
     if (args.length === 0) throw new TypeError("Event type must be provided");
@@ -120,6 +245,8 @@ const __krrListenerOptions = (options) => ({
 });
 const __krrEventTargetListeners = new WeakMap();
 const __krrEventHandlers = new WeakMap();
+const __krrReadyStateTargets = new Set();
+let __krrReadyStateAttributeTargetsInitialized = false;
 const __krrLifecyclePropertyOverrides = new WeakMap();
 const __krrPrevalidatedImageEventAttribute = "data-krr-prevalidated-image-event";
 const __krrLifecycleEventTypes = new Set(["load", "error", "readystatechange", "DOMContentLoaded"]);
@@ -133,6 +260,10 @@ const __krrNormalizeLifecycleEventType = (type) => {
 const __krrSyncEventTarget = (target, type, entries) => {
   if (!target.__krrNodeId) return;
   const handler = __krrEventHandlers.get(target)?.get(String(type));
+  if (String(type) === "readystatechange") {
+    if (entries.length > 0 || typeof handler === "function") __krrReadyStateTargets.add(target);
+    else __krrReadyStateTargets.delete(target);
+  }
   __krrNativeDom(
     "setEventTarget",
     target.__krrNodeId,
@@ -372,6 +503,7 @@ const __krrClassToken = (token) => {
 };
 const __krrElements = new Map();
 const __krrElementInstances = new WeakSet();
+const __krrElementChildrenCollections = new WeakMap();
 const __krrIsWindowLoadNode = (nodeId) => {
   const normalizedId = String(nodeId);
   const bodyId = String(__krrNativeDom("querySelector", "body") ?? "");
@@ -423,6 +555,177 @@ const __krrElement = (nodeId) => {
   __krrElementInstances.add(element);
   return element;
 };
+const __krrElementChildrenIndexedItem = (property, currentNodeIds) => {
+  if (typeof property !== "string" || !/^(0|[1-9][0-9]*)$/.test(property)) return undefined;
+  const index = Number(property);
+  if (!Number.isSafeInteger(index) || index > 0xfffffffe) return undefined;
+  const nodeId = currentNodeIds()[index];
+  return nodeId === undefined ? undefined : __krrElement(nodeId);
+};
+const __krrElementChildren = (element) => {
+  const existing = __krrElementChildrenCollections.get(element);
+  if (existing) return existing.collection;
+
+  const state = { revision: null, nodeIds: [], collection: null };
+  const currentNodeIds = () => {
+    const revision = __krrNativeDom("treeRevision");
+    if (revision !== state.revision) {
+      state.nodeIds = __krrNativeDom("elementChildren", element.__krrNodeId);
+      state.revision = revision;
+    }
+    return state.nodeIds;
+  };
+  const item = (index) => {
+    const numericIndex = Number(index);
+    const normalizedIndex = Number.isFinite(numericIndex) ? Math.trunc(numericIndex) >>> 0 : 0;
+    const nodeId = currentNodeIds()[normalizedIndex];
+    return nodeId === undefined ? null : __krrElement(nodeId);
+  };
+  const namedItem = (name) => {
+    const key = String(name);
+    if (key === "") return null;
+    const nodeId = findNamedNodeId(key);
+    return nodeId === undefined ? null : __krrElement(nodeId);
+  };
+  const findNamedNodeId = (key) => {
+    if (key === "") return undefined;
+    const nodeIds = currentNodeIds();
+    // WHY: Chrome の HTMLCollection は name 一致より全体の id 一致を優先する。
+    for (const nodeId of nodeIds) {
+      const child = __krrElement(nodeId);
+      if (child.id === key) return nodeId;
+    }
+    for (const nodeId of nodeIds) {
+      const child = __krrElement(nodeId);
+      if (child.getAttribute("name") === key) return nodeId;
+    }
+    return undefined;
+  };
+  const namedProperties = () => {
+    const properties = new Set();
+    for (const nodeId of currentNodeIds()) {
+      const child = __krrElement(nodeId);
+      if (child.id !== "") properties.add(child.id);
+      const name = child.getAttribute("name");
+      if (name !== null && name !== "") properties.add(name);
+    }
+    return properties;
+  };
+  const indexedNodeId = (property) => {
+    if (typeof property !== "string" || !/^(0|[1-9][0-9]*)$/.test(property)) return undefined;
+    const index = Number(property);
+    if (!Number.isSafeInteger(index) || index > 0xfffffffe) return undefined;
+    return currentNodeIds()[index];
+  };
+  const iterator = () => {
+    let index = 0;
+    let finished = false;
+    const iteratorState = {
+      next() {
+        if (finished) return { done: true, value: undefined };
+        const nodeIds = currentNodeIds();
+        if (index >= nodeIds.length) {
+          finished = true;
+          return { done: true, value: undefined };
+        }
+        return { done: false, value: __krrElement(nodeIds[index++]) };
+      },
+      [Symbol.iterator]() {
+        return this;
+      },
+    };
+    return iteratorState;
+  };
+  const target = Object.create(null);
+  const collectionMethods = new Set(["length", "item", "namedItem"]);
+  const builtinProperty = (property) => {
+    if (property === "length") return currentNodeIds().length;
+    if (property === "item") return item;
+    if (property === "namedItem") return namedItem;
+    if (property === Symbol.iterator) return iterator;
+    if (property === Symbol.toStringTag) return "HTMLCollection";
+    return undefined;
+  };
+  const readProperty = (property) => {
+    const builtin = builtinProperty(property);
+    if (builtin !== undefined) return builtin;
+    if (Reflect.has(target, property)) return Reflect.get(target, property);
+    const nodeId = indexedNodeId(property);
+    if (nodeId !== undefined) return __krrElement(nodeId);
+    if (typeof property !== "string") return undefined;
+    const namedNodeId = findNamedNodeId(property);
+    return namedNodeId === undefined ? undefined : __krrElement(namedNodeId);
+  };
+  const collection = new Proxy(target, {
+    get(_target, property) {
+      return readProperty(property);
+    },
+    has(_target, property) {
+      if (
+        collectionMethods.has(property) ||
+        property === Symbol.iterator ||
+        property === Symbol.toStringTag
+      )
+        return true;
+      if (Reflect.has(target, property)) return true;
+      if (indexedNodeId(property) !== undefined) return true;
+      return typeof property === "string" && findNamedNodeId(property) !== undefined;
+    },
+    ownKeys() {
+      const nodeIds = currentNodeIds();
+      const keys = nodeIds.map((_nodeId, index) => String(index));
+      for (const property of namedProperties()) {
+        if (!keys.includes(property)) keys.push(property);
+      }
+      for (const property of Reflect.ownKeys(target)) {
+        if (!keys.includes(property)) keys.push(property);
+      }
+      return keys;
+    },
+    getOwnPropertyDescriptor(_target, property) {
+      if (Reflect.has(target, property)) return Reflect.getOwnPropertyDescriptor(target, property);
+      const nodeId = indexedNodeId(property);
+      if (nodeId !== undefined) {
+        return {
+          value: __krrElement(nodeId),
+          writable: false,
+          enumerable: true,
+          configurable: true,
+        };
+      }
+      if (typeof property === "string") {
+        const nodeId = findNamedNodeId(property);
+        if (nodeId !== undefined) {
+          return {
+            value: __krrElement(nodeId),
+            writable: false,
+            enumerable: false,
+            configurable: true,
+          };
+        }
+      }
+      return undefined;
+    },
+    set(_target, property, value) {
+      if (collectionMethods.has(property) || indexedNodeId(property) !== undefined) return false;
+      if (typeof property === "string" && findNamedNodeId(property) !== undefined) return false;
+      return Reflect.set(target, property, value);
+    },
+    defineProperty(_target, property, descriptor) {
+      if (collectionMethods.has(property) || indexedNodeId(property) !== undefined) return false;
+      if (typeof property === "string" && findNamedNodeId(property) !== undefined) return false;
+      return Reflect.defineProperty(target, property, descriptor);
+    },
+    deleteProperty(_target, property) {
+      if (indexedNodeId(property) !== undefined) return false;
+      if (typeof property === "string" && findNamedNodeId(property) !== undefined) return false;
+      return Reflect.deleteProperty(target, property);
+    },
+  });
+  state.collection = collection;
+  __krrElementChildrenCollections.set(element, state);
+  return state.collection;
+};
 const __krrElementPrototype = {
   getBoundingClientRect() {
     return JSON.parse(__krrNativeDom("boundingClientRect", this.__krrNodeId));
@@ -465,6 +768,9 @@ const __krrElementPrototype = {
   get lastElementChild() {
     return __krrElement(__krrNativeDom("lastElementChild", this.__krrNodeId));
   },
+  get children() {
+    return __krrElementChildren(this);
+  },
   get className() {
     return __krrNativeDom("getAttribute", this.__krrNodeId, "class") || "";
   },
@@ -506,11 +812,19 @@ const __krrElementPrototype = {
   get id() {
     return __krrNativeDom("getAttribute", this.__krrNodeId, "id") || "";
   },
+  get tagName() {
+    return __krrNativeDom("tagName", this.__krrNodeId) || "";
+  },
   set id(value) {
     __krrNativeDom("setAttribute", this.__krrNodeId, "id", String(value));
   },
   get href() {
     return __krrNativeDom("getAttribute", this.__krrNodeId, "href") || "";
+  },
+  get hash() {
+    const tagName = this.tagName;
+    if (tagName !== "A" && tagName !== "AREA") return undefined;
+    return __krrNativeDom("anchorHash", this.__krrNodeId, globalThis.location.href);
   },
   set href(value) {
     __krrNativeDom("setAttribute", this.__krrNodeId, "href", String(value));
@@ -522,10 +836,23 @@ const __krrElementPrototype = {
     this.setAttribute("src", String(value));
   },
   get value() {
-    return __krrNativeDom("getAttribute", this.__krrNodeId, "value") || "";
+    return __krrNativeDom("value", this.__krrNodeId);
   },
   set value(value) {
-    __krrNativeDom("setAttribute", this.__krrNodeId, "value", String(value));
+    const nodeId = this.__krrNodeId;
+    if (__krrNativeDom("tagName", nodeId) === "SELECT") {
+      __krrNativeDom("setSelectValue", nodeId, String(value));
+    } else {
+      __krrNativeDom("setAttribute", nodeId, "value", String(value));
+    }
+  },
+  get hidden() {
+    const value = __krrNativeDom("hidden", this.__krrNodeId);
+    return value === undefined ? undefined : value === "1";
+  },
+  set hidden(value) {
+    if (value) __krrNativeDom("setAttribute", this.__krrNodeId, "hidden", "");
+    else __krrNativeDom("removeAttribute", this.__krrNodeId, "hidden");
   },
   get checked() {
     return __krrNativeDom("getAttribute", this.__krrNodeId, "checked") !== null;
@@ -613,8 +940,20 @@ const __krrElementPrototype = {
     __krrNativeDom("appendChild", this.__krrNodeId, child.__krrNodeId);
     return child;
   },
+  append(...children) {
+    for (const child of children) {
+      if (child && typeof child === "object" && child.__krrNodeId !== undefined) {
+        this.appendChild(child);
+      } else {
+        __krrNativeDom("appendText", this.__krrNodeId, String(child));
+      }
+    }
+  },
   insertAdjacentHTML(position, value) {
     __krrNativeDom("insertAdjacentHTML", this.__krrNodeId, String(position), String(value));
+  },
+  insertAdjacentText(position, value) {
+    __krrNativeDom("insertAdjacentText", this.__krrNodeId, String(position), String(value));
   },
   click() {
     this.dispatchEvent(new Event("click", { bubbles: true, cancelable: true }));
@@ -671,6 +1010,41 @@ const __krrThrowDeferredListenerError = (event) => {
   delete event.__krrHasListenerError;
   throw error;
 };
+const __krrDispatchCapture = (event, ancestors) => {
+  const captures = [window, document, ...ancestors.slice().reverse()];
+  for (const currentTarget of captures) {
+    __krrDispatchElementPhase(currentTarget, event, true, Event.CAPTURING_PHASE);
+    if (event.__krrPropagationStopped) break;
+  }
+};
+const __krrDispatchTarget = (target, event) => {
+  if (event.__krrPropagationStopped) return;
+  __krrDispatchElementPhase(target, event, true, Event.AT_TARGET);
+  if (!event.__krrImmediatePropagationStopped)
+    __krrDispatchElementPhase(target, event, false, Event.AT_TARGET);
+};
+const __krrDispatchBubble = (event, ancestors) => {
+  if (!event.bubbles || event.__krrPropagationStopped) return;
+  for (const currentTarget of [...ancestors, document, window]) {
+    __krrDispatchElementPhase(currentTarget, event, false, Event.BUBBLING_PHASE);
+    if (event.__krrPropagationStopped) break;
+  }
+};
+const __krrDispatchDefaultAction = (target, event) => {
+  if (String(event.type) !== "click" || event.defaultPrevented) return;
+  const submitter = target.closest?.("button") || target.closest?.("input");
+  if (!submitter || submitter.getAttribute?.("disabled") !== null) return;
+  const tagName = String(submitter.tagName || "").toLowerCase();
+  const type = String(
+    submitter.getAttribute?.("type") || (tagName === "button" ? "submit" : "text"),
+  ).toLowerCase();
+  if ((tagName !== "button" && tagName !== "input") || type !== "submit") return;
+  const form = submitter.closest("form");
+  if (!form) return;
+  const submitEvent = new Event("submit", { bubbles: true, cancelable: true });
+  submitEvent.submitter = submitter;
+  form.dispatchEvent(submitEvent);
+};
 const __krrDispatchElementEvent = (target, event) => {
   __krrBeginDispatch(target, event);
   try {
@@ -678,23 +1052,11 @@ const __krrDispatchElementEvent = (target, event) => {
     if (!Array.isArray(nodeIds)) return event;
     const path = nodeIds.map(__krrElement);
     const ancestors = path.slice(1);
-    const captures = [window, document, ...ancestors.slice().reverse()];
-    for (const currentTarget of captures) {
-      __krrDispatchElementPhase(currentTarget, event, true, Event.CAPTURING_PHASE);
-      if (event.__krrPropagationStopped) break;
-    }
-    if (!event.__krrPropagationStopped) {
-      __krrDispatchElementPhase(target, event, true, Event.AT_TARGET);
-      if (!event.__krrImmediatePropagationStopped)
-        __krrDispatchElementPhase(target, event, false, Event.AT_TARGET);
-    }
-    if (event.bubbles && !event.__krrPropagationStopped) {
-      for (const currentTarget of [...ancestors, document, window]) {
-        __krrDispatchElementPhase(currentTarget, event, false, Event.BUBBLING_PHASE);
-        if (event.__krrPropagationStopped) break;
-      }
-    }
+    __krrDispatchCapture(event, ancestors);
+    __krrDispatchTarget(target, event);
+    __krrDispatchBubble(event, ancestors);
     __krrThrowDeferredListenerError(event);
+    __krrDispatchDefaultAction(target, event);
     return event;
   } finally {
     __krrEndDispatch(event);
@@ -705,7 +1067,99 @@ globalThis.__krrDispatchHostEvent = (nodeId, type, key, bubbles, cancelable) => 
   if (key !== null && key !== undefined) event.key = String(key);
   return __krrDispatchElementEvent(__krrElement(nodeId), event);
 };
+const __krrMutationObservers = new Set();
+let __krrMutationDeliveryScheduled = false;
+const __krrDeliverMutations = () => {
+  __krrMutationDeliveryScheduled = false;
+  for (const observer of [...__krrMutationObservers]) {
+    if (observer.__krrRecords.length === 0) continue;
+    const records = observer.__krrRecords.splice(0);
+    observer.__krrCallback(records, observer);
+  }
+};
+const __krrRecordMutation = (observer, mutation) => {
+  const normalizedId = String(mutation.target);
+  const path = mutation.path.map(String);
+  const registration = observer.__krrRegistrations.find((candidate) => {
+    const observed = String(candidate.target.__krrNodeId);
+    const inScope =
+      normalizedId === observed || (candidate.options.subtree && path.includes(observed));
+    if (!inScope || !candidate.options[mutation.type]) return false;
+    return (
+      mutation.type !== "attributes" ||
+      candidate.options.attributeFilter === null ||
+      candidate.options.attributeFilter.includes(mutation.attributeName)
+    );
+  });
+  if (!registration) return;
+  const record = { type: mutation.type, target: __krrElement(normalizedId) };
+  if (mutation.type === "attributes") record.attributeName = mutation.attributeName;
+  observer.__krrRecords.push(record);
+};
+__krrQueueMutation = (mutation) => {
+  for (const observer of __krrMutationObservers) __krrRecordMutation(observer, mutation);
+  if (__krrMutationObservers.size > 0 && !__krrMutationDeliveryScheduled) {
+    __krrMutationDeliveryScheduled = true;
+    Promise.resolve().then(__krrDeliverMutations);
+  }
+};
+globalThis.MutationObserver = class MutationObserver {
+  constructor(callback) {
+    if (typeof callback !== "function")
+      throw new TypeError("MutationObserver callback must be a function");
+    this.__krrCallback = callback;
+    this.__krrRecords = [];
+    this.__krrRegistrations = [];
+  }
+  observe(target, options = {}) {
+    if (!target || target.__krrNodeId === undefined)
+      throw new TypeError("MutationObserver target must be an element");
+    const attributeFilter = Array.isArray(options.attributeFilter)
+      ? options.attributeFilter.map(String)
+      : null;
+    if (options.attributes === false && attributeFilter !== null)
+      throw new TypeError("attributeFilter requires attributes to be enabled");
+    const normalizedOptions = {
+      childList: Boolean(options.childList),
+      attributes: Boolean(options.attributes || attributeFilter !== null),
+      subtree: Boolean(options.subtree),
+      attributeFilter,
+    };
+    if (!normalizedOptions.childList && !normalizedOptions.attributes)
+      throw new TypeError("MutationObserver options need childList or attributes");
+    const registration = {
+      target,
+      options: normalizedOptions,
+    };
+    const existingIndex = this.__krrRegistrations.findIndex(
+      (candidate) => String(candidate.target.__krrNodeId) === String(target.__krrNodeId),
+    );
+    if (existingIndex < 0) this.__krrRegistrations.push(registration);
+    else this.__krrRegistrations[existingIndex] = registration;
+    __krrMutationObservers.add(this);
+    __krrHasMutationObservers = true;
+  }
+  disconnect() {
+    this.__krrRegistrations = [];
+    this.__krrRecords = [];
+    __krrMutationObservers.delete(this);
+    __krrHasMutationObservers = __krrMutationObservers.size > 0;
+  }
+  takeRecords() {
+    return this.__krrRecords.splice(0);
+  }
+};
 let __krrDocumentReadyState = "loading";
+let __krrFocusedNodeId = null;
+globalThis.__krrSetFocusedNodeId = (nodeId) => {
+  if (nodeId === null) {
+    __krrFocusedNodeId = null;
+    return;
+  }
+  if (typeof nodeId !== "string" || !/^(0|[1-9][0-9]*)$/.test(nodeId))
+    throw new TypeError("focused DOM node id must be a decimal string or null");
+  __krrFocusedNodeId = nodeId;
+};
 globalThis.document = __krrInstallEventTarget({
   getElementById(id) {
     return __krrElement(__krrNativeDom("getElementById", String(id)));
@@ -722,6 +1176,16 @@ globalThis.document = __krrInstallEventTarget({
   get body() {
     return __krrElement(__krrNativeDom("querySelector", "body"));
   },
+  get documentElement() {
+    return __krrElement(__krrNativeDom("querySelector", "html")) || this.body;
+  },
+  get activeElement() {
+    if (__krrFocusedNodeId === null || __krrNativeDom("isConnected", __krrFocusedNodeId) !== "1") {
+      return this.body;
+    }
+    return __krrElement(__krrFocusedNodeId) || this.body;
+  },
+  fonts: { ready: Promise.resolve() },
   get location() {
     return globalThis.location;
   },
@@ -816,11 +1280,14 @@ const __krrLayoutMetrics = () => JSON.parse(__krrNativeDom("layoutMetrics"));
 Object.defineProperties(globalThis, {
   innerWidth: { get: () => __krrLayoutMetrics().width },
   innerHeight: { get: () => __krrLayoutMetrics().height },
+  pageXOffset: { get: () => __krrLayoutMetrics().scrollX },
+  scrollX: { get: () => __krrLayoutMetrics().scrollX },
   pageYOffset: { get: () => __krrLayoutMetrics().scrollY },
   scrollY: { get: () => __krrLayoutMetrics().scrollY },
 });
 const __krrIntersectionObservers = new Set();
 let __krrIntersectionLayoutMetricsReady = false;
+const __krrResizeObservers = new Set();
 const __krrIntersectionRect = (first, second) => {
   const left = Math.max(first.left, second.left);
   const top = Math.max(first.top, second.top);
@@ -861,8 +1328,9 @@ const __krrClippedRootBounds = (rootBounds, clips) => {
   return clips.reduce(
     (state, clip) => {
       const clipRect = __krrClipRect(clip);
+      const clipped = __krrClipFragment(state.rect, state.rect, [clip]);
       return {
-        rect: __krrIntersectionRect(state.rect, clipRect),
+        rect: clipped.rect,
         separated: state.separated || !__krrRectsIntersectOrAreEdgeAdjacent(state.rect, clipRect),
       };
     },
@@ -887,6 +1355,9 @@ const __krrMetadataBelongsToRoot = (metadata, target, root) => {
     metadata.clips.every(
       (clip) =>
         Number.isSafeInteger(clip.owner) &&
+        Array.isArray(clip.activeAxes) &&
+        clip.activeAxes.length === 2 &&
+        clip.activeAxes.every((axis) => typeof axis === "boolean") &&
         [clip.x, clip.y, clip.width, clip.height].every(Number.isFinite) &&
         clip.width >= 0 &&
         clip.height >= 0,
@@ -933,17 +1404,18 @@ const __krrTargetWithinRoot = (target, root, metadata, clipsAreConsistent) =>
   clipsAreConsistent &&
   __krrMetadataBelongsToRoot(metadata, target, root);
 const __krrClipRect = (clip) => {
-  const scrollY = __krrLayoutMetrics().scrollY;
+  const { scrollX, scrollY } = __krrLayoutMetrics();
+  const left = clip.x - scrollX;
   const top = clip.y - scrollY;
   return {
-    x: clip.x,
+    x: left,
     y: top,
     width: clip.width,
     height: clip.height,
     top,
-    right: clip.x + clip.width,
+    right: left + clip.width,
     bottom: top + clip.height,
-    left: clip.x,
+    left,
   };
 };
 const __krrRectPolygon = (rect) =>
@@ -990,6 +1462,26 @@ const __krrPointInPolygon = (point, polygon) => {
   }
   return inside;
 };
+const __krrClipPolygonEdge = (input, first, second) => {
+  const output = [];
+  for (let pointIndex = 0; pointIndex < input.length; pointIndex += 1) {
+    const previous = input[(pointIndex + input.length - 1) % input.length];
+    const current = input[pointIndex];
+    const previousInside = __krrCross(first, second, previous) >= 0;
+    const currentInside = __krrCross(first, second, current) >= 0;
+    if (currentInside !== previousInside) {
+      const previousSide = __krrCross(first, second, previous);
+      const currentSide = __krrCross(first, second, current);
+      const ratio = previousSide / (previousSide - currentSide);
+      output.push({
+        x: previous.x + (current.x - previous.x) * ratio,
+        y: previous.y + (current.y - previous.y) * ratio,
+      });
+    }
+    if (currentInside) output.push(current);
+  }
+  return output;
+};
 const __krrPolygonIntersection = (subject, clip) => {
   if (subject.length === 0 || clip.length === 0) return [];
   if (__krrPolygonIsPoint(clip)) {
@@ -999,29 +1491,73 @@ const __krrPolygonIntersection = (subject, clip) => {
   for (let index = 0; index < clip.length && output.length > 0; index += 1) {
     const first = clip[index];
     const second = clip[(index + 1) % clip.length];
-    const input = output;
-    output = [];
-    for (let pointIndex = 0; pointIndex < input.length; pointIndex += 1) {
-      const previous = input[(pointIndex + input.length - 1) % input.length];
-      const current = input[pointIndex];
-      const previousInside = __krrCross(first, second, previous) >= 0;
-      const currentInside = __krrCross(first, second, current) >= 0;
-      if (currentInside !== previousInside) {
-        const previousSide = __krrCross(first, second, previous);
-        const currentSide = __krrCross(first, second, current);
-        const ratio = previousSide / (previousSide - currentSide);
-        output.push({
-          x: previous.x + (current.x - previous.x) * ratio,
-          y: previous.y + (current.y - previous.y) * ratio,
-        });
-      }
-      if (currentInside) output.push(current);
-    }
+    output = __krrClipPolygonEdge(output, first, second);
   }
   return output;
 };
+const __krrPolygonIntersectionActiveEdges = (subject, clip, activeEdge) => {
+  let output = subject;
+  for (let index = 0; index < clip.length && output.length > 0; index += 1) {
+    if (!activeEdge(index)) continue;
+    const edge = clip[index];
+    const first = edge.first ?? edge;
+    const second = edge.second ?? clip[(index + 1) % clip.length];
+    if (first.x === second.x && first.y === second.y) return [];
+    output = __krrClipPolygonEdge(output, first, second);
+  }
+  return output;
+};
+const __krrActivePolygonIntersection = (subject, clip) => {
+  const activeAxes = clip.activeAxes;
+  if (
+    !Array.isArray(activeAxes) ||
+    activeAxes.length !== 2 ||
+    activeAxes.some((axis) => typeof axis !== "boolean")
+  ) {
+    return [];
+  }
+  if (!activeAxes[0] && !activeAxes[1]) return subject;
+  if (activeAxes[0] && activeAxes[1])
+    return __krrPolygonIntersection(subject, __krrRoundedClipPolygon(clip));
+  const corners = __krrClipCorners(clip);
+  const edgeDirection = (index) => {
+    const first = corners[index];
+    const second = corners[(index + 1) % corners.length];
+    if (first.x !== second.x || first.y !== second.y) return { first, second };
+    const referenceIndexes = index % 2 === 0 ? [1, 3] : [0, 2];
+    const referenceIndex = referenceIndexes.find((candidate) => {
+      const candidateFirst = corners[candidate];
+      const candidateSecond = corners[(candidate + 1) % corners.length];
+      return candidateFirst.x !== candidateSecond.x || candidateFirst.y !== candidateSecond.y;
+    });
+    if (referenceIndex === undefined) return null;
+    const referenceFirst = corners[referenceIndex];
+    const referenceSecond = corners[(referenceIndex + 1) % corners.length];
+    const referenceX = referenceSecond.x - referenceFirst.x;
+    const referenceY = referenceSecond.y - referenceFirst.y;
+    const sign = index === 1 || index === 2 ? 1 : -1;
+    return {
+      first,
+      second: {
+        x: first.x - sign * referenceY,
+        y: first.y + sign * referenceX,
+      },
+    };
+  };
+  const activeEdges = corners.map((_, index) => edgeDirection(index));
+  if (
+    activeEdges.some(
+      (edge, index) => (index % 2 === 0 ? activeAxes[1] : activeAxes[0]) && edge === null,
+    )
+  ) {
+    return [];
+  }
+  return __krrPolygonIntersectionActiveEdges(subject, activeEdges, (index) =>
+    index % 2 === 0 ? activeAxes[1] : activeAxes[0],
+  );
+};
 const __krrClipCorners = (clip) => {
-  const scrollY = __krrLayoutMetrics().scrollY;
+  const { scrollX, scrollY } = __krrLayoutMetrics();
   if (
     Array.isArray(clip.corners) &&
     clip.corners.length === 4 &&
@@ -1029,7 +1565,7 @@ const __krrClipCorners = (clip) => {
       (corner) => Array.isArray(corner) && corner.length === 2 && corner.every(Number.isFinite),
     )
   ) {
-    return clip.corners.map(([x, y]) => ({ x, y: y - scrollY }));
+    return clip.corners.map(([x, y]) => ({ x: x - scrollX, y: y - scrollY }));
   }
   return __krrRectPolygon(__krrClipRect(clip));
 };
@@ -1113,8 +1649,7 @@ const __krrRoundedClipPolygon = (clip) => {
 };
 const __krrClipFragment = (fragment, boundary, clips) => {
   let polygon = __krrPolygonIntersection(__krrRectPolygon(fragment), __krrRectPolygon(boundary));
-  for (const clip of clips)
-    polygon = __krrPolygonIntersection(polygon, __krrRoundedClipPolygon(clip));
+  for (const clip of clips) polygon = __krrActivePolygonIntersection(polygon, clip);
   return { polygon, rect: __krrPolygonRect(polygon) };
 };
 const __krrViewportRect = () => {
@@ -1133,9 +1668,16 @@ const __krrRootOverflowClip = (metadata) =>
 const __krrRootMarginIsZero = (margin) => margin.every((part) => part.amount === 0);
 const __krrRootMarginOffsets = (root, margins) => {
   const [top, right, bottom, left] = margins;
-  const resolve = (margin) =>
+  const resolveHorizontal = (margin) =>
     margin.unit === "%" ? (root.width * margin.amount) / 100 : margin.amount;
-  return [resolve(top), resolve(right), resolve(bottom), resolve(left)];
+  const resolveVertical = (margin) =>
+    margin.unit === "%" ? (root.height * margin.amount) / 100 : margin.amount;
+  return [
+    resolveVertical(top),
+    resolveHorizontal(right),
+    resolveVertical(bottom),
+    resolveHorizontal(left),
+  ];
 };
 const __krrRootClipCorners = (clip) =>
   Array.isArray(clip.corners) &&
@@ -1143,12 +1685,12 @@ const __krrRootClipCorners = (clip) =>
   clip.corners.every(
     (corner) => Array.isArray(corner) && corner.length === 2 && corner.every(Number.isFinite),
   )
-    ? clip.corners.map(([x, y]) => ({ x, y }))
+    ? clip.corners.map(([x, y]) => ({ x: x - __krrLayoutMetrics().scrollX, y }))
     : [
-        { x: clip.x, y: clip.y },
-        { x: clip.x + clip.width, y: clip.y },
-        { x: clip.x + clip.width, y: clip.y + clip.height },
-        { x: clip.x, y: clip.y + clip.height },
+        { x: clip.x - __krrLayoutMetrics().scrollX, y: clip.y },
+        { x: clip.x + clip.width - __krrLayoutMetrics().scrollX, y: clip.y },
+        { x: clip.x + clip.width - __krrLayoutMetrics().scrollX, y: clip.y + clip.height },
+        { x: clip.x - __krrLayoutMetrics().scrollX, y: clip.y + clip.height },
       ];
 const __krrExpandedRootClip = (clip, rootBounds, margins) => {
   if (!clip || __krrRootMarginIsZero(margins)) return clip;
@@ -1239,7 +1781,7 @@ const __krrIntersectionEntry = (observer, target) => {
   const boundingClientRect = targetBox.boundingClientRect;
   const requestedRootClipData = elementRoot
     ? __krrClipsWithinRoot(targetBox.metadata, target, elementRoot)
-    : { rootClip: null, ancestorClips: [] };
+    : { rootClip: null, ancestorClips: targetBox.metadata?.clips ?? [] };
   const rootClips = requestedRootClipData?.ancestorClips ?? [];
   const rootBox = elementRoot ? __krrObservedElementBox(elementRoot) : null;
   const rootOverflowClip = __krrRootOverflowClip(rootBox?.metadata);
@@ -1254,7 +1796,6 @@ const __krrIntersectionEntry = (observer, target) => {
   const rootBounds = __krrExpandRootBounds(rootBaseBounds, observer.__krrRootMargin);
   const targetFragments = [boundingClientRect];
   const clippedRoot = __krrClippedRootBounds(rootBounds, rootClips);
-  const clippedRootBounds = clippedRoot.rect;
   const rootShape = __krrExpandedRootClip(
     rootOverflowClip,
     rootBaseBounds,
@@ -1262,7 +1803,7 @@ const __krrIntersectionEntry = (observer, target) => {
   );
   const clipShapes = rootShape ? [...rootClips, rootShape] : rootClips;
   const clippedFragments = targetWithinRoot
-    ? targetFragments.map((fragment) => __krrClipFragment(fragment, clippedRootBounds, clipShapes))
+    ? targetFragments.map((fragment) => __krrClipFragment(fragment, rootBounds, clipShapes))
     : [];
   const intersectionFragments = clippedFragments.map((fragment) => fragment.rect);
   const positiveIntersectionFragments = intersectionFragments.filter(
@@ -1433,14 +1974,60 @@ globalThis.__krrPrepareIntersectionObservers = () => {
   return [...__krrIntersectionObservers].some((observer) => observer.targets.size > 0);
 };
 window.addEventListener("scroll", globalThis.__krrRefreshIntersectionObservers);
+globalThis.ResizeObserver = class ResizeObserver {
+  constructor(callback) {
+    if (typeof callback !== "function")
+      throw new TypeError("ResizeObserver callback must be a function");
+    this.callback = callback;
+    this.targets = new Set();
+  }
+  observe(target) {
+    if (!target || typeof target.getBoundingClientRect !== "function") {
+      throw new TypeError("ResizeObserver target must be an element");
+    }
+    this.targets.add(target);
+    __krrResizeObservers.add(this);
+  }
+  unobserve(target) {
+    this.targets.delete(target);
+    if (this.targets.size === 0) __krrResizeObservers.delete(this);
+  }
+  disconnect() {
+    this.targets.clear();
+    __krrResizeObservers.delete(this);
+  }
+};
+globalThis.__krrPrepareResizeObservers = () =>
+  [...__krrResizeObservers].some((observer) => observer.targets.size > 0);
+globalThis.__krrRefreshResizeObservers = () => {
+  for (const observer of [...__krrResizeObservers]) {
+    const entries = [...observer.targets].map((target) => ({
+      target,
+      contentRect: target.getBoundingClientRect(),
+    }));
+    if (entries.length > 0) observer.callback(entries, observer);
+  }
+};
 const __krrDispatchDocumentReadyStateChange = () => {
   // document handler の例外は、同じ state transition の要素通知を中断させない。
   try {
     document.dispatchEvent(new Event("readystatechange"));
   } catch (_error) {}
 };
+const __krrInitializeReadyStateAttributeTargets = () => {
+  if (__krrReadyStateAttributeTargetsInitialized) return;
+  __krrReadyStateAttributeTargetsInitialized = true;
+  for (const element of document.querySelectorAll("[onreadystatechange]")) {
+    __krrElement(element.__krrNodeId);
+  }
+};
 const __krrDispatchElementReadyStateChange = () => {
-  for (const element of document.querySelectorAll("*")) {
+  __krrInitializeReadyStateAttributeTargets();
+  const orderedTargets = document.querySelectorAll("[onreadystatechange]");
+  const dispatchedTargets = new Set();
+  for (const element of [...orderedTargets, ...__krrReadyStateTargets]) {
+    if (dispatchedTargets.has(element)) continue;
+    dispatchedTargets.add(element);
     const handler = __krrEventHandlers.get(element)?.get("readystatechange");
     const listeners = __krrEventTargetListeners.get(element)?.get("readystatechange");
     if (typeof handler === "function" || (listeners?.length ?? 0) > 0) {
@@ -2056,10 +2643,25 @@ globalThis.__krrDispatchWindowLoad = async () => {
   else
     __krrRouteWindowLoadElement(__krrElement(__krrNativeDom("querySelector", "html > frameset")));
   const resourceDispatchState = {};
+  const resourcePresence = String(__krrNativeDom("resourcePresence"));
+  let [hasImages, hasFrames] = resourcePresence.includes(":")
+    ? resourcePresence.split(":").map((value) => value === "1")
+    : [document.querySelectorAll("img").length > 0, document.querySelectorAll("iframe").length > 0];
   for (let pass = 0; pass < 8; pass += 1) {
-    const framesDispatched = await __krrDispatchPendingLocalFrames(document, resourceDispatchState);
-    const imagesDispatched = await __krrDispatchPendingImages(document, resourceDispatchState);
+    const framesDispatched = hasFrames
+      ? await __krrDispatchPendingLocalFrames(document, resourceDispatchState)
+      : false;
+    const imagesDispatched = hasImages
+      ? await __krrDispatchPendingImages(document, resourceDispatchState)
+      : false;
     if (!framesDispatched && !imagesDispatched) break;
+    const updatedPresence = String(__krrNativeDom("resourcePresence"));
+    [hasImages, hasFrames] = updatedPresence.includes(":")
+      ? updatedPresence.split(":").map((value) => value === "1")
+      : [
+          document.querySelectorAll("img").length > 0,
+          document.querySelectorAll("iframe").length > 0,
+        ];
     await __krrLifecycleCheckpoint();
   }
   __krrDocumentReadyState = "complete";

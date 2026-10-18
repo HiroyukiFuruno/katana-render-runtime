@@ -27,6 +27,7 @@ impl StaticHtmlRuntimeSession {
         )
     }
 
+    #[cfg(test)]
     pub(in crate::renderer::backends) fn update_layout_metrics_with_intersection_metadata(
         &mut self,
         viewport_width: f32,
@@ -35,10 +36,27 @@ impl StaticHtmlRuntimeSession {
         boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
         metadata: impl IntoIterator<Item = (u64, String)>,
     ) -> Result<bool, HtmlRuntimeError> {
+        self.update_layout_metrics_xy_with_intersection_metadata(
+            viewport_width,
+            viewport_height,
+            (0.0, scroll_y),
+            boxes,
+            metadata,
+        )
+    }
+
+    pub(in crate::renderer::backends) fn update_layout_metrics_xy_with_intersection_metadata(
+        &mut self,
+        viewport_width: f32,
+        viewport_height: f32,
+        scroll_offset: (f32, f32),
+        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
+        metadata: impl IntoIterator<Item = (u64, String)>,
+    ) -> Result<bool, HtmlRuntimeError> {
         self.update_layout_metrics_from_boxes(
             viewport_width,
             viewport_height,
-            scroll_y,
+            scroll_offset,
             boxes.into_iter().collect(),
             metadata.into_iter().collect(),
         )
@@ -48,11 +66,17 @@ impl StaticHtmlRuntimeSession {
         &mut self,
         viewport_width: f32,
         viewport_height: f32,
-        scroll_y: f32,
+        scroll_offset: (f32, f32),
         boxes: Vec<LayoutMetric>,
         metadata: Vec<(u64, String)>,
     ) -> Result<bool, HtmlRuntimeError> {
-        self.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes, metadata)?;
+        self.set_layout_metrics(
+            viewport_width,
+            viewport_height,
+            scroll_offset,
+            boxes,
+            metadata,
+        )?;
         let observer_work = self.has_intersection_observer_work();
         if matches!(observer_work, Err(HtmlRuntimeError::ExecutionTimeout)) {
             self.discard();
@@ -79,7 +103,7 @@ impl StaticHtmlRuntimeSession {
         let has_work = evaluate_value(
             scope,
             "krr-html-intersection-observer-work",
-            "globalThis.__krrPrepareIntersectionObservers();",
+            "globalThis.__krrPrepareIntersectionObservers() || globalThis.__krrPrepareResizeObservers?.();",
         )?
         .is_true();
         check_bridge_error(scope)?;
@@ -90,7 +114,7 @@ impl StaticHtmlRuntimeSession {
         &mut self,
         viewport_width: f32,
         viewport_height: f32,
-        scroll_y: f32,
+        scroll_offset: (f32, f32),
         boxes: Vec<LayoutMetric>,
         metadata: Vec<(u64, String)>,
     ) -> Result<(), HtmlRuntimeError> {
@@ -98,7 +122,7 @@ impl StaticHtmlRuntimeSession {
         let state = isolate
             .get_slot::<HtmlDomBridgeState>()
             .ok_or_else(dom_state_unavailable_error)?;
-        state.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes);
+        state.set_layout_metrics_xy(viewport_width, viewport_height, scroll_offset, boxes);
         state.set_intersection_metadata(metadata);
         Ok(())
     }
@@ -113,7 +137,7 @@ impl StaticHtmlRuntimeSession {
         evaluate(
             scope,
             "krr-html-intersection-layout-sync",
-            "globalThis.__krrRefreshIntersectionObservers();",
+            "globalThis.__krrRefreshResizeObservers?.();globalThis.__krrRefreshIntersectionObservers();",
         )
         .and_then(|()| perform_microtask_checkpoint(scope))
         .and_then(|()| check_bridge_error(scope))
@@ -283,7 +307,7 @@ mod tests {
 
     fn root_clip_edge_contact_metadata(clip: u64) -> String {
         format!(
-            r#"{{"positioning":"in-flow","viewportEscape":false,"clips":[{{"owner":{clip},"x":0,"y":0,"width":10,"height":10}}],"fragments":[]}}"#
+            r#"{{"positioning":"in-flow","viewportEscape":false,"clips":[{{"owner":{clip},"x":0,"y":0,"width":10,"height":10,"activeAxes":[true,true]}}],"fragments":[]}}"#
         )
     }
 

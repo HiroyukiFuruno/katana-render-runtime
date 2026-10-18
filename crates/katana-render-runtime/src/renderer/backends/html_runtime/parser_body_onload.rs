@@ -80,10 +80,14 @@ mod tests {
     use crate::renderer::backends::html_runtime::dom_state::HtmlDomBridgeState;
     use crate::renderer::backends::html_runtime::script::{evaluate, install_dom_bridge};
 
+    fn new_initialized_isolate() -> v8::OwnedIsolate {
+        DiagramV8Runtime::ensure_initialized();
+        v8::Isolate::new(Default::default())
+    }
+
     #[test]
     fn parser_body_onload_capture_requires_initialized_dom_bridge() {
-        DiagramV8Runtime::ensure_initialized();
-        let mut isolate = v8::Isolate::new(Default::default());
+        let mut isolate = new_initialized_isolate();
         v8::scope!(let handle_scope, &mut isolate);
         let context = v8::Context::new(handle_scope, Default::default());
         let context_scope = &mut v8::ContextScope::new(handle_scope, context);
@@ -98,8 +102,7 @@ mod tests {
     #[test]
     fn parser_body_onload_callback_boundary_rejects_non_function_and_preserves_arguments()
     -> Result<(), HtmlRuntimeError> {
-        DiagramV8Runtime::ensure_initialized();
-        let mut isolate = v8::Isolate::new(Default::default());
+        let mut isolate = new_initialized_isolate();
         v8::scope!(let handle_scope, &mut isolate);
         let context = v8::Context::new(handle_scope, Default::default());
         let context_scope = &mut v8::ContextScope::new(handle_scope, context);
@@ -122,8 +125,7 @@ mod tests {
     #[test]
     fn parser_body_onload_callback_exception_preserves_real_v8_message()
     -> Result<(), HtmlRuntimeError> {
-        DiagramV8Runtime::ensure_initialized();
-        let mut isolate = v8::Isolate::new(Default::default());
+        let mut isolate = new_initialized_isolate();
         v8::scope!(let handle_scope, &mut isolate);
         let context = v8::Context::new(handle_scope, Default::default());
         let context_scope = &mut v8::ContextScope::new(handle_scope, context);
@@ -151,8 +153,7 @@ mod tests {
     #[test]
     fn parser_body_onload_initial_source_fallback_and_invalid_payload()
     -> Result<(), HtmlRuntimeError> {
-        DiagramV8Runtime::ensure_initialized();
-        let mut isolate = v8::Isolate::new(Default::default());
+        let mut isolate = new_initialized_isolate();
         isolate.set_slot(HtmlDomBridgeState::new(HtmlDocument::parse(
             "<body onload='globalThis.parserInstalled = true'>",
         )));

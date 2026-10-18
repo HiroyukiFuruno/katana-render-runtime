@@ -15,6 +15,25 @@ export interface NormalizedPair {
   pairImagePath: string;
 }
 
+export interface GeometryImageComparison {
+  fullCanvasScore: number;
+  foregroundUnionScore: number;
+  roi: { x: number; y: number; width: number; height: number };
+  width: number;
+  height: number;
+}
+
+export interface PaintProjectedImageComparison {
+  fullCanvasRmseScore: number;
+  fullCanvasMaeScore: number;
+  contentRmseScore: number;
+  contentMaeScore: number;
+  score: number;
+  roi: { x: number; y: number; width: number; height: number };
+  width: number;
+  height: number;
+}
+
 export class MagickOps {
   private workDir: string;
   private theme: DiagramTheme;
@@ -73,6 +92,74 @@ export class MagickOps {
     return ImageSize.parse(result);
   }
 
+  compareGeometryImages(
+    left: string,
+    right: string,
+    workDir: string,
+    slug: string,
+  ): GeometryImageComparison {
+    const leftSize = this.imageSize(left),
+      rightSize = this.imageSize(right);
+    if (leftSize.width !== rightSize.width || leftSize.height !== rightSize.height) {
+      throw new Error(`Neutral geometry raster dimensions differ for ${slug}`);
+    }
+    const bounds = [this.foregroundBounds(left), this.foregroundBounds(right)];
+    if (bounds.some((bound) => bound.width < 2 || bound.height < 2)) {
+      throw new Error(`Neutral geometry raster has no measurable foreground for ${slug}`);
+    }
+    const roi = unionBounds(bounds, leftSize);
+    const officialCrop = path.join(workDir, `${slug}-official-roi.png`),
+      candidateCrop = path.join(workDir, `${slug}-candidate-roi.png`);
+    this.cropAt(left, roi, officialCrop);
+    this.cropAt(right, roi, candidateCrop);
+    return {
+      fullCanvasScore: this.scoreMetric("RMSE", left, right),
+      foregroundUnionScore: this.scoreMetric("RMSE", officialCrop, candidateCrop),
+      roi,
+      width: leftSize.width,
+      height: leftSize.height,
+    };
+  }
+
+  comparePaintProjectedImages(
+    projectedReference: string,
+    candidate: string,
+    workDir: string,
+    slug: string,
+  ): PaintProjectedImageComparison {
+    const referenceSize = this.imageSize(projectedReference),
+      candidateSize = this.imageSize(candidate);
+    if (
+      referenceSize.width !== candidateSize.width ||
+      referenceSize.height !== candidateSize.height
+    ) {
+      throw new Error(`Paint projected raster dimensions differ for ${slug}`);
+    }
+    const bounds = [this.foregroundBounds(projectedReference), this.foregroundBounds(candidate)];
+    if (bounds.some((bound) => bound.width < 2 || bound.height < 2)) {
+      throw new Error(`Paint projected raster has no measurable foreground for ${slug}`);
+    }
+    const roi = unionBounds(bounds, referenceSize);
+    const referenceCrop = path.join(workDir, `${slug}-projected-reference-roi.png`),
+      candidateCrop = path.join(workDir, `${slug}-candidate-source-roi.png`);
+    this.cropAt(projectedReference, roi, referenceCrop);
+    this.cropAt(candidate, roi, candidateCrop);
+    const fullCanvasRmseScore = this.scoreMetric("RMSE", projectedReference, candidate),
+      fullCanvasMaeScore = this.scoreMetric("MAE", projectedReference, candidate),
+      contentRmseScore = this.scoreMetric("RMSE", referenceCrop, candidateCrop),
+      contentMaeScore = this.scoreMetric("MAE", referenceCrop, candidateCrop);
+    return {
+      fullCanvasRmseScore,
+      fullCanvasMaeScore,
+      contentRmseScore,
+      contentMaeScore,
+      score: Math.min(fullCanvasRmseScore, fullCanvasMaeScore, contentRmseScore, contentMaeScore),
+      roi,
+      width: referenceSize.width,
+      height: referenceSize.height,
+    };
+  }
+
   private normalizedPair(pair: ReferencePair): NormalizedPair {
     return {
       pair,
@@ -99,6 +186,29 @@ export class MagickOps {
 
   private normalizeContent(input: string, output: string) {
     this.magick([input, "-fuzz", "4%", "-trim", "+repage", ...this.canvasArgs(), output]);
+  }
+
+  private scoreMetric(metric: string, left: string, right: string): number {
+    return Math.max(0, 100 * (1 - this.compareNormalizedError(metric, left, right)));
+  }
+
+  private foregroundBounds(input: string): { x: number; y: number; width: number; height: number } {
+    const geometry = execFileSync(
+      "magick",
+      [input, "-fuzz", "0%", "-trim", "-format", "%wx%h%X%Y", "info:"],
+      { encoding: "utf8" },
+    );
+    return parseTrimGeometry(geometry);
+  }
+
+  private cropAt(input: string, roi: GeometryImageComparison["roi"], output: string) {
+    this.magick([
+      input,
+      "-crop",
+      `${roi.width}x${roi.height}+${roi.x}+${roi.y}`,
+      "+repage",
+      output,
+    ]);
   }
 
   private canvasArgs(): string[] {
@@ -142,6 +252,51 @@ export class MagickOps {
   private magick(args: string[]) {
     execFileSync("magick", args, { stdio: "inherit" });
   }
+}
+
+function parseTrimGeometry(value: string): { x: number; y: number; width: number; height: number } {
+  const match = value.trim().match(/^(\d+)x(\d+)([+-]\d+)([+-]\d+)$/);
+  if (match === null) throw new Error(`ImageMagick foreground bounds are invalid: ${value}`);
+  const [, width, height, x, y] = match;
+  const result = { width: Number(width), height: Number(height), x: Number(x), y: Number(y) };
+  if (Object.values(result).some((part) => !Number.isSafeInteger(part) || part < 0)) {
+    throw new Error(`ImageMagick foreground bounds are outside the image: ${value}`);
+  }
+  return result;
+}
+
+function unionBounds(
+  bounds: Array<{ x: number; y: number; width: number; height: number }>,
+  image: ImageSize,
+): GeometryImageComparison["roi"] {
+  const x = Math.min(...bounds.map((bound) => bound.x)),
+    y = Math.min(...bounds.map((bound) => bound.y)),
+    right = Math.max(...bounds.map((bound) => bound.x + bound.width)),
+    bottom = Math.max(...bounds.map((bound) => bound.y + bound.height));
+  if (right > image.width || bottom > image.height || right <= x || bottom <= y) {
+    throw new Error("Neutral geometry foreground union is invalid");
+  }
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+export function prepareReferenceImageOps(options: {
+  outputDir: string;
+  katanaCrop: CropRect | null;
+  theme: DiagramThemeName;
+}): MagickOps {
+  const magick = new MagickOps(options.outputDir, options.katanaCrop, options.theme);
+  magick.prepare();
+  return magick;
+}
+
+export function renderAndScoreReferencePairs<Baseline, Score>(
+  pairs: ReferencePair[],
+  magick: MagickOps,
+  loadBaselines: () => Baseline[],
+  score: (normalized: NormalizedPair[], baselines: Baseline[]) => Score,
+): { normalized: NormalizedPair[]; scores: Score } {
+  const normalized = pairs.map((pair) => magick.renderPair(pair));
+  return { normalized, scores: score(normalized, loadBaselines()) };
 }
 
 export class ImageSize {

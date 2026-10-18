@@ -2,6 +2,11 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+#[cfg(unix)]
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(unix)]
+static NEXT_JUST_PROJECT: AtomicU64 = AtomicU64::new(0);
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -18,8 +23,6 @@ fn cli_help_uses_krr_root_command() -> TestResult<()> {
 
 #[test]
 fn cli_renders_mermaid() -> TestResult<()> {
-    let runtime = temp_file("cli-mermaid.js");
-    std::fs::write(&runtime, fake_mermaid_bundle())?;
     let markdown = temp_file("cli-mermaid.md");
     let svg = temp_file("cli-mermaid.svg");
     std::fs::write(&markdown, "```mermaid\ngraph TD; A-->B\n```\n")?;
@@ -29,7 +32,7 @@ fn cli_renders_mermaid() -> TestResult<()> {
         .arg(&markdown)
         .arg("--output")
         .arg(&svg)
-        .env("MERMAID_JS", &runtime)
+        .env_remove("MERMAID_JS")
         .status()?;
     assert!(mermaid.success());
     assert!(std::fs::read_to_string(&svg)?.contains("<svg"));
@@ -39,17 +42,24 @@ fn cli_renders_mermaid() -> TestResult<()> {
 #[test]
 #[cfg(unix)]
 fn cli_delegates_reference_commands_to_just() -> TestResult<()> {
-    let fixtures = std::env::temp_dir().join(format!("krr-cli-fixtures-{}", std::process::id()));
-    std::fs::create_dir_all(&fixtures)?;
-    let success_path = fake_just("success", 0)?;
+    let just_project = JustProject::new()?;
+    let fixtures = just_project.root();
 
-    assert!(reference_status("mermaid", "reference-update", &fixtures, &success_path)?.success());
-    assert!(reference_status("mermaid", "compare", &fixtures, &success_path)?.success());
-    assert!(reference_status("drawio", "bench", &fixtures, &success_path)?.success());
-    assert!(reference_status("plantuml", "bench", &fixtures, &success_path)?.success());
+    assert!(reference_status("mermaid", "reference-update", &just_project)?.success());
+    assert!(reference_status("mermaid", "compare", &just_project)?.success());
+    assert!(reference_status("drawio", "bench", &just_project)?.success());
+    assert!(reference_status("plantuml", "bench", &just_project)?.success());
+    assert!(!reference_status("drawio", "compare", &just_project)?.success());
 
-    let failure_path = fake_just("failure", 7)?;
-    assert!(!reference_status("drawio", "compare", &fixtures, &failure_path)?.success());
+    let invocations = std::fs::read_to_string(just_project.invocation_log())?;
+    let expected = [
+        format!("mermaid-reference\t{}", fixtures.display()),
+        format!("mermaid-compare\t{}\t12.5", fixtures.display()),
+        format!("drawio-bench\t{}", fixtures.display()),
+        format!("plantuml-bench\t{}", fixtures.display()),
+        format!("drawio-compare\t{}\t12.5", fixtures.display()),
+    ];
+    assert_eq!(invocations.lines().collect::<Vec<_>>(), expected);
     Ok(())
 }
 
@@ -109,54 +119,86 @@ fn cli_drawio_default_runtime_reports_error_without_stub_svg() -> TestResult<()>
 }
 
 #[cfg(unix)]
+struct JustProject {
+    root: PathBuf,
+    invocation_log: PathBuf,
+}
+
+#[cfg(unix)]
+impl JustProject {
+    fn new() -> TestResult<Self> {
+        let root = std::env::temp_dir().join(format!(
+            "krr-cli-just-{}-{}",
+            std::process::id(),
+            NEXT_JUST_PROJECT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root)?;
+        let project = Self {
+            invocation_log: root.join("invocations.log"),
+            root,
+        };
+        std::fs::write(
+            project.root.join("Justfile"),
+            r#"
+mermaid-reference fixtures:
+    @printf '%s\t%s\n' mermaid-reference "{{fixtures}}" >> "$KRR_TEST_JUST_LOG"
+
+mermaid-compare fixtures min_score:
+    @printf '%s\t%s\t%s\n' mermaid-compare "{{fixtures}}" "{{min_score}}" >> "$KRR_TEST_JUST_LOG"
+
+drawio-bench fixtures:
+    @printf '%s\t%s\n' drawio-bench "{{fixtures}}" >> "$KRR_TEST_JUST_LOG"
+
+plantuml-bench fixtures:
+    @printf '%s\t%s\n' plantuml-bench "{{fixtures}}" >> "$KRR_TEST_JUST_LOG"
+
+drawio-compare fixtures min_score:
+    @printf '%s\t%s\t%s\n' drawio-compare "{{fixtures}}" "{{min_score}}" >> "$KRR_TEST_JUST_LOG"
+    @exit 7
+"#,
+        )?;
+        Ok(project)
+    }
+
+    fn root(&self) -> &Path {
+        &self.root
+    }
+
+    fn invocation_log(&self) -> &Path {
+        &self.invocation_log
+    }
+}
+
+#[cfg(unix)]
+impl Drop for JustProject {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+#[cfg(unix)]
 fn reference_status(
     kind: &str,
     action: &str,
-    fixtures: &Path,
-    path: &Path,
+    project: &JustProject,
 ) -> TestResult<std::process::ExitStatus> {
     let mut cmd = command();
-    cmd.arg(kind).arg(action).arg("--fixtures").arg(fixtures);
+    cmd.current_dir(project.root())
+        .env("KRR_TEST_JUST_LOG", project.invocation_log())
+        .arg(kind)
+        .arg(action)
+        .arg("--fixtures")
+        .arg(project.root());
     if action == "compare" {
         cmd.args(["--min-score", "12.5"]);
     }
-    Ok(cmd.env("PATH", path).status()?)
+    Ok(cmd.status()?)
 }
 
 fn command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_krr"))
 }
 
-#[cfg(unix)]
-fn fake_just(name: &str, exit_code: i32) -> TestResult<PathBuf> {
-    let dir = std::env::temp_dir().join(format!("krr-fake-just-{name}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir)?;
-    write_fake_just(&dir, exit_code)?;
-    Ok(dir)
-}
-
-#[cfg(unix)]
-fn write_fake_just(dir: &Path, exit_code: i32) -> TestResult<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let just = dir.join("just");
-    std::fs::write(&just, format!("#!/bin/sh\nexit {exit_code}\n"))?;
-    let mut permissions = std::fs::metadata(&just)?.permissions();
-    permissions.set_mode(0o755);
-    Ok(std::fs::set_permissions(&just, permissions)?)
-}
-
 fn temp_file(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("krr-{name}-{}", std::process::id()))
-}
-
-fn fake_mermaid_bundle() -> &'static str {
-    r#"
-globalThis.mermaid = {
-  initialize() {},
-  render: async (id, source) => ({
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" id="${id}" width="20" height="10" viewBox="0 0 20 10"><text>${source}</text></svg>`
-  })
-};
-"#
 }

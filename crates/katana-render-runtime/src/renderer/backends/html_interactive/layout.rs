@@ -1,14 +1,18 @@
+#[path = "layout_initialization.rs"]
+mod initialization;
+
 use super::super::html_browser::HtmlBrowserViewport;
-use super::super::html_document::HtmlDocumentNode;
-use super::constants::MIN_LAYOUT_WIDTH;
 use super::layout_measurement_cache::FlowMeasurementCache;
-use super::style::CssStyle;
-use super::svg::svg_header;
-use super::types::{DetailsContext, ElementBox, HitTarget, LayoutResult};
+use super::layout_paint_order::{PaintClip, PaintFragment};
+use super::layout_viewport_overflow::HtmlViewportOverflowPolicy;
+use super::types::{ElementBox, HitTarget, LayoutResult};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
+#[derive(Default)]
 pub(super) struct HtmlLayoutRenderer {
+    pub(super) scroll_x: f32,
     pub(super) scroll_y: f32,
+    pub(super) viewport_overflow: Option<HtmlViewportOverflowPolicy>,
     pub(super) svg: String,
     pub(super) hit_targets: Vec<HitTarget>,
     pub(super) element_boxes: Vec<ElementBox>,
@@ -24,14 +28,32 @@ pub(super) struct HtmlLayoutRenderer {
     pub(super) clickable_nodes: std::collections::HashSet<u64>,
     pub(super) document_paint_start: usize,
     pub(super) deferred_paint: Vec<DeferredPaint>,
+    pub(super) deferred_axis_clips: Vec<DeferredAxisClip>,
     pub(super) next_paint_order: u64,
     pub(super) flow_measurements: Rc<RefCell<FlowMeasurementCache>>,
+    pub(super) font_markup_cache: super::layout_paint::paint_text::FontMarkupCache,
 }
 
 pub(super) struct DeferredPaint {
+    pub(super) node_id: u64,
     pub(super) z_index: i32,
     pub(super) order: u64,
-    pub(super) svg: String,
+    pub(super) fragment: PaintFragment,
+    pub(super) clips: Vec<PaintClip>,
+}
+
+pub(super) struct DeferredAxisClip {
+    pub(super) id: u64,
+    pub(super) owner_node_id: u64,
+    pub(super) source_owner: (f32, f32, f32, f32),
+    pub(super) clip: super::types::OverflowClip,
+}
+
+pub(super) struct StackingPaintContext {
+    pub(super) node_id: u64,
+    pub(super) deferred_start: usize,
+    pub(super) background_len: usize,
+    pub(super) children: Vec<DeferredPaint>,
 }
 
 #[derive(Clone, Copy)]
@@ -46,8 +68,11 @@ pub(super) struct ContainingBlock {
 
 #[derive(Default)]
 pub(super) struct LayoutOwnership {
+    pub(super) leading_child_margins: Vec<f32>,
+    pub(super) trailing_child_margins: Vec<f32>,
     pub(super) containing_blocks: Vec<ContainingBlock>,
     pub(super) rendering_elements: Vec<u64>,
+    pub(super) paint_contexts: Vec<StackingPaintContext>,
     pub(super) inline_fragment_owners: Vec<u64>,
     pub(super) element_box_indices: HashMap<u64, usize>,
 }
@@ -59,7 +84,7 @@ impl HtmlLayoutRenderer {
 
     #[cfg(test)]
     pub(super) fn render(
-        nodes: &[HtmlDocumentNode],
+        nodes: &[super::super::html_document::HtmlDocumentNode],
         viewport: HtmlBrowserViewport,
         scroll_y: f32,
         input_values: &HashMap<u64, String>,
@@ -75,118 +100,74 @@ impl HtmlLayoutRenderer {
         )
     }
 
-    pub(super) fn render_with_clickable_nodes(
-        nodes: &[HtmlDocumentNode],
-        viewport: HtmlBrowserViewport,
-        scroll_y: f32,
-        input_values: &HashMap<u64, String>,
-        focused_input: Option<u64>,
-        clickable_nodes: &std::collections::HashSet<u64>,
+    pub(super) fn into_layout_result(
+        mut self,
+        content_height: f32,
     ) -> Result<LayoutResult, String> {
-        let mut renderer = Self::new_with_clickable_nodes(
-            viewport,
-            scroll_y,
-            input_values,
-            focused_input,
-            clickable_nodes,
-            Rc::new(RefCell::new(FlowMeasurementCache::default())),
-        );
-        let width = viewport.logical_width().max(MIN_LAYOUT_WIDTH);
-        let root_style = CssStyle::browser_default_for_viewport(
-            viewport.logical_width(),
-            viewport.logical_height(),
-        );
-        let bottom =
-            renderer.render_nodes(nodes, 0.0, 0.0, width, &root_style, DetailsContext::NONE);
-        renderer.into_layout_result(bottom)
+        self.finalize_deferred_axis_clips()?;
+        self.ensure_layout_succeeded()?;
+        let (content_width, content_height) = super::layout_scroll_extent::scrollable_extent(
+            &self.element_boxes,
+            &self.ownership.element_box_indices,
+            self.viewport_width,
+            self.viewport_height,
+            content_height,
+        )?;
+        Ok(self.finish_layout_result(content_width, content_height))
     }
 
-    fn into_layout_result(mut self, content_height: f32) -> Result<LayoutResult, String> {
-        self.ensure_layout_succeeded()?;
+    fn finish_layout_result(mut self, content_width: f32, content_height: f32) -> LayoutResult {
+        let viewport_overflow = self.viewport_overflow.map_or(
+            (
+                super::super::html_browser::HtmlBrowserOverflowPolicy::Auto,
+                super::super::html_browser::HtmlBrowserOverflowPolicy::Auto,
+            ),
+            |policy| policy.axes,
+        );
         self.finish_deferred_paint();
         self.svg.push_str("</svg>");
-        Ok(LayoutResult {
+        LayoutResult {
             svg: self.svg,
             hit_targets: self.hit_targets,
             element_boxes: self.element_boxes,
             anchor_positions: self.anchor_positions,
+            content_width,
             content_height,
-        })
-    }
-
-    #[cfg(test)]
-    pub(super) fn new(
-        viewport: HtmlBrowserViewport,
-        scroll_y: f32,
-        input_values: &HashMap<u64, String>,
-        focused_input: Option<u64>,
-    ) -> Self {
-        Self::new_with_measurement_cache(
-            viewport,
-            scroll_y,
-            input_values,
-            focused_input,
-            Rc::new(RefCell::new(FlowMeasurementCache::default())),
-        )
-    }
-
-    pub(super) fn new_with_measurement_cache(
-        viewport: HtmlBrowserViewport,
-        scroll_y: f32,
-        input_values: &HashMap<u64, String>,
-        focused_input: Option<u64>,
-        flow_measurements: Rc<RefCell<FlowMeasurementCache>>,
-    ) -> Self {
-        Self::new_with_clickable_nodes(
-            viewport,
-            scroll_y,
-            input_values,
-            focused_input,
-            &std::collections::HashSet::new(),
-            flow_measurements,
-        )
-    }
-
-    fn new_with_clickable_nodes(
-        viewport: HtmlBrowserViewport,
-        scroll_y: f32,
-        input_values: &HashMap<u64, String>,
-        focused_input: Option<u64>,
-        clickable_nodes: &std::collections::HashSet<u64>,
-        flow_measurements: Rc<RefCell<FlowMeasurementCache>>,
-    ) -> Self {
-        let (svg, document_paint_start) = initial_svg(viewport);
-        Self {
-            scroll_y,
-            svg,
-            hit_targets: Vec::new(),
-            element_boxes: Vec::new(),
-            anchor_positions: HashMap::new(),
-            input_values: input_values.clone(),
-            focused_input,
-            layout_error: None,
-            viewport_height: viewport.logical_height(),
-            viewport_width: viewport.logical_width(),
-            next_clip_id: 0,
-            next_gradient_id: 0,
-            ownership: LayoutOwnership::default(),
-            clickable_nodes: clickable_nodes.clone(),
-            document_paint_start,
-            deferred_paint: Vec::new(),
-            next_paint_order: 0,
-            flow_measurements,
+            viewport_overflow,
         }
+    }
+
+    pub(super) fn clips_element_overflow(
+        &self,
+        node_id: u64,
+        style: &super::style::CssStyle,
+    ) -> bool {
+        let (x, y) = self.element_overflow_clip_axes(node_id, style);
+        x || y
+    }
+
+    pub(super) fn element_overflow_clip_axes(
+        &self,
+        node_id: u64,
+        style: &super::style::CssStyle,
+    ) -> (bool, bool) {
+        if self
+            .viewport_overflow
+            .and_then(|policy| policy.source_node_id)
+            == Some(node_id)
+        {
+            return (false, false);
+        }
+        let (x, y) = style.computed_overflow_axes();
+        (
+            x != super::style::CssOverflowAxis::Visible,
+            y != super::style::CssOverflowAxis::Visible,
+        )
     }
 
     pub(super) fn ensure_layout_succeeded(&mut self) -> Result<(), String> {
         self.layout_error.take().map_or(Ok(()), Err)
     }
-}
-
-fn initial_svg(viewport: HtmlBrowserViewport) -> (String, usize) {
-    let svg = svg_header(viewport);
-    let document_paint_start = svg.len();
-    (svg, document_paint_start)
 }
 
 #[cfg(test)]

@@ -19,6 +19,8 @@ export interface CliParsedOptions {
   fixtureGlob?: string;
   referenceMode?: OfficialReferenceMode;
   referenceScope?: "formal" | "diagnostic";
+  rasterBindingConfigPath?: string;
+  rasterBindingConfigSha256?: string;
 }
 
 export const CliOptions = {
@@ -29,6 +31,27 @@ export const CliOptions = {
       throw new Error(`Unsupported reference scope: ${scopeValue}`);
     }
     assertReferenceScope(mode, scopeValue);
+    const rasterBindingConfigPath = CliOptions.getOptionalPath(argv, "--raster-binding-config");
+    const rasterBindingConfigSha256 = CliOptions.getOptionalValue(
+      argv,
+      "--raster-binding-config-sha",
+    );
+    if ((rasterBindingConfigPath === null) !== (rasterBindingConfigSha256 === undefined)) {
+      throw new Error(
+        "Raster comparison config and externally pinned SHA must be supplied together",
+      );
+    }
+    if (
+      rasterBindingConfigPath !== null &&
+      (!path.isAbsolute(rasterBindingConfigPath) ||
+        path.resolve(rasterBindingConfigPath) !== rasterBindingConfigPath ||
+        !/^[0-9a-f]{64}$/.test(rasterBindingConfigSha256 ?? ""))
+    ) {
+      throw new Error("Absolute raster comparison config and SHA256 required");
+    }
+    if (mode === "strictVendorOriginal" && rasterBindingConfigPath === null) {
+      throw new Error("Strict comparison requires externally pinned raster production bindings");
+    }
     const katanaDir = path.resolve(
       CliOptions.get(argv, "--katana", "tmp/mermaid-parts-en-dark-katana-browser"),
     );
@@ -55,6 +78,12 @@ export const CliOptions = {
       theme: DiagramTheme.parse(CliOptions.get(argv, "--theme", "dark")).name,
       referenceMode: mode,
       referenceScope: scopeValue,
+      ...(rasterBindingConfigPath === null
+        ? {}
+        : {
+            rasterBindingConfigPath,
+            rasterBindingConfigSha256: rasterBindingConfigSha256 as string,
+          }),
     };
   },
 

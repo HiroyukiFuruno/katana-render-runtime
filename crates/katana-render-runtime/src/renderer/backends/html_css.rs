@@ -1,18 +1,19 @@
-use super::html_css_cascade::{inherited_custom_properties, resolved_css_values};
-use super::html_css_rule::{CssRule, CssRuleMatchState, parse_rules};
+use super::html_css_rule::{CssRule, parse_rules};
 use super::html_css_selector::{CssAncestor, CssPseudoElement};
-use super::html_css_sources::{inline_styles, interactive_styles};
+use super::html_css_sources::{INTERACTIVE_USER_AGENT_STYLES, inline_styles, interactive_styles};
 use markup5ever_rcdom::Handle;
 use std::collections::HashMap;
 
+#[path = "html_css_apply.rs"]
+mod apply;
 #[path = "html_css_generated_content.rs"]
 mod generated_content;
+#[path = "html_css_pseudo.rs"]
+mod pseudo;
 #[path = "html_css_resolution.rs"]
 mod resolution;
 
-use generated_content::parse_generated_content;
 pub(super) use generated_content::{CssGeneratedContent, CssPseudoStyle};
-use resolution::select_inline_declarations;
 
 pub(super) type HtmlAttributes = Vec<(String, String)>;
 
@@ -22,7 +23,11 @@ pub(super) struct CssPseudoRequest<'a> {
     pub(super) ancestors: &'a [CssAncestor],
     pub(super) inheritance_ancestors: &'a [CssAncestor],
     pub(super) sibling_index: usize,
+    pub(super) sibling_type_index: usize,
+    pub(super) sibling_type_count: usize,
     pub(super) hovered: bool,
+    pub(super) focused: bool,
+    pub(super) focus_visible: bool,
     pub(super) pseudo_element: CssPseudoElement,
 }
 
@@ -47,26 +52,19 @@ impl StaticCss {
         Self::with_mode(document, CssResolutionMode::StaticSnapshot)
     }
 
-    #[cfg(test)]
-    pub(super) fn for_interactive_document_with_styles(
-        document: &Handle,
-        external_stylesheets: &HashMap<String, String>,
-    ) -> Self {
-        Self::for_interactive_document_with_styles_at_width(
-            document,
-            external_stylesheets,
-            DEFAULT_CSS_VIEWPORT_WIDTH,
-        )
-    }
-
     pub(super) fn for_interactive_document_with_styles_at_width(
         document: &Handle,
         external_stylesheets: &HashMap<String, String>,
         viewport_width: f32,
     ) -> Self {
         let source = interactive_styles(document, external_stylesheets);
+        let mut rules = parse_rules(&source);
+        let user_agent_count = parse_rules(INTERACTIVE_USER_AGENT_STYLES).len();
+        for rule in rules.iter_mut().take(user_agent_count) {
+            rule.user_agent = true;
+        }
         Self {
-            rules: parse_rules(&source),
+            rules,
             mode: CssResolutionMode::InteractiveRuntime,
             viewport_width,
         }
@@ -80,118 +78,6 @@ impl StaticCss {
             viewport_width: DEFAULT_CSS_VIEWPORT_WIDTH,
         }
     }
-
-    pub(super) fn apply(&self, tag: &str, attributes: &HtmlAttributes) -> HtmlAttributes {
-        self.apply_with_ancestors(tag, attributes, &[])
-    }
-
-    pub(super) fn apply_with_ancestors(
-        &self,
-        tag: &str,
-        attributes: &HtmlAttributes,
-        ancestors: &[CssAncestor],
-    ) -> HtmlAttributes {
-        self.apply_with_ancestors_at(tag, attributes, ancestors, 1)
-    }
-
-    pub(super) fn apply_with_ancestors_at(
-        &self,
-        tag: &str,
-        attributes: &HtmlAttributes,
-        ancestors: &[CssAncestor],
-        sibling_index: usize,
-    ) -> HtmlAttributes {
-        self.apply_with_ancestors_at_state(tag, attributes, ancestors, sibling_index, false)
-    }
-
-    pub(super) fn apply_with_ancestors_at_state(
-        &self,
-        tag: &str,
-        attributes: &HtmlAttributes,
-        ancestors: &[CssAncestor],
-        sibling_index: usize,
-        hovered: bool,
-    ) -> HtmlAttributes {
-        let mut rendered = attributes
-            .iter()
-            .filter(|(name, _)| !name.eq_ignore_ascii_case("style"))
-            .cloned()
-            .collect::<HtmlAttributes>();
-        let stylesheet =
-            self.resolved_declarations(tag, attributes, ancestors, sibling_index, hovered);
-        if stylesheet.is_empty() {
-            return rendered;
-        }
-        rendered.push(("style".to_string(), stylesheet.join("; ")));
-        rendered
-    }
-
-    fn resolved_declarations(
-        &self,
-        tag: &str,
-        attributes: &HtmlAttributes,
-        ancestors: &[CssAncestor],
-        sibling_index: usize,
-        hovered: bool,
-    ) -> Vec<String> {
-        let mut selected = inherited_custom_properties(ancestors);
-        let state = CssRuleMatchState::element(tag, attributes, ancestors, sibling_index, hovered);
-        self.select_rule_declarations(state, &mut selected);
-        select_inline_declarations(attributes, &mut selected);
-        resolved_css_values(selected)
-    }
-
-    pub(super) fn pseudo_style_at_state(
-        &self,
-        request: CssPseudoRequest<'_>,
-    ) -> Option<CssPseudoStyle> {
-        if self.mode != CssResolutionMode::InteractiveRuntime {
-            return None;
-        }
-        let mut selected = inherited_custom_properties(request.inheritance_ancestors);
-        let state = CssRuleMatchState::element(
-            request.tag,
-            request.attributes,
-            request.ancestors,
-            request.sibling_index,
-            request.hovered,
-        )
-        .for_pseudo(request.pseudo_element);
-        self.select_rule_declarations(state, &mut selected);
-        let declarations = resolved_css_values(selected);
-        let content = declarations
-            .iter()
-            .find_map(|declaration| declaration.strip_prefix("content: "))
-            .and_then(parse_generated_content)?;
-        Some(CssPseudoStyle {
-            attributes: vec![("style".to_string(), declarations.join("; "))],
-            content,
-        })
-    }
-
-    fn select_rule_declarations(
-        &self,
-        state: CssRuleMatchState<'_>,
-        selected: &mut Vec<super::html_css_cascade::SelectedDeclaration>,
-    ) {
-        for (rule_order, rule) in self.rules.iter().enumerate() {
-            let Some(specificity) = self.rule_specificity(rule, state) else {
-                continue;
-            };
-            self.select_matched_declarations(rule, rule_order, specificity, selected);
-        }
-    }
-
-    fn rule_specificity(&self, rule: &CssRule, state: CssRuleMatchState<'_>) -> Option<u16> {
-        match self.mode {
-            CssResolutionMode::StaticSnapshot => state
-                .pseudo_element
-                .is_none()
-                .then(|| rule.matches_static_snapshot(state.tag, state.attributes))
-                .flatten(),
-            CssResolutionMode::InteractiveRuntime => rule.matches_state(state, self.viewport_width),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -200,6 +86,33 @@ mod tests {
     use super::super::html_document::{HtmlDocument, HtmlDocumentNode};
     use super::{CssPseudoElement, CssPseudoRequest, HtmlAttributes, StaticCss};
     use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn author_control_styles_override_browser_defaults() -> Result<(), String> {
+        let document = HtmlDocument::parse(
+            "<style>* { font-size: 18px; } button { border: 0; background: #123456; text-align: left; }</style><button>Action</button>",
+        );
+        let nodes = document.interactive_nodes_with_styles(&HashMap::new());
+        let style = find_style_attribute(&nodes, "button").ok_or("missing button styles")?;
+        assert!(style.contains("font-size: 18px"), "{style}");
+        assert!(style.contains("#123456"), "{style}");
+        assert!(style.contains("text-align: left"), "{style}");
+        assert!(!style.contains("#efefef"), "{style}");
+        Ok(())
+    }
+
+    #[test]
+    fn author_universal_reset_overrides_user_agent_body_margin() -> Result<(), String> {
+        let document = HtmlDocument::parse(
+            "<style>*, *::before, *::after { margin: 0; padding: 0; }</style><p>Reset</p>",
+        );
+        let nodes = document.interactive_nodes_with_styles(&HashMap::new());
+        let style = find_style_attribute(&nodes, "body")
+            .ok_or_else(|| "missing body styles".to_string())?;
+        assert!(style.contains("margin-left: 0"), "{style}");
+        assert!(!style.contains("8px"), "{style}");
+        Ok(())
+    }
 
     #[test]
     fn longhand_padding_is_resolved_before_shorthand() {
@@ -313,7 +226,11 @@ mod tests {
             ancestors: &[],
             inheritance_ancestors: &[],
             sibling_index: 1,
+            sibling_type_index: 1,
+            sibling_type_count: 1,
             hovered: false,
+            focused: false,
+            focus_visible: false,
             pseudo_element: CssPseudoElement::Before,
         });
 

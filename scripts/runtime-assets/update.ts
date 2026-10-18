@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { DrawioWarExtractor } from "./drawio-war-extractor";
 import {
+  isPatchedRuntimeAsset,
   RuntimeAssetCatalog,
   RuntimeAssetCatalogSource,
   RuntimeAssetChecksum,
@@ -224,6 +225,11 @@ class UpdateCommand {
   ) {}
 
   async run() {
+    if (isPatchedRuntimeAsset(this.definition)) {
+      throw new Error(
+        `Patched runtime asset ${this.definition.version} requires explicit patched adoption; ordinary CDN updates are refused`,
+      );
+    }
     await new RuntimeAssetDownloader().download(this.definition, this.version);
     const checksum = RuntimeAssetChecksum.writeChecksumFile(this.definition, this.version);
     if (RuntimePackageAssetCompressor.supports(this.definition)) {

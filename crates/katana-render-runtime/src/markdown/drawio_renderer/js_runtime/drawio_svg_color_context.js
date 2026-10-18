@@ -106,10 +106,6 @@ function katanaDrawioIsPidWhiteFillSourceElement(element) {
   return [shape.startsWith("mxgraph.pid."), style.has("ellipse")].some(Boolean);
 }
 
-function katanaDrawioAndroidDeviceScreenFillColor(element, name, value) {
-  return katanaDrawioIsAndroidDeviceScreenFill(element, name, value) ? "transparent" : "";
-}
-
 function katanaDrawioIsAndroidDeviceScreenFill(element, name, value) {
   return [
     katanaDrawioIsDarkMode(),

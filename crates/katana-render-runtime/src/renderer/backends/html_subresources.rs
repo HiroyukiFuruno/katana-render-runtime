@@ -4,7 +4,12 @@ mod iframe;
 mod image_data;
 mod policy;
 #[cfg(test)]
-mod tests;
+pub(super) mod resource_audit;
+#[cfg(test)]
+pub(super) mod tests;
+#[cfg(test)]
+pub(super) mod transport;
+#[cfg(not(test))]
 mod transport;
 
 use super::html_browser::HtmlBrowserSource;
@@ -36,17 +41,32 @@ impl HtmlSubresourceLoader {
     }
 
     pub(super) fn load_text(&self, reference: &str) -> Result<String, String> {
-        let url = self.policy.resolve_subresource(reference)?;
+        let resolved = self.policy.resolve_subresource(reference);
+        #[cfg(test)]
+        if let Err(error) = &resolved {
+            resource_audit::record_failure(reference, error);
+        }
+        let url = resolved?;
         transport::load_text(&url)
     }
 
     pub(super) fn load_same_origin_text(&self, reference: &str) -> Result<String, String> {
-        let url = self.policy.resolve_same_origin_request(reference)?;
+        let resolved = self.policy.resolve_same_origin_request(reference);
+        #[cfg(test)]
+        if let Err(error) = &resolved {
+            resource_audit::record_failure(reference, error);
+        }
+        let url = resolved?;
         transport::load_text(&url)
     }
 
     pub(super) fn load_image_data_url(&self, reference: &str) -> Result<String, String> {
-        let url = self.policy.resolve_subresource(reference)?;
+        let resolved = self.policy.resolve_subresource(reference);
+        #[cfg(test)]
+        if let Err(error) = &resolved {
+            resource_audit::record_failure(reference, error);
+        }
+        let url = resolved?;
         transport::load_image_data_url(&url)
     }
 
@@ -55,9 +75,18 @@ impl HtmlSubresourceLoader {
     }
 
     fn load_iframe(&self, reference: &str) -> Result<HtmlBrowserSource, String> {
-        let url = self.policy.resolve_iframe(reference)?;
+        let resolved = self.policy.resolve_iframe(reference);
+        #[cfg(test)]
+        if let Err(error) = &resolved {
+            resource_audit::record_failure(reference, error);
+        }
+        let url = resolved?;
         let raw_html = transport::load_text(&url)?;
-        HtmlBrowserSource::new(raw_html, url.as_str()).map_err(|error| error.to_string())
+        HtmlBrowserSource::new(raw_html, url.as_str()).map_err(|error| {
+            #[cfg(test)]
+            resource_audit::record_failure(url.as_str(), &error.to_string());
+            error.to_string()
+        })
     }
 
     pub(super) fn document_origin(&self) -> &str {

@@ -1,4 +1,4 @@
-export const MERMAID_RUNTIME_ENTRYPOINT = String.raw`
+export const MERMAID_RUNTIME_ENTRYPOINT = `
 globalThis["katanaRunMermaidRuntime"] = function katanaRunMermaidRuntime(request) {
   return (async () => katanaRenderMermaid(request))().catch((error) => {
     const detail = error?.stack ? error.stack : String(error);
@@ -7,6 +7,10 @@ globalThis["katanaRunMermaidRuntime"] = function katanaRunMermaidRuntime(request
 };
 
 async function katanaRenderMermaid(request) {
+  document.body.style.setProperty(
+    "font-family",
+    '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  );
   const mermaidValue = katanaMermaidGlobal();
   mermaidValue.initialize({
     startOnLoad: false,

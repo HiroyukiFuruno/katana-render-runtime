@@ -1,26 +1,23 @@
 use super::image_data;
-use base64::{Engine as _, engine::general_purpose::GeneralPurpose};
-use percent_encoding::percent_decode_str;
+use base64::Engine as _;
 use url::Url;
 
-const BASE64_BLOCK_SIZE: usize = 4;
-const BASE64_REMAINDER_TWO: usize = 2;
-const BASE64_REMAINDER_THREE: usize = 3;
-
-const FORGIVING_BASE64: GeneralPurpose = GeneralPurpose::new(
-    &base64::alphabet::STANDARD,
-    base64::engine::general_purpose::GeneralPurposeConfig::new()
-        .with_decode_allow_trailing_bits(true),
-);
-
-const MAX_SUBRESOURCE_BYTES: u64 = 8 * 1024 * 1024;
-const MAX_BASE64_DATA_URL_BYTES: u64 = MAX_SUBRESOURCE_BYTES.div_ceil(3) * 4;
-const MAX_PERCENT_ENCODED_DATA_URL_BYTES: u64 = MAX_SUBRESOURCE_BYTES * 3;
-const MAX_PERCENT_ENCODED_BASE64_DATA_URL_BYTES: u64 = MAX_BASE64_DATA_URL_BYTES * 3;
+#[path = "transport_data_url.rs"]
+mod data_url;
+#[cfg(test)]
+use data_url::{
+    MAX_BASE64_DATA_URL_BYTES, MAX_PERCENT_ENCODED_BASE64_DATA_URL_BYTES, check_data_url_size,
+    decode_forgiving_base64, normalize_forgiving_base64,
+};
+use data_url::{MAX_SUBRESOURCE_BYTES, decode_data_url};
 
 pub(super) fn load_text(url: &Url) -> Result<String, String> {
-    let text = String::from_utf8(load_bytes(url)?)
-        .map_err(|error| format!("subresource is not UTF-8: {error}"))?;
+    let bytes = load_bytes(url)?;
+    let text = String::from_utf8(bytes).map_err(|error| {
+        #[cfg(test)]
+        super::resource_audit::record_failure(url.as_str(), &error.to_string());
+        format!("subresource is not UTF-8: {error}")
+    })?;
     Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_string())
 }
 
@@ -31,31 +28,60 @@ pub(super) fn image_data_url_is_decodable(reference: &str) -> bool {
     if url.scheme() != "data" {
         return false;
     }
-    load_bytes(&url)
-        .and_then(|bytes| image_data::validate_data_url(&url, &bytes))
-        .is_ok()
+    let result = load_bytes(&url).and_then(|bytes| image_data::validate_data_url(&url, &bytes));
+    #[cfg(test)]
+    if let Err(error) = &result {
+        super::resource_audit::record_failure(url.as_str(), error);
+    }
+    result.is_ok()
 }
 
 pub(super) fn load_image_data_url(url: &Url) -> Result<String, String> {
     if url.scheme() == "data" {
-        image_data::validate_data_url(url, &load_bytes(url)?)?;
+        let bytes = load_bytes(url)?;
+        let validation = image_data::validate_data_url(url, &bytes);
+        #[cfg(test)]
+        if let Err(error) = &validation {
+            super::resource_audit::record_failure(url.as_str(), error);
+        }
+        validation?;
         return Ok(url.to_string());
     }
     let payload = load_image_bytes(url)?;
-    let media_type =
-        image_data::resolve_media_type(payload.declared_media_type.as_deref(), &payload.bytes)?;
+    let media_type_result =
+        image_data::resolve_media_type(payload.declared_media_type.as_deref(), &payload.bytes);
+    #[cfg(test)]
+    if let Err(error) = &media_type_result {
+        super::resource_audit::record_failure(url.as_str(), error);
+    }
+    let media_type = media_type_result?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(payload.bytes);
     Ok(format!("data:{media_type};base64,{encoded}"))
 }
 
 fn load_bytes(url: &Url) -> Result<Vec<u8>, String> {
-    match url.scheme() {
+    let result = match url.scheme() {
         "data" => decode_data_url(url),
-        "file" => std::fs::read(url.to_file_path().map_err(|_| "file URL is invalid")?)
-            .map_err(|error| format!("local subresource could not be read: {error}")),
+        "file" => match url.to_file_path() {
+            Ok(path) => std::fs::read(path)
+                .map_err(|error| format!("local subresource could not be read: {error}")),
+            Err(()) => Err("file URL is invalid".to_owned()),
+        },
         "http" | "https" => load_http(url),
         scheme => Err(format!("unsupported subresource scheme: {scheme}")),
+    };
+    #[cfg(test)]
+    if !matches!(url.scheme(), "http" | "https") {
+        match &result {
+            Ok(bytes) => {
+                super::resource_audit::record_success(url.as_str(), bytes);
+            }
+            Err(error) => {
+                super::resource_audit::record_failure(url.as_str(), error);
+            }
+        }
     }
+    result
 }
 
 struct ImagePayload {
@@ -87,6 +113,16 @@ struct HttpPayload {
 }
 
 fn load_http_payload(url: &Url) -> Result<HttpPayload, String> {
+    let result = load_http_payload_inner(url);
+    #[cfg(test)]
+    match &result {
+        Ok(payload) => super::resource_audit::record_success(url.as_str(), &payload.bytes),
+        Err(error) => super::resource_audit::record_failure(url.as_str(), error),
+    }
+    result
+}
+
+fn load_http_payload_inner(url: &Url) -> Result<HttpPayload, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .max_redirects(0)
         .build()
@@ -110,85 +146,6 @@ fn load_http_payload(url: &Url) -> Result<HttpPayload, String> {
         bytes,
         content_type,
     })
-}
-
-fn decode_data_url(url: &Url) -> Result<Vec<u8>, String> {
-    let without_fragment = url
-        .as_str()
-        .split_once('#')
-        .map_or(url.as_str(), |(source, _)| source);
-    let source = &without_fragment["data:".len()..];
-    let (metadata, payload) = source.split_once(',').ok_or("data URL has no payload")?;
-    if uses_base64_data_url_encoding(metadata) {
-        return decode_base64_data_url_payload(payload);
-    }
-    decode_percent_data_url_payload(payload)
-}
-
-fn uses_base64_data_url_encoding(metadata: &str) -> bool {
-    metadata
-        .split(';')
-        .next_back()
-        .is_some_and(|part| part.eq_ignore_ascii_case("base64"))
-}
-
-fn decode_base64_data_url_payload(payload: &str) -> Result<Vec<u8>, String> {
-    check_data_url_size(
-        payload.len(),
-        MAX_PERCENT_ENCODED_BASE64_DATA_URL_BYTES,
-        "encoded",
-    )?;
-    let decoded_payload = percent_decode_str(payload).collect::<Vec<u8>>();
-    let normalized_payload = normalize_forgiving_base64(&decoded_payload);
-    check_data_url_size(
-        normalized_payload.len(),
-        MAX_BASE64_DATA_URL_BYTES,
-        "base64 encoded",
-    )?;
-    let bytes = decode_forgiving_base64(&normalized_payload)
-        .map_err(|error| format!("data URL base64 payload is invalid: {error}"))?;
-    check_data_url_size(bytes.len(), MAX_SUBRESOURCE_BYTES, "decoded")?;
-    Ok(bytes)
-}
-
-fn decode_percent_data_url_payload(payload: &str) -> Result<Vec<u8>, String> {
-    check_data_url_size(payload.len(), MAX_PERCENT_ENCODED_DATA_URL_BYTES, "encoded")?;
-    let bytes = percent_decode_str(payload).collect::<Vec<_>>();
-    check_data_url_size(bytes.len(), MAX_SUBRESOURCE_BYTES, "decoded")?;
-    Ok(bytes)
-}
-
-fn check_data_url_size(size: usize, limit: u64, representation: &str) -> Result<(), String> {
-    if size as u64 > limit {
-        return Err(format!(
-            "data URL {representation} payload exceeds the {limit}-byte limit"
-        ));
-    }
-    Ok(())
-}
-
-fn decode_forgiving_base64(payload: &[u8]) -> Result<Vec<u8>, base64::DecodeError> {
-    let payload = normalize_forgiving_base64(payload);
-    if payload.contains(&b'=') {
-        return FORGIVING_BASE64.decode(payload);
-    }
-    let padding = match payload.len() % BASE64_BLOCK_SIZE {
-        0 => 0,
-        BASE64_REMAINDER_TWO => BASE64_REMAINDER_TWO,
-        BASE64_REMAINDER_THREE => 1,
-        _ => return FORGIVING_BASE64.decode(payload),
-    };
-    let mut padded = payload;
-    padded.extend(std::iter::repeat_n(b'=', padding));
-    FORGIVING_BASE64.decode(padded)
-}
-
-fn normalize_forgiving_base64(payload: &[u8]) -> Vec<u8> {
-    payload
-        .iter()
-        .copied()
-        .filter(|byte| !byte.is_ascii_whitespace())
-        .collect()
 }
 
 #[cfg(test)]

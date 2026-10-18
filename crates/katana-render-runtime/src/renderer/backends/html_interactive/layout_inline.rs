@@ -9,6 +9,10 @@ mod paint;
 
 #[path = "layout_inline_floats.rs"]
 mod floats;
+#[path = "layout_inline_line_metrics.rs"]
+mod line_metrics;
+#[path = "layout_inline_line_plan.rs"]
+mod line_plan;
 #[path = "layout_inline_render.rs"]
 mod render;
 #[path = "layout_inline_state.rs"]
@@ -19,6 +23,10 @@ mod state;
 mod tests;
 
 use fragment::{advance_inline_text, inline_flow_style};
+#[path = "layout_inline_atomic.rs"]
+mod atomic;
+#[path = "layout_inline_atomic_metrics.rs"]
+mod atomic_metrics;
 pub(super) use measure::InlineMeasurement;
 use state::InlineFlowState;
 

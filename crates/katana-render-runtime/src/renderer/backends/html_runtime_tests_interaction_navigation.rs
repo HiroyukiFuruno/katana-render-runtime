@@ -1,6 +1,7 @@
 use super::super::DOM_EVENT_CONTRACT_DOCUMENT;
-use crate::renderer::backends::html_runtime::{HtmlRuntimeDispatch, StaticHtmlRuntimeSession};
-use crate::renderer::backends::{HtmlNodeId, HtmlRuntimeEvent, StaticHtmlRuntime};
+use super::{must_node, must_result, must_session};
+use crate::renderer::backends::HtmlRuntimeEvent;
+use crate::renderer::backends::html_runtime::HtmlRuntimeDispatch;
 
 #[test]
 fn dom_event_options_order_cancellation_and_default_action_follow_the_event_path() {
@@ -26,23 +27,6 @@ fn returns_navigation_intent_without_a_click_handler() {
             .map(|intent| intent.href.as_str()),
         Some("/next")
     );
-}
-
-fn must_session(source: &str) -> StaticHtmlRuntimeSession {
-    must_result(StaticHtmlRuntime.start(source))
-}
-
-fn must_node(session: &mut StaticHtmlRuntimeSession, element_id: &str) -> HtmlNodeId {
-    let node = session.node_for_element_id(element_id);
-    assert!(node.is_some());
-    let mut nodes = node.into_iter().collect::<Vec<_>>();
-    nodes.remove(0)
-}
-
-fn must_result<T, E>(result: Result<T, E>) -> T {
-    assert!(result.is_ok());
-    let mut values = result.into_iter().collect::<Vec<_>>();
-    values.remove(0)
 }
 
 fn assert_dom_event_contract(

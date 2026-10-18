@@ -2,35 +2,45 @@ import fs from "node:fs";
 import path from "node:path";
 import { CLASS_REFERENCE_TARGETS, validateScoredClassReferencePair } from "./class-reference-gate";
 import { CliOptions, type CliParsedOptions } from "./reference_compare_options";
-import { MagickOps } from "./reference_image_ops";
+import { prepareReferenceImageOps } from "./reference_image_ops";
 import { ReferencePairRepository } from "./reference_pair_repository";
 import { ReferenceCompareReport } from "./reference_report";
 import { type ReferenceScoreRow, ReferenceScorer, ReferenceScores } from "./reference_score";
 import type { ReferenceScoreBaseline } from "./reference_score_policy";
+import { scorePaintProjectedReferenceTargets } from "./reference_svg_geometry_scoring";
 
 class ReferenceCompare {
   constructor(private options: CliParsedOptions) {}
 
-  run() {
+  async run() {
     this.validateTargetClassReferenceSvgs();
     const repository = new ReferencePairRepository(this.options);
     const inventory = repository.inventory();
     const pairs = repository.list(inventory);
     this.assertFreshStrictOutput();
-    const magick = new MagickOps(
-      this.options.outputDir,
-      this.options.katanaCrop,
-      this.options.theme,
-    );
-    magick.prepare();
-
+    const magick = prepareReferenceImageOps(this.options);
     const normalized = pairs.map((pair) => magick.renderPair(pair));
+    const projectedReference =
+      this.options.referenceMode === "strictVendorOriginal" &&
+      this.options.referenceScope === "formal"
+        ? await scorePaintProjectedReferenceTargets(
+            pairs,
+            this.options.outputDir,
+            this.options.theme,
+            magick,
+          )
+        : null;
     const baselines = this.options.baselineScoresPath
       ? this.loadBaselines(this.options.baselineScoresPath)
       : [];
-    const scores = new ReferenceScorer(magick, this.options.minScore, baselines).score(normalized);
+    const scores = new ReferenceScorer(magick, this.options.minScore, baselines).score(
+      normalized,
+      projectedReference?.scores,
+      projectedReference !== null,
+    );
     const contactSheet = magick.renderContactSheet(normalized.map((it) => it.pairImagePath));
 
+    repository.assertRasterInputsUnchanged();
     new ReferenceCompareReport(this.options.outputDir).write(pairs, scores, contactSheet, {
       mode: this.options.referenceMode ?? "legacyNormalized",
       scope: this.options.referenceScope ?? "diagnostic",
@@ -39,6 +49,16 @@ class ReferenceCompare {
       scoreThreshold: this.options.minScore,
       formalAccepted: false,
       independentGold: false,
+      scoreSemantics:
+        projectedReference === null ? "rgb-v1" : "rgb-v1+paint-projected-reference-v1",
+      ...(projectedReference === null
+        ? {}
+        : {
+            paintProjectedReferenceEvidence: {
+              path: path.basename(projectedReference.evidencePath),
+              sha256: projectedReference.evidenceSha256,
+            },
+          }),
     });
     fs.writeFileSync(
       path.join(this.options.outputDir, "fixture-inventory.json"),
@@ -48,6 +68,7 @@ class ReferenceCompare {
     for (const skipped of inventory.skippedEmpty) {
       console.log(`skipped empty fixture ${skipped.slug}: ${skipped.reason}`);
     }
+    repository.assertRasterInputsUnchanged();
     this.printSummary(scores, contactSheet);
     process.exitCode = this.exitCode(scores);
   }
@@ -165,4 +186,7 @@ class BaselineScoreEntry {
   }
 }
 
-new ReferenceCompare(CliOptions.parse(process.argv.slice(2))).run();
+new ReferenceCompare(CliOptions.parse(process.argv.slice(2))).run().catch((error: Error) => {
+  console.error(error.message);
+  process.exitCode = 1;
+});

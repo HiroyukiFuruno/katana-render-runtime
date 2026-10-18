@@ -18,5 +18,10 @@ pub(super) fn append_context(
     receipt["scope"] = json!(
         "CLI RenderInput boundary; vendor prepared source/config and cache branch are not observed"
     );
+    if receipt["artifacts"]["classicCapture"].is_object() {
+        receipt["scope"] = json!(
+            "CLI RenderInput and actual Mermaid request/classic program evaluation; vendor build provenance, external exit and performance require separate evidence"
+        );
+    }
     Ok(())
 }

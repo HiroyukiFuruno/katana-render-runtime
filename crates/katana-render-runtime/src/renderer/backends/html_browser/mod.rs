@@ -1,11 +1,14 @@
 mod error;
 mod frame;
 mod runtime;
+mod scroll_metrics;
 mod session;
 mod source;
 
 pub use error::HtmlBrowserError;
-pub use frame::{HtmlBrowserFrame, HtmlBrowserPixelFormat};
+pub use frame::{
+    HtmlBrowserFrame, HtmlBrowserOverflowPolicy, HtmlBrowserPixelFormat, HtmlBrowserScrollMetrics,
+};
 pub use runtime::{HtmlRuntime, HtmlRuntimeSession};
 pub use session::{HtmlBrowserSession, HtmlBrowserSessionState};
 pub use source::{

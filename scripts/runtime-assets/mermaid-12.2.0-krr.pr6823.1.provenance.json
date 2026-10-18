@@ -1,0 +1,39 @@
+{
+  "schema": "krr-mermaid-patched-runtime-provenance-v1",
+  "artifact_version": "12.2.0-krr.pr6823.1",
+  "upstream_version": "12.2.0",
+  "upstream_repository": "https://github.com/mermaid-js/mermaid",
+  "upstream_tag": "mermaid@12.2.0",
+  "upstream_commit": "1fb7869866dd619168d840291c9c54b4f129758b",
+  "upstream_archive_url": "https://codeload.github.com/mermaid-js/mermaid/tar.gz/1fb7869866dd619168d840291c9c54b4f129758b",
+  "upstream_archive_sha256": "cc9efe255ea61aa2e991ea4c9c0c49f286b3f81e590fa58d04750723da758476",
+  "license": "MIT",
+  "license_sha256": "ec9fb67dcb25eccc416ed56e1aab819222c805a2a4bfe4cb19e7556bf2ffde80",
+  "patch": {
+    "source": "https://github.com/mermaid-js/mermaid/pull/6823",
+    "path": "scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.patch",
+    "sha256": "83b12555170e0bef0303a0995d19f8524daf909d90862f052fec863ad9f5dddf",
+    "scope": "sankey.jison Unicode macros and two lexer substitutions only"
+  },
+  "lock": {
+    "path": "pnpm-lock.yaml",
+    "sha256": "d75b263b5a0ace23797e375423a7d24e6e208c440c7eb75d4cc4a422de5973ca",
+    "package_manager": "pnpm 10.30.3",
+    "pnpm_cjs_sha256": "b276da51dc8ca5b0d3ee3371695b50fc8b3244b281b091c63a3f082a88dadeb9",
+    "node": "v26.10.0"
+  },
+  "build": {
+    "recipe": "scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.build.sh",
+    "command": "pnpm install --frozen-lockfile && pnpm build:mermaid",
+    "output": "mermaid.min.js",
+    "output_sha256": "831ed9d054742315d8edcb9bb933c6e56fd79d0c187a2cdf41ad48e388583a4c",
+    "output_bytes": 5494857
+  },
+  "unpatched_grammar_fixture": {
+    "path": "tests/fixtures/runtime-assets/mermaid-12.2.0-sankey.jison",
+    "sha256": "1f5b7bf55f5cf1c9149543678aa827f5ab5340998dd33fbdeaaf73921b49cff0",
+    "upstream_path": "packages/mermaid/src/diagrams/sankey/parser/sankey.jison",
+    "license": "MIT"
+  },
+  "license_file": "crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/LICENSE"
+}

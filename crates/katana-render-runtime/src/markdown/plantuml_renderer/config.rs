@@ -1,6 +1,25 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
+pub(super) struct PlantUmlConfigOps;
+
+impl PlantUmlConfigOps {
+    pub(super) fn from_value<T>(
+        value: &serde_json::Value,
+        validate: impl FnOnce(&T) -> Result<(), String>,
+    ) -> Result<T, String>
+    where
+        T: serde::de::DeserializeOwned + Default,
+    {
+        if value.is_null() {
+            return Ok(T::default());
+        }
+        let config: T = serde_json::from_value(value.clone()).map_err(|error| error.to_string())?;
+        validate(&config)?;
+        Ok(config)
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub(crate) struct PlantUmlRuntimeConfig {
     #[serde(default, rename = "plantuml_cache_dir", alias = "plantumlCacheDir")]
@@ -9,13 +28,7 @@ pub(crate) struct PlantUmlRuntimeConfig {
 
 impl PlantUmlRuntimeConfig {
     pub(crate) fn from_value(value: &serde_json::Value) -> Result<Self, String> {
-        if value.is_null() {
-            return Ok(Self::default());
-        }
-        let config: Self =
-            serde_json::from_value(value.clone()).map_err(|error| error.to_string())?;
-        config.validate()?;
-        Ok(config)
+        PlantUmlConfigOps::from_value(value, Self::validate)
     }
 
     pub(crate) fn cache_dir(&self) -> Option<PathBuf> {

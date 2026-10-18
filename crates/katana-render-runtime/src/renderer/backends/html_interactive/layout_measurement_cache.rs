@@ -31,6 +31,12 @@ pub(super) struct FlowMeasurementCache {
 }
 
 impl FlowMeasurementCache {
+    pub(super) fn clear(&mut self) {
+        self.values.clear();
+        self.hits = 0;
+        self.misses = 0;
+    }
+
     pub(super) fn get(&mut self, key: FlowMeasurementKey) -> Option<f32> {
         let value = self.values.get(&key).copied();
         if value.is_some() {
@@ -45,7 +51,6 @@ impl FlowMeasurementCache {
         self.values.insert(key, height);
     }
 
-    #[cfg(test)]
     pub(super) fn stats(&self) -> (usize, usize) {
         (self.hits, self.misses)
     }

@@ -13,14 +13,8 @@ function katanaNormalizeFlowchartEdgeLabelSvg(svg, request) {
 
 function katanaNormalizeStateEdgeLabelSvg(svg, request) {
   return katanaApplySvgWhen(svg, katanaHasStateDiagramRole, (current) =>
-    katanaNormalizeStateViewBox(
-      katanaNormalizeStateNodeLabels(katanaEdgeLabelSvgForRequest(current, request)),
-    ),
+    katanaEdgeLabelSvgForRequest(current, request),
   );
-}
-
-function katanaNormalizeStateViewBox(svg) {
-  return katanaStateViewBoxContext(svg).map(katanaApplyStateViewBox).concat([svg])[0];
 }
 
 function katanaHasFlowchartRole(svg) {
@@ -41,63 +35,12 @@ function katanaEdgeLabelSvgForRequest(svg, request) {
   );
 }
 
-function katanaStateViewBoxContext(svg) {
-  return [{ svg, viewBox: katanaReadViewBox(svg) }].filter(katanaHasStateViewBoxContext);
-}
-
-function katanaHasStateViewBoxContext(context) {
-  return [
-    context.viewBox,
-    context.viewBox?.[1] !== 0,
-    Math.abs(context.viewBox?.[1] ?? 0) <= 12,
-  ].every(Boolean);
-}
-
-function katanaApplyStateViewBox(context) {
-  const viewBox = context.viewBox;
-  const x = katanaNormalizedStateViewBoxX(viewBox);
-  const width = katanaNormalizedStateViewBoxWidth(viewBox);
-  return katanaSetSvgViewBox(
-    katanaSetSvgMaxWidth(context.svg, width),
-    `${katanaFormatVisualNumber(x)} 0 ${katanaFormatVisualNumber(width)} ${katanaFormatVisualNumber(viewBox[3] + viewBox[1])}`,
-  );
-}
-
-function katanaNormalizedStateViewBoxX(viewBox) {
-  return katanaShouldTrimStateViewBoxLeft(viewBox) ? 0 : viewBox[0];
-}
-
-function katanaNormalizedStateViewBoxWidth(viewBox) {
-  return katanaShouldTrimStateViewBoxLeft(viewBox) ? viewBox[2] + viewBox[0] : viewBox[2];
-}
-
-function katanaShouldTrimStateViewBoxLeft(viewBox) {
-  return Math.abs(viewBox[0] + 8) < 0.01;
-}
-
 function katanaFormatVisualNumber(value) {
   return Number(value.toFixed(6)).toString();
 }
 
 function katanaShouldHideEdgeLabelBackground(request) {
   return request.theme !== "dark";
-}
-
-function katanaNormalizeStateNodeLabels(svg) {
-  return katanaRewriteBalancedGroups(
-    svg,
-    /<g class="node\s+statediagram-state\s+"/g,
-    katanaNormalizeStateNodeLabel,
-  );
-}
-
-function katanaNormalizeStateNodeLabel(node) {
-  return node
-    .replace(
-      /(<g class="label" style="" transform="translate\()[-\d.]+,\s*([-\d.]+)(\)">)/g,
-      "$10, $2$3",
-    )
-    .replace(/<text y="-10\.1" style="">/g, '<text y="-10.1" style="" text-anchor="middle">');
 }
 
 function katanaNormalizeRequirementEdgeLabelSvg(svg) {

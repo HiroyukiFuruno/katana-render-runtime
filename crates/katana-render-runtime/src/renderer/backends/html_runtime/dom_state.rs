@@ -12,6 +12,8 @@ mod content_lookup;
 mod geometry;
 #[path = "dom_state_lookup.rs"]
 mod lookup;
+#[path = "dom_state_lookup_nodes.rs"]
+mod lookup_nodes;
 #[path = "dom_state_mutation.rs"]
 mod mutation;
 #[path = "dom_state_request.rs"]
@@ -71,9 +73,27 @@ pub(super) fn node_id(value: &str) -> Result<u64, String> {
 }
 
 #[cfg(test)]
-mod tests {
+mod test_support {
     use super::HtmlDomBridgeState;
+
+    pub(super) fn with_fixture_element(
+        state: &HtmlDomBridgeState,
+        id: &str,
+        action: impl FnOnce(String),
+    ) {
+        let node_id = state.document.borrow_mut().get_element_by_id(id);
+        assert!(node_id.is_some(), "fixture element #{id} must be indexed");
+        if let Some(node_id) = node_id {
+            action(node_id.to_string());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HtmlDomBridgeState, test_support::with_fixture_element};
     use crate::renderer::backends::html_document::HtmlDocument;
+    use crate::renderer::backends::html_runtime::types::DomValue;
 
     fn state() -> HtmlDomBridgeState {
         HtmlDomBridgeState::new(HtmlDocument::parse("<p id=target>Text</p>"))
@@ -96,6 +116,39 @@ mod tests {
                 .set_attribute("unsupported", &["1".to_string(), "state".to_string()])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn tree_mutations_update_registered_document_content() {
+        let state = HtmlDomBridgeState::new(HtmlDocument::parse("<div id=target>start</div>"));
+        with_fixture_element(&state, "target", |target| {
+            assert_dom_undefined(
+                state.mutate_tree("appendText", &[target.clone(), " appended".to_string()]),
+            );
+            assert_dom_undefined(state.mutate_tree(
+                "insertAdjacentText",
+                &[
+                    target.clone(),
+                    "afterbegin".to_string(),
+                    "prefix ".to_string(),
+                ],
+            ));
+            assert!(matches!(
+                state.lookup("textContent", &[target]),
+                Ok(DomValue::String(value)) if value == "prefix start appended"
+            ));
+        });
+    }
+
+    #[test]
+    fn resource_presence_lookup_detects_nested_image_and_frame_elements() {
+        let state = HtmlDomBridgeState::new(HtmlDocument::parse(
+            "<main><img src='x'><section><iframe></iframe></section></main>",
+        ));
+        assert!(matches!(
+            state.dispatch("resourcePresence", &[]),
+            Ok(super::super::types::DomValue::String(value)) if value == "1:1"
+        ));
     }
 
     #[test]
@@ -125,5 +178,90 @@ mod tests {
             state.lookup_node("not_supported", &[]),
             Err(error) if error == "unsupported HTML node lookup operation: not_supported"
         ));
+    }
+
+    #[test]
+    fn content_lookup_covers_markup_path_and_missing_attribute_contracts() {
+        let state = HtmlDomBridgeState::new(HtmlDocument::parse(
+            "<main><section id=scope><p id=target data-kind=card>Text</p></section></main>",
+        ));
+        with_fixture_element(&state, "target", |target| {
+            assert_content_markup(&state, &target)
+        });
+    }
+
+    fn assert_content_markup(state: &HtmlDomBridgeState, target: &str) {
+        assert!(matches!(
+            state.lookup("innerHTML", &[target.to_string()]),
+            Ok(DomValue::String(value)) if value == "Text"
+        ));
+        assert!(matches!(
+            state.lookup("outerHTML", &[target.to_string()]),
+            Ok(DomValue::String(value)) if value.contains("data-kind=\"card\"")
+        ));
+        assert_missing_content_lookups(state, target);
+    }
+
+    fn assert_missing_content_lookups(state: &HtmlDomBridgeState, target: &str) {
+        assert!(matches!(
+            state.lookup("getAttribute", &[target.to_string(), "missing".to_string()],),
+            Ok(DomValue::Null)
+        ));
+        assert!(matches!(
+            state.lookup("closest", &[target.to_string(), ".missing".to_string()]),
+            Ok(DomValue::Null)
+        ));
+        assert!(matches!(
+            state.lookup("resourcePresence", &[]),
+            Ok(DomValue::String(value)) if value == "0:0"
+        ));
+    }
+
+    #[test]
+    fn tree_and_attribute_mutations_cover_adjacent_remove_and_style_reset() {
+        let state = HtmlDomBridgeState::new(HtmlDocument::parse(
+            "<main><div id=target><span id=child>body</span></div></main>",
+        ));
+        with_fixture_element(&state, "target", |target| {
+            with_fixture_element(&state, "child", |child| {
+                apply_mutations(&state, &target, &child);
+            });
+        });
+    }
+
+    fn apply_mutations(state: &HtmlDomBridgeState, target: &str, child: &str) {
+        assert_dom_undefined(state.mutate_tree(
+            "insertAdjacentText",
+            &[target.to_string(), "afterbegin".into(), "pre".into()],
+        ));
+        assert_dom_undefined(state.mutate_tree(
+            "insertAdjacentHTML",
+            &[target.to_string(), "beforeend".into(), "<b>tail</b>".into()],
+        ));
+        assert_dom_undefined(state.mutate_tree("appendText", &[target.to_string(), "!".into()]));
+        assert_dom_undefined(state.set_attribute(
+            "setAttribute",
+            &[target.to_string(), "data-state".into(), "ready".into()],
+        ));
+        assert!(matches!(
+            state.style("styleGet", &[target.to_string(), "color".into()]),
+            Ok(DomValue::Null)
+        ));
+        finish_mutations(state, target, child);
+    }
+
+    fn finish_mutations(state: &HtmlDomBridgeState, target: &str, child: &str) {
+        assert_dom_undefined(state.mutate_tree("remove", &[child.to_string()]));
+        assert_dom_undefined(state.set_attribute(
+            "removeAttribute",
+            &[target.to_string(), "data-state".into()],
+        ));
+        assert!(
+            matches!(state.lookup("textContent", &[target.to_string()]), Ok(DomValue::String(value)) if value.contains("pre") && value.contains("tail"))
+        );
+    }
+
+    fn assert_dom_undefined(result: Result<DomValue, String>) {
+        assert!(matches!(result, Ok(DomValue::Undefined)));
     }
 }

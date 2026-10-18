@@ -1,7 +1,6 @@
 import { type RuntimeFragment, RuntimeFragmentFactory } from "#shared/runtime_bundle";
 
-const MERMAID_JS_RUNTIME =
-  "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime";
+const MERMAID_JS_RUNTIME = "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime";
 
 export const SharedDomFragments = {
   all(): RuntimeFragment[] {
@@ -39,6 +38,14 @@ export const SharedDomFragments = {
       RuntimeFragmentFactory.verbatim(
         "svg-path-bounds.js",
         `${MERMAID_JS_RUNTIME}/svg_path_bounds.js`,
+      ),
+      RuntimeFragmentFactory.verbatim(
+        "dom-text-font-context.js",
+        `${MERMAID_JS_RUNTIME}/dom_text_font_context.js`,
+      ),
+      RuntimeFragmentFactory.verbatim(
+        "dom-text-run-lines.js",
+        `${MERMAID_JS_RUNTIME}/dom_text_run_lines.js`,
       ),
       RuntimeFragmentFactory.verbatim("dom-measure.js", `${MERMAID_JS_RUNTIME}/dom_measure.js`),
       RuntimeFragmentFactory.verbatim(

@@ -1,6 +1,24 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { parse } from "@babel/parser";
+import type {
+  File,
+  ObjectExpression,
+  ObjectMethod,
+  ObjectProperty,
+  VariableDeclarator,
+} from "@babel/types";
+import {
+  isArrayExpression,
+  isIdentifier,
+  isObjectExpression,
+  isObjectMethod,
+  isObjectProperty,
+  isSpreadElement,
+  isStringLiteral,
+  isVariableDeclarator,
+} from "@babel/types";
 
 export type RuntimeAssetKind =
   | "mermaid"
@@ -20,25 +38,38 @@ export interface RuntimeAssetDefinition {
   readonly rustChecksumConst: string;
   readonly rustDownloadConst: string;
   readonly latestUrl: string;
+  readonly source?: {
+    readonly kind: "patched-upstream";
+    readonly upstreamVersion: string;
+    readonly immutableUrl: string;
+    readonly provenancePath: string;
+  };
   releasePageUrl(version: string): string;
   downloadUrl(version: string): string;
 }
+
+const MERMAID_PATCHED_URL =
+  "https://raw.githubusercontent.com/HiroyukiFuruno/katana-render-runtime/v0.4.24/crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js";
 
 const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "mermaid",
     displayName: "Mermaid.js",
-    version: "12.1.0",
-    checksum: "6484afc32872a3aa16cac9a76ba1816a1ed4cc870a6593cc2e17757750f518b2",
+    version: "12.2.0-krr.pr6823.1",
+    checksum: "831ed9d054742315d8edcb9bb933c6e56fd79d0c187a2cdf41ad48e388583a4c",
     fileName: "mermaid.min.js",
     rustVersionConst: "MERMAID_JS_VERSION",
     rustChecksumConst: "MERMAID_JS_CHECKSUM",
     rustDownloadConst: "MERMAID_DOWNLOAD_URL",
     latestUrl: "https://registry.npmjs.org/mermaid/latest",
-    releasePageUrl: (version: string) =>
-      `https://cdn.jsdelivr.net/npm/mermaid@${version}/dist/mermaid.min.js`,
-    downloadUrl: (version: string) =>
-      `https://cdn.jsdelivr.net/npm/mermaid@${version}/dist/mermaid.min.js`,
+    source: {
+      kind: "patched-upstream",
+      upstreamVersion: "12.2.0",
+      immutableUrl: MERMAID_PATCHED_URL,
+      provenancePath: "scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.provenance.json",
+    },
+    releasePageUrl: () => MERMAID_PATCHED_URL,
+    downloadUrl: () => MERMAID_PATCHED_URL,
   },
   {
     kind: "mermaid-zenuml",
@@ -58,8 +89,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "zenuml-core",
     displayName: "ZenUML Core",
-    version: "4.4.1",
-    checksum: "9b0465fca4a804ab19965296f6567fd8cd9f797eee0af6c2daf7472b0191cd53",
+    version: "4.7.2",
+    checksum: "45120d40efdab49ae9d8175e80d06a83136647cc1bf04054a1dd7d38925e7435",
     fileName: "zenuml.js",
     rustVersionConst: "ZENUML_CORE_JS_VERSION",
     rustChecksumConst: "ZENUML_CORE_JS_CHECKSUM",
@@ -73,8 +104,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "drawio",
     displayName: "Draw.io",
-    version: "32.0.2",
-    checksum: "21c390edd6aff2aa527596c0cddb90a3059dc40f39104c0df85790252608dcca",
+    version: "32.4.1",
+    checksum: "4aa6456e721fa52964eab5eac1d92a1a5483471d510b8e555c4295791724fd9c",
     fileName: "drawio.min.js",
     rustVersionConst: "DRAWIO_JS_VERSION",
     rustChecksumConst: "DRAWIO_JS_CHECKSUM",
@@ -130,6 +161,133 @@ export const RuntimeAssetCatalog = {
     return definition;
   },
 };
+
+export function runtimeAssetUpstreamVersion(definition: RuntimeAssetDefinition): string {
+  return definition.source?.upstreamVersion ?? definition.version;
+}
+
+export function isPatchedRuntimeAsset(definition: RuntimeAssetDefinition): boolean {
+  return definition.source?.kind === "patched-upstream";
+}
+
+export function runtimeAssetFreshnessEntries(
+  source: string,
+): readonly { kind: string; version: string; latestUrl: string }[] {
+  const file = parse(source, {
+    sourceType: "module",
+    plugins: ["typescript"],
+    errorRecovery: false,
+  });
+  const definitions = findDefinitions(file);
+  const declaration = definitions[0];
+  if (definitions.length !== 1 || declaration === undefined) {
+    throw new Error("Runtime asset DEFINITIONS declaration must be unique");
+  }
+  return readDefinitions(declaration);
+}
+
+function findDefinitions(file: File): VariableDeclarator[] {
+  const found: VariableDeclarator[] = [];
+  for (const statement of file.program.body) {
+    const declaration =
+      statement.type === "VariableDeclaration"
+        ? statement
+        : statement.type === "ExportNamedDeclaration" &&
+            statement.declaration?.type === "VariableDeclaration"
+          ? statement.declaration
+          : undefined;
+    if (declaration === undefined) continue;
+    for (const candidate of declaration.declarations) {
+      if (
+        isVariableDeclarator(candidate) &&
+        isIdentifier(candidate.id) &&
+        candidate.id.name === "DEFINITIONS"
+      ) {
+        found.push(candidate);
+      }
+    }
+  }
+  return found;
+}
+
+function readDefinitions(
+  declaration: VariableDeclarator,
+): readonly { kind: string; version: string; latestUrl: string }[] {
+  if (
+    declaration.init === null ||
+    declaration.init === undefined ||
+    !isArrayExpression(declaration.init)
+  ) {
+    throw new Error("Runtime asset DEFINITIONS must be an array literal");
+  }
+  const rows: { kind: string; version: string; latestUrl: string }[] = [];
+  const kinds = new Set<string>();
+  for (const element of declaration.init.elements) {
+    if (element === null || element.type === "SpreadElement" || !isObjectExpression(element)) {
+      throw new Error("Runtime asset definitions must be direct object literals");
+    }
+    const properties = objectProperties(element);
+    const kind = stringProperty(properties, "kind");
+    if (kinds.has(kind)) throw new Error(`Duplicate runtime asset kind: ${kind}`);
+    kinds.add(kind);
+    const version = assetVersion(properties);
+    rows.push({ kind, version, latestUrl: stringProperty(properties, "latestUrl") });
+  }
+  if (rows.length === 0) throw new Error("Runtime asset DEFINITIONS must not be empty");
+  return rows;
+}
+
+function objectProperties(object: ObjectExpression): Map<string, ObjectProperty | ObjectMethod> {
+  const properties = new Map<string, ObjectProperty | ObjectMethod>();
+  for (const member of object.properties) {
+    if (isSpreadElement(member)) throw new Error("Runtime asset object spreads are not supported");
+    if (!isObjectProperty(member) && !isObjectMethod(member))
+      throw new Error("Unsupported runtime asset member");
+    if (member.computed || (!isIdentifier(member.key) && !isStringLiteral(member.key))) {
+      throw new Error("Runtime asset property names must be literal identifiers or strings");
+    }
+    const key = member.key.type === "Identifier" ? member.key.name : member.key.value;
+    if (properties.has(key)) throw new Error(`Duplicate runtime asset key: ${key}`);
+    properties.set(key, member);
+  }
+  return properties;
+}
+
+function stringProperty(
+  properties: Map<string, ObjectProperty | ObjectMethod>,
+  key: string,
+): string {
+  const property = properties.get(key);
+  if (property === undefined || !isObjectProperty(property) || !isStringLiteral(property.value)) {
+    throw new Error(`Runtime asset ${key} must be a direct string literal`);
+  }
+  if (property.value.value === "") throw new Error(`Runtime asset ${key} must not be empty`);
+  return property.value.value;
+}
+
+function assetVersion(properties: Map<string, ObjectProperty | ObjectMethod>): string {
+  const artifactVersion = stringProperty(properties, "version");
+  const source = properties.get("source");
+  if (source === undefined) return artifactVersion;
+  if (!isObjectProperty(source) || !isObjectExpression(source.value)) {
+    throw new Error("Runtime asset source must be an object literal");
+  }
+  const sourceProperties = objectProperties(source.value);
+  if (stringProperty(sourceProperties, "kind") !== "patched-upstream") {
+    throw new Error("Unsupported runtime asset source kind");
+  }
+  return stringProperty(sourceProperties, "upstreamVersion");
+}
+
+function runFreshnessCatalogCli(argv: readonly string[]): void {
+  const [flag, catalogArgument] = argv;
+  if (argv.length !== 2 || flag !== "--freshness-catalog" || catalogArgument === undefined) {
+    throw new Error("Expected exactly --freshness-catalog <catalog.ts path>");
+  }
+  const catalogPath = path.resolve(catalogArgument);
+  const source = fs.readFileSync(catalogPath, "utf8");
+  process.stdout.write(`${JSON.stringify(runtimeAssetFreshnessEntries(source))}\n`);
+}
 
 export const RuntimeAssetCatalogSource = {
   updatePinnedAsset(
@@ -244,3 +402,12 @@ export const RuntimeAssetChecksum = {
     return checksum;
   },
 };
+
+if (import.meta.main) {
+  try {
+    runFreshnessCatalogCli(process.argv.slice(2));
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+}

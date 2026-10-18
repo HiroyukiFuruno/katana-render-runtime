@@ -1,6 +1,41 @@
 use super::support::{TestResult, click_element, start_with_viewport, to_string};
 use crate::renderer::backends::html_browser::HtmlBrowserInput;
 
+macro_rules! target_observer_document {
+    ($layout:literal, $options:literal) => {
+        concat!(
+            $layout,
+            r##"<script>
+const root = document.getElementById("root");
+new IntersectionObserver((entries) => {
+  const entry = entries[0];
+  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+}, "##,
+            $options,
+            r##").observe(document.getElementById("target"));
+</script>"##
+        )
+    };
+}
+
+macro_rules! dimensional_target_document {
+    ($layout:literal, $bindings:literal, $entry_bindings:literal, $options:literal) => {
+        concat!(
+            $layout,
+            "<script>\n",
+            $bindings,
+            "new IntersectionObserver((entries) => {\n  const entry = entries[0];\n",
+            $entry_bindings,
+            r##"  observed.setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
+  observed.setAttribute("data-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
+}, "##,
+            $options,
+            r##").observe(document.getElementById("target"));
+</script>"##
+        )
+    };
+}
+
 #[test]
 fn intersection_observer_tracks_rendered_sections_after_real_host_scroll() -> TestResult {
     let mut session = start_with_viewport(intersection_document(), 160, 100)?;
@@ -36,6 +71,25 @@ fn negative_bottom_root_margin_changes_toc_during_real_host_scroll() -> TestResu
         })
         .map_err(to_string)?;
 
+    assert_active_anchor(&session, "two")
+}
+
+#[test]
+fn percentage_root_margin_tracks_active_section_after_scroll() -> TestResult {
+    let mut session = start_with_viewport(percentage_root_margin_document(), 320, 240)?;
+
+    assert_active_anchor(&session, "one")?;
+    let initial = session.runtime.snapshot().map_err(to_string)?;
+    assert!(
+        initial.contains(r##"data-root-bounds="24:60""##),
+        "percentage root margins must resolve vertical offsets from viewport height: {initial}"
+    );
+    session
+        .dispatch_input(HtmlBrowserInput::Scroll {
+            delta_x: 0.0,
+            delta_y: 120.0,
+        })
+        .map_err(to_string)?;
     assert_active_anchor(&session, "two")
 }
 
@@ -90,7 +144,7 @@ fn observer_content_collapse_clamps_scroll_before_the_scroll_handler_runs() -> T
 
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
     let expected_scroll = session.max_scroll();
-    assert_eq!(session.scroll_y, expected_scroll);
+    assert_eq!(session.scroll_geometry.scroll_y, expected_scroll);
     assert!(
         snapshot.contains(&format!(r##"data-scroll-y="{expected_scroll}""##)),
         "the scroll handler must receive the collapsed layout's max scroll {expected_scroll}: {snapshot}"
@@ -598,8 +652,17 @@ fn rotated_overflow_clip_keeps_its_shape_in_real_host() -> TestResult {
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
 
     assert!(
-        snapshot.contains(r##"data-target="false:0""##),
+        snapshot.contains(r##"data-outside="false:0""##),
         "a target in the rotated clip AABB but outside its shape must not intersect: {snapshot}"
+    );
+    let (inside_intersects, inside_ratio) = observed_boolean_number(&snapshot, "data-inside")?;
+    assert!(
+        inside_intersects && inside_ratio.is_finite() && inside_ratio > 0.0,
+        "a target inside the rotated clip must still intersect with a positive ratio: {snapshot}"
+    );
+    assert!(
+        snapshot.contains(r##"data-clip-rotated="true""##),
+        "overflow metadata must preserve the clip's rotated corners: {snapshot}"
     );
     Ok(())
 }
@@ -728,6 +791,24 @@ const observer = new IntersectionObserver((entries) => {
     document.querySelector(`a[href="#${entry.target.id}"]`).classList.toggle("active", entry.isIntersecting);
   }
 }, { rootMargin: "0px 0px -80px 0px" });
+document.querySelectorAll("section").forEach((section) => observer.observe(section));
+</script>"##
+}
+
+fn percentage_root_margin_document() -> &'static str {
+    r##"<style>
+html, body { margin: 0; }
+section { height: 120px; }
+</style>
+<nav><a class=toc-item href=#one>One</a><a class=toc-item href=#two>Two</a></nav>
+<section id=one>First</section><section id=two>Second</section><div style="height: 240px"></div>
+<script>
+const observer = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    document.querySelector(`a[href="#${entry.target.id}"]`).classList.toggle("active", entry.isIntersecting);
+    document.querySelector("nav").setAttribute("data-root-bounds", `${entry.rootBounds.top}:${entry.rootBounds.bottom}`);
+  }
+}, { rootMargin: "-10% 0% -75% 0%" });
 document.querySelectorAll("section").forEach((section) => observer.observe(section));
 </script>"##
 }
@@ -1183,38 +1264,34 @@ new IntersectionObserver((entries) => {
 }
 
 fn over_shrunk_root_margin_document() -> &'static str {
-    r##"<style>
+    dimensional_target_document!(
+        r##"<style>
 html, body { margin: 0; }
 #root { position: relative; width: 100px; height: 100px; }
 #target { position: absolute; left: 40px; top: 40px; width: 20px; height: 20px; }
 </style>
 <div id=root><div id=target>Central target</div></div><p id=observed></p>
-<script>
-const observed = document.getElementById("observed");
-new IntersectionObserver((entries) => {
-  const entry = entries[0];
-  observed.setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
-  observed.setAttribute("data-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
-}, { root: document.getElementById("root"), rootMargin: "-60px" }).observe(document.getElementById("target"));
-</script>"##
+"##,
+        "const observed = document.getElementById(\"observed\");\n",
+        "",
+        r##"{ root: document.getElementById("root"), rootMargin: "-60px" }"##
+    )
 }
 
 fn over_shrunk_root_margin_with_ancestor_clip_document() -> &'static str {
-    r##"<style>
+    dimensional_target_document!(
+        r##"<style>
 html, body { margin: 0; }
 #root { position: relative; width: 100px; height: 100px; }
 #clip { width: 100px; height: 100px; overflow: hidden; }
 #target { width: 20px; height: 20px; margin: 40px; }
 </style>
 <div id=root><div id=clip><div id=target>Central target</div></div></div><p id=observed></p>
-<script>
-const observed = document.getElementById("observed");
-new IntersectionObserver((entries) => {
-  const entry = entries[0];
-  observed.setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
-  observed.setAttribute("data-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
-}, { root: document.getElementById("root"), rootMargin: "-60px" }).observe(document.getElementById("target"));
-</script>"##
+"##,
+        "const observed = document.getElementById(\"observed\");\n",
+        "",
+        r##"{ root: document.getElementById("root"), rootMargin: "-60px" }"##
+    )
 }
 
 fn bordered_element_root_document() -> &'static str {
@@ -1265,121 +1342,131 @@ new IntersectionObserver((entries) => {
 }
 
 fn zero_sized_overflow_root_document() -> &'static str {
-    r##"<style>
+    dimensional_target_document!(
+        r##"<style>
 html, body { margin: 0; }
 #root { position: relative; width: 0; height: 0; overflow: hidden; }
 #target { position: absolute; left: 100px; top: 100px; width: 20px; height: 20px; }
 </style>
 <div id=root><div id=target>Distant target</div></div><p id=observed></p>
-<script>
-const root = document.getElementById("root");
-new IntersectionObserver((entries) => {
-  const entry = entries[0];
-  const observed = document.getElementById("observed");
-  observed.setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
-  observed.setAttribute("data-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
-}, { root }).observe(document.getElementById("target"));
-</script>"##
+"##,
+        "const root = document.getElementById(\"root\");\n",
+        "  const observed = document.getElementById(\"observed\");\n",
+        "{ root }"
+    )
 }
 
 fn collapsed_root_margin_document() -> &'static str {
-    r##"<style>
+    dimensional_target_document!(
+        r##"<style>
 html, body { margin: 0; }
 #root { position: relative; width: 100px; height: 100px; }
 #target { position: absolute; left: 100px; top: 100px; width: 20px; height: 20px; }
 </style>
 <div id=root><div id=target>Distant target</div></div><p id=observed></p>
-<script>
-const root = document.getElementById("root");
-new IntersectionObserver((entries) => {
-  const entry = entries[0];
-  const observed = document.getElementById("observed");
-  observed.setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
-  observed.setAttribute("data-intersection", `${entry.intersectionRect.width}:${entry.intersectionRect.height}`);
-}, { root, rootMargin: "-50px" }).observe(document.getElementById("target"));
-</script>"##
+"##,
+        "const root = document.getElementById(\"root\");\n",
+        "  const observed = document.getElementById(\"observed\");\n",
+        r##"{ root, rootMargin: "-50px" }"##
+    )
 }
 
 fn unclipped_bordered_element_root_document() -> &'static str {
-    r##"<style>
+    target_observer_document!(
+        r##"<style>
 html, body { margin: 0; }
 #root { position: relative; width: 80px; height: 40px; border: 4px solid; }
 #target { position: absolute; top: 0; left: 4px; width: 20px; height: 3px; }
 </style>
 <div id=root><div id=target>Border</div></div><p id=observed></p>
-<script>
-const root = document.getElementById("root");
-new IntersectionObserver((entries) => {
-  const entry = entries[0];
-  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
-}, { root }).observe(document.getElementById("target"));
-</script>"##
+"##,
+        "{ root }"
+    )
 }
 
-fn rotated_overflow_clip_document() -> &'static str {
-    r##"<style>
+const ROTATED_OVERFLOW_CLIP_DOCUMENT: &str = r##"<style>
 html, body { margin: 0; }
 #root { position: relative; width: 160px; height: 160px; }
 #clip { position: relative; width: 100px; height: 100px; overflow: hidden; transform: rotate(45deg); }
-#target { position: absolute; left: 120px; top: 0; width: 20px; height: 20px; }
+#outside { position: absolute; left: 120px; top: 0; width: 20px; height: 20px; }
+#inside { position: absolute; left: 30px; top: 30px; width: 10px; height: 10px; }
 </style>
-<div id=root><div id=clip><div id=target>Outside</div></div></div><p id=observed></p>
+<div id=root><div id=clip><div id=outside>Outside</div><div id=inside>Inside</div></div></div><p id=observed></p>
 <script>
 const root = document.getElementById("root");
-new IntersectionObserver((entries) => {
-  const entry = entries[0];
-  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
-}, { root }).observe(document.getElementById("target"));
-</script>"##
+const outside = document.getElementById("outside");
+const inside = document.getElementById("inside");
+const clip = document.getElementById("clip");
+const observer = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    document.getElementById("observed").setAttribute(`data-${entry.target.id}`, `${entry.isIntersecting}:${entry.intersectionRatio}`);
+    if (entry.target === outside) {
+      const metadataText = __krrNativeDom("intersectionMetadata", outside.__krrNodeId);
+      document.getElementById("observed").setAttribute("data-clip-metadata", metadataText);
+      const metadata = JSON.parse(metadataText);
+      const clips = Array.isArray(metadata?.clips) ? metadata.clips : [];
+      const clipMetadata = clips.find((candidate) => String(candidate.owner) === clip.__krrNodeId);
+      const corners = clipMetadata?.corners;
+      const validCorners =
+        Array.isArray(corners) &&
+        corners.length === 4 &&
+        corners.every((corner) =>
+          Array.isArray(corner) && corner.length === 2 && corner.every(Number.isFinite));
+      const rotatedCorners =
+        validCorners && Math.abs(corners[0][1] - corners[1][1]) > 0.001;
+      const observed = document.getElementById("observed");
+      observed.setAttribute("data-clip-owner-found", String(Boolean(clipMetadata)));
+      observed.setAttribute("data-clip-corners-valid", String(validCorners));
+      observed.setAttribute("data-clip-rotated", String(rotatedCorners));
+    }
+  }
+}, { root });
+observer.observe(outside);
+observer.observe(inside);
+</script>"##;
+
+fn rotated_overflow_clip_document() -> &'static str {
+    ROTATED_OVERFLOW_CLIP_DOCUMENT
 }
 
 fn rotated_rounded_overflow_clip_document() -> &'static str {
-    r##"<style>
+    target_observer_document!(
+        r##"<style>
 html, body { margin: 0; }
 #root { position: relative; width: 160px; height: 160px; }
 #clip { position: relative; width: 120px; height: 40px; overflow: hidden; border-radius: 20px; transform: rotate(45deg); }
 #target { position: absolute; left: 30px; top: 5px; width: 10px; height: 10px; }
 </style>
 <div id=root><div id=clip><div id=target>Rounded edge</div></div></div><p id=observed></p>
-<script>
-const root = document.getElementById("root");
-new IntersectionObserver((entries) => {
-  const entry = entries[0];
-  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
-}, { root }).observe(document.getElementById("target"));
-</script>"##
+"##,
+        "{ root }"
+    )
 }
 
 fn rounded_element_root_document() -> &'static str {
-    r##"<style>
+    target_observer_document!(
+        r##"<style>
 html, body { margin: 0; }
 #root { position: relative; width: 100px; height: 100px; border-radius: 50%; overflow: hidden; }
 #target { position: absolute; left: 0; top: 0; width: 10px; height: 10px; }
 </style>
 <div id=root><div id=target>Corner</div></div><p id=observed></p>
-<script>
-const root = document.getElementById("root");
-new IntersectionObserver((entries) => {
-  const entry = entries[0];
-  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
-}, { root }).observe(document.getElementById("target"));
-</script>"##
+"##,
+        "{ root }"
+    )
 }
 
 fn rounded_element_root_margin_document() -> &'static str {
-    r##"<style>
+    target_observer_document!(
+        r##"<style>
 html, body { margin: 0; }
 #root { position: relative; width: 100px; height: 100px; border-radius: 50%; overflow: hidden; }
 #target { position: absolute; left: -10px; top: 0; width: 5px; height: 5px; }
 </style>
 <div id=root><div id=target>Corner</div></div><p id=observed></p>
-<script>
-const root = document.getElementById("root");
-new IntersectionObserver((entries) => {
-  const entry = entries[0];
-  document.getElementById("observed").setAttribute("data-target", `${entry.isIntersecting}:${entry.intersectionRatio}`);
-}, { root, rootMargin: "10px" }).observe(document.getElementById("target"));
-</script>"##
+"##,
+        r##"{ root, rootMargin: "10px" }"##
+    )
 }
 
 fn asymmetric_border_root_document() -> &'static str {
@@ -1462,6 +1549,26 @@ fn observed_number(snapshot: &str, attribute: &str) -> TestResult<f32> {
     value
         .parse::<f32>()
         .map_err(|error| format!("invalid {attribute} {value:?}: {error}"))
+}
+fn observed_boolean_number(snapshot: &str, attribute: &str) -> TestResult<(bool, f32)> {
+    let prefix = format!("{attribute}=\"");
+    let value = snapshot
+        .split(&prefix)
+        .nth(1)
+        .and_then(|tail| tail.split('\"').next())
+        .ok_or_else(|| format!("missing {attribute}: {snapshot}"))?;
+    let (boolean, number) = value
+        .split_once(':')
+        .ok_or_else(|| format!("invalid {attribute} {value:?}: expected bool:number"))?;
+    let boolean = match boolean {
+        "true" => true,
+        "false" => false,
+        _ => return Err(format!("invalid {attribute} boolean {boolean:?}")),
+    };
+    let number = number
+        .parse::<f32>()
+        .map_err(|error| format!("invalid {attribute} number {number:?}: {error}"))?;
+    Ok((boolean, number))
 }
 
 fn dispatch_scroll(session: &mut super::super::HtmlInteractiveSession) -> TestResult {

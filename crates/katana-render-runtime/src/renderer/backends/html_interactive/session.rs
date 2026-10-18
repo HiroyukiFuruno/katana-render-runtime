@@ -1,13 +1,20 @@
 use super::super::html_browser::{
-    HtmlBrowserFrame, HtmlBrowserNavigationEvent, HtmlBrowserSource, HtmlBrowserViewport,
+    HtmlBrowserFrame, HtmlBrowserNavigationEvent, HtmlBrowserScrollMetrics, HtmlBrowserSource,
+    HtmlBrowserViewport,
 };
 use super::super::html_debug_trace::HtmlDebugTrace;
 use super::super::html_runtime::{StaticHtmlRuntime, StaticHtmlRuntimeSession};
 use super::super::html_subresources::HtmlSubresourcePolicy;
-use super::session_geometry::max_scroll_for;
+use super::layout_measurement_cache::FlowMeasurementCache;
+use super::session_scroll_geometry::HtmlInteractiveScrollGeometry;
 use super::types::{ElementBox, HitTarget};
 use super::{HtmlBrowserError, runtime_failure};
-use std::collections::{HashMap, HashSet};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    ops::{Deref, DerefMut},
+    rc::Rc,
+};
 
 /// In-process Rust/V8 HTML session. It owns the DOM, layout, hit-test and
 /// raster frame so downstream crates only exchange frames and input events.
@@ -15,21 +22,48 @@ pub(in crate::renderer::backends) struct HtmlInteractiveSession {
     pub(super) source: HtmlBrowserSource,
     pub(super) viewport: HtmlBrowserViewport,
     pub(super) runtime: StaticHtmlRuntimeSession,
+    pub(super) state: HtmlInteractiveSessionState,
+    pub(super) resource_policy: HtmlSubresourcePolicy,
+    pub(super) trace: HtmlDebugTrace,
+    pub(super) flow_measurements: Rc<RefCell<FlowMeasurementCache>>,
+    pub(super) flow_projection_fingerprint: Option<u64>,
+}
+
+#[derive(Default)]
+pub(in crate::renderer::backends) struct HtmlInteractiveSessionState {
     pub(super) generation: u64,
     pub(super) latest_frame: Option<HtmlBrowserFrame>,
+    pub(super) latest_scroll_metrics: Option<HtmlBrowserScrollMetrics>,
     pub(super) hit_targets: Vec<HitTarget>,
     pub(super) element_boxes: Vec<ElementBox>,
     pub(super) hovered_nodes: HashSet<u64>,
     pub(super) input_values: HashMap<u64, String>,
     pub(super) pressed_target: Option<u64>,
     pub(super) focused_input: Option<u64>,
+    pub(super) focused_node: Option<u64>,
+    pub(super) tab_order: Vec<u64>,
+    pub(super) pointer_focusable_nodes: HashSet<u64>,
+    pub(super) keyboard_modality: bool,
+    pub(super) shift_pressed: bool,
+    pub(super) focus_visible: bool,
     pub(super) dirty_inputs: HashSet<u64>,
-    pub(super) scroll_y: f32,
-    pub(super) content_height: f32,
+    pub(super) scroll_geometry: HtmlInteractiveScrollGeometry,
     pub(super) resize_anchor: Option<String>,
     pub(super) pending_navigation: Option<HtmlBrowserNavigationEvent>,
-    pub(super) resource_policy: HtmlSubresourcePolicy,
-    pub(super) trace: HtmlDebugTrace,
+}
+
+impl Deref for HtmlInteractiveSession {
+    type Target = HtmlInteractiveSessionState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
+impl DerefMut for HtmlInteractiveSession {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
 }
 
 impl HtmlInteractiveSession {
@@ -64,26 +98,22 @@ impl HtmlInteractiveSession {
             source,
             viewport,
             runtime,
-            generation: 0,
-            latest_frame: None,
-            hit_targets: Vec::new(),
-            element_boxes: Vec::new(),
-            hovered_nodes: HashSet::new(),
-            input_values: HashMap::new(),
-            pressed_target: None,
-            focused_input: None,
-            dirty_inputs: HashSet::new(),
-            scroll_y: 0.0,
-            content_height: 0.0,
-            resize_anchor: None,
-            pending_navigation: None,
+            state: HtmlInteractiveSessionState::default(),
             resource_policy,
             trace,
+            flow_measurements: Rc::new(RefCell::new(FlowMeasurementCache::default())),
+            flow_projection_fingerprint: None,
         }
     }
 
     pub(in crate::renderer::backends) fn latest_frame(&self) -> Option<&HtmlBrowserFrame> {
         self.latest_frame.as_ref()
+    }
+
+    pub(in crate::renderer::backends) fn latest_scroll_metrics(
+        &self,
+    ) -> Option<&HtmlBrowserScrollMetrics> {
+        self.latest_scroll_metrics.as_ref()
     }
 
     pub(in crate::renderer::backends) fn take_navigation(
@@ -96,21 +126,28 @@ impl HtmlInteractiveSession {
         self.render_frame()
     }
 
+    pub(in crate::renderer::backends) fn advance_time(
+        &mut self,
+        elapsed_ms: f64,
+    ) -> Result<(), HtmlBrowserError> {
+        if self
+            .runtime
+            .advance_timers(elapsed_ms)
+            .map_err(runtime_failure)?
+        {
+            self.render_frame()?;
+        }
+        Ok(())
+    }
+
     pub(in crate::renderer::backends) fn resize(
         &mut self,
         viewport: HtmlBrowserViewport,
     ) -> Result<(), HtmlBrowserError> {
         viewport.validate()?;
         self.viewport = viewport;
-        let layout = self.layout()?;
-        let next_scroll = self
-            .resize_anchor
-            .as_ref()
-            .and_then(|anchor| layout.anchor_positions.get(anchor))
-            .copied()
-            .unwrap_or(self.scroll_y);
-        self.scroll_y = next_scroll.clamp(0.0, max_scroll_for(&layout, viewport));
-        self.render_frame()
+        self.flow_projection_fingerprint = None;
+        self.render_resize_frame()
     }
 }
 

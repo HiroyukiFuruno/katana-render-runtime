@@ -13,6 +13,7 @@ pub(super) struct SelectedDeclaration {
     rule_order: usize,
     declaration_order: usize,
     important: bool,
+    author_origin: bool,
 }
 
 pub(super) fn style_attribute(attributes: &HtmlAttributes) -> &str {
@@ -28,6 +29,7 @@ pub(super) fn select_declaration(
     specificity: u16,
     rule_order: usize,
     declaration_order: usize,
+    author_origin: bool,
 ) {
     let candidate = SelectedDeclaration {
         name: declaration.name.clone(),
@@ -36,6 +38,7 @@ pub(super) fn select_declaration(
         rule_order,
         declaration_order,
         important: declaration.important,
+        author_origin,
     };
     let Some(current) = selected
         .iter_mut()
@@ -50,9 +53,10 @@ pub(super) fn select_declaration(
 }
 
 impl SelectedDeclaration {
-    fn precedence(&self) -> (bool, u16, usize, usize) {
+    fn precedence(&self) -> (bool, bool, u16, usize, usize) {
         (
             self.important,
+            self.author_origin,
             self.specificity,
             self.rule_order,
             self.declaration_order,
@@ -60,13 +64,23 @@ impl SelectedDeclaration {
     }
 }
 
+fn inherited_custom_declarations(style: &str) -> Vec<CssDeclaration> {
+    /* WHY: 通常の祖先styleを全要素・疑似要素で再parseせず、escapeされたcustom名は通常parserで保持する。 */
+    if !style.contains("--") && !style.contains('\\') {
+        return Vec::new();
+    }
+    parse_declarations(style)
+        .into_iter()
+        .filter(|declaration| declaration.name.starts_with("--"))
+        .collect()
+}
+
 pub(super) fn inherited_custom_properties(ancestors: &[CssAncestor]) -> Vec<SelectedDeclaration> {
     let mut selected = Vec::new();
     for (ancestor_order, ancestor) in ancestors.iter().enumerate() {
         for (declaration_order, declaration) in
-            parse_declarations(style_attribute(ancestor.attributes()))
+            inherited_custom_declarations(style_attribute(ancestor.attributes()))
                 .iter()
-                .filter(|declaration| declaration.name.starts_with("--"))
                 .enumerate()
         {
             let inherited = CssDeclaration {
@@ -80,6 +94,7 @@ pub(super) fn inherited_custom_properties(ancestors: &[CssAncestor]) -> Vec<Sele
                 0,
                 ancestor_order,
                 declaration_order,
+                true,
             );
         }
     }
@@ -195,6 +210,7 @@ mod tests {
                 rule_order: 0,
                 declaration_order: 0,
                 important: false,
+                author_origin: true,
             },
             SelectedDeclaration {
                 name: "color".to_string(),
@@ -203,6 +219,7 @@ mod tests {
                 rule_order: 0,
                 declaration_order: 1,
                 important: false,
+                author_origin: true,
             },
         ];
 
@@ -221,6 +238,7 @@ mod tests {
                 rule_order: 0,
                 declaration_order: 0,
                 important: false,
+                author_origin: true,
             },
             SelectedDeclaration {
                 name: "color".to_string(),
@@ -229,6 +247,7 @@ mod tests {
                 rule_order: 0,
                 declaration_order: 1,
                 important: false,
+                author_origin: true,
             },
         ];
 
@@ -293,5 +312,18 @@ mod tests {
             ),
             Some("fallback".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod inherited_parse_tests {
+    #[test]
+    fn inherited_custom_properties_preserve_escaped_names_and_omit_ordinary_styles() {
+        assert!(super::inherited_custom_declarations("font-size: 16px; color: green").is_empty());
+        let declarations =
+            super::inherited_custom_declarations(r"\2d\2d marker: green; color: red");
+        assert_eq!(declarations.len(), 1);
+        assert_eq!(declarations[0].name, "--marker");
+        assert_eq!(declarations[0].value, "green");
     }
 }

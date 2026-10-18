@@ -1,0 +1,117 @@
+use super::{html_font_db_for_measured_text, matching_font_face};
+use rustybuzz::ttf_parser::{Face, Tag};
+
+#[cfg(not(target_os = "macos"))]
+const OS2_AVERAGE_CHAR_WIDTH_BYTES: std::ops::Range<usize> = 2..4;
+#[cfg(target_os = "windows")]
+const HHEA_MAX_ADVANCE_BYTES: std::ops::Range<usize> = 10..12;
+
+pub(crate) struct InputCharacterMetrics {
+    pub(crate) average: f32,
+    pub(crate) maximum: f32,
+    pub(crate) average_from_primary_font: bool,
+}
+
+pub(in super::super) fn html_input_character_metrics(
+    family: &str,
+    size: f32,
+    weight: u16,
+    italic: bool,
+) -> Option<InputCharacterMetrics> {
+    let size = super::effective_html_font_size(size);
+    let database = html_font_db_for_measured_text(family, "x0", weight, italic);
+    let id = matching_font_face(&database, family, weight, italic)?;
+    database.with_face_data(id, |data, index| {
+        let mut face = Face::parse(data, index).ok()?;
+        for (tag, value) in [
+            (Tag::from_bytes(b"wght"), f32::from(weight)),
+            (Tag::from_bytes(b"ital"), if italic { 1.0 } else { 0.0 }),
+            (Tag::from_bytes(b"opsz"), size),
+        ] {
+            let _ = face.set_variation(tag, value);
+        }
+        character_metrics(&face, size / f32::from(face.units_per_em()))
+    })?
+}
+
+#[cfg(target_os = "macos")]
+fn character_metrics(face: &Face<'_>, scale: f32) -> Option<InputCharacterMetrics> {
+    /* WHY: BlinkのmacOS入力幅は平均をx glyph、最大をprimary fontのascentから求める。 */
+    let average = f32::from(face.glyph_hor_advance(face.glyph_index('x')?)?) * scale;
+    Some(InputCharacterMetrics {
+        average,
+        maximum: f32::from(face.ascender()) * scale,
+        average_from_primary_font: true,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn character_metrics(face: &Face<'_>, scale: f32) -> Option<InputCharacterMetrics> {
+    let table = face.raw_face().table(Tag::from_bytes(b"OS/2"))?;
+    let average = f32::from(i16::from_be_bytes(
+        table.get(OS2_AVERAGE_CHAR_WIDTH_BYTES)?.try_into().ok()?,
+    )) * scale;
+    if average <= 0.0 {
+        let zero = f32::from(face.glyph_hor_advance(face.glyph_index('0')?)?) * scale;
+        return Some(InputCharacterMetrics {
+            average: zero,
+            maximum: zero,
+            average_from_primary_font: false,
+        });
+    }
+    Some(InputCharacterMetrics {
+        average,
+        maximum: maximum_character_width(face, scale)?,
+        average_from_primary_font: true,
+    })
+}
+
+#[cfg(all(not(target_os = "macos"), target_os = "windows"))]
+fn maximum_character_width(face: &Face<'_>, scale: f32) -> Option<f32> {
+    let table = face.raw_face().table(Tag::from_bytes(b"hhea"))?;
+    Some(
+        f32::from(u16::from_be_bytes(
+            table.get(HHEA_MAX_ADVANCE_BYTES)?.try_into().ok()?,
+        )) * scale,
+    )
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn maximum_character_width(face: &Face<'_>, scale: f32) -> Option<f32> {
+    let bounds = face.global_bounding_box();
+    Some((f32::from(bounds.x_max) - f32::from(bounds.x_min)) * scale)
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::html_input_character_metrics;
+
+    #[test]
+    fn fractional_font_size_uses_chrome_font_cache_precision() {
+        use crate::markdown::svg_rasterize::SvgRasterizeOps;
+        assert!(
+            SvgRasterizeOps::measure_html_text("x", "Arial", 13.333333, 400, false, 0.0, None)
+                .is_ok_and(|width| {
+                    assert!((width - 6.665).abs() < 0.0001, "width {width}");
+                    true
+                }),
+            "Arial fixture text measurement must succeed"
+        );
+    }
+
+    #[test]
+    fn arial_input_size_matches_independent_chrome_width() {
+        assert!(
+            html_input_character_metrics("Arial", 13.333333, 400, false).is_some_and(|metrics| {
+                assert!(metrics.average_from_primary_font);
+                assert_eq!(
+                    (metrics.average.round() * 20.0).ceil() + metrics.maximum.round()
+                        - metrics.average.round(),
+                    145.0
+                );
+                true
+            }),
+            "Arial fixture input metrics must exist"
+        );
+    }
+}

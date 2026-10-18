@@ -2,13 +2,13 @@ use crate::renderer::backends::html_interactive::style::value::{
     css_font_size, css_font_weight, css_resolved_px, split_top_level_whitespace,
 };
 use crate::renderer::backends::html_interactive::style::{
-    CssStyle, CssTextAlign, CssTextTransform, CssWhiteSpace,
+    normalized_property_name, CssStyle, CssTextAlign, CssTextTransform, CssWhiteSpace,
 };
 use crate::renderer::backends::html_interactive::style::style_typography_declaration::typography_parser::FontShorthandParser;
 
 impl CssStyle {
     pub(crate) fn apply_typography_property(&mut self, name: &str, value: &str) -> bool {
-        match name.to_ascii_lowercase().as_str() {
+        match normalized_property_name(name).as_ref() {
             "font" => self.apply_font_shorthand(value),
             "font-size" => self.apply_font_size(value),
             "font-weight" => self.apply_font_weight(value),
@@ -29,6 +29,7 @@ impl CssStyle {
     }
 
     fn apply_font_size(&mut self, value: &str) {
+        self.explicit_typography = true;
         self.font_size = css_font_size(
             value,
             self.font_size,
@@ -77,6 +78,7 @@ impl CssStyle {
     fn apply_font_family(&mut self, value: &str) {
         let family = value.trim();
         if !family.is_empty() {
+            self.explicit_typography = true;
             self.font_family = family.to_string();
         }
     }
