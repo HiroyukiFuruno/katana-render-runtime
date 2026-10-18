@@ -22,7 +22,20 @@ export const PAINT_PROJECTED_REFERENCE_TARGET_SLUGS = [
   "22-01-tree-view-simple",
   "22-02-tree-view-file-system",
 ] as const;
-const PAINT_PROJECTED_TARGET_SET = new Set<string>(PAINT_PROJECTED_REFERENCE_TARGET_SLUGS);
+export const PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA = [
+  "08-01-c4",
+  "08-02-c4",
+  "08-03-c4",
+  "08-04-c4",
+  "08-05-c4",
+  "08-06-c4",
+  "22-01-tree-view-beta",
+  "22-02-tree-view-beta",
+] as const;
+const PAINT_PROJECTED_TARGET_SET = new Set<string>([
+  ...PAINT_PROJECTED_REFERENCE_TARGET_SLUGS,
+  ...PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA,
+]);
 export const NEUTRAL_GEOMETRY_TARGET_SLUGS = PAINT_PROJECTED_REFERENCE_TARGET_SLUGS;
 const PAINT_PROPERTIES = new Set([
   "color",
@@ -54,6 +67,25 @@ export function isNeutralGeometryTargetSlug(slug: string): boolean {
 }
 
 export const isPaintProjectedReferenceTargetSlug = isNeutralGeometryTargetSlug;
+
+export function assertCompletePaintProjectedTargetSlugs(
+  pairCount: number,
+  slugs: readonly string[],
+): void {
+  if (new Set(slugs).size !== slugs.length) {
+    throw new Error("Paint projection target slugs are duplicated");
+  }
+  if (pairCount !== 59 && pairCount !== 58) return;
+  const expected =
+    pairCount === 58
+      ? PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA
+      : PAINT_PROJECTED_REFERENCE_TARGET_SLUGS;
+  if (slugs.length !== expected.length || expected.some((slug) => !slugs.includes(slug))) {
+    throw new Error(
+      "Full language comparison requires all eight paint-projected C4 and TreeView targets",
+    );
+  }
+}
 
 export function prepareNeutralSvg(source: string): NeutralSvgSource {
   const root = parseSvg(source);

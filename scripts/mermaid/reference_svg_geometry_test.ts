@@ -17,10 +17,13 @@ import { assignStrictSvg, resizeSvgCapture } from "./raster-capture-observation"
 import { rasterCaptureHtml } from "./rasterize-svg-dir";
 import { MagickOps } from "./reference_image_ops";
 import {
+  assertCompletePaintProjectedTargetSlugs,
   compareSvgGeometry,
   compareSvgGeometryForNeutralRaster,
   isNeutralGeometryTargetSlug,
   NEUTRAL_GEOMETRY_TARGET_SLUGS,
+  PAINT_PROJECTED_REFERENCE_TARGET_SLUGS,
+  PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA,
   prepareNeutralSvg,
 } from "./reference_svg_geometry";
 import { waitForStrictSvgExternalImages } from "./strict-svg-external-images";
@@ -31,9 +34,48 @@ const sourceSvg = (rootId: string, fill: string, shift: string, label = "Box") =
 test("neutral geometry scope is the fixed current C4 and TreeView fixture family", () => {
   expect(NEUTRAL_GEOMETRY_TARGET_SLUGS).toHaveLength(8);
   expect(NEUTRAL_GEOMETRY_TARGET_SLUGS.every(isNeutralGeometryTargetSlug)).toBe(true);
+  expect(PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA).toHaveLength(8);
+  expect(PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA.every(isNeutralGeometryTargetSlug)).toBe(true);
   expect(isNeutralGeometryTargetSlug("11-c4")).toBe(false);
-  expect(isNeutralGeometryTargetSlug("08-04-c4")).toBe(false);
+  expect(isNeutralGeometryTargetSlug("08-04-c4x")).toBe(false);
   expect(isNeutralGeometryTargetSlug("custom-tree-view-prototype")).toBe(false);
+});
+
+test.each([
+  ...PAINT_PROJECTED_REFERENCE_TARGET_SLUGS,
+  ...PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA,
+])("paint projection recognizes the exact language target slug: %s", (slug) => {
+  expect(isNeutralGeometryTargetSlug(slug)).toBe(true);
+});
+
+test.each([
+  { pairCount: 59, slugs: PAINT_PROJECTED_REFERENCE_TARGET_SLUGS },
+  { pairCount: 58, slugs: PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA },
+])(
+  "accepts the complete target set for the language pair count: $pairCount",
+  ({ pairCount, slugs }) => {
+    expect(() => assertCompletePaintProjectedTargetSlugs(pairCount, slugs)).not.toThrow();
+  },
+);
+
+test.each([
+  { name: "missing target", slugs: PAINT_PROJECTED_REFERENCE_TARGET_SLUGS.slice(0, 7) },
+  {
+    name: "duplicate target",
+    slugs: [
+      ...PAINT_PROJECTED_REFERENCE_TARGET_SLUGS.slice(0, 7),
+      PAINT_PROJECTED_REFERENCE_TARGET_SLUGS[0],
+    ],
+  },
+  { name: "wrong language", slugs: PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA },
+])("rejects an incomplete or wrong target set: $name", ({ slugs }) => {
+  expect(() => assertCompletePaintProjectedTargetSlugs(59, slugs)).toThrow();
+});
+
+test("rejects duplicate targets even for a scoped pair count", () => {
+  expect(() =>
+    assertCompletePaintProjectedTargetSlugs(2, ["scoped-target", "scoped-target"]),
+  ).toThrow("Paint projection target slugs are duplicated");
 });
 
 test("neutral SVG geometry accepts palette-only changes and equivalent root IDs", () => {

@@ -11,10 +11,10 @@ import {
 import type { MagickOps, PaintProjectedImageComparison } from "./reference_image_ops";
 import type { ReferencePair } from "./reference_pair_repository";
 import {
+  assertCompletePaintProjectedTargetSlugs,
   compareSvgGeometryForNeutralRaster,
   isPaintProjectedReferenceTargetSlug,
   PAINT_PROJECTED_REFERENCE_POLICY,
-  PAINT_PROJECTED_REFERENCE_TARGET_SLUGS,
   prepareNeutralSvg,
 } from "./reference_svg_geometry";
 
@@ -109,17 +109,7 @@ export async function scorePaintProjectedReferenceTargets(
 
 function assertCompleteLanguageTargetSet(pairs: ReferencePair[], targets: ReferencePair[]) {
   const slugs = targets.map((pair) => pair.slug);
-  if (new Set(slugs).size !== slugs.length)
-    throw new Error("Paint projection target slugs are duplicated");
-  if (pairs.length !== 59 && pairs.length !== 58) return;
-  if (
-    slugs.length !== PAINT_PROJECTED_REFERENCE_TARGET_SLUGS.length ||
-    PAINT_PROJECTED_REFERENCE_TARGET_SLUGS.some((slug) => !slugs.includes(slug))
-  ) {
-    throw new Error(
-      "Full language comparison requires all eight paint-projected C4 and TreeView targets",
-    );
-  }
+  assertCompletePaintProjectedTargetSlugs(pairs.length, slugs);
 }
 
 function prepareInputs(pairs: ReferencePair[], outputDirectory: string) {
