@@ -11,9 +11,9 @@ import sys
 from pathlib import Path
 from typing import cast
 
-import native_coverage_result as coverage_result
 import native_coverage_linux_context as linux_context
 import native_coverage_local_result as local_result
+import native_coverage_result as coverage_result
 
 
 def _read_json(path: Path, label: str) -> object:
@@ -71,7 +71,7 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--context", required=True, type=Path)
     validate.add_argument("--manifest", required=True, type=Path)
     commands.add_parser("collect-context")
-    for name in ("local-key", "local-begin", "local-validate"):
+    for name in ("local-key", "local-begin", "local-validate", "local-collection-validate"):
         local = commands.add_parser(name)
         local.add_argument("--producer", required=True, choices=("root", "performance"))
         if name == "local-key":
@@ -79,6 +79,9 @@ def _parser() -> argparse.ArgumentParser:
     finish = commands.add_parser("local-finish")
     finish.add_argument("--producer", required=True, choices=("root", "performance"))
     finish.add_argument("--producer-exit", required=True, type=int)
+    collection_finish = commands.add_parser("local-collect-finish")
+    collection_finish.add_argument("--producer", required=True, choices=("root", "performance"))
+    collection_finish.add_argument("--producer-exit", required=True, type=int)
     return parser
 
 
@@ -94,8 +97,12 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
         return local_result.local_begin(repo, args.producer)
     if args.command == "local-finish":
         return local_result.local_finish(repo, args.producer, args.producer_exit)
+    if args.command == "local-collect-finish":
+        return local_result.local_collect_finish(repo, args.producer, args.producer_exit)
     if args.command == "local-validate":
         return local_result.local_validate(repo, args.producer)
+    if args.command == "local-collection-validate":
+        return local_result.local_collection_validate(repo, args.producer)
     if args.command == "collect-context":
         try:
             return linux_context.collect_context(repo)
@@ -130,8 +137,13 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         result = _run(args)
+    except coverage_result.CoveragePolicyError as error:
+        print(json.dumps({"valid": False, "failure": "coverage-policy"}, sort_keys=True))
+        print(f"coverage result: {error}", file=sys.stderr)
+        return 1
     except (OSError, coverage_result.CoverageResultError, linux_context.LinuxCoverageContextError,
             local_result.LocalCoverageError) as error:
+        print(json.dumps({"valid": False, "failure": "invalid-collection"}, sort_keys=True))
         print(f"coverage result: {error}", file=sys.stderr)
         return 1
     print(json.dumps(result, sort_keys=True))

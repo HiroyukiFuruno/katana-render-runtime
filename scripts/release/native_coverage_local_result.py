@@ -19,7 +19,7 @@ import native_coverage_local_anchor as local_anchor
 
 KEY_SCHEMA = "krr-native-local-coverage-key-v1"
 RUN_SCHEMA = "krr-native-local-coverage-run-v1"
-RECEIPT_SCHEMA = "krr-native-local-coverage-receipt-v1"
+COLLECTION_RECEIPT_SCHEMA = "krr-native-local-coverage-collection-receipt-v1"
 LOCAL_CONTEXT_SCHEMA = "krr-native-local-coverage-context-v1"
 LOCAL_HOST_KEYS = {"os", "productVersion", "buildVersion", "architecture"}
 LOCAL_TOOL_KEYS = {
@@ -218,6 +218,14 @@ def _commands(repo: Path, producer: str) -> list[JsonObject]:
     ]
 
 
+def _collection_report_records(repo: Path, producer: str) -> list[JsonObject]:
+    threads = _threads()
+    return [
+        {"domain": domain, **coverage_result._collection_report_record(repo, domain, threads)}
+        for domain in _producer_domains(producer)
+    ]
+
+
 def _execution_environment_digest() -> str:
     keys = (
         "CARGO",
@@ -313,12 +321,19 @@ def _ensure_report_directory(repo: Path) -> None:
             )
 
 
-def _read_json(path: Path, label: str) -> object:
+def _read_json_bytes(path: Path, label: str) -> bytes:
     try:
         if path.is_symlink() or not path.is_file():
             raise LocalCoverageError(f"{label} must be a regular non-symlink file")
-        return json.loads(path.read_bytes())
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        return path.read_bytes()
+    except OSError as error:
+        raise LocalCoverageError(f"{label} is unavailable or invalid JSON") from error
+
+
+def _read_json(path: Path, label: str) -> object:
+    try:
+        return json.loads(_read_json_bytes(path, label))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise LocalCoverageError(f"{label} is unavailable or invalid JSON") from error
 
 
@@ -436,57 +451,12 @@ def local_begin(repo: Path, producer: str) -> JsonObject:
     return {"schema": RUN_SCHEMA, "producer": producer, "started": True}
 
 
-def _report_records(repo: Path, producer: str) -> list[JsonObject]:
-    rows = []
-    threads = _threads()
-    for domain in _producer_domains(producer):
-        rows.append(
-            {"domain": domain, **coverage_result._report_record(repo, domain, threads)}
-        )
-    return rows
-
-
-def _validate_identity(
-    receipt: object, identity: JsonObject, producer: str, token: str | None
-) -> JsonObject:
-    row = coverage_result._object(receipt, "local coverage receipt")
-    required = {
-        "schema",
-        "authenticity",
-        "producer",
-        "producerExit",
-        "cacheable",
-        "probeToken",
-        "identity",
-        "domains",
-    }
-    if set(row) != required or row.get("schema") != RECEIPT_SCHEMA:
-        raise LocalCoverageError("local coverage receipt fields or schema differ")
-    if (
-        row.get("authenticity") != AUTHENTICITY
-        or row.get("producer") != producer
-        or type(row.get("producerExit")) is not int
-        or row["producerExit"] != 0
-        or row.get("cacheable") is not identity["cacheable"]
-        or row.get("probeToken") != token
-        or row.get("identity") != identity
-    ):
-        raise LocalCoverageError(
-            "local coverage receipt identity or producer result differs"
-        )
-    return row
-
-
-def local_finish(repo: Path, producer: str, producer_exit: int) -> JsonObject:
-    """Trust the fixed Just recipe's exit argument; this is not an adversarial-caller attestation."""
-    _ensure_report_directory(repo)
-    if type(producer_exit) is not int or producer_exit != 0:
-        raise LocalCoverageError("coverage producer did not exit successfully")
+def _current_run(repo: Path, producer: str) -> tuple[JsonObject, JsonObject, str | None]:
+    identity = _bound_identity(repo, producer)
+    token = _probe_token(repo, producer, identity)
     run = coverage_result._object(
         _read_json(_paths(repo, producer)["run"], "local run"), "local run"
     )
-    identity = _bound_identity(repo, producer)
-    token = _probe_token(repo, producer, identity)
     if (
         set(run) != {"schema", "producer", "runId", "probeToken", "identity"}
         or run.get("schema") != RUN_SCHEMA
@@ -495,46 +465,72 @@ def local_finish(repo: Path, producer: str, producer_exit: int) -> JsonObject:
         or run.get("probeToken") != token
     ):
         raise LocalCoverageError("producer inputs changed between begin and finish")
-    receipt: JsonObject = {
-        "schema": RECEIPT_SCHEMA,
-        "authenticity": AUTHENTICITY,
-        "producer": producer,
-        "producerExit": 0,
-        "cacheable": identity["cacheable"],
-        "probeToken": token,
-        "identity": identity,
-        "domains": _report_records(repo, producer),
-    }
-    _write_atomic(_paths(repo, producer)["receipt"], receipt)
-    if identity["anchorEpoch"] is not None:
-        receipt_bytes = _paths(repo, producer)["receipt"].read_bytes()
-        if not local_anchor.commit(
-            repo,
-            producer,
-            cast(str, identity["baseIdentitySha256"]),
-            cast(str, identity["anchorEpoch"]),
-            receipt_bytes,
-        ):
-            raise LocalCoverageError(
-                "trusted local coverage anchor could not be committed"
-            )
-    return {
-        "schema": RECEIPT_SCHEMA,
-        "created": True,
-        "cacheable": identity["cacheable"],
-    }
+    return run, identity, token
 
 
-def local_validate(repo: Path, producer: str) -> JsonObject:
-    _ensure_report_directory(repo)
+def _commit_receipt(
+    repo: Path, producer: str, identity: JsonObject, receipt: JsonObject
+) -> None:
+    receipt_path = _paths(repo, producer)["receipt"]
+    _write_atomic(receipt_path, receipt)
+    epoch = identity["anchorEpoch"]
+    if epoch is None:
+        return
+    receipt_bytes = receipt_path.read_bytes()
+    if not local_anchor.commit(
+        repo,
+        producer,
+        cast(str, identity["baseIdentitySha256"]),
+        cast(str, epoch),
+        receipt_bytes,
+    ):
+        raise LocalCoverageError("trusted local coverage anchor could not be committed")
+
+
+def _collection_receipt(
+    repo: Path, producer: str, identity: JsonObject, token: str | None,
+    receipt: object,
+) -> JsonObject:
+    receipt = coverage_result._object(receipt, "collection receipt")
+    required = {
+        "schema", "role", "authenticity", "producer", "producerExit", "cacheable",
+        "probeToken", "identity", "domains",
+    }
+    if (
+        set(receipt) != required
+        or receipt.get("schema") != COLLECTION_RECEIPT_SCHEMA
+        or receipt.get("role") != "collection"
+        or receipt.get("authenticity") != AUTHENTICITY
+        or receipt.get("producer") != producer
+        or type(receipt.get("producerExit")) is not int
+        or receipt.get("producerExit") != 0
+        or receipt.get("cacheable") is not identity["cacheable"]
+        or receipt.get("probeToken") != token
+        or receipt.get("identity") != identity
+    ):
+        raise LocalCoverageError("collection receipt identity or report differs")
+    if receipt.get("domains") != _collection_report_records(repo, producer):
+        raise LocalCoverageError("coverage reports changed or no longer satisfy collection totals")
+    return receipt
+
+
+def _authenticated_collection(
+    repo: Path, producer: str
+) -> tuple[JsonObject, JsonObject]:
     identity = _bound_identity(repo, producer)
     token = _probe_token(repo, producer, identity)
     receipt_path = _paths(repo, producer)["receipt"]
+    try:
+        receipt_bytes = _read_json_bytes(receipt_path, "collection receipt")
+        receipt_value = json.loads(receipt_bytes)
+    except (LocalCoverageError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        if identity["anchorEpoch"] is not None:
+            local_anchor.invalidate(
+                repo, producer, cast(str, identity["baseIdentitySha256"]),
+                cast(str, identity["anchorEpoch"]),
+            )
+        raise LocalCoverageError("collection receipt is unavailable or invalid") from error
     if identity["anchorEpoch"] is not None:
-        try:
-            receipt_bytes = receipt_path.read_bytes()
-        except OSError:
-            receipt_bytes = b""
         if not local_anchor.verify(
             repo,
             producer,
@@ -548,11 +544,9 @@ def local_validate(repo: Path, producer: str) -> JsonObject:
                 cast(str, identity["baseIdentitySha256"]),
                 cast(str, identity["anchorEpoch"]),
             )
-            raise LocalCoverageError(
-                "trusted local coverage anchor does not match receipt bytes"
-            )
+            raise LocalCoverageError("trusted collection anchor does not match receipt bytes")
     try:
-        _validate_receipt_reports(repo, producer, identity, token, receipt_path)
+        receipt = _collection_receipt(repo, producer, identity, token, receipt_value)
     except (LocalCoverageError, coverage_result.CoverageResultError):
         if identity["anchorEpoch"] is not None:
             local_anchor.invalidate(
@@ -562,26 +556,49 @@ def local_validate(repo: Path, producer: str) -> JsonObject:
                 cast(str, identity["anchorEpoch"]),
             )
         raise
-    return {
-        "schema": RECEIPT_SCHEMA,
-        "valid": True,
-        "cacheable": identity["cacheable"],
+    return receipt, identity
+
+
+def local_finish(repo: Path, producer: str, producer_exit: int) -> JsonObject:
+    """Collect the receipt, then apply strict 100/0 policy without invalidating it."""
+    result = local_collect_finish(repo, producer, producer_exit)
+    receipt, _identity = _authenticated_collection(repo, producer)
+    coverage_result.validate_collection_policy(receipt["domains"], _producer_domains(producer))
+    return result
+
+
+def local_collect_finish(repo: Path, producer: str, producer_exit: int) -> JsonObject:
+    """Record a successful test/report collection without accepting coverage policy."""
+    _ensure_report_directory(repo)
+    if type(producer_exit) is not int or producer_exit != 0:
+        raise LocalCoverageError("coverage collection producer did not exit successfully")
+    _run, identity, token = _current_run(repo, producer)
+    receipt: JsonObject = {
+        "schema": COLLECTION_RECEIPT_SCHEMA,
+        "role": "collection",
+        "authenticity": AUTHENTICITY,
         "producer": producer,
+        "producerExit": 0,
+        "cacheable": identity["cacheable"],
+        "probeToken": token,
+        "identity": identity,
+        "domains": _collection_report_records(repo, producer),
     }
+    _commit_receipt(repo, producer, identity, receipt)
+    return {"schema": COLLECTION_RECEIPT_SCHEMA, "created": True, "cacheable": identity["cacheable"]}
 
 
-def _validate_receipt_reports(
-    repo: Path,
-    producer: str,
-    identity: JsonObject,
-    token: str | None,
-    receipt_path: Path,
-) -> JsonObject:
-    receipt = _validate_identity(
-        _read_json(receipt_path, "local receipt"), identity, producer, token
-    )
-    if receipt.get("domains") != _report_records(repo, producer):
-        raise LocalCoverageError(
-            "coverage reports changed or no longer satisfy strict 100/0 totals"
-        )
-    return receipt
+def local_validate(repo: Path, producer: str) -> JsonObject:
+    _ensure_report_directory(repo)
+    receipt, identity = _authenticated_collection(repo, producer)
+    coverage_result.validate_collection_policy(receipt["domains"], _producer_domains(producer))
+    return {"schema": COLLECTION_RECEIPT_SCHEMA, "valid": True,
+            "cacheable": identity["cacheable"], "producer": producer}
+
+
+def local_collection_validate(repo: Path, producer: str) -> JsonObject:
+    """Validate collection authenticity while leaving coverage policy to aggregate."""
+    _ensure_report_directory(repo)
+    _receipt, identity = _authenticated_collection(repo, producer)
+    return {"schema": COLLECTION_RECEIPT_SCHEMA, "valid": True, "cacheable": identity["cacheable"],
+            "producer": producer}

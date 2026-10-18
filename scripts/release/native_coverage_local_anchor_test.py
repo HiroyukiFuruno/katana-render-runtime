@@ -199,7 +199,7 @@ class NativeCoverageLocalAnchorTests(unittest.TestCase):
             report = json.loads(report_path.read_bytes())
             report["version"] = "2.0.2"
             report_path.write_text(json.dumps(report), encoding="utf-8")
-        receipt["domains"] = local_result._report_records(self.root, producer)
+        receipt["domains"] = local_result._collection_report_records(self.root, producer)
         receipt_path.write_text(
             json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8"
         )

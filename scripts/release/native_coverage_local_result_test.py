@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
+import native_coverage_local_anchor as local_anchor
 import native_coverage_local_result as local_result
 import native_coverage_result as coverage_result
 import native_coverage_result_cli as result_cli
@@ -168,7 +169,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
                 hashlib.sha256(report.read_bytes()).hexdigest(), domains[0]["sha256"]
             )
             with self.assertRaises(local_result.LocalCoverageError):
-                local_result.local_validate(self.root, "root")
+                local_result.local_collection_validate(self.root, "root")
 
     def test_standalone_just_begin_can_start_without_a_moon_key_probe(self) -> None:
         self.prepare_reports()
@@ -213,11 +214,92 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
             )
             with self.assertRaises(coverage_result.CoverageResultError):
                 local_result.local_finish(self.root, "root", 0)
-        self.assertFalse(
-            (
-                self.root / coverage_result.REPORT_DIRECTORY / "root-local-result.json"
-            ).exists()
+        receipt_path = self.root / coverage_result.REPORT_DIRECTORY / "root-local-result.json"
+        self.assertTrue(receipt_path.exists())
+        self.assertEqual(json.loads(receipt_path.read_bytes())["role"], "collection")
+
+    def test_collection_receipt_accepts_partial_and_strict_wrapper_rejects(self) -> None:
+        fixture_helpers.write_fixture_report(self.root, "root", count=10, covered=9, percent=90.0)
+        with (
+            patch.object(local_result, "_source_digest", return_value=self.source_digest),
+            patch.object(local_result, "_local_context", return_value=self.context),
+        ):
+            self.begin_producer("root")
+            collection = local_result.local_collect_finish(self.root, "root", 0)
+            self.assertTrue(collection["created"])
+            self.assertTrue(local_result.local_collection_validate(self.root, "root")["valid"])
+            with self.assertRaisesRegex(coverage_result.CoverageResultError, "100/0"):
+                local_result.local_validate(self.root, "root")
+            anchor_directory = local_anchor._anchor_directory(self.root, create=False)
+            self.assertIsNotNone(anchor_directory)
+            anchor = local_anchor._read(cast(Path, anchor_directory), "root")
+            if anchor is None:
+                self.fail("collection anchor is missing")
+            self.assertEqual(anchor["state"], "valid")
+        receipt = json.loads(
+            (self.root / coverage_result.REPORT_DIRECTORY / "root-local-result.json").read_bytes()
         )
+        self.assertEqual(receipt["role"], "collection")
+
+    def test_collection_validation_rejects_malformed_report(self) -> None:
+        self.prepare_reports()
+        with (
+            patch.object(local_result, "_source_digest", return_value=self.source_digest),
+            patch.object(local_result, "_local_context", return_value=self.context),
+        ):
+            self.begin_producer("root")
+            local_result.local_collect_finish(self.root, "root", 0)
+            (self.root / coverage_result.REPORT_DIRECTORY / "root.json").write_text("{bad\n")
+            with self.assertRaises(coverage_result.CoverageResultError):
+                local_result.local_collection_validate(self.root, "root")
+            anchor_directory = local_anchor._anchor_directory(self.root, create=False)
+            self.assertIsNotNone(anchor_directory)
+            anchor = local_anchor._read(cast(Path, anchor_directory), "root")
+            if anchor is None:
+                self.fail("collection anchor is missing")
+            self.assertEqual(anchor["state"], "pending")
+
+    def test_strict_policy_uses_rows_authenticated_before_report_mutation(self) -> None:
+        fixture_helpers.write_fixture_report(self.root, "root", count=10, covered=9, percent=90.0)
+        with (
+            patch.object(local_result, "_source_digest", return_value=self.source_digest),
+            patch.object(local_result, "_local_context", return_value=self.context) as context_mock,
+        ):
+            self.begin_producer("root")
+            local_result.local_collect_finish(self.root, "root", 0)
+            context_before_validate = context_mock.call_count
+            original = local_result._collection_report_records
+
+            def rows_then_mutate(repo: Path, producer: str) -> list[dict[str, object]]:
+                rows = original(repo, producer)
+                fixture_helpers.write_fixture_report(repo, "root", count=10, covered=10)
+                return rows
+
+            with (
+                patch.object(local_result, "_collection_report_records", side_effect=rows_then_mutate) as rows_mock,
+                patch.object(local_result, "_bound_identity", wraps=local_result._bound_identity) as identity_mock,
+            ):
+                with self.assertRaises(coverage_result.CoveragePolicyError):
+                    local_result.local_validate(self.root, "root")
+            self.assertEqual(identity_mock.call_count, 1)
+            self.assertEqual(rows_mock.call_count, 1)
+            self.assertEqual(context_mock.call_count, context_before_validate + 1)
+
+    def test_collection_receipt_symlink_is_rejected(self) -> None:
+        self.prepare_reports()
+        with (
+            patch.object(local_result, "_source_digest", return_value=self.source_digest),
+            patch.object(local_result, "_local_context", return_value=self.context),
+        ):
+            self.begin_producer("root")
+            local_result.local_collect_finish(self.root, "root", 0)
+            receipt = self.root / coverage_result.REPORT_DIRECTORY / "root-local-result.json"
+            target = self.root / "receipt-target.json"
+            target.write_text(receipt.read_text(encoding="utf-8"), encoding="utf-8")
+            receipt.unlink()
+            receipt.symlink_to(target)
+            with self.assertRaises(local_result.LocalCoverageError):
+                local_result.local_validate(self.root, "root")
 
     def test_missing_performance_report_never_creates_receipt(self) -> None:
         self.prepare_reports()

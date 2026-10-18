@@ -60,3 +60,28 @@ native CLIのプロセス証跡は、固定した実行ファイル・引数・�
 Bunで個別のテストファイルを実行するときは、実在するファイルを `./scripts/..._test.ts` または絶対パスで指定する。`scripts/..._test.ts` は文字列フィルターとして扱われ、tmp内の同名source snapshotまで収集し得る。保存snapshotを検査対象へ混入させず、対象ファイル数と実コマンド全体の終了値を確認する。対象テストの成功だけでsnapshot import errorsを含む失敗を合格へ読み替えない。実再現・修正証跡は `tmp/quality/rust-native-width-unused-realm-root-final-suite/receipt.json`。
 
 重複検査の件数は保存されたJSONレポートの入力集合・統計・複製レコードから取得する。JSON-only reporterの標準出力に複製表示がないことや終了値0を、重複0の根拠にしない。実行前後の物理入力を固定し、異なるtoken/line inventoryの結果を同じ入力として比較しない。
+
+
+## Nativeテスト結果の収集とカバレッジ合否の分離
+
+既存MoonがDAG・キー・出力cacheを所有し、cargo-llvm-covが実テストと計測を行う。KRR側は固定3domainのコマンド・出所・レポートの検証と100/0受入だけを担当し、汎用runnerやcacheを新造しない。
+
+成功した実テストと有効なJSONレポートの収集は、coverage合否から分ける。収集producerは全workspace/target/feature・既存target・資源・環境の束縛を維持し、実exit0の結果だけを記録する。過去のpolicy失敗exit1を収集成功へ再認定しない。レポートの型・件数・百分率の整合性、現在の入力・ツール・環境、物理bytesとtrusted anchorの一致を検証してから、Moonの成功artifactを再利用する。
+
+収集専用のguard指定は明示し、従来の厳格なcoverage guardは100/0指定が欠けたコマンドを引き続き拒否する。独立したcollection readerとpolicy readerを設け、従来のCI manifest作成・検証とlocalの厳格readerは100%・未計測0のままにする。収集receiptのschema/roleで、coverage受入そのものを証明しないことを区別する。
+
+常時実行するaggregateは、まず収集結果の真正性を検証し、その後100/0を判定する。artifactが不正なら当該producerだけを実検査する。一方、真正な結果でcoverageだけが不足していれば、producerをrefreshせずaggregateを失敗させる。閾値変更や失敗の成功扱いではなく、検査結果の収集と最終合否の責務を分ける。
+
+実入力・資源・環境・コマンドが同じfresh/hit、出力復元、改変拒否と該当producer再生成、policy不足時の重いテスト未再実行、strict reader/CIによる部分coverage拒否を実証する。最終のcurrent HEAD完全ゲートと必須CIは別途必要とする。
+
+localキーはnative source manifestによる現在の作業treeのbytesを束縛し、途中変更を拒否する。CI・公開証跡のtested SHAにはclean HEADを要求する。後者の条件をlocal cache単体実証の前提へ転用せず、開発中に不要なcommitや完全検査を反復しない。
+
+### 修正中の失敗項目だけの再実行
+
+ビルド済みlibtestの診断では、失敗した完全名を複数のpositional filterとして渡し、`--exact`で絞る。広いprefixで成功済みの千件まで再実行しない。物理binaryのSHAと元のsource、実argvと実行されたcaseを記録する。source変更後の既存binaryの成功は、変更後の検証へ流用しない。
+
+自動で失敗・未実行・新規caseを選ぶ開発反復には、既存nextestのrecord/rerunを利用できる。公式prebuiltの固定versionとSHAを検証し、recordingを有効にした生成user configを実行ごとの管理外ディレクトリへ置く。初回の`cargo llvm-cov nextest`に通常と同じworkspace・target・feature・instrumentationを指定し、再実行は`-R`へ保存済みrun IDを渡して元のbuild scopeを継承する。`latest`は同じworkspaceで別実行がない場合だけ使い、元run ID・実行/skip件数・実終了値・入力条件を保存する。異なるscopeに伴う再buildをcacheの性能として比較しない。
+
+nextestのrerunはsource/buildの変更を追跡しない。開発途中の限定確認に使い、全件合格・安全なカバレッジ再利用の証明にはしない。正式Moon producer・常時100/0 aggregate・最終current HEADの完全ゲートを維持し、部分runや0件実行のexit0を正式receiptへ渡さない。記録制御・選択・保存はnextestへ任せ、KRRに汎用runnerや失敗ログparserを新設しない。
+
+依存の実bytes照合は同一呼出し内の既存dedupを維持し、未照合rootだけを最大3並列で処理する。全root成功後にcache/recordsを更新し、一部失敗なら未完成の結果を採用しない。効率評価では同じ固定metadataと実依存集合を使い、逐次/並列の全record一致を先に確認する。準備処理の部分短縮を、製品の表示時間や品質ゲート全体の短縮へ読み替えない。

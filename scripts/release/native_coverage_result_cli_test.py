@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 
 import native_coverage_result as coverage_result
+import native_coverage_result_cli as result_cli
 import native_coverage_result_test as fixture_helpers
-
 
 CLI = Path(__file__).with_name("native_coverage_result_cli.py").resolve()
 
@@ -116,6 +119,34 @@ class NativeCoverageResultCliTests(unittest.TestCase):
         self.assertEqual(unknown_arg.returncode, 2)
         unknown_command = self.invoke("cache-all", "--context", str(self.context_path))
         self.assertEqual(unknown_command.returncode, 2)
+
+    def test_collection_finish_and_validation_commands_are_fixed_choices(self) -> None:
+        finish = result_cli._parser().parse_args(
+            ["--repo", str(self.root), "local-collect-finish", "--producer", "root", "--producer-exit", "0"]
+        )
+        validate = result_cli._parser().parse_args(
+            ["--repo", str(self.root), "local-collection-validate", "--producer", "performance"]
+        )
+        self.assertEqual(finish.command, "local-collect-finish")
+        self.assertEqual(validate.command, "local-collection-validate")
+        with self.assertRaises(SystemExit):
+            result_cli._parser().parse_args(
+                ["--repo", str(self.root), "local-collect-finish", "--producer", "arbitrary", "--producer-exit", "0"]
+            )
+
+    def test_failure_payloads_distinguish_policy_from_invalid_collection(self) -> None:
+        policy_output = io.StringIO()
+        with patch.object(result_cli, "_run", side_effect=coverage_result.CoveragePolicyError("below 100/0")), \
+             redirect_stdout(policy_output):
+            policy = result_cli.main(["--repo", str(self.root), "local-validate", "--producer", "root"])
+        self.assertEqual(policy, 1)
+        self.assertEqual(json.loads(policy_output.getvalue()), {"failure": "coverage-policy", "valid": False})
+        invalid_output = io.StringIO()
+        with patch.object(result_cli, "_run", side_effect=coverage_result.CoverageResultError("receipt changed")), \
+             redirect_stdout(invalid_output):
+            invalid = result_cli.main(["--repo", str(self.root), "local-validate", "--producer", "root"])
+        self.assertEqual(invalid, 1)
+        self.assertEqual(json.loads(invalid_output.getvalue()), {"failure": "invalid-collection", "valid": False})
 
     def test_collect_context_is_registered_without_accepting_context_input(self) -> None:
         result = self.invoke("collect-context", "--context", str(self.context_path))

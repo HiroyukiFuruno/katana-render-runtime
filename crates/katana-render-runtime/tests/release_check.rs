@@ -56,35 +56,35 @@ fn release_verify_tests_the_packaged_library_sources() -> Result<(), Box<dyn std
 }
 
 #[test]
-fn release_target_check_requires_v0_4_23_intent() -> Result<(), Box<dyn std::error::Error>> {
+fn release_target_check_requires_v0_4_24_intent() -> Result<(), Box<dyn std::error::Error>> {
     let root = workspace_root()?;
-    assert_release_target_check(root, "0.4.23", "0.4.22", "missing-release-head", false)?;
-    assert_release_target_check(root, "0.4.23", "0.4.21", "HEAD", false)?;
+    assert_release_target_check(root, "0.4.24", "0.4.23", "missing-release-head", false)?;
     assert_release_target_check(root, "0.4.24", "0.4.22", "HEAD", false)?;
+    assert_release_target_check(root, "0.4.25", "0.4.23", "HEAD", false)?;
     assert_release_target_check(
         root,
+        "0.4.24",
         "0.4.23",
-        "0.4.22",
-        "185d056de67282a4056729296e57c164a6a343d6",
+        "8654789f69d24401b8ae67036db1cdb3e7f4294e",
         false,
     )?;
     for version in [
         "0.3.9", "0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.4.4", "0.4.5", "0.4.6", "0.4.7", "0.4.8",
         "0.4.9", "0.4.10", "0.4.11", "0.4.12", "0.4.13", "0.4.14", "0.4.15", "0.4.16", "0.4.17",
-        "0.4.18", "0.4.19", "0.4.20", "0.4.21", "0.5.0", "1.0.0", "2.0.0",
+        "0.4.18", "0.4.19", "0.4.20", "0.4.21", "0.4.22", "0.4.23", "0.5.0", "1.0.0", "2.0.0",
     ] {
-        assert_release_target_check(root, version, "0.4.22", "HEAD", false)?;
+        assert_release_target_check(root, version, "0.4.23", "HEAD", false)?;
     }
     Ok(())
 }
 
 #[test]
-fn v0_4_23_validation_snapshot_passes_the_release_contract()
+fn v0_4_24_validation_snapshot_passes_the_release_contract()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = workspace_root()?;
     let snapshot = current_release_validation_snapshot(root)?;
-    assert_release_target_check(root, "0.4.23", "0.4.22", &snapshot, true)?;
-    assert_release_target_check(root, "0.4.23", "0.4.23", &snapshot, true)?;
+    assert_release_target_check(root, "0.4.24", "0.4.23", &snapshot, true)?;
+    assert_release_target_check(root, "0.4.24", "0.4.24", &snapshot, true)?;
     Ok(())
 }
 
@@ -235,9 +235,11 @@ fn coverage_gate_remains_strict_and_includes_integration_targets()
     let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
     let coverage = recipe_body(&justfile, "coverage")?;
     let recipe = recipe_body(&justfile, "root-test-and-coverage")?;
+    let aggregate = recipe_body(&justfile, "coverage-result-check")?;
 
     assert_coverage_recipe_arms(coverage);
     assert_root_coverage_contract(recipe);
+    assert_coverage_aggregate_contract(aggregate);
     assert_coverage_defaults(&justfile);
     Ok(())
 }
@@ -262,15 +264,32 @@ fn assert_root_coverage_contract(recipe: &str) {
         recipe,
         &[
             "--all-targets",
-            "--fail-under-lines {{COVERAGE_MIN_LINES}}",
-            "--fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}",
+            "--coverage-collection-domain root",
             "llvm-cov clean --workspace",
             "--json --summary-only --output-path",
+            "local-collect-finish --producer root --producer-exit 0",
         ],
     );
     assert_contains_none(
         recipe,
-        &["rm -rf target/", "cargo clean", "--ignore-run-fail"],
+        &[
+            "--fail-under-lines",
+            "--fail-uncovered-lines",
+            "rm -rf target/",
+            "cargo clean",
+            "--ignore-run-fail",
+        ],
+    );
+}
+
+fn assert_coverage_aggregate_contract(recipe: &str) {
+    assert_eq!(
+        recipe
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>(),
+        ["python3 scripts/release/native_coverage_local_aggregate.py --repo \"{{REPO_ROOT}}\""]
     );
 }
 

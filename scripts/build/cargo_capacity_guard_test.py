@@ -4049,7 +4049,8 @@ class ExpectedStateBindingUnitTests(unittest.TestCase):
 
 class CoverageDomainUnitTests(unittest.TestCase):
     @contextlib.contextmanager
-    def fixture(self, domain: str = "performance-baseline", action: str = "clean") -> Iterator[tuple[Path, argparse.Namespace, dict[str, str]]]:
+    def fixture(self, domain: str = "performance-baseline", action: str = "clean",
+                collection: bool = False) -> Iterator[tuple[Path, argparse.Namespace, dict[str, str]]]:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             target = root / "target"
@@ -4072,11 +4073,19 @@ class CoverageDomainUnitTests(unittest.TestCase):
                 command += ["--manifest-path", "scripts/html/performance-harness/Cargo.toml", "--locked"]
             command.append("--workspace")
             if action == "test":
-                command += ["--all-targets", "--summary-only", "--fail-under-lines", "100", "--fail-uncovered-lines", "0"]
+                command += ["--all-targets", "--summary-only"]
+                if collection:
+                    command += ["--json", "--output-path",
+                                str(root / "tmp/quality/standalone-performance-coverage" /
+                                    f"{domain.removeprefix('performance-')}.json")]
+                else:
+                    command += ["--fail-under-lines", "100", "--fail-uncovered-lines", "0"]
                 command += (["--all-features", "--locked"] if domain == "root" else
                             ["--no-default-features", "--features", domain.removeprefix("performance-")])
             args = argparse.Namespace(target=str(target), target_dir=None, state=None, factor=2.0,
-                                      dry_run=False, print_json=True, command=command, coverage_domain=domain,
+                                      dry_run=False, print_json=True, command=command,
+                                      coverage_domain=None if collection else domain,
+                                      coverage_collection_domain=domain if collection else None,
                                       expected_state_sha256=None, protected_ref=[str(reference)])
             environment = {"CARGO_TARGET_DIR": str(target), "CARGO_LLVM_COV_TARGET_DIR": str(target / (
                 "llvm-cov-target" if domain == "root" else f"llvm-cov-{domain}"))}
@@ -4120,6 +4129,30 @@ class CoverageDomainUnitTests(unittest.TestCase):
                     evidence = json.loads(self.errors.getvalue())['coverage_tool_query']
                     self.assertEqual(bytes.fromhex(evidence['stdout_hex']), b"cargo-llvm-cov 0.9.1\n")
                     self.assertEqual(bytes.fromhex(evidence['stderr_hex']), b"tool-raw\n")
+
+    def test_coverage_collection_domains_require_fixed_report_without_thresholds(self) -> None:
+        for domain in ("root", "performance-baseline", "performance-candidate"):
+            with self.subTest(domain=domain), self.fixture(domain, "test", collection=True) as (root, args, environment):
+                self.assertEqual(self.execute(root, args, environment, code=7), 7)
+                self.assertEqual(self.calls[-1], args.command)
+                self.assertNotIn("--fail-under-lines", args.command)
+                self.assertNotIn("--fail-uncovered-lines", args.command)
+
+    def test_coverage_collection_rejects_thresholds_clean_and_unfixed_output(self) -> None:
+        with self.fixture("root", "test", collection=True) as (root, args, environment):
+            args.command += ["--fail-under-lines", "100"]
+            with self.assertRaisesRegex(RuntimeError, "threshold"):
+                self.execute(root, args, environment)
+            self.assert_no_worker()
+        with self.fixture("root", "clean", collection=True) as (root, args, environment):
+            with self.assertRaisesRegex(RuntimeError, "test command"):
+                self.execute(root, args, environment)
+            self.assert_no_worker()
+        with self.fixture("root", "test", collection=True) as (root, args, environment):
+            args.command[args.command.index("--output-path") + 1] = str(root / "tmp/unknown.json")
+            with self.assertRaisesRegex(RuntimeError, "report"):
+                self.execute(root, args, environment)
+            self.assert_no_worker()
 
     def test_coverage_child_admits_incomplete_cleanup_below_fixed_hardcap(self) -> None:
         with self.fixture() as (root, args, environment):

@@ -10,15 +10,27 @@
 
 ## 現在の状態（2026-10-18）
 
-v0.4.24は未リリース。依存・配布設定9ファイルを通常hook成功後にcommitした（`45dd933`、`tmp/quality/normal-commit-dependency-release-r1/execution-report.json`）。描画996pathも通常hook成功後にcommitした（`dd3269e`、`tmp/quality/normal-commit-rendering-release-r2/execution-report.json`）。品質基盤202pathは未commit。短い実行入口は `tmp/html-fidelity/active-work-plan-20261012.json`、以下の未チェック行が唯一の未対応台帳。
+v0.4.24は未リリース。依存45dd933、描画dd3269ee、品質基盤f1e0daaf、Moonキー修正12bfd2ee、context照合並列化d3bf7a34を通常hookでcommitした。公開・PRは未実施。最新の短い入口は `tmp/html-fidelity/active-work-plan-20261012.json`。以下の未チェック行が唯一の未対応台帳。
 
-効率化の実証は、固定7ファイルのfresh405.053秒→同一入力hit185.607秒、破損1leafだけ6件52.710秒。共通ASTの実行内再利用は同じ9件32.216秒→20.257秒・双方exit0。これらは記録時点の入力に限定した証跡であり、現行coverage100/未計測0、安全なnative cache、CI再利用の合格は未確認。whole-source keyを安全な根拠なく縮めない。Moonのwrite-onlyは保存用、hit/restoreはread-writeで実証する。
+効率化を先行する。過去の固定7leafはfresh405.053秒→同一入力hit185.607秒、破損1leafだけ6件52.710秒。共通ASTの実行内再利用は同じ9件32.216秒→20.257秒・双方exit0。これらは記録時点の入力に限定し、現行native cacheや全体合格へ転用しない。
 
-現行に至る検査では、TS harness678件、root Rust2314件、限定integration19件・残runtime8件・残workspace112件が成功。独立integration testだけの変更後は、成功済みrootを反復せず残targetを回収した。配布フォントfixtureの漏れは既存package gateで実exit1を確認後に補完し、source-static-foundation16.168秒、AST、関連3回帰、4888入力の前後一致が成功した。実行と保証範囲は `tmp/quality/pre-native-cache-commit-current-review-r1/report.json`、`tmp/quality/public-font-probe-package-green-current-static-r1/report.json`。この組合せを現行ソースの全品質ゲート成功には代用しない。
+現行native計測は `tmp/quality/native-cache-current-node-root-fresh-hit-r3/report.json`。29targetの実結果は2,506成功・0失敗・10ignored、coverageは59,783行中58,534行=97.910777%、未被覆1,249行/197ファイルで、producerはexit1（389.761秒）。テスト成功とcoverage100/0判定の結合によりcachehitへ進めていない。既存Moon/cargo-llvm-covを用い、成功artifactの収集・真正性検証と、常時実行する100/0合否判定を分離する。policy不足だけでは成功済みテストをrefreshせず、artifact不正時は当該producerを実検査する。過去exit1をexit0へ再認定しない。独自の汎用基盤をKRR内へ新設しない。
 
-次は品質基盤commitとclean HEADでの実coverage/cache検証。全117図各99、HTML全対象90・動的84・全Y/実末尾/全目次、全frame3秒未満と時間/RSS非劣化、coverage100/未計測0、依存更新と完全ゲート、Draft最新HEADレビュー・必須3OS・保護merge・Release/3crate公開・Issue整理・cleanupは未完了。HTML最終99の#106と、暫定90の#109を区別する。C4/TreeViewは実PNG形状99と配色別評価、他図はRGB min4の99。独立raw JSを正解としLiveは参考に限定、私有原本のGit/公開は禁止、固定容量4,726,095,872B/goal2,363,047,936Bは維持する。
+Moon fingerprintと実task間の実retry metadata2項目の差をtraceで確認し限定修正。変更前red、変更後13回帰・Ruff・strict mypy・dup成功、実producerは計測用build/testへ進んだ。証跡は `tmp/quality/native-cache-current-node-root-environment-trace-r1/root-cause-review-r2.json` と `tmp/quality/native-coverage-retry-env-current-green-r1/report.json`。要件図の正入力不変・異常入力保持24回帰も成功。現在のcoverage不足を解消済みとしない。
 
-先行する詳細状況は各物理証跡と、管理外の不変snapshot `tmp/html-fidelity/history/quality-ledger-before-current-section-consolidation-20261018-r1.md` に保持した。snapshotは履歴参照用であり、別の現行台帳ではない。
+公開v0.4.23に旧130pin全てが含まれることをGit祖先集合で確認し、source/candidate双方に公開snapshotと今回の必須commitを要求する形へ縮約した。同じHEAD・同じ祖先検査関数で131参照から5参照へ減らし、交互3回の中央値は1.386秒→0.050秒、関連18回帰は成功した（`tmp/quality/release-target-pin-closure-controlled-benchmark-r1/report.json`、`tmp/quality/release-target-v0424-root-integration-r1/python-regression-report.json`）。最終source checkpointのmanifest/snapshot同期と完全ゲートは未完了。
+
+収集と合否の分離は実装・限定回帰を統合中。Python静的解析129ファイル、容量保護438回帰、重複・書式・TS型検査は限定範囲で成功した。実cache計測r1はtest開始前に生成物8,633,401,344Bで固定容量ガードが拒否。既存`just clean`はexit0、7.7GiBを整理し、保護44参照と固定上限を維持した（`tmp/quality/native-collection-capacity-recovery-r1/clean-exit.json`）。再試行r2は、aggregateの二重環境認証と認証後のreport再読込を先に除くためCargo開始前に通常SIGINTで終了し、実exit -2・source前後一致を保存した。未成功のcachehitや速度効果を主張しない。次は認証済みの同じ行集計へ100/0を適用し、型付きpolicy失敗では再テストせず、不正な成果物だけrefreshする単一認証経路を検証する。
+
+単一認証経路の統合40回帰は9.586秒・exit0、Python129ファイルの前後一致と静的解析時の同じbytesを照合した（`tmp/quality/native-single-auth-root-integration-unit-r1/`）。途中で90%のreportを100%へ差し替えても認証済み90%のまま拒否し、receiptのsymlinkも拒否する。既存graph契約のcollector期待を合わせ、TS型・重複・owned契約の静的3laneも全てexit0、変更19ファイルの前後一致を確認した（`tmp/quality/native-single-auth-integration-static-r2/report.json`）。容量438回帰は変更のないguardソースに対する既存r4の結果を再利用し、再実行していない。本番Moonのfresh/hit・復元・破損回復・常時100/0判定は引き続き未検証。
+
+全117図各99、HTML全対象90・動的84・全Y/実末尾/全目次、全frame3秒未満と時間/RSS非劣化、coverage100/未計測0、安全な結果再利用とCI再利用、依存更新と完全ゲート、Draft最新HEADレビュー・必須3OS・保護merge・Release/3crate公開・Issue整理・cleanupは未完了。HTML最終99の#106と暫定90の#109を区別する。C4/TreeViewは実PNG形状99と配色別評価、他図はRGB min4の99。独立raw JSを正解としLiveは参考に限定。私有原本のGit/公開は禁止。固定容量4,726,095,872B/goal2,363,047,936Bを維持する。
+
+単一認証r2の旧Rust契約1件は限定検証で修正確認済み。本番r3はsource前後一致、root lib 2,286成功・28失敗・9ignored、全28件がENOSPCでexit101・309.133秒となった（`tmp/quality/native-single-auth-current-root-moon-r3/report.json`）。実空き容量の回復後、再buildせず同一物理binaryのHTML prefixだけを実行し、1,331成功・失敗0・1ignoredを74.17秒で確認した（`tmp/quality/native-single-auth-subset-html-r1/report.json`）。失敗28件だけの検査とは表現しない。次の限定診断には既存libtestの複数完全一致filterを使い、成功済みprefixまで反復しない。subsetの追加profileにより固定capを約4MB超えたため、既存profraw-only整理で復帰する。全件成功・cachehit・100/0は未検証。
+
+collector/anchor/CLI/aggregateの48回帰とPython129ファイルのLint/strict型は、実ファイルの検査前後SHA一致を新規取得して成功した（`tmp/quality/native-coverage-source-bound-final-r1/report.json`）。r4に欠けていた開始時snapshotは再構成しない。その後のcontext最大3並列化は16回帰・標準Python Lint/strict型・実重複検査に成功し、同じ277root・30,267entry・330,152,773Bを用いたA-B-B-A比較で744recordが全て一致した。中央値16.948秒→9.369秒、照合部分44.72%短縮を確認してd3bf7a34へ採用した（`tmp/quality/native-context-parallel-fixed-benchmark-r1/comparison.json`）。先行profileの223.232秒とは条件が異なるため直接比較しない。製品表示やゲート全体の短縮へ転用しない。
+
+公式nextest 0.9.148のSHA検証済みtoolで、release_checkの19件成功後に同runの`-R latest`が19件を省略・0件実行・exit0・1.377秒になることを実測した（`tmp/quality/nextest-current-release-check-record-r1/report.json`）。初回37.341秒には異なるtarget scopeによる再buildも含まれ、直接の速度比較にしない。source/build変更を追跡しないnextestは開発反復専用とし、正式Moon cacheと100/0は別に実証する。余分なfingerprintの生成物により固定容量を超えたため、既存cleanで安全に回復してから後続へ進む。私有資料・保護44参照・閾値は維持する。
 
 以下が唯一のチェックリスト。過去の実行記録は末尾へ分離した。履歴内の「最新」は記録当時の表現であり、現在の合格を意味しない。
 

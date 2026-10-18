@@ -12,13 +12,34 @@ from pathlib import Path
 PRODUCERS = {"root": "root-test-and-coverage", "performance": "performance-harness-coverage"}
 
 
+def _cli(root: Path, command: str, producer: str) -> tuple[int, dict[str, object]]:
+    result = subprocess.run(
+        [sys.executable, str(root / "scripts/release/native_coverage_result_cli.py"),
+         "--repo", str(root), command, "--producer", producer],
+        cwd=root, check=False, capture_output=True, text=True,
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        payload = {"valid": False, "failure": "invalid-collection", "stderr": result.stderr.strip()}
+    if not isinstance(payload, dict):
+        payload = {"valid": False, "failure": "invalid-collection"}
+    return result.returncode, payload
+
+
 def validate_or_refresh(root: Path, producer: str) -> dict[str, object]:
     recipe = PRODUCERS[producer]
-    validate = [sys.executable, str(root / "scripts/release/native_coverage_result_cli.py"),
-                "--repo", str(root), "local-validate", "--producer", producer]
-    before = subprocess.run(validate, cwd=root, check=False, stdout=sys.stderr).returncode
-    if before == 0:
-        return {"producer": producer, "valid": True, "refreshed": False}
+    before, validation = _cli(root, "local-validate", producer)
+    if before == 0 and validation.get("valid") is True:
+        return {"producer": producer, "valid": True, "refreshed": False,
+                "failure": None, "validation": validation}
+    failure = validation.get("failure")
+    if failure == "coverage-policy":
+        return {"producer": producer, "valid": False, "refreshed": False,
+                "failure": "coverage-policy", "validation": validation}
+    if failure not in (None, "invalid-collection") and before == 0:
+        return {"producer": producer, "valid": False, "refreshed": False,
+                "failure": "invalid-collection", "validation": validation}
     # 再検査はキャッシュ済みtaskのhashから切り離し、新しいprobeで始める。
     environment = {name: value for name, value in os.environ.items()
                    if name not in {"MOON_TASK_ID", "MOON_TASK_HASH"}}
@@ -26,10 +47,18 @@ def validate_or_refresh(root: Path, producer: str) -> dict[str, object]:
                            env=environment).returncode
     if fresh != 0:
         return {"producer": producer, "valid": False, "refreshed": True,
-                "validationBeforeExit": before, "producerExit": fresh}
-    after = subprocess.run(validate, cwd=root, check=False, stdout=sys.stderr).returncode
-    return {"producer": producer, "valid": after == 0, "refreshed": True,
-            "validationBeforeExit": before, "producerExit": fresh, "validationAfterExit": after}
+                "failure": "invalid-collection", "validationBeforeExit": before,
+                "producerExit": fresh, "validation": validation}
+    after, refreshed_validation = _cli(root, "local-validate", producer)
+    if after != 0 or refreshed_validation.get("valid") is not True:
+        return {"producer": producer, "valid": False, "refreshed": True,
+                "failure": refreshed_validation.get("failure", "invalid-collection"),
+                "validationBeforeExit": before, "producerExit": fresh,
+                "validation": refreshed_validation}
+    return {"producer": producer, "valid": True, "refreshed": True,
+            "failure": None,
+            "validationBeforeExit": before, "producerExit": fresh,
+            "validationAfterExit": after, "validation": refreshed_validation}
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -3317,8 +3317,8 @@ test.each([
   ],
   [
     "performance-harness-coverage",
-    "--coverage-domain performance-candidate",
-    "--coverage-domain performance-baseline",
+    "--coverage-collection-domain performance-candidate",
+    "--coverage-collection-domain performance-baseline",
     "domain",
   ],
   [
@@ -3328,8 +3328,18 @@ test.each([
     "profiles",
   ],
   ["performance-harness-coverage", "candidate.json", "baseline.json", "report"],
-  ["performance-harness-coverage", "{{COVERAGE_MIN_LINES}}", "99", "threshold"],
-  ["performance-harness-coverage", "{{COVERAGE_MAX_UNCOVERED_LINES}}", "1", "uncovered"],
+  [
+    "performance-harness-coverage",
+    "--coverage-collection-domain performance-candidate",
+    "--coverage-domain performance-candidate",
+    "strict collector mode",
+  ],
+  [
+    "performance-harness-coverage",
+    "--coverage-collection-domain performance-baseline",
+    "--coverage-domain performance-baseline",
+    "baseline collector mode",
+  ],
   ["performance-harness-coverage", "--json", "--no-run --json", "no-run"],
   ["coverage", "just root-test-and-coverage", "echo coverage", "shared root producer"],
   ["coverage", "just coverage-result-check", "echo accepted", "uncached result validation"],
@@ -3344,18 +3354,6 @@ test.each([
     "--producer-exit 0",
     "--producer-exit 1",
     "producer success binding",
-  ],
-  [
-    "root-test-and-coverage",
-    "--fail-under-lines {{COVERAGE_MIN_LINES}}",
-    "--fail-under-lines 99",
-    "root 100 percent gate",
-  ],
-  [
-    "root-test-and-coverage",
-    "--fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}",
-    "--fail-uncovered-lines 1",
-    "root uncovered gate",
   ],
   [
     "root-test-and-coverage",

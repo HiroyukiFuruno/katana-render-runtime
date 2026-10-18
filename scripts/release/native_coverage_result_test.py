@@ -185,6 +185,27 @@ class NativeCoverageResultTests(unittest.TestCase):
                 self.write_report(domain.removeprefix("performance-") if domain != "root" else "root",
                                   12, 12, 100.0)
 
+    def test_collected_line_totals_accept_partial_but_strict_totals_reject(self) -> None:
+        self.write_report("root", 12, 11, 91.666666)
+        report = json.loads(self.report_path("root").read_text())
+        collected = coverage_result._collected_line_totals(report, "root")
+        self.assertEqual(collected["count"], 12)
+        self.assertEqual(collected["covered"], 11)
+        self.assertEqual(collected["unmeasured"], 1)
+        with self.assertRaisesRegex(coverage_result.CoverageResultError, "100/0"):
+            coverage_result._line_totals(report, "root")
+
+    def test_authenticated_collection_rows_raise_typed_policy_error(self) -> None:
+        partial = {"domain": "root", "lines": {
+            "count": 10, "covered": 9, "unmeasured": 1, "percent": 90.0,
+        }}
+        with self.assertRaises(coverage_result.CoveragePolicyError):
+            coverage_result.validate_collection_policy([partial], ("root",))
+        full = {"domain": "root", "lines": {
+            "count": 10, "covered": 10, "unmeasured": 0, "percent": 100.0,
+        }}
+        coverage_result.validate_collection_policy([full], ("root",))
+
     def test_zero_denominator_and_inconsistent_percent_reject(self) -> None:
         self.write_report("root", 0, 0, 0.0)
         with self.assertRaisesRegex(coverage_result.CoverageResultError, "100/0"):

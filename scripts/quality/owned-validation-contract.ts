@@ -1379,20 +1379,22 @@ function performanceCoverageCommands(arm: "root" | (typeof PERFORMANCE_ARMS)[num
   const root = arm === "root";
   const directory = root ? "llvm-cov-target" : `llvm-cov-performance-${arm}`;
   const domain = root ? "root" : `performance-${arm}`;
-  const prefix = `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/${directory}" python3 scripts/build/cargo_capacity_guard.py --coverage-domain ${domain} -- {{CARGO}} llvm-cov`;
+  const cleanPrefix = `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/${directory}" python3 scripts/build/cargo_capacity_guard.py --coverage-domain ${domain} -- {{CARGO}} llvm-cov`;
+  const prefix = `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/${directory}" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain ${domain} -- {{CARGO}} llvm-cov`;
   const manifest = root ? "" : ` --manifest-path ${PERFORMANCE_MANIFEST}`;
   const selection = root ? "--all-features" : `--no-default-features --features ${arm}`;
   const report = root
     ? `--json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"`
     : `--json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${arm}.json"`;
   return [
-    `${prefix} clean${manifest} --workspace${root ? "" : " --locked"}`,
-    `${prefix}${manifest} --workspace --all-targets ${selection} --locked ${report} --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}{{TEST_THREAD_ARGS}}`,
+    `${cleanPrefix} clean${manifest} --workspace${root ? "" : " --locked"}`,
+    `${prefix}${manifest} --workspace --all-targets ${selection} --locked ${report}{{TEST_THREAD_ARGS}}`,
   ];
 }
 function localCoverageCommand(producer: "root" | "performance", phase: "begin" | "finish"): string {
-  const exit = phase === "finish" ? " --producer-exit 0" : "";
-  return `python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-${phase} --producer ${producer}${exit}`;
+  if (phase === "finish")
+    return `python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer ${producer} --producer-exit 0`;
+  return `python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer ${producer}`;
 }
 function performanceRecipeCommands(): Record<string, string[]> {
   const deny = PERFORMANCE_CLIPPY_DENY.map((name) => `-D ${name}`).join(" ");

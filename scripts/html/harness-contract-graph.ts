@@ -3831,13 +3831,12 @@ function moonCoverageRecipesVerified(
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line.includes(" llvm-cov ") && !line.includes(" llvm-cov clean "));
-  const suffix =
-    " --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}{{TEST_THREAD_ARGS}}";
+  const suffix = "{{TEST_THREAD_ARGS}}";
   const rootCommand =
-    'CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-domain root -- {{CARGO}} llvm-cov --workspace --all-targets --all-features --locked --json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"' +
+    'CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root -- {{CARGO}} llvm-cov --workspace --all-targets --all-features --locked --json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"' +
     suffix;
   const performanceCommand = (variant: "baseline" | "candidate") =>
-    `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-${variant}" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-${variant} -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features ${variant} --locked --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${variant}.json"` +
+    `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-${variant}" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-${variant} -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features ${variant} --locked --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${variant}.json"` +
     suffix;
   if (!/^COVERAGE_MIN_LINES := env_var_or_default\("COVERAGE_MIN_LINES", "100"\)$/m.test(justfile))
     errors.push("root coverage threshold default differs");

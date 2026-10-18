@@ -47,6 +47,10 @@ class CoverageResultError(ValueError):
     """Raised when a coverage report or its result manifest is invalid."""
 
 
+class CoveragePolicyError(CoverageResultError):
+    """Raised when authenticated coverage is below the fixed acceptance policy."""
+
+
 def _object(value: object, label: str) -> JsonObject:
     if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
         raise CoverageResultError(f"{label} must be an object with string keys")
@@ -166,7 +170,7 @@ def coverage_cache_key(root: Path, context_value: object) -> JsonObject:
     return {"schema": COVERAGE_CACHE_KEY_SCHEMA, "key": _sha256(encoded)}
 
 
-def _line_totals(report: object, domain: str) -> JsonObject:
+def _collected_line_totals(report: object, domain: str) -> JsonObject:
     root = _object(report, f"{domain} llvm-cov report")
     version = root.get("version")
     if (root.get("type") != "llvm.coverage.json.export"
@@ -196,10 +200,37 @@ def _line_totals(report: object, domain: str) -> JsonObject:
             raise CoverageResultError(f"{domain} line percentage disagrees with its counts")
         total_count += count
         total_covered += covered
-    if total_count <= 0 or total_covered != total_count:
-        raise CoverageResultError(f"{domain} coverage does not satisfy 100/0")
-    return {"count": total_count, "covered": total_covered, "unmeasured": total_count - total_covered,
-            "percent": 100.0}
+    if total_count <= 0:
+        raise CoverageResultError(f"{domain} coverage does not satisfy 100/0: no measured lines")
+    unmeasured = total_count - total_covered
+    percent = total_covered * 100.0 / total_count
+    return {"count": total_count, "covered": total_covered, "unmeasured": unmeasured,
+            "percent": percent}
+
+
+def _line_totals(report: object, domain: str) -> JsonObject:
+    totals = _collected_line_totals(report, domain)
+    _require_complete_line_totals(totals, domain)
+    totals["percent"] = 100.0
+    return totals
+
+
+def _require_complete_line_totals(totals: JsonObject, domain: str) -> None:
+    if totals["covered"] != totals["count"] or totals["unmeasured"] != 0:
+        raise CoveragePolicyError(f"{domain} coverage does not satisfy 100/0")
+
+
+def validate_collection_policy(value: object, domains: tuple[str, ...]) -> None:
+    """Apply strict 100/0 policy to already authenticated collection rows."""
+    rows = _array(value, "collection domains")
+    if len(rows) != len(domains):
+        raise CoverageResultError("collection domains differ from the fixed producer")
+    for domain, raw_row in zip(domains, rows, strict=True):
+        row = _object(raw_row, f"{domain} collection result")
+        lines = _object(row.get("lines"), f"{domain} collection line totals")
+        if set(lines) != {"count", "covered", "unmeasured", "percent"}:
+            raise CoverageResultError(f"{domain} collection line totals are malformed")
+        _require_complete_line_totals(lines, domain)
 
 
 def _coverage_selection() -> Callable[..., tuple[str, Path]]:
@@ -235,14 +266,16 @@ def _domain_command(root: Path, domain: str, report_name: str, threads: str) -> 
                      "--all-targets", "--no-default-features", "--features", feature, "--locked", "--json"])
         just_target = "performance-harness-coverage"
     output = f"{REPORT_DIRECTORY}/{report_name}"
-    argv.extend(["--output-path", output, "--fail-under-lines", "100", "--fail-uncovered-lines", "0"])
+    argv.extend(["--output-path", output])
     if threads != "default":
         argv.extend(["--", f"--test-threads={threads}"])
     selected = root / "target" / ("llvm-cov-target" if domain == "root" else f"llvm-cov-{domain}")
     environment = {"CARGO_TARGET_DIR": str(root / "target"), "CARGO_LLVM_COV_TARGET_DIR": str(selected),
                    "CARGO_HOME": str(root / "tmp/cargo-home")}
     try:
-        action, actual_target = _coverage_selection()(root, root / "target", domain, argv, environment)
+        # collection と strict の記録は同じcollector argvに束縛し、strict性は行数検証で判定する。
+        action, actual_target = _coverage_selection()(root, root / "target", domain, argv, environment,
+                                                      collection=True)
     except (OSError, RuntimeError) as error:
         raise CoverageResultError(f"{domain} command fails the existing coverage contract") from error
     if action != "test" or actual_target != selected:
@@ -251,7 +284,7 @@ def _domain_command(root: Path, domain: str, report_name: str, threads: str) -> 
             "selectedTarget": str(selected.relative_to(root))}
 
 
-def _report_record(root: Path, domain: str, threads: str) -> JsonObject:
+def _report_record(root: Path, domain: str, threads: str, *, collection: bool = False) -> JsonObject:
     name = "root.json" if domain == "root" else f"{domain.removeprefix('performance-')}.json"
     relative = f"{REPORT_DIRECTORY}/{name}"
     raw = _read_repo_file(root, relative)
@@ -264,8 +297,12 @@ def _report_record(root: Path, domain: str, threads: str) -> JsonObject:
         "sha256": _sha256(raw),
         "bytes": len(raw),
         "command": _domain_command(root, domain, name, threads),
-        "lines": _line_totals(report, domain),
+        "lines": (_collected_line_totals if collection else _line_totals)(report, domain),
     }
+
+
+def _collection_report_record(root: Path, domain: str, threads: str) -> JsonObject:
+    return _report_record(root, domain, threads, collection=True)
 
 
 def _source_pins(root: Path) -> list[JsonObject]:

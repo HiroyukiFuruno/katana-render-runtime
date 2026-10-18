@@ -1047,7 +1047,7 @@ def collect_protected_references(cli_refs: object, environment_value: str | None
 
 
 def coverage_selection(root: Path, target: Path, domain: str, command: list[str],
-                       environment: Mapping[str, str]) -> tuple[str, Path]:
+                       environment: Mapping[str, str], *, collection: bool = False) -> tuple[str, Path]:
     if domain not in COVERAGE_DOMAINS or target != root / "target":
         raise RuntimeError("coverage domain requires the canonical aggregate target")
     selected = target / ("llvm-cov-target" if domain == "root" else f"llvm-cov-{domain}")
@@ -1067,6 +1067,8 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
     words = words[2:]
     action = "clean" if words[:1] == ["clean"] else "test"
     if action == "clean":
+        if collection:
+            raise RuntimeError("coverage collection requires a test command")
         words = words[1:]
     if "--" in words:
         boundary = words.index("--")
@@ -1108,9 +1110,15 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
     if domain != "root":
         required |= {"--manifest-path", "--locked"}
     if action == "test":
-        required |= {"--locked", "--all-targets", "--fail-under-lines", "--fail-uncovered-lines"}
-        if options.get("--fail-under-lines") != "100" or options.get("--fail-uncovered-lines") != "0":
-            raise RuntimeError("coverage thresholds must remain 100/0")
+        required |= {"--locked", "--all-targets"}
+        if collection:
+            required |= {"--json", "--output-path"}
+            if "--fail-under-lines" in options or "--fail-uncovered-lines" in options:
+                raise RuntimeError("coverage collection must not specify coverage thresholds")
+        else:
+            required |= {"--fail-under-lines", "--fail-uncovered-lines"}
+            if options.get("--fail-under-lines") != "100" or options.get("--fail-uncovered-lines") != "0":
+                raise RuntimeError("coverage thresholds must remain 100/0")
         if domain == "root":
             required.add("--all-features")
             if "--features" in options or "--no-default-features" in options:
@@ -1516,17 +1524,19 @@ def run(args: argparse.Namespace) -> int:
         raise RuntimeError("library alias cache requires the standard RUSTFLAGS=-D warnings")
     native_enabled = ("KRR_NATIVE_CLI_GUARD_REQUEST" in os.environ
                       or "KRR_NATIVE_CLI_GUARD_REQUEST_SHA256" in os.environ)
+    coverage_collection_value = getattr(args, "coverage_collection_domain", None)
     if native_enabled:
         from cargo_capacity_guard_native_cli_observation import observe, validate_capacity_report, validate_request
         native_root = _root()
         native_admission = validate_request(native_root, args.command, os.environ)
         if (args.dry_run or getattr(args, "coverage_domain", None) is not None
-                or getattr(args, "retain_build_profile", None) != "debug"
-                or getattr(args, "retain_profile", [])
-                or args.state not in (None, str(native_admission.state))
-                or args.factor != DEFAULT_FACTOR
-                or args.target not in (None, str(native_root / "target"))
-                or args.target_dir not in (None, str(native_root / "target"))):
+            or coverage_collection_value is not None
+            or getattr(args, "retain_build_profile", None) != "debug"
+            or getattr(args, "retain_profile", [])
+            or args.state not in (None, str(native_admission.state))
+            or args.factor != DEFAULT_FACTOR
+            or args.target not in (None, str(native_root / "target"))
+            or args.target_dir not in (None, str(native_root / "target"))):
             raise RuntimeError("native observation requires the canonical retained CLI build")
         native_refs = collect_protected_references(
             getattr(args, "protected_ref", []), os.environ.get("CARGO_CAPACITY_PROTECTED_REFS"),
@@ -1534,6 +1544,11 @@ def run(args: argparse.Namespace) -> int:
         if native_refs != native_admission.protected:
             raise RuntimeError("guard protected references differ from native admission")
     coverage_value: object = getattr(args, "coverage_domain", None)
+    if coverage_value is not None and coverage_collection_value is not None:
+        raise RuntimeError("coverage policy and collection domains are mutually exclusive")
+    if coverage_collection_value is not None:
+        coverage_value = coverage_collection_value
+    coverage_collection = coverage_collection_value is not None
     check_value: object = getattr(args, "check_domain", None)
     try:
         configured_factor = float(os.environ.get("CARGO_CAPACITY_FACTOR", str(DEFAULT_FACTOR)))
@@ -1663,6 +1678,7 @@ def run(args: argparse.Namespace) -> int:
         raise RuntimeError("capacity factor must be finite and greater than 1")
     coverage = None if coverage_value is None else coverage_selection(
         root, target, _text(coverage_value, "coverage domain"), args.command, os.environ,
+        collection=coverage_collection,
     )
     if coverage is not None and (state_path != root / "tmp/.cargo-capacity-guard.json" or factor != DEFAULT_FACTOR):
         raise RuntimeError("coverage requires the canonical state and existing capacity factor")
@@ -1830,7 +1846,9 @@ def main() -> int:
     parser.add_argument("--root")
     parser.add_argument("--state")
     parser.add_argument("--expected-state-sha256")
-    parser.add_argument("--coverage-domain", choices=COVERAGE_DOMAINS)
+    coverage_modes = parser.add_mutually_exclusive_group()
+    coverage_modes.add_argument("--coverage-domain", choices=COVERAGE_DOMAINS)
+    coverage_modes.add_argument("--coverage-collection-domain", choices=COVERAGE_DOMAINS)
     parser.add_argument("--check-domain", choices=CHECK_DOMAINS, action="append")
     parser.add_argument("--factor", type=float, default=DEFAULT_FACTOR)
     parser.add_argument("--dry-run", action="store_true")
