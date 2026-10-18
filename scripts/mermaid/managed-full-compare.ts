@@ -6,6 +6,7 @@ import {
   type PinnedInputs,
   parseManagedFullCompareRequest,
   validateFreshInputState,
+  validateLanguageInventory,
   validatePinnedInputs,
 } from "./managed-full-compare-input";
 import {
@@ -27,7 +28,7 @@ import {
   verifyNativeBuildReceipt,
 } from "./native-build-receipt";
 import { captureNativeSourceManifest } from "./native-source-manifest";
-import { physicalFileIdentity } from "./raster-comparison-binding";
+import { physicalFileIdentity, RasterComparisonBinding } from "./raster-comparison-binding";
 import { type RasterFileIdentity, sameRasterFileIdentity } from "./raster-production-binding";
 
 interface BuildResponse {
@@ -73,6 +74,7 @@ export function runManagedFullComparison(requestPath: string, requestSha256: str
     expectedSource.files.length,
   );
   try {
+    validateOfficialBaselines(request, pins);
     const buildReceiptPath = buildNativeCli(
       request,
       expectedSource.digest,
@@ -112,6 +114,27 @@ export function runManagedFullComparison(requestPath: string, requestSha256: str
   }
   writeExclusive(path.join(request.outputRoot, "receipt.json"), receipt);
   return receipt;
+}
+
+function validateOfficialBaselines(
+  request: ManagedFullCompareRequest,
+  pins: PinnedInputs,
+): void {
+  for (const language of ["en", "ja"] as const) {
+    const input = request.languages[language];
+    const inventory = validateLanguageInventory(request, language, pins.fixtureSources[language]);
+    RasterComparisonBinding.validateOfficialRole(
+      request.repositoryRoot,
+      {
+        receiptPath: input.officialReceipt.path,
+        receiptSha256: input.officialReceipt.sha256,
+        processEvidencePath: input.officialProcessEvidence.path,
+        processEvidenceSha256: input.officialProcessEvidence.sha256,
+        pairDirectory: input.officialPairDirectory,
+      },
+      inventory.slugs,
+    );
+  }
 }
 
 function buildNativeCli(

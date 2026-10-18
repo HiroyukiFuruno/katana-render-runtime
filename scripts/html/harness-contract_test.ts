@@ -1131,6 +1131,34 @@ describe("fixed native artifact and Python collector bindings", () => {
     expect(checkHarnessContract(snapshot)).toEqual([]);
   });
 
+  test("accepts the verified batch result rows projection", () => {
+    const snapshot = processRouteFixture();
+    replaceSources(snapshot, {
+      "scripts/mermaid/native-render-provenance.ts": nativeRouteProducer.replace(
+        "const rows = await renderFixtures([], input, prepared.build);",
+        "const renderedResult = await renderFixtures([], input, prepared.build); const rows = renderedResult.rows;",
+      ),
+    });
+    expect(checkHarnessContract(snapshot)).toEqual([]);
+  });
+
+  test.each([
+    ["verified result rows", "const rows = renderedResult.rows;", true],
+    ["unrelated result rows", "const rows = unrelatedResult.rows;", false],
+    ["unverified result rows", "const rows = forged;", false],
+  ])("validates native batch result binding: %s", (_label, extraction, accepted) => {
+    const snapshot = processRouteFixture();
+    replaceSources(snapshot, {
+      "scripts/mermaid/native-render-provenance.ts": nativeRouteProducer.replace(
+        "const rows = await renderFixtures([], input, prepared.build);",
+        `const renderedResult = await renderFixtures([], input, prepared.build); ${extraction}`,
+      ),
+    });
+    const issues = checkHarnessContract(snapshot);
+    if (accepted) expect(issues).toEqual([]);
+    else expect(issues).toContain("unresolved/external code: !unresolved-executable");
+  });
+
   test.each([
     [
       "before guard missing",
@@ -2721,6 +2749,38 @@ describe("reviewed Mermaid CLI source route and runtime compressor unit", () => 
   const compressorCaller = "scripts/runtime-assets/runtime-package-asset-compressor_test.ts";
   const compressorScript = "scripts/runtime-assets/runtime-package-asset-compressor.ts";
 
+  test.each([
+    ["canonical", "caller", null, null, true],
+    ["different binary", "caller", "process.execPath", "otherBinary", false],
+    ["different child program", "caller", "process.stdout.write", "process.stderr.write", false],
+    ["different wrapper launch", "wrapper", "spawn(binary", "spawn(otherBinary", false],
+  ] as const)(
+    "native batch reviewed fixture boundary: %s",
+    (_label, role, before, after, accepted) => {
+      const caller = "scripts/mermaid/native-render-batch_test.ts";
+      const wrapper = "scripts/mermaid/native-cli-process.ts";
+      const sources = {
+        caller: fs.readFileSync(
+          path.join(import.meta.dir, "../mermaid/native-render-batch_test.ts"),
+          "utf8",
+        ),
+        wrapper: fs.readFileSync(
+          path.join(import.meta.dir, "../mermaid/native-cli-process.ts"),
+          "utf8",
+        ),
+      };
+      if (before !== null && after !== null) sources[role] = sources[role].replace(before, after);
+      const references = sourceCode(sources.wrapper, {
+        name: wrapper,
+        importer: caller,
+        importerSource: sources.caller,
+        read: (name) =>
+          name === caller ? sources.caller : name === wrapper ? sources.wrapper : undefined,
+      });
+      expect(references.includes("!unresolved-executable")).toBe(!accepted);
+    },
+  );
+
   test("classifies the actual native helper only with a matching production or pinned unit context", () => {
     const wrapper = fs.readFileSync(
       path.join(import.meta.dir, "../mermaid/native-cli-process.ts"),
@@ -3074,15 +3134,15 @@ ${runtimeRecipes.join("\n")}
 root-test-and-coverage:
     mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer root
-    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-domain root -- {{CARGO}} llvm-cov --workspace --all-targets --all-features --locked --json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json" --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}{{TEST_THREAD_ARGS}}
+    NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-root-state" LLVM_PROFILE_FILE_NAME="krr-nextest-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root -- {{CARGO}} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml" --json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"{{NEXTEST_THREAD_ARGS}}
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-finish --producer root --producer-exit 0
 performance-harness-coverage:
     mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer performance
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-baseline -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked
-    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-baseline -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features baseline --locked --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/baseline.json" --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}{{TEST_THREAD_ARGS}}
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-baseline -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features baseline --locked --profile krr-coverage --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/baseline.json"{{TEST_THREAD_ARGS}}
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-candidate -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked
-    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-candidate -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features candidate --locked --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/candidate.json" --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}{{TEST_THREAD_ARGS}}
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-candidate -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features candidate --locked --profile krr-coverage --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/candidate.json"{{TEST_THREAD_ARGS}}
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-finish --producer performance --producer-exit 0
 coverage-result-check:
     python3 scripts/release/native_coverage_local_aggregate.py --repo "{{REPO_ROOT}}"
@@ -3386,7 +3446,14 @@ test("combined coverage producer binds the root and performance arms", () => {
   expect(checkHarnessContract(combinedCoverageMoonFixture())).toEqual([]);
 });
 
-test.each(["old unit leaf", "coverage mask", "coverage threshold", "missing asset dependency"])(
+test.each([
+  "old unit leaf",
+  "coverage mask",
+  "coverage threshold",
+  "missing asset dependency",
+  "performance profile missing",
+  "performance profile wrong",
+])(
   "combined coverage contract rejects %s",
   (fault) => {
     const snapshot = combinedCoverageMoonFixture();
@@ -3408,8 +3475,8 @@ test.each(["old unit leaf", "coverage mask", "coverage threshold", "missing asse
           snapshot
             .read("Justfile")
             ?.replace(
-              "python3 scripts/build/cargo_capacity_guard.py --coverage-domain root",
-              "echo python3 scripts/build/cargo_capacity_guard.py --coverage-domain root",
+              "python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root",
+              "echo python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root",
             ) ?? "",
       });
     else if (fault === "coverage threshold")
@@ -3418,6 +3485,16 @@ test.each(["old unit leaf", "coverage mask", "coverage threshold", "missing asse
           snapshot
             .read("Justfile")
             ?.replace('"COVERAGE_MIN_LINES", "100"', '"COVERAGE_MIN_LINES", "99"') ?? "",
+      });
+    else if (fault === "performance profile missing" || fault === "performance profile wrong")
+      replaceSources(snapshot, {
+        Justfile:
+          snapshot.read("Justfile")?.replace(
+            "--features baseline --locked --profile krr-coverage --json",
+            fault === "performance profile missing"
+              ? "--features baseline --locked --json"
+              : "--features baseline --locked --profile wrong-profile --json",
+          ) ?? "",
       });
     expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
   },
