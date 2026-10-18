@@ -34,7 +34,14 @@ class LocalCoverageContextTests(unittest.TestCase):
         self.assertNotIn("private path", str(result))
 
     def test_environment_hash_ignores_run_nonce_but_binds_safe_inputs(self) -> None:
-        moon_values = {name: f"first-{name}" for name in local_context.VOLATILE_ENV if name.startswith("MOON_")}
+        retry_values = {
+            "MOON_TASK_RETRY_ATTEMPT": "1",
+            "MOON_TASK_RETRY_TOTAL": "1",
+        }
+        moon_values = {
+            name: f"first-{name}" for name in local_context.VOLATILE_ENV
+            if name.startswith("MOON_") and name not in retry_values
+        }
         first = {
             "PATH": "/tools", "LANG": "en_US.UTF-8", "GITHUB_RUN_ID": "1", "API_TOKEN": "secret-a",
             "TMPDIR": "/tmp/one-run",
@@ -47,13 +54,24 @@ class LocalCoverageContextTests(unittest.TestCase):
             "_": "/different/last/command",
             "KRR_LOCAL_COVERAGE_PROFILE_PATH": "/tmp/profile-two.json",
             **{name: f"second-{name}" for name in moon_values},
+            **retry_values,
+        }
+        retry_changed = {
+            **same,
+            "MOON_TASK_RETRY_ATTEMPT": "second-MOON_TASK_RETRY_ATTEMPT",
+            "MOON_TASK_RETRY_TOTAL": "second-MOON_TASK_RETRY_TOTAL",
         }
         changed = {**same, "LANG": "ja_JP.UTF-8"}
         self.assertEqual(local_context._record_environment(first), local_context._record_environment(same))
+        self.assertEqual(local_context._record_environment(same), local_context._record_environment(retry_changed))
         self.assertNotEqual(local_context._record_environment(first), local_context._record_environment(changed))
         secret_digest = local_context._record_environment(first)
         self.assertNotEqual(secret_digest, local_context._record_environment({**first, "API_TOKEN": "secret-b"}))
         self.assertNotIn("secret-a", secret_digest)
+        self.assertNotEqual(
+            secret_digest,
+            local_context._record_environment({**first, "MOON_CACHE": "read"}),
+        )
         self.assertNotEqual(secret_digest, local_context._record_environment({**first, "TMPDIR": "/tmp/other"}))
         self.assertNotEqual(
             secret_digest,

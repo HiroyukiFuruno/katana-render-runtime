@@ -24,6 +24,9 @@ VOLATILE_ENV = frozenset({
     "_", "PWD", "OLDPWD", "SHLVL",
     "MOON_CACHE_DIR", "MOON_PROJECT_ID", "MOON_PROJECT_ROOT", "MOON_PROJECT_SOURCE",
     "MOON_PROJECT_SNAPSHOT", "MOON_TARGET", "MOON_TASK_ID", "MOON_TASK_HASH",
+    # 再試行カウンタは入力ではなく実行時だけ付くため、キー計算時との一致を保つ。
+    # https://moonrepo.dev/docs/env-vars#during-retries
+    "MOON_TASK_RETRY_ATTEMPT", "MOON_TASK_RETRY_TOTAL",
     "MOON_WORKSPACE_ROOT", "MOON_WORKING_DIR", "KRR_LOCAL_COVERAGE_PROFILE_PATH",
 })
 UNSUPPORTED_ENV = frozenset({
