@@ -76,6 +76,8 @@ Bunで個別のテストファイルを実行するときは、実在するフ�
 
 localキーはnative source manifestによる現在の作業treeのbytesを束縛し、途中変更を拒否する。CI・公開証跡のtested SHAにはclean HEADを要求する。後者の条件をlocal cache単体実証の前提へ転用せず、開発中に不要なcommitや完全検査を反復しない。
 
+Moon producerと直接Just producerの実行環境を混ぜない。Moon producerの検証は同じMoon経路の `krr:coverage`（`upstream none` の診断を含む）で行い、直接Just producerの検証は同じJust経路の `coverage-result-check` で行う。未知の環境差を無視してcache hitや成功へ読み替えない。`local-validate` はanchorを更新・失効させることがあるため、完全なread-only操作として扱わない。成功直後のLLVM詳細reportはテスト再実行なしのreport-only収集として保存する。
+
 ### 修正中の失敗項目だけの再実行
 
 ビルド済みlibtestの診断では、失敗した完全名を複数のpositional filterとして渡し、`--exact`で絞る。広いprefixで成功済みの千件まで再実行しない。物理binaryのSHAと元のsource、実argvと実行されたcaseを記録する。source変更後の既存binaryの成功は、変更後の検証へ流用しない。
