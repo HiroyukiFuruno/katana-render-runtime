@@ -29,8 +29,15 @@ impl Drop for TempFixture {
 
 fn write_mermaid_input(root: &TempFixture) -> std::io::Result<PathBuf> {
     let input = root.path("diagram.mmd");
-    std::fs::write(&input, "graph TD; A-->B")?;
+    std::fs::write(&input, mermaid_fixture_source(root))?;
     Ok(input)
+}
+
+fn mermaid_fixture_source(root: &TempFixture) -> String {
+    format!(
+        "graph TD; A-->B\n%% fixture-{}",
+        root.root.file_name().unwrap_or_default().to_string_lossy()
+    )
 }
 
 fn run_mermaid_render(
@@ -107,21 +114,25 @@ fn missing_mermaid_input_is_reported_by_public_cli() -> Result<(), Box<dyn std::
     Ok(())
 }
 
-fn assert_attestation_contract(receipt_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn assert_attestation_contract(
+    receipt_path: &Path,
+    source: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let receipt: serde_json::Value = serde_json::from_slice(&std::fs::read(receipt_path)?)?;
-    assert_attestation_metadata(&receipt)?;
+    assert_attestation_metadata(&receipt, source)?;
     assert_runtime_binding(&receipt)?;
-    assert_attested_input(receipt_path)?;
+    assert_attested_input(receipt_path, source)?;
     Ok(())
 }
 
 fn assert_attestation_metadata(
     receipt: &serde_json::Value,
+    source: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(receipt["schema"], "katana-native-render-attestation-v1");
     assert_eq!(receipt["status"], "output-written");
     assert_eq!(receipt["attemptToken"], "coverage-contract");
-    assert_eq!(receipt["actualRenderInput"]["source"], "graph TD; A-->B");
+    assert_eq!(receipt["actualRenderInput"]["source"], source);
     assert_eq!(receipt["actualExit"], serde_json::Value::Null);
     assert_eq!(receipt["accepted"], false);
     assert_eq!(receipt["requiresExternalExitEvidence"], true);
@@ -143,11 +154,14 @@ fn assert_runtime_binding(receipt: &serde_json::Value) -> Result<(), Box<dyn std
     Ok(())
 }
 
-fn assert_attested_input(receipt_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn assert_attested_input(
+    receipt_path: &Path,
+    source: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let artifacts = receipt_path.with_extension("artifacts");
     assert_eq!(
         std::fs::read(artifacts.join("raw-input.bin"))?,
-        b"graph TD; A-->B"
+        source.as_bytes()
     );
     Ok(())
 }
@@ -185,7 +199,8 @@ fn render_and_validate_attestation(
         .output()?;
     assert!(result.status.success(), "{:?}", result);
     assert!(std::fs::read_to_string(output)?.contains("<svg"));
-    assert_attestation_contract(receipt_path)
+    let source = std::fs::read_to_string(input)?;
+    assert_attestation_contract(receipt_path, &source)
 }
 
 fn noncanonical_alias(path: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
