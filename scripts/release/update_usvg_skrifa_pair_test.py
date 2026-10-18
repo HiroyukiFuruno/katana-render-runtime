@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TypedDict
 from unittest.mock import Mock
 
 
@@ -28,7 +29,49 @@ OLD_SKRIFA_ID = f"{REGISTRY}#skrifa@0.48.0"
 TARGET_SKRIFA_ID = f"{REGISTRY}#skrifa@0.44.0"
 
 
-def edge(name: str, package_id: str) -> dict[str, object]:
+class CargoDependencyKind(TypedDict):
+    kind: str | None
+    target: str | None
+
+
+class CargoMetadataEdge(TypedDict):
+    name: str
+    pkg: str
+    dep_kinds: list[CargoDependencyKind]
+
+
+class CargoPackageDependency(TypedDict):
+    name: str
+    source: str | None
+    req: str
+    kind: str | None
+    optional: bool
+
+
+class CargoPackage(TypedDict):
+    id: str
+    name: str
+    version: str
+    source: str | None
+    dependencies: list[CargoPackageDependency]
+
+
+class CargoResolveNode(TypedDict):
+    id: str
+    deps: list[CargoMetadataEdge]
+
+
+class CargoResolve(TypedDict):
+    nodes: list[CargoResolveNode]
+
+
+class CargoMetadata(TypedDict):
+    packages: list[CargoPackage]
+    workspace_members: list[str]
+    resolve: CargoResolve
+
+
+def edge(name: str, package_id: str) -> CargoMetadataEdge:
     return {
         "name": name,
         "pkg": package_id,
@@ -36,7 +79,9 @@ def edge(name: str, package_id: str) -> dict[str, object]:
     }
 
 
-def dependency(name: str, requirement: str, source: str | None, kind: str | None = None) -> dict[str, object]:
+def dependency(
+    name: str, requirement: str, source: str | None, kind: str | None = None
+) -> CargoPackageDependency:
     return {
         "name": name,
         "source": source,
@@ -46,12 +91,14 @@ def dependency(name: str, requirement: str, source: str | None, kind: str | None
     }
 
 
-def metadata(direct_id: str = TARGET_SKRIFA_ID, direct_req: str = "^0.44") -> dict[str, object]:
+def metadata(
+    direct_id: str = TARGET_SKRIFA_ID, direct_req: str = "^0.44"
+) -> CargoMetadata:
     versions = {
         OLD_SKRIFA_ID: "0.48.0",
         TARGET_SKRIFA_ID: "0.44.0",
     }
-    packages = [
+    packages: list[CargoPackage] = [
         {
             "id": RUNTIME_ID,
             "name": "katana-render-runtime",
@@ -73,17 +120,17 @@ def metadata(direct_id: str = TARGET_SKRIFA_ID, direct_req: str = "^0.44") -> di
             "source": REGISTRY,
             "dependencies": [dependency("skrifa", "^0.44", REGISTRY)],
         },
-        *[
-            {
-                "id": package_id,
-                "name": "skrifa",
-                "version": version,
-                "source": REGISTRY,
-                "dependencies": [],
-            }
-            for package_id, version in versions.items()
-        ],
     ]
+    packages.extend(
+        {
+            "id": package_id,
+            "name": "skrifa",
+            "version": version,
+            "source": REGISTRY,
+            "dependencies": [],
+        }
+        for package_id, version in versions.items()
+    )
     return {
         "packages": packages,
         "workspace_members": [RUNTIME_ID],
@@ -132,7 +179,15 @@ class UpdateUsvgSkrifaPairTest(unittest.TestCase):
         graph = metadata()
         packages = graph["packages"]
         nodes = graph["resolve"]["nodes"]
-        packages.append({"id": f"{REGISTRY}#usvg@0.49.0", "name": "usvg", "source": REGISTRY})
+        packages.append(
+            {
+                "id": f"{REGISTRY}#usvg@0.49.0",
+                "name": "usvg",
+                "version": "0.49.0",
+                "source": REGISTRY,
+                "dependencies": [],
+            }
+        )
         nodes.append({"id": f"{REGISTRY}#usvg@0.49.0", "deps": []})
         nodes[1]["deps"].append(edge("usvg", f"{REGISTRY}#usvg@0.49.0"))
         with self.assertRaisesRegex(ValueError, "expected one resolved usvg"):

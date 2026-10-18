@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig-owned-native-pure-utilities.json",
+  "files": [
+    "../../crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime_native_width_trace.js",
+    "../../crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime_native_width_trace_host.d.ts"
+  ]
+}

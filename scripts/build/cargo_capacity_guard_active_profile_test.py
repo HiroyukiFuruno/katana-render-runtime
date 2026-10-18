@@ -5,6 +5,11 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import subprocess
+from dataclasses import replace
+
+from cargo_capacity_guard import JsonObject, _object, _selected_input_check
+from cargo_capacity_guard_build_script_ownership import BuildScriptOwnership, build_script_ownership
 
 from cargo_capacity_guard import workspace_incremental_prefixes
 from cargo_capacity_guard_active_profile_fixtures import (
@@ -12,6 +17,20 @@ from cargo_capacity_guard_active_profile_fixtures import (
     guard_call, identities, protect_outputs, real_cargo, size_bytes, workspace_metadata,
 )
 from cargo_capacity_guard_lock import ProfileLocks, evict_artifacts, retained_profile_paths
+from cargo_capacity_guard_selected_cache_ownership import SelectedCacheOwnership, create_selected_cache_ownership
+
+
+def protected_host_metadata(root: Path, target: Path) -> tuple[list[Path], JsonObject]:
+    refs = [target / "debug/mathjax_consumer_facts"]
+    frozen = root / "frozen"
+    frozen.mkdir()
+    for index in range(39):
+        path = frozen / str(index)
+        path.write_bytes(f"consumer {index}".encode())
+        refs.append(path)
+    metadata = _object(json.loads(real_cargo(root, ["metadata", "--offline", "--locked", "--all-features",
+                                                   "--format-version", "1"], cargo_env(target))), "native host fixture")
+    return refs, metadata
 
 
 @unittest.skipIf(os.name == "nt", "POSIX native locking and allocated-byte fixtures")
@@ -145,6 +164,214 @@ class ActiveProfileTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "kind or device boundary"):
                 retained_profile_paths(target, [str(target / "alias/release")])
             self.assertEqual(identities(active_files(active)), old)
+
+
+@unittest.skipIf(os.name == "nt", "POSIX native lock and allocated-byte Cargo fixture")
+class OwnedBuildScriptNativeTests(unittest.TestCase):
+    def workspace(self, root: Path) -> None:
+        (root / "Cargo.toml").write_text('[workspace]\nmembers=["crates/kdr-linter","crates/worker"]\nresolver="2"\n')
+        host = root / "crates/kdr-linter"
+        worker = root / "crates/worker"
+        for package in (host, worker):
+            (package / "src").mkdir(parents=True)
+        (host / "Cargo.toml").write_text('[package]\nname="kdr-linter"\nversion="0.1.0"\nedition="2021"\n'
+                                         '[[bin]]\nname="mathjax_consumer_facts"\npath="src/main.rs"\n')
+        (host / "src/main.rs").write_text('fn main() { println!("selected host"); }\n')
+        (worker / "Cargo.toml").write_text('[package]\nname="worker"\nversion="0.1.0"\nedition="2021"\n'
+                                           '[features]\nalternate=[]\n'
+                                           '[[bin]]\nname="worker_probe"\npath="src/main.rs"\n')
+        (worker / "src/lib.rs").write_text('include!(concat!(env!("OUT_DIR"), "/generated.rs"));\n')
+        (worker / "src/main.rs").write_text('fn main() { println!("{}", worker::value()); }\n')
+        (worker / "build.rs").write_text(
+            'fn main() {\n'
+            ' let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());\n'
+            ' std::fs::write(out.join("generated.rs"), "pub fn value() -> u32 { 7 }\\n").unwrap();\n'
+            ' println!("cargo:rerun-if-changed=build.rs");\n'
+            '}\n',
+        )
+
+    def prepared(self, root: Path) -> tuple[Path, Path, list[Path], JsonObject]:
+        self.workspace(root)
+        target = root / "target"
+        env = cargo_env(target)
+        real_cargo(root, ["build", "--offline", "--message-format=json"], env)
+        old = list((target / "debug/build").glob("worker-*/build-script-build"))
+        self.assertEqual(len(old), 1)
+        real_cargo(root, ["build", "--offline", "--features", "worker/alternate", "--message-format=json"], env)
+        (root / "old-fingerprint").mkdir()
+        fingerprint = target / "debug/.fingerprint" / old[0].parent.name
+        fingerprint.rename(root / "old-fingerprint" / fingerprint.name)
+        refs, metadata = protected_host_metadata(root, target)
+        return target, old[0].parent, refs, metadata
+
+    def test_real_orphan_script_closure_keeps_40_consumers_and_regenerates_missing_unit(self) -> None:
+        with tempfile.TemporaryDirectory() as value:
+            root = Path(value).resolve()
+            target, orphan, refs, metadata = self.prepared(root)
+            profile = target / "debug"
+            proof = build_script_ownership(root, target, metadata, _selected_input_check(root, metadata))
+            old_refs = identities(refs)
+            fingerprint_files = active_files([profile / ".fingerprint"])
+            fingerprints_before = identities(fingerprint_files)
+            outputs = [path for path in (profile / "build").rglob("*")
+                       if path.is_file() and not path.is_relative_to(orphan)]
+            outputs_before = identities(outputs)
+            orphan_files = sorted(orphan.iterdir())
+            self.assertEqual(len(orphan_files), 3)
+            available = sum(path.stat().st_blocks * 512 for path in orphan_files)
+            before = size_bytes(target)
+            with ProfileLocks(target, proof.verify) as epoch:
+                code, preview = evict_artifacts(target, before - available, before, True, refs, epoch,
+                                                retained_profiles=[profile], selected_package_profiles=[profile],
+                                                build_script_ownership=proof)
+                self.assertEqual(code, 0, preview)
+                self.assertEqual(preview["deleted_files"], 0)
+                self.assertEqual(preview["estimated_candidate_bytes"], available)
+                self.assertEqual(identities(refs), old_refs)
+                code, report = evict_artifacts(target, before - available, before, False, refs, epoch,
+                                               retained_profiles=[profile], selected_package_profiles=[profile],
+                                               build_script_ownership=proof)
+                self.assertEqual(code, 0, report)
+                self.assertEqual(report["deleted_files"], 3)
+                self.assertEqual(report["invalidated_profiles"], [])
+            self.assertFalse(list(orphan.iterdir()))
+            self.assertEqual(before - size_bytes(target), available)
+            self.assertEqual(identities(refs), old_refs)
+            self.assertEqual(identities(fingerprint_files), fingerprints_before)
+            self.assertEqual(identities(outputs), outputs_before)
+            selected = cargo_messages(real_cargo(root, ["build", "--offline", "--locked", "-p", "kdr-linter",
+                                                        "--bin", "mathjax_consumer_facts", "--message-format=json"],
+                                                  cargo_env(target)))
+            artifacts = [row for row in selected if row.get("reason") == "compiler-artifact"]
+            self.assertTrue(artifacts)
+            self.assertTrue(all(row["fresh"] for row in artifacts), artifacts)
+            regenerated = cargo_messages(real_cargo(root, ["build", "--offline", "--locked", "-p", "worker",
+                                                           "--message-format=json"], cargo_env(target)))
+            self.assertTrue(any(row.get("reason") == "compiler-artifact" and row["fresh"] is False
+                                for row in regenerated), regenerated)
+            self.assertTrue((orphan / "build-script-build").is_file())
+            completed = subprocess.run([str(profile / "worker_probe")], cwd=root, text=True,
+                                       capture_output=True, check=False, timeout=10)
+            self.assertEqual((completed.returncode, completed.stdout.strip()), (0, "7"))
+
+
+@unittest.skipIf(os.name == "nt", "POSIX native session locking and allocated-byte Cargo fixture")
+class SelectedCacheNativeTests(unittest.TestCase):
+    def prepared(self, root: Path) -> tuple[Path, list[Path], JsonObject]:
+        host = root / "crates/kdr-linter"
+        (host / "src").mkdir(parents=True)
+        (root / "Cargo.toml").write_text('[workspace]\nmembers=["crates/kdr-linter"]\nresolver="2"\n')
+        (host / "Cargo.toml").write_text('[package]\nname="kdr-linter"\nversion="0.1.0"\nedition="2021"\n'
+                                        '[[bin]]\nname="mathjax_consumer_facts"\npath="src/main.rs"\n')
+        (host / "src/lib.rs").write_text('pub fn value() -> u32 { 7 }\n')
+        (host / "src/main.rs").write_text('fn main() { println!("{}", kdr_linter::value()); }\n')
+        target = root / "target"
+        real_cargo(root, ["build", "--offline", "--message-format=json"], cargo_env(target))
+        refs, metadata = protected_host_metadata(root, target)
+        return target, refs, metadata
+
+    def test_native_protected_or_unknown_alias_latest_index_refuses_all_deletion(self) -> None:
+        for boundary in ("protected", "unknown-alias"):
+            with self.subTest(boundary=boundary), tempfile.TemporaryDirectory() as value:
+                root = Path(value).resolve()
+                target, refs, metadata = self.prepared(root)
+                profile = target / "debug"
+                indexes = [p for p in (profile / "incremental").rglob("*")
+                           if p.name in {"dep-graph.bin", "query-cache.bin"}]
+                self.assertEqual(len(indexes), 4)
+                selected = indexes[0]
+                if boundary == "protected":
+                    refs[-1] = selected
+                else:
+                    os.link(selected, root / "unknown-index-alias")
+                old_indexes, old_refs = identities(indexes), identities(refs)
+                input_check = _selected_input_check(root, metadata)
+                original_orphan = build_script_ownership(root, target, metadata, input_check)
+                original_cache = create_selected_cache_ownership(root, target, metadata, input_check)
+
+                def verify(orphan: BuildScriptOwnership = original_orphan,
+                           cache: SelectedCacheOwnership = original_cache) -> None:
+                    orphan.verify()
+                    cache.verify()
+
+                before = size_bytes(target)
+                available = sum(p.stat().st_blocks * 512 for p in indexes)
+                with ProfileLocks(target, verify) as epoch:
+                    code, report = evict_artifacts(
+                        target, before - available, before, False, refs, epoch,
+                        retained_profiles=[profile], selected_package_profiles=[profile],
+                        build_script_ownership=replace(original_orphan, verify=verify),
+                        selected_cache_ownership=replace(original_cache, verify=verify),
+                    )
+                self.assertEqual(code, 1, report)
+                self.assertEqual(report["deleted_files"], 0)
+                self.assertEqual(report["invalidated_profiles"], [])
+                self.assertEqual(identities(indexes), old_indexes)
+                self.assertEqual(identities(refs), old_refs)
+                self.assertIn("insufficient closed inactive", report["error"])
+
+    def test_native_latest_two_indexes_only_preserve_warm_skip_and_changed_source_rebuild(self) -> None:
+        with tempfile.TemporaryDirectory() as value:
+            root = Path(value).resolve()
+            target, refs, metadata = self.prepared(root)
+            profile = target / "debug"
+            indexes = [p for p in (profile / "incremental").rglob("*")
+                       if p.name in {"dep-graph.bin", "query-cache.bin"}]
+            self.assertEqual(len(indexes), 4, "actual library and binary index pairs required")
+            held = [p for p in profile.rglob("*") if p.is_file() and p not in indexes
+                    and (p.suffix in {".o", ".rmeta", ".rlib", ".d"}
+                         or p.name in {"work-products.bin", "mathjax_consumer_facts"}
+                         or p.is_relative_to(profile / ".fingerprint"))]
+            old_held, old_refs = identities(held), identities(refs)
+            input_check = _selected_input_check(root, metadata)
+            original_orphan = build_script_ownership(root, target, metadata, input_check)
+            original_cache = create_selected_cache_ownership(root, target, metadata, input_check)
+
+            def verify() -> None:
+                original_orphan.verify()
+                original_cache.verify()
+
+            orphan = replace(original_orphan, verify=verify)
+            cache = replace(original_cache, verify=verify)
+            before = size_bytes(target)
+            available = sum(p.stat().st_blocks * 512 for p in indexes)
+            with ProfileLocks(target, verify) as epoch:
+                code, preview = evict_artifacts(target, before - available, before, True, refs, epoch,
+                                                retained_profiles=[profile], selected_package_profiles=[profile],
+                                                build_script_ownership=orphan, selected_cache_ownership=cache)
+                self.assertEqual(code, 0, preview)
+                self.assertEqual(set(preview["candidate_paths"]), {str(p.relative_to(target)) for p in indexes})
+                self.assertEqual(preview["deleted_files"], 0)
+                code, report = evict_artifacts(target, before - available, before, False, refs, epoch,
+                                               retained_profiles=[profile], selected_package_profiles=[profile],
+                                               build_script_ownership=orphan, selected_cache_ownership=cache)
+                self.assertEqual(code, 0, report)
+                self.assertEqual(report["deleted_files"], 4)
+                self.assertEqual(report["invalidated_profiles"], [])
+            self.assertTrue(all(not p.exists() for p in indexes))
+            self.assertEqual(identities(held), old_held)
+            self.assertEqual(identities(refs), old_refs)
+            self.assertEqual(before - size_bytes(target), available)
+            build = ["build", "--offline", "--locked", "-p", "kdr-linter", "--bin", "mathjax_consumer_facts",
+                     "--message-format=json"]
+            warm = [r for r in cargo_messages(real_cargo(root, build, cargo_env(target)))
+                    if r.get("reason") == "compiler-artifact"]
+            self.assertTrue(warm)
+            self.assertTrue(all(r["fresh"] is True for r in warm), warm)
+            # Cargoのfreshな出力配置でinodeだけが変わる場合も、成果物の内容は維持する。
+            self.assertEqual([(r[0], r[1], r[3], r[4]) for r in identities(held)],
+                             [(r[0], r[1], r[3], r[4]) for r in old_held])
+            self.assertEqual([(r[0], r[1], r[3], r[4]) for r in identities(refs)],
+                             [(r[0], r[1], r[3], r[4]) for r in old_refs])
+            (root / "crates/kdr-linter/src/lib.rs").write_text('pub fn value() -> u32 { 9 }\n')
+            with self.assertRaisesRegex(RuntimeError, "source inputs changed"):
+                cache.verify()
+            rebuilt = [r for r in cargo_messages(real_cargo(root, build, cargo_env(target)))
+                       if r.get("reason") == "compiler-artifact"]
+            self.assertTrue(any(r["fresh"] is False for r in rebuilt), rebuilt)
+            executed = subprocess.run([str(profile / "mathjax_consumer_facts")], cwd=root,
+                                      text=True, capture_output=True, check=False, timeout=10)
+            self.assertEqual((executed.returncode, executed.stdout.strip()), (0, "9"))
 
 
 class ActiveProfileBoundaryUnitTests(unittest.TestCase):

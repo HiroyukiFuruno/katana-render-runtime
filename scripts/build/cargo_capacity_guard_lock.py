@@ -17,6 +17,13 @@ from pathlib import Path
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from typing import TYPE_CHECKING, Protocol, TextIO, TypedDict, runtime_checkable
+from cargo_capacity_guard_build_script_ownership import (
+    BuildScriptOwnership, OrphanBuildScript, file_stamp, orphan_build_scripts, verify_orphan_build_scripts,
+)
+from cargo_capacity_guard_selected_cache_ownership import (
+    SelectedCacheOwnership, binary_cache_members,
+)
+from cargo_capacity_guard_library_alias_ownership import LibraryAliasOwnership, library_alias_groups
 
 if TYPE_CHECKING:
     _Identity = tuple[int, int, int]
@@ -39,6 +46,16 @@ class _EvictionReportFields(TypedDict):
     estimated_candidate_bytes: int
     deleted_files: int
     retained_unknown_entries: int
+    retained_unknown_alias_diagnostics: list[UnknownAliasDiagnostic]
+
+
+class UnknownAliasDiagnostic(TypedDict):
+    device: int
+    inode: int
+    st_nlink: int
+    candidate_row_count: int
+    unique_path_count: int
+    paths: list[str]
 
 
 class EvictionReport(_EvictionReportFields, total=False):
@@ -190,6 +207,9 @@ class ProfileLocks:
     def verify(self) -> None:
         if self.input_check is not None:
             self.input_check()
+        self._verify_identities()
+
+    def _verify_identities(self) -> None:
         for path, descriptor, identity in self.ancestors:
             if (_identity(path.lstat()) != identity
                     or _identity(os.fstat(descriptor)) != identity):
@@ -536,6 +556,7 @@ def _incremental_index_closure(
     rows: Sequence[_Candidate], aliases: dict[_Inode, list[_Candidate]], sessions: dict[Path, Path],
     indexes: dict[Path, dict[str, _Candidate]], members: dict[Path, list[_Candidate]],
     protected: set[_Inode], cache_leaf_sessions: set[Path] | None = None,
+    owned_members: dict[Path, list[_Candidate]] | None = None,
 ) -> dict[_Inode, list[_Candidate]] | None:
     pending = list(rows)
     closure: dict[_Inode, list[_Candidate]] = {}
@@ -550,6 +571,8 @@ def _incremental_index_closure(
             return None
         closure[key] = linked
         for _, path, _ in linked:
+            if owned_members is not None and path in owned_members:
+                pending.extend(owned_members[path])
             session = sessions.get(path)
             if session is not None:
                 index_rows = indexes[session]
@@ -570,11 +593,15 @@ def evict_artifacts(
     auxiliary_only_profiles: Sequence[_PathValue] = (),
     unselected_incremental_prefixes: Sequence[str] = (),
     selected_package_profiles: Sequence[_PathValue] = (),
+    build_script_ownership: BuildScriptOwnership | None = None,
+    selected_cache_ownership: SelectedCacheOwnership | None = None,
+    library_alias_ownership: LibraryAliasOwnership | None = None,
 ) -> tuple[int, EvictionReport]:
     """Invalidate fingerprints before one finite eviction of managed cache files."""
     report: EvictionReport = {"candidate_paths": [], "staged_paths": [], "invalidated_profiles": [],
               "retained_unknown_alias_inodes": 0, "retained_protected_inodes": 0,
-              "estimated_candidate_bytes": 0, "deleted_files": 0, "retained_unknown_entries": 0}
+              "estimated_candidate_bytes": 0, "deleted_files": 0, "retained_unknown_entries": 0,
+              "retained_unknown_alias_diagnostics": []}
     held: list[_Held] = []
     root_checks: list[_Held] = []
     descriptors: dict[Path, int] = {}
@@ -588,6 +615,17 @@ def evict_artifacts(
     retained_cache_files: dict[Path, list[_File]] = {}
     removed_cache_leaves: set[Path] = set()
     removed_session_locks: set[Path] = set()
+    owned_files: set[Path] = set()
+    library_alias_files: set[Path] = set()
+    owned_members: dict[Path, list[_Candidate]] = {}
+    owned_records: tuple[OrphanBuildScript, ...] = ()
+    removed_owned_files: set[Path] = set()
+    selected_cache_sessions: set[Path] = set()
+    selected_cache_latest_sessions: set[Path] = set()
+    selected_cache_old_rows: list[_Candidate] = []
+    selected_cache_latest_rows: list[_Candidate] = []
+    selected_cache_collect: Callable[[], None] | None = None
+    protected_directory_snapshots: list[tuple[Path, list[_File], list[_Directory]]] = []
     def verify_session_lock(session: Path) -> None:
         lock_path, lock_fd, lock_identity = retained_session_locks[session]
         parent_fd = descriptors[lock_path.parent]
@@ -603,7 +641,14 @@ def evict_artifacts(
                 verify_session_lock(session)
     def verify_roots(parents: Iterable[Path] = (), full: bool = False) -> None:
         if epoch is not None:
-            epoch.verify()
+            if (library_alias_ownership is not None
+                    and epoch.input_check is library_alias_ownership.verify):
+                # alias証跡のfull input/tool snapshotは下段で実行するため、変異検出用のidentity順序を維持する。
+                epoch._verify_identities()
+            elif full:
+                epoch.verify()
+            else:
+                epoch._verify_identities()
         checks = list(held if full else root_checks)
         for parent in parents:
             chain = []
@@ -623,6 +668,18 @@ def evict_artifacts(
                     or _identity(named) != identity):
                 raise RuntimeError("cache root identity changed")
         verify_session_locks()
+        if library_alias_ownership is not None:
+            library_alias_ownership.verify()
+            if epoch is not None and epoch.input_check is library_alias_ownership.verify:
+                epoch._verify_identities()
+        for path, files, directories in protected_directory_snapshots:
+            current_files, current_directories = _fingerprint_files(path, device)
+            if ([(p, _stamp(v)) for p, v in files] != [(p, _stamp(v)) for p, v in current_files]
+                    or directories != current_directories):
+                raise RuntimeError("protected directory closure changed")
+        if build_script_ownership is not None:
+            verify_orphan_build_scripts(build_script_ownership, descriptors[build_script_ownership.profile],
+                                        descriptors, owned_records, removed_owned_files)
         for session, files in retained_cache_files.items():
             expected_names = sorted(name for name in retained_session_names[session]
                                     if session / name not in removed_cache_leaves)
@@ -643,13 +700,39 @@ def evict_artifacts(
         if "build_script_build-" in unselected_incremental_prefixes:
             raise RuntimeError("custom-build incremental namespace must remain retained")
         if selected_package_profiles and (
-            not unselected_incremental_prefixes
+            not (unselected_incremental_prefixes or build_script_ownership is not None
+                 or library_alias_ownership is not None)
             or not set(selected_package_profiles).issubset(retained_profiles)
             or epoch is None or epoch.input_check is None
         ):
             raise RuntimeError("selected package cleanup requires bound metadata inputs and retained profiles")
         if unselected_incremental_prefixes and not selected_package_profiles:
             raise RuntimeError("unselected namespaces require verified selected package profiles")
+        if build_script_ownership is not None and (
+            build_script_ownership.target != target
+            or build_script_ownership.profile not in selected_package_profiles
+            or epoch is None or epoch.input_check is not build_script_ownership.verify
+            or not protected_refs
+        ):
+            raise RuntimeError("orphan build-script cleanup requires bound selected metadata and protected consumers")
+        if selected_cache_ownership is not None and (
+            selected_cache_ownership.target != target
+            or selected_cache_ownership.profile not in selected_package_profiles
+            or epoch is None or epoch.input_check is not selected_cache_ownership.verify
+            or library_alias_ownership is None and (build_script_ownership is None
+                or selected_cache_ownership.verify is not build_script_ownership.verify)
+            or library_alias_ownership is not None and selected_cache_ownership is not library_alias_ownership.cache
+            or not protected_refs
+        ):
+            raise RuntimeError("selected cache cleanup requires a bound selected host and protected consumers")
+        if library_alias_ownership is not None and (
+            library_alias_ownership.target != target
+            or library_alias_ownership.target / "debug" not in selected_package_profiles
+            or epoch is None or epoch.input_check is not library_alias_ownership.verify
+            or not protected_refs or build_script_ownership is not None
+            or selected_cache_ownership is not library_alias_ownership.cache
+        ):
+            raise RuntimeError("library alias cleanup requires bound classifiers and protected consumers")
         if auxiliary_only_profiles:
             if protected_refs:
                 raise RuntimeError("auxiliary-only cleanup requires an empty protected reference set")
@@ -666,6 +749,16 @@ def evict_artifacts(
         protected: set[_Inode] = set()
         protected_snapshots: list[_File] = []
         for reference in protected_refs:
+            reference_path = Path(reference)
+            if library_alias_ownership is not None and reference_path.is_dir():
+                if (reference_path.resolve() != reference_path or reference_path.is_symlink()
+                        or not reference_path.is_relative_to(target)):
+                    raise RuntimeError("library alias protected directory is not canonical")
+                ref_files, ref_dirs = _fingerprint_files(reference_path, device)
+                protected_directory_snapshots.append((reference_path, ref_files, ref_dirs))
+                protected.update((v.st_dev, v.st_ino) for _, v in ref_files)
+                protected_snapshots.extend(ref_files)
+                continue
             value = _reference_metadata(Path(reference), device)
             protected.add((value.st_dev, value.st_ino))
             protected_snapshots.append((Path(reference), value))
@@ -723,7 +816,9 @@ def evict_artifacts(
                 profile_prefixes += tuple(inactive_prefixes)
             if profile in selected_package_profiles:
                 profile_prefixes += tuple(unselected_incremental_prefixes)
-            if profile_prefixes:
+            if library_alias_ownership is not None:
+                profile_prefixes = ()
+            if profile_prefixes or selected_cache_ownership is not None and profile == selected_cache_ownership.profile:
                 incremental = profile / "incremental"
                 if incremental.exists():
                     root_fd = os.open(incremental, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -736,7 +831,11 @@ def evict_artifacts(
                     def visit_incremental(
                         path: Path, parent_fd: int, owner: Path = profile,
                         incremental_root: Path = incremental,
+                        selected_cache_visit: bool = False,
                     ) -> None:
+                        if (library_alias_ownership is not None and selected_cache_visit
+                                and path in retained_session_locks and path not in selected_cache_sessions):
+                            return
                         descriptor = os.open(path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                                              dir_fd=parent_fd)
                         value = os.fstat(descriptor)
@@ -753,6 +852,10 @@ def evict_artifacts(
                                 and any(re.fullmatch(re.escape(prefix) + r"[0-9a-z]{13}", path.name)
                                         for prefix in unselected_incremental_prefixes)
                             )
+                            cache_owner = next((item for item in selected_cache_ownership.owners
+                                                if re.fullmatch(re.escape(item.prefix) + r"[0-9a-z]{13}", path.name)), None) if (
+                                selected_cache_visit and selected_cache_ownership is not None
+                            ) else None
                             lock_prefix_counts = Counter(
                                 lock_name for name in names
                                 if (lock_name := _rust_session_lock_name(name)) is not None
@@ -783,7 +886,15 @@ def evict_artifacts(
                                             else now_micros - timestamp > 10_000_000)
                                 if unselected_owner:
                                     eligible = finalized
+                                if cache_owner is not None:
+                                    eligible = finalized
+                                if selected_cache_ownership is not None and owner == selected_cache_ownership.profile and not finalized:
+                                    eligible = False
                                 if not eligible:
+                                    continue
+                                if (library_alias_ownership is not None and selected_cache_visit
+                                        and session_path in retained_session_locks
+                                        and session_path not in selected_cache_sessions):
                                     continue
                                 lock = _acquire_incremental_session_lock(
                                     path, descriptor, child_name, device, protected,
@@ -799,9 +910,24 @@ def evict_artifacts(
                                     named_value = os.stat(child_name, dir_fd=descriptor, follow_symlinks=False)
                                     session_names = sorted(os.listdir(session_fd))
                                     cache_leaves_only = unselected_owner and finalized and "metadata.rmeta" in session_names
+                                    selected_cache = cache_owner is not None and finalized
+                                    # 同じCargo lib targetのtest-mode cacheにはrmetaがなく、既存binary形でindicesだけを再生成できる。
+                                    selected_schema = (
+                                        _known_session_members(session_fd, session_names, True, True)
+                                        if cache_owner is not None and cache_owner.kind == "library"
+                                        and "metadata.rmeta" in session_names
+                                        else binary_cache_members(session_fd, session_names)
+                                    ) if selected_cache else False
+                                    if selected_cache:
+                                        cache_leaves_only = selected_schema
+                                    strict_optional_cache = (
+                                        selected_cache_ownership is not None and owner == selected_cache_ownership.profile
+                                    )
                                     if (_identity(session_value) != _identity(named_value)
                                             or session_value.st_dev != device
-                                            or not _known_session_members(session_fd, session_names, finalized, cache_leaves_only)
+                                            or strict_optional_cache and not cache_leaves_only
+                                            or (not selected_schema if selected_cache else
+                                                not _known_session_members(session_fd, session_names, finalized, cache_leaves_only))
                                             or cache_leaves_only and (
                                                 getattr(session_value, "st_flags", 0) != 0
                                                 or getattr(os.fstat(lock_fd), "st_flags", 0) != 0
@@ -811,17 +937,24 @@ def evict_artifacts(
                                         session_fd = None
                                         os.close(lock_fd)
                                         continue
+                                    candidate_names = (
+                                        sorted({"dep-graph.bin", "query-cache.bin"}.intersection(session_names))
+                                        if selected_cache or strict_optional_cache else sorted(INCREMENTAL_INDEX_NAMES.intersection(session_names))
+                                        if cache_leaves_only else session_names
+                                    )
                                     preserved_cache_files = [
                                         (session_path / name, _metadata_at(session_fd, name, device))
-                                        for name in session_names if cache_leaves_only and name not in INCREMENTAL_INDEX_NAMES
+                                        for name in session_names if cache_leaves_only and name not in candidate_names
                                     ]
                                     retained_session_locks[session_path] = (lock_path, lock_fd, lock_identity)
                                     retained_session_dirs[session_path] = _identity(session_value)
                                     retained_session_names[session_path] = session_names
-                                    candidate_names = (sorted(INCREMENTAL_INDEX_NAMES.intersection(session_names))
-                                                       if cache_leaves_only else session_names)
                                     if cache_leaves_only:
                                         retained_cache_files[session_path] = preserved_cache_files
+                                    if selected_cache:
+                                        selected_cache_sessions.add(session_path)
+                                        if timestamp == latest_finalized:
+                                            selected_cache_latest_sessions.add(session_path)
                                     retained_session_files.update(session_path / filename for filename in candidate_names)
                                     if not finalized:
                                         retained_working_sessions.add(session_path)
@@ -840,7 +973,7 @@ def evict_artifacts(
                             if item.st_dev != device:
                                 raise RuntimeError("incremental device boundary")
                             if stat.S_ISDIR(item.st_mode):
-                                visit_incremental(child, descriptor, owner)
+                                visit_incremental(child, descriptor, owner, incremental_root, selected_cache_visit)
                             elif stat.S_ISREG(item.st_mode):
                                 session = _incremental_session(child, owner)
                                 working_session = (child.parent if child.parent in retained_working_sessions
@@ -850,7 +983,12 @@ def evict_artifacts(
                                 if (session is not None and retained_eligible
                                         and (filename in INCREMENTAL_INDEX_NAMES or child.suffix == ".o")):
                                     row = (owner, child, _metadata_at(descriptor, filename, device))
-                                    candidates.append(row)
+                                    if session in selected_cache_sessions:
+                                        destination = (selected_cache_latest_rows if session in selected_cache_latest_sessions
+                                                       else selected_cache_old_rows)
+                                        destination.append(row)
+                                    else:
+                                        candidates.append(row)
                                     incremental_sessions[child] = session
                                     incremental_members[session].append(row)
                                     if filename in INCREMENTAL_INDEX_NAMES:
@@ -885,55 +1023,219 @@ def evict_artifacts(
                             visit_incremental(incremental / filename, root_fd)
                         else:
                             report["retained_unknown_entries"] += 1
+                    if selected_cache_ownership is not None and profile == selected_cache_ownership.profile:
+                        def collect_selected_cache(
+                            cache_names: list[str] = root_names, cache_path: Path = incremental,
+                            cache_fd: int = root_fd, cache_profile: Path = profile,
+                            visit: Callable[[Path, int, Path, Path, bool], None] = visit_incremental,
+                            cache_proof: SelectedCacheOwnership = selected_cache_ownership,
+                        ) -> None:
+                            cache_proof.verify()
+                            for filename in cache_names:
+                                if any(re.fullmatch(re.escape(item.prefix) + r"[0-9a-z]{13}", filename)
+                                       for item in cache_proof.owners):
+                                    visit(cache_path / filename, cache_fd, cache_profile, cache_path, True)
+                            if cache_names != sorted(os.listdir(cache_fd)):
+                                raise RuntimeError("selected cache namespace changed during admission")
+
+                        selected_cache_collect = collect_selected_cache
                     if root_names != sorted(os.listdir(root_fd)):
                         raise RuntimeError("incremental namespace changed during selection")
+            if build_script_ownership is not None and profile == build_script_ownership.profile:
+                build = profile / "build"
+                profile_fd = next(fd for path, fd, _ in held if path == profile)
+                build_fd = os.open("build", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=profile_fd)
+                held.append((build, build_fd, _identity(os.fstat(build_fd))))
+                namespaces.append((build, sorted(os.listdir(build_fd))))
+                owned_records = orphan_build_scripts(build_script_ownership, profile_fd, build_fd, device, protected)
+                for record in owned_records:
+                    owner_fd = os.open(record.directory.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                       dir_fd=build_fd)
+                    if _identity(os.fstat(owner_fd)) != record.identity:
+                        os.close(owner_fd)
+                        raise RuntimeError("compiled build-script owner changed after selection")
+                    held.append((record.directory, owner_fd, record.identity))
+                    rows = [(profile, path, value) for path, value in record.leaves]
+                    candidates.extend(rows)
+                    for _, path, _ in rows:
+                        owned_files.add(path)
+                        owned_members[path] = rows
+        if library_alias_ownership is not None:
+            references = [Path(value) for value in protected_refs]
+            census, _ = _fingerprint_files(target, device)
+            # クォータ目標の達成可否は結果判定の責務にし、所有証明を抑制しない。
+            groups = library_alias_groups(library_alias_ownership, census, protected, references)
+
+            def hold_alias_parent(path: Path) -> int:
+                existing = next((fd for item, fd, _ in held if item == path), None)
+                if existing is not None:
+                    return existing
+                parent = hold_alias_parent(path.parent)
+                descriptor = os.open(path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                value = os.fstat(descriptor)
+                held.append((path, descriptor, _identity(value)))
+                if (value.st_dev != device or getattr(value, "st_flags", 0) != 0
+                        or _identity(value) != _identity(os.stat(path.name, dir_fd=parent, follow_symlinks=False))):
+                    raise RuntimeError("library alias parent changed")
+                namespaces.append((path, sorted(os.listdir(descriptor))))
+                return descriptor
+
+            for group in groups:
+                indexes_for_group: list[_Candidate] = []
+                eligible = True
+                for session in group.sessions:
+                    owner_fd = hold_alias_parent(session.parent)
+                    session_fd = hold_alias_parent(session)
+                    names = sorted(os.listdir(session_fd))
+                    if (not _known_session_members(session_fd, names, True, True)
+                            or any((_metadata_at(session_fd, name, device).st_dev,
+                                    _metadata_at(session_fd, name, device).st_ino) in protected
+                                   for name in names)
+                            or any(ref.is_relative_to(session) or session.is_relative_to(ref)
+                                   for ref in references)):
+                        eligible = False
+                        break
+                    if session not in retained_session_locks:
+                        acquired = _acquire_incremental_session_lock(
+                            session.parent, owner_fd, session.name, device, protected,
+                        )
+                        if acquired is None:
+                            eligible = False
+                            break
+                        lock_fd, lock_path, lock_identity = acquired
+                        retained_session_locks[session] = (lock_path, lock_fd, lock_identity)
+                        retained_session_dirs[session] = _identity(os.fstat(session_fd))
+                        retained_session_names[session] = names
+                        retained_cache_files[session] = [
+                            (session / name, _metadata_at(session_fd, name, device)) for name in names
+                        ]
+                    for name in ("dep-graph.bin", "query-cache.bin"):
+                        if name in names:
+                            indexes_for_group.append((target / "debug", session / name,
+                                                      _metadata_at(session_fd, name, device)))
+                if not eligible:
+                    continue
+                rows = [(target / "debug", path, value) for path, value in group.files]
+                bound = list({row[1]: row for row in rows + indexes_for_group}.values())
+                for row in bound:
+                    profile, path, value = row
+                    parent_fd = hold_alias_parent(path.parent)
+                    if _stamp(_metadata_at(parent_fd, path.name, device)) != _stamp(value):
+                        raise RuntimeError("library alias changed during admission")
+                    owned_files.add(path)
+                    library_alias_files.add(path)
+                    owned_members[path] = bound
+                    if path.parent in group.sessions:
+                        session = path.parent
+                        retained_session_files.add(path)
+                        retained_session_for_file[path] = session
+                        incremental_sessions[path] = session
+                        if not any(item[1] == path for item in incremental_members[session]):
+                            incremental_members[session].append(row)
+                        if path.name in INCREMENTAL_INDEX_NAMES:
+                            incremental_indexes[session][path.name] = row
+                        retained_cache_files[session] = [
+                            item for item in retained_cache_files[session] if item[0] != path
+                        ]
+                    if not any(item[1] == path for item in candidates):
+                        candidates.append(row)
+            library_alias_ownership.verify()
+            debug_objects = library_alias_ownership.debug_objects
+            if debug_objects is not None and debug_objects.snapshot is not None:
+                # consumer証明付きの選択は、そのsnapshotが検証したobject/index集合に閉じる。
+                admitted_paths = {path for path, _ in (*debug_objects.snapshot.objects,
+                                                        *debug_objects.snapshot.indexes,
+                                                        *debug_objects.snapshot.archives)}
+                candidates[:] = [row for row in candidates if row[1] in admitted_paths]
+                selected_cache_old_rows[:] = [row for row in selected_cache_old_rows
+                                              if row[1] in admitted_paths]
+                selected_cache_latest_rows[:] = [row for row in selected_cache_latest_rows
+                                                 if row[1] in admitted_paths]
+                selected_cache_collect = None
+            if library_alias_ownership.archives_only:
+                # ARCHIVES-onlyはLLVMに束縛したarchive群だけを選び、一般cacheを混在させない。
+                candidates[:] = [row for row in candidates if row[1] in library_alias_files]
+                selected_cache_old_rows.clear()
+                selected_cache_latest_rows.clear()
+                selected_cache_collect = None
         aliases: defaultdict[_Inode, list[_Candidate]] = defaultdict(list)
-        for row in candidates:
-            value = row[2]
-            aliases[(value.st_dev, value.st_ino)].append(row)
         selected: list[_Candidate] = []
         selected_keys: set[_Inode] = set()
         needed = max(0, current_bytes - threshold)
-        for key, rows in sorted(aliases.items(), key=lambda item: max(row[2].st_mtime_ns for row in item[1])):
-            if key in protected:
-                report["retained_protected_inodes"] += 1
-            elif len(rows) != rows[0][2].st_nlink:
-                report["retained_unknown_alias_inodes"] += 1
-            elif report["estimated_candidate_bytes"] < needed:
-                closure = _incremental_index_closure(
-                    rows, aliases, incremental_sessions, incremental_indexes, incremental_members, protected,
-                    set(retained_cache_files),
-                )
-                if closure is None:
-                    report["retained_unknown_entries"] += len(rows)
-                    continue
-                touches_retained_profile = any(
-                    row[0] in retained_profiles for closed_rows in closure.values() for row in closed_rows
-                )
-                if (touches_retained_profile
-                        and any(row[1] not in retained_session_files
-                                for closed_rows in closure.values() for row in closed_rows)):
-                    report["retained_active_closures"] = report.get("retained_active_closures", 0) + 1
-                    continue
-                for closed_key, closed_rows in closure.items():
-                    if closed_key not in selected_keys:
-                        selected_keys.add(closed_key)
-                        selected.extend(closed_rows)
-                        report["estimated_candidate_bytes"] += closed_rows[0][2].st_blocks * 512
+
+        def extend_selection(rows_to_add: Sequence[_Candidate]) -> None:
+            added_keys: dict[_Inode, None] = {}
+            for row in rows_to_add:
+                value = row[2]
+                key = value.st_dev, value.st_ino
+                aliases[key].append(row)
+                added_keys[key] = None
+            for key, rows in sorted(((key, aliases[key]) for key in added_keys),
+                                    key=lambda item: max(row[2].st_mtime_ns for row in item[1])):
+                if key in protected:
+                    report["retained_protected_inodes"] += 1
+                elif len(rows) != rows[0][2].st_nlink:
+                    report["retained_unknown_alias_inodes"] += 1
+                    diagnostics = report["retained_unknown_alias_diagnostics"]
+                    if len(diagnostics) < 5:
+                        # 集計値だけでは外部hardlinkと同一候補pathの重複登録を区別できないため、拒否を維持したまま先頭例を記録する。
+                        diagnostics.append({
+                            "device": key[0],
+                            "inode": key[1],
+                            "st_nlink": rows[0][2].st_nlink,
+                            "candidate_row_count": len(rows),
+                            "unique_path_count": len({row[1] for row in rows}),
+                            "paths": [str(row[1].relative_to(target)) for row in rows[:5]],
+                        })
+                elif report["estimated_candidate_bytes"] < needed:
+                    closure = _incremental_index_closure(
+                        rows, aliases, incremental_sessions, incremental_indexes, incremental_members, protected,
+                        set(retained_cache_files),
+                        owned_members,
+                    )
+                    if closure is None:
+                        report["retained_unknown_entries"] += len(rows)
+                        continue
+                    touches_retained_profile = any(
+                        row[0] in retained_profiles for closed_rows in closure.values() for row in closed_rows
+                    )
+                    if (touches_retained_profile
+                            and any(row[1] not in retained_session_files | owned_files
+                                    for closed_rows in closure.values() for row in closed_rows)):
+                        report["retained_active_closures"] = report.get("retained_active_closures", 0) + 1
+                        continue
+                    for closed_key, closed_rows in closure.items():
+                        if closed_key not in selected_keys:
+                            selected_keys.add(closed_key)
+                            selected.extend(closed_rows)
+                            report["estimated_candidate_bytes"] += closed_rows[0][2].st_blocks * 512
+
+        extend_selection(candidates)
+        if report["estimated_candidate_bytes"] < needed and selected_cache_collect is not None:
+            selected_cache_collect()
+            extend_selection(selected_cache_old_rows)
+            if report["estimated_candidate_bytes"] < needed:
+                # 最新cacheは要求cleanup goalへ届かない時だけ候補にし、成果物とwork-productsは保持する。
+                extend_selection(selected_cache_latest_rows)
         # 欠落objectを指す旧indexを先に外し、中断時も残indexからの再利用を防ぐ。
         selected.sort(key=lambda row: 0 if row[1] in incremental_sessions and row[1].name == "dep-graph.bin"
                       else 1 if row[1] in incremental_sessions and row[1].name in INCREMENTAL_INDEX_NAMES else 2)
         report["candidate_paths"] = [str(row[1].relative_to(target)) for row in selected]
         if auxiliary_profiles and any(
-            row[0] not in auxiliary_profiles or row[1] not in retained_session_files
+            row[0] not in auxiliary_profiles or row[1] not in retained_session_files | owned_files
             for row in selected
         ):
             raise RuntimeError("auxiliary-only selection escaped verified closed incremental sessions")
         if retained_profiles and report["estimated_candidate_bytes"] < needed:
-            raise RuntimeError("insufficient closed inactive artifact capacity; active profiles retained")
+            partial_alias_units = (
+                library_alias_ownership is not None
+                and any(path in library_alias_files for _, path, _ in selected)
+            )
+            if not partial_alias_units:
+                raise RuntimeError("insufficient closed inactive artifact capacity; active profiles retained")
         selected_incremental_files = {row[1] for row in selected} & retained_session_files
         selected_sessions = {retained_session_for_file[path] for path in selected_incremental_files}
-        affected = {row[0] for row in selected if row[1] not in retained_session_files}
+        affected = {row[0] for row in selected if row[1] not in retained_session_files | owned_files}
         if auxiliary_profiles and affected:
             raise RuntimeError("auxiliary-only selection cannot invalidate profile fingerprints")
         fp_aliases = Counter((value.st_dev, value.st_ino)
@@ -954,14 +1256,21 @@ def evict_artifacts(
         descriptors.update((path, descriptor) for path, descriptor, _ in held)
         identities.update((path, identity) for path, _, identity in held)
         root_checks.extend(row for row in held if row[0] not in incremental_descendants)
-        standard_selected = [row for row in selected if row[1] not in retained_session_files]
+        standard_selected = [row for row in selected if row[1] not in retained_session_files | owned_files]
+        if library_alias_ownership is not None:
+            for _, path, value in selected:
+                if _stamp(_metadata_at(descriptors[path.parent], path.name, device)) != _stamp(value):
+                    raise RuntimeError("library alias selected physical input changed")
         for _, path, value in standard_selected:
             if _stamp(_metadata_at(descriptors[path.parent], path.name, device)) != _stamp(value):
                 raise RuntimeError("artifact changed before staging")
         for path, names in namespaces:
             if sorted(os.listdir(descriptors[path])) != names:
                 raise RuntimeError("artifact namespace changed before staging")
-        verify_roots()
+        # 最初のrename/unlink前にfull input/tool検証を行い、admission境界を閉じる。
+        verify_roots(full=True)
+        if library_alias_ownership is not None and library_alias_ownership.debug_objects is not None:
+            library_alias_ownership.debug_objects.validate_selection(frozenset(path for _, path, _ in selected))
         if dry_run or not selected:
             return 0, report
         for reference, value in protected_snapshots:
@@ -1039,19 +1348,29 @@ def evict_artifacts(
                     if session is not None:
                         verify_session_lock(session)
                     os.unlink(path.name, dir_fd=descriptors[path.parent])
+                    if path in owned_files:
+                        removed_owned_files.add(path)
                     if session in retained_cache_files:
                         removed_cache_leaves.add(path)
                     if artifacts:
                         report["deleted_files"] += 1
+                    transition = None
                     if index + 1 < len(paths):
                         next_path = paths[index + 1]
-                        actual = _stamp(_metadata_at(descriptors[next_path.parent], next_path.name, device))
+                        next_value = _metadata_at(descriptors[next_path.parent], next_path.name, device)
+                        actual = _stamp(next_value)
                         previous = stamps[key]
                         # 自分のunlinkによるnlink減少とctime更新だけを次aliasへ引き継ぐ。
                         if (actual[0] != previous[0] or actual[1] != previous[1] - 1
                                 or actual[2:4] != previous[2:4] or actual[5] != previous[5]):
                             raise RuntimeError("alias changed after owned unlink")
                         stamps[key] = actual
+                        transition = file_stamp(next_value)
+                    if (library_alias_ownership is not None and library_alias_ownership.debug_objects is not None
+                            and path in owned_files):
+                        library_alias_ownership.debug_objects.record_owned_unlink(path, transition)
+        # 全staged artifactのrename完了後、purge開始前にもsource変化を拒否する。
+        verify_roots(full=True)
         purge(staged_artifacts, expected, True)
         verify_roots(full=True)
         fp_rows = [(stages[profile] / path.relative_to(profile / ".fingerprint"), value)
@@ -1072,7 +1391,7 @@ def evict_artifacts(
                 root_checks[:] = [row for row in root_checks if row[1] != descriptor]
                 os.close(descriptor)
             os.mkdir(".fingerprint", dir_fd=descriptors[profile])
-        retained_rows = [(path, value) for _, path, value in selected if path in retained_session_files]
+        retained_rows = [(path, value) for _, path, value in selected if path in retained_session_files | owned_files]
         if retained_rows:
             retained_stamps = {(value.st_dev, value.st_ino): _stamp(value) for _, value in retained_rows}
             purge(retained_rows, retained_stamps, True)

@@ -7,20 +7,23 @@
     "resolvePackageJsonImports": true,
     "strict": true,
     "noImplicitAny": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "strictNullChecks": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "useUnknownInCatchVariables": false,
+    "useUnknownInCatchVariables": true,
     "noEmit": true,
     "types": ["node", "bun"]
   },
   "include": [
     "scripts/**/*.ts",
-    "crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/**/*.ts"
+    "tests/fixtures/quality-cache/*.ts",
+    "crates/katana-render-runtime/src/markdown/diagram_runtime/source/**/*.ts"
   ],
   "exclude": [
-    "crates/katana-diagram-renderer/src/markdown/diagram_runtime/generated/**",
-    "crates/katana-diagram-renderer/vendor/**",
+    "crates/katana-render-runtime/src/markdown/diagram_runtime/generated/**",
+    "crates/katana-render-runtime/vendor/**",
     "target/**",
     "tmp/**"
   ]

@@ -9,7 +9,9 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: write
+  pull-requests: read
 
 env:
   CARGO_INCREMENTAL: 0
@@ -34,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: stable
 
@@ -47,6 +49,32 @@ jobs:
           test "$(git -C release-source rev-parse HEAD)" = "$(git -C release-source rev-list -n 1 "${RELEASE_TAG}")"
           cd release-source
           bash ../release-tools/scripts/release/verify-version.sh "${RELEASE_TAG}"
+
+      - name: Verify completed merged release context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.version }}
+        run: |
+          python3 release-tools/scripts/release/verify_completed_release_context.py \
+            --repo release-source --head "$(git --no-replace-objects -C release-source rev-parse HEAD)" \
+            --version "${RELEASE_TAG}"
+
+      - name: Acquire completed exact-tag CI and paired performance evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 release-tools/scripts/release/verify_html_performance_evidence.py \
+            --repo release-source --evidence-dir release-source/tmp/html-performance-release-evidence --acquire
+
+      - name: Reverify acquired completed generation before retry publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.version }}
+        run: |
+          python3 release-tools/scripts/release/verify_completed_release_context.py \
+            --repo release-source --head "$(git --no-replace-objects -C release-source rev-parse HEAD)" \
+            --version "${RELEASE_TAG}" \
+            --acquisition-receipt release-source/tmp/html-performance-release-evidence/acquisition.json
 
       - name: Publish crates.io from release tag
         env:

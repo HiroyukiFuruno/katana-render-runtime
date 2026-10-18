@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 import copy
 import hashlib
 import importlib.util
@@ -11,12 +12,44 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from typing import TYPE_CHECKING
 
 
 SPEC = importlib.util.spec_from_file_location("local_macos_tool_provenance", Path(__file__).with_name("local_macos_tool_provenance.py"))
 assert SPEC and SPEC.loader
 PROVENANCE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PROVENANCE)
+
+if TYPE_CHECKING:
+    from typing import TypeGuard
+    from local_macos_tool_provenance import HostToolProof, InventoryEntry
+else:
+    HostToolProof = PROVENANCE.HostToolProof
+    InventoryEntry = PROVENANCE.InventoryEntry
+
+
+def _fixture_object_shape(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+
+def fixture_object(value: object) -> dict[str, object]:
+    if not _fixture_object_shape(value):
+        raise AssertionError("official fixture metadata must be a string-keyed object")
+    return value
+
+
+def _fixture_array_shape(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def fixture_array(value: object) -> list[object]:
+    if not _fixture_array_shape(value):
+        raise AssertionError("official fixture metadata must be an array")
+    return value
+
+
+def bottle_files(value: dict[str, object]) -> dict[str, object]:
+    return fixture_object(fixture_object(fixture_object(value["bottle"])["stable"])["files"])
 
 
 def digest(value: bytes) -> str:
@@ -37,7 +70,7 @@ def macho(dependencies: tuple[str, ...] = (), rpaths: tuple[str, ...] = ()) -> b
     return struct.pack("<IIIIIIII", 0xFEEDFACF, 0x0100000C, 0, 2, len(commands), len(body), 0, 0) + body
 
 
-def archive(files: dict[str, bytes | tuple[str, str]], *, extra: list[tarfile.TarInfo] | None = None) -> bytes:
+def archive(files: Mapping[str, bytes | tuple[str, str]], *, extra: list[tarfile.TarInfo] | None = None) -> bytes:
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode="w:gz", format=tarfile.PAX_FORMAT) as target:
         for path, value in files.items():
@@ -55,7 +88,7 @@ def archive(files: dict[str, bytes | tuple[str, str]], *, extra: list[tarfile.Ta
     return output.getvalue()
 
 
-def formula(name: str, bottle: bytes, dependencies: list[str]) -> dict:
+def formula(name: str, bottle: bytes, dependencies: list[str]) -> dict[str, object]:
     sha = digest(bottle)
     return {
         "name": name, "full_name": name, "versions": {"stable": "1.0", "bottle": True}, "revision": 0,
@@ -71,7 +104,7 @@ def formula(name: str, bottle: bytes, dependencies: list[str]) -> dict:
 class OfficialFixture:
     def __init__(self, *, external_dependency: str | None = None, graphviz_wrapper: bool = False) -> None:
         dependencies = (external_dependency or "/opt/homebrew/opt/cairo/lib/libcairo.2.dylib", "/usr/lib/libSystem.B.dylib")
-        self.graphviz_contents = {
+        self.graphviz_contents: dict[str, bytes | tuple[str, str]] = {
             "graphviz/1.0/bin/dot": b"#!/bin/sh\nexit 0\n" if graphviz_wrapper else macho(dependencies),
             "graphviz/1.0/lib/libgvc.6.dylib": macho(dependencies),
             "graphviz/1.0/lib/libgvc.dylib": ("symlink", "libgvc.6.dylib"),
@@ -79,7 +112,7 @@ class OfficialFixture:
             "graphviz/1.0/lib/graphviz/config6a": b"libgvplugin_core.6.dylib core {}\n",
         }
         self.cairo_contents = {"cairo/1.0/lib/libcairo.2.dylib": macho(("/usr/lib/libSystem.B.dylib",))}
-        self.java_contents = {
+        self.java_contents: dict[str, bytes | tuple[str, str]] = {
             "jdk-21.0.12.1+1/Contents/Info.plist": b"official bundle metadata",
             "jdk-21.0.12.1+1/Contents/Home/bin/java": macho(("@rpath/libjli.dylib",), ("@executable_path/../lib",)),
             "jdk-21.0.12.1+1/Contents/Home/lib/libjli.dylib": macho(("/usr/lib/libSystem.B.dylib",)),
@@ -93,13 +126,13 @@ class OfficialFixture:
                          "cairo": formula("cairo", self.bottles["cairo"], [])}
         self.java_archive = archive(self.java_contents)
         self.java_url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.12.1_1.tar.gz"
-        self.release = {"draft": False, "prerelease": False, "tag_name": "jdk-21.0.12.1+1", "assets": [
+        self.release: dict[str, object] = {"draft": False, "prerelease": False, "tag_name": "jdk-21.0.12.1+1", "assets": [
             {"name": "OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.12.1_1.tar.gz", "size": len(self.java_archive),
              "browser_download_url": self.java_url, "digest": "sha256:" + digest(self.java_archive)},
         ]}
         self.requests: list[str] = []
 
-    def json(self, url: str):
+    def json(self, url: str) -> dict[str, object]:
         self.requests.append(url)
         if url == PROVENANCE.JAVA_RELEASE_API:
             return self.release
@@ -110,14 +143,17 @@ class OfficialFixture:
         if url == self.java_url:
             return self.java_archive
         for name, value in self.formulas.items():
-            if url == value["bottle"]["stable"]["files"]["arm64_sequoia"]["url"]:
+            if url == fixture_object(bottle_files(value)["arm64_sequoia"])["url"]:
                 return self.bottles[name]
         raise AssertionError(f"unexpected official archive: {url}")
 
-    def proof(self, version: str = "15.7"):
-        return PROVENANCE.fetch_official_host_tool_proof(version, fetch_json=self.json, fetch_archive=self.download)
+    def proof(self, version: object = "15.7") -> HostToolProof:
+        proof: object = PROVENANCE.fetch_official_host_tool_proof(version, fetch_json=self.json, fetch_archive=self.download)
+        if not isinstance(proof, HostToolProof):
+            raise AssertionError("official proof must use the loaded provenance type")
+        return proof
 
-    def install(self, base: Path):
+    def install(self, base: Path) -> tuple[HostToolProof, Path, Path]:
         base = base.resolve()
         proof = self.proof()
         homebrew = base / "opt/homebrew"
@@ -125,13 +161,16 @@ class OfficialFixture:
         contents = {PROVENANCE.CELLAR + "/" + path: value for path, value in {**self.graphviz_contents, **self.cairo_contents}.items()}
         def remap(path: str) -> str:
             return str(homebrew) + path.removeprefix("/opt/homebrew") if path.startswith("/opt/homebrew") else path
-        mapped = {remap(path): PROVENANCE.InventoryEntry(entry.kind, entry.mode, remap(entry.value) if entry.kind == "symlink" else entry.value)
+        mapped = {remap(path): InventoryEntry(entry.kind, entry.mode, remap(entry.value) if entry.kind == "symlink" else entry.value)
                   for path, entry in proof.graphviz_files.items()}
         for original, entry in proof.graphviz_files.items():
             path = Path(remap(original))
             path.parent.mkdir(parents=True, exist_ok=True)
             if entry.kind == "file":
-                path.write_bytes(contents[original])
+                content = contents[original]
+                if not isinstance(content, bytes):
+                    raise AssertionError("official regular-file fixture must contain bytes")
+                path.write_bytes(content)
                 path.chmod(0o644 | entry.mode)
             elif entry.kind == "installer-metadata":
                 path.write_bytes(b'{"poured_from_bottle":true,"time":123}')
@@ -142,11 +181,14 @@ class OfficialFixture:
             path = java_home / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             if entry.kind == "file":
-                path.write_bytes(self.java_contents["jdk-21.0.12.1+1/Contents/Home/" + relative])
+                content = self.java_contents["jdk-21.0.12.1+1/Contents/Home/" + relative]
+                if not isinstance(content, bytes):
+                    raise AssertionError("official regular-file fixture must contain bytes")
+                path.write_bytes(content)
                 path.chmod(0o644 | entry.mode)
             else:
                 path.symlink_to(java_home / entry.value)
-        return PROVENANCE.HostToolProof(mapped, proof.java_files, proof.identities, remap(proof.dot_path)), java_home, homebrew / "Cellar"
+        return HostToolProof(mapped, proof.java_files, proof.identities, remap(proof.dot_path)), java_home, homebrew / "Cellar"
 
 
 class ToolProvenanceTest(unittest.TestCase):
@@ -180,7 +222,7 @@ class ToolProvenanceTest(unittest.TestCase):
 
     def test_official_all_bottle_is_supported_but_linux_only_is_not(self) -> None:
         value = formula("certificates", b"official certificates", [])
-        files = value["bottle"]["stable"]["files"]
+        files = bottle_files(value)
         files["all"] = files.pop("arm64_sequoia")
         files.pop("arm64_tahoe")
         identity, _ = PROVENANCE._formula(value, "certificates", "arm64_sequoia")
@@ -203,21 +245,21 @@ class ToolProvenanceTest(unittest.TestCase):
             {"full_name": "cairo", "version": "1.0", "revision": 0, "declared_directly": True},
         ]
         fixture.proof()
-        fixture.formulas["graphviz"]["runtime_dependencies"][0]["version"] = "0.9"
+        fixture_object(fixture_array(fixture.formulas["graphviz"]["runtime_dependencies"])[0])["version"] = "0.9"
         with self.assertRaises(PROVENANCE.ProvenanceError):
             fixture.proof()
         for field, replacement in (("url", "https://evil.example/archive"), ("sha256", "f" * 63), ("cellar", "/untrusted/Cellar")):
             fixture = OfficialFixture()
-            fixture.formulas["graphviz"]["bottle"]["stable"]["files"]["arm64_sequoia"][field] = replacement
+            fixture_object(bottle_files(fixture.formulas["graphviz"])["arm64_sequoia"])[field] = replacement
             with self.subTest(field=field), self.assertRaises(PROVENANCE.ProvenanceError):
                 fixture.proof()
 
     def test_java_release_identity_and_asset_ambiguity_fail_closed(self) -> None:
-        variants = [lambda value: value.update(draft=True), lambda value: value.update(prerelease=True),
+        variants: list[Callable[[dict[str, object]], None]] = [lambda value: value.update(draft=True), lambda value: value.update(prerelease=True),
                     lambda value: value.update(tag_name="jdk-17.0.1+1"),
-                    lambda value: value["assets"].append(copy.deepcopy(value["assets"][0])),
-                    lambda value: value["assets"][0].update(digest="sha256:" + "0" * 64),
-                    lambda value: value["assets"][0].update(browser_download_url="https://github.com/foreign/runtime/archive.tar.gz")]
+                    lambda value: fixture_array(value["assets"]).append(copy.deepcopy(fixture_array(value["assets"])[0])),
+                    lambda value: fixture_object(fixture_array(value["assets"])[0]).update(digest="sha256:" + "0" * 64),
+                    lambda value: fixture_object(fixture_array(value["assets"])[0]).update(browser_download_url="https://github.com/foreign/runtime/archive.tar.gz")]
         for change in variants:
             fixture = OfficialFixture()
             change(fixture.release)
@@ -338,7 +380,7 @@ class ToolProvenanceTest(unittest.TestCase):
 
     def test_missing_official_artifact_or_metadata_declines_without_executing_installer(self) -> None:
         fixture = OfficialFixture()
-        fixture.formulas["graphviz"]["bottle"]["stable"]["files"].pop("arm64_sequoia")
+        bottle_files(fixture.formulas["graphviz"]).pop("arm64_sequoia")
         with self.assertRaises(PROVENANCE.ProvenanceError):
             fixture.proof()
         with self.assertRaises(PROVENANCE.ProvenanceError):

@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2024"],
+    "types": [],
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true
+  },
+  "files": [
+    "../../crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_bounds_attrs.js",
+    "../../crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_group_utils.js",
+    "../../crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/drawio_svg_shape_colors.js"
+  ]
+}

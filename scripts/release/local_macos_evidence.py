@@ -18,22 +18,26 @@ import tarfile
 import tempfile
 import time
 import zipfile
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, NamedTuple
+from types import ModuleType
+from typing import Any, NamedTuple
 from urllib import error, parse, request
 
 import local_macos_tool_provenance as TOOL_PROVENANCE
 
 try:
-    import tomllib
+    import tomllib as _tomllib
 except ModuleNotFoundError:
-    tomllib = None
+    tomllib: ModuleType | None = None
+else:
+    tomllib = _tomllib
 
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/test-and-build.yml"
-SUPPORTED_WORKFLOW_SHA256 = "768c0c48fcb06863ba5c10f6fb52e2b4b180f49a0a4766aa0b38956b5bac743e"
+SUPPORTED_WORKFLOW_SHA256 = "c47846e7d26ba8b0c66dc7cd14d00475976d66ad8bf60189bf2453a065faef8a"
 SCHEMA = 1
 FRESHNESS_SECONDS = 24 * 60 * 60
 MARKER = "<!-- krr-local-macos-evidence:v1 -->"
@@ -85,6 +89,16 @@ SCOPE_PARAMETERS = {
     "RUSTC_WORKSPACE_WRAPPER": "",
     "BUN_INSTALL_CACHE_DIR": "<fresh-empty-directory-per-collection>",
     "TEST_THREADS": "1",
+}
+LINT_CHILD_ENVIRONMENT_POLICY = {
+    "unset": (
+        "CARGO_BUILD_TARGET", "CARGO_BUILD_RUSTFLAGS", "CARGO_BUILD_RUSTC",
+        "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+        "CARGO_ENCODED_RUSTFLAGS", "CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER",
+        "RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER",
+    ),
+    "CARGO_TARGET_DIR": "<repository>/target",
+    "RUSTFLAGS": "-D warnings",
 }
 JAVA_VENDOR = "Eclipse Adoptium"
 COMMAND_PATH_POLICY = "isolated-bound-symlinks-plus-os-system-directories-v2"
@@ -233,9 +247,23 @@ def verify_installed_host_tools(
 def scope_digest(workflow_sha: str | None = None) -> str:
     body = {
         "schema": SCHEMA, "commands": COMMANDS, "environment": SCOPE_PARAMETERS,
+        "command_environment_policy": {"lint": LINT_CHILD_ENVIRONMENT_POLICY},
         "workflow_sha256": workflow_sha or workflow_digest(),
     }
     return sha256_bytes(canonical(body))
+
+
+def command_environment_for(command_id: str, base: dict[str, str]) -> dict[str, str]:
+    known_commands = {name for name, _argv in COMMANDS}
+    if command_id not in known_commands:
+        raise EvidenceError(f"unknown local evidence command: {command_id}")
+    environment = dict(base)
+    if command_id == "lint":
+        for name in LINT_CHILD_ENVIRONMENT_POLICY["unset"]:
+            environment.pop(name, None)
+        environment["CARGO_TARGET_DIR"] = str(ROOT / "target")
+        environment["RUSTFLAGS"] = "-D warnings"
+    return environment
 
 
 def read_comments_api(token: str, repository: str, number: int) -> list[Any]:
@@ -401,7 +429,7 @@ def java_home_from_settings(output: str) -> str:
 
 
 def java_vendor_from_settings(output: str) -> str:
-    vendors = re.findall(r"(?m)^\s*java\.vendor\s*=\s*(.*?)\s*$", output)
+    vendors: list[str] = re.findall(r"(?m)^\s*java\.vendor\s*=\s*(.*?)\s*$", output)
     if vendors != [JAVA_VENDOR]:
         raise EvidenceError("local proof requires Temurin (Eclipse Adoptium), matching the macOS CI setup")
     return vendors[0]
@@ -689,11 +717,14 @@ def canonical_owner(repo_payload: Any, repository: str) -> str:
     if not isinstance(repo_payload, dict):
         raise EvidenceError("repository API response is invalid")
     owner = repo_payload.get("owner")
-    if not isinstance(owner, dict) or not isinstance(owner.get("login"), str) or not owner["login"].strip():
+    if not isinstance(owner, dict):
+        raise EvidenceError("repository owner is invalid")
+    login = owner.get("login")
+    if not isinstance(login, str) or not login.strip():
         raise EvidenceError("repository owner is invalid")
     if repo_payload.get("full_name", "").lower() != repository.lower():
         raise EvidenceError("repository identity changed")
-    return owner["login"]
+    return login
 
 
 def base_is_merged(compare_payload: Any, base_sha: str) -> bool:
@@ -843,7 +874,7 @@ def download_trusted_just(
         req = request.Request(asset_url, headers={"Accept": "application/octet-stream", "User-Agent": "katana-render-runtime-local-macos-evidence"})
         with request.urlopen(req, timeout=60) as response:
             final_url = response.geturl()
-            final_host = request.urlparse(final_url).hostname
+            final_host = parse.urlparse(final_url).hostname
             if final_host not in {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}:
                 raise EvidenceError("official just asset redirected to an untrusted host")
             archive = response.read(MAX_JUST_ASSET_BYTES + 1)
@@ -952,7 +983,7 @@ def download_bun_asset(metadata: dict[str, str]) -> bytes:
             headers={"Accept": "application/octet-stream", "User-Agent": "katana-render-runtime-local-macos-evidence"},
         )
         with request.urlopen(req, timeout=60) as response:
-            final_host = request.urlparse(response.geturl()).hostname
+            final_host = parse.urlparse(response.geturl()).hostname
             if final_host not in {
                 "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com",
             }:
@@ -962,7 +993,7 @@ def download_bun_asset(metadata: dict[str, str]) -> bytes:
         raise
     except (error.URLError, error.HTTPError, TimeoutError, OSError) as exc:
         raise EvidenceError("official Bun asset download failed") from exc
-    if len(archive) > MAX_BUN_ASSET_BYTES:
+    if not isinstance(archive, bytes) or len(archive) > MAX_BUN_ASSET_BYTES:
         raise EvidenceError("official Bun asset exceeds its size limit")
     return archive
 
@@ -1031,6 +1062,7 @@ def assert_command_binding(binding: CommandBinding, just_binding: JustBinding) -
     assert_private_command_directory(expected_directory, set(binding.executables) - {"source_git"})
     for name, (raw_path, expected_hash) in binding.executables.items():
         path = Path(raw_path)
+        effective: str | None
         try:
             if name == "source_git":
                 effective = str(path)
@@ -1423,7 +1455,7 @@ def download_rust_component(component: RustComponent) -> bytes:
             archive = response.read(MAX_RUST_COMPONENT_ARCHIVE_BYTES + 1)
     except (error.URLError, error.HTTPError, TimeoutError, OSError) as exc:
         raise EvidenceError("official Rust component archive is unavailable") from exc
-    if (not archive or len(archive) > MAX_RUST_COMPONENT_ARCHIVE_BYTES
+    if (not isinstance(archive, bytes) or not archive or len(archive) > MAX_RUST_COMPONENT_ARCHIVE_BYTES
             or sha256_bytes(archive) != component.xz_sha256):
         raise EvidenceError("official Rust component archive digest is invalid")
     return archive
@@ -1460,7 +1492,7 @@ def derive_rust_component_proof(
             raise EvidenceError("official Rust component archive digest is invalid")
         try:
             with tarfile.open(fileobj=io.BytesIO(archive), mode="r:xz") as bundle:
-                members = []
+                members: list[tarfile.TarInfo] = []
                 for member in bundle:
                     if len(members) >= MAX_RUST_COMPONENT_ENTRIES:
                         raise EvidenceError("official Rust component entry count is invalid")
@@ -1540,10 +1572,10 @@ def derive_rust_component_proof(
         }))
     executable_hashes = {}
     for name, path in RUST_EXECUTABLE_PATHS.items():
-        identity = all_files.get(path)
-        if identity is None or identity[0] == 0:
+        executable_identity = all_files.get(path)
+        if executable_identity is None or executable_identity[0] == 0:
             raise EvidenceError(f"official Rust archives are missing executable {name}")
-        executable_hashes[name] = identity[1]
+        executable_hashes[name] = executable_identity[1]
     return RustComponentProof(all_files, component_digests, executable_hashes)
 
 
@@ -1786,7 +1818,11 @@ def verify_from_api(
             return False
         if fetch is None:
             token = os.environ.get("GH_TOKEN") or gh_token()
-            fetch = lambda path: api_request(token, "GET", path)
+
+            def fetch_api(path: str) -> Any:
+                return api_request(token, "GET", path)
+
+            fetch = fetch_api
         pr_path = f"repos/{repository}/pulls/{number}"
         repo_path = f"repos/{repository}"
         comments_base = f"repos/{repository}/issues/{number}/comments?per_page=100&page="
@@ -1942,7 +1978,10 @@ def collect(repository: str, number: int, publish: bool) -> int:
                 argv, 0, "", "Preinstalled Graphviz matches the official bottle and runtime closure.\n",
             )
         else:
-            result = subprocess.run(argv, cwd=ROOT, env=command_env, text=True, capture_output=True)
+            result = subprocess.run(
+                argv, cwd=ROOT, env=command_environment_for(command_id, command_env),
+                text=True, capture_output=True,
+            )
         assert_command_binding(binding, just_binding)
         duration = int((time.monotonic() - start) * 1000)
         output = result.stdout + result.stderr

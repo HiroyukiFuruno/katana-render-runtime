@@ -185,7 +185,7 @@ class StableVersion:
     patch: int
 
     @classmethod
-    def parse(cls, value: str) -> "StableVersion":
+    def parse(cls, value: str) -> StableVersion:
         match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", value.strip())
         if match is None:
             raise ValueError(f"expected vX.Y.Z, got {value!r}")
@@ -317,7 +317,8 @@ def release_manifest_sha256(
         return None
     gate_paths = {path.encode("utf-8") for path in RELEASE_GATE_PATHS}
     entries: list[tuple[bytes, bytes]] = []
-    for raw_record, path in zip(records[:-1:2], records[1:-1:2]):
+    for offset, raw_record in enumerate(records[:-1:2]):
+        path = records[2 * offset + 1]
         if not raw_record.startswith(b":") or not path:
             return None
         if path not in gate_paths:

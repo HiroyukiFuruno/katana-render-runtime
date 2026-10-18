@@ -7,8 +7,10 @@ import errno
 import hashlib
 import io
 import json
+import math
 import os
 import platform
+import re
 import shutil
 import signal
 import stat
@@ -19,7 +21,7 @@ import tempfile
 from contextlib import ExitStack
 from pathlib import Path
 from types import FrameType
-from typing import BinaryIO, Literal, NamedTuple, TypedDict, overload
+from typing import BinaryIO, Literal, NamedTuple, TypedDict, cast, overload
 from collections.abc import Callable, Mapping, Sequence
 
 import verify_html_performance_evidence as gate
@@ -29,12 +31,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "build"))
 LOCAL_CAPACITY_BASELINE = 2363047936
 LOCAL_CAPACITY_THRESHOLD = 4726095872
 PROTECTED_REGISTRY_SCHEMA = "krr-protected-refs-successor-v1"
-PROTECTED_REFERENCE_COUNT = 40
 
 
 class FilePin(TypedDict):
     path: str
     sha256: str
+
+
+class SizedFilePin(FilePin):
+    size: int
 
 
 class SourceFile(FilePin):
@@ -56,6 +61,42 @@ class OperationPlan(TypedDict):
     expected_dom_state_sha256: str
 
 
+class CatalogOperationPlan(TypedDict):
+    profile: str
+    conditionId: str
+    caseId: str
+    state: str
+    operationKind: str
+    targetSelector: str | None
+    fixtureSha256: str
+    viewport: Viewport
+    operationEvidencePath: str
+    operationEvidenceSha256: str
+    evidenceBinarySha256: str
+    operationStream: list[gate.JsonObject]
+
+
+class CatalogCondition(TypedDict):
+    condition_id: str
+    case_id: str
+    state: str
+    operation_kind: str
+    target_selector: str | None
+    fixture: Path
+    fixture_sha256: str
+    viewport: Viewport
+    operation_plan: CatalogOperationPlan
+    operation_evidence: FilePin
+    capture: FilePin
+    chrome_capture: SizedFilePin
+    chrome_receipt: SizedFilePin
+    font_identity_request: SizedFilePin
+    font_identity_response: SizedFilePin
+    font_identity_binary_path: str
+    font_identity_binary_sha256: str
+    link_captures: list[FilePin]
+
+
 class Provenance(TypedDict):
     rustc: str
     cargo: str
@@ -73,7 +114,7 @@ class ToolContext(TypedDict):
     cargo: str
     platform: str
     cpuCount: int | None
-    environment: dict[str, str]
+    environmentSha256: str
 
 
 class ContextSnapshot(TypedDict):
@@ -86,6 +127,18 @@ class ContextSnapshot(TypedDict):
     config: list[gate.JsonObject]
     preference: gate.JsonObject
     toolContext: ToolContext
+
+
+def _environment_sha256(environment: Mapping[str, str]) -> str:
+    canonical = json.dumps(dict(environment), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _performance_worker_environment(rustc: str, cargo: str, environment_sha: str,
+                                    lock: Path, snapshot: FilePin) -> dict[str, str]:
+    return {**os.environ, "KRR_PERF_RUSTC": rustc, "KRR_PERF_CARGO": cargo,
+            "KRR_PERF_ENVIRONMENT_SHA256": environment_sha, "KRR_PERF_LOCK_PATH": str(lock),
+            "KRR_PERF_SOURCE_SNAPSHOT_PATH": snapshot["path"]}
 
 
 class _ExpectedFields(TypedDict):
@@ -104,6 +157,16 @@ class _ExpectedFields(TypedDict):
 class ExpectedPerformance(_ExpectedFields, total=False):
     sourcePair: gate.JsonObject
     endpointRefs: dict[str, FilePin]
+    catalogCondition: gate.JsonObject
+    operationEvidenceRef: FilePin
+    catalogManifestRef: FilePin
+    catalogPlanRef: FilePin
+    chromeCaptureRef: SizedFilePin
+    chromeReceiptRef: SizedFilePin
+    catalogCaptureValidationRef: FilePin
+    fontIdentityRequestRef: SizedFilePin
+    fontIdentityResponseRef: SizedFilePin
+    fontIdentityProbeBinary: FilePin
 
 
 class CapacityBinding(NamedTuple):
@@ -121,6 +184,16 @@ def _pinned_file(path: Path, checksum: str) -> None:
                  and not path.is_symlink(), "capacity input must be a canonical regular file")
     gate.require(len(checksum) == 64 and all(c in "0123456789abcdef" for c in checksum), "capacity input SHA256 is invalid")
     gate.require(gate.sha256(path) == checksum, "capacity input SHA256 differs")
+
+
+def _catalog_probe_file(value: object, label: str) -> SizedFilePin:
+    pin = gate._object(value, label)
+    path = Path(gate._text(pin.get("path"), label + " path"))
+    checksum = gate._text(pin.get("sha256"), label + " SHA")
+    size = gate._integer(pin.get("sizeBytes"), label + " size")
+    _pinned_file(path, checksum)
+    gate.require(path.stat().st_size == size, label + " size differs")
+    return {"path": str(path), "sha256": checksum, "size": size}
 
 
 def _pinned_json(path: Path, checksum: str) -> gate.JsonObject:
@@ -159,15 +232,20 @@ def load_capacity_binding(root: Path, document: Path, checksum: str) -> Capacity
                  "protected registry schema differs")
     physical_count = gate._integer(registry_value["physicalRefCount"], "protected reference count")
     records = gate._objects(registry_value["refs"], "protected references")
-    gate.require(physical_count == len(records) == PROTECTED_REFERENCE_COUNT,
-                 "fixed protected reference count differs")
-    references = []
+    gate.require(physical_count > 0 and physical_count == len(records),
+                 "protected reference count differs from registry records")
+    references: list[str] = []
+    physical_identities: list[tuple[int, int]] = []
     for record in records:
         validated = protected_identity(record)
         path = Path(gate._text(validated["path"], "protected reference path"))
         references.append(str(path))
-    gate.require(len(set(references)) == PROTECTED_REFERENCE_COUNT,
+        physical_identities.append((gate._integer(validated["dev"], "protected dev"),
+                                    gate._integer(validated["ino"], "protected ino")))
+    gate.require(len(set(references)) == len(records),
                  "protected reference paths are not unique")
+    gate.require(len(set(physical_identities)) == len(records),
+                 "protected reference physical identities are not unique")
     return CapacityBinding(document, checksum, state, state_sha, registry, registry_sha, tuple(references))
 
 
@@ -672,7 +750,7 @@ def _native_raw_fd_closure(paths: tuple[Path, Path], identities: list[tuple[int,
     gate.require({"path": str(tool), "sha256": gate.sha256(tool), "size": tool.stat().st_size} == pin,
                  "native FD observer tool changed")
     environment = dict(env)
-    environment_sha = hashlib.sha256(json.dumps(environment, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    environment_sha = _environment_sha256(environment)
     return {"schema": "krr-native-raw-fd-closure-v1", "toolBefore": pin, "toolAfter": pin,
         "argv": argv, "cwd": str(cwd), "attemptToken": attempt,
         "environment": environment, "environmentSha256": environment_sha, "identity": identity,
@@ -878,10 +956,9 @@ def observe_native_cli_command(args: Sequence[str], *, role: MeasurementRole,
     gate.require(len(pins) == 2 and result.stdout == Path(str(pins[0]["path"])).read_bytes()
                  and result.stderr == Path(str(pins[1]["path"])).read_bytes(), "native CLI raw bytes differ")
     environment = dict(env)
-    encoded = json.dumps(environment, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return NativeCliCommandEvidence({"argv": list(args), "stdout": pins[0], "stderr": pins[1],
         "label": label, "cwd": str(cwd), "attemptToken": attempt_token,
-        "environment": environment, "environmentSha256": hashlib.sha256(encoded.encode()).hexdigest(),
+        "environment": environment, "environmentSha256": _environment_sha256(environment),
         "pid": identity["pid"], "actualExit": 0, "startedNs": str(started), "endedNs": str(ended),
         "reaped": True, "errors": []},
         {"path": str(lifecycle_path), "sha256": gate.sha256(lifecycle_path),
@@ -960,7 +1037,7 @@ def context(root: Path, target: Path, input_paths: Sequence[Path], log_directory
     registry = inventory(cargo_home / "registry")
     cache = inventory(target)
     scope = {"registry": str(cargo_home / "registry"), "target": str(target)}
-    return {"source": source(root, git_query=git_query), "inputs": [file_state(p) for p in input_paths], "registry": registry, "cache": cache, "cacheUnion": {"registry": registry, "target": cache}, "scope": scope, "config": [file_state(p) for p in (root / ".cargo/config.toml", root / ".cargo/config", cargo_home / "config.toml", cargo_home / "config")], "preference": file_state(Path.home() / ".CFUserTextEncoding"), "toolContext": {"rustc": command(["rustc", "-vV"], text=True, role="tool-query", log_directory=log_directory), "cargo": command(["cargo", "-vV"], text=True, role="tool-query", log_directory=log_directory), "platform": platform.platform(), "cpuCount": os.cpu_count(), "environment": dict(os.environ)}}
+    return {"source": source(root, git_query=git_query), "inputs": [file_state(p) for p in input_paths], "registry": registry, "cache": cache, "cacheUnion": {"registry": registry, "target": cache}, "scope": scope, "config": [file_state(p) for p in (root / ".cargo/config.toml", root / ".cargo/config", cargo_home / "config.toml", cargo_home / "config")], "preference": file_state(Path.home() / ".CFUserTextEncoding"), "toolContext": {"rustc": command(["rustc", "-vV"], text=True, role="tool-query", log_directory=log_directory), "cargo": command(["cargo", "-vV"], text=True, role="tool-query", log_directory=log_directory), "platform": platform.platform(), "cpuCount": os.cpu_count(), "environmentSha256": _environment_sha256(os.environ)}}
 
 
 def quiet() -> float:
@@ -995,41 +1072,320 @@ def validate_interaction(value: object, fixture_sha256: str) -> None:
                  and js_state["expanded"] is True, "real same-source interaction evidence absent")
 
 
+def _catalog_operation_stream(operation_kind: str, evidence: gate.JsonObject) -> list[gate.JsonObject]:
+    return gate.catalog_operation_stream(operation_kind, evidence)
+
+
+def _validate_catalog_capture_envelope(stdout: bytes, manifest_pin: FilePin,
+                                       plan_pin: FilePin,
+                                       conditions: Sequence[CatalogCondition]) -> gate.JsonObject:
+    envelope = gate._object(json.loads(stdout, object_pairs_hook=gate.unique_object),
+                            "strict Chrome capture validation output")
+    gate.require(envelope.get("schema") == "krr-html84-independent-stage90-validation-v1"
+                 and envelope.get("threshold") == 90
+                 and envelope.get("measurement") == "not-performed"
+                 and envelope.get("manifestPath") == manifest_pin["path"]
+                 and envelope.get("manifestSha256") == manifest_pin["sha256"]
+                 and envelope.get("planPath") == plan_pin["path"]
+                 and envelope.get("planSha256") == plan_pin["sha256"],
+                 "strict Chrome capture validation manifest/plan binding differs")
+    rows = gate._objects(envelope.get("conditions"), "validated Chrome conditions")
+    gate.require(len(rows) == len(conditions) == 84,
+                 "strict Chrome capture validation must cover exactly 84 conditions")
+    by_id = {gate._text(row.get("conditionId"), "validated condition id"): row for row in rows}
+    gate.require(len(by_id) == len(rows), "strict Chrome validation condition ids are duplicated")
+    probe = gate._object(envelope.get("fontIdentityProbe"), "validated font identity probe pins")
+    gate._text(probe.get("inventoryMethod"), "font inventory method")
+    gate._text(probe.get("inventoryLimit"), "font inventory limit")
+    first = conditions[0]
+    gate.require(probe.get("request") == first["font_identity_request"]
+                 and probe.get("response") == first["font_identity_response"]
+                 and probe.get("binary") == {"path": first["font_identity_binary_path"],
+                                              "sha256": first["font_identity_binary_sha256"]},
+                 "validated font identity probe pins differ from catalog manifest")
+    for condition in conditions:
+        row = by_id.get(condition["condition_id"])
+        if row is None:
+            raise ValueError(f"strict Chrome validation is missing {condition['condition_id']}")
+        gate.require(gate._numeric(row.get("score"), "independent image score") >= 90,
+                     f"independent raw stage90 score is below 90: {condition['condition_id']}")
+        gate._numeric(row.get("rmseScore"), "independent RMSE score")
+        gate._numeric(row.get("maeScore"), "independent MAE score")
+        for output_key, pin in (("capture", condition["chrome_capture"]),
+                                ("receipt", condition["chrome_receipt"])):
+            gate.require(row.get(output_key + "Path") == pin["path"]
+                         and row.get(output_key + "Sha256") == pin["sha256"]
+                         and gate._integer(row.get(output_key + "Size"), output_key + " size") == pin["size"],
+                         f"strict Chrome {output_key} transport pin differs: {condition['condition_id']}")
+            path = Path(pin["path"])
+            _pinned_file(path, pin["sha256"])
+            gate.require(path.stat().st_size == pin["size"],
+                         f"strict Chrome {output_key} size changed: {condition['condition_id']}")
+    return envelope
+
+
+def load_catalog_conditions(root: Path, manifest_path: Path) -> tuple[list[CatalogCondition], FilePin, FilePin]:
+    _pinned_file(manifest_path, gate.sha256(manifest_path))
+    manifest = gate.read_json(manifest_path)
+    gate.require(manifest.get("profile") == "catalog-stage90-captures"
+                 and manifest.get("acceptance") is False,
+                 "catalog performance input must be the non-accepted stage90 capture manifest")
+    plan_path = Path(gate._text(manifest.get("planPath"), "catalog plan path"))
+    plan_sha = gate._text(manifest.get("planSha256"), "catalog plan SHA")
+    _pinned_file(plan_path, plan_sha)
+    plan = gate.read_json(plan_path)
+    gate.require(plan.get("profile") == "krr-html84-condition-plan-v1"
+                 and plan.get("acceptance") is False,
+                 "catalog stage90 condition plan profile differs")
+    catalog_path = Path(gate._text(manifest.get("catalogPath"), "feature catalog path"))
+    catalog_sha = gate._text(manifest.get("catalogSha256"), "feature catalog SHA")
+    _pinned_file(catalog_path, catalog_sha)
+    gate.require(plan.get("catalogPath") == str(catalog_path)
+                 and plan.get("catalogSha256") == catalog_sha,
+                 "catalog plan is bound to a different feature catalog")
+    expected_conditions = gate._objects(plan.get("conditions"), "catalog plan condition")
+    captured_conditions = gate._objects(manifest.get("conditions"), "catalog capture condition")
+    gate.require(len(expected_conditions) == 84 and len(captured_conditions) == 84,
+                 "catalog plan and capture manifest must contain exactly 84 conditions")
+    by_id = {gate._text(item.get("conditionId"), "capture condition id"): item
+             for item in captured_conditions}
+    gate.require(len(by_id) == len(captured_conditions), "catalog capture condition ids are duplicated")
+    binary_sha = gate._text(manifest.get("binarySha256"), "catalog capture binary SHA")
+    gate.digest(binary_sha)
+    font_probe = gate._object(manifest.get("fontIdentityProbe"), "font identity probe pins")
+    font_request = _catalog_probe_file(font_probe.get("request"), "font identity request")
+    font_response = _catalog_probe_file(font_probe.get("response"), "font identity response")
+    font_binary = gate._object(font_probe.get("binary"), "font identity probe binary pin")
+    font_binary_path = Path(gate._text(font_binary.get("path"), "font probe binary path"))
+    font_binary_sha = gate._text(font_binary.get("sha256"), "font probe binary SHA")
+    _pinned_file(font_binary_path, font_binary_sha)
+    conditions: list[CatalogCondition] = []
+    evidence_paths: set[Path] = set()
+    evidence_shas: set[str] = set()
+    for expected in expected_conditions:
+        condition_id = gate._text(expected.get("conditionId"), "condition id")
+        captured = by_id.get(condition_id)
+        if captured is None:
+            raise ValueError(f"catalog capture is missing {condition_id}")
+        fixture = Path(gate._text(expected.get("fixturePath"), "condition fixture path"))
+        source_sha = gate._text(expected.get("sourceSha256"), "condition source SHA")
+        _pinned_file(fixture, source_sha)
+        viewport = gate._object(expected.get("viewport"), "catalog viewport")
+        viewport_value: Viewport = {
+            "width": gate._integer(viewport.get("width"), "viewport width"),
+            "height": gate._integer(viewport.get("height"), "viewport height"),
+            "scale": gate._integer(viewport.get("scale"), "viewport scale"),
+        }
+        expected_id = (f"{expected.get('caseId')}/{expected.get('state')}/"
+                       f"{viewport_value['width']}x{viewport_value['height']}@{viewport_value['scale']}")
+        gate.require(condition_id == expected_id, f"catalog condition id does not bind its tuple: {condition_id}")
+        for field in ("caseId", "state", "operationKind", "targetSelector", "sourceSha256"):
+            gate.require(captured.get(field) == expected.get(field),
+                         f"catalog capture {field} differs for {condition_id}")
+        gate.require(captured.get("binarySha256") == binary_sha,
+                     f"catalog capture binary differs: {condition_id}")
+        gate.require(captured.get("viewport") == viewport_value,
+                     f"catalog capture viewport differs for {condition_id}")
+        raw_path = Path(gate._text(captured.get("krrReportPath"), "raw KRR report path"))
+        raw_sha = gate._text(captured.get("krrReportSha256"), "raw KRR report SHA")
+        _pinned_file(raw_path, raw_sha)
+        gate.require(raw_path not in evidence_paths and raw_sha not in evidence_shas,
+                     "catalog conditions reuse a raw KRR evidence file")
+        evidence_paths.add(raw_path)
+        evidence_shas.add(raw_sha)
+        raw_report = gate.read_json(raw_path)
+        capture_path = Path(gate._text(raw_report.get("capturePath"), "raw KRR capture path"))
+        capture_sha = gate._text(raw_report.get("captureSha256"), "raw KRR capture SHA")
+        _pinned_file(capture_path, capture_sha)
+        gate.require(captured.get("krrCapturePath") == str(capture_path)
+                     and captured.get("krrCaptureSha256") == capture_sha
+                     and captured.get("krrState") == raw_report.get("state"),
+                     f"catalog manifest capture binding differs: {condition_id}")
+        gate.require(gate._same_json(captured.get("chromeState"), raw_report.get("state")),
+                     f"independent Chrome/KRR semantic state differs: {condition_id}")
+        gate.require(captured.get("status") == "captured",
+                     f"catalog raw capture is not finalized: {condition_id}")
+        chrome_path = Path(gate._text(captured.get("chromeCapturePath"), "Chrome capture path"))
+        chrome_sha = gate._text(captured.get("chromeCaptureSha256"), "Chrome capture SHA")
+        chrome_receipt_path = Path(gate._text(captured.get("chromeReceiptPath"), "Chrome receipt path"))
+        chrome_receipt_sha = gate._text(captured.get("chromeReceiptSha256"), "Chrome receipt SHA")
+        _pinned_file(chrome_path, chrome_sha)
+        _pinned_file(chrome_receipt_path, chrome_receipt_sha)
+        chrome_capture_pin: SizedFilePin = {
+            "path": str(chrome_path), "sha256": chrome_sha, "size": chrome_path.stat().st_size,
+        }
+        chrome_receipt_pin: SizedFilePin = {
+            "path": str(chrome_receipt_path), "sha256": chrome_receipt_sha,
+            "size": chrome_receipt_path.stat().st_size,
+        }
+        operation_kind = gate._text(expected.get("operationKind"), "operation kind")
+        gate.require(raw_report.get("status") == "observed",
+                     f"catalog raw report is not observed: {condition_id}")
+        gate.require("unknownReason" not in raw_report,
+                     f"observed catalog report carries an unknown reason: {condition_id}")
+        raw_viewport = gate._object(raw_report.get("viewport"), "raw report viewport")
+        gate.require(raw_report.get("conditionId") == condition_id
+                     and raw_report.get("caseId") == expected.get("caseId")
+                     and raw_report.get("boundaryState") == expected.get("state")
+                     and raw_report.get("operationKind") == operation_kind
+                     and raw_report.get("htmlSha256") == source_sha
+                     and raw_report.get("binarySha256") == binary_sha
+                     and raw_viewport == viewport_value,
+                     f"catalog raw report identity differs: {condition_id}")
+        evidence = gate._object(raw_report.get("operationEvidence"), "typed operation evidence")
+        gate.require(captured.get("operationEvidence") == evidence,
+                     f"catalog manifest operation evidence differs: {condition_id}")
+        gate.require(evidence.get("schema") == "krr-html84-operation-evidence-v1"
+                     and evidence.get("kind") == operation_kind
+                     and evidence.get("sourceSha256Before") == source_sha
+                     and evidence.get("sourceSha256After") == source_sha,
+                     f"catalog operation evidence identity differs: {condition_id}")
+        for frame_name in ("preFrame", "postFrame"):
+            frame = gate._object(evidence.get(frame_name), "catalog operation frame")
+            gate.require(gate._integer(frame.get("generation"), "catalog frame generation") > 0,
+                         f"catalog frame generation is missing: {condition_id}")
+            scroll = gate._numeric(frame.get("scrollY"), "catalog frame scroll")
+            gate.require(math.isfinite(scroll) and scroll >= 0,
+                         f"catalog frame scroll is invalid: {condition_id}")
+        state = gate._object(evidence.get("state"), "catalog semantic state evidence")
+        gate.require("before" in state and "after" in state,
+                     f"catalog state transition evidence is missing: {condition_id}")
+        frame = gate._object(raw_report.get("frame"), "catalog captured frame")
+        gate.require(gate._integer(frame.get("generation"), "captured frame generation") > 0,
+                     f"catalog captured frame generation is missing: {condition_id}")
+        content_height = gate._numeric(frame.get("contentHeight"), "captured content height")
+        scroll_y = gate._numeric(frame.get("scrollY"), "captured scroll")
+        gate.require(math.isfinite(content_height) and content_height > 0
+                     and math.isfinite(scroll_y) and scroll_y >= 0
+                     and raw_report.get("targetVisible") is True,
+                     f"catalog frame or target visibility is unverified: {condition_id}")
+        target = gate._object(evidence.get("target"), "catalog operation target")
+        selector_value = expected.get("targetSelector")
+        selector = None if selector_value is None else gate._text(selector_value, "target selector")
+        gate.require(target.get("visible") is True and gate._integer(target.get("nodeId"), "target node id") > 0
+                     and (selector is None or target.get("selector") == selector),
+                     f"catalog target evidence differs: {condition_id}")
+        link_captures: list[FilePin] = []
+        if operation_kind == "navigation-all-pointer-clicks":
+            for link in gate._objects(evidence.get("links"), "catalog TOC link"):
+                link_capture_path = Path(gate._text(link.get("capturePath"), "TOC link capture path"))
+                link_capture_sha = gate._text(link.get("captureSha256"), "TOC link capture SHA")
+                _pinned_file(link_capture_path, link_capture_sha)
+                link_captures.append({"path": str(link_capture_path), "sha256": link_capture_sha})
+        stream = _catalog_operation_stream(operation_kind, evidence)
+        operation_plan: CatalogOperationPlan = {
+            "profile": "catalog-plan84", "conditionId": condition_id,
+            "caseId": gate._text(expected.get("caseId"), "case id"),
+            "state": gate._text(expected.get("state"), "boundary state"),
+            "operationKind": operation_kind, "targetSelector": selector,
+            "fixtureSha256": source_sha, "viewport": viewport_value,
+            "operationEvidencePath": str(raw_path), "operationEvidenceSha256": raw_sha,
+            "evidenceBinarySha256": binary_sha, "operationStream": stream,
+        }
+        conditions.append({
+            "condition_id": condition_id,
+            "case_id": operation_plan["caseId"],
+            "state": operation_plan["state"],
+            "operation_kind": operation_kind,
+            "target_selector": selector,
+            "fixture": fixture,
+            "fixture_sha256": source_sha,
+            "viewport": viewport_value,
+            "operation_plan": operation_plan,
+            "operation_evidence": {"path": str(raw_path), "sha256": raw_sha},
+            "capture": {"path": str(capture_path), "sha256": capture_sha},
+            "chrome_capture": chrome_capture_pin,
+            "chrome_receipt": chrome_receipt_pin,
+            "font_identity_request": font_request,
+            "font_identity_response": font_response,
+            "font_identity_binary_path": str(font_binary_path),
+            "font_identity_binary_sha256": font_binary_sha,
+            "link_captures": link_captures,
+        })
+    return (conditions,
+            {"path": str(manifest_path), "sha256": gate.sha256(manifest_path)},
+            {"path": str(plan_path), "sha256": plan_sha})
+
+
 def produce(root: Path, output: Path, capacity_document: Path | None = None,
-            capacity_document_sha256: str | None = None) -> None:
+            capacity_document_sha256: str | None = None,
+            catalog_manifest_path: Path | None = None, *,
+            _allow_legacy_diagnostic: bool = False,
+            _allow_catalog_diagnostic: bool = False) -> None:
+    if catalog_manifest_path is None and not _allow_legacy_diagnostic:
+        raise ValueError("catalog capture manifest required for formal performance production")
     gate.require(platform.system() == "Darwin" and platform.machine() == "arm64", "measurement lane requires macOS Apple Silicon")
     gate.require(not output.exists() and output.is_relative_to(root / "tmp"), "fresh ignored owned output required")
+    catalog_conditions: list[CatalogCondition] | None = None
+    catalog_manifest_pin: FilePin | None = None
+    catalog_plan_pin: FilePin | None = None
+    if catalog_manifest_path is not None:
+        catalog_conditions, catalog_manifest_pin, catalog_plan_pin = load_catalog_conditions(root, catalog_manifest_path)
     os.environ["GIT_OPTIONAL_LOCKS"] = "0"
     # 生成済みJSとsourceの同期が未確認のcandidateをビルド・計測しない。
     lifecycle = output.parent / f"{output.name}.lifecycle"
     gate.require(not lifecycle.exists(), "fresh measurement lifecycle output required")
     git_query = _make_git_query(lifecycle)
     initial = source(root, git_query=git_query)
+    catalog_capture_validation: gate.JsonObject | None = None
+    if catalog_conditions is not None:
+        if catalog_manifest_pin is None or catalog_plan_pin is None:
+            raise ValueError("catalog capture validation pins are missing")
+        validation = _measurement_command(
+            ["bun", "run", "scripts/html/fidelity-acceptance-cli.ts",
+             "catalog-stage90-validate-captures", catalog_manifest_pin["path"],
+             catalog_plan_pin["path"]],
+            cwd=root, role="preflight", log_directory=lifecycle,
+        )
+        catalog_capture_validation = _validate_catalog_capture_envelope(
+            validation.stdout, catalog_manifest_pin, catalog_plan_pin, catalog_conditions,
+        )
+        gate._require_html84_acceptance(
+            catalog_capture_validation, diagnostic=_allow_catalog_diagnostic,
+        )
+        gate.require(source(root, git_query=git_query) == initial,
+                     "source changed during strict Chrome capture validation")
     _measurement_command(["just", "runtime-bundle-check"], cwd=root, role="preflight", log_directory=lifecycle)
     gate.require(source(root, git_query=git_query) == initial, "source changed during runtime bundle check")
     if capacity_document is None or capacity_document_sha256 is None:
         raise ValueError("capacity binding input required before builds")
     binding = load_capacity_binding(root, capacity_document, capacity_document_sha256)
     output.mkdir(parents=True)
+    catalog_capture_validation_pin: FilePin | None = None
+    if catalog_capture_validation is not None:
+        catalog_capture_validation_pin = write(
+            output / "catalog-chrome-capture-validation.json", catalog_capture_validation,
+        )
     harness = root / gate.HARNESS_ROOT
     lock = harness / "Cargo.lock"
     gate.require(gate.sha256(lock) == gate.LOCK_SHA, "common lock pin differs")
-    fixture = root / "tests/fixtures/html/interaction-fidelity.html"
-    dom = root / "tmp/html-interaction-suite/krr.json"
-    state = gate.read_json(dom)
-    validate_interaction(state, gate.sha256(fixture))
-    plan: OperationPlan = {"fixture_sha256": gate.sha256(fixture), "operation": "action-button-toggle", "x": 100.0, "y": 100.0, "expected_dom_state_path": str(dom), "expected_dom_state_sha256": gate.sha256(dom)}
-    plan_path = output / "operation-plan.json"
-    plan_pin = write(plan_path, plan)
+    fixture: Path | None = None
+    dom: Path | None = None
+    plan: OperationPlan | None = None
+    plan_path: Path | None = None
+    plan_pin: FilePin | None = None
+    if catalog_conditions is None:
+        fixture = root / "tests/fixtures/html/interaction-fidelity.html"
+        dom = root / "tmp/html-interaction-suite/krr.json"
+        state = gate.read_json(dom)
+        validate_interaction(state, gate.sha256(fixture))
+        plan = {"fixture_sha256": gate.sha256(fixture), "operation": "action-button-toggle", "x": 100.0, "y": 100.0, "expected_dom_state_path": str(dom), "expected_dom_state_sha256": gate.sha256(dom)}
+        plan_path = output / "operation-plan.json"
+        plan_pin = write(plan_path, plan)
     source_before = write(output / "source-before.json", initial)
-    capacity_input_pin = write(output / "capacity-inputs.json", {
+    capacity_input_value: gate.JsonObject = {
         "sourceBeforeRef": source_before,
         "bindingRef": {"path": str(binding.document), "sha256": binding.document_sha256},
         "stateRef": {"path": str(binding.state), "sha256": binding.state_sha256},
         "protectedRegistryRef": {"path": str(binding.registry), "sha256": binding.registry_sha256},
         "protectedReferenceCount": len(binding.references), "target": str(root / "target"),
         "baselineBytes": LOCAL_CAPACITY_BASELINE, "factor": 2, "thresholdBytes": LOCAL_CAPACITY_THRESHOLD,
-    })
+    }
+    if catalog_manifest_pin is not None:
+        capacity_input_value["catalogManifestRef"] = catalog_manifest_pin
+    if catalog_plan_pin is not None:
+        capacity_input_value["catalogPlanRef"] = catalog_plan_pin
+    capacity_input_pin = write(output / "capacity-inputs.json", capacity_input_value)
     approved = write(output / "approved-source.json", initial)
     head = gate._text(initial["head"], "source HEAD")
     inventory_digest = gate._text(initial["inventoryDigest"], "source inventory digest")
@@ -1038,6 +1394,17 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     snapshot_pin = write(output / "shared-source-snapshot.json", {"records": snapshot_rows, "digest": hashlib.sha256(encoded(snapshot_rows)).hexdigest()})
     target = root / "target"
     source_records = gate.current_source(root, initial, git_query=git_query)
+    if catalog_manifest_path is not None:
+        manifest_value = gate.read_json(catalog_manifest_path)
+        feature_catalog_path = Path(gate._text(manifest_value.get("catalogPath"), "feature catalog path"))
+        feature_catalog_sha = gate._text(manifest_value.get("catalogSha256"), "feature catalog SHA")
+        feature_relative = feature_catalog_path.relative_to(root).as_posix()
+        gate.require(source_records.get(feature_relative, (None,))[0] == feature_catalog_sha,
+                     "catalog feature source differs from current committed HEAD")
+        for condition in catalog_conditions or []:
+            fixture_relative = condition["fixture"].relative_to(root).as_posix()
+            gate.require(source_records.get(fixture_relative, (None,))[0] == condition["fixture_sha256"],
+                         f"catalog fixture differs from current committed HEAD: {fixture_relative}")
     capacity_configs: list[Path] = []
     binaries: dict[str, Path] = {}
     builds: dict[str, ArmBuildResult] = {}
@@ -1050,7 +1417,60 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         binaries[arm] = build.binary
         builds[arm] = build
         gate.require(source(root, git_query=git_query) == initial, "source changed during build")
-    input_paths = [fixture, plan_path, dom, lock, output / "shared-source-snapshot.json", *binaries.values(),
+    measurement_rows: list[gate.JsonObject] = []
+    if catalog_conditions is None:
+        assert fixture is not None and plan_path is not None and dom is not None and plan is not None and plan_pin is not None
+        for width, height in gate.VIEWPORTS:
+            measurement_rows.append({"fixture": fixture, "fixture_sha256": gate.sha256(fixture),
+                "plan_path": plan_path, "plan": plan, "plan_pin": plan_pin,
+                "dom": dom, "dom_sha256": gate.sha256(dom),
+                "viewport": {"width": width, "height": height, "scale": 1},
+                "folder_name": f"{width}x{height}", "catalog": False})
+    else:
+        for condition in catalog_conditions:
+            label = re.sub(r"[^a-zA-Z0-9.-]+", "_", condition["condition_id"])
+            condition_dir = output / "conditions" / label
+            condition_dir.mkdir(parents=True)
+            condition_plan_path = condition_dir / "operation-plan.json"
+            condition_plan_pin = write(condition_plan_path, condition["operation_plan"])
+            measurement_rows.append({"fixture": condition["fixture"],
+                "fixture_sha256": condition["fixture_sha256"],
+                "plan_path": condition_plan_path, "plan": condition["operation_plan"],
+                "plan_pin": condition_plan_pin, "dom": None, "dom_sha256": "",
+                "viewport": condition["viewport"], "folder_name": label, "catalog": True,
+                "condition_id": condition["condition_id"], "case_id": condition["case_id"],
+                "state": condition["state"], "operation_kind": condition["operation_kind"],
+                "target_selector": condition["target_selector"],
+                "operation_evidence": condition["operation_evidence"],
+                "capture": condition["capture"], "link_captures": condition["link_captures"],
+                "chrome_capture": condition["chrome_capture"],
+                "chrome_receipt": condition["chrome_receipt"],
+                "font_identity_request": condition["font_identity_request"],
+                "font_identity_response": condition["font_identity_response"],
+                "font_identity_binary_path": condition["font_identity_binary_path"],
+                "font_identity_binary_sha256": condition["font_identity_binary_sha256"]})
+    font_probe_input_paths: list[Path] = []
+    if catalog_conditions:
+        first_catalog = catalog_conditions[0]
+        font_probe_input_paths = [
+            Path(first_catalog["font_identity_request"]["path"]),
+            Path(first_catalog["font_identity_response"]["path"]),
+            Path(first_catalog["font_identity_binary_path"]),
+        ]
+    input_paths = [*[cast(Path, row["fixture"]) for row in measurement_rows],
+                   *[cast(Path, row["plan_path"]) for row in measurement_rows],
+                   *[cast(Path, row["dom"]) for row in measurement_rows if row["dom"] is not None],
+                   *[Path(cast(FilePin, row["operation_evidence"])["path"]) for row in measurement_rows if row["catalog"]],
+                   *[Path(cast(FilePin, row["capture"])["path"]) for row in measurement_rows if row["catalog"]],
+                   *[Path(pin["path"]) for row in measurement_rows if row["catalog"]
+                     for pin in cast(list[FilePin], row["link_captures"])],
+                   *[Path(cast(SizedFilePin, row["chrome_capture"])['path']) for row in measurement_rows if row["catalog"]],
+                   *[Path(cast(SizedFilePin, row["chrome_receipt"])['path']) for row in measurement_rows if row["catalog"]],
+                   *font_probe_input_paths,
+                   *([catalog_manifest_path] if catalog_manifest_path is not None else []),
+                   *([Path(catalog_plan_pin["path"])] if catalog_plan_pin is not None else []),
+                   *([Path(catalog_capture_validation_pin["path"])] if catalog_capture_validation_pin is not None else []),
+                   lock, output / "shared-source-snapshot.json", *binaries.values(),
                    binding.document, binding.state, binding.registry, *capacity_configs,
                    *[Path(pin["path"]) for pin in build_pins]]
     arms = expected_arm_pins(builds, snapshot_pin["sha256"])
@@ -1061,11 +1481,42 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     transport_attempts: list[dict[str, FilePin]] = []
     transport: gate.JsonObject = {"schema": "krr-html-performance-release-bundle-v1", "head": head, "files": transport_files, "attempts": transport_attempts}
     expected_all: list[tuple[Path, ExpectedPerformance, gate.JsonObject, FilePin]] = []
-    for width, height in gate.VIEWPORTS:
-        folder = output / f"{width}x{height}"
+    for row in measurement_rows:
+        fixture = cast(Path, row["fixture"])
+        plan_path = cast(Path, row["plan_path"])
+        plan_pin = cast(FilePin, gate._object(row["plan_pin"], "operation plan pin"))
+        plan_data = gate._object(row["plan"], "operation plan")
+        row_dom = row["dom"]
+        dom_sha256 = gate._text(row["dom_sha256"], "DOM evidence SHA")
+        row_viewport = gate._object(row["viewport"], "measurement viewport")
+        width = gate._integer(row_viewport.get("width"), "viewport width")
+        height = gate._integer(row_viewport.get("height"), "viewport height")
+        folder = output / gate._text(row["folder_name"], "measurement folder")
         folder.mkdir()
-        viewport: Viewport = {"width": width, "height": height, "scale": 1}
-        expected: ExpectedPerformance = {"fixture_sha256": gate.sha256(fixture), "operation_plan_sha256": plan_pin["sha256"], "operation": plan["operation"], "expected_dom_state_sha256": gate.sha256(dom), "viewport": viewport, "provenance": {"rustc": before_context["toolContext"]["rustc"], "cargo": before_context["toolContext"]["cargo"], "environment_sha256": environment_sha}, "arms": arms, "reportPins": [], "operationPlanRef": plan_pin, "domStateRef": {"path": str(dom), "sha256": gate.sha256(dom)}}
+        operation_name = gate._text(plan_data.get("operation") if not row["catalog"]
+                                    else plan_data.get("operationKind"), "operation name")
+        fixture_sha256 = gate._text(row["fixture_sha256"], "fixture SHA")
+        viewport_value: Viewport = {"width": width, "height": height,
+                                    "scale": gate._integer(row_viewport.get("scale"), "viewport scale")}
+        dom_ref: FilePin = ({"path": str(row_dom), "sha256": dom_sha256} if row_dom is not None
+                           else cast(FilePin, row["operation_evidence"]))
+        expected: ExpectedPerformance = {"fixture_sha256": fixture_sha256, "operation_plan_sha256": plan_pin["sha256"], "operation": operation_name, "expected_dom_state_sha256": dom_sha256, "viewport": viewport_value, "provenance": {"rustc": before_context["toolContext"]["rustc"], "cargo": before_context["toolContext"]["cargo"], "environment_sha256": environment_sha}, "arms": arms, "reportPins": [], "operationPlanRef": plan_pin, "domStateRef": dom_ref}
+        if row["catalog"]:
+            catalog_identity = {key: row[key] for key in ("condition_id", "case_id", "state", "operation_kind", "target_selector")}
+            catalog_identity["fixture_path"] = str(fixture)
+            expected["catalogCondition"] = {**catalog_identity, "viewport": viewport_value, "fixture_sha256": fixture_sha256}
+            expected["operationEvidenceRef"] = cast(FilePin, row["operation_evidence"])
+            expected["catalogManifestRef"] = cast(FilePin, catalog_manifest_pin)
+            expected["catalogPlanRef"] = cast(FilePin, catalog_plan_pin)
+            expected["chromeCaptureRef"] = cast(SizedFilePin, row["chrome_capture"])
+            expected["chromeReceiptRef"] = cast(SizedFilePin, row["chrome_receipt"])
+            expected["catalogCaptureValidationRef"] = cast(FilePin, catalog_capture_validation_pin)
+            expected["fontIdentityRequestRef"] = cast(SizedFilePin, row["font_identity_request"])
+            expected["fontIdentityResponseRef"] = cast(SizedFilePin, row["font_identity_response"])
+            expected["fontIdentityProbeBinary"] = {
+                "path": cast(str, row["font_identity_binary_path"]),
+                "sha256": cast(str, row["font_identity_binary_sha256"]),
+            }
         order: list[gate.JsonObject] = []
         reports: list[Path] = []
         for pair in range(5):
@@ -1073,27 +1524,37 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 binary = binaries[arm]
                 report_path = folder / "reports" / f"{arm}-{pair}.json"
                 raw_arm = "baseline-0.4.23" if arm == "baseline" else arm
-                environment = {**os.environ, "KRR_PERF_RUSTC": expected["provenance"]["rustc"], "KRR_PERF_CARGO": expected["provenance"]["cargo"], "KRR_PERF_ENVIRONMENT_SHA256": environment_sha, "KRR_PERF_LOCK_PATH": str(lock), "KRR_PERF_SOURCE_SNAPSHOT_PATH": snapshot_pin["path"]}
+                environment = _performance_worker_environment(expected["provenance"]["rustc"], expected["provenance"]["cargo"], environment_sha, lock, snapshot_pin)
                 samples: list[gate.JsonObject] = []
                 loads: list[dict[str, float]] = []
                 for sample in range(5):
                     load_before = await_quiet()
                     require_frozen_binary(builds[arm])
-                    stdout = command([str(binary), "--worker", str(sample), str(fixture), str(report_path), str(plan_path), str(width), str(height), "1"], cwd=root, env=environment, role="worker", log_directory=lifecycle)
+                    stdout = command([str(binary), "--worker", str(sample), str(fixture), str(report_path), str(plan_path), str(width), str(height), str(viewport_value["scale"])], cwd=root, env=environment, role="worker", log_directory=lifecycle)
                     load_after = quiet()
                     gate.require(load_after <= 0.25 and gate.sha256(binary) == arms[raw_arm]["binary_sha256"], "worker load/binary changed")
-                    payload = worker_sample(stdout, sample, viewport)
+                    payload = worker_sample(stdout, sample, viewport_value)
                     samples.append(payload)
                     loads.append({"before": load_before, "after": load_after})
-                report: gate.JsonObject = {"arm": raw_arm, "pair_index": pair, "measurement_executed": True, "sample_count": 5, "source_sha256": expected["fixture_sha256"], "operation_plan_sha256": expected["operation_plan_sha256"], "operation": plan["operation"], "expected_dom_state_sha256": expected["expected_dom_state_sha256"], "viewport": viewport, "provenance": {**expected["provenance"], "binary_sha256": arms[raw_arm]["binary_sha256"], "source_snapshot_sha256": snapshot_pin["sha256"], "deps_lock_sha256": gate.LOCK_SHA}, "samples": samples}
+                report: gate.JsonObject = {"arm": raw_arm, "pair_index": pair, "measurement_executed": True, "sample_count": 5, "source_sha256": expected["fixture_sha256"], "operation_plan_sha256": expected["operation_plan_sha256"], "operation": expected["operation"], "expected_dom_state_sha256": expected["expected_dom_state_sha256"], "viewport": viewport_value, "provenance": {**expected["provenance"], "binary_sha256": arms[raw_arm]["binary_sha256"], "source_snapshot_sha256": snapshot_pin["sha256"], "deps_lock_sha256": gate.LOCK_SHA}, "samples": samples}
+                if row["catalog"]:
+                    report.update({"condition_id": row["condition_id"], "case_id": row["case_id"],
+                        "state": row["state"], "operation_kind": row["operation_kind"],
+                        "operation_evidence_ref": row["operation_evidence"],
+                        "catalog_condition": expected["catalogCondition"]})
                 report_pin = write(report_path, report)
                 expected["reportPins"].append(report_pin)
                 reports.append(report_path)
                 order.append({"arm": arm, "pair_index": pair, "executable": str(binary), "executable_sha256": arms[raw_arm]["binary_sha256"], "output": str(report_path), "load_ratio_before": max(x["before"] for x in loads), "load_ratio_after": max(x["after"] for x in loads), "workerLoads": loads})
-        manifest_pin = write(folder / "reports/pair-manifest.json", {"measurement_executed": True, "input_sha256": expected["fixture_sha256"], "environment_sha256": environment_sha, "platform": platform.platform(), "order": order})
+        manifest_data: gate.JsonObject = {"measurement_executed": True, "input_sha256": expected["fixture_sha256"], "environment_sha256": environment_sha, "platform": platform.platform(), "order": order}
+        if row["catalog"]:
+            manifest_data.update({"condition_id": row["condition_id"], "operation_evidence_ref": row["operation_evidence"]})
+        manifest_pin = write(folder / "reports/pair-manifest.json", manifest_data)
         aggregate = gate.aggregate_comparison(reports, {**expected})
         policy = {p: {k: v <= 0 for k, v in values.items()} for p, values in aggregate["comparison"].items()}
-        result: gate.JsonObject = {"formalAccepted": False, "performanceAccepted": False, "measurementExecuted": True, "policy": {"policyPass": all(ok for phase in policy.values() for ok in phase.values()), "policy": policy, "deltaThreshold": 0, "quietLoadLimit": 0.25, "phaseRecords": 250, "aggregate": aggregate}}
+        result: gate.JsonObject = {"formalAccepted": False, "performanceAccepted": False, "measurementExecuted": True, "policy": {"policyPass": all(ok for phase in policy.values() for ok in phase.values()), "policy": policy, "deltaThreshold": 0, "quietLoadLimit": 0.25, "phaseRecords": len(gate.PHASES) * 50, "aggregate": aggregate}}
+        if row["catalog"]:
+            result["catalogCondition"] = expected["catalogCondition"]
         expected_all.append((folder, expected, result, manifest_pin))
     after_context = context(root, target, input_paths, lifecycle, git_query=git_query)
     end_pin = write(output / "context-end.json", after_context)
@@ -1102,7 +1563,26 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     before_endpoint: Mapping[str, object] = before_context
     after_endpoint: Mapping[str, object] = after_context
     flags = {name: before_endpoint[key] == after_endpoint[key] for name, key in mapping.items()}
-    refs: list[FilePin] = [source_before, source_end, approved, snapshot_pin, before_pin, end_pin, plan_pin, capacity_input_pin, *build_pins, {"path": str(dom), "sha256": gate.sha256(dom)}, *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in binaries.values()]]
+    refs: list[FilePin] = [source_before, source_end, approved, snapshot_pin, before_pin, end_pin, capacity_input_pin, *build_pins, *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in binaries.values()]]
+    for row in measurement_rows:
+        refs.append(FilePin(path=str(row["plan_path"]), sha256=gate.sha256(cast(Path, row["plan_path"]))))
+        if row["dom"] is not None:
+            refs.append(FilePin(path=str(row["dom"]), sha256=gate.sha256(cast(Path, row["dom"]))))
+        if row["catalog"]:
+            evidence = cast(FilePin, row["operation_evidence"])
+            capture = cast(FilePin, row["capture"])
+            refs.extend([evidence, capture,
+                         cast(SizedFilePin, row["chrome_capture"]),
+                         cast(SizedFilePin, row["chrome_receipt"]),
+                         cast(SizedFilePin, row["font_identity_request"]),
+                         cast(SizedFilePin, row["font_identity_response"]),
+                         *cast(list[FilePin], row["link_captures"])])
+    if catalog_manifest_path is not None and catalog_manifest_pin is not None:
+        refs.append(catalog_manifest_pin)
+    if catalog_plan_pin is not None:
+        refs.append(catalog_plan_pin)
+    if catalog_capture_validation_pin is not None:
+        refs.append(catalog_capture_validation_pin)
     for folder, expected, result, manifest_pin in expected_all:
         expected["sourcePair"] = {"before": source_before, "end": source_end, "approvedSourceRef": approved, "inputPins": [approved, capacity_input_pin], "approvedInventoryDigest": inventory_digest, "snapshot": snapshot_pin}
         expected["endpointRefs"] = {"before": before_pin, "end": end_pin}
@@ -1128,8 +1608,13 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         shutil.copyfile(original, destination)
         transport_files.append({"originalPath": ref["path"], "relativePath": relative, "sha256": ref["sha256"]})
     write(bundle / "bundle.json", transport)
-    gate.verify(bundle, root, git_query=git_query)
-    print(json.dumps({"head": head, "bundle": str(bundle), "checks": 60, "phaseRecords": 750}))
+    if catalog_manifest_path is None:
+        gate._verify_legacy_diagnostic(bundle, root, git_query=git_query)
+    elif _allow_catalog_diagnostic:
+        gate._verify_catalog_diagnostic(bundle, root, git_query=git_query)
+    else:
+        gate.verify(bundle, root, git_query=git_query)
+    print(json.dumps({"head": head, "bundle": str(bundle), "checks": len(expected_all) * 20, "phaseRecords": len(expected_all) * len(gate.PHASES) * 50}))
 
 
 def main() -> None:
@@ -1138,8 +1623,10 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=Path("tmp/html-performance-producer"))
     parser.add_argument("--capacity-binding", type=Path)
     parser.add_argument("--capacity-binding-sha256")
+    parser.add_argument("--catalog-plan", type=Path, required=True)
     args = parser.parse_args()
-    produce(args.repo.resolve(), args.output.resolve(), args.capacity_binding, args.capacity_binding_sha256)
+    produce(args.repo.resolve(), args.output.resolve(), args.capacity_binding, args.capacity_binding_sha256,
+            args.catalog_plan.resolve())
 
 
 if __name__ == "__main__":

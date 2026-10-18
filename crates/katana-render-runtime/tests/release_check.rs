@@ -22,7 +22,7 @@ fn release_check_requires_all_quality_and_publish_readiness_gates()
             "release-check must require {required_gate}"
         );
     }
-    for required_gate in ["check", "coverage"] {
+    for required_gate in ["check", "html-performance-nonregression-check"] {
         assert!(
             quality.contains(required_gate),
             "release-quality must require {required_gate}"
@@ -233,20 +233,55 @@ fn archive_gate_release_recipe_runs_the_script_contract_test()
 fn coverage_gate_remains_strict_and_includes_integration_targets()
 -> Result<(), Box<dyn std::error::Error>> {
     let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
-    let recipe = recipe_body(&justfile, "coverage")?;
+    let coverage = recipe_body(&justfile, "coverage")?;
+    let recipe = recipe_body(&justfile, "root-test-and-coverage")?;
 
-    assert!(recipe.contains("--all-targets"));
-    assert!(recipe.contains("--fail-under-lines {{COVERAGE_MIN_LINES}}"));
-    assert!(recipe.contains("--fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}"));
-    assert!(recipe.contains("llvm-cov clean --workspace"));
-    assert!(!recipe.contains("rm -rf target/"));
-    assert!(!recipe.contains("cargo clean"));
-    assert!(
-        justfile
-            .contains("COVERAGE_MIN_LINES := env_var_or_default(\"COVERAGE_MIN_LINES\", \"100\")")
-    );
-    assert!(justfile.contains("COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default(\"COVERAGE_MAX_UNCOVERED_LINES\", \"0\")"));
+    assert_coverage_recipe_arms(coverage);
+    assert_root_coverage_contract(recipe);
+    assert_coverage_defaults(&justfile);
     Ok(())
+}
+
+fn assert_coverage_recipe_arms(coverage: &str) {
+    assert_eq!(
+        coverage
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>(),
+        [
+            "just root-test-and-coverage",
+            "just performance-harness-coverage",
+            "just coverage-result-check",
+        ]
+    );
+}
+
+fn assert_root_coverage_contract(recipe: &str) {
+    assert_contains_all(
+        recipe,
+        &[
+            "--all-targets",
+            "--fail-under-lines {{COVERAGE_MIN_LINES}}",
+            "--fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}",
+            "llvm-cov clean --workspace",
+            "--json --summary-only --output-path",
+        ],
+    );
+    assert_contains_none(
+        recipe,
+        &["rm -rf target/", "cargo clean", "--ignore-run-fail"],
+    );
+}
+
+fn assert_coverage_defaults(justfile: &str) {
+    assert_contains_all(
+        justfile,
+        &[
+            "COVERAGE_MIN_LINES := env_var_or_default(\"COVERAGE_MIN_LINES\", \"100\")",
+            "COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default(\"COVERAGE_MAX_UNCOVERED_LINES\", \"0\")",
+        ],
+    );
 }
 
 #[test]
@@ -261,7 +296,15 @@ fn quality_gate_requires_the_html_runtime_in_the_crate_package()
         "the Cargo lane must require the HTML runtime package gate"
     );
     assert!(rust_lane.contains("just plantuml-runtime-package-check"));
-    assert!(package_check.contains("src/renderer/backends/html_runtime/dom_bootstrap.js"));
+    assert_contains_all(
+        package_check,
+        &[
+            "src/renderer/backends/html_runtime/dom_bootstrap.js",
+            "assets/test-fixtures/font-probes/recursive-latin-crsv-normal.ttf",
+            "assets/test-fixtures/font-probes/native-class-ja-probe.svg",
+            "assets/test-fixtures/font-probes/licenses/Recursive-OFL-1.1.txt",
+        ],
+    );
     Ok(())
 }
 
@@ -397,19 +440,14 @@ fn local_quality_gate_runs_repository_automation_contract_tests()
     let root = workspace_root()?;
     let justfile = std::fs::read_to_string(root.join("Justfile"))?;
     let check = recipe_body(&justfile, "check")?;
-    let contracts_lane = recipe_body(&justfile, "check-contracts")?;
     let automation = recipe_body(&justfile, "automation-contract-test")?;
     let scheduler = std::fs::read_to_string(root.join("scripts/hooks/run_parallel_checks.py"))?;
+    let moon = std::fs::read_to_string(root.join("moon.yml"))?;
+    let moon_workspace = std::fs::read_to_string(root.join(".moon/workspace.yml"))?;
 
     assert!(check.contains("run_parallel_checks.py"));
-    assert!(scheduler.contains("Lane(\"contracts\", \"check-contracts\")"));
-    assert!(contracts_lane.contains("just automation-contract-test"));
-    for script_dir in ["scripts/hooks", "scripts/release"] {
-        assert!(
-            automation.contains(&format!("unittest discover -s {script_dir} -p '*_test.py'")),
-            "automation contract gate must discover tests under {script_dir}"
-        );
-    }
+    assert_moon_quality_dag(&moon, &scheduler, &moon_workspace);
+    assert_python_automation_discovery(automation);
     Ok(())
 }
 
@@ -692,6 +730,52 @@ fn recipe_body<'a>(justfile: &'a str, recipe: &str) -> Result<&'a str, Box<dyn s
     let (start, header_len) = start.ok_or_else(|| format!("{recipe} recipe is missing"))?;
     let body = &justfile[start + header_len + 1..];
     Ok(body.split("\n\n").next().unwrap_or(body))
+}
+
+fn assert_contains_all(source: &str, required: &[&str]) {
+    for fragment in required {
+        assert!(
+            source.contains(fragment),
+            "missing required fragment: {fragment}"
+        );
+    }
+}
+
+fn assert_contains_none(source: &str, forbidden: &[&str]) {
+    for fragment in forbidden {
+        assert!(
+            !source.contains(fragment),
+            "unexpected fragment: {fragment}"
+        );
+    }
+}
+
+fn assert_moon_quality_dag(moon: &str, scheduler: &str, moon_workspace: &str) {
+    assert!(scheduler.contains("\"krr:coverage\""));
+    assert!(moon_workspace.contains("krr: '.'"));
+    assert_contains_all(
+        moon,
+        &[
+            "  performance-coverage:\n    command: ['just', 'performance-harness-coverage']\n    deps: ['heavy-native', 'check']",
+            "  coverage:\n    command: ['just', 'coverage-result-check']\n    deps: ['performance-coverage']",
+            "  unit-test:\n    command: ['just', 'root-test-and-coverage']\n    deps: ['runtime-asset-script-test']",
+            "  check:\n    command: noop\n    inputs: *quality-inputs\n    deps:\n      - heavy-native\n      - runtime-asset-script-test\n      - automation-contract-test\n      - build-capacity-check",
+        ],
+    );
+    for task in ["automation-contract-test", "build-capacity-check"] {
+        assert!(moon.contains(&format!(
+            "  {task}:\n    command: ['just', '{task}']\n    deps: ['static']"
+        )));
+    }
+}
+
+fn assert_python_automation_discovery(automation: &str) {
+    for script_dir in ["scripts/hooks", "scripts/release"] {
+        assert!(
+            automation.contains(&format!("unittest discover -s {script_dir} -p '*_test.py'")),
+            "automation contract gate must discover tests under {script_dir}"
+        );
+    }
 }
 
 fn release_target_check(

@@ -119,7 +119,8 @@ HTMLの性能修正では、対象原本のSHA-256を固定して次を実行す
 rtk proxy just html-first-frame-check '/path/to/input.html' '<input-sha256>' 'tmp/html-first-frame.json'
 ```
 
-ビルド時間を除き、1280×900・scale 1の初期フレームと実際のsession closeを
+配布と同じ最適化releaseビルドを使用し、ビルド時間を除いて1280×900・scale 1の
+初期フレームが3秒未満で得られることと、実際のsession closeを
 プロセス全体の60秒上限で検証する。終了コード、フレームの寸法・バッファ、
 入力・実行ファイルのハッシュ、CPU時間、残存プロセスの有無をJSONへ記録する。
 タイムアウト、close失敗、実行中の入力・バイナリ変更は失敗となる。

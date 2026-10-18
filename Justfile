@@ -11,21 +11,38 @@ TEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " -- --test-threads=" + 
 RUNTIME_UPDATE_LOG_DIR := env_var_or_default("RUNTIME_UPDATE_LOG_DIR", "tmp/runtime-update-logs")
 export RUSTFLAGS := env_var_or_default("RUSTFLAGS", "-D warnings")
 CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")
+HTML84_CARGO := if RTK == "" { "cargo" } else { RTK + " proxy cargo" }
+CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO
 KRR_BIN := env_var_or_default("KRR_BIN", REPO_ROOT + "/target/debug/krr")
+export KRR_BUILD_RECEIPT := env_var_or_default("KRR_BUILD_RECEIPT", "")
+export MERMAID_RASTER_SESSION_CONFIG := env_var_or_default("MERMAID_RASTER_SESSION_CONFIG", "")
+export MERMAID_RASTER_SESSION_CONFIG_SHA := env_var_or_default("MERMAID_RASTER_SESSION_CONFIG_SHA", "")
+export MERMAID_RASTER_BINDING_CONFIG := env_var_or_default("MERMAID_RASTER_BINDING_CONFIG", "")
+export MERMAID_RASTER_BINDING_CONFIG_SHA := env_var_or_default("MERMAID_RASTER_BINDING_CONFIG_SHA", "")
+MERMAID_RASTER_SESSION_CONFIG_EN := env_var_or_default("MERMAID_RASTER_SESSION_CONFIG_EN", "")
+MERMAID_RASTER_SESSION_CONFIG_SHA_EN := env_var_or_default("MERMAID_RASTER_SESSION_CONFIG_SHA_EN", "")
+MERMAID_RASTER_BINDING_CONFIG_EN := env_var_or_default("MERMAID_RASTER_BINDING_CONFIG_EN", "")
+MERMAID_RASTER_BINDING_CONFIG_SHA_EN := env_var_or_default("MERMAID_RASTER_BINDING_CONFIG_SHA_EN", "")
+MERMAID_RASTER_SESSION_CONFIG_JA := env_var_or_default("MERMAID_RASTER_SESSION_CONFIG_JA", "")
+MERMAID_RASTER_SESSION_CONFIG_SHA_JA := env_var_or_default("MERMAID_RASTER_SESSION_CONFIG_SHA_JA", "")
+MERMAID_RASTER_BINDING_CONFIG_JA := env_var_or_default("MERMAID_RASTER_BINDING_CONFIG_JA", "")
+MERMAID_RASTER_BINDING_CONFIG_SHA_JA := env_var_or_default("MERMAID_RASTER_BINDING_CONFIG_SHA_JA", "")
+HTML_PROBE_BIN := REPO_ROOT + "/target/debug/examples/html_fidelity_probe" + if os() == "windows" { ".exe" } else { "" }
+HTML_INTERACTION_REPORT := env_var_or_default("HTML_INTERACTION_REPORT", REPO_ROOT + "/tmp/html-interaction-suite/krr.json")
+HTML_INTERACTION_OUTPUT := env_var_or_default("HTML_INTERACTION_OUTPUT", REPO_ROOT + "/tmp/html-interaction-suite/chrome")
 VERSION := env_var_or_default("VERSION", `awk -F '"' '/^version = / { print $2; exit }' Cargo.toml`)
 VERSION_BARE := replace(VERSION, "v", "")
 TAG := "v" + VERSION_BARE
 RELEASE_REPO := env_var_or_default("RELEASE_REPO", "HiroyukiFuruno/katana-render-runtime")
 COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
-MERMAID_JS_VERSION := "12.1.0"
+MERMAID_JS_VERSION := "12.2.0-krr.pr6823.1"
 MERMAID_ZENUML_JS_VERSION := "1.0.1"
-DRAWIO_JS_VERSION := "32.0.2"
+DRAWIO_JS_VERSION := "32.4.1"
 MATHJAX_JS_VERSION := "4.1.3"
-ZENUML_CORE_JS_VERSION := "4.4.1"
+ZENUML_CORE_JS_VERSION := "4.7.2"
 PLANTUML_JAR_VERSION := "1.2026.8"
 PLANTUML_JAR_CHECKSUM := "1057dd8b346bed26a48ffebe6054e16fc785dda7c91f37f6c19030a4aab8a942"
-PLAYWRIGHT_VERSION := "1.60.0"
 MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-render-runtime/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
 MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-render-runtime/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
 DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-render-runtime/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
@@ -45,19 +62,22 @@ help:
 # Apply Rust formatting
 fmt:
     {{CARGO}} fmt --all
+    {{CARGO}} fmt --manifest-path scripts/html/performance-harness/Cargo.toml --all
 
 # Check Rust formatting
 fmt-check:
     {{CARGO}} fmt --all -- --check
+    just performance-harness-fmt-check
 
-# 実入力の遅延再発を捕捉するため、初期描画とcloseを60秒上限で検証する。
+# 配布と同じ最適化ビルドで初期描画は3秒未満、closeとプロセス全体は60秒上限で検証する。
 html-first-frame-check input expected_sha256 report="tmp/html-first-frame.json":
-    {{CARGO}} build --locked -p katana-render-runtime --example html_initial_frame_probe
-    python3 scripts/release/verify_html_first_frame.py --input "{{input}}" --expected-sha256 "{{expected_sha256}}" --binary "{{env_var_or_default('CARGO_TARGET_DIR', 'target')}}/debug/examples/html_initial_frame_probe" --report "{{report}}"
+    python3 {{quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py")}} --retain-build-profile release -- {{CARGO}} build --release --locked -p katana-render-runtime --example html_initial_frame_probe
+    python3 scripts/release/verify_html_first_frame.py --input "{{input}}" --expected-sha256 "{{expected_sha256}}" --binary "{{env_var_or_default('CARGO_TARGET_DIR', 'target')}}/release/examples/html_initial_frame_probe" --report "{{report}}"
 
 # Run strict Clippy checks
 lint:
-    RUSTFLAGS="-D warnings" {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity
+    RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity
+    just performance-harness-lint
 
 # Run Rust syntax based structural checks
 ast-lint:
@@ -76,10 +96,66 @@ dependency-leak:
 unit-test: plantuml-install
     {{CARGO}} test --workspace --all-targets --all-features --locked{{TEST_THREAD_ARGS}}
 
+# Root unit tests and line coverage share one fresh instrumented test run.
+native-coverage-cache-key producer:
+    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint
+
+root-test-and-coverage: plantuml-install
+    mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
+    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer root
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-domain root -- {{CARGO}} llvm-cov clean --workspace
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-domain root -- {{CARGO}} llvm-cov --workspace --all-targets --all-features --locked --json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json" --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}{{TEST_THREAD_ARGS}}
+    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-finish --producer root --producer-exit 0
+
+# 継続利用するPythonは固定版のLintと厳格型検査を両方通す。
+python-lint:
+    uvx --from ruff==0.16.10 ruff check --select F,E4,E7,E9,B,UP scripts
+
+python-typecheck:
+    uvx --from mypy==2.4.0 mypy --strict scripts
+
+# 所有コードとテストの未承認重複を必須検査として検出する。
+duplication-check:
+    bun scripts/quality/duplication-check.ts
+
+# 検証コードの管理・解析範囲・標準導線の登録漏れを拒否する。
+html-harness-contract-check:
+    bun scripts/html/harness-contract-cli.ts
+
+# 所有ソース全体の解析対象と標準テスト登録の欠落を検出する。
+owned-validation-contract-check:
+    bun scripts/quality/owned-validation-contract.ts
+    {{CARGO}} metadata --locked --all-features --format-version 1 --manifest-path "{{REPO_ROOT}}/Cargo.toml" > /dev/null
+    {{CARGO}} metadata --locked --no-default-features --features baseline --format-version 1 --manifest-path "{{REPO_ROOT}}/scripts/html/performance-harness/Cargo.toml" > /dev/null
+    {{CARGO}} metadata --locked --no-default-features --features candidate --format-version 1 --manifest-path "{{REPO_ROOT}}/scripts/html/performance-harness/Cargo.toml" > /dev/null
+
 # Run coverage as a required full-check gate
-coverage: plantuml-install
-    {{CARGO}} llvm-cov clean --workspace
-    {{CARGO}} llvm-cov --workspace --all-targets --all-features --locked --summary-only --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}{{TEST_THREAD_ARGS}}
+coverage:
+    just root-test-and-coverage
+    just performance-harness-coverage
+    just coverage-result-check
+
+# WHY: cacheから復元された結果も毎回検証し、不正な結果は実検査で置き換える。
+coverage-result-check:
+    python3 scripts/release/native_coverage_local_aggregate.py --repo "{{REPO_ROOT}}"
+
+# 独立workspaceの両armを個別に検査し、排他featureを同時選択しない。
+performance-harness-fmt-check:
+    {{CARGO}} fmt --manifest-path scripts/html/performance-harness/Cargo.toml --all -- --check
+
+performance-harness-lint:
+    RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py --check-domain performance-baseline -- {{CARGO}} clippy -j {{JOBS}} --manifest-path scripts/html/performance-harness/Cargo.toml --all-targets --no-default-features --features baseline --locked -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity
+    RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py --check-domain performance-candidate -- {{CARGO}} clippy -j {{JOBS}} --manifest-path scripts/html/performance-harness/Cargo.toml --all-targets --no-default-features --features candidate --locked -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity
+
+# profileは分離し、全出力は同じroot targetの固定aggregate容量へ含める。
+performance-harness-coverage:
+    mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
+    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer performance
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-baseline -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-baseline -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features baseline --locked --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/baseline.json" --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}{{TEST_THREAD_ARGS}}
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-candidate -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-candidate -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features candidate --locked --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/candidate.json" --fail-under-lines {{COVERAGE_MIN_LINES}} --fail-uncovered-lines {{COVERAGE_MAX_UNCOVERED_LINES}}{{TEST_THREAD_ARGS}}
+    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-finish --producer performance --producer-exit 0
 
 # Verify pinned runtime asset checksums
 runtime-asset-check:
@@ -99,10 +175,17 @@ runtime-bundle-build:
 # Verify generated diagram runtime bundles are synced with TypeScript source
 runtime-bundle-check:
     bun run runtime-bundle:check
+    bun scripts/runtime-bundles/parser-body-onload-generation.ts --check
 
 # Run TypeScript formatter/linter gate
 biome:
-    bun run biome
+    bun run moon exec krr:biome
+
+# 準備と検査を同じJust環境で行い、古いhostを受理しない。
+[private]
+biome-run:
+    bun scripts/runtime-bundles/runtime-rust-facts-host.ts verify {{quote(REPO_ROOT)}} {{quote(REPO_ROOT + "/tmp/quality/rust-facts-host/current/receipt.json")}}
+    bun scripts/runtime-bundles/runtime-unused-check.ts --gate
 
 # Run strict TypeScript compiler checks
 typecheck:
@@ -138,10 +221,16 @@ runtime-bundle-package-check:
 # Verify the in-process HTML runtime source is included in the library crate package
 html-runtime-package-check:
     @package_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \
-    if ! printf '%s\n' "$package_files" | grep -qx "src/renderer/backends/html_runtime/dom_bootstrap.js"; then \
-      echo "missing HTML runtime package file: dom_bootstrap.js" >&2; \
-      exit 1; \
-    fi
+    for required in \
+      "src/renderer/backends/html_runtime/dom_bootstrap.js" \
+      "assets/test-fixtures/font-probes/recursive-latin-crsv-normal.ttf" \
+      "assets/test-fixtures/font-probes/native-class-ja-probe.svg" \
+      "assets/test-fixtures/font-probes/licenses/Recursive-OFL-1.1.txt"; do \
+      if ! printf '%s\n' "$package_files" | grep -qx "$required"; then \
+        echo "missing HTML runtime package file: $required" >&2; \
+        exit 1; \
+      fi; \
+    done
 
 # Verify the PlantUML checksum manifest is included without packaging the JAR body
 plantuml-runtime-package-check:
@@ -157,8 +246,175 @@ plantuml-runtime-package-check:
 
 # Run TypeScript tests for runtime asset helper scripts
 runtime-asset-script-test:
-    bun test --path-ignore-patterns 'tmp/**' scripts/runtime-assets/runtime-asset-common_test.ts scripts/runtime-assets/update_test.ts scripts/runtime-assets/latest-check_test.ts scripts/runtime-assets/update_zenuml_test.ts scripts/runtime-assets/depends-update-all_test.ts scripts/runtime-assets/runtime-package-asset-compressor_test.ts scripts/mermaid/official_renderer_i18n_test.ts scripts/mermaid/diagram_update_markdown_assets_test.ts
-    bun test --path-ignore-patterns 'tmp/**' scripts/drawio/reference_score_test.ts scripts/drawio/official-runtime-determinism_test.ts scripts/drawio/official-source-fonts_test.ts
+    bun run moon exec krr:runtime-asset-script-test
+
+runtime-asset-script-aggregate-run:
+    bun scripts/runtime-bundles/runtime-unused-check.ts --gate
+
+runtime-asset-script-preflight-run:
+    bun scripts/runtime-bundles/runtime-rust-facts-host.ts verify {{ quote(REPO_ROOT) }} {{ quote(REPO_ROOT + "/tmp/quality/rust-facts-host/current/receipt.json") }}
+    NODE_ENV=test bun scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts verify
+
+runtime-classic-generation-evidence:
+    bun scripts/runtime-bundles/bundle-runtime.ts --check --classic-generation-evidence
+
+runtime-asset-script-other-run:
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-rust-facts-host_test.ts ./scripts/runtime-bundles/runtime-rust-facts-host-freshness_test.ts ./scripts/runtime-bundles/runtime-mathjax-audit-evidence_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-source-inventory_test.ts ./scripts/quality/owned-validation-contract_test.ts
+    python3 scripts/quality/moon_cache_contract_test.py --moon bun run moon
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-assets/runtime-asset-common_test.ts ./scripts/runtime-assets/update_test.ts ./scripts/runtime-assets/latest-check_test.ts ./scripts/runtime-assets/update_zenuml_test.ts ./scripts/runtime-assets/depends-update-all_test.ts ./scripts/runtime-assets/runtime-package-asset-compressor_test.ts ./scripts/runtime-assets/mermaid-patched-build-recipe_test.ts ./scripts/mermaid/official_renderer_i18n_test.ts ./scripts/mermaid/diagram_update_markdown_assets_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/reference_score_test.ts ./scripts/drawio/official-runtime-determinism_test.ts ./scripts/drawio/official-source-fonts_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/html/reference-capture_test.ts ./scripts/html/fidelity-suite_test.ts ./scripts/html/scroll-coverage_test.ts ./scripts/html/toc-fidelity_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/html/interaction-suite_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/html/visual-state-fidelity_test.ts ./scripts/html/dynamic-fidelity_test.ts ./scripts/html/interim-feature-results_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/html/harness-contract_test.ts ./scripts/html/stage-score_test.ts ./scripts/html/stage-score-suite_test.ts ./scripts/html/anonymized-fixture_test.ts ./scripts/html/compare-toc-evidence_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./crates/katana-render-runtime/src/renderer/backends/html_runtime/dom_bootstrap_test.js ./scripts/mermaid/class_reference_gate_test.ts ./scripts/mermaid/class_reference_integrity_test.ts ./scripts/mermaid/diagram_update_fixtures_test.ts ./scripts/mermaid/diagram_update_markdown_reference_test.ts ./scripts/mermaid/dom_css_font_variables_contract_test.ts ./scripts/mermaid/dom_css_priority_contract_test.ts ./scripts/mermaid/dom_plain_text_measure_contract_test.ts ./scripts/mermaid/managed_full_compare_test.ts ./scripts/mermaid/mermaid_pair_manifest_test.ts ./scripts/mermaid/native-cli-process_test.ts ./scripts/mermaid/native-source-manifest_test.ts ./scripts/mermaid/native_render_provenance_test.ts ./scripts/mermaid/official_reference_mode_test.ts ./scripts/mermaid/official_renderer_provenance_test.ts ./scripts/mermaid/raster_comparison_binding_test.ts ./scripts/mermaid/raster_producer_observation_test.ts ./scripts/mermaid/raster_production_binding_test.ts ./scripts/mermaid/rasterize_svg_fonts_test.ts ./scripts/mermaid/rasterize_svg_input_test.ts ./scripts/mermaid/reference_pair_repository_test.ts ./scripts/mermaid/reference_pair_strict_provenance_test.ts ./scripts/mermaid/reference_score_policy_test.ts ./scripts/mermaid/reference_svg_geometry_test.ts ./scripts/mermaid/split_markdown_fixtures_test.ts ./scripts/mermaid/strict_svg_external_images_test.ts ./scripts/mermaid/svg_normalizer_general_contract_test.ts ./scripts/mermaid/svg_sequence_activation_fixes_test.ts ./scripts/quality/duplication-check_test.ts ./scripts/runtime-bundles/runtime-bundle-checks_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_classic_capture_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_build_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_build_reader_test.ts
+    KRR_CLASSIC_GENERATION_EVIDENCE_PATH={{quote(REPO_ROOT + "/tmp/quality/classic-generation-evidence/current.json")}} bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-unused-classic-capture_test.ts ./scripts/runtime-bundles/runtime-unused-classic-binding_test.ts ./scripts/runtime-bundles/runtime-classic-generation_test.ts ./scripts/runtime-bundles/runtime-unused-semantic-adapter_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/parser-body-onload-generation.test.ts
+    just browser-contract-test
+
+# WHY: 関連leafだけの診断再実行であり、full quality gateの代替ではない。
+runtime-unused-script-regression:
+    bun run moon exec krr:runtime-unused-script-regression
+
+runtime-unused-script-regression-run:
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-fragment-loader_test.ts ./scripts/runtime-bundles/runtime-bundle-definitions_test.ts ./scripts/runtime-bundles/runtime-unused-check_test.ts ./scripts/runtime-bundles/runtime-bundle-tool-fingerprint_test.ts ./scripts/runtime-bundles/runtime-unused-mathjax_test.ts ./scripts/runtime-bundles/runtime-unused-native-width-hash_test.ts ./scripts/runtime-bundles/runtime-unused-rust-classic_test.ts
+
+runtime-unused-script-producer-run producer="runtime-unused-script-regression":
+    python3 scripts/release/runtime_script_cache_cli.py run --repo {{ quote(REPO_ROOT) }} --producer {{ quote(producer) }}
+
+runtime-unused-script-verify-run producer="runtime-unused-script-regression":
+    python3 scripts/release/runtime_script_cache_cli.py ensure --repo {{ quote(REPO_ROOT) }} --producer {{ quote(producer) }}
+
+runtime-unused-script-cache-key producer="runtime-unused-script-regression":
+    python3 scripts/release/runtime_script_cache_cli.py key --repo {{ quote(REPO_ROOT) }} --producer {{ quote(producer) }}
+
+runtime-unused-script-final-verify-run:
+    python3 scripts/release/runtime_script_cache_cli.py ensure-all --repo {{ quote(REPO_ROOT) }}
+
+runtime-unused-fragment-loader-run:
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-fragment-loader_test.ts
+
+runtime-unused-bundle-definitions-run:
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-bundle-definitions_test.ts
+
+runtime-unused-check-run:
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-unused-check_test.ts
+
+runtime-unused-tool-fingerprint-run:
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-bundle-tool-fingerprint_test.ts
+
+runtime-unused-mathjax-run:
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-unused-mathjax_test.ts
+
+runtime-unused-native-width-run:
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-unused-native-width-hash_test.ts
+
+runtime-unused-rust-classic-run:
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-unused-rust-classic_test.ts
+
+# WHY: ブラウザ起動の管理は既存fixtureへ任せ、テスト本体の5秒制限を維持する。
+browser-contract-test:
+    node node_modules/playwright/cli.js test --config scripts/html/playwright.config.ts
+
+# Verify the finite MathJax Rust consumer route with the pinned syn AST parser.
+mathjax-consumer-facts root=REPO_ROOT:
+    @CARGO_TARGET_DIR={{quote(root + "/target")}} bun {{quote(root + "/scripts/runtime-bundles/runtime-rust-facts-host.ts")}} run {{quote(root)}} mathjax {{quote(root)}} {{quote(root + "/tmp/quality/rust-facts-host/current/receipt.json")}}
+
+# Verify the finite NativeWidth hash route with the pinned syn AST parser.
+native-width-hash-facts root=REPO_ROOT source_root=REPO_ROOT:
+    @CARGO_TARGET_DIR={{quote(root + "/target")}} bun {{quote(root + "/scripts/runtime-bundles/runtime-rust-facts-host.ts")}} run {{quote(root)}} native-width {{quote(source_root)}} {{quote(root + "/tmp/quality/rust-facts-host/current/receipt.json")}}
+
+# 同じconsumerの検査は準備済みhostの確認を共有し、両方の実Rust検査を維持する。
+native-width-classic-facts root=REPO_ROOT source_root=REPO_ROOT:
+    @CARGO_TARGET_DIR={{quote(root + "/target")}} bun {{quote(root + "/scripts/runtime-bundles/runtime-rust-facts-host.ts")}} run {{quote(root)}} native-width-classic {{quote(source_root)}} {{quote(root + "/tmp/quality/rust-facts-host/current/receipt.json")}}
+
+# Verify the finite Mermaid classic-script source route with the pinned syn AST parser.
+mermaid-classic-script-facts root=REPO_ROOT source_root=REPO_ROOT:
+    @CARGO_TARGET_DIR={{quote(root + "/target")}} bun {{quote(root + "/scripts/runtime-bundles/runtime-rust-facts-host.ts")}} run {{quote(root)}} classic {{quote(source_root)}} {{quote(root + "/tmp/quality/rust-facts-host/current/receipt.json")}}
+
+rust-facts-host-prebuild:
+    bun scripts/runtime-bundles/runtime-rust-facts-host.ts prepare {{quote(REPO_ROOT)}} {{quote(REPO_ROOT + "/tmp/quality/rust-facts-host/current/receipt.json")}}
+
+# Admit the canonical Cargo target before the host prebuild without starting a child.
+capacity-admission:
+    python3 scripts/build/cargo_capacity_guard.py --root {{quote(REPO_ROOT)}} --target {{quote(REPO_ROOT + "/target")}} --state {{quote(REPO_ROOT + "/tmp/.cargo-capacity-guard.json")}} --require-capacity --print-json
+
+mathjax-owned-evidence:
+    NODE_ENV=test bun scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts
+
+rust-facts-host-build root=REPO_ROOT:
+    @CARGO_TARGET_DIR={{quote(root + "/target")}} {{CARGO_BUILD}} build --locked -p kdr-linter --bin mathjax_consumer_facts
+
+rust-facts-host-metadata root=REPO_ROOT:
+    @CARGO_TARGET_DIR={{quote(root + "/target")}} {{CARGO}} metadata --locked --format-version 1
+
+# Compare every input-state boundary operation against Chrome at the immutable 99 threshold.
+html-input-state-fidelity-check:
+    mkdir -p tmp/html-fidelity/input-state
+    {{RTK_CMD}}proxy cargo test -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/input-state/test-build.jsonl
+    bun scripts/html/fidelity-acceptance-cli.ts input-state-final tmp/html-fidelity/input-state/test-build.jsonl
+
+# Interim input-state release gate; final fidelity remains fixed at 99.
+html-input-state-fidelity-interim-check:
+    mkdir -p tmp/html-fidelity/input-state-interim
+    {{RTK_CMD}}proxy cargo test -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/input-state-interim/test-build.jsonl
+    bun scripts/html/fidelity-acceptance-cli.ts input-state-interim tmp/html-fidelity/input-state-interim/test-build.jsonl
+
+# Compare every script-state case against Chrome at the immutable 99 threshold.
+html-dynamic-fidelity-check:
+    mkdir -p tmp/html-fidelity/dynamic
+    {{RTK_CMD}}proxy cargo test -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/dynamic/test-build.jsonl
+    bun scripts/html/fidelity-acceptance-cli.ts dynamic-final tmp/html-fidelity/dynamic/test-build.jsonl
+
+# Interim dynamic-state release gate; final script-feature results remain fixed at 99.
+html-dynamic-fidelity-interim-check:
+    mkdir -p tmp/html-fidelity/dynamic-interim
+    {{RTK_CMD}}proxy cargo test -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/dynamic-interim/test-build.jsonl
+    bun scripts/html/fidelity-acceptance-cli.ts dynamic-interim tmp/html-fidelity/dynamic-interim/test-build.jsonl
+
+# Compare independent KRR frames with the installed Google Chrome without resizing.
+html-fidelity-check:
+    {{CARGO_BUILD}} build -p katana-render-runtime --example html_fidelity_probe --locked
+    mkdir -p tmp/html-fidelity
+    {{RTK_CMD}}proxy cargo test -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/toc-test-build.jsonl
+    @status=0; \
+      just browser-contract-test || status=1; \
+      bun test --path-ignore-patterns 'tmp/**' ./scripts/html/visual-state-fidelity_test.ts || status=1; \
+      bun scripts/html/fidelity-suite.ts --binary {{quote(HTML_PROBE_BIN)}} --toc-build-report tmp/html-fidelity/toc-test-build.jsonl --min-score 99 || status=1; \
+      just html-dynamic-fidelity-check || status=1; \
+      just html-input-state-fidelity-check || status=1; \
+      bun scripts/html/fidelity-acceptance-cli.ts reports-final || status=1; \
+      exit "$$status"
+
+# Explicit v0.4.24 interim release; the final recipe above retains its 99 gate.
+html-fidelity-interim-check:
+    {{CARGO_BUILD}} build -p katana-render-runtime --example html_fidelity_probe --locked
+    mkdir -p tmp/html-fidelity/interim
+    {{RTK_CMD}}proxy cargo test -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/interim/toc-test-build.jsonl
+    @status=0; \
+      just browser-contract-test || status=1; \
+      bun test --path-ignore-patterns 'tmp/**' ./scripts/html/interim-feature-results_test.ts || status=1; \
+      bun scripts/html/fidelity-suite.ts --binary {{quote(HTML_PROBE_BIN)}} --toc-build-report tmp/html-fidelity/interim/toc-test-build.jsonl --output tmp/html-fidelity/interim --phase interim --min-score 90 || status=1; \
+      just html-dynamic-fidelity-interim-check || status=1; \
+      just html-input-state-fidelity-interim-check || status=1; \
+      bun scripts/html/fidelity-acceptance-cli.ts reports-interim || status=1; \
+      exit "$$status"
+
+# Select from the committed release authorization and package version; no threshold override.
+html-release-fidelity-check:
+    @recipe="$(python3 scripts/release/html_fidelity_policy.py --format recipe)" && just "$$recipe"
+
+# Run the independent KRR snapshot interaction probe and compare it with real Google Chrome.
+# Interaction evidence supplements the final 99-point visual and performance contract.
+html-interaction-check:
+    mkdir -p "$(dirname '{{HTML_INTERACTION_REPORT}}')" "{{HTML_INTERACTION_OUTPUT}}"
+    KRR_HTML_INTERACTION_REPORT="{{HTML_INTERACTION_REPORT}}" {{CARGO}} test -p katana-render-runtime interaction_state_is_derived_from_the_runtime_snapshot -- --nocapture
+    bun scripts/html/interaction-suite.ts --html "{{REPO_ROOT}}/tests/fixtures/html/interaction-fidelity.html" --krr-report "{{HTML_INTERACTION_REPORT}}" --output "{{HTML_INTERACTION_OUTPUT}}"
+    @echo "HTML interaction evidence completed; the final 99-point visual and performance gates still apply."
 
 [private]
 runtime-package-asset-check:
@@ -176,8 +432,14 @@ runtime-package-asset-check:
       done
     @runtime_package_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \
     asset_package_files="$({{CARGO}} package -p katana-render-runtime-assets --locked --allow-dirty --list)"; \
+    if ! printf '%s\n' "$runtime_package_files" | grep -qx "vendor/drawio/{{DRAWIO_JS_VERSION}}/LICENSE"; then \
+      echo "missing Draw.io license from runtime crate package" >&2; exit 1; \
+    fi; \
     if ! printf '%s\n' "$asset_package_files" | grep -qx "assets/drawio.min.js.br"; then \
       echo "missing compressed Draw.io asset package file" >&2; exit 1; \
+    fi; \
+    if ! printf '%s\n' "$asset_package_files" | grep -qx "assets/licenses/drawio/LICENSE"; then \
+      echo "missing Draw.io license from assets crate package" >&2; exit 1; \
     fi; \
     if printf '%s\n' "$runtime_package_files" | grep -Eq '^vendor/drawio/{{DRAWIO_JS_VERSION}}/drawio\.min\.js(\.br)?$'; then \
       echo "Draw.io source and compressed asset belong to the assets package" >&2; exit 1; \
@@ -187,6 +449,9 @@ runtime-package-asset-check:
 automation-contract-test:
     python3 -m unittest discover -s scripts/hooks -p '*_test.py'
     python3 -m unittest discover -s scripts/release -p '*_test.py'
+    python3 -m unittest discover -s scripts/quality -p '*_test.py'
+    python3 -m unittest discover -s scripts/mermaid -p '*_test.py'
+    python3 -m unittest discover -s scripts/validation-timing -p test_measure.py
 
 # 必要時の要求適合レビューを明示実行し、DraftのPRレビューとの重複を避ける。
 local-review:
@@ -219,7 +484,7 @@ check-rust:
     just html-runtime-package-check
     just plantuml-runtime-package-check
 
-# These checks read source/generated assets and do not write the shared Cargo target.
+# 実解析の準備も標準Moon経路に通し、検査中の暗黙ビルドを防ぐ。
 check-assets:
     just runtime-bundle-check
     just runtime-asset-script-test
@@ -229,6 +494,11 @@ check-assets:
 # Python contract suites use isolated temporary repositories.
 check-contracts:
     just automation-contract-test
+    just build-capacity-check
+
+# 容量超過・使用中lock・実Cargo targetの安全条件を独立projectで検証する。
+build-capacity-check:
+    {{RTK_CMD}}proxy python3 -m unittest discover -s scripts/build -p 'cargo_capacity_guard*test.py' -v
 
 # Sweep old build artifacts locally (older than 7 days)
 sweep:
@@ -256,7 +526,7 @@ release-target-manifest-update:
     python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --head-ref HEAD --update-release-manifest
 
 # 未公開のworkspace依存を含め、Cargoの検証を通した配布packageを揃える。
-release-verify: release-target-check
+release-verify: html-performance-nonregression-check release-target-check
     bash scripts/release/verify-version.sh "{{VERSION}}"
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
     {{CARGO}} package -p katana-render-runtime-assets -p katana-render-runtime -p katana-render-runtime-cli --locked --allow-dirty
@@ -264,9 +534,12 @@ release-verify: release-target-check
     @asset_files="$({{CARGO}} package -p katana-render-runtime-assets --locked --allow-dirty --list)"; \
     if ! printf '%s\n' "$asset_files" | grep -qx "assets/drawio.min.js.br"; then \
       echo "missing compressed Draw.io asset from assets crate package" >&2; exit 1; \
+    fi; \
+    if ! printf '%s\n' "$asset_files" | grep -qx "assets/licenses/drawio/LICENSE"; then \
+      echo "missing Draw.io license from assets crate package" >&2; exit 1; \
     fi
     @runtime_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \
-    for file in "vendor/drawio/{{DRAWIO_JS_VERSION}}/drawio.min.js.sha256"; do \
+    for file in "vendor/drawio/{{DRAWIO_JS_VERSION}}/drawio.min.js.sha256" "vendor/drawio/{{DRAWIO_JS_VERSION}}/LICENSE"; do \
       if ! printf '%s\n' "$runtime_files" | grep -qx "$file"; then echo "missing runtime source/checksum package file: $file" >&2; exit 1; fi; \
     done; \
     if printf '%s\n' "$runtime_files" | grep -Eq '^vendor/drawio/{{DRAWIO_JS_VERSION}}/drawio\.min\.js(\.br)?$'; then \
@@ -281,8 +554,47 @@ release-openspec-archive:
     bash scripts/release/check-openspec-release-archive.sh --self-test
     bash scripts/release/check-openspec-release-archive.sh "{{VERSION}}"
 
+# 同一committed sourceの3幅・実測時間/RSSを再集計し、劣化時は公開を止める。
+html-performance-nonregression-check:
+    python3 scripts/release/verify_html_performance_evidence.py
+
+# 同一SHAの完了した実測CIからimmutableな生計測証跡を取得する。
+html-performance-evidence-acquire:
+    python3 scripts/release/verify_html_performance_evidence.py --acquire
+
+# 既存catalog CLIで84条件のstage90 raw capture manifestを作る。
+html-performance-catalog-captures output_root:
+    @set -euo pipefail; \
+      output_relative={{quote(output_root)}}; \
+      if [[ ! "$output_relative" =~ ^tmp/html-performance-stage90/[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then echo "output root must be tmp/html-performance-stage90/<run-id>" >&2; exit 2; fi; \
+      run_root={{quote(REPO_ROOT)}}/"$output_relative"; \
+      tmp_root={{quote(REPO_ROOT + "/tmp")}}; \
+      stage_root={{quote(REPO_ROOT + "/tmp/html-performance-stage90")}}; \
+      if [[ -L "$tmp_root" || -L "$stage_root" ]]; then echo "refusing symlinked HTML stage90 output parent" >&2; exit 1; fi; \
+      if [[ -e "$tmp_root" && ! -d "$tmp_root" || -e "$stage_root" && ! -d "$stage_root" ]]; then echo "HTML stage90 output parent is not a directory" >&2; exit 1; fi; \
+      if [[ -e "$run_root" || -L "$run_root" ]]; then echo "refusing existing HTML stage90 output root: $run_root" >&2; exit 1; fi; \
+      if [[ ! -e "$tmp_root" ]]; then mkdir "$tmp_root"; fi; \
+      if [[ -L "$tmp_root" || ! -d "$tmp_root" ]]; then echo "HTML stage90 tmp root changed during creation" >&2; exit 1; fi; \
+      if [[ ! -e "$stage_root" ]]; then mkdir "$stage_root"; fi; \
+      if [[ -L "$stage_root" || ! -d "$stage_root" || -e "$run_root" || -L "$run_root" ]]; then echo "HTML stage90 output path changed during creation" >&2; exit 1; fi; \
+      mkdir "$run_root"; \
+      bun scripts/html/fidelity-acceptance-cli.ts catalog-stage90-plan "$run_root/plan.json"; \
+      just capacity-admission; \
+      python3 scripts/build/cargo_capacity_guard.py --root {{quote(REPO_ROOT)}} --target {{quote(REPO_ROOT + "/target")}} --state {{quote(REPO_ROOT + "/tmp/.cargo-capacity-guard.json")}} -- {{HTML84_CARGO}} test -p katana-render-runtime --lib --no-run --locked --message-format=json > "$run_root/test-build.jsonl"; \
+      bun scripts/html/fidelity-acceptance-cli.ts catalog-stage90-capture "$run_root/test-build.jsonl" "$run_root/plan.json" "$run_root/captures"; \
+      test -s "$run_root/captures/catalog-stage90-captures.json"
+
+# stage90 capture manifestなしの正式paired performanceを拒否する。
+html-performance-evidence-produce catalog_manifest:
+    @set -euo pipefail; \
+      manifest={{quote(catalog_manifest)}}; \
+      if [[ ! -f "$manifest" || -L "$manifest" ]]; then echo "catalog stage90 capture manifest is missing or not a regular file: $manifest" >&2; exit 2; fi; \
+      binding_path="{{REPO_ROOT}}/tmp/html-performance-capacity/binding.json"; \
+      binding_sha256="$(python3 scripts/build/initialize_ci_capacity_state.py --root "{{REPO_ROOT}}" --interaction-report "{{REPO_ROOT}}/tmp/html-interaction-suite/krr.json")"; \
+      python3 scripts/release/produce_html_performance_evidence.py --repo "{{REPO_ROOT}}" --capacity-binding "$binding_path" --capacity-binding-sha256 "$binding_sha256" --catalog-plan "$manifest"
+
 # Run the complete quality gate before release-specific verification.
-release-quality: check coverage
+release-quality: check html-performance-nonregression-check
 
 # Verify the concrete release version and packaged artifact.
 release-specific: release-openspec-archive release-verify
@@ -300,7 +612,7 @@ browser-install:
 
 # Build the local krr CLI once before parallel fixture compares
 krr-build:
-    {{CARGO}} build -p katana-render-runtime-cli
+    {{CARGO_BUILD}} build -p katana-render-runtime-cli
 
 # Force-update all Rust and JavaScript dependencies plus pinned runtime assets, then run required checks
 depends-update-all:
@@ -367,9 +679,41 @@ mermaid-render-prebuilt fixtures output='tmp/krr-mermaid-rendered' fixture_glob=
       "{{KRR_BIN}}" mermaid render --input "$file" --output "{{output}}/$slug.svg"; \
     done
 
+# 独立承認した入力と保護対象を使い、管理された実ビルド証跡を取得する。
+native-cli-build-receipt expected_source expected_source_sha256 protected_registry protected_registry_sha256 cargo_bin rustc_bin runtime=MERMAID_JS:
+    python3 scripts/mermaid/produce_native_cli_build_receipt.py --root {{quote(REPO_ROOT)}} --expected-source {{quote(expected_source)}} --expected-source-sha256 {{quote(expected_source_sha256)}} --protected-registry {{quote(protected_registry)}} --protected-registry-sha256 {{quote(protected_registry_sha256)}} --cargo {{quote(cargo_bin)}} --rustc {{quote(rustc_bin)}} --runtime {{quote(runtime)}}
+
+# 既存guardの物理identity検証結果を、そのまま保護ref環境値へ使う。
+protected-capacity-admission protected_registry:
+    python3 scripts/mermaid/native_cli_build_bindings.py --repo {{quote(REPO_ROOT)}} --protected-registry {{quote(protected_registry)}}
+
+# WHY: caller が監査済み producer の receipt を供給するまで正式比較を開始しない。
+[private]
+mermaid-build-receipt-required:
+    @receipt={{quote(KRR_BUILD_RECEIPT)}}; host_os=$(uname -s); \
+    case "$host_os" in \
+      MINGW*|MSYS*|CYGWIN*) \
+        case "$receipt" in [A-Za-z]:/*|[A-Za-z]:\\*|\\*|/*) ;; \
+          *) printf '%s\n' "KRR_BUILD_RECEIPT must be an absolute caller-supplied receipt path" >&2; exit 1 ;; \
+        esac ;; \
+      *) \
+        case "$receipt" in /*) ;; \
+          *) printf '%s\n' "KRR_BUILD_RECEIPT must be an absolute caller-supplied receipt path" >&2; exit 1 ;; \
+        esac ;; \
+    esac; \
+    test -f "$receipt" && test -s "$receipt" && ! test -L "$receipt" || { printf '%s\n' "KRR_BUILD_RECEIPT must name an existing regular nonempty receipt" >&2; exit 1; }
+
+# Render Mermaid fixtures through the native renderer while retaining exact source and binary bindings
+mermaid-render-strict fixtures output='tmp/krr-mermaid-rendered' fixture_glob='*.md': mermaid-build-receipt-required
+    bun run scripts/mermaid/native-render-provenance.ts --fixtures-dir "{{fixtures}}" --fixture-glob "{{fixture_glob}}" --output-dir "{{output}}" --binary "{{KRR_BIN}}" --runtime "{{MERMAID_JS}}" --build-receipt "{{KRR_BUILD_RECEIPT}}"
+
 # Update official Mermaid reference SVG / PNG
 mermaid-reference fixtures output='tmp/krr-mermaid-official':
-    bun run scripts/mermaid/diagram-update.ts --fixtures "{{fixtures}}" --output "{{output}}" --markdown-output "{{fixtures}}/official-dark" --theme dark --mermaid-js "{{MERMAID_JS}}" --mermaid-zenuml-js "{{MERMAID_ZENUML_JS}}" --skip-errors
+    bun run scripts/mermaid/diagram-update.ts --fixtures "{{fixtures}}" --output "{{output}}" --markdown-output "{{fixtures}}/official-dark" --theme dark --reference-mode legacyNormalized --reference-scope diagnostic --mermaid-js "{{MERMAID_JS}}" --mermaid-zenuml-js "{{MERMAID_ZENUML_JS}}" --skip-errors
+
+# Generate a strict vendor-original diagnostic reference without rewriting fixture markdown
+mermaid-reference-strict fixtures output=('tmp/krr-mermaid-strict-official/' + file_name(fixtures)):
+    bun run scripts/mermaid/diagram-update.ts --fixtures "{{fixtures}}" --output "{{output}}" --theme dark --reference-mode strictVendorOriginal --reference-scope formal --mermaid-js "{{MERMAID_JS}}" --mermaid-zenuml-js "{{MERMAID_ZENUML_JS}}" --raster-session-config {{quote(MERMAID_RASTER_SESSION_CONFIG)}} --raster-session-config-sha {{quote(MERMAID_RASTER_SESSION_CONFIG_SHA)}}
 
 # Update all committed Mermaid reference SVG / PNG fixtures
 mermaid-reference-all:
@@ -379,34 +723,58 @@ mermaid-reference-all:
       "tests/fixtures/mermaid/en" \
       "tests/fixtures/mermaid/ja" \
       "tests/fixtures/mermaid/representative" \
-      | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/mermaid/}; log="{{RUNTIME_UPDATE_LOG_DIR}}/mermaid-reference-${slug//\//-}.log"; if just mermaid-reference "$1" "tmp/krr-mermaid-official/$slug" >"$log" 2>&1; then echo "mermaid reference passed: $slug (log: $log)"; else echo "mermaid reference failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {}
+      | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/mermaid/}; log="{{RUNTIME_UPDATE_LOG_DIR}}/mermaid-reference-${slug//\//-}.log"; if just mermaid-reference-strict "$1" "tmp/krr-mermaid-strict-official/$slug" >"$log" 2>&1; then echo "strict mermaid reference passed: $slug (log: $log)"; else echo "strict mermaid reference failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {}
 
 # Compare committed official Mermaid reference with krr rendering through ImageMagick score
-mermaid-compare fixtures min_score='99' output='tmp/krr-mermaid' fixture_glob='*.md':
-    just mermaid-render "{{fixtures}}" "{{output}}/rendered" "{{fixture_glob}}"
-    bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser" --theme dark
-    bun run scripts/mermaid/reference-compare.ts --official "{{fixtures}}/official-dark" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --theme dark --min-score "{{min_score}}"
+mermaid-compare fixtures min_score='99' output='tmp/krr-mermaid' fixture_glob='*.md' official=('tmp/krr-mermaid-strict-official/' + file_name(fixtures)): mermaid-build-receipt-required
+    just mermaid-render-strict "{{fixtures}}" "{{output}}/rendered" "{{fixture_glob}}"
+    bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser" --theme dark --reference-mode strictVendorOriginal --reference-scope formal --fixtures-dir "{{fixtures}}" --fixture-glob "{{fixture_glob}}" --raster-session-config {{quote(MERMAID_RASTER_SESSION_CONFIG)}} --raster-session-config-sha {{quote(MERMAID_RASTER_SESSION_CONFIG_SHA)}}
+    bun run scripts/mermaid/reference-compare.ts --official "{{official}}" --katana "{{output}}/rendered-browser" --katana-svg-dir "{{output}}/rendered" --fixtures-dir "{{fixtures}}" --fixture-glob "{{fixture_glob}}" --output "{{output}}/comparison" --theme dark --min-score "{{min_score}}" --reference-mode strictVendorOriginal --reference-scope formal --raster-binding-config {{quote(MERMAID_RASTER_BINDING_CONFIG)}} --raster-binding-config-sha {{quote(MERMAID_RASTER_BINDING_CONFIG_SHA)}}
 
 # Compare Mermaid fixtures using the prebuilt krr binary
-mermaid-compare-prebuilt fixtures min_score='99' output='tmp/krr-mermaid' fixture_glob='*.md':
-    just mermaid-render-prebuilt "{{fixtures}}" "{{output}}/rendered" "{{fixture_glob}}"
-    bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser" --theme dark
-    bun run scripts/mermaid/reference-compare.ts --official "{{fixtures}}/official-dark" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --theme dark --min-score "{{min_score}}"
+mermaid-compare-prebuilt fixtures min_score='99' output='tmp/krr-mermaid' fixture_glob='*.md' official=('tmp/krr-mermaid-strict-official/' + file_name(fixtures)): mermaid-build-receipt-required
+    just mermaid-render-strict "{{fixtures}}" "{{output}}/rendered" "{{fixture_glob}}"
+    bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser" --theme dark --reference-mode strictVendorOriginal --reference-scope formal --fixtures-dir "{{fixtures}}" --fixture-glob "{{fixture_glob}}" --raster-session-config {{quote(MERMAID_RASTER_SESSION_CONFIG)}} --raster-session-config-sha {{quote(MERMAID_RASTER_SESSION_CONFIG_SHA)}}
+    bun run scripts/mermaid/reference-compare.ts --official "{{official}}" --katana "{{output}}/rendered-browser" --katana-svg-dir "{{output}}/rendered" --fixtures-dir "{{fixtures}}" --fixture-glob "{{fixture_glob}}" --output "{{output}}/comparison" --theme dark --min-score "{{min_score}}" --reference-mode strictVendorOriginal --reference-scope formal --raster-binding-config {{quote(MERMAID_RASTER_BINDING_CONFIG)}} --raster-binding-config-sha {{quote(MERMAID_RASTER_BINDING_CONFIG_SHA)}}
+
+# WHY: 実 capture と外部 bindings の固定を score より先に完了できる入口を分ける。
+mermaid-capture-prebuilt fixtures output='tmp/krr-mermaid' fixture_glob='*.md': mermaid-build-receipt-required
+    just mermaid-render-strict "{{fixtures}}" "{{output}}/rendered" "{{fixture_glob}}"
+    bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser" --theme dark --reference-mode strictVendorOriginal --reference-scope formal --fixtures-dir "{{fixtures}}" --fixture-glob "{{fixture_glob}}" --raster-session-config {{quote(MERMAID_RASTER_SESSION_CONFIG)}} --raster-session-config-sha {{quote(MERMAID_RASTER_SESSION_CONFIG_SHA)}}
+
+# WHY: 完了した二 producer の外部 pins を検査し、再 capture せず各99で比較する。
+mermaid-score-strict fixtures output='tmp/krr-mermaid' fixture_glob='*.md' official=('tmp/krr-mermaid-strict-official/' + file_name(fixtures)): mermaid-build-receipt-required
+    bun run scripts/mermaid/reference-compare.ts --official "{{official}}" --katana "{{output}}/rendered-browser" --katana-svg-dir "{{output}}/rendered" --fixtures-dir "{{fixtures}}" --fixture-glob "{{fixture_glob}}" --output "{{output}}/comparison" --theme dark --min-score "99" --reference-mode strictVendorOriginal --reference-scope formal --raster-binding-config {{quote(MERMAID_RASTER_BINDING_CONFIG)}} --raster-binding-config-sha {{quote(MERMAID_RASTER_BINDING_CONFIG_SHA)}}
 
 # Compare representative Mermaid patterns for CI/CD
-mermaid-compare-ci min_score='99':
-    just krr-build
+mermaid-compare-ci min_score='99': mermaid-build-receipt-required
     just mermaid-compare-prebuilt tests/fixtures/mermaid/representative "{{min_score}}" tmp/krr-mermaid-ci
 
+# Run the managed current-source EN/JA full comparison and aggregate exact 117 score evidence.
+mermaid-compare-full-managed request request_sha256:
+    bun run scripts/mermaid/managed-full-compare.ts --request "{{request}}" --request-sha256 "{{request_sha256}}"
+
 # Compare full Mermaid fixture sets for local release validation
-mermaid-compare-full min_score='99':
-    just krr-build
+mermaid-compare-full min_score='99' output='tmp/krr-mermaid-full' official='tmp/krr-mermaid-strict-official': mermaid-build-receipt-required
     @set -euo pipefail; \
+    compare_output={{quote(output)}}; \
+    official_root={{quote(official)}}; \
+    session_config_en={{quote(MERMAID_RASTER_SESSION_CONFIG_EN)}}; \
+    session_sha_en={{quote(MERMAID_RASTER_SESSION_CONFIG_SHA_EN)}}; \
+    binding_config_en={{quote(MERMAID_RASTER_BINDING_CONFIG_EN)}}; \
+    binding_sha_en={{quote(MERMAID_RASTER_BINDING_CONFIG_SHA_EN)}}; \
+    session_config_ja={{quote(MERMAID_RASTER_SESSION_CONFIG_JA)}}; \
+    session_sha_ja={{quote(MERMAID_RASTER_SESSION_CONFIG_SHA_JA)}}; \
+    binding_config_ja={{quote(MERMAID_RASTER_BINDING_CONFIG_JA)}}; \
+    binding_sha_ja={{quote(MERMAID_RASTER_BINDING_CONFIG_SHA_JA)}}; \
+    test -n "$session_config_en" && test -n "$session_sha_en" && test -n "$binding_config_en" && test -n "$binding_sha_en" || { printf '%s\n' "EN strict raster session and binding config/SHA are required" >&2; exit 1; }; \
+    test -n "$session_config_ja" && test -n "$session_sha_ja" && test -n "$binding_config_ja" && test -n "$binding_sha_ja" || { printf '%s\n' "JA strict raster session and binding config/SHA are required" >&2; exit 1; }; \
+    [[ "$session_sha_en" =~ ^[a-f0-9]{64}$ && "$binding_sha_en" =~ ^[a-f0-9]{64}$ && "$session_sha_ja" =~ ^[a-f0-9]{64}$ && "$binding_sha_ja" =~ ^[a-f0-9]{64}$ ]] || { printf '%s\n' "Per-language strict raster config SHA must be lowercase SHA-256" >&2; exit 1; }; \
     mkdir -p "{{RUNTIME_UPDATE_LOG_DIR}}"; \
     printf '%s\n' \
       "tests/fixtures/mermaid/en" \
       "tests/fixtures/mermaid/ja" \
-      | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/mermaid/}; log="{{RUNTIME_UPDATE_LOG_DIR}}/mermaid-compare-${slug//\//-}.log"; if just mermaid-compare-prebuilt "$1" "$2" "tmp/krr-mermaid-full/$slug" >"$log" 2>&1; then echo "mermaid compare passed: $slug (log: $log)"; else echo "mermaid compare failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {} "{{min_score}}"
+      | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'set -euo pipefail; slug=${1#tests/fixtures/mermaid/}; case "$slug" in en) session_config="$3"; session_sha="$4"; binding_config="$5"; binding_sha="$6";; ja) session_config="$7"; session_sha="$8"; binding_config="$9"; binding_sha="${10}";; *) printf "%s\n" "Unsupported Mermaid full-compare domain: $slug" >&2; exit 1;; esac; unset MERMAID_RASTER_SESSION_CONFIG_EN MERMAID_RASTER_SESSION_CONFIG_SHA_EN MERMAID_RASTER_BINDING_CONFIG_EN MERMAID_RASTER_BINDING_CONFIG_SHA_EN MERMAID_RASTER_SESSION_CONFIG_JA MERMAID_RASTER_SESSION_CONFIG_SHA_JA MERMAID_RASTER_BINDING_CONFIG_JA MERMAID_RASTER_BINDING_CONFIG_SHA_JA; log="{{RUNTIME_UPDATE_LOG_DIR}}/mermaid-compare-${slug//\//-}.log"; if MERMAID_RASTER_SESSION_CONFIG="$session_config" MERMAID_RASTER_SESSION_CONFIG_SHA="$session_sha" MERMAID_RASTER_BINDING_CONFIG="$binding_config" MERMAID_RASTER_BINDING_CONFIG_SHA="$binding_sha" just mermaid-compare-prebuilt "$1" "$2" "${11}/$slug" "*.md" "${12}/$slug" >"$log" 2>&1; then echo "mermaid compare passed: $slug (log: $log)"; else echo "mermaid compare failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {} "{{min_score}}" "$session_config_en" "$session_sha_en" "$binding_config_en" "$binding_sha_en" "$session_config_ja" "$session_sha_ja" "$binding_config_ja" "$binding_sha_ja" "$compare_output" "$official_root"
 
 # Render Mermaid fixtures for a timing smoke check
 mermaid-bench fixtures:

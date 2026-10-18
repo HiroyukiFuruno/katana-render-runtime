@@ -1,0 +1,610 @@
+{
+  "schema": 1,
+  "library": {
+    "name": "@mathjax/src",
+    "version": "4.1.3",
+    "packageSHA256": "385eb710405477cfbc7760becdc8acd26cacc563519f3e7f9f185769299401d3",
+    "lockEntrySHA256": "8c72a42dce03474cd3da3a5357d0c309089c0eaad407be836861f3e8dd7b0349"
+  },
+  "compiler": {
+    "version": "7.0.2",
+    "packageSHA256": "3722b30210616a13a3213ded11575ba6b2dbab10c32a5ef67afca8513e27017e",
+    "lockEntrySHA256": "6f3f063b96726bacb3daaf599c5559315c1e21cee78e7146eb1d0dc822e9392e",
+    "libs": [
+      {
+        "name": "lib.decorators.d.ts",
+        "sha256": "1ce14b81c5cc821994aa8ec1d42b220dd41b27fcc06373bce3958af7421b77d4"
+      },
+      {
+        "name": "lib.decorators.legacy.d.ts",
+        "sha256": "b3a048b3e9302ef9a34ef4ebb9aecfb28b66abb3bce577206a79fee559c230da"
+      },
+      {
+        "name": "lib.es2015.collection.d.ts",
+        "sha256": "f0b6b1d3624fb143656dd86a8dd3e1950b7e65f218319b47bde52f65d47e2e4b"
+      },
+      {
+        "name": "lib.es2015.core.d.ts",
+        "sha256": "770011bd32a52f929fc98fbf9976c1fa9d80b6445171c02b08627fdba9778933"
+      },
+      {
+        "name": "lib.es2015.d.ts",
+        "sha256": "3f88bedbeb09c6f5a6645cb24c7c55f1aa22d19ae96c8e6959cbd8b85a707bc6"
+      },
+      {
+        "name": "lib.es2015.generator.d.ts",
+        "sha256": "00343ca5b2e3d48fa5df1db6e32ea2a59afab09590274a6cccb1dbae82e60c7c"
+      },
+      {
+        "name": "lib.es2015.iterable.d.ts",
+        "sha256": "ebd9f816d4002697cb2864bea1f0b70a103124e18a8cd9645eeccc09bdf80ab4"
+      },
+      {
+        "name": "lib.es2015.promise.d.ts",
+        "sha256": "2c1afac30a01772cd2a9a298a7ce7706b5892e447bb46bdbeef720f7b5da77ad"
+      },
+      {
+        "name": "lib.es2015.proxy.d.ts",
+        "sha256": "7b0225f483e4fa685625ebe43dd584bb7973bbd84e66a6ba7bbe175ee1048b4f"
+      },
+      {
+        "name": "lib.es2015.reflect.d.ts",
+        "sha256": "c0a4b8ac6ce74679c1da2b3795296f5896e31c38e888469a8e0f99dc3305de60"
+      },
+      {
+        "name": "lib.es2015.symbol.d.ts",
+        "sha256": "83e3871cda2abd4421970fa923cca51a9ce8cdbece6f898285643ab030cb80f3"
+      },
+      {
+        "name": "lib.es2015.symbol.wellknown.d.ts",
+        "sha256": "c5079c53f0f141a0698faa903e76cb41cd664e3efb01cc17a5c46ec2eb0bef42"
+      },
+      {
+        "name": "lib.es2016.array.include.d.ts",
+        "sha256": "32cafbc484dea6b0ab62cf8473182bbcb23020d70845b406f80b7526f38ae862"
+      },
+      {
+        "name": "lib.es2016.d.ts",
+        "sha256": "7fe93b39b810eadd916be8db880dd7f0f7012a5cc6ffb62de8f62a2117fa6f1f"
+      },
+      {
+        "name": "lib.es2016.intl.d.ts",
+        "sha256": "fca4cdcb6d6c5ef18a869003d02c9f0fd95df8cfaf6eb431cd3376bc034cad36"
+      },
+      {
+        "name": "lib.es2017.arraybuffer.d.ts",
+        "sha256": "b93ec88115de9a9dc1b602291b85baf825c85666bf25985cc5f698073892b467"
+      },
+      {
+        "name": "lib.es2017.d.ts",
+        "sha256": "bb0074cc08b84a2374af33d8bf044b80851ccc9e719a5e202eacf40db2c31600"
+      },
+      {
+        "name": "lib.es2017.date.d.ts",
+        "sha256": "f5c06dcc3fe849fcb297c247865a161f995cc29de7aa823afdd75aaaddc1419b"
+      },
+      {
+        "name": "lib.es2017.intl.d.ts",
+        "sha256": "c7b3542146734342e440a84b213384bfa188835537ddbda50d30766f0593aff9"
+      },
+      {
+        "name": "lib.es2017.object.d.ts",
+        "sha256": "b77e16112127a4b169ef0b8c3a4d730edf459c5f25fe52d5e436a6919206c4d7"
+      },
+      {
+        "name": "lib.es2017.sharedmemory.d.ts",
+        "sha256": "fbffd9337146eff822c7c00acbb78b01ea7ea23987f6c961eba689349e744f8c"
+      },
+      {
+        "name": "lib.es2017.string.d.ts",
+        "sha256": "6aaeba1e4f228fda4e9175e34d96807e2c6dc984d0b37a772b3af9365a456681"
+      },
+      {
+        "name": "lib.es2017.typedarrays.d.ts",
+        "sha256": "ce6180fa19b1cccd07ee7f7dbb9a367ac19c0ed160573e4686425060b6df7f57"
+      },
+      {
+        "name": "lib.es2018.asyncgenerator.d.ts",
+        "sha256": "3f02e2476bccb9dbe21280d6090f0df17d2f66b74711489415a8aa4df73c9675"
+      },
+      {
+        "name": "lib.es2018.asynciterable.d.ts",
+        "sha256": "45e3ab34c1c013c8ab2dc1ba4c80c780744b13b5676800ae2e3be27ae862c40c"
+      },
+      {
+        "name": "lib.es2018.d.ts",
+        "sha256": "1a7daebe4f45fb03d9ec53d60008fbf9ac45a697fdc89e4ce218bc94b94f94d6"
+      },
+      {
+        "name": "lib.es2018.intl.d.ts",
+        "sha256": "805c86f6cca8d7702a62a844856dbaa2a3fd2abef0536e65d48732441dde5b5b"
+      },
+      {
+        "name": "lib.es2018.promise.d.ts",
+        "sha256": "e42e397f1a5a77994f0185fd1466520691456c772d06bf843e5084ceb879a0ad"
+      },
+      {
+        "name": "lib.es2018.regexp.d.ts",
+        "sha256": "f4c2b41f90c95b1c532ecc874bd3c111865793b23aebcc1c3cbbabcd5d76ffb0"
+      },
+      {
+        "name": "lib.es2019.array.d.ts",
+        "sha256": "ab26191cfad5b66afa11b8bf935ef1cd88fabfcb28d30b2dfa6fad877d050332"
+      },
+      {
+        "name": "lib.es2019.d.ts",
+        "sha256": "f94b133a3cb14a288803be545ac2683e0d0ff6661bcd37e31aaaec54fc382aed"
+      },
+      {
+        "name": "lib.es2019.intl.d.ts",
+        "sha256": "689da16f46e647cef0d64b0def88910e818a5877ca5379ede156ca3afb780ac3"
+      },
+      {
+        "name": "lib.es2019.object.d.ts",
+        "sha256": "2088bc26531e38fb05eedac2951480db5309f6be3fa4a08d2221abb0f5b4200d"
+      },
+      {
+        "name": "lib.es2019.string.d.ts",
+        "sha256": "cb9d366c425fea79716a8fb3af0d78e6b22ebbab3bd64d25063b42dc9f531c1e"
+      },
+      {
+        "name": "lib.es2019.symbol.d.ts",
+        "sha256": "500934a8089c26d57ebdb688fc9757389bb6207a3c8f0674d68efa900d2abb34"
+      },
+      {
+        "name": "lib.es2020.bigint.d.ts",
+        "sha256": "bc21cc8b6fee4f4c2440d08035b7ea3c06b3511314c8bab6bef7a92de58a2593"
+      },
+      {
+        "name": "lib.es2020.d.ts",
+        "sha256": "f59d0650799f8782fd74cf73c19223730c6d1b9198671b1c5b3a38e1188b5953"
+      },
+      {
+        "name": "lib.es2020.date.d.ts",
+        "sha256": "7ca53d13d2957003abb47922a71866ba7cb2068f8d154877c596d63c359fed25"
+      },
+      {
+        "name": "lib.es2020.intl.d.ts",
+        "sha256": "db839fa0625981ae6e20a55e079c3613184310ca246879245b294573e7cc6926"
+      },
+      {
+        "name": "lib.es2020.number.d.ts",
+        "sha256": "b7bf9377723203b5a6a4b920164df22d56a43f593269ba6ae1fdc97774b68855"
+      },
+      {
+        "name": "lib.es2020.promise.d.ts",
+        "sha256": "54725f8c4df3d900cb4dac84b64689ce29548da0b4e9b7c2de61d41c79293611"
+      },
+      {
+        "name": "lib.es2020.sharedmemory.d.ts",
+        "sha256": "e5594bc3076ac29e6c1ebda77939bc4c8833de72f654b6e376862c0473199323"
+      },
+      {
+        "name": "lib.es2020.string.d.ts",
+        "sha256": "2f3eb332c2d73e729f3364fcc0c2b375e72a121e8157d25a82d67a138c83a95c"
+      },
+      {
+        "name": "lib.es2020.symbol.wellknown.d.ts",
+        "sha256": "6f4427f9642ce8d500970e4e69d1397f64072ab73b97e476b4002a646ac743b1"
+      },
+      {
+        "name": "lib.es2021.d.ts",
+        "sha256": "8a15b4607d9a499e2dbeed9ec0d3c0d7372c850b2d5f1fb259e8f6d41d468a84"
+      },
+      {
+        "name": "lib.es2021.intl.d.ts",
+        "sha256": "a917a49ac94cd26b754ab84e113369a75d1a47a710661d7cd25e961cc797065f"
+      },
+      {
+        "name": "lib.es2021.promise.d.ts",
+        "sha256": "db9709688f82c9e5f65a119c64d835f906efe5f559d08b11642d56eb85b79357"
+      },
+      {
+        "name": "lib.es2021.string.d.ts",
+        "sha256": "4b25b8c874acd1a4cf8444c3617e037d444d19080ac9f634b405583fd10ce1f7"
+      },
+      {
+        "name": "lib.es2021.weakref.d.ts",
+        "sha256": "37be57d7c90cf1f8112ee2636a068d8fd181289f82b744160ec56a7dc158a9f5"
+      },
+      {
+        "name": "lib.es2022.array.d.ts",
+        "sha256": "6d3261badeb7843d157ef3e6f5d1427d0eeb0af0cf9df84a62cfd29fd47ac86e"
+      },
+      {
+        "name": "lib.es2022.d.ts",
+        "sha256": "26e0fe14baee4e127f4365d1ae0b276f400562e45e19e35fd2d4c296684715e6"
+      },
+      {
+        "name": "lib.es2022.error.d.ts",
+        "sha256": "195daca651dde22f2167ac0d0a05e215308119a3100f5e6268e8317d05a92526"
+      },
+      {
+        "name": "lib.es2022.intl.d.ts",
+        "sha256": "8b11e4285cd2bb164a4dc09248bdec69e9842517db4ca47c1ba913011e44ff2f"
+      },
+      {
+        "name": "lib.es2022.object.d.ts",
+        "sha256": "0508571a52475e245b02bc50fa1394065a0a3d05277fbf5120c3784b85651799"
+      },
+      {
+        "name": "lib.es2022.regexp.d.ts",
+        "sha256": "fc611fea8d30ea72c6bbfb599c9b4d393ce22e2f5bfef2172534781e7d138104"
+      },
+      {
+        "name": "lib.es2022.string.d.ts",
+        "sha256": "8f9af488f510c3015af3cc8c267a9e9d96c4dd38a1fdff0e11dc5a544711415b"
+      },
+      {
+        "name": "lib.es2023.array.d.ts",
+        "sha256": "0bd714129fca875f7d4c477a1a392200b0bcd13fb2e80928cd334b63830ea047"
+      },
+      {
+        "name": "lib.es2023.collection.d.ts",
+        "sha256": "e2c9037ae6cd2c52d80ceef0b3c5ffdb488627d71529cf4f63776daf11161c9a"
+      },
+      {
+        "name": "lib.es2023.d.ts",
+        "sha256": "1e9332c23e9a907175e0ffc6a49e236f97b48838cc8aec9ce7e4cec21e544b65"
+      },
+      {
+        "name": "lib.es2023.intl.d.ts",
+        "sha256": "135d5cf4d345f59f1a9caadfafcd858d3d9cc68290db616cc85797224448cccc"
+      },
+      {
+        "name": "lib.es2024.arraybuffer.d.ts",
+        "sha256": "bc238c3f81c2984751932b6aab223cd5b830e0ac6cad76389e5e9d2ffc03287d"
+      },
+      {
+        "name": "lib.es2024.collection.d.ts",
+        "sha256": "4a07f9b76d361f572620927e5735b77d6d2101c23cdd94383eb5b706e7b36357"
+      },
+      {
+        "name": "lib.es2024.d.ts",
+        "sha256": "3753fbc1113dc511214802a2342280a8b284ab9094f6420e7aa171e868679f91"
+      },
+      {
+        "name": "lib.es2024.object.d.ts",
+        "sha256": "7c4e8dc6ab834cc6baa0227e030606d29e3e8449a9f67cdf5605ea5493c4db29"
+      },
+      {
+        "name": "lib.es2024.promise.d.ts",
+        "sha256": "de7ba0fd02e06cd9a5bd4ab441ed0e122735786e67dde1e849cced1cd8b46b78"
+      },
+      {
+        "name": "lib.es2024.regexp.d.ts",
+        "sha256": "6148e4e88d720a06855071c3db02069434142a8332cf9c182cda551adedf3156"
+      },
+      {
+        "name": "lib.es2024.sharedmemory.d.ts",
+        "sha256": "d63dba625b108316a40c95a4425f8d4294e0deeccfd6c7e59d819efa19e23409"
+      },
+      {
+        "name": "lib.es2024.string.d.ts",
+        "sha256": "0568d6befee03dd435bed4fc25c4e46865b24bdcb8c563fdc21f580a2c301904"
+      },
+      {
+        "name": "lib.es5.d.ts",
+        "sha256": "6388847232654d7fcbed7fe89ea511a65ad1f5104b41e905c43f90910e1408b6"
+      }
+    ]
+  },
+  "owned": {
+    "runtimeSHA256": "5b6aeb654ab7c45ef67e23f8ab7b4c14f1d8db6a718a85b349d004334ae58d65",
+    "abiSHA256": "ae1bfcdf1f45e7dff595b24ce3560c6a08a8f15242d014b725009183cbfa3f92",
+    "consumerConfigSHA256": "2b0ef58ea318c64793d29fe52f8a5ebc7d32733f0ba4381454ba5dd8a8cb28e3",
+    "companionConfigSHA256": "80493b2c7305ec21465d7c42041751c86cb2afa40e4d9c8d5939149326dac909",
+    "rustRequestSHA256": "88c1d178ba7a2ba9c1b88758434570709f4756ca5f5d1fb04c76d0647cca7885",
+    "rustScriptsSHA256": "95fb6304f22bee5b06eafe3e5d2a9252454950881742202e7eda96ab1cd78b4a"
+  },
+  "declarations": [
+    {
+      "path": "node_modules/@mathjax/src/mjs/adaptors/HTMLAdaptor.d.ts",
+      "sha256": "2dab5d8396b22499ab1b2366bd5b53e9b0758b72855d41c3d88067daab750d2a"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/adaptors/NodeMixin.d.ts",
+      "sha256": "ff7b6f9172791fc7a488daf43bca41d8d5ee07cf96c0b9ad5ec7acc230f25fab"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/adaptors/lite/Document.d.ts",
+      "sha256": "91d3ef49b5dd24658f905b3cc3c1d6fad1db06392f5efe1c65d693fd2cb38895"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/adaptors/lite/Element.d.ts",
+      "sha256": "b03eb052a94b97092fb115611e9a75ae1300cdc0ec470c4e8f2a002b66f821d2"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/adaptors/lite/List.d.ts",
+      "sha256": "1787433cd1d12a6158028878047bbd43c8d608d01246e56dd64ad6d2ac8385a5"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/adaptors/lite/Parser.d.ts",
+      "sha256": "44c375349eb9fb5f0cad2979a441eb048e3532ba19250363fb91efbca30346c5"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/adaptors/lite/Text.d.ts",
+      "sha256": "3a4c2ef4f5e42d7ce0c7cbc40cc857569229975245b9001ea95786e85448a8ee"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/adaptors/lite/Window.d.ts",
+      "sha256": "da8bfbfa6ac1346c62d8c5af9a1a7221814769c9c9701b244a6868eef96acb79"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/adaptors/liteAdaptor.d.ts",
+      "sha256": "9c18a9c5a35f591d921e7b166ab2a93c6a5abec841ecb935f3bdb53e9d082786"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/DOMAdaptor.d.ts",
+      "sha256": "dab7c5e12273f65ef09e8415604efdc03fa8382b359779ed8150cc3b8b74c362"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/FindMath.d.ts",
+      "sha256": "d1e4734feadf722b761d72b601f52aff639497e01f30210c2498b236c88f6d1f"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/Handler.d.ts",
+      "sha256": "4b95398b7517ab91a0dac31797e02be5a8b0e2160610d998a7b9e51c58f9e657"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/HandlerList.d.ts",
+      "sha256": "6cb891941032b1841b7db626bba0cbf5ad8f74b43caa44d658d6c040cd3bd360"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/InputJax.d.ts",
+      "sha256": "d708d5cda41ab5cdb7238c75cab0650a1d8216cf0bd803b166a0b4e3371b2ead"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/MathDocument.d.ts",
+      "sha256": "8fb9e3b0dc73b89cfd5d411dc391d7b12dd7bf4e721c62ecc7cfdbca51f49d90"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/MathItem.d.ts",
+      "sha256": "a3757ee1ad6b7412ba3ff14077f79e3f7965f9e170b975c610ea8033a87a01c8"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/MathList.d.ts",
+      "sha256": "adbe638d4ebb0a68e18fd257cc0be63e4dbf96efb311d6f7a0f502f746bae4d2"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/MmlTree/Attributes.d.ts",
+      "sha256": "82695de54e31ba922cc7dbca0d33cbd91ff7a24fa9993a3f6f0dd461ca580e09"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/MmlTree/MmlFactory.d.ts",
+      "sha256": "82d888fbb993663fb208972615b80b065d05af7b83dcfd032061a69540b0d7d4"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/MmlTree/MmlNode.d.ts",
+      "sha256": "896db2b951bea032835e8396fe4a4b898edbf8c6d51668a89fc48f07ef3b9e4b"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/OutputJax.d.ts",
+      "sha256": "79a984994a4bb876e6fbda1ca937d376d0a07ea98529e309382f78a7d2774b02"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/Tree/Factory.d.ts",
+      "sha256": "0553fe55dea25bca5c65dd32b8ddd3be252dac19deedf5351068b14e3802292c"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/Tree/Node.d.ts",
+      "sha256": "3e6a872402a1f4deae5699ac0710b07089424576bb64bc1b687e96d10b56b291"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/Tree/NodeFactory.d.ts",
+      "sha256": "1e138f665d4a699b1816b230470b6430e06eb10b63edc4c7d0ba77074f0295c0"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/Tree/Visitor.d.ts",
+      "sha256": "5ee03c7828c406bb6351617f528dd7e7aa851ade5c410a6bc5130c39662ca0c3"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/Tree/Wrapper.d.ts",
+      "sha256": "049084536784e89760ce041bdefdf15a4178ecab9c7955a039ba3e2ce75a404c"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/core/Tree/WrapperFactory.d.ts",
+      "sha256": "48f9263a34b78742c45ab3323006dc52be161298ada793dbd39a8e074a5aea36"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/handlers/html.d.ts",
+      "sha256": "cd61b15097d59dd194159d2fdeda0dd34ad6332e0468b71146575586db982d0e"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/handlers/html/HTMLDocument.d.ts",
+      "sha256": "34566d5dc64b5d676f0dd7943e42358ebae56c53b08375d5cf0ca2cd9877e960"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/handlers/html/HTMLDomStrings.d.ts",
+      "sha256": "179b3da619a6204d6275f3c3e13650c78e520efaacbd64e470ec869cc251a087"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/handlers/html/HTMLHandler.d.ts",
+      "sha256": "398a4cf4d047ddccd47780c1761a96b06fcce7e0c0c5a4480d8d98535e20aea3"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/handlers/html/HTMLMathItem.d.ts",
+      "sha256": "aa560c87579e0e071b144989bba56487c0deb85f201e2d682378d7b207ceffa0"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/handlers/html/HTMLMathList.d.ts",
+      "sha256": "ae8ab92d78c92f527e35f8a37bff82576bbbde0fd7e8a460377ad51d85992f6a"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex.d.ts",
+      "sha256": "48def278284b6070983dc9b8eb1a5d91946eb70eabf9b9a0d3daa4d1e31cb4ee"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/ColumnParser.d.ts",
+      "sha256": "66a2a0743b2ef07963c31daa23af70195065d154cc9ea66ee23468481439e45f"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/Configuration.d.ts",
+      "sha256": "1f55de8ef05efbf039bbefe39d2d5cb98a204bea22606d5dc416a810b9ee7381"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/FindTeX.d.ts",
+      "sha256": "814cb4c2e44e1d1311559302a67f00c9054c9f850e03bc4c6068b8dd064ed6f5"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/HandlerTypes.d.ts",
+      "sha256": "f2f8c63843661ab8ba64057bf9cf3290f254c9079348f87c567f12b265c54ca7"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/MapHandler.d.ts",
+      "sha256": "6f3777afe7a823b35110d64131e21dbd14a6c0c9275dd5ce83391bd707f6bf1e"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/NodeFactory.d.ts",
+      "sha256": "f92d7436de78177fe2d931ed4f2b9efb900af319845d9a0b33c948e81fce6dda"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/ParseOptions.d.ts",
+      "sha256": "1a7ecde45595515d68888abf67c9271c0c04613c0f98e604150f2620f8bbfaf2"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/Stack.d.ts",
+      "sha256": "d4847c56ce024a4ad8ff715b65e8af6b76eba442a13d8730d484a246bced9861"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/StackItem.d.ts",
+      "sha256": "f4fde20b8ada85e6f5668232cf0ad93d5f89f4f0315de2b49051ce67b297abb1"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/StackItemFactory.d.ts",
+      "sha256": "8a480dd48b83a683049509d51b4c008efafd17fc31ffb13c956ea0eaccbd9f36"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/Tags.d.ts",
+      "sha256": "85c2a1e1ffccdb72dd7626e42a600b4de8b658b38429366bba8e39dfce06571d"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/TexError.d.ts",
+      "sha256": "2efd37a6626889d88e7881b1a3228a24944f7b4a02e4a72081b684bf28477f93"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/TexParser.d.ts",
+      "sha256": "39fcc518a07860b543f980e7b596c5f89c779534660baf522a584a95bf0d7146"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/Token.d.ts",
+      "sha256": "e5ac30fbc0570f5516499e0c27ce73fae53cd72ece36ec0fe6f1a52c78c1ed0f"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/TokenMap.d.ts",
+      "sha256": "be78855302f89a3fcc1eaadf0f7426ecd86d22c524b39ddcfa1e482b19dc5c6f"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/Types.d.ts",
+      "sha256": "0d1f6ed638371189e41ab47f2eab2bea035a61fa6c89a98d55fade8d98339ba4"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/base/BaseConfiguration.d.ts",
+      "sha256": "2d355bca3bcd3583b8c8b5820c4ead05917d24f2ca08d402a2ec1c112e17b087"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/base/BaseItems.d.ts",
+      "sha256": "8cd505b3dff2801667c312a4dccf3e77c257cfa432392424dd3911efbaf72a64"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/input/tex/base/BaseMappings.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/mathjax.d.ts",
+      "sha256": "1574f3b06ae5f6eb9adc36e4cf19449b8474d4aff4f88958c077a9c46c08d536"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/common.d.ts",
+      "sha256": "4d02c14ea17ba1c1aee539d564895932c03fcf110485a08731a1c7ad51c061cd"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/common/Direction.d.ts",
+      "sha256": "4b07594cbb4ba0f49c59a0117b422025a2317479b1008b6b432ec9ba232bd297"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/common/FontData.d.ts",
+      "sha256": "fbffdc2ba4c2527ab2abc69cc5279deb2cd71b6467a689c3861f8cb8ba66603f"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/common/LineBBox.d.ts",
+      "sha256": "5c26e2c36bbb95cca77ad80996b25d0fecc70d1fde8556410fd56c699a85bad9"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/common/LinebreakVisitor.d.ts",
+      "sha256": "86854e872d3b77ce7a33489829af89452d200a3b3a56ad7001504851b75919f0"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/common/Wrapper.d.ts",
+      "sha256": "b36788845f2bb8902119afb76a262dccb53c780e659308cd7735378819137a87"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/common/WrapperFactory.d.ts",
+      "sha256": "76950e1766c1a9007d3c6e7d1c4c47c5c3d56e6dcacc229c82a45cc449ba06a3"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/common/Wrappers/mo.d.ts",
+      "sha256": "194e8429ee7eccf7e1741dbab641c50e17c9bcbace9af9cfd4eac7f7d697e56e"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/common/Wrappers/mspace.d.ts",
+      "sha256": "b32fcb0a475a1b7f0e360ca5c7a751cdb2760c2862c3dc104fe1a4e7fd5d3512"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/svg.d.ts",
+      "sha256": "99ad62cab5d7aa66d53cc6be7af5dc51a237eb87eb24fa19ccf106ac6c157309"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/svg/FontCache.d.ts",
+      "sha256": "35c5cc3541c3a2b390d1d0dd9812900d221f29809a9d13330748fc689d3d483c"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/svg/FontData.d.ts",
+      "sha256": "7e564f94a67b59d5e818534e71b3ab5f3e820978517e5c26f59b57463371675e"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/svg/Wrapper.d.ts",
+      "sha256": "21a8ffca52cdc43a3ecb72eed227a3f5b8b49a4c2a330898de9676e325e87e45"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/output/svg/WrapperFactory.d.ts",
+      "sha256": "fd0afc12a799ab1d419d95a96624c30ff71358602df6cdd474eb98baa534af7b"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/util/BBox.d.ts",
+      "sha256": "77096b0c9b497d75c63ad3f1e9e028a387826628544fb539e0acd56abdd4052d"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/util/BitField.d.ts",
+      "sha256": "a8128e02f6c067da2f13224157b3b0024b1c5aa9d2a15946438d35d447a06b32"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/util/FunctionList.d.ts",
+      "sha256": "283f6b47b3e957757356342a9dcd1fa710c1441b144813d4d09fdccd41bd5918"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/util/LinkedList.d.ts",
+      "sha256": "5c4aca0fa1ad57f9dade933fe9ece9b67d818daf1a64c87b53dce39bc65938f0"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/util/Options.d.ts",
+      "sha256": "45c7535a901a09b688c87e0c6a1872ff8b03085437ebaf85aa1ae186a1e486c2"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/util/PrioritizedList.d.ts",
+      "sha256": "f4ba453e06187b1be97c7ef73ef36767a939f4674165171aeadf92c0f567d7c5"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/util/Retries.d.ts",
+      "sha256": "5649e49be8ccae8f46c0f211caf102c5a99089e2ada2c789237a164a43b1c1c7"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/util/StyleJson.d.ts",
+      "sha256": "c398eab488a9a2c0448a653461846b05bd416d3061487d5f0e86dc208e823bc0"
+    },
+    {
+      "path": "node_modules/@mathjax/src/mjs/util/Styles.d.ts",
+      "sha256": "5e78bbf93cc3c88bc16595f456fb269233dfa6c60b8ea5a89094fcf9ac19a2ab"
+    }
+  ]
+}

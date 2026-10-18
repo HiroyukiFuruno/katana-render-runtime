@@ -12,6 +12,7 @@ import shutil
 import sys
 import subprocess
 import signal
+import socket
 import time
 import threading
 from typing import BinaryIO
@@ -33,6 +34,66 @@ producer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(producer)
 
 
+class CatalogProducerOperationTest(unittest.TestCase):
+    def test_formal_cli_requires_catalog_before_calling_producer(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(producer.sys, "argv", [
+                 "produce_html_performance_evidence.py",
+                 "--repo", temporary,
+                 "--output", str(Path(temporary) / "tmp/evidence"),
+                 "--capacity-binding", str(Path(temporary) / "capacity.json"),
+                 "--capacity-binding-sha256", "a" * 64,
+             ]), \
+             patch.object(producer.sys, "stderr", io.StringIO()), \
+             patch.object(producer, "produce") as run:
+            with self.assertRaises(SystemExit) as caught:
+                producer.main()
+        self.assertEqual(caught.exception.code, 2)
+        run.assert_not_called()
+
+    def test_producer_rejects_missing_catalog_before_preflight_or_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "tmp/evidence"
+            with patch.object(producer, "_measurement_command") as run:
+                with self.assertRaisesRegex(ValueError, "catalog capture manifest required"):
+                    producer.produce(root, output)
+            run.assert_not_called()
+            self.assertFalse(output.exists())
+
+    def test_formal_cli_forwards_catalog_manifest_to_producer(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "tmp/evidence"
+            capacity = root / "capacity.json"
+            manifest = root / "catalog-stage90-captures.json"
+            with patch.object(producer.sys, "argv", [
+                "produce_html_performance_evidence.py",
+                "--repo", str(root),
+                "--output", str(output),
+                "--capacity-binding", str(capacity),
+                "--capacity-binding-sha256", "b" * 64,
+                "--catalog-plan", str(manifest),
+            ]), patch.object(producer, "produce") as run:
+                producer.main()
+            run.assert_called_once_with(root.resolve(), output.resolve(), capacity,
+                                        "b" * 64, manifest.resolve())
+
+    def test_producer_reuses_strict_observed_pointer_mapping(self) -> None:
+        evidence: gate.JsonObject = {"steps": [
+            {"kind": kind, "targetNodeId": 4, "x": 14.0, "y": 22.0}
+            for kind in ("move", "down", "up")
+        ], "hashBefore": "", "hashAfter": "#a", "destination": "#a"}
+        stream = producer._catalog_operation_stream("navigation-pointer-click", evidence)
+        self.assertEqual([item["kind"] for item in stream],
+                         ["pointer_move", "pointer_down", "pointer_up"])
+        self.assertEqual(stream[0]["x"], 14.0)
+
+    def test_unknown_catalog_kind_fails_before_any_build(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported finite catalog operation"):
+            producer._catalog_operation_stream("future-operation", {"steps": []})
+
+
 class RuntimeSyncPreflightTest(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -40,6 +101,36 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
         self.root = Path(temporary.name) / "repo"
         self.root.mkdir()
         self.output = self.root / "tmp" / "evidence"
+
+    def test_public_producer_rejects_unaccepted_html84_before_build(self) -> None:
+        manifest = self.root / "catalog-stage90-captures.json"
+        pins = ({"path": str(manifest), "sha256": "a" * 64},
+                {"path": str(self.root / "plan.json"), "sha256": "b" * 64})
+        validation = {"acceptance": False, "fontIdentityEquivalence": "not-established"}
+        validator = ["bun", "run", "scripts/html/fidelity-acceptance-cli.ts",
+                     "catalog-stage90-validate-captures", pins[0]["path"], pins[1]["path"]]
+        completed = subprocess.CompletedProcess(validator, 0, stdout=b"{}", stderr=b"")
+        with patch.object(producer.platform, "system", return_value="Darwin"), \
+             patch.object(producer.platform, "machine", return_value="arm64"), \
+             patch.object(producer, "load_catalog_conditions", return_value=([], *pins)), \
+             patch.object(producer, "source", return_value={"head": "initial"}), \
+             patch.object(producer, "_measurement_command", return_value=completed) as run, \
+             patch.object(producer, "_validate_catalog_capture_envelope", return_value=validation), \
+             patch.object(producer, "command") as build:
+            with self.assertRaisesRegex(ValueError, "HTML84 visual acceptance is not established"):
+                producer.produce(self.root, self.output, catalog_manifest_path=manifest)
+        run.assert_called_once_with(
+            validator, cwd=self.root, role="preflight",
+            log_directory=self.output.parent / f"{self.output.name}.lifecycle",
+        )
+        build.assert_not_called()
+        self.assertFalse(self.output.exists())
+
+    def test_private_catalog_diagnostic_keeps_unaccepted_state_explicit(self) -> None:
+        diagnostic = {"acceptance": False, "fontIdentityEquivalence": "not-established"}
+        gate._require_html84_acceptance(diagnostic, diagnostic=True)
+        with self.assertRaisesRegex(ValueError, "HTML84 visual acceptance is not established"):
+            gate._require_html84_acceptance(diagnostic)
 
     def test_stale_runtime_check_propagates_before_output_build_or_measurement(self) -> None:
         check = ["just", "runtime-bundle-check"]
@@ -51,7 +142,7 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
              patch.object(producer, "write") as write, \
              patch.object(producer, "command") as command:
             with self.assertRaises(subprocess.CalledProcessError) as caught:
-                producer.produce(self.root, self.output)
+                producer.produce(self.root, self.output, _allow_legacy_diagnostic=True)
             self.assertIs(caught.exception, failed)
             self.assertEqual(caught.exception.returncode, 31)
             run.assert_called_once_with(check, cwd=self.root, role="preflight",
@@ -63,6 +154,7 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
             command.assert_not_called()
             self.assertFalse(self.output.exists())
 
+
     def test_source_change_during_successful_sync_check_rejects_inventory(self) -> None:
         check = ["just", "runtime-bundle-check"]
         with patch.object(producer.platform, "system", return_value="Darwin"), \
@@ -72,7 +164,7 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
              patch.object(producer, "write") as write, \
              patch.object(producer, "command") as command:
             with self.assertRaisesRegex(ValueError, "source changed during runtime bundle check"):
-                producer.produce(self.root, self.output)
+                producer.produce(self.root, self.output, _allow_legacy_diagnostic=True)
             run.assert_called_once_with(check, cwd=self.root, role="preflight",
                                         log_directory=self.output.parent / f"{self.output.name}.lifecycle")
             self.assertEqual(source.call_count, 2)
@@ -94,11 +186,37 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
                     patch.object(producer, "load_capacity_binding") as capacity, \
                     patch.object(producer, "context") as endpoint:
                 with self.assertRaises(type(failure)) as caught:
-                    producer.produce(self.root, self.output)
+                    producer.produce(self.root, self.output, _allow_legacy_diagnostic=True)
                 self.assertIs(caught.exception, failure)
                 capacity.assert_not_called()
                 endpoint.assert_not_called()
                 self.assertFalse(self.output.exists())
+
+
+class ContextEnvironmentPrivacyTest(unittest.TestCase):
+    def test_context_hashes_environment_without_changing_worker_environment(self) -> None:
+        environment = {"PATH": os.environ.get("PATH", ""), "KRR_SYNTHETIC_SECRET": "credential-value"}
+        root = Path.cwd()
+        with patch.dict(os.environ, environment, clear=True), \
+             patch.object(producer, "source", return_value={"head": "unit"}), \
+             patch.object(producer, "inventory", return_value={"exists": True, "files": []}), \
+             patch.object(producer, "command", return_value="tool version"):
+            worker_environment_before = dict(os.environ)
+            snapshot = producer.context(root, root / "target", [], root / "logs")
+            context_json = json.dumps(snapshot, sort_keys=True)
+            environment_sha = producer._environment_sha256(environment)
+            self.assertNotIn("credential-value", context_json)
+            self.assertEqual(snapshot["toolContext"]["environmentSha256"], environment_sha)
+            self.assertEqual(producer._environment_sha256(environment), environment_sha)
+            changed = {**environment, "KRR_SYNTHETIC_SECRET": "changed"}
+            self.assertNotEqual(producer._environment_sha256(changed), environment_sha)
+            self.assertEqual(dict(os.environ), worker_environment_before)
+            worker = producer._performance_worker_environment(
+                "rustc", "cargo", "context-pin", root / "Cargo.lock", {"path": "snapshot.json"})
+            self.assertEqual(worker, {**worker_environment_before, "KRR_PERF_RUSTC": "rustc",
+                "KRR_PERF_CARGO": "cargo", "KRR_PERF_ENVIRONMENT_SHA256": "context-pin",
+                "KRR_PERF_LOCK_PATH": str(root / "Cargo.lock"),
+                "KRR_PERF_SOURCE_SNAPSHOT_PATH": "snapshot.json"})
 
 
 class CapacityBindingUnitTests(unittest.TestCase):
@@ -251,7 +369,7 @@ class CapacityBindingUnitTests(unittest.TestCase):
                 patch.object(typed_producer, "source", return_value={"head": "unit source"}), \
                 patch.object(typed_producer, "_measurement_command") as run:
             with self.assertRaisesRegex(ValueError, "capacity binding input required"):
-                typed_producer.produce(self.root, output)
+                typed_producer.produce(self.root, output, _allow_legacy_diagnostic=True)
             run.assert_called_once_with(["just", "runtime-bundle-check"], cwd=self.root,
                                         role="preflight", log_directory=output.parent / f"{output.name}.lifecycle")
             self.assertFalse(output.exists())
@@ -270,9 +388,8 @@ class CapacityBindingUnitTests(unittest.TestCase):
             self.assertEqual(self.state.read_bytes(), before)
         self.saved = original
         self.rebind()
-        for refs in (self.references[:-6], self.references[:-1],
-                     [*self.references[:-1], self.references[0]]):
-            self.write_registry(refs)
+        for count in (0, 39, 41):
+            self.write_registry(self.references, physical_count=count)
             self.rebind()
             with self.assertRaises(ValueError):
                 self.binding()
@@ -320,11 +437,28 @@ class CapacityBindingUnitTests(unittest.TestCase):
                 self.invoke()
             self.assertFalse(self.commands)
 
-    def test_current_registry_requires_exact_schema_count_and_physical_identities(self) -> None:
+    def test_current_registry_accepts_pinned_positive_counts_and_rejects_invalid_identities(self) -> None:
+        additional_references = [self.extra_reference]
+        for index in range(41, 44):
+            path = self.root / f"ref-{index}"
+            path.write_bytes(str(index).encode())
+            info = path.stat()
+            additional_references.append({"path": str(path), "sha256": gate.sha256(path),
+                                          "size": info.st_size, "dev": info.st_dev,
+                                          "ino": info.st_ino, "mode": info.st_mode})
+        for label, references in (
+            ("40 references", self.references),
+            ("41 references", [*self.references, additional_references[0]]),
+            ("44 references", [*self.references, *additional_references]),
+        ):
+            with self.subTest(case=label):
+                self.write_registry(references)
+                self.rebind()
+                binding = self.binding()
+                self.assertEqual(len(binding.references), len(references))
+        self.write_registry(self.references)
+        self.rebind()
         cases: list[tuple[str, list[dict[str, object]], int | None, str]] = [
-            ("34 references", self.references[:34], None, "krr-protected-refs-successor-v1"),
-            ("39 references", self.references[:39], None, "krr-protected-refs-successor-v1"),
-            ("41 references", [*self.references, self.extra_reference], None, "krr-protected-refs-successor-v1"),
             ("missing references", [], None, "krr-protected-refs-successor-v1"),
             ("wrong count", self.references, 39, "krr-protected-refs-successor-v1"),
             ("wrong schema", self.references, 40, "krr-protected-refs-other-v1"),
@@ -363,9 +497,8 @@ class CapacityBindingUnitTests(unittest.TestCase):
                            "mode": hardlink_info.st_mode}
         self.write_registry([*self.references[:-1], hardlink_record])
         self.rebind()
-        binding = self.binding()
-        self.assertEqual(binding.references[-1], str(hardlink))
-        self.assertEqual(len(set(binding.references)), 40)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.binding()
 
         self.registry.write_bytes(b"{")
         self.rebind()
@@ -374,7 +507,7 @@ class CapacityBindingUnitTests(unittest.TestCase):
 
         self.write_registry(self.references)
         self.rebind()
-        self.assertEqual(len(self.binding().references), 40)
+        self.assertEqual(len(self.binding().references), len(self.references))
 
     def test_standalone_metadata_and_source_mutation_reject_before_guard(self) -> None:
         cases: list[tuple[str, object]] = [("target_directory", str(self.root / "other")),
@@ -920,6 +1053,59 @@ class NativeCliOwnerHookTests(unittest.TestCase):
                 pin = gate._object(record[key], key)
                 self.assertEqual(Path(gate._text(pin["path"], key)).read_bytes(), expected)
                 self.assertEqual(pin["size"], len(expected))
+
+    @unittest.skipUnless(hasattr(socket, "AF_UNIX"), "Unix-domain socket synchronization required")
+    def test_live_child_raw_stdout_rename_prevents_completed_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            log_directory = root / "logs"
+            log_directory.mkdir()
+            ready_path = root / "helper-ready.sock"
+            coordinator_path = root / "raw-coordinator.sock"
+            ready_listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            ready_listener.bind(str(ready_path))
+            ready_listener.listen(1)
+            ready_listener.settimeout(15)
+            coordinator_code = (
+                "import socket,sys; server=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); "
+                "server.bind(sys.argv[2]); server.listen(1); ready=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); "
+                "ready.connect(sys.argv[1]); ready.sendall(b'ready'); ready.close(); "
+                "connection,_=server.accept(); path=connection.recv(4096).decode(); "
+                "renamed=path.removesuffix('stdout.raw')+'stdout.moved'; "
+                "import os; os.replace(path,renamed); connection.sendall(b'renamed'); "
+                "connection.close(); server.close()"
+            )
+            child_code = (
+                "import glob,os,socket,sys; os.write(1,b'owned raw'); "
+                "paths=glob.glob(sys.argv[2]+'/tool-query-*/stdout.raw'); "
+                "assert len(paths)==1; connection=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); "
+                "connection.connect(sys.argv[1]); connection.sendall(paths[0].encode()); "
+                "assert connection.recv(16)==b'renamed'; connection.close()"
+            )
+            coordinator = subprocess.Popen(
+                [sys.executable, "-c", coordinator_code, str(ready_path), str(coordinator_path)],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            try:
+                ready_connection, _ = ready_listener.accept()
+                with ready_connection:
+                    self.assertEqual(ready_connection.recv(16), b"ready")
+                with self.assertRaisesRegex(RuntimeError, "measurement cleanup failed") as caught:
+                    typed_producer.observe_native_cli_command(
+                        [sys.executable, "-c", child_code, str(coordinator_path), str(log_directory)],
+                        role="tool-query", cwd=root, env={"PATH": os.environ["PATH"]},
+                        log_directory=log_directory, attempt_token="e" * 64, label="rename-live-raw",
+                    )
+                self.assertEqual(coordinator.wait(timeout=15), 0)
+            finally:
+                ready_listener.close()
+                if coordinator.poll() is None:
+                    coordinator.kill()
+                    coordinator.wait()
+            self.assertIn("FileNotFoundError", str(caught.exception))
+            self.assertEqual(list(log_directory.glob("tool-query-*/lifecycle.json")), [])
+            self.assertEqual(list(log_directory.glob("tool-query-*/stdout.moved"))[0].read_bytes(), b"owned raw")
 
     def test_failed_actual_hook_never_returns_completed_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

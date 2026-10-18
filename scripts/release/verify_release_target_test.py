@@ -118,7 +118,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
 
     def test_published_v0422_checker_fixture_preserves_historical_contract(self) -> None:
         source = self.historical_v0422_checker()
-        self.assertIn(f'REQUIRED_TARGET_RELEASE = "v0.4.22"', source)
+        self.assertIn('REQUIRED_TARGET_RELEASE = "v0.4.22"', source)
         self.assertIn(f'REQUIRED_RELEASE_BASE = "{PUBLISHED_V0422_RELEASE_BASE}"', source)
         self.assertIn(
             f'REQUIRED_RELEASE_MANIFEST_SHA256 = "{PUBLISHED_V0422_RELEASE_MANIFEST}"',

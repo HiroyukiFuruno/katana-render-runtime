@@ -14,8 +14,10 @@ import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from http.client import HTTPMessage
 from functools import total_ordering
 from pathlib import Path
+from typing import IO
 from urllib import error, parse, request
 
 USVG_SKRIFA_PAIR_PATH = Path(__file__).with_name("update_usvg_skrifa_pair.py")
@@ -25,23 +27,22 @@ if USVG_SKRIFA_PAIR_SPEC is None or USVG_SKRIFA_PAIR_SPEC.loader is None:
 usvg_skrifa_pair = importlib.util.module_from_spec(USVG_SKRIFA_PAIR_SPEC)
 USVG_SKRIFA_PAIR_SPEC.loader.exec_module(usvg_skrifa_pair)
 
+_loader_root = str(USVG_SKRIFA_PAIR_PATH.resolve().parent)
+sys.path.insert(0, _loader_root)
 try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
-    try:
-        import tomli as tomllib  # type: ignore[no-redef]
-    except ModuleNotFoundError:
-        # Python 3.10 does not ship ``tomllib``.  Keep the release check
-        # independent of its host environment by using the vendored, complete
-        # TOML 1.0 parser rather than attempting to parse Cargo manifests.
-        parser_root = str(Path(__file__).resolve().parent)
-        if parser_root not in sys.path:
-            sys.path.insert(0, parser_root)
-        from _tomli import _parser as tomllib  # type: ignore[no-redef]
+    from toml_loader import load_toml_parser
+finally:
+    sys.path.remove(_loader_root)
+
+_expected_loader = USVG_SKRIFA_PAIR_PATH.with_name("toml_loader.py").resolve()
+if any(Path(origin).resolve() != _expected_loader for origin in (sys.modules["toml_loader"].__file__ or "", load_toml_parser.__code__.co_filename)):
+    raise ImportError("loaded TOML helper is outside the owned release directory")
+tomllib = load_toml_parser()
 
 TIMEOUT_SECONDS = 15
 MAX_RESPONSE_BYTES = 1_000_000
 RUNTIME_CATALOG = Path("scripts/runtime-assets/runtime-asset-common.ts")
+RUNTIME_CATALOG_CLI = Path(__file__).resolve().parents[1] / "runtime-assets/runtime-asset-common.ts"
 NON_RELEASE_CARGO_MANIFEST_PARTS = {"target", "vendor", ".git", ".worktrees", "tmp"}
 KRR_SKRIFA_MANIFEST = Path("crates/katana-render-runtime/Cargo.toml")
 
@@ -49,7 +50,15 @@ KRR_SKRIFA_MANIFEST = Path("crates/katana-render-runtime/Cargo.toml")
 class _StripAuthorizationRedirectHandler(request.HTTPRedirectHandler):
     """転送先への認証情報流出を防ぐため、redirectでは認証ヘッダーを除去する。"""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+        newurl: str,
+    ) -> request.Request | None:
         redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
         if redirected is not None:
             redirected.remove_header("Authorization")
@@ -70,7 +79,8 @@ class Version:
             return self.parts < other.parts
         if self.stable != other.stable:
             return not self.stable
-        for left, right in zip(self.prerelease, other.prerelease):
+        for index in range(min(len(self.prerelease), len(other.prerelease))):
+            left, right = self.prerelease[index], other.prerelease[index]
             if left == right:
                 continue
             left_kind, left_value = left
@@ -78,12 +88,16 @@ class Version:
             if left_kind != right_kind:
                 # SemVer では数値の prerelease identifier を非数値より前に置く。
                 return left_kind < right_kind
-            return left_value < right_value
+            if isinstance(left_value, int) and isinstance(right_value, int):
+                return left_value < right_value
+            if isinstance(left_value, str) and isinstance(right_value, str):
+                return left_value < right_value
+            raise TypeError("prerelease identifier kind does not match its value")
         # それまで同一なら、identifier が短い prerelease の優先度を下げる。
         return len(self.prerelease) < len(other.prerelease)
 
     @classmethod
-    def parse(cls, value: str) -> "Version":
+    def parse(cls, value: str) -> Version:
         number = r"(?:0|[1-9][0-9]*)"
         identifier = r"[0-9A-Za-z-]+"
         match = re.fullmatch(
@@ -96,7 +110,10 @@ class Version:
         if any(item.isdigit() and len(item) > 1 and item.startswith("0") for item in identifiers):
             raise ValueError(f"unsupported semantic version: {value!r}")
         prerelease = tuple((0, int(item)) if item.isdigit() else (1, item) for item in identifiers)
-        return cls(tuple(int(part) for part in match.group(1, 2, 3)), not identifiers, prerelease)
+        major, minor, patch = match.group(1, 2, 3)
+        if major is None or minor is None or patch is None:
+            raise ValueError(f"unsupported semantic version: {value!r}")
+        return cls((int(major), int(minor), int(patch)), not identifiers, prerelease)
 
 
 @dataclass(frozen=True)
@@ -220,8 +237,9 @@ def cargo_requirement_matches(requirement: str, version: Version) -> bool:
     for term in terms:
         operator = term.operator
         parts = term.parts
+        padded_parts = (*parts, 0, 0, 0)
         candidate = term.prerelease or Version(
-            tuple((*parts, *(0 for _ in range(3 - len(parts))))), True, ()
+            (padded_parts[0], padded_parts[1], padded_parts[2]), True, ()
         )
         prefix_matches = version.parts[:len(parts)] == parts
         if operator == "*":
@@ -363,7 +381,18 @@ def load_bun_lock(path: Path) -> dict[str, object]:
             if following.startswith(("}", "]")):
                 continue
         result.append(character)
-    return json.loads("".join(result))
+    return _string_keyed_object(json.loads("".join(result)), "bun.lock must be a JSON object")
+
+
+def _string_keyed_object(value: object, message: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError(message)
+    result: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ValueError(message)
+        result[key] = item
+    return result
 
 
 def cargo_metadata(root: Path) -> dict[str, object]:
@@ -373,9 +402,7 @@ def cargo_metadata(root: Path) -> dict[str, object]:
         payload = json.loads(completed.stdout)
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
         raise ValueError(f"cargo metadata failed: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("cargo metadata response must be a JSON object")
-    return payload
+    return _string_keyed_object(payload, "cargo metadata response must be a JSON object")
 
 
 def verified_krr_usvg_skrifa_manifest(root: Path, metadata: dict[str, object]) -> Path | None:
@@ -466,21 +493,11 @@ def rust_packages(root: Path, metadata: dict[str, object] | None = None) -> list
 
 
 def _load_manifest_payload(root: Path, manifest: Path) -> dict[str, object]:
-    if tomllib is not None:
-        try:
-            payload = tomllib.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, tomllib.TOMLDecodeError) as exc:
-            raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise ValueError(f"Rust manifest must be a table: {manifest}")
-        return payload
     try:
         payload = tomllib.loads(manifest.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise ValueError(f"failed to read Rust manifest {manifest}: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError(f"Rust manifest must be a table: {manifest}")
-    return payload
+    return _string_keyed_object(payload, f"Rust manifest must be a table: {manifest}")
 
 
 def rust_manifest_dependencies(root: Path, coupled_skrifa_manifest: Path | None = None) -> list[Package]:
@@ -711,48 +728,54 @@ def js_lock_is_latest_compatible(root: Path) -> bool:
 
 
 def runtime_assets(root: Path) -> list[Package]:
-    source = (root / RUNTIME_CATALOG).read_text(encoding="utf-8")
-    entries: list[str] = []
-    depth, start = 0, 0
-    quote: str | None = None
-    escaped = False
-    for index, character in enumerate(source):
-        if quote is not None:
-            if escaped:
-                escaped = False
-            elif character == "\\":
-                escaped = True
-            elif character == quote:
-                quote = None
-            continue
-        if character in ('"', "'", "`"):
-            quote = character
-        elif character == "{":
-            if depth == 0:
-                start = index + 1
-            depth += 1
-        elif character == "}":
-            depth -= 1
-            if depth < 0:
-                raise ValueError("runtime asset catalog has unbalanced braces")
-            if depth == 0:
-                entries.append(source[start:index])
-    if quote is not None or depth != 0:
-        raise ValueError("runtime asset catalog has unbalanced syntax")
+    catalog = (root / RUNTIME_CATALOG).resolve(strict=True)
+    cli = RUNTIME_CATALOG_CLI.resolve(strict=True)
+    try:
+        completed = subprocess.run(
+            ["bun", "run", str(cli), "--freshness-catalog", str(catalog)],
+            # Bun/TypeScript を所有するリポジトリからCLIを起動し、fixture側の
+            # cwdによってAST compilerの解決先が変わらないようにする。
+            cwd=RUNTIME_CATALOG_CLI.resolve().parents[2],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except OSError as exc:
+        raise ValueError("runtime asset catalog AST CLI failed to start") from exc
+    if completed.returncode != 0:
+        detail = completed.stderr.strip()
+        suffix = f": {detail}" if detail else ""
+        raise ValueError(f"runtime asset catalog AST CLI exited with {completed.returncode}{suffix}")
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("runtime asset catalog AST CLI returned duplicate JSON properties")
+            result[key] = value
+        return result
+
+    payload = json.loads(completed.stdout, object_pairs_hook=unique_object)
+    if not isinstance(payload, list) or not payload:
+        raise ValueError("runtime asset catalog AST CLI must return a non-empty JSON array")
     assets: list[Package] = []
-    for entry in entries:
-        properties = {
-            name: match.group("value")
-            for name in ("kind", "version", "latestUrl")
-            if (match := re.search(rf'\b{name}:\s*"(?P<value>[^"]+)"', entry)) is not None
-        }
-        if "kind" not in properties or "{" in properties["kind"]:
-            continue
-        if set(properties) != {"kind", "version", "latestUrl"}:
-            raise ValueError("runtime asset catalog entry is missing a pinned asset property")
-        assets.append(Package("Runtime asset", f"{properties['kind']}|{properties['latestUrl']}", properties["version"]))
-    if not assets:
-        raise ValueError("runtime asset catalog did not contain pinned assets")
+    seen_kinds: set[str] = set()
+    required_keys = {"kind", "version", "latestUrl"}
+    for item in payload:
+        if not isinstance(item, dict) or set(item) != required_keys:
+            raise ValueError("runtime asset catalog AST CLI returned an invalid entry schema")
+        kind, version, latest_url = item["kind"], item["version"], item["latestUrl"]
+        if (
+            not isinstance(kind, str) or not kind.strip()
+            or not isinstance(version, str) or not version.strip()
+            or not isinstance(latest_url, str) or not latest_url.strip()
+        ):
+            raise ValueError("runtime asset catalog AST CLI returned an empty or non-string entry value")
+        if kind in seen_kinds:
+            raise ValueError("runtime asset catalog AST CLI returned duplicate asset kinds")
+        seen_kinds.add(kind)
+        assets.append(Package("Runtime asset", f"{kind}|{latest_url}", version))
     return assets
 
 
@@ -778,6 +801,8 @@ def fetch(url: str) -> bytes:
             body = response.read(MAX_RESPONSE_BYTES + 1)
     except (OSError, error.URLError, error.HTTPError) as exc:
         raise ValueError(f"request failed for {url}: {exc}") from exc
+    if not isinstance(body, bytes):
+        raise ValueError(f"response body is not bytes: {url}")
     if len(body) > MAX_RESPONSE_BYTES:
         raise ValueError(f"response exceeds {MAX_RESPONSE_BYTES} bytes: {url}")
     return body
@@ -862,7 +887,15 @@ def main(argv: list[str] | None = None) -> int:
         packages = runtime_assets(args.root)
         freshness_packages = [*rust_manifest, *packages]
         with ThreadPoolExecutor(max_workers=8) as executor:
-            resolved = list(zip(freshness_packages, executor.map(latest, freshness_packages, timeout=TIMEOUT_SECONDS * len(freshness_packages))))
+            latest_versions = executor.map(
+                latest,
+                freshness_packages,
+                timeout=TIMEOUT_SECONDS * len(freshness_packages),
+            )
+            resolved = [
+                (freshness_packages[index], next(latest_versions))
+                for index in range(len(freshness_packages))
+            ]
     except (ValueError, TimeoutError, subprocess.TimeoutExpired, json.JSONDecodeError, UnicodeDecodeError) as exc:
         print(f"Dependency freshness check failed closed: {exc}", file=sys.stderr)
         return 1

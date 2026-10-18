@@ -1,0 +1,16 @@
+projects:
+  krr: '.'
+
+versionConstraint: '=2.6.2'
+telemetry: false
+
+# 既存の依存導入手順とGit hookをmoonから変更させない。
+pipeline:
+  installDependencies: false
+  syncProjects: false
+  syncWorkspace: false
+
+vcs:
+  client: git
+  defaultBranch: master
+  sync: false

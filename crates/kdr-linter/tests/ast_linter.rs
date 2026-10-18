@@ -18,8 +18,12 @@ fn workspace_root() -> Result<PathBuf, KdrLintError> {
 }
 
 #[test]
-fn ast_linter_workspace_rules() -> Result<(), KdrLintError> {
+fn ast_linter_external_workspace_rules() {
     KatanaAstLint::from_workspace().assert_clean();
+}
+
+#[test]
+fn ast_linter_workspace_rules() -> Result<(), KdrLintError> {
     let root = workspace_root()?;
     let violations = KdrLinter::lint_workspace(&root)?;
     assert!(

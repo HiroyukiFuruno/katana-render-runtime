@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import math
 import os
 import subprocess
 import tempfile
@@ -68,10 +69,351 @@ def json_array_at(value: object, *path: str | int) -> list[object]:
     return json_array(current)
 
 
+class CatalogOperationStreamTest(unittest.TestCase):
+    @staticmethod
+    def pointer_steps() -> list[JsonObject]:
+        return [
+            {"kind": kind, "targetNodeId": 7, "x": 12.5, "y": 20.0}
+            for kind in ("move", "down", "up")
+        ]
+
+    def test_pointer_stream_uses_only_observed_target_coordinates(self) -> None:
+        stream = gate.catalog_operation_stream("input-state-selected", {
+            "steps": self.pointer_steps(),
+        })
+        self.assertEqual([item["kind"] for item in stream],
+                         ["pointer_move", "pointer_down", "pointer_up"])
+        self.assertEqual(stream[0]["x"], 12.5)
+        self.assertEqual(stream[1]["button"], 0)
+
+    def test_pointer_stream_accepts_only_physically_present_optional_frame_trace(self) -> None:
+        steps = self.pointer_steps()
+        frame = {"generation": 2, "contentHeight": 100.0, "scrollY": 0}
+        for step in steps:
+            step["preFrame"] = frame
+            step["postFrame"] = frame
+        stream = gate.catalog_operation_stream("input-state-selected", {"steps": steps})
+        self.assertEqual(len(stream), 3)
+
+    def test_pointer_frame_accepts_both_observed_producer_shapes(self) -> None:
+        for frame in (
+            {"generation": 2, "contentHeight": 100.0, "scrollY": 0.0},
+            {"generation": 2, "scrollY": 0.0},
+        ):
+            steps = self.pointer_steps()
+            for step in steps:
+                step["preFrame"] = frame
+                step["postFrame"] = frame
+            with self.subTest(frame=frame):
+                self.assertEqual(len(gate.catalog_operation_stream(
+                    "input-state-selected", {"steps": steps})), 3)
+
+    def test_pointer_frame_rejects_negative_nonfinite_and_unknown_fields(self) -> None:
+        invalid_frames = (
+            {"generation": 2, "contentHeight": -1.0, "scrollY": 0.0},
+            {"generation": 2, "contentHeight": float("nan"), "scrollY": 0.0},
+            {"generation": 2, "contentHeight": 100.0, "scrollY": -1.0},
+            {"generation": 2, "contentHeight": 100.0, "scrollY": 0.0, "extra": True},
+        )
+        for frame in invalid_frames:
+            steps = self.pointer_steps()
+            for step in steps:
+                step["preFrame"] = frame
+                step["postFrame"] = frame
+            with self.subTest(frame=frame), self.assertRaisesRegex(ValueError, "frame identity"):
+                gate.catalog_operation_stream("input-state-selected", {"steps": steps})
+
+    def test_static_load_does_not_create_an_input_stream(self) -> None:
+        self.assertEqual(gate.catalog_operation_stream(
+            "load-and-observe-target", {"delivery": "session-load"}), [])
+
+    def test_mutation_delivery_evidence_is_observation_not_input(self) -> None:
+        self.assertEqual(gate.catalog_operation_stream("script-await-mutation-delivery", {
+            "delivery": "mutation-observer",
+            "state": {"before": ["initial"], "after": ["mutation"]},
+        }), [])
+
+    @staticmethod
+    def settled_mutation_evidence() -> tuple[JsonObject, JsonObject]:
+        expected: JsonObject = {"log": ["mutation", "resize"]}
+        evidence: JsonObject = {
+            "schema": "krr-html84-operation-evidence-v1",
+            "kind": "script-await-mutation-delivery",
+            "sourceSha256Before": "a" * 64,
+            "sourceSha256After": "a" * 64,
+            "preFrame": {"generation": 1, "scrollY": 0},
+            "postFrame": {"generation": 1, "scrollY": 0},
+            "target": {"visible": True, "nodeId": 1, "selector": "#observed"},
+            "state": {"before": expected, "after": expected},
+            "steps": [{"kind": "session-load-settled-observer-state",
+                       "stateBefore": expected, "stateAfter": expected}],
+            "delivery": "session-load-settled",
+        }
+        return evidence, expected
+
+    def test_settled_mutation_evidence_matches_fixture_state_and_raw_report(self) -> None:
+        evidence, expected = self.settled_mutation_evidence()
+        self.assertEqual(gate.catalog_operation_stream(
+            "script-await-mutation-delivery", evidence, expected, expected), [])
+
+    def test_settled_mutation_rejects_malformed_or_unbound_evidence(self) -> None:
+        evidence, expected = self.settled_mutation_evidence()
+        json_array(evidence["steps"])[0] = {
+            "kind": "generic-observation", "stateBefore": expected, "stateAfter": expected,
+        }
+        with self.assertRaisesRegex(ValueError, "fixture callback log"):
+            gate.catalog_operation_stream("script-await-mutation-delivery", evidence,
+                                          expected, expected)
+
+        evidence, expected = self.settled_mutation_evidence()
+        json_array(evidence["steps"]).append({
+            "kind": "session-load-settled-observer-state",
+            "stateBefore": expected, "stateAfter": expected,
+        })
+        with self.assertRaisesRegex(ValueError, "fixture callback log"):
+            gate.catalog_operation_stream("script-await-mutation-delivery", evidence,
+                                          expected, expected)
+
+        evidence, expected = self.settled_mutation_evidence()
+        json_object(evidence["state"])["after"] = {"log": ["wrong"]}
+        with self.assertRaisesRegex(ValueError, "fixture callback log"):
+            gate.catalog_operation_stream("script-await-mutation-delivery", evidence,
+                                          expected, expected)
+
+    def test_settled_mutation_rejects_raw_state_and_other_operation_kind(self) -> None:
+        evidence, expected = self.settled_mutation_evidence()
+        with self.assertRaisesRegex(ValueError, "fixture callback log"):
+            gate.catalog_operation_stream("script-await-mutation-delivery", evidence,
+                                          expected, {"log": ["wrong"]})
+        with self.assertRaisesRegex(ValueError, "observation/reopen"):
+            gate.catalog_operation_stream("script-load-observe", evidence, expected, expected)
+
+    def test_fixture_expected_observer_log_comes_from_pinned_fixture_json(self) -> None:
+        fixture = Path(__file__).parents[2] / "tests/fixtures/html/aspects/script-observers.html"
+        self.assertEqual(gate._fixture_expected_state(fixture), [
+            "takeRecords", "mutation", "resize", "intersection",
+        ])
+
+    def test_filled_save_replays_only_observed_pointer_and_text_steps(self) -> None:
+        input_steps = self.pointer_steps()
+        save_steps = [dict(step, targetNodeId=8, x=30.0, y=40.0) for step in self.pointer_steps()]
+        steps = [*input_steps, {"kind": "text", "targetNodeId": 7,
+                                "text": "架空の名称", "before": "", "after": "架空の名称"},
+                 *save_steps]
+        stream = gate.catalog_operation_stream("input-state-filled-save", {"steps": steps})
+        self.assertEqual([item["kind"] for item in stream], [
+            "pointer_move", "pointer_down", "pointer_up", "text",
+            "pointer_move", "pointer_down", "pointer_up",
+        ])
+
+    def test_missing_observed_key_up_fails_closed(self) -> None:
+        evidence = self.script_event_evidence()
+        json_array(evidence["events"]).pop(3)
+        with self.assertRaisesRegex(ValueError, "omits or reorders"):
+            gate.catalog_operation_stream("script-real-events", evidence)
+
+    @staticmethod
+    def script_event_evidence() -> JsonObject:
+        start = {"result": "", "key": ""}
+        typed = {"result": "", "key": ""}
+        keyed = {"result": "", "key": "Shift"}
+        submitted = {"result": "capture>bubble>input>capture>bubble>submit", "key": "Shift"}
+        events: list[JsonObject] = [
+            {"type": "focus", "targetNodeId": 7, "focused": True,
+             "stateBefore": start, "stateAfter": start},
+            {"type": "input", "targetNodeId": 7,
+             "stateBefore": start, "stateAfter": typed},
+            {"type": "keydown", "targetNodeId": 7, "key": "Shift",
+             "stateBefore": typed, "stateAfter": keyed},
+            {"type": "keyup", "targetNodeId": 7, "key": "Shift",
+             "stateBefore": keyed, "stateAfter": keyed},
+            {"type": "click", "targetNodeId": 8,
+             "stateBefore": keyed, "stateAfter": submitted},
+            {"type": "submit", "targetNodeId": 9,
+             "stateBefore": keyed, "stateAfter": submitted},
+        ]
+        steps = [
+            *CatalogOperationStreamTest.pointer_steps(),
+            {"kind": "text", "targetNodeId": 7, "text": "入力",
+             "stateBefore": start, "stateAfter": typed},
+            {"kind": "key_down", "targetNodeId": 7, "key": "Shift",
+             "stateBefore": typed, "stateAfter": keyed},
+            {"kind": "key_up", "targetNodeId": 7, "key": "Shift",
+             "stateBefore": keyed, "stateAfter": keyed},
+            *[
+                {"kind": kind, "targetNodeId": 8, "x": 30.0, "y": 40.0}
+                for kind in ("move", "down", "up")
+            ],
+        ]
+        return {
+            "schema": "krr-html84-operation-evidence-v1",
+            "kind": "script-real-events",
+            "sourceSha256Before": "a" * 64,
+            "sourceSha256After": "a" * 64,
+            "preFrame": {"generation": 1, "scrollY": 0},
+            "postFrame": {"generation": 1, "scrollY": 0},
+            "target": {"visible": True, "nodeId": 7, "selector": "#field"},
+            "steps": steps,
+            "events": events,
+            "state": {"before": start, "after": submitted},
+            "delivery": "session-load",
+        }
+
+    def test_script_real_events_replays_exact_ordered_dispatch_trace(self) -> None:
+        evidence = self.script_event_evidence()
+        expected = {"result": "capture>bubble>input>capture>bubble>submit", "key": "Shift"}
+        stream = gate.catalog_operation_stream("script-real-events", evidence, expected, expected)
+        self.assertEqual([item["kind"] for item in stream], [
+            "pointer_move", "pointer_down", "pointer_up", "text", "key_down", "key_up",
+            "pointer_move", "pointer_down", "pointer_up",
+        ])
+        self.assertEqual(stream[3]["text"], "入力")
+        self.assertEqual(stream[4]["key"], "Shift")
+        self.assertEqual(stream[5]["key"], "Shift")
+
+    def test_script_real_events_rejects_missing_reordered_extra_and_mismatched_evidence(self) -> None:
+        evidence = self.script_event_evidence()
+        evidence["events"] = json_array(evidence["events"])[:3] + json_array(evidence["events"])[4:]
+        with self.assertRaisesRegex(ValueError, "omits or reorders"):
+            gate.catalog_operation_stream("script-real-events", evidence)
+
+        evidence = self.script_event_evidence()
+        json_array(evidence["steps"])[5], json_array(evidence["steps"])[4] = (
+            json_array(evidence["steps"])[4], json_array(evidence["steps"])[5],
+        )
+        with self.assertRaisesRegex(ValueError, "dispatch order"):
+            gate.catalog_operation_stream("script-real-events", evidence)
+
+        evidence = self.script_event_evidence()
+        json_array(evidence["steps"]).append({"kind": "key_up", "targetNodeId": 7, "key": "Shift"})
+        with self.assertRaisesRegex(ValueError, "dispatch order"):
+            gate.catalog_operation_stream("script-real-events", evidence)
+
+        evidence = self.script_event_evidence()
+        json_object(json_array(evidence["events"])[3])["targetNodeId"] = 8
+        with self.assertRaisesRegex(ValueError, "bind to the observed dispatch"):
+            gate.catalog_operation_stream("script-real-events", evidence)
+
+        evidence = self.script_event_evidence()
+        json_object(json_array(evidence["steps"])[5])["stateAfter"] = {"value": "wrong"}
+        with self.assertRaisesRegex(ValueError, "state differs"):
+            gate.catalog_operation_stream("script-real-events", evidence)
+
+        evidence = self.script_event_evidence()
+        json_array(evidence["events"])[2], json_array(evidence["events"])[3] = (
+            json_array(evidence["events"])[3], json_array(evidence["events"])[2],
+        )
+        with self.assertRaisesRegex(ValueError, "omits or reorders"):
+            gate.catalog_operation_stream("script-real-events", evidence)
+
+        evidence = self.script_event_evidence()
+        evidence["delivery"] = "unknown"
+        with self.assertRaisesRegex(ValueError, "fresh fixture load"):
+            gate.catalog_operation_stream("script-real-events", evidence)
+
+        evidence = self.script_event_evidence()
+        evidence["unexpected"] = True
+        with self.assertRaisesRegex(ValueError, "fresh fixture load"):
+            gate.catalog_operation_stream("script-real-events", evidence)
+
+        evidence = self.script_event_evidence()
+        with self.assertRaisesRegex(ValueError, "operation state differs"):
+            gate.catalog_operation_stream("script-real-events", evidence,
+                                          {"result": "different"},
+                                          {"result": "different"})
+
+    @classmethod
+    def toc_evidence(cls) -> JsonObject:
+        source_sha = "a" * 64
+        links: list[JsonObject] = []
+        steps: list[JsonObject] = []
+        previous_hash = ""
+        for index, destination in enumerate(("#a", "#b", "#c")):
+            pointer_trace: list[JsonObject] = [
+                {"kind": kind, "targetNodeId": 20 + index, "x": 12.0 + index,
+                 "y": 20.0, "preFrame": {"generation": index + 1, "scrollY": float(index)},
+                 "postFrame": {"generation": index + 1, "scrollY": float(index)}}
+                for kind in ("move", "down", "up")
+            ]
+            steps.extend(pointer_trace)
+            links.append({
+                "destination": destination,
+                "hash": destination,
+                "hashBefore": previous_hash,
+                "hashAfter": destination,
+                "scrollY": float(index),
+                "frame": {"generation": index + 1, "contentHeight": 1500.0,
+                          "scrollY": float(index)},
+                "targetVisible": True,
+                "sourceSha256": source_sha,
+                "capturePath": f"/captures/toc-{index}.png",
+                "captureSha256": str(index + 1) * 64,
+                "svgPath": f"/captures/toc-{index}.svg",
+                "svgSha256": str(index + 4) * 64,
+                "pointerTrace": pointer_trace,
+            })
+            previous_hash = destination
+        return {
+            "schema": "krr-html84-operation-evidence-v1",
+            "kind": "navigation-all-pointer-clicks",
+            "sourceSha256Before": source_sha,
+            "sourceSha256After": source_sha,
+            "preFrame": {"generation": 1, "scrollY": 0},
+            "postFrame": {"generation": 4, "scrollY": 2.0},
+            "target": {"visible": True, "nodeId": 20, "selector": "#a"},
+            "state": {"before": {}, "after": {}},
+            "steps": steps,
+            "delivery": "session-load",
+            "links": links,
+        }
+
+    def test_all_toc_replays_actual_anchor_pointer_trace_without_invented_scroll(self) -> None:
+        stream = gate.catalog_operation_stream("navigation-all-pointer-clicks", self.toc_evidence())
+        self.assertEqual(len(stream), 9)
+        self.assertEqual([item["kind"] for item in stream], [
+            "pointer_move", "pointer_down", "pointer_up",
+            "pointer_move", "pointer_down", "pointer_up",
+            "pointer_move", "pointer_down", "pointer_up",
+        ])
+
+    def test_all_toc_rejects_hash_frame_source_capture_and_pointer_mismatch(self) -> None:
+        evidence = self.toc_evidence()
+        json_object(json_array(evidence["links"])[1])["hashBefore"] = "#c"
+        with self.assertRaisesRegex(ValueError, "hash transition"):
+            gate.catalog_operation_stream("navigation-all-pointer-clicks", evidence)
+
+        evidence = self.toc_evidence()
+        link = json_object(json_array(evidence["links"])[0])
+        json_object(link["frame"])["scrollY"] = 10.0
+        with self.assertRaisesRegex(ValueError, "frame/scroll"):
+            gate.catalog_operation_stream("navigation-all-pointer-clicks", evidence)
+
+        evidence = self.toc_evidence()
+        json_object(json_array(evidence["links"])[0])["sourceSha256"] = "b" * 64
+        with self.assertRaisesRegex(ValueError, "source differs"):
+            gate.catalog_operation_stream("navigation-all-pointer-clicks", evidence)
+
+        evidence = self.toc_evidence()
+        json_object(json_array(evidence["links"])[2])["capturePath"] = "/captures/toc-1.png"
+        with self.assertRaisesRegex(ValueError, "separate capture"):
+            gate.catalog_operation_stream("navigation-all-pointer-clicks", evidence)
+
+        evidence = self.toc_evidence()
+        json_array(evidence["steps"])[1] = dict(json_object(json_array(evidence["steps"])[1]), x=-1.0)
+        with self.assertRaisesRegex(ValueError, "top-level steps"):
+            gate.catalog_operation_stream("navigation-all-pointer-clicks", evidence)
+
+    def test_pointer_trace_cannot_be_replaced_by_generic_steps(self) -> None:
+        malformed = self.pointer_steps()
+        malformed[1]["targetNodeId"] = 8
+        with self.assertRaisesRegex(ValueError, "target or coordinates differ"):
+            gate.catalog_operation_stream("navigation-pointer-click", {"steps": malformed})
+
+
 def modify_measurement(report: JsonObject, phase: str, metric: str, value: int) -> None:
     for sample in json_array_at(report, "samples"):
         measured = json_object_at(sample, "phases", phase)
-        if phase == "post_operation":
+        if phase in ("post_operation", "same_session_resize"):
             measured = json_object_at(measured, "measurement")
         measured[metric] = value
 
@@ -266,8 +608,13 @@ class PerformanceEvidenceTest(unittest.TestCase):
                         for p in gate.PHASES
                     }
                     json_object_at(phases, "full_y").update(
-                        actual_bottom=True, scroll_steps=3, max_scroll=1000, final_scroll_y=1000
+                        actual_bottom=True,
+                        scroll_steps=3,
+                        max_scroll=1000,
+                        final_scroll_y=1000,
+                        max_frame_elapsed_ms=10,
                     )
+                    json_object_at(phases, "full_y", "frame")["scroll_y"] = 1000
                     phases["post_operation"] = {
                         "operation": expected["operation"],
                         "expected_dom_state_sha256": expected["expected_dom_state_sha256"],
@@ -277,6 +624,22 @@ class PerformanceEvidenceTest(unittest.TestCase):
                         "pixel_sha_before": "2" * 64,
                         "pixel_sha_after": "3" * 64,
                         "visual_change_observed": True,
+                    }
+                    resized_viewport = {"width": width - max(width // 4, 1), "height": height, "scale": 1}
+                    phases["same_session_resize"] = {
+                        "measurement": {
+                            "elapsed_ms": 10,
+                            "peak_rss_bytes": 100,
+                            "frame": {"viewport": resized_viewport,
+                                      "pixel_bytes": resized_viewport["width"] * height * 4},
+                        },
+                        "resize_evidence": {
+                            "from_viewport": expected["viewport"],
+                            "to_viewport": resized_viewport,
+                            "generation_before": 2,
+                            "generation_after": 3,
+                            "real_raster_frame": True,
+                        },
                     }
                     samples.append(
                         {"sample": sample, "viewport": expected["viewport"], "phases": phases}
@@ -311,7 +674,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
                 reports.append(self.bundle / f"{index}/reports/{arm}-{pair}.json")
         aggregate = gate.aggregate_comparison(reports, expected)
         policy = {p: {k: v <= 0 for k, v in values.items()} for p, values in aggregate["comparison"].items()}
-        result = {"measurementExecuted": True, "performanceAccepted": False, "formalAccepted": False, **{k: True for k in gate.ENDPOINT_FLAGS}, "policy": {"policyPass": True, "policy": policy, "deltaThreshold": 0, "quietLoadLimit": 0.25, "phaseRecords": 250, "aggregate": aggregate}}
+        result = {"measurementExecuted": True, "performanceAccepted": False, "formalAccepted": False, **{k: True for k in gate.ENDPOINT_FLAGS}, "policy": {"policyPass": True, "policy": policy, "deltaThreshold": 0, "quietLoadLimit": 0.25, "phaseRecords": len(gate.PHASES) * 50, "aggregate": aggregate}}
         expected_pin = self.add_file(attempt + "/expected-enriched.json", f"{index}/expected-enriched.json", expected)
         result_pin = self.add_file(attempt + "/result.json", f"{index}/result.json", result)
         manifest_pin = self.add_file(attempt + "/pair-manifest.json", f"{index}/pair-manifest.json", manifest)
@@ -373,7 +736,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
 
     def reject(self) -> None:
         with self.assertRaises((ValueError, KeyError)):
-            gate.verify(self.bundle, self.root)
+            gate._verify_legacy_diagnostic(self.bundle, self.root)
 
     def change_candidate_metric(self, path: Path, phase: str, metric: str, value: int) -> None:
         self.mutate_report(
@@ -389,16 +752,34 @@ class PerformanceEvidenceTest(unittest.TestCase):
         lock_path = self.root / gate.HARNESS_ROOT / "Cargo.lock"
         with patch.object(gate, "LOCK_SHA", "0" * 64):
             with self.assertRaisesRegex(ValueError, "harness lock differs"):
-                gate.verify(self.bundle, self.root)
+                gate._verify_legacy_diagnostic(self.bundle, self.root)
 
         lock_path.write_bytes(lock_path.read_bytes() + b"\n# tampered\n")
         with self.assertRaisesRegex(
             ValueError, "release source is dirty or untracked"
         ):
-            gate.verify(self.bundle, self.root)
+            gate._verify_legacy_diagnostic(self.bundle, self.root)
 
     def test_equal_all_three_viewports_pass_with_diagnostic_acceptance_false(self) -> None:
-        self.assertEqual(gate.verify(self.bundle, self.root)["checks"], 60)
+        self.assertEqual(gate._verify_legacy_diagnostic(self.bundle, self.root)["checks"], 60)
+
+    def test_formal_verifier_rejects_legacy_three_viewport_bundle(self) -> None:
+        with patch.object(gate.sys, "argv", [
+            "verify_html_performance_evidence.py",
+            "--repo", str(self.root),
+            "--evidence-dir", str(self.bundle),
+        ]), patch.object(gate.sys, "stderr", io.StringIO()) as stderr:
+            self.assertEqual(gate.main(), 1)
+        self.assertIn("formal HTML performance requires all 84 catalog conditions",
+                      stderr.getvalue())
+
+    def test_formal_catalog_dispatch_requires_exact84_and_catalog_binding(self) -> None:
+        attempts: list[JsonObject] = [{"expected": f"attempt-{index}"} for index in range(84)]
+        gate._require_catalog_attempt_set(attempts, {"catalogCondition": {"condition_id": "first"}})
+        with self.assertRaisesRegex(ValueError, "all 84 catalog conditions"):
+            gate._require_catalog_attempt_set(attempts[:-1], {"catalogCondition": {}})
+        with self.assertRaisesRegex(ValueError, "catalog-bound current-source evidence"):
+            gate._require_catalog_attempt_set(attempts, {})
 
     def test_injected_git_query_transports_real_fixture_queries(self) -> None:
         calls: list[tuple[tuple[str, ...], bytes | None, bool]] = []
@@ -417,7 +798,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
                 return output
             raise AssertionError("real Git query returned unexpected output type")
 
-        self.assertEqual(gate.verify(self.bundle, self.root, git_query=query)["checks"], 60)
+        self.assertEqual(gate._verify_legacy_diagnostic(self.bundle, self.root, git_query=query)["checks"], 60)
         self.assertTrue(any(args == ("cat-file", "--batch") and input_bytes is not None and not text
                             for args, input_bytes, text in calls))
         self.assertTrue(any(args == ("ls-tree", "-r", "-z", "HEAD") and not text
@@ -425,7 +806,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
 
     def test_absent_evidence_fails(self) -> None:
         with self.assertRaises(OSError):
-            gate.verify(self.bundle / "absent", self.root)
+            gate._verify_legacy_diagnostic(self.bundle / "absent", self.root)
 
     def test_only_one_viewport_fails(self) -> None:
         self.transport["attempts"] = json_array_at(self.transport, "attempts")[:1]
@@ -470,10 +851,126 @@ class PerformanceEvidenceTest(unittest.TestCase):
                         self.change_candidate_metric(path, phase, metric, baseline + 1)
                     self.reaggregate(0)
                     with self.assertRaisesRegex(ValueError, "time/RSS median/p95 regression"):
-                        gate.verify(self.bundle, self.root)
+                        gate._verify_legacy_diagnostic(self.bundle, self.root)
                     for path in candidates:
                         self.change_candidate_metric(path, phase, metric, baseline)
                     self.reaggregate(0)
+
+    def test_candidate_display_phases_require_each_frame_under_three_seconds(self) -> None:
+        candidate = next(path for path in self.report_paths[0] if path.name.startswith("candidate"))
+        report = json_object(gate.read_json(candidate))
+        expected = json_object(gate.read_json(self.expected_paths[0]))
+        for phase in gate.DISPLAY_COMPLETION_PHASES:
+            for sample in json_array_at(report, "samples"):
+                measured = json_object_at(sample, "phases", phase)
+                if phase in ("post_operation", "same_session_resize"):
+                    measured = json_object(measured["measurement"])
+                measured["elapsed_ms"] = 2999.999
+            gate._validate_report(report, expected)
+            measured = json_object_at(report, "samples", 0, "phases", phase)
+            if phase in ("post_operation", "same_session_resize"):
+                measured = json_object(measured["measurement"])
+            measured["elapsed_ms"] = 3000
+            with self.subTest(phase=phase), self.assertRaisesRegex(ValueError, "under 3000 ms"):
+                gate._validate_report(report, expected)
+            measured["elapsed_ms"] = 2999.999
+
+    def test_candidate_full_y_max_frame_time_is_finite_nonnegative_and_under_three_seconds(self) -> None:
+        candidate = next(path for path in self.report_paths[0] if path.name.startswith("candidate"))
+        report = json_object(gate.read_json(candidate))
+        expected = json_object(gate.read_json(self.expected_paths[0]))
+        samples = json_array_at(report, "samples")
+        for sample in samples:
+            json_object_at(sample, "phases", "full_y")["max_frame_elapsed_ms"] = 2999.999
+        gate._validate_report(report, expected)
+        measured = json_object_at(report, "samples", 0, "phases", "full_y")
+        measured["max_frame_elapsed_ms"] = 0
+        gate._validate_report(report, expected)
+        for elapsed in (3000, -1, math.nan, math.inf, True, None):
+            measured["max_frame_elapsed_ms"] = elapsed
+            with self.subTest(elapsed=elapsed), self.assertRaises(ValueError):
+                gate._validate_report(report, expected)
+        measured.pop("max_frame_elapsed_ms")
+        with self.assertRaisesRegex(ValueError, "must be numeric"):
+            gate._validate_report(report, expected)
+
+    def test_candidate_full_y_requires_the_captured_bottom_frame_position(self) -> None:
+        candidate = next(path for path in self.report_paths[0] if path.name.startswith("candidate"))
+        expected = json_object(gate.read_json(self.expected_paths[0]))
+        original = json_object(gate.read_json(candidate))
+        gate._validate_report(original, expected)
+
+        for invalid in ("missing", math.nan, 999):
+            report = json.loads(json.dumps(original))
+            frame = json_object_at(report, "samples", 0, "phases", "full_y", "frame")
+            if invalid == "missing":
+                frame.pop("scroll_y")
+            else:
+                frame["scroll_y"] = invalid
+            with self.subTest(frame_scroll=invalid), self.assertRaises(ValueError):
+                gate._validate_report(report, expected)
+
+        # The legacy baseline has no candidate bottom-frame acceptance contract.
+        baseline = next(path for path in self.report_paths[0] if path.name.startswith("baseline"))
+        baseline_report = json_object(gate.read_json(baseline))
+        json_object_at(
+            baseline_report, "samples", 0, "phases", "full_y", "frame"
+        ).pop("scroll_y")
+        gate._validate_report(baseline_report, expected)
+
+    def test_catalog_candidate_accepts_zero_span_at_the_actual_bottom(self) -> None:
+        candidate = next(path for path in self.report_paths[0] if path.name.startswith("candidate"))
+        report = json.loads(json.dumps(gate.read_json(candidate)))
+        expected = json.loads(json.dumps(gate.read_json(self.expected_paths[0])))
+        identity = {
+            "condition_id": "zero-span-condition",
+            "case_id": "zero-span-case",
+            "state": "initial",
+            "operation_kind": "none",
+        }
+        evidence_ref = {"path": "/captured/operation.json", "sha256": "d" * 64}
+        expected["catalogCondition"] = identity
+        expected["operationEvidenceRef"] = evidence_ref
+        report.update(
+            condition_id=identity["condition_id"],
+            case_id=identity["case_id"],
+            state=identity["state"],
+            operation_kind=identity["operation_kind"],
+            operation_evidence_ref=evidence_ref,
+            catalog_condition=identity,
+        )
+        sample_condition = {
+            "profile": "catalog-plan84",
+            **identity,
+            "operation_evidence_sha256": evidence_ref["sha256"],
+        }
+        for sample in json_array_at(report, "samples"):
+            sample_object = json_object(sample)
+            sample_object["catalog_condition"] = sample_condition
+            full_y = json_object_at(sample_object, "phases", "full_y")
+            full_y.update(
+                actual_bottom=True,
+                scroll_steps=0,
+                max_scroll=0,
+                final_scroll_y=0,
+            )
+            json_object(full_y["frame"])["scroll_y"] = 0
+        gate._validate_report(report, expected)
+
+        full_y = json_object_at(report, "samples", 0, "phases", "full_y")
+        for invalid_steps in (-1, 1):
+            full_y["scroll_steps"] = invalid_steps
+            with self.subTest(scroll_steps=invalid_steps), self.assertRaisesRegex(
+                ValueError, "full-Y span incomplete"
+            ):
+                gate._validate_report(report, expected)
+
+        for sample in json_array_at(report, "samples"):
+            full_y = json_object_at(sample, "phases", "full_y")
+            full_y.update(scroll_steps=0, max_scroll=1, final_scroll_y=1)
+            json_object(full_y["frame"])["scroll_y"] = 1
+        with self.assertRaisesRegex(ValueError, "full-Y span incomplete"):
+            gate._validate_report(report, expected)
 
     def test_p95_only_regression_is_rejected(self) -> None:
         path = self.bundle / "0/reports/candidate-4.json"
@@ -484,7 +981,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.assertEqual(delta["elapsed_ms_delta_median"], 0)
         self.assertGreater(delta["elapsed_ms_delta_p95"], 0)
         with self.assertRaisesRegex(ValueError, "time/RSS median/p95 regression"):
-            gate.verify(self.bundle, self.root)
+            gate._verify_legacy_diagnostic(self.bundle, self.root)
 
     def test_false_policy_flag_fails(self) -> None:
         self.mutate_json(
@@ -500,6 +997,28 @@ class PerformanceEvidenceTest(unittest.TestCase):
         )
         self.reject()
 
+    def test_same_session_resize_requires_new_raster_frame(self) -> None:
+        self.mutate_report(
+            self.report_paths[0][0],
+            lambda value: json_object_at(
+                value, "samples", 0, "phases", "same_session_resize", "resize_evidence"
+            ).update(real_raster_frame=False),
+        )
+        self.reject()
+
+    def test_same_session_resize_rejects_one_pixel_width_change(self) -> None:
+        def mutate(value: JsonObject) -> None:
+            resize = json_object_at(value, "samples", 0, "phases", "same_session_resize")
+            evidence = json_object(resize["resize_evidence"])
+            evidence["to_viewport"] = {"width": 1281, "height": 900, "scale": 1}
+            measurement = json_object(resize["measurement"])
+            json_object(measurement["frame"]).update(
+                viewport=evidence["to_viewport"], pixel_bytes=1281 * 900 * 4
+            )
+
+        self.mutate_report(self.report_paths[0][0], mutate)
+        self.reject()
+
     def test_worker_viewport_mismatch_and_partial_full_y_fail(self) -> None:
         path = self.report_paths[0][0]
         self.mutate_report(
@@ -509,26 +1028,30 @@ class PerformanceEvidenceTest(unittest.TestCase):
             ),
         )
         with self.assertRaisesRegex(ValueError, "worker viewport differs"):
-            gate.verify(self.bundle, self.root)
+            gate._verify_legacy_diagnostic(self.bundle, self.root)
         self.mutate_report(
             path,
             lambda value: json_object_at(value, "samples", 0).update(
                 viewport={"width": 1280, "height": 900, "scale": 1}
             ),
         )
+        candidate_path = next(
+            report_path for report_path in self.report_paths[0]
+            if report_path.name.startswith("candidate")
+        )
         self.mutate_report(
-            path,
+            candidate_path,
             lambda value: json_object_at(value, "samples", 0, "phases", "full_y").update(
                 actual_bottom=False
             ),
         )
         with self.assertRaisesRegex(ValueError, "full-Y span incomplete"):
-            gate.verify(self.bundle, self.root)
+            gate._verify_legacy_diagnostic(self.bundle, self.root)
 
     def test_quiet_load_violation_fails(self) -> None:
         self.mutate_json(self.manifest_paths[0], violate_quiet_load)
         with self.assertRaisesRegex(ValueError, "worker quiet load limit exceeded"):
-            gate.verify(self.bundle, self.root)
+            gate._verify_legacy_diagnostic(self.bundle, self.root)
 
     def test_duplicate_json_key_and_transport_traversal_fail(self) -> None:
         (self.bundle / "bundle.json").write_text('{"schema":"a","schema":"b"}')
@@ -684,7 +1207,7 @@ class PerformanceAcquisitionTest(unittest.TestCase):
 
     def test_current_producer_success_before_workflow_completion(self) -> None:
         self.acquire_case("producer_success")
-        self.assertEqual(gate.verify(self.destination, self.fixture.root)["checks"], 60)
+        self.assertEqual(gate._verify_legacy_diagnostic(self.destination, self.fixture.root)["checks"], 60)
 
     def test_current_producer_requires_exact_pr_head(self) -> None:
         with self.assertRaisesRegex(ValueError, "PR head/base binding"):
@@ -703,7 +1226,7 @@ class PerformanceAcquisitionTest(unittest.TestCase):
 
     def test_matching_run_artifact_and_raw_bundle_pass(self) -> None:
         self.acquire_case("success")
-        self.assertEqual(gate.verify(self.destination, self.fixture.root)["checks"], 60)
+        self.assertEqual(gate._verify_legacy_diagnostic(self.destination, self.fixture.root)["checks"], 60)
         self.assertEqual(gate.read_json(self.destination / "acquisition.json"), {"repository": self.repository, "head": self.fixture.head, "runId": 101, "runAttempt": 1, "artifactId": 202, "artifactDigest": self.artifact_digest})
 
     def test_pending_run_does_not_download_artifact(self) -> None:
@@ -747,6 +1270,47 @@ class PerformanceAcquisitionTest(unittest.TestCase):
 
 
 class PerformanceJsonBoundaryTest(unittest.TestCase):
+    def test_public_verifier_rejects_diagnostic_html84_result(self) -> None:
+        result: JsonObject = {
+            "htmlStage90": {"acceptance": False, "fontIdentityEquivalence": "not-established"},
+            "performanceNonregression": True,
+        }
+        with patch.object(gate, "_verify", return_value=result):
+            with self.assertRaisesRegex(ValueError, "HTML84 visual acceptance is not established"):
+                gate.verify(Path("bundle"), Path("repo"))
+
+    def test_private_catalog_diagnostic_retains_false_acceptance(self) -> None:
+        result: JsonObject = {
+            "htmlStage90": {"acceptance": False, "fontIdentityEquivalence": "not-established"},
+            "performanceNonregression": True,
+        }
+        with patch.object(gate, "_verify", return_value=result) as verify:
+            self.assertIs(gate._verify_catalog_diagnostic(Path("bundle"), Path("repo")), result)
+        verify.assert_called_once_with(
+            Path("bundle"), Path("repo"), git_query=None,
+            require_catalog=True, diagnostic_catalog=True,
+        )
+
+    def test_formal_release_result_requires_visual_font_and_performance_acceptance(self) -> None:
+        accepted: JsonObject = {
+            "htmlStage90": {"acceptance": True, "fontIdentityEquivalence": "established"},
+            "performanceNonregression": True,
+        }
+        gate._require_formal_release_result(accepted)
+        rejected: tuple[tuple[str, object, str], ...] = (
+            ("htmlStage90", {"acceptance": False, "fontIdentityEquivalence": "established"},
+             "HTML84 visual acceptance"),
+            ("htmlStage90", {"acceptance": True, "fontIdentityEquivalence": "not-established"},
+             "same-font equivalence"),
+            ("performanceNonregression", False, "performance non-regression"),
+        )
+        for key, value, message in rejected:
+            with self.subTest(key=key, value=value):
+                candidate = dict(accepted)
+                candidate[key] = value
+                with self.assertRaisesRegex(ValueError, message):
+                    gate._require_formal_release_result(candidate)
+
     def test_json_container_and_text_shapes_reject_invalid_values(self) -> None:
         document: JsonObject = {"field": "value"}
         array: list[object] = [document]

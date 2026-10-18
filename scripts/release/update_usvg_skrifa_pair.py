@@ -11,26 +11,27 @@ import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Union
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
-    try:
-        import tomli as tomllib  # type: ignore[no-redef]
-    except ModuleNotFoundError:
-        parser_root = str(Path(__file__).resolve().parent)
-        if parser_root not in sys.path:
-            sys.path.insert(0, parser_root)
-        from _tomli import _parser as tomllib  # type: ignore[no-redef]
-
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
+_loader_root = str(ROOT / "scripts" / "release")
+sys.path.insert(0, _loader_root)
+try:
+    from toml_loader import load_toml_parser
+finally:
+    sys.path.remove(_loader_root)
+
+_expected_loader = (ROOT / "scripts" / "release" / "toml_loader.py").resolve()
+if any(Path(origin).resolve() != _expected_loader for origin in (sys.modules["toml_loader"].__file__ or "", load_toml_parser.__code__.co_filename)):
+    raise ImportError("loaded TOML helper is outside the owned release directory")
+tomllib = load_toml_parser()
+
 MANIFEST = ROOT / "crates/katana-render-runtime/Cargo.toml"
 RUNTIME_PACKAGE = "katana-render-runtime"
 USVG_PACKAGE = "usvg"
 SKRIFA_PACKAGE = "skrifa"
-CommandRunner = Callable[..., Union[subprocess.CompletedProcess[bytes], subprocess.CompletedProcess[str]]]
+# Python 3.9 でも型 alias の評価時に PEP 604 の演算を実行しない。
+CommandRunner = Callable[..., "subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]"]
 
 
 def parse_cargo_command(value: str) -> list[str]:
@@ -211,6 +212,8 @@ def sync_manifest_text(contents: str, requirement: str) -> tuple[str, bool]:
         manifest = tomllib.loads(contents)
     except tomllib.TOMLDecodeError as error:
         raise ValueError(f"cannot parse KRR Cargo.toml: {error}") from error
+    if not isinstance(manifest, dict) or not all(isinstance(key, str) for key in manifest):
+        raise ValueError("KRR Cargo.toml must be a table with string keys")
     dependencies = manifest.get("dependencies")
     if not isinstance(dependencies, dict) or not isinstance(dependencies.get(SKRIFA_PACKAGE), str):
         raise ValueError("KRR direct skrifa dependency must be a string requirement")

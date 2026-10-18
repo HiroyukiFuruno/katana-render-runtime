@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import contextlib
-import builtins
 import importlib.util
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import TypedDict
+from urllib.request import Request
 from unittest.mock import patch
 
 MODULE_PATH = Path(__file__).with_name("verify_dependency_freshness.py")
@@ -21,7 +23,92 @@ sys.modules[MODULE_SPEC.name] = freshness
 MODULE_SPEC.loader.exec_module(freshness)
 
 
+class MetadataDependency(TypedDict, total=False):
+    name: str
+    pkg: str
+    req: str
+    source: str
+    kind: str | None
+    dep_kinds: list[dict[str, None]]
+
+
+class MetadataPackage(TypedDict, total=False):
+    id: str
+    name: str
+    version: str
+    source: str | None
+    manifest_path: str
+    dependencies: list[MetadataDependency]
+
+
+class MetadataNode(TypedDict):
+    id: str
+    deps: list[MetadataDependency]
+
+
+class MetadataResolve(TypedDict):
+    nodes: list[MetadataNode]
+
+
+class CargoMetadata(TypedDict):
+    workspace_members: list[str]
+    packages: list[MetadataPackage]
+    resolve: MetadataResolve
+
+
+def load_fallback_without_toml(module_name: str) -> ModuleType:
+    fallback_spec = importlib.util.spec_from_file_location(module_name, MODULE_PATH)
+    assert fallback_spec is not None and fallback_spec.loader is not None
+    fallback = importlib.util.module_from_spec(fallback_spec)
+    prior_module = sys.modules.get(module_name)
+    sys.modules[module_name] = fallback
+    original_resolver = importlib.import_module
+
+    def reject_toml(name: str, package: str | None = None) -> ModuleType:
+        if name in {"tomllib", "tomli"}:
+            raise ModuleNotFoundError(name=name)
+        return original_resolver(name, package)
+
+    try:
+        with patch.object(importlib, "import_module", reject_toml):
+            fallback_spec.loader.exec_module(fallback)
+    finally:
+        if prior_module is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = prior_module
+    return fallback
+
+
 class DependencyFreshnessTest(unittest.TestCase):
+    @staticmethod
+    def runtime_catalog_source(
+        version: str = "1.0.0",
+        source: str = "",
+        *,
+        reverse_properties: bool = False,
+    ) -> str:
+        properties = [
+            'kind: "mermaid"',
+            'displayName: "Mermaid.js"',
+            f'version: "{version}"',
+            'checksum: "0123456789abcdef"',
+            'fileName: "mermaid.min.js"',
+            'rustVersionConst: "MERMAID_JS_VERSION"',
+            'rustChecksumConst: "MERMAID_JS_CHECKSUM"',
+            'rustDownloadConst: "MERMAID_DOWNLOAD_URL"',
+            'latestUrl: "https://example.test/runtime"',
+            'releasePageUrl: (value: string) => `https://example.test/${value}`',
+            'downloadUrl: (value: string) => `https://example.test/${value}`',
+        ]
+        if source:
+            properties.insert(-2, source)
+        if reverse_properties:
+            properties.reverse()
+        return "const DEFINITIONS: RuntimeAssetDefinition[] = [{\n" + ",\n".join(
+            f"  {property}" for property in properties
+        ) + "\n}];\n"
+
     def test_fetch_authenticates_only_exact_github_api_origin(self) -> None:
         seen_headers: list[dict[str, str]] = []
 
@@ -29,7 +116,7 @@ class DependencyFreshnessTest(unittest.TestCase):
             status = 200
 
         class Opener:
-            def open(self, req: object, timeout: int) -> Response:
+            def open(self, req: Request, timeout: int) -> Response:
                 seen_headers.append(dict(req.header_items()))
                 return Response(b"{}")
 
@@ -52,7 +139,7 @@ class DependencyFreshnessTest(unittest.TestCase):
             status = 200
 
         class Opener:
-            def open(self, req: object, timeout: int) -> Response:
+            def open(self, req: Request, timeout: int) -> Response:
                 self.headers = dict(req.header_items())
                 return Response(b"{}")
 
@@ -77,7 +164,7 @@ class DependencyFreshnessTest(unittest.TestCase):
             status = 200
 
         class Opener:
-            def open(self, req: object, timeout: int) -> Response:
+            def open(self, req: Request, timeout: int) -> Response:
                 self.headers = dict(req.header_items())
                 return Response(b"{}")
 
@@ -104,19 +191,7 @@ class DependencyFreshnessTest(unittest.TestCase):
 
     def test_python310_fallback_reads_single_quoted_alternate_registry_dependency(self) -> None:
         fallback_name = "verify_dependency_freshness_py310_fallback"
-        fallback_spec = importlib.util.spec_from_file_location(fallback_name, MODULE_PATH)
-        assert fallback_spec is not None and fallback_spec.loader is not None
-        fallback = importlib.util.module_from_spec(fallback_spec)
-        sys.modules[fallback_name] = fallback
-        original_import = builtins.__import__
-
-        def reject_toml(name: str, *args: object, **kwargs: object) -> object:
-            if name in {"tomllib", "tomli"}:
-                raise ModuleNotFoundError(name)
-            return original_import(name, *args, **kwargs)
-
-        with patch.object(builtins, "__import__", reject_toml):
-            fallback_spec.loader.exec_module(fallback)
+        fallback = load_fallback_without_toml(fallback_name)
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n"
             "[workspace.dependencies]\n"
@@ -130,19 +205,7 @@ class DependencyFreshnessTest(unittest.TestCase):
 
     def test_python310_fallback_reads_multiline_virtual_workspace_dependencies(self) -> None:
         fallback_name = "verify_dependency_freshness_virtual_workspace_fallback"
-        fallback_spec = importlib.util.spec_from_file_location(fallback_name, MODULE_PATH)
-        assert fallback_spec is not None and fallback_spec.loader is not None
-        fallback = importlib.util.module_from_spec(fallback_spec)
-        sys.modules[fallback_name] = fallback
-        original_import = builtins.__import__
-
-        def reject_toml(name: str, *args: object, **kwargs: object) -> object:
-            if name in {"tomllib", "tomli"}:
-                raise ModuleNotFoundError(name)
-            return original_import(name, *args, **kwargs)
-
-        with patch.object(builtins, "__import__", reject_toml):
-            fallback_spec.loader.exec_module(fallback)
+        fallback = load_fallback_without_toml(fallback_name)
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n"
             "[workspace.dependencies]\n"
@@ -160,9 +223,20 @@ class DependencyFreshnessTest(unittest.TestCase):
             [("serde", "1.0.0"), ("serde_json", "2.0.0")],
         )
 
+    def test_forced_fallback_restores_existing_module_binding_and_paths(self) -> None:
+        name = "verify_dependency_freshness_existing_fallback"
+        existing = ModuleType(name)
+        before = sys.path.copy()
+        with patch.dict(sys.modules, {name: existing}):
+            fallback = load_fallback_without_toml(name)
+            self.assertIs(sys.modules[name], existing)
+        self.assertIsNot(fallback, existing)
+        self.assertEqual(sys.path, before)
+
     def test_semver_prerelease_precedence(self) -> None:
         versions = ["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"]
-        for older, newer in zip(versions, versions[1:]):
+        for index in range(len(versions) - 1):
+            older, newer = versions[index], versions[index + 1]
             with self.subTest(older=older, newer=newer):
                 self.assertLess(freshness.Version.parse(older), freshness.Version.parse(newer))
         self.assertLess(freshness.Version.parse("1.0.0-99"), freshness.Version.parse("1.0.0-A"))
@@ -224,7 +298,7 @@ class DependencyFreshnessTest(unittest.TestCase):
         (self.root / "package.json").write_text(json.dumps({"devDependencies": {"example": "1.0.0"}}), encoding="utf-8")
         (self.root / "bun.lock").write_text(json.dumps({"packages": {"example": ["example@1.0.0", "", {}]}}), encoding="utf-8")
         (self.root / "scripts/runtime-assets/runtime-asset-common.ts").write_text(
-            'const assets = [{ kind: "mermaid", version: "1.0.0", latestUrl: "https://example.test/runtime" }];\n',
+            self.runtime_catalog_source(),
             encoding="utf-8",
         )
 
@@ -232,7 +306,7 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     @staticmethod
-    def metadata_for_direct_serde(version: str = "1.0.0") -> dict[str, object]:
+    def metadata_for_direct_serde(version: str = "1.0.0") -> CargoMetadata:
         member_id = "path+file:///workspace/crates/renderer#renderer@0.1.0"
         serde_id = f"registry+https://github.com/rust-lang/crates.io-index#serde@{version}"
         return {
@@ -247,7 +321,7 @@ class DependencyFreshnessTest(unittest.TestCase):
     def run_check(
         self,
         responses: dict[str, object],
-        metadata: dict[str, object] | None = None,
+        metadata: CargoMetadata | None = None,
         rust_fresh: bool = True,
         javascript_fresh: bool = True,
     ) -> tuple[int, str, str]:
@@ -283,7 +357,7 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertIn("passed (3 resolved dependencies and pinned runtime assets)", stdout)
 
     @staticmethod
-    def metadata_for_krr_usvg_skrifa(root: Path) -> dict[str, object]:
+    def metadata_for_krr_usvg_skrifa(root: Path) -> CargoMetadata:
         registry = "registry+https://github.com/rust-lang/crates.io-index"
         runtime_id = "path+file:///workspace/crates/katana-render-runtime#katana-render-runtime@0.1.0"
         resvg_id = f"{registry}#resvg@0.48.1"
@@ -1004,11 +1078,80 @@ target-build = "=3.0.0"
 
     def test_runtime_asset_catalog_properties_are_order_independent(self) -> None:
         (self.root / "scripts/runtime-assets/runtime-asset-common.ts").write_text(
-            'const assets = [\n  {\n    latestUrl: "https://example.test/runtime",\n    version: "1.0.0",\n    kind: "mermaid",\n  },\n];\n',
+            self.runtime_catalog_source(reverse_properties=True),
             encoding="utf-8",
         )
         result, _, stderr = self.run_check(self.clean_responses())
         self.assertEqual(result, 0, stderr)
+
+    def test_runtime_asset_patched_upstream_uses_upstream_version(self) -> None:
+        (self.root / "scripts/runtime-assets/runtime-asset-common.ts").write_text(
+            self.runtime_catalog_source(
+                "12.2.0-krr.pr6823.1",
+                'source: { kind: "patched-upstream", upstreamVersion: "12.2.0", immutableUrl: "https://example.test/patched", provenancePath: "scripts/runtime-assets/mermaid.provenance.json" }',
+            ),
+            encoding="utf-8",
+        )
+        packages = freshness.runtime_assets(self.root)
+        self.assertEqual(len(packages), 1)
+        self.assertEqual(packages[0].current, "12.2.0")
+        self.assertEqual(packages[0].name, "mermaid|https://example.test/runtime")
+
+    def test_runtime_asset_catalog_is_parsed_without_execution(self) -> None:
+        catalog = self.root / "scripts/runtime-assets/runtime-asset-common.ts"
+        catalog.write_text(
+            self.runtime_catalog_source() + 'throw new Error("catalog source must not execute");\n',
+            encoding="utf-8",
+        )
+        packages = freshness.runtime_assets(self.root)
+        self.assertEqual([package.current for package in packages], ["1.0.0"])
+
+    def test_runtime_asset_cli_boundary_rejects_invalid_json_payloads(self) -> None:
+        invalid_outputs = (
+            "not json",
+            "{}",
+            "[]",
+            '[{"kind":"mermaid","kind":"drawio","version":"1.0.0","latestUrl":"https://example.test/runtime"}]',
+            '[{"kind":"mermaid","version":"1.0.0","latestUrl":"https://example.test/runtime","extra":true}]',
+            '[{"kind":"mermaid","version":"1.0.0"}]',
+            '[{"kind":"mermaid","version":"1.0.0","latestUrl":" "}]',
+            '[{"kind":"mermaid","version":1,"latestUrl":"https://example.test/runtime"}]',
+            '[{"kind":"mermaid","version":"1.0.0","latestUrl":"https://example.test/runtime"},{"kind":"mermaid","version":"1.0.0","latestUrl":"https://example.test/runtime"}]',
+        )
+        for output in invalid_outputs:
+            with self.subTest(output=output):
+                completed = subprocess.CompletedProcess([], 0, output, "")
+                with patch.object(freshness.subprocess, "run", return_value=completed):
+                    with self.assertRaises(ValueError):
+                        freshness.runtime_assets(self.root)
+
+    def test_runtime_asset_cli_failure_is_not_hidden(self) -> None:
+        completed = subprocess.CompletedProcess([], 7, "", "AST parsing failed")
+        with patch.object(freshness.subprocess, "run", return_value=completed) as run:
+            with self.assertRaisesRegex(ValueError, "exited with 7: AST parsing failed"):
+                freshness.runtime_assets(self.root)
+        arguments = run.call_args.args[0]
+        self.assertEqual(arguments[0:2], ["bun", "run"])
+        self.assertEqual(Path(arguments[2]), freshness.RUNTIME_CATALOG_CLI.resolve())
+        self.assertEqual(arguments[3:], ["--freshness-catalog", str((self.root / freshness.RUNTIME_CATALOG).resolve())])
+        self.assertEqual(run.call_args.kwargs["cwd"], freshness.RUNTIME_CATALOG_CLI.resolve().parents[2])
+
+    def test_runtime_asset_cli_start_failure_is_fail_closed(self) -> None:
+        with patch.object(freshness.subprocess, "run", side_effect=OSError("bun unavailable")):
+            with self.assertRaisesRegex(ValueError, "AST CLI failed to start"):
+                freshness.runtime_assets(self.root)
+
+    def test_runtime_asset_cli_timeout_fails_closed(self) -> None:
+        with patch.object(
+            freshness.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["bun", "run"], timeout=120),
+        ):
+            result, _, stderr = self.run_check(self.clean_responses())
+        self.assertEqual(result, 1)
+        self.assertIn("failed closed", stderr)
+        self.assertIn("timed out", stderr)
+        self.assertNotIn("Traceback", stderr)
 
     def test_transport_failure_is_fail_closed(self) -> None:
         responses = self.clean_responses()

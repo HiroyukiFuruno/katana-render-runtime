@@ -3,12 +3,24 @@
   "files": {
     "includes": [
       "scripts/**/*.ts",
-      "crates/katana-diagram-renderer/src/markdown/diagram_runtime/source/**/*.ts",
+      "crates/katana-render-runtime/src/markdown/mermaid_renderer/**/*.js",
+      "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/*.js",
+      "crates/katana-render-runtime/src/markdown/mathjax_renderer/**/*.js",
+      "crates/katana-render-runtime/src/markdown/mathjax_renderer/js_runtime/host_mathjax.d.ts",
+      "crates/katana-render-runtime/src/renderer/backends/html_runtime/parser_body_onload.ts",
+      "crates/katana-render-runtime/src/renderer/backends/html_runtime/host_parser_onload.d.ts",
+      "scripts/quality/tsconfig-owned-*.json",
+      "crates/katana-render-runtime/tests/fixtures/html_browser/resources/action.js",
+      "scripts/runtime-bundles/runtime-css-variables.js",
+      "tests/fixtures/quality-cache/*.ts",
+      "crates/katana-render-runtime/src/markdown/diagram_runtime/source/**/*.ts",
       "crates/katana-render-runtime/src/renderer/backends/html_runtime/**/*.js",
-      "!crates/katana-diagram-renderer/src/markdown/diagram_runtime/generated",
-      "!crates/katana-diagram-renderer/vendor",
+      "!crates/katana-render-runtime/src/markdown/diagram_runtime/generated",
+      "!crates/katana-render-runtime/vendor",
       "!target",
-      "!tmp"
+      "!tmp",
+      "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime_native_width_trace_host.d.ts",
+      "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/browser_reference_host.d.ts"
     ]
   },
   "formatter": {
@@ -38,5 +50,17 @@
         "noExplicitAny": "error"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["scripts/html/playwright.config.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    }
+  ]
 }

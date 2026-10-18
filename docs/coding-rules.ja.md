@@ -178,7 +178,7 @@ fn process(&self, path: &Path) -> Result<Output, MyError> {
 
 ### 5.1 禁止型
 
-TypeScript の `any` / `unknown` / `Record<string, unknown>` に相当する以下の使用を禁止する:
+TypeScript の無制限な `any`、`as any`、Lint抑制を禁止する。`unknown` と `Record<string, unknown>` は、外部入力・JSON・compiler AST の境界で実行時検証により値を絞り込んでから内部へ渡す場合に使用できる。内部データには具体型を優先する。以下の Rust 相当型は、外部境界の契約上必要な場合を除き禁止する:
 
 | 禁止 | 理由 | 代替 |
 |------|------|------|

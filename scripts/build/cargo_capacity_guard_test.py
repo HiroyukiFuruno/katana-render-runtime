@@ -6,12 +6,14 @@ import hashlib
 import contextlib
 import io
 import json
+import logging
 import os
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -20,10 +22,15 @@ from collections.abc import Callable, Iterator, Sequence
 from types import SimpleNamespace
 from typing import IO, Literal, TextIO
 
+import cargo_capacity_guard as guard
+from cargo_capacity_guard_debug_object_ownership import PROGRESS_LOGGER_NAME
 from cargo_capacity_guard import inspect as inspect_capacity
 from cargo_capacity_guard import (
+    JsonObject,
+    run,
     record_cleanup_result,
     current_build_profiles,
+    validate_build_executable,
     load_state,
     resolve_target,
     runtime_incremental_prefixes,
@@ -46,6 +53,9 @@ from cargo_capacity_guard_lock import (
     evict_artifacts,
     is_successful_build,
 )
+from cargo_capacity_guard_build_script_ownership import BuildScriptOwnership
+from cargo_capacity_guard_library_alias_ownership import LibraryAliasOwnership
+from cargo_capacity_guard_selected_cache_ownership import SelectedCacheOwnership
 
 
 @contextlib.contextmanager
@@ -131,6 +141,99 @@ def incremental_session_lock_holder(
 
 
 class GuardTests(unittest.TestCase):
+    def test_library_alias_caller_is_exact_and_does_not_mutate_the_argv(self) -> None:
+        from cargo_capacity_guard import library_alias_cargo_command
+        build = ["cargo", "build", "-p", "katana-render-runtime-cli"]
+        for prefix in ([], ["rtk"], ["/absolute/rtk", "proxy"]):
+            words = prefix + build
+            original = words.copy()
+            self.assertEqual(library_alias_cargo_command(words), "cargo")
+            self.assertEqual(words, original)
+        for words in ([], ["fake", *build[1:]], build + ["--release"],
+                      ["cargo", "clean", "-p", "katana-render-runtime-cli"],
+                      ["cargo", "build", "-p", "kdr-linter"], ["rtk", "proxy", "proxy", *build]):
+            with self.subTest(words=words), self.assertRaisesRegex(RuntimeError, "caller"):
+                library_alias_cargo_command(words)
+
+    def test_build_executable_explicit_child_environment_overrides_parent_resolution(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            parent = root / "parent-bin"
+            child = root / "toolchain-bin"
+            parent.mkdir()
+            child.mkdir()
+            for path in (parent / "cargo", child / "cargo"):
+                path.write_text("#!/usr/bin/false\n")
+                path.chmod(0o700)
+            command = [str(child / "cargo"), "build", "-p", "katana-render-runtime-cli"]
+            with patch.dict(os.environ, {"PATH": str(parent)}, clear=True):
+                validate_build_executable(root, command, {"PATH": str(child)})
+                with self.assertRaisesRegex(RuntimeError, "differs from metadata"):
+                    validate_build_executable(root, command)
+                with self.assertRaisesRegex(RuntimeError, "differs from metadata"):
+                    validate_build_executable(root, command, {"PATH": str(parent)})
+
+    def test_native_disabled_preserves_child_arguments_environment_exit_and_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            target = root / "target"
+            target.mkdir()
+            state = root / "state.json"
+            state.write_text(json.dumps({"metric": "unique-inode-allocated-bytes", "metric_version": 1,
+                                         "baseline_bytes": 1, "factor": 2, "target": str(target)}))
+            before = state.read_bytes()
+            args = argparse.Namespace(target=str(target), target_dir=None, state=str(state), factor=2.0,
+                                      dry_run=False, print_json=False, command=["cargo", "--version"])
+            environment = {"PATH": "unchanged", "HOME": str(root), "CUSTOM_DISABLED": "preserved"}
+            with patch.dict(os.environ, environment, clear=True), \
+                    patch.dict(sys.modules, {"cargo_capacity_guard_native_cli_observation": None}), \
+                    patch("cargo_capacity_guard._root", return_value=root), \
+                    patch("cargo_capacity_guard.subprocess.run", return_value=subprocess.CompletedProcess(args.command, 17)) as child, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(run_guard(args), 17)
+            child.assert_called_once_with(args.command, cwd=root, env=environment, check=False)
+            self.assertEqual(state.read_bytes(), before)
+            self.assertFalse((root / "tmp/observation.json").exists())
+
+    def test_opt_in_metadata_queries_keep_fixed_deadline_and_fail_before_build(self) -> None:
+        for configured in (None, "target"):
+            with self.subTest(configured=configured), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                (root / "Cargo.toml").write_text("metadata query fixture")
+                target = root / "target"
+                target.mkdir()
+                value = None if configured is None else str(target)
+                with patch("cargo_capacity_guard.subprocess.run", side_effect=subprocess.TimeoutExpired("cargo metadata", 120)) as query:
+                    with self.assertRaisesRegex(RuntimeError, "metadata deadline exceeded"):
+                        resolve_target(root, value, metadata_timeout=120)
+                query.assert_called_once()
+                self.assertEqual(query.call_args.kwargs["timeout"], 120)
+                self.assertEqual(query.call_args.args[0][1], "metadata")
+
+    def test_native_invalid_request_rejects_before_any_cargo_probe(self) -> None:
+        for variation in ("missing-path", "missing-sha", "unknown-fields", "old-schema", "duplicate-json", "invalid-utf8"):
+            with self.subTest(variation=variation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                request = root / "tmp" / ("a" * 64) / "request.json"
+                request.parent.mkdir(parents=True)
+                raw = {"unknown-fields": b'{"schema":"krr-native-cli-guard-request-v1","unknown":1}',
+                       "old-schema": b'{"schema":"krr-native-cargo-observer-request-v2"}',
+                       "duplicate-json": b'{"schema":"x","schema":"x"}', "invalid-utf8": b"\xff"}.get(variation, b"{}")
+                request.write_bytes(raw)
+                environment = {"KRR_NATIVE_CLI_GUARD_REQUEST": str(request),
+                               "KRR_NATIVE_CLI_GUARD_REQUEST_SHA256": hashlib.sha256(raw).hexdigest()}
+                if variation == "missing-path":
+                    environment.pop("KRR_NATIVE_CLI_GUARD_REQUEST")
+                if variation == "missing-sha":
+                    environment.pop("KRR_NATIVE_CLI_GUARD_REQUEST_SHA256")
+                args = argparse.Namespace(command=["cargo", "build", "-p", "katana-render-runtime-cli"])
+                with patch.dict(os.environ, environment, clear=True), \
+                        patch("cargo_capacity_guard._root", return_value=root), \
+                        patch("cargo_capacity_guard.subprocess.run") as child:
+                    with self.assertRaises(RuntimeError):
+                        run_guard(args)
+                child.assert_not_called()
+
     def test_windows_guard_lock_preserves_native_modes_and_fd_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             lock = GuardLock(Path(directory) / "guard.lock")
@@ -265,6 +368,55 @@ class GuardTests(unittest.TestCase):
         (profile / "app").write_bytes(b"current-app")
         return target, profile, fp, artifact
 
+    def library_alias_fixture(
+        self, directory: str, verify: Callable[[], None],
+    ) -> tuple[Path, Path, LibraryAliasOwnership, list[Path], tuple[Path, ...]]:
+        target, profile, _fp, artifact = self.artifact_fixture(directory)
+        owner = profile / "incremental" / "fixture-abc"
+        session = owner / ("s-0000000001-0000001-" + "a" * 25)
+        session.mkdir(parents=True)
+        (owner / "s-0000000001-0000001.lock").write_bytes(b"")
+        metadata = session / "metadata.rmeta"
+        metadata.write_bytes(b"owned metadata" * 1024)
+        for name in ("dep-graph.bin", "query-cache.bin", "work-products.bin"):
+            (session / name).write_bytes((name.encode() + b"-") * 1024)
+        anchor = profile / "deps" / "libfixture-0123456789abcdef.rmeta"
+        os.link(metadata, anchor)
+        proof = LibraryAliasOwnership(
+            target.parent, target, frozenset({metadata}), frozenset({anchor}), verify,
+        )
+        protected = [profile / "app", artifact]
+        selected = (metadata, anchor, session / "dep-graph.bin", session / "query-cache.bin")
+        return target, profile, proof, protected, selected
+
+    def library_alias_evict(
+        self, target: Path, profile: Path, proof: LibraryAliasOwnership, protected: list[Path],
+        *, dry_run: bool = False, epoch: ProfileLocks | None = None, required_extra_bytes: int = 0,
+    ) -> tuple[int, EvictionReport]:
+        session = next(path for path in (profile / "incremental" / "fixture-abc").iterdir() if path.is_dir())
+        paths = [session / "metadata.rmeta", profile / "deps" / "libfixture-0123456789abcdef.rmeta",
+                 session / "dep-graph.bin", session / "query-cache.bin"]
+        inodes: set[tuple[int, int]] = set()
+        needed = 0
+        for path in paths:
+            value = path.stat()
+            key = value.st_dev, value.st_ino
+            if key not in inodes:
+                inodes.add(key)
+                needed += value.st_blocks * 512
+        current = self.measured_size(target)
+        if epoch is None:
+            with ProfileLocks(target, proof.verify) as held:
+                return self.library_alias_evict(
+                    target, profile, proof, protected, dry_run=dry_run, epoch=held,
+                    required_extra_bytes=required_extra_bytes,
+                )
+        return evict_artifacts(
+            target, current - needed - required_extra_bytes, current, dry_run, protected, epoch,
+            retained_profiles=[profile], selected_package_profiles=[profile],
+            library_alias_ownership=proof,
+        )
+
     def evict_fixture(
         self, target: Path, protected: tuple[Path, ...] | list[Path] = (), dry_run: bool = False,
     ) -> tuple[int, EvictionReport]:
@@ -278,6 +430,98 @@ class GuardTests(unittest.TestCase):
         if value is None:
             raise AssertionError("fixture target must have an available allocated-byte measurement")
         return value
+
+    @staticmethod
+    def swiftpm_alias_fixture(
+        target: Path,
+        package: str,
+        link_text: str = "out/Products/Release",
+        wrong_kind: bool = False,
+        wrong_output: bool = False,
+        coverage_subtarget: str | None = None,
+    ) -> tuple[Path, Path]:
+        cargo_root = target / coverage_subtarget if coverage_subtarget is not None else target
+        build = cargo_root / "debug" / "build" / f"{package}-0123456789abcdef"
+        swift_root = build / "out" / "swift-build"
+        product = swift_root / "out" / "Products" / "Release"
+        product.parent.mkdir(parents=True)
+        if wrong_kind:
+            product.write_bytes(b"not a directory")
+        else:
+            product.mkdir()
+            (product / "libBridge.a").write_bytes(b"swift library")
+        alias = swift_root / "release"
+        alias.symlink_to(link_text, target_is_directory=True)
+        marker = swift_root / ".buildSystem_release"
+        marker.write_bytes(b"swiftbuild")
+        (swift_root / "manifest.pif").write_bytes(b"pif")
+        (swift_root / "workspace-state.json").write_text(json.dumps({
+            "version": 7,
+            "object": {"artifacts": [], "dependencies": [], "prebuilts": []},
+        }))
+        library = {"apple-cf": "AppleCFBridge", "coretext-rs": "CoreTextBridge"}.get(
+            package, "AppleCFBridge",
+        )
+        canonical_alias = alias.parent.resolve() / alias.name
+        output = [f"cargo:rustc-link-search=native={canonical_alias}", f"cargo:rustc-link-lib=static={library}"]
+        if wrong_output:
+            output[0] = f"cargo:rustc-link-search=native={swift_root}"
+        (build / "output").write_text("\n".join(output) + "\n")
+        return alias, product
+
+    @unittest.skipIf(os.name == "nt", "allocated block metric unavailable on Windows")
+    def test_swiftpm_release_aliases_are_counted_without_following_them(self) -> None:
+        cases = ((package, coverage) for package in ("apple-cf", "coretext-rs")
+                 for coverage in (None, *sorted(guard.SWIFTPM_COVERAGE_TARGETS)))
+        for package, coverage in cases:
+            with self.subTest(package=package, coverage=coverage), tempfile.TemporaryDirectory() as directory:
+                target = Path(directory) / "target"
+                target.mkdir()
+                alias, product = self.swiftpm_alias_fixture(target, package, coverage_subtarget=coverage)
+                self.assertEqual(resolve_target(Path(directory), str(target)), target.resolve())
+                expected_inodes: set[tuple[int, int]] = set()
+                expected = 0
+                for path in target.rglob("*"):
+                    value = path.lstat()
+                    if stat.S_ISREG(value.st_mode) or path == alias:
+                        identity = (value.st_dev, value.st_ino)
+                        if identity not in expected_inodes:
+                            expected_inodes.add(identity)
+                            expected += value.st_blocks * 512
+                self.assertTrue(product.is_dir())
+                self.assertEqual(self.measured_size(target), expected)
+
+    @unittest.skipIf(os.name == "nt", "POSIX symlink rejection fixture")
+    def test_swiftpm_release_alias_rejects_unpinned_shapes_and_producers(self) -> None:
+        cases: tuple[tuple[str, str, bool, bool, str | None], ...] = (
+            ("apple-cf", "/tmp/release", False, False, None),
+            ("apple-cf", "../../../../../../outside", False, False, None),
+            ("apple-cf", "missing/Release", False, False, None),
+            ("apple-cf", "out/Products/Release", True, False, None),
+            ("unknown-crate", "out/Products/Release", False, False, None),
+            ("apple-cf", "out/Products/Release", False, True, None),
+            ("apple-cf", "out/Products/Release", False, False, "llvm-cov-unknown"),
+        )
+        for package, link_text, wrong_kind, wrong_output, coverage in cases:
+            with self.subTest(package=package, link_text=link_text, wrong_kind=wrong_kind,
+                              wrong_output=wrong_output, coverage=coverage), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                target = root / "target"
+                target.mkdir()
+                if link_text == "../../../../../../outside":
+                    outside = root / "outside"
+                    outside.mkdir()
+                    alias_parent = target / "debug" / "build" / f"{package}-0123456789abcdef" / "out" / "swift-build"
+                    self.assertNotIn(outside.resolve(), target.resolve().parents)
+                    with self.assertRaises(ValueError):
+                        (alias_parent / link_text).resolve().relative_to(target.resolve())
+                alias, _product = self.swiftpm_alias_fixture(
+                    target, package, link_text, wrong_kind, wrong_output, coverage,
+                )
+                self.assertIsNone(guard._swiftpm_release_alias_stat(alias, target))
+                with self.assertRaisesRegex(RuntimeError, "refusing symlink"):
+                    resolve_target(root, str(target))
+                self.assertIsNotNone(size_bytes(target))
 
     @unittest.skipIf(os.name == "nt", "POSIX native no-follow eviction fixture")
     def test_missing_protection_input_blocks_eviction(self) -> None:
@@ -303,6 +547,256 @@ class GuardTests(unittest.TestCase):
             self.assertEqual(report["candidate_paths"], report["staged_paths"])
 
     @unittest.skipIf(os.name == "nt", "POSIX native no-follow eviction fixture")
+    def test_source_drift_after_last_artifact_stage_rejects_purge(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target, _profile, _fp, _artifact = self.artifact_fixture(directory)
+            marker = target.parent / "source.marker"
+            marker.write_text("stable\n")
+
+            def verify_source() -> None:
+                if marker.read_text() != "stable\n":
+                    raise RuntimeError("source inputs changed after artifact staging")
+
+            original_rename = os.rename
+            staged_artifacts = 0
+
+            def rename_and_drift(
+                source: str | os.PathLike[str], destination: str | os.PathLike[str], *,
+                src_dir_fd: int | None = None, dst_dir_fd: int | None = None,
+            ) -> None:
+                nonlocal staged_artifacts
+                original_rename(source, destination, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+                if str(destination).startswith(".capacity-artifact-"):
+                    staged_artifacts += 1
+                    marker.write_text("changed after last artifact staging\n")
+
+            current = self.measured_size(target)
+            with patch("cargo_capacity_guard_lock.os.rename", side_effect=rename_and_drift), \
+                    ProfileLocks(target, verify_source) as epoch:
+                code, report = evict_artifacts(
+                    target, current - 1, current, False, [target / "debug/app"], epoch,
+                )
+            self.assertEqual(code, 1, report)
+            self.assertIn("source inputs changed after artifact staging", report.get("error", ""))
+            self.assertEqual(staged_artifacts, 1)
+            self.assertEqual(report["deleted_files"], 0)
+            self.assertTrue(report["staged_paths"])
+
+    def test_profile_lock_verify_calls_input_once_and_propagates_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory).resolve() / "target"
+            target.mkdir()
+            calls: list[str] = []
+            def check() -> None:
+                calls.append("check")
+            with ProfileLocks(target, check) as epoch:
+                epoch.verify()
+            self.assertEqual(calls, ["check"])
+            def fail() -> None:
+                calls.append("failure")
+                raise RuntimeError("bound input failed")
+            with ProfileLocks(target, fail) as epoch, self.assertRaisesRegex(RuntimeError, "bound input failed"):
+                epoch.verify()
+            self.assertEqual(calls, ["check", "failure"])
+
+    @unittest.skipIf(os.name == "nt", "POSIX library alias callback fixture")
+    def test_bound_library_alias_cleanup_runs_one_complete_check_per_roots_and_preserves_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            complete_calls: list[int] = []
+            root_check_pending = False
+            root_callback_calls: list[int] = []
+            def verify() -> None:
+                nonlocal root_check_pending
+                complete_calls.append(len(complete_calls) + 1)
+                if root_check_pending:
+                    root_check_pending = False
+                    root_callback_calls.append(len(root_callback_calls) + 1)
+            target, profile, proof, protected, selected = self.library_alias_fixture(directory, verify)
+            identity_calls: list[int] = []
+            original = ProfileLocks._verify_identities
+            def track_identity(epoch: ProfileLocks) -> None:
+                nonlocal root_check_pending
+                identity_calls.append(len(identity_calls) + 1)
+                original(epoch)
+                root_check_pending = True
+            before = self.file_tree_bytes(target)
+            with patch.object(ProfileLocks, "_verify_identities", track_identity):
+                code, report = self.library_alias_evict(target, profile, proof, protected)
+            self.assertEqual(code, 0, report)
+            self.assertGreater(len(identity_calls), 0)
+            self.assertEqual(len(identity_calls), len(root_callback_calls) * 2)
+            self.assertGreater(len(complete_calls), len(root_callback_calls))
+            self.assertEqual(report["deleted_files"], 4)
+            for path in selected:
+                self.assertFalse(path.exists())
+            self.assertTrue((profile / "incremental/fixture-abc").is_dir())
+            self.assertTrue((profile / "incremental/fixture-abc" / next(
+                child.name for child in (profile / "incremental/fixture-abc").iterdir() if child.is_dir()
+            ) / "work-products.bin").exists())
+            self.assertTrue((profile / ".fingerprint/fixture-1111111111111111/lib-fixture").exists())
+            for path in protected:
+                self.assertEqual(path.read_bytes(), before[path.relative_to(target).as_posix()])
+
+    @unittest.skipIf(os.name == "nt", "POSIX library alias partial cleanup fixture")
+    def test_verified_alias_units_allow_partial_cleanup_but_do_not_admit_child(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target, profile, proof, protected, selected = self.library_alias_fixture(directory, lambda: None)
+            (profile / "app").write_bytes(b"protected output" * 65536)
+            before = self.measured_size(target)
+            protected_bytes = {path: path.read_bytes() for path in protected}
+            fingerprint_bytes = sum(path.stat().st_blocks * 512 for path in (profile / ".fingerprint").rglob("*")
+                                    if path.is_file())
+            code, finite = self.library_alias_evict(
+                target, profile, proof, protected, required_extra_bytes=fingerprint_bytes + 512,
+            )
+            self.assertEqual(code, 0, finite)
+            self.assertGreater(finite["estimated_candidate_bytes"], 0)
+            self.assertEqual(before - self.measured_size(target), finite["estimated_candidate_bytes"])
+            self.assertTrue(all(not path.exists() for path in selected))
+            self.assertTrue(all(path.read_bytes() == content for path, content in protected_bytes.items()))
+            maximum = before - finite["estimated_candidate_bytes"] - fingerprint_bytes - 512
+            report: JsonObject = {
+                "metric_available": True,
+                "current_bytes": before, "threshold_bytes": self.measured_size(target) + 1,
+                "active_sweep_maxsize_bytes": maximum, "cleanup_attempts": [],
+                "finite_cleanup": finite,
+            }
+            guard.record_cleanup_result(report, target, 0, json.dumps(finite), False)
+            self.assertEqual(report["cleanup_status"], "incomplete")
+            self.assertFalse(report["cleanup_goal_reached"])
+            self.assertFalse(report["remaining_over_capacity"])
+            self.assertTrue(guard._safe_incomplete_cleanup_below_hardcap(report))
+
+            result, workers, _goal, still_protected, alias_modes = self._run_incomplete_admission_mode("library-alias")
+            self.assertEqual((result, workers), (1, 0))
+            self.assertEqual(still_protected, b"protected")
+            self.assertEqual(alias_modes, (False, False))
+
+    @unittest.skipIf(os.name == "nt", "POSIX library alias ownership fixture")
+    def test_empty_verified_alias_selection_still_rejects_insufficient_goal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target, profile, proof, protected, selected = self.library_alias_fixture(directory, lambda: None)
+            code, report = self.library_alias_evict(target, profile, proof, [*protected, selected[0]], dry_run=True)
+            self.assertEqual(code, 1, report)
+            self.assertIn("insufficient closed inactive artifact capacity", report["error"])
+            self.assertEqual(report["estimated_candidate_bytes"], 0)
+            self.assertTrue(all(path.exists() for path in selected))
+
+    @unittest.skipIf(os.name == "nt", "POSIX library alias callback fixture")
+    def test_bound_library_alias_final_checks_fail_before_unlink(self) -> None:
+        for mutation in ("callback", "native-lock", "session-drift"):
+            with self.subTest(mutation=mutation):
+                self._assert_bound_library_alias_final_check_fails(mutation)
+
+    def _assert_bound_library_alias_final_check_fails(self, mutation: Literal["callback", "native-lock", "session-drift"]) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root_check_pending = False
+            root_callback_calls = 0
+            target = Path(directory).resolve() / "target"
+            session = target / "debug/incremental/fixture-abc" / ("s-0000000001-0000001-" + "a" * 25)
+            metadata = session / "metadata.rmeta"
+            expected: tuple[int, int, int] = (0, 0, 0)
+            def verify() -> None:
+                nonlocal root_check_pending, root_callback_calls
+                if not root_check_pending:
+                    return
+                root_check_pending = False
+                root_callback_calls += 1
+                if root_callback_calls != 1:
+                    return
+                if mutation == "callback":
+                    raise RuntimeError("late complete callback failed")
+                if mutation == "native-lock":
+                    lock = target / ".cargo-lock"
+                    lock.unlink()
+                    lock.write_bytes(b"replacement lock")
+                else:
+                    metadata.write_bytes(b"mutated session metadata")
+                    value = metadata.stat()
+                    if (value.st_ino, value.st_size, value.st_mtime_ns) != expected:
+                        raise RuntimeError("session input drift")
+            original_identity = ProfileLocks._verify_identities
+            def track_identity(epoch: ProfileLocks) -> None:
+                nonlocal root_check_pending
+                original_identity(epoch)
+                root_check_pending = True
+            target, profile, proof, protected, selected = self.library_alias_fixture(directory, verify)
+            self.assertEqual(selected[0], metadata)
+            value = metadata.stat()
+            expected = value.st_ino, value.st_size, value.st_mtime_ns
+            before = self.file_tree_identity_bytes(target)
+            with patch.object(ProfileLocks, "_verify_identities", track_identity):
+                code, report = self.library_alias_evict(
+                    target, profile, proof, protected, dry_run=mutation == "native-lock",
+                )
+            self.assertEqual(code, 1, report)
+            self.assertEqual(report["deleted_files"], 0)
+            if mutation == "native-lock":
+                self.assertIn("native lock identity changed", report["error"])
+            elif mutation == "session-drift":
+                self.assertIn("session input drift", report["error"])
+            else:
+                self.assertIn("late complete callback failed", report["error"])
+            self.assertEqual(root_callback_calls, 1)
+            self.assertTrue(all(path.exists() for path in selected))
+            after = self.file_tree_identity_bytes(target)
+            if mutation == "callback":
+                self.assertEqual(after, before)
+            elif mutation == "native-lock":
+                for path in selected:
+                    relative = path.relative_to(target).as_posix()
+                    self.assertEqual(after[relative], before[relative])
+                self.assertEqual((target / ".cargo-lock").read_bytes(), b"replacement lock")
+                self.assertEqual({name: value for name, value in after.items() if name != ".cargo-lock"},
+                                 {name: value for name, value in before.items() if name != ".cargo-lock"})
+            else:
+                changed = b"mutated session metadata"
+                expected_after = dict(before)
+                for path in selected[:2]:
+                    relative = path.relative_to(target).as_posix()
+                    device, _inode, _size, _content = expected_after[relative]
+                    current = path.stat()
+                    expected_after[relative] = (device, current.st_ino, current.st_size, changed)
+                self.assertEqual(after, expected_after)
+
+    @unittest.skipIf(os.name == "nt", "POSIX native no-follow eviction fixture")
+    def test_generic_cleanup_keeps_callback_per_root_and_rejects_wrapped_alias_checker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target, profile, _fp, _artifact, _cache, _object = self.incremental_fixture(directory)
+            calls: list[int] = []
+            def verify() -> None:
+                calls.append(len(calls) + 1)
+            identity_calls: list[int] = []
+            original = ProfileLocks._verify_identities
+            def track_identity(epoch: ProfileLocks) -> None:
+                identity_calls.append(len(identity_calls) + 1)
+                original(epoch)
+            current = self.measured_size(target)
+            with patch.object(ProfileLocks, "_verify_identities", track_identity):
+                with ProfileLocks(target, verify) as epoch:
+                    code, report = evict_artifacts(
+                        target, current - 1, current, True, [profile / "app"], epoch,
+                        incremental_prefixes=["fixture-"],
+                    )
+            self.assertEqual(code, 0, report)
+            self.assertGreater(len(identity_calls), 0)
+            self.assertEqual(len(calls), len(identity_calls))
+            self.assertEqual(report["deleted_files"], 0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            def check() -> None:
+                return None
+            target, profile, proof, protected, selected = self.library_alias_fixture(directory, check)
+            def wrapped() -> None:
+                check()
+            with ProfileLocks(target, wrapped) as epoch:
+                code, report = self.library_alias_evict(target, profile, proof, protected, epoch=epoch)
+            self.assertEqual(code, 1, report)
+            self.assertIn("library alias cleanup requires bound classifiers", report["error"])
+            self.assertEqual(report["deleted_files"], 0)
+            self.assertTrue(all(path.exists() for path in selected))
+
+    @unittest.skipIf(os.name == "nt", "POSIX native no-follow eviction fixture")
     def test_unknown_alias_and_explicit_protected_inode_are_retained(self) -> None:
         for explicit in (False, True):
             with self.subTest(explicit=explicit), tempfile.TemporaryDirectory() as directory:
@@ -319,6 +813,75 @@ class GuardTests(unittest.TestCase):
                     "retained_protected_inodes" if explicit else "retained_unknown_alias_inodes"
                 )
                 self.assertEqual(report[reason], 1)
+                diagnostics = report["retained_unknown_alias_diagnostics"]
+                if explicit:
+                    self.assertEqual(diagnostics, [])
+                else:
+                    self.assertEqual(len(diagnostics), 1)
+                    self.assertEqual(diagnostics[0]["st_nlink"], 2)
+                    self.assertEqual(diagnostics[0]["candidate_row_count"], 1)
+                    self.assertEqual(diagnostics[0]["unique_path_count"], 1)
+                    self.assertEqual(diagnostics[0]["paths"], [str(artifact.relative_to(target))])
+
+    @unittest.skipIf(os.name == "nt", "POSIX native no-follow eviction fixture")
+    def test_unknown_alias_diagnostic_distinguishes_duplicate_candidate_path_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target, profile, fp, artifact = self.artifact_fixture(directory)
+            native_listdir = os.listdir
+            deps_identity = (artifact.parent.stat().st_dev, artifact.parent.stat().st_ino)
+
+            def duplicate_deps_listing(path: str | bytes | os.PathLike[str] | int) -> list[str] | list[bytes]:
+                names = native_listdir(path)
+                if isinstance(path, int):
+                    value = os.fstat(path)
+                    if (value.st_dev, value.st_ino) == deps_identity:
+                        return [*names, *([artifact.name] * 5)]
+                return names
+
+            with patch("cargo_capacity_guard_lock.os.listdir", side_effect=duplicate_deps_listing):
+                code, report = self.evict_fixture(target)
+
+            self.assertEqual(code, 0, report)
+            self.assertEqual(report["retained_unknown_alias_inodes"], 1)
+            diagnostic = report["retained_unknown_alias_diagnostics"][0]
+            self.assertEqual(diagnostic["st_nlink"], 1)
+            self.assertEqual(diagnostic["candidate_row_count"], 6)
+            self.assertEqual(diagnostic["unique_path_count"], 1)
+            self.assertEqual(diagnostic["paths"], [str(artifact.relative_to(target))] * 5)
+            self.assertLessEqual(len(diagnostic["paths"]), 5)
+            self.assertTrue(artifact.exists())
+            self.assertTrue(fp.exists())
+            self.assertEqual(report["deleted_files"], 0)
+
+    @unittest.skipIf(os.name == "nt", "POSIX native no-follow eviction fixture")
+    def test_unknown_alias_diagnostic_is_limited_to_first_five_inode_groups(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target, profile, fp, first = self.artifact_fixture(directory)
+            artifacts = [first]
+            first_alias = Path(directory) / "consumer-first"
+            os.link(first, first_alias)
+            outside_aliases = [first_alias]
+            for index in range(6):
+                artifact = profile / "deps" / f"libextra-{index:016x}.rlib"
+                artifact.write_bytes(b"extra")
+                outside = Path(directory) / f"consumer-{index}"
+                os.link(artifact, outside)
+                artifacts.append(artifact)
+                outside_aliases.append(outside)
+
+            code, report = self.evict_fixture(target)
+
+            self.assertEqual(code, 0, report)
+            self.assertEqual(report["retained_unknown_alias_inodes"], 7)
+            diagnostics = report["retained_unknown_alias_diagnostics"]
+            self.assertEqual(len(diagnostics), 5)
+            self.assertTrue(all(len(item["paths"]) <= 5 for item in diagnostics))
+            self.assertTrue(all(item["candidate_row_count"] == 1 for item in diagnostics))
+            self.assertTrue(all(item["unique_path_count"] == 1 for item in diagnostics))
+            self.assertTrue(all(artifact.exists() for artifact in artifacts))
+            self.assertTrue(all(alias.exists() for alias in outside_aliases))
+            self.assertTrue(fp.exists())
+            self.assertEqual(report["deleted_files"], 0)
 
     @unittest.skipIf(os.name == "nt", "POSIX native no-follow eviction fixture")
     def test_closed_hardlink_set_is_evicted_once_in_allocated_metric(self) -> None:
@@ -660,6 +1223,29 @@ class GuardTests(unittest.TestCase):
             self.assertFalse(marker.exists())
             self.assertTrue((profile / "app").exists())
 
+    def test_cleanup_error_precedes_dry_run_metric_and_goal_statuses(self) -> None:
+        for dry_run, post_clean, maximum in (
+            (True, 10, 1),
+            (False, 10, 1),
+            (False, None, 1),
+        ):
+            with self.subTest(dry_run=dry_run, post_clean=post_clean, maximum=maximum), \
+                    tempfile.TemporaryDirectory() as directory:
+                target = Path(directory) / "target"
+                target.mkdir()
+                report: dict[str, object] = {
+                    "current_bytes": 10,
+                    "threshold_bytes": 5,
+                    "active_sweep_maxsize_bytes": maximum,
+                    "finite_cleanup": {"error": "preserved eviction failure"},
+                }
+                with patch("cargo_capacity_guard.size_bytes", return_value=post_clean):
+                    record_cleanup_result(report, target, 1, "raw eviction failure", dry_run)
+                self.assertEqual(report["cleanup_status"], "failed")
+                self.assertFalse(report["cleanup_goal_reached"])
+                self.assertTrue(report["remaining_over_capacity"])
+                self.assertEqual(report["finite_cleanup"], {"error": "preserved eviction failure"})
+
     def test_windows_inspection_unavailable_skips_native_cleanup_and_command(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -704,6 +1290,376 @@ class GuardTests(unittest.TestCase):
             self.assertIsNone(report["baseline_bytes"])
             self.assertEqual(artifact.read_bytes(), b"existing build")
 
+    def test_require_capacity_preserves_empty_bootstrap_but_rejects_nonempty_uncalibrated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.mkdir()
+            protected = root / "protected.bin"
+            protected.write_bytes(b"protected")
+            state = root / "tmp/.cargo-capacity-guard.json"
+            environment = dict(os.environ, CARGO_CAPACITY_PROTECTED_REFS=json.dumps([str(protected)]))
+            empty = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve().parent / "cargo_capacity_guard.py"),
+                 "--root", str(root), "--target", str(target), "--state", str(state),
+                 "--require-capacity", "--print-json"],
+                cwd=root, env=environment, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(empty.returncode, 0, empty.stderr)
+            self.assertEqual(json.loads(empty.stdout)["cleanup_status"], "uncalibrated")
+            artifact = target / "existing"
+            artifact.write_bytes(b"existing build")
+            nonempty = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve().parent / "cargo_capacity_guard.py"),
+                 "--root", str(root), "--target", str(target), "--state", str(state),
+                 "--require-capacity", "--print-json"],
+                cwd=root, env=environment, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(nonempty.returncode, 1)
+            self.assertEqual(json.loads(nonempty.stdout)["cleanup_status"], "uncalibrated")
+            self.assertEqual(artifact.read_bytes(), b"existing build")
+
+    def require_capacity_fixture(
+        self, directory: str, *, over_capacity: bool = False,
+        protected: Sequence[Path] = (),
+    ) -> tuple[Path, Path, Path, argparse.Namespace]:
+        root = Path(directory).resolve()
+        target = root / "target"
+        target.mkdir()
+        if over_capacity:
+            (target / "over-capacity").write_bytes(b"x" * 8192)
+        state = root / "tmp/.cargo-capacity-guard.json"
+        state.parent.mkdir()
+        state.write_text(json.dumps({
+            "baseline_bytes": 1,
+            "metric": "unique-inode-allocated-bytes",
+            "metric_version": 1,
+            "target": str(target),
+        }))
+        args = argparse.Namespace(
+            target=str(target), target_dir=None, state=str(state), factor=2.0,
+            dry_run=False, print_json=True, protected_ref=[str(path) for path in protected],
+            require_capacity=True, command=[],
+        )
+        return root, target, state, args
+
+    def test_capacity_admission_threshold_still_controls_cleanup_trigger(self) -> None:
+        for current in (199, 200):
+            with self.subTest(current=current), tempfile.TemporaryDirectory() as directory:
+                root, target, state, args = self.require_capacity_fixture(directory)
+                state.write_text(json.dumps({
+                    "baseline_bytes": 100,
+                    "metric": "unique-inode-allocated-bytes",
+                    "metric_version": 1,
+                    "target": str(target),
+                }))
+                state_before = state.read_bytes()
+                output = io.StringIO()
+                with patch("cargo_capacity_guard._root", return_value=root), \
+                     patch("cargo_capacity_guard.size_bytes", return_value=current), \
+                     patch("cargo_capacity_guard.evict_artifacts") as evict, \
+                     contextlib.redirect_stdout(output):
+                    result = run_guard(args)
+                report = json.loads(output.getvalue())
+                self.assertEqual(result, 0, report)
+                self.assertEqual(report["threshold_bytes"], 200)
+                self.assertFalse(report["over_capacity"])
+                self.assertEqual(report["cleanup_status"], "not-needed")
+                self.assertEqual(state.read_bytes(), state_before)
+                evict.assert_not_called()
+
+    def test_fixed_capacity_boundary_keeps_threshold_and_low_water_goal(self) -> None:
+        baseline = 2_363_047_936
+        threshold = 4_726_095_872
+        for current, expected_goal, expected_status in (
+            (threshold, None, "not-needed"),
+            (threshold + 1, baseline, "completed"),
+        ):
+            with self.subTest(current=current), tempfile.TemporaryDirectory() as directory:
+                root, target, state, args = self.require_capacity_fixture(directory)
+                protected = root / "protected.bin"
+                protected.write_bytes(b"protected")
+                args.protected_ref = [str(protected)]
+                state.write_text(json.dumps({
+                    "baseline_bytes": baseline,
+                    "metric": "unique-inode-allocated-bytes",
+                    "metric_version": 1,
+                    "target": str(target),
+                }))
+                output = io.StringIO()
+                sizes = [current] if expected_goal is None else [current, baseline]
+                with patch("cargo_capacity_guard._root", return_value=root), \
+                     patch("cargo_capacity_guard.size_bytes", side_effect=sizes), \
+                     patch("cargo_capacity_guard.busy_processes", return_value=[]), \
+                     patch("cargo_capacity_guard.evict_artifacts", return_value=(0, {})) as evict, \
+                     contextlib.redirect_stdout(output):
+                    result = run_guard(args)
+                report = json.loads(output.getvalue())
+                self.assertEqual(result, 0, report)
+                self.assertEqual(report["threshold_bytes"], threshold)
+                self.assertEqual(report["cleanup_status"], expected_status)
+                self.assertEqual(report.get("cleanup_goal_bytes"), expected_goal)
+                self.assertFalse(report["remaining_over_capacity"])
+                if expected_goal is None:
+                    evict.assert_not_called()
+                else:
+                    self.assertEqual(evict.call_args.args[1], baseline)
+                self.assertEqual(protected.read_bytes(), b"protected")
+
+    def test_over_capacity_cleanup_uses_baseline_goal_and_reports_shortfall(self) -> None:
+        for post_clean, expected_status, expected_result, reached in (
+            (100, "completed", 0, True),
+            (150, "incomplete", 0, False),
+        ):
+            with self.subTest(post_clean=post_clean), tempfile.TemporaryDirectory() as directory:
+                root, target, state, args = self.require_capacity_fixture(directory)
+                protected = root / "protected.bin"
+                protected.write_bytes(b"protected")
+                args.protected_ref = [str(protected)]
+                state.write_text(json.dumps({
+                    "baseline_bytes": 100,
+                    "metric": "unique-inode-allocated-bytes",
+                    "metric_version": 1,
+                    "target": str(target),
+                }))
+                state_before = state.read_bytes()
+                output = io.StringIO()
+                with patch("cargo_capacity_guard._root", return_value=root), \
+                     patch("cargo_capacity_guard.size_bytes", side_effect=[300, post_clean]), \
+                     patch("cargo_capacity_guard.busy_processes", return_value=[]), \
+                     patch("cargo_capacity_guard.evict_artifacts", return_value=(0, {})) as evict, \
+                     contextlib.redirect_stdout(output):
+                    result = run_guard(args)
+                report = json.loads(output.getvalue())
+                self.assertEqual(result, expected_result, report)
+                self.assertEqual(report["threshold_bytes"], 200)
+                self.assertTrue(report["over_capacity"])
+                self.assertEqual(report["cleanup_goal_bytes"], 100)
+                self.assertIs(report["cleanup_goal_reached"], reached)
+                self.assertEqual(report["remaining_over_capacity"], post_clean > 200)
+                self.assertEqual(report["cleanup_status"], expected_status)
+                self.assertEqual(evict.call_args.args[1], 100)
+                self.assertIn(str(protected), evict.call_args.args[4])
+                self.assertEqual(state.read_bytes(), state_before)
+                self.assertEqual(protected.read_bytes(), b"protected")
+
+    def test_incomplete_below_hardcap_predicate_rejects_unsafe_cleanup(self) -> None:
+        report: JsonObject = {
+            "cleanup_status": "incomplete", "cleanup_goal_reached": False, "clean_exitcode": 0,
+            "metric_available": True, "threshold_bytes": 200, "post_clean_bytes": 150,
+            "remaining_over_capacity": False,
+            "cleanup_attempts": [{"exit_code": 0, "dry_run": False, "post_clean_bytes": 150}],
+            "finite_cleanup": {},
+        }
+        self.assertTrue(guard._safe_incomplete_cleanup_below_hardcap(report))
+        for field, value in (
+            ("clean_exitcode", 1), ("clean_exitcode", False), ("metric_available", False),
+            ("post_clean_bytes", 201),
+            ("post_clean_bytes", None), ("remaining_over_capacity", True),
+            ("cleanup_attempts", [{"exit_code": False, "dry_run": False, "post_clean_bytes": 150}]),
+            ("cleanup_attempts", [{"exit_code": 0, "dry_run": False, "post_clean_bytes": 149}]),
+            ("finite_cleanup", {"error": "source drift"}),
+        ):
+            with self.subTest(field=field, value=value):
+                changed = dict(report, **{field: value})
+                self.assertFalse(guard._safe_incomplete_cleanup_below_hardcap(changed))
+
+    @staticmethod
+    def _incomplete_admission_report(target: Path) -> JsonObject:
+        return {
+            "target": str(target), "metric": "unique-inode-allocated-bytes", "metric_version": 1,
+            "metric_available": True, "baseline_bytes": 100, "current_bytes": 300,
+            "factor": 2.0, "threshold_bytes": 200, "over_capacity": True,
+        }
+
+    def _admission_mode_fixture(self, directory: str) -> tuple[Path, Path, Path, Path]:
+        root = Path(directory).resolve()
+        target = root / "target"
+        target.mkdir()
+        state = root / "tmp/.cargo-capacity-guard.json"
+        state.parent.mkdir(parents=True)
+        state.write_text(json.dumps({
+            "baseline_bytes": 100, "factor": 2.0, "target": str(target),
+            "metric": "unique-inode-allocated-bytes", "metric_version": 1,
+        }))
+        protected = root / "protected.bin"
+        protected.write_bytes(b"protected")
+        return root, target, state, protected
+
+    def _run_incomplete_admission_mode(
+        self, mode: Literal["root-check", "native", "retained", "library-alias",
+                            "library-alias-metadata-only", "library-alias-archives-only"],
+    ) -> tuple[int, int, int | None, bytes, tuple[bool, bool] | None]:
+        with tempfile.TemporaryDirectory() as directory:
+            root, target, state, protected = self._admission_mode_fixture(directory)
+            profile = target / "debug"
+            profile.mkdir()
+            native = mode == "native"
+            retained = mode in {"native", "retained", "library-alias", "library-alias-metadata-only",
+                                "library-alias-archives-only"}
+            alias_enabled = mode in {"library-alias", "library-alias-metadata-only", "library-alias-archives-only"}
+            metadata_only = mode == "library-alias-metadata-only"
+            archives_only = mode == "library-alias-archives-only"
+            command = (["owned-root-check-child"] if mode == "root-check"
+                       else ["cargo", "build", "-p", "katana-render-runtime-cli"] if alias_enabled
+                       else ["cargo", "build"])
+            args = argparse.Namespace(
+                target=str(target), target_dir=None, state=str(state), factor=2.0,
+                dry_run=False, print_json=True, protected_ref=[str(protected)],
+                retain_profile=[], retain_build_profile="debug" if retained else None,
+                coverage_domain=None, check_domain="root" if mode == "root-check" else None,
+                expected_state_sha256=None, command=command, library_alias_cache=alias_enabled,
+                library_alias_cache_metadata_only=metadata_only,
+                library_alias_cache_archives_only=archives_only,
+            )
+            metadata = {"target_directory": str(target), "build_directory": str(target)}
+            admission = SimpleNamespace(state=state, state_sha256=None, protected=[str(protected)])
+            alias = LibraryAliasOwnership(root, target, frozenset(), frozenset(), lambda: None)
+            child: subprocess.CompletedProcess[object] = subprocess.CompletedProcess(command, 0)
+            classifier_modes: list[tuple[bool, bool]] = []
+
+            def classify_alias(*_args: object, **kwargs: object) -> LibraryAliasOwnership:
+                classifier_modes.append((bool(kwargs["metadata_only"]), bool(kwargs["archives_only"])))
+                return alias
+
+            def resolve(*values: object, **_options: object) -> Path:
+                if mode == "root-check" and isinstance(values[4], dict):
+                    values[4].update(metadata)
+                return target
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(patch("cargo_capacity_guard._root", return_value=root))
+                stack.enter_context(patch("cargo_capacity_guard.resolve_target", side_effect=resolve))
+                stack.enter_context(patch("cargo_capacity_guard.inspect",
+                                         return_value=self._incomplete_admission_report(target)))
+                stack.enter_context(patch("cargo_capacity_guard.busy_processes", return_value=[]))
+                stack.enter_context(patch("cargo_capacity_guard.size_bytes", return_value=150))
+                evict = stack.enter_context(patch("cargo_capacity_guard.evict_artifacts",
+                                                  return_value=(0, {"scope": "test"})))
+                worker = stack.enter_context(patch("cargo_capacity_guard.subprocess.run", return_value=child))
+                environment = ({"KRR_NATIVE_CLI_GUARD_REQUEST": "request.json",
+                                "KRR_NATIVE_CLI_GUARD_REQUEST_SHA256": "request-sha"}
+                               if native else {"RUSTFLAGS": "-D warnings"} if alias_enabled else {})
+                stack.enter_context(patch.dict(os.environ, environment, clear=True))
+                if mode == "root-check":
+                    stack.enter_context(patch("cargo_capacity_guard.check_domain_selection",
+                                              return_value=(metadata, lambda: None)))
+                if retained:
+                    stack.enter_context(patch("cargo_capacity_guard.validate_build_profile"))
+                    stack.enter_context(patch("cargo_capacity_guard.validate_build_selection"))
+                    stack.enter_context(patch("cargo_capacity_guard.validate_build_executable"))
+                    stack.enter_context(patch("cargo_capacity_guard.current_build_profiles",
+                                              return_value=(profile,)))
+                    stack.enter_context(patch("cargo_capacity_guard.selected_package_cleanup",
+                                              return_value=([], None)))
+                if native:
+                    stack.enter_context(patch("cargo_capacity_guard_native_cli_observation.validate_request",
+                                              return_value=admission))
+                    stack.enter_context(patch("cargo_capacity_guard_native_cli_observation.validate_capacity_report"))
+                if alias_enabled:
+                    stack.enter_context(patch("cargo_capacity_guard.shutil.which", return_value="/usr/bin/cargo"))
+                    stack.enter_context(patch("cargo_capacity_guard.create_library_alias_ownership",
+                                              side_effect=classify_alias))
+                with contextlib.redirect_stdout(io.StringIO()):
+                    result = run_guard(args)
+            evict_goal = evict.call_args.args[1] if evict.call_args else None
+            classifier_mode = classifier_modes[0] if classifier_modes else None
+            return result, worker.call_count, evict_goal, protected.read_bytes(), classifier_mode
+
+    def test_incomplete_admission_mode_matrix(self) -> None:
+        cases: tuple[tuple[Literal["root-check", "native", "retained", "library-alias",
+                                  "library-alias-metadata-only", "library-alias-archives-only"], int, int,
+                           int | None, tuple[bool, bool] | None], ...] = (
+            ("root-check", 0, 1, 100, None), ("native", 1, 0, 100, None),
+            ("retained", 1, 0, 100, None), ("library-alias", 1, 0, 100, (False, False)),
+            ("library-alias-metadata-only", 1, 0, 100, (True, False)),
+            ("library-alias-archives-only", 1, 0, 100, (False, True)),
+        )
+        for mode, expected_result, expected_workers, expected_goal, expected_modes in cases:
+            with self.subTest(mode=mode):
+                result, workers, goal, protected, alias_modes = self._run_incomplete_admission_mode(mode)
+                self.assertEqual(result, expected_result)
+                self.assertEqual(workers, expected_workers)
+                self.assertEqual(goal, expected_goal)
+                self.assertEqual(protected, b"protected")
+                self.assertEqual(alias_modes, expected_modes)
+
+    def test_require_capacity_rejects_busy_over_capacity_without_child(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            protected = root / "protected.bin"
+            protected.write_bytes(b"protected")
+            root, target, _state, args = self.require_capacity_fixture(
+                directory, over_capacity=True, protected=(protected,),
+            )
+            output = io.StringIO()
+            with patch("cargo_capacity_guard._root", return_value=root), \
+                 patch("cargo_capacity_guard.busy_processes", return_value=["busy"]), \
+                 contextlib.redirect_stdout(output):
+                result = run_guard(args)
+            self.assertEqual(result, 1)
+            self.assertEqual(json.loads(output.getvalue())["clean_skipped"], "busy")
+
+    def test_require_capacity_rejects_child_command(self) -> None:
+        args = argparse.Namespace(
+            target="/tmp/target", target_dir=None, state="/tmp/state", factor=2.0,
+            dry_run=False, print_json=False, protected_ref=[], require_capacity=True,
+            command=["cargo", "build"],
+        )
+        with self.assertRaisesRegex(RuntimeError, "no-child admission"):
+            run_guard(args)
+
+    def test_require_capacity_rejects_unavailable_metric(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root, _target, _state, args = self.require_capacity_fixture(directory)
+            with patch("cargo_capacity_guard._root", return_value=root), \
+                 patch("cargo_capacity_guard.size_bytes", return_value=None):
+                self.assertEqual(run_guard(args), 1)
+
+    def test_require_capacity_rejects_state_change_during_admission(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root, _target, _state, args = self.require_capacity_fixture(directory)
+            with patch("cargo_capacity_guard._root", return_value=root), \
+                 patch("cargo_capacity_guard.state_identity", side_effect=[(1, 1, "a"), (1, 2, "b")]), \
+                 patch("cargo_capacity_guard.inspect", return_value={
+                     "metric_available": True, "baseline_bytes": 1, "current_bytes": 8192,
+                     "threshold_bytes": 2, "over_capacity": True,
+                 }), \
+                 patch("cargo_capacity_guard.evict_artifacts") as evict:
+                with self.assertRaisesRegex(RuntimeError, "changed before eviction"):
+                    run_guard(args)
+                evict.assert_not_called()
+
+    def test_require_capacity_rejects_cargo_lock_busy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root, _target, _state, args = self.require_capacity_fixture(
+                directory, over_capacity=True,
+            )
+            with patch("cargo_capacity_guard._root", return_value=root), \
+                 patch("cargo_capacity_guard.busy_processes", return_value=[]), \
+                 patch("cargo_capacity_guard.ProfileLocks", side_effect=BlockingIOError("busy")):
+                self.assertEqual(run_guard(args), 1)
+
+    def test_require_capacity_rejects_failed_eviction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root, _target, _state, args = self.require_capacity_fixture(
+                directory, over_capacity=True,
+            )
+            class Epoch:
+                input_check = None
+                def verify(self) -> None:
+                    return None
+            class Locks:
+                def __enter__(self) -> Epoch:
+                    return Epoch()
+                def __exit__(self, *exc: object) -> None:
+                    return None
+            with patch("cargo_capacity_guard._root", return_value=root), \
+                 patch("cargo_capacity_guard.busy_processes", return_value=[]), \
+                 patch("cargo_capacity_guard.ProfileLocks", return_value=Locks()), \
+                 patch("cargo_capacity_guard.evict_artifacts", return_value=(1, {})):
+                self.assertEqual(run_guard(args), 1)
+
     @unittest.skipIf(os.name == "nt", "allocated block metric unavailable on Windows")
     def test_size_counts_unique_inode_allocated_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -746,10 +1702,32 @@ class GuardTests(unittest.TestCase):
             state = root / "state.json"
             with patch("cargo_capacity_guard.size_bytes", return_value=None):
                 report = inspect_capacity(root, target, state, 2.0)
-            self.assertFalse(report["metric_available"])
+            self.assertIs(report["metric_available"], False)
             self.assertIsNone(report["current_bytes"])
             self.assertFalse(report["over_capacity"])
             self.assertIsNone(report["baseline_bytes"])
+
+    @unittest.skipIf(os.name == "nt", "POSIX allocated block metric contract")
+    def test_measured_inspect_serializes_explicit_metric_availability_for_empty_and_nonempty_targets(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        target = root / "target"
+        target.mkdir()
+        state = root / "state.json"
+        empty = json.loads(json.dumps(inspect_capacity(root, target, state, 2.0)))
+        self.assertIs(empty["metric_available"], True)
+        self.assertEqual(empty["current_bytes"], 0)
+        self.assertIsNone(empty["threshold_bytes"])
+        payload = target / "payload"
+        payload.write_bytes(b"measured capacity" * 256)
+        measured = payload.stat().st_blocks * 512
+        state.write_text(json.dumps({"target": str(target), "metric": "unique-inode-allocated-bytes",
+                                    "metric_version": 1, "baseline_bytes": measured * 2}))
+        report = json.loads(json.dumps(inspect_capacity(root, target, state, 2.0)))
+        self.assertIs(report["metric_available"], True)
+        self.assertEqual(report["current_bytes"], measured)
+        self.assertEqual(report["threshold_bytes"], measured * 4)
+        self.assertIs(report["over_capacity"], False)
+        self.assertNotIn("cleanup_status", report)
 
     def test_metadata_uses_project_configuration_from_another_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1279,8 +2257,8 @@ class GuardTests(unittest.TestCase):
             available_files = [*old.iterdir(), working / "dep-graph.part.bin"]
             available = sum(path.stat().st_blocks * 512 for path in available_files)
             current = self.measured_size(target)
-            needed = max(512, available // 2)
-            baseline = (current - needed) / 2
+            baseline = max(1, current - available + 1)
+            self.assertLess(baseline * 2, current)
             state = root / "state.json"
             state.write_text(json.dumps({
                 "baseline_bytes": baseline, "factor": 2.0,
@@ -1319,7 +2297,11 @@ class GuardTests(unittest.TestCase):
                 auxiliary_only_profiles: Sequence[str | Path] = (),
                 unselected_incremental_prefixes: Sequence[str] = (),
                 selected_package_profiles: Sequence[str | Path] = (),
+                build_script_ownership: BuildScriptOwnership | None = None,
+                selected_cache_ownership: SelectedCacheOwnership | None = None,
             ) -> tuple[int, EvictionReport]:
+                self.assertIsNone(build_script_ownership)
+                self.assertIsNone(selected_cache_ownership)
                 authorized.append(tuple(Path(path) for path in auxiliary_only_profiles))
                 return real_evict(
                     selected_target, threshold, current_bytes, dry_run, protected_refs, epoch,
@@ -2084,12 +3066,17 @@ class GuardTests(unittest.TestCase):
                         selected_package_incremental_prefixes(root, value)
 
     def test_selected_input_baseline_then_manifest_lock_config_environment_drift(self) -> None:
-        for mutation in ("manifest", "lock", "config", "environment", "workspace-add"):
+        for mutation in ("manifest", "lock", "config", "environment", "workspace-add",
+                         "empty-config-dir", "empty-config-dir-remove"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory).resolve()
                 value = self.selected_metadata(root)
+                config_base = root / ".cargo"
+                if mutation == "empty-config-dir-remove":
+                    config_base.mkdir()
                 verify = _selected_input_check(root, value)
                 verify()
+                secret = "input-diagnostic-secret-value"
                 with patch.dict(os.environ, os.environ.copy(), clear=True):
                     if mutation == "manifest":
                         (root / "crates/runtime/Cargo.toml").write_text('[dependencies]\nkdr = "1"\n')
@@ -2100,10 +3087,35 @@ class GuardTests(unittest.TestCase):
                         (root / ".cargo/config.toml").write_text('[build]\n')
                     elif mutation == "workspace-add":
                         (root / "crates/new-package").mkdir()
+                    elif mutation == "empty-config-dir":
+                        config_base.mkdir()
+                    elif mutation == "empty-config-dir-remove":
+                        config_base.rmdir()
                     else:
-                        os.environ["RUSTFLAGS"] = os.environ.get("RUSTFLAGS", "") + " --cfg input_mutation"
-                    with self.assertRaisesRegex(RuntimeError, "selected metadata inputs changed"):
+                        os.environ["RUSTFLAGS"] = secret
+                    with self.assertRaisesRegex(RuntimeError, "selected metadata inputs changed") as raised:
                         verify()
+                    diagnostic = str(raised.exception)
+                    self.assertTrue(diagnostic.startswith("selected metadata inputs changed; artifacts retained; diagnostics:"))
+                    if mutation == "manifest":
+                        self.assertIn("input_files_changed", diagnostic)
+                        self.assertIn("crates/runtime/Cargo.toml", diagnostic)
+                    elif mutation == "lock":
+                        self.assertIn("input_files_changed", diagnostic)
+                        self.assertIn("Cargo.lock", diagnostic)
+                    elif mutation == "config":
+                        self.assertIn("config_paths_added", diagnostic)
+                        self.assertIn(".cargo/config.toml", diagnostic)
+                        self.assertIn("config_entries_added", diagnostic)
+                    elif mutation == "workspace-add":
+                        self.assertIn("directory_entries_added", diagnostic)
+                        self.assertIn("new-package", diagnostic)
+                    elif mutation in ("empty-config-dir", "empty-config-dir-remove"):
+                        self.assertIn("config_base_presence_changed", diagnostic)
+                        self.assertIn(".cargo", diagnostic)
+                    else:
+                        self.assertIn("environment_keys_changed=['RUSTFLAGS']", diagnostic)
+                        self.assertNotIn(secret, diagnostic)
 
     def test_canonical_command_only_and_same_input_metadata_epoch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -2111,27 +3123,239 @@ class GuardTests(unittest.TestCase):
             full = self.selected_metadata(root)
             initial = json.loads(json.dumps(full))
             initial["packages"] = initial["packages"][:2]
-            command = ["cargo", "build", "--offline", "--locked", "-p", "kdr-linter", "--bin", "mathjax_consumer_facts"]
+            cargo_args = ["build", "--offline", "--locked", "-p", "kdr-linter", "--bin", "mathjax_consumer_facts"]
+            commands = (
+                ["cargo", *cargo_args],
+                ["/toolchain/bin/cargo", *cargo_args],
+                ["rtk", "cargo", *cargo_args],
+                ["/opt/homebrew/bin/rtk", "cargo", *cargo_args],
+                ["rtk", "proxy", "cargo", *cargo_args],
+                ["/opt/homebrew/bin/rtk", "proxy", "cargo", *cargo_args],
+            )
+            for command in commands:
+                original_command = list(command)
+                result = subprocess.CompletedProcess(command, 0, json.dumps(full), "")
+                with self.subTest(command=command), patch("cargo_capacity_guard.subprocess.run", return_value=result) as query:
+                    prefixes, verify = selected_package_cleanup(root, root / "target", command, initial)
+                    self.assertEqual(prefixes, ["unselected-"])
+                    self.assertIsNotNone(verify)
+                    if verify is not None:
+                        verify()
+                    self.assertEqual(command, original_command)
+                    self.assertEqual(query.call_count, 1)
+                    metadata_command = query.call_args.args[0]
+                    self.assertEqual(metadata_command[1:], [
+                        "metadata", "--offline", "--locked", "--all-features", "--format-version", "1",
+                        "--manifest-path", str(root / "Cargo.toml"),
+                    ])
+            command = commands[0]
             result = subprocess.CompletedProcess(command, 0, json.dumps(full), "")
             with patch("cargo_capacity_guard.subprocess.run", return_value=result) as query:
-                prefixes, verify = selected_package_cleanup(root, root / "target", command, initial)
-                self.assertEqual(prefixes, ["unselected-"])
-                self.assertIsNotNone(verify)
-                if verify is not None:
-                    verify()
                 for tail in (["--workspace"], ["-p", "runtime"], ["--features", "anything"], ["--release"]):
                     self.assertEqual(selected_package_cleanup(root, root / "target", command + tail, initial), ([], None))
+                for unknown in (
+                    ["unknown-tool", *cargo_args],
+                    ["/toolchain/bin/not-rtk", "cargo", *cargo_args],
+                    ["rtk", "unknown-proxy-mode", "cargo", *cargo_args],
+                ):
+                    self.assertEqual(selected_package_cleanup(root, root / "target", unknown, initial), ([], None))
                 for key, value in (("RUSTC_WRAPPER", "/unknown/wrapper"), ("RUSTFLAGS", "--crate-name unselected"),
                                    ("CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS", "--crate-name unselected")):
                     with patch.dict(os.environ, {key: value}):
                         self.assertEqual(selected_package_cleanup(root, root / "target", command, initial), ([], None))
-                self.assertEqual(query.call_count, 1)
+                configuration = root / ".cargo" / "config.toml"
+                configuration.parent.mkdir(exist_ok=True)
+                for content in ('[build]\nrustc-wrapper = "unknown"\n', '[target.host]\nrustflags = []\n'):
+                    configuration.write_text(content)
+                    self.assertEqual(selected_package_cleanup(root, root / "target", command, initial), ([], None))
+                configuration.write_text("")
+                self.assertEqual(query.call_count, 0)
             def drift(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
                 (root / "Cargo.lock").write_text('# changed during metadata\n')
                 return result
             with patch("cargo_capacity_guard.subprocess.run", side_effect=drift):
                 with self.assertRaisesRegex(RuntimeError, "selected metadata inputs changed"):
                     selected_package_cleanup(root, root / "target", command, initial)
+
+    def test_selected_ownership_capture_preserves_default_tuple_and_exact_verifier(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            full = self.selected_metadata(root)
+            initial = _object(json.loads(json.dumps(full)), "initial metadata")
+            initial["packages"] = _array(initial["packages"], "packages")[:2]
+            command = ["cargo", "build", "--offline", "--locked", "-p", "kdr-linter", "--bin", "mathjax_consumer_facts"]
+            result = subprocess.CompletedProcess(command, 0, json.dumps(full), "")
+            with patch("cargo_capacity_guard.subprocess.run", return_value=result), \
+                    patch("cargo_capacity_guard.build_script_ownership", side_effect=AssertionError("default called ownership factory")) as factory:
+                for explicit_none in (False, True):
+                    returned = selected_package_cleanup(root, root / "target", command, initial, None) if explicit_none else selected_package_cleanup(root, root / "target", command, initial)
+                    self.assertEqual(len(returned), 2)
+                    self.assertEqual(returned[0], ["unselected-"])
+                    self.assertIsNotNone(returned[1])
+                factory.assert_not_called()
+            captured: list[BuildScriptOwnership] = []
+            with patch("cargo_capacity_guard.subprocess.run", return_value=result):
+                prefixes, verify = selected_package_cleanup(root, root / "target", command, initial, captured.append)
+            self.assertEqual(prefixes, ["unselected-"])
+            self.assertEqual(len(captured), 1)
+            self.assertIs(verify, captured[0].verify)
+            captured[0].verify()
+            (root / "Cargo.lock").write_text("changed input")
+            with self.assertRaisesRegex(RuntimeError, "selected metadata inputs changed"):
+                captured[0].verify()
+
+    def test_ownership_capture_rejects_metadata_before_callback_and_propagates_callback_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            full = self.selected_metadata(root)
+            initial = _object(json.loads(json.dumps(full)), "initial metadata")
+            initial["packages"] = _array(initial["packages"], "packages")[:2]
+            command = ["cargo", "build", "--locked", "-p", "kdr-linter", "--bin", "mathjax_consumer_facts"]
+            captured: list[BuildScriptOwnership] = []
+            broken = dict(full)
+            broken["workspace_members"] = ["unselected"]
+            result = subprocess.CompletedProcess(command, 0, json.dumps(broken), "")
+            with patch("cargo_capacity_guard.subprocess.run", return_value=result), \
+                    patch("cargo_capacity_guard.build_script_ownership") as factory:
+                with self.assertRaisesRegex(RuntimeError, "metadata differs"):
+                    selected_package_cleanup(root, root / "target", command, initial, captured.append)
+                factory.assert_not_called()
+            self.assertEqual(captured, [])
+            for invalid_command in (command + ["--release"], ["unknown-tool", *command[1:]]):
+                self.assertEqual(selected_package_cleanup(root, root / "target", invalid_command, initial, captured.append), ([], None))
+            self.assertEqual(captured, [])
+            def fail_capture(proof: BuildScriptOwnership) -> None:
+                proof.verify()
+                raise RuntimeError("ownership callback failed")
+            result = subprocess.CompletedProcess(command, 0, json.dumps(full), "")
+            with patch("cargo_capacity_guard.subprocess.run", return_value=result):
+                with self.assertRaisesRegex(RuntimeError, "ownership callback failed"):
+                    selected_package_cleanup(root, root / "target", command, initial, fail_capture)
+
+    def test_guard_binds_zero_one_or_ambiguous_capture_to_locked_eviction(self) -> None:
+        for protected, captures in ((False, 0), (True, 0), (True, 1), (True, 2)):
+            with self.subTest(protected=protected, captures=captures):
+                self._guard_ownership_capture_case(protected, captures)
+
+    def test_selected_cache_capture_shares_nonrecursive_orphan_and_epoch_verifier(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            full = self.selected_metadata(root)
+            initial = dict(full)
+            initial["packages"] = [item for item in _array(full["packages"], "packages")
+                                   if _object(item, "package")["id"] in _array(full["workspace_members"], "members")]
+            target = root / "target"
+            checks: list[str] = []
+            cache = SelectedCacheOwnership(root, target, target / "debug", (), lambda: checks.append("cache"))
+            scripts: list[BuildScriptOwnership] = []
+            caches: list[SelectedCacheOwnership] = []
+            result = subprocess.CompletedProcess([], 0, json.dumps(full), "")
+            command = ["cargo", "build", "--locked", "-p", "kdr-linter", "--bin", "mathjax_consumer_facts"]
+            with patch("cargo_capacity_guard.subprocess.run", return_value=result), \
+                    patch("cargo_capacity_guard.create_selected_cache_ownership", return_value=cache) as create:
+                prefixes, verify = selected_package_cleanup(root, target, command, initial,
+                                                            scripts.append, caches.append)
+            self.assertTrue(prefixes)
+            create.assert_called_once()
+            self.assertEqual((len(scripts), len(caches)), (1, 1))
+            self.assertIs(verify, scripts[0].verify)
+            self.assertIs(verify, caches[0].verify)
+            self.assertIsNot(verify, cache.verify)
+            if verify is None:
+                raise AssertionError("combined verifier is required")
+            verify()
+            self.assertEqual(checks, ["cache"])
+
+    def test_selected_cache_cannot_bypass_shared_host_verifier(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            target = root / "target"
+            profile = target / "debug"
+            profile.mkdir(parents=True)
+            reference = root / "consumer"
+            reference.write_bytes(b"retained")
+            def check() -> None:
+                return None
+            orphan = BuildScriptOwnership(root, target, profile, (), check)
+            cache = SelectedCacheOwnership(root, target, profile, (), lambda: None)
+            with ProfileLocks(target, check) as epoch:
+                code, report = evict_artifacts(target, 1, 2, True, [reference], epoch,
+                                               retained_profiles=[profile], selected_package_profiles=[profile],
+                                               build_script_ownership=orphan, selected_cache_ownership=cache)
+            self.assertEqual(code, 1)
+            self.assertEqual(report["deleted_files"], 0)
+            self.assertIn("bound selected host", report["error"])
+
+    def _guard_ownership_capture_case(self, protected: bool, captures: int) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            full = self.selected_metadata(root)
+            target = root / "target"
+            profile = target / "debug"
+            profile.mkdir(parents=True)
+            reference = profile / "consumer.bin"
+            reference.write_bytes(b"protected consumer" * 1024)
+            state = root / "state.json"
+            state.write_text(json.dumps({"metric": "unique-inode-allocated-bytes", "metric_version": 1,
+                                         "baseline_bytes": 1, "target": str(target), "factor": 2}))
+            state_before, reference_before = state.read_bytes(), reference.read_bytes()
+            events: list[str] = []
+            def check() -> None:
+                events.append("input-verify")
+            proof = BuildScriptOwnership(root, target, profile, (), check)
+            def select(selected_root: Path, selected_target: Path, command: list[str], metadata: JsonObject,
+                       capture: Callable[[BuildScriptOwnership], None] | None = None,
+                       cache_capture: Callable[[SelectedCacheOwnership], None] | None = None,
+                       ) -> tuple[list[str], Callable[[], None] | None]:
+                self.assertEqual((selected_root, selected_target), (root, target))
+                self.assertEqual(capture is not None, protected)
+                self.assertEqual(cache_capture is not None, protected)
+                for _ in range(captures):
+                    if capture is None:
+                        raise AssertionError("proof capture unavailable")
+                    capture(proof)
+                return [], proof.verify if captures else None
+            def evict(*arguments: object, **keywords: object) -> tuple[int, dict[str, object]]:
+                epoch = arguments[5]
+                self.assertIsInstance(epoch, ProfileLocks)
+                if not isinstance(epoch, ProfileLocks):
+                    raise AssertionError("native lock epoch unavailable")
+                self.assertTrue(epoch.handles)
+                self.assertTrue(all(not handle.closed for handle in epoch.handles))
+                self.assertIs(keywords["build_script_ownership"], proof if captures else None)
+                self.assertIs(epoch.input_check, proof.verify if captures else None)
+                self.assertEqual(keywords["selected_package_profiles"], (profile,) if captures else ())
+                events.append("eviction-enter")
+                epoch.verify()
+                events.append("eviction-return")
+                return 0, {"scope": "pure caller unit; no eviction performed"}
+            args = argparse.Namespace(target=str(target), target_dir=None, state=str(state), factor=2.0,
+                                      dry_run=True, print_json=True, retain_build_profile="debug", retain_profile=[],
+                                      protected_ref=[str(reference)] if protected else [],
+                                      command=["cargo", "build", "--locked", "-p", "kdr-linter", "--bin", "mathjax_consumer_facts"])
+            result = subprocess.CompletedProcess(args.command, 0, json.dumps(full), "")
+            test_environment = os.environ.copy()
+            test_environment.pop("CARGO_CAPACITY_PROTECTED_REFS", None)
+            with patch("cargo_capacity_guard._root", return_value=root), \
+                    patch("cargo_capacity_guard.subprocess.run", return_value=result), \
+                    patch("cargo_capacity_guard.current_build_profiles", return_value=(profile,)), \
+                    patch("cargo_capacity_guard.selected_package_cleanup", side_effect=select), \
+                    patch("cargo_capacity_guard.busy_processes", return_value=[]), \
+                    patch("cargo_capacity_guard.evict_artifacts", side_effect=evict) as eviction, \
+                    patch.dict(os.environ, test_environment, clear=True), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                if captures > 1:
+                    with self.assertRaisesRegex(RuntimeError, "capture is ambiguous"):
+                        run_guard(args)
+                    eviction.assert_not_called()
+                    self.assertFalse((root / "tmp/.cargo-capacity-guard.lock").exists())
+                else:
+                    self.assertEqual(run_guard(args), 0)
+                    eviction.assert_called_once()
+            self.assertEqual(state.read_bytes(), state_before)
+            self.assertEqual(reference.read_bytes(), reference_before)
+            self.assertEqual(events, ["eviction-enter", "input-verify", "eviction-return", "input-verify"] if captures == 1
+                             else [] if captures > 1 else ["eviction-enter", "eviction-return"])
 
     @unittest.skipIf(os.name == "nt", "POSIX rustc session lock fixture")
     def test_selected_package_latest_whole_session_and_retained_outputs(self) -> None:
@@ -2428,7 +3652,8 @@ class GuardTests(unittest.TestCase):
                 ) -> None:
                     nonlocal count
                     count += 1
-                    if count == 2:
+                    # leafごとのfull hashに依存せず、pre-stage境界で拒否する。
+                    if count == 1:
                         if selected == "input":
                             (selected_root / "Cargo.lock").write_text("changed\n")
                         elif selected == "namespace":
@@ -2452,6 +3677,59 @@ class GuardTests(unittest.TestCase):
                 self.assertEqual(code, 1, report)
                 self.assertEqual(report["deleted_files"], 0)
                 self.assertTrue(report.get("error"), report)
+
+    @unittest.skipIf(os.name == "nt", "POSIX metadata cache leaf fixture")
+    def test_metadata_cache_leaf_source_drift_after_first_unlink_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root, target, sessions, protected = self.metadata_leaf_fixture(directory)
+            leaves = [session / name for session in sessions
+                      for name in ("dep-graph.bin", "query-cache.bin", "work-products.bin")]
+            needed = sum(path.stat().st_blocks * 512 for path in leaves)
+            original_unlink = os.unlink
+            unlink_count = 0
+
+            def mutate_after_first_unlink(name: str, *, dir_fd: int | None = None) -> None:
+                nonlocal unlink_count
+                original_unlink(name, dir_fd=dir_fd)
+                unlink_count += 1
+                if unlink_count == 1:
+                    (root / "Cargo.lock").write_text("changed during purge\n")
+
+            with patch("cargo_capacity_guard_lock.os.unlink", side_effect=mutate_after_first_unlink):
+                code, report = self.metadata_leaf_evict(root, target, protected, needed)
+            self.assertEqual(code, 1, report)
+            self.assertIn("selected metadata inputs changed", report.get("error", ""))
+            self.assertGreater(report["deleted_files"], 0)
+            self.assertLessEqual(report["deleted_files"], len(leaves))
+            self.assertTrue(unlink_count >= report["deleted_files"])
+            self.assertTrue(all(path.exists() for path in protected))
+
+    @unittest.skipIf(os.name == "nt", "POSIX metadata cache leaf fixture")
+    def test_metadata_cache_leaf_full_input_checks_are_boundary_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root, target, sessions, protected = self.metadata_leaf_fixture(directory)
+            leaves = [session / name for session in sessions
+                      for name in ("dep-graph.bin", "query-cache.bin", "work-products.bin")]
+            needed = sum(path.stat().st_blocks * 512 for path in leaves)
+            metadata = self.selected_metadata(root)
+            checks = 0
+
+            def full_input_check() -> None:
+                nonlocal checks
+                checks += 1
+                _selected_input_check(root, metadata)()
+
+            with ProfileLocks(target, full_input_check) as epoch:
+                current = self.measured_size(target)
+                code, report = evict_artifacts(
+                    target, current - needed, current, False, protected, epoch,
+                    retained_profiles=[target / "debug"], selected_package_profiles=[target / "debug"],
+                    unselected_incremental_prefixes=selected_package_incremental_prefixes(root, metadata),
+                )
+            self.assertEqual(code, 0, report)
+            self.assertEqual(report["deleted_files"], len(leaves))
+            # 5つの固定transaction境界は6件のleaf候補数に比例しない。
+            self.assertEqual(checks, 5)
 
     @unittest.skipIf(os.name == "nt", "POSIX actual rustc incremental fixture")
     def test_actual_rustc_rebuilds_after_metadata_cache_leaf_trim(self) -> None:
@@ -2488,7 +3766,100 @@ class GuardTests(unittest.TestCase):
                            check=True, capture_output=True, text=True)
 
 
+class LibraryAliasEnvironmentBoundaryUnitTests(unittest.TestCase):
+    def test_metadata_only_flag_requires_library_alias_mode_before_guard_setup(self) -> None:
+        args = argparse.Namespace(
+            command=[], require_capacity=False, library_alias_cache=False,
+            library_alias_cache_metadata_only=True,
+        )
+        with patch("cargo_capacity_guard._root") as root:
+            with self.assertRaisesRegex(RuntimeError, "requires --library-alias-cache"):
+                run_guard(args)
+            root.assert_not_called()
+
+    def test_archives_only_flag_requires_library_alias_mode_before_guard_setup(self) -> None:
+        args = argparse.Namespace(
+            command=[], require_capacity=False, library_alias_cache=False,
+            library_alias_cache_archives_only=True,
+        )
+        with patch("cargo_capacity_guard._root") as root:
+            with self.assertRaisesRegex(RuntimeError, "archives-only mode requires --library-alias-cache"):
+                run_guard(args)
+            root.assert_not_called()
+
+    def test_alias_cache_modes_are_mutually_exclusive_at_cli_boundary(self) -> None:
+        argv = ["cargo_capacity_guard", "--library-alias-cache-metadata-only",
+                "--library-alias-cache-archives-only"]
+        with patch.object(sys, "argv", argv), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                guard.main()
+        self.assertEqual(error.exception.code, 2)
+
+    def test_metadata_and_archives_modes_cannot_be_combined_in_direct_namespace(self) -> None:
+        args = argparse.Namespace(
+            command=[], require_capacity=False, library_alias_cache=True,
+            library_alias_cache_metadata_only=True, library_alias_cache_archives_only=True,
+        )
+        with patch("cargo_capacity_guard._root") as root:
+            with self.assertRaisesRegex(RuntimeError, "mutually exclusive"):
+                run_guard(args)
+            root.assert_not_called()
+
+    def test_nonstandard_flags_reject_before_metadata_classifiers_or_eviction(self) -> None:
+        for flags in (None, "", "-Dwarnings", "-C opt-level=1"):
+            environment = {} if flags is None else {"RUSTFLAGS": flags}
+            with self.subTest(flags=flags), patch.dict(os.environ, environment, clear=True), \
+                    patch("cargo_capacity_guard._root") as root, \
+                    patch("cargo_capacity_guard.resolve_target") as metadata, \
+                    patch("cargo_capacity_guard.create_library_alias_ownership") as classifier, \
+                    patch("cargo_capacity_guard.evict_artifacts") as eviction, \
+                    patch("cargo_capacity_guard.subprocess.run") as process:
+                with self.assertRaisesRegex(RuntimeError, "standard RUSTFLAGS"):
+                    run(argparse.Namespace(library_alias_cache=True))
+                for boundary in (root, metadata, classifier, eviction, process):
+                    boundary.assert_not_called()
+
+    def test_standard_flags_reach_the_normal_route_and_general_lane_keeps_empty_flags(self) -> None:
+        for alias, flags in ((True, "-D warnings"), (False, None), (False, "")):
+            environment = {} if flags is None else {"RUSTFLAGS": flags}
+            with self.subTest(alias=alias, flags=flags), patch.dict(os.environ, environment, clear=True), \
+                    patch("cargo_capacity_guard._root", side_effect=RuntimeError("normal route reached")) as root:
+                with self.assertRaisesRegex(RuntimeError, "normal route reached"):
+                    run(argparse.Namespace(library_alias_cache=alias))
+                root.assert_called_once_with()
+
+
 class GuardJsonBoundaryUnitTests(unittest.TestCase):
+    def test_report_writer_completes_large_json_on_nonblocking_pipe(self) -> None:
+        read_descriptor, write_descriptor = os.pipe()
+        os.set_blocking(write_descriptor, False)
+        writer = os.fdopen(write_descriptor, "w", encoding="utf-8", buffering=1)
+        output = bytearray()
+        reader_errors: list[BaseException] = []
+
+        def drain_pipe() -> None:
+            try:
+                with os.fdopen(read_descriptor, "rb") as reader:
+                    while chunk := reader.read(16_384):
+                        output.extend(chunk)
+            except BaseException as error:
+                reader_errors.append(error)
+
+        reader = threading.Thread(target=drain_pipe)
+        reader.start()
+        report = {"payload": "x" * 262_144, "cleanup_status": "not-needed"}
+        expected = json.dumps(report, sort_keys=True, indent=2) + "\n"
+        try:
+            guard._write_text(writer, expected)
+            self.assertFalse(os.get_blocking(writer.fileno()))
+        finally:
+            writer.close()
+        reader.join()
+
+        self.assertEqual(reader_errors, [])
+        self.assertEqual(bytes(output), expected.encode("utf-8"))
+        self.assertEqual(json.loads(output), report)
+
     def test_metadata_shapes_fail_closed_without_path_or_kind_coercion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -2636,7 +4007,7 @@ class ExpectedStateBindingUnitTests(unittest.TestCase):
                 if busy_calls == 2:
                     state.write_bytes(b"{}")
                 return []
-            def report(*values: object, **options: object) -> None:
+            def report(stream: object, value: str) -> None:
                 if stage == "build":
                     state.write_bytes(b"{}")
             def child(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
@@ -2649,7 +4020,8 @@ class ExpectedStateBindingUnitTests(unittest.TestCase):
                     patch("cargo_capacity_guard.busy_processes", side_effect=busy), \
                     patch("cargo_capacity_guard.evict_artifacts") as eviction, \
                     patch("cargo_capacity_guard.subprocess.run", side_effect=child) as build, \
-                    patch("cargo_capacity_guard.save_state") as save, patch("builtins.print", side_effect=report):
+                    patch("cargo_capacity_guard.save_state") as save, \
+                    patch("cargo_capacity_guard._write_text", side_effect=report):
                 with self.assertRaisesRegex(RuntimeError, "SHA256 differs"):
                     run_guard(args)
                 eviction.assert_not_called()
@@ -2748,6 +4120,19 @@ class CoverageDomainUnitTests(unittest.TestCase):
                     evidence = json.loads(self.errors.getvalue())['coverage_tool_query']
                     self.assertEqual(bytes.fromhex(evidence['stdout_hex']), b"cargo-llvm-cov 0.9.1\n")
                     self.assertEqual(bytes.fromhex(evidence['stderr_hex']), b"tool-raw\n")
+
+    def test_coverage_child_admits_incomplete_cleanup_below_fixed_hardcap(self) -> None:
+        with self.fixture() as (root, args, environment):
+            with patch("cargo_capacity_guard.size_bytes", side_effect=[33_554_433, 33_000_000, 33_000_000]), \
+                    patch("cargo_capacity_guard.evict_artifacts", return_value=(0, {})) as evict:
+                result = self.execute(root, args, environment)
+            self.assertEqual(result, 0)
+            report = json.loads(self.output.getvalue())
+            self.assertEqual(report["cleanup_status"], "incomplete")
+            self.assertFalse(report["cleanup_goal_reached"])
+            self.assertFalse(report["remaining_over_capacity"])
+            self.assertEqual(evict.call_args.args[1], 16_777_216)
+            self.assertEqual(self.calls[-1], args.command)
 
     def test_coverage_fresh_ci_empty_consumer_closure_is_recorded_exactly(self) -> None:
         for declared in (False, True):
@@ -2952,6 +4337,67 @@ class CoverageDomainUnitTests(unittest.TestCase):
                     self.execute(root, args, environment)
                 self.assert_no_worker()
 
+    @unittest.skipIf(os.name == "nt", "POSIX SwiftPM alias fixture")
+    def test_coverage_preflight_admits_only_fixed_swiftpm_aliases_as_leaf_entries(self) -> None:
+        from cargo_capacity_guard import coverage_cleanup_preflight
+        for coverage in sorted(guard.SWIFTPM_COVERAGE_TARGETS):
+            for package in ("apple-cf", "coretext-rs"):
+                with self.subTest(coverage=coverage, package=package), self.fixture() as (root, _args, environment):
+                    target = root / "target"
+                    alias, product = GuardTests.swiftpm_alias_fixture(
+                        target, package, coverage_subtarget=coverage,
+                    )
+                    selected = target / coverage
+                    coverage_cleanup_preflight(root, target, selected, [str(root / "consumer")])
+                    self.assertTrue(alias.is_symlink())
+                    self.assertTrue((product / "libBridge.a").is_file())
+                    self.assertEqual(environment["CARGO_TARGET_DIR"], str(target))
+
+    @unittest.skipIf(os.name == "nt", "POSIX symlink rejection fixture")
+    def test_coverage_preflight_rejects_unknown_escape_and_protected_alias_destinations(self) -> None:
+        from cargo_capacity_guard import coverage_cleanup_preflight
+        with self.fixture() as (root, _args, environment):
+            target = root / "target"
+            selected = target / "llvm-cov-target"
+            selected.mkdir()
+            (selected / "unknown").symlink_to(root / "outside", target_is_directory=True)
+            with self.assertRaisesRegex(RuntimeError, "symlink"):
+                coverage_cleanup_preflight(root, target, selected, [str(root / "consumer")])
+        for protected_kind in ("alias", "destination"):
+            with self.subTest(protected_kind=protected_kind), self.fixture() as (root, _args, _environment):
+                target = root / "target"
+                alias, product = GuardTests.swiftpm_alias_fixture(
+                    target, "apple-cf", coverage_subtarget="llvm-cov-target",
+                )
+                selected = target / "llvm-cov-target"
+                protected = alias if protected_kind == "alias" else product / "libBridge.a"
+                with self.assertRaises(RuntimeError):
+                    coverage_cleanup_preflight(root, target, selected, [str(protected)])
+
+    @unittest.skipIf(os.name == "nt", "POSIX SwiftPM alias mutation fixture")
+    def test_coverage_preflight_rejects_swiftpm_alias_identity_changes(self) -> None:
+        from cargo_capacity_guard import coverage_cleanup_preflight
+        with self.fixture() as (root, _args, _environment):
+            target = root / "target"
+            alias, _product = GuardTests.swiftpm_alias_fixture(
+                target, "coretext-rs", coverage_subtarget="llvm-cov-performance-baseline",
+            )
+            selected = target / "llvm-cov-performance-baseline"
+            original = guard._swiftpm_release_alias_stat
+            calls = 0
+            def replace_after_locked_scan(path: Path, cargo_target: Path) -> os.stat_result | None:
+                nonlocal calls
+                result = original(path, cargo_target)
+                if path == alias:
+                    calls += 1
+                    if calls == 2:
+                        alias.unlink()
+                        alias.symlink_to("out/Products/Release", target_is_directory=True)
+                return result
+            with patch("cargo_capacity_guard._swiftpm_release_alias_stat", side_effect=replace_after_locked_scan):
+                with self.assertRaisesRegex(RuntimeError, "alias changed"):
+                    coverage_cleanup_preflight(root, target, selected, [str(root / "consumer")])
+
     def test_coverage_busy_and_lock_failure_do_not_run_child(self) -> None:
         from cargo_capacity_guard import coverage_cleanup_preflight
         for kind in ("busy", "lock", "unavailable"):
@@ -3012,6 +4458,69 @@ class CoverageDomainUnitTests(unittest.TestCase):
             environment["CARGO_CAPACITY_EXPECTED_STATE_SHA256"] = "invalid"
             self.assertEqual(self.execute(root, args, environment), 0)
             self.assertEqual(self.calls, [["owned-child"]])
+
+
+class ProgressLoggingCliUnitTests(unittest.TestCase):
+    def _invoke(
+        self, options: list[str], action: Callable[[argparse.Namespace], int],
+    ) -> tuple[int, str, str, str, str]:
+        logger = logging.getLogger(PROGRESS_LOGGER_NAME)
+        root = logging.getLogger()
+        original = (logger.level, logger.propagate, list(logger.handlers), root.level, list(root.handlers))
+        existing_output = io.StringIO()
+        root_output = io.StringIO()
+        existing_handler = logging.StreamHandler(existing_output)
+        logger.handlers[:] = [existing_handler]
+        logger.setLevel(logging.NOTSET)
+        logger.propagate = True
+        root_handler = logging.StreamHandler(root_output)
+        root.handlers[:] = [root_handler]
+        root.setLevel(logging.INFO)
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        try:
+            with patch.object(sys, "argv", ["cargo_capacity_guard", *options]), \
+                    patch("cargo_capacity_guard.run", side_effect=action), \
+                    contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                result = guard.main()
+            self.assertEqual(logger.level, logging.NOTSET)
+            self.assertTrue(logger.propagate)
+            self.assertEqual(logger.handlers, [existing_handler])
+            self.assertEqual(root.level, logging.INFO)
+            self.assertEqual(root.handlers, [root_handler])
+            return result, stdout.getvalue(), stderr.getvalue(), existing_output.getvalue(), root_output.getvalue()
+        finally:
+            logger.handlers[:] = original[2]
+            logger.setLevel(original[0])
+            logger.propagate = original[1]
+            root.handlers[:] = original[4]
+            root.setLevel(original[3])
+
+    def test_progress_is_opt_in_and_uses_one_dedicated_stderr_handler(self) -> None:
+        def report(_args: argparse.Namespace) -> int:
+            logging.getLogger(PROGRESS_LOGGER_NAME).info("progress-row")
+            print("final-output")
+            return 0
+
+        default = self._invoke([], report)
+        self.assertEqual(default, (0, "final-output\n", "", "", ""))
+        first = self._invoke(["--progress"], report)
+        second = self._invoke(["--progress"], report)
+        for result in (first, second):
+            self.assertEqual(result[0:2], (0, "final-output\n"))
+            self.assertEqual(result[2].count("progress-row"), 1)
+            self.assertEqual(result[3:], ("", ""))
+
+    def test_progress_logger_state_is_restored_when_run_raises(self) -> None:
+        def fail(_args: argparse.Namespace) -> int:
+            logging.getLogger(PROGRESS_LOGGER_NAME).info("before-error")
+            raise RuntimeError("controlled failure")
+
+        result = self._invoke(["--progress"], fail)
+        self.assertEqual(result[0], 2)
+        self.assertIn("before-error", result[2])
+        self.assertIn("controlled failure", result[2])
+        self.assertEqual(result[3:], ("", ""))
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 import os
+import json
 import shlex
 import subprocess
 import tempfile
@@ -18,6 +19,19 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.publisher = (root / "scripts/release/publish-crates.sh").read_text(encoding="utf-8")
         self.justfile = (root / "Justfile").read_text(encoding="utf-8")
         self.ci = (root / ".github/workflows/test-and-build.yml").read_text(encoding="utf-8")
+
+    def test_ubuntu_capacity_reference_precedes_cached_target_checks_and_coverage(self) -> None:
+        name = "Initialize fixed capacity reference"
+        step = self.workflow_step(self.ci, name)
+        self.assertIn("if: matrix.os == 'ubuntu-latest'", step)
+        self.assertEqual(
+            shlex.split(step.split("run:", 1)[1].strip()),
+            ["python3", "scripts/build/initialize_ci_capacity_state.py", "--root", "$PWD"],
+        )
+        for later in ("Check Rust types", "Run coverage"):
+            with self.subTest(later=later):
+                self.assertLess(self.ci.index(f"- name: {name}\n"),
+                                self.ci.index(f"- name: {later}\n"))
 
     def test_ubuntu_coverage_owns_unit_tests_without_manual_cache_purges(self) -> None:
         unit_step = self.workflow_step(self.ci, "Run tests")
@@ -83,7 +97,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
     def test_ubuntu_v8_repair_cleans_only_targets_with_missing_or_empty_archives(self) -> None:
         script = self.workflow_script(self.ci, "Repair cached V8 archive on Ubuntu")
-        cases = (
+        cases: tuple[tuple[str | None, str | None, list[str]], ...] = (
             (None, None, []),
             ("target", None, ["clean --target-dir target -p v8"]),
             (
@@ -145,19 +159,24 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
     def test_coverage_uses_official_clean_and_full_gate_without_wiping_build_cache(self) -> None:
         root = Path(__file__).parents[2]
-        lines = (root / "Justfile").read_text(encoding="utf-8").splitlines()
-        recipe_start = next(
-            index for index, line in enumerate(lines) if line.startswith("coverage:")
+        dumped = subprocess.run(
+            ["just", "--dump", "--dump-format", "json"], cwd=root,
+            capture_output=True, text=True, check=True,
         )
-        recipe_commands = []
-        for line in lines[recipe_start + 1 :]:
-            if line.startswith("    "):
-                recipe_commands.append(line.strip())
-            elif not line:
-                continue
-            else:
-                break
-
+        document: object = json.loads(dumped.stdout)
+        assert isinstance(document, dict)
+        recipes: object = document.get("recipes")
+        assert isinstance(recipes, dict)
+        wrapper: object = recipes.get("coverage")
+        assert isinstance(wrapper, dict)
+        self.assertEqual(wrapper.get("body"), [
+            ["just root-test-and-coverage"], ["just performance-harness-coverage"],
+        ])
+        expanded = subprocess.run(
+            ["just", "--dry-run", "root-test-and-coverage"], cwd=root,
+            capture_output=True, text=True, check=True,
+        )
+        recipe_commands = (expanded.stdout + expanded.stderr).splitlines()
         parsed_commands = [shlex.split(command) for command in recipe_commands]
         coverage_commands = [tokens for tokens in parsed_commands if "llvm-cov" in tokens]
         cleanup_commands = [tokens for tokens in coverage_commands if "clean" in tokens]
@@ -186,10 +205,10 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 self.assertIn(option, coverage)
         self.assertEqual(
             coverage[coverage.index("--fail-under-lines") + 1],
-            "{{COVERAGE_MIN_LINES}}",
+            "100",
         )
         self.assertIn(
-            "{{COVERAGE_MAX_UNCOVERED_LINES}}",
+            "0",
             coverage[coverage.index("--fail-uncovered-lines") + 1],
         )
 
@@ -244,7 +263,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             (self.release, "Release target check", 'run: just VERSION="${{ steps.version.outputs.version }}" release-target-check'),
             (self.release, "Verify release package", 'run: just VERSION="${{ needs.release-context.outputs.version }}" release-verify'),
             (self.preflight, "Release check", 'run: just VERSION="${{ steps.version.outputs.version }}" release-check'),
-            (self.preflight, "Release preflight checks", 'run: just VERSION="${{ steps.version.outputs.version }}" release-preflight-check'),
+            (self.ci, "Release preflight checks", 'run: just VERSION="${{ steps.version.outputs.version }}" release-preflight-check'),
         )
         for workflow, name, command in freshness_steps:
             step = self.workflow_step(workflow, name)
@@ -266,12 +285,12 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         cleanup = self.release.index("- name: Cleanup published release state")
         self.assertLess(publish, public)
         self.assertLess(public, cleanup)
-        conditional = "if: github.event_name == 'pull_request' || inputs.publish_crates == true"
+        conditional = "if: github.event_name == 'workflow_run' || inputs.publish_crates == true"
         self.assertGreaterEqual(self.release.count(conditional), 3)
         self.assertIn('while IFS= read -r package; do', self.publisher)
         self.assertIn('publish_if_needed "${package}"\n  wait_for_crate "${package}"', self.publisher)
-        cleanup = self.workflow_step(self.release, "Cleanup published release state")
-        self.assertNotIn("--delete-remote", cleanup)
+        cleanup_step = self.workflow_step(self.release, "Cleanup published release state")
+        self.assertNotIn("--delete-remote", cleanup_step)
 
     def test_retry_rejoins_the_same_publication_completion_path(self) -> None:
         publish = self.retry.index("- name: Publish crates.io from release tag")
@@ -412,10 +431,10 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             'run: just VERSION="${{ needs.release-context.outputs.version }}" release-verify',
             package_verification,
         )
-        self.assertRegex(self.justfile, r"(?m)^release-verify: release-target-check$")
+        self.assertRegex(self.justfile, r"(?m)^release-verify: html-performance-nonregression-check release-target-check$")
 
-        for name in ("Release check", "Release preflight checks"):
-            premerge_step = self.workflow_step(self.preflight, name)
+        for workflow, name in ((self.preflight, "Release check"), (self.ci, "Release preflight checks")):
+            premerge_step = self.workflow_step(workflow, name)
             self.assertNotIn("ALLOW_PUBLISHED_PREFIX", premerge_step)
 
         # 配布検証の依存recipeでも再試行モードが伝わり、既定の未公開要求が残ることを確認する。
@@ -565,6 +584,14 @@ katana-render-runtime = { workspace = true }
         self.assertIn('printf \'%s\\n\' "$runtime_package_files"', reject_line)
         self.assertIn(r"drawio\.min\.js(\.br)?$", reject_line)
         self.assertIn('assets/drawio.min.js.br', recipe)
+        self.assertIn('vendor/drawio/{{DRAWIO_JS_VERSION}}/LICENSE', recipe)
+        self.assertIn('assets/licenses/drawio/LICENSE', recipe)
+
+        release_start = self.justfile.index("release-verify:")
+        release_end = self.justfile.index("# Verify completed OpenSpec changes", release_start)
+        release_recipe = self.justfile[release_start:release_end]
+        self.assertIn('\"assets/licenses/drawio/LICENSE\"', release_recipe)
+        self.assertIn('\"vendor/drawio/{{DRAWIO_JS_VERSION}}/LICENSE\"', release_recipe)
 
     def run_plantuml_install(self, failures: int, checksum: str) -> tuple[subprocess.CompletedProcess[str], Path, int]:
         root = Path(__file__).parents[2]

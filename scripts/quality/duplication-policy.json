@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "engine": "jscpd@5.4.1",
+  "minLines": 8,
+  "minTokens": 75,
+  "mode": "mild",
+  "formats": [
+    "rust",
+    "typescript",
+    "javascript",
+    "python"
+  ],
+  "roots": [
+    "crates",
+    "scripts",
+    "tests"
+  ],
+  "excludes": [
+    "generated",
+    "vendor",
+    "target",
+    "node_modules"
+  ],
+  "assetManifest": "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources/drawio-resource-manifest.json",
+  "assetResourcesRoot": "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources",
+  "assetSourceKinds": [
+    "drawio-shapes",
+    "drawio-webapp"
+  ],
+  "assetBoundaryReason": "Exclude only unchanged Draw.io JavaScript assets explicitly owned by the upstream resource manifest; repository-owned helpers and tests remain in scope.",
+  "exceptions": [
+    {
+      "first": {
+        "path": "crates/katana-render-runtime-cli/src/system/process.rs",
+        "sha256": "02041f56d11c4a59f7644d47a4f2730f385874df19a2675b02d05a556671b8d5",
+        "start": {"line": 2, "column": 25, "position": 46},
+        "end": {"line": 26, "column": 1, "position": 641}
+      },
+      "second": {
+        "path": "crates/katana-render-runtime/src/system/process.rs",
+        "sha256": "bff64126caa2b16101c412a21678cb6297acf12fe6fd3a61c53fd0e2d68bb057",
+        "start": {"line": 1, "column": 39, "position": 39},
+        "end": {"line": 25, "column": 1, "position": 634}
+      },
+      "fragmentSha256": "660aacabf0c54455a27a3a732d5054106c2d82cb153f821c427b253e6af22d75",
+      "reason": "Q15 low-benefit process wrapper clone: exactly 25 lines and 138 tokens across two separately distributed crates. Sharing through the existing runtime dependency would require a new public command-creation API; a new distributed crate would add package, dependency, and release overhead disproportionate to this small wrapper. The current 10 call sites are within the existing two distributed crates (two production consumers plus test subprocesses); test assertion repetition is not exempted. Reassess if a third distributed crate needs this wrapper or an independent public API requirement arises."
+    },
+    {
+      "first": {
+        "path": "crates/katana-render-runtime/src/markdown/svg_rasterize_preprocess_marker_stylesheet.rs",
+        "sha256": "3f5dd67bb7ce869f6e772202dbe34499554fd5605ef990ebc5626f04474b0f2a",
+        "start": {"line": 149, "column": 52, "position": 4547},
+        "end": {"line": 167, "column": 56, "position": 5008}
+      },
+      "second": {
+        "path": "crates/katana-render-runtime/src/markdown/svg_rasterize_preprocess_shadow_stylesheet.rs",
+        "sha256": "0376f64345da6fb7df0d9baee884907ba8a5264535ff9d356cab68c7f44c1db0",
+        "start": {"line": 57, "column": 52, "position": 1492},
+        "end": {"line": 75, "column": 56, "position": 1953}
+      },
+      "fragmentSha256": "3ddc3a9e89c490c80c63b4ef7935cb45a4baca9de93225a037fcbb463dca6c5d",
+      "reason": "Required cssparser 0.38.0 AtRuleParser adapter scaffold: its associated types and method signatures have no equivalent local wrapper, and the default methods reject these at-rules. The exact 19-line/108-token fragment contains only the required declarations/signatures and delegation to the existing shared consume_nested helper; the distinct parse_block bodies begin after this fragment and remain subject to duplication checks and tests. Reassess if the trait or these adapters change."
+    },
+    {
+      "first": {
+        "path": "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/browser_text_measure.js",
+        "sha256": "7819c4662273a4dbc1a53b0e4a566c371a8f2e345a4f8b787f72b5a44790137d",
+        "start": {
+          "column": 43,
+          "line": 81,
+          "position": 2552
+        },
+        "end": {
+          "column": 5,
+          "line": 105,
+          "position": 3094
+        }
+      },
+      "second": {
+        "path": "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/dom_text_measure.js",
+        "sha256": "d5c8dedf66dffb61772fae4c3e46889f94921ffcfae91efc5ab576271b094003",
+        "start": {
+          "column": 35,
+          "line": 351,
+          "position": 9972
+        },
+        "end": {
+          "column": 5,
+          "line": 370,
+          "position": 10339
+        }
+      },
+      "fragmentSha256": "aed812699a3722db17f828650c5e20173aafae3228d0f8edf0497759cec016a2",
+      "reason": "Q15 individual low-benefit CJK helper: one 25-line/75-token production/legacy-normalized reference clone across separately loaded realms. Existing shared verbatim JS loading is feasible, but requires 5 source changes plus type/provider/order/provenance and native/reference behavior verification for four small helpers and constants. Strict vendor-original mode does not install these helpers. Retain only this exact clone; test repetition remains subject to the gate. Reassess on a third independently implemented helper consumer, helper growth, CJK behavior divergence or repeated paired fixes, or an already-existing common helper route that materially lowers integration cost."
+    }
+  ]
+}
