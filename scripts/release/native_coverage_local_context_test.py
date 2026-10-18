@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import json
 import os
 import threading
+import time
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
@@ -99,6 +101,113 @@ class LocalCoverageContextTests(unittest.TestCase):
             local_context._record_environment({"RUSTFLAGS": "-C opt-level=3"})
         with self.assertRaisesRegex(local_context.LocalCoverageContextError, "unsupported_tool_override"):
             local_context._record_environment({"LLVM_COV": "/unreviewed/llvm-cov"})
+
+    def test_stage_merge_preserves_records_from_all_stages(self) -> None:
+        merged = local_context._merge_stage_records((
+            {"tool": {"sha256": "a", "size": 1}},
+            {"cargo": {"sha256": "b", "size": 2}},
+            {"font": {"sha256": "c", "size": 3}},
+        ))
+        self.assertEqual(set(merged), {"tool", "cargo", "font"})
+        self.assertEqual(merged["cargo"]["sha256"], "b")
+
+    def test_stage_merge_rejects_cross_stage_record_collision(self) -> None:
+        self.assertIn("identity_record_collision", local_context.MISS_REASON_CODES)
+        with self.assertRaisesRegex(local_context.LocalCoverageContextError, "identity_record_collision"):
+            local_context._merge_stage_records((
+                {"same": {"sha256": "a", "size": 1}},
+                {"same": {"sha256": "a", "size": 1}},
+            ))
+
+    def test_collection_stages_reach_bounded_parallel_overlap(self) -> None:
+        reached = threading.Barrier(3)
+
+        def tool_stage(repo: Path, env: dict[str, str]) -> tuple[dict[str, str], dict[str, dict[str, object]], float]:
+            reached.wait(timeout=2)
+            return {"rustc": "tool"}, {"tool": {"sha256": "a", "size": 1}}, 1.0
+
+        def cargo_stage(repo: Path) -> tuple[dict[str, dict[str, object]], dict[str, object], float]:
+            reached.wait(timeout=2)
+            return {"cargo": {"sha256": "b", "size": 2}}, {"cargoField": 3}, 2.0
+
+        def font_stage() -> tuple[dict[str, dict[str, object]], float]:
+            reached.wait(timeout=2)
+            return {"font": {"sha256": "c", "size": 3}}, 3.0
+
+        with patch.object(local_context, "_collect_tool_stage", side_effect=tool_stage), \
+                patch.object(local_context, "_collect_cargo_stage", side_effect=cargo_stage), \
+                patch.object(local_context, "_collect_font_stage", side_effect=font_stage):
+            tools, records, profile, timings = local_context._collect_stages(Path("."), {})
+        self.assertEqual(tools, {"rustc": "tool"})
+        self.assertEqual(set(records), {"tool", "cargo", "font"})
+        self.assertEqual(profile, {"cargoField": 3})
+        self.assertEqual(timings, {
+            "toolAndRuntimeIdentitySeconds": 1.0,
+            "cargoMetadataAndDependencySeconds": 2.0,
+            "fontInventorySeconds": 3.0,
+        })
+
+    def test_collection_stages_does_not_merge_after_stage_failure(self) -> None:
+        merge = patch.object(local_context, "_merge_stage_records")
+        with patch.object(local_context, "_collect_tool_stage", side_effect=local_context.LocalCoverageContextError("tool failed")), \
+                patch.object(local_context, "_collect_cargo_stage", return_value=({}, {}, 0.0)), \
+                patch.object(local_context, "_collect_font_stage", return_value=({}, 0.0)), \
+                merge as merge_mock:
+            with self.assertRaisesRegex(local_context.LocalCoverageContextError, "tool failed"):
+                local_context._collect_stages(Path("."), {})
+        merge_mock.assert_not_called()
+
+    def test_collection_stage_profile_fields_are_retained(self) -> None:
+        with patch.object(local_context, "_collect_tool_stage", return_value=({}, {}, 1.0)), \
+                patch.object(local_context, "_collect_cargo_stage", return_value=({}, {
+                    "cargoMetadataSecondsByDomain": {"root": 0.1},
+                    "cargoDependencyHashSeconds": 0.2,
+                }, 2.0)), \
+                patch.object(local_context, "_collect_font_stage", return_value=({}, 3.0)):
+            _, _, profile, timings = local_context._collect_stages(Path("."), {})
+        self.assertEqual(profile["cargoDependencyHashSeconds"], 0.2)
+        self.assertEqual(profile["cargoMetadataSecondsByDomain"], {"root": 0.1})
+        self.assertEqual(timings["fontInventorySeconds"], 3.0)
+
+    def test_opt_in_real_host_stage_benchmark_a_b_b_a(self) -> None:
+        output_value = os.environ.get("KRR_LOCAL_COVERAGE_STAGE_BENCHMARK_PATH")
+        if not output_value:
+            self.skipTest("opt-in real-host stage benchmark")
+        output = Path(output_value)
+        self.assertTrue(output.is_absolute())
+        self.assertTrue(output.parent.is_dir())
+        self.assertFalse(output.exists())
+        results = []
+        for workers in (1, 3, 3, 1):
+            profile: dict[str, object] = {}
+            started = time.perf_counter()
+            with patch.object(local_context, "CONTEXT_STAGE_WORKERS", workers):
+                context = local_context._collect(Path.cwd().resolve(), dict(os.environ), profile)
+            results.append((context, profile, time.perf_counter() - started))
+        output_payload = {
+            "schema": "krr-native-local-context-stage-benchmark-v1",
+            "order": ["single", "parallel", "parallel", "single"],
+            "contexts": [{
+                "hostContextSha256": hashlib.sha256(local_context._canonical(context)).hexdigest(),
+                "resourcesSha256": context["resourcesSha256"],
+                "recordCount": profile["recordCount"],
+                "stageSeconds": {key: profile[key] for key in (
+                    "toolAndRuntimeIdentitySeconds", "cargoMetadataAndDependencySeconds",
+                    "fontInventorySeconds",
+                )},
+                "totalSeconds": elapsed,
+            } for context, profile, elapsed in results],
+        }
+        with output.open("x", encoding="utf-8") as stream:
+            json.dump(output_payload, stream, indent=2)
+            stream.write("\n")
+        first_context, first_profile, _ = results[0]
+        for context, profile, _ in results[1:]:
+            self.assertEqual(context, first_context)
+            self.assertEqual(profile["recordCount"], first_profile["recordCount"])
+            self.assertEqual(profile["cargoDependencyRootCount"], first_profile["cargoDependencyRootCount"])
+            self.assertEqual(profile["cargoDependencyEntryCount"], first_profile["cargoDependencyEntryCount"])
+            self.assertEqual(profile["cargoDependencyFileBytes"], first_profile["cargoDependencyFileBytes"])
 
     def test_cargo_metadata_commands_cover_exact_host_domains_offline(self) -> None:
         with TemporaryDirectory() as temporary:

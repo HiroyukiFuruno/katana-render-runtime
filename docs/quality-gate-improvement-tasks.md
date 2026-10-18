@@ -18,6 +18,10 @@ v0.4.24は未リリース。描画、容量検査、日本語判定、Rust回帰
 
 Q19/Q20の反復コスト削減は先行する。同一ソース・同一Moon経路のroot限定実測はfresh375.569秒、cache hit46.067秒、常時実行する厳格判定43.008秒だった。これは旧HEAD4654の実証で、coverage97.910777%・未被覆1,249行の不足を `coverage-policy`・`refreshed=false` として拒否し、テストを再実行しなかった。実restore/tamper、performance側、CI再利用と最終100/0は未完了であり、この部分実証を全体完了にしない。
 
+Q19の準備処理も先行改善した。既存ThreadPoolExecutorでtool/runtime・依存・フォント検証を独立して実行し、全成功後に記録を統合する。実ホストA-B-B-Aで1,662記録の資源・context digestが全回一致し、平均46.691秒から17.817秒へ61.842%短縮した（`tmp/quality/native-local-context-stage-parallel-real-abba-r1/report.json`）。PythonのLint・strict型・重複検査と関連回帰は成功した。製品描画時間やcache hit全体の短縮へは換算しない。
+
+依存更新後のroot実行は2,514成功・0失敗・12 ignored、262.268秒、coverage58,723/59,887行（98.056339%、不足1,164行）だった（`tmp/quality/native-same-moon-restore-tamper-r1/report.json`）。この回はcollectionがcacheable=falseであり、復元・改変拒否は未実証。中断後のLLVM詳細81.198%は部分profileの可能性があるため、fresh成功の詳細と扱わない。後続の読み取り専用Moon診断ではcontextとanchorの利用条件を満たしたが、過去の拒否理由は確定していない（`tmp/quality/native-coverage-cache-diagnose-r6-moon/report.json`）。coverage不足とcacheabilityを混同せず、次回は新probeの適格性を先に確認する。
+
 以下が唯一のチェックリスト。過去の実行記録は末尾へ分離した。履歴内の「最新」は記録当時の表現であり、現在の合格を意味しない。
 
 - [/] Q09/Q18 中断された容量整理の復旧手順を、通常の再試行やguardの迂回と区別する。旧244ファイル限定の明示承認、独立レビュー、既存guard/native lock、全identity/hash・現行fingerprint・保護参照・使用中プロセスの再照合を経て復旧済み（`tmp/quality/approved-capacity-recovery-r1/`）。既存guardの拒否中に退避領域のrename、古いfingerprintのrestore、容量閾値の変更、未検証の削除を行わない。検査中のラッパーを後処理の待機と取り違えて中断しない。静的検査の証跡は古いmanifestをコピーせず、その実行の前後でGit-visibleな入力を再取得し、既存のsource verifierへ通す。完全ゲートの成功は別途検証する。

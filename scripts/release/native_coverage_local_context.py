@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import cast
 
 SCHEMA = "krr-native-local-coverage-context-v1"
+CONTEXT_STAGE_WORKERS = 3
 TOOLS = ("rustc", "cargo", "cargoLlvmCov", "llvm", "java", "bun", "node", "python", "graphviz", "plantuml")
 VOLATILE_ENV = frozenset({
     "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB", "GITHUB_ACTION", "GITHUB_ACTIONS",
@@ -47,7 +48,7 @@ MISS_REASON_CODES = frozenset({
     "unsupported_host_profile", "cargo_dependency_metadata_unavailable",
     "cargo_dependency_graph_invalid", "cargo_dependency_source_unavailable",
     "cargo_dependency_source_changed", "cargo_dependency_source_symlink",
-    "cargo_dependency_source_unsupported_file",
+    "cargo_dependency_source_unsupported_file", "identity_record_collision",
 })
 
 
@@ -575,13 +576,10 @@ def _record_cargo_dependencies(repo: Path, records: dict[str, dict[str, object]]
         profile["cargoDependencyFileBytes"] = sum(item[2] for item in dependency_digests.values())
 
 
-def _collect(repo: Path, env: Mapping[str, str], profile: dict[str, object] | None = None) -> dict[str, object]:
+def _collect_tool_stage(repo: Path, env: Mapping[str, str]) -> tuple[dict[str, str], dict[str, dict[str, object]], float]:
     started = time.perf_counter()
-    if platform.system() != "Darwin" or platform.machine() not in {"arm64", "aarch64"}:
-        raise LocalCoverageContextError("unsupported_host_profile")
     records: dict[str, dict[str, object]] = {}
     tools: dict[str, str] = {}
-    tool_started = time.perf_counter()
     tools["rustc"] = _record_command("rustc", ["rustc", "--version"], records, "rustc")
     tools["cargo"] = _record_command("cargo", ["cargo", "--version"], records, "cargo")
     tools["cargoLlvmCov"] = _record_command("cargo-llvm-cov", ["cargo", "llvm-cov", "--version"], records, "cargoLlvmCov")
@@ -613,13 +611,58 @@ def _collect(repo: Path, env: Mapping[str, str], profile: dict[str, object] | No
                         Path.home() / ".rustup" / "settings.toml"):
         if config_path.exists() or config_path.is_symlink():
             _record_file(config_path, records, f"user-config:{_path_id(config_path)}")
-    tool_seconds = time.perf_counter() - tool_started
-    cargo_started = time.perf_counter()
+    return tools, records, time.perf_counter() - started
+
+
+def _collect_cargo_stage(repo: Path) -> tuple[dict[str, dict[str, object]], dict[str, object], float]:
+    started = time.perf_counter()
+    records: dict[str, dict[str, object]] = {}
+    profile: dict[str, object] = {}
     _record_cargo_dependencies(repo, records, profile)
-    cargo_seconds = time.perf_counter() - cargo_started
-    font_started = time.perf_counter()
+    return records, profile, time.perf_counter() - started
+
+
+def _collect_font_stage() -> tuple[dict[str, dict[str, object]], float]:
+    started = time.perf_counter()
+    records: dict[str, dict[str, object]] = {}
     _record_fonts(records)
-    font_seconds = time.perf_counter() - font_started
+    return records, time.perf_counter() - started
+
+
+def _merge_stage_records(stage_records: tuple[dict[str, dict[str, object]], ...]) -> dict[str, dict[str, object]]:
+    records: dict[str, dict[str, object]] = {}
+    for stage in stage_records:
+        overlap = records.keys() & stage.keys()
+        if overlap:
+            raise LocalCoverageContextError("identity_record_collision")
+        records.update(stage)
+    return records
+
+
+def _collect_stages(repo: Path, env: Mapping[str, str]) -> tuple[
+    dict[str, str], dict[str, dict[str, object]], dict[str, object], dict[str, float]
+]:
+    with ThreadPoolExecutor(max_workers=CONTEXT_STAGE_WORKERS) as executor:
+        tool_future = executor.submit(_collect_tool_stage, repo, env)
+        cargo_future = executor.submit(_collect_cargo_stage, repo)
+        font_future = executor.submit(_collect_font_stage)
+        tools, tool_records, tool_seconds = tool_future.result()
+        cargo_records, cargo_profile, cargo_seconds = cargo_future.result()
+        font_records, font_seconds = font_future.result()
+    records = _merge_stage_records((tool_records, cargo_records, font_records))
+    timings = {
+        "toolAndRuntimeIdentitySeconds": tool_seconds,
+        "cargoMetadataAndDependencySeconds": cargo_seconds,
+        "fontInventorySeconds": font_seconds,
+    }
+    return tools, records, cargo_profile, timings
+
+
+def _collect(repo: Path, env: Mapping[str, str], profile: dict[str, object] | None = None) -> dict[str, object]:
+    started = time.perf_counter()
+    if platform.system() != "Darwin" or platform.machine() not in {"arm64", "aarch64"}:
+        raise LocalCoverageContextError("unsupported_host_profile")
+    tools, records, cargo_profile, stage_timings = _collect_stages(repo, env)
     environment_sha = _record_environment(env)
     host = {
         "os": "macOS", "productVersion": _run(["sw_vers", "-productVersion"]),
@@ -627,13 +670,12 @@ def _collect(repo: Path, env: Mapping[str, str], profile: dict[str, object] | No
     }
     resources_sha = _sha256(_canonical(records))
     if profile is not None:
+        profile.update(cargo_profile)
         profile.update({
             "schema": "krr-native-local-coverage-profile-v1",
             "cacheable": True,
             "recordCount": len(records),
-            "toolAndRuntimeIdentitySeconds": tool_seconds,
-            "cargoMetadataAndDependencySeconds": cargo_seconds,
-            "fontInventorySeconds": font_seconds,
+            **stage_timings,
             "totalSeconds": time.perf_counter() - started,
         })
     return {
