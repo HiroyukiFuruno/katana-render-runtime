@@ -77,23 +77,14 @@ test("existing pixel units remain idempotent without changing arbitrary geometry
   }
 });
 
-test("C4 Container review normalization preserves the independent Mermaid viewBox", () => {
+test("C4 Container review normalization preserves all independent Mermaid geometry", () => {
   const normalize = createNormalizer();
-  const rawViewBox = "0 -70 1248 861.1848754882812";
-  const input = `<svg id="katana-mermaid-svg-container" viewBox="${rawViewBox}" aria-roledescription="c4"><g class="node c4-shape"></g></svg>`;
-
-  expect(
-    normalize(
-      "katanaNormalizeC4RuntimeContainerReviewSvg",
-      input,
-      'C4Container\nContainerDb(db, "DB", "SQL")',
-    ),
-  ).toContain(`viewBox="${rawViewBox}"`);
-
-  for (const type of ["C4Context", "C4Component", "C4Dynamic", "C4Deployment"]) {
-    expect(normalize("katanaNormalizeC4RuntimeContainerReviewSvg", input, `${type}\nA()`)).toBe(
-      input,
-    );
+  const body = '<g transform="translate(34,329)"><g class="node c4-shape"><rect fill="none" stroke="#AAAAAA" x="19" y="137" width="71" height="43"/></g></g><line x1="19" y1="113" x2="317" y2="513" marker-end="url(#arrow)"/><path stroke="#AAAAAA" d="M19,113 L317,519"/><text x="19" y="329" style="font-size: 16px;">Independent observer</text>';
+  for (const id of ["katana-mermaid-svg-container", "independent-mermaid-container"]) {
+    const input = `<svg id="${id}" width="100%" viewBox="-17 23 413.03125 617.0625" aria-roledescription="c4">${body}</svg>`;
+    for (const type of C4_TYPES) {
+      expect(normalize("katanaNormalizeReviewFeedbackSvg", input, `${type}\nA()`)).toBe(input);
+    }
   }
 });
 

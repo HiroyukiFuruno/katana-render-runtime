@@ -23,6 +23,72 @@ function measurePlainText(diagramType: string, text: string) {
   };
 }
 
+type SvgShapeCase = {
+  tag: "circle" | "ellipse" | "rect";
+  attributes: Record<string, string>;
+  expected: { x: number; y: number; width: number; height: number };
+};
+
+function measureSvgShapes(cases: SvgShapeCase[]) {
+  const context = createContext({ KatanaNode: class {}, shapeCases: cases });
+  for (const name of ["dom_layout.js", "dom_measure.js"]) {
+    runInContext(readFileSync(new URL(name, RUNTIME_DIRECTORY), "utf8"), context);
+  }
+  return runInContext(
+    `shapeCases.map(({ tag, attributes }) => {
+      const node = {
+        localName: tag,
+        getAttribute: (name) => attributes[name] ?? null,
+        children: [],
+      };
+      return {
+        visible: katanaVisibleMeasuredBox(node),
+        accurate: katanaVisibleMeasuredBoxAccurate(node),
+      };
+    })`,
+    context,
+  ) as Array<{
+    visible: { x: number; y: number; width: number; height: number };
+    accurate: { x: number; y: number; width: number; height: number };
+  }>;
+}
+
+test("round SVG shapes use cx/cy/radii before unrelated explicit box attributes", () => {
+  const cases: SvgShapeCase[] = [
+    {
+      tag: "circle",
+      attributes: { x: "100", y: "200", width: "14", height: "14", cx: "20", cy: "30", r: "7" },
+      expected: { x: 13, y: 23, width: 14, height: 14 },
+    },
+    {
+      tag: "ellipse",
+      attributes: {
+        x: "100",
+        y: "200",
+        width: "16",
+        height: "10",
+        cx: "20",
+        cy: "30",
+        rx: "8",
+        ry: "5",
+      },
+      expected: { x: 12, y: 25, width: 16, height: 10 },
+    },
+    {
+      tag: "rect",
+      attributes: { x: "100", y: "200", width: "16", height: "10" },
+      expected: { x: 100, y: 200, width: 16, height: 10 },
+    },
+  ];
+  for (const [index, result] of measureSvgShapes(cases).entries()) {
+    const current = cases[index];
+    if (!current) throw new Error(`missing SVG shape case at index ${index}`);
+    const expected = current.expected;
+    expect(result.visible).toMatchObject(expected);
+    expect(result.accurate).toMatchObject(expected);
+  }
+});
+
 type SvgMetricCell = { x: number; y: number; width: number; height: number };
 type SvgMetrics = {
   advance: number;

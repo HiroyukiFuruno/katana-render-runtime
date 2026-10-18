@@ -313,30 +313,25 @@ test("実Bezierとpath bounds utilityは極値と座標group stateを保持す�
   }
 });
 
-test("実pie legendのASCII判定は全UTF-16 code unitと補助文字を区別する", () => {
+test("実pie legendの色補正はroot属性と図形geometryを保持する", () => {
   const source = path.join(
     root,
     "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_visual_fixes.js",
   );
   const context = createContext({});
   runInContext(fs.readFileSync(source, "utf8"), context);
-  const mismatches: unknown = runInContext(
-    `(() => {
-      const failures = [];
-      for (let code = 0; code <= 65535; code += 1) {
-        const svg = '<g class="legend"><text>' + String.fromCharCode(code) + '</text></g>';
-        if (katanaPieHasNonAsciiLegend(svg) !== (code > 127)) failures.push(code);
-      }
-      for (const text of ["", "abc", "日本語", "\u{1F600}", "abc日本語"]) {
-        const svg = '<g class="legend"><text>' + text + '</text></g>';
-        const expected = text !== "" && text !== "abc";
-        if (katanaPieHasNonAsciiLegend(svg) !== expected) failures.push(text);
-      }
-      return JSON.stringify(failures);
-    })()`,
-    context,
-  );
-  expect(mismatches).toBe("[]");
+  const cases = [
+    { label: "Dogs", fill: "#111111" },
+    { label: "Long label", fill: "#222222" },
+    { label: "日本語の凡例", fill: "#333333" },
+  ];
+  for (const { label, fill } of cases) {
+    const svg = `<svg width="100%" viewBox="0 0 546.96875 450" aria-roledescription="pie"><path fill="${fill}" class="pieCircle" d="M0 0 L186 0"/><g class="legend"><rect style="fill: old; stroke: old;"></rect><text>${label}</text></g></svg>`;
+    const result: unknown = runInContext(`katanaNormalizePieSvg(${JSON.stringify(svg)})`, context);
+    expect(result).toBe(
+      `<svg width="100%" viewBox="0 0 546.96875 450" aria-roledescription="pie"><path fill="${fill}" class="pieCircle" d="M0 0 L186 0"/><g class="legend"><rect style="fill: ${fill}; stroke: ${fill};"></rect><text>${label}</text></g></svg>`,
+    );
+  }
 });
 
 function compileMathJaxProject(project: string) {

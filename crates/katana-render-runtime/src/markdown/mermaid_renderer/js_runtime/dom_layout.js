@@ -109,6 +109,9 @@ function katanaVisibleMeasuredBox(node) {
 }
 
 function katanaExplicitMeasuredBox(node) {
+  if (katanaIsRoundSvgShape(node)) {
+    return null;
+  }
   const attrs = katanaBoxAttributes(node);
   if ([attrs.width > 0, attrs.height > 0].includes(true)) {
     return katanaBox(attrs.x, attrs.y, attrs.width, attrs.height);

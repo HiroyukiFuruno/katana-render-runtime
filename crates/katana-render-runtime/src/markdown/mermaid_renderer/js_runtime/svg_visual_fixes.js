@@ -106,66 +106,13 @@ function katanaNormalizePieSvg(svg) {
       return `${start}${katanaRemoveSvgAttr(attributes, "style")} style="fill: ${fill}; stroke: ${fill};"${end}`;
     },
   );
-  return katanaNormalizePieViewBox(withLegend);
-}
-
-function katanaNormalizePieViewBox(svg) {
-  return katanaPieViewBoxContext(svg).map(katanaApplyPieViewBox).concat([svg])[0];
-}
-
-function katanaPieViewBoxContext(svg) {
-  return [{ svg, viewBox: katanaReadViewBox(svg), contentBox: katanaContentBox(svg) }].filter(
-    katanaHasPieViewBoxContext,
-  );
-}
-
-function katanaHasPieViewBoxContext(context) {
-  return [context.viewBox, context.contentBox].every(Boolean);
-}
-
-function katanaApplyPieViewBox(context) {
-  const width = katanaNormalizedPieViewBoxWidth(context.svg, context.viewBox, context.contentBox);
-  return katanaSetNormalizedSvgSize(context.svg, [
-    context.viewBox[0],
-    context.viewBox[1],
-    width,
-    context.viewBox[3],
-  ]);
+  return withLegend;
 }
 
 const KATANA_EDGE_LABEL_BACKGROUND_READERS = [
   (svg) => svg,
   (svg) => katanaHideBackgroundRects(svg),
 ];
-
-function katanaPieViewBoxWidth(viewBox, contentBox) {
-  const right = contentBox[0] + contentBox[2];
-  return Math.max(viewBox[2], right + 40);
-}
-
-function katanaNormalizedPieViewBoxWidth(svg, viewBox, contentBox) {
-  const widened = katanaPieViewBoxWidth(viewBox, contentBox);
-  const maxLegendTextLength = katanaPieMaxLegendTextLength(svg);
-  if (maxLegendTextLength <= 4) {
-    return Math.ceil(widened);
-  }
-  if (katanaPieHasNonAsciiLegend(svg) && maxLegendTextLength >= 8) {
-    return katanaFormatVisualNumber(viewBox[2] - 0.38125);
-  }
-  return Math.floor(viewBox[2] * 2) / 2;
-}
-
-function katanaPieMaxLegendTextLength(svg) {
-  return Array.from(svg.matchAll(/<g class="legend"[\s\S]*?<text\b[^>]*>([^<]*)<\/text>/g))
-    .map((match) => match[1]?.trim()?.length ?? 0)
-    .reduce((maxLength, length) => Math.max(maxLength, length), 0);
-}
-
-function katanaPieHasNonAsciiLegend(svg) {
-  return Array.from(svg.matchAll(/<g class="legend"[\s\S]*?<text\b[^>]*>([^<]*)<\/text>/g)).some(
-    (match) => /\P{ASCII}/u.test(match[1] ?? ""),
-  );
-}
 
 function katanaNormalizeVennSvg(svg) {
   if (!svg.includes('aria-roledescription="venn"')) {
