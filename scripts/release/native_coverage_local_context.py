@@ -13,9 +13,9 @@ import stat
 import subprocess
 import time
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import cast
-
 
 SCHEMA = "krr-native-local-coverage-context-v1"
 TOOLS = ("rustc", "cargo", "cargoLlvmCov", "llvm", "java", "bun", "node", "python", "graphviz", "plantuml")
@@ -503,18 +503,39 @@ def _record_cargo_metadata(repo: Path, label: str, metadata: object,
         package_identity = {"name": name, "version": version, "sourceSha256": source_digest,
                             "rootPathSha256": _path_id(package_root)}
         external.setdefault(package_root, []).append(package_identity)
-    records[f"cargo-resolution:{label}"] = {
-        "sha256": _sha256(_canonical(resolution_rows)), "size": len(resolution_rows),
+    sorted_external = sorted(external.items(), key=lambda item: str(item[0]))
+    unseen_roots = [package_root for package_root, _ in sorted_external
+                    if package_root not in dependency_digests]
+    if len(unseen_roots) > 1:
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(_dependency_tree_digest, package_root)
+                       for package_root in unseen_roots]
+            try:
+                unseen_digests = [future.result() for future in futures]
+            except BaseException:
+                for future in futures:
+                    future.cancel()
+                raise
+    else:
+        unseen_digests = [_dependency_tree_digest(package_root) for package_root in unseen_roots]
+    computed_digests = dict(zip(unseen_roots, unseen_digests, strict=True))
+    pending_records: dict[str, dict[str, object]] = {
+        f"cargo-resolution:{label}": {
+            "sha256": _sha256(_canonical(resolution_rows)), "size": len(resolution_rows),
+        },
     }
-    for package_root, identities in sorted(external.items(), key=lambda item: str(item[0])):
-        if package_root not in dependency_digests:
-            dependency_digests[package_root] = _dependency_tree_digest(package_root)
-        tree_digest, entry_count, _ = dependency_digests[package_root]
+    for package_root, identities in sorted_external:
+        digest = dependency_digests.get(package_root)
+        if digest is None:
+            digest = computed_digests[package_root]
+        tree_digest, entry_count, _ = digest
         for identity in identities:
             package_key = _sha256(_canonical(identity))
-            records[f"cargo-package:{label}:{package_key}"] = {
+            pending_records[f"cargo-package:{label}:{package_key}"] = {
                 "sha256": tree_digest, "entryCount": entry_count,
             }
+    dependency_digests.update(computed_digests)
+    records.update(pending_records)
 
 
 def _record_cargo_dependencies(repo: Path, records: dict[str, dict[str, object]],

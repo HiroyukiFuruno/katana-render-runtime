@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import os
+import threading
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,6 +14,23 @@ import native_coverage_local_context as local_context
 
 
 class LocalCoverageContextTests(unittest.TestCase):
+    def _external_metadata_fixture(self, root: Path, count: int) -> tuple[Path, list[Path], dict[str, object]]:
+        repo = root / "repo"
+        repo.mkdir()
+        package_roots = [root / "registry" / f"fixture-{index}" for index in range(count)]
+        packages: list[dict[str, object]] = []
+        nodes: list[dict[str, object]] = []
+        for index, package_root in enumerate(package_roots):
+            package_root.mkdir(parents=True)
+            manifest = package_root / "Cargo.toml"
+            manifest.write_text(f"[package]\nname='fixture{index}'\nversion='1.0.0'\n")
+            package_id = f"registry+https://example.invalid#index#fixture{index}@1.0.0"
+            packages.append({"id": package_id, "name": f"fixture{index}", "version": "1.0.0",
+                             "source": "registry+https://example.invalid#index",
+                             "manifest_path": str(manifest)})
+            nodes.append({"id": package_id, "features": [], "deps": []})
+        return repo, package_roots, {"packages": packages, "resolve": {"nodes": nodes}}
+
     def test_context_digest_covers_every_field_except_itself(self) -> None:
         payload: dict[str, object] = {
             "schema": local_context.SCHEMA, "cacheable": True, "missReasons": [],
@@ -265,6 +283,75 @@ class LocalCoverageContextTests(unittest.TestCase):
                 for label in ("root", "baseline", "candidate"):
                     local_context._record_cargo_metadata(repo, label, metadata, records, digest_cache)
             digest.assert_called_once_with(package_root.resolve())
+
+    def test_unseen_dependency_digests_match_sorted_sequential_results(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, package_roots, metadata = self._external_metadata_fixture(root, 3)
+            digest_values = {path.resolve(): (chr(97 + index) * 64, index + 1, index)
+                             for index, path in enumerate(package_roots)}
+            sequential_cache = {path: digest_values[path] for path in digest_values}
+            sequential_records: dict[str, dict[str, object]] = {}
+            local_context._record_cargo_metadata(repo, "root", metadata, sequential_records, sequential_cache)
+            parallel_records: dict[str, dict[str, object]] = {}
+            parallel_cache: dict[Path, tuple[str, int, int]] = {}
+            with patch.object(local_context, "_dependency_tree_digest",
+                              side_effect=lambda path: digest_values[path]):
+                local_context._record_cargo_metadata(repo, "root", metadata,
+                                                     parallel_records, parallel_cache)
+            self.assertEqual(parallel_cache, sequential_cache)
+            self.assertEqual(parallel_records, sequential_records)
+
+    def test_unseen_dependency_digest_concurrency_is_bounded_at_three(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, _, metadata = self._external_metadata_fixture(root, 5)
+            active = 0
+            maximum = 0
+            entered = 0
+            lock = threading.Lock()
+            reached = threading.Barrier(3)
+
+            def digest(path: Path) -> tuple[str, int, int]:
+                nonlocal active, entered, maximum
+                with lock:
+                    entered += 1
+                    barrier_participant = entered <= 3
+                    active += 1
+                    maximum = max(maximum, active)
+                if barrier_participant:
+                    reached.wait(timeout=1)
+                with lock:
+                    active -= 1
+                return ("b" * 64, 1, 0)
+
+            with patch.object(local_context, "_dependency_tree_digest", side_effect=digest):
+                local_context._record_cargo_metadata(repo, "root", metadata, {}, {})
+            self.assertEqual(maximum, 3)
+
+    def test_unseen_dependency_digest_failure_does_not_commit_partial_cache_or_records(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, _, metadata = self._external_metadata_fixture(root, 2)
+            cache: dict[Path, tuple[str, int, int]] = {}
+            records: dict[str, dict[str, object]] = {}
+            calls = 0
+            lock = threading.Lock()
+
+            def digest(_: Path) -> tuple[str, int, int]:
+                nonlocal calls
+                with lock:
+                    calls += 1
+                    if calls == 1:
+                        return ("c" * 64, 1, 0)
+                raise local_context.LocalCoverageContextError("digest failed")
+
+            with patch.object(local_context, "_dependency_tree_digest",
+                              side_effect=digest), \
+                    self.assertRaisesRegex(local_context.LocalCoverageContextError, "digest failed"):
+                local_context._record_cargo_metadata(repo, "root", metadata, records, cache)
+            self.assertEqual(cache, {})
+            self.assertEqual(records, {})
 
     def test_font_rows_bind_face_inventory_and_physical_file_bytes(self) -> None:
         with TemporaryDirectory() as temporary:
