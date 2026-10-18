@@ -10,11 +10,13 @@
 
 ## 現在の状態（2026-10-18）
 
-v0.4.24は未リリース。現行root sourceは `4654b49b558704e8ebb19db9fcb027fa781311bc`。限定native featureでは同じMoon経路のfresh/hitとstrict policy判定を実証済みで、証跡は `tmp/quality/native-same-moon-route-fresh-hit-policy-r1/report.json`。coverageは97.910777%、未被覆1,249行。117図、HTML84、性能、公開、完全ゲートは未完了である。
+v0.4.24は未リリース。描画、容量検査、日本語判定、Rust回帰の限定修正を `db13d1a0`・`7b275f3c`・`1041a60f`・`e724836b` に保存した。依存込みの基礎静的解析10項目、AST16件、重複検査、同じworkspace条件での計測付き限定6件は成功した（`tmp/quality/native-runtime-final-foundation-r2/`、`tmp/quality/syntax-ast-regression-r5/report.json`、`tmp/quality/native-rust-narrow-verification-r1/report.json`）。これは完全ゲートや100/0の成功ではない。
+
+117図の前回実行r27はEN35/59合格・最低91.48656、JA58図は生成後の対象名検証で失敗した。後続のfresh native buildは受理され、限定4図は実生成exit0。stateとpieのviewBoxは独立raw JSと一致し、C4の高さ差は約0.000008px、classの幅差は0.03125pxだった（`tmp/quality/native-cli-build-current-r4/report.json`、`tmp/quality/current-scoped-native-render-r3/diagnostic-report.json`）。寸法診断を画像99の合格に代用しない。Python切替shimによる環境拒否は、既存producerへ実PythonのPATHを渡して解消し、不要な許可拡大は撤回した。限定Rust検査後の容量整理は既存`just clean`で完了し、削除されたbinaryの旧receiptは履歴として保持する（`tmp/quality/checkpoint-clean-r1/`）。HTML84・全Y・性能・完全ゲート・公開は未完了。
 
 現在の入口は本ファイルのチェックリストと `tmp/quality/native-same-moon-route-fresh-hit-policy-r1/report.json`。Moonと直接Justの環境を混ぜず、成功artifactの収集・真正性検証と常時100/0の合否判定を分ける。部分実証を全体合格へ転用せず、既存のDoD・未対応項目・live entry pointerを維持する。
 
-Q19/Q20の反復コスト削減は先行する。同一ソース・同一Moon経路のroot限定実測はfresh375.569秒、cache hit46.067秒、常時実行する厳格判定43.008秒だった。カバレッジ不足は `coverage-policy`・`refreshed=false` として拒否し、テストを再実行しなかった。実restore/tamper、performance側、CI再利用と最終100/0は未完了であり、この部分実証を全体完了にしない。
+Q19/Q20の反復コスト削減は先行する。同一ソース・同一Moon経路のroot限定実測はfresh375.569秒、cache hit46.067秒、常時実行する厳格判定43.008秒だった。これは旧HEAD4654の実証で、coverage97.910777%・未被覆1,249行の不足を `coverage-policy`・`refreshed=false` として拒否し、テストを再実行しなかった。実restore/tamper、performance側、CI再利用と最終100/0は未完了であり、この部分実証を全体完了にしない。
 
 以下が唯一のチェックリスト。過去の実行記録は末尾へ分離した。履歴内の「最新」は記録当時の表現であり、現在の合格を意味しない。
 
