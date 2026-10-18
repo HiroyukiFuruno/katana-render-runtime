@@ -22,12 +22,14 @@ pub(in super::super) struct FaceSource {
     pub(in super::super) monospaced: bool,
 }
 pub(super) fn source_record(face: &FaceInfo, mode: Mode) -> Option<(FaceSource, Option<ByteWeak>)> {
+    let (stamp, bytes_sha256) = if matches!(mode, Mode::Audit) {
+        audited_source(face)?
+    } else {
+        (None, None)
+    };
     let (mut record, owner) = measured_source_record(face);
-    if matches!(mode, Mode::Audit) {
-        let (stamp, bytes_sha256) = audited_source(face)?;
-        record.stamp = stamp;
-        record.bytes_sha256 = bytes_sha256;
-    }
+    record.stamp = stamp;
+    record.bytes_sha256 = bytes_sha256;
     Some((record, owner))
 }
 

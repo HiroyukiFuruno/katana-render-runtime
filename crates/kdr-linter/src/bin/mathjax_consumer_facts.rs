@@ -28,6 +28,9 @@ mod runtime_dispatch;
 mod source;
 #[path = "mathjax_consumer_facts/syntax.rs"]
 mod syntax;
+#[cfg(test)]
+#[path = "mathjax_consumer_facts/syntax_tests.rs"]
+mod syntax_tests;
 #[path = "mathjax_consumer_facts/v8_compile.rs"]
 mod v8_compile;
 #[path = "mathjax_consumer_facts/v8_route.rs"]
