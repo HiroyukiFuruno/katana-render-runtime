@@ -7,7 +7,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 import native_cli_build_bindings as bindings
@@ -82,6 +85,68 @@ class InputAdmissionTests(unittest.TestCase):
         alias.symlink_to(self.source)
         with self.assertRaises(RuntimeError):
             guard.file_record(alias)
+
+    def test_capacity_preflight_is_no_child_guard_before_request_environment(self) -> None:
+        attempt = self.root / "tmp" / ("d" * 64)
+        attempt.mkdir(parents=True)
+        target = self.root / "target"
+        target.mkdir()
+        stdout = attempt / "stdout.raw"
+        stderr = attempt / "stderr.raw"
+        report = {**guard.policy(target), "metric_available": True, "current_bytes": 1024,
+                  "over_capacity": False, "removed": ["finite artifact eviction"],
+                  "cleanup_status": "completed"}
+        stdout.write_text(json.dumps(report) + "\n")
+        stderr.write_text("")
+        lifecycle = attempt / "lifecycle.json"
+        lifecycle.write_text(json.dumps({"exitCode": 0, "groupClosed": True,
+            "rawFdsClosed": True, "raw": [{"path": str(stdout)}, {"path": str(stderr)}]}))
+        binding = SimpleNamespace(
+            tools={"python3": {"path": sys.executable}},
+            child_environment={"PATH": os.environ["PATH"], "CARGO_CAPACITY_PROTECTED_REFS": "[]"},
+        )
+        observed: list[list[str]] = []
+
+        def measured(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+            observed.append(argv)
+            self.assertEqual(kwargs["check"], False)
+            self.assertNotIn(guard.REQUEST_ENV, cast(dict[str, str], kwargs["env"]))
+            callback = cast(Callable[[Path], None], kwargs["lifecycle_sink"])
+            callback(lifecycle)
+            return subprocess.CompletedProcess(argv, 0, (json.dumps(report) + "\n").encode(), b"")
+
+        with patch.object(owner, "_measurement_command", side_effect=measured):
+                evidence = producer._capacity_preflight(cast(bindings.Bindings, binding), self.root, attempt)
+        self.assertEqual(len(observed), 1)
+        self.assertIn("--require-capacity", observed[0])
+        self.assertNotIn("build", observed[0])
+        self.assertEqual(evidence["actualExit"], 0)
+        self.assertEqual(cast(JsonObject, evidence["report"])["cleanup_status"], "completed")
+        self.assertTrue((attempt / "capacity-preflight.json").is_file())
+
+    def test_capacity_preflight_failure_stops_before_cargo(self) -> None:
+        attempt = self.root / "tmp" / ("e" * 64)
+        attempt.mkdir(parents=True)
+        stdout = attempt / "stdout.raw"
+        stderr = attempt / "stderr.raw"
+        stdout.write_text("{}\n")
+        stderr.write_text("capacity unavailable\n")
+        lifecycle = attempt / "lifecycle.json"
+        lifecycle.write_text(json.dumps({"exitCode": 1, "groupClosed": True,
+            "rawFdsClosed": True, "raw": [{"path": str(stdout)}, {"path": str(stderr)}]}))
+        binding = SimpleNamespace(tools={"python3": {"path": sys.executable}}, child_environment={})
+        cargo_calls: list[object] = []
+
+        def measured(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+            cast(Callable[[Path], None], kwargs["lifecycle_sink"])(lifecycle)
+            cargo_calls.append(argv)
+            return subprocess.CompletedProcess(argv, 1, b"{}\n", b"capacity unavailable\n")
+
+        with patch.object(owner, "_measurement_command", side_effect=measured):
+            with self.assertRaisesRegex(RuntimeError, "capacity preflight did not admit"):
+                producer._capacity_preflight(cast(bindings.Bindings, binding), self.root, attempt)
+        self.assertEqual(len(cargo_calls), 1)
+        self.assertNotIn("krr-build", cast(list[str], cargo_calls[0]))
 
     def _capacity_registry(self) -> tuple[Path, list[JsonObject], Path]:
         (self.root / "tmp").mkdir(exist_ok=True)

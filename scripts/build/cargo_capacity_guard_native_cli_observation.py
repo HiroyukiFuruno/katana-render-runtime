@@ -163,7 +163,7 @@ def policy(target: Path) -> JsonObject:
             "target": str(target)}
 
 
-def validate_capacity_report(report: JsonObject, target: Path) -> None:
+def validate_capacity_limit_report(report: JsonObject, target: Path) -> None:
     for key, expected in policy(target).items():
         actual = report.get(key)
         if isinstance(expected, int):
@@ -174,6 +174,10 @@ def validate_capacity_report(report: JsonObject, target: Path) -> None:
             "capacity metric unavailable or over capacity")
     require(0 <= _integer(report.get("current_bytes"), "current bytes") <= THRESHOLD,
             "capacity current bytes invalid")
+
+
+def validate_capacity_report(report: JsonObject, target: Path) -> None:
+    validate_capacity_limit_report(report, target)
     require(not report.get("removed") and report.get("cleanup_status", "not-needed") == "not-needed",
             "native observation requires capacity without cleanup")
 

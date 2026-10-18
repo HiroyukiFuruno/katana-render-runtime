@@ -8,9 +8,47 @@ import secrets
 import time
 from pathlib import Path
 
-from native_cli_build_bindings import SCHEMA, construct_bindings
+from native_cli_build_bindings import Bindings, SCHEMA, construct_bindings
 import cargo_capacity_guard_native_cli_observation as guard
 from cargo_capacity_guard import JsonObject, _array, _object, _text
+import produce_html_performance_evidence as owner
+
+
+def _capacity_preflight(bindings: Bindings, root: Path, attempt: Path) -> JsonObject:
+    """native観測内の整理を避けるため、request発行前に既存guardで容量を確保する。"""
+    tools = _object(bindings.tools, "bound tools")
+    python = _text(_object(tools["python3"], "python3 tool")["path"], "python3 path")
+    argv = [python, str(root / "scripts/build/cargo_capacity_guard.py"),
+            "--root", str(root), "--target", str(root / "target"),
+            "--state", str(root / "tmp/.cargo-capacity-guard.json"),
+            "--require-capacity", "--print-json"]
+    lifecycle_paths: list[Path] = []
+    result = owner._measurement_command(
+        argv, role="preflight", log_directory=attempt / "capacity-preflight",
+        cwd=root, env=dict(bindings.child_environment), check=False,
+        lifecycle_sink=lifecycle_paths.append, native_attempt_token=attempt.name,
+    )
+    guard.require(len(lifecycle_paths) == 1, "capacity preflight lifecycle must be unique")
+    lifecycle_path = lifecycle_paths[0]
+    lifecycle = guard.parse_json(lifecycle_path.read_bytes())
+    guard.require(result.returncode == 0 and lifecycle.get("exitCode") == 0
+                  and lifecycle.get("groupClosed") is True
+                  and lifecycle.get("rawFdsClosed") is True,
+                  "capacity preflight did not admit the fixed capacity")
+    report = guard.parse_json(result.stdout)
+    guard.validate_capacity_limit_report(report, root / "target")
+    raw = _array(lifecycle["raw"], "capacity preflight raw")
+    guard.require(len(raw) == 2, "capacity preflight raw streams are incomplete")
+    stdout = guard.file_record(Path(_text(_object(raw[0], "capacity stdout")["path"], "stdout path")))
+    stderr = guard.file_record(Path(_text(_object(raw[1], "capacity stderr")["path"], "stderr path")))
+    evidence: JsonObject = {
+        "schema": "krr-native-cli-capacity-preflight-v1", "argv": argv,
+        "cwd": str(root), "actualExit": result.returncode, "reaped": True,
+        "stdout": stdout, "stderr": stderr,
+        "lifecycle": guard.file_record(lifecycle_path), "report": report,
+    }
+    guard.exclusive_json(attempt / "capacity-preflight.json", evidence)
+    return evidence
 
 
 def completed_observation(value: JsonObject, request: JsonObject, build: JsonObject,
@@ -62,7 +100,13 @@ def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path
     attempt = root / "tmp/native-cli-managed-build" / nonce
     attempt.mkdir(parents=True, exist_ok=False)
     bindings = construct_bindings(root, attempt, expected_source, expected_sha, registry, registry_sha, cargo, rustc)
-    before = bindings.snapshot()
+    initial = bindings.snapshot()
+    _capacity_preflight(bindings, root, attempt)
+    bindings = construct_bindings(root, attempt, expected_source, expected_sha, registry, registry_sha, cargo, rustc)
+    after_preflight = bindings.snapshot()
+    for key in ("source", "tools", "control", "environment", "environmentSha256", "toolchainFiles", "toolchainAbsent"):
+        guard.require(after_preflight[key] == initial[key], "inputs changed during capacity preflight: " + key)
+    before = after_preflight
     source_files = [_object(row, "source pin") for row in _array(before["source"], "source pins")]
     source_manifest = guard.exclusive_json(attempt / "source-manifest.json", bindings.expected)
     runtime_pin = guard.file_record(runtime)

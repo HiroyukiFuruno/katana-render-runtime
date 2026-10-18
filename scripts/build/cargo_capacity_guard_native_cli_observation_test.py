@@ -323,6 +323,7 @@ class NativeObservationTests(unittest.TestCase):
                     fixture.admission()
                 self.assertFalse((fixture.attempt / "child.json").exists())
 
+
     def test_just_shell_overlay_values_remain_exactly_bound(self) -> None:
         for key, value in (("PWD", "/wrong"), ("SHLVL", "1"), ("_", "/arbitrary/python3"),
                            ("__CF_USER_TEXT_ENCODING", "0x0:0x0:0x0")):
@@ -645,6 +646,11 @@ class NativeObservationTests(unittest.TestCase):
             fixture = Fixture(Path(directory))
             report = inspect(fixture.root, fixture.target, fixture.state, 2)
             observation.validate_capacity_report(report, fixture.target)
+            cleaned = {**report, "current_bytes": 1024, "over_capacity": False,
+                       "removed": ["finite artifact eviction"], "cleanup_status": "completed"}
+            observation.validate_capacity_limit_report(cleaned, fixture.target)
+            with self.assertRaisesRegex(RuntimeError, "without cleanup"):
+                observation.validate_capacity_report(cleaned, fixture.target)
             for key, value in (("metric_version", True), ("baseline_bytes", None), ("current_bytes", True),
                                ("metric_available", False), ("over_capacity", True), ("factor", 3),
                                ("cleanup_status", "completed"), ("removed", ["something"])):
