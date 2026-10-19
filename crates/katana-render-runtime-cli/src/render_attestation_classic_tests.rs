@@ -4,6 +4,9 @@ use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[path = "render_attestation_classic_typed_fields_tests.rs"]
+mod typed_fields;
+
 const SOURCE: &str = "flowchart TD\n  A[日本語] --> B";
 static SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -151,29 +154,6 @@ fn completion_without_script_and_double_completion_are_rejected() -> anyhow::Res
 }
 
 #[test]
-fn unknown_phase_extra_fields_and_debug_strings_are_rejected() -> anyhow::Result<()> {
-    rejected(
-        observe(|| {
-            tracing::event!(target: TARGET, tracing::Level::TRACE, phase = "unknown");
-        })?,
-        "unknown classic event phase",
-    )?;
-    rejected(
-        observe(|| {
-            tracing::event!(target: TARGET, tracing::Level::TRACE,
-            phase = "complete", unexpected = "field");
-        })?,
-        "invalid classic event field",
-    )?;
-    rejected(
-        observe(|| {
-            tracing::event!(target: TARGET, tracing::Level::TRACE, phase = ?"complete");
-        })?,
-        "invalid classic event field",
-    )
-}
-
-#[test]
 fn request_source_schema_and_program_bytes_are_bound() -> anyhow::Result<()> {
     let value = request_json(false);
     let state = observe(|| {
@@ -201,25 +181,6 @@ fn request_source_schema_and_program_bytes_are_bound() -> anyhow::Result<()> {
         .code
         .push(' ');
     rejected(state, "request program differs")
-}
-
-#[test]
-fn type_count_and_event_level_are_rejected() -> anyhow::Result<()> {
-    let value = request_json(false);
-    rejected(
-        observe(|| {
-            request(&value, 5);
-            programs(&value, true);
-        })?,
-        "type/count differs",
-    )?;
-    rejected(observe(|| request(&value, 3))?, "script count differs")?;
-    rejected(
-        observe(|| {
-            tracing::event!(target: TARGET, tracing::Level::INFO, phase = "complete");
-        })?,
-        "invalid classic event field",
-    )
 }
 
 #[test]
