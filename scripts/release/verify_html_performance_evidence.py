@@ -181,6 +181,43 @@ def _text(value: object, label: str) -> str:
     return value
 
 
+def provenance_file_refs(report: JsonObject) -> list[JsonObject]:
+    refs: dict[str, JsonObject] = {}
+    resources = report.get("resourceProvenance")
+    if isinstance(resources, dict) and "requests" in resources:
+        requests = resources.get("requests")
+        if not isinstance(requests, list):
+            raise ValueError("resource provenance requests are unavailable")
+        for request in requests:
+            item = _object(request, "resource provenance request")
+            _add_provenance_ref(refs, _text(item.get("bodyPath"), "resource body path"),
+                                _provenance_sha(item.get("bytesSha256"), "resource body SHA"))
+    fonts = report.get("fontProvenance")
+    if not isinstance(fonts, list):
+        raise ValueError("font provenance is unavailable")
+    for font in fonts:
+        item = _object(font, "font provenance")
+        require(item.get("fileBytesVerified") is True, "font physical provenance is unavailable")
+        _add_provenance_ref(refs, _text(item.get("filePath"), "font file path"),
+                            _provenance_sha(item.get("fileSha256"), "font file SHA"))
+    return list(refs.values())
+
+
+def _provenance_sha(value: object, label: str) -> str:
+    digest(value)
+    return _text(value, label)
+
+
+def _add_provenance_ref(refs: dict[str, JsonObject], path: str, checksum: str) -> None:
+    file_path = Path(path)
+    require(file_path.is_file() and not file_path.is_symlink() and sha256(file_path) == checksum,
+            "provenance input file differs")
+    previous = refs.get(path)
+    require(previous is None or previous["sha256"] == checksum,
+            "provenance path has conflicting hashes")
+    refs[path] = {"path": path, "sha256": checksum}
+
+
 def _integer(value: object, label: str) -> int:
     if type(value) is not int:
         raise ValueError(f"{label} must be an integer")
@@ -236,9 +273,10 @@ def catalog_operation_stream(operation_kind: str, evidence_value: object,
         require(evidence.get("delivery") == "session-load-settled"
                 and set(state) == {"before", "after"}
                 and set(evidence) == {
-                    "schema", "kind", "sourceSha256Before", "sourceSha256After",
+                    "schema", "kind", "status", "sourceSha256Before", "sourceSha256After",
                     "preFrame", "postFrame", "target", "state", "steps", "delivery",
                 }
+                and evidence.get("status") == "observed"
                 and len(steps) == 1
                 and set(steps[0]) == {"kind", "stateBefore", "stateAfter"}
                 and steps[0].get("kind") == "session-load-settled-observer-state"
@@ -282,9 +320,10 @@ def catalog_operation_stream(operation_kind: str, evidence_value: object,
     if operation_kind == "navigation-all-pointer-clicks":
         require(evidence.get("delivery") == "session-load"
                 and set(evidence) == {
-                    "schema", "kind", "sourceSha256Before", "sourceSha256After",
+                    "schema", "kind", "status", "sourceSha256Before", "sourceSha256After",
                     "preFrame", "postFrame", "target", "state", "steps", "delivery", "links",
                 }
+                and evidence.get("status") == "observed"
                 and evidence.get("sourceSha256Before") == evidence.get("sourceSha256After"),
                 "all-TOC operation evidence is not bound to one fresh fixture source")
         links = _objects(evidence.get("links"), "catalog TOC link")
@@ -342,6 +381,41 @@ def catalog_operation_stream(operation_kind: str, evidence_value: object,
         require(len(capture_paths) == 3, "all-TOC links must have separate capture files")
         return _catalog_pointer_stream(steps)
     if operation_kind == "script-await-timer-microtask":
+        if evidence.get("delivery") == "session-load-settled":
+            state = _object(evidence.get("state"), "settled timer operation state")
+            settled_steps = _objects(evidence.get("steps", []), "settled timer operation step")
+            require(
+                set(evidence) == {
+                    "schema", "kind", "status", "sourceSha256Before", "sourceSha256After",
+                    "preFrame", "postFrame", "target", "state", "steps", "delivery",
+                }
+                and evidence.get("status") == "observed"
+                and set(state) == {"before", "after"}
+                and len(settled_steps) == 1
+                and set(settled_steps[0]) == {
+                    "kind", "elapsedMs", "timerRan", "microtaskCheckpoint",
+                    "stateBefore", "stateAfter", "fixtureStateVerified",
+                }
+                and settled_steps[0].get("kind") == "host-time-advance"
+                and settled_steps[0].get("elapsedMs") == 0
+                and settled_steps[0].get("timerRan") is False
+                and settled_steps[0].get("microtaskCheckpoint") == "runtime-advance-timers"
+                and settled_steps[0].get("fixtureStateVerified") is True
+                and expected_state is not None and report_state is not None
+                and _same_json(state["before"], state["after"])
+                and _same_json(state["before"], settled_steps[0]["stateBefore"])
+                and _same_json(state["after"], settled_steps[0]["stateAfter"]),
+                "settled timer operation lacks a verified load-settled state",
+            )
+            require(
+                all(_same_json(value, expected_state) for value in (
+                    state["before"], state["after"],
+                    settled_steps[0]["stateBefore"], settled_steps[0]["stateAfter"],
+                    report_state,
+                )),
+                "settled timer operation differs from its fixture state",
+            )
+            return []
         require(len(steps) == 1 and set(steps[0]) == {
                     "kind", "elapsedMs", "timerRan", "microtaskCheckpoint"
                 } and steps[0].get("kind") == "host-time-advance"
@@ -355,9 +429,10 @@ def catalog_operation_stream(operation_kind: str, evidence_value: object,
     if operation_kind == "script-real-events":
         require(evidence.get("delivery") == "session-load"
                 and set(evidence) == {
-                    "schema", "kind", "sourceSha256Before", "sourceSha256After",
+                    "schema", "kind", "status", "sourceSha256Before", "sourceSha256After",
                     "preFrame", "postFrame", "target", "state", "steps", "delivery", "events",
                 }
+                and evidence.get("status") == "observed"
                 and evidence.get("sourceSha256Before") == evidence.get("sourceSha256After"),
                 "script event operation does not prove one fresh fixture load")
         require(len(steps) == 9
@@ -436,7 +511,28 @@ def catalog_operation_stream(operation_kind: str, evidence_value: object,
         key_up = {"kind": "key_up", "key": up_step["key"]}
         return [*script_first_pointer, text_input, key_down, key_up, *script_last_pointer]
     if operation_kind == "script-await-resource-font":
-        raise ValueError("resource/font operation has no complete observed operation evidence")
+        state = _object(evidence.get("state"), "resource/font operation state")
+        settled_steps = _objects(evidence.get("steps", []), "resource/font operation step")
+        require(
+            evidence.get("delivery") == "session-load-settled"
+            and set(evidence) == {
+                "schema", "kind", "status", "sourceSha256Before", "sourceSha256After",
+                "preFrame", "postFrame", "target", "state", "steps", "delivery",
+            }
+            and evidence.get("status") == "observed"
+            and set(state) == {"before", "after"}
+            and len(settled_steps) == 1
+            and set(settled_steps[0]) == {"kind", "stateBefore", "stateAfter"}
+            and settled_steps[0].get("kind") == "session-load-settled-resource-state"
+            and _same_json(state["before"], state["after"])
+            and _same_json(state["before"], settled_steps[0]["stateBefore"])
+            and _same_json(state["after"], settled_steps[0]["stateAfter"])
+            and expected_state is not None and report_state is not None
+            and _same_json(state["before"], expected_state)
+            and _same_json(report_state, expected_state),
+            "resource/font operation lacks a verified settled resource state",
+        )
+        return []
     raise ValueError(f"unsupported finite catalog operation: {operation_kind}")
 
 
@@ -1276,7 +1372,8 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                     _text(catalog["operation_kind"], "catalog operation kind"), operation_evidence,
                     (_fixture_expected_state(root / fixture_relative)
                      if catalog.get("operation_kind") in {
-                         "script-await-mutation-delivery", "script-real-events",
+                         "script-await-timer-microtask", "script-await-mutation-delivery",
+                         "script-real-events", "script-await-resource-font",
                      } else None),
                     dom.get("state"),
                 ),
@@ -1303,6 +1400,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                 and (catalog.get("target_selector") is None
                      or target.get("selector") == catalog.get("target_selector")),
                 "catalog raw operation target differs")
+    provenance_refs = provenance_file_refs(dom) if catalog_expected is not None else []
     context_rows = _objects(before_context["inputs"], "context inputs")
     context_inputs = {_text(row["path"], "context input path"): row for row in context_rows}
     require(len(context_inputs) == len(context_rows), "duplicate context input")
@@ -1317,6 +1415,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
             _object(expected["chromeReceiptRef"], "Chrome receipt reference"),
             capture_ref,
             *link_capture_refs,
+            *provenance_refs,
         ])
     for ref in input_refs:
         context_input = context_inputs[_text(ref["path"], "input reference path")]

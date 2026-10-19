@@ -1,14 +1,16 @@
-use std::{fs, time::Instant};
+use std::time::Instant;
 
 mod catalog_evidence;
+mod legacy;
 use catalog_evidence::{catalog_condition_report, validate_sample_input};
+use legacy::measure_legacy_post_operation;
 const RESIZE_WIDTH_REDUCTION_DIVISOR: u32 = 4;
 
-use super::{hex_digest, phase_snapshot, HtmlBrowserSession, HtmlBrowserViewport, SessionFrame};
 use super::{
-    operations::{measure_full_y, perform_operation, CatalogOperations},
+    operations::{measure_full_y, CatalogOperations},
     options::{CatalogOperationPlan, OperationPlan},
 };
+use super::{phase_snapshot, HtmlBrowserSession, HtmlBrowserViewport, SessionFrame};
 #[cfg(feature = "baseline")]
 use baseline::{HtmlBrowserSource, HtmlRuntime};
 #[cfg(feature = "candidate")]
@@ -21,15 +23,21 @@ pub(super) fn measure_one(
     sample: usize,
     operation_plan: &OperationPlan,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    validate_sample_input(operation_plan, source_hash, viewport)?;
+    let settled_load = validate_sample_input(operation_plan, source_hash, viewport)?;
     let origin = format!("file:///krr-performance/{source_hash}.html");
     let (mut session, cold, warm_phase) = measure_open_phases(html, &origin, viewport)?;
     let refresh_start = Instant::now();
     session.refresh_frame()?;
     let redisplay = phase_snapshot(refresh_start, &session)?;
     let (full_y, scroll_steps, scroll_y, max_scroll) = measure_full_y(&mut session, viewport)?;
-    let post_operation =
-        measure_post_operation(&mut session, operation_plan, html, &origin, viewport)?;
+    let post_operation = measure_post_operation(
+        &mut session,
+        operation_plan,
+        html,
+        &origin,
+        viewport,
+        settled_load,
+    )?;
     let same_session_resize = measure_same_session_resize(&mut session, viewport)?;
     session.close()?;
     let catalog_condition = catalog_condition_report(operation_plan);
@@ -133,10 +141,11 @@ fn measure_post_operation(
     html: &[u8],
     origin: &str,
     viewport: HtmlBrowserViewport,
+    settled_load: bool,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     match operation_plan {
         OperationPlan::Catalog(plan) => {
-            measure_catalog_post_operation(session, plan, html, origin, viewport)
+            measure_catalog_post_operation(session, plan, html, origin, viewport, settled_load)
         }
         OperationPlan::Legacy(plan) => measure_legacy_post_operation(session, plan),
     }
@@ -148,8 +157,9 @@ fn measure_catalog_post_operation(
     html: &[u8],
     origin: &str,
     viewport: HtmlBrowserViewport,
+    settled_load: bool,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    if !CatalogOperations::is_static(plan) {
+    if !CatalogOperations::is_static(plan) && !settled_load {
         return CatalogOperations::perform(session, plan);
     }
     let operation_start = Instant::now();
@@ -167,28 +177,5 @@ fn measure_catalog_post_operation(
             "delivery": "measured-close-and-new-session-open",
             "frame_after": session.frame_state()?,
         }
-    }))
-}
-
-fn measure_legacy_post_operation(
-    session: &mut HtmlBrowserSession,
-    plan: &super::options::LegacyOperationPlan,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let (measurement, previous_generation, operation_generation, before_pixels, after_pixels) =
-        perform_operation(session, plan)?;
-    if before_pixels == after_pixels {
-        return Err("post-operation did not change frame pixels".into());
-    }
-    let expected_state_sha256 = hex_digest(&fs::read(&plan.expected_dom_state_path)?);
-    if expected_state_sha256 != plan.expected_dom_state_sha256 {
-        return Err("expected DOM state evidence SHA does not match its file".into());
-    }
-    Ok(serde_json::json!({
-        "measurement": measurement, "generation_before": previous_generation,
-        "generation_after": operation_generation, "pixel_sha_before": before_pixels,
-        "pixel_sha_after": after_pixels, "visual_change_observed": true,
-        "semantic_state_evidence": {"lane": "existing-html-interaction-regression",
-            "expected_state_file_sha256": expected_state_sha256},
-        "operation": plan.operation, "expected_dom_state_sha256": expected_state_sha256,
     }))
 }

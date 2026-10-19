@@ -952,8 +952,13 @@ def validate_interaction(value: object, fixture_sha256: str) -> None:
                  and js_state["expanded"] is True, "real same-source interaction evidence absent")
 
 
-def _catalog_operation_stream(operation_kind: str, evidence: gate.JsonObject) -> list[gate.JsonObject]:
-    return gate.catalog_operation_stream(operation_kind, evidence)
+def _catalog_operation_stream(
+    operation_kind: str,
+    evidence: gate.JsonObject,
+    expected_state: object | None = None,
+    report_state: object | None = None,
+) -> list[gate.JsonObject]:
+    return gate.catalog_operation_stream(operation_kind, evidence, expected_state, report_state)
 
 
 def _validate_catalog_capture_envelope(stdout: bytes, manifest_pin: FilePin,
@@ -1152,7 +1157,19 @@ def load_catalog_conditions(root: Path, manifest_path: Path) -> tuple[list[Catal
                 link_capture_sha = gate._text(link.get("captureSha256"), "TOC link capture SHA")
                 _pinned_file(link_capture_path, link_capture_sha)
                 link_captures.append({"path": str(link_capture_path), "sha256": link_capture_sha})
-        stream = _catalog_operation_stream(operation_kind, evidence)
+        expected_operation_state = (
+            gate._fixture_expected_state(fixture)
+            if operation_kind in {
+                "script-await-timer-microtask",
+                "script-await-mutation-delivery",
+                "script-real-events",
+                "script-await-resource-font",
+            }
+            else None
+        )
+        stream = _catalog_operation_stream(
+            operation_kind, evidence, expected_operation_state, raw_report.get("state")
+        )
         operation_plan: CatalogOperationPlan = {
             "profile": "catalog-plan84", "conditionId": condition_id,
             "caseId": gate._text(expected.get("caseId"), "case id"),
@@ -1341,6 +1358,13 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             Path(first_catalog["font_identity_response"]["path"]),
             Path(first_catalog["font_identity_binary_path"]),
         ]
+    provenance_input_paths = [
+        Path(cast(str, ref["path"]))
+        for row in measurement_rows if row["catalog"]
+        for ref in gate.provenance_file_refs(
+            gate.read_json(Path(cast(FilePin, row["operation_evidence"])["path"]))
+        )
+    ]
     input_paths = [*[cast(Path, row["fixture"]) for row in measurement_rows],
                    *[cast(Path, row["plan_path"]) for row in measurement_rows],
                    *[cast(Path, row["dom"]) for row in measurement_rows if row["dom"] is not None],
@@ -1351,12 +1375,14 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                    *[Path(cast(SizedFilePin, row["chrome_capture"])['path']) for row in measurement_rows if row["catalog"]],
                    *[Path(cast(SizedFilePin, row["chrome_receipt"])['path']) for row in measurement_rows if row["catalog"]],
                    *font_probe_input_paths,
+                   *provenance_input_paths,
                    *([catalog_manifest_path] if catalog_manifest_path is not None else []),
                    *([Path(catalog_plan_pin["path"])] if catalog_plan_pin is not None else []),
                    *([Path(catalog_capture_validation_pin["path"])] if catalog_capture_validation_pin is not None else []),
                    lock, output / "shared-source-snapshot.json", *binaries.values(),
                    binding.document, binding.state, binding.registry, *capacity_configs,
                    *[Path(pin["path"]) for pin in build_pins]]
+    input_paths = list(dict.fromkeys(input_paths))
     arms = expected_arm_pins(builds, snapshot_pin["sha256"], build_artifact_refs)
     before_context = context(root, target, input_paths, lifecycle, git_query=git_query)
     before_pin = write(output / "context-before.json", before_context)

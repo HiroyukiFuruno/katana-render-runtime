@@ -127,6 +127,102 @@ class CatalogOperationStreamTest(unittest.TestCase):
         self.assertEqual(gate.catalog_operation_stream(
             "load-and-observe-target", {"delivery": "session-load"}), [])
 
+    @staticmethod
+    def settled_timer_evidence() -> JsonObject:
+        state_before = "microtask>ready>timer"
+        state_after = "microtask>ready>timer"
+        return {
+            "schema": "krr-html84-operation-evidence-v1",
+            "kind": "script-await-timer-microtask",
+            "status": "observed",
+            "sourceSha256Before": "a" * 64,
+            "sourceSha256After": "a" * 64,
+            "preFrame": {"generation": 1, "scrollY": 0},
+            "postFrame": {"generation": 1, "scrollY": 0},
+            "target": {"visible": True, "nodeId": 1, "selector": "#state"},
+            "state": {"before": state_before, "after": state_after},
+            "steps": [{
+                "kind": "host-time-advance", "elapsedMs": 0, "timerRan": False,
+                "microtaskCheckpoint": "runtime-advance-timers",
+                "stateBefore": state_before, "stateAfter": state_after, "fixtureStateVerified": True,
+            }],
+            "delivery": "session-load-settled",
+        }
+
+    def test_settled_timer_is_a_close_reopen_operation(self) -> None:
+        evidence = self.settled_timer_evidence()
+        expected = "microtask>ready>timer"
+        self.assertEqual(gate.catalog_operation_stream(
+            "script-await-timer-microtask", evidence, expected, expected), [])
+
+    def test_settled_timer_rejects_dispatch_claims_and_state_drift(self) -> None:
+        evidence = self.settled_timer_evidence()
+        json_object_at(evidence, "steps", 0)["timerRan"] = True
+        expected = "microtask>ready>timer"
+        with self.assertRaisesRegex(ValueError, "settled timer operation"):
+            gate.catalog_operation_stream("script-await-timer-microtask", evidence, expected, expected)
+
+        evidence = self.settled_timer_evidence()
+        json_object_at(evidence, "state")["after"] = "wrong"
+        expected = "microtask>ready>timer"
+        with self.assertRaisesRegex(ValueError, "settled timer operation"):
+            gate.catalog_operation_stream("script-await-timer-microtask", evidence, expected, expected)
+
+    def test_timer_dispatch_still_emits_advance_time(self) -> None:
+        evidence = {
+            "steps": [{
+                "kind": "host-time-advance", "elapsedMs": 25,
+                "timerRan": True, "microtaskCheckpoint": "runtime-advance-timers",
+            }],
+        }
+        self.assertEqual(gate.catalog_operation_stream(
+            "script-await-timer-microtask", evidence),
+            [{"kind": "advance_time", "elapsed_ms": 25}])
+
+    def test_resource_settlement_replays_only_verified_loaded_state(self) -> None:
+        state = {"state": "loaded", "fonts": "ready"}
+        evidence = {
+            "schema": "krr-html84-operation-evidence-v1",
+            "kind": "script-await-resource-font", "status": "observed",
+            "sourceSha256Before": "a" * 64, "sourceSha256After": "a" * 64,
+            "preFrame": {"generation": 1, "scrollY": 0},
+            "postFrame": {"generation": 1, "scrollY": 0},
+            "target": {"visible": True, "nodeId": 1, "selector": "#state"},
+            "state": {"before": state, "after": state},
+            "steps": [{"kind": "session-load-settled-resource-state",
+                       "stateBefore": state, "stateAfter": state}],
+            "delivery": "session-load-settled",
+        }
+        self.assertEqual(gate.catalog_operation_stream(
+            "script-await-resource-font", evidence, state, state), [])
+        step: JsonObject = json_object_at(evidence, "steps", 0)
+        step["stateAfter"] = {"state": "wrong"}
+        with self.assertRaisesRegex(ValueError, "settled resource state"):
+            gate.catalog_operation_stream("script-await-resource-font", evidence, state, state)
+
+    def test_provenance_files_are_bound_and_tampering_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "resource.bin"
+            path.write_bytes(b"verified")
+            checksum = gate.sha256(path)
+            report: JsonObject = {
+                "resourceProvenance": {
+                    "inventoryComplete": True,
+                    "requests": [{"bodyPath": str(path), "bytesSha256": checksum}],
+                },
+                "fontProvenance": [{
+                    "fileBytesVerified": True,
+                    "filePath": str(path),
+                    "fileSha256": checksum,
+                }],
+            }
+            self.assertEqual(gate.provenance_file_refs(report), [
+                {"path": str(path), "sha256": checksum},
+            ])
+            path.write_bytes(b"tampered")
+            with self.assertRaisesRegex(ValueError, "provenance input file differs"):
+                gate.provenance_file_refs(report)
+
     def test_mutation_delivery_evidence_is_observation_not_input(self) -> None:
         self.assertEqual(gate.catalog_operation_stream("script-await-mutation-delivery", {
             "delivery": "mutation-observer",
@@ -139,6 +235,7 @@ class CatalogOperationStreamTest(unittest.TestCase):
         evidence: JsonObject = {
             "schema": "krr-html84-operation-evidence-v1",
             "kind": "script-await-mutation-delivery",
+            "status": "observed",
             "sourceSha256Before": "a" * 64,
             "sourceSha256After": "a" * 64,
             "preFrame": {"generation": 1, "scrollY": 0},
@@ -248,6 +345,7 @@ class CatalogOperationStreamTest(unittest.TestCase):
         return {
             "schema": "krr-html84-operation-evidence-v1",
             "kind": "script-real-events",
+            "status": "observed",
             "sourceSha256Before": "a" * 64,
             "sourceSha256After": "a" * 64,
             "preFrame": {"generation": 1, "scrollY": 0},
@@ -356,6 +454,7 @@ class CatalogOperationStreamTest(unittest.TestCase):
         return {
             "schema": "krr-html84-operation-evidence-v1",
             "kind": "navigation-all-pointer-clicks",
+            "status": "observed",
             "sourceSha256Before": source_sha,
             "sourceSha256After": source_sha,
             "preFrame": {"generation": 1, "scrollY": 0},

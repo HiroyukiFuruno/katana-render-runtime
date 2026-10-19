@@ -22,21 +22,21 @@ pub(super) fn validate_sample_input(
     operation_plan: &OperationPlan,
     source_hash: &str,
     viewport: HtmlBrowserViewport,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<bool, Box<dyn std::error::Error>> {
     if operation_plan.fixture_sha256() != source_hash {
         return Err("operation plan fixture SHA does not match input".into());
     }
     if let OperationPlan::Catalog(plan) = operation_plan {
-        validate_catalog_evidence(plan, source_hash, viewport)?;
+        return validate_catalog_evidence(plan, source_hash, viewport);
     }
-    Ok(())
+    Ok(false)
 }
 
 fn validate_catalog_evidence(
     plan: &CatalogOperationPlan,
     source_hash: &str,
     viewport: HtmlBrowserViewport,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<bool, Box<dyn std::error::Error>> {
     let report = read_catalog_report(plan)?;
     validate_catalog_report_identity(&report, plan, source_hash, viewport)?;
     let evidence = report
@@ -44,7 +44,7 @@ fn validate_catalog_evidence(
         .ok_or("catalog typed operation evidence is missing")?;
     validate_typed_operation_evidence(evidence, plan, source_hash)?;
     validate_catalog_target(evidence, plan)?;
-    validate_catalog_operation_stream(plan)
+    validate_catalog_operation_stream(plan, evidence)
 }
 
 fn read_catalog_report(
@@ -173,9 +173,22 @@ fn validate_catalog_target(
 
 fn validate_catalog_operation_stream(
     plan: &CatalogOperationPlan,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if CatalogOperations::is_static(plan) != plan.operation_stream.is_empty() {
+    evidence: &serde_json::Value,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    if CatalogOperations::is_static(plan) {
+        if !plan.operation_stream.is_empty() {
+            return Err("catalog operation stream does not match its finite operation kind".into());
+        }
+        return Ok(false);
+    }
+    if CatalogOperations::is_settled_timer(plan, evidence) {
+        return Ok(true);
+    }
+    if CatalogOperations::is_settled_resource(plan, evidence) {
+        return Ok(true);
+    }
+    if plan.operation_stream.is_empty() {
         return Err("catalog operation stream does not match its finite operation kind".into());
     }
-    Ok(())
+    Ok(false)
 }
