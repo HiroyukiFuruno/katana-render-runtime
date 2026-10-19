@@ -12,7 +12,7 @@ fn dom_property_getters_match_html_and_foreign_element_semantics() -> Result<(),
 
 fn property_fixture() -> HtmlDomBridgeState {
     HtmlDomBridgeState::new(HtmlDocument::parse(
-        "<div id=plain><input id=text value='typed'><input id=check type=checkbox><textarea id=area>note</textarea><select id=selected><option value=first>First</option><option value=chosen selected>Chosen</option></select><select id=default><option>Default text</option><option value=other>Other</option></select><select id=empty></select><span id=concealed hidden></span><svg><linearGradient id=gradient></linearGradient></svg></div>",
+        "<div id=plain><input id=text value='typed'><input id=check type=checkbox><input id=radio type=radio><button id=action value=run>Run</button><textarea id=area>note</textarea><select id=selected><option id=first-option value=first>First</option><option value=chosen selected>Chosen</option></select><select id=default><option>Default text</option><option value=other>Other</option></select><select id=empty></select><span id=concealed hidden></span><svg><linearGradient id=gradient></linearGradient></svg></div>",
     ))
 }
 
@@ -42,7 +42,19 @@ fn assert_form_values(state: &HtmlDomBridgeState) -> Result<(), String> {
         Ok(DomValue::Undefined)
     ));
     assert_text_input_values(state)?;
-    assert_select_values(state)
+    assert_select_values(state)?;
+    assert_additional_form_values(state)
+}
+
+fn assert_additional_form_values(state: &HtmlDomBridgeState) -> Result<(), String> {
+    assert_lookup_string(state, "value", &element_id(state, "radio")?, "on");
+    assert_lookup_string(state, "value", &element_id(state, "action")?, "run");
+    assert_lookup_string(state, "value", &element_id(state, "first-option")?, "first");
+    assert!(matches!(
+        state.lookup("value", &[element_id(state, "gradient")?]),
+        Ok(DomValue::Undefined)
+    ));
+    Ok(())
 }
 
 fn assert_text_input_values(state: &HtmlDomBridgeState) -> Result<(), String> {

@@ -2,26 +2,29 @@ use super::stacking_context_tests::{element, pixel, render_pixels};
 use crate::renderer::backends::html_interactive::types::LayoutResult;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
+const RGBA_CHANNEL_COUNT: usize = 4;
+const DEFERRED_CHILD_NODE_ID: u64 = 3;
 
 #[test]
 fn deferred_z_child_obeys_non_stacking_rounded_overflow_clip() -> TestResult {
-    let child = element(
-        3,
+    assert_deferred_clip_pixels(
         "position:absolute;left:0;top:0;width:60px;height:60px;background:red;z-index:1",
-        vec![],
-    );
-    let clip = element(
-        2,
         "position:relative;width:40px;height:40px;overflow:hidden;border-radius:20px",
-        vec![child],
-    );
-    let root = element(1, "position:relative;width:100px;height:100px", vec![clip]);
-    let (layout, pixels) = render_pixels(root)?;
-    assert_clip_owner(&layout, 3, 2, true)?;
-    assert_eq!(pixel(&pixels, 20, 20)?, [255, 0, 0, 255]);
-    assert_eq!(pixel(&pixels, 2, 2)?, [255, 255, 255, 255]);
-    assert_eq!(pixel(&pixels, 50, 20)?, [255, 255, 255, 255]);
-    Ok(())
+        &[
+            (20, 20, [255, 0, 0, 255]),
+            (2, 2, [255, 255, 255, 255]),
+            (50, 20, [255, 255, 255, 255]),
+        ],
+    )
+}
+
+#[test]
+fn zero_width_axis_clip_hides_deferred_paint_from_html_layout() -> TestResult {
+    assert_deferred_clip_pixels(
+        "position:absolute;left:0;top:0;width:20px;height:20px;background:red;z-index:1",
+        "position:relative;width:0;height:40px;overflow-x:clip",
+        &[(1, 10, [255, 255, 255, 255])],
+    )
 }
 
 #[test]
@@ -129,6 +132,22 @@ fn outer_clip_stays_outside_inner_context_rotation() -> TestResult {
     assert_eq!(pixel(&pixels, 42, 30)?, [255, 0, 0, 255]);
     assert_eq!(pixel(&pixels, 48, 30)?, [255, 255, 255, 255]);
     assert_eq!(pixel(&pixels, 42, 55)?, [255, 255, 255, 255]);
+    Ok(())
+}
+
+fn assert_deferred_clip_pixels(
+    child_style: &str,
+    clip_style: &str,
+    samples: &[(u32, u32, [u8; RGBA_CHANNEL_COUNT])],
+) -> TestResult {
+    let child = element(DEFERRED_CHILD_NODE_ID, child_style, vec![]);
+    let clip = element(2, clip_style, vec![child]);
+    let root = element(1, "position:relative;width:100px;height:100px", vec![clip]);
+    let (layout, pixels) = render_pixels(root)?;
+    assert_clip_owner(&layout, DEFERRED_CHILD_NODE_ID, 2, true)?;
+    for &(x, y, expected) in samples {
+        assert_eq!(pixel(&pixels, x, y)?, expected);
+    }
     Ok(())
 }
 
