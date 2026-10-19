@@ -10,6 +10,14 @@
 
 ## 現在の状態（2026-10-20）
 
+R203は全静的19項目がexit0（180.975秒、source前後`f2c89e8a`一致）。R205ではroot実テスト2571成功・17skip、独立性能harnessはbaseline10件・candidate11件が全成功し、候補CLIの実PNG出力回帰も通過した。一方coverage-policyは実exit1で、root60127/61189行（98.264394%、未計測1062）、baseline717/1107行、candidate721/1114行。producerは今回完了しているが100/0ではなく、画像99・実表示時間/RSS・公開条件の合格には転用しない。検証済みの関心別修正を通常hook付き中間commitへ取り込み、clean-source正式性能・画像producerへ進める。追加の小修正は既存の関連テスト診断経路で先に確認し、完全ゲートは最終候補でまとめて再実行する。
+
+R197は現行の回帰・性能証跡契約修正を含む全静的19項目がexit0（61.367秒、source前後`4a884118`一致）。R194のroot実テストは2570成功・1失敗・17skip、実exit100。失敗は重複coverage呼出しを除いたR141に対し、契約テストが直接の`just coverage`を要求し続けていたもの。必須coverageの推移的な実行経路を維持して契約を修正する。rootのcoverage producerは完了しておらず、残っている旧coverage JSONを今回の結果として扱わない。R200の詳細exportは未計測箇所を調べる診断専用であり、正式な100/0合格ではない。
+
+R163で公開候補manifestを固定し、clean HEAD `63487117` のR164は依存鮮度476件・公開内容・版・未公開tag/crateのadmissionがexit0。R165は独立raw JSのEN59/JA58とstrict official readerが成功し、壊れていた日本語クラス図も4クラスの正常な形を確認した。これは見本の受理で、KRR native117各99ではない。R166は現行ソースのstage90 raw capture84件がexit0（373.014秒）だが、manifestのacceptanceはfalse。R168の正式paired producerは、ロード時に完了したtimerを追加dispatchと同じ契約で要求して実exit1（計測前）となった。timerRanや過去receiptを書き換えず、load-settledと実dispatchを区別する回帰・既存close/reopen計測の接続を修正する。R173では失敗した容量bindingをbytes/inode不変で履歴へ移し、再実行時の上書きを防いだ。表示時間/RSSの合格はまだない。
+
+R169の読み取り調査担当が報告書作成のシェル引用を誤り、禁止していたcoverage buildを偶発実行した。完了前に停止し、mainでも対象プロセス不在とtracked cleanを確認した。正確な展開後argv・終了コードは未取得のまま記録し、検査成功には転用しない。証跡は`tmp/quality/performance-cli-coverage-integration-plan-r169/incident.md`。以後の文書・ソース編集はapply_patchを使い、Markdownをシェル文字列へ補間しない。
+
 R146/R149/R152/R154/R156/R158で、SVG形状、HTML consumer、実glyph監査、契約変異回帰、CLI証跡回帰、検証経路の6関心を通常hook付きローカルcommitへ取り込んだ。最新は`c5f31a60`、各commit実exit0、push/PR/公開は未実施。R142は依存鮮度476件を通過したが、既存の公開内容manifestが過去HEADのためrelease-targetが拒否した。公開内容の期待値を途中HEADへ更新して通過させず、残る文書を取り込んだ最終候補で既存のmanifest producerを実行・差分レビュー・commitしてから正式証拠を生成する。現在の100/0・全117各99・表示時間/RSS・完全ゲートは未合格のまま維持する。
 
 R132は保護44件を正式validatorで確認し、使用中targetなしを確認した標準clean後、`depends-update-all`を再実行した。LICENSE同期・圧縮・配布資産・静的解析・自動化・runtime-unused全7系統・Rust2568成功/17skipを含む42項目が完了したが、coverage-policyで実exit1（1670.273秒、source前後`9491af2d`一致）。rootは60101/61170行（98.252411%、未計測1069）、独立性能harnessはbaseline213/913行・candidate213/920行で、いずれも100/0ではない。原LICENSEエラーの解消と完全ゲート不合格を区別する。R138のrelease-targetは互換更新webpki-roots 1.0.9→1.0.10を検出して停止し、stage/commitは未実行。R141はroot/独立harness両lock更新と、`check`内のcoverage DAG直後に同じcoverageを直接再実行する重複1行の除去を行い、関連Bun2file・owned contract・差分検査がexit0。sourceは`59b943ec`へ変わっているためR132を更新後全体合格へ転用しない。証跡は`tmp/quality/current-dependency-update-protected-retry-r132/`と`tmp/quality/current-update-final-lock-and-dedup-r141/`。ローカル実装commitとclean-source正式producer、画像・性能・100/0・レビュー/CI/公開は継続する。
