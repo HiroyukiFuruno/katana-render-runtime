@@ -27,6 +27,10 @@ CLIの診断ビルドでも、既存の `native_cli_build_bindings.base_environm
 
 共通helperを複数の配置で使う場合は、実際の全consumerのmodule階層と可視性を確認する。単一の簡略fixtureでの成功を全consumerの名前解決・型検査へ代用しない。純粋probe、実コンパイル、native実行の証跡は区別する。 関数を親へ移すときは、その関数が使う型のimportも実際の宣言元から移す。親が持っていないbindingをsuperから取得できると仮定せず、元の絶対crate pathを維持できる場合は維持する。
 
+分担するファイルは、委譲前の許可済み内容をGit indexへ記録し、返却時にその差分から担当範囲外の変更も確認する。抽出対象外の関数を古い内容で上書きせず、直前に修正した行が戻っていないことを確認してから検査を開始する。既存のstage対象を黙って解除したり、indexへの記録を検証・commitの完了として扱ったりしない。
+
+完了状態の担当へ追加作業を渡す際は `followup_task` で起動し、直後に `list_agents` で稼働状態を確認する。`send_message` は通知であり、実行開始の証拠にしない。担当の「完了」も受入条件ではなく、割り当てたDoDに対応する実プロセス・結果・未検証範囲をmainが確認する。途中の実装報告や別担当の軽微なformat違反を、新たな承認待ちや実行停止の理由にしない。
+
 テスト用macroの共通化では、実際の全呼び出し形について、末尾commaやstatement区切りをコンパイラの展開で確認する。rustfmtや未展開ASTの成功をmacro展開・実ライブラリの型検査と同一視しない。
 
 静的なsource所有分類は、実binaryの由来・実行・入力改変検出を証明しない。後段の実検証を保持し、静的firstへnative buildを先行要求する循環や、同じruntimeガードの独自AST検証への重複実装を作らない。
@@ -45,7 +49,6 @@ native CLIのプロセス証跡は、固定した実行ファイル・引数・�
 
 指摘事項と未完了状態は `docs/quality-gate-improvement-tasks.md` の Q01–Q22・R01–R06へ集約する。本書は設計原則を保持し、別のチェックリストを重複管理しない。再開・圧縮・担当統合の際は最新指示と番号付き台帳を読み、担当終了だけで検証済みにしない。
 
-完了済みの担当へ続行を依頼する場合は、起動を伴う `followup_task` を使う。`send_message` だけで実行中とみなさず、待機へ入る前に担当の実行状態を確認する。起動漏れを、外部待ちや検査中として記録しない。
 
 担当開始後の競合は、開始時に保存した実ファイルと現在のファイルを直接比較して判定する。HEADとの差には継承した変更も含まれるため、開始後の追加とみなさない。Rustのテスト件数はテスト属性の付いた関数を数え、補助関数をテストに含めない。
 
@@ -78,12 +81,16 @@ localキーはnative source manifestによる現在の作業treeのbytesを束�
 
 Moon producerと直接Just producerの実行環境を混ぜない。Moon producerの検証は同じMoon経路の `krr:coverage`（`upstream none` の診断を含む）で行い、直接Just producerの検証は同じJust経路の `coverage-result-check` で行う。未知の環境差を無視してcache hitや成功へ読み替えない。`local-validate` はanchorを更新・失効させることがあるため、完全なread-only操作として扱わない。成功直後のLLVM詳細reportはテスト再実行なしのreport-only収集として保存する。
 
+producer単体の真正性を診断するときも、`just --command python3 scripts/release/native_coverage_result_cli.py --repo "$PWD" local-collection-validate --producer performance` のようにJustのexportを保持する。空文字のexportと未設定は異なる入力であり、CLIを外側の環境から直接呼ぶと、改変前からanchorが不一致になり得る。真正性の成功を確認してから出力を改変し、拒否と実producerによる回復を確認する。100/0未達の真正な収集結果は、`local-validate` のcoverage-policy失敗として別に記録する。
+
 ### 修正中の失敗項目だけの再実行
 
 ビルド済みlibtestの診断では、失敗した完全名を複数のpositional filterとして渡し、`--exact`で絞る。広いprefixで成功済みの千件まで再実行しない。物理binaryのSHAと元のsource、実argvと実行されたcaseを記録する。source変更後の既存binaryの成功は、変更後の検証へ流用しない。
 
-自動で失敗・未実行・新規caseを選ぶ開発反復には、既存nextestのrecord/rerunを利用できる。公式prebuiltの固定versionとSHAを検証し、recordingを有効にした生成user configを実行ごとの管理外ディレクトリへ置く。初回の`cargo llvm-cov nextest`に通常と同じworkspace・target・feature・instrumentationを指定し、再実行は`-R`へ保存済みrun IDを渡して元のbuild scopeを継承する。`latest`は同じworkspaceで別実行がない場合だけ使い、元run ID・実行/skip件数・実終了値・入力条件を保存する。異なるscopeに伴う再buildをcacheの性能として比較しない。
+自動で失敗・未実行・新規caseを選ぶ開発反復には、既存nextestのrecord/rerunを利用できる。CIと開発環境は公式prebuilt `cargo-nextest 0.9.148`（macOS universal配布物 SHA-256 `6c23b7fb4ca82c571fc8dfedbab45bfa773d45918f933170c85d21cd7f4b852b`）を固定し、追跡済みの `scripts/release/nextest-local-user.toml` でrecordingを有効にする。record storeは実行ごとの管理外ディレクトリへ置く。初回の正式root coverageは通常と同じworkspace・target・feature・instrumentationを指定した `cargo llvm-cov nextest` で全件を計測し、性能2armと合わせたcombined reportをaggregateで100/0判定する。再実行は開発診断に限り`-R`へ保存済みrun IDを渡して元のbuild scopeを継承する。`latest`は同じworkspaceで別実行がない場合だけ使い、元run ID・実行/skip件数・実終了値・入力条件を保存する。異なるscopeに伴う再buildをcacheの性能として比較しない。これは開発時の失敗範囲選択に使うもので、正式な100/0 coverage receiptの代替にはしない。
 
 nextestのrerunはsource/buildの変更を追跡しない。開発途中の限定確認に使い、全件合格・安全なカバレッジ再利用の証明にはしない。正式Moon producer・常時100/0 aggregate・最終current HEADの完全ゲートを維持し、部分runや0件実行のexit0を正式receiptへ渡さない。記録制御・選択・保存はnextestへ任せ、KRRに汎用runnerや失敗ログparserを新設しない。
+
+ローカルの `just check` は `TEST_THREADS` 未指定時に既定値2を使い、明示した値をそのまま維持する。CIと直接unit recipeの明示値1は変更しない。
 
 依存の実bytes照合は同一呼出し内の既存dedupを維持し、未照合rootだけを最大3並列で処理する。全root成功後にcache/recordsを更新し、一部失敗なら未完成の結果を採用しない。効率評価では同じ固定metadataと実依存集合を使い、逐次/並列の全record一致を先に確認する。準備処理の部分短縮を、製品の表示時間や品質ゲート全体の短縮へ読み替えない。
