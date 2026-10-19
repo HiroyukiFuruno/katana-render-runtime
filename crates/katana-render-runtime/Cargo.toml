@@ -22,7 +22,7 @@ include = [
     "vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js.sha256",
     "vendor/mermaid/12.2.0-krr.pr6823.1/LICENSE",
     "vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js.sha256",
-    "vendor/plantuml/1.2026.8/plantuml.jar.sha256",
+    "vendor/plantuml/1.2026.9/plantuml.jar.sha256",
     "vendor/zenuml-core/4.7.2/zenuml.js.sha256",
     "src/markdown/generated/zenuml-runtime-assets.bin.br",
     "src/markdown/drawio_renderer/generated/drawio-resources.bin.br",
@@ -79,5 +79,7 @@ brotli-decompressor = { workspace = true }
 xml = "=1.4.0"
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
+core-graphics = "=0.25.0"
 core-foundation = "=0.10.1"
 core-text = "=22.0.0"
+skia-safe = { version = "=0.153.3", default-features = false, features = ["binary-cache", "embed-icudtl", "gl", "jpeg", "metal", "pdf", "svg", "textlayout"] }

@@ -982,12 +982,14 @@ version = "0.4.24"
 name = "krr-html-performance-harness"
 version = "0.1.0"
 dependencies = [
+ "image",
  "katana-render-runtime 0.4.23",
  "katana-render-runtime 0.4.24",
  "libc",
  "serde",
  "serde_json",
  "sha2",
+ "url",
 ]
 
 [[package]]

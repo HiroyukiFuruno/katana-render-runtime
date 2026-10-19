@@ -11,6 +11,12 @@ resolver = "2"
 [profile.dev]
 debug = 1
 
+# WHY: 通常の開発用行情報を維持し、coverage専用の生成物だけ縮小する。
+[profile.krr-coverage]
+inherits = "dev"
+debug = 0
+incremental = false
+
 [workspace.package]
 version = "0.4.24"
 edition = "2024"

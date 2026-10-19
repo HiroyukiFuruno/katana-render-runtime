@@ -10,9 +10,15 @@ publish = false
 [profile.dev]
 debug = 1
 
+# WHY: coverage専用成果物のdebug情報と増分状態を抑え、通常のdev生成物を維持する。
+[profile.krr-coverage]
+inherits = "dev"
+debug = 0
+incremental = false
+
 [features]
 baseline = ["dep:baseline"]
-candidate = ["dep:candidate"]
+candidate = ["dep:candidate", "dep:image", "dep:url"]
 
 [dependencies]
 baseline = { package = "katana-render-runtime", version = "=0.4.23", registry = "crates-io", optional = true }
@@ -21,3 +27,5 @@ sha2 = "0.11"
 libc = "0.2"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
+image = { version = "0.25.10", default-features = false, features = ["png"], optional = true }
+url = { version = "2.5.8", optional = true }

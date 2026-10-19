@@ -9,7 +9,7 @@
 | Draw.io | 32.4.1 | `crates/katana-render-runtime/vendor/drawio/32.4.1/drawio.min.js` | `4aa6456e721fa52964eab5eac1d92a1a5483471d510b8e555c4295791724fd9c` |
 | MathJax | 4.1.3 | `crates/katana-render-runtime/vendor/mathjax/4.1.3/tex-svg.js` | `23c036deccc0f2374834a47e4032e452419f3ac027bf17e17c104e2746b19f4c` |
 | ZenUML Core | 4.7.2 | `crates/katana-render-runtime/vendor/zenuml-core/4.7.2/zenuml.js` | `45120d40efdab49ae9d8175e80d06a83136647cc1bf04054a1dd7d38925e7435` |
-| PlantUML | 1.2026.8 | `crates/katana-render-runtime/vendor/plantuml/1.2026.8/plantuml.jar.sha256` | `1057dd8b346bed26a48ffebe6054e16fc785dda7c91f37f6c19030a4aab8a942` |
+| PlantUML | 1.2026.9 | `crates/katana-render-runtime/vendor/plantuml/1.2026.9/plantuml.jar.sha256` | `1dbb847646f0f440595fecd5f991e902aae47dc3391a01f64bab548089241a46` |
 
 MathJax は公式配布の JavaScript asset を repository 上で checksum 管理し、実行に使う自己完結 bundle は
 `crates/katana-render-runtime/src/markdown/diagram_runtime/generated/runtime-bundles.sha256`
