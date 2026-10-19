@@ -10,6 +10,14 @@
 
 ## 現在の状態（2026-10-19）
 
+直近checkpointは `4e7e69d9`。未採用Skiaを退役し、統合source-static35.267秒・関連native33件49.600秒が成功（`tmp/quality/skia-retirement-integrated-r2/`）。以下のcoverageは退役前の実測であり、現行100/0の合格へ転用しない。native比較wrapperの自然寸法修正は関連10件37assert、既存寸法回帰57assert・strict型・Biomeが成功（`tmp/quality/native-frame-wrapper-r1/source-ready-report.json`）。並行依存更新の未追跡Draw.io資産によりowned contractは失敗し、統合検査へ残す。
+
+- [/] DEP-DRAWIO-LICENSE: Draw.io 32.5.5更新後のvendor/LICENSE欠落を修正。公式タグから取得し、同version欠落修復・存在時skip・取得成功/404拒否を回帰化。実圧縮と依存鮮度、統合静的検査が成功。LICENSE専用の実失敗時pin不変はコード順序レビューと区別し、全リリースゲート完了とは扱わない。
+
+DEP-DRAWIO-LICENSEの限定修正: 公式tagからLICENSEを取得し、同version欠落修復・存在時skip・HTTP成功/404拒否のunit、strict型、Biomeが成功（`tmp/quality/drawio-license-repair-r1/report-r3.json`）。実圧縮は73.557秒・exit0（`tmp/quality/drawio-license-root-compressor-r1/result.json`）。独立レビューP0/P1なし。pin更新前の取得完了はコード順序で確認し、LICENSE専用の実失敗時pin不変回帰とは区別する。統合staticの初回は更新後Rust整形で5.495秒で拒否し、重い後続を停止。既存`just fmt`で修正し統合再検査へ進む。更新されたpackage.json/bun.lockに対してr8の公式基準readerも物理endpoint不一致で拒否したため、新規基準を正規producerで再生成する。旧receiptや画像は書き換えない。
+
+依存更新後のsource `fe06dc7ebccadf980d9720d0360220adda97697323ba8e90aa3df61881c72688` で統合source-static38.583秒・source前後一致（`tmp/quality/drawio-native-wrapper-integrated-static-r2/`）、正規依存鮮度exit0（`tmp/quality/dependency-freshness-current-after-drawio-r5/`）。r9の公式raw基準はEN59件51.985秒・JA58件51.851秒で新規生成し、source前後一致、既存strict readerが1.235秒で両言語を受理した（`tmp/quality/mermaid-current-owned-raw117-r9-execution-r1/`）。これは候補117件の99点合格とは別である。
+
 source `bfc51f1cc47bb9c4809fac3f88c7bc3dc9958dba6a065102456c807aa8c3ba89` で全Rust2,528成功・18skip（225.954秒）、標準Clippy121.595秒がsource前後一致で成功。検証基盤契約696件/1,686assertも成功。coverageは58,868/60,124行=97.910984%、未計測1,256で100/0未達。独立raw117はrootの排他的r8 execution-r2でEN50.134秒/JA50.339秒の実exit0、source前後一致、既存validateOfficialRoleが両言語59/58を受理（reader1.207秒）。これはcandidate画像99の合格ではない。r7は実argv/outerexit再構成の不備で正式拒否し、旧証跡を保持する。
 
 - [/] build-proof state binding P1: guard argvの期待state path照合とBundle.fileによる輸送state bytes/SHA照合を修正。別path・nested SHAすり替え拒否を含む126件のfocused unittest、Ruff・strict mypy成功、2file source前後一致（`tmp/quality/native-build-proof-state-pin-fix-r2/`）。旧欠陥の再現証跡は`tmp/quality/native-build-proof-review-r1/`へ保持。全体staticは統合回収する。
