@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { DOMParser } from "@xmldom/xmldom";
 import { z } from "zod";
 import { assertExactlyOneReportedInputSha } from "../html/reference-capture";
 import { DiagramTheme } from "./diagram_theme";
@@ -124,7 +125,10 @@ function captureRow(
     wrapperPath = path.join(rowDirectory, "input.html");
   fs.mkdirSync(rowDirectory, { recursive: true, mode: 0o700 });
   fs.mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(wrapperPath, captureWrapper(svg, frame), { flag: "wx", mode: 0o600 });
+  fs.writeFileSync(wrapperPath, nativeFrameCaptureWrapper(svg, frame), {
+    flag: "wx",
+    mode: 0o600,
+  });
   const argv = [
     options.probeBinary.path,
     "--input",
@@ -174,13 +178,56 @@ function captureRow(
   };
 }
 
-function captureWrapper(svg: string, dimensions: { width: number; height: number }): string {
+export function nativeFrameCaptureWrapper(
+  svg: string,
+  dimensions: { width: number; height: number },
+): string {
+  const naturalSize = svgViewBoxSize(svg),
+    diagramStyle =
+      naturalSize === undefined
+        ? ""
+        : ` style="width:${naturalSize.width}px;height:${naturalSize.height}px"`;
   return rasterCaptureHtml(DiagramTheme.parse("dark"))
     .replace(
       '<div id="capture">',
       `<div id="capture" style="width:${dimensions.width}px;height:${dimensions.height}px">`,
     )
-    .replace('<div id="diagram"></div>', `<div id="diagram">${svg}</div>`);
+    .replace('<div id="diagram"></div>', `<div id="diagram"${diagramStyle}>${svg}</div>`);
+}
+
+function svgViewBoxSize(svg: string): { width: number; height: number } | undefined {
+  const document = new DOMParser({
+      onError: (level, message) => {
+        throw new Error(`Native frame SVG parse ${level}: ${message}`);
+      },
+    }).parseFromString(svg, "image/svg+xml"),
+    root = document.documentElement;
+  if (
+    document.doctype !== null ||
+    root === null ||
+    root.localName !== "svg" ||
+    (root.namespaceURI !== null && root.namespaceURI !== "http://www.w3.org/2000/svg") ||
+    document.getElementsByTagName("parsererror").length > 0
+  ) {
+    throw new Error("Native frame input requires one well-formed SVG root");
+  }
+  const viewBox = root.getAttribute("viewBox");
+  if (viewBox === null) return undefined;
+  const values = viewBox
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  if (
+    values.length !== 4 ||
+    values.some((value) => !Number.isFinite(value)) ||
+    values[2] === undefined ||
+    values[3] === undefined ||
+    values[2] <= 0 ||
+    values[3] <= 0
+  ) {
+    throw new Error("Native frame input has an invalid SVG viewBox");
+  }
+  return { width: values[2], height: values[3] };
 }
 
 function pngDimensions(filePath: string): {
@@ -296,7 +343,8 @@ function verifyWrapper(row: z.infer<typeof rowSchema>): void {
   if (!wrapperText.includes(svgText))
     throw new Error(`Native frame wrapper does not contain its input SVG: ${row.slug}`);
   if (
-    wrapperText !== captureWrapper(svgText, { width: row.frame.width, height: row.frame.height })
+    wrapperText !==
+    nativeFrameCaptureWrapper(svgText, { width: row.frame.width, height: row.frame.height })
   ) {
     throw new Error(`Native frame wrapper differs from the managed capture template: ${row.slug}`);
   }

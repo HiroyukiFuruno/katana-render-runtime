@@ -29,18 +29,31 @@ export function resizeSvgCapture(
   return page.evaluate(
     ({ strict, mode }) => {
       const svgElement = document.querySelector("#diagram svg") as SVGSVGElement;
-      const viewBox = String(
-        mode === "strictViewBox"
-          ? svgElement.getAttribute("viewBox")
-          : (svgElement.getAttribute("viewBox") ?? ""),
-      )
-        .split(/\s+/)
-        .map((value) => Number(value));
+      const rawViewBox = svgElement.getAttribute("viewBox"),
+        viewBox = (
+          mode === "strictViewBox"
+            ? String(rawViewBox)
+                .trim()
+                .split(/[\s,]+/)
+            : String(rawViewBox ?? "").split(/\s+/)
+        ).map(Number),
+        strictViewBoxIsValid = () => {
+          if (rawViewBox === null || viewBox.length !== 4) return false;
+          const width = viewBox.at(2),
+            height = viewBox.at(3);
+          return (
+            viewBox.every(Number.isFinite) &&
+            width !== undefined &&
+            height !== undefined &&
+            width > 0 &&
+            height > 0
+          );
+        };
+      if (mode === "strictViewBox" && !strictViewBoxIsValid()) {
+        throw new Error("SVG viewBox is invalid");
+      }
       const dimensionAt = (values: number[], index: number): number => {
         const value = values.at(index);
-        if (mode === "strictViewBox" && (value === undefined || !Number.isFinite(value))) {
-          throw new Error("SVG viewBox is invalid");
-        }
         return value === undefined || !Number.isFinite(value) ? 0 : value;
       };
       const attributeDimension = (name: string): number => {
@@ -51,24 +64,14 @@ export function resizeSvgCapture(
       const box = mode === "officialFallback" ? svgElement.getBoundingClientRect() : null;
       const positiveDimension = (values: number[]): number =>
         values.find((value) => value > 0) ?? 1;
-      const width = Math.ceil(
-        mode === "strictViewBox"
-          ? dimensionAt(viewBox, 2)
-          : positiveDimension([
-              dimensionAt(viewBox, 2),
-              attributeDimension("width"),
-              box?.width ?? 0,
-            ]),
-      );
-      const height = Math.ceil(
-        mode === "strictViewBox"
-          ? dimensionAt(viewBox, 3)
-          : positiveDimension([
-              dimensionAt(viewBox, 3),
-              attributeDimension("height"),
-              box?.height ?? 0,
-            ]),
-      );
+      const captureDimension = (index: number, name: string, fallback: number): number =>
+        Math.ceil(
+          mode === "strictViewBox"
+            ? dimensionAt(viewBox, index)
+            : positiveDimension([dimensionAt(viewBox, index), attributeDimension(name), fallback]),
+        );
+      const width = captureDimension(2, "width", box?.width ?? 0),
+        height = captureDimension(3, "height", box?.height ?? 0);
       if (!strict) {
         svgElement.setAttribute("width", String(width));
         svgElement.setAttribute("height", String(height));

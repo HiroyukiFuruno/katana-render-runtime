@@ -8,10 +8,14 @@ import { fileSha256 } from "./mermaid-pair-manifest";
 import type { NativeFrameEvidence } from "./native-frame-evidence";
 import {
   NATIVE_FRAME_TARGETS,
+  nativeFrameCaptureWrapper,
   parseNativeFrameEvidence,
   scoreNativeFramePaintProjection,
   verifyNativeFrameEvidence,
 } from "./native-frame-evidence";
+import { PlaywrightLoader } from "./official-renderer";
+import type { PageHandle } from "./official-renderer-types";
+import { assignStrictSvg, resizeSvgCapture } from "./raster-capture-observation";
 import { rasterCaptureHtml } from "./rasterize-svg-dir";
 import { MagickOps } from "./reference_image_ops";
 import { PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA } from "./reference_svg_geometry";
@@ -67,9 +71,7 @@ function fixture(language: "en" | "ja" = "en") {
     row.outputDirectory = framesDirectory;
     row.argv[4] = framesDirectory;
     const svg = fs.readFileSync(row.inputSvg.path, "utf8"),
-      wrapper = rasterCaptureHtml(DiagramTheme.parse("dark"))
-        .replace('<div id="capture">', '<div id="capture" style="width:1px;height:1px">')
-        .replace('<div id="diagram"></div>', `<div id="diagram">${svg}</div>`);
+      wrapper = nativeFrameCaptureWrapper(svg, { width: 1, height: 1 });
     fs.writeFileSync(row.wrapperHtml.path, wrapper, { flag: "w" });
     row.wrapperHtml.sha256 = fileSha256(row.wrapperHtml.path);
     fs.writeFileSync(
@@ -102,6 +104,40 @@ function fixture(language: "en" | "ja" = "en") {
 }
 
 describe("native frame evidence", () => {
+  test("sizes the native wrapper to the same natural viewBox as formal Chrome capture", async () => {
+    const playwright = await new PlaywrightLoader().load(),
+      browser = await playwright.chromium.launch({ headless: true }),
+      page = await browser.newPage({
+        viewport: { width: 1520, height: 845 },
+        deviceScaleFactor: 1,
+      });
+    try {
+      for (const target of nativeFrameSizingCases) await compareNativeAndFormalSizing(page, target);
+      for (const viewBox of ["0 0 20", "0 0 0 20", "0 0 -1 20", "0 0 20 10 5"]) {
+        await expectInvalidBrowserViewBox(page, viewBox);
+      }
+    } finally {
+      await page.close();
+      await browser.close();
+    }
+  });
+
+  test("preserves no-viewBox fallback and rejects malformed natural dimensions", () => {
+    const fallback = nativeFrameCaptureWrapper('<svg id="unit"/>', { width: 10, height: 8 });
+    expect(fallback).toContain('<div id="diagram"><svg id="unit"/></div>');
+    for (const viewBox of ["0 0 20", "0 0 0 20", "0 0 -1 20", "0 0 NaN 20"]) {
+      expect(() =>
+        nativeFrameCaptureWrapper(
+          `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}"/>`,
+          {
+            width: 44,
+            height: 44,
+          },
+        ),
+      ).toThrow("invalid SVG viewBox");
+    }
+  });
+
   test("requires the exact C4 and TreeView target inventory and physical pins", () => {
     const data = fixture();
     try {
@@ -239,3 +275,68 @@ describe("native frame evidence", () => {
     }
   });
 });
+
+const nativeFrameSizingCases = [
+  {
+    relativePath: "tests/fixtures/mermaid/en/official-dark/08-01-c4-context-simple.svg",
+    viewBox: [0, -70, 1148, 441],
+  },
+  {
+    relativePath: "tests/fixtures/mermaid/en/official-dark/22-01-tree-view-simple.svg",
+    viewBox: [-0.5, 0, 124.828125, 232],
+  },
+] as const;
+
+async function compareNativeAndFormalSizing(
+  page: PageHandle,
+  fixture: (typeof nativeFrameSizingCases)[number],
+) {
+  const svg = fs.readFileSync(path.join(process.cwd(), fixture.relativePath), "utf8"),
+    frame = {
+      width: Math.ceil(fixture.viewBox[2]) + 24,
+      height: Math.ceil(fixture.viewBox[3]) + 24,
+    };
+  await page.setContent(nativeFrameCaptureWrapper(svg, frame), { waitUntil: "load" });
+  const native = await readBrowserGeometry(page);
+  await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
+  const loaded = await assignStrictSvg(page, svg);
+  expect(loaded.assignedSvgSerialization).toBe(native.svgHtml);
+  await resizeSvgCapture(page, true, "strictViewBox");
+  const formal = await readBrowserGeometry(page);
+  expect(native.capture).toEqual(frame);
+  expect(native.diagram).toEqual(formal.diagram);
+  expect(native.svgBox).toEqual(formal.svgBox);
+  expect(native.capture).toEqual(formal.capture);
+  expect(native.svgHtml).toBe(loaded.expectedSvgSerialization);
+  expect(native.rootFontSize).toBe("16px");
+}
+
+function readBrowserGeometry(page: PageHandle) {
+  return page.evaluate(() => {
+    const capture = document.getElementById("capture") as HTMLElement,
+      diagram = document.getElementById("diagram") as HTMLElement,
+      svg = document.querySelector("#diagram svg") as SVGSVGElement,
+      captureBox = capture.getBoundingClientRect(),
+      diagramBox = diagram.getBoundingClientRect(),
+      svgBox = svg.getBoundingClientRect();
+    return {
+      capture: { width: captureBox.width, height: captureBox.height },
+      diagram: { width: diagramBox.width, height: diagramBox.height },
+      svgBox: { width: svgBox.width, height: svgBox.height },
+      svgHtml: svg.outerHTML,
+      rootFontSize: getComputedStyle(svg).fontSize,
+    };
+  });
+}
+
+async function expectInvalidBrowserViewBox(page: PageHandle, viewBox: string) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}"/>`;
+  expect(() => nativeFrameCaptureWrapper(svg, { width: 44, height: 44 })).toThrow(
+    "invalid SVG viewBox",
+  );
+  await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
+  await assignStrictSvg(page, svg);
+  await expect(resizeSvgCapture(page, true, "strictViewBox")).rejects.toThrow(
+    "SVG viewBox is invalid",
+  );
+}
