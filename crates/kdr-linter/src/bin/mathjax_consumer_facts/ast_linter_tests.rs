@@ -185,6 +185,13 @@ fn reject_parser_pin_change(
     fixture.replace("Cargo.lock", "version = \"3.0.9\"", "version = \"3.99.0\"")?;
     fixture.reject("parser-pin:build-input-drift")?;
     fixture.restore_from("Cargo.lock", &repository.join("Cargo.lock"))?;
+    fixture.replace(
+        "Cargo.toml",
+        "syn = { version = \"3\", features = [\"full\", \"visit\"] }",
+        "syn = { version = \"4\", features = [\"full\", \"visit\"] }",
+    )?;
+    fixture.reject("parser-pin:build-input-drift")?;
+    fixture.restore_from("Cargo.toml", &repository.join("Cargo.toml"))?;
     Ok(())
 }
 

@@ -473,7 +473,8 @@ fn local_quality_gate_runs_repository_automation_contract_tests()
 #[test]
 fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
 -> Result<(), Box<dyn std::error::Error>> {
-    let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
+    let root = workspace_root()?;
+    let justfile = std::fs::read_to_string(root.join("Justfile"))?;
     let recipe = recipe_body(&justfile, "depends-update-all")?;
     let commands = recipe
         .lines()
@@ -483,7 +484,10 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
     let positions = dependency_update_command_positions(&commands)?;
 
     assert_dependency_update_command_order(&commands, positions);
-    assert_dependency_update_quality_gates(recipe);
+    let scheduler = std::fs::read_to_string(root.join("scripts/hooks/run_parallel_checks.py"))?;
+    let moon = std::fs::read_to_string(root.join("moon.yml"))?;
+    let moon_workspace = std::fs::read_to_string(root.join(".moon/workspace.yml"))?;
+    assert_dependency_update_quality_gates(recipe, &scheduler, &moon, &moon_workspace);
     Ok(())
 }
 
@@ -555,7 +559,12 @@ fn assert_usvg_skrifa_pair_order(commands: &[&str], lockfile_update: usize, pair
     );
 }
 
-fn assert_dependency_update_quality_gates(recipe: &str) {
+fn assert_dependency_update_quality_gates(
+    recipe: &str,
+    scheduler: &str,
+    moon: &str,
+    moon_workspace: &str,
+) {
     for required in [
         "{{CARGO}} update",
         "bun update --latest",
@@ -563,13 +572,15 @@ fn assert_dependency_update_quality_gates(recipe: &str) {
         "just mermaid-compare-full",
         "just drawio-compare-full",
         "just check",
-        "just coverage",
     ] {
         assert!(
             recipe.contains(required),
             "depends-update-all must require {required}"
         );
     }
+    assert_eq!(recipe.matches("just check").count(), 1);
+    assert!(!recipe.contains("just coverage"));
+    assert_moon_quality_dag(moon, scheduler, moon_workspace);
 }
 
 #[test]

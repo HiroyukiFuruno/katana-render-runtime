@@ -39,6 +39,11 @@ const BUNDLE_STRUCTURE_MUTATIONS: &[(&str, &str, &str)] = &[
         "        vec![\n            DiagramRuntimeScript::owned(\"mathjax-runtime.min.js\", runtime_source),\n            DiagramRuntimeScript::owned(\"extra.js\", runtime_source),",
         "script-order:count",
     ),
+    (
+        "            DiagramRuntimeScript::owned(\"mathjax-runtime.min.js\", runtime_source),\n            DiagramRuntimeScript::owned(\n                \"render-mathjax.js\",",
+        "            DiagramRuntimeScript::owned(\"mathjax-runtime.min.js\", String::new()),\n            DiagramRuntimeScript::owned(\n                \"render-mathjax.js\",",
+        "script-order:source",
+    ),
 ];
 
 #[test]

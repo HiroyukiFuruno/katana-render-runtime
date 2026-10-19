@@ -44,6 +44,11 @@ const RESOLVER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
         "DiagramKind::Mermaid => DrawioRendererOps::resolve_drawio_js(),",
         "runtime-path-resolver:arm:DiagramKind::Mermaid",
     ),
+    (
+        "return Ok(path);",
+        "return Ok(PathBuf::new());",
+        "runtime-path-resolver:early-return",
+    ),
 ];
 
 pub(super) fn reject_runtime_resolver_changes(
