@@ -1,9 +1,36 @@
-use super::{Fixture, OPAQUE_INPUTS, RUST_INPUTS, inspect_root};
+use super::{Fixture, OPAQUE_INPUTS, RUST_INPUTS, inspect_root, repository_root};
 
 #[path = "materializer_shared_readback_helper_tests.rs"]
 mod helper_tests;
 
 const HELPER: &str = "crates/katana-render-runtime/src/markdown/runtime_assets.rs";
+const MATERIALIZER_BODY_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "if Self::exists_with_same_bytes(&path)? {",
+        "if Self::exists_with_same_bytes(&parent)? {",
+        "default-materializer:existing-byte-guard",
+    ),
+    (
+        "let Some(parent) = path.parent() else {",
+        "let Some(parent) = path.file_name() else {",
+        "default-materializer:parent-binding",
+    ),
+    (
+        "std::fs::create_dir_all(parent).map_err(runtime_asset_error)?;",
+        "std::fs::create_dir(parent).map_err(runtime_asset_error)?;",
+        "default-materializer:create-parent",
+    ),
+    (
+        "std::fs::write(&path, MathJaxRuntimeScripts::runtime_source())",
+        "std::fs::write(&path, String::new())",
+        "default-materializer:write-source",
+    ),
+    (
+        "        Ok(path)\n    }\n\n    fn exists_with_same_bytes",
+        "        Ok(parent.to_path_buf())\n    }\n\n    fn exists_with_same_bytes",
+        "default-materializer:return-path",
+    ),
+];
 const OWNER_CONTEXT_VARIANT_COUNT: usize = 5;
 const SHARED: &str = "RuntimeAsset::exists_with_matching_bytes(path, |existing| {\n            Ok(existing == MathJaxRuntimeScripts::runtime_source().as_bytes())\n        })";
 const LEGACY: &str = "match std::fs::read(path) {\n            Ok(existing) => Ok(existing == MathJaxRuntimeScripts::runtime_source().as_bytes()),\n            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),\n            Err(error) => Err(runtime_asset_error(error)),\n        }";
@@ -123,6 +150,28 @@ fn mathjax_shared_readback_ast_linter_binds_current_and_legacy_routes()
         assert!(pins.contains_key(HELPER));
         assert_eq!(report["generatedGlobalVerified"], false);
         assert_eq!(report["overrideContentVerified"], false);
+    }
+    Ok(())
+}
+
+#[test]
+fn mathjax_materializer_body_rejects_each_changed_file_operation()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = fixture()?;
+    let renderer = RUST_INPUTS[0];
+    let source = std::fs::read_to_string(repository_root()?.join(renderer))?;
+    for (before, _, _) in MATERIALIZER_BODY_MUTATIONS {
+        assert_eq!(
+            source.matches(before).count(),
+            1,
+            "mutation anchor: {before}"
+        );
+    }
+    for (before, after, issue) in MATERIALIZER_BODY_MUTATIONS {
+        fixture.replace(renderer, before, after)?;
+        fixture.reject(issue)?;
+        fixture.restore(renderer)?;
+        inspect_root(fixture.root())?;
     }
     Ok(())
 }

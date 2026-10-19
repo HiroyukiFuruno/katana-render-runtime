@@ -28,6 +28,23 @@ const PLANTUML_MUTATIONS: &[(&str, &str, &str)] = &[
         "runtime-path-resolver:plantuml-cache",
     ),
 ];
+const RESOLVER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "match kind {",
+        "let _extra = (); match kind {",
+        "runtime-path-resolver:statement-count",
+    ),
+    (
+        "|path| {",
+        "|path, other| {",
+        "runtime-path-resolver:plantuml-closure",
+    ),
+    (
+        "DiagramKind::Mermaid => MermaidBinaryOps::resolve_mermaid_js(),",
+        "DiagramKind::Mermaid => DrawioRendererOps::resolve_drawio_js(),",
+        "runtime-path-resolver:arm:DiagramKind::Mermaid",
+    ),
+];
 
 pub(super) fn reject_runtime_resolver_changes(
     fixture: &Fixture,
@@ -92,6 +109,28 @@ fn reject_resolver_error_and_early_return(
     )?;
     fixture.reject("runtime-path-resolver:early-return")?;
     fixture.restore_from(resolver, &original)?;
+
+    reject_resolver_shape_mutations(fixture, resolver, &original)
+}
+
+fn reject_resolver_shape_mutations(
+    fixture: &Fixture,
+    resolver: &str,
+    original: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = std::fs::read_to_string(original)?;
+    for (before, after, expected) in RESOLVER_SHAPE_MUTATIONS {
+        assert_eq!(
+            source.matches(*before).count(),
+            1,
+            "ambiguous mutation: {before}"
+        );
+        fixture.replace(resolver, before, after)?;
+        fixture.reject(expected).map_err(|error| {
+            format!("resolver mutation {before:?} -> {after:?} ({expected}): {error}")
+        })?;
+        fixture.restore_from(resolver, original)?;
+    }
     Ok(())
 }
 
@@ -130,14 +169,21 @@ fn reject_v8_runtime_mutations() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn reject_v8_allocation_mutations(v8_runtime: &str) -> Result<(), Box<dyn std::error::Error>> {
-    for (before, after) in [
+    for (before, after, expected) in [
         (
             "v8::String::new(scope, script_code)",
             "v8::String::new(scope, script.name)",
+            "v8-compile-order:allocation",
         ),
         (
             "v8::String::new(scope, script.name)",
             "v8::String::new(scope, script_code)",
+            "v8-compile-order:allocation",
+        ),
+        (
+            "script.code.as_ref()",
+            "script.name.as_ref()",
+            "v8-compile-order:method:as_ref",
         ),
     ] {
         let isolated = mathjax_fixture()?;
@@ -146,21 +192,37 @@ fn reject_v8_allocation_mutations(v8_runtime: &str) -> Result<(), Box<dyn std::e
             "missing v8 allocation mutation: {before}"
         );
         isolated.replace(v8_runtime, before, after)?;
-        isolated.reject("v8-compile-order:allocation")?;
+        isolated.reject(expected)?;
     }
     Ok(())
 }
 
 fn reject_v8_compile_mutations(v8_runtime: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let before = "ScriptCompiler::compile_with_origin(scope, source, origin_name)";
-    let after = "ScriptCompiler::compile(scope, source)";
-    let isolated = mathjax_fixture()?;
-    assert!(
-        std::fs::read_to_string(isolated.root().join(v8_runtime))?.contains(before),
-        "missing v8 mutation: {before}"
-    );
-    isolated.replace(v8_runtime, before, after)?;
-    isolated.reject("v8-compile-order:compile")?;
+    for (before, after, expected) in [
+        (
+            "ScriptCompiler::compile_with_origin(scope, source, origin_name)",
+            "ScriptCompiler::compile(scope, source)",
+            "v8-compile-order:compile",
+        ),
+        (
+            "required(v8::String::new(scope, script_code), SOURCE_ALLOC_ERR)",
+            "maybe_required(v8::String::new(scope, script_code), SOURCE_ALLOC_ERR)",
+            "v8-compile-order:required",
+        ),
+        (
+            "let resolved = resolve_value(scope, value)?;",
+            "let _extra = value;\n    let resolved = resolve_value(scope, value)?;",
+            "v8-compile-order:statement-count",
+        ),
+    ] {
+        let isolated = mathjax_fixture()?;
+        assert!(
+            std::fs::read_to_string(isolated.root().join(v8_runtime))?.contains(before),
+            "missing v8 compile mutation: {before}"
+        );
+        isolated.replace(v8_runtime, before, after)?;
+        isolated.reject(expected)?;
+    }
     Ok(())
 }
 

@@ -1,6 +1,95 @@
 use super::native_width_hash;
 use super::test_support::Fixture;
 
+const SVG_ID_SIGNATURE: &str = "fn svg_id(source: &str, preset: &DiagramColorPreset) -> String";
+const CACHE_SIGNATURE: &str = "fn cache_file_path_with_zenuml_key(\n        source: &str,\n        mermaid_js: &Path,\n        preset: &DiagramColorPreset,\n        mode: DiagramRuntimeMode,\n        zenuml_plugin_key: (&str, &str),\n    ) -> PathBuf";
+const SVG_SIGNATURE_MUTATIONS: &[(&str, &str)] = &[
+    ("preset: &DiagramColorPreset", "preset: &Theme"),
+    ("source: &str", "source: &mut str"),
+    ("source: &str", "content: &str"),
+    (
+        "source: &str, preset: &DiagramColorPreset",
+        "&self, preset: &DiagramColorPreset",
+    ),
+    (
+        "preset: &DiagramColorPreset) -> String",
+        "preset: &DiagramColorPreset, unused: bool) -> String",
+    ),
+    (") -> String", ") -> PathBuf"),
+    (") -> String", ")"),
+];
+const CACHE_SIGNATURE_MUTATIONS: &[(&str, &str)] = &[
+    ("source: &str", "content: &str"),
+    ("source: &str", "source: &mut str"),
+    ("mermaid_js: &Path", "mermaid_js: &str"),
+    ("mermaid_js: &Path", "mermaid_js: Path"),
+    ("mermaid_js: &Path", "mermaid_js: &std::path::Path"),
+    ("mermaid_js: &Path", "mermaid_js: &&Path"),
+    ("preset: &DiagramColorPreset", "preset: &Theme"),
+    ("mode: DiagramRuntimeMode", "mode: bool"),
+    (
+        "mode: DiagramRuntimeMode",
+        "runtime_mode: DiagramRuntimeMode",
+    ),
+    (
+        "zenuml_plugin_key: (&str, &str)",
+        "plugin_key: (&str, &str)",
+    ),
+    ("zenuml_plugin_key: (&str, &str)", "zenuml_plugin_key: &str"),
+    (
+        "zenuml_plugin_key: (&str, &str)",
+        "zenuml_plugin_key: (&String, &str)",
+    ),
+    (
+        "zenuml_plugin_key: (&str, &str)",
+        "zenuml_plugin_key: (&str, &str, &str)",
+    ),
+    (
+        "zenuml_plugin_key: (&str, &str),\n    ) -> PathBuf",
+        "zenuml_plugin_key: (&str, &str),\n        unused: bool,\n    ) -> PathBuf",
+    ),
+    (") -> PathBuf", ") -> String"),
+    (") -> PathBuf", ")"),
+];
+const INPUT_SHAPE_MUTATIONS: &[(usize, &str, &str, &str)] = &[
+    (
+        1,
+        "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
+        "stringify!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
+        "svg-id-hash-route:output",
+    ),
+    (
+        1,
+        "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
+        "let _svg_id = format!(\"katana-mermaid-svg-{:016x}\", hasher.finish());",
+        "svg-id-hash-route:output",
+    ),
+    (
+        2,
+        ".join(\"katana_mermaid_cache\")\n            .join(format!(",
+        ".join(\"katana_mermaid_cache\")\n            .join(filename(",
+        "render-cache-hash-route:filename",
+    ),
+    (
+        2,
+        "std::env::temp_dir()\n            .join(\"katana_mermaid_cache\")",
+        "cache_directory()",
+        "render-cache-hash-route:path",
+    ),
+    (
+        2,
+        "format!(\n                \"{:016x}.{}\",\n                hasher.finish(),\n                mode.mermaid_cache_extension()\n            )",
+        "format!(\n                \"{:016x}.{}\",\n                hasher.to_string(),\n                mode.mermaid_cache_extension()\n            )",
+        "render-cache-hash-route:filename",
+    ),
+    (
+        2,
+        "mode.mermaid_cache_extension()",
+        "mode.to_string()",
+        "render-cache-hash-route:filename",
+    ),
+];
+
 #[test]
 fn native_width_hash_ast_linter_rejects_hash_route_mutations()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -22,6 +111,56 @@ fn native_width_hash_ast_linter_rejects_hash_route_mutations()
     reject_hash_field_changes(&fixture)?;
     reject_svg_id_changes(&fixture)?;
     reject_render_cache_changes(&fixture)?;
+    reject_signature_mutations(&fixture)?;
+    reject_input_shape_mutations(&fixture)?;
+    Ok(())
+}
+
+fn reject_signature_mutations(fixture: &Fixture) -> Result<(), Box<dyn std::error::Error>> {
+    check_signature_mutations(
+        fixture,
+        native_width_hash::HASH_INPUTS[1],
+        SVG_ID_SIGNATURE,
+        SVG_SIGNATURE_MUTATIONS,
+        "svg-id-hash-route:signature",
+    )?;
+    check_signature_mutations(
+        fixture,
+        native_width_hash::HASH_INPUTS[2],
+        CACHE_SIGNATURE,
+        CACHE_SIGNATURE_MUTATIONS,
+        "render-cache-hash-route:signature",
+    )?;
+    Ok(())
+}
+
+fn check_signature_mutations(
+    fixture: &Fixture,
+    path: &str,
+    signature: &str,
+    mutations: &[(&str, &str)],
+    diagnostic: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for (original, replacement) in mutations {
+        let changed_signature = signature.replace(original, replacement);
+        assert_ne!(
+            changed_signature, signature,
+            "mutation must change signature"
+        );
+        fixture.replace(path, signature, &changed_signature)?;
+        fixture.reject(diagnostic)?;
+        fixture.restore(path)?;
+    }
+    Ok(())
+}
+
+fn reject_input_shape_mutations(fixture: &Fixture) -> Result<(), Box<dyn std::error::Error>> {
+    for (input_index, original, replacement, diagnostic) in INPUT_SHAPE_MUTATIONS {
+        let path = native_width_hash::HASH_INPUTS[*input_index];
+        fixture.replace(path, original, replacement)?;
+        fixture.reject(diagnostic)?;
+        fixture.restore(path)?;
+    }
     Ok(())
 }
 

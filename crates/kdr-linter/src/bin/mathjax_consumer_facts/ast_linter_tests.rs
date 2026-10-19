@@ -8,21 +8,31 @@ const MATHJAX_JS_SCRIPTS_INDEX: usize = 2;
 const MATHJAX_BACKEND_INDEX: usize = 4;
 const RUNTIME_ASSET_HELPER_INPUT_INDEX: usize = 8;
 const GENERATED_MATHJAX_RUNTIME_INDEX: usize = 3;
-const BUNDLE_EXECUTION_MUTATIONS: &[(&str, &str, &str)] = &[
+const DEFAULT_MATERIALIZATION_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
     (
-        "            DiagramRuntimeScript::owned(\"mathjax-runtime.min.js\", runtime_source),\n            DiagramRuntimeScript::owned(\n                \"render-mathjax.js\",\n                format!(\"katanaRunMathJaxRuntime({request_json});\"),\n            ),",
-        "            DiagramRuntimeScript::owned(\n                \"render-mathjax.js\",\n                format!(\"katanaRunMathJaxRuntime({request_json});\"),\n            ),\n            DiagramRuntimeScript::owned(\"mathjax-runtime.min.js\", runtime_source),",
-        "script-order:name",
+        "if let Some(path) = Self::env_mathjax_js_from(env_value)? {",
+        "if let Ok(path) = Self::env_mathjax_js_from(env_value) {",
+        "default-materialize:env-branch",
     ),
     (
-        "katanaRunMathJaxRuntime({request_json});",
-        "otherGlobal({request_json});",
-        "global-invocation:template",
+        "let Some(path) = bundled_path else {",
+        "let Some(other) = bundled_path else {",
+        "default-materialize:path-binding",
     ),
     (
-        "katanaRunMathJaxRuntime({request_json});",
-        "katanaRunMathJaxRuntime();",
-        "global-invocation:template",
+        "let Some(path) = value else {",
+        "let Some(other) = value else {",
+        "explicit-override:env-bind",
+    ),
+    (
+        "if path.is_empty() {",
+        "if path.len() == 0 {",
+        "explicit-override:empty-check",
+    ),
+    (
+        "return Err(\"MATHJAX_JS is empty\".to_string())",
+        "return Err(\"different error\".to_string())",
+        "explicit-override:path-conversion",
     ),
 ];
 
@@ -43,6 +53,9 @@ mod shared_readback;
 
 #[path = "call_binding_tests.rs"]
 mod call_binding_tests;
+
+#[path = "bundle_execution_tests.rs"]
+mod bundle_execution_tests;
 
 #[test]
 fn mathjax_consumer_facts_ast_linter_rejects_changed_routes_and_opaque_bytes_are_not_rust()
@@ -70,17 +83,6 @@ fn mathjax_consumer_facts_ast_linter_rejects_parser_pin_and_generated_include_dr
     Ok(())
 }
 
-#[test]
-fn mathjax_consumer_facts_ast_linter_rejects_bundle_order_and_invocation_drift()
--> Result<(), Box<dyn std::error::Error>> {
-    let repository = repository_root()?;
-    let fixture = mathjax_fixture()?;
-    assert_eq!(inspect_root(fixture.root())?["status"], "verified");
-    reject_bundle_execution_contract_changes(&fixture, &repository)?;
-    assert_eq!(inspect_root(fixture.root())?["status"], "verified");
-    Ok(())
-}
-
 fn reject_default_materialization_changes(
     fixture: &Fixture,
     repository: &Path,
@@ -103,6 +105,20 @@ fn reject_default_materialization_changes(
     fixture.reject("default-materialize:install-path-join")?;
     fixture.restore_from(renderer, &original)?;
     reject_materializer_implementation_changes(fixture, &original, renderer)?;
+    reject_default_materialization_shape_changes(fixture, &original, renderer)?;
+    Ok(())
+}
+
+fn reject_default_materialization_shape_changes(
+    fixture: &Fixture,
+    original: &Path,
+    renderer: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for &(before, after, expected) in DEFAULT_MATERIALIZATION_SHAPE_MUTATIONS {
+        fixture.replace(renderer, before, after)?;
+        fixture.reject(expected)?;
+        fixture.restore_from(renderer, original)?;
+    }
     Ok(())
 }
 
@@ -185,20 +201,6 @@ fn reject_generated_include_path_change(
     )?;
     fixture.reject("include-str-generated:path")?;
     fixture.restore_from(scripts, &original)?;
-    Ok(())
-}
-
-fn reject_bundle_execution_contract_changes(
-    fixture: &Fixture,
-    repository: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let scripts = RUST_INPUTS[MATHJAX_JS_SCRIPTS_INDEX];
-    let original = repository.join(scripts);
-    for (before, after, expected) in BUNDLE_EXECUTION_MUTATIONS {
-        fixture.replace(scripts, before, after)?;
-        fixture.reject(expected)?;
-        fixture.restore_from(scripts, &original)?;
-    }
     Ok(())
 }
 

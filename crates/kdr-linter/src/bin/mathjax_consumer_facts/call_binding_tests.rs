@@ -74,6 +74,44 @@ const SOURCE_READER_PERMISSION_ARM: &str = concat!(
     "Err(\"permission denied\".to_string()),\n",
 );
 
+const BACKEND_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "DiagramColorPreset::for_render_input(input)",
+        "DiagramColorPreset::for_render_input(other_input)",
+        "backend-runtime-path:preset-input",
+    ),
+    (
+        "MathJaxRendererOps::render_mathjax_with_runtime_path(",
+        "MathJaxRendererOps::render_mathjax_with_runtime(",
+        "backend-runtime-path:arguments",
+    ),
+    (
+        "MathJaxRenderConfig::display(input)",
+        "MathJaxRenderConfig::display(other_input)",
+        "backend-runtime-path:arguments",
+    ),
+    (
+        "if input.kind != DiagramKind::MathJax {",
+        "if input.kind == DiagramKind::MathJax {",
+        "backend-runtime-path:render-kind-check",
+    ),
+    (
+        "RuntimeDescriptor::mathjax()",
+        "RuntimeDescriptor::native()",
+        "backend-runtime-path:render-runtime",
+    ),
+    (
+        "Ok(svg) => RenderOutputFactory::from_diagram_result(",
+        "Err(svg) => RenderOutputFactory::from_diagram_result(",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
+        "kind: crate::markdown::DiagramKind::MathJax,",
+        "kind: input.kind,",
+        "backend-runtime-path:block-fields",
+    ),
+];
+
 #[test]
 fn rejects_request_json_from_wrong_receiver_or_call_arguments()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -101,6 +139,22 @@ fn rejects_runtime_source_reader_arm_counts_with_the_call_diagnostic()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = mathjax_fixture()?;
     reject_runtime_source_reader_arm_counts(&fixture)
+}
+
+#[test]
+fn rejects_backend_route_changes_at_their_contract_boundary()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    let relative = RUST_INPUTS[4];
+    let source = std::fs::read_to_string(repository_root()?.join(relative))?;
+    for (before, _, _) in BACKEND_ROUTE_MUTATIONS {
+        assert_eq!(
+            source.matches(before).count(),
+            1,
+            "mutation anchor: {before}"
+        );
+    }
+    reject_mutations(&fixture, relative, BACKEND_ROUTE_MUTATIONS)
 }
 
 fn reject_runtime_source_reader_arm_counts(
@@ -136,7 +190,9 @@ fn reject_mutations(
     let original = repository_root()?.join(relative);
     for (before, after, diagnostic) in mutations {
         fixture.replace(relative, before, after)?;
-        fixture.reject(diagnostic)?;
+        fixture
+            .reject(diagnostic)
+            .map_err(|error| format!("mutation {before:?} => {after:?}: {error}"))?;
         fixture.restore_from(relative, &original)?;
     }
     Ok(())
