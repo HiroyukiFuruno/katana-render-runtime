@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | Mermaid.js | 12.2.0-krr.pr6823.1 (upstream 12.2.0) | `crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js` | `831ed9d054742315d8edcb9bb933c6e56fd79d0c187a2cdf41ad48e388583a4c` |
 | Mermaid ZenUML | 1.0.1 | `crates/katana-render-runtime/vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js` | `f75662869d22aac58870e52370fe4c46b89b9710bf4b03df93b3227b5e18e730` |
-| Draw.io | 32.4.1 | `crates/katana-render-runtime/vendor/drawio/32.4.1/drawio.min.js` | `4aa6456e721fa52964eab5eac1d92a1a5483471d510b8e555c4295791724fd9c` |
+| Draw.io | 32.5.5 | `crates/katana-render-runtime/vendor/drawio/32.5.5/drawio.min.js` | `a60f2899ff00829165097272f46b7c6de618575673b8770e295d53c13625a5a7` |
 | MathJax | 4.1.3 | `crates/katana-render-runtime/vendor/mathjax/4.1.3/tex-svg.js` | `23c036deccc0f2374834a47e4032e452419f3ac027bf17e17c104e2746b19f4c` |
 | ZenUML Core | 4.7.2 | `crates/katana-render-runtime/vendor/zenuml-core/4.7.2/zenuml.js` | `45120d40efdab49ae9d8175e80d06a83136647cc1bf04054a1dd7d38925e7435` |
 | PlantUML | 1.2026.9 | `crates/katana-render-runtime/vendor/plantuml/1.2026.9/plantuml.jar.sha256` | `1dbb847646f0f440595fecd5f991e902aae47dc3391a01f64bab548089241a46` |

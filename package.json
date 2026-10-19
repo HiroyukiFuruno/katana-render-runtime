@@ -35,7 +35,7 @@
     "magic-string": "1.4.3",
     "p-map": "7.1.1",
     "playwright": "1.64.1",
-    "rollup": "^4.64.9",
+    "rollup": "^4.64.10",
     "source-map-js": "1.2.2",
     "terser": "^5.51.2",
     "tslib": "^2.8.1",
