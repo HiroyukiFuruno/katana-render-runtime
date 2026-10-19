@@ -1,9 +1,70 @@
 use super::super::{Capture, sources};
-use resvg::usvg::{Tree, WriteOptions};
+use resvg::usvg::{Text, Tree, WriteOptions};
 use serde::Serialize;
 
 const MAX_FINAL_GLYPH_RECORDS: usize = 512;
+pub(super) use super::layout::{
+    FinalGlyphLayout, TRANSFORM_COMPONENTS, ensure_finite_layout, transform_is_finite,
+    transform_values,
+};
 
+pub(super) fn requested_text_spans(text: &Text) -> (Vec<RequestedTextSpan>, usize) {
+    let total = text
+        .chunks()
+        .iter()
+        .map(|chunk| chunk.spans().len())
+        .sum::<usize>();
+    let spans = text
+        .chunks()
+        .iter()
+        .enumerate()
+        .flat_map(|(chunk_index, chunk)| {
+            chunk
+                .spans()
+                .iter()
+                .enumerate()
+                .map(move |(span_index, source_span)| {
+                    requested_span(chunk_index, span_index, chunk, source_span)
+                })
+        })
+        .take(MAX_FINAL_GLYPH_RECORDS)
+        .collect();
+    (spans, total.saturating_sub(MAX_FINAL_GLYPH_RECORDS))
+}
+
+fn requested_span(
+    chunk_index: usize,
+    span_index: usize,
+    chunk: &resvg::usvg::TextChunk,
+    source_span: &resvg::usvg::TextSpan,
+) -> RequestedTextSpan {
+    let source_text = chunk.text().get(source_span.start()..source_span.end());
+    RequestedTextSpan {
+        chunk_index,
+        span_index,
+        text: source_text.map(str::to_owned),
+        families: source_span
+            .font()
+            .families()
+            .iter()
+            .map(|family| format!("{family:?}"))
+            .collect(),
+        weight: source_span.font().weight(),
+        variations: variation_evidence(source_span.font().variations()),
+    }
+}
+
+pub(super) fn variation_evidence(
+    variations: &[resvg::usvg::FontVariation],
+) -> Vec<FontVariationEvidence> {
+    variations
+        .iter()
+        .map(|variation| FontVariationEvidence {
+            tag: String::from_utf8_lossy(&variation.tag).into_owned(),
+            value: variation.value,
+        })
+        .collect()
+}
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(in super::super) struct FinalGlyphTree {
@@ -17,20 +78,23 @@ pub(in super::super) struct FinalGlyphTree {
     pub(super) resolved_text_svg: Option<String>,
     pub(super) faces: Vec<FinalGlyphFace>,
     pub(super) text_spans: Vec<FinalGlyphTextSpan>,
+    pub(super) glyph_layout_dropped: usize,
+    pub(super) glyph_layout_errors: Vec<String>,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct FinalGlyphTextSpan {
     pub(super) layout_span_index: usize,
+    pub(super) text_path: String,
+    pub(super) text_abs_transform: [f32; TRANSFORM_COMPONENTS],
     pub(super) request_association: &'static str,
     pub(super) requested: Option<RequestedTextSpan>,
     pub(super) request_candidate_indices: Vec<usize>,
     pub(super) layout_variations: Vec<FontVariationEvidence>,
     pub(super) glyph_count: usize,
     pub(super) faces: Vec<FinalGlyphSpanFace>,
+    pub(super) glyph_layout: Vec<FinalGlyphLayout>,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RequestedTextSpan {
@@ -41,7 +105,6 @@ pub(super) struct RequestedTextSpan {
     pub(super) weight: u16,
     pub(super) variations: Vec<FontVariationEvidence>,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct FontVariationEvidence {
@@ -73,7 +136,6 @@ pub(in super::super) struct FinalGlyphError {
     pub(super) face_id: Option<String>,
     pub(super) reason: String,
 }
-
 pub(super) fn append_tree(
     tree: FinalGlyphTree,
     errors: Vec<FinalGlyphError>,

@@ -4,6 +4,35 @@ mod test_support;
 use test_support::{assert_publication_barrier, receipt};
 
 #[test]
+fn admitted_local_missing_scope_rejects_existing_path_without_mutation() -> Result<(), String> {
+    let fixture = Fixture::new()?;
+    let missing = fixture.root.join("absent.ttf");
+    let sentinel = b"existing local font must remain untouched".to_vec();
+    std::fs::write(&missing, &sentinel).map_err(|error| error.to_string())?;
+
+    let error = raster_observer::LocalMissingFontScope::enter(
+        Arc::clone(&fixture.context.original),
+        Arc::clone(&fixture.context.proof),
+        missing.clone(),
+    )
+    .err()
+    .ok_or("existing local missing-font path was accepted")?;
+
+    assert_eq!(
+        error,
+        format!(
+            "local missing-font path already exists: {}",
+            missing.display()
+        )
+    );
+    assert_eq!(
+        std::fs::read(&missing).map_err(|error| error.to_string())?,
+        sentinel
+    );
+    Ok(())
+}
+
+#[test]
 fn admitted_selector_late_font_reparses_before_public_raster_and_releases() -> Result<(), String> {
     let fixture = Fixture::new()?;
     let injection = raster_observer::LocalMissingFontScope::enter(

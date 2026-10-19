@@ -9,6 +9,9 @@ use std::sync::{Arc, Weak};
 const RECORDS_PER_BINARY_FACE: usize = 2;
 const RETAINED_STAGES: usize = 2;
 const DROPPED_RECORD_ATTEMPTS: usize = 2;
+const REGULAR_FONT_WEIGHT: u16 = 400;
+const REGULAR_FONT_WEIGHT_STYLE: &str = "font-weight:400";
+const INITIAL_MARKUP_RECORDS: usize = 3;
 type FontBytesWeak = Weak<dyn AsRef<[u8]> + Send + Sync>;
 type RealDatabase = (Arc<Database>, ID, FontBytesWeak);
 
@@ -142,6 +145,62 @@ fn assert_released_backing(capture: &Capture, owner: &Weak<Database>, bytes: &Fo
             .iter()
             .all(|owner| owner.upgrade().is_none())
     );
+}
+
+#[test]
+fn actual_markup_audit_records_resolution_and_capacity() {
+    let family = String::from("KRR audit fixture");
+    let capture = record_markup_samples(&family);
+    assert_eq!(capture.html_font_markups.len(), MAX_CAPTURED_RECORDS);
+    assert_eq!(capture.html_font_markups_dropped, 1);
+    assert_eq!(
+        capture.html_font_markups[..INITIAL_MARKUP_RECORDS]
+            .iter()
+            .map(|record| record["resolvedRunStatus"].as_str())
+            .collect::<Vec<_>>(),
+        [Some("unresolved"), Some("empty"), Some("resolved")]
+    );
+}
+
+fn record_markup_samples(family: &str) -> Capture {
+    let family = family.to_owned();
+    let ((), capture) = super::with_actual_route(|| {
+        let record = |run_families| {
+            crate::markdown::svg_rasterize::SvgRasterizeOps::record_actual_html_font_markup(
+                "KRR audit fixture",
+                REGULAR_FONT_WEIGHT,
+                run_families,
+                REGULAR_FONT_WEIGHT_STYLE,
+            );
+        };
+        record(None);
+        record(Some(&[]));
+        record(Some(std::slice::from_ref(&family)));
+        for _ in INITIAL_MARKUP_RECORDS..MAX_CAPTURED_RECORDS {
+            record(None);
+        }
+        record(None);
+    });
+    capture
+}
+
+#[test]
+fn actual_binary_face_audit_keeps_fallback_evidence_and_ignores_missing_ids() -> Result<(), String>
+{
+    let (database, id, _) = real_database()?;
+    let (_, capture) = super::with_actual_route(|| {
+        super::record_actual_selected_face(&database, None);
+        super::record_actual_selected_face(&database, Some(ID::dummy()));
+        super::record_actual_selected_face(&database, Some(id));
+    });
+    assert_eq!(capture.faces.len(), 1);
+    assert_eq!(capture.faces[0].kind, "Binary");
+    assert_eq!(
+        capture.errors,
+        ["selected font source bytes or stable physical stamp could not be audited"]
+    );
+    assert_eq!(capture.dropped, 0);
+    Ok(())
 }
 
 #[path = "svg_rasterize_html_font_lazy_diagnostic_file_audit_tests.rs"]

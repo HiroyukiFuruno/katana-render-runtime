@@ -2,6 +2,8 @@ use resvg::usvg::{Group, ImageKind, Node, Text, Tree, fontdb::ID};
 use std::collections::BTreeMap;
 #[path = "svg_rasterize_html_font_lazy_final_glyph_faces.rs"]
 mod faces;
+#[path = "svg_rasterize_html_font_lazy_final_glyph_layout.rs"]
+pub(super) mod layout;
 #[path = "svg_rasterize_html_font_lazy_final_glyph_output.rs"]
 mod output;
 pub(super) use output::{FinalGlyphError, FinalGlyphTree};
@@ -21,6 +23,9 @@ struct TreeEvidence {
     text_spans: Vec<output::FinalGlyphTextSpan>,
     embedded: Vec<(String, Tree)>,
     dropped: usize,
+    glyph_layout_recorded: usize,
+    glyph_layout_dropped: usize,
+    glyph_layout_errors: Vec<String>,
 }
 
 pub(super) fn record(tree: &Tree, source_svg: &str, paint_call: Option<u64>) {
@@ -47,6 +52,7 @@ fn record_tree(
     let mut evidence = TreeEvidence::default();
     walk_group(tree.root(), &tree_path, &mut evidence);
     let resolved = faces::resolve(tree, &tree_path, paint_call, &evidence.faces);
+    let glyph_layout_dropped = evidence.glyph_layout_dropped;
     let mut record = FinalGlyphTree {
         paint_call,
         tree_path: tree_path.clone(),
@@ -58,6 +64,8 @@ fn record_tree(
         resolved_text_svg: None,
         faces: resolved.faces,
         text_spans: evidence.text_spans,
+        glyph_layout_dropped,
+        glyph_layout_errors: evidence.glyph_layout_errors,
     };
     serialize_record_tree(tree, &mut record);
     output::append_tree(record, resolved.errors, resolved.owners, evidence.dropped);
@@ -103,7 +111,7 @@ fn walk_group(group: &Group, path: &str, evidence: &mut TreeEvidence) {
 fn walk_node(node: &Node, path: &str, evidence: &mut TreeEvidence) {
     match node {
         Node::Group(group) => walk_group(group, path, evidence),
-        Node::Text(text) => record_text_fonts(text, evidence),
+        Node::Text(text) => record_text_fonts(text, path, evidence),
         Node::Image(image) => {
             if let ImageKind::SVG(embedded) = image.kind() {
                 evidence
@@ -118,61 +126,23 @@ fn walk_node(node: &Node, path: &str, evidence: &mut TreeEvidence) {
     }
 }
 
-fn record_text_fonts(text: &Text, evidence: &mut TreeEvidence) {
-    let (requested, source_spans_dropped) = requested_text_spans(text);
+fn record_text_fonts(text: &Text, path: &str, evidence: &mut TreeEvidence) {
+    let (requested, source_spans_dropped) = output::requested_text_spans(text);
     evidence.dropped += source_spans_dropped;
     for (layout_span_index, span) in text.layouted().iter().enumerate() {
         let span_faces = span_face_counts(span);
         for glyph in &span.positioned_glyphs {
             record_glyph_font(glyph.font, evidence);
         }
-        record_text_span(span, layout_span_index, &requested, span_faces, evidence);
-    }
-}
-
-fn requested_text_spans(text: &Text) -> (Vec<output::RequestedTextSpan>, usize) {
-    let total = text
-        .chunks()
-        .iter()
-        .map(|chunk| chunk.spans().len())
-        .sum::<usize>();
-    let spans = text
-        .chunks()
-        .iter()
-        .enumerate()
-        .flat_map(|(chunk_index, chunk)| {
-            chunk
-                .spans()
-                .iter()
-                .enumerate()
-                .map(move |(span_index, source_span)| {
-                    requested_span(chunk_index, span_index, chunk, source_span)
-                })
-        })
-        .take(MAX_FINAL_GLYPH_RECORDS)
-        .collect();
-    (spans, total.saturating_sub(MAX_FINAL_GLYPH_RECORDS))
-}
-
-fn requested_span(
-    chunk_index: usize,
-    span_index: usize,
-    chunk: &resvg::usvg::TextChunk,
-    source_span: &resvg::usvg::TextSpan,
-) -> output::RequestedTextSpan {
-    let source_text = chunk.text().get(source_span.start()..source_span.end());
-    output::RequestedTextSpan {
-        chunk_index,
-        span_index,
-        text: source_text.map(str::to_owned),
-        families: source_span
-            .font()
-            .families()
-            .iter()
-            .map(|family| format!("{family:?}"))
-            .collect(),
-        weight: source_span.font().weight(),
-        variations: variation_evidence(source_span.font().variations()),
+        record_text_span(
+            text,
+            path,
+            span,
+            layout_span_index,
+            &requested,
+            span_faces,
+            evidence,
+        );
     }
 }
 
@@ -185,6 +155,8 @@ fn span_face_counts(span: &resvg::usvg::layout::Span) -> BTreeMap<ID, u64> {
 }
 
 fn record_text_span(
+    text: &Text,
+    text_path: &str,
     span: &resvg::usvg::layout::Span,
     layout_span_index: usize,
     requested: &[output::RequestedTextSpan],
@@ -195,15 +167,46 @@ fn record_text_span(
         evidence.dropped += 1;
         return;
     }
-    let row = text_span_evidence(span, layout_span_index, requested, span_faces);
+    if !record_text_transform(text, text_path, span, evidence) {
+        return;
+    }
+    let row = text_span_evidence(
+        text,
+        text_path,
+        span,
+        layout_span_index,
+        requested,
+        span_faces,
+        evidence,
+    );
     evidence.text_spans.push(row);
 }
 
+fn record_text_transform(
+    text: &Text,
+    text_path: &str,
+    span: &resvg::usvg::layout::Span,
+    evidence: &mut TreeEvidence,
+) -> bool {
+    let transform = output::transform_values(text.abs_transform());
+    if output::transform_is_finite(transform) {
+        return true;
+    }
+    evidence
+        .glyph_layout_errors
+        .push(format!("non-finite text transform at {text_path}"));
+    evidence.glyph_layout_dropped += span.positioned_glyphs.len();
+    false
+}
+
 fn text_span_evidence(
+    text: &Text,
+    text_path: &str,
     span: &resvg::usvg::layout::Span,
     layout_span_index: usize,
     requested: &[output::RequestedTextSpan],
     span_faces: BTreeMap<ID, u64>,
+    evidence: &mut TreeEvidence,
 ) -> output::FinalGlyphTextSpan {
     let candidates = request_candidates(span, requested);
     let (association, request) = match candidates.as_slice() {
@@ -211,21 +214,50 @@ fn text_span_evidence(
         [] => ("unmatched_text", None),
         _ => ("ambiguous_text_match", None),
     };
+    let faces = span_face_evidence(span_faces);
     output::FinalGlyphTextSpan {
         layout_span_index,
+        text_path: text_path.to_owned(),
+        text_abs_transform: output::transform_values(text.abs_transform()),
         request_association: association,
         requested: request,
         request_candidate_indices: candidates,
-        layout_variations: variation_evidence(&span.variations),
+        layout_variations: output::variation_evidence(&span.variations),
         glyph_count: span.positioned_glyphs.len(),
-        faces: span_faces
-            .into_iter()
-            .map(|(face_id, glyph_count)| output::FinalGlyphSpanFace {
-                face_id: face_id.to_string(),
-                glyph_count,
-            })
-            .collect(),
+        faces,
+        glyph_layout: record_glyph_layout(span, evidence),
     }
+}
+
+fn span_face_evidence(span_faces: BTreeMap<ID, u64>) -> Vec<output::FinalGlyphSpanFace> {
+    span_faces
+        .into_iter()
+        .map(|(face_id, glyph_count)| output::FinalGlyphSpanFace {
+            face_id: face_id.to_string(),
+            glyph_count,
+        })
+        .collect()
+}
+
+fn record_glyph_layout(
+    span: &resvg::usvg::layout::Span,
+    evidence: &mut TreeEvidence,
+) -> Vec<output::FinalGlyphLayout> {
+    let available = MAX_FINAL_GLYPH_RECORDS.saturating_sub(evidence.glyph_layout_recorded);
+    let glyphs = span.positioned_glyphs.iter().take(available);
+    let attempted = glyphs.clone().count();
+    let mut rows = Vec::new();
+    for glyph in glyphs {
+        match output::FinalGlyphLayout::from_glyph(glyph) {
+            Ok(row) => rows.push(row),
+            Err(error) => {
+                evidence.glyph_layout_errors.push(error);
+            }
+        }
+    }
+    evidence.glyph_layout_recorded += attempted;
+    evidence.glyph_layout_dropped += span.positioned_glyphs.len().saturating_sub(rows.len());
+    rows
 }
 
 fn request_candidates(
@@ -243,18 +275,6 @@ fn request_candidates(
                     .iter()
                     .all(|glyph| !glyph.text.is_empty() && text.contains(glyph.text.as_str()));
             contains_all_glyph_text.then_some(index)
-        })
-        .collect()
-}
-
-fn variation_evidence(
-    variations: &[resvg::usvg::FontVariation],
-) -> Vec<output::FontVariationEvidence> {
-    variations
-        .iter()
-        .map(|variation| output::FontVariationEvidence {
-            tag: String::from_utf8_lossy(&variation.tag).into_owned(),
-            value: variation.value,
         })
         .collect()
 }

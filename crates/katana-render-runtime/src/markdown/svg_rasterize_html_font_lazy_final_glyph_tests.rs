@@ -14,6 +14,79 @@ fn actual_raster_route_retains_each_top_and_embedded_svg_tree() -> Result<(), St
     Ok(())
 }
 
+#[test]
+fn actual_raster_route_bounds_glyph_layout_sidecar() -> Result<(), String> {
+    const EXTRA_GLYPHS: usize = 32;
+    let text = "A".repeat(super::MAX_FINAL_GLYPH_RECORDS / 2 + EXTRA_GLYPHS);
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="32"><text x="1" y="20" font-family="Arial" font-size="16"><tspan>{text}</tspan><tspan x="2048">{text}</tspan></text></svg>"#
+    );
+    let (renders, audit) = SvgRasterizeOps::with_actual_font_source_audit(|| {
+        SvgRasterizeOps::rasterize_html_svg(&svg, 1.0)
+    })
+    .map_err(|error| error.to_string())?;
+    renders.map_err(|error| error.to_string())?;
+    let trees = audit["finalGlyphTrees"]
+        .as_array()
+        .ok_or("glyph tree evidence is absent")?;
+    let tree = trees
+        .iter()
+        .find(|tree| tree["treePath"] == "root")
+        .ok_or("root glyph tree evidence is absent")?;
+    assert_glyph_cap(tree)?;
+    assert_eq!(audit["finalGlyphDropped"], 0);
+    Ok(())
+}
+
+fn assert_glyph_cap(tree: &serde_json::Value) -> Result<(), String> {
+    let spans = tree["textSpans"]
+        .as_array()
+        .ok_or("text span evidence is absent")?
+        .as_slice();
+    let recorded = spans
+        .iter()
+        .map(|span| span["glyphLayout"].as_array().map_or(0, Vec::len))
+        .sum::<usize>();
+    let total = spans
+        .iter()
+        .map(|span| {
+            span["glyphCount"]
+                .as_u64()
+                .ok_or("glyph count evidence is absent")
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|count| count as usize)
+        .sum::<usize>();
+    assert_eq!(tree["glyphLayoutErrors"], serde_json::json!([]));
+    assert!(total > super::MAX_FINAL_GLYPH_RECORDS);
+    assert_eq!(recorded, super::MAX_FINAL_GLYPH_RECORDS);
+    assert_eq!(tree["glyphLayoutDropped"], total - recorded);
+    Ok(())
+}
+
+#[test]
+fn glyph_layout_rejects_non_finite_values() -> Result<(), String> {
+    let finite = [0.0; super::output::TRANSFORM_COMPONENTS];
+    let mut invalid = Vec::new();
+    for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let mut transform = finite;
+        transform[0] = value;
+        invalid.push(("transform", 16.0, transform, finite));
+        let mut outline = finite;
+        outline[0] = value;
+        invalid.push(("outlineTransform", 16.0, finite, outline));
+        invalid.push(("fontSize", value, finite, finite));
+    }
+    for (field, font_size, transform, outline_transform) in invalid {
+        match super::output::ensure_finite_layout(7, font_size, transform, outline_transform) {
+            Ok(()) => return Err(format!("{field} was accepted")),
+            Err(error) => assert!(error.contains("non-finite glyph layout")),
+        }
+    }
+    Ok(())
+}
+
 fn svg_inputs() -> (String, String) {
     use base64::Engine;
 
@@ -42,6 +115,7 @@ fn assert_svg_tree_rows(
             "root",
             super::output::sha256(source.as_bytes()),
         );
+        assert_glyph_layout(trees, call)?;
     }
     assert!(trees.iter().any(|tree| {
         tree["paintCall"] == 2
@@ -53,6 +127,50 @@ fn assert_svg_tree_rows(
             && tree["resolvedTextSvg"].is_null()
             && tree["resolvedTextSvgSha256"].is_null()
     }));
+    Ok(())
+}
+
+fn assert_glyph_layout(trees: &[serde_json::Value], call: u64) -> Result<(), String> {
+    let tree = trees
+        .iter()
+        .find(|tree| tree["paintCall"] == call && tree["treePath"] == "root")
+        .ok_or("root glyph tree row is absent")?;
+    assert_eq!(tree["glyphLayoutDropped"], 0);
+    assert_eq!(tree["glyphLayoutErrors"], serde_json::json!([]));
+    let spans = tree["textSpans"]
+        .as_array()
+        .ok_or("text spans are absent")?;
+    for span in spans {
+        assert!(span["textPath"].is_string());
+        assert_finite_transform(span, "textAbsTransform")?;
+        assert_span_glyphs(span)?;
+    }
+    Ok(())
+}
+
+fn assert_span_glyphs(span: &serde_json::Value) -> Result<(), String> {
+    let glyphs = span["glyphLayout"]
+        .as_array()
+        .ok_or("glyph layout is absent")?;
+    for glyph in glyphs {
+        assert!(glyph["id"].is_u64());
+        assert!(glyph["text"].is_string());
+        assert!(glyph["fontId"].is_string());
+        assert!(glyph["fontSize"].as_f64().is_some_and(f64::is_finite));
+        assert_finite_transform(glyph, "transform")?;
+        assert_finite_transform(glyph, "outlineTransform")?;
+    }
+    Ok(())
+}
+
+fn assert_finite_transform(glyph: &serde_json::Value, key: &str) -> Result<(), String> {
+    let values = glyph[key].as_array().ok_or("transform is absent")?;
+    assert_eq!(values.len(), super::output::TRANSFORM_COMPONENTS);
+    assert!(
+        values
+            .iter()
+            .all(|value| value.as_f64().is_some_and(f64::is_finite))
+    );
     Ok(())
 }
 
