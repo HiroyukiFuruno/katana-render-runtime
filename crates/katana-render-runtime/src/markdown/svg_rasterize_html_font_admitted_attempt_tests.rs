@@ -1,7 +1,7 @@
 use super::*;
 #[path = "svg_rasterize_html_font_admitted_attempt_test_support.rs"]
 mod test_support;
-use test_support::{assert_publication_barrier, receipt};
+use test_support::{assert_fixture_escape, assert_publication_barrier, receipt};
 
 #[test]
 fn admitted_local_missing_scope_rejects_existing_path_without_mutation() -> Result<(), String> {
@@ -30,6 +30,43 @@ fn admitted_local_missing_scope_rejects_existing_path_without_mutation() -> Resu
         sentinel
     );
     Ok(())
+}
+
+#[test]
+fn admitted_local_missing_scope_preserves_file_created_after_admission() -> Result<(), String> {
+    let fixture = Fixture::new()?;
+    let missing = fixture.root.join("absent.ttf");
+    let injection = raster_observer::LocalMissingFontScope::enter(
+        Arc::clone(&fixture.context.original),
+        Arc::clone(&fixture.context.proof),
+        missing.clone(),
+    )?;
+    let sentinel = b"racing file must remain untouched";
+    std::fs::write(&missing, sentinel).map_err(|error| error.to_string())?;
+    raster_observer::local_missing_after_selector(&Database::new(), true);
+    let error = injection
+        .mutation_result()
+        .err()
+        .ok_or("late-created font was overwritten")?;
+    assert!(error.starts_with("create local missing font: "));
+    assert!(!injection.mutated());
+    assert_eq!(
+        std::fs::read(&missing).map_err(|error| error.to_string())?,
+        sentinel
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn admitted_replacement_rejects_fixture_escape_symlinks() -> Result<(), String> {
+    let fixture = Fixture::new()?;
+    let external = Fixture::new()?;
+    let escaped = fixture.root.join("escaped.ttf");
+    std::os::unix::fs::symlink(external.root.join("arial.ttf"), &escaped)
+        .map_err(|error| error.to_string())?;
+    assert_fixture_escape(&fixture, &escaped, true)?;
+    assert_fixture_escape(&fixture, &escaped, false)
 }
 
 #[test]

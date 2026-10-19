@@ -154,3 +154,26 @@ pub(super) fn assert_publication_barrier(
     assert_same_pixels(svg, &actual)?;
     assert_state_empty(&fixture.context)
 }
+
+pub(super) fn assert_fixture_escape(
+    fixture: &Fixture,
+    escaped: &std::path::Path,
+    selected_escapes: bool,
+) -> Result<(), String> {
+    let local = fixture.root.join("noto.ttf");
+    let (selected, replacement, label) = if selected_escapes {
+        (escaped.to_path_buf(), local, "selected font")
+    } else {
+        (local, escaped.to_path_buf(), "replacement font")
+    };
+    let error = raster_observer::LocalMissingFontScope::replace_after_admission(
+        Arc::clone(&fixture.context.original),
+        Arc::clone(&fixture.context.proof),
+        selected,
+        replacement,
+    )
+    .err()
+    .ok_or("fixture-escaping replacement path was accepted")?;
+    assert_eq!(error, format!("local {label} escaped fixture root"));
+    Ok(())
+}
