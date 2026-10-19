@@ -15,9 +15,11 @@ import {
   readExpectedState,
   readFeatureResults,
 } from "./feature-catalog";
+import { TOC_LINK_SELECTOR } from "./scroll-coverage";
 import { inspectChromeCatalogBoundary } from "./visual-state-fidelity";
 
 const root = path.resolve("tests/fixtures/html");
+const tocSelectorFixture = path.resolve("tests/fixtures/html-harness/toc-selector-contract.html");
 function passedFeatureResults(catalog: FeatureCatalog): FeatureCaseResult[] {
   return [...catalog.visualAspects, ...catalog.scriptCases].map((entry) => ({
     caseId: entry.id,
@@ -72,6 +74,19 @@ async function evaluateDynamicFixture(
 }
 
 test.describe("HTML feature catalog", () => {
+  test("collects legacy and navigation TOC links once in document order", async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(fs.readFileSync(tocSelectorFixture, "utf8"));
+      const hrefs = await page
+        .locator(TOC_LINK_SELECTOR)
+        .evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+      expect(hrefs).toEqual(["#legacy", "#both", "#nav"]);
+    } finally {
+      await page.close();
+    }
+  });
+
   test("maps every aspect fixture and keeps the 99 threshold", () => {
     const catalog = loadFeatureCatalog();
     expect(() => assertCatalogComplete(catalog)).not.toThrow();

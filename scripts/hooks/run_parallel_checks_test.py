@@ -14,13 +14,42 @@ from unittest import mock
 
 import run_parallel_checks as bridge
 from local_review_lock import review_lock
-from local_review_state import ReviewError
+from local_review_state import ReviewError, strict_json
 from run_parallel_checks import main, run_checks
 
 
 ROOT = Path(__file__).resolve().parents[2]
 EVIDENCE_DIR = ROOT / "tmp/quality/moon-terminal-runner-implementation-r1"
 HEAD = "a" * 40
+EXPECTED_AUTHORITY_PATHS = frozenset(
+    {
+        ".moon/workspace.yml",
+        "moon.yml",
+        "Justfile",
+        "package.json",
+        "bun.lock",
+        "scripts/html/harness-contract-cli.ts",
+        "scripts/html/harness-contract-graph.ts",
+        "scripts/html/native-coverage-cache-contract.ts",
+        "scripts/html/moon-quality-inputs.ts",
+        "scripts/html/harness-contract-policy.json",
+        "scripts/hooks/run_parallel_checks.py",
+        "scripts/release/native_coverage_local_aggregate.py",
+        "scripts/release/native_coverage_local_anchor.py",
+        "scripts/release/native_coverage_local_context.py",
+        "scripts/release/native_coverage_local_result.py",
+        "scripts/release/native_coverage_linux_context.py",
+        "scripts/release/native_coverage_result.py",
+        "scripts/release/native_coverage_result_cli.py",
+        "scripts/mermaid/native-source-manifest.ts",
+        "scripts/mermaid/mermaid-pair-manifest.ts",
+        "scripts/mermaid/native-build-receipt.ts",
+        "scripts/mermaid/native-cli-managed-build.ts",
+        "scripts/mermaid/native-cli-managed-build-schema.ts",
+        "scripts/mermaid/native-cli-managed-json.ts",
+        "scripts/html/moon-authority-inputs.json",
+    }
+)
 
 EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -46,6 +75,7 @@ class MoonBridgeTest(unittest.TestCase):
         report_text: str | None = '{"status":"completed"}',
         prior_report: str | None = None,
         preflight_return: int = 0,
+        preflight_text: str | None = None,
         moon_return: int = 0,
         verifier_return: int = 0,
         verifier_stdout: str | None = None,
@@ -71,14 +101,15 @@ class MoonBridgeTest(unittest.TestCase):
                 os.utime(report_path, ns=(old_ns, old_ns))
 
             actual_hashes = bridge._authority_sha256(ROOT)
-            preflight_text = json.dumps(
-                {
-                    "schema": 1,
-                    "staticContractOnly": True,
-                    "errors": [],
-                    "moonRunContract": {"inputSha256": actual_hashes},
-                }
-            )
+            if preflight_text is None:
+                preflight_text = json.dumps(
+                    {
+                        "schema": 1,
+                        "staticContractOnly": True,
+                        "errors": [],
+                        "moonRunContract": {"inputSha256": actual_hashes},
+                    }
+                )
             if duplicate_preflight:
                 preflight_text = preflight_text.replace(
                     '"schema": 1,', '"schema": 1, "schema": 1,', 1
@@ -223,10 +254,48 @@ class MoonBridgeTest(unittest.TestCase):
 
     def test_preflight_wrong_authority_and_invalid_envelope_are_rejected(self) -> None:
         wrong = dict(bridge._authority_sha256(ROOT))
-        wrong[bridge.AUTHORITY_PATHS[0]] = "0" * 64
+        wrong[next(iter(wrong))] = "0" * 64
         result, calls, _request, _ = self.run_isolated(authority_hashes=[wrong])
         self.assertEqual(result, 1)
         self.assertEqual(len(calls), 1)
+
+    def test_current_typescript_preflight_authority_registry_is_consumed_exactly(self) -> None:
+        producer_expression = (
+            'import { moonRunContract } from "./scripts/html/harness-contract-cli.ts"; '
+            'console.log(JSON.stringify({schema: 1, staticContractOnly: true, '
+            'errors: [], moonRunContract: moonRunContract(process.cwd())}));'
+        )
+        preflight = subprocess.run(
+            ["bun", "-e", producer_expression],
+            check=False,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(preflight.returncode, 0, preflight.stderr)
+        envelope = strict_json(preflight.stdout)
+        self.assertEqual(
+            set(envelope["moonRunContract"]["inputSha256"]), EXPECTED_AUTHORITY_PATHS
+        )
+        result, calls, request, _ = self.run_isolated(preflight_text=preflight.stdout)
+        self.assertEqual(result, 0)
+        self.assertEqual(len(calls), 3)
+        self.assertIsNotNone(request)
+
+    def test_authority_registry_rejects_duplicate_empty_and_unsafe_inputs(self) -> None:
+        invalid_registries = [
+            '{"schema":1,"inputs":{"scripts/html/moon-authority-inputs.json":true,"scripts/html/moon-authority-inputs.json":true}}',
+            '{"schema":1,"inputs":{}}',
+            '{"schema":1,"inputs":{"../outside":true}}',
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            registry = root / bridge.AUTHORITY_REGISTRY_PATH
+            registry.parent.mkdir(parents=True)
+            for raw in invalid_registries:
+                registry.write_text(raw, encoding="utf-8")
+                with self.subTest(raw=raw), self.assertRaises(ReviewError):
+                    bridge._authority_paths(root)
 
     def test_moon_nonzero_exit_is_forwarded_without_verification(self) -> None:
         result, calls, request, actual_calls = self.run_isolated(moon_return=23)
@@ -305,7 +374,7 @@ class MoonBridgeTest(unittest.TestCase):
     def test_authority_or_head_change_during_moon_or_verification_is_rejected(self) -> None:
         current = bridge._authority_sha256(ROOT)
         changed = dict(current)
-        changed[bridge.AUTHORITY_PATHS[0]] = "0" * 64
+        changed[next(iter(current))] = "0" * 64
         result, calls, request, _ = self.run_isolated(authority_hashes=[current, changed])
         self.assertEqual(result, 1)
         self.assertEqual(len(calls), 2)

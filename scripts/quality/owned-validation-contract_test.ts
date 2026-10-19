@@ -117,9 +117,12 @@ const fixtureJustDefinitions = [
 const cargoCapacityGuardPath = "scripts/build/cargo_capacity_guard.py";
 const runtimeAssetUnitFixtureSource =
   'import { test } from "bun:test";\ntest("canonical recipe fixture source", () => {});\n';
+const playwrightGeometryTestPath = "scripts/mermaid/reference_svg_geometry_browser_test.ts";
 const playwrightUnitPaths = [
   "scripts/html/feature-catalog_test.ts",
   "scripts/html/chrome_badge_metrics_test.ts",
+  "scripts/html/reference-capture_browser_test.ts",
+  playwrightGeometryTestPath,
 ] as const;
 const playwrightConfigPath = "scripts/html/playwright.config.ts";
 const playwrightFixtureSource =
@@ -320,7 +323,14 @@ function writeRuntimeAssetUnitFixtures(root: string): void {
     (name) => !fs.existsSync(path.join(root, name)),
   ))
     write(root, name, fs.readFileSync(path.join(actualRoot, name), "utf8"));
-  for (const name of playwrightUnitPaths) write(root, name, playwrightFixtureSource);
+  for (const name of playwrightUnitPaths)
+    write(
+      root,
+      name,
+      name === playwrightGeometryTestPath
+        ? fs.readFileSync(path.join(actualRoot, name), "utf8")
+        : playwrightFixtureSource,
+    );
   write(
     root,
     playwrightConfigPath,
@@ -717,15 +727,100 @@ test("runtime asset registration uses Playwright without dropping sibling Bun te
   expect(invocations.find((paths) => paths.includes(pureHtmlTests[0] ?? ""))).toEqual(
     pureHtmlTests,
   );
-  expect(actualRecipeBody("runtime-asset-script-test").split("\n").at(-1)).toBe(
-    "just browser-contract-test",
+  const runtimeAssetCommands = actualRecipeBody("runtime-asset-script-test").split("\n");
+  expect(runtimeAssetCommands.at(-2)).toBe("just browser-contract-test");
+  expect(runtimeAssetCommands.at(-1)).toBe(
+    "bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-source-inventory_test.ts ./scripts/quality/owned-validation-contract_test.ts",
   );
   expect(actualRecipeBody("browser-contract-test")).toBe(
     "node node_modules/playwright/cli.js test --config scripts/html/playwright.config.ts",
   );
-  expect(actualRuntimeAssetUnitPaths()).not.toContain(playwrightUnitPaths[1]);
+  for (const playwrightUnit of playwrightUnitPaths)
+    expect(actualRuntimeAssetUnitPaths()).not.toContain(playwrightUnit);
   expect(actualRuntimeAssetUnitPaths()).toEqual(expect.arrayContaining(pureHtmlTests));
 });
+
+test.each(["current", "previous canonical"] as const)(
+  "owned validation accepts runtime asset command order: %s",
+  (order) => {
+    const commands = actualRecipeBody("runtime-asset-script-other-run").split("\n");
+    const asset = commands.find((line) =>
+      line.includes("./scripts/runtime-assets/runtime-asset-common_test.ts"),
+    );
+    const host = commands.find((line) => line.includes("runtime-rust-facts-host_test.ts"));
+    const owned = commands.find((line) =>
+      line.includes("./scripts/quality/owned-source-inventory_test.ts"),
+    );
+    const moon = commands.find((line) =>
+      line.startsWith("python3 scripts/quality/moon_cache_contract_test.py"),
+    );
+    if (!asset || !host || !owned || !moon) throw new Error("missing runtime asset order fixture");
+    const body =
+      order === "current"
+        ? commands.join("\n")
+        : [
+            host,
+            owned,
+            moon,
+            asset,
+            ...commands.filter((line) => ![asset, host, owned, moon].includes(line)),
+          ].join("\n");
+    const root = strictUnusedRegistrationFixture();
+    recipes(root, { "runtime-asset-script-other-run": body });
+    track(root);
+    const report = inspectMathJaxUnusedAuditRoute(root);
+    expect(report.binding).toMatchObject({
+      standardCommandVerified: true,
+      standardLocalCheckRegistered: true,
+      standardCiCheckRegistered: true,
+    });
+    const browserRoute = inspectPlaywrightRoute(root);
+    expect(browserRoute.localRegistered).toBe(true);
+    expect(browserRoute.ciRegistered).toBe(true);
+    expect(report.issues.filter((issue) => issue.code.startsWith("mathjax-host-evidence"))).toEqual(
+      [],
+    );
+  },
+);
+
+test.each(["missing owned", "duplicate owned", "changed arguments", "browser moved"] as const)(
+  "owned validation rejects runtime asset order mutation: %s",
+  (mutation) => {
+    const commands = actualRecipeBody("runtime-asset-script-other-run").split("\n");
+    const ownedIndex = commands.findIndex((line) =>
+      line.includes("./scripts/quality/owned-source-inventory_test.ts"),
+    );
+    const browserIndex = commands.indexOf("just browser-contract-test");
+    if (ownedIndex < 0 || browserIndex < 0)
+      throw new Error("missing runtime asset mutation fixture");
+    if (mutation === "missing owned") commands.splice(ownedIndex, 1);
+    if (mutation === "duplicate owned") commands.push(commands[ownedIndex] ?? "");
+    if (mutation === "changed arguments")
+      commands[ownedIndex] = `${commands[ownedIndex]} --filter altered`;
+    if (mutation === "browser moved") {
+      const browser = commands.splice(browserIndex, 1)[0];
+      if (browser === undefined) throw new Error("missing browser command");
+      commands.splice(3, 0, browser);
+    }
+    const body = commands.join("\n");
+    expect(body).not.toBe(actualRecipeBody("runtime-asset-script-other-run"));
+    const root = strictUnusedRegistrationFixture();
+    recipes(root, { "runtime-asset-script-other-run": body });
+    track(root);
+    const report = inspectMathJaxUnusedAuditRoute(root);
+    expect(report.binding.standardCommandVerified).toBe(false);
+    expect(report.binding.standardLocalCheckRegistered).toBe(false);
+    expect(report.binding.standardCiCheckRegistered).toBe(false);
+    expect(report.issues.map((issue) => issue.code)).toContain(
+      "mathjax-host-evidence-registration-unverified",
+    );
+    if (mutation === "browser moved") {
+      const browserRoute = inspectPlaywrightRoute(root);
+      expect(browserRoute.localRegistered).toBe(false);
+      expect(browserRoute.ciRegistered).toBe(false);
+    }
+  },
+);
 
 test.each(["missing", "moved", "duplicate"] as const)(
   "runtime asset registration rejects a %s Playwright process",
@@ -770,11 +865,16 @@ test.each([
   ["only", "forbidOnly: true", "forbidOnly: false"],
   ["headless", "headless: true", "headless: false"],
   ["viewport", "width: 1280", "width: 1281"],
-  ["entry deletion", '"chrome_badge_metrics_test.ts"', '"missing_test.ts"'],
+  ["test directory", 'testDir: ".."', 'testDir: "."'],
+  [
+    "geometry spec deletion",
+    '"mermaid/reference_svg_geometry_browser_test.ts"',
+    '"mermaid/removed_test.ts"',
+  ],
   [
     "extra entry",
-    '"chrome_badge_metrics_test.ts"',
-    '"chrome_badge_metrics_test.ts", "extra_test.ts"',
+    '"mermaid/reference_svg_geometry_browser_test.ts",',
+    '"mermaid/reference_svg_geometry_browser_test.ts", "mermaid/extra_test.ts",',
   ],
   ["output", "../../tmp/quality/", "tmp/quality/"],
   ["unknown setting", "retries: 0", "retries: 0, grep: /never/"],
@@ -784,6 +884,29 @@ test.each([
   const source = fs.readFileSync(path.join(root, playwrightConfigPath), "utf8");
   expect(source).toContain(before);
   write(root, playwrightConfigPath, source.replace(before, after));
+  const route = inspectPlaywrightRoute(root);
+  expect(route.localRegistered).toBe(false);
+  expect(route.ciRegistered).toBe(false);
+  expect(route.issues.map((issue) => issue.code)).toContain("playwright-inputs-unverified");
+});
+
+test.each([
+  "strict raster sizing preserves SVG markup and resolves percentage width from the viewBox",
+  "paint projection evaluates actual candidate pixels",
+  "keeps the color-only candidate exact while changing RGB and preserving SVG bytes",
+  "rejects a candidate with a missing label",
+  "rejects a candidate with a missing edge",
+  "keeps the neutral geometry raster exact",
+  "same mapping",
+  "source maps to different targets",
+  "targets map from different sources",
+])("Playwright geometry registration rejects a removed browser case: %s", (caseName) => {
+  const root = fixture(),
+    geometryPath = playwrightGeometryTestPath,
+    actualSource = fs.readFileSync(path.resolve(import.meta.dir, "../..", geometryPath), "utf8");
+  expect(actualSource.split(caseName)).toHaveLength(2);
+  const mutated = actualSource.replace(caseName, "removed browser case");
+  write(root, geometryPath, `${mutated}\nconst unusedCaseTitle = ${JSON.stringify(caseName)};\n`);
   const route = inspectPlaywrightRoute(root);
   expect(route.localRegistered).toBe(false);
   expect(route.ciRegistered).toBe(false);
@@ -867,6 +990,7 @@ test.each([
   ["type-only", 'import type { test } from "playwright/test";'],
   ["deleted cases", 'import { test } from "playwright/test";'],
   ["skip", playwrightFixtureSource.replace('test("canonical', 'test.skip("canonical')],
+  ["unapproved lifecycle hook", `${playwrightFixtureSource}test.beforeEach(() => {});`],
   [
     "describe skip",
     `${playwrightFixtureSource.replace('test("canonical', 'test.describe.skip("group", () => { test("canonical')} });`,
@@ -911,7 +1035,10 @@ test("fixture sources stay classified when its shell registration is unsupported
   const runtimeUnitPaths = actualRuntimeAssetUnitPaths();
   expect(report.languageCounts).toEqual({
     rust: 2,
-    typescript: 16 + runtimeUnitPaths.filter((name) => name.endsWith(".ts")).length,
+    typescript:
+      14 +
+      playwrightUnitPaths.length +
+      runtimeUnitPaths.filter((name) => name.endsWith(".ts")).length,
     javascript: 2 + runtimeUnitPaths.filter((name) => name.endsWith(".js")).length,
     python: 7,
   });
@@ -2696,12 +2823,50 @@ test("stale static includes are diagnosed even when other patterns cover current
       .sort(),
   ).toEqual(["biome.json", "tsconfig.json"]);
 });
-test("whole Bun discovery and literal RTK proxy retain actual units", () => {
+test.each(["", " --failfast"] as const)(
+  "whole Bun discovery and Python unittest discovery%s retain actual units",
+  (failfast) => {
+    const root = fixture();
+    recipes(root, {
+      unit: `bun test ./\nrtk proxy python3 -m unittest discover -s scripts -p '*_test.py'${failfast}`,
+    });
+    const report = inspectOwnedValidationContract(root);
+    expect(report.units.python).toContain("scripts/tool_test.py");
+    expect(
+      report.issues.filter(
+        (issue) =>
+          ["unit-local-missing", "unit-ci-missing"].includes(issue.code) &&
+          issue.path === "scripts/tool_test.py",
+      ),
+    ).toEqual([]);
+  },
+);
+
+test.each([
+  [
+    "duplicate failfast",
+    "python3 -m unittest discover -s scripts -p '*_test.py' --failfast --failfast",
+  ],
+  [
+    "narrowed discovery root",
+    "python3 -m unittest discover -s scripts/quality -p '*_test.py' --failfast",
+  ],
+  [
+    "test-name filter",
+    "python3 -m unittest discover -s scripts -p '*_test.py' --failfast -k test_value",
+  ],
+  [
+    "unknown option",
+    "python3 -m unittest discover -s scripts -p '*_test.py' --failfast --unknown-option",
+  ],
+  [
+    "conditional discovery",
+    "if false; then\npython3 -m unittest discover -s scripts -p '*_test.py' --failfast;\nfi",
+  ],
+] as const)("Python discovery rejects %s as unit coverage", (_label, body) => {
   const root = fixture();
-  recipes(root, {
-    unit: "bun test ./\nrtk proxy python3 -m unittest discover -s scripts -p '*_test.py'",
-  });
-  expect(inspectOwnedValidationContract(root).issues).toEqual([]);
+  recipes(root, { unit: body });
+  expect(codes(root)).toContain("unit-local-missing:scripts/tool_test.py");
 });
 test.each(["tsc --noEmit --strict false", "tsc --noEmit scripts/tool.ts", "tsc --noEmit || true"])(
   "compiler command overrides cannot be hidden by showConfig: %s",
@@ -4369,24 +4534,30 @@ const hostEvidenceRecipeMutations = [
   ],
 ] satisfies readonly RecipeMutation[];
 
-test.each(hostEvidenceRecipeMutations)(
-  "host evidence registration rejects %s",
-  (_label, before, after, recipeName) => {
+describe("host evidence registration mutations", () => {
+  beforeAll(() => {
     const root = strictUnusedRegistrationFixture();
     expect(inspectMathJaxUnusedAuditRoute(root).binding.standardCommandVerified).toBe(true);
-    const body = actualRecipeBody(recipeName);
-    expect(body).toContain(before);
-    recipes(root, {
-      [recipeName]: body.replace(before, after),
-    });
-    track(root);
-    const report = inspectMathJaxUnusedAuditRoute(root);
-    expect(report.binding.standardCommandVerified).toBe(false);
-    expect(report.issues.map((issue) => issue.code)).toContain(
-      "mathjax-host-evidence-registration-unverified",
-    );
-  },
-);
+  });
+
+  test.each(hostEvidenceRecipeMutations)(
+    "host evidence registration rejects %s",
+    (_label, before, after, recipeName) => {
+      const root = strictUnusedRegistrationFixture();
+      const body = actualRecipeBody(recipeName);
+      expect(body).toContain(before);
+      recipes(root, {
+        [recipeName]: body.replace(before, after),
+      });
+      track(root);
+      const report = inspectMathJaxUnusedAuditRoute(root);
+      expect(report.binding.standardCommandVerified).toBe(false);
+      expect(report.issues.map((issue) => issue.code)).toContain(
+        "mathjax-host-evidence-registration-unverified",
+      );
+    },
+  );
+});
 test.each([
   ["fabricated report", "const report = evidence.report;", "const report = { messages: [] };"],
   [
@@ -4525,25 +4696,30 @@ const strictRegistrationMutations = [
   ],
 ] as const;
 
-test.each(strictRegistrationMutations)(
-  "official strict registration rejects %s",
-  (_kind, name, before, after) => {
+describe("official strict registration mutations", () => {
+  beforeAll(() => {
     const root = strictUnusedRegistrationFixture();
-    const baseline = inspectMathJaxUnusedAuditRoute(root);
-    expect(baseline.binding.inputSelectionVerified).toBe(true);
-    const source = fs.readFileSync(path.join(root, name), "utf8");
-    expect(source).toContain(before);
-    write(root, name, source.replace(before, after));
-    track(root);
-    const report = inspectMathJaxUnusedAuditRoute(root);
-    expect(report.binding.inputSelectionVerified).toBe(false);
-    expect(report.binding.standardLocalCheckRegistered).toBe(false);
-    expect(report.binding.standardCiCheckRegistered).toBe(false);
-    expect(report.issues.map((issue) => issue.code)).toContain(
-      "mathjax-unused-input-selection-unverified",
-    );
-  },
-);
+    expect(inspectMathJaxUnusedAuditRoute(root).binding.inputSelectionVerified).toBe(true);
+  });
+
+  test.each(strictRegistrationMutations)(
+    "official strict registration rejects %s",
+    (_kind, name, before, after) => {
+      const root = strictUnusedRegistrationFixture();
+      const source = fs.readFileSync(path.join(root, name), "utf8");
+      expect(source).toContain(before);
+      write(root, name, source.replace(before, after));
+      track(root);
+      const report = inspectMathJaxUnusedAuditRoute(root);
+      expect(report.binding.inputSelectionVerified).toBe(false);
+      expect(report.binding.standardLocalCheckRegistered).toBe(false);
+      expect(report.binding.standardCiCheckRegistered).toBe(false);
+      expect(report.issues.map((issue) => issue.code)).toContain(
+        "mathjax-unused-input-selection-unverified",
+      );
+    },
+  );
+});
 
 test.each([
   "scripts/mermaid/official-renderer-asset-inputs.ts",

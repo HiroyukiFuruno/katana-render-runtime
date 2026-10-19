@@ -2,7 +2,13 @@ import { defineConfig } from "playwright/test";
 
 // WHY: Playwright Test の外部APIが設定のdefault exportを要求する。
 export default defineConfig({
-  testMatch: ["feature-catalog_test.ts", "chrome_badge_metrics_test.ts"],
+  testDir: "..",
+  testMatch: [
+    "html/feature-catalog_test.ts",
+    "html/chrome_badge_metrics_test.ts",
+    "html/reference-capture_browser_test.ts",
+    "mermaid/reference_svg_geometry_browser_test.ts",
+  ],
   timeout: 5000,
   retries: 0,
   workers: 1,

@@ -140,13 +140,26 @@ const PARSER_CHECK_RECIPE_SHA256 =
 const PARSER_TEST_RECIPE_SHA256 =
   "0e955697c278ac8c2a56c8347cd05c1488cfd50ecfcc21c3177d208d5e8457ed";
 const HTML_FEATURE_CATALOG_TEST = "scripts/html/feature-catalog_test.ts";
-const PLAYWRIGHT_TESTS = [HTML_FEATURE_CATALOG_TEST, "scripts/html/chrome_badge_metrics_test.ts"];
+const PLAYWRIGHT_GEOMETRY_TEST = "scripts/mermaid/reference_svg_geometry_browser_test.ts";
+const PLAYWRIGHT_TESTS = [
+  HTML_FEATURE_CATALOG_TEST,
+  "scripts/html/chrome_badge_metrics_test.ts",
+  "scripts/html/reference-capture_browser_test.ts",
+  PLAYWRIGHT_GEOMETRY_TEST,
+];
 const PLAYWRIGHT_CONFIG = "scripts/html/playwright.config.ts";
 const PLAYWRIGHT_RECIPE = "browser-contract-test";
 const PLAYWRIGHT_COMMAND = `node node_modules/playwright/cli.js test --config ${PLAYWRIGHT_CONFIG}`;
 const PLAYWRIGHT_CONFIG_SOURCE = `import { defineConfig } from "playwright/test";
+// WHY: ブラウザ起動の管理は既存fixtureへ任せ、テスト本体の5秒制限を維持する。
 export default defineConfig({
-  testMatch: ["feature-catalog_test.ts", "chrome_badge_metrics_test.ts"],
+  testDir: "..",
+  testMatch: [
+    "html/feature-catalog_test.ts",
+    "html/chrome_badge_metrics_test.ts",
+    "html/reference-capture_browser_test.ts",
+    "mermaid/reference_svg_geometry_browser_test.ts",
+  ],
   timeout: 5000,
   retries: 0,
   workers: 1,
@@ -202,6 +215,9 @@ const HOST_EVIDENCE_PRECONDITIONS = [
 ] as const;
 const HOST_EVIDENCE_TEST_COMMAND =
   "bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-rust-facts-host_test.ts ./scripts/runtime-bundles/runtime-rust-facts-host-freshness_test.ts ./scripts/runtime-bundles/runtime-mathjax-audit-evidence_test.ts";
+const RUNTIME_ASSET_TEST_MARKER = "./scripts/runtime-assets/runtime-asset-common_test.ts";
+const OWNED_VALIDATION_COMMAND =
+  "bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-source-inventory_test.ts ./scripts/quality/owned-validation-contract_test.ts";
 function runtimeAssetRecipeBody(context: ContractContext): string {
   if (context.recipes.has(RUNTIME_ASSET_OTHER_RECIPE)) {
     if (
@@ -1850,8 +1866,10 @@ function bunSelection(context: ContractContext, words: string[], name: string): 
       );
 }
 function pythonDiscoveryOptions(words: string[]): boolean {
+  let failfastSeen = false;
   for (let index = 4; index < words.length; index += 1) {
     if (["-s", "-p"].includes(words[index] ?? "")) index += 1;
+    else if (words[index] === "--failfast" && !failfastSeen) failfastSeen = true;
     else if (!["-v", "-q"].includes(words[index] ?? "")) return false;
   }
   return true;
@@ -1919,8 +1937,9 @@ function playwrightConfigVerified(context: ContractContext): boolean {
     return false;
   }
 }
-function playwrightTestSourceVerified(source: string): boolean {
+function playwrightTestSourceVerified(name: string, source: string): boolean {
   if (!hasPlaywrightTests(source)) return false;
+  if (name === PLAYWRIGHT_GEOMETRY_TEST && !playwrightGeometryCasesVerified(source)) return false;
   const calls = browserAstNodes(parseSync(source, { syntax: "typescript", tsx: true }))
     .map(({ node }) => node)
     .filter((node) => node.type === "CallExpression");
@@ -1936,13 +1955,118 @@ function playwrightTestSourceVerified(source: string): boolean {
       const object = astObject.parse(callee.object);
       const property = astObject.parse(callee.property);
       const receiver = object.type === "MemberExpression" ? astObject.parse(object.object) : object;
-      return (
-        receiver.type === "Identifier" &&
-        receiver.value === "test" &&
-        (object.type === "MemberExpression" || property.value !== "describe")
-      );
+      const approvedBoundary =
+        object.type !== "MemberExpression" &&
+        (property.value === "describe" ||
+          property.value === "beforeAll" ||
+          property.value === "afterAll");
+      return receiver.type === "Identifier" && receiver.value === "test" && !approvedBoundary;
     })
   );
+}
+function playwrightGeometryCasesVerified(source: string): boolean {
+  const module = parseSync(source, { syntax: "typescript", tsx: true });
+  const direct = executablePlaywrightTitles(module);
+  return (
+    [
+      "strict raster sizing preserves SVG markup and resolves percentage width from the viewBox",
+      "paint projection evaluates actual candidate pixels",
+      "keeps the neutral geometry raster exact",
+    ].every((title) => direct.has(title)) &&
+    geometryTableVerified(module, "paintProjectionScoreCases", "title", [
+      "keeps the color-only candidate exact while changing RGB and preserving SVG bytes",
+      "rejects a candidate with a missing label",
+      "rejects a candidate with a missing edge",
+    ]) &&
+    geometryTableVerified(module, "paintProjectionIdMapCases", "name", [
+      "same mapping",
+      "source maps to different targets",
+      "targets map from different sources",
+    ])
+  );
+}
+function executablePlaywrightTitles(module: unknown): Set<string> {
+  return new Set([
+    ...playwrightCallTitles(module, "test"),
+    ...playwrightCallTitles(module, "describe"),
+  ]);
+}
+function playwrightCallTitles(module: unknown, method: "test" | "describe"): string[] {
+  return browserAstNodes(module).flatMap(({ node }) => {
+    if (node.type !== "CallExpression") return [];
+    const callee = astObject.parse(node.callee);
+    if (method === "test" && (callee.type !== "Identifier" || callee.value !== "test")) return [];
+    if (method === "describe" && !playwrightDescribeCallee(callee)) return [];
+    const first = z.array(astObject).parse(node.arguments ?? [])[0];
+    const value = first ? astObject.parse(first.expression) : undefined;
+    return value?.type === "StringLiteral" ? [String(value.value)] : [];
+  });
+}
+function playwrightDescribeCallee(callee: Record<string, unknown>): boolean {
+  if (callee.type !== "MemberExpression") return false;
+  const object = astObject.parse(callee.object),
+    property = astObject.parse(callee.property);
+  return object.type === "Identifier" && object.value === "test" && property.value === "describe";
+}
+function geometryTableVerified(
+  module: unknown,
+  tableName: string,
+  fieldName: string,
+  expected: readonly string[],
+): boolean {
+  const table = geometryTableValues(module, tableName, fieldName);
+  if (table.length !== expected.length) return false;
+  if (!expected.every((value) => table.includes(value))) return false;
+  const loops = browserAstNodes(module).filter(({ node }) => node.type === "ForOfStatement");
+  return loops.some(({ node }) => {
+    const right = astObject.parse(node.right);
+    const left = astObject.parse(node.left);
+    const binding = z.array(astObject).parse(left.declarations ?? [])[0];
+    if (right.type !== "Identifier" || right.value !== tableName || !binding) return false;
+    const identifier = astObject.parse(binding.id);
+    return identifier.value === "item" && loopUsesTestField(node.body, "item", fieldName);
+  });
+}
+function geometryTableValues(module: unknown, tableName: string, fieldName: string): string[] {
+  const declaration = browserAstNodes(module).find(
+    ({ node }) =>
+      node.type === "VariableDeclarator" && astObject.parse(node.id).value === tableName,
+  );
+  if (!declaration) return [];
+  const init = astObject.parse(declaration.node.init);
+  const array = init.type === "TsConstAssertion" ? astObject.parse(init.expression) : init;
+  if (array.type !== "ArrayExpression") return [];
+  return z
+    .array(astObject)
+    .parse(array.elements)
+    .flatMap((element) => {
+      const object = astObject.parse(element.expression);
+      if (object.type !== "ObjectExpression") return [];
+      const property = z
+        .array(astObject)
+        .parse(object.properties)
+        .find(
+          (entry) =>
+            entry.type === "KeyValueProperty" && astObject.parse(entry.key).value === fieldName,
+        );
+      const value = property ? astObject.parse(property.value) : undefined;
+      return value?.type === "StringLiteral" ? [String(value.value)] : [];
+    });
+}
+function loopUsesTestField(body: unknown, itemName: string, fieldName: string): boolean {
+  return browserAstNodes(body).some(({ node }) => {
+    if (node.type !== "CallExpression") return false;
+    const callee = astObject.parse(node.callee);
+    if (callee.type !== "Identifier" || callee.value !== "test") return false;
+    const first = z.array(astObject).parse(node.arguments ?? [])[0];
+    if (!first) return false;
+    return browserAstNodes(first.expression).some(
+      ({ node: nested }) =>
+        nested.type === "MemberExpression" &&
+        astObject.parse(nested.object).value === itemName &&
+        astObject.parse(nested.property).value === fieldName,
+    );
+  });
 }
 function playwrightInputsVerified(context: ContractContext): boolean {
   try {
@@ -1954,7 +2078,7 @@ function playwrightInputsVerified(context: ContractContext): boolean {
           fs.existsSync(safeFile(context.root, name)),
       ) &&
       playwrightConfigVerified(context) &&
-      PLAYWRIGHT_TESTS.every((name) => playwrightTestSourceVerified(context.read(name)))
+      PLAYWRIGHT_TESTS.every((name) => playwrightTestSourceVerified(name, context.read(name)))
     );
   } catch {
     return false;
@@ -1962,10 +2086,12 @@ function playwrightInputsVerified(context: ContractContext): boolean {
 }
 function playwrightRegistered(context: ContractContext, lane: Set<string>): boolean {
   const lines = unconditionalRecipeCommands(runtimeAssetRecipeBody(context));
+  const reviewed = normalizeMovedRuntimeAssetCommands(lines);
   return (
+    reviewed !== undefined &&
     lane.has(PLAYWRIGHT_RECIPE) &&
     context.recipes.get(PLAYWRIGHT_RECIPE)?.trim() === PLAYWRIGHT_COMMAND &&
-    lines.at(-1) === `just ${PLAYWRIGHT_RECIPE}` &&
+    reviewed.at(-1) === `just ${PLAYWRIGHT_RECIPE}` &&
     playwrightInputsVerified(context)
   );
 }
@@ -2146,7 +2272,8 @@ function hostEvidenceRecipesRegistered(context: ContractContext): boolean {
     registered(context, RUNTIME_ASSET_PREFLIGHT_RECIPE) &&
     unusedRegressionRecipeVerified(context) &&
     runtimeUnusedLeafRecipesVerified(context) &&
-    commands[0] === HOST_EVIDENCE_TEST_COMMAND &&
+    (commands[0] === HOST_EVIDENCE_TEST_COMMAND ||
+      normalizeMovedRuntimeAssetCommands(commands)?.[0] === HOST_EVIDENCE_TEST_COMMAND) &&
     reviewedSplitRuntimeAssetTestCommands(context) !== undefined &&
     [
       [
@@ -3560,7 +3687,9 @@ function reviewedRuntimeAssetTestCommands(
 ): string[] | undefined {
   const withoutClassicEvidence = removeClassicGenerationEvidenceCommands(lines);
   if (!withoutClassicEvidence) return undefined;
-  const prepared = restoreReviewedBrowserContractProcess(withoutClassicEvidence);
+  const normalizedOrder = normalizeMovedRuntimeAssetCommands(withoutClassicEvidence);
+  if (!normalizedOrder) return undefined;
+  const prepared = restoreReviewedBrowserContractProcess(normalizedOrder);
   if (!prepared) return undefined;
   if (
     prepared[0] === HOST_EVIDENCE_PRECONDITIONS[0] &&
@@ -3576,6 +3705,60 @@ function reviewedRuntimeAssetTestCommands(
   }
   const normalized = normalizeClassicFactsTestCommands([...canonical, ...appendedCommands]);
   return normalized ? reviewedRuntimeAssetTestCommandsWithoutClassic(normalized) : undefined;
+}
+function normalizeMovedRuntimeAssetCommands(lines: string[]): string[] | undefined {
+  const leadingAssetsIndex = uniqueCommandIndex(lines, RUNTIME_ASSET_TEST_MARKER);
+  const ownedMarkerIndex = uniqueCommandIndex(
+    lines,
+    "./scripts/quality/owned-source-inventory_test.ts",
+  );
+  if (leadingAssetsIndex !== 0 && ownedMarkerIndex !== lines.length - 1) return lines;
+  const indexes = movedRuntimeAssetCommandIndexes(lines);
+  if (!indexes) return undefined;
+  const [assetIndex, hostIndex, ownedIndex, moonIndex] = indexes;
+  if (hostIndex === 0 && ownedIndex === 1 && moonIndex === 2 && assetIndex === 3) return lines;
+  if (assetIndex !== 0 || hostIndex !== 1 || moonIndex !== 2 || ownedIndex !== lines.length - 1)
+    return undefined;
+  return [
+    HOST_EVIDENCE_TEST_COMMAND,
+    OWNED_VALIDATION_COMMAND,
+    MOON_CACHE_OWNER_COMMAND,
+    ...lines.slice(assetIndex, assetIndex + 1),
+    ...lines.slice(3, -1),
+  ];
+}
+function movedRuntimeAssetCommandIndexes(lines: string[]): number[] | undefined {
+  const assetIndex = uniqueCommandIndex(lines, RUNTIME_ASSET_TEST_MARKER);
+  const ownedIndexes = lines.flatMap((line, index) =>
+    line === OWNED_VALIDATION_COMMAND ? [index] : [],
+  );
+  const hostIndexes = lines.flatMap((line, index) =>
+    line === HOST_EVIDENCE_TEST_COMMAND ? [index] : [],
+  );
+  const moonIndexes = lines.flatMap((line, index) =>
+    line === MOON_CACHE_OWNER_COMMAND ? [index] : [],
+  );
+  const ownedIndex = ownedIndexes[0];
+  const hostIndex = hostIndexes[0];
+  const moonIndex = moonIndexes[0];
+  if (
+    assetIndex === undefined ||
+    ownedIndex === undefined ||
+    ownedIndexes.length !== 1 ||
+    hostIndex === undefined ||
+    hostIndexes.length !== 1 ||
+    moonIndex === undefined ||
+    moonIndexes.length !== 1
+  )
+    return undefined;
+  return [assetIndex, hostIndex, ownedIndex, moonIndex];
+}
+function uniqueCommandIndex(lines: string[], marker: string): number | undefined {
+  const indexes = lines.flatMap((line, index) => {
+    const words = unitCommand(line);
+    return words.filter((word) => word === marker).length === 1 ? [index] : [];
+  });
+  return indexes.length === 1 ? indexes[0] : undefined;
 }
 function removeClassicGenerationEvidenceCommands(lines: string[]): string[] | undefined {
   const consumerIndexes = lines.flatMap((line, index) =>
@@ -3995,6 +4178,11 @@ function moonOwnerCommandRegistered(context: ContractContext): boolean {
     reviewedSplitRuntimeAssetTestCommands(context) !== undefined
   );
 }
+function moonCacheOwnerCheckRecipe(context: ContractContext): string {
+  return context.recipes.has(RUNTIME_ASSET_OTHER_RECIPE)
+    ? RUNTIME_ASSET_OTHER_RECIPE
+    : MOON_CACHE_RECIPE;
+}
 function moonRootDagVerified(
   context: ContractContext,
   expected: z.infer<typeof moonOwnerAstResult>["schedulerTasks"],
@@ -4110,16 +4298,17 @@ function moonCacheFixtureBinding(
   const ownerCommandPresent = moonOwnerCommandRegistered(context);
   if (!ownerCommandPresent)
     add(context, "moon-cache-fixture-owner-command-unverified", "Justfile", MOON_CACHE_RECIPE);
+  const ownerCheckRecipe = moonCacheOwnerCheckRecipe(context);
   const localCheckRegistered =
     ownerVerified &&
     fixtureVerified &&
     ownerCommandPresent &&
-    (context.localRecipes?.has(MOON_CACHE_RECIPE) ?? false);
+    (context.localRecipes?.has(ownerCheckRecipe) ?? false);
   const ciCheckRegistered =
     ownerVerified &&
     fixtureVerified &&
     ownerCommandPresent &&
-    (context.ciRecipes?.has(MOON_CACHE_RECIPE) ?? false);
+    (context.ciRecipes?.has(ownerCheckRecipe) ?? false);
   if (!localCheckRegistered)
     add(context, "moon-cache-fixture-owner-unregistered", MOON_CACHE_RECIPE, "local");
   if (!ciCheckRegistered)

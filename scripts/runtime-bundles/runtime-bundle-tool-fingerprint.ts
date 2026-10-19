@@ -3,9 +3,10 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const FINGERPRINT_SCHEMA = "krr-runtime-bundle-tool-fingerprint-v1" as const;
-const REPOSITORY_ROOT = path.resolve(import.meta.dir, "../..");
+const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const VERSION_PROBE_OPTIONS: ExecFileSyncOptionsWithStringEncoding = {
   cwd: REPOSITORY_ROOT,
   encoding: "utf8",

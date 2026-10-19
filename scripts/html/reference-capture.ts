@@ -1,8 +1,9 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { chromium, type Page } from "playwright";
+import { type Browser, chromium, type Page } from "playwright";
 
 export type CaptureMode = "viewport" | "full-page" | "scroll";
 export type ImageFailurePolicy = "complete" | "natural-width";
@@ -214,9 +215,13 @@ export async function waitForAssets(
 }
 
 function identify(pathname: string): ImageSize {
-  const result = Bun.spawnSync(["magick", "identify", "-format", "%w %h", pathname]);
-  if (result.exitCode !== 0) throw new Error(`ImageMagick identify failed for ${pathname}`);
-  const dimensions = new TextDecoder().decode(result.stdout).trim().split(/\s+/).map(Number);
+  const result = spawnSync("magick", ["identify", "-format", "%w %h", pathname]);
+  if (result.status !== 0) throw new Error(`ImageMagick identify failed for ${pathname}`);
+  const dimensions = new TextDecoder()
+    .decode(result.stdout ?? new Uint8Array())
+    .trim()
+    .split(/\s+/)
+    .map(Number);
   const width = dimensions.at(0);
   const height = dimensions.at(1);
   if (
@@ -231,33 +236,37 @@ function identify(pathname: string): ImageSize {
 }
 
 function compare(metric: string, left: string, right: string): number {
-  const result = Bun.spawnSync(["magick", "compare", "-metric", metric, left, right, "null:"]);
-  if (result.exitCode !== 0 && result.exitCode !== 1) {
+  const result = spawnSync("magick", ["compare", "-metric", metric, left, right, "null:"]);
+  if (result.status !== 0 && result.status !== 1) {
     throw new Error(
-      `ImageMagick compare failed (${metric}): ${new TextDecoder().decode(result.stderr)}`,
+      `ImageMagick compare failed (${metric}): ${new TextDecoder().decode(
+        result.stderr ?? new Uint8Array(),
+      )}`,
     );
   }
   return parseMetricOutput(
-    `${new TextDecoder().decode(result.stderr)}${new TextDecoder().decode(result.stdout)}`,
+    `${new TextDecoder().decode(result.stderr ?? new Uint8Array())}${new TextDecoder().decode(
+      result.stdout ?? new Uint8Array(),
+    )}`,
   );
 }
 
 function writeDiff(left: string, right: string, output: string): void {
-  const result = Bun.spawnSync([
-    "magick",
-    "compare",
-    "-compose",
-    "difference",
-    left,
-    right,
-    output,
-  ]);
-  if (result.exitCode !== 0 && result.exitCode !== 1) {
-    throw new Error(`ImageMagick diff failed: ${new TextDecoder().decode(result.stderr)}`);
+  const result = spawnSync("magick", ["compare", "-compose", "difference", left, right, output]);
+  if (result.status !== 0 && result.status !== 1) {
+    throw new Error(
+      `ImageMagick diff failed: ${new TextDecoder().decode(result.stderr ?? new Uint8Array())}`,
+    );
   }
 }
 
-async function capture(
+export interface CaptureBrowser {
+  capture(options: CaptureOptions): Promise<BrowserMetadata & { capturePath: string }>;
+  close(): Promise<void>;
+}
+
+async function captureWithBrowser(
+  browser: Browser,
   options: CaptureOptions,
 ): Promise<BrowserMetadata & { capturePath: string }> {
   if (options.mode === "full-page") {
@@ -267,13 +276,12 @@ async function capture(
   }
   fs.mkdirSync(options.outputDir, { recursive: true });
   const capturePath = path.join(options.outputDir, "chrome.png");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const context = await browser.newContext({
+    viewport: { width: options.width, height: options.height },
+    deviceScaleFactor: options.scale,
+    colorScheme: "light",
+  });
   try {
-    const context = await browser.newContext({
-      viewport: { width: options.width, height: options.height },
-      deviceScaleFactor: options.scale,
-      colorScheme: "light",
-    });
     const page = await context.newPage();
     const failedResponses: string[] = [];
     collectFailedAssetResponses(page, failedResponses);
@@ -295,21 +303,53 @@ async function capture(
     await page.screenshot({ path: capturePath, fullPage: false });
     const version = browser.version();
     const actualScrollY = await page.evaluate(() => window.scrollY);
-    await context.close();
     return { name: "Google Chrome", version, actualScrollY, capturePath };
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 
-export async function run(options: CaptureOptions): Promise<ScoreReport> {
+export function createCaptureBrowser(): CaptureBrowser {
+  let browser: Browser | undefined;
+  return {
+    async capture(options) {
+      browser ??= await chromium.launch({ channel: "chrome", headless: true });
+      return captureWithBrowser(browser, options);
+    },
+    async close() {
+      if (browser === undefined) return;
+      const current = browser;
+      browser = undefined;
+      await current.close();
+    },
+  };
+}
+
+function validateCaptureInputs(options: CaptureOptions): string {
   if (!fs.existsSync(options.htmlPath))
     throw new Error(`HTML input does not exist: ${options.htmlPath}`);
   if (!fs.existsSync(options.krrPath))
     throw new Error(`KRR PNG does not exist: ${options.krrPath}`);
   const htmlSha256Before = sha256File(options.htmlPath);
   assertExpectedInputSha(options.expectedHtmlSha256, htmlSha256Before);
-  const browser = await capture(options);
+  return htmlSha256Before;
+}
+
+export async function run(options: CaptureOptions): Promise<ScoreReport> {
+  const captureBrowser = createCaptureBrowser();
+  try {
+    return await runWithCaptureBrowser(options, captureBrowser);
+  } finally {
+    await captureBrowser.close();
+  }
+}
+
+export async function runWithCaptureBrowser(
+  options: CaptureOptions,
+  captureBrowser: CaptureBrowser,
+): Promise<ScoreReport> {
+  const htmlSha256Before = validateCaptureInputs(options);
+  const browser = await captureBrowser.capture(options);
   const htmlSha256After = sha256File(options.htmlPath);
   assertInputUnchanged(htmlSha256Before, htmlSha256After);
   assertExpectedInputSha(options.expectedHtmlSha256, htmlSha256After);

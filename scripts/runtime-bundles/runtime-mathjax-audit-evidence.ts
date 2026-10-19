@@ -204,7 +204,9 @@ export function mathJaxEvidenceFingerprint(root: string): string {
 
 if (import.meta.main) {
   const root = fs.realpathSync(path.resolve(import.meta.dir, "../.."));
-  if (process.argv.length === 3 && process.argv[2] === "verify") readMathJaxAuditEvidence(root);
+  if (process.argv.length === 3 && process.argv[2] === "preflight") inputs(root);
+  else if (process.argv.length === 3 && process.argv[2] === "verify")
+    readMathJaxAuditEvidence(root);
   else if (process.argv.length === 3 && process.argv[2] === "fingerprint")
     process.stdout.write(
       `${JSON.stringify({
@@ -217,5 +219,8 @@ if (import.meta.main) {
       "./runtime-mathjax-audit-evidence-producer"
     );
     await acquireMathJaxAuditEvidence(root);
-  } else throw new Error("MathJax evidence requires repository cwd and no arguments, or verify");
+  } else
+    throw new Error(
+      "MathJax evidence requires repository cwd and no arguments, preflight, verify, or fingerprint",
+    );
 }

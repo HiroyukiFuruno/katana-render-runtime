@@ -10,8 +10,10 @@ import {
   assertExactlyOneReportedInputSha,
   assertExpectedInputSha,
   assertInputUnchanged,
+  type CaptureBrowser,
   type CaptureOptions,
-  run,
+  createCaptureBrowser,
+  runWithCaptureBrowser,
   type ScoreReport,
   sha256File,
 } from "./reference-capture";
@@ -191,6 +193,7 @@ async function runCase(
   scroll: number,
   krrScrollY: number,
   expectedHtmlSha256: string,
+  captureBrowser: CaptureBrowser,
 ): Promise<CaseResult> {
   const fixture = path.basename(input, path.extname(input));
   const outputDir = path.join(
@@ -215,7 +218,7 @@ async function runCase(
     minScore: options.minScore,
     expectedHtmlSha256,
   };
-  const score = await run(captureOptions);
+  const score = await runWithCaptureBrowser(captureOptions, captureBrowser);
   const metadata = JSON.parse(fs.readFileSync(path.join(outputDir, "scores.json"), "utf8")) as {
     browser: { actualScrollY: number };
     input: { htmlSha256: string };
@@ -340,26 +343,39 @@ async function runViewport(
   );
   assertExpectedInputSha(coverage.htmlSha256, probe.htmlSha256);
   const results: CaseResult[] = [];
-  for (const { name, requested } of coverage.scrolls) {
-    const krrScrollY = probe.scrolls.get(name);
-    if (krrScrollY === undefined) throw new Error(`Missing KRR scroll sample: ${name}`);
-    try {
-      results.push(
-        await runCase(options, input, viewport, requested, krrScrollY, probe.htmlSha256),
-      );
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : error);
-      results.push(
-        failedCase(
-          options,
-          fixture,
-          viewport,
-          requested,
-          krrScrollY,
-          error instanceof Error ? error.message : String(error),
-        ),
-      );
+  const captureBrowser = createCaptureBrowser();
+  try {
+    for (const { name, requested } of coverage.scrolls) {
+      const krrScrollY = probe.scrolls.get(name);
+      if (krrScrollY === undefined) throw new Error(`Missing KRR scroll sample: ${name}`);
+      try {
+        results.push(
+          await runCase(
+            options,
+            input,
+            viewport,
+            requested,
+            krrScrollY,
+            probe.htmlSha256,
+            captureBrowser,
+          ),
+        );
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : error);
+        results.push(
+          failedCase(
+            options,
+            fixture,
+            viewport,
+            requested,
+            krrScrollY,
+            error instanceof Error ? error.message : String(error),
+          ),
+        );
+      }
     }
+  } finally {
+    await captureBrowser.close();
   }
   assertScrollCoverage(
     results.map((result) => result.chromeScrollY),

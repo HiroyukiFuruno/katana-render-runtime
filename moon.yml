@@ -90,11 +90,16 @@ tasks:
       - duplication-check
       - html-harness-contract-check
       - owned-validation-contract-check
+      - mathjax-import-pin-preflight
 
   source-static:
     command: noop
     inputs: *quality-inputs
     deps: ['source-static-foundation', 'biome']
+
+  mathjax-import-pin-preflight:
+    command: ['just', 'mathjax-import-pin-preflight']
+    inputs: *quality-inputs
 
   # Cargoの共有出力を使う解析も成功してから重い検査を許可する。
   static:

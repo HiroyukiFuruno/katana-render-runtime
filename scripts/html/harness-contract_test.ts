@@ -4484,6 +4484,7 @@ test("Playwright Test boundary returns only owned runner inputs", () => {
     "!execute-local:scripts/html/playwright.config.ts",
     "!execute-local:scripts/html/feature-catalog_test.ts",
     "!execute-local:scripts/html/chrome_badge_metrics_test.ts",
+    "!execute-local:scripts/html/reference-capture_browser_test.ts",
   ]);
 });
 
@@ -4503,6 +4504,7 @@ test("root Just recipe registers the exact Playwright runner inputs", () => {
       "scripts/html/playwright.config.ts",
       "scripts/html/feature-catalog_test.ts",
       "scripts/html/chrome_badge_metrics_test.ts",
+      "scripts/html/reference-capture_browser_test.ts",
     ]),
   );
   expect(snapshot.graph.errors).not.toContain("unresolved/external code: !unresolved-executable");
@@ -5475,6 +5477,22 @@ describe("finite standard gate process and scratch import bindings", () => {
       "crates/katana-render-runtime/src/markdown/diagram_runtime/source/mermaid/runtime_definition.ts",
     );
     expect(references(gate)).toContain("!execute-local:runtime-unused-semantic-node.ts");
+  });
+  test("accepts the reviewed MathJax preflight sources and rejects changed routes", () => {
+    const cli = "scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts";
+    const inputs = "scripts/runtime-bundles/runtime-mathjax-audit-evidence-inputs.ts";
+    for (const name of [cli, inputs]) {
+      expect(references(name)).not.toContain("!unresolved-executable");
+    }
+    const changedCli = read(cli).replace(
+      'process.argv[2] === "preflight"',
+      'process.argv[2] === "preflight-alt"',
+    );
+    expect(changedCli).not.toBe(read(cli));
+    expect(references(cli, changedCli)).toContain("!unresolved-executable");
+    const changedInputs = read(inputs).replace("process.env.BIOME_BINARY ||", "false ||");
+    expect(changedInputs).not.toBe(read(inputs));
+    expect(references(inputs, changedInputs)).toContain("!unresolved-executable");
   });
   test("binds only the hermetic duplication CLI that copies and hashes current sources", () => {
     const testPath = "scripts/quality/duplication-check_test.ts";

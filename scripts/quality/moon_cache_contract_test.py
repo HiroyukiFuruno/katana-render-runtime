@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TypedDict
 
 ROOT = Path(__file__).resolve().parents[2]
-FIXTURE = ROOT / "tests/fixtures/quality-cache"
+FIXTURE_SOURCE = ROOT / "tests/fixtures/quality-cache"
 ASSESSMENT = ROOT / "tmp/html-fidelity/test-cache-library-assessment-20261012-r1"
 DIRECT_INPUT_EVIDENCE = ROOT / "tmp/quality/moon-tmp-durable-regression-r1"
 DIRECT_INPUTS: list[str] = [
@@ -47,7 +47,9 @@ SCHEDULER_DEPENDENCIES: dict[str, list[str]] = {
     ],
     "runtime-asset-script-other": ["runtime-classic-generation-evidence"],
     "runtime-unused-fragment-loader-producer": ["runtime-classic-generation-evidence"],
-    "runtime-unused-bundle-definitions-producer": ["runtime-unused-fragment-loader-producer"],
+    "runtime-unused-bundle-definitions-producer": [
+        "runtime-unused-fragment-loader-producer"
+    ],
     "runtime-unused-check-producer": ["runtime-unused-bundle-definitions-producer"],
     "runtime-unused-tool-fingerprint-producer": ["runtime-unused-check-producer"],
     "runtime-unused-mathjax-producer": ["runtime-unused-tool-fingerprint-producer"],
@@ -71,7 +73,9 @@ SCHEDULER_DEPENDENCIES: dict[str, list[str]] = {
         "duplication-check",
         "html-harness-contract-check",
         "owned-validation-contract-check",
+        "mathjax-import-pin-preflight",
     ],
+    "mathjax-import-pin-preflight": [],
     "runtime-bundle-check": [],
     "runtime-asset-check": [],
     "biome": ["rust-facts-host-prebuild"],
@@ -99,12 +103,26 @@ SCHEDULER_TASK_OPTIONS: dict[str, str | bool] = {
     "expectFailure": False,
 }
 SCHEDULER_EVENT_PHASES = (
-    "runtime-bundle-check", "runtime-asset-check", "fmt-check", "typecheck",
-    "python-lint", "python-typecheck", "duplication-check",
-    "html-harness-contract-check", "owned-validation-contract-check",
-    "capacity-admission", "rust-facts-host-prebuild", "static", "ast-lint", "lint", "dependency-leak",
-    "mathjax-owned-evidence", "runtime-asset-script-preflight",
-    "runtime-classic-generation-evidence", "runtime-asset-script-other",
+    "runtime-bundle-check",
+    "runtime-asset-check",
+    "fmt-check",
+    "typecheck",
+    "python-lint",
+    "python-typecheck",
+    "duplication-check",
+    "html-harness-contract-check",
+    "owned-validation-contract-check",
+    "mathjax-import-pin-preflight",
+    "capacity-admission",
+    "rust-facts-host-prebuild",
+    "static",
+    "ast-lint",
+    "lint",
+    "dependency-leak",
+    "mathjax-owned-evidence",
+    "runtime-asset-script-preflight",
+    "runtime-classic-generation-evidence",
+    "runtime-asset-script-other",
     "runtime-unused-fragment-loader-producer",
     "runtime-unused-bundle-definitions-producer",
     "runtime-unused-check-producer",
@@ -113,13 +131,18 @@ SCHEDULER_EVENT_PHASES = (
     "runtime-unused-native-width-producer",
     "runtime-unused-rust-classic-producer",
     "runtime-unused-script-regression",
-    "runtime-asset-script-test", "unit-test",
+    "runtime-asset-script-test",
+    "unit-test",
 )
-SCHEDULER_FOUNDATION_PHASES = SCHEDULER_EVENT_PHASES[:9]
-SCHEDULER_PRE_LINT_PHASES = SCHEDULER_EVENT_PHASES[:12]
+SCHEDULER_FOUNDATION_PHASES = SCHEDULER_EVENT_PHASES[:10]
+SCHEDULER_PRE_LINT_PHASES = SCHEDULER_EVENT_PHASES[:13]
 SCHEDULER_BARRIER_PHASES = (
-    "lint", "ast-lint", "dependency-leak", "mathjax-owned-evidence",
-    "runtime-asset-script-preflight", "runtime-classic-generation-evidence",
+    "lint",
+    "ast-lint",
+    "dependency-leak",
+    "mathjax-owned-evidence",
+    "runtime-asset-script-preflight",
+    "runtime-classic-generation-evidence",
     "runtime-asset-script-other",
     "runtime-unused-fragment-loader-producer",
     "runtime-unused-bundle-definitions-producer",
@@ -128,10 +151,13 @@ SCHEDULER_BARRIER_PHASES = (
     "runtime-unused-mathjax-producer",
     "runtime-unused-native-width-producer",
     "runtime-unused-rust-classic-producer",
-    "runtime-unused-script-regression", "runtime-asset-script-test", "unit-test",
+    "runtime-unused-script-regression",
+    "runtime-asset-script-test",
+    "unit-test",
 )
 SCHEDULER_NATIVE_PHASES = (
-    "runtime-asset-script-preflight", "runtime-classic-generation-evidence",
+    "runtime-asset-script-preflight",
+    "runtime-classic-generation-evidence",
     "runtime-asset-script-other",
     "runtime-unused-fragment-loader-producer",
     "runtime-unused-bundle-definitions-producer",
@@ -140,7 +166,9 @@ SCHEDULER_NATIVE_PHASES = (
     "runtime-unused-mathjax-producer",
     "runtime-unused-native-width-producer",
     "runtime-unused-rust-classic-producer",
-    "runtime-unused-script-regression", "runtime-asset-script-test", "unit-test",
+    "runtime-unused-script-regression",
+    "runtime-asset-script-test",
+    "unit-test",
 )
 MOON_TASK_CONTEXT_VARIABLES = (
     "MOON_CACHE_DIR",
@@ -154,7 +182,6 @@ MOON_TASK_CONTEXT_VARIABLES = (
     "MOON_WORKSPACE_ROOT",
     "MOON_WORKING_DIR",
 )
-
 
 
 class OptionalFixtureTask(TypedDict, total=False):
@@ -210,9 +237,13 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
         "tmp/quality/standalone-performance-coverage/root.json",
         "tmp/quality/standalone-performance-coverage/root-local-result.json",
     ]
-    assert unit.get("checks") == [{
-        "check": "fingerprint", "script": "just native-coverage-cache-key root", "hash": "stdout",
-    }]
+    assert unit.get("checks") == [
+        {
+            "check": "fingerprint",
+            "script": "just native-coverage-cache-key root",
+            "hash": "stdout",
+        }
+    ]
     assert coverage.get("command") == ["just", "coverage-result-check"]
     assert coverage.get("deps") == ["performance-coverage"]
     assert performance_task.get("command") == ["just", "performance-harness-coverage"]
@@ -222,13 +253,22 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
         "tmp/quality/standalone-performance-coverage/candidate.json",
         "tmp/quality/standalone-performance-coverage/performance-local-result.json",
     ]
-    assert performance_task.get("checks") == [{
-        "check": "fingerprint", "script": "just native-coverage-cache-key performance", "hash": "stdout",
-    }]
+    assert performance_task.get("checks") == [
+        {
+            "check": "fingerprint",
+            "script": "just native-coverage-cache-key performance",
+            "hash": "stdout",
+        }
+    ]
     justfile = (ROOT / "Justfile").read_text()
-    assert "unit-test: plantuml-install\n    {{CARGO}} test --workspace --all-targets --all-features --locked{{TEST_THREAD_ARGS}}" in justfile
+    assert (
+        "unit-test: plantuml-install\n    {{CARGO}} test --workspace --all-targets --all-features --locked{{TEST_THREAD_ARGS}}"
+        in justfile
+    )
     assert "root-test-and-coverage: plantuml-install\n" in justfile
-    producer = justfile.split("\nroot-test-and-coverage: plantuml-install\n", 1)[1].split("\n\n", 1)[0]
+    producer = justfile.split("\nroot-test-and-coverage: plantuml-install\n", 1)[
+        1
+    ].split("\n\n", 1)[0]
     guard = 'CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-domain root -- {{CARGO}}'
     collection_guard = 'NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-root-state" LLVM_PROFILE_FILE_NAME="krr-nextest-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root -- {{CARGO}}'
     assert producer.splitlines() == [
@@ -241,12 +281,17 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
     coverage_recipe = justfile.split("\ncoverage:", 1)[1].split("\n\n", 1)[0]
     coverage_commands = [line for line in coverage_recipe.splitlines() if line]
     assert coverage_commands == [
-        "    just root-test-and-coverage", "    just performance-harness-coverage",
-        "    just coverage-result-check"
+        "    just root-test-and-coverage",
+        "    just performance-harness-coverage",
+        "    just coverage-result-check",
     ]
-    performance = justfile.split("\nperformance-harness-coverage:", 1)[1].split("\n\n", 1)[0]
+    performance = justfile.split("\nperformance-harness-coverage:", 1)[1].split(
+        "\n\n", 1
+    )[0]
     assert performance.count(" llvm-cov --manifest-path ") == 2
-    assert "--features baseline" in performance and "--features candidate" in performance
+    assert (
+        "--features baseline" in performance and "--features candidate" in performance
+    )
 
 
 def production_task_input_binding(
@@ -269,10 +314,12 @@ def production_task_input_binding(
     declared_path = evidence_dir / "production-declared-inputs.json"
     declared_path.write_text(declared_output)
     declared = moon_json_object(json.loads(declared_output))
-    assert len(declared) == 43, "Production Moon task count changed"
+    assert len(declared) == 44, "Production Moon task count changed"
     validate_root_test_coverage_contract(declared)
     runtime_preflight = moon_json_object(declared.get("runtime-asset-script-preflight"))
-    classic_evidence = moon_json_object(declared.get("runtime-classic-generation-evidence"))
+    classic_evidence = moon_json_object(
+        declared.get("runtime-classic-generation-evidence")
+    )
     runtime_other = moon_json_object(declared.get("runtime-asset-script-other"))
     runtime_unused = moon_json_object(declared.get("runtime-unused-script-regression"))
     runtime_aggregate = moon_json_object(declared.get("runtime-asset-script-test"))
@@ -280,7 +327,17 @@ def production_task_input_binding(
     assert classic_evidence.get("deps") == ["runtime-asset-script-preflight"]
     assert runtime_other.get("deps") == ["runtime-classic-generation-evidence"]
     assert runtime_unused.get("deps") == ["runtime-unused-rust-classic-producer"]
-    assert runtime_unused.get("command") == ["just", "runtime-unused-script-final-verify-run"]
+    assert runtime_unused.get("command") == [
+        "just",
+        "runtime-unused-script-final-verify-run",
+    ]
+    pin_preflight = moon_json_object(declared.get("mathjax-import-pin-preflight"))
+    assert pin_preflight.get("command") == ["just", "mathjax-import-pin-preflight"]
+    assert pin_preflight.get("deps", []) == []
+    foundation = moon_json_object(declared.get("source-static-foundation"))
+    foundation_deps = foundation.get("deps")
+    assert isinstance(foundation_deps, list)
+    assert "mathjax-import-pin-preflight" in foundation_deps
     for index, leaf in enumerate(RUNTIME_UNUSED_LEAF_IDS):
         producer = moon_json_object(declared.get(f"{leaf}-producer"))
         previous = (
@@ -289,15 +346,23 @@ def production_task_input_binding(
             else f"{RUNTIME_UNUSED_LEAF_IDS[index - 1]}-producer"
         )
         assert producer.get("deps") == [previous]
-        assert producer.get("command") == ["just", "runtime-unused-script-producer-run", leaf]
+        assert producer.get("command") == [
+            "just",
+            "runtime-unused-script-producer-run",
+            leaf,
+        ]
         assert producer.get("outputs") == [
             f"tmp/quality/runtime-script-results/{leaf}.json",
             f"tmp/quality/runtime-script-results/{leaf}-current-group-001.xml",
         ]
         assert moon_json_object(producer.get("options")).get("cache") == "local"
-        assert producer.get("checks") == [{
-            "check": "fingerprint", "script": f"just runtime-unused-script-cache-key {leaf}", "hash": "stdout",
-        }]
+        assert producer.get("checks") == [
+            {
+                "check": "fingerprint",
+                "script": f"just runtime-unused-script-cache-key {leaf}",
+                "hash": "stdout",
+            }
+        ]
     assert runtime_aggregate.get("deps") == [
         "runtime-asset-script-other",
         "runtime-unused-script-regression",
@@ -326,7 +391,9 @@ def production_task_input_binding(
     query = moon_json_object(json.loads(query_output))
     projects = moon_json_object(query.get("tasks"))
     tasks = moon_json_object(projects.get("krr"))
-    assert set(tasks) == set(declared), "Actual Moon task names differ from current YAML"
+    assert set(tasks) == set(declared), (
+        "Actual Moon task names differ from current YAML"
+    )
     # Moon自身が追加する設定入力を保持し、宣言した入力だけとの混同を防ぐ。
     config_glob = "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}"
     expected = [*DIRECT_INPUTS, config_glob]
@@ -337,7 +404,9 @@ def production_task_input_binding(
         globs = [moon_json_object(item).get("glob") for item in inputs]
         assert globs == expected, f"Actual Moon input expansion differs: {name} {globs}"
     source_sha256_after = digest(config_path)
-    assert source_sha256_after == source_sha256, "Production Moon YAML changed during query"
+    assert source_sha256_after == source_sha256, (
+        "Production Moon YAML changed during query"
+    )
     return {
         "accepted": True,
         "task_count": len(tasks),
@@ -398,9 +467,13 @@ def direct_input_run_record(
         operation = moon_json_object(raw)
         meta = moon_json_object(operation.get("meta"))
         if meta.get("type") == "hash-generation":
-            assert operation.get("status") == "passed", f"{label}: hash generation failed"
+            assert operation.get("status") == "passed", (
+                f"{label}: hash generation failed"
+            )
             generated_hashes.append(meta.get("hash"))
-    assert generated_hashes == [task_hash], f"{label}: generated hash differs from target"
+    assert generated_hashes == [task_hash], (
+        f"{label}: generated hash differs from target"
+    )
     manifest_path = evidence_dir / f"{label}.hashManifest.json"
     shutil.copyfile(
         workspace_dir / ".moon/cache/blobs" / task_hash[:2] / task_hash[2:],
@@ -463,16 +536,23 @@ def scheduler_success_order_valid(phases: list[str]) -> bool:
         return False
     positions = {phase: phases.index(phase) for phase in phases}
     return (
-        all(positions[phase] < positions["capacity-admission"] for phase in SCHEDULER_FOUNDATION_PHASES)
+        all(
+            positions[phase] < positions["capacity-admission"]
+            for phase in SCHEDULER_FOUNDATION_PHASES
+        )
         and positions["capacity-admission"] < positions["rust-facts-host-prebuild"]
-        and positions["rust-facts-host-prebuild"] < positions["static"]
-        < positions["ast-lint"] < positions["lint"] < positions["dependency-leak"]
+        and positions["rust-facts-host-prebuild"]
+        < positions["static"]
+        < positions["ast-lint"]
+        < positions["lint"]
+        < positions["dependency-leak"]
         < positions["mathjax-owned-evidence"]
         < positions["runtime-asset-script-preflight"]
         < positions["runtime-classic-generation-evidence"]
         and positions["runtime-classic-generation-evidence"]
         < positions["runtime-asset-script-other"]
-        and positions["runtime-asset-script-other"] < positions["runtime-asset-script-test"]
+        and positions["runtime-asset-script-other"]
+        < positions["runtime-asset-script-test"]
         and positions["runtime-classic-generation-evidence"]
         < positions["runtime-unused-fragment-loader-producer"]
         < positions["runtime-unused-bundle-definitions-producer"]
@@ -491,6 +571,23 @@ def scheduler_failure_barrier_is_closed(phases: list[str]) -> bool:
     return all(phase not in phases for phase in SCHEDULER_BARRIER_PHASES)
 
 
+def initialize_isolated_git(workspace_dir: Path) -> None:
+    subprocess.run(
+        ["git", "init", "--quiet", "--initial-branch=master", str(workspace_dir)],
+        check=True,
+    )
+    git = ["git", "-C", str(workspace_dir)]
+    subprocess.run([*git, "config", "user.name", "Moon Cache Contract"], check=True)
+    subprocess.run(
+        [*git, "config", "user.email", "moon-cache-contract@example.invalid"],
+        check=True,
+    )
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run(
+        [*git, "commit", "--quiet", "-m", "Create isolated Moon fixture"], check=True
+    )
+
+
 def main() -> int:
     if not __debug__:
         raise RuntimeError("Moon owner requires enabled Python assertions")
@@ -506,13 +603,36 @@ def main() -> int:
     run_dir.mkdir(parents=True)
     direct_run_dir = DIRECT_INPUT_EVIDENCE / f"run-{time.time_ns()}"
     direct_run_dir.mkdir(parents=True)
-    probe = FIXTURE / ".probe"
+    fixture_root = run_dir / "fixture"
+    fixture_root.mkdir()
+    fixture_sources = sorted(FIXTURE_SOURCE.glob("*.ts"))
+    tracked_fixture_sources = [FIXTURE_SOURCE / ".gitignore", *fixture_sources]
+    source_bytes = {path: path.read_bytes() for path in tracked_fixture_sources}
+    source_pins = {
+        str(path): hashlib.sha256(content).hexdigest()
+        for path, content in source_bytes.items()
+    }
+    for source in tracked_fixture_sources:
+        (fixture_root / source.name).write_bytes(source_bytes[source])
+    originals = {
+        fixture_root / source.name: source_bytes[source] for source in fixture_sources
+    }
+    initialize_isolated_git(fixture_root)
+
+    def assert_source_fixture_unchanged() -> None:
+        changed = [
+            path
+            for path, expected in source_bytes.items()
+            if Path(path).read_bytes() != expected
+        ]
+        assert not changed, f"Tracked Moon fixture sources changed: {changed}"
+
+    probe = fixture_root / ".probe"
     probe.mkdir(exist_ok=True)
-    (FIXTURE / ".moon").mkdir(exist_ok=True)
+    (fixture_root / ".moon").mkdir(exist_ok=True)
     events_path = probe / "events.jsonl"
     events_path.write_text("")
     results: list[dict[str, object]] = []
-    originals = {p: p.read_bytes() for p in FIXTURE.glob("*.ts")}
     config_path, lock_path = probe / "config.json", probe / "lock.json"
     config = {"revision": "baseline", "staticFailure": False}
     config_path.write_text(json.dumps(config))
@@ -521,7 +641,7 @@ def main() -> int:
         "projects": {"fixture": "."},
         "vcs": {"client": "git", "defaultBranch": "master", "sync": False},
     }
-    (FIXTURE / ".moon/workspace.yml").write_text(json.dumps(workspace))
+    (fixture_root / ".moon/workspace.yml").write_text(json.dumps(workspace))
     environment = os.environ.copy()
     # 入れ子のMoonには外側taskのworkspace/project情報を引き継がない。
     for variable in MOON_TASK_CONTEXT_VARIABLES:
@@ -534,7 +654,7 @@ def main() -> int:
             "MOON_CACHE": "read-write",
             "CACHE_CONTRACT_ENV": "baseline",
             "MOON_AUTO_INSTALL": "false",
-            "PWD": str(FIXTURE),
+            "PWD": str(fixture_root),
         }
     )
     inputs = [
@@ -545,7 +665,7 @@ def main() -> int:
         ".probe/lock.json",
         "$CACHE_CONTRACT_ENV",
     ]
-    common_env = {"CONTRACT_ROOT": str(FIXTURE)}
+    common_env = {"CONTRACT_ROOT": str(fixture_root)}
 
     def settings(extra_key: str = "baseline", *, cas_integrity: bool = False) -> None:
         tasks: dict[str, FixtureTask] = {
@@ -608,12 +728,17 @@ def main() -> int:
                 "toolchains": ["system"],
             }
             tasks["unit"]["deps"] = ["before-unit"]
-        (FIXTURE / "moon.yml").write_text(json.dumps({"tasks": tasks}))
+        (fixture_root / "moon.yml").write_text(json.dumps({"tasks": tasks}))
 
     def settings_scheduler(
-        *, static_failure: bool, expect_failure: bool = False, acquisition_failure: bool = False,
-        foundation_failure: bool = False, preparation_failure: bool = False,
-        ast_failure: bool = False
+        *,
+        static_failure: bool,
+        expect_failure: bool = False,
+        acquisition_failure: bool = False,
+        foundation_failure: bool = False,
+        preparation_failure: bool = False,
+        pin_preflight_failure: bool = False,
+        ast_failure: bool = False,
     ) -> None:
         config["staticFailure"] = static_failure
         config_path.write_text(json.dumps(config))
@@ -624,13 +749,25 @@ def main() -> int:
                 if name in SCHEDULER_NOOP_TASKS
                 else [
                     str(bun),
-                    str(FIXTURE / "moon-cache-task.ts"),
+                    str(fixture_root / "moon-cache-task.ts"),
                     (
-                        "failure" if ((acquisition_failure and name == "mathjax-owned-evidence")
-                        or (foundation_failure and name == "typecheck")
-                        or (preparation_failure and name == "rust-facts-host-prebuild")
-                        or (ast_failure and name == "ast-lint"))
-                        else "static" if name == "biome" else name
+                        "failure"
+                        if (
+                            (acquisition_failure and name == "mathjax-owned-evidence")
+                            or (
+                                pin_preflight_failure
+                                and name == "mathjax-import-pin-preflight"
+                            )
+                            or (foundation_failure and name == "typecheck")
+                            or (
+                                preparation_failure
+                                and name == "rust-facts-host-prebuild"
+                            )
+                            or (ast_failure and name == "ast-lint")
+                        )
+                        else "static"
+                        if name == "biome"
+                        else name
                     ),
                 ]
             )
@@ -644,7 +781,7 @@ def main() -> int:
             if expect_failure and name == "biome":
                 task["options"] = {"expectFailure": True}
             tasks[name] = task
-        (FIXTURE / "moon.yml").write_text(
+        (fixture_root / "moon.yml").write_text(
             json.dumps(
                 {
                     "taskOptions": SCHEDULER_TASK_OPTIONS,
@@ -671,12 +808,13 @@ def main() -> int:
                 "detailed",
                 "--color=false",
             ],
-            cwd=FIXTURE,
+            cwd=fixture_root,
             env=environment,
             text=True,
             capture_output=True,
             check=False,
         )
+        assert_source_fixture_unchanged()
         log = run_dir / f"{label}.log"
         log.write_text(completed.stdout + completed.stderr)
         record = {
@@ -687,8 +825,13 @@ def main() -> int:
             "log": str(log),
             "log_sha256": digest(log),
             "inputs": {
-                str(path.relative_to(FIXTURE)): digest(path)
-                for path in (*originals, config_path, lock_path, FIXTURE / "moon.yml")
+                str(path.relative_to(fixture_root)): digest(path)
+                for path in (
+                    *originals,
+                    config_path,
+                    lock_path,
+                    fixture_root / "moon.yml",
+                )
             },
             "environment": environment["CACHE_CONTRACT_ENV"],
             "events": {
@@ -718,7 +861,9 @@ def main() -> int:
         return bool(counts) and all(count > 0 for count in counts)
 
     def verify_direct_input_contract() -> dict[str, object]:
-        production_binding = production_task_input_binding(bun, moon_command, direct_run_dir)
+        production_binding = production_task_input_binding(
+            bun, moon_command, direct_run_dir
+        )
         workspace_dir = direct_run_dir / "workspace"
         (workspace_dir / ".moon").mkdir(parents=True)
         (workspace_dir / "tmp").mkdir()
@@ -793,21 +938,7 @@ def main() -> int:
                 }
             )
         )
-        subprocess.run(
-            ["git", "init", "--quiet", "--initial-branch=master", str(workspace_dir)],
-            check=True,
-        )
-        git = ["git", "-C", str(workspace_dir)]
-        subprocess.run([*git, "config", "user.name", "Moon Cache Contract"], check=True)
-        subprocess.run(
-            [*git, "config", "user.email", "moon-cache-contract@example.invalid"],
-            check=True,
-        )
-        subprocess.run([*git, "add", "-A"], check=True)
-        subprocess.run(
-            [*git, "commit", "--quiet", "-m", "Create isolated Moon fixture"],
-            check=True,
-        )
+        initialize_isolated_git(workspace_dir)
 
         def run(label: str) -> DirectInputRunRecord:
             started = time.monotonic_ns()
@@ -879,15 +1010,19 @@ def main() -> int:
             generated_ignored["hash"] != ignored["hash"]
             or generated_ignored["execution_count"] != ignored["execution_count"]
         ):
-            failures.append("Generated target/tool-cache changes affected direct inputs")
+            failures.append(
+                "Generated target/tool-cache changes affected direct inputs"
+            )
         if (
             source_changed["hash"] == generated_ignored["hash"]
-            or source_changed["execution_count"] != generated_ignored["execution_count"] + 1
+            or source_changed["execution_count"]
+            != generated_ignored["execution_count"] + 1
         ):
             failures.append("Root source change did not invalidate task")
         if (
             managed_changed["hash"] == source_changed["hash"]
-            or managed_changed["execution_count"] != source_changed["execution_count"] + 1
+            or managed_changed["execution_count"]
+            != source_changed["execution_count"] + 1
         ):
             failures.append("Managed scripts/tmp change did not invalidate task")
         if (
@@ -927,12 +1062,14 @@ def main() -> int:
             ],
             "failures": failures,
         }
-        receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n")
+        receipt_path.write_text(
+            json.dumps(receipt, ensure_ascii=False, indent=2) + "\n"
+        )
         assert not failures, "; ".join(failures)
         return {"receipt": str(receipt_path), "accepted": True}
 
     def run_cas_integrity_contract() -> dict[str, object]:
-        workspace_path = FIXTURE / ".moon/workspace.yml"
+        workspace_path = fixture_root / ".moon/workspace.yml"
         workspace_config = json.loads(workspace_path.read_text())
         workspace_config["cache"] = {"cas": {"verifyIntegrity": True}}
         workspace_config["experiments"] = {"casOutputsCache": True}
@@ -940,7 +1077,7 @@ def main() -> int:
         settings("cas-integrity", cas_integrity=True)
 
         version = subprocess.check_output(
-            [*moon_command, "--version"], cwd=FIXTURE, env=environment, text=True
+            [*moon_command, "--version"], cwd=fixture_root, env=environment, text=True
         ).strip()
         resolved_binary = subprocess.check_output(
             [
@@ -955,16 +1092,19 @@ def main() -> int:
         binary_path = Path(resolved_binary).resolve(strict=True)
         cli_dir = ROOT / "node_modules/@moonrepo/cli"
         cli_inputs = {
-            name: digest(cli_dir / name) for name in ("package.json", "moon.js", "utils.js")
+            name: digest(cli_dir / name)
+            for name in ("package.json", "moon.js", "utils.js")
         }
-        output_path = FIXTURE / ".outputs/unit.json"
-        cache_root = FIXTURE / ".moon/cache"
+        output_path = fixture_root / ".outputs/unit.json"
+        cache_root = fixture_root / ".moon/cache"
         event_start = events("unit")
 
         invoke("cas-first", "unit")
         first_output = output_path.read_bytes()
         first_event_count = events("unit")
-        assert first_event_count == event_start + 1, "First CAS invocation did not execute"
+        assert first_event_count == event_start + 1, (
+            "First CAS invocation did not execute"
+        )
         run_report = json.loads((cache_root / "runReport.json").read_text())
         unit_action = next(
             action
@@ -988,11 +1128,17 @@ def main() -> int:
         blob_bytes = blob_path.read_bytes()
         assert len(blob_bytes) == unit_entry["digest"]["size"]
         assert hashlib.sha256(blob_bytes).hexdigest() == blob_digest
-        assert blob_bytes == first_output, "Moon CAS blob does not match the output manifest"
+        assert blob_bytes == first_output, (
+            "Moon CAS blob does not match the output manifest"
+        )
 
         invoke("cas-same-input", "unit")
-        assert events("unit") == first_event_count, "Same-input task did not hit the cache"
-        assert output_path.read_bytes() == first_output, "Same-input hit changed task output"
+        assert events("unit") == first_event_count, (
+            "Same-input task did not hit the cache"
+        )
+        assert output_path.read_bytes() == first_output, (
+            "Same-input hit changed task output"
+        )
         same_input_report = json.loads((cache_root / "runReport.json").read_text())
         same_input_unit = next(
             action
@@ -1008,18 +1154,24 @@ def main() -> int:
         output_path.unlink()
         invoke("cas-output-restoration", "unit")
         baseline_output = output_path.read_bytes()
-        assert baseline_output == first_output, "Deleted output was not restored from CAS"
+        assert baseline_output == first_output, (
+            "Deleted output was not restored from CAS"
+        )
         assert events("unit") == first_event_count, "Output restoration reran the task"
 
         config["revision"] = "cas-input-changed"
         config_path.write_text(json.dumps(config))
         invoke("cas-changed-input", "unit")
-        assert events("unit") == first_event_count + 1, "Changed input reused stale task output"
+        assert events("unit") == first_event_count + 1, (
+            "Changed input reused stale task output"
+        )
         config["revision"] = "baseline"
         config_path.write_text(json.dumps(config))
         settings("cas-integrity", cas_integrity=True)
         invoke("cas-baseline-restoration", "unit")
-        assert output_path.read_bytes() == baseline_output, "Baseline CAS entry did not restore"
+        assert output_path.read_bytes() == baseline_output, (
+            "Baseline CAS entry did not restore"
+        )
 
         corrupted_bytes = bytearray(blob_bytes)
         assert len(corrupted_bytes) > 16, "CAS output blob is too small to corrupt"
@@ -1039,22 +1191,26 @@ def main() -> int:
         try:
             corrupt_run = subprocess.run(
                 corrupt_command,
-                cwd=FIXTURE,
+                cwd=fixture_root,
                 env=environment,
                 text=True,
                 capture_output=True,
                 check=False,
             )
+            assert_source_fixture_unchanged()
             corrupt_log = run_dir / "cas-corrupt-hydration.log"
             corrupt_log.write_text(corrupt_run.stdout + corrupt_run.stderr)
             after_corrupt_run_events = events("unit")
             corrupt_output = output_path.read_bytes() if output_path.is_file() else None
-            corrupted_blob_after_run_sha256 = hashlib.sha256(blob_path.read_bytes()).hexdigest()
+            corrupted_blob_after_run_sha256 = hashlib.sha256(
+                blob_path.read_bytes()
+            ).hexdigest()
             corrupt_report = json.loads((cache_root / "runReport.json").read_text())
             corrupt_unit_action = next(
                 action
                 for action in corrupt_report["actions"]
-                if action.get("node", {}).get("params", {}).get("target") == "fixture:unit"
+                if action.get("node", {}).get("params", {}).get("target")
+                == "fixture:unit"
             )
             corrupt_action_hash = next(
                 operation["meta"]["hash"]
@@ -1079,7 +1235,9 @@ def main() -> int:
                 else "Moon returned a cache hit without restoring expected bytes"
             )
         else:
-            corruption_rejected = corrupt_output is None or corrupt_output == baseline_output
+            corruption_rejected = (
+                corrupt_output is None or corrupt_output == baseline_output
+            )
             corrupt_behavior = "corrupt CAS hydration failed closed"
 
         return {
@@ -1093,15 +1251,18 @@ def main() -> int:
             "bun": {
                 "path": str(bun),
                 "sha256": digest(bun),
-                "version": subprocess.check_output([str(bun), "--version"], text=True).strip(),
+                "version": subprocess.check_output(
+                    [str(bun), "--version"], text=True
+                ).strip(),
             },
             "moon_cli_inputs_sha256": cli_inputs,
             "workspace_config_sha256": digest(workspace_path),
-            "task_config_sha256": digest(FIXTURE / "moon.yml"),
+            "task_config_sha256": digest(fixture_root / "moon.yml"),
             "cas_configuration": {
                 "verify_integrity": workspace_config["cache"]["cas"]["verifyIntegrity"],
                 "outputs_cache": workspace_config["experiments"]["casOutputsCache"],
-                "environment_override_present": "MOON_CACHE_CAS_VERIFY_INTEGRITY" in environment,
+                "environment_override_present": "MOON_CACHE_CAS_VERIFY_INTEGRITY"
+                in environment,
                 "outputs_environment_override_present": "MOON_EXPERIMENT_CAS_OUTPUTS_CACHE"
                 in environment,
             },
@@ -1123,9 +1284,12 @@ def main() -> int:
                 "corrupt_hydration_status": corrupt_hydration_status,
                 "expected_output_sha256": hashlib.sha256(baseline_output).hexdigest(),
                 "actual_corrupt_output_sha256": (
-                    hashlib.sha256(corrupt_output).hexdigest() if corrupt_output is not None else None
+                    hashlib.sha256(corrupt_output).hexdigest()
+                    if corrupt_output is not None
+                    else None
                 ),
-                "corrupt_task_event_delta": after_corrupt_run_events - before_corrupt_run_events,
+                "corrupt_task_event_delta": after_corrupt_run_events
+                - before_corrupt_run_events,
                 "corruption_rejected": corruption_rejected,
                 "blob_restored": hashlib.sha256(blob_path.read_bytes()).hexdigest()
                 == hashlib.sha256(blob_bytes).hexdigest(),
@@ -1136,14 +1300,16 @@ def main() -> int:
         status = "failed"
         report_path = run_dir / "cas-integrity-receipt.json"
         preserved_paths = (
-            FIXTURE / "moon.yml",
-            FIXTURE / ".moon/workspace.yml",
+            fixture_root / "moon.yml",
+            fixture_root / ".moon/workspace.yml",
             config_path,
             lock_path,
             events_path,
         )
-        saved_files = {path: path.read_bytes() for path in preserved_paths if path.exists()}
-        output_path = FIXTURE / ".outputs/unit.json"
+        saved_files = {
+            path: path.read_bytes() for path in preserved_paths if path.exists()
+        }
+        output_path = fixture_root / ".outputs/unit.json"
         saved_output = output_path.read_bytes() if output_path.exists() else None
         try:
             cas_result = run_cas_integrity_contract()
@@ -1170,6 +1336,8 @@ def main() -> int:
                         "fixture_only": True,
                         "krr_coverage_achievement": False,
                         "other_native_platforms_verified": False,
+                        "fixture_root": str(fixture_root),
+                        "tracked_fixture_source_sha256": source_pins,
                         "results": results,
                     },
                     ensure_ascii=False,
@@ -1180,24 +1348,25 @@ def main() -> int:
             print(report_path)
         return 0
 
+    status = "failed"
     try:
         settings()
         miss("unit-first")
         before = events("unit")
-        original_report = (FIXTURE / ".outputs/unit.json").read_bytes()
+        original_report = (fixture_root / ".outputs/unit.json").read_bytes()
         invoke("unit-repeat", "unit")
         assert events("unit") == before, "Same input did not skip execution"
-        (FIXTURE / ".outputs/unit.json").unlink()
+        (fixture_root / ".outputs/unit.json").unlink()
         invoke("unit-restore", "unit")
         assert (
             events("unit") == before
-            and (FIXTURE / ".outputs/unit.json").read_bytes() == original_report
+            and (fixture_root / ".outputs/unit.json").read_bytes() == original_report
         ), "Output was not restored from real moon cache"
         for filename, label in [
             ("moon-cache-subject.ts", "source-change"),
             ("moon-cache-subject.test.ts", "test-change"),
         ]:
-            path = FIXTURE / filename
+            path = fixture_root / filename
             path.write_bytes(
                 originals[path] + "\n// キャッシュ入力の変更を検証する。\n".encode()
             )
@@ -1227,7 +1396,7 @@ def main() -> int:
         config["staticFailure"] = False
         config_path.write_text(json.dumps(config))
         invoke("coverage-first", "coverage")
-        lcov = FIXTURE / ".outputs/coverage/lcov.info"
+        lcov = fixture_root / ".outputs/coverage/lcov.info"
         coverage_hash = digest(lcov)
         assert verify_coverage(lcov, coverage_hash), (
             "Real Bun LCOV has uncovered/absent lines"
@@ -1276,7 +1445,7 @@ def main() -> int:
             json.loads(line)["phase"] for line in events_path.read_text().splitlines()
         ]
         assert scheduler_success_order_valid(success_phases), (
-            f"23-task scheduler success order changed: {success_phases}"
+            f"scheduler success order changed: {success_phases}"
         )
         results.append(
             {
@@ -1311,27 +1480,69 @@ def main() -> int:
         )
 
         for label, failure_options, blocked_phases in [
-             ("foundation", {"foundation_failure": True},
-             ("capacity-admission", "rust-facts-host-prebuild", "static", *SCHEDULER_BARRIER_PHASES)),
-            ("preparation", {"preparation_failure": True},
-             ("static", *SCHEDULER_BARRIER_PHASES)),
+            (
+                "foundation",
+                {"foundation_failure": True},
+                (
+                    "capacity-admission",
+                    "rust-facts-host-prebuild",
+                    "static",
+                    *SCHEDULER_BARRIER_PHASES,
+                ),
+            ),
+            (
+                "preparation",
+                {"preparation_failure": True},
+                ("static", *SCHEDULER_BARRIER_PHASES),
+            ),
+            (
+                "mathjax-pin-preflight",
+                {"pin_preflight_failure": True},
+                (
+                    "capacity-admission",
+                    "rust-facts-host-prebuild",
+                    "source-static-foundation",
+                    "biome",
+                    "source-static",
+                    "static",
+                    "ast-lint",
+                    "lint",
+                    "dependency-leak",
+                    "mathjax-owned-evidence",
+                    "runtime-asset-script-preflight",
+                    "runtime-classic-generation-evidence",
+                    "runtime-asset-script-other",
+                    "runtime-unused-script-regression",
+                    "runtime-asset-script-test",
+                    "unit-test",
+                ),
+            ),
         ]:
             settings_scheduler(static_failure=False, **failure_options)
             events_path.write_text("")
             invoke(f"scheduler-{label}-failure-barrier", "unit-test", succeeds=False)
             bootstrap_failure_phases = [
-                json.loads(line)["phase"] for line in events_path.read_text().splitlines()
+                json.loads(line)["phase"]
+                for line in events_path.read_text().splitlines()
             ]
-            assert bootstrap_failure_phases.count("failure") == 1, "Bootstrap failure event missing"
-            assert all(phase not in bootstrap_failure_phases for phase in blocked_phases), (
+            assert bootstrap_failure_phases.count("failure") == 1, (
+                "Bootstrap failure event missing"
+            )
+            assert all(
+                phase not in bootstrap_failure_phases for phase in blocked_phases
+            ), (
                 f"A downstream task ran after {label} failure: {bootstrap_failure_phases}"
             )
             if label == "preparation":
                 assert set(SCHEDULER_FOUNDATION_PHASES) <= set(bootstrap_failure_phases)
-            results.append({
-                "label": f"scheduler-{label}-failure-barrier", "passed": True,
-                "event_phases": bootstrap_failure_phases, "blocked_phases": list(blocked_phases),
-            })
+            results.append(
+                {
+                    "label": f"scheduler-{label}-failure-barrier",
+                    "passed": True,
+                    "event_phases": bootstrap_failure_phases,
+                    "blocked_phases": list(blocked_phases),
+                }
+            )
 
         settings_scheduler(static_failure=True)
         events_path.write_text("")
@@ -1363,15 +1574,23 @@ def main() -> int:
         acquisition_phases = [
             json.loads(line)["phase"] for line in events_path.read_text().splitlines()
         ]
-        assert acquisition_phases.count("failure") == 1, "Acquisition failure event missing"
-        assert acquisition_phases.index("rust-facts-host-prebuild") < acquisition_phases.index("failure")
-        assert all(phase not in acquisition_phases for phase in SCHEDULER_NATIVE_PHASES), (
-            f"Consumer or native ran after failed acquisition: {acquisition_phases}"
+        assert acquisition_phases.count("failure") == 1, (
+            "Acquisition failure event missing"
         )
-        results.append({
-            "label": "scheduler-acquisition-failure-barrier", "passed": True,
-            "event_phases": acquisition_phases, "blocked_phases": list(SCHEDULER_NATIVE_PHASES),
-        })
+        assert acquisition_phases.index(
+            "rust-facts-host-prebuild"
+        ) < acquisition_phases.index("failure")
+        assert all(
+            phase not in acquisition_phases for phase in SCHEDULER_NATIVE_PHASES
+        ), f"Consumer or native ran after failed acquisition: {acquisition_phases}"
+        results.append(
+            {
+                "label": "scheduler-acquisition-failure-barrier",
+                "passed": True,
+                "event_phases": acquisition_phases,
+                "blocked_phases": list(SCHEDULER_NATIVE_PHASES),
+            }
+        )
 
         settings_scheduler(static_failure=True, expect_failure=True)
         events_path.write_text("")
@@ -1397,7 +1616,9 @@ def main() -> int:
             }
         )
         direct_input_result = verify_direct_input_contract()
-        results.append({"label": "durable-direct-input-exclusion", **direct_input_result})
+        results.append(
+            {"label": "durable-direct-input-exclusion", **direct_input_result}
+        )
         status = "passed"
     except Exception as error:
         status = "failed"
@@ -1407,7 +1628,7 @@ def main() -> int:
         for path, content in originals.items():
             path.write_bytes(content)
         receipt = {
-            "status": locals().get("status", "failed"),
+            "status": status,
             "owner_sha256": digest(Path(__file__).resolve()),
             "moon_version": subprocess.check_output(
                 [*moon_command, "--version"], text=True
@@ -1419,6 +1640,8 @@ def main() -> int:
             "fixture_only": True,
             "krr_coverage_achievement": False,
             "other_native_platforms_verified": False,
+            "fixture_root": str(fixture_root),
+            "tracked_fixture_source_sha256": source_pins,
             "results": results,
         }
         (run_dir / "receipt.json").write_text(

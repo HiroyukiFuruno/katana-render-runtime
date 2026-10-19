@@ -48,7 +48,9 @@ import {
   astSpan,
   type BrowserUnusedProgram,
   browserAstNodes,
+  inspectSharedSvgCaptureProgram,
   RuntimeUnusedOrigin,
+  sharedSvgCaptureRoute,
   unusedDiagnosticSchema,
 } from "./runtime-unused-origin";
 import {
@@ -1168,6 +1170,13 @@ function standardGateContexts(root: string) {
 }
 
 export function runStandardUnusedGate(root: string, directory: string) {
+  const sharedSvgRaw = new Map(
+    sharedSvgCaptureRoute.map(({ sourcePath }) => [
+      sourcePath,
+      readUnusedPhysicalSource(root, sourcePath),
+    ]),
+  );
+  inspectSharedSvgCaptureProgram(sharedSvgRaw);
   const run = collectStandardUnusedRawBiome(root, directory),
     raw = gateRawReport(root, run),
     { contexts, failures } = raw.diagnostics.some(

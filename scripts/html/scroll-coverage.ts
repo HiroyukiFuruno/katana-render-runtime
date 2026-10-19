@@ -6,6 +6,7 @@ import { chromium, type Page } from "playwright";
 import { collectFailedAssetResponses, waitForAssets } from "./reference-capture";
 
 export const BOTTOM_SCROLL_REQUEST = 1_000_000_000;
+export const TOC_LINK_SELECTOR = '.sidebar .toc-item[href^="#"], nav a[href^="#"]';
 
 export interface ScrollViewport {
   width: number;
@@ -191,12 +192,10 @@ export async function measureScrollCoverage(
     collectFailedAssetResponses(page, failedResponses);
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: "networkidle" });
     await waitForAssets(page, failedResponses);
-    const documentInfo = await page.evaluate(() => {
+    const documentInfo = await page.evaluate((selector) => {
       const scrolling = document.scrollingElement;
       const maxScrollY = Math.max(0, (scrolling?.scrollHeight ?? 0) - window.innerHeight);
-      const links = [
-        ...document.querySelectorAll<HTMLAnchorElement>('.sidebar .toc-item[href^="#"]'),
-      ].map((link) => {
+      const links = [...document.querySelectorAll<HTMLAnchorElement>(selector)].map((link) => {
         const href = link.getAttribute("href") ?? "";
         const id = decodeURIComponent(href.slice(1));
         const target = id ? document.getElementById(id) : null;
@@ -213,7 +212,7 @@ export async function measureScrollCoverage(
         maxScrollY,
         links,
       };
-    });
+    }, TOC_LINK_SELECTOR);
     const targetScrollYs = documentInfo.links.flatMap((link) =>
       link.targetY === null ? [] : [Math.max(0, link.targetY - input.viewport.height * 0.2)],
     );
@@ -236,7 +235,7 @@ export async function measureScrollCoverage(
       input.viewport.height,
     );
     const toc: TocEvidence[] = [];
-    const links = page.locator('.sidebar .toc-item[href^="#"]');
+    const links = page.locator(TOC_LINK_SELECTOR);
     for (let index = 0; index < documentInfo.links.length; index += 1) {
       const source = documentInfo.links[index];
       if (!source) continue;

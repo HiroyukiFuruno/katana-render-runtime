@@ -73,11 +73,28 @@ test("MathJax evidence fingerprint CLI emits the stable schema", () => {
   });
 });
 
+test("MathJax import pin preflight CLI runs the existing input validation", () => {
+  const child = Bun.spawnSync(
+    [process.execPath, "scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts", "preflight"],
+    {
+      cwd: root,
+      env: { ...process.env, BIOME_BINARY: "untrusted-preflight-path" },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  expect(child.exitCode).toBe(1);
+  expect(Buffer.from(child.stderr).toString("utf8")).toContain(
+    "MathJax evidence rejects unpinned tool override",
+  );
+  expect(fs.readdirSync(directory)).toHaveLength(0);
+});
+
 test("fixed runtime regressions require every imported tool's physical bytes", () => {
   const imported = runtimeUnusedImportInputs(root);
   const pins = inputs(root);
   expect(() => verifyRuntimeUnusedImportPins(imported, pins)).not.toThrow();
-  for (const name of ["source-map-js", "acorn-loose", "acorn-walk"]) {
+  for (const name of ["p-map", "source-map-js", "acorn-loose", "acorn-walk"]) {
     const prefix = path.join(root, "node_modules", name) + path.sep;
     expect(imported.tools.some((file) => file.startsWith(prefix))).toBe(true);
     const remaining = pins.filter((pin) => !pin.path.startsWith(prefix));

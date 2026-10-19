@@ -621,6 +621,7 @@ function playwrightTestRunnerFiles(words: string[]): string[] | undefined {
     "scripts/html/playwright.config.ts",
     "scripts/html/feature-catalog_test.ts",
     "scripts/html/chrome_badge_metrics_test.ts",
+    "scripts/html/reference-capture_browser_test.ts",
   ];
 }
 
@@ -1069,8 +1070,8 @@ const NATIVE_BATCH_UNIT_CALLER = {
 
 const RUNTIME_ASSET_COMPRESSOR_UNIT_PROGRAM = {
   caller: "scripts/runtime-assets/runtime-package-asset-compressor_test.ts",
-  callerSourceSha256: "11ed165e8385ff593ad73fc65f69d08cd0486ffa88a0521a819ff479a66c0670",
-  callerAstSha256: "fbf473330e96fbb1a26a2ba68203c125e318c9af6ee643aa9593838f3c5544c8",
+  callerSourceSha256: "341c191ee4e8079303ba3adc1f2be19dd02c652999a5e47c6265fa2f312e88fa",
+  callerAstSha256: "02e4097c2bf8d075d83dc244a8be494322b09a67a9efa2d6edd4df059f044bdd",
   wrapper: "scripts/runtime-assets/runtime-package-asset-compressor.ts",
   wrapperSourceSha256: "1eae43d7e77deaf44bda83585159c5ccde6dcd24d0d524d395d031c081621f48",
   wrapperAstSha256: "b3b54b4f989cc4afa735785789688131dcc9f04916a2dbd24755e6208d211f85",
@@ -3547,9 +3548,9 @@ const HOST_EVIDENCE_SOURCE_AST_SHA256: Record<string, string> = {
   "scripts/runtime-bundles/runtime-rust-facts-host-protocol.ts":
     "8dbc5f4231e9756d4e5f77cb91ab688e59459f288e2115660c273180fb62558e",
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts":
-    "a4d55d060af44d2711de44cdb04f6e8b3b353a9b2934ccc2fa37c0aece0bc971",
+    "4484139b289df41f69436936caa5a09477a132822f25b9c35dd68282332dadca",
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence-inputs.ts":
-    "7a091a7f5af2d9b8e71617ca7dedb6a1dc51d6ad2400a8da1f3f07e0f5888b9c",
+    "52423087a617ceeae10bb0c276af43fb8dcd839db791b418dcbc00ce2443a6cb",
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence-producer.ts":
     "7ebce6df5e2534548bc16efb72981e9af2f1f458ac6ec67109c5dccbbe8c05a2",
 };
@@ -4425,9 +4426,9 @@ function ciMoonLeaves(
 // 実producer・consumerをreviewしたepochに固定し、呼出文字列だけの偽装を拒否する。
 const MOON_TERMINAL_SOURCES = {
   "scripts/hooks/run_parallel_checks.py":
-    "5b1ba155f4705bff35d3a43cac746fa57a979d54b28ec58f3ce22d09181ce6db",
+    "6590d3482195d88452d2592a2a690e114c7e060270e95908c735c695256ac180",
   "scripts/html/harness-contract-cli.ts":
-    "1113e5b23e98a1c84d654dff6a60e964f554261aa46ffa825abfeb84501bb304",
+    "67c99ad4efd4695bbbe15e005baead0794dc1b5cc018d1d1796756e88b0a24cf",
 } as const;
 
 function moonTerminalSourcesRegistered(

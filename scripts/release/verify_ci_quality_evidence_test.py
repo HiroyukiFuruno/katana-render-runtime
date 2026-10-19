@@ -906,7 +906,7 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertIn("python3 scripts/build/cargo_capacity_guard.py --root", justfile)
         guarded_build = (
             '--state {{quote(REPO_ROOT + "/tmp/.cargo-capacity-guard.json")}} -- '
-            '{{HTML84_CARGO}} test -p katana-render-runtime --lib --no-run'
+            '{{HTML84_CARGO}} test --release -p katana-render-runtime --lib --no-run'
         )
         self.assertIn(guarded_build, justfile)
         self.assertNotIn(

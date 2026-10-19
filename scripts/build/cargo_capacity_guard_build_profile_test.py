@@ -280,15 +280,45 @@ class CheckDomainTests(unittest.TestCase):
     def test_explicit_cli_and_environment_references_remain_protected(self) -> None:
         with self.isolated_workspace(capacity_factor=True) as (root, environment):
             self.require_successful_initial_root_clippy(root, environment)
-            outputs = sorted((root / "target/debug/deps").glob("libkatana_render_runtime-*.r*"))
-            self.assertGreaterEqual(len(outputs), 2, "real Clippy must produce protected library outputs")
-            environment_reference, cli_reference = outputs[:2]
+            harness = root / "scripts/html/performance-harness"
+            payload = harness / "src/payload.bin"
+            payload.write_bytes(hashlib.shake_256(b"real-cargo-inactive-profile").digest(1_120_000))
+            (harness / "src/lib.rs").write_text(
+                '#[used]\npub static PAYLOAD: [u8; 1_120_000] = '
+                '*include_bytes!("payload.bin");\n'
+            )
+            cargo = shutil.which("cargo")
+            if cargo is None:
+                self.fail("real Cargo is required")
+            release_build = subprocess.run(
+                [cargo, "build", "--offline", "--release", "--manifest-path",
+                 str(harness / "Cargo.toml"), "--message-format=json"],
+                cwd=root, env=environment, text=True, capture_output=True, timeout=120,
+                check=False,
+            )
+            self.assertEqual(release_build.returncode, 0,
+                             f"{release_build.stderr}\n{release_build.stdout}")
+            release_outputs = sorted((root / "target/release/deps").glob("libharness_fixture-*.rlib"))
+            self.assertEqual(len(release_outputs), 1, "real Cargo must produce the inactive fixture rlib")
+            self.assertGreater(release_outputs[0].stat().st_blocks * 512, 900_000)
+            debug_outputs = sorted(
+                (root / "target/debug/deps").glob("libkatana_render_runtime-*.r*")
+            )
+            self.assertGreaterEqual(
+                len(debug_outputs), 2, "real Clippy must produce protected library outputs"
+            )
+            environment_reference, cli_reference = debug_outputs[:2]
             identities = {
                 path: (path.stat().st_dev, path.stat().st_ino, hashlib.sha256(path.read_bytes()).digest())
                 for path in (environment_reference, cli_reference)
             }
             current = self.measured_bytes(root / "target")
-            self.capacity_state(root, root / "target", max(1, (current - 1) // 2))
+            debug_bytes = self.measured_bytes(root / "target/debug")
+            release_bytes = self.measured_bytes(root / "target/release/deps")
+            baseline = current - release_bytes + 1
+            self.assertGreaterEqual(baseline, debug_bytes)
+            self.assertGreater(current, baseline * guard.DEFAULT_FACTOR)
+            self.capacity_state(root, root / "target", baseline)
             environment["CARGO_CAPACITY_PROTECTED_REFS"] = json.dumps([str(environment_reference)])
             result = self.run_guard_clippy(root, environment, "root", cli_reference, dry_run=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -296,6 +326,8 @@ class CheckDomainTests(unittest.TestCase):
             cleanup = report["finite_cleanup"]
             self.assertGreater(cleanup["retained_protected_inodes"], 0)
             selected = {root / "target" / path for path in cleanup["candidate_paths"]}
+            self.assertIn(release_outputs[0], selected,
+                          "cleanup must select the real inactive Cargo rlib")
             self.assertTrue({environment_reference, cli_reference}.isdisjoint(selected))
             for path, identity in identities.items():
                 self.assertEqual((path.stat().st_dev, path.stat().st_ino,

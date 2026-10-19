@@ -6,7 +6,7 @@ RTK_CMD := if RTK == "" { "" } else { RTK + " " }
 JOBS := env_var_or_default("JOBS", "2")
 CHECK_JOBS := env_var_or_default("CHECK_JOBS", "3")
 FIXTURE_JOBS := env_var_or_default("FIXTURE_JOBS", JOBS)
-TEST_THREADS := env_var_or_default("TEST_THREADS", "1")
+TEST_THREADS := env_var_or_default("TEST_THREADS", "2")
 TEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " -- --test-threads=" + TEST_THREADS }
 NEXTEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " --test-threads=" + TEST_THREADS }
 RUNTIME_UPDATE_LOG_DIR := env_var_or_default("RUNTIME_UPDATE_LOG_DIR", "tmp/runtime-update-logs")
@@ -28,7 +28,7 @@ MERMAID_RASTER_SESSION_CONFIG_JA := env_var_or_default("MERMAID_RASTER_SESSION_C
 MERMAID_RASTER_SESSION_CONFIG_SHA_JA := env_var_or_default("MERMAID_RASTER_SESSION_CONFIG_SHA_JA", "")
 MERMAID_RASTER_BINDING_CONFIG_JA := env_var_or_default("MERMAID_RASTER_BINDING_CONFIG_JA", "")
 MERMAID_RASTER_BINDING_CONFIG_SHA_JA := env_var_or_default("MERMAID_RASTER_BINDING_CONFIG_SHA_JA", "")
-HTML_PROBE_BIN := REPO_ROOT + "/target/debug/examples/html_fidelity_probe" + if os() == "windows" { ".exe" } else { "" }
+HTML_PROBE_BIN := REPO_ROOT + "/target/release/examples/html_fidelity_probe" + if os() == "windows" { ".exe" } else { "" }
 HTML_INTERACTION_REPORT := env_var_or_default("HTML_INTERACTION_REPORT", REPO_ROOT + "/tmp/html-interaction-suite/krr.json")
 HTML_INTERACTION_OUTPUT := env_var_or_default("HTML_INTERACTION_OUTPUT", REPO_ROOT + "/tmp/html-interaction-suite/chrome")
 VERSION := env_var_or_default("VERSION", `awk -F '"' '/^version = / { print $2; exit }' Cargo.toml`)
@@ -268,14 +268,16 @@ runtime-asset-script-preflight-run:
     bun scripts/runtime-bundles/runtime-rust-facts-host.ts verify {{ quote(REPO_ROOT) }} {{ quote(REPO_ROOT + "/tmp/quality/rust-facts-host/current/receipt.json") }}
     NODE_ENV=test bun scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts verify
 
+mathjax-import-pin-preflight:
+    NODE_ENV=test bun scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts preflight
+
 runtime-classic-generation-evidence:
     bun scripts/runtime-bundles/bundle-runtime.ts --check --classic-generation-evidence
 
 runtime-asset-script-other-run:
-    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-rust-facts-host_test.ts ./scripts/runtime-bundles/runtime-rust-facts-host-freshness_test.ts ./scripts/runtime-bundles/runtime-mathjax-audit-evidence_test.ts
-    bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-source-inventory_test.ts ./scripts/quality/owned-validation-contract_test.ts
-    python3 scripts/quality/moon_cache_contract_test.py --moon bun run moon
     bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-assets/runtime-asset-common_test.ts ./scripts/runtime-assets/update_test.ts ./scripts/runtime-assets/latest-check_test.ts ./scripts/runtime-assets/update_zenuml_test.ts ./scripts/runtime-assets/depends-update-all_test.ts ./scripts/runtime-assets/runtime-package-asset-compressor_test.ts ./scripts/runtime-assets/mermaid-patched-build-recipe_test.ts ./scripts/mermaid/official_renderer_i18n_test.ts ./scripts/mermaid/diagram_update_markdown_assets_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-rust-facts-host_test.ts ./scripts/runtime-bundles/runtime-rust-facts-host-freshness_test.ts ./scripts/runtime-bundles/runtime-mathjax-audit-evidence_test.ts
+    python3 scripts/quality/moon_cache_contract_test.py --moon bun run moon
     bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/reference_score_test.ts ./scripts/drawio/official-runtime-determinism_test.ts ./scripts/drawio/official-source-fonts_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/reference-capture_test.ts ./scripts/html/fidelity-suite_test.ts ./scripts/html/scroll-coverage_test.ts ./scripts/html/toc-fidelity_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/interaction-suite_test.ts
@@ -288,6 +290,7 @@ runtime-asset-script-other-run:
     KRR_CLASSIC_GENERATION_EVIDENCE_PATH={{quote(REPO_ROOT + "/tmp/quality/classic-generation-evidence/current.json")}} bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-unused-classic-capture_test.ts ./scripts/runtime-bundles/runtime-unused-classic-binding_test.ts ./scripts/runtime-bundles/runtime-classic-generation_test.ts ./scripts/runtime-bundles/runtime-unused-semantic-adapter_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/parser-body-onload-generation.test.ts
     just browser-contract-test
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-source-inventory_test.ts ./scripts/quality/owned-validation-contract_test.ts
 
 # WHY: 関連leafだけの診断再実行であり、full quality gateの代替ではない。
 runtime-unused-script-regression:
@@ -368,58 +371,67 @@ rust-facts-host-metadata root=REPO_ROOT:
 # Compare every input-state boundary operation against Chrome at the immutable 99 threshold.
 html-input-state-fidelity-check:
     mkdir -p tmp/html-fidelity/input-state
-    {{RTK_CMD}}proxy cargo test -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/input-state/test-build.jsonl
+    {{RTK_CMD}}proxy cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/input-state/test-build.jsonl
     bun scripts/html/fidelity-acceptance-cli.ts input-state-final tmp/html-fidelity/input-state/test-build.jsonl
 
 # Interim input-state release gate; final fidelity remains fixed at 99.
 html-input-state-fidelity-interim-check:
     mkdir -p tmp/html-fidelity/input-state-interim
-    {{RTK_CMD}}proxy cargo test -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/input-state-interim/test-build.jsonl
+    {{RTK_CMD}}proxy cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/input-state-interim/test-build.jsonl
     bun scripts/html/fidelity-acceptance-cli.ts input-state-interim tmp/html-fidelity/input-state-interim/test-build.jsonl
 
 # Compare every script-state case against Chrome at the immutable 99 threshold.
 html-dynamic-fidelity-check:
     mkdir -p tmp/html-fidelity/dynamic
-    {{RTK_CMD}}proxy cargo test -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/dynamic/test-build.jsonl
+    {{RTK_CMD}}proxy cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/dynamic/test-build.jsonl
     bun scripts/html/fidelity-acceptance-cli.ts dynamic-final tmp/html-fidelity/dynamic/test-build.jsonl
 
 # Interim dynamic-state release gate; final script-feature results remain fixed at 99.
 html-dynamic-fidelity-interim-check:
     mkdir -p tmp/html-fidelity/dynamic-interim
-    {{RTK_CMD}}proxy cargo test -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/dynamic-interim/test-build.jsonl
+    {{RTK_CMD}}proxy cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/dynamic-interim/test-build.jsonl
     bun scripts/html/fidelity-acceptance-cli.ts dynamic-interim tmp/html-fidelity/dynamic-interim/test-build.jsonl
 
+html-fidelity-probe-build:
+    python3 {{quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py")}} --retain-build-profile release -- {{CARGO}} build --release --locked -p katana-render-runtime --example html_fidelity_probe
+
 # Compare independent KRR frames with the installed Google Chrome without resizing.
-html-fidelity-check:
-    {{CARGO_BUILD}} build -p katana-render-runtime --example html_fidelity_probe --locked
+html-diagram-consumer-check phase output:
+    @run_dir={{quote(output)}}/"$(bun -e 'process.stdout.write(crypto.randomUUID())')"; \
+      for fixture in mermaid-class-diagram drawio-class-diagram; do \
+        bun scripts/html/fidelity-suite.ts --binary {{quote(HTML_PROBE_BIN)}} --input "tests/fixtures/html-diagram-consumer/$fixture.html" --output "$run_dir/$fixture" --phase {{quote(phase)}} --min-score {{if phase == "interim" { "90" } else { "99" }}} || exit "$?"; \
+      done
+
+html-fidelity-check: html-fidelity-probe-build
     mkdir -p tmp/html-fidelity
-    {{RTK_CMD}}proxy cargo test -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/toc-test-build.jsonl
+    {{RTK_CMD}}proxy cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/toc-test-build.jsonl
     @status=0; \
       just browser-contract-test || status=1; \
       bun test --path-ignore-patterns 'tmp/**' ./scripts/html/visual-state-fidelity_test.ts || status=1; \
       bun scripts/html/fidelity-suite.ts --binary {{quote(HTML_PROBE_BIN)}} --toc-build-report tmp/html-fidelity/toc-test-build.jsonl --min-score 99 || status=1; \
-      just html-dynamic-fidelity-check || status=1; \
-      just html-input-state-fidelity-check || status=1; \
-      bun scripts/html/fidelity-acceptance-cli.ts reports-final || status=1; \
-      exit "$$status"
+      just html-diagram-consumer-check final tmp/html-fidelity/diagram-consumer || status=1; \
+      if [[ "$status" -eq 0 ]]; then just html-dynamic-fidelity-check || status=1; fi; \
+      if [[ "$status" -eq 0 ]]; then just html-input-state-fidelity-check || status=1; fi; \
+      if [[ "$status" -eq 0 ]]; then bun scripts/html/fidelity-acceptance-cli.ts reports-final || status=1; fi; \
+      exit "$status"
 
 # Explicit v0.4.24 interim release; the final recipe above retains its 99 gate.
-html-fidelity-interim-check:
-    {{CARGO_BUILD}} build -p katana-render-runtime --example html_fidelity_probe --locked
+html-fidelity-interim-check: html-fidelity-probe-build
     mkdir -p tmp/html-fidelity/interim
-    {{RTK_CMD}}proxy cargo test -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/interim/toc-test-build.jsonl
+    {{RTK_CMD}}proxy cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/interim/toc-test-build.jsonl
     @status=0; \
       just browser-contract-test || status=1; \
       bun test --path-ignore-patterns 'tmp/**' ./scripts/html/interim-feature-results_test.ts || status=1; \
       bun scripts/html/fidelity-suite.ts --binary {{quote(HTML_PROBE_BIN)}} --toc-build-report tmp/html-fidelity/interim/toc-test-build.jsonl --output tmp/html-fidelity/interim --phase interim --min-score 90 || status=1; \
-      just html-dynamic-fidelity-interim-check || status=1; \
-      just html-input-state-fidelity-interim-check || status=1; \
-      bun scripts/html/fidelity-acceptance-cli.ts reports-interim || status=1; \
-      exit "$$status"
+      just html-diagram-consumer-check interim tmp/html-fidelity/interim/diagram-consumer || status=1; \
+      if [[ "$status" -eq 0 ]]; then just html-dynamic-fidelity-interim-check || status=1; fi; \
+      if [[ "$status" -eq 0 ]]; then just html-input-state-fidelity-interim-check || status=1; fi; \
+      if [[ "$status" -eq 0 ]]; then bun scripts/html/fidelity-acceptance-cli.ts reports-interim || status=1; fi; \
+      exit "$status"
 
 # Select from the committed release authorization and package version; no threshold override.
 html-release-fidelity-check:
-    @recipe="$(python3 scripts/release/html_fidelity_policy.py --format recipe)" && just "$$recipe"
+    @recipe="$(python3 scripts/release/html_fidelity_policy.py --format recipe)" && just "$recipe"
 
 # Run the independent KRR snapshot interaction probe and compare it with real Google Chrome.
 # Interaction evidence supplements the final 99-point visual and performance contract.
@@ -460,11 +472,11 @@ runtime-package-asset-check:
 
 # Verify repository hook and release cleanup contracts
 automation-contract-test:
-    python3 -m unittest discover -s scripts/hooks -p '*_test.py'
-    python3 -m unittest discover -s scripts/release -p '*_test.py'
-    python3 -m unittest discover -s scripts/quality -p '*_test.py'
-    python3 -m unittest discover -s scripts/mermaid -p '*_test.py'
-    python3 -m unittest discover -s scripts/validation-timing -p test_measure.py
+    python3 -m unittest discover -s scripts/hooks -p '*_test.py' --failfast
+    python3 -m unittest discover -s scripts/release -p '*_test.py' --failfast
+    python3 -m unittest discover -s scripts/quality -p '*_test.py' --failfast
+    python3 -m unittest discover -s scripts/mermaid -p '*_test.py' --failfast
+    python3 -m unittest discover -s scripts/validation-timing -p test_measure.py --failfast
 
 # 必要時の要求適合レビューを明示実行し、DraftのPRレビューとの重複を避ける。
 local-review:
@@ -480,7 +492,7 @@ draft-review: check
 # 指摘修正ごとの重複を避け、AIレビューは専用targetから明示実行する。
 check:
     @export COVERAGE_MIN_LINES={{quote(COVERAGE_MIN_LINES)}} COVERAGE_MAX_UNCOVERED_LINES={{quote(COVERAGE_MAX_UNCOVERED_LINES)}} \
-      TEST_THREADS={{quote(env_var_or_default("TEST_THREADS", "2"))}} RUSTFLAGS={{quote(RUSTFLAGS)}} CARGO={{quote(CARGO)}} JOBS={{quote(JOBS)}} CHECK_JOBS={{quote(CHECK_JOBS)}}; \
+      TEST_THREADS={{quote(TEST_THREADS)}} RUSTFLAGS={{quote(RUSTFLAGS)}} CARGO={{quote(CARGO)}} JOBS={{quote(JOBS)}} CHECK_JOBS={{quote(CHECK_JOBS)}}; \
       python3 scripts/hooks/run_parallel_checks.py --jobs "$CHECK_JOBS"
     @echo "checks passed"
 
@@ -598,7 +610,7 @@ html-performance-catalog-captures output_root prior_observation='' prior_finaliz
       mkdir "$run_root"; \
       bun scripts/html/fidelity-acceptance-cli.ts catalog-stage90-plan "$run_root/plan.json"; \
       just capacity-admission; \
-      python3 scripts/build/cargo_capacity_guard.py --root {{quote(REPO_ROOT)}} --target {{quote(REPO_ROOT + "/target")}} --state {{quote(REPO_ROOT + "/tmp/.cargo-capacity-guard.json")}} -- {{HTML84_CARGO}} test -p katana-render-runtime --lib --no-run --locked --message-format=json > "$run_root/test-build.jsonl"; \
+      python3 scripts/build/cargo_capacity_guard.py --root {{quote(REPO_ROOT)}} --target {{quote(REPO_ROOT + "/target")}} --state {{quote(REPO_ROOT + "/tmp/.cargo-capacity-guard.json")}} -- {{HTML84_CARGO}} test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$run_root/test-build.jsonl"; \
       capture_args=(catalog-stage90-capture "$run_root/test-build.jsonl" "$run_root/plan.json" "$run_root/captures"); \
       if [[ -n "$prior_observation" ]]; then capture_args+=("$prior_observation" "$prior_finalized"); fi; \
       bun scripts/html/fidelity-acceptance-cli.ts "${capture_args[@]}"; \
@@ -647,7 +659,6 @@ depends-update-all:
     just fmt
     just runtime-bundle-build
     just check
-    just coverage
     just mermaid-reference-all
     just mermaid-compare-full
     just mermaid-compare-ci

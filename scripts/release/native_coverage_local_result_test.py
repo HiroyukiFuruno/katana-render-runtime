@@ -350,7 +350,10 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
                 local_result.local_finish(self.root, "root", 0)
             current_context[0] = self.context
             self.begin_producer("root")
-            with patch.dict(os.environ, {"TEST_THREADS": "2"}):
+            recorded_threads = local_result._threads()
+            changed_threads = "1" if recorded_threads != "1" else "2"
+            with patch.dict(os.environ, {"TEST_THREADS": changed_threads}):
+                self.assertNotEqual(local_result._threads(), recorded_threads)
                 with self.assertRaises(local_result.LocalCoverageError):
                     local_result.local_finish(self.root, "root", 0)
             self.begin_producer("root")

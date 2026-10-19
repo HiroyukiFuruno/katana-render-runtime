@@ -5,35 +5,24 @@ import { z } from "zod";
 import { javaScriptTypeReader, typeScriptToolBinding } from "../quality/owned-type-projects";
 import { checkHarnessContract, declaredValidationCode } from "./harness-contract";
 import { executionGraph, moonStaticTaskProjection, policyContract } from "./harness-contract-graph";
+import moonAuthorityInputs from "./moon-authority-inputs.json";
 import { nativeCoverageCacheTask } from "./native-coverage-cache-contract";
 
-const moonAuthorityNames = [
-  ".moon/workspace.yml",
-  "moon.yml",
-  "Justfile",
-  "package.json",
-  "bun.lock",
-  "scripts/html/harness-contract-cli.ts",
-  "scripts/html/harness-contract-graph.ts",
-  "scripts/html/native-coverage-cache-contract.ts",
-  "scripts/html/moon-quality-inputs.ts",
-  "scripts/html/harness-contract-policy.json",
-  "scripts/hooks/run_parallel_checks.py",
-  "scripts/release/native_coverage_local_aggregate.py",
-  "scripts/release/native_coverage_local_anchor.py",
-  "scripts/release/native_coverage_local_context.py",
-  "scripts/release/native_coverage_local_result.py",
-  "scripts/release/native_coverage_linux_context.py",
-  "scripts/release/native_coverage_result.py",
-  "scripts/release/native_coverage_result_cli.py",
-  "scripts/mermaid/native-source-manifest.ts",
-  "scripts/mermaid/mermaid-pair-manifest.ts",
-  "scripts/mermaid/native-build-receipt.ts",
-  "scripts/mermaid/native-cli-managed-build.ts",
-  "scripts/mermaid/native-cli-managed-build-schema.ts",
-  "scripts/mermaid/native-cli-managed-json.ts",
-] as const;
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
+const moonAuthorityRegistry = z.strictObject({
+  schema: z.literal(1),
+  inputs: z
+    .record(z.string().min(1), z.literal(true))
+    .refine((inputs) => Object.keys(inputs).length > 0),
+});
+type MoonAuthorityName = keyof typeof moonAuthorityInputs.inputs;
+const moonAuthorityNames = Object.keys(moonAuthorityInputs.inputs) as MoonAuthorityName[];
+const inputSha256 = z.strictObject(
+  Object.fromEntries(moonAuthorityNames.map((name) => [name, sha256])) as Record<
+    MoonAuthorityName,
+    typeof sha256
+  >,
+);
 const fingerprintIdentity = z.strictObject({
   version: z.string().min(1),
   executableSha256: sha256,
@@ -59,7 +48,6 @@ const runtimeBundleToolFingerprint = z.strictObject({
 });
 const runtimeBundleFingerprintScript =
   "bun scripts/runtime-bundles/runtime-bundle-tool-fingerprint.ts";
-const inputSha256 = z.record(z.enum(moonAuthorityNames), sha256);
 const moonEntry = z.enum(["coverage", "runtime-bundle-check"]);
 const nanoseconds = z.string().regex(/^(?:0|[1-9][0-9]*)$/);
 const head = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
@@ -186,6 +174,23 @@ function authorityBytes(root: string, name: (typeof moonAuthorityNames)[number])
   if (!fs.lstatSync(file).isFile()) throw new Error(`non-regular Moon authority: ${name}`);
   return fs.readFileSync(file);
 }
+function validatedMoonAuthorityNames(): readonly MoonAuthorityName[] {
+  const registry = moonAuthorityRegistry.parse(moonAuthorityInputs);
+  const names = Object.keys(registry.inputs);
+  if (
+    !names.includes("scripts/html/moon-authority-inputs.json") ||
+    !names.includes("scripts/html/harness-contract-cli.ts") ||
+    !names.includes("scripts/hooks/run_parallel_checks.py") ||
+    names.some(
+      (name) =>
+        name.startsWith("/") ||
+        name.includes("\\") ||
+        name.split("/").some((part) => part.length === 0 || part === "." || part === ".."),
+    )
+  )
+    throw new Error("invalid Moon authority input registry");
+  return names as MoonAuthorityName[];
+}
 function timestampNs(value: string): bigint {
   const withoutZone = moonTimestamp.parse(value).replace(/Z$/, "");
   const [seconds, fraction = ""] = withoutZone.split(".");
@@ -220,7 +225,8 @@ export function moonRunContract(
   entry: z.infer<typeof moonEntry> = "coverage",
 ): MoonRunContract {
   root = repositoryIdentity(root).root;
-  const contents = new Map(moonAuthorityNames.map((name) => [name, authorityBytes(root, name)]));
+  const authorityNames = validatedMoonAuthorityNames();
+  const contents = new Map(authorityNames.map((name) => [name, authorityBytes(root, name)]));
   const text = (name: (typeof moonAuthorityNames)[number]): string => {
     const bytes = contents.get(name);
     if (!bytes) throw new Error(`missing Moon authority: ${name}`);

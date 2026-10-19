@@ -153,7 +153,9 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         self.assertIs(self.inspect(mutated)["valid"], False)
 
     def test_owner_rejects_bypassed_acquisition_failure_barrier(self) -> None:
-        marker = "assert all(phase not in acquisition_phases for phase in SCHEDULER_NATIVE_PHASES)"
+        marker = """assert all(
+            phase not in acquisition_phases for phase in SCHEDULER_NATIVE_PHASES
+        ), f"Consumer or native ran after failed acquisition: {acquisition_phases}"""
         self.assertEqual(self.source.count(marker), 1)
         self.assertIs(self.inspect(self.source.replace(marker, "assert True", 1))["valid"], False)
 
@@ -292,14 +294,37 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         self.assertIs(module.scheduler_success_order_valid(phases), False)
 
     def test_bootstrap_failure_assertion_cannot_be_removed_or_made_optional(self) -> None:
-        marker = "assert all(phase not in bootstrap_failure_phases for phase in blocked_phases)"
-        self.assertEqual(self.source.count(marker), 1)
-        for changed in [self.source.replace(marker, "assert True", 1),
-                        self.source.replace('("foundation", {"foundation_failure": True}',
-                                            '("foundation", {"foundation_failure": False}', 1),
-                        self.source.replace('("preparation", {"preparation_failure": True}',
-                                            '("preparation", {"preparation_failure": False}', 1)]:
-            with self.subTest(changed=changed != self.source):
+        mutations = [
+            (
+                "blocked phase assertion",
+                """assert all(
+                phase not in bootstrap_failure_phases for phase in blocked_phases
+            )""",
+                "assert True",
+            ),
+            (
+                "foundation failure",
+                '''(
+                "foundation",
+                {"foundation_failure": True},''',
+                '''(
+                "foundation",
+                {"foundation_failure": False},''',
+            ),
+            (
+                "preparation failure",
+                '''(
+                "preparation",
+                {"preparation_failure": True},''',
+                '''(
+                "preparation",
+                {"preparation_failure": False},''',
+            ),
+        ]
+        for label, original, replacement in mutations:
+            with self.subTest(label=label):
+                self.assertEqual(self.source.count(original), 1)
+                changed = self.source.replace(original, replacement, 1)
                 self.assertNotEqual(changed, self.source)
                 self.assertIs(self.inspect(changed)["valid"], False)
 

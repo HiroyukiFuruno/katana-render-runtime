@@ -975,7 +975,7 @@ export const sharedSvgCaptureRoute = [
   },
   {
     sourcePath: "scripts/mermaid/raster-capture-observation.ts",
-    sourceSha256: "556d1756d96994635acef4cd84924cfc62620c9d63c628ed40598cb17baf6bf5",
+    sourceSha256: "29eaac2b5bc227fbaaa6504c076863a6989f88597c1a5ce994b43c12da09b6fb",
   },
   {
     sourcePath: "scripts/mermaid/official-renderer-types.ts",

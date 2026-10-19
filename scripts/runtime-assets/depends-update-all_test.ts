@@ -208,7 +208,6 @@ test("depends-update-all は既存の更新・品質・比較ステップを各1
     "just fmt",
     "just runtime-bundle-build",
     "just check",
-    "just coverage",
     "just mermaid-reference-all",
     "just mermaid-compare-full",
     "just mermaid-compare-ci",
@@ -243,7 +242,6 @@ test("depends-update-all は資産生成・整形・ビルド・品質検査・�
     ["just fmt"],
     ["just runtime-bundle-build"],
     ["just check"],
-    ["just coverage"],
     [
       "just mermaid-reference-all",
       "just mermaid-compare-full",
@@ -259,4 +257,5 @@ test("depends-update-all は資産生成・整形・ビルド・品質検査・�
     expect(positions.every((position) => position > previousStageEnd)).toBe(true);
     previousStageEnd = Math.max(...positions);
   }
+  expect(lines).not.toContain("just coverage");
 });

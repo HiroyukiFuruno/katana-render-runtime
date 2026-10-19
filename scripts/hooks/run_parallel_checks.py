@@ -4,7 +4,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import stat
 import subprocess
@@ -18,16 +18,12 @@ from local_review_state import ReviewError, command, strict_json
 VERIFY_COMMAND = ["bun", "scripts/html/harness-contract-cli.ts", "--verify-moon-run"]
 REPORT_RELATIVE_PATH = Path(".moon/cache/runReport.json")
 LOCK_RELATIVE_PATH = Path(".moon/cache/krr-terminal-report.lock")
-AUTHORITY_PATHS = (
-    ".moon/workspace.yml",
-    "moon.yml",
-    "package.json",
-    "bun.lock",
+AUTHORITY_REGISTRY_PATH = "scripts/html/moon-authority-inputs.json"
+REQUIRED_AUTHORITY_BOOTSTRAP_PATHS = {
+    AUTHORITY_REGISTRY_PATH,
     "scripts/html/harness-contract-cli.ts",
-    "scripts/html/harness-contract-graph.ts",
-    "scripts/html/harness-contract-policy.json",
     "scripts/hooks/run_parallel_checks.py",
-)
+}
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 HEAD_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
@@ -66,10 +62,45 @@ def _read_stable_file(path: Path) -> tuple[bytes, os.stat_result]:
     return contents, after_fd
 
 
-def _authority_sha256(root: Path) -> dict[str, str]:
+def _authority_paths(root: Path) -> tuple[str, ...]:
+    contents, _metadata = _read_stable_file(root / AUTHORITY_REGISTRY_PATH)
+    try:
+        envelope = strict_json(contents.decode("utf-8"))
+    except (UnicodeDecodeError, ReviewError) as error:
+        raise ReviewError("Moon authority registry is invalid JSON") from error
+    if (
+        not isinstance(envelope, dict)
+        or set(envelope) != {"schema", "inputs"}
+        or type(envelope.get("schema")) is not int
+        or envelope["schema"] != 1
+    ):
+        raise ReviewError("Moon authority registry has an invalid schema")
+    inputs = envelope["inputs"]
+    if not isinstance(inputs, dict) or not inputs:
+        raise ReviewError("Moon authority registry inputs must be a non-empty object")
+    paths = tuple(inputs)
+    if any(type(value) is not bool or value is not True for value in inputs.values()):
+        raise ReviewError("Moon authority registry entries must be true")
+    for name in paths:
+        if (
+            not isinstance(name, str)
+            or not name
+            or "\\" in name
+            or PurePosixPath(name).is_absolute()
+            or PurePosixPath(name).as_posix() != name
+            or any(part in {"", ".", ".."} for part in name.split("/"))
+        ):
+            raise ReviewError("Moon authority registry contains an unsafe path")
+    if not REQUIRED_AUTHORITY_BOOTSTRAP_PATHS.issubset(paths):
+        raise ReviewError("Moon authority registry omits a bootstrap authority")
+    return paths
+
+
+def _authority_sha256(root: Path, authority_paths: tuple[str, ...] | None = None) -> dict[str, str]:
+    paths = _authority_paths(root) if authority_paths is None else authority_paths
     return {
         name: hashlib.sha256(_read_stable_file(root / name)[0]).hexdigest()
-        for name in AUTHORITY_PATHS
+        for name in paths
     }
 
 
@@ -80,7 +111,11 @@ def _validate_object_json(raw_text: str, label: str) -> dict[str, object]:
     return value
 
 
-def _preflight_authority(raw_text: str, current: dict[str, str]) -> None:
+def _preflight_authority(
+    raw_text: str,
+    current: dict[str, str],
+    authority_paths: tuple[str, ...],
+) -> None:
     envelope = _validate_object_json(raw_text, "preflight")
     if set(envelope) != {"schema", "staticContractOnly", "errors", "moonRunContract"}:
         raise ReviewError("preflight fields differ from the accepted schema")
@@ -98,7 +133,7 @@ def _preflight_authority(raw_text: str, current: dict[str, str]) -> None:
     if not isinstance(contract, dict):
         raise ReviewError("Moon run contract is invalid")
     input_sha256 = contract.get("inputSha256")
-    if not isinstance(input_sha256, dict) or set(input_sha256) != set(AUTHORITY_PATHS):
+    if not isinstance(input_sha256, dict) or set(input_sha256) != set(authority_paths):
         raise ReviewError("preflight authority set differs from the exact required inputs")
     if any(not isinstance(value, str) or not SHA256_PATTERN.fullmatch(value) for value in input_sha256.values()):
         raise ReviewError("preflight authority contains an invalid SHA-256")
@@ -199,7 +234,8 @@ def run_checks(jobs: int) -> int:
         if Path.cwd().resolve() != root:
             raise ReviewError("run the KRR checks from the repository root")
 
-        input_sha256_before = _authority_sha256(root)
+        authority_paths = _authority_paths(root)
+        input_sha256_before = _authority_sha256(root, authority_paths)
         head_before = _head(root)
         preflight = subprocess.run(
             ["bun", "scripts/html/harness-contract-cli.ts"],
@@ -217,7 +253,7 @@ def run_checks(jobs: int) -> int:
             sys.stderr.flush()
         if preflight.returncode != 0:
             return preflight.returncode
-        _preflight_authority(preflight.stdout, input_sha256_before)
+        _preflight_authority(preflight.stdout, input_sha256_before, authority_paths)
 
         lock_path = root / LOCK_RELATIVE_PATH
         lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -249,7 +285,7 @@ def run_checks(jobs: int) -> int:
             if result.returncode != 0:
                 return result.returncode
 
-            input_sha256_after = _authority_sha256(root)
+            input_sha256_after = _authority_sha256(root, authority_paths)
             head_after = _head(root)
             if input_sha256_after != input_sha256_before or head_after != head_before:
                 raise ReviewError("repository authority files or HEAD changed during Moon execution")
@@ -274,7 +310,7 @@ def run_checks(jobs: int) -> int:
                 finished_ns,
                 report_metadata.st_mtime_ns,
             )
-            before_verify_sha256 = _authority_sha256(root)
+            before_verify_sha256 = _authority_sha256(root, authority_paths)
             before_verify_head = _head(root)
             if before_verify_sha256 != input_sha256_before or before_verify_head != head_before:
                 raise ReviewError("repository authority changed before Moon verification")
@@ -303,7 +339,7 @@ def run_checks(jobs: int) -> int:
                 report_metadata.st_mtime_ns,
             )
 
-            after_verify_sha256 = _authority_sha256(root)
+            after_verify_sha256 = _authority_sha256(root, authority_paths)
             after_verify_head = _head(root)
             if after_verify_sha256 != input_sha256_before or after_verify_head != head_before:
                 raise ReviewError("repository authority changed during Moon verification")

@@ -156,7 +156,7 @@ export function inputs(root: string): FileRecord[] {
     "node_modules/@rollup",
     "node_modules/@swc",
     "node_modules/@biomejs",
-    ..."rollup terser zod acorn acorn-loose acorn-walk source-map-js magic-string estree-walker picomatch resolve is-core-module deepmerge commondir fdir @jridgewell @types/resolve @types/estree is-reference is-module smob es-errors hasown function-bind path-parse supports-preserve-symlinks-flag commander source-map-support source-map buffer-from"
+    ..."rollup terser zod acorn acorn-loose acorn-walk source-map-js magic-string estree-walker picomatch resolve is-core-module deepmerge commondir fdir p-map @jridgewell @types/resolve @types/estree is-reference is-module smob es-errors hasown function-bind path-parse supports-preserve-symlinks-flag commander source-map-support source-map buffer-from"
       .split(" ")
       .map((name) => `node_modules/${name}`),
   ];

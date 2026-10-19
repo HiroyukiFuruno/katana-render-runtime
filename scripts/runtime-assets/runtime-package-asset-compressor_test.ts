@@ -67,9 +67,10 @@ test("配布用圧縮資産は決定的かつ元バイト列へ復元できる",
 
 test("Draw.io package license はvendor原文へ同期し、欠落と不一致を拒否する", () => {
   const root = temporaryRoot();
+  const drawio = RuntimeAssetCatalog.byKind("drawio");
   const vendorLicense = path.join(
     root,
-    "crates/katana-render-runtime/vendor/drawio/32.4.1/LICENSE",
+    `crates/katana-render-runtime/vendor/drawio/${drawio.version}/LICENSE`,
   );
   const packageLicense = path.join(
     root,

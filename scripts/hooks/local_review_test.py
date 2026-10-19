@@ -1724,13 +1724,16 @@ class DriverContractTest(unittest.TestCase):
                 self.assertEqual(executed["config"]["CHECK_JOBS"], executed["jobs"])
                 return cast(dict[str, Any], executed["config"])
             baseline = run_local_review([])
+            self.assertEqual(baseline["TEST_THREADS"], "2")
             self.assertEqual(baseline, run_quality_check([]))
             self.assertEqual(baseline, local_review_state.gate_configuration(root))
-            explicit = [argument for name in names if name != "RUSTFLAGS" for argument in ("--set", name, baseline[name])]
-            explicit.append(f"RUSTFLAGS={baseline['RUSTFLAGS']}")
-            self.assertEqual(baseline, run_local_review(explicit))
-            self.assertEqual(baseline, run_quality_check(explicit))
-            for name, changed in [("CHECK_JOBS", "1"), ("TEST_THREADS", "2"), ("CARGO", "cargo --offline"),
+            explicit_values = {**baseline, "TEST_THREADS": "3"}
+            explicit = [argument for name in names if name != "RUSTFLAGS"
+                        for argument in ("--set", name, explicit_values[name])]
+            explicit.append(f"RUSTFLAGS={explicit_values['RUSTFLAGS']}")
+            self.assertEqual(explicit_values, run_local_review(explicit))
+            self.assertEqual(explicit_values, run_quality_check(explicit))
+            for name, changed in [("CHECK_JOBS", "1"), ("TEST_THREADS", "3"), ("CARGO", "cargo --offline"),
                                   ("JOBS", "4"), ("RUSTFLAGS", "-D warnings -C opt-level=1"),
                                   ("COVERAGE_MIN_LINES", "100.0"), ("COVERAGE_MAX_UNCOVERED_LINES", "00")]:
                 with self.subTest(name=name):
@@ -1775,7 +1778,7 @@ class DriverContractTest(unittest.TestCase):
                     with self.assertRaisesRegex(ReviewError, "another input"):
                         validate_receipt(receipt_payload(baseline, review(baseline), TEST_REVIEWED_HEAD_SHA), updated)
             defaults = {"PATH": os.environ["PATH"], "CI": "true", "COVERAGE_MIN_LINES": "100",
-                        "COVERAGE_MAX_UNCOVERED_LINES": "0", "TEST_THREADS": "1", "RUSTFLAGS": "-D warnings",
+                        "COVERAGE_MAX_UNCOVERED_LINES": "0", "TEST_THREADS": "2", "RUSTFLAGS": "-D warnings",
                         "GITHUB_TOKEN": "secret-not-an-input"}
             with patch.dict(os.environ, defaults, clear=True):
                 self.assertEqual(baseline, local_review.build_inputs(root, args, [89]))

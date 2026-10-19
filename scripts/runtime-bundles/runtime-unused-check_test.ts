@@ -1758,9 +1758,9 @@ test.each([
       );
     if (kind === "computed")
       code = code.replace("  return page.evaluate(", '  return page["evaluate"](');
-    if (kind === "closure")
-      code = code.replace("const width = Math.ceil(", "const width = rasterSha256(");
+    if (kind === "closure") code = code.replace("Math.ceil(", "rasterSha256(");
     if (kind === "data-order") code = code.replace("{ strict, mode },", "{ mode, strict },");
+    expect(code).not.toBe(sizingHelper.code);
     expect(() => inspectSharedSvgCaptureCallback(code)).toThrow();
   },
 );
@@ -2480,6 +2480,11 @@ function standardGateFixture(
   const modules = path.join(root, "node_modules");
   if (!isolatedTools) fs.symlinkSync(path.join(repositoryRoot, "node_modules"), modules);
   else isolatedStandardGateTools(modules);
+  for (const { sourcePath } of sharedSvgCaptureRoute) {
+    const target = path.join(root, sourcePath);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(repositoryRoot, sourcePath), target);
+  }
   const raw = new Map(names.map((name) => [name, readUnusedPhysicalSource(root, name)])),
     definition = new RuntimeBundleDefinition(
       "mermaid",
@@ -2605,6 +2610,19 @@ test("standard unused gate passes actual zero raw diagnostics without requiring 
   expect(result.rows).toHaveLength(0);
   expect(result.groups).toHaveLength(0);
   expect(result.fullRuntimeAcceptance).toBe(false);
+});
+
+test("standard unused gate rejects stale shared SVG capture before running raw Biome", () => {
+  const item = standardGateFixture("", "console.log(1);\n");
+  const binding = sharedSvgCaptureRoute[2];
+  if (!binding) throw new Error("missing shared SVG capture binding");
+  fs.mkdirSync(item.directory, { recursive: true });
+  fs.appendFileSync(path.join(item.root, binding.sourcePath), "\n// stale shared capture source\n");
+
+  expect(() => runStandardUnusedGate(item.root, item.directory)).toThrow(
+    `changed/missing shared SVG consumer: ${binding.sourcePath}`,
+  );
+  expect(fs.existsSync(path.join(item.directory, "raw-biome.json"))).toBe(false);
 });
 
 test("standard unused gate never resolves actual nonunused formatting/error diagnostics", () => {
