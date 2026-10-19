@@ -48,12 +48,33 @@ fn assert_svg_tree_rows(
             && tree["treePath"]
                 .as_str()
                 .is_some_and(|path| path.contains("image-svg@root/"))
+            && tree["sourceSvg"].is_null()
+            && tree["resolvedSvg"].is_null()
+            && tree["resolvedTextSvg"].is_null()
+            && tree["resolvedTextSvgSha256"].is_null()
     }));
     Ok(())
 }
 
 fn assert_tree_row(trees: &[serde_json::Value], call: u64, path: &str, sha: String) {
     assert!(trees.iter().any(|tree| {
-        tree["paintCall"] == call && tree["treePath"] == path && tree["sourceSvgSha256"] == sha
+        tree["paintCall"] == call
+            && tree["treePath"] == path
+            && tree["sourceSvgSha256"] == sha
+            && tree["sourceSvg"]
+                .as_str()
+                .is_some_and(|source| super::output::sha256(source.as_bytes()) == sha)
+            && tree["resolvedSvg"].is_string()
+            && tree["resolvedSvg"].as_str().is_some_and(|resolved| {
+                tree["resolvedSvgSha256"] == super::output::sha256(resolved.as_bytes())
+            })
+            && tree["resolvedTextSvg"].is_string()
+            && tree["resolvedTextSvg"].as_str().is_some_and(|resolved| {
+                tree["resolvedTextSvgSha256"] == super::output::sha256(resolved.as_bytes())
+                    && resolved.contains("<text")
+            })
+            && tree["resolvedSvg"]
+                .as_str()
+                .is_some_and(|resolved| resolved.contains("<path"))
     }));
 }

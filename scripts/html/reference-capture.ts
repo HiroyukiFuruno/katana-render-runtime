@@ -135,6 +135,16 @@ export function assertExpectedInputSha(expected: string | undefined, actual: str
   }
 }
 
+export function assertExactlyOneReportedInputSha(output: string, expected: string): string {
+  const matches = [...output.matchAll(/source_sha256=([0-9a-f]{64})\b/gi)];
+  const actual = matches[0]?.[1]?.toLowerCase();
+  if (matches.length !== 1 || actual === undefined) {
+    throw new Error("KRR probe did not report exactly one source SHA");
+  }
+  assertExpectedInputSha(expected, actual);
+  return actual;
+}
+
 export function assertNoFailedAssets(failedAssets: string[]): void {
   if (failedAssets.length > 0) {
     throw new Error(`HTML asset loading failed: ${failedAssets.join(", ")}`);

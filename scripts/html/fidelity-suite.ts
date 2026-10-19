@@ -7,6 +7,7 @@ import {
 } from "./feature-catalog";
 import { type FidelityPhase, fidelityThresholdForPhase } from "./fidelity-phase";
 import {
+  assertExactlyOneReportedInputSha,
   assertExpectedInputSha,
   assertInputUnchanged,
   type CaptureOptions,
@@ -166,14 +167,10 @@ export function runProbe(
   const htmlSha256After = sha256File(input);
   assertInputUnchanged(htmlSha256Before, htmlSha256After);
   const actual = new Map<string, number>();
-  const sourceShaMatches = [
-    ...new TextDecoder().decode(result.stdout).matchAll(/source_sha256=([0-9a-f]{64})\b/gi),
-  ];
-  if (sourceShaMatches.length !== 1 || sourceShaMatches[0]?.[1] === undefined) {
-    throw new Error(`KRR probe did not report exactly one source SHA for ${input}`);
-  }
-  const reportedHtmlSha256 = sourceShaMatches[0][1].toLowerCase();
-  assertExpectedInputSha(htmlSha256After, reportedHtmlSha256);
+  const reportedHtmlSha256 = assertExactlyOneReportedInputSha(
+    new TextDecoder().decode(result.stdout),
+    htmlSha256After,
+  );
   for (const line of new TextDecoder().decode(result.stdout).split(/\r?\n/)) {
     const match = line.match(/png=(\S+).*scroll_y=([-+]?\d+(?:\.\d+)?)/);
     if (!match?.[1] || !match[2]) continue;

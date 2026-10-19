@@ -77,6 +77,15 @@ export function resizeSvgCapture(
       const capture = document.getElementById("capture") as HTMLElement;
       capture.style.width = `${width + 24}px`;
       capture.style.height = `${height + 24}px`;
+      const naturalWidth = dimensionAt(viewBox, 2),
+        naturalHeight = dimensionAt(viewBox, 3);
+      const naturalizeDiagram = (diagram: HTMLElement) => {
+        if (strict && naturalWidth > 0 && naturalHeight > 0) {
+          diagram.style.width = `${naturalWidth}px`;
+          diagram.style.height = `${naturalHeight}px`;
+        }
+      };
+      naturalizeDiagram(document.getElementById("diagram") as HTMLElement);
     },
     { strict, mode },
   );

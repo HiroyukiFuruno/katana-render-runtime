@@ -15,7 +15,7 @@ const USAGE: &str = "usage: html_fidelity_probe --input INPUT.html --output DIR 
 
 type ProbeResult<T> = Result<T, Box<dyn std::error::Error>>;
 
-fn main() {
+pub(crate) fn main() {
     if let Err(error) = run() {
         eprintln!("html fidelity probe failed: {error}");
         std::process::exit(1);

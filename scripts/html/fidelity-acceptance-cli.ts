@@ -13,7 +13,11 @@ import {
   validateCatalogRawStage90Captures,
 } from "./stage-score-suite";
 import { tocBinaryFromBuildReport } from "./toc-fidelity";
-import { runCatalogStage90Captures, runInputStateFidelity } from "./visual-state-fidelity";
+import {
+  type CatalogStage90ResumeOptions,
+  runCatalogStage90Captures,
+  runInputStateFidelity,
+} from "./visual-state-fidelity";
 
 const modeSchema = z.enum([
   "input-state-final",
@@ -60,6 +64,7 @@ interface CatalogCapturePlan {
   output: string;
   threshold: 90;
   acceptance: false;
+  resume?: CatalogStage90ResumeOptions;
 }
 
 interface CatalogPlanWrite {
@@ -179,18 +184,7 @@ function catalogAcceptancePlan(
   argv: readonly string[],
 ): FidelityAcceptancePlan {
   if (mode === "catalog-stage90-capture") {
-    if (argv.length !== 4 || argv.slice(1).some((argument) => argument.length === 0))
-      throw new Error(
-        "catalog stage90 capture requires build report, exact condition plan, and output directory",
-      );
-    return {
-      kind: "catalog-stage90-capture",
-      buildReport: argv[1] as string,
-      conditionPlan: argv[2] as string,
-      output: argv[3] as string,
-      threshold: 90,
-      acceptance: false,
-    };
+    return catalogCapturePlan(argv);
   }
   if (argv.length !== 3 || argv.slice(1).some((argument) => argument.length === 0))
     throw new Error(
@@ -200,6 +194,29 @@ function catalogAcceptancePlan(
     kind: "catalog-stage90-validate",
     candidateSuite: argv[1] as string,
     trustedPlan: argv[2] as string,
+  };
+}
+
+function catalogCapturePlan(argv: readonly string[]): CatalogCapturePlan {
+  if (![4, 6].includes(argv.length) || argv.slice(1).some((argument) => argument.length === 0))
+    throw new Error(
+      "catalog capture requires build report, exact plan, output, and optionally both prior observation and finalized manifests",
+    );
+  return {
+    kind: "catalog-stage90-capture",
+    buildReport: argv[1] as string,
+    conditionPlan: argv[2] as string,
+    output: argv[3] as string,
+    threshold: 90,
+    acceptance: false,
+    ...(argv.length === 6
+      ? {
+          resume: {
+            observationManifestPath: argv[4] as string,
+            finalizedManifestPath: argv[5] as string,
+          },
+        }
+      : {}),
   };
 }
 
@@ -220,7 +237,7 @@ export async function runFidelityAcceptance(argv: readonly string[]): Promise<vo
   }
   if (plan.kind === "catalog-stage90-validate-captures") {
     const envelope = validateCatalogChromeCaptures(plan.captureManifest, plan.conditionPlan);
-    console.log(JSON.stringify(envelope));
+    process.stdout.write(`${JSON.stringify(envelope)}\n`);
     return;
   }
   if (plan.kind === "catalog-stage90-plan") {
@@ -229,7 +246,7 @@ export async function runFidelityAcceptance(argv: readonly string[]): Promise<vo
   }
   if (plan.kind === "catalog-stage90-capture") {
     const binary = tocBinaryFromBuildReport(plan.buildReport);
-    await runCatalogStage90Captures(binary, plan.conditionPlan, plan.output);
+    await runCatalogStage90Captures(binary, plan.conditionPlan, plan.output, plan.resume);
     return;
   }
   const binary = tocBinaryFromBuildReport(plan.buildReport);

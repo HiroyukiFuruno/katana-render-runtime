@@ -1,13 +1,18 @@
 import { expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import { digestFileRecords, type FileRecord } from "../mermaid/native-build-receipt";
+import { collectRuntimeBundleToolFingerprint } from "../runtime-bundles/runtime-bundle-tool-fingerprint";
+import type { CatalogCaptureProducerContext } from "./catalog-capture-producer-context";
 import type { JsonValue } from "./dynamic-state";
 import { type CatalogCase, loadFeatureCatalog, readExpectedState } from "./feature-catalog";
 import { sha256File } from "./reference-capture";
 import {
+  assertCatalogCaptureIdentity,
   assertCatalogStage90ConditionPlan,
   assertStageScoreSuite,
   createCatalogStage90ConditionPlan,
+  inspectCatalogRawStage90Reuse,
   requiredStageScoreTuples,
   validateCatalogRawStage90Captures,
 } from "./stage-score-suite";
@@ -18,6 +23,7 @@ const CORETEXT_FIXTURE_AXIS_MAXIMUM = 900;
 const CORETEXT_FIXTURE_AXIS_DEFAULT = 400;
 
 type JsonObject = { [key: string]: JsonValue };
+const producerTools = collectRuntimeBundleToolFingerprint();
 type NavigationLinkFixture = JsonObject & {
   pointerTrace: JsonValue[];
   frame: { generation: number; contentHeight: number; scrollY: number };
@@ -387,10 +393,23 @@ function objectConditions(value: JsonObject): JsonObject[] {
   });
 }
 
+function captureForCondition(
+  fixture: ReturnType<typeof rawCaptureFixture>,
+  condition: JsonObject,
+): JsonObject {
+  const conditionId = requiredString(condition.conditionId, "condition ID");
+  const capture = objectConditions(fixture.manifest).find(
+    (candidate) => candidate.conditionId === conditionId,
+  );
+  if (!capture) throw new Error(`missing raw fixture row: ${conditionId}`);
+  return capture;
+}
+
 function rawCaptureFixture(): {
   manifest: JsonObject;
   plan: JsonObject;
   planPath: string;
+  producerContext: CatalogCaptureProducerContext;
   cleanup: () => void;
 } {
   const suite = suiteFixture();
@@ -400,6 +419,42 @@ function rawCaptureFixture(): {
     "plan.json",
   );
   fs.writeFileSync(planPath, JSON.stringify(plan));
+  const sourceFile: FileRecord = {
+    path: process.execPath,
+    sha256: sha256File(process.execPath),
+    size: fs.statSync(process.execPath).size,
+  };
+  const sourceManifestPath = path.join(path.dirname(planPath), "source-manifest.json");
+  const producerContext: CatalogCaptureProducerContext = {
+    schema: "krr-html84-capture-producer-context-v1",
+    role: "before",
+    sourceManifest: {
+      path: sourceManifestPath,
+      sha256: "",
+      digest: digestFileRecords([sourceFile]),
+    },
+    tools: {} as CatalogCaptureProducerContext["tools"],
+    playwrightFiles: [],
+    os: { release: "test", version: "test" },
+    fontEnvironment: {
+      schema: "krr-font-environment-v1",
+      cacheable: true,
+      platform: "test",
+      inventorySha256: "1".repeat(64),
+      recordCount: 1,
+      missReasons: [],
+      pythonVersion: "3.14.3",
+      pythonExecutableSha256: "2".repeat(64),
+    },
+  };
+  const sourceManifest = {
+    schema: "krr-native-build-source-manifest-v1",
+    digest: producerContext.sourceManifest.digest,
+    files: [sourceFile],
+  };
+  fs.writeFileSync(sourceManifestPath, `${JSON.stringify(sourceManifest)}\n`);
+  producerContext.sourceManifest.sha256 = sha256File(sourceManifestPath);
+  producerContext.tools = producerTools;
   const trustedById = new Map(
     objectConditions(suite.trustedPlan).map((condition) => [
       condition.conditionId as string,
@@ -421,11 +476,25 @@ function rawCaptureFixture(): {
       planSha256: sha256File(planPath),
       binaryPath: process.execPath,
       binarySha256: sha256File(process.execPath),
+      chromeRuntimeVersion: "chrome-test-runtime/1",
+      producerContext: producerContext as unknown as JsonValue,
       conditions,
     },
     plan: plan as unknown as JsonObject,
     planPath,
+    producerContext,
     cleanup: suite.cleanup,
+  };
+}
+
+function reuseContext(fixture: ReturnType<typeof rawCaptureFixture>) {
+  return {
+    planPath: fixture.planPath,
+    binaryPath: process.execPath,
+    chromeExecutablePath: process.execPath,
+    chromeExecutableSha256: sha256File(process.execPath),
+    chromeRuntimeVersion: "chrome-test-runtime/1",
+    producerContext: fixture.producerContext,
   };
 }
 
@@ -501,6 +570,226 @@ test("raw stage90 adapter rejects a capture that is not strictly observed", () =
     expect(() =>
       validateCatalogRawStage90Captures(fixture.manifest, fixture.plan, fixture.planPath),
     ).toThrow(/not verified/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("raw stage90 reuse inspection accepts only current binary and Chrome receipts", () => {
+  const fixture = rawCaptureFixture();
+  try {
+    const context = reuseContext(fixture);
+    const result = inspectCatalogRawStage90Reuse(fixture.manifest, fixture.plan, context);
+    expect(result.reusableConditionIds).toHaveLength(84);
+    expect(result.rejected).toHaveLength(0);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+const identityMutations: ReadonlyArray<readonly [string, (capture: JsonObject) => void]> = [
+  ["missing selector", (capture: JsonObject) => delete capture.targetSelector],
+  ["different selector", (capture: JsonObject) => (capture.targetSelector = ".other")],
+  ["different viewport", (capture: JsonObject) => (capture.viewport = { width: 1 })],
+  ["different source", (capture: JsonObject) => (capture.sourceSha256 = "0".repeat(64))],
+  ["different binary", (capture: JsonObject) => (capture.binarySha256 = "0".repeat(64))],
+];
+
+function identityFixture(): {
+  fixture: ReturnType<typeof rawCaptureFixture>;
+  condition: Parameters<typeof assertCatalogCaptureIdentity>[0];
+  capture: JsonObject;
+} {
+  const fixture = rawCaptureFixture();
+  const conditionValue = objectConditions(fixture.plan).find(
+    (value: JsonObject) => value.targetSelector !== undefined,
+  );
+  const condition = conditionValue as unknown as Parameters<typeof assertCatalogCaptureIdentity>[0];
+  if (!condition || !conditionValue) {
+    fixture.cleanup();
+    throw new Error("missing raw fixture row");
+  }
+  return { fixture, condition, capture: captureForCondition(fixture, conditionValue) };
+}
+
+test.each(identityMutations)("raw stage90 identity rejects %s", (_label, mutate) => {
+  const { fixture, condition, capture } = identityFixture();
+  try {
+    mutate(capture);
+    expect(() =>
+      assertCatalogCaptureIdentity(condition, capture, sha256File(process.execPath)),
+    ).toThrow(/catalog raw capture identity differs/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("raw stage90 identity validation leaves late metadata checks to the strict reader", () => {
+  const { fixture, condition, capture } = identityFixture();
+  try {
+    const binarySha256 = requiredString(capture.binarySha256, "binary SHA");
+    capture.status = "unverified";
+    expect(() => assertCatalogCaptureIdentity(condition, capture, binarySha256)).not.toThrow();
+    expect(() =>
+      validateCatalogRawStage90Captures(fixture.manifest, fixture.plan, fixture.planPath),
+    ).toThrow(/not verified/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("raw stage90 reuse inspection rejects an invalid current plan before cache review", () => {
+  const fixture = rawCaptureFixture();
+  try {
+    const invalidPlan = { ...fixture.plan, conditions: [] };
+    expect(() =>
+      inspectCatalogRawStage90Reuse(fixture.manifest, invalidPlan, reuseContext(fixture)),
+    ).toThrow(/condition coverage is incomplete/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("raw stage90 reuse inspection accepts a copied current plan", () => {
+  const fixture = rawCaptureFixture();
+  try {
+    const copiedPlanPath = path.join(path.dirname(fixture.planPath), "copied-plan.json");
+    fs.writeFileSync(copiedPlanPath, fs.readFileSync(fixture.planPath));
+    const result = inspectCatalogRawStage90Reuse(fixture.manifest, fixture.plan, {
+      ...reuseContext(fixture),
+      planPath: copiedPlanPath,
+    });
+    expect(result.reusableConditionIds).toHaveLength(84);
+    expect(result.rejected).toHaveLength(0);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("raw stage90 reuse inspection rejects a changed single receipt", () => {
+  const fixture = rawCaptureFixture();
+  try {
+    const first = objectConditions(fixture.manifest)[0];
+    if (!first) throw new Error("missing raw fixture row");
+    const receiptPath = requiredString(first.chromeReceiptPath, "Chrome receipt path");
+    fs.appendFileSync(receiptPath, "changed");
+    const result = inspectCatalogRawStage90Reuse(
+      fixture.manifest,
+      fixture.plan,
+      reuseContext(fixture),
+    );
+    expect(result.reusableConditionIds).toHaveLength(83);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]?.conditionId).toBe(requiredString(first.conditionId, "condition ID"));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("raw stage90 reuse inspection rejects a changed current Chrome identity", () => {
+  const fixture = rawCaptureFixture();
+  try {
+    const result = inspectCatalogRawStage90Reuse(fixture.manifest, fixture.plan, {
+      ...reuseContext(fixture),
+      chromeExecutableSha256: "0".repeat(64),
+    });
+    expect(result.reusableConditionIds).toHaveLength(0);
+    expect(result.rejected).toHaveLength(84);
+    expect(
+      result.rejected.every(
+        ({ reason }) => reason === "current Chrome executable identity differs",
+      ),
+    ).toBe(true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("raw stage90 reuse inspection rejects a changed Chrome runtime version", () => {
+  const fixture = rawCaptureFixture();
+  try {
+    const result = inspectCatalogRawStage90Reuse(fixture.manifest, fixture.plan, {
+      ...reuseContext(fixture),
+      chromeRuntimeVersion: "chrome-test-runtime/2",
+    });
+    expect(result.reusableConditionIds).toHaveLength(0);
+    expect(result.rejected).toHaveLength(84);
+    expect(
+      result.rejected.every(({ reason }) => reason === "current Chrome runtime version differs"),
+    ).toBe(true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test.each([
+  ["font inventory", { inventorySha256: "3".repeat(64) }],
+  ["Python executable", { pythonExecutableSha256: "4".repeat(64) }],
+])("raw stage90 reuse inspection rejects changed %s identity", (_label, change) => {
+  const fixture = rawCaptureFixture();
+  try {
+    const context = reuseContext(fixture);
+    const fontEnvironment = context.producerContext.fontEnvironment;
+    if (!fontEnvironment) throw new Error("missing font environment fixture");
+    const result = inspectCatalogRawStage90Reuse(fixture.manifest, fixture.plan, {
+      ...context,
+      producerContext: {
+        ...context.producerContext,
+        fontEnvironment: {
+          ...fontEnvironment,
+          ...change,
+        },
+      },
+    });
+    expect(result.reusableConditionIds).toHaveLength(0);
+    expect(result.rejected).toHaveLength(84);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test.each(["captured", "current"] as const)(
+  "raw stage90 reuse inspection rejects unavailable %s font environment",
+  (side) => {
+    const fixture = rawCaptureFixture();
+    try {
+      const context = reuseContext(fixture);
+      if (side === "captured") {
+        const producerContext = fixture.manifest.producerContext as JsonObject;
+        const fontEnvironment = producerContext.fontEnvironment as unknown as JsonObject;
+        fontEnvironment.cacheable = false;
+      } else {
+        const fontEnvironment = context.producerContext.fontEnvironment as unknown as JsonObject;
+        fontEnvironment.cacheable = false;
+      }
+      const result = inspectCatalogRawStage90Reuse(fixture.manifest, fixture.plan, context);
+      expect(result.reusableConditionIds).toHaveLength(0);
+      expect(result.rejected).toHaveLength(84);
+      expect(result.rejected.every(({ reason }) => reason.includes("font environment"))).toBe(true);
+    } finally {
+      fixture.cleanup();
+    }
+  },
+);
+
+test("raw stage90 reuse inspection rejects duplicate condition inventory", () => {
+  const fixture = rawCaptureFixture();
+  try {
+    const captures = fixture.manifest.conditions;
+    if (!Array.isArray(captures)) throw new Error("missing raw captures");
+    const first = captures[0];
+    if (!first) throw new Error("missing raw fixture row");
+    captures.push(first);
+    const result = inspectCatalogRawStage90Reuse(
+      fixture.manifest,
+      fixture.plan,
+      reuseContext(fixture),
+    );
+    expect(result.reusableConditionIds).toHaveLength(0);
+    expect(result.rejected).toHaveLength(84);
+    expect(result.rejected.every(({ reason }) => reason.includes("incomplete or duplicated"))).toBe(
+      true,
+    );
   } finally {
     fixture.cleanup();
   }

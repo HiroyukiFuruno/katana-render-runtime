@@ -421,6 +421,53 @@ describe("finite Rust host and MathJax evidence registration", () => {
 });
 
 describe("fixed native artifact and Python collector bindings", () => {
+  test.each([
+    ["current candidate probe route", (source: string) => source, false],
+    [
+      "changed executable binding",
+      (source: string) => source.replaceAll("options.probeBinary.path", "options.other.path"),
+      true,
+    ],
+    [
+      "extra probe argument",
+      (source: string) => source.replaceAll('"--scroll-y",', '"--forged", "1", "--scroll-y",'),
+      true,
+    ],
+    [
+      "different argv binding",
+      (source: string) => source.replace("Bun.spawnSync(argv,", "Bun.spawnSync(forged,"),
+      true,
+    ],
+    [
+      "mutated argv",
+      (source: string) =>
+        source.replace("Bun.spawnSync(argv,", 'argv.push("--forged"); Bun.spawnSync(argv,'),
+      true,
+    ],
+    [
+      "spread argv element",
+      (source: string) =>
+        source.replace("options.probeBinary.path,", "...options.probeBinary.path,"),
+      true,
+    ],
+    [
+      "callee shadow",
+      (source: string) =>
+        source.replace(
+          "  const result = Bun.spawnSync(argv, {",
+          "  const Bun = { spawnSync: Bun.spawnSync };\n  const result = Bun.spawnSync(argv, {",
+        ),
+      true,
+    ],
+  ])("keeps native frame probe binding exact: %s", (_label, mutate, rejected) => {
+    const name = "scripts/mermaid/native-frame-evidence.ts";
+    const read = (file: string) =>
+      fs.readFileSync(path.join(import.meta.dir, "../..", file), "utf8");
+    const references = sourceCode(mutate(read(name)), { name, read });
+    if (rejected) expect(references).toContain("!unresolved-executable");
+    else expect(references).not.toContain("!unresolved-executable");
+  });
+
   test("binds actual current producers without running native or browser captures", () => {
     const read = (name: string) =>
       fs.readFileSync(path.join(import.meta.dir, "../..", name), "utf8");
@@ -2959,7 +3006,7 @@ describe("reviewed Chrome font identity probe process route", () => {
   test("accepts only the actual synchronous probe in its production caller context", () => {
     const importerSource = importerSources.get(importerPaths[0] ?? "");
     expect(importerSource).toContain(
-      "await runCatalogStage90Captures(binary, plan.conditionPlan, plan.output)",
+      "await runCatalogStage90Captures(binary, plan.conditionPlan, plan.output, plan.resume)",
     );
     for (const importer of importerPaths) {
       const importerSourceForRoute = importerSources.get(importer);
@@ -2969,6 +3016,19 @@ describe("reviewed Chrome font identity probe process route", () => {
         "!unresolved-executable",
       );
     }
+  });
+
+  test("keeps the reviewed probe route stable when source prefixes move its AST positions", () => {
+    const importer = importerPaths[0];
+    if (importer === undefined) throw new Error("Production importer path is missing");
+    const importerSource = importerSources.get(importer);
+    if (importerSource === undefined) throw new Error("Production importer source is missing");
+    expect(
+      sourceCode(
+        `// position-independent-probe-fixture\n${probeSource}`,
+        probeContext(importer, importerSource),
+      ),
+    ).not.toContain("!unresolved-executable");
   });
 
   test("resolves the catalog inspector import without changing the pinned probe", () => {
@@ -3453,52 +3513,51 @@ test.each([
   "missing asset dependency",
   "performance profile missing",
   "performance profile wrong",
-])(
-  "combined coverage contract rejects %s",
-  (fault) => {
-    const snapshot = combinedCoverageMoonFixture();
-    if (fault === "old unit leaf")
-      changeMoon(snapshot, (tasks) => {
-        const unit = tasks["unit-test"];
-        if (!unit) throw new Error("fixture unit-test task missing");
-        unit.command = ["just", "unit-test"];
-      });
-    else if (fault === "missing asset dependency")
-      changeMoon(snapshot, (tasks) => {
-        const unit = tasks["unit-test"];
-        if (!unit) throw new Error("fixture unit-test task missing");
-        unit.deps = [];
-      });
-    else if (fault === "coverage mask")
-      replaceSources(snapshot, {
-        Justfile:
-          snapshot
-            .read("Justfile")
-            ?.replace(
-              "python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root",
-              "echo python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root",
-            ) ?? "",
-      });
-    else if (fault === "coverage threshold")
-      replaceSources(snapshot, {
-        Justfile:
-          snapshot
-            .read("Justfile")
-            ?.replace('"COVERAGE_MIN_LINES", "100"', '"COVERAGE_MIN_LINES", "99"') ?? "",
-      });
-    else if (fault === "performance profile missing" || fault === "performance profile wrong")
-      replaceSources(snapshot, {
-        Justfile:
-          snapshot.read("Justfile")?.replace(
+])("combined coverage contract rejects %s", (fault) => {
+  const snapshot = combinedCoverageMoonFixture();
+  if (fault === "old unit leaf")
+    changeMoon(snapshot, (tasks) => {
+      const unit = tasks["unit-test"];
+      if (!unit) throw new Error("fixture unit-test task missing");
+      unit.command = ["just", "unit-test"];
+    });
+  else if (fault === "missing asset dependency")
+    changeMoon(snapshot, (tasks) => {
+      const unit = tasks["unit-test"];
+      if (!unit) throw new Error("fixture unit-test task missing");
+      unit.deps = [];
+    });
+  else if (fault === "coverage mask")
+    replaceSources(snapshot, {
+      Justfile:
+        snapshot
+          .read("Justfile")
+          ?.replace(
+            "python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root",
+            "echo python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root",
+          ) ?? "",
+    });
+  else if (fault === "coverage threshold")
+    replaceSources(snapshot, {
+      Justfile:
+        snapshot
+          .read("Justfile")
+          ?.replace('"COVERAGE_MIN_LINES", "100"', '"COVERAGE_MIN_LINES", "99"') ?? "",
+    });
+  else if (fault === "performance profile missing" || fault === "performance profile wrong")
+    replaceSources(snapshot, {
+      Justfile:
+        snapshot
+          .read("Justfile")
+          ?.replace(
             "--features baseline --locked --profile krr-coverage --json",
             fault === "performance profile missing"
               ? "--features baseline --locked --json"
               : "--features baseline --locked --profile wrong-profile --json",
           ) ?? "",
-      });
-    expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
-  },
-);
+    });
+  expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
+});
 
 test("local coverage entry preserves static barrier and required heavy closure", () => {
   const snapshot = localCoverageMoonFixture();

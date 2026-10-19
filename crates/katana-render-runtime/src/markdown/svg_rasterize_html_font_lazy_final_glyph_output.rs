@@ -1,4 +1,5 @@
 use super::super::{Capture, sources};
+use resvg::usvg::{Tree, WriteOptions};
 use serde::Serialize;
 
 const MAX_FINAL_GLYPH_RECORDS: usize = 512;
@@ -9,6 +10,11 @@ pub(in super::super) struct FinalGlyphTree {
     pub(super) paint_call: u64,
     pub(super) tree_path: String,
     pub(super) source_svg_sha256: String,
+    pub(super) source_svg: Option<String>,
+    pub(super) resolved_svg_sha256: Option<String>,
+    pub(super) resolved_svg: Option<String>,
+    pub(super) resolved_text_svg_sha256: Option<String>,
+    pub(super) resolved_text_svg: Option<String>,
     pub(super) faces: Vec<FinalGlyphFace>,
     pub(super) text_spans: Vec<FinalGlyphTextSpan>,
 }
@@ -122,4 +128,11 @@ pub(super) fn sha256(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+pub(super) fn serialize_tree(tree: &Tree, preserve_text: bool) -> String {
+    tree.to_string(&WriteOptions {
+        preserve_text,
+        ..Default::default()
+    })
 }

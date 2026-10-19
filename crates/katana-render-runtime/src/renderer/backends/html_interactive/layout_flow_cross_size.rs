@@ -1,5 +1,6 @@
 use super::super::super::html_document::HtmlDocumentNode;
 use super::super::constants::MIN_LAYOUT_WIDTH;
+use super::super::layout_media::resolved_svg_width;
 use super::super::style::CssStyle;
 use super::intrinsic::intrinsic_layout_width;
 use taffy::prelude::Display;
@@ -31,8 +32,9 @@ pub(super) fn non_grid_measured_widths(
         .zip(styles)
         .map(|(node, style)| {
             let explicit_width = style.explicit_width(width);
-            let measured =
-                explicit_width.unwrap_or_else(|| intrinsic_layout_width(node, style, width));
+            let measured = explicit_width
+                .or_else(|| resolved_svg_width(node, width, style))
+                .unwrap_or_else(|| intrinsic_layout_width(node, style, width));
             let measured = if explicit_width.is_some() && is_nonstretch_flex_column(parent) {
                 measured
             } else {

@@ -1,7 +1,8 @@
 use super::{
     ResourceFile, SelectedFont,
     identity::{
-        face_identity, load_resource_database, physical_file, resolve_font, unique_file_face,
+        FontResolutionCache, face_identity, load_resource_database, physical_file,
+        resolve_font_with_cache, unique_file_face,
     },
     test_support::{TempDirectory, probe_single_capture},
 };
@@ -11,13 +12,65 @@ use std::{fs, path::PathBuf};
 pub(super) fn observed_system_face_resolves_to_its_physical_file_and_index() -> Result<(), String> {
     let mut database = Database::new();
     database.load_system_fonts();
-    let (_, face) =
+    let (source_path, face) =
         unique_file_face(&database).ok_or("system font inventory has no unique physical face")?;
     let selected = selected_from_face(&face)?;
     let expected = face_identity(&database, &face)?;
-    let resolved = resolve_font(&database, &Database::new(), &[], &selected)?;
-    assert_eq!(resolved.identity, expected);
-    assert!(resolved.core_text_descriptor.is_none());
+    let mut cache = FontResolutionCache::for_system_database(&database);
+    let first = resolve_font_with_cache(&database, &Database::new(), &[], &selected, &mut cache)?;
+    let second = resolve_font_with_cache(&database, &Database::new(), &[], &selected, &mut cache)?;
+    assert_eq!(first, second);
+    assert_eq!(first.identity, expected);
+    assert!(first.core_text_descriptor.is_none());
+    assert_cache_rejects_different_database(&selected, &mut cache)?;
+    cache.verify_physical_inputs()?;
+    cached_direct_face_rejects_physical_mutation(&source_path)?;
+    Ok(())
+}
+
+fn assert_cache_rejects_different_database(
+    selected: &SelectedFont,
+    cache: &mut FontResolutionCache<'_>,
+) -> Result<(), String> {
+    let other_database = Database::new();
+    let error =
+        match resolve_font_with_cache(&other_database, &Database::new(), &[], selected, cache) {
+            Ok(_) => return Err("direct cache accepted a different system Database".to_string()),
+            Err(error) => error,
+        };
+    if error.contains("Database binding differs") {
+        return Ok(());
+    }
+    Err(format!("unexpected cache binding error: {error}"))
+}
+
+fn cached_direct_face_rejects_physical_mutation(source_path: &PathBuf) -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let copied_path = temp
+        .path()
+        .join(source_path.file_name().ok_or("font path has no name")?);
+    fs::copy(source_path, &copied_path).map_err(|error| error.to_string())?;
+    let mut copied_database = Database::new();
+    copied_database
+        .load_font_file(&copied_path)
+        .map_err(|error| error.to_string())?;
+    let (_, copied_face) =
+        unique_file_face(&copied_database).ok_or("copied font inventory has no unique face")?;
+    let selected = selected_from_face(&copied_face)?;
+    let mut cache = FontResolutionCache::for_system_database(&copied_database);
+    resolve_font_with_cache(
+        &copied_database,
+        &Database::new(),
+        &[],
+        &selected,
+        &mut cache,
+    )?;
+    append_changed_byte(&copied_path)?;
+    let error = match cache.verify_physical_inputs() {
+        Ok(()) => return Err("cached direct face accepted changed physical bytes".to_string()),
+        Err(error) => error,
+    };
+    assert!(error.contains("physical font changed"));
     Ok(())
 }
 

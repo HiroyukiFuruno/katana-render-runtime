@@ -739,6 +739,7 @@ interface DomainProcessRoute {
   nativeWidthConsumerCall?: Record<string, unknown>;
   classicFactsCall?: Record<string, unknown>;
   mathjaxFactsCall?: Record<string, unknown>;
+  nativeFrameCall?: Record<string, unknown>;
 }
 
 function astNodes(value: unknown): Record<string, unknown>[] {
@@ -830,29 +831,58 @@ function functionStatements(fn: Record<string, unknown> | undefined): Record<str
     : [];
 }
 
+function initializedVariables(
+  fn: Record<string, unknown> | undefined,
+  name: string,
+): Array<{ declaration: Record<string, unknown>; index: number }> {
+  const result: Array<{ declaration: Record<string, unknown>; index: number }> = [];
+  const statements = functionStatements(fn);
+  for (const [index, statement] of statements.entries()) {
+    for (const declaration of variableDeclarations(statement)) {
+      if (object(declaration.id)?.value !== name || hasReturnBefore(statements, index)) continue;
+      result.push({ declaration, index });
+    }
+  }
+  return result;
+}
+
+function variableDeclarations(statement: Record<string, unknown>): Record<string, unknown>[] {
+  if (statement.type !== "VariableDeclaration") return [];
+  return Array.isArray(statement.declarations)
+    ? statement.declarations
+        .map(object)
+        .filter((value): value is Record<string, unknown> => !!value)
+    : [];
+}
+
+function hasReturnBefore(statements: Record<string, unknown>[], index: number): boolean {
+  return statements
+    .slice(0, index)
+    .some((prior) => astNodes(prior).some((node) => node.type === "ReturnStatement"));
+}
+
 function initializedCall(
   fn: Record<string, unknown> | undefined,
   name: string,
   key: string | undefined,
 ): { args: unknown[]; key: string; index: number } | undefined {
-  const statements = functionStatements(fn);
-  for (const [index, statement] of statements.entries()) {
-    if (statement.type !== "VariableDeclaration") continue;
-    const declarations = Array.isArray(statement.declarations) ? statement.declarations : [];
-    for (const value of declarations) {
-      const declaration = object(value);
-      if (object(declaration?.id)?.value !== name) continue;
-      const args = callArguments(declaration?.init, key);
-      const id = identifierKey(declaration?.id);
-      if (
-        args &&
-        id &&
-        !statements
-          .slice(0, index)
-          .some((prior) => astNodes(prior).some((node) => node.type === "ReturnStatement"))
-      )
-        return { args, key: id, index };
-    }
+  for (const { declaration, index } of initializedVariables(fn, name)) {
+    const args = callArguments(declaration.init, key);
+    const id = identifierKey(declaration.id);
+    if (args && id) return { args, key: id, index };
+  }
+  return undefined;
+}
+
+function initializedMember(
+  fn: Record<string, unknown> | undefined,
+  name: string,
+  key: string | undefined,
+  property: string,
+): { key: string; index: number } | undefined {
+  for (const { declaration, index } of initializedVariables(fn, name)) {
+    const id = identifierKey(declaration.id);
+    if (id && memberOf(declaration.init, key, property)) return { key: id, index };
   }
   return undefined;
 }
@@ -893,18 +923,23 @@ function nativeProducerVerified(source: string | undefined): boolean {
   if (!batchKey || astNodes(module).filter((node) => identifierKey(node) === batchKey).length !== 2)
     return false;
   const rows = initializedCall(run, "rows", batchKey);
+  const rendered = initializedCall(run, "renderedResult", batchKey);
+  const renderedRows = initializedMember(run, "rows", rendered?.key, "rows");
+  const batch = rows ?? rendered;
   const after = initializedCall(run, "afterBuild", verifier);
   return (
     buildArguments(before?.args, parameterKey(prepare, 0)) &&
     prepared?.args.length === 1 &&
     identifierKey(prepared.args[0]) === parameterKey(run, 0) &&
-    rows !== undefined &&
-    prepared.index < rows.index &&
+    batch !== undefined &&
+    (rows !== undefined || renderedRows !== undefined) &&
+    prepared.index < batch.index &&
+    (rows !== undefined || (renderedRows !== undefined && batch.index < renderedRows.index)) &&
     after !== undefined &&
-    rows.index < after.index &&
+    (renderedRows?.index ?? batch.index) < after.index &&
     buildArguments(after.args, parameterKey(run, 0)) &&
-    memberOf(rows.args[2], prepared.key, "build") &&
-    identifierKey(rows.args[1]) === parameterKey(run, 0) &&
+    memberOf(batch.args[2], prepared.key, "build") &&
+    identifierKey(batch.args[1]) === parameterKey(run, 0) &&
     unchangedParameter(prepare, parameterKey(prepare, 0)) &&
     unchangedParameter(run, parameterKey(run, 0)) &&
     nativeFixtureRoute(module)
@@ -1026,6 +1061,12 @@ const NATIVE_UNIT_PROGRAM = {
   swcVersion: "1.16.18",
 };
 
+// 呼出し回数だけでは別binaryや別programも通るため、実行する既知のunit本文を束縛する。
+const NATIVE_BATCH_UNIT_CALLER = {
+  path: "scripts/mermaid/native-render-batch_test.ts",
+  sourceSha256: "938d5ad164767699af00ad59abc1f123d58372fe471ec064af8ff5c040d31f95",
+};
+
 const RUNTIME_ASSET_COMPRESSOR_UNIT_PROGRAM = {
   caller: "scripts/runtime-assets/runtime-package-asset-compressor_test.ts",
   callerSourceSha256: "11ed165e8385ff593ad73fc65f69d08cd0486ffa88a0521a819ff479a66c0670",
@@ -1047,7 +1088,7 @@ const CHROME_FONT_IDENTITY_PROBE = {
   module: "scripts/html/visual-state-fidelity.ts",
   importers: CHROME_FONT_IDENTITY_PROBE_IMPORTERS,
   functionName: "runChromeFontIdentityProbe",
-  functionAstSha256: "be2fa01a198d93f05f9e36d564be1a030570ce9013b382f18646b5c17531b704",
+  functionAstSha256: "c267370fec379e37b093c1731fffa134fabec63260763ce53ca6a9246ed6b4bf",
   swcVersion: "1.16.18",
 } as const;
 
@@ -1055,10 +1096,14 @@ function sourceDigest(source: string): string {
   return createHash("sha256").update(source).digest("hex");
 }
 
-function canonicalNativeUnitAstDigest(module: unknown): string {
+function canonicalNativeUnitAstDigest(
+  module: unknown,
+  extraOmittedKeys: readonly string[] = [],
+): string {
+  const omittedKeys = new Set(["span", "ctxt", "bodyCtxt", "raw", ...extraOmittedKeys]);
   return sourceDigest(
     JSON.stringify(module, (key: string, value: unknown) =>
-      ["span", "ctxt", "bodyCtxt", "raw"].includes(key) ? undefined : value,
+      omittedKeys.has(key) ? undefined : value,
     ),
   );
 }
@@ -1543,6 +1588,51 @@ function nativeUnitRoute(
   return binary;
 }
 
+function nativeBatchUnitRoute(
+  module: Record<string, unknown>,
+  source: string,
+  context: SourceCodeContext,
+): string | undefined {
+  if (
+    context.name !== NATIVE_UNIT_PROGRAM.wrapper ||
+    context.importer !== NATIVE_BATCH_UNIT_CALLER.path ||
+    !reviewedUnitSourceMatches(source, module, NATIVE_UNIT_PROGRAM, "wrapper")
+  )
+    return undefined;
+  const caller = context.importerSource;
+  if (
+    caller === undefined ||
+    caller !== context.read(NATIVE_BATCH_UNIT_CALLER.path) ||
+    sourceDigest(caller) !== NATIVE_BATCH_UNIT_CALLER.sourceSha256
+  )
+    return undefined;
+  let callerModule: Record<string, unknown>;
+  try {
+    callerModule = parseSync(caller, { syntax: "typescript", tsx: true }) as unknown as Record<
+      string,
+      unknown
+    >;
+  } catch {
+    return undefined;
+  }
+  const spawn = importKey(callerModule, "./native-cli-process", "spawnNativeCli");
+  const batch = importKey(callerModule, "./native-render-batch", "renderNativeFixtureBatch");
+  const child = functionNamed(callerModule, "runChild");
+  const childCalls = astNodes(child).filter(
+    (node) => node.type === "CallExpression" && identifierKey(node.callee) === spawn,
+  );
+  const batchCalls = astNodes(callerModule).filter(
+    (node) => node.type === "CallExpression" && identifierKey(node.callee) === batch,
+  );
+  const wrapper = functionNamed(module, "spawnNativeCli");
+  const binary = parameterKey(wrapper, 0);
+  return spawn && batch && child && childCalls.length === 1 && batchCalls.length === 3 && binary
+    ? unchangedParameter(wrapper, binary)
+      ? binary
+      : undefined
+    : undefined;
+}
+
 function runtimeAssetCompressorUnitCall(
   module: Record<string, unknown>,
   source: string,
@@ -1611,7 +1701,8 @@ function chromeFontIdentityProbeCall(
   const probe = functionNamed(module, CHROME_FONT_IDENTITY_PROBE.functionName);
   if (
     !probe ||
-    canonicalNativeUnitAstDigest(probe) !== CHROME_FONT_IDENTITY_PROBE.functionAstSha256
+    canonicalNativeUnitAstDigest(probe, ["start", "end"]) !==
+      CHROME_FONT_IDENTITY_PROBE.functionAstSha256
   )
     return undefined;
   const processes = processBindings(module);
@@ -2937,7 +3028,196 @@ function registeredProcessRoute(
   const chromeFontProbe = chromeFontIdentityProbeCall(module, context);
   if (chromeFontProbe) return { chromeFontIdentityProbeCall: chromeFontProbe };
   const compressorCall = runtimeAssetCompressorUnitCall(module, source, context);
-  return compressorCall ? { unitProgramCall: compressorCall } : undefined;
+  if (compressorCall) return { unitProgramCall: compressorCall };
+  const nativeFrameCall = nativeFrameCaptureCall(module, context);
+  return nativeFrameCall ? { nativeFrameCall } : undefined;
+}
+
+function nativeFrameCaptureCall(
+  module: Record<string, unknown>,
+  context: SourceCodeContext | undefined,
+): Record<string, unknown> | undefined {
+  if (context?.name !== "scripts/mermaid/native-frame-evidence.ts") return undefined;
+  const capture = functionNamed(module, "captureRow");
+  if (!capture) return undefined;
+  const calls = astNodes(capture).filter(
+    (node) => node.type === "CallExpression" && memberOf(object(node.callee), "Bun:1", "spawnSync"),
+  );
+  const call = calls.length === 1 ? calls[0] : undefined;
+  if (!call || !nativeFrameCaptureShape(capture, call)) return undefined;
+  return call;
+}
+
+function nativeFrameCaptureShape(
+  fn: Record<string, unknown>,
+  call: Record<string, unknown>,
+): boolean {
+  const args = Array.isArray(call.arguments) ? call.arguments : [];
+  const argvArgument = object(object(args[0])?.expression);
+  const argvDeclaration = nativeFrameConstVariable(fn, "argv");
+  const argvIdentifier = object(argvDeclaration?.id);
+  const argvArray = object(argvDeclaration?.init);
+  const elements: Record<string, unknown>[] = Array.isArray(argvArray?.elements)
+    ? argvArray.elements
+        .map(object)
+        .filter((element): element is Record<string, unknown> => !!element)
+    : [];
+  if (
+    args.length !== 2 ||
+    !argvArgument ||
+    argvArgument?.type !== "Identifier" ||
+    argvArgument.value !== "argv" ||
+    !argvDeclaration ||
+    !argvIdentifier ||
+    argvIdentifier.type !== "Identifier" ||
+    elements.length !== 13 ||
+    elements.some((element) => element?.type === "SpreadElement" || element?.spread != null) ||
+    !nativeFrameArgvElements(fn, elements)
+  )
+    return false;
+  const argvKey = identifierKey(argvDeclaration.id);
+  const returnedArgv = astNodes(fn)
+    .filter((node) => node.type === "ReturnStatement")
+    .flatMap((node) => astNodes(node.argument))
+    .find((node) => identifierKey(node) === argvKey);
+  if (
+    !argvKey ||
+    !returnedArgv ||
+    !identifierUsesAre(fn, argvKey, [argvIdentifier, argvArgument, returnedArgv]) ||
+    nativeFrameMutatesArgv(fn, argvKey) ||
+    !nativeFrameParametersAreSafe(fn)
+  )
+    return false;
+  const options = object(object(args[1])?.expression);
+  const properties = Array.isArray(options?.properties)
+    ? options.properties.map(object).filter((value): value is Record<string, unknown> => !!value)
+    : [];
+  const property = (name: string) =>
+    properties.find(
+      (entry) =>
+        entry.type === "KeyValueProperty" &&
+        object(entry.key)?.type === "Identifier" &&
+        object(entry.key)?.value === name,
+    );
+  return (
+    properties.length === 2 &&
+    nativeFrameMemberChain(object(property("cwd")?.value), nativeParameterKey(fn, 0), "root") &&
+    namedMemberChain(object(property("env")?.value), ["process", "env"])
+  );
+}
+
+function nativeFrameConstVariable(
+  fn: Record<string, unknown>,
+  name: string,
+): Record<string, unknown> | undefined {
+  const declarations = astNodes(fn).flatMap((node) =>
+    node.type === "VariableDeclaration" && node.kind === "const" && Array.isArray(node.declarations)
+      ? node.declarations.map(object).filter((value): value is Record<string, unknown> => !!value)
+      : [],
+  );
+  const matches = declarations.filter((declaration) => object(declaration.id)?.value === name);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function nativeFrameVariableKey(fn: Record<string, unknown>, name: string): string | undefined {
+  const declaration = nativeFrameConstVariable(fn, name);
+  return declaration ? identifierKey(declaration.id) : undefined;
+}
+
+function nativeFrameStringMember(
+  value: unknown,
+  key: string | undefined,
+  property: string,
+): boolean {
+  const call = object(value);
+  const args = Array.isArray(call?.arguments) ? call.arguments : [];
+  return (
+    call?.type === "CallExpression" &&
+    identifierKey(call.callee) === "String:1" &&
+    args.length === 1 &&
+    nativeFrameMemberChain(object(args[0])?.expression, key, property)
+  );
+}
+
+function nativeFrameMemberChain(
+  value: unknown,
+  key: string | undefined,
+  ...properties: string[]
+): boolean {
+  return key !== undefined && nativeMemberChain(value, [key, ...properties]);
+}
+
+function nativeFrameArgvElements(
+  fn: Record<string, unknown>,
+  elements: Record<string, unknown>[],
+): boolean {
+  const options = nativeParameterKey(fn, 0);
+  const wrapperPath = nativeFrameVariableKey(fn, "wrapperPath");
+  const outputDirectory = nativeFrameVariableKey(fn, "outputDirectory");
+  const frame = nativeFrameVariableKey(fn, "frame");
+  return (
+    nativeFrameMemberChain(object(elements[0]?.expression), options, "probeBinary", "path") &&
+    literal(object(elements[1]?.expression)) === "--input" &&
+    identifierKey(object(elements[2]?.expression)) === wrapperPath &&
+    literal(object(elements[3]?.expression)) === "--output" &&
+    identifierKey(object(elements[4]?.expression)) === outputDirectory &&
+    literal(object(elements[5]?.expression)) === "--width" &&
+    nativeFrameStringMember(elements[6]?.expression, frame, "width") &&
+    literal(object(elements[7]?.expression)) === "--height" &&
+    nativeFrameStringMember(elements[8]?.expression, frame, "height") &&
+    literal(object(elements[9]?.expression)) === "--scale" &&
+    nativeFrameStringMember(elements[10]?.expression, options, "scale") &&
+    literal(object(elements[11]?.expression)) === "--scroll-y" &&
+    nativeFrameStringMember(elements[12]?.expression, options, "scrollY")
+  );
+}
+
+function nativeFrameMutatesArgv(fn: Record<string, unknown>, key: string): boolean {
+  return astNodes(fn).some((node) => {
+    const callee = object(node.callee);
+    return (
+      (node.type === "AssignmentExpression" &&
+        astNodes(node.left).some((target) => identifierKey(target) === key)) ||
+      (node.type === "UpdateExpression" &&
+        astNodes(node.argument).some((target) => identifierKey(target) === key)) ||
+      (node.type === "CallExpression" &&
+        callee?.type === "MemberExpression" &&
+        memberOf(callee, key, String(object(callee.property)?.value)))
+    );
+  });
+}
+
+function nativeFrameParametersAreSafe(fn: Record<string, unknown>): boolean {
+  const params = Array.isArray(fn.params) ? fn.params.map(object) : [];
+  return (
+    params.length === 2 &&
+    object(object(params[0])?.pat)?.value === "options" &&
+    object(object(params[1])?.pat)?.value === "slug" &&
+    !astNodes(fn).some(
+      (node) =>
+        node.type === "VariableDeclaration" &&
+        Array.isArray(node.declarations) &&
+        node.declarations.some((declaration) =>
+          ["options", "String", "Bun"].includes(String(object(object(declaration)?.id)?.value)),
+        ),
+    )
+  );
+}
+
+function namedMemberChain(value: unknown, parts: string[]): boolean {
+  let node = object(value);
+  const properties: string[] = [];
+  while (node?.type === "MemberExpression") {
+    const property = object(node.property);
+    if (property?.type !== "Identifier") return false;
+    properties.push(String(property.value));
+    node = object(node.object);
+  }
+  return (
+    node?.type === "Identifier" &&
+    node.value === parts[0] &&
+    properties.reverse().join(".") === parts.slice(1).join(".")
+  );
 }
 
 function domainProcessRoute(
@@ -2947,15 +3227,8 @@ function domainProcessRoute(
 ): DomainProcessRoute {
   const factsRoute = registeredProcessRoute(module, source, context);
   if (factsRoute) return factsRoute;
-  if (
-    context?.name === "scripts/mermaid/native-cli-process.ts" &&
-    context.importer === "scripts/mermaid/native-render-provenance.ts" &&
-    nativeProducerVerified(context.read("scripts/mermaid/native-render-provenance.ts"))
-  ) {
-    const wrapper = functionNamed(module, "spawnNativeCli");
-    const binary = parameterKey(wrapper, 0);
-    return binary && unchangedParameter(wrapper, binary) ? { nativeBinary: binary } : {};
-  }
+  const nativeRoute = nativeProcessRoute(module, source, context);
+  if (nativeRoute) return nativeRoute;
   if (context) {
     const unitBinary = nativeUnitRoute(module, source, context);
     if (unitBinary) return { unitBinary };
@@ -2966,6 +3239,25 @@ function domainProcessRoute(
     if (collector && request) return { observerRequest: request, collector };
   }
   return {};
+}
+
+function nativeProcessRoute(
+  module: Record<string, unknown>,
+  source: string,
+  context?: SourceCodeContext,
+): DomainProcessRoute | undefined {
+  if (
+    context?.name === "scripts/mermaid/native-cli-process.ts" &&
+    context.importer === "scripts/mermaid/native-render-provenance.ts" &&
+    nativeProducerVerified(context.read("scripts/mermaid/native-render-provenance.ts"))
+  ) {
+    const wrapper = functionNamed(module, "spawnNativeCli");
+    const binary = parameterKey(wrapper, 0);
+    return binary && unchangedParameter(wrapper, binary) ? { nativeBinary: binary } : {};
+  }
+  const batchUnitBinary = context ? nativeBatchUnitRoute(module, source, context) : undefined;
+  if (batchUnitBinary) return { nativeBinary: batchUnitBinary };
+  return undefined;
 }
 
 function domainProcessCode(
@@ -3013,6 +3305,7 @@ function callCode(
     node === domain.classicFactsCall ||
     node === domain.mathjaxFactsCall ||
     node === domain.unitProgramCall ||
+    node === domain.nativeFrameCall ||
     node === domain.chromeFontIdentityProbeCall
   )
     return [];
@@ -3301,16 +3594,7 @@ function sourceCodeFromModule(
     result.push("!unresolved-executable");
   const spyArguments = reviewedBunSpyArguments(moduleRecord);
   const domain = domainProcessRoute(moduleRecord, source, context);
-  if (
-    context?.name === NATIVE_WIDTH_HASH_CALLER &&
-    !domain.nativeWidthCall &&
-    !domain.nativeWidthConsumerCall
-  )
-    result.push("!unresolved-executable");
-  if (context?.name === CLASSIC_FACTS_CALLER && !domain.classicFactsCall)
-    result.push("!unresolved-executable");
-  if (context?.name === MATHJAX_FACTS_CALLER && !domain.mathjaxFactsCall)
-    result.push("!unresolved-executable");
+  if (unresolvedDomainRoute(context, domain)) result.push("!unresolved-executable");
   const nativeCall = nativeConsumerCall(moduleRecord, source, processes, context);
   if (HTML_NATIVE_CONSUMERS.some((entry) => entry.caller === context?.name) && !nativeCall)
     result.push("!unresolved-executable");
@@ -3385,6 +3669,19 @@ function sourceCodeFromModule(
   };
   visit(module);
   return result;
+}
+
+function unresolvedDomainRoute(
+  context: SourceCodeContext | undefined,
+  domain: DomainProcessRoute,
+): boolean {
+  const name = context?.name;
+  return [
+    [name === NATIVE_WIDTH_HASH_CALLER, !domain.nativeWidthCall && !domain.nativeWidthConsumerCall],
+    [name === CLASSIC_FACTS_CALLER, !domain.classicFactsCall],
+    [name === MATHJAX_FACTS_CALLER, !domain.mathjaxFactsCall],
+    [name === "scripts/mermaid/native-frame-evidence.ts", !domain.nativeFrameCall],
+  ].some(([matched, missing]) => matched === true && missing === true);
 }
 
 export function justRecipes(source: string): Map<string, string> {
@@ -3833,10 +4130,9 @@ function moonCoverageRecipesVerified(
       .filter((line) => line.includes(" llvm-cov ") && !line.includes(" llvm-cov clean "));
   const suffix = "{{TEST_THREAD_ARGS}}";
   const rootCommand =
-    'CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root -- {{CARGO}} llvm-cov --workspace --all-targets --all-features --locked --json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"' +
-    suffix;
+    'NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-root-state" LLVM_PROFILE_FILE_NAME="krr-nextest-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root -- {{CARGO}} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml" --json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"{{NEXTEST_THREAD_ARGS}}';
   const performanceCommand = (variant: "baseline" | "candidate") =>
-    `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-${variant}" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-${variant} -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features ${variant} --locked --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${variant}.json"` +
+    `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-${variant}" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-${variant} -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features ${variant} --locked --profile krr-coverage --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${variant}.json"` +
     suffix;
   if (!/^COVERAGE_MIN_LINES := env_var_or_default\("COVERAGE_MIN_LINES", "100"\)$/m.test(justfile))
     errors.push("root coverage threshold default differs");

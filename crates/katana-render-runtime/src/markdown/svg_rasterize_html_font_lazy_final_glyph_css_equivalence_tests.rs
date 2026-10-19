@@ -1,9 +1,11 @@
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
-
+#[path = "svg_rasterize_html_font_frame_diagnostic_tests.rs"]
+mod frame_diagnostic;
 const VIEWPORT_WIDTH: u32 = 900;
 const VIEWPORT_HEIGHT: u32 = 600;
 const NORMAL_WEIGHT: u64 = 400;
 const BOLD_WEIGHT: u64 = 700;
+const FINAL_GLYPH_ORIGIN: &str = "file:///krr-final-glyph-audit.html";
 
 const HTML: &str = r#"<!doctype html><html lang="ja"><head><style>
 body { font-family: system-ui, sans-serif; }
@@ -15,20 +17,36 @@ const INLINE_CONTROL_HTML: &str = r#"<!doctype html><html lang="ja"><body style=
 
 #[test]
 fn actual_html_session_records_final_glyph_fonts() -> Result<(), String> {
-    let (session, mut audit) = open_html_with_audit(HTML)?;
-    let (control_session, control_audit) = open_html_with_audit(INLINE_CONTROL_HTML)?;
+    let (session, mut audit) =
+        open_html_with_audit(HTML, FINAL_GLYPH_ORIGIN, VIEWPORT_WIDTH, VIEWPORT_HEIGHT)?;
+    let (control_session, control_audit) = open_html_with_audit(
+        INLINE_CONTROL_HTML,
+        FINAL_GLYPH_ORIGIN,
+        VIEWPORT_WIDTH,
+        VIEWPORT_HEIGHT,
+    )?;
     let family_matches = record_family_comparison(&mut audit, &control_audit);
     audit["sourceCssFontFamily"] = serde_json::json!("system-ui, sans-serif");
     audit["inlineControlSourceCssFontFamily"] = serde_json::json!("system-ui,sans-serif");
     audit["rgbaComparison"] = rgba_comparison(&session, &control_session);
     audit["inlineControl"] = control_audit;
     println!("KRR_FINAL_GLYPH_HTML_AUDIT {audit}");
-    assert_html_frame(&session)?;
-    assert_valid_paint_evidence(&audit)?;
-    assert_weighted_span_records(&audit)?;
-    assert_html_frame(&control_session)?;
-    assert_valid_paint_evidence(&audit["inlineControl"])?;
-    assert_weighted_span_records(&audit["inlineControl"])?;
+    assert_frame_font_evidence(&session, &audit)?;
+    assert_frame_font_evidence(&control_session, &audit["inlineControl"])?;
+    assert_equivalent_css_frames(&audit, family_matches);
+    Ok(())
+}
+
+fn assert_frame_font_evidence(
+    session: &crate::HtmlBrowserSession,
+    audit: &serde_json::Value,
+) -> Result<(), String> {
+    assert_html_frame(session)?;
+    assert_valid_paint_evidence(audit)?;
+    assert_weighted_span_records(audit)
+}
+
+fn assert_equivalent_css_frames(audit: &serde_json::Value, family_matches: Option<bool>) {
     assert_eq!(
         family_matches,
         Some(true),
@@ -38,7 +56,6 @@ fn actual_html_session_records_final_glyph_fonts() -> Result<(), String> {
         audit["rgbaComparison"]["equal"], true,
         "equivalent CSS inputs must render identical RGBA frames"
     );
-    Ok(())
 }
 
 fn assert_weighted_span_records(audit: &serde_json::Value) -> Result<(), String> {
@@ -139,12 +156,14 @@ fn selector_family_for_weight(audit: &serde_json::Value, weight: u64) -> Option<
 
 fn open_html_with_audit(
     html: &str,
+    origin: &str,
+    width: u32,
+    height: u32,
 ) -> Result<(crate::HtmlBrowserSession, serde_json::Value), String> {
     let observer = crate::markdown::svg_rasterize::font::observation::Scope::enter();
-    let source = crate::HtmlBrowserSource::new(html, "file:///krr-final-glyph-audit.html")
-        .map_err(|error| error.to_string())?;
-    let viewport = crate::HtmlBrowserViewport::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())?;
+    let source = crate::HtmlBrowserSource::new(html, origin).map_err(|error| error.to_string())?;
+    let viewport =
+        crate::HtmlBrowserViewport::new(width, height, 1.0).map_err(|error| error.to_string())?;
     let (session, mut audit) = SvgRasterizeOps::with_actual_font_source_audit(|| {
         crate::HtmlRuntime.open(source, viewport)
     })
@@ -168,7 +187,6 @@ fn assert_html_frame(session: &crate::HtmlBrowserSession) -> Result<(), String> 
     assert!(frame.pixels.chunks_exact(4).any(|pixel| pixel[3] != 0));
     Ok(())
 }
-
 fn assert_valid_paint_evidence(audit: &serde_json::Value) -> Result<(), String> {
     let calls = audit["finalGlyphPaintCalls"]
         .as_u64()

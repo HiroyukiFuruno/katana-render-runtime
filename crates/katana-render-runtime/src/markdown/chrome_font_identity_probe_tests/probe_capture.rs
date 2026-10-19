@@ -6,7 +6,7 @@ use resvg::usvg::fontdb::Database;
 pub(super) fn probe_capture(
     system_database: &Database,
     capture: CaptureRequest,
-    resolution_cache: &mut FontResolutionCache,
+    resolution_cache: &mut FontResolutionCache<'_>,
 ) -> CaptureResult {
     let (resource_database, resource_error) = capture_resource_database(&capture.resource_files);
     let mut result = initial_capture_result(
@@ -65,7 +65,7 @@ fn resolve_capture_fonts(
     resources: &[ResourceFile],
     resource_error: Option<&str>,
     selected_fonts: Vec<SelectedFont>,
-    resolution_cache: &mut FontResolutionCache,
+    resolution_cache: &mut FontResolutionCache<'_>,
     result: &mut CaptureResult,
 ) {
     for selected in selected_fonts {

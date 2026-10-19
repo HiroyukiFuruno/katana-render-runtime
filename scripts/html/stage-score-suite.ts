@@ -1,5 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import {
+  assertCatalogProducerContext,
+  type CatalogCaptureProducerContext,
+  sameCatalogProducerContext,
+} from "./catalog-capture-producer-context";
 import { stableJson } from "./dynamic-fidelity";
 import type { JsonValue } from "./dynamic-state";
 import { assertCatalogComplete, type CatalogCase, loadFeatureCatalog } from "./feature-catalog";
@@ -78,6 +83,20 @@ export interface CatalogRawStage90Result {
   state: JsonValue;
 }
 
+export interface CatalogRawStage90ReuseContext {
+  planPath: string;
+  binaryPath: string;
+  chromeExecutablePath: string;
+  chromeExecutableSha256: string;
+  chromeRuntimeVersion: string;
+  producerContext: CatalogCaptureProducerContext;
+}
+
+export interface CatalogRawStage90ReuseResult {
+  reusableConditionIds: string[];
+  rejected: Array<{ conditionId: string; reason: string }>;
+}
+
 export function validateCatalogRawStage90Captures(
   manifestValue: JsonValue,
   planValue: JsonValue,
@@ -100,6 +119,128 @@ export function validateCatalogRawStage90Captures(
     if (!capture) throw new Error(`catalog raw capture is missing: ${condition.conditionId}`);
     return validateRawCaptureCondition(condition, capture, manifest, nonces, imageScores);
   });
+}
+
+/** Diagnostic only: identifies captured conditions safe to re-use for the current run. */
+export function inspectCatalogRawStage90Reuse(
+  manifestValue: JsonValue,
+  planValue: JsonValue,
+  context: CatalogRawStage90ReuseContext,
+  catalogPath = "tests/fixtures/html/feature-catalog.json",
+): CatalogRawStage90ReuseResult {
+  const plan = assertCatalogStage90ConditionPlan(planValue, catalogPath);
+  const planIds = plan.conditions.map((condition) => condition.conditionId);
+  const rejectAll = (reason: string): CatalogRawStage90ReuseResult => ({
+    reusableConditionIds: [],
+    rejected: planIds.map((conditionId) => ({ conditionId, reason })),
+  });
+  try {
+    const manifest = record(manifestValue, "catalog stage90 capture manifest");
+    const capturedPlanPath = text(manifest.planPath, "capture plan path");
+    assertRawCaptureManifest(manifest, plan, capturedPlanPath);
+    const capturedContext = assertCatalogProducerContext(manifest.producerContext);
+    assertReusableFontEnvironment(capturedContext, "captured");
+    assertReusableFontEnvironment(context.producerContext, "current");
+    if (!sameCatalogProducerContext(manifest.producerContext, context.producerContext))
+      return rejectAll("capture producer context differs");
+    if (
+      sha256File(fs.realpathSync(context.planPath)) !==
+      sha256File(fs.realpathSync(capturedPlanPath))
+    )
+      return rejectAll("current plan identity differs");
+    assertCurrentBinaryIdentity(manifest, context.binaryPath);
+    const currentChromePath = fs.realpathSync(context.chromeExecutablePath);
+    const currentChromeSha256 = sha256File(currentChromePath);
+    if (currentChromeSha256 !== context.chromeExecutableSha256)
+      return rejectAll("current Chrome executable identity differs");
+    const capturedChromeRuntimeVersion = text(
+      manifest.chromeRuntimeVersion,
+      "capture Chrome runtime version",
+    );
+    if (capturedChromeRuntimeVersion !== context.chromeRuntimeVersion)
+      return rejectAll("current Chrome runtime version differs");
+    const captures = records(manifest.conditions, "catalog raw captures");
+    const byId = new Map(
+      captures.map((capture) => [text(capture.conditionId, "capture condition id"), capture]),
+    );
+    if (captures.length !== plan.conditions.length || byId.size !== captures.length)
+      return rejectAll("capture inventory is incomplete or duplicated");
+    return inspectRawCaptureConditions(
+      plan,
+      manifest,
+      byId,
+      currentChromePath,
+      context.chromeExecutableSha256,
+    );
+  } catch (error) {
+    return rejectAll(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function assertReusableFontEnvironment(value: CatalogCaptureProducerContext, label: string): void {
+  if (!value.fontEnvironment?.cacheable)
+    throw new Error(`${label} font environment is unavailable for cache reuse`);
+}
+
+function inspectRawCaptureConditions(
+  plan: CatalogStage90ConditionPlan,
+  manifest: { [key: string]: JsonValue },
+  captures: Map<string, { [key: string]: JsonValue }>,
+  currentChromePath: string,
+  currentChromeSha256: string,
+): CatalogRawStage90ReuseResult {
+  const nonces = new Set<string>();
+  const imageScores = new Map<string, ReturnType<typeof compareImages>>();
+  const reusableConditionIds: string[] = [];
+  const rejected: Array<{ conditionId: string; reason: string }> = [];
+  for (const condition of plan.conditions) {
+    const capture = captures.get(condition.conditionId);
+    if (!capture) {
+      rejected.push({ conditionId: condition.conditionId, reason: "capture is missing" });
+      continue;
+    }
+    try {
+      validateRawCaptureCondition(condition, capture, manifest, nonces, imageScores);
+      assertCurrentChromeIdentity(capture, currentChromePath, currentChromeSha256);
+      reusableConditionIds.push(condition.conditionId);
+    } catch (error) {
+      rejected.push({
+        conditionId: condition.conditionId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { reusableConditionIds, rejected };
+}
+
+function assertCurrentBinaryIdentity(
+  manifest: { [key: string]: JsonValue },
+  currentBinaryPathValue: string,
+): void {
+  const manifestPath = fs.realpathSync(text(manifest.binaryPath, "capture binary path"));
+  const currentPath = fs.realpathSync(currentBinaryPathValue);
+  if (
+    manifestPath !== currentPath ||
+    sha256File(currentPath) !== sha(text(manifest.binarySha256, "capture binary SHA"))
+  )
+    throw new Error("current binary identity differs");
+}
+
+function assertCurrentChromeIdentity(
+  capture: { [key: string]: JsonValue },
+  currentChromePath: string,
+  currentChromeSha256: string,
+): void {
+  const receiptPath = text(capture.chromeReceiptPath, "Chrome receipt path");
+  const receipt = record(JSON.parse(fs.readFileSync(receiptPath, "utf8")), "Chrome raw receipt");
+  const receiptPathValue = fs.realpathSync(
+    text(receipt.browserExecutablePath, "Chrome executable"),
+  );
+  if (
+    receiptPathValue !== currentChromePath ||
+    text(receipt.browserExecutableSha256, "Chrome executable SHA") !== currentChromeSha256
+  )
+    throw new Error("current Chrome executable identity differs");
 }
 
 function assertRawCaptureManifest(
@@ -189,17 +330,33 @@ function assertRawCaptureTuple(
 ): void {
   if (capture.status !== "captured")
     throw new Error(`catalog raw capture is not verified: ${condition.conditionId}`);
+  assertCatalogCaptureIdentity(
+    condition,
+    capture,
+    text(manifest.binarySha256, "capture binary SHA"),
+  );
   const fontObservation = record(capture.fontIdentityObservation, "font identity observation");
   if (
+    capture.fontIdentityRequestConditionId !== condition.conditionId ||
+    fontObservation.status !== "observed" ||
+    records(fontObservation.unknownReasons, "font identity unknown reasons").length !== 0
+  )
+    throw new Error(`catalog raw capture tuple differs: ${condition.conditionId}`);
+}
+
+export function assertCatalogCaptureIdentity(
+  condition: CatalogStage90ConditionPlan["conditions"][number],
+  capture: { [key: string]: JsonValue },
+  binarySha256: string,
+): void {
+  if (
+    capture.conditionId !== condition.conditionId ||
     capture.caseId !== condition.caseId ||
     capture.state !== condition.state ||
     capture.operationKind !== condition.operationKind ||
     capture.targetSelector !== condition.targetSelector ||
     capture.sourceSha256 !== condition.sourceSha256 ||
-    capture.binarySha256 !== manifest.binarySha256 ||
-    capture.fontIdentityRequestConditionId !== condition.conditionId ||
-    fontObservation.status !== "observed" ||
-    records(fontObservation.unknownReasons, "font identity unknown reasons").length !== 0 ||
+    capture.binarySha256 !== binarySha256 ||
     stableJson(capture.viewport as JsonValue) !==
       stableJson({
         width: condition.viewport.width,
@@ -207,7 +364,7 @@ function assertRawCaptureTuple(
         scale: condition.viewport.scale,
       })
   )
-    throw new Error(`catalog raw capture tuple differs: ${condition.conditionId}`);
+    throw new Error(`catalog raw capture identity differs: ${condition.conditionId}`);
 }
 
 function rawCaptureIdentity(

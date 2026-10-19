@@ -59,8 +59,7 @@ export class RasterComparisonBinding {
     ) {
       throw new Error("Unsupported trusted raster comparison config");
     }
-    binding.repositoryRoot = absolute(config.trustedRepositoryRoot);
-    binding.repositoryStamp = binding.observeRepositoryRoot();
+    binding.initializeRepositoryRoot(absolute(config.trustedRepositoryRoot));
     const roles = object(config.roles, "raster roles");
     keys(roles, ["official", "candidate"]);
     for (const role of ["official", "candidate"] as const) {
@@ -68,6 +67,35 @@ export class RasterComparisonBinding {
     }
     binding.assertUnchanged();
     return binding;
+  }
+
+  static validateOfficialRole(
+    repositoryRoot: string,
+    input: RasterRoleConfigInput,
+    inventory: string[],
+  ): void {
+    const binding = new RasterComparisonBinding();
+    binding.initializeRepositoryRoot(repositoryRoot);
+    const pins = new Map<string, RasterFileIdentity>();
+    const role = comparisonRoleConfig("official", input, inventory, binding.repositoryRoot, pins);
+    binding.roles.set(
+      "official",
+      binding.readRole("official", role as unknown as JsonInput, inventory),
+    );
+    for (const slug of inventory) {
+      binding.readPairManifest(
+        "official",
+        slug,
+        path.join(absolute(input.pairDirectory), `${slug}.pair.json`),
+      );
+    }
+    binding.assertUnchanged();
+    assertPinnedInputsUnchanged(pins);
+  }
+
+  private initializeRepositoryRoot(repositoryRoot: string): void {
+    this.repositoryRoot = absolute(repositoryRoot);
+    this.repositoryStamp = this.observeRepositoryRoot();
   }
 
   readObservedFile(filePath: string): Buffer {
@@ -372,7 +400,7 @@ export class RasterComparisonBinding {
   }
 }
 
-interface RasterRoleConfigInput {
+export interface RasterRoleConfigInput {
   receiptPath: string;
   receiptSha256: string;
   processEvidencePath: string;
@@ -421,10 +449,16 @@ export function writeRasterComparisonConfig(input: RasterComparisonConfigInput) 
         path.join(input[role].pairDirectory, `${slug}.pair.json`),
       );
   binding.assertUnchanged();
-  for (const [file, pin] of pins)
-    if (!sameRasterFileIdentity(physicalFileIdentity(file), pin))
-      throw new Error(`Raster builder input changed: ${file}`);
+  assertPinnedInputsUnchanged(pins);
   return { path: configPath, sha256, inventory };
+}
+
+function assertPinnedInputsUnchanged(pins: Map<string, RasterFileIdentity>): void {
+  for (const [file, pin] of pins) {
+    if (!sameRasterFileIdentity(physicalFileIdentity(file), pin)) {
+      throw new Error(`Raster builder input changed: ${file}`);
+    }
+  }
 }
 
 function pinnedBuilderInput(

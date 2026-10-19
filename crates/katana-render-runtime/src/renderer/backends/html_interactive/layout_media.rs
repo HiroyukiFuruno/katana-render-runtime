@@ -84,6 +84,20 @@ pub(super) fn intrinsic_image_width(
     }
 }
 
+pub(super) fn resolved_svg_width(
+    node: &crate::renderer::backends::html_document::HtmlDocumentNode,
+    available_width: f32,
+    style: &CssStyle,
+) -> Option<f32> {
+    let crate::renderer::backends::html_document::HtmlDocumentNode::Element {
+        tag, attributes, ..
+    } = node
+    else {
+        return None;
+    };
+    (tag == "svg").then(|| embedded_svg_size(attributes, available_width, style).0)
+}
+
 fn image_box_size(source: &str, available_width: f32, style: &CssStyle) -> (f32, f32) {
     let natural = png::data_dimensions(source).unwrap_or((
         available_width,

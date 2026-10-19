@@ -553,32 +553,26 @@ test("official-only adapter rejects stale physical endpoints before candidate bi
   if (lock === undefined) throw new Error("Missing synthetic lock endpoint");
   fs.appendFileSync(lock.end.path, "changed");
   expect(() =>
-    RasterComparisonBinding.validateOfficialRole(
-      f.input.trustedRepositoryRoot,
-      f.input.official,
-      ["unit"],
-    ),
+    RasterComparisonBinding.validateOfficialRole(f.input.trustedRepositoryRoot, f.input.official, [
+      "unit",
+    ]),
   ).toThrow("physical endpoint differs");
 });
 test("official-only adapter accepts the complete role and pair inventory", () => {
   const f = comparisonBuilderFixture();
   expect(() =>
-    RasterComparisonBinding.validateOfficialRole(
-      f.input.trustedRepositoryRoot,
-      f.input.official,
-      ["unit"],
-    ),
+    RasterComparisonBinding.validateOfficialRole(f.input.trustedRepositoryRoot, f.input.official, [
+      "unit",
+    ]),
   ).not.toThrow();
 });
 test("official-only adapter rejects a tampered official pair artifact before candidate binding", () => {
   const f = comparisonBuilderFixture();
   fs.unlinkSync(path.join(f.input.official.pairDirectory, "unit.pair.json"));
   expect(() =>
-    RasterComparisonBinding.validateOfficialRole(
-      f.input.trustedRepositoryRoot,
-      f.input.official,
-      ["unit"],
-    ),
+    RasterComparisonBinding.validateOfficialRole(f.input.trustedRepositoryRoot, f.input.official, [
+      "unit",
+    ]),
   ).toThrow();
 });
 test("official-only adapter rejects a tampered official loaded SVG digest before candidate binding", () => {
@@ -592,11 +586,9 @@ test("official-only adapter rejects a tampered official loaded SVG digest before
   row.loadedSvgSha256 = "f".repeat(64);
   fs.writeFileSync(receiptPath, JSON.stringify(receipt));
   expect(() =>
-    RasterComparisonBinding.validateOfficialRole(
-      f.input.trustedRepositoryRoot,
-      f.input.official,
-      ["unit"],
-    ),
+    RasterComparisonBinding.validateOfficialRole(f.input.trustedRepositoryRoot, f.input.official, [
+      "unit",
+    ]),
   ).toThrow();
 });
 test("comparison input drift is rejected after initial read", () => {

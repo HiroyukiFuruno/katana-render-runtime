@@ -18,7 +18,7 @@ pub(super) fn probe(request_bytes: &[u8]) -> Result<ProbeResponse, String> {
     validate_request(&request)?;
     let mut system_database = Database::new();
     system_database.load_system_fonts();
-    let mut resolution_cache = FontResolutionCache::default();
+    let mut resolution_cache = FontResolutionCache::for_system_database(&system_database);
     let captures = request
         .captures
         .into_iter()
@@ -77,7 +77,7 @@ fn resolve_selected_font(
     resources: &[super::ResourceFile],
     resource_error: Option<&str>,
     selected: SelectedFont,
-    resolution_cache: &mut FontResolutionCache,
+    resolution_cache: &mut FontResolutionCache<'_>,
     result: &mut CaptureResult,
 ) {
     let resolution = resolve_selected_identity(
@@ -97,7 +97,7 @@ fn resolve_selected_identity(
     resources: &[super::ResourceFile],
     resource_error: Option<&str>,
     selected: &SelectedFont,
-    resolution_cache: &mut FontResolutionCache,
+    resolution_cache: &mut FontResolutionCache<'_>,
 ) -> Result<super::identity::ResolvedFont, String> {
     if let Some(error) = custom_resource_error(selected.is_custom_font, resource_error) {
         return Err(error);

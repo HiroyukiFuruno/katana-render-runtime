@@ -171,6 +171,122 @@ test("neutral SVG geometry fails closed for malformed and unsupported SVG conten
   ).toThrow();
 });
 
+const naturalViewBoxSizingCases = [
+  {
+    relativePath: "tests/fixtures/mermaid/en/official-dark/08-01-c4-context-simple.svg",
+    viewBox: [0, -70, 1148, 441],
+  },
+  {
+    relativePath: "tests/fixtures/mermaid/en/official-dark/22-01-tree-view-simple.svg",
+    viewBox: [-0.5, 0, 124.828125, 232],
+  },
+] as const;
+
+test("strict raster sizing preserves SVG markup and resolves percentage width from the viewBox", async () => {
+  const playwright = await new PlaywrightLoader().load(),
+    browser = await playwright.chromium.launch({ headless: true }),
+    page = await browser.newPage({
+      viewport: { width: 1520, height: 845 },
+      deviceScaleFactor: 1,
+    });
+  try {
+    for (const fixture of naturalViewBoxSizingCases) {
+      for (const mode of ["strictViewBox", "officialFallback"] as const) {
+        await expectNaturalViewBoxSizing(page, fixture, mode);
+      }
+    }
+    await expectOfficialFallbackWithoutViewBox(page);
+  } finally {
+    await page.close();
+    await browser.close();
+  }
+});
+
+async function expectNaturalViewBoxSizing(
+  page: PageHandle,
+  fixture: (typeof naturalViewBoxSizingCases)[number],
+  mode: "strictViewBox" | "officialFallback",
+) {
+  const svg = fs.readFileSync(path.join(process.cwd(), fixture.relativePath), "utf8");
+  await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
+  const loaded = await assignStrictSvg(page, svg),
+    before = await page.evaluate(() => {
+      const element = document.querySelector("#diagram svg") as SVGSVGElement;
+      return {
+        outerHTML: element.outerHTML,
+        width: element.getAttribute("width"),
+        height: element.getAttribute("height"),
+        viewBox: element.getAttribute("viewBox"),
+      };
+    });
+  expect(loaded.assignedSvgSerialization).toBe(before.outerHTML);
+  expect(before.width).toBe("100%");
+  expect(before.height).toBeNull();
+  expect(before.viewBox?.trim().split(/[ ,]+/).map(Number)).toEqual(Array.from(fixture.viewBox));
+
+  await resizeSvgCapture(page, true, mode);
+  await page.evaluate(() => (document as FontReadyDocument).fonts.ready);
+  const geometry = await page.evaluate(() => {
+    const capture = document.getElementById("capture") as HTMLElement,
+      diagram = document.getElementById("diagram") as HTMLElement,
+      svgElement = document.querySelector("#diagram svg") as SVGSVGElement,
+      captureBox = capture.getBoundingClientRect(),
+      diagramBox = diagram.getBoundingClientRect(),
+      svgBox = svgElement.getBoundingClientRect();
+    return {
+      capture: { width: captureBox.width, height: captureBox.height },
+      diagram: {
+        x: diagramBox.x,
+        y: diagramBox.y,
+        width: diagramBox.width,
+        height: diagramBox.height,
+      },
+      svg: { width: svgBox.width, height: svgBox.height },
+      rootFontSize: getComputedStyle(svgElement).fontSize,
+      width: svgElement.getAttribute("width"),
+      height: svgElement.getAttribute("height"),
+      viewBox: (svgElement.getAttribute("viewBox") ?? "").trim().split(/[ ,]+/).map(Number),
+      outerHTML: svgElement.outerHTML,
+    };
+  });
+  expect(geometry.capture).toEqual({
+    width: Math.ceil(fixture.viewBox[2]) + 24,
+    height: Math.ceil(fixture.viewBox[3]) + 24,
+  });
+  expect(geometry.diagram.width).toBe(fixture.viewBox[2]);
+  expect(geometry.diagram.height).toBe(fixture.viewBox[3]);
+  expect(geometry.svg).toEqual({ width: fixture.viewBox[2], height: fixture.viewBox[3] });
+  expect(geometry.rootFontSize).toBe("16px");
+  expect(geometry.width).toBe(before.width);
+  expect(geometry.height).toBe(before.height);
+  expect(geometry.viewBox).toEqual(Array.from(fixture.viewBox));
+  expect(geometry.outerHTML).toBe(before.outerHTML);
+}
+
+async function expectOfficialFallbackWithoutViewBox(page: PageHandle) {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80"><rect width="160" height="80"/></svg>';
+  await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
+  const loaded = await assignStrictSvg(page, svg);
+  await resizeSvgCapture(page, true, "officialFallback");
+  const result = await page.evaluate(() => {
+    const element = document.querySelector("#diagram svg") as SVGSVGElement,
+      diagram = document.getElementById("diagram") as HTMLElement;
+    return {
+      outerHTML: element.outerHTML,
+      width: element.getAttribute("width"),
+      height: element.getAttribute("height"),
+      diagramStyleWidth: diagram.style.width,
+      diagramStyleHeight: diagram.style.height,
+    };
+  });
+  expect(loaded.assignedSvgSerialization).toBe(result.outerHTML);
+  expect(result.width).toBe("160");
+  expect(result.height).toBe("80");
+  expect(result.diagramStyleWidth).toBe("");
+  expect(result.diagramStyleHeight).toBe("");
+}
+
 test("paint projection scores actual candidate pixels and rejects PNG-only label loss", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "krr-paint-projection-"));
   try {
@@ -199,17 +315,24 @@ test("paint projection scores actual candidate pixels and rejects PNG-only label
     ) {
       throw new Error("Paint projection fixture did not produce every expected raster");
     }
-    const projectionScore = magick.comparePaintProjectedImages(
-        projectedRecord.projectedReferencePngPath,
+    const projectedVariants = [
+        { label: "color-only", pngPath: fixture.input.candidatePngPath, passes: true },
+        { label: "missing-label", pngPath: fixture.missingLabelPngPath, passes: false },
+        { label: "missing-edge", pngPath: fixture.missingEdgePngPath, passes: false },
+      ] as const,
+      projectedScores = projectedVariants.map((variant) => ({
+        ...variant,
+        score: magick.comparePaintProjectedImages(
+          projectedRecord.projectedReferencePngPath,
+          variant.pngPath,
+          path.join(root, "projected"),
+          variant.label,
+        ).score,
+      })),
+      colorOnlyRgbError = magick.compareNormalizedError(
+        "RMSE",
+        fixture.input.officialPngPath,
         fixture.input.candidatePngPath,
-        path.join(root, "projected"),
-        fixture.input.slug,
-      ),
-      missingLabelScore = magick.comparePaintProjectedImages(
-        projectedRecord.projectedReferencePngPath,
-        fixture.missingLabelPngPath,
-        path.join(root, "projected"),
-        "missing-label",
       ),
       neutralScore = magick.compareGeometryImages(
         neutralOfficial.neutralPngPath,
@@ -217,8 +340,11 @@ test("paint projection scores actual candidate pixels and rejects PNG-only label
         path.join(root, "neutral"),
         fixture.input.slug,
       );
-    expect(projectionScore.score).toBe(100);
-    expect(missingLabelScore.score).toBeLessThan(99);
+    for (const variant of projectedScores) {
+      if (variant.passes) expect(variant.score).toBe(100);
+      else expect(variant.score).toBeLessThan(99);
+    }
+    expect(colorOnlyRgbError).toBeGreaterThan(0);
     expect(neutralScore.fullCanvasScore).toBe(100);
     expect(fixture.input.candidateSvgSha256).toBe(fileSha256(fixture.input.candidateSvgPath));
   } finally {
@@ -278,6 +404,7 @@ interface PaintProjectionFixture {
   neutralOfficial: NeutralRasterInput;
   neutralCandidate: NeutralRasterInput;
   missingLabelPngPath: string;
+  missingEdgePngPath: string;
 }
 
 async function createPaintProjectionFixture(root: string): Promise<PaintProjectionFixture> {
@@ -290,6 +417,7 @@ async function createPaintProjectionFixture(root: string): Promise<PaintProjecti
       paths.officialPngPath,
       paths.candidatePngPath,
       paths.missingLabelPngPath,
+      paths.missingEdgePngPath,
     );
   fs.writeFileSync(paths.officialSvgPath, officialSvg, { flag: "wx" });
   fs.writeFileSync(paths.candidateSvgPath, candidateSvg, { flag: "wx" });
@@ -310,6 +438,7 @@ function createPaintProjectionInput(
     paths.officialPngPath,
     paths.candidatePngPath,
     paths.missingLabelPngPath,
+    paths.missingEdgePngPath,
   ])
     fs.writeFileSync(outputPath, png, { flag: "wx" });
   fs.writeFileSync(paths.officialSvgPath, officialSvg, { flag: "wx" });
@@ -321,7 +450,7 @@ function createPaintProjectionInput(
 }
 
 function paintProjectionSvg(fill: string, text: string): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80" viewBox="0 0 160 80"><rect x="4" y="4" width="152" height="72" rx="4" fill="${fill}" stroke="${fill}"/><text x="10" y="45" fill="${text}" font-family="Arial, sans-serif" font-size="18">DELETE LABEL TEXT</text></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80" viewBox="0 0 160 80"><rect x="4" y="4" width="152" height="72" rx="4" fill="${fill}" stroke="${fill}"/><line x1="20" y1="20" x2="140" y2="60" stroke="${text}" stroke-width="3"/><text x="10" y="45" fill="${text}" font-family="Arial, sans-serif" font-size="18">DELETE LABEL TEXT</text></svg>`;
 }
 
 function paintProjectionSvgWithIds(ids: readonly [string, string, string], fill: string): string {
@@ -337,6 +466,7 @@ function paintProjectionPaths(root: string) {
     officialPngPath: path.join(root, "official.png"),
     candidatePngPath: path.join(root, "candidate.png"),
     missingLabelPngPath: path.join(root, "candidate-missing-label.png"),
+    missingEdgePngPath: path.join(root, "candidate-missing-edge.png"),
   };
 }
 
@@ -346,6 +476,7 @@ async function renderPaintProjectionFixture(
   officialPngPath: string,
   candidatePngPath: string,
   missingLabelPngPath: string,
+  missingEdgePngPath: string,
 ) {
   const playwright = await new PlaywrightLoader().load(),
     browser = await playwright.chromium.launch({ headless: true });
@@ -355,9 +486,15 @@ async function renderPaintProjectionFixture(
       deviceScaleFactor: 1,
     });
     try {
-      await renderProjectionPng(page, officialSvg, officialPngPath, false);
-      await renderProjectionPng(page, candidateSvg, candidatePngPath, false);
-      await renderProjectionPng(page, candidateSvg, missingLabelPngPath, true);
+      const variants = [
+        { svg: officialSvg, outputPath: officialPngPath, removeElement: null },
+        { svg: candidateSvg, outputPath: candidatePngPath, removeElement: null },
+        { svg: candidateSvg, outputPath: missingLabelPngPath, removeElement: "text" },
+        { svg: candidateSvg, outputPath: missingEdgePngPath, removeElement: "line" },
+      ] as const;
+      for (const variant of variants) {
+        await renderProjectionPng(page, variant.svg, variant.outputPath, variant.removeElement);
+      }
     } finally {
       await page.close();
     }
@@ -374,19 +511,19 @@ async function renderProjectionPng(
   page: PageHandle,
   svg: string,
   outputPath: string,
-  removeLabel: boolean,
+  removeElement: "text" | "line" | null,
 ) {
   await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
   await assignStrictSvg(page, svg);
   await resizeSvgCapture(page, true, "strictViewBox");
   await waitForStrictSvgExternalImages(page);
   await page.evaluate(() => (document as FontReadyDocument).fonts.ready);
-  if (removeLabel) {
-    await page.evaluate(() => {
-      const text = document.querySelector("#diagram svg text");
-      if (text === null) throw new Error("Fixture SVG text node is missing");
-      text.textContent = "";
-    });
+  if (removeElement !== null) {
+    await page.evaluate((selector: "text" | "line") => {
+      const element = document.querySelector(`#diagram svg ${selector}`);
+      if (element === null) throw new Error(`Fixture SVG ${selector} is missing`);
+      element.remove();
+    }, removeElement);
   }
   await page.locator("#capture").screenshot({ path: outputPath, omitBackground: false });
 }
@@ -427,6 +564,7 @@ function projectionFixture(
     neutralOfficial: neutralFixture(input, "official", paths.officialSvgPath, officialSvg),
     neutralCandidate: neutralFixture(input, "candidate", paths.candidateSvgPath, candidateSvg),
     missingLabelPngPath: paths.missingLabelPngPath,
+    missingEdgePngPath: paths.missingEdgePngPath,
   };
 }
 

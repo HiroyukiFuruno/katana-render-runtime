@@ -31,6 +31,10 @@ mod fragment_tests;
 #[path = "svg_rasterize_text_harfrust_combined_metrics_probe.rs"]
 mod combined_metrics_probe;
 
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_text_harfrust_tree_diagnostic_tests.rs"]
+mod tree_diagnostic;
+
 pub(super) fn shape_text_with_face(
     database: &usvg::fontdb::Database,
     face_id: usvg::fontdb::ID,

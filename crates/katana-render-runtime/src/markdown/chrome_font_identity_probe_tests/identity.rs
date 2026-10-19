@@ -14,7 +14,7 @@ mod resources;
 #[path = "identity_resolution.rs"]
 mod resolution;
 
-pub(super) use resolution::{FontResolutionCache, resolve_font, resolve_font_with_cache};
+pub(super) use resolution::{FontResolutionCache, resolve_font_with_cache};
 
 #[cfg(target_os = "macos")]
 #[path = "identity_coretext.rs"]

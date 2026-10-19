@@ -28,28 +28,52 @@ pub(super) fn record(tree: &Tree, source_svg: &str, paint_call: Option<u64>) {
         return;
     };
     let source_svg_sha256 = output::sha256(source_svg.as_bytes());
-    record_tree(tree, source_svg_sha256, paint_call, "root".into());
+    record_tree(
+        tree,
+        source_svg_sha256,
+        Some(source_svg.to_owned()),
+        paint_call,
+        "root".into(),
+    );
 }
 
-fn record_tree(tree: &Tree, source_svg_sha256: String, paint_call: u64, tree_path: String) {
+fn record_tree(
+    tree: &Tree,
+    source_svg_sha256: String,
+    source_svg: Option<String>,
+    paint_call: u64,
+    tree_path: String,
+) {
     let mut evidence = TreeEvidence::default();
     walk_group(tree.root(), &tree_path, &mut evidence);
     let resolved = faces::resolve(tree, &tree_path, paint_call, &evidence.faces);
-    let dropped = evidence.dropped;
-    let text_spans = evidence.text_spans;
-    output::append_tree(
-        FinalGlyphTree {
-            paint_call,
-            tree_path: tree_path.clone(),
-            source_svg_sha256: source_svg_sha256.clone(),
-            faces: resolved.faces,
-            text_spans,
-        },
-        resolved.errors,
-        resolved.owners,
-        dropped,
-    );
+    let mut record = FinalGlyphTree {
+        paint_call,
+        tree_path: tree_path.clone(),
+        source_svg_sha256: source_svg_sha256.clone(),
+        source_svg,
+        resolved_svg_sha256: None,
+        resolved_svg: None,
+        resolved_text_svg_sha256: None,
+        resolved_text_svg: None,
+        faces: resolved.faces,
+        text_spans: evidence.text_spans,
+    };
+    serialize_record_tree(tree, &mut record);
+    output::append_tree(record, resolved.errors, resolved.owners, evidence.dropped);
     record_embedded(evidence.embedded, source_svg_sha256, paint_call, tree_path);
+}
+
+fn serialize_record_tree(tree: &Tree, record: &mut FinalGlyphTree) {
+    if record.source_svg.is_none() {
+        return;
+    }
+    let svg = output::serialize_tree(tree, false);
+    let text_svg = output::serialize_tree(tree, true);
+    record.resolved_svg_sha256 = Some(output::sha256(svg.as_bytes()));
+    record.resolved_svg = Some(svg);
+    record.resolved_text_svg_sha256 = Some(output::sha256(text_svg.as_bytes()));
+    record.resolved_text_svg = Some(text_svg);
 }
 
 fn record_embedded(
@@ -62,6 +86,7 @@ fn record_embedded(
         record_tree(
             &embedded,
             source_svg_sha256.clone(),
+            None,
             paint_call,
             format!("{tree_path}/{suffix}"),
         );

@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Page, type Request, type Response } from "playwright";
+import {
+  type CatalogCaptureProducerContext,
+  captureCatalogProducerContext,
+  sameCatalogProducerContext,
+} from "./catalog-capture-producer-context";
 import { assertCoreTextPostScriptOrder, validateFontProvenance } from "./coretext-font-provenance";
 import { applyEventsInteraction } from "./dynamic-events";
 import {
@@ -21,8 +26,10 @@ import {
   type Html84ConditionIdentity,
 } from "./stage-score";
 import {
+  assertCatalogCaptureIdentity,
   assertCatalogStage90ConditionPlan,
   type CatalogStage90ConditionPlan,
+  inspectCatalogRawStage90Reuse,
 } from "./stage-score-suite";
 
 export const INPUT_STATE_OPERATIONS = [
@@ -71,6 +78,11 @@ interface ChromeFontIdentityCapture {
   conditionId: string;
   selectedFonts: ChromeSelectedFont[];
   resourceFiles: Array<Pick<ChromeResourceEntry, "url" | "bodyPath" | "bytesSha256">>;
+}
+
+export interface CatalogStage90ResumeOptions {
+  observationManifestPath: string;
+  finalizedManifestPath: string;
 }
 
 export interface ChromeFontIdentityRequest {
@@ -611,6 +623,7 @@ export async function runCatalogStage90Captures(
   binary: string,
   planPath: string,
   outputDirectory: string,
+  resume?: CatalogStage90ResumeOptions,
 ): Promise<JsonValue> {
   outputDirectory = path.resolve(outputDirectory);
   const catalog = loadFeatureCatalog();
@@ -623,10 +636,12 @@ export async function runCatalogStage90Captures(
   if (fs.existsSync(outputDirectory))
     throw new Error("Catalog stage90 capture output directory already exists");
   fs.mkdirSync(outputDirectory);
+  const producerContext = captureCatalogProducerContext(outputDirectory, "before");
   const server = await chromium.launchServer({ channel: "chrome", headless: true });
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
   const conditions: JsonValue[] = [];
   const fontIdentityCaptures: ChromeFontIdentityCapture[] = [];
+  let chromeRuntimeVersion = "";
   try {
     const chromeProcess = server.process();
     if (!chromeProcess.spawnfile)
@@ -635,19 +650,51 @@ export async function runCatalogStage90Captures(
     const chromeExecutableSha256 = sha256File(chromeExecutablePath);
     const connected = await chromium.connect(server.wsEndpoint());
     browser = connected;
-    for (const tuple of plan.conditions) {
-      const capture = await captureCatalogCondition(
-        connected,
-        catalog,
-        tuple,
-        binary,
-        binarySha256,
-        outputDirectory,
-        { path: chromeExecutablePath, sha256: chromeExecutableSha256 },
+    chromeRuntimeVersion = requireChromeRuntimeVersion(connected);
+    const prior = resume
+      ? readCatalogStage90Resume(resume, planPath, {
+          binaryPath: path.resolve(binary),
+          chromeExecutablePath,
+          chromeExecutableSha256,
+          producerContext,
+          chromeRuntimeVersion,
+        })
+      : undefined;
+    if (prior?.rejectionReason)
+      fs.writeFileSync(
+        path.join(outputDirectory, "catalog-stage90-resume-rejection.json"),
+        `${JSON.stringify({ reason: prior.rejectionReason }, null, 2)}\n`,
+        { flag: "wx" },
       );
-      conditions.push(capture.condition);
-      fontIdentityCaptures.push(capture.fontIdentityRequest);
-    }
+    if (prior)
+      fs.writeFileSync(
+        path.join(outputDirectory, "catalog-stage90-resume-report.json"),
+        `${JSON.stringify(
+          {
+            reusedConditionIds: [...prior.reusableConditionIds],
+            recapturedConditionIds: plan.conditions
+              .map((condition) => condition.conditionId)
+              .filter((conditionId) => !prior.reusableConditionIds.has(conditionId)),
+            rejected: prior.rejected ?? [],
+            ...(prior.rejectionReason ? { rejectionReason: prior.rejectionReason } : {}),
+          },
+          null,
+          2,
+        )}\n`,
+        { flag: "wx" },
+      );
+    const captured = await collectCatalogConditions(
+      connected,
+      catalog,
+      plan,
+      binary,
+      binarySha256,
+      outputDirectory,
+      { path: chromeExecutablePath, sha256: chromeExecutableSha256 },
+      prior,
+    );
+    conditions.push(...captured.conditions);
+    fontIdentityCaptures.push(...captured.fontIdentityCaptures);
   } finally {
     try {
       if (browser) await browser.close();
@@ -659,6 +706,8 @@ export async function runCatalogStage90Captures(
     throw new Error("Catalog probe binary changed during capture");
   if (sha256File("tests/fixtures/html/feature-catalog.json") !== catalogSha256)
     throw new Error("Feature catalog changed during capture");
+  const producerContextAfter = captureCatalogProducerContext(outputDirectory, "after");
+  assertCatalogProducerContextStable(producerContext, producerContextAfter);
   const request = createChromeFontIdentityRequest(
     fontIdentityCaptures,
     plan.conditions.map((condition) => condition.conditionId),
@@ -693,6 +742,9 @@ export async function runCatalogStage90Captures(
     planSha256: sha256File(planPath),
     binaryPath: path.resolve(binary),
     binarySha256,
+    producerContext,
+    producerContextAfter,
+    chromeRuntimeVersion,
     fontIdentityRequest: requestRef,
     fontIdentityProbeBinary: { path: path.resolve(binary), sha256: binarySha256 },
     conditions: conditionsWithRequest,
@@ -721,6 +773,291 @@ export async function runCatalogStage90Captures(
   )
     throw new Error("Catalog stage90 capture has unverified conditions; acceptance remains false");
   return finalized;
+}
+
+function requireChromeRuntimeVersion(browser: { version(): string }): string {
+  const version = browser.version();
+  if (!version) throw new Error("Chrome runtime version is empty");
+  return version;
+}
+
+function assertCatalogProducerContextStable(
+  before: CatalogCaptureProducerContext,
+  after: CatalogCaptureProducerContext,
+): void {
+  if (!sameCatalogProducerContext(before, after))
+    throw new Error("Catalog capture producer context changed during capture");
+}
+
+interface CatalogStage90ResumeState {
+  reusableConditionIds: Set<string>;
+  finalizedById: Map<string, JsonValue>;
+  observationById: Map<string, JsonValue>;
+  rejected?: Array<{ conditionId: string; reason: string }>;
+  rejectionReason?: string;
+}
+
+async function collectCatalogConditions(
+  browser: Awaited<ReturnType<typeof chromium.launch>>,
+  catalog: ReturnType<typeof loadFeatureCatalog>,
+  plan: CatalogStage90ConditionPlan,
+  binary: string,
+  binarySha256: string,
+  outputDirectory: string,
+  chromeExecutable: { path: string; sha256: string },
+  prior: CatalogStage90ResumeState | undefined,
+): Promise<{ conditions: JsonValue[]; fontIdentityCaptures: ChromeFontIdentityCapture[] }> {
+  const conditions: JsonValue[] = [];
+  const fontIdentityCaptures: ChromeFontIdentityCapture[] = [];
+  for (const tuple of plan.conditions) {
+    const reused = prior?.reusableConditionIds.has(tuple.conditionId) ?? false;
+    const capture = reused
+      ? reusedCatalogCondition(requireResumeState(prior), tuple.conditionId, outputDirectory)
+      : await captureCatalogCondition(
+          browser,
+          catalog,
+          tuple,
+          binary,
+          binarySha256,
+          outputDirectory,
+          chromeExecutable,
+        );
+    assertCatalogCaptureIdentity(
+      tuple,
+      jsonRecord(capture.condition, "catalog condition capture"),
+      binarySha256,
+    );
+    conditions.push(capture.condition);
+    fontIdentityCaptures.push(capture.fontIdentityRequest);
+  }
+  return { conditions, fontIdentityCaptures };
+}
+
+function reusedCatalogCondition(
+  prior: CatalogStage90ResumeState,
+  conditionId: string,
+  outputDirectory: string,
+): { condition: JsonValue; fontIdentityRequest: ChromeFontIdentityCapture } {
+  const finalizedValue = prior.finalizedById.get(conditionId);
+  const observationValue = prior.observationById.get(conditionId);
+  if (!finalizedValue || !observationValue)
+    throw new Error(`reusable catalog condition evidence is missing: ${conditionId}`);
+  const finalized = jsonRecord(finalizedValue, "prior finalized condition");
+  const observation = jsonRecord(observationValue, "prior observation condition");
+  assertReusableRowsMatch(finalized, observation, conditionId);
+  const oldReceiptPath = jsonText(observation.chromeReceiptPath, "prior Chrome receipt path");
+  const label = conditionId.replace(/[^a-zA-Z0-9.-]+/g, "_");
+  const freshReceiptPath = path.join(outputDirectory, `${label}-chrome-receipt.json`);
+  const freshReceiptSha256 = copyCatalogStage90Receipt(
+    oldReceiptPath,
+    freshReceiptPath,
+    jsonText(observation.chromeReceiptSha256, "prior Chrome receipt SHA"),
+  );
+  const condition = {
+    ...observation,
+    chromeReceiptPath: freshReceiptPath,
+    chromeReceiptSha256: freshReceiptSha256,
+    status: "unverified",
+  } as unknown as JsonValue;
+  return {
+    condition,
+    fontIdentityRequest: catalogFontIdentityCapture(observation, conditionId),
+  };
+}
+
+function requireResumeState(
+  state: CatalogStage90ResumeState | undefined,
+): CatalogStage90ResumeState {
+  if (!state) throw new Error("catalog resume state is missing");
+  return state;
+}
+
+export function copyCatalogStage90Receipt(
+  sourcePath: string,
+  destinationPath: string,
+  expectedSha256: string,
+): string {
+  const bytes = fs.readFileSync(sourcePath);
+  const actualSha256 = sha256Bytes(bytes);
+  if (actualSha256 !== expectedSha256) throw new Error("prior Chrome receipt changed");
+  fs.writeFileSync(destinationPath, bytes, { flag: "wx" });
+  return actualSha256;
+}
+
+function assertReusableRowsMatch(
+  finalized: Record<string, JsonValue>,
+  observation: Record<string, JsonValue>,
+  conditionId: string,
+): void {
+  for (const key of [
+    "conditionId",
+    "caseId",
+    "state",
+    "operationKind",
+    "targetSelector",
+    "viewport",
+    "sourceSha256",
+    "binarySha256",
+    "chromePath",
+    "chromeSha256",
+    "krrReportPath",
+    "krrReportSha256",
+    "resourceProvenance",
+    "fontIdentityObservation",
+  ])
+    if (!sameJson(finalized[key] ?? null, observation[key] ?? null))
+      throw new Error(`prior observation differs from finalized row: ${conditionId}`);
+}
+
+function sha256Bytes(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function readCatalogStage90Resume(
+  resume: CatalogStage90ResumeOptions,
+  currentPlanPath: string,
+  context: {
+    binaryPath: string;
+    chromeExecutablePath: string;
+    chromeExecutableSha256: string;
+    producerContext: CatalogCaptureProducerContext;
+    chromeRuntimeVersion: string;
+  },
+): CatalogStage90ResumeState {
+  const priorManifestPath = fs.realpathSync(path.resolve(resume.finalizedManifestPath));
+  const priorObservationPath = fs.realpathSync(path.resolve(resume.observationManifestPath));
+  const priorManifest = jsonRecord(
+    JSON.parse(fs.readFileSync(priorManifestPath, "utf8")) as JsonValue,
+    "prior catalog capture manifest",
+  );
+  const priorPlanPath = absolutePath(priorManifest.planPath, "prior catalog plan path");
+  const currentPlanRealPath = fs.realpathSync(path.resolve(currentPlanPath));
+  if (sha256File(priorPlanPath) !== sha256File(currentPlanRealPath))
+    return {
+      reusableConditionIds: new Set(),
+      finalizedById: new Map(),
+      observationById: new Map(),
+      rejected: rejectedPlanIds(
+        currentPlanPath,
+        "prior catalog plan differs from the current plan",
+      ),
+      rejectionReason: "prior catalog plan differs from the current plan",
+    };
+  const currentPlan = assertCatalogStage90ConditionPlan(
+    JSON.parse(fs.readFileSync(currentPlanRealPath, "utf8")) as JsonValue,
+  );
+  const changedFixture = currentPlan.conditions.find(
+    (condition) => sha256File(condition.fixturePath) !== condition.sourceSha256,
+  );
+  if (changedFixture)
+    return {
+      reusableConditionIds: new Set(),
+      finalizedById: new Map(),
+      observationById: new Map(),
+      rejected: rejectedPlanIds(currentPlanPath, "current catalog fixture differs"),
+      rejectionReason: `current catalog fixture differs: ${changedFixture.conditionId}`,
+    };
+  const reuse = inspectCatalogRawStage90Reuse(priorManifest, currentPlan as unknown as JsonValue, {
+    planPath: priorPlanPath,
+    binaryPath: context.binaryPath,
+    chromeExecutablePath: context.chromeExecutablePath,
+    chromeExecutableSha256: context.chromeExecutableSha256,
+    producerContext: context.producerContext,
+    chromeRuntimeVersion: context.chromeRuntimeVersion,
+  });
+  if (reuse.reusableConditionIds.length === 0)
+    return {
+      reusableConditionIds: new Set(),
+      finalizedById: new Map(),
+      observationById: new Map(),
+      rejected: reuse.rejected,
+      rejectionReason: "prior catalog captures cannot be reused",
+    };
+  const observation = jsonRecord(
+    JSON.parse(fs.readFileSync(priorObservationPath, "utf8")) as JsonValue,
+    "prior catalog observation",
+  );
+  assertObservationManifest(observation, priorManifest, currentPlan, priorPlanPath);
+  const finalizedById = new Map(
+    jsonArray(priorManifest.conditions, "prior finalized conditions").map((value) => {
+      const row = jsonRecord(value, "prior finalized condition");
+      return [jsonText(row.conditionId, "prior condition id"), row] as const;
+    }),
+  );
+  const observationById = new Map(
+    jsonArray(observation.conditions, "prior observation conditions").map((value) => {
+      const row = jsonRecord(value, "prior observation condition");
+      return [jsonText(row.conditionId, "prior observation condition id"), row] as const;
+    }),
+  );
+  return {
+    reusableConditionIds: new Set(reuse.reusableConditionIds),
+    finalizedById,
+    observationById,
+    rejected: reuse.rejected,
+  };
+}
+
+function rejectedPlanIds(
+  planPath: string,
+  reason: string,
+): Array<{ conditionId: string; reason: string }> {
+  const plan = assertCatalogStage90ConditionPlan(
+    JSON.parse(fs.readFileSync(path.resolve(planPath), "utf8")) as JsonValue,
+  );
+  return plan.conditions.map((condition) => ({
+    conditionId: condition.conditionId,
+    reason,
+  }));
+}
+
+function assertObservationManifest(
+  observation: Record<string, JsonValue>,
+  finalized: Record<string, JsonValue>,
+  plan: CatalogStage90ConditionPlan,
+  planPath: string,
+): void {
+  if (
+    observation.profile !== "catalog-stage90-captures" ||
+    observation.threshold !== 90 ||
+    observation.acceptance !== false ||
+    observation.catalogPath !== plan.catalogPath ||
+    observation.catalogSha256 !== plan.catalogSha256 ||
+    path.resolve(jsonText(observation.planPath, "observation plan path")) !==
+      path.resolve(planPath) ||
+    observation.planSha256 !== sha256File(planPath) ||
+    observation.binaryPath !== finalized.binaryPath ||
+    observation.binarySha256 !== finalized.binarySha256 ||
+    observation.chromeRuntimeVersion !== finalized.chromeRuntimeVersion
+  )
+    throw new Error("prior catalog observation identity differs");
+  if (
+    !sameCatalogProducerContext(observation.producerContext, finalized.producerContext) ||
+    (observation.producerContextAfter !== undefined &&
+      !sameCatalogProducerContext(observation.producerContext, observation.producerContextAfter))
+  )
+    throw new Error("prior catalog producer context differs");
+  const expected = plan.conditions.map((condition) => condition.conditionId);
+  const actual = jsonArray(observation.conditions, "prior observation conditions").map((value) =>
+    jsonText(jsonRecord(value, "prior observation condition").conditionId, "condition id"),
+  );
+  if (actual.length !== expected.length || new Set(actual).size !== actual.length)
+    throw new Error("prior observation condition inventory is incomplete or duplicated");
+  if (actual.some((conditionId, index) => conditionId !== expected[index]))
+    throw new Error("prior observation condition order differs from the plan");
+}
+
+function catalogFontIdentityCapture(
+  row: Record<string, JsonValue>,
+  conditionId: string,
+): ChromeFontIdentityCapture {
+  const observation = jsonRecord(row.fontIdentityObservation, "prior font observation");
+  const resources = jsonRecord(row.resourceProvenance, "prior resource provenance");
+  return {
+    conditionId,
+    selectedFonts: jsonSelectedFonts(observation.selectedFonts),
+    resourceFiles: jsonResourceFiles(resources.requests),
+  };
 }
 
 function runChromeFontIdentityProbe(
@@ -1170,13 +1507,8 @@ async function captureCatalogCondition(
   } catch (error) {
     return {
       condition: {
-        conditionId: tuple.conditionId,
-        caseId: tuple.caseId,
-        state: tuple.state,
-        operationKind: tuple.operationKind,
+        ...catalogConditionIdentityFields(tuple, fixtureSha, binarySha256),
         viewport: { ...tuple.viewport },
-        sourceSha256: fixtureSha,
-        binarySha256,
         status: "unverified",
         error: String(error),
         fontIdentityObservation: {
@@ -1267,12 +1599,8 @@ function unknownCatalogCondition(
   krr: Extract<ReturnType<typeof captureKrrCatalogCondition>, { status: "unknown" }>,
 ): JsonValue {
   return {
-    conditionId: tuple.conditionId,
-    caseId: tuple.caseId,
-    state: tuple.state,
+    ...catalogConditionIdentityFields(tuple, fixtureSha, binarySha256),
     viewport: { ...tuple.viewport },
-    sourceSha256: fixtureSha,
-    binarySha256,
     chromePath,
     chromeSha256: sha256File(chromePath),
     chromeReceiptPath,
@@ -1337,13 +1665,8 @@ function unverifiedChromeCatalogCondition(
   krr: Extract<ReturnType<typeof captureKrrCatalogCondition>, { status: "observed" }>,
 ): JsonValue {
   return {
-    conditionId: tuple.conditionId,
-    caseId: tuple.caseId,
-    state: tuple.state,
-    operationKind: tuple.operationKind,
+    ...catalogConditionIdentityFields(tuple, sourceSha256, binarySha256),
     viewport: { ...tuple.viewport },
-    sourceSha256,
-    binarySha256,
     chromePath,
     chromeSha256: sha256File(chromePath),
     chromeReceiptPath,
@@ -1362,6 +1685,22 @@ function unverifiedChromeCatalogCondition(
       "Independent Chrome raw receipt has unknown physical font/browser binary provenance",
     status: "unverified",
   } as unknown as JsonValue;
+}
+
+export function catalogConditionIdentityFields(
+  tuple: CatalogStage90ConditionPlan["conditions"][number],
+  sourceSha256: string,
+  binarySha256: string,
+): Record<string, JsonValue> {
+  return {
+    conditionId: tuple.conditionId,
+    caseId: tuple.caseId,
+    state: tuple.state,
+    operationKind: tuple.operationKind,
+    ...(tuple.targetSelector ? { targetSelector: tuple.targetSelector } : {}),
+    sourceSha256,
+    binarySha256,
+  };
 }
 
 function catalogOperationSpec(entry: CatalogCase, state: string): VisualStateSpec {

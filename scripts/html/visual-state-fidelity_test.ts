@@ -1,14 +1,48 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { loadFeatureCatalog } from "./feature-catalog";
 import { fidelityThresholdForPhase } from "./fidelity-phase";
 import { createCatalogStage90ConditionPlan } from "./stage-score-suite";
 import {
+  catalogConditionIdentityFields,
   chromeFontTextNodeIds,
+  copyCatalogStage90Receipt,
   createChromeFontIdentityRequest,
   INPUT_STATE_OPERATIONS,
   runInputStateFidelity,
   VISUAL_STATE_SPECS,
 } from "./visual-state-fidelity";
+
+describe("catalog stage90 resume receipts", () => {
+  test("copies the prior unknown receipt exclusively and rejects tampered bytes", () => {
+    const directory = fs.mkdtempSync(path.resolve("tmp/catalog-stage90-resume-test-"));
+    try {
+      const sourcePath = path.join(directory, "prior-unknown.json");
+      const destinationPath = path.join(directory, "fresh-unknown.json");
+      const original = Buffer.from('{"status":"unknown"}\n');
+      fs.writeFileSync(sourcePath, original);
+      const originalSha256 = createHash("sha256").update(original).digest("hex");
+      expect(copyCatalogStage90Receipt(sourcePath, destinationPath, originalSha256)).toBe(
+        originalSha256,
+      );
+      expect(fs.readFileSync(destinationPath)).toEqual(original);
+
+      fs.writeFileSync(sourcePath, Buffer.from('{"status":"tampered"}\n'));
+      expect(() =>
+        copyCatalogStage90Receipt(
+          sourcePath,
+          path.join(directory, "tampered-copy.json"),
+          originalSha256,
+        ),
+      ).toThrow(/receipt changed/);
+      expect(fs.readFileSync(destinationPath)).toEqual(original);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("Chrome rendered text inventory", () => {
   test("visits deep text, pseudo content, shadow trees and frame documents once", () => {
@@ -152,6 +186,26 @@ describe("catalog visual state inventory", () => {
         (spec) => spec.caseId === "navigation" && spec.state === "all-toc-links",
       ),
     ).toBe(true);
+  });
+
+  test("serializes planned target selectors for both targeted and untargeted rows", () => {
+    const plan = createCatalogStage90ConditionPlan();
+    const targeted = plan.conditions.find((condition) => condition.targetSelector);
+    const untargeted = plan.conditions.find((condition) => !condition.targetSelector);
+    if (!targeted || !untargeted) throw new Error("plan lacks target selector boundary cases");
+    const binarySha256 = "b".repeat(64);
+    const targetedRoundTrip = JSON.parse(
+      JSON.stringify(catalogConditionIdentityFields(targeted, targeted.sourceSha256, binarySha256)),
+    ) as Record<string, unknown>;
+    const untargetedRoundTrip = JSON.parse(
+      JSON.stringify(
+        catalogConditionIdentityFields(untargeted, untargeted.sourceSha256, binarySha256),
+      ),
+    ) as Record<string, unknown>;
+    expect(targetedRoundTrip.targetSelector).toBe(targeted.targetSelector);
+    expect(untargetedRoundTrip).not.toHaveProperty("targetSelector");
+    expect(targetedRoundTrip.operationKind).toBe(targeted.operationKind);
+    expect(untargetedRoundTrip.operationKind).toBe(untargeted.operationKind);
   });
 });
 

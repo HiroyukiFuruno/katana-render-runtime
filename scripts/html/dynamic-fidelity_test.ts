@@ -1563,6 +1563,28 @@ describe("fixed fidelity acceptance CLI routes", () => {
     ).toThrow();
   });
 
+  test("catalog resume requires both prior manifests and preserves the complete capture contract", () => {
+    const argv = ["catalog-stage90-capture", "build.jsonl", "plan.json", "out"];
+    const original = fidelityAcceptancePlan(argv);
+    if (original.kind !== "catalog-stage90-capture")
+      throw new Error("expected the catalog capture plan");
+    const observationManifestPath = "prior-observation.json";
+    const finalizedManifestPath = "prior-finalized.json";
+    expect(
+      fidelityAcceptancePlan([...argv, observationManifestPath, finalizedManifestPath]),
+    ).toEqual({
+      ...original,
+      resume: { observationManifestPath, finalizedManifestPath },
+    });
+    for (const incomplete of [
+      [observationManifestPath],
+      [observationManifestPath, ""],
+      ["", finalizedManifestPath],
+      [observationManifestPath, finalizedManifestPath, "extra"],
+    ])
+      expect(() => fidelityAcceptancePlan([...argv, ...incomplete])).toThrow();
+  });
+
   test("catalog plan CLI writes the exact physical 84 tuples without overwriting", () => {
     const directory = fs.mkdtempSync(path.resolve("tmp/html84-plan-cli-"));
     const output = path.join(directory, "exact84-plan.json");

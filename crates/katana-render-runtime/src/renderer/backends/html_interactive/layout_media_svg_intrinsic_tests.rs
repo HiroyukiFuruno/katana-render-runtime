@@ -54,6 +54,12 @@ fn percentage_svg_obeys_maximum_width_inside_centered_flex() -> TestResult {
 }
 
 #[test]
+fn percentage_svg_uses_default_intrinsic_width_in_nested_auto_flex() -> TestResult {
+    let html = capture_auto_viewport_html(PERCENT_SVG);
+    assert_geometry(&html, 300.0, 300.0 * 380.0 / 600.406_25)
+}
+
+#[test]
 fn explicit_css_width_takes_priority_over_svg_width_attribute() -> TestResult {
     let svg = NATURAL_SVG.replacen(
         "width=\"80\" height=\"50\"",
@@ -145,8 +151,26 @@ fn capture_html(svg: &str, flex: bool) -> String {
     } else {
         svg.to_owned()
     };
+    capture_document(
+        content,
+        format!(
+            "width:{SVG_VIEWPORT_WIDTH}px;height:{SVG_VIEWPORT_HEIGHT}px;display:flex;align-items:center;justify-content:center"
+        ),
+        format!("max-width:{SVG_VIEWPORT_WIDTH}px;max-height:{SVG_VIEWPORT_HEIGHT}px"),
+    )
+}
+
+fn capture_auto_viewport_html(svg: &str) -> String {
+    capture_document(
+        format!("<main class=capture><div class=viewport>{svg}</div></main>"),
+        "display:flex;align-items:center;justify-content:center".to_owned(),
+        String::new(),
+    )
+}
+
+fn capture_document(content: String, viewport_style: String, svg_style: String) -> String {
     format!(
-        "<!doctype html><html><head><style>html,body{{margin:0;width:{CAPTURE_WIDTH}px;height:{CAPTURE_HEIGHT}px;overflow:hidden;background:#1e1e1e}}.capture{{width:{CAPTURE_WIDTH}px;height:{CAPTURE_HEIGHT}px;display:flex;align-items:center;justify-content:center}}.viewport{{width:{SVG_VIEWPORT_WIDTH}px;height:{SVG_VIEWPORT_HEIGHT}px;display:flex;align-items:center;justify-content:center}}.viewport>svg{{max-width:{SVG_VIEWPORT_WIDTH}px;max-height:{SVG_VIEWPORT_HEIGHT}px}}</style></head><body>{content}</body></html>"
+        "<!doctype html><html><head><style>html,body{{margin:0;width:{CAPTURE_WIDTH}px;height:{CAPTURE_HEIGHT}px;overflow:hidden;background:#1e1e1e}}.capture{{width:{CAPTURE_WIDTH}px;height:{CAPTURE_HEIGHT}px;display:flex;align-items:center;justify-content:center}}.viewport{{{viewport_style}}}.viewport>svg{{{svg_style}}}</style></head><body>{content}</body></html>"
     )
 }
 

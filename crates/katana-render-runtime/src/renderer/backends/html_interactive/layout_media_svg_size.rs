@@ -6,6 +6,7 @@ use super::DEFAULT_IMAGE_MAX_HEIGHT;
 const VIEW_BOX_VALUE_COUNT: usize = 4;
 const VIEW_BOX_WIDTH_INDEX: usize = 2;
 const VIEW_BOX_HEIGHT_INDEX: usize = 3;
+const DEFAULT_INTRINSIC_SVG_WIDTH: f32 = 300.0;
 type ViewBox = (f32, f32, f32, f32);
 
 pub(super) fn intrinsic_svg_width(
@@ -15,6 +16,17 @@ pub(super) fn intrinsic_svg_width(
 ) -> Option<f32> {
     let explicit_width =
         attribute(attributes, "width").and_then(|value| parse_svg_length(value, available_width));
+    /* WHY: 百分率はintrinsic幅を持たず、auto flexの測定時に親幅へ展開すると循環する。 */
+    if style.width.is_none()
+        && explicit_width.is_some()
+        && attribute(attributes, "width").is_some_and(|value| value.trim().ends_with('%'))
+    {
+        return Some(used_svg_width(
+            DEFAULT_INTRINSIC_SVG_WIDTH,
+            available_width,
+            style,
+        ));
+    }
     /* WHY: 投影済みSVGは子が空でも寸法を持つ。viewBoxだけの既存自然幅方針は変えない。 */
     (style.width.is_some() || explicit_width.is_some())
         .then(|| embedded_svg_size(attributes, available_width, style).0)
