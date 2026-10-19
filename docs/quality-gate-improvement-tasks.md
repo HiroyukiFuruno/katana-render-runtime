@@ -8,9 +8,94 @@
 
 - [ ] C4/TreeView配色別評価のP1是正: 中立SVGをChromium再描画した画像だけではKRR実PNGの文字・図形欠落を見逃す。実PNGの形状99を正式判定へ接続し、色差だけを別記録する。原本不変・他図RGB min4の99維持。代表2例の中立SVG score100を正式合格にしない。
 
-## 現在の状態（2026-10-19）
+## 現在の状態（2026-10-20）
 
-直近checkpointは `4e7e69d9`。未採用Skiaを退役し、統合source-static35.267秒・関連native33件49.600秒が成功（`tmp/quality/skia-retirement-integrated-r2/`）。以下のcoverageは退役前の実測であり、現行100/0の合格へ転用しない。native比較wrapperの自然寸法修正は関連10件37assert、既存寸法回帰57assert・strict型・Biomeが成功（`tmp/quality/native-frame-wrapper-r1/source-ready-report.json`）。並行依存更新の未追跡Draw.io資産によりowned contractは失敗し、統合検査へ残す。
+R146/R149/R152/R154/R156/R158で、SVG形状、HTML consumer、実glyph監査、契約変異回帰、CLI証跡回帰、検証経路の6関心を通常hook付きローカルcommitへ取り込んだ。最新は`c5f31a60`、各commit実exit0、push/PR/公開は未実施。R142は依存鮮度476件を通過したが、既存の公開内容manifestが過去HEADのためrelease-targetが拒否した。公開内容の期待値を途中HEADへ更新して通過させず、残る文書を取り込んだ最終候補で既存のmanifest producerを実行・差分レビュー・commitしてから正式証拠を生成する。現在の100/0・全117各99・表示時間/RSS・完全ゲートは未合格のまま維持する。
+
+R132は保護44件を正式validatorで確認し、使用中targetなしを確認した標準clean後、`depends-update-all`を再実行した。LICENSE同期・圧縮・配布資産・静的解析・自動化・runtime-unused全7系統・Rust2568成功/17skipを含む42項目が完了したが、coverage-policyで実exit1（1670.273秒、source前後`9491af2d`一致）。rootは60101/61170行（98.252411%、未計測1069）、独立性能harnessはbaseline213/913行・candidate213/920行で、いずれも100/0ではない。原LICENSEエラーの解消と完全ゲート不合格を区別する。R138のrelease-targetは互換更新webpki-roots 1.0.9→1.0.10を検出して停止し、stage/commitは未実行。R141はroot/独立harness両lock更新と、`check`内のcoverage DAG直後に同じcoverageを直接再実行する重複1行の除去を行い、関連Bun2file・owned contract・差分検査がexit0。sourceは`59b943ec`へ変わっているためR132を更新後全体合格へ転用しない。証跡は`tmp/quality/current-dependency-update-protected-retry-r132/`と`tmp/quality/current-update-final-lock-and-dedup-r141/`。ローカル実装commitとclean-source正式producer、画像・性能・100/0・レビュー/CI/公開は継続する。
+
+- [ ] RELEASE-CLEAN-SOURCE-EVIDENCE-ORDER: 性能producerはcleanなcommit済みソースとHEADを要求する一方、release skillがcommit前のrelease-checkでその証拠を要求して循環していた。両skillの順序を「変更対応の検査・自己レビュー・通常hook付きローカル実装commit → 最新HEADの正式証拠生成 → 完全release gate → push/Draft」へ修正。未完了のスコア・性能・coverage100条件を中間commitの成功へ置き換えず、実際のclean-source producerまで確認する。
+
+R119はR115の古いrelease-profile期待値1箇所を修正し、全静的・自動化契約の再検証がexit0・413.210秒、source前後`11ea478c`一致。R116は既存official producerでraw JS基準をEN59/JA58全件fresh取得し、strict official readerがexit0・同source前後一致。旧R9 receiptのSHA不変も確認済み。これは独立基準の受理であり、KRR native117各99の合格ではない。
+
+R113は最適化した既存release profileで正式HTML全体を再検証し、実exit0・805.598秒、source前後`7ad803ed`一致。静的286・埋込図表22・動的84・入力state・統合readerの全条件を維持し、R108の1698.067秒から検証時間を短縮した。製品の表示時間/RSS非劣化とは別の結果。続くR115の`just check`は実exit1・1213.480秒、source前後同一、39完了・1失敗・3skip。Rust全体テストと資産検査は成功したが、release profileへ追随していない契約テスト1箇所が失敗し、完全ゲートは未合格。新規native coverageは60097/61175行（98.237842%、未計測1078）で100%条件は未達。詳細は`tmp/quality/current-full-quality-and-coverage-r115/coverage-detail.json`。旧raw117のofficial readerは`bun.lock`の同一内容SHA・異なるinodeを実際に拒否したため、旧receiptを書き換えず、既存raw JS producerでfresh基準を取得する。
+
+R108の正式`html-release-fidelity-check`は実exit0（1698.067秒）、source前後`2c04e1ff`一致。静的286/286（全スクロール214＋目次72、最低91.95591）、埋込図表22/22、動的84・入力state・interim統合readerが成功した。HTML90条件の実証であり、表示時間/RSS・Mermaid単体117各99・coverage100・公開工程は未完了。次の反復を速くするR109の既存release profile試行は同じ48条件が全90成功、48枚のnative PNGがR105とbytes完全一致、suite175.914→61.809秒（1回ずつの検証時間観測、製品性能の受入ではない）。正式証跡は`tmp/quality/current-html-release-fidelity-r108/`と`tmp/quality/current-html-release-profile-library-trial-r109/`、bytes比較は`tmp/quality/html-profile-output-equivalence-r110/`。標準recipeへの適用と適用後の全体回帰を続行する。
+
+R102はBun限定63件とRust目次回帰が成功したが、Node実BrowserでBun専用process APIを検出して19成功/1失敗。Node標準spawnSyncへ変更し、status/nullの失敗拒否を維持したR104は型検査・画像比較unit・Chrome20件が成功（source前後a1461498一致）。R103のbuild前容量拒否は、保護44件がtarget外・使用中buildなしを確認して標準just cleanで回復し、前後の正式validatorも成功。R105の現物buildと原HTML比較は48/48成功、最低93.02844（前回83.6088）、全3幅の実末尾・全5目次×3幅の15操作を含む。source前後a1461498一致、実exit0。証跡は`tmp/quality/current-html-library-table-toc-r105/`。これは当該fixtureの合格であり、全catalog・動的84・性能・117各99・coverage100・公開の合格ではない。
+
+- [/] HTML-CONSUMER-NAV-TOC-COVERAGE: library reservationのnav5目次にtoc-item classが無く、Chrome/Rust両selectorが除外していた。既存anonymous16/navigation3とlegacy class観点を維持し、semantic nav内のfragmentリンク・重複除去・DOM順を共通条件で検証する。fixtureへclassを足して回避しない。
+- [/] Q18-DUPLICATE-RUN-RECOVERY: 登録回帰のBun2fileが4重起動（PID67011/67623/67708/68229）。全て実SIGINTし、`tmp/quality/r98-duplicate-bun-recovery-r1/`へ記録。未回収sessionを再起動しないルールと既存terminal-report lockで単一ownerへ固定し、現在sourceで単一実行を回収する。過去4runは不採用。
+
+R94全静的19項目はsource `43205f0a` 前後一致・exit0（178.952秒）。R95の正式HTML入口は同source前後一致で、静的257件中252成功/図書予約5件失敗（最小83.6088）、図表22画像は全90成功。既知のtable不合格を修正してから重い動的検証を再実行するためSIGINT終了（実exit-2、1687.872秒）を回収し、失敗・中断証跡と画像は保持した。動的84/入力state/全体readerは未合格。
+
+- [/] HTML-CONSUMER-TABLE-DECLARED-UNDERFILL: 幅100% tableの3列各23%で残余31%が配分されず、960幅で594px→約410px・本文3行各1行余分（計67.2px）の後続flow差を生む。全宣言列の不足幅を一般的な列幅配分で補い、mixedauto/100%/overflow/intrinsic minimaの回帰と元HTML全viewport/scrollを再比較する。fixture/基準/scoreは変更しない。
+
+
+source `f82833d9` はR91のfmt/AST/Clippy・default profileのmarker/svg関連unit（runtime67件/674件・10ignored、重複あり）と、R92全静的19項目176.460秒・exit0を通過。R93実Chrome比較は3viewport/両fixtureの22/22画像が全90成功（Mermaid最小90.31383、Draw.io最小91.22981、suite71.445秒）、6つのscroll coverage reportも実末尾まで受理。source前後一致。上記6項目の限定不具合修正はこの範囲で検証済み。HTML全catalog・全目次・動的84・初回/再表示/resize/RSS・117各99・coverage100・公開全工程の合格とは区別する。Draw.io末尾のExtensibility fallback警告は残存し、CSSauto-heightや配色とは別のSVG対応範囲として#106最終99の評価へ残す。
+
+source `1b924782` はR85の関連native240/240成功（実test2.644秒/build込み116.310秒）と、R88の全静的19項目174.064秒・exit0で前後一致。R77実Chrome再比較はMermaid11画像中10成功、960幅はtop93.0855/scroll・bottom90.80039へ改善し末尾576も一致。620幅scroll720だけ89.9496で未達（他620幅90.00395〜91.71563）、番号markerの左揃え固定とChromeの末尾揃え差を検出。R89 Draw.ioはCSS変数解決で白fillとlabelが回復したが1280幅79.5158〜86.017。CSS`height:auto`が未指定と同じNoneへ潰れ、width1120でもSVG height属性404を再採用するため、正しい395.524との差8.476px/上下letterbox4.238pxを生む。両不具合を分離担当で修正中。R77/R89は正式HTML90合格ではなく、図/fixture/score/スクロール範囲は変更しない。
+
+- [/] HTML-CONSUMER-OUTSIDE-MARKER-ALIGNMENT: 共通font metricsでdecimal/bullet markerの末尾と空白advanceを揃え、1/2/3桁・grid/flex/通常listの位置と本文/row/hit不変を回帰化。R77全画像を再取得して全90を確認する。
+- [/] HTML-CONSUMER-SVG-AUTO-HEIGHT-PRECEDENCE: 明示CSSautoがSVG高さ属性を上書きし、解決幅に対するintrinsic比率を使う。高さ未指定の属性維持・明示CSS高さの優先も回帰化し、R89の図と本文/scroll末尾を実比較する。
+
+最新の修正source `5a3fe7de` はR83のfmt/AST/Clippyと、R84全静的19項目54.844秒・exit0を通過（各source前後一致）。R76の関連nativeはbuild込み118.383秒、実test2.742秒で239成功/新規回帰1失敗。grid標準stretchでshort/wrappedとも56pxになるのに、新規testがwrappedだけ10px以上高いと仮定しており、仕様どおりの期待値とnormaldiv/flexの高さ差を区別して是正中。R77実Chrome再比較はまだ開始していない。R73/R74/R75/R78/R80/R81/R82の構造・型・Clippy失敗は各物理runに保持し、最終sourceの成功へ転用しない。
+
+C4のR71実face比較は全12spanでChromeとnativeのfamily/weight一致。R73の派生画像はgeometry-only99.178757/text-only97.937860で正式native99とは別。既存CoreText8行を再評価したR77/R78ではfullcanvas99以上でもforeground最小91.868920（KRR89.265500）で99未達。Skia SVG text実験も97.47〜97.52で不採用だが、低レベルSkFontへ同一glyph ID/positionを渡す経路は未検証であり全戦略を否定しない。配色・基準・score契約は変更していない。
+
+最新統合source `9dfd6453` はR68の全静的19項目58.774秒・exit0と、R69の関連native139件（実test1.649秒、build込み126.395秒）に成功し、両runともsource前後一致。R70のprobe buildは固定容量soft goal未達で実build前に拒否されたため、標準`just clean`で回復（保護44件前後一致、実空き+4.13GiB）。R71はprobe build81.695秒・exit0、その後の実Chrome比較でMermaid1280幅のtop93.4095/scroll・bottom92.15007に改善したが、960幅はtop88.9277/後半77.0632、native末尾510<Chrome576で拒否された。行高24pxは一致しており、計測時liが旧経路でcontent48pxを返す一方、描画時はcontainer経路でpadding8pxを加える不整合が6px×11行不足を生む。leaf全体へpaddingを一律加算せず、計測と描画の経路を揃えて修正中。
+
+R72のDraw.io HTMLはparse error解消後に実PNGを取得したが、1280幅66.1582〜74.2744で不合格。`fill:var(--ge-adaptive-bg,#ffffff)`が未解決のままusvgへ渡り白背景rectが黒になる。既存HTML CSS resolverをSVG serialize walkでも共用して修正する。R71/R72は全viewport・全scroll完了ではなく、低scoreと末尾不一致の拒否結果であり正式HTML90合格へ転用しない。
+
+C4 full-frame派生診断R70（`tmp/quality/current-c4-fullframe-dy-r70/`）で、二注記glyph pathだけdyを0〜2px変更してもforeground97.34320→97.43887（+0.064点）に留まることを確認。数学baseline差だけでは全体99未達を説明できず、upstream API提案は下書きとして保持して製品対応へ進めない。現在はcaptionを含む全spanのraw computed weight/Chrome実faceとnative実faceを対照する。診断用Chrome再描画を正式native合格へ転用しない。
+
+C4の診断R68kはraw側に実R16 HTML wrapperを保持し、R42 resolved SVG側は既に含む12px translationを再適用しないbody原点へ直接配置して比較条件を是正。text-only派生画像でEdits/Readsの上方向残差を確認したが正式native scoreではない。Chrome156同revision一次sourceにmacOS Helveticaのascent補正とmath baseline分岐を確認（`tmp/quality/current-c4-chrome156-math-baseline-source-r1/`）。古いmixed-revision FontMetrics解釈を現行根拠にしない。usvg0.48.1公開resolverはfont選択のみでmetric overrideは無く、図/文字列特例・font bytes・raw reference改変は禁止のまま、既存libでの解決経路を調査中。
+
+- [/] HTML-CONSUMER-SVG-CUSTOM-PROPERTIES: opaque SVG子要素へのCSS変数の未解決伝播を修正する。既存StaticCss/cascade/variable resolverをserializer walkで再利用し、fallback・継承・優先順位・cycleを回帰化。独自parser・特定変数名の特例・fixture/score変更を追加せず、元2fixture全viewport/scrollを再比較する。
+
+R64の全静的19項目は103.603秒・exit0、source前後`59c042a2`一致で成功（`tmp/quality/current-html-layout-xml-static-r64/`）。SVG auto margin・foreignObject XML除去・list markerのstyled lifecycle/文字baseline回帰を含むが、実描画は未検証。独立差分レビューでgrid/flex list rootが通常containerの指定幅・高さ・overflow lifecycleを迂回する漏れを発見したため、既存container経路へ統合中。R60の33行関数とR62の未使用変数の失敗は各runに保持し、修正後のR64成功と区別する。C4の旧wrapper画像を使用したR62 pixel診断は現行判定から除外し、R65でR42 native PNGとR16 raw referenceの実SHAを再束縛した。text envelope診断を正式99点合格へ転用しない。
+
+現行source `9a12d5d7` はR46の全静的検査19項目（101.515秒）とR40の関連Rust39件（125.342秒、実test8.615秒）が成功。R37のPython全5群1,024件/6skipも成功したが、その後のRust変更を含む完全ゲートではない。R42は現物binary SHAと入力SHAを束縛し、同じpaint treeのC4/Tree PNG・glyph sidecarを新規取得した。R53は同じ実HTMLでnative glyph原点とChrome SVG API始点を12文字列分収集したが、2注記の約2.262px差はbaseline原点規約の違いを含む可能性があり、実paint差やlib bugの証拠に採用しない。ligature内部の文字原点はnative APIでは取得できずcluster原点と明示した。R55の属性table解釈はR58で訂正し、明示mathematicalがdominantを上書きすることを確認。R57の実HTML CDPでは両注記はHelvetica、UserはHelvetica-Boldであり、旧R26のserialized SVGだけの観測と区別する。serialized SVG対照R49と実入力対照R53を混同せず、同じalphabetic基準と実pixelで再確認する。99合格の証跡ではない。
+
+- [/] HTML-CONSUMER-SVG-AUTO-MARGIN: R52のChrome画像比較で1280px幅のMermaid図が約260px左へずれ、top score70.9237を検出。埋込SVG経路が左右auto marginを反映していない。共通幅計算を使う修正と6ケースの回帰を統合検証し、原fixtureの全viewport/scrollを再取得する。
+- [/] HTML-CONSUMER-LIST-FLOW: 同じR52でolのgridとliのmin-height/paddingが専用list経路で迂回され、スクロール末尾も228<330で拒否された。既存Taffyへ接続し、可視項目の番号・DOM順・link/hitを維持して検証する。独自grid計算やfixtureの簡略化で合格させない。
+- [/] HTML-CONSUMER-FOREIGN-OBJECT: R55のDraw.io HTMLがSVG parse errorで拒否。foreignObject除去の文字列処理が後続/子要素や引用符内の`/>`を開始tagの自己終了と誤認する。既存roxmltreeのnode rangeと共通source editを使う修正、完全XML/fallback保持の回帰、実Draw.io画像比較を完了する。
+
+R41のbuild前容量拒否は、標準`just clean` exit0で回復し保護44refsの物理record/registry一致を前後validatorで確認（`tmp/quality/capacity-recovery-clean-r2/`）。固定閾値は不変。R52のprobe buildは79.700秒で成功したが、上記不具合により全2fixtureの合格ではない。R42のbinaryはclean後に現行binaryとして再認定しない。
+
+現行native収集R28は標準`just root-test-and-coverage`が275.020秒・exit0、2,548成功/17skip。source前後`8aeb972f7ab5c959b5a175527dbf312304d1700e90161b45d975db62747e434f`一致、LLVM summary/detail totals一致で59,274/60,355行=98.208930%、未計測1,081。前回R12から34行改善したが100/0ではない（`tmp/quality/native-current-root-coverage-r28/`、`tmp/quality/native-current-root-coverage-r28-export/`）。R27の全体検査は古いTEST_THREADS期待値を検出し中断、exit1で全体未合格。該当期待値修正後のDriverContractTest38件は成功。全117/native16・HTML84とHTML内図表consumer・表示時間/RSS・完全ゲート・レビュー/公開は未完了。現在はR28後の追加修正中であり、R28成功を変更後の全体合格に転用しない。
+
+継続検証：R32は全ASTと公開DOMのserialize/setter/4位置のtext挿入、実MathJax変異の23件が成功（source前後`ee722bcb…`一致）。Python標準lane R31はhooks310件成功後、release647件で旧workflow/lock固定SHA等の不整合を検出し失敗。実差分確認後の限定修正はmacOS証跡76件・性能証跡77件が成功したが、全Python laneは再実行待ち。正常baseline共有は独立mutation24件を維持し、関連28件の単発観測42.28→29.02秒。既存unittestのfail-fastを標準5群へ接続し、R34で検出したargv readerの未対応も限定修正・実owned CLI欠落0を確認した。R34自体は失敗として保持し、完全staticは再実行する。
+
+HTML内図表は私有資料を使わない独立raw Mermaid/公式Draw.io SVGの2fixtureを`tests/fixtures/html-diagram-consumer/`へ追加し、元SVG SHAと出所の改変拒否を回帰化。既存HTML84/catalogは変更せず、同じsuiteの単一入力経路を暫定90/最終99の各レシピへ追加した。実PNGは未取得。HTML両レシピの`exit "$$status"`が成功時もBash exit2になる不具合は、実dry-runとBash終了値0/1の回帰で修正した（`tmp/quality/html-recipe-exit-status-fix-r1/`）。このレシピ修正の成功を描画精度・性能の合格へ転用しない。
+
+- [ ] R-SVG-CSS-RADII: C4の`rx/ry:12px !important`が属性`rx/ry=5`へ反映されない現行経路を確認。usvg 0.48.1のCSS presentation whitelistがRx/Ryを含まない。SVG2仕様上はgeometry CSS propertyであり、raw基準は変更しない。既存simplecss（usvg自身の依存）・公開XML API・svgtypesを再利用した最小前処理を実装し、stylesheet/inline/important・通常属性の回帰、実PNG、性能を検証する。独自lexer/selectorや図名特例は禁止。旧probeの代表比較はC4 foreground97.09556/Tree99.451435だが旧source診断であり、現行の正式スコアではない（`tmp/quality/c4-rx-ry-css-resolution-assessment-r1/`、`tmp/quality/c4-rx-ry-css-library-assessment-r1/`、`tmp/quality/native-frame-frozen-probe-two-image-diagnostics-r1/`）。
+
+R-SVG-CSS-RADIIの前処理sourceReady。backendと同じsimplecss selector subsetを使い、geometry属性変更で他のselector一致が変わるSVGは原文を維持する。foreign namespace styleもusvg同様に収集し、安全判定の漏れを修正した。任意のサイズ上限は追加せず、無変更Stringのコピーを避ける。依存は既存simplecss 0.2.2のdirect化のみで、正規Cargo metadataのlock差分も依存名1行追加（`tmp/quality/svg-radii-lock-resolution-r1/`）。format確認のみの段階であり、Cargo実回帰・PNG・性能はこれから検証する。sourceReadyの呼出し型不一致はrootの統合レビューで修正した。共有容量不足には保護validator後の標準`just clean`で対処し、実空き約56GiBを確認（`tmp/quality/shared-disk-root-clean-r1/`）。同時に共有側の整理もあったため、回復量全体をKRR cleanの効果とはしない。
+
+統合static r1は9.559秒でgeometryと既存shadowのedit適用重複1組を拒否し、重い後段は実行されなかった（`tmp/quality/svg-radii-preflight-integrated-r1/`）。例外追加ではなく既存処理を共通化する。性能harnessの独立lockも正規Cargo metadataで候補側simplecss名1行のみ追加し、baseline 0.4.23は変更しない（`tmp/quality/svg-radii-harness-lock-resolution-r1/`）。
+
+r3の重複検査は1,411ソース・未承認0組で成功したが、HTML harnessがMathJax CLI/inputsの旧AST pinを拒否してstatic全体は9.635秒で失敗（`tmp/quality/svg-radii-preflight-integrated-r3/`）。rootと独立担当がpreflightは既存inputs呼出しだけ、p-map追加はpin範囲の補完のみでprocess辺を増やさないとレビューした（`tmp/quality/mathjax-preflight-review-r1/`）。既存pinと改変拒否回帰を更新中。r2はrootの新module Git登録漏れを検査前admission段階で中断し、未合格として保持した。
+
+最新互換解決の再検査でcc1.8.0→1.9.0/find-msvc-tools0.1.14→0.1.15を検出し、root/standalone lockだけを標準Cargoで更新した。想定外package差分なし、再鮮度476依存・資産はexit0（`tmp/quality/dependency-cc-find-msvc-update-r1/`）。これは更新後のビルド/性能合格ではない。
+
+r4はHTML graphのerrors0を確認したが、owned-validationが新preflight taskと既存Moon Python回帰のowner/DAG不一致6項目を拒否（17.577秒、`tmp/quality/svg-radii-preflight-integrated-r4/`）。pin例外の拡張ではなく既存owner contractへの正確な登録を修正する。MathJaxの2AST pin更新は正常/改変負例6assert・実HTML契約・strict型・対象Biomeが成功。独立read-onlyでgeometry::style_attributeの返却lifetime曖昧性を発見し、Node借用期間を明示する1署名を修正した。formatのみ成功、実Cargo回帰は未実行。
+
+raw r9の公式role readerは依存更新後も日英59/58を受理、exit0・2.071秒（`tmp/quality/mermaid-current-owned-raw117-r9-execution-r1/strict-official-reader-after-radii-deps-r1/`）。候補99合格とは別。旧artifact-test-target2.0GiBは保護44pathに非該当・open handleなしで標準Cargo cleanを試したが、CACHEDIR.TAG欠落によりactual101で拒否。未回復、PID欠落をそのまま記録しmarker追加や別削除で迂回していない（`tmp/quality/legacy-artifact-target-clean-r1/`）。KRR現行target自体は存在せず、共有空き約4.2GiBを確認。上限を変えず通常gateへ進む。
+
+r5で既存source-static-foundation18.933秒→保護admission40.524秒→全source-static58.188秒が成功、source前後は`fff0d8baa8e6f60eb054f7ec33b13d17e3f62622c83836ad8f309a79141406d5`で一致した（`tmp/quality/svg-radii-preflight-integrated-r5/`）。source-staticはRust実回帰/coverage/画像/性能の合格ではない。pin-preflight失敗barrierの専用22行は既存foundation/preparation tableと同じrun/assert/resultの反復であるため、ユーザーの反復不許容指示に従って既存tableへ統合し、label・16blockedphases・count条件を維持する。新frameworkや対象削減は追加しない。
+
+共通table統合後r6はfoundation12.588秒・全source-static37.862秒で成功、source前後`4b289d0b4cc91836325585eea981f0746f2c934436584d448cac4fad1fa466d7`一致（`tmp/quality/svg-radii-preflight-integrated-r6/`）。続く初回Rust回帰r1は依存コンパイル後91.952秒でE0433、現行cssparserにParserInputがないAPI不整合を検出した（`tmp/quality/svg-radii-native-related-r1/`）。実テスト未実行・未合格として保持し、既存shadow/markerと同じParser::new(source)へ限定修正する。
+
+r7は全source-static35.170秒・関連Rust48件55.973秒(実test0.539秒)で成功、source前後`2f4578edb4e6b92e136aba79b163061aa1a2eaa3910573ae9111bdcc8b0d8966`一致（`tmp/quality/svg-radii-preflight-native-integrated-r7/`）。続くroot collection-r3は2542成功/2AST失敗/17skip、200.386秒・actual100。Rust ASTの関数長2箇所とspecificity配列サイズ3の定数化漏れを是正した。全upstream成功の証拠がないのに`--upstream none`で全件collectorを先行させたrootの手順誤りがあり、今後は標準`moon exec krr:unit-test`でAST→Clippy→JS→Rustを先行順序ごと実行する。collection-r3失敗profrawのreport-only診断は60336/59221行・1115未計測だが正式root.json未生成であり旧root.jsonと結合しない。変更3geometry filesを除きper-file SHA一致範囲だけ次の回帰計画に使う（`tmp/quality/native-collection-r3-detail-report-r1/`）。
+
+最新統合状況：v0.4.24は未公開。標準全DAG r10は371.890秒で失敗したが、source-static・Rust AST・3系統Clippy・全7runtime-unused producerと最終readerは成功し、全source前後はfe81175101e76f92e1cac8a902f9f422d1aea9e6aef6ab03a5587fa9f45357a2で一致した（tmp/quality/native-current-root-coverage-r10/）。失敗はBunの33file群586件中、ブラウザID比較3件のtimeoutで、root Rust/coverageは未実行。r9の別失敗は、キャッシュ回帰がGit管理fixtureを一時変更して並列fingerprintと干渉したもの。原本をbyte一致で復元し、回帰を実行ごとの隔離Git fixtureへ移した。実Moonの44観測は16.343秒で成功し、source前後一致・各invoke時の原本不変を確認した（tmp/quality/moon-isolated-fixture-actual-r1/）。ブラウザの5ケースは、観点を削らず既存Node Playwrightへ移し、純Bun30件を維持。共通実画像準備と各判定を分け、HTML10件を含む標準18件が5秒制限・retry0で成功した（tmp/quality/reference-svg-browser-contract-final-r2/）。Node importのBun専用ディレクトリ初期化も標準node:url APIへ限定修正。これは更新後全sourceの完全ゲート、117各99・実native16、HTML全90/動的84、表示時間/RSS、coverage100/未計測0の合格ではない。LLVMのfunction/instantiation未実行記録をsource未計測行へ代用せず、fresh成功collectionのline集計で判定する。次の実行状態と証跡はtmp/html-fidelity/active-work-plan-20261012.jsonを参照する。旧r4の失敗・修正過程は物理runと本段落更新前snapshotへ保持し、過去の成功を現行へ再認定しない。
+
+- [ ] GATE-MATHJAX-IMPORT-PIN: checkpoint `39cb28c1` の標準runtime-script gateが165.957秒後、MathJax入力記録の`p-map/index.js`欠落で失敗（`tmp/quality/current-runtime-script-gate-r1/`）。既存pin treeへp-mapを追加し、実producer・関連38件・strict型・Biomeが成功（`tmp/quality/mathjax-pmap-pin-fix-r1/`）。inputs検証は既存関数を再利用した早期preflightとしてsource-staticへ追加し、後段のproducer前後検証も維持する。green pathの追加コストを測り、pin不備を重Clippy前に拒否するDAG回帰を確認してから統合する。全gate合格は未達。
+
+早期preflightは既存`inputs(root)`の呼出しだけを追加し、1.355秒で実行成功。型・Biome・Ruff・strict mypy・Moon44 taskの失敗barrier回帰が成功（`tmp/quality/mathjax-import-pin-preflight-early-fail-r1/`）。新CLI後の正規full producer再生成とMathJax全39件/67assertも成功（`tmp/quality/mathjax-pmap-pin-fix-r2/`）。DAGの失敗はsimulationであり、元のp-map欠落CLIの実再現時間と同一視しない。全runtime-script gateは再実行待ち。
+
+Skia退役checkpointは `4e7e69d9`。統合source-static35.267秒・関連native33件49.600秒が成功（`tmp/quality/skia-retirement-integrated-r2/`）。以下のcoverageは退役前の実測であり、現行100/0の合格へ転用しない。native比較wrapperの自然寸法修正は関連10件37assert、既存寸法回帰57assert・strict型・Biomeが成功（`tmp/quality/native-frame-wrapper-r1/source-ready-report.json`）。当時のowned contract失敗は、依存更新で追加されたDraw.io資産のGit登録後に、下記統合source-staticで解消した。
 
 - [/] DEP-DRAWIO-LICENSE: Draw.io 32.5.5更新後のvendor/LICENSE欠落を修正。公式タグから取得し、同version欠落修復・存在時skip・取得成功/404拒否を回帰化。実圧縮と依存鮮度、統合静的検査が成功。LICENSE専用の実失敗時pin不変はコード順序レビューと区別し、全リリースゲート完了とは扱わない。
 
