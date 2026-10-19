@@ -123,6 +123,7 @@ function katanaShallowCloneNode(node) {
     clone.setAttribute(attribute.name, attribute.value);
   });
   clone.style = node.style.clone();
+  clone.style.ownerNode = clone;
   clone._textContent = node._textContent ?? "";
   clone.className = node.className;
   clone.id = node.id;

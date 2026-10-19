@@ -1,67 +1,23 @@
 use super::{DiagramRuntimeScript, MermaidRuntimeScripts};
 use crate::markdown::{diagram_js_runtime::DiagramV8Runtime, runtime_assets::RuntimeAsset};
+#[path = "js_runtime_scripts_raw_geometry_class_git_diagnostic_tests.rs"]
+mod class_git_diagnostic;
+#[path = "js_runtime_scripts_raw_geometry_er_attribute_tests.rs"]
+mod er_attribute_tests;
 #[path = "js_runtime_scripts_raw_geometry_tree_tests.rs"]
 mod geometry_tree;
 #[path = "js_runtime_scripts_raw_geometry_sequence_diagnostic_tests.rs"]
 mod sequence_diagnostic;
-use geometry_tree::{normalize_permitted_changes, raw_geometry_tree};
+use geometry_tree::{first_geometry_difference, normalize_permitted_changes, raw_geometry_tree};
 
 #[path = "js_runtime_scripts_raw_geometry_structure_tests.rs"]
 mod geometry_structure;
-use geometry_structure::{
-    assert_actual_vendor_class_structure, assert_empty_methods_group_present,
-};
+#[path = "js_runtime_scripts_raw_geometry_layout_tests.rs"]
+mod layout_tests;
+#[path = "js_runtime_scripts_raw_geometry_vendor_layout_tests.rs"]
+mod vendor_layout_tests;
 
-const ORIGINAL_CLASS_SOURCE: &str = r#"classDiagram
-    class PreviewPane {
-        +full_render(source)
-        +show_content(ui)
-    }
-    class RenderedSection {
-        <<enumeration>>
-        Markdown
-        Image
-        Error
-    }
-    PreviewPane --> RenderedSection"#;
-const EMPTY_METHODS_CLASS_SOURCE: &str = r#"classDiagram
-    class Packet {
-        +String body
-    }
-    class Sink
-    Packet --> Sink"#;
 const RAW_TEST_SVG_ID: &str = "vendor-raw-geometry-contract";
-
-#[test]
-fn actual_vendor_class_geometry_survives_production_postprocess() -> Result<(), String> {
-    assert_actual_vendor_geometry(ORIGINAL_CLASS_SOURCE, &["PreviewPane", "RenderedSection"])
-}
-
-#[test]
-fn actual_vendor_empty_methods_geometry_survives_postprocess() -> Result<(), String> {
-    assert_actual_vendor_geometry(EMPTY_METHODS_CLASS_SOURCE, &["Packet", "Sink"])
-}
-
-fn assert_actual_vendor_geometry(source: &str, labels: &[&str; 2]) -> Result<(), String> {
-    let request = raw_geometry_request(source);
-    let config = raw_geometry_vendor_config();
-    let envelope = render_vendor_raw_and_processed(&request, &config)?;
-    assert_eq!(envelope["renderCalls"], 1);
-    assert_eq!(envelope["renderInput"], source);
-    assert_eq!(envelope["svgId"], RAW_TEST_SVG_ID);
-    assert_eq!(envelope["initializeInput"], config);
-    let raw = envelope_svg(&envelope, "raw")?;
-    let processed = envelope_svg(&envelope, "processed")?;
-    let expected = raw_geometry_tree(raw)?;
-    let mut actual = raw_geometry_tree(processed)?;
-    if source == EMPTY_METHODS_CLASS_SOURCE {
-        assert_empty_methods_group_present(raw)?;
-    }
-    normalize_permitted_changes(&expected, &mut actual)?;
-    assert_eq!(expected, actual);
-    assert_actual_vendor_class_structure(raw, labels)
-}
-
 fn raw_geometry_request(source: &str) -> serde_json::Value {
     serde_json::json!({
         "source": source, "svgId": RAW_TEST_SVG_ID,
@@ -93,7 +49,7 @@ fn render_vendor_raw_and_processed(
     request: &serde_json::Value,
     config: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    render_vendor_raw_and_processed_mode(request, config, false, &[])
+    render_vendor_raw_and_processed_mode(request, config, false, &[], &[])
 }
 
 pub(super) fn render_vendor_raw_and_processed_through_runtime(
@@ -101,7 +57,15 @@ pub(super) fn render_vendor_raw_and_processed_through_runtime(
     config: &serde_json::Value,
     actor_labels: &[&str],
 ) -> Result<serde_json::Value, String> {
-    render_vendor_raw_and_processed_mode(request, config, true, actor_labels)
+    render_vendor_raw_and_processed_mode(request, config, true, actor_labels, &[])
+}
+
+pub(super) fn render_vendor_raw_and_processed_with_metric_labels(
+    request: &serde_json::Value,
+    config: &serde_json::Value,
+    metric_labels: &[&str],
+) -> Result<serde_json::Value, String> {
+    render_vendor_raw_and_processed_mode(request, config, true, &[], metric_labels)
 }
 
 fn render_vendor_raw_and_processed_mode(
@@ -109,6 +73,7 @@ fn render_vendor_raw_and_processed_mode(
     config: &serde_json::Value,
     production_entrypoint: bool,
     actor_labels: &[&str],
+    metric_labels: &[&str],
 ) -> Result<serde_json::Value, String> {
     let bytes = RuntimeAsset::mermaid()
         .bytes()
@@ -120,7 +85,13 @@ fn render_vendor_raw_and_processed_mode(
         .ok_or_else(|| "runtime scripts missing".to_string())?;
     *last = DiagramRuntimeScript::owned(
         "raw-vendor-geometry-test.js",
-        raw_geometry_driver(request, config, production_entrypoint, actor_labels),
+        raw_geometry_driver(
+            request,
+            config,
+            production_entrypoint,
+            actor_labels,
+            metric_labels,
+        ),
     );
     let envelope = DiagramV8Runtime::render(&scripts)?;
     serde_json::from_str(&envelope).map_err(|error| error.to_string())
@@ -132,10 +103,12 @@ fn raw_geometry_driver(
     config: &serde_json::Value,
     production_entrypoint: bool,
     actor_labels: &[&str],
+    metric_labels: &[&str],
 ) -> String {
     let actor_labels = serde_json::json!(actor_labels);
+    let metric_labels = serde_json::json!(metric_labels);
     format!(
-        "(async () => {{const request = {request}; const config = {config}; const productionEntryPoint = {production_entrypoint}; const actorLabels = {actor_labels};\n{RAW_GEOMETRY_DRIVER_BODY}\n}})();"
+        "(async () => {{const request = {request}; const config = {config}; const productionEntryPoint = {production_entrypoint}; const actorLabels = {actor_labels}; const metricLabels = {metric_labels};\n{RAW_GEOMETRY_DRIVER_BODY}\n}})();"
     )
 }
 
@@ -144,9 +117,19 @@ if (!vendor || typeof vendor.render !== 'function') throw new Error('vendor abse
 let initializeInput, renderInput, svgId, renderCalls = 0;
 let fontMeasureCalls = 0, svgFontMetricCalls = 0;
 const svgFontMetricObservations = [];
+let selectedMetricCalls = 0, selectedMetricDuplicateCalls = 0;
 const svgFontMetricTraceLimit = 32;
+const recordAllSvgFontMetrics = metricLabels.length === 0;
 const svgTextBoxObservations = [];
 const svgTextBoxTraceLimit = 16;
+const c4GeometryObservations = [];
+const c4GeometryTraceLimit = 16;
+let c4GeometryObserverEnabled = false;
+let c4GeometryHookCalls = {getBBox: 0, getBoundingClientRect: 0};
+const c4GeometryHookNodes = [];
+let c4GeometryPrototype;
+let c4GetBBoxHook;
+let c4GetBoundingClientRectHook;
 const originalInitialize = vendor.initialize.bind(vendor);
 const originalRender = vendor.render.bind(vendor);
 const originalMeasureText = globalThis.__katanaMeasureText;
@@ -182,6 +165,50 @@ if (actorLabels.length > 0) {
     return box;
   };
 }
+if (/^C4(?:Context|Container|Component|Dynamic|Deployment)\b/.test(String(request.source ?? ''))) {
+  c4GeometryObserverEnabled = true;
+  const svgProbe = globalThis.document?.createElementNS?.(
+    'http://www.w3.org/2000/svg',
+    'svg',
+  );
+  const elementPrototype = svgProbe && Object.getPrototypeOf(svgProbe);
+  const originalGetBBox = elementPrototype?.getBBox;
+  const originalGetBoundingClientRect = elementPrototype?.getBoundingClientRect;
+  if (typeof originalGetBBox !== 'function' || typeof originalGetBoundingClientRect !== 'function')
+    throw new Error('C4 geometry observers absent');
+  const isObserved = (node) =>
+    (node.localName === 'svg' && node.getAttribute('id') === svgId) ||
+    (node.localName === 'line' && node.hasAttribute('x1') && node.hasAttribute('y1'));
+  const nodeDescriptor = (node) => ({
+    localName: node.localName,
+    id: node.getAttribute('id'),
+    x1: node.getAttribute('x1'),
+    y1: node.getAttribute('y1'),
+    x2: node.getAttribute('x2'),
+    y2: node.getAttribute('y2'),
+  });
+  c4GeometryPrototype = elementPrototype;
+  c4GetBBoxHook = function(...args) {
+    c4GeometryHookCalls.getBBox += 1;
+    const box = originalGetBBox.apply(this, args);
+    if (c4GeometryHookNodes.length < c4GeometryTraceLimit)
+      c4GeometryHookNodes.push({kind: 'getBBox', node: nodeDescriptor(this)});
+    if (isObserved(this) && c4GeometryObservations.length < c4GeometryTraceLimit)
+      c4GeometryObservations.push({kind: 'getBBox', node: nodeDescriptor(this), box});
+    return box;
+  };
+  c4GetBoundingClientRectHook = function(...args) {
+    c4GeometryHookCalls.getBoundingClientRect += 1;
+    const box = originalGetBoundingClientRect.apply(this, args);
+    if (c4GeometryHookNodes.length < c4GeometryTraceLimit)
+      c4GeometryHookNodes.push({kind: 'getBoundingClientRect', node: nodeDescriptor(this)});
+    if (isObserved(this) && c4GeometryObservations.length < c4GeometryTraceLimit)
+      c4GeometryObservations.push({kind: 'getBoundingClientRect', node: nodeDescriptor(this), box});
+    return box;
+  };
+  elementPrototype.getBBox = c4GetBBoxHook;
+  elementPrototype.getBoundingClientRect = c4GetBoundingClientRectHook;
+}
 if (productionEntryPoint) {
   globalThis.__katanaMeasureText = function(...args) {
     fontMeasureCalls += 1;
@@ -189,13 +216,25 @@ if (productionEntryPoint) {
   };
   globalThis.__katanaMeasureSvgTextMetrics = function(...args) {
     svgFontMetricCalls += 1;
-    if (svgFontMetricObservations.length >= svgFontMetricTraceLimit)
-      throw new Error('SVG font metric diagnostic trace limit exceeded');
     const metrics = originalMeasureSvgTextMetrics.apply(this, args);
+    if (!recordAllSvgFontMetrics && !metricLabels.includes(String(args[0]))) return metrics;
     const result = {advance: metrics.advance, ascent: metrics.ascent, descent: metrics.descent};
     for (const name of ['layoutAscent', 'inkLeft', 'inkTop', 'inkRight', 'inkBottom']) {
       if (Object.hasOwn(metrics, name)) result[name] = metrics[name];
     }
+    if (!recordAllSvgFontMetrics) {
+      selectedMetricCalls += 1;
+      const argsKey = JSON.stringify(args);
+      const existing = svgFontMetricObservations.find((observation) => JSON.stringify(observation.args) === argsKey);
+      if (existing) {
+        selectedMetricDuplicateCalls += 1;
+        if (JSON.stringify(existing.metrics) !== JSON.stringify(result))
+          throw new Error('selected SVG font metric changed for identical arguments');
+        return metrics;
+      }
+    }
+    if (svgFontMetricObservations.length >= svgFontMetricTraceLimit)
+      throw new Error('SVG font metric diagnostic trace limit exceeded');
     svgFontMetricObservations.push({ordinal: svgFontMetricObservations.length, args, metrics: result});
     return metrics;
   };
@@ -223,7 +262,14 @@ if (productionEntryPoint) {
 if (typeof raw !== 'string' || !raw) throw new Error('raw SVG absent');
 return JSON.stringify({raw, processed, request, renderInput, svgId, initializeInput, expectedConfig: config,
   diagramType: globalThis.__katanaMermaidDiagramType, renderCalls, fontMeasureCalls, svgFontMetricCalls,
-  svgFontMetricObservations, svgTextBoxObservations});"#;
+  svgMetricLabels: metricLabels, svgMetricObservationMode: recordAllSvgFontMetrics ? 'all' : 'selected',
+  selectedMetricCalls, selectedMetricDuplicateCalls,
+  svgFontMetricObservations, svgTextBoxObservations, c4GeometryObservations,
+  c4GeometryObserverEnabled, c4GeometryHookCalls, c4GeometryHookNodes,
+  c4GeometryPrototypeAfterRender: c4GeometryObserverEnabled ? {
+    getBBox: c4GeometryPrototype?.getBBox === c4GetBBoxHook,
+    getBoundingClientRect: c4GeometryPrototype?.getBoundingClientRect === c4GetBoundingClientRectHook,
+  } : null});"#;
 
 pub(super) fn fixture_mermaid_source(markdown: &str) -> Result<String, String> {
     let lines = markdown.lines().collect::<Vec<_>>();

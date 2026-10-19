@@ -487,10 +487,10 @@ JSON.stringify(rows);
     }
 
     #[test]
-    fn runtime_normalizes_er_viewbox_to_browser_bounds() -> Result<(), String> {
+    fn runtime_preserves_er_vendor_viewbox_and_geometry() -> Result<(), String> {
         let first = original_synthetic_svg(fake_mermaid_with_er_viewbox())?;
         let second = vary_synthetic_geometry(&first)?;
-        assert_fake_svg_geometry_is_source_independent(
+        assert_fake_vendor_svg_geometry_is_source_independent(
             [first, second],
             [
                 "erDiagram\nDOCUMENT ||--o{ SECTION : contains",
@@ -913,8 +913,6 @@ globalThis.mermaid = {
     const SYNTHETIC_VARIANT_X: f64 = 7.0;
     const SYNTHETIC_VARIANT_Y: f64 = 11.0;
     const SVG_NUMBER_PRECISION: f64 = 1_000_000.0;
-    const ER_WIDTH_PADDING: f64 = 4.5;
-    const ER_BOTTOM_PADDING: f64 = 8.0;
     const NORMALIZED_ORIGIN: f64 = -8.0;
     const ORIGIN_MATCH_EPSILON: f64 = 0.01;
 
@@ -922,13 +920,40 @@ globalThis.mermaid = {
         geometries: [String; 2],
         source_variants: [&str; 2],
     ) -> Result<(), String> {
+        assert_fake_svg_geometry_is_source_independent_with_contract(
+            geometries,
+            source_variants,
+            false,
+        )
+    }
+
+    fn assert_fake_vendor_svg_geometry_is_source_independent(
+        geometries: [String; 2],
+        source_variants: [&str; 2],
+    ) -> Result<(), String> {
+        assert_fake_svg_geometry_is_source_independent_with_contract(
+            geometries,
+            source_variants,
+            true,
+        )
+    }
+
+    fn assert_fake_svg_geometry_is_source_independent_with_contract(
+        geometries: [String; 2],
+        source_variants: [&str; 2],
+        preserve_vendor_attributes: bool,
+    ) -> Result<(), String> {
         let mut outputs = Vec::new();
         let mut output_boxes = Vec::new();
         for raw in geometries {
             let first = render_fake_svg_for_source(&raw, source_variants[0])?;
             let second = render_fake_svg_for_source(&raw, source_variants[1])?;
             assert_eq!(first, second, "source changed the same raw SVG");
-            assert_synthetic_svg_contract(&raw, &first)?;
+            if preserve_vendor_attributes {
+                assert_synthetic_vendor_svg_contract(&raw, &first)?;
+            } else {
+                assert_synthetic_svg_contract(&raw, &first)?;
+            }
             output_boxes.push(
                 svg_attribute_value(&first, "viewBox")
                     .ok_or("missing viewBox")?
@@ -956,6 +981,21 @@ globalThis.mermaid = {
             synthetic_svg_body(raw)?,
             synthetic_svg_body(rendered)?,
             "unclassified child geometry, attributes, labels and structure must remain byte-exact"
+        );
+        Ok(())
+    }
+
+    fn assert_synthetic_vendor_svg_contract(raw: &str, rendered: &str) -> Result<(), String> {
+        assert_synthetic_root_namespace_is_preserved(raw, rendered)?;
+        assert_eq!(
+            synthetic_root_attributes(raw)?,
+            synthetic_root_attributes(rendered)?,
+            "vendor root attributes changed"
+        );
+        assert_eq!(
+            synthetic_svg_body(raw)?,
+            synthetic_svg_body(rendered)?,
+            "vendor child geometry, attributes, labels and structure changed"
         );
         Ok(())
     }
@@ -1042,7 +1082,6 @@ globalThis.mermaid = {
         let negative = (input[0] - NORMALIZED_ORIGIN).abs() < ORIGIN_MATCH_EPSILON
             && (input[1] - NORMALIZED_ORIGIN).abs() < ORIGIN_MATCH_EPSILON;
         match (role, negative) {
-            ("er", true) => Ok((expected_synthetic_er_view_box(raw, input)?, true)),
             ("requirement", true) => Ok((
                 [
                     0.0,
@@ -1054,18 +1093,6 @@ globalThis.mermaid = {
             )),
             _ => Ok((input, false)),
         }
-    }
-
-    fn expected_synthetic_er_view_box(
-        raw: &str,
-        input: SyntheticViewBox,
-    ) -> Result<SyntheticViewBox, String> {
-        Ok([
-            0.0,
-            0.0,
-            rounded_synthetic_number(input[2] + ER_WIDTH_PADDING),
-            rounded_synthetic_number(synthetic_er_bottom(raw)? + ER_BOTTOM_PADDING),
-        ])
     }
 
     fn resize_synthetic_root_attributes(
@@ -1082,75 +1109,6 @@ globalThis.mermaid = {
             *style = format!("max-width: {width}px;");
         }
         Ok(())
-    }
-
-    fn synthetic_er_bottom(raw: &str) -> Result<f64, String> {
-        let document =
-            resvg::usvg::roxmltree::Document::parse(raw).map_err(|error| error.to_string())?;
-        let mut bottoms = Vec::new();
-        for node in document.descendants().filter(|node| {
-            node.is_element()
-                && node.tag_name().name() == "g"
-                && node.attribute("class") == Some("node default ")
-                && node
-                    .attribute("id")
-                    .is_some_and(|id| id.contains("entity-"))
-        }) {
-            let origin = parse_synthetic_translate(
-                node.attribute("transform")
-                    .ok_or("entity transform missing")?,
-            )?;
-            bottoms.push(origin[1] + synthetic_er_local_bottom(node)?);
-        }
-        bottoms
-            .into_iter()
-            .reduce(f64::max)
-            .ok_or("entity bounds missing".into())
-    }
-
-    fn synthetic_er_local_bottom(
-        node: resvg::usvg::roxmltree::Node<'_, '_>,
-    ) -> Result<f64, String> {
-        if let Some(path) = node
-            .descendants()
-            .find(|node| node.is_element() && node.tag_name().name() == "path")
-        {
-            return synthetic_er_path_bottom(path);
-        }
-        let rect = node
-            .descendants()
-            .find(|node| node.is_element() && node.tag_name().name() == "rect")
-            .ok_or("entity rectangle missing")?;
-        let y = rect
-            .attribute("y")
-            .ok_or("rect Y missing")?
-            .parse::<f64>()
-            .map_err(|error| error.to_string())?;
-        let height = rect
-            .attribute("height")
-            .ok_or("rect height missing")?
-            .parse::<f64>()
-            .map_err(|error| error.to_string())?;
-        Ok(y + height)
-    }
-
-    fn synthetic_er_path_bottom(path: resvg::usvg::roxmltree::Node<'_, '_>) -> Result<f64, String> {
-        let data = path.attribute("d").ok_or("path data missing")?;
-        let values = data
-            .split(['M', 'L', ' ', ','])
-            .filter(|value| !value.is_empty())
-            .map(|value| value.parse::<f64>().map_err(|error| error.to_string()))
-            .collect::<Result<Vec<_>, _>>()?;
-        if values.len() != 8 {
-            return Err("fixture path must be four rectangle corners".into());
-        }
-        values
-            .iter()
-            .skip(1)
-            .step_by(2)
-            .copied()
-            .reduce(f64::max)
-            .ok_or("path Y missing".into())
     }
 
     fn original_synthetic_svg(fake: &str) -> Result<String, String> {
@@ -1562,18 +1520,6 @@ globalThis.mermaid = {
     }
 
     fn assert_malformed_svg_geometry() -> Result<(), String> {
-        assert!(synthetic_er_bottom("<svg/>").is_err());
-        assert!(
-            synthetic_er_bottom(r#"<svg><g class="node default " id="entity-a"/></svg>"#).is_err()
-        );
-
-        let path_document = resvg::usvg::roxmltree::Document::parse(r#"<path d="M0,0 L1,1"/>"#)
-            .map_err(|error| error.to_string())?;
-        assert!(synthetic_er_path_bottom(path_document.root_element()).is_err());
-        let empty_entity_document =
-            resvg::usvg::roxmltree::Document::parse("<g/>").map_err(|error| error.to_string())?;
-        assert!(synthetic_er_local_bottom(empty_entity_document.root_element()).is_err());
-
         assert!(original_synthetic_svg("return { svg: `<svg>${value}</svg>` };").is_err());
         assert!(vary_synthetic_child_geometry("<svg/>".into()).is_err());
         assert!(parse_view_box("0 0 NaN 1").is_err());

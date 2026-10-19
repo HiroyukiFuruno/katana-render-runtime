@@ -35,6 +35,53 @@ globalThis.mermaid = {
 };
 "##;
 
+const SAME_FONT_WORD_BOUNDARY_FIXTURE: &str = r##"
+globalThis.mermaid = {
+  initialize() {},
+  render: async () => {
+    globalThis.__katanaMermaidDiagramType = 'classdiagram';
+    const ns = 'http://www.w3.org/2000/svg';
+    const family = 'trebuchet ms, verdana, arial, sans-serif';
+    const cases = [
+      { owners: ['-int', ' sizeInFeet'], groups: ['-int', ' sizeInFeet'] },
+      { owners: [' AV', 'A'], groups: [' AVA'] },
+      { owners: ['AV', 'A tail '], groups: ['AVA tail '] },
+      { owners: ['A', 'V', 'A tail ', ' B'], groups: ['AVA tail ', ' B'] },
+    ];
+    const expectedRuns = __KATANA_RUST_RAW_SVG_ADVANCES__;
+    let expectedIndex = 0;
+    const observed = cases.map(({ owners, groups }) => {
+      const text = document.createElementNS(ns, 'text');
+      const outer = document.createElementNS(ns, 'tspan');
+      owners.forEach(value => {
+        const owner = document.createElementNS(ns, 'tspan');
+        owner.textContent = value;
+        outer.appendChild(owner);
+      });
+      text.appendChild(outer);
+      const expectedWidth = groups.reduce((sum, value) => {
+        const advance = expectedRuns[expectedIndex++];
+        return sum + Math.ceil(advance * 64) / 64;
+      }, 0);
+      const rootBox = text.getBBox();
+      return {
+        expectedWidth,
+        actualWidth: rootBox.width,
+        actualLength: text.getComputedTextLength(),
+        mergedWidth: globalThis.__katanaMeasureSvgTextMetrics(owners.join(''), family, 16, 400, false).advance,
+      };
+    });
+    const correct = observed.every(({ expectedWidth, actualWidth, actualLength }) =>
+      Math.abs(actualWidth - expectedWidth) < 0.0001
+        && Math.abs(actualLength - expectedWidth) < 0.0001,
+    );
+    return { svg: '<svg data-word-boundary="' + (correct && expectedIndex === expectedRuns.length)
+      + '" data-word-boundary-details="' + JSON.stringify({ family, expectedRuns, observed })
+        .replaceAll('&', '&amp;').replaceAll('"', '&quot;') + '"></svg>' };
+  }
+};
+"##;
+
 const NESTED_TSPAN_MEASURE_FIXTURE: &str = r##"
 globalThis.mermaid = {
   initialize() {},
@@ -202,6 +249,27 @@ fn svg_same_font_nested_text_preserves_shaped_run_kerning() -> Result<(), String
     let rendered = render_svg_fixture(SAME_FONT_SHAPED_RUN_FIXTURE)?;
     assert!(
         rendered.contains(r##"data-shaped-runs="true"##),
+        "{rendered}"
+    );
+    Ok(())
+}
+
+#[test]
+fn svg_same_font_word_boundary_splits_only_actual_owner_boundaries() -> Result<(), String> {
+    let fixture = svg_fixture_with_independent_raw_advances(
+        SAME_FONT_WORD_BOUNDARY_FIXTURE,
+        &[
+            ("-int", 400),
+            (" sizeInFeet", 400),
+            (" AVA", 400),
+            ("AVA tail ", 400),
+            ("AVA tail ", 400),
+            (" B", 400),
+        ],
+    )?;
+    let rendered = render_svg_fixture(&fixture)?;
+    assert!(
+        rendered.contains(r##"data-word-boundary="true"##),
         "{rendered}"
     );
     Ok(())

@@ -8,6 +8,7 @@ function matchesSelector(node, selector) {
 
 const KATANA_SELECTOR_MATCHERS = [
   { applies: katanaIsBareFirstChildSelector, matches: katanaMatchesBareFirstChild },
+  { applies: katanaIsNotFirstChildSelector, matches: katanaMatchesNotFirstChild },
   { applies: katanaIsNestedFirstChildSelector, matches: katanaMatchesNestedFirstChild },
   { applies: katanaIsWildcardSelector, matches: katanaMatchesWildcard },
   { applies: katanaIsTagIdSelector, matches: katanaMatchesTagId },
@@ -24,6 +25,15 @@ function katanaIsBareFirstChildSelector(selector) {
 
 function katanaMatchesBareFirstChild(node) {
   return node.parentNode?.firstElementChild === node;
+}
+
+function katanaIsNotFirstChildSelector(selector) {
+  return /^[a-zA-Z0-9:_-]+:not\(:first-child\)$/.test(selector);
+}
+
+function katanaMatchesNotFirstChild(node, selector) {
+  const base = selector.slice(0, -":not(:first-child)".length);
+  return [matchesSelector(node, base), !katanaMatchesBareFirstChild(node)].every(Boolean);
 }
 
 function katanaIsNestedFirstChildSelector(selector) {

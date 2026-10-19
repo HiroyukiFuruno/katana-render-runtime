@@ -1,6 +1,8 @@
 use super::MermaidRuntimeScripts;
 use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
 
+#[path = "js_runtime_scripts_svg_style_tests.rs"]
+mod style;
 #[path = "js_runtime_scripts_svg_text_runs_tests.rs"]
 mod text_runs;
 

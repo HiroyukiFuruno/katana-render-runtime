@@ -72,6 +72,20 @@ function katanaSameTextRunFont(left, right) {
 
 function katanaAppendOrderedTextRun(node, text, font, state) {
   const owner = node.nodeType === 3 ? node.parentNode : node;
+  const lastFragment = state.pending?.fragments.at(-1);
+  let nativeWordBoundary = false;
+  if (
+    state.pending &&
+    lastFragment?.node !== owner &&
+    katanaIsMermaidClassDiagram() &&
+    state.pending.svgNativeEligible &&
+    font.nativeAdvanceEligible === true &&
+    katanaCanMergeNativeTextOwners(state.pending) &&
+    katanaCanMergeNativeTextOwners(owner) &&
+    (/^\s/u.test(text) || /\s$/u.test(lastFragment.texts.join("")))
+  )
+    nativeWordBoundary = true;
+  if (nativeWordBoundary) katanaFlushOrderedTextRun(state);
   if (
     state.pending &&
     (!katanaSameTextRunFont(state.pending.font, font) ||

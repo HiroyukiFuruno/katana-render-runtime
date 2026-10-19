@@ -12,10 +12,6 @@ function katanaNormalizeC4ContainerText(svg) {
   return svg.replace(/font-size: (\d+);/g, "font-size: $1px;");
 }
 
-function katanaIsRuntimeSvg(svg) {
-  return svg.includes('id="katana-mermaid-svg-');
-}
-
 function katanaNormalizeJourneyReviewSvg(svg, request) {
   if (!svg.includes('aria-roledescription="journey"')) {
     return svg;

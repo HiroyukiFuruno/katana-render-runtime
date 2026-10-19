@@ -244,7 +244,7 @@ fn diagnostic_output_path() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn write_fresh_output(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(super) fn write_fresh_output(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or("diagnostic output parent is missing")?
@@ -274,7 +274,7 @@ fn write_fresh_output(path: &Path, bytes: &[u8]) -> Result<(), String> {
     file.write_all(bytes).map_err(|e| e.to_string())
 }
 
-fn sha256(bytes: &[u8]) -> String {
+pub(super) fn sha256(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))

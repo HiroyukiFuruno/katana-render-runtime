@@ -97,6 +97,7 @@ KatanaStyle.prototype.setProperty = function setProperty(name, value, priority =
   if (!Object.getOwnPropertyDescriptor(KatanaStyle.prototype, camel)) {
     this[camel] = String(value);
   }
+  katanaSyncOwnerStyleAttribute(this, true);
 };
 
 KatanaStyle.prototype.getPropertyPriority = function getPropertyPriority(name) {
@@ -124,12 +125,15 @@ function katanaStyleOwnValue(style, camel) {
 }
 
 KatanaStyle.prototype.removeProperty = function removeProperty(name) {
+  const hadProperty = katanaStyleHasProperty(this, name);
   const value = this.getPropertyValue(name);
+  if (!hadProperty) return value;
   delete this.values[String(name)];
   delete this.values[katanaStyleKebabName(name)];
   delete this.values[katanaStyleCamelName(name)];
   if (this.priorities) delete this.priorities[katanaStyleKebabName(name)];
   delete this[katanaStyleCamelName(name)];
+  katanaSyncOwnerStyleAttribute(this, false);
   return value;
 };
 
@@ -143,10 +147,7 @@ Object.defineProperty(KatanaStyle.prototype, "cssText", {
       .join("; ");
   },
   set(value) {
-    for (const key of Object.keys(this.values)) this.removeProperty(key);
-    this.values = {};
-    this.priorities = {};
-    katanaApplyCssText(this, value);
+    katanaReplaceStyleCssText(this, value, true);
   },
 });
 
@@ -166,9 +167,40 @@ KatanaStyle.prototype.item = function item(index) {
 };
 
 const katanaSetAttributeBase = KatanaNode.prototype.setAttribute;
+function katanaSyncOwnerStyleAttribute(style, createAttribute) {
+  const owner = style.ownerNode;
+  if (style.suppressOwnerSync || !owner || (!createAttribute && !owner.hasAttribute("style")))
+    return;
+  katanaSetAttributeBase.call(owner, "style", style.cssText);
+}
+
+function katanaReplaceStyleCssText(style, value, reflectOwner) {
+  const previousSuppression = style.suppressOwnerSync === true;
+  style.suppressOwnerSync = true;
+  try {
+    for (const key of Object.keys(style.values)) style.removeProperty(key);
+    style.values = {};
+    style.priorities = {};
+    katanaApplyCssText(style, value);
+  } finally {
+    style.suppressOwnerSync = previousSuppression;
+  }
+  if (reflectOwner) katanaSyncOwnerStyleAttribute(style, true);
+}
+
 KatanaNode.prototype.setAttribute = function setAttribute(name, value) {
   katanaSetAttributeBase.call(this, name, value);
   if (String(name).toLowerCase() === "style") {
-    this.style.cssText = value;
+    katanaReplaceStyleCssText(this.style, value, false);
   }
 };
+
+function katanaStyleHasProperty(style, name) {
+  const key = String(name);
+  const camel = katanaStyleCamelName(key);
+  return (
+    [key, katanaStyleKebabName(key), camel].some((candidate) =>
+      Object.hasOwn(style.values, candidate),
+    ) || Object.hasOwn(style, camel)
+  );
+}

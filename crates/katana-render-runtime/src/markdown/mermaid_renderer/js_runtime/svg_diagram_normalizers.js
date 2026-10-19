@@ -110,25 +110,6 @@ function katanaNormalizeBlockSvg(svg) {
   return svg;
 }
 
-function katanaNormalizeIshikawaSvg(svg) {
-  if (!svg.includes('aria-roledescription="ishikawa"')) {
-    return svg;
-  }
-  return svg
-    .replace(/<g class="ishikawa-head-group"[\s\S]*?<\/g>/, katanaNormalizeIshikawaHeadGroup)
-    .replace(
-      /(<rect\b[^>]*class="ishikawa-label-box"[^>]*height=")([^"]+)("[^>]*>)/g,
-      katanaIshikawaLabelHeightReplacement,
-    );
-}
-
-function katanaIshikawaLabelHeightReplacement(match, before, height, after) {
-  if (Number(height) > 80) {
-    return `${before}28${after}`;
-  }
-  return match;
-}
-
 function katanaNormalizeNegativeRectWidths(svg) {
   return svg.replace(
     /<rect([^>]*\sx=")([-\d.]+)(".*?\swidth=")([-\d.]+)(".*?>)/g,

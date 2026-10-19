@@ -50,15 +50,9 @@ function mermaidRuntimeFragments(): RuntimeFragment[] {
       "svg-block-fixture-layout-fixes.js",
       `${MERMAID_JS_RUNTIME}/svg_block_fixture_layout_fixes.js`,
     ),
-    RuntimeFragmentFactory.verbatim("svg-er-layout.js", `${MERMAID_JS_RUNTIME}/svg_er_layout.js`),
-    RuntimeFragmentFactory.verbatim("svg-er-fixes.js", `${MERMAID_JS_RUNTIME}/svg_er_fixes.js`),
     RuntimeFragmentFactory.verbatim(
       "svg-er-fixture-layout-fixes.js",
       `${MERMAID_JS_RUNTIME}/svg_er_fixture_layout_fixes.js`,
-    ),
-    RuntimeFragmentFactory.verbatim(
-      "svg-er-viewbox-fixes.js",
-      `${MERMAID_JS_RUNTIME}/svg_er_viewbox_fixes.js`,
     ),
     RuntimeFragmentFactory.verbatim(
       "svg-class-fixes.js",
@@ -85,28 +79,12 @@ function mermaidRuntimeFragments(): RuntimeFragment[] {
       `${MERMAID_JS_RUNTIME}/svg_review_fixes.js`,
     ),
     RuntimeFragmentFactory.verbatim(
-      "svg-review-ishikawa-fixes.js",
-      `${MERMAID_JS_RUNTIME}/svg_review_ishikawa_fixes.js`,
-    ),
-    RuntimeFragmentFactory.verbatim(
       "svg-review-venn-fixes.js",
       `${MERMAID_JS_RUNTIME}/svg_review_venn_fixes.js`,
     ),
     RuntimeFragmentFactory.verbatim(
       "svg-review-treemap-fixes.js",
       `${MERMAID_JS_RUNTIME}/svg_review_treemap_fixes.js`,
-    ),
-    RuntimeFragmentFactory.verbatim(
-      "svg-kanban-text.js",
-      `${MERMAID_JS_RUNTIME}/svg_kanban_text.js`,
-    ),
-    RuntimeFragmentFactory.verbatim(
-      "svg-kanban-viewbox.js",
-      `${MERMAID_JS_RUNTIME}/svg_kanban_viewbox.js`,
-    ),
-    RuntimeFragmentFactory.verbatim(
-      "svg-kanban-label-layout.js",
-      `${MERMAID_JS_RUNTIME}/svg_kanban_label_layout.js`,
     ),
     RuntimeFragmentFactory.verbatim(
       "svg-kanban-fixes.js",

@@ -59,10 +59,8 @@ function katanaSvgDimensionScale() {
 }
 
 function katanaNormalizeFinalSvg(svg, request) {
-  return katanaNormalizeErViewBox(
-    katanaEscapeTextMarkers(
-      katanaNormalizeEmptyTextFill(katanaNormalizeFontFamilyAttributes(svg), request),
-    ),
+  return katanaEscapeTextMarkers(
+    katanaNormalizeEmptyTextFill(katanaNormalizeFontFamilyAttributes(svg), request),
   );
 }
 
@@ -71,7 +69,6 @@ function katanaNormalizeDiagramSpecificSvg(svg, request) {
   normalized = katanaNormalizeTreeViewSvg(normalized, request);
   normalized = katanaNormalizeTreemapSvg(normalized, request);
   normalized = katanaNormalizeClassSvg(normalized);
-  normalized = katanaNormalizeErSvg(normalized);
   normalized = katanaNormalizeFlowchartEdgeLabelSvg(normalized, request);
   normalized = katanaNormalizeFlowchartViewBoxSvg(normalized);
   normalized = katanaNormalizeStateEdgeLabelSvg(normalized, request);

@@ -4,7 +4,56 @@ mod schema;
 use schema::validate_supported_geometry_events;
 
 #[derive(Debug, PartialEq)]
-pub(super) struct RawGeometryNode(Vec<XmlEvent>);
+pub(super) struct RawGeometryNode(pub(super) Vec<XmlEvent>);
+
+pub(super) fn first_geometry_difference(
+    expected: &RawGeometryNode,
+    actual: &RawGeometryNode,
+) -> String {
+    for (index, (left, right)) in expected.0.iter().zip(actual.0.iter()).enumerate() {
+        if left != right {
+            return format!(
+                "event {index}: expected {}, actual {}",
+                geometry_event_summary(left),
+                geometry_event_summary(right)
+            );
+        }
+    }
+    if expected.0.len() != actual.0.len() {
+        return format!(
+            "event count: expected {}, actual {}",
+            expected.0.len(),
+            actual.0.len()
+        );
+    }
+    "no difference".to_string()
+}
+
+fn geometry_event_summary(event: &XmlEvent) -> String {
+    match event {
+        XmlEvent::StartElement {
+            name, attributes, ..
+        } => format!(
+            "start <{}> attrs={} [{}]",
+            name.local_name,
+            attributes.len(),
+            attributes
+                .iter()
+                .filter(|attribute| {
+                    matches!(
+                        attribute.name.local_name.as_str(),
+                        "class" | "d" | "text-anchor" | "transform" | "viewBox"
+                    )
+                })
+                .map(|attribute| format!("{}={}", attribute.name.local_name, attribute.value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        XmlEvent::EndElement { name } => format!("end </{}>", name.local_name),
+        XmlEvent::Characters(value) => format!("text {:?}", value),
+        other => format!("{:?}", std::mem::discriminant(other)),
+    }
+}
 
 /* WHY: local名だけに縮めるとnamespaceやPIの描画差が消えるので、完全なXMLイベントを保持する。 */
 pub(super) fn raw_geometry_tree(svg: &str) -> Result<RawGeometryNode, String> {

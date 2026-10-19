@@ -43,34 +43,7 @@ fn zenuml_source_uses_v8_renderer_from_mermaid_surface() {
 }
 
 #[test]
-fn runtime_keeps_ascii_kanban_overflow_at_reference_height() {
-    let mermaid = RuntimeAsset::mermaid();
-    let rendered = mermaid
-        .materialize_at(mermaid.materialized_path())
-        .and_then(|mermaid_js| {
-            MermaidJsRuntimeOps::render(
-                "kanban\n    Todo\n      [export runtime]\n    Doing\n      [Rust-managed Mermaid]\n    Done\n      [Remove OS Chrome path]",
-                &mermaid_js,
-                DiagramColorPreset::dark(),
-            )
-        });
-
-    assert!(
-        rendered
-            .as_ref()
-            .is_ok_and(|svg| svg.contains("viewBox=\"90 -310 630 94\"")),
-        "{rendered:?}"
-    );
-    assert!(
-        rendered
-            .as_ref()
-            .is_ok_and(|svg| !svg.contains("height=\"56.6\"")),
-        "{rendered:?}"
-    );
-}
-
-#[test]
-fn runtime_normalizes_treemap_value_metrics() -> Result<(), String> {
+fn runtime_preserves_treemap_value_geometry() -> Result<(), String> {
     let mermaid = RuntimeAsset::mermaid();
     let rendered = mermaid
         .materialize_at(mermaid.materialized_path())
@@ -84,12 +57,6 @@ fn runtime_normalizes_treemap_value_metrics() -> Result<(), String> {
 
     let svg = rendered.as_ref().map_err(|error| error.to_owned())?;
     super::geometry_contract::GeometryContract::treemap(svg)?;
-    assert!(
-        rendered
-            .as_ref()
-            .is_ok_and(|svg| svg.contains("font-size: 23px") && svg.contains("fill: lightgrey")),
-        "{rendered:?}"
-    );
     for label in ["Mermaid", "DOM shim", "Rasterize", "Cache"] {
         assert!(
             rendered.as_ref().is_ok_and(|svg| svg.contains(label)),

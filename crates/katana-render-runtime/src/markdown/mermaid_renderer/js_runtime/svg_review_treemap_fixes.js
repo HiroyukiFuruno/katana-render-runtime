@@ -13,7 +13,5 @@ function katanaNormalizeTreemapValueText(svg) {
 }
 
 function katanaTreemapValueAttributes(attributes) {
-  return attributes
-    .replace(/font-size:\s*[\d.]+px/g, "font-size: 23px")
-    .replace(/fill:\s*lightgrey/g, "fill: lightgrey");
+  return attributes.replace(/fill:\s*lightgrey/g, "fill: lightgrey");
 }
