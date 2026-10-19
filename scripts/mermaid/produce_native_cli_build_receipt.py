@@ -10,6 +10,7 @@ from pathlib import Path
 
 from native_cli_build_bindings import Bindings, SCHEMA, construct_bindings
 import cargo_capacity_guard_native_cli_observation as guard
+from cargo_capacity_guard_lock import retained_profile_paths
 from cargo_capacity_guard import JsonObject, _array, _object, _text
 import produce_html_performance_evidence as owner
 
@@ -22,6 +23,11 @@ def _capacity_preflight(bindings: Bindings, root: Path, attempt: Path) -> JsonOb
             "--root", str(root), "--target", str(root / "target"),
             "--state", str(root / "tmp/.cargo-capacity-guard.json"),
             "--require-capacity", "--print-json"]
+    debug_profile = root / "target" / "debug"
+    if debug_profile.exists() or debug_profile.is_symlink():
+        retained = retained_profile_paths(root / "target", [debug_profile])
+        guard.require(len(retained) == 1, "debug profile retention is ambiguous")
+        argv.extend(["--retain-profile", str(retained[0])])
     lifecycle_paths: list[Path] = []
     result = owner._measurement_command(
         argv, role="preflight", log_directory=attempt / "capacity-preflight",

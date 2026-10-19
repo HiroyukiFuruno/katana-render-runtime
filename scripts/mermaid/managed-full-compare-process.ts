@@ -119,6 +119,7 @@ function managedCommandRoute(script: string): ManagedCommandRoute {
   switch (script) {
     case "scripts/mermaid/produce_native_cli_build_receipt.py":
     case "scripts/mermaid/produce_raster_process_evidence.py":
+    case "scripts/release/verify_html_performance_evidence.py":
       return { kind: "python3", script };
     case "scripts/mermaid/raster-production-session.ts":
     case "scripts/mermaid/native-render-provenance.ts":
@@ -174,6 +175,17 @@ function spawnManagedRoute(
 ) {
   const stdio: ["ignore", number, number] = ["ignore", stdoutFd, stderrFd];
   if (route.kind === "python3") {
+    if (route.script === "scripts/release/verify_html_performance_evidence.py") {
+      return spawnSync(
+        "python3",
+        ["scripts/release/verify_html_performance_evidence.py", ...argv.slice(2)],
+        {
+          cwd,
+          env,
+          stdio,
+        },
+      );
+    }
     return route.script === "scripts/mermaid/produce_native_cli_build_receipt.py"
       ? spawnSync(
           "python3",

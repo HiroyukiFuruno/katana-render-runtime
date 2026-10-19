@@ -36,6 +36,8 @@ if TYPE_CHECKING:
     _Fingerprint = tuple[Path, Path, list[_File], list[_Directory]]
     _PathValue = str | os.PathLike[str]
 
+KNOWN_PROFILE_NAMES = frozenset({"debug", "release", "krr-coverage"})
+
 
 class _EvictionReportFields(TypedDict):
     candidate_paths: list[str]
@@ -168,9 +170,36 @@ class ProfileLocks:
     def __enter__(self) -> ProfileLocks:
         try:
             cursor = Path(os.path.abspath(self.target))
-            for path in [*reversed(cursor.parents), cursor]:
-                descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-                self.ancestors.append((path, descriptor, _identity(os.fstat(descriptor))))
+            if os.name == "nt":
+                self.target.mkdir(parents=True, exist_ok=True)
+                for path in [*reversed(cursor.parents), cursor]:
+                    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    self.ancestors.append((path, descriptor, _identity(os.fstat(descriptor))))
+            else:
+                # clean直後のtargetは、検証済みparentのdir_fdから安全に作成する。
+                current = Path(cursor.anchor)
+                parent_fd = os.open(current, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                self.ancestors.append((current, parent_fd, _identity(os.fstat(parent_fd))))
+                for name in cursor.parts[1:]:
+                    current /= name
+                    try:
+                        descriptor = os.open(
+                            name,
+                            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=parent_fd,
+                        )
+                    except FileNotFoundError:
+                        try:
+                            os.mkdir(name, 0o755, dir_fd=parent_fd)
+                        except FileExistsError:
+                            pass
+                        descriptor = os.open(
+                            name,
+                            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=parent_fd,
+                        )
+                    self.ancestors.append((current, descriptor, _identity(os.fstat(descriptor))))
+                    parent_fd = descriptor
             self.target_identity = _identity(self.target.lstat())
             for profile in _profiles(self.target):
                 self.paths.append(profile / ".cargo-lock")
@@ -358,7 +387,7 @@ def _profiles(target: Path) -> list[Path]:
         if _checked_profile(child, target):
             profiles.append(child)
         else:
-            for suffix in ("debug", "release", "build/debug", "build/release"):
+            for suffix in ("debug", "release", "krr-coverage", "build/debug", "build/release"):
                 profile = child / suffix
                 if _checked_profile(profile, target):
                     profiles.append(profile)
@@ -375,9 +404,9 @@ def retained_profile_paths(target: Path, values: Iterable[_PathValue]) -> tuple[
             parts = path.relative_to(target).parts
         except ValueError as exc:
             raise RuntimeError("retained profile escapes target") from exc
-        if (not parts or parts[-1] not in {"debug", "release"}
+        if (not parts or parts[-1] not in KNOWN_PROFILE_NAMES
                 or len(parts) > 3 or ".." in parts
-                or (len(parts) == 3 and parts[1] != "build")):
+                or (len(parts) == 3 and (parts[1] != "build" or parts[-1] not in {"debug", "release"}))):
             raise RuntimeError("retained profile is outside known profile scope")
         cursor = target
         for part in parts:

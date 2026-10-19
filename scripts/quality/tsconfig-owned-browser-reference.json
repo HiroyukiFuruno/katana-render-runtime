@@ -5,7 +5,6 @@
     "skipDefaultLibCheck": false
   },
   "files": [
-    "../../crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/browser_text_measure.js",
     "../../crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/mermaid_zenuml_bridge.js",
     "../../crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/browser_reference_host.d.ts"
   ]

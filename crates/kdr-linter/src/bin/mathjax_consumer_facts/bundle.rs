@@ -56,7 +56,7 @@ fn require_runtime_source(source: &Source) -> Result<(), String> {
     Ok(())
 }
 
-fn script_entries(block: &syn::Block) -> Result<Vec<syn::Expr>, String> {
+fn script_entries(block: &syn::Block) -> Result<[syn::Expr; 2], String> {
     if block.stmts.len() != 1 {
         return Err("script-order:body".into());
     }
@@ -73,20 +73,17 @@ fn script_entries(block: &syn::Block) -> Result<Vec<syn::Expr>, String> {
     let entries = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
         .parse2(array.mac.tokens.clone())
         .map_err(|_| "script-order:array")?;
-    if entries.len() != 2 {
-        return Err("script-order:count".into());
-    }
-    Ok(entries.into_iter().collect())
+    entries
+        .into_iter()
+        .collect::<Vec<_>>()
+        .try_into()
+        .map_err(|_| "script-order:count".to_string())
 }
 
-fn validate_script_order(entries: &[syn::Expr]) -> Result<(), String> {
-    validate_entry(
-        entries.first().ok_or("script-order:missing-first")?,
-        "mathjax-runtime.min.js",
-        None,
-    )?;
+fn validate_script_order([first, second]: &[syn::Expr; 2]) -> Result<(), String> {
+    validate_entry(first, "mathjax-runtime.min.js", None)?;
     if validate_entry(
-        entries.get(1).ok_or("script-order:missing-second")?,
+        second,
         "render-mathjax.js",
         Some("katanaRunMathJaxRuntime({request_json});"),
     )? != "katanaRunMathJaxRuntime({request_json});"

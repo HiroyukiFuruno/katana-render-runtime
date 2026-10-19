@@ -5,85 +5,79 @@ use std::fs;
 const MATHJAX_RENDERER_INDEX: usize = 0;
 const MATHJAX_JS_RUNTIME_INDEX: usize = 1;
 const MATHJAX_JS_SCRIPTS_INDEX: usize = 2;
-const MATHJAX_RUNTIME_PATH_RESOLVER_INDEX: usize = 3;
 const MATHJAX_BACKEND_INDEX: usize = 4;
-const V8_SCRIPT_ORIGIN_HELPER_INDEX: usize = 6;
-const LIB_MODULE_REGISTRATION_INDEX: usize = 7;
 const RUNTIME_ASSET_HELPER_INPUT_INDEX: usize = 8;
 const GENERATED_MATHJAX_RUNTIME_INDEX: usize = 3;
+const BUNDLE_EXECUTION_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "            DiagramRuntimeScript::owned(\"mathjax-runtime.min.js\", runtime_source),\n            DiagramRuntimeScript::owned(\n                \"render-mathjax.js\",\n                format!(\"katanaRunMathJaxRuntime({request_json});\"),\n            ),",
+        "            DiagramRuntimeScript::owned(\n                \"render-mathjax.js\",\n                format!(\"katanaRunMathJaxRuntime({request_json});\"),\n            ),\n            DiagramRuntimeScript::owned(\"mathjax-runtime.min.js\", runtime_source),",
+        "script-order:name",
+    ),
+    (
+        "katanaRunMathJaxRuntime({request_json});",
+        "otherGlobal({request_json});",
+        "global-invocation:template",
+    ),
+    (
+        "katanaRunMathJaxRuntime({request_json});",
+        "katanaRunMathJaxRuntime();",
+        "global-invocation:template",
+    ),
+];
 
-#[path = "materializer_shared_readback_tests.rs"]
-mod shared_readback;
+#[path = "runtime_v8_route_tests.rs"]
+mod runtime_v8_route_tests;
 
-#[test]
-fn mathjax_consumer_facts_ast_linter_rejects_changed_routes_and_opaque_bytes_are_not_rust()
--> Result<(), Box<dyn std::error::Error>> {
-    let repository = repository_root()?;
+fn mathjax_fixture() -> Result<Fixture, Box<dyn std::error::Error>> {
     let input_paths = RUST_INPUTS
         .iter()
         .chain(OPAQUE_INPUTS)
         .copied()
         .collect::<Vec<_>>();
-    let fixture = Fixture::copy_mathjax_inputs(&input_paths)?;
+    Fixture::copy_mathjax_inputs(&input_paths)
+}
+
+#[path = "materializer_shared_readback_tests.rs"]
+mod shared_readback;
+
+#[path = "call_binding_tests.rs"]
+mod call_binding_tests;
+
+#[test]
+fn mathjax_consumer_facts_ast_linter_rejects_changed_routes_and_opaque_bytes_are_not_rust()
+-> Result<(), Box<dyn std::error::Error>> {
+    let repository = repository_root()?;
+    let fixture = mathjax_fixture()?;
     assert_eq!(inspect_root(fixture.root())?["status"], "verified");
-    reject_runtime_resolver_changes(&fixture, &repository)?;
+    runtime_v8_route_tests::reject_runtime_resolver_changes(&fixture, &repository)?;
     reject_default_materialization_changes(&fixture, &repository)?;
     reject_backend_and_source_changes(&fixture, &repository)?;
-    reject_v8_and_registration_changes(&fixture, &repository)?;
-    reject_parser_and_bundle_changes(&fixture, &repository)?;
+    runtime_v8_route_tests::reject_v8_and_registration_changes(&fixture, &repository)?;
     verify_opaque_input_is_not_parsed_as_rust(&fixture)?;
     Ok(())
 }
 
-fn reject_runtime_resolver_changes(
-    fixture: &Fixture,
-    repository: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    reject_resolver_arm_and_dispatch(fixture, repository)?;
-    reject_resolver_error_and_early_return(fixture, repository)
-}
-
-fn reject_resolver_arm_and_dispatch(
-    fixture: &Fixture,
-    repository: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let resolver = RUST_INPUTS[MATHJAX_RUNTIME_PATH_RESOLVER_INDEX];
-    let original = repository.join(resolver);
-    fixture.replace(
-        resolver,
-        "DiagramKind::MathJax => MathJaxRendererOps::resolve_mathjax_js(),",
-        "DiagramKind::MathJax => FakeMathJaxOps::resolve_mathjax_js(),",
-    )?;
-    fixture.reject("runtime-path-resolver:arm:DiagramKind::MathJax")?;
-    fixture.restore_from(resolver, &original)?;
-
-    fixture.replace(resolver, "match kind {", "match runtime_path {")?;
-    fixture.reject("runtime-path-resolver:dispatch-shape")?;
-    fixture.restore_from(resolver, &original)?;
+#[test]
+fn mathjax_consumer_facts_ast_linter_rejects_parser_pin_and_generated_include_drift()
+-> Result<(), Box<dyn std::error::Error>> {
+    let repository = repository_root()?;
+    let fixture = mathjax_fixture()?;
+    assert_eq!(inspect_root(fixture.root())?["status"], "verified");
+    reject_parser_pin_change(&fixture, &repository)?;
+    reject_generated_include_path_change(&fixture, &repository)?;
+    assert_eq!(inspect_root(fixture.root())?["status"], "verified");
     Ok(())
 }
 
-fn reject_resolver_error_and_early_return(
-    fixture: &Fixture,
-    repository: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let resolver = RUST_INPUTS[MATHJAX_RUNTIME_PATH_RESOLVER_INDEX];
-    let original = repository.join(resolver);
-    fixture.replace(
-        resolver,
-        "map_err(RenderError::RuntimeResolution)",
-        "map_err(ForgedError::RuntimeResolution)",
-    )?;
-    fixture.reject("runtime-path-resolver:map-err")?;
-    fixture.restore_from(resolver, &original)?;
-
-    fixture.replace(
-        resolver,
-        "if let Some(path) = runtime_path {",
-        "if let Some(path) = None {",
-    )?;
-    fixture.reject("runtime-path-resolver:early-return")?;
-    fixture.restore_from(resolver, &original)?;
+#[test]
+fn mathjax_consumer_facts_ast_linter_rejects_bundle_order_and_invocation_drift()
+-> Result<(), Box<dyn std::error::Error>> {
+    let repository = repository_root()?;
+    let fixture = mathjax_fixture()?;
+    assert_eq!(inspect_root(fixture.root())?["status"], "verified");
+    reject_bundle_execution_contract_changes(&fixture, &repository)?;
+    assert_eq!(inspect_root(fixture.root())?["status"], "verified");
     Ok(())
 }
 
@@ -160,40 +154,28 @@ fn reject_backend_and_source_changes(
     let original = repository.join(js_runtime);
     fixture.replace(
         js_runtime,
-        "std::fs::read_to_string(mathjax_js)",
-        "std::fs::read(mathjax_js)",
+        "runtime_source_from(mathjax_js)",
+        "runtime_source_from(&other_path)",
     )?;
-    fixture.reject("read-render-route:source-reader-call")?;
+    fixture.reject("read-render-route:argument:mathjax_js")?;
     fixture.restore_from(js_runtime, &original)?;
     Ok(())
 }
 
-fn reject_v8_and_registration_changes(
-    fixture: &Fixture,
-    repository: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let v8_helper = RUST_INPUTS[V8_SCRIPT_ORIGIN_HELPER_INDEX];
-    let original = repository.join(v8_helper);
-    fixture.replace(v8_helper, "origin_name.into(),", "source.into(),")?;
-    fixture.reject("v8-script-origin-helper:origin")?;
-    fixture.restore_from(v8_helper, &original)?;
-
-    let registration = RUST_INPUTS[LIB_MODULE_REGISTRATION_INDEX];
-    let original = repository.join(registration);
-    fixture.replace(registration, "mod v8_script;", "pub mod v8_script;")?;
-    fixture.reject("v8-script-origin-helper:module-registration")?;
-    fixture.restore_from(registration, &original)?;
-    Ok(())
-}
-
-fn reject_parser_and_bundle_changes(
+fn reject_parser_pin_change(
     fixture: &Fixture,
     repository: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     fixture.replace("Cargo.lock", "version = \"3.0.9\"", "version = \"3.99.0\"")?;
     fixture.reject("parser-pin:build-input-drift")?;
     fixture.restore_from("Cargo.lock", &repository.join("Cargo.lock"))?;
+    Ok(())
+}
 
+fn reject_generated_include_path_change(
+    fixture: &Fixture,
+    repository: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let scripts = RUST_INPUTS[MATHJAX_JS_SCRIPTS_INDEX];
     let original = repository.join(scripts);
     fixture.replace(
@@ -203,6 +185,20 @@ fn reject_parser_and_bundle_changes(
     )?;
     fixture.reject("include-str-generated:path")?;
     fixture.restore_from(scripts, &original)?;
+    Ok(())
+}
+
+fn reject_bundle_execution_contract_changes(
+    fixture: &Fixture,
+    repository: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let scripts = RUST_INPUTS[MATHJAX_JS_SCRIPTS_INDEX];
+    let original = repository.join(scripts);
+    for (before, after, expected) in BUNDLE_EXECUTION_MUTATIONS {
+        fixture.replace(scripts, before, after)?;
+        fixture.reject(expected)?;
+        fixture.restore_from(scripts, &original)?;
+    }
     Ok(())
 }
 

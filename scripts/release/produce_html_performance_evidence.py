@@ -25,7 +25,6 @@ from typing import BinaryIO, Literal, NamedTuple, TypedDict, cast, overload
 from collections.abc import Callable, Mapping, Sequence
 
 import verify_html_performance_evidence as gate
-from toml_loader import load_toml_parser
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "build"))
 LOCAL_CAPACITY_BASELINE = 2363047936
@@ -107,6 +106,7 @@ class ArmPin(TypedDict):
     binary_sha256: str
     source_snapshot_sha256: str
     lock_sha256: str
+    build_artifact_ref: FilePin
 
 
 class ToolContext(TypedDict):
@@ -249,10 +249,7 @@ def load_capacity_binding(root: Path, document: Path, checksum: str) -> Capacity
     return CapacityBinding(document, checksum, state, state_sha, registry, registry_sha, tuple(references))
 
 
-class ExpectedBuild(NamedTuple):
-    harness: gate.JsonObject
-    runtime: gate.JsonObject
-    arm: str
+ExpectedBuild = gate.ExpectedBuild
 
 
 class ArmBuildResult(NamedTuple):
@@ -276,141 +273,8 @@ def _canonical_file(value: object, label: str) -> Path:
     return path
 
 
-def _runtime_lock_packages(harness: Path) -> dict[str, gate.JsonObject]:
-    raw = (harness / "Cargo.lock").read_bytes()
-    gate.require(hashlib.sha256(raw).hexdigest() == gate.LOCK_SHA, "common lock pin differs")
-    lock = gate._object(load_toml_parser().loads(raw.decode("utf8")), "common Cargo lock")
-    packages = [p for p in gate._objects(lock["package"], "locked packages")
-                if p.get("name") == "katana-render-runtime"]
-    baseline = [p for p in packages if p.get("source") == "registry+https://github.com/rust-lang/crates.io-index"
-                and p.get("version") == "0.4.23"]
-    candidate = [p for p in packages if "source" not in p]
-    gate.require(len(packages) == 2 and len(baseline) == 1 and len(candidate) == 1,
-                 "fixed runtime lock packages differ")
-    gate._text(candidate[0]["version"], "locked candidate version")
-    return {"baseline": baseline[0], "candidate": candidate[0]}
-
-
-def expected_build(root: Path, harness: Path, arm: str, metadata: gate.JsonObject,
-                   environment: Mapping[str, str]) -> ExpectedBuild:
-    gate.require(gate._integer(metadata["version"], "metadata schema version") == 1, "metadata schema differs")
-    packages = gate._objects(metadata["packages"], "standalone Cargo packages")
-    harness_packages = [p for p in packages if p.get("manifest_path") == str(harness / "Cargo.toml")
-                        and p.get("name") == "krr-html-performance-harness"]
-    gate.require(len(harness_packages) == 1, "standalone manifest identity differs")
-    selected_harness = harness_packages[0]
-    harness_manifest = gate._object(load_toml_parser().loads((harness / "Cargo.toml").read_text()), "harness manifest")
-    harness_package = gate._object(harness_manifest["package"], "harness package")
-    gate.require(selected_harness["source"] is None
-                 and selected_harness.get("version") == gate._text(harness_package["version"], "harness version"),
-                 "harness package version/origin differs")
-    harness_id = gate._text(selected_harness["id"], "harness package id")
-    gate.require(metadata["workspace_members"] == [harness_id], "standalone workspace members differ")
-    ids = [gate._text(p["id"], "metadata package id") for p in packages]
-    gate.require(len(set(ids)) == len(ids), "duplicate metadata package id")
-    resolve = gate._object(metadata["resolve"], "Cargo resolve")
-    gate.require(resolve["root"] == harness_id, "Cargo resolve root differs")
-    nodes = gate._objects(resolve["nodes"], "Cargo resolve nodes")
-    roots = [node for node in nodes if node.get("id") == harness_id]
-    gate.require(len(roots) == 1 and roots[0].get("features") == [arm], "Cargo arm features differ")
-    dependencies = gate._objects(roots[0]["deps"], "harness resolved dependencies")
-    arms = [dep for dep in dependencies if dep.get("name") in {"baseline", "candidate"}]
-    gate.require(len(arms) == 1 and arms[0].get("name") == arm, "Cargo resolved arm differs")
-    runtime_id = gate._text(arms[0]["pkg"], "runtime package id")
-    runtime_packages = [p for p in packages if p.get("id") == runtime_id]
-    gate.require(len(runtime_packages) == 1, "resolved runtime package missing")
-    runtime = dict(runtime_packages[0])
-    runtime_nodes = [node for node in nodes if node.get("id") == runtime_id]
-    gate.require(len(runtime_nodes) == 1, "resolved runtime node missing")
-    runtime["resolvedFeatures"] = [gate._text(f, "resolved runtime feature")
-                                   for f in gate._array(runtime_nodes[0]["features"], "resolved runtime features")]
-    locked = _runtime_lock_packages(harness)[arm]
-    gate.require(runtime.get("name") == "katana-render-runtime" and runtime.get("version") == locked["version"],
-                 "runtime name/version differs from fixed lock")
-    manifest = _canonical_file(runtime["manifest_path"], "runtime manifest")
-    if arm == "baseline":
-        cargo_home = Path(environment.get("CARGO_HOME", str(Path.home() / ".cargo"))).resolve()
-        gate.require(runtime.get("source") == locked["source"]
-                     and manifest.is_relative_to(cargo_home / "registry/src")
-                     and manifest.parent.name == "katana-render-runtime-0.4.23", "baseline runtime origin differs")
-    else:
-        gate.require(runtime["source"] is None
-                     and manifest == root / "crates/katana-render-runtime/Cargo.toml", "candidate runtime origin differs")
-        manifest_value = gate._object(load_toml_parser().loads(manifest.read_text()), "candidate manifest")
-        package = gate._object(manifest_value["package"], "candidate package")
-        inherited = gate._object(package["version"], "candidate inherited version")
-        workspace = gate._object(load_toml_parser().loads((root / "Cargo.toml").read_text()), "root manifest")
-        workspace_package = gate._object(gate._object(workspace["workspace"], "workspace")["package"], "workspace package")
-        gate.require(inherited.get("workspace") is True and workspace_package.get("version") == locked["version"],
-                     "candidate version differs from fixed lock")
-    for package, name, kind, source in ((selected_harness, "krr-html-performance-harness", ["bin"], harness / "src/main.rs"),
-                                       (runtime, "katana_render_runtime", ["lib"], manifest.parent / "src/lib.rs")):
-        targets = [t for t in gate._objects(package["targets"], "Cargo package targets") if t.get("name") == name]
-        gate.require(len(targets) == 1 and targets[0].get("kind") == kind
-                     and targets[0].get("crate_types") == kind and targets[0].get("src_path") == str(source),
-                     "Cargo package target differs")
-        _canonical_file(str(source), "Cargo target source")
-    return ExpectedBuild(selected_harness, runtime, arm)
-
-
-def cargo_build_artifacts(raw: bytes, expected: ExpectedBuild, target: Path) -> tuple[Path, gate.JsonObject]:
-    events: list[gate.JsonObject] = []
-    terminal_seen = False
-    for line in raw.decode("utf8").splitlines():
-        gate.require(not terminal_seen or not line.strip(), "nonterminal build-finished event")
-        candidate = line.lstrip()
-        if not candidate:
-            continue
-        starts_object = candidate.startswith("{")
-        starts_array = candidate.startswith("[")
-        starts_scalar = candidate[0] in '"tfn-0123456789'
-        if not (starts_object or starts_array or starts_scalar):
-            continue
-        try:
-            decoded = json.loads(candidate, object_pairs_hook=gate.unique_object)
-        except json.JSONDecodeError:
-            gate.require(not starts_object, "malformed Cargo JSON object")
-            # proc-macro出力はCargo JSONではなく「[」から始まることがある。
-            continue
-        event = gate._object(decoded, "Cargo JSON event")
-        reason = gate._text(event["reason"], "Cargo event reason")
-        events.append(event)
-        terminal_seen = reason == "build-finished"
-    finished = [e for e in events if e.get("reason") == "build-finished"]
-    gate.require(len(finished) == 1 and finished[0].get("success") is True
-                 and events[-1] is finished[0], "unique terminal successful build-finished required")
-    selected: list[gate.JsonObject] = []
-    binary: Path | None = None
-    for package, name in ((expected.runtime, "katana_render_runtime"), (expected.harness, "krr-html-performance-harness")):
-        rows = [e for e in events if e.get("reason") == "compiler-artifact"
-                and gate._object(e.get("target"), "artifact target").get("name") == name]
-        gate.require(len(rows) == 1, "unique runtime/harness compiler-artifact required")
-        artifact = rows[0]
-        profile = gate._object(artifact["profile"], "artifact profile")
-        actual_target = gate._object(artifact["target"], "artifact target")
-        expected_targets = [t for t in gate._objects(package["targets"], "expected targets") if t.get("name") == name]
-        gate.require(len(expected_targets) == 1, "expected artifact target differs")
-        gate.require(artifact.get("package_id") == package["id"] and artifact.get("manifest_path") == package["manifest_path"]
-                     and all(actual_target.get(k) == expected_targets[0][k] for k in ("name", "kind", "crate_types", "src_path")),
-                     "artifact package/origin/target differs")
-        gate.require(profile.get("opt_level") == "3" and profile.get("test") is False
-                     and type(artifact.get("fresh")) is bool, "artifact is not release non-test")
-        features = [gate._text(f, "artifact feature") for f in gate._array(artifact["features"], "artifact features")]
-        if package is expected.runtime:
-            gate.require(sorted(features) == sorted(gate._text(f, "expected runtime feature")
-                         for f in gate._array(package["resolvedFeatures"], "expected runtime features")),
-                         "runtime artifact features differ")
-        if package is expected.harness:
-            gate.require(features == [expected.arm], "harness artifact arm features differ")
-            binary = _canonical_file(artifact["executable"], "artifact executable")
-            gate.require(binary == target / "release/krr-html-performance-harness"
-                         and str(binary) in [gate._text(f, "artifact filename") for f in gate._array(artifact["filenames"], "artifact filenames")],
-                         "artifact executable namespace differs")
-        else:
-            gate.require(artifact["executable"] is None, "runtime library executable differs")
-        selected.append(artifact)
-    gate.require(binary is not None, "artifact executable missing")
-    return _canonical_file(str(binary), "artifact executable"), {"runtimeArtifact": selected[0], "binaryArtifact": selected[1], "buildFinished": finished[0]}
+expected_build = gate.expected_build
+cargo_build_artifacts = gate.cargo_build_artifacts
 
 
 def _file_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
@@ -481,6 +345,11 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
     cargo_value = shutil.which("cargo")
     gate.require(cargo_value is not None, "Cargo executable is unavailable")
     cargo = Path(gate._text(cargo_value, "Cargo executable")).resolve(strict=True)
+    cargo_info = {"path": str(cargo), "sha256": gate.sha256(cargo)}
+    rustc_value = environment.get("RUSTC") or shutil.which("rustc", path=environment.get("PATH"))
+    gate.require(rustc_value is not None, "rustc executable is unavailable")
+    rustc = Path(gate._text(rustc_value, "rustc executable")).resolve(strict=True)
+    rustc_info = {"path": str(rustc), "sha256": gate.sha256(rustc)}
     capacity.validate_build_executable(root, [str(cargo), "build"])
     required = [harness / "Cargo.toml", harness / "Cargo.lock", root / "scripts/build/cargo_capacity_guard.py",
                 root / "scripts/build/cargo_capacity_guard_lock.py", harness / "src/main.rs",
@@ -513,16 +382,13 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
                      and source_records[str(path.relative_to(root))] == (gate.sha256(path), path.stat().st_size),
                      "capacity/manifest source changed during metadata")
     expected = expected_build(root, harness, arm, value, environment)
+    cargo_version = command([gate._text(cargo_value, "Cargo executable"), "-vV"], text=True,
+        cwd=root, env=environment, role="tool-query", log_directory=output.parent / f"{output.name}.lifecycle")
+    rustc_version = command([gate._text(rustc_value, "rustc executable"), "-vV"], text=True,
+        cwd=root, env=environment, role="tool-query", log_directory=output.parent / f"{output.name}.lifecycle")
     load_capacity_binding(root, binding.document, binding.document_sha256)
-    argv = [sys.executable, str(root / "scripts/build/cargo_capacity_guard.py"), "--root", str(root),
-            "--target-dir", str(target), "--state", str(binding.state), "--factor", "2",
-            "--expected-state-sha256", binding.state_sha256]
-    for reference in references:
-        argv.extend(["--protected-ref", reference])
-    for profile in retained:
-        argv.extend(["--retain-profile", str(profile)])
-    argv.extend(["--", str(cargo), "build", "--release", "--locked", "--manifest-path", str(harness / "Cargo.toml"),
-                 "--target-dir", str(target), "--message-format=json", "--no-default-features", "--features", arm])
+    argv = gate.guarded_build_argv(root, harness, cargo, arm, binding.state, binding.state_sha256,
+                                   references, [str(profile) for profile in retained])
     output.mkdir(parents=True, exist_ok=False)
     result = _measurement_command(argv, cwd=root, env=environment, check=False, role="build",
                                   log_directory=output.parent / f"{output.name}.lifecycle")
@@ -548,13 +414,25 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
         gate.require(not path.is_symlink() and path.resolve() == path
                      and source_records[str(path.relative_to(root))] == (gate.sha256(path), path.stat().st_size),
                      "capacity/manifest source changed during build")
+    cargo_version_after = command([gate._text(cargo_value, "Cargo executable"), "-vV"], text=True,
+        cwd=root, env=environment, role="tool-query", log_directory=output.parent / f"{output.name}.lifecycle")
+    rustc_version_after = command([gate._text(rustc_value, "rustc executable"), "-vV"], text=True,
+        cwd=root, env=environment, role="tool-query", log_directory=output.parent / f"{output.name}.lifecycle")
+    gate.require(cargo_version_after == cargo_version and rustc_version_after == rustc_version
+                 and gate.sha256(cargo) == cargo_info["sha256"] and gate.sha256(rustc) == rustc_info["sha256"],
+                 "Cargo/Rustc executable changed during build")
     frozen = output / "binary" / "krr-html-performance-harness"
     checksum = freeze_binary(binary, frozen)
     proof: gate.JsonObject = {"schema": "krr-html-performance-build-artifact-v1", "arm": arm,
         "argv": argv, "buildExit": build_exit, "expectedHarness": expected.harness,
         "expectedRuntime": expected.runtime, "artifacts": artifacts, "rawPins": pins,
-        "lockSha256": gate.LOCK_SHA, "selectedBinary": {"path": str(binary), "sha256": checksum}, "frozenBinary": {"path": str(frozen), "sha256": checksum}}
-    return ArmBuildResult(configs, frozen, checksum, proof, pins)
+        "lockSha256": gate.LOCK_SHA, "selectedBinary": {"path": str(binary), "sha256": checksum},
+        "frozenBinary": {"path": str(frozen), "sha256": checksum}, "cargoExecutable": cargo_info,
+        "cargoConfigPins": [{"path": str(path), "sha256": pin} for path, pin in config_pins],
+        "rustcExecutable": rustc_info, "buildEnvironmentSha256": _environment_sha256(environment),
+        "toolVersions": {"cargo": cargo_version, "rustc": rustc_version}}
+    config_file_pins: list[FilePin] = [{"path": str(path), "sha256": pin} for path, pin in config_pins]
+    return ArmBuildResult(configs, frozen, checksum, proof, [*pins, *config_file_pins])
 
 
 def require_frozen_binary(build: ArmBuildResult) -> None:
@@ -563,7 +441,8 @@ def require_frozen_binary(build: ArmBuildResult) -> None:
                  "frozen build binary changed before measurement")
 
 
-def expected_arm_pins(builds: Mapping[str, ArmBuildResult], snapshot_sha256: str) -> dict[str, ArmPin]:
+def expected_arm_pins(builds: Mapping[str, ArmBuildResult], snapshot_sha256: str,
+                      build_artifact_refs: Mapping[str, FilePin]) -> dict[str, ArmPin]:
     arms: dict[str, ArmPin] = {}
     for arm, build in builds.items():
         require_frozen_binary(build)
@@ -571,6 +450,7 @@ def expected_arm_pins(builds: Mapping[str, ArmBuildResult], snapshot_sha256: str
             "binary_sha256": build.binary_sha256,
             "source_snapshot_sha256": snapshot_sha256,
             "lock_sha256": gate.LOCK_SHA,
+            "build_artifact_ref": build_artifact_refs[arm],
         }
     return arms
 
@@ -1408,12 +1288,16 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     capacity_configs: list[Path] = []
     binaries: dict[str, Path] = {}
     builds: dict[str, ArmBuildResult] = {}
+    build_artifact_refs: dict[str, FilePin] = {}
     build_pins: list[FilePin] = []
     for arm in ("baseline", "candidate"):
         build = guarded_arm_build(root, harness, arm, binding, source_records, output / "builds" / arm)
         capacity_configs = build.configs
-        build.proof.update({"sourceBeforeRef": source_before, "sourceSnapshotRef": snapshot_pin})
-        build_pins.extend([*build.pins, write(output / "builds" / arm / "build-artifact.json", build.proof)])
+        build.proof.update({"sourceBeforeRef": source_before, "sourceSnapshotRef": snapshot_pin,
+                            "capacityInputRef": capacity_input_pin})
+        build_artifact_pin = write(output / "builds" / arm / "build-artifact.json", build.proof)
+        build_artifact_refs[arm] = build_artifact_pin
+        build_pins.extend([*build.pins, build_artifact_pin])
         binaries[arm] = build.binary
         builds[arm] = build
         gate.require(source(root, git_query=git_query) == initial, "source changed during build")
@@ -1473,7 +1357,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                    lock, output / "shared-source-snapshot.json", *binaries.values(),
                    binding.document, binding.state, binding.registry, *capacity_configs,
                    *[Path(pin["path"]) for pin in build_pins]]
-    arms = expected_arm_pins(builds, snapshot_pin["sha256"])
+    arms = expected_arm_pins(builds, snapshot_pin["sha256"], build_artifact_refs)
     before_context = context(root, target, input_paths, lifecycle, git_query=git_query)
     before_pin = write(output / "context-before.json", before_context)
     environment_sha = before_pin["sha256"]

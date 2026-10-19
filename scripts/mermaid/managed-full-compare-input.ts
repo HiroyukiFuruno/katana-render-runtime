@@ -19,6 +19,29 @@ const languageInput = z
     officialReceipt: filePin,
     officialProcessEvidence: filePin,
     officialPairDirectory: absolutePath,
+    nativeFrameEvidence: filePin.optional(),
+    nativeFrameCapture: z
+      .object({
+        probeBinary: filePin,
+        config: filePin,
+        fontContext: filePin,
+        buildProof: z
+          .object({
+            bundleManifest: filePin.refine((value) => path.basename(value.path) === "bundle.json"),
+            artifactPath: z
+              .string()
+              .min(1)
+              .refine(
+                (value) =>
+                  !path.isAbsolute(value) &&
+                  value.split(/[\\/]/).every((part) => part !== ".." && part !== ""),
+              ),
+            artifactSha256: sha256,
+          })
+          .strict(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -231,6 +254,13 @@ function allFilePins(
     add(language.officialTemplate);
     add(language.officialReceipt);
     add(language.officialProcessEvidence);
+    if (language.nativeFrameEvidence !== undefined) add(language.nativeFrameEvidence);
+    if (language.nativeFrameCapture !== undefined) {
+      add(language.nativeFrameCapture.probeBinary);
+      add(language.nativeFrameCapture.config);
+      add(language.nativeFrameCapture.fontContext);
+      add(language.nativeFrameCapture.buildProof.bundleManifest);
+    }
   }
   return pins;
 }

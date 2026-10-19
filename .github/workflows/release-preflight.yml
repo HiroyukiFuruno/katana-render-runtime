@@ -85,6 +85,12 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
         uses: taiki-e/install-action@cargo-llvm-cov
 
+      - name: Install cargo-nextest
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+
       - name: Acquire completed exact-source CI and paired performance evidence
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
         env:

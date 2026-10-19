@@ -106,6 +106,47 @@ class NativeCoverageResultTests(unittest.TestCase):
         self.assertNotIn("files", serialized)
         self.assertEqual(manifest["authenticity"], "unsigned-local-result")
 
+    def test_root_domain_uses_fixed_nextest_report_command_and_maps_threads(self) -> None:
+        selected = self.root / "target" / "llvm-cov-target"
+        with patch.object(coverage_result, "_coverage_selection", return_value=lambda *args, **kwargs: ("test", selected)):
+            command = coverage_result._domain_command(self.root, "root", "root.json", "3")
+        self.assertEqual(command["justTarget"], "root-test-and-coverage")
+        self.assertEqual(command["selectedTarget"], "target/llvm-cov-target")
+        self.assertEqual(command["argv"], [
+            "cargo", "llvm-cov", "nextest", "--workspace", "--all-targets", "--all-features", "--locked",
+            "--cargo-profile", "krr-coverage", "--no-fail-fast", "--retries", "0",
+            "--user-config-file", "scripts/release/nextest-local-user.toml", "--json", "--summary-only",
+            "--output-path", "tmp/quality/standalone-performance-coverage/root.json",
+            "--test-threads=3",
+        ])
+
+    def test_performance_domains_bind_the_fixed_coverage_profile(self) -> None:
+        selected = self.root / "target" / "llvm-cov-performance-baseline"
+        with patch.object(coverage_result, "_coverage_selection", return_value=lambda *args, **kwargs: ("test", selected)):
+            command = coverage_result._domain_command(
+                self.root, "performance-baseline", "baseline.json", "default"
+            )
+        self.assertEqual(command["argv"], [
+            "cargo", "llvm-cov", "--manifest-path", "scripts/html/performance-harness/Cargo.toml",
+            "--workspace", "--all-targets", "--no-default-features", "--features", "baseline",
+            "--locked", "--profile", "krr-coverage", "--json", "--output-path",
+            "tmp/quality/standalone-performance-coverage/baseline.json",
+        ])
+        for mutation in ("missing", "wrong"):
+            manifest = self.manifest()
+            domains = cast(list[dict[str, object]], manifest["domains"])
+            performance = next(domain for domain in domains if domain["domain"] == "performance-baseline")
+            command = cast(dict[str, object], performance["command"])
+            argv = list(cast(list[str], command["argv"]))
+            if mutation == "missing":
+                profile_index = argv.index("--profile")
+                del argv[profile_index : profile_index + 2]
+            else:
+                argv[argv.index("krr-coverage")] = "wrong-profile"
+            command["argv"] = argv
+            with self.subTest(mutation=mutation), self.assertRaises(coverage_result.CoverageResultError):
+                self.verify(manifest)
+
     def test_tested_workflow_identity_and_exact_domains_are_bound(self) -> None:
         for key in ("testedSha", "workflowSha"):
             manifest = self.manifest()

@@ -345,6 +345,9 @@ class CapacityBindingUnitTests(unittest.TestCase):
                 if mutation is not None:
                     mutation()
                 return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.metadata).encode(), stderr=b"metadata stderr\n")
+            if argv[-1] == "-vV":
+                tool = "cargo" if Path(argv[0]) == self.cargo else "rustc"
+                return subprocess.CompletedProcess(argv, 0, stdout=f"{tool} 1.90.0\n".encode(), stderr=b"")
             stdout = b"macro output preserved\n" + b"\n".join(json.dumps(event).encode() for event in self.arm_events(arm))
             return subprocess.CompletedProcess(argv, guard_exit, stdout=stdout, stderr=b'{"guard":"report"}\nCargo stderr\n')
         # fake Cargo単体では出力fixtureだけを置き、実FD安全性は別classで検証する。
@@ -406,9 +409,9 @@ class CapacityBindingUnitTests(unittest.TestCase):
         for arm in ("baseline", "candidate"):
             self.metadata = self.arm_metadata(arm)
             self.invoke(arm)
-        self.assertEqual(len(self.commands), 4)
+        self.assertEqual(len(self.commands), 12)
         for index, arm in enumerate(("baseline", "candidate")):
-            argv = self.commands[index * 2 + 1]
+            argv = self.commands[index * 6 + 3]
             self.assertEqual(argv[:2], [sys.executable, str(self.root / "scripts/build/cargo_capacity_guard.py")])
             self.assertEqual(argv[argv.index("--expected-state-sha256") + 1], gate.sha256(self.state))
             self.assertEqual(argv[argv.index("--state") + 1], str(self.state))
@@ -552,11 +555,11 @@ class CapacityBindingUnitTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError) as rejected:
             self.invoke(guard_exit=2)
         self.assertEqual(rejected.exception.returncode, 2)
-        self.assertEqual(len(self.commands), 2)
+        self.assertEqual(len(self.commands), 4)
         self.commands.clear()
         with self.assertRaisesRegex(ValueError, "SHA256 differs"):
             self.invoke(mutation=lambda: self.registry.write_bytes(b"changed registry"))
-        self.assertEqual(len(self.commands), 1)
+        self.assertEqual(len(self.commands), 3)
 
 
     def expected(self, arm: str = "baseline") -> typed_producer.ExpectedBuild:
@@ -659,8 +662,8 @@ class CapacityBindingUnitTests(unittest.TestCase):
         self.assertEqual((directory / "guard-cargo.stderr").read_bytes(), b'{"guard":"report"}\nCargo stderr\n')
         self.assertEqual((directory / "binary/krr-html-performance-harness").read_bytes(), b"unit binary")
         self.assertNotIn("--no-deps", self.commands[0])
-        self.assertIn("--message-format=json", self.commands[1])
-        self.assertNotIn("--print-json", self.commands[1])
+        self.assertIn("--message-format=json", self.commands[3])
+        self.assertNotIn("--print-json", self.commands[3])
 
 
 class ProducerJsonBoundaryUnitTests(unittest.TestCase):
@@ -819,7 +822,9 @@ class FrozenBinaryCarryUnitTests(unittest.TestCase):
             binary.write_bytes(b"original build")
             checksum = gate.sha256(binary)
             build = typed_producer.ArmBuildResult([], binary, checksum, {}, [])
-            expected = typed_producer.expected_arm_pins({"baseline": build}, "snapshot")
+            build_ref: dict[str, typed_producer.FilePin] = {
+                "baseline": {"path": "/build-artifact.json", "sha256": "a" * 64}}
+            expected = typed_producer.expected_arm_pins({"baseline": build}, "snapshot", build_ref)
             self.assertEqual(expected["baseline-0.4.23"]["binary_sha256"], checksum)
             self.assertEqual(expected["baseline-0.4.23"]["source_snapshot_sha256"], "snapshot")
             for method in ("write", "replace"):
@@ -832,7 +837,7 @@ class FrozenBinaryCarryUnitTests(unittest.TestCase):
                         replacement.replace(binary)
                     self.assertNotEqual(gate.sha256(binary), checksum)
                     for validate in (
-                        lambda: typed_producer.expected_arm_pins({"baseline": build}, "snapshot"),
+                        lambda: typed_producer.expected_arm_pins({"baseline": build}, "snapshot", build_ref),
                         lambda: typed_producer.require_frozen_binary(build),
                     ):
                         with self.assertRaisesRegex(ValueError, "frozen build binary changed"):

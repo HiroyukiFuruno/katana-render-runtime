@@ -142,6 +142,7 @@ def _record_tools(records: dict[str, str], rustup_llvm_cov: Path) -> dict[str, s
         "rustc": (["rustc", "--version"], "rustc"),
         "cargo": (["cargo", "--version"], "cargo"),
         "cargoLlvmCov": (["cargo", "llvm-cov", "--version"], "cargo-llvm-cov"),
+        "cargoNextest": (["cargo", "nextest", "--version"], "cargo-nextest"),
         "java": (["java", "-version"], "java"),
         "bun": (["bun", "--version"], "bun"),
         "node": (["node", "--version"], "node"),
@@ -270,6 +271,14 @@ def _record_fonts(records: dict[str, str]) -> None:
         matched_path = Path(fields[3])
         matched_sha = _sha256(_file_digest(matched_path, records, f"font-match:{family}"))
         records[f"font-match-result:{family}"] = _sha256("\t".join((*fields[:3], matched_sha)).encode())
+
+
+def collect_font_inventory() -> tuple[str, int]:
+    """Return the validated Linux font/fontconfig inventory digest and count."""
+    records: dict[str, str] = {}
+    _record_fontconfig_closure(records)
+    _record_fonts(records)
+    return _sha256(json.dumps(records, sort_keys=True, separators=(",", ":")).encode()), len(records)
 
 
 def _record_rust_toolchain(records: dict[str, str]) -> Path:

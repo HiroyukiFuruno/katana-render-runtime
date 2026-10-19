@@ -2,8 +2,6 @@ use super::consumer::require_direct_call;
 use super::source::{call, ident};
 use syn::parse::Parser;
 
-const SOURCE_READER_ARM_COUNT: usize = 3;
-
 pub(super) fn require_request_json(expression: &syn::Expr) -> Result<(), String> {
     let syn::Expr::MethodCall(to_string) = expression else {
         return Err("read-render-route:request-json".into());
@@ -42,7 +40,6 @@ fn source_reader_match(file: &syn::File) -> Result<&syn::ExprMatch, String> {
     if super::source::path_name_from_expr(&read_call.func) != "std::fs::read_to_string"
         || read_call.args.len() != 1
         || !ident(&read_call.args[0], "mathjax_js")
-        || read.arms.len() != SOURCE_READER_ARM_COUNT
     {
         return Err("read-render-route:source-reader-call".into());
     }
@@ -50,9 +47,8 @@ fn source_reader_match(file: &syn::File) -> Result<&syn::ExprMatch, String> {
 }
 
 fn validate_source_reader_arms(read: &syn::ExprMatch) -> Result<(), String> {
-    let arms = read.arms.iter().collect::<Vec<_>>();
-    let [success, missing, other] = arms.as_slice() else {
-        return Err("read-render-route:source-reader-arms".into());
+    let [success, missing, other] = read.arms.as_slice() else {
+        return Err("read-render-route:source-reader-call".into());
     };
     let (success_pattern, success_guard) = guarded_pattern(&success.pat);
     let (missing_pattern, missing_guard) = guarded_pattern(&missing.pat);

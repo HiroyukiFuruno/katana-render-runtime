@@ -26,6 +26,7 @@ LOCAL_TOOL_KEYS = {
     "rustc",
     "cargo",
     "cargoLlvmCov",
+    "cargoNextest",
     "llvm",
     "java",
     "bun",

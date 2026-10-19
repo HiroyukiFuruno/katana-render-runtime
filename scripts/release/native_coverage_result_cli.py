@@ -6,12 +6,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import stat
 import sys
 from pathlib import Path
 from typing import cast
+from hashlib import sha256
 
 import native_coverage_linux_context as linux_context
+import native_coverage_local_context as local_context
+import native_coverage_local_anchor as local_anchor
 import native_coverage_local_result as local_result
 import native_coverage_result as coverage_result
 
@@ -71,11 +75,14 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--context", required=True, type=Path)
     validate.add_argument("--manifest", required=True, type=Path)
     commands.add_parser("collect-context")
+    commands.add_parser("font-context")
     for name in ("local-key", "local-begin", "local-validate", "local-collection-validate"):
         local = commands.add_parser(name)
         local.add_argument("--producer", required=True, choices=("root", "performance"))
         if name == "local-key":
             local.add_argument("--moon-fingerprint", action="store_true", required=True)
+    diagnose = commands.add_parser("local-diagnose")
+    diagnose.add_argument("--producer", required=True, choices=("root", "performance"))
     finish = commands.add_parser("local-finish")
     finish.add_argument("--producer", required=True, choices=("root", "performance"))
     finish.add_argument("--producer-exit", required=True, type=int)
@@ -87,6 +94,47 @@ def _parser() -> argparse.ArgumentParser:
 
 def _context(path: Path) -> coverage_result.JsonObject:
     return coverage_result.parse_coverage_context(_read_json(path, "coverage context"))
+
+
+def _font_environment() -> dict[str, object]:
+    if sys.platform == "darwin":
+        inventory_sha, record_count = local_context.collect_font_inventory()
+        platform_name = "Darwin"
+    elif sys.platform.startswith("linux"):
+        inventory_sha, record_count = linux_context.collect_font_inventory()
+        platform_name = "Linux"
+    else:
+        return {
+            "schema": "krr-font-environment-v1", "cacheable": False,
+            "platform": sys.platform, "inventorySha256": "unavailable",
+            "recordCount": 0, "missReasons": ["unsupported_host_profile"],
+            "pythonVersion": sys.version.split()[0],
+        }
+    executable = Path(sys.executable).resolve(strict=True)
+    executable_sha = sha256(executable.read_bytes()).hexdigest()
+    return {
+        "schema": "krr-font-environment-v1", "cacheable": True,
+        "platform": platform_name, "inventorySha256": inventory_sha,
+        "recordCount": record_count, "missReasons": [],
+        "pythonVersion": sys.version.split()[0],
+        "pythonExecutableSha256": executable_sha,
+    }
+
+
+def _local_diagnose(repo: Path, producer: str) -> dict[str, object]:
+    context = local_result._local_context(repo)
+    directory = local_anchor._anchor_directory(repo, create=False)
+    anchor = local_anchor._read(directory, producer) if directory is not None else None
+    return {
+        "schema": "krr-native-local-coverage-diagnosis-v1",
+        "producer": producer,
+        "contextCacheable": context["cacheable"],
+        "missReasons": context["missReasons"],
+        "gitEnvironmentNames": sorted(name for name in os.environ if name.startswith("GIT_")),
+        "gitDirectoryAvailable": local_anchor._git_directory(repo) is not None,
+        "anchorDirectoryAvailable": directory is not None,
+        "anchorReadable": anchor is not None,
+    }
 
 
 def _run(args: argparse.Namespace) -> dict[str, object]:
@@ -103,11 +151,23 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
         return local_result.local_validate(repo, args.producer)
     if args.command == "local-collection-validate":
         return local_result.local_collection_validate(repo, args.producer)
+    if args.command == "local-diagnose":
+        return _local_diagnose(repo, args.producer)
     if args.command == "collect-context":
         try:
             return linux_context.collect_context(repo)
         except OSError as error:
             raise linux_context.LinuxCoverageContextError("Linux host identity could not be read") from error
+    if args.command == "font-context":
+        try:
+            return _font_environment()
+        except (local_context.LocalCoverageContextError, linux_context.LinuxCoverageContextError) as error:
+            return {
+                "schema": "krr-font-environment-v1", "cacheable": False,
+                "platform": platform.system(), "inventorySha256": "unavailable",
+                "recordCount": 0, "missReasons": [str(error)],
+                "pythonVersion": sys.version.split()[0],
+            }
     context = _context(args.context)
     if args.command == "cache-key":
         return coverage_result.coverage_cache_key(repo, context)

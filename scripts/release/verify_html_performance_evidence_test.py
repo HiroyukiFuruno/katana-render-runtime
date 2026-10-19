@@ -434,6 +434,80 @@ def violate_quiet_load(manifest: JsonObject) -> None:
     json_object(workers[-1])["after"] = 0.3
 
 
+class BuildArtifactArgvTest(unittest.TestCase):
+    def test_build_reader_reuses_policy_without_matching_consumer_volatile_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            harness = root / "scripts/html/performance-harness"
+            harness.mkdir(parents=True)
+            binary_directory = root / "bin"
+            binary_directory.mkdir()
+            cargo = binary_directory / "cargo"
+            cargo.write_text("cargo fixture")
+            cargo.chmod(0o755)
+            home = root / "home"
+            home.mkdir()
+            environment = {"PATH": str(binary_directory), "HOME": str(home),
+                           "CARGO_HOME": str(home / ".cargo"), "CARGO_TARGET_DIR": str(root / "target"),
+                           "TERM": "build-terminal", "SHLVL": "2"}
+            proof = {"buildEnvironmentSha256": "a" * 64}
+            gate._validate_build_environment(proof, root, harness, cargo, environment)
+            environment.update({"TERM": "consumer-terminal", "SHLVL": "7"})
+            gate._validate_build_environment(proof, root, harness, cargo, environment)
+            environment["CARGO_BUILD_TARGET"] = "aarch64-unknown-linux-gnu"
+            with self.assertRaisesRegex(RuntimeError, "environment target selection"):
+                gate._validate_build_environment(proof, root, harness, cargo, environment)
+
+    def test_guarded_build_argv_accepts_only_exact_capacity_and_cargo_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            harness = root / "scripts/html/performance-harness"
+            harness.mkdir(parents=True)
+            cargo = root / "cargo"
+            cargo.write_bytes(b"cargo")
+            state = root / "capacity-state.json"
+            state.write_bytes(b"state")
+            profile = root / "target/release"
+            profile.mkdir(parents=True)
+            refs = []
+            for index in range(40):
+                reference = root / f"protected-{index}"
+                reference.write_bytes(str(index).encode())
+                refs.append(str(reference))
+            argv = gate.guarded_build_argv(root, harness, cargo, "candidate", state,
+                gate.sha256(state), refs, [str(profile)])
+            recorded_state_sha = gate.sha256(state)
+            gate.validate_guarded_build_argv(argv, root, harness, cargo, "candidate", state,
+                recorded_state_sha, refs)
+            changed_state_path = list(argv)
+            changed_state_path[changed_state_path.index("--state") + 1] = str(root / "different-state.json")
+            with self.assertRaisesRegex(ValueError, "recorded capacity state/factor differs"):
+                gate.validate_guarded_build_argv(changed_state_path, root, harness, cargo, "candidate",
+                    state, recorded_state_sha, refs)
+            state.write_bytes(b"post-build capacity state")
+            Path(refs[0]).unlink()
+            profile.rmdir()
+            gate.validate_guarded_build_argv(argv, root, harness, cargo, "candidate", state,
+                recorded_state_sha, refs)
+            mutations: tuple[Callable[[list[str]], None], ...] = (
+                lambda changed: changed.insert(changed.index("--features"), "--config"),
+                lambda changed: changed.insert(changed.index("--features"), "--target"),
+                lambda changed: changed.insert(changed.index("--features") + 1, "--all-features"),
+                lambda changed: changed.insert(changed.index("--release"), "--profile"),
+            )
+            for mutation in mutations:
+                changed = list(argv)
+                mutation(changed)
+                with self.assertRaisesRegex(ValueError, "canonical guarded Cargo command"):
+                    gate.validate_guarded_build_argv(changed, root, harness, cargo, "candidate", state,
+                        recorded_state_sha, refs)
+            changed = list(argv)
+            changed[changed.index(refs[0])] = str(root / "unrecorded-protected-ref")
+            with self.assertRaisesRegex(ValueError, "unbound capacity references"):
+                gate.validate_guarded_build_argv(changed, root, harness, cargo, "candidate", state,
+                    recorded_state_sha, refs)
+
+
 class PerformanceEvidenceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
@@ -499,6 +573,53 @@ class PerformanceEvidenceTest(unittest.TestCase):
             {"originalPath": original, "relativePath": relative, "sha256": checksum}
         )
         return {"path": original, "sha256": checksum}
+
+    def test_bundle_relative_build_artifact_pin_requires_matching_transport_sha(self) -> None:
+        bundle = gate.Bundle(self.bundle)
+        row = json_object(json_array_at(self.transport, "files")[0])
+        reference = bundle.relative_reference(row["relativePath"], row["sha256"])
+        self.assertEqual(bundle.file(reference).read_bytes(),
+                         (self.bundle / str(row["relativePath"])).read_bytes())
+        with self.assertRaisesRegex(ValueError, "bundle-relative file pin mismatch"):
+            bundle.relative_reference(row["relativePath"], "0" * 64)
+
+    def test_recorded_capacity_state_requires_its_transported_bytes(self) -> None:
+        state_ref = self.add_file("/captured/capacity-state.json", "capacity/state.json", b"prebuild state")
+        valid_input_ref = self.add_file(
+            "/captured/valid-capacity-input.json",
+            "capacity/valid-input.json",
+            {"stateRef": state_ref},
+        )
+        invalid_input_ref = self.add_file(
+            "/captured/invalid-capacity-input.json",
+            "capacity/invalid-input.json",
+            {"stateRef": {**state_ref, "sha256": "0" * 64}},
+        )
+        self.save_transport()
+        bundle = gate.Bundle(self.bundle)
+        self.assertEqual(
+            gate._recorded_capacity_state(bundle, bundle.json(valid_input_ref)),
+            (Path(cast(str, state_ref["path"])), cast(str, state_ref["sha256"])),
+        )
+        with self.assertRaisesRegex(ValueError, "original pin mismatch"):
+            gate._recorded_capacity_state(bundle, bundle.json(invalid_input_ref))
+
+    def test_old_build_receipt_without_tool_observations_is_rejected(self) -> None:
+        expected = json.loads(self.expected_paths[0].read_text())
+        source_pair = json_object(expected["sourcePair"])
+        proof = {
+            "schema": "krr-html-performance-build-artifact-v1",
+            "arm": "candidate",
+            "buildExit": 0,
+            "lockSha256": gate.LOCK_SHA,
+            "sourceBeforeRef": source_pair["before"],
+            "sourceSnapshotRef": source_pair["snapshot"],
+        }
+        ref = self.add_file("/captured/old-build.json", "old/build.json", proof)
+        self.save_transport()
+        bundle = gate.Bundle(self.bundle)
+        with self.assertRaisesRegex(ValueError, "build environment SHA must be text"):
+            gate._validate_build_proof(bundle, self.root, ref, "candidate")
 
     def make_attempt(self, index: int, width: int, height: int) -> None:
         origin = "/captured/repo"
@@ -1270,6 +1391,26 @@ class PerformanceAcquisitionTest(unittest.TestCase):
 
 
 class PerformanceJsonBoundaryTest(unittest.TestCase):
+    def test_candidate_build_cli_emits_only_build_identity_pins(self) -> None:
+        expected: JsonObject = {
+            "binarySha256": "a" * 64,
+            "sourceHead": "head",
+            "sourceSnapshotSha256": "b" * 64,
+            "lockSha256": "c" * 64,
+            "buildArtifactSha256": "d" * 64,
+            "cargoExecutableSha256": "e" * 64,
+        }
+        with patch.object(gate.sys, "argv", ["verify_html_performance_evidence.py", "--repo", ".",
+                    "--evidence-dir", "bundle", "--candidate-build-proof", "build/candidate.json",
+                    "--build-artifact-sha256", "f" * 64, "--bundle-manifest-sha256", "0" * 64]), \
+             patch.object(gate.sys, "stdout", io.StringIO()) as stdout, \
+             patch.object(gate, "validate_candidate_build_proof", return_value=expected) as verify:
+            self.assertEqual(gate.main(), 0)
+        verify.assert_called_once_with(Path("bundle"), Path(".").resolve(), "0" * 64,
+                                       "build/candidate.json", "f" * 64)
+        self.assertEqual(json.loads(stdout.getvalue()), expected)
+        self.assertFalse({"accepted", "performancePassed", "htmlAccepted"} & set(json.loads(stdout.getvalue())))
+
     def test_public_verifier_rejects_diagnostic_html84_result(self) -> None:
         result: JsonObject = {
             "htmlStage90": {"acceptance": False, "fontIdentityEquivalence": "not-established"},

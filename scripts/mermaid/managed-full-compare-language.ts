@@ -17,7 +17,17 @@ import {
   validateLanguageScoreEvidence,
 } from "./managed-full-compare-results";
 import { fileSha256 } from "./mermaid-pair-manifest";
+import {
+  nativeFrameBuildProofArgv,
+  requireNativeFrameBuildFacts,
+} from "./native-frame-build-proof";
+import {
+  captureNativeFrameEvidence,
+  scoreNativeFramePaintProjection,
+  verifyNativeFrameEvidence,
+} from "./native-frame-evidence";
 import { requireNativeRenderInventory } from "./native-render-provenance";
+import { MagickOps } from "./reference_image_ops";
 import { isNeutralGeometryTargetSlug } from "./reference_svg_geometry";
 
 export interface ManagedStep {
@@ -45,6 +55,9 @@ export interface LanguageAcceptance {
   rasterProcessEvidence: FilePin;
   comparison: FilePin;
   bindingConfig: FilePin;
+  nativeFrameEvidence?: FilePin;
+  nativeFrameComparison?: FilePin;
+  nativeFrameBuildProof: FilePin;
 }
 
 export interface FilePin {
@@ -53,14 +66,14 @@ export interface FilePin {
   size: number;
 }
 
-export function runManagedLanguage(
+export async function runManagedLanguage(
   request: ManagedFullCompareRequest,
   language: LanguageName,
   buildReceiptPath: string,
   outputRoot: string,
   steps: ManagedStep[],
   expectedFixtureSources: FixtureSourcePin[],
-): LanguageAcceptance {
+): Promise<LanguageAcceptance> {
   const input = request.languages[language],
     workspace = path.join(outputRoot, language),
     svgDirectory = path.join(workspace, "candidate-svg"),
@@ -78,6 +91,29 @@ export function runManagedLanguage(
   createEmptyDirectory(rasterPairs);
   const inventory = validateLanguageInventory(request, language, expectedFixtureSources);
   const slugs = inventory.slugs;
+  let nativeFrameEvidence: FilePin | undefined;
+  let nativeEvidenceValue: ReturnType<typeof verifyNativeFrameEvidence> | undefined;
+  let nativeFrameComparison: FilePin | undefined;
+  let nativeFrameAccepted = true;
+  assertNativeFrameInputMode(input);
+  const capturePins = input.nativeFrameCapture;
+  if (capturePins === undefined) throw new Error("Native frame managed capture pins are missing");
+  const buildProof = runStep(
+    request,
+    outputRoot,
+    steps,
+    `${language}-native-frame-build-proof`,
+    nativeFrameBuildProofArgv(request.tools.python.path, request.repositoryRoot, capturePins),
+  );
+  requireCommandSuccess(buildProof);
+  requireNativeFrameBuildFacts(
+    parseChildJson<unknown>(buildProof, "native frame build proof"),
+    capturePins,
+    request.tools.cargo.sha256,
+  );
+  const suppliedNativeEvidence = loadNativeFrameEvidence(request, input, language, slugs);
+  nativeEvidenceValue = suppliedNativeEvidence?.evidence;
+  nativeFrameEvidence = suppliedNativeEvidence?.pin;
   copyNonemptyFixtures(input.fixtures, candidateFixtures, inventory.sources, slugs);
   createEmptyDirectory(comparisonDirectory);
 
@@ -128,6 +164,21 @@ export function runManagedLanguage(
   );
   if (nativeBindings.size !== slugs.length || slugs.some((slug) => !nativeBindings.has(slug))) {
     throw new Error(`${language} native render receipt differs from the fixed inventory`);
+  }
+  if (nativeEvidenceValue !== undefined) {
+    assertNativeFrameInputs(nativeEvidenceValue, svgDirectory, slugs);
+  }
+  if (input.nativeFrameCapture !== undefined) {
+    const captured = captureNativeFrame(
+      request,
+      language,
+      input.nativeFrameCapture,
+      svgDirectory,
+      rasterPairs,
+      workspace,
+    );
+    nativeEvidenceValue = captured.evidence;
+    nativeFrameEvidence = captured.pin;
   }
 
   runStep(request, outputRoot, steps, `${language}-raster-process`, [
@@ -252,11 +303,31 @@ export function runManagedLanguage(
     projectedEvidence,
   );
   requireScoreProcessOutcome(scoring, score.accepted);
+  if (nativeEvidenceValue !== undefined) {
+    const nativePairs = slugs.map((slug) => ({
+      slug,
+      officialPath: path.join(input.officialPairDirectory, `${slug}.png`),
+      katanaPath: path.join(rasterPairs, `${slug}.png`),
+      officialSvgPath: path.join(input.officialPairDirectory, `${slug}.svg`),
+      katanaSvgPath: path.join(svgDirectory, `${slug}.svg`),
+    }));
+    const nativeComparison = await scoreNativeFramePaintProjection(
+      nativePairs,
+      nativeEvidenceValue,
+      path.join(comparisonDirectory, "native-frame-paint-projection"),
+      "dark",
+      new MagickOps(path.join(comparisonDirectory, "native-frame-paint-magick"), null, "dark"),
+    );
+    nativeFrameAccepted = [...nativeComparison.scores.values()].every(
+      (row) => row.score >= 99 && row.structuralIntegrityAccepted,
+    );
+    nativeFrameComparison = filePin(nativeComparison.evidencePath);
+  }
   return {
     language,
     fixtureCount: score.fixtureCount,
     minimumScore: score.minimumScore,
-    accepted: score.accepted,
+    accepted: score.accepted && nativeFrameAccepted,
     failedScores: score.scores
       .filter((row) => !row.passed || row.score < 99)
       .map(({ slug, score, minScore }) => ({ slug, score, minScore })),
@@ -267,6 +338,9 @@ export function runManagedLanguage(
     rasterProcessEvidence: filePin(rasterEvidence),
     comparison: filePin(path.join(comparisonDirectory, "scores.json")),
     bindingConfig: filePin(bindingConfig),
+    nativeFrameBuildProof: filePin(buildProof.stdoutPath),
+    ...(nativeFrameEvidence === undefined ? {} : { nativeFrameEvidence }),
+    ...(nativeFrameComparison === undefined ? {} : { nativeFrameComparison }),
   };
 }
 
@@ -438,6 +512,96 @@ function commandTool(request: ManagedFullCompareRequest, argv: string[]): Manage
   if (argv[0] === request.tools.bun.path) return { kind: "bun", ...request.tools.bun };
   if (argv[0] === request.tools.python.path) return { kind: "python3", ...request.tools.python };
   throw new Error("Managed command executable does not match its pinned Bun/Python tool");
+}
+
+function assertNativeFrameInputMode(input: ManagedFullCompareRequest["languages"]["en"]): void {
+  if (input.nativeFrameEvidence === undefined && input.nativeFrameCapture === undefined) {
+    throw new Error("Formal Mermaid comparison requires a native frame sidecar or capture pin");
+  }
+  if (input.nativeFrameEvidence !== undefined && input.nativeFrameCapture === undefined) {
+    throw new Error("Native frame evidence requires the managed probe/config/font pins");
+  }
+}
+
+function assertNativeFramePins(
+  evidence: ReturnType<typeof verifyNativeFrameEvidence>,
+  capture:
+    | NonNullable<ManagedFullCompareRequest["languages"]["en"]["nativeFrameCapture"]>
+    | undefined,
+): void {
+  if (capture === undefined) throw new Error("Native frame managed pins are missing");
+  for (const [actual, expected, label] of [
+    [evidence.probeBinary, capture.probeBinary, "probe"],
+    [evidence.config, capture.config, "config"],
+    [evidence.fontContext, capture.fontContext, "font context"],
+  ] as const) {
+    if (actual.path !== expected.path || actual.sha256 !== expected.sha256) {
+      throw new Error(`Native frame ${label} pin differs from the managed request`);
+    }
+  }
+}
+
+function loadNativeFrameEvidence(
+  request: ManagedFullCompareRequest,
+  input: ManagedFullCompareRequest["languages"]["en"],
+  language: LanguageName,
+  slugs: readonly string[],
+): { evidence: ReturnType<typeof verifyNativeFrameEvidence>; pin: FilePin } | undefined {
+  if (input.nativeFrameEvidence === undefined) return undefined;
+  const evidence = verifyNativeFrameEvidence(
+    readJson(input.nativeFrameEvidence.path),
+    language,
+    slugs,
+  );
+  if (
+    evidence.sourceManifest.path !== request.sourceManifest.path ||
+    evidence.sourceManifest.sha256 !== request.sourceManifest.sha256
+  ) {
+    throw new Error(`${language} native frame evidence has a different source manifest`);
+  }
+  assertNativeFramePins(evidence, input.nativeFrameCapture);
+  return { evidence, pin: filePin(input.nativeFrameEvidence.path) };
+}
+
+function captureNativeFrame(
+  request: ManagedFullCompareRequest,
+  language: LanguageName,
+  capture: NonNullable<ManagedFullCompareRequest["languages"]["en"]["nativeFrameCapture"]>,
+  svgDirectory: string,
+  rasterDirectory: string,
+  workspace: string,
+): { evidence: ReturnType<typeof verifyNativeFrameEvidence>; pin: FilePin } {
+  const captureDirectory = path.join(workspace, "native-frame"),
+    evidence = captureNativeFrameEvidence({
+      language,
+      sourceSvgDirectory: svgDirectory,
+      sourcePngDirectory: rasterDirectory,
+      outputDirectory: captureDirectory,
+      probeBinary: capture.probeBinary,
+      runtime: request.runtime,
+      sourceManifest: request.sourceManifest,
+      config: capture.config,
+      fontContext: capture.fontContext,
+      root: request.repositoryRoot,
+      scale: 1,
+      scrollY: 0,
+    });
+  return { evidence, pin: filePin(path.join(captureDirectory, "native-frame-evidence.json")) };
+}
+
+function assertNativeFrameInputs(
+  evidence: ReturnType<typeof verifyNativeFrameEvidence>,
+  svgDirectory: string,
+  slugs: readonly string[],
+): void {
+  for (const slug of slugs.filter((value) => evidence.rows.some((row) => row.slug === value))) {
+    const row = evidence.rows.find((value) => value.slug === slug);
+    if (row === undefined) throw new Error(`Missing native frame input: ${slug}`);
+    const expectedPath = path.resolve(svgDirectory, `${slug}.svg`);
+    if (row.inputSvg.path !== expectedPath || fileSha256(expectedPath) !== row.inputSvg.sha256) {
+      throw new Error(`Native frame input differs from current candidate SVG: ${slug}`);
+    }
+  }
 }
 
 function recordManagedStep(steps: ManagedStep[], result: ManagedCommandResult): void {

@@ -733,14 +733,14 @@ if (!browserPrograms) throw new Error("missing browser program metadata");
 
 test("official browser provider order and callback modes retain actual producer programs", () => {
   const providers = browserPrograms.filter((program) => program.role === "provider");
-  expect(providers).toHaveLength(33);
+  expect(providers).toHaveLength(25);
   expect(providers[0]?.sourcePath.endsWith("/dom_text_metrics.js")).toBe(true);
-  expect(providers[1]?.sourcePath.endsWith("/browser_text_measure.js")).toBe(true);
-  expect(providers[32]?.sourcePath.endsWith("/mermaid_zenuml_bridge.js")).toBe(true);
+  expect(providers[1]?.sourcePath.endsWith("/svg_bounds_attrs.js")).toBe(true);
+  expect(providers[24]?.sourcePath.endsWith("/mermaid_zenuml_bridge.js")).toBe(true);
   const physicalProviders = [...browserRaw].filter(([sourcePath]) =>
     sourcePath.startsWith("crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/"),
   );
-  expect(physicalProviders).toHaveLength(39);
+  expect(physicalProviders).toHaveLength(31);
   expect(physicalProviders.filter(([, source]) => source.code.length === 0)).toHaveLength(6);
   expect(providers.every((program) => program.start < program.end)).toBe(true);
   expect(providers.map((program) => program.sourcePath)).toEqual(
@@ -766,15 +766,15 @@ test("official browser provider order and callback modes retain actual producer 
   ).toBe(true);
   expect(browserContext.stages).toEqual(["assembled"]);
   expect(browserContext.codeBytesEqual).toBe(false);
-  expect(browserContext.origin.coverage("assembled")).toHaveLength(39);
+  expect(browserContext.origin.coverage("assembled")).toHaveLength(31);
   verifyUnusedSources(browserRoot, browserRaw);
 });
 
-test.each(["katanaTextWidth", "katanaNormalizeMermaidSvg"])(
+test.each(["katanaSvgTextBox", "katanaNormalizeMermaidSvg"])(
   "browser whole diagnostic %s retains actual physical provider",
   (name) => {
     const code = browserContext.origin.assembled;
-    const at = code.indexOf(name);
+    const at = code.lastIndexOf(name);
     const origin = browserContext.origin.resolve(diagnosticAt(code, at, name.length), "assembled");
     const raw = browserRaw.get(origin.sourcePath);
     if (!raw) throw new Error("missing mapped browser raw source");

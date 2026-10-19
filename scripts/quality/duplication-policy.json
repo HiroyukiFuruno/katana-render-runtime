@@ -60,38 +60,6 @@
       },
       "fragmentSha256": "3ddc3a9e89c490c80c63b4ef7935cb45a4baca9de93225a037fcbb463dca6c5d",
       "reason": "Required cssparser 0.38.0 AtRuleParser adapter scaffold: its associated types and method signatures have no equivalent local wrapper, and the default methods reject these at-rules. The exact 19-line/108-token fragment contains only the required declarations/signatures and delegation to the existing shared consume_nested helper; the distinct parse_block bodies begin after this fragment and remain subject to duplication checks and tests. Reassess if the trait or these adapters change."
-    },
-    {
-      "first": {
-        "path": "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/browser_text_measure.js",
-        "sha256": "7819c4662273a4dbc1a53b0e4a566c371a8f2e345a4f8b787f72b5a44790137d",
-        "start": {
-          "column": 43,
-          "line": 81,
-          "position": 2552
-        },
-        "end": {
-          "column": 5,
-          "line": 105,
-          "position": 3094
-        }
-      },
-      "second": {
-        "path": "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/dom_text_measure.js",
-        "sha256": "d5c8dedf66dffb61772fae4c3e46889f94921ffcfae91efc5ab576271b094003",
-        "start": {
-          "column": 35,
-          "line": 351,
-          "position": 9972
-        },
-        "end": {
-          "column": 5,
-          "line": 370,
-          "position": 10339
-        }
-      },
-      "fragmentSha256": "aed812699a3722db17f828650c5e20173aafae3228d0f8edf0497759cec016a2",
-      "reason": "Q15 individual low-benefit CJK helper: one 25-line/75-token production/legacy-normalized reference clone across separately loaded realms. Existing shared verbatim JS loading is feasible, but requires 5 source changes plus type/provider/order/provenance and native/reference behavior verification for four small helpers and constants. Strict vendor-original mode does not install these helpers. Retain only this exact clone; test repetition remains subject to the gate. Reassess on a third independently implemented helper consumer, helper growth, CJK behavior divergence or repeated paired fixes, or an already-existing common helper route that materially lowers integration cost."
     }
   ]
 }

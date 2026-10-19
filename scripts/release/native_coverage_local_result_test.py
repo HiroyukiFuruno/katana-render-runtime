@@ -47,6 +47,10 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         context["hostContextSha256"] = local_result._digest(context)
         return context
 
+    def test_local_context_accepts_nextest_tool_identity(self) -> None:
+        self.assertIn("cargoNextest", local_result.LOCAL_TOOL_KEYS)
+        self.assertIn("cargoNextest", cast(dict[str, str], self.context["tools"]))
+
     def prepare_reports(self) -> None:
         for domain in ("root", "baseline", "candidate"):
             fixture_helpers.write_fixture_report(self.root, domain)

@@ -160,6 +160,12 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.9.1
 
+      - name: Install cargo-nextest
+        if: matrix.os == 'ubuntu-latest'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+
       - name: Install just
         if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         uses: taiki-e/install-action@just

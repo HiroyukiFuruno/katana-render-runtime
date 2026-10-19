@@ -50,7 +50,10 @@ export interface RunReceipt {
   error: string | null;
 }
 
-export function runManagedFullComparison(requestPath: string, requestSha256: string): RunReceipt {
+export async function runManagedFullComparison(
+  requestPath: string,
+  requestSha256: string,
+): Promise<RunReceipt> {
   const requestFile = readPinnedRequest(requestPath, requestSha256);
   const request = parseManagedFullCompareRequest(
     JSON.parse(requestFile.bytes.toString("utf8")) as unknown,
@@ -84,7 +87,7 @@ export function runManagedFullComparison(requestPath: string, requestSha256: str
     receipt.buildReceipt = { path: buildReceiptPath, sha256: fileSha256(buildReceiptPath) };
     for (const language of ["en", "ja"] as const) {
       languages.push(
-        runManagedLanguage(
+        await runManagedLanguage(
           request,
           language,
           buildReceiptPath,
@@ -116,10 +119,7 @@ export function runManagedFullComparison(requestPath: string, requestSha256: str
   return receipt;
 }
 
-function validateOfficialBaselines(
-  request: ManagedFullCompareRequest,
-  pins: PinnedInputs,
-): void {
+function validateOfficialBaselines(request: ManagedFullCompareRequest, pins: PinnedInputs): void {
   for (const language of ["en", "ja"] as const) {
     const input = request.languages[language];
     const inventory = validateLanguageInventory(request, language, pins.fixtureSources[language]);
@@ -319,7 +319,7 @@ function parseCli(argv: string[]): { request: string; requestSha256: string } {
 if (import.meta.main) {
   try {
     const args = parseCli(process.argv.slice(2));
-    const receipt = runManagedFullComparison(args.request, args.requestSha256);
+    const receipt = await runManagedFullComparison(args.request, args.requestSha256);
     process.stdout.write(
       `${JSON.stringify({
         accepted: receipt.accepted,

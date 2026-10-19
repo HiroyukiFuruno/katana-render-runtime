@@ -895,7 +895,8 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
             workflow.index("Capture all 84 HTML catalog conditions"),
             workflow.index("Measure all 84 catalog conditions against baseline"),
         )
-        self.assertIn("html-performance-catalog-captures output_root:", justfile)
+        self.assertIn("html-performance-catalog-captures output_root prior_observation='' prior_finalized='':", justfile)
+        self.assertIn('capture_args+=("$prior_observation" "$prior_finalized")', justfile)
         self.assertIn("catalog-stage90-plan", justfile)
         self.assertIn("--require-capacity --print-json", justfile)
         self.assertIn(

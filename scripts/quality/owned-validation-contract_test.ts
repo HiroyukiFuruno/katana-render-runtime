@@ -1416,6 +1416,74 @@ test.each([
   );
 });
 test.each([
+  [
+    "evidence",
+    "missing",
+    "./scripts/mermaid/native_frame_evidence_test.ts",
+    "./scripts/mermaid/native_frame_build_proof_test.ts",
+    "./scripts/mermaid/native-render-batch_test.ts",
+  ],
+  [
+    "evidence",
+    "duplicated",
+    "./scripts/mermaid/native_frame_evidence_test.ts",
+    "./scripts/mermaid/native_frame_build_proof_test.ts",
+    "./scripts/mermaid/native-render-batch_test.ts",
+  ],
+  [
+    "evidence",
+    "moved",
+    "./scripts/mermaid/native_frame_evidence_test.ts",
+    "./scripts/mermaid/native_frame_build_proof_test.ts",
+    "./scripts/mermaid/native-render-batch_test.ts",
+  ],
+  [
+    "build proof",
+    "missing",
+    "./scripts/mermaid/native_frame_build_proof_test.ts",
+    "./scripts/mermaid/native_render_provenance_test.ts",
+    "./scripts/mermaid/native_frame_evidence_test.ts",
+  ],
+  [
+    "build proof",
+    "duplicated",
+    "./scripts/mermaid/native_frame_build_proof_test.ts",
+    "./scripts/mermaid/native_render_provenance_test.ts",
+    "./scripts/mermaid/native_frame_evidence_test.ts",
+  ],
+  [
+    "build proof",
+    "moved",
+    "./scripts/mermaid/native_frame_build_proof_test.ts",
+    "./scripts/mermaid/native_render_provenance_test.ts",
+    "./scripts/mermaid/native_frame_evidence_test.ts",
+  ],
+] as const)(
+  "native frame %s registration rejects %s drift",
+  (_testName, mutation, token, previous, next) => {
+    const root = parserFixture();
+    const recipe = actualRecipeBody("runtime-asset-script-test");
+    expect(recipe).toContain(token);
+    const mutated =
+      mutation === "missing"
+        ? recipe.replace(` ${token}`, "")
+        : mutation === "duplicated"
+          ? recipe.replace(` ${token}`, ` ${token} ${token}`)
+          : recipe
+              .replace(` ${token}`, "")
+              .replace(` ${previous} ${next}`, ` ${token} ${previous} ${next}`);
+    expect(mutated).not.toBe(recipe);
+    recipes(root, { "runtime-asset-script-test": mutated });
+    track(root);
+    expect(inspectOwnedValidationContract(root).issues).toContainEqual(
+      expect.objectContaining({
+        code: "parser-body-onload-test-unregistered",
+        path: "runtime-asset-script-test",
+      }),
+    );
+  },
+);
+test.each([
   ["missing", (recipe: string, token: string) => recipe.replace(` ${token}`, "")],
   [
     "moved",
@@ -2153,10 +2221,7 @@ test("an established product JS profile cannot silently become deferred", () => 
 
 const browserReferenceDirectory =
   "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime";
-const browserReferenceHelpers = [
-  `${browserReferenceDirectory}/browser_text_measure.js`,
-  `${browserReferenceDirectory}/mermaid_zenuml_bridge.js`,
-];
+const browserReferenceHelpers = [`${browserReferenceDirectory}/mermaid_zenuml_bridge.js`];
 const browserReferenceHost = `${browserReferenceDirectory}/browser_reference_host.d.ts`;
 const browserReferenceLeaf = "scripts/mermaid/official-renderer-browser-globals.d.ts";
 const browserReferenceProfile = "scripts/quality/tsconfig-owned-browser-reference.json";
@@ -2212,8 +2277,8 @@ test("browser reference adapters bind real consumers and exact isolated compiler
 test.each([
   [
     "scripts/mermaid/official-renderer-i18n.ts",
-    '"dom_text_metrics.js",\n  "browser_text_measure.js",',
-    '"browser_text_measure.js",\n  "dom_text_metrics.js",',
+    '"dom_text_metrics.js",\n  "svg_bounds_attrs.js",',
+    '"svg_bounds_attrs.js",\n  "dom_text_metrics.js",',
   ],
   [
     "scripts/mermaid/official-renderer.ts",
@@ -2283,7 +2348,9 @@ test.each(["extra-owned", "DOM"] as const)(
         `/// <reference lib="dom" />\n${fs.readFileSync(path.join(root, browserReferenceHost), "utf8")}`,
       );
     else {
-      const helper = browserReferenceHelpers[1];
+      const helper = browserReferenceHelpers.find((name) =>
+        name.endsWith("mermaid_zenuml_bridge.js"),
+      );
       if (!helper) throw new Error("bridge fixture missing");
       write(
         root,
@@ -3181,7 +3248,7 @@ function performanceHarnessFixture(): string {
 [[package]]
 name = "krr-html-performance-harness"
 version = "0.1.0"
-dependencies = ["katana-render-runtime 0.4.23", "katana-render-runtime 0.1.0"]
+dependencies = ["image", "katana-render-runtime 0.4.23", "katana-render-runtime 0.1.0", "url"]
 [[package]]
 name = "katana-render-runtime"
 version = "0.4.23"
@@ -3190,6 +3257,33 @@ checksum = "${"a".repeat(64)}"
 [[package]]
 name = "katana-render-runtime"
 version = "0.1.0"
+dependencies = ["image", "url"]
+[[package]]
+name = "image"
+version = "0.25.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
+[[package]]
+name = "url"
+version = "2.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+`,
+  );
+  write(
+    root,
+    "Cargo.lock",
+    `version = 4
+[[package]]
+name = "image"
+version = "0.25.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
+[[package]]
+name = "url"
+version = "2.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
 `,
   );
   performanceHarnessRecipes(root);
@@ -3199,7 +3293,10 @@ version = "0.1.0"
 test("standalone performance harness binds both owned Rust arms without executing coverage", () => {
   const root = performanceHarnessFixture();
   const manifest = Bun.TOML.parse(fs.readFileSync(path.join(root, performanceManifest), "utf8"));
-  expect(manifest).toHaveProperty("profile", { dev: { debug: 1 } });
+  expect(manifest).toHaveProperty("profile", {
+    dev: { debug: 1 },
+    "krr-coverage": { inherits: "dev", debug: 0, incremental: false },
+  });
   write(root, `${performanceRoot}/tests/arm.rs`, "#[test] fn arm() {}\n");
   track(root);
   const before = inspectOwnedValidationContract(root);
@@ -3224,13 +3321,77 @@ test.each([
   ["publish", "publish = false", "publish = true"],
   [
     "arms",
-    'candidate = ["dep:candidate"]',
-    'candidate = ["dep:candidate"]\ndefault = ["baseline"]',
+    'candidate = ["dep:candidate", "dep:image", "dep:url"]',
+    'candidate = ["dep:candidate", "dep:image", "dep:url"]\ndefault = ["baseline"]',
+  ],
+  [
+    "missing frame capture dependency feature",
+    'candidate = ["dep:candidate", "dep:image", "dep:url"]',
+    'candidate = ["dep:candidate", "dep:url"]',
+  ],
+  [
+    "unreviewed frame backend feature",
+    'candidate = ["dep:candidate", "dep:image", "dep:url"]',
+    'candidate = ["dep:candidate", "dep:image", "dep:url", "dep:jpeg"]',
   ],
   ["baseline", 'version = "=0.4.23"', 'version = "0.4.23"'],
   ["candidate", "../../../crates/katana-render-runtime", "../../../crates/demo"],
+  [
+    "image nonoptional",
+    'optional = true }\nurl = { version = "2.5.8"',
+    'optional = false }\nurl = { version = "2.5.8"',
+  ],
+  ["image default features enabled", "default-features = false", "default-features = true"],
+  ["image default features omitted", ", default-features = false", ""],
+  ["image extra backend", 'features = ["png"]', 'features = ["png", "jpeg"]'],
+  [
+    "image git source",
+    'features = ["png"], optional = true }',
+    'features = ["png"], optional = true, git = "https://example.invalid/image" }',
+  ],
+  [
+    "image path source",
+    'features = ["png"], optional = true }',
+    'features = ["png"], optional = true, path = "../image" }',
+  ],
+  [
+    "image registry override",
+    'features = ["png"], optional = true }',
+    'features = ["png"], optional = true, registry = "other" }',
+  ],
+  [
+    "url nonoptional",
+    'url = { version = "2.5.8", optional = true }',
+    'url = { version = "2.5.8", optional = false }',
+  ],
+  [
+    "url git source",
+    'url = { version = "2.5.8", optional = true }',
+    'url = { version = "2.5.8", optional = true, git = "https://example.invalid/url" }',
+  ],
+  [
+    "url path source",
+    'url = { version = "2.5.8", optional = true }',
+    'url = { version = "2.5.8", optional = true, path = "../url" }',
+  ],
   ["unknown", 'sha2 = "0.11"', 'sha2 = "0.11"\nunknown = "1"'],
+  [
+    "missing image dependency",
+    'image = { version = "0.25.10", default-features = false, features = ["png"], optional = true }\n',
+    "",
+  ],
+  ["missing url dependency", 'url = { version = "2.5.8", optional = true }\n', ""],
   ["missing profile", "[profile.dev]\ndebug = 1", ""],
+  [
+    "missing coverage profile",
+    '[profile.krr-coverage]\ninherits = "dev"\ndebug = 0\nincremental = false\n',
+    "",
+  ],
+  [
+    "wrong coverage profile",
+    '[profile.krr-coverage]\ninherits = "dev"\ndebug = 0\nincremental = false\n',
+    '[profile.krr-coverage]\ninherits = "dev"\ndebug = 1\nincremental = false\n',
+  ],
   ["missing debug", "debug = 1", ""],
   ["debug disabled", "debug = 1", "debug = 0"],
   ["debug full", "debug = 1", "debug = 2"],
@@ -3249,6 +3410,31 @@ test.each([
   write(root, performanceManifest, source.replace(before, after));
   expect(codes(root)).toContain(`performance-harness-manifest-unverified:${performanceManifest}`);
 });
+test.each([
+  [
+    "image root lock version",
+    'name = "image"\nversion = "0.25.10"',
+    'name = "image"\nversion = "0.25.11"',
+  ],
+  ["url root lock version", 'name = "url"\nversion = "2.5.8"', 'name = "url"\nversion = "2.5.9"'],
+  [
+    "image root lock checksum",
+    'name = "image"\nversion = "0.25.10"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"',
+    `name = "image"\nversion = "0.25.10"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "${"a".repeat(64)}"`,
+  ],
+] as const)(
+  "standalone performance capture dependency rejects %s drift",
+  (_name, before, after) => {
+    const root = performanceHarnessFixture();
+    const source = fs.readFileSync(path.join(root, "Cargo.lock"), "utf8");
+    expect(source).toContain(before);
+    const changed = source.replace(before, after);
+    write(root, "Cargo.lock", changed);
+    expect(codes(root)).toContain(
+      `performance-harness-lock-unverified:${performanceRoot}/Cargo.lock`,
+    );
+  },
+);
 test.each(["Cargo.toml", "Cargo.lock", "src/main.rs"])(
   "standalone performance input %s cannot become untracked",
   (name) => {
@@ -3334,6 +3520,8 @@ test.each([
     "--coverage-domain performance-candidate",
     "strict collector mode",
   ],
+  ["performance-harness-coverage", "--profile krr-coverage", "--profile dev", "profile"],
+  ["performance-harness-coverage", "--profile krr-coverage", "", "missing profile"],
   [
     "performance-harness-coverage",
     "--coverage-collection-domain performance-baseline",

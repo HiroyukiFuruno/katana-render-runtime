@@ -7,18 +7,24 @@ compile_error!("select the baseline or candidate measurement arm");
 use baseline::HtmlBrowserViewport;
 #[cfg(feature = "candidate")]
 use candidate::HtmlBrowserViewport;
-use sha2::{Digest, Sha256};
+#[cfg(feature = "candidate")]
+extern crate candidate as katana_render_runtime;
 use std::{env, fs, path::Path, time::Instant};
 
 mod measurement;
+#[cfg(feature = "candidate")]
+#[path = "../../../../crates/katana-render-runtime/examples/html_fidelity_probe.rs"]
+mod native_frame_capture;
 mod operations;
 mod options;
 #[path = "../../../../crates/katana-render-runtime/src/system/process.rs"]
 mod process;
+mod provenance;
 
 use measurement::measure_one;
 use options::{parse_options, worker_sample, Options};
 use process::ProcessService;
+use provenance::{arm_name, hex_digest, provenance};
 
 const SAMPLE_COUNT: usize = 5;
 const BYTES_PER_RSS_UNIT: u64 = 1024;
@@ -94,6 +100,15 @@ fn measure_sample_worker(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "candidate")]
+    if env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--input")) {
+        native_frame_capture::main();
+        return Ok(());
+    }
+    run_measurement()
+}
+
+fn run_measurement() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args_os().skip(1).peekable();
     if let Some(sample) = worker_sample(&mut args)? {
         let options = parse_options(args)?;
@@ -163,33 +178,4 @@ fn peak_rss_bytes() -> Result<u64, Box<dyn std::error::Error>> {
     } else {
         Ok(value.saturating_mul(BYTES_PER_RSS_UNIT))
     }
-}
-
-fn provenance() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let required = |name: &str| -> Result<String, Box<dyn std::error::Error>> {
-        Ok(env::var(name).map_err(|_| format!("{name} is required"))?)
-    };
-    Ok(
-        serde_json::json!({"binary_sha256": hex_digest(&fs::read(env::current_exe()?)?),
-        "rustc": required("KRR_PERF_RUSTC")?, "cargo": required("KRR_PERF_CARGO")?,
-        "environment_sha256": required("KRR_PERF_ENVIRONMENT_SHA256")?,
-        "deps_lock_path": required("KRR_PERF_LOCK_PATH")?,
-        "deps_lock_sha256": hex_digest(&fs::read(required("KRR_PERF_LOCK_PATH")?)?),
-        "source_snapshot_path": required("KRR_PERF_SOURCE_SNAPSHOT_PATH")?,
-        "source_snapshot_sha256": hex_digest(&fs::read(required("KRR_PERF_SOURCE_SNAPSHOT_PATH")?)?)}),
-    )
-}
-
-fn arm_name() -> &'static str {
-    if cfg!(feature = "baseline") {
-        "baseline-0.4.23"
-    } else {
-        "candidate"
-    }
-}
-fn hex_digest(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }

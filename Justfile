@@ -8,6 +8,7 @@ CHECK_JOBS := env_var_or_default("CHECK_JOBS", "3")
 FIXTURE_JOBS := env_var_or_default("FIXTURE_JOBS", JOBS)
 TEST_THREADS := env_var_or_default("TEST_THREADS", "1")
 TEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " -- --test-threads=" + TEST_THREADS }
+NEXTEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " --test-threads=" + TEST_THREADS }
 RUNTIME_UPDATE_LOG_DIR := env_var_or_default("RUNTIME_UPDATE_LOG_DIR", "tmp/runtime-update-logs")
 export RUSTFLAGS := env_var_or_default("RUSTFLAGS", "-D warnings")
 CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")
@@ -41,8 +42,8 @@ MERMAID_ZENUML_JS_VERSION := "1.0.1"
 DRAWIO_JS_VERSION := "32.4.1"
 MATHJAX_JS_VERSION := "4.1.3"
 ZENUML_CORE_JS_VERSION := "4.7.2"
-PLANTUML_JAR_VERSION := "1.2026.8"
-PLANTUML_JAR_CHECKSUM := "1057dd8b346bed26a48ffebe6054e16fc785dda7c91f37f6c19030a4aab8a942"
+PLANTUML_JAR_VERSION := "1.2026.9"
+PLANTUML_JAR_CHECKSUM := "1dbb847646f0f440595fecd5f991e902aae47dc3391a01f64bab548089241a46"
 MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-render-runtime/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
 MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-render-runtime/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
 DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-render-runtime/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
@@ -100,11 +101,23 @@ unit-test: plantuml-install
 native-coverage-cache-key producer:
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint
 
+native-coverage-cache-diagnose producer:
+    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-diagnose --producer {{quote(producer)}}
+
+# WHY: 正式coverageの合格とは分け、既存runner候補の全件実行コストを測る。
+native-nextest-diagnostic filter="": plantuml-install runtime-bundle-check
+    @set -euo pipefail; \
+      diagnostic_run_id="$(bun -e 'process.stdout.write(crypto.randomUUID())')"; \
+      retain_profile="{{REPO_ROOT}}/target/llvm-cov-target/krr-coverage"; \
+      retain_args=(); \
+      if [[ -d "$retain_profile" && ! -L "$retain_profile" ]]; then retain_args=(--retain-profile "$retain_profile"); fi; \
+      NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-diagnostic-state" LLVM_PROFILE_FILE_NAME="krr-nextest-diagnostic-${diagnostic_run_id}-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-diagnostic-domain root "${retain_args[@]}" -- {{CARGO}} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-report --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml"{{NEXTEST_THREAD_ARGS}}{{if filter == "" { "" } else { " -E " + quote(filter) }}}
+
 root-test-and-coverage: plantuml-install
     mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer root
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-domain root -- {{CARGO}} llvm-cov clean --workspace
-    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root -- {{CARGO}} llvm-cov --workspace --all-targets --all-features --locked --json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"{{TEST_THREAD_ARGS}}
+    NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-root-state" LLVM_PROFILE_FILE_NAME="krr-nextest-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root -- {{CARGO}} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml" --json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"{{NEXTEST_THREAD_ARGS}}
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer root --producer-exit 0
 
 # 継続利用するPythonは固定版のLintと厳格型検査を両方通す。
@@ -152,9 +165,9 @@ performance-harness-coverage:
     mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer performance
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-baseline -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked
-    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-baseline -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features baseline --locked --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/baseline.json"{{TEST_THREAD_ARGS}}
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-baseline -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features baseline --locked --profile krr-coverage --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/baseline.json"{{TEST_THREAD_ARGS}}
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-candidate -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked
-    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-candidate -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features candidate --locked --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/candidate.json"{{TEST_THREAD_ARGS}}
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-candidate -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features candidate --locked --profile krr-coverage --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/candidate.json"{{TEST_THREAD_ARGS}}
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer performance --producer-exit 0
 
 # Verify pinned runtime asset checksums
@@ -267,8 +280,8 @@ runtime-asset-script-other-run:
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/reference-capture_test.ts ./scripts/html/fidelity-suite_test.ts ./scripts/html/scroll-coverage_test.ts ./scripts/html/toc-fidelity_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/interaction-suite_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/visual-state-fidelity_test.ts ./scripts/html/dynamic-fidelity_test.ts ./scripts/html/interim-feature-results_test.ts
-    bun test --path-ignore-patterns 'tmp/**' ./scripts/html/harness-contract_test.ts ./scripts/html/stage-score_test.ts ./scripts/html/stage-score-suite_test.ts ./scripts/html/anonymized-fixture_test.ts ./scripts/html/compare-toc-evidence_test.ts
-    bun test --path-ignore-patterns 'tmp/**' ./crates/katana-render-runtime/src/renderer/backends/html_runtime/dom_bootstrap_test.js ./scripts/mermaid/class_reference_gate_test.ts ./scripts/mermaid/class_reference_integrity_test.ts ./scripts/mermaid/diagram_update_fixtures_test.ts ./scripts/mermaid/diagram_update_markdown_reference_test.ts ./scripts/mermaid/dom_css_font_variables_contract_test.ts ./scripts/mermaid/dom_css_priority_contract_test.ts ./scripts/mermaid/dom_plain_text_measure_contract_test.ts ./scripts/mermaid/managed_full_compare_test.ts ./scripts/mermaid/mermaid_pair_manifest_test.ts ./scripts/mermaid/native-cli-process_test.ts ./scripts/mermaid/native-source-manifest_test.ts ./scripts/mermaid/native_render_provenance_test.ts ./scripts/mermaid/official_reference_mode_test.ts ./scripts/mermaid/official_renderer_provenance_test.ts ./scripts/mermaid/raster_comparison_binding_test.ts ./scripts/mermaid/raster_producer_observation_test.ts ./scripts/mermaid/raster_production_binding_test.ts ./scripts/mermaid/rasterize_svg_fonts_test.ts ./scripts/mermaid/rasterize_svg_input_test.ts ./scripts/mermaid/reference_pair_repository_test.ts ./scripts/mermaid/reference_pair_strict_provenance_test.ts ./scripts/mermaid/reference_score_policy_test.ts ./scripts/mermaid/reference_svg_geometry_test.ts ./scripts/mermaid/split_markdown_fixtures_test.ts ./scripts/mermaid/strict_svg_external_images_test.ts ./scripts/mermaid/svg_normalizer_general_contract_test.ts ./scripts/mermaid/svg_sequence_activation_fixes_test.ts ./scripts/quality/duplication-check_test.ts ./scripts/runtime-bundles/runtime-bundle-checks_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/html/harness-contract_test.ts ./scripts/html/stage-score_test.ts ./scripts/html/stage-score-suite_test.ts ./scripts/html/catalog-capture-producer-context_test.ts ./scripts/html/anonymized-fixture_test.ts ./scripts/html/compare-toc-evidence_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./crates/katana-render-runtime/src/renderer/backends/html_runtime/dom_bootstrap_test.js ./scripts/mermaid/class_reference_gate_test.ts ./scripts/mermaid/class_reference_integrity_test.ts ./scripts/mermaid/diagram_update_fixtures_test.ts ./scripts/mermaid/diagram_update_markdown_reference_test.ts ./scripts/mermaid/dom_css_font_variables_contract_test.ts ./scripts/mermaid/dom_css_priority_contract_test.ts ./scripts/mermaid/dom_plain_text_measure_contract_test.ts ./scripts/mermaid/managed_full_compare_test.ts ./scripts/mermaid/mermaid_pair_manifest_test.ts ./scripts/mermaid/native-cli-process_test.ts ./scripts/mermaid/native-source-manifest_test.ts ./scripts/mermaid/native_render_provenance_test.ts ./scripts/mermaid/native_frame_build_proof_test.ts ./scripts/mermaid/native_frame_evidence_test.ts ./scripts/mermaid/native-render-batch_test.ts ./scripts/mermaid/official_reference_mode_test.ts ./scripts/mermaid/official_renderer_provenance_test.ts ./scripts/mermaid/raster_comparison_binding_test.ts ./scripts/mermaid/raster_producer_observation_test.ts ./scripts/mermaid/raster_production_binding_test.ts ./scripts/mermaid/rasterize_svg_fonts_test.ts ./scripts/mermaid/rasterize_svg_input_test.ts ./scripts/mermaid/reference_pair_repository_test.ts ./scripts/mermaid/reference_pair_strict_provenance_test.ts ./scripts/mermaid/reference_score_policy_test.ts ./scripts/mermaid/reference_svg_geometry_test.ts ./scripts/mermaid/split_markdown_fixtures_test.ts ./scripts/mermaid/strict_svg_external_images_test.ts ./scripts/mermaid/svg_normalizer_general_contract_test.ts ./scripts/mermaid/svg_sequence_activation_fixes_test.ts ./scripts/quality/duplication-check_test.ts ./scripts/runtime-bundles/runtime-bundle-checks_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_classic_capture_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_build_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_build_reader_test.ts
@@ -467,16 +480,16 @@ draft-review: check
 # 指摘修正ごとの重複を避け、AIレビューは専用targetから明示実行する。
 check:
     @export COVERAGE_MIN_LINES={{quote(COVERAGE_MIN_LINES)}} COVERAGE_MAX_UNCOVERED_LINES={{quote(COVERAGE_MAX_UNCOVERED_LINES)}} \
-      TEST_THREADS={{quote(TEST_THREADS)}} RUSTFLAGS={{quote(RUSTFLAGS)}} CARGO={{quote(CARGO)}} JOBS={{quote(JOBS)}} CHECK_JOBS={{quote(CHECK_JOBS)}}; \
+      TEST_THREADS={{quote(env_var_or_default("TEST_THREADS", "2"))}} RUSTFLAGS={{quote(RUSTFLAGS)}} CARGO={{quote(CARGO)}} JOBS={{quote(JOBS)}} CHECK_JOBS={{quote(CHECK_JOBS)}}; \
       python3 scripts/hooks/run_parallel_checks.py --jobs "$CHECK_JOBS"
     @echo "checks passed"
 
 # Cargo operations share target/ and the PlantUML cache, so keep them ordered.
 check-rust:
     just fmt-check
+    just ast-lint
     just lint
     just unit-test
-    just ast-lint
     just dependency-leak
     just runtime-asset-check
     just runtime-package-asset-check
@@ -563,9 +576,14 @@ html-performance-evidence-acquire:
     python3 scripts/release/verify_html_performance_evidence.py --acquire
 
 # 既存catalog CLIで84条件のstage90 raw capture manifestを作る。
-html-performance-catalog-captures output_root:
+html-performance-catalog-captures output_root prior_observation='' prior_finalized='':
     @set -euo pipefail; \
       output_relative={{quote(output_root)}}; \
+      prior_observation={{quote(prior_observation)}}; \
+      prior_finalized={{quote(prior_finalized)}}; \
+      if [[ -n "$prior_observation" || -n "$prior_finalized" ]]; then \
+        if [[ -z "$prior_observation" || -z "$prior_finalized" || ! -f "$prior_observation" || ! -f "$prior_finalized" || -L "$prior_observation" || -L "$prior_finalized" ]]; then echo "resume requires both regular prior observation and finalized manifests" >&2; exit 2; fi; \
+      fi; \
       if [[ ! "$output_relative" =~ ^tmp/html-performance-stage90/[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then echo "output root must be tmp/html-performance-stage90/<run-id>" >&2; exit 2; fi; \
       run_root={{quote(REPO_ROOT)}}/"$output_relative"; \
       tmp_root={{quote(REPO_ROOT + "/tmp")}}; \
@@ -581,7 +599,9 @@ html-performance-catalog-captures output_root:
       bun scripts/html/fidelity-acceptance-cli.ts catalog-stage90-plan "$run_root/plan.json"; \
       just capacity-admission; \
       python3 scripts/build/cargo_capacity_guard.py --root {{quote(REPO_ROOT)}} --target {{quote(REPO_ROOT + "/target")}} --state {{quote(REPO_ROOT + "/tmp/.cargo-capacity-guard.json")}} -- {{HTML84_CARGO}} test -p katana-render-runtime --lib --no-run --locked --message-format=json > "$run_root/test-build.jsonl"; \
-      bun scripts/html/fidelity-acceptance-cli.ts catalog-stage90-capture "$run_root/test-build.jsonl" "$run_root/plan.json" "$run_root/captures"; \
+      capture_args=(catalog-stage90-capture "$run_root/test-build.jsonl" "$run_root/plan.json" "$run_root/captures"); \
+      if [[ -n "$prior_observation" ]]; then capture_args+=("$prior_observation" "$prior_finalized"); fi; \
+      bun scripts/html/fidelity-acceptance-cli.ts "${capture_args[@]}"; \
       test -s "$run_root/captures/catalog-stage90-captures.json"
 
 # stage90 capture manifestなしの正式paired performanceを拒否する。

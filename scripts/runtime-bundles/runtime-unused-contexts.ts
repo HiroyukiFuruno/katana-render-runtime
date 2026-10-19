@@ -7,6 +7,10 @@ import MagicString, { Bundle } from "magic-string";
 import { z } from "zod";
 import { resolveOfficialRendererAssetInputs } from "../mermaid/official-renderer-asset-inputs";
 import { MermaidRuntimeScripts } from "../mermaid/official-renderer-i18n";
+import {
+  OFFICIAL_BROWSER_CONSUMER_PINS,
+  OFFICIAL_BROWSER_PROVIDER_COUNT,
+} from "./official-browser-consumer-contract";
 import { runtimeBundleDefinitions } from "./runtime-bundle-definitions";
 import { RuntimeFragmentLoader } from "./runtime-fragment-loader";
 import { readClassicUnusedBindings } from "./runtime-unused-classic-binding";
@@ -251,18 +255,16 @@ export function officialMermaidUnusedContext(
 ): RuntimeUnusedContext {
   if (fs.realpathSync(process.cwd()) !== root) throw new Error("browser provider root mismatch");
   // 正規consumerの既存レビュー済み経路を再利用する。経路変更時はprovider/modeを再レビューする。
-  for (const [name, sha256] of Object.entries({
-    "scripts/mermaid/official-renderer-i18n.ts":
-      "e930ae84f301d413e58ef430b705867b676de75a0d2d4da92471af689bf1da15",
-    "scripts/mermaid/official-renderer.ts":
-      "9417b6982aad961e55b2bfb9ebc4365f85bf22d8f946ccbe555bf21ba9c1c716",
-  })) {
+  for (const [name, sha256] of Object.entries(OFFICIAL_BROWSER_CONSUMER_PINS)) {
     const source = readUnusedPhysicalSource(root, name);
     if (source.sha256 !== sha256) throw new Error("changed official browser consumer route");
     raw.set(name, source);
   }
   const provider = [...MermaidRuntimeScripts.paths(), MermaidRuntimeScripts.zenumlBridgePath()];
-  if (provider.length !== 39 || new Set(provider).size !== 39)
+  if (
+    provider.length !== OFFICIAL_BROWSER_PROVIDER_COUNT ||
+    new Set(provider).size !== OFFICIAL_BROWSER_PROVIDER_COUNT
+  )
     throw new Error("unknown browser provider inventory");
   const programs: BrowserUnusedProgram[] = provider.flatMap((file) => {
     const sourcePath = path.relative(root, file).split(path.sep).join("/");

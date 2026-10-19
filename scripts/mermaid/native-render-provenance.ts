@@ -16,6 +16,7 @@ import {
   verifyNativeClassicCapture,
 } from "./native-classic-capture";
 import { spawnNativeCli } from "./native-cli-process";
+import { type NativeRenderBatchResult, renderNativeFixtureBatch } from "./native-render-batch";
 
 interface Options {
   fixturesDir: string;
@@ -24,6 +25,7 @@ interface Options {
   binary: string;
   runtime: string;
   buildReceipt: string;
+  renderConcurrency: 1 | 2;
 }
 
 export interface CliAttestationExpected {
@@ -116,6 +118,8 @@ export interface NativeRenderReceipt {
   runtimeSha256: string;
   runtimeAssetPins: FileRecord[];
   skippedEmpty: Array<{ slug: string; reason: string }>;
+  renderConcurrency: 1 | 2;
+  errors: string[];
   rows: NativeRenderRow[];
 }
 
@@ -126,7 +130,7 @@ export interface VerifiedNativeRenderBinding {
 }
 
 if (import.meta.main) {
-  void run(parseOptions(process.argv.slice(2))).catch((error) => {
+  void run(parseNativeRenderOptions(process.argv.slice(2))).catch((error) => {
     const detail = error instanceof Error ? error.message : String(error);
     console.error(detail);
     process.exitCode = 1;
@@ -673,13 +677,19 @@ function currentFileRecord(filePath: string): FileRecord {
   };
 }
 
-function parseOptions(argv: string[]): Options {
+export function parseNativeRenderOptions(argv: string[]): Options {
   const fixturesDir = value(argv, "--fixtures-dir");
   const fixtureGlob = value(argv, "--fixture-glob");
   const outputDir = value(argv, "--output-dir");
   const binary = value(argv, "--binary");
   const runtime = value(argv, "--runtime");
   const buildReceipt = value(argv, "--build-receipt");
+  const concurrencyFlags = argv.filter((argument) => argument === "--render-concurrency");
+  if (concurrencyFlags.length > 1) {
+    throw new Error("--render-concurrency must be specified at most once");
+  }
+  const concurrencyIndex = argv.indexOf("--render-concurrency");
+  const renderConcurrency = concurrencyIndex < 0 ? "2" : argv.at(concurrencyIndex + 1);
   if (
     fixturesDir === undefined ||
     fixtureGlob === undefined ||
@@ -690,8 +700,11 @@ function parseOptions(argv: string[]): Options {
     buildReceipt.length === 0
   ) {
     throw new Error(
-      "Usage: native-render-provenance.ts --fixtures-dir DIR --fixture-glob GLOB --output-dir DIR --binary FILE --runtime FILE --build-receipt FILE",
+      "Usage: native-render-provenance.ts --fixtures-dir DIR --fixture-glob GLOB --output-dir DIR --binary FILE --runtime FILE --build-receipt FILE [--render-concurrency 1|2]",
     );
+  }
+  if (renderConcurrency !== "1" && renderConcurrency !== "2") {
+    throw new Error("--render-concurrency must be 1 or 2");
   }
   return {
     fixturesDir: path.resolve(fixturesDir),
@@ -700,6 +713,7 @@ function parseOptions(argv: string[]): Options {
     binary: path.resolve(binary),
     runtime: path.resolve(runtime),
     buildReceipt: path.resolve(buildReceipt),
+    renderConcurrency: renderConcurrency === "1" ? 1 : 2,
   };
 }
 
@@ -713,7 +727,13 @@ async function run(input: Options) {
   const skippedEmpty = prepared.fixtures
     .filter((fixture) => (fixture.originalFenceSource ?? "").trim() === "")
     .map((fixture) => ({ slug: fixture.slug, reason: "empty captured fence body" }));
-  const rows = await renderFixtures(rendered, input, prepared.build);
+  const renderedResult = await renderFixtures(
+    rendered,
+    input,
+    prepared.build,
+    input.renderConcurrency,
+  );
+  const rows = renderedResult.rows;
   const afterBuild = verifyNativeBuildReceipt(input.buildReceipt, input.binary, input.runtime);
   const afterCodePins = captureCodePins();
   const codeStable = sameFileRecords(prepared.beforeCodePins, afterCodePins);
@@ -729,7 +749,8 @@ async function run(input: Options) {
         row.renderError === null &&
         row.inputMarkdownSha256 === row.inputMarkdownSha256After &&
         row.outputSvgSha256 !== null,
-    );
+    ) &&
+    renderedResult.errors.length === 0;
   const receipt = {
     schema: "katana-mermaid-native-render-bindings-v1",
     diagnosticOnly: true,
@@ -768,6 +789,8 @@ async function run(input: Options) {
     expectedNonemptyCount: rendered.length,
     skippedEmpty,
     outputCount: rows.length,
+    renderConcurrency: input.renderConcurrency,
+    errors: renderedResult.errors,
     status: success ? "completed" : "failed",
     rows,
   };
@@ -833,14 +856,16 @@ async function renderFixtures(
   fixtures: Fixture[],
   input: Options,
   build: NativeBuildReceiptSummary,
-): Promise<NativeRenderRow[]> {
-  const rows: NativeRenderRow[] = [];
-  for (const fixture of fixtures) {
+  concurrency: 1 | 2,
+): Promise<{ rows: NativeRenderRow[]; errors: string[] }> {
+  const batch = await renderNativeFixtureBatch(fixtures, concurrency, async (fixture) => {
     const row = await renderFixture(fixture, input, build);
-    rows.push(row);
-    if (row.renderError !== null) break;
-  }
-  return rows;
+    return { row, renderError: row.renderError } satisfies NativeRenderBatchResult;
+  });
+  return {
+    rows: batch.results.flatMap(({ result }) => (result.row === null ? [] : [result.row])),
+    errors: batch.errors,
+  };
 }
 
 async function renderFixture(
@@ -1032,6 +1057,9 @@ function parseReceipt(value: JsonValue): NativeRenderReceipt {
     root.effectiveVendorConfigObserved !== false ||
     root.vendorCacheBranchObserved !== false ||
     root.externalRuntimeConfigObserved !== false ||
+    (root.renderConcurrency !== 1 && root.renderConcurrency !== 2) ||
+    !Array.isArray(root.errors) ||
+    root.errors.length !== 0 ||
     !Array.isArray(root.rows) ||
     !Array.isArray(root.skippedEmpty)
   ) {
@@ -1129,6 +1157,8 @@ function parseReceipt(value: JsonValue): NativeRenderReceipt {
     runtimeSha256: stringField(root, "runtimeSha256"),
     runtimeAssetPins: fileRecordArray(root.runtimeAssetPins, "runtime asset pins"),
     skippedEmpty,
+    renderConcurrency: root.renderConcurrency,
+    errors: stringArray(root.errors),
     rows,
   };
 }

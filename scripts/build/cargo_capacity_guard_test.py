@@ -305,6 +305,78 @@ class GuardTests(unittest.TestCase):
                     with self.assertRaises(OSError):
                         os.fstat(descriptors[0])
 
+    def test_profile_locks_creates_empty_target_after_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = (Path(directory) / "target").resolve()
+            self.assertFalse(target.exists())
+            with ProfileLocks(target):
+                self.assertTrue(target.is_dir())
+                self.assertTrue((target / ".cargo-lock").is_file())
+            self.assertTrue(target.is_dir())
+
+    @unittest.skipIf(os.name == "nt", "POSIX custom coverage profile eviction fixture")
+    def test_known_coverage_profile_is_retained_and_evicted_by_existing_ownership(self) -> None:
+        from cargo_capacity_guard_lock import _profiles, retained_profile_paths
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = (Path(directory) / "target").resolve()
+            profile = target / "llvm-cov-performance-baseline" / "krr-coverage"
+            (profile / "deps").mkdir(parents=True)
+            (profile / ".fingerprint/fixture-1111111111111111").mkdir(parents=True)
+            (profile / ".fingerprint/fixture-1111111111111111/lib-fixture").write_bytes(b"old-hash")
+            artifact = profile / "deps/libfixture-2222222222222222.rlib"
+            artifact.write_bytes(b"x" * 8192)
+            protected = profile / "app"
+            protected.write_bytes(b"current-app")
+
+            self.assertEqual(_profiles(target), [profile])
+            self.assertEqual(retained_profile_paths(target, [profile]), (profile,))
+            fingerprint = profile / ".fingerprint/fixture-1111111111111111/lib-fixture"
+            with ProfileLocks(target) as epoch:
+                current_bytes = self.measured_size(target)
+                code, report = evict_artifacts(
+                    target, 1, current_bytes, False, [], epoch,
+                    retained_profiles=[profile], auxiliary_only_profiles=[profile],
+                )
+            self.assertEqual(code, 1, report)
+            self.assertIn("active profiles retained", report.get("error", ""))
+            self.assertEqual(artifact.read_bytes(), b"x" * 8192)
+            self.assertEqual(fingerprint.read_bytes(), b"old-hash")
+            self.assertTrue(profile.is_dir())
+            with ProfileLocks(target) as epoch:
+                current_bytes = self.measured_size(target)
+                code, report = evict_artifacts(
+                    target, 1, current_bytes, False, [protected], epoch,
+                )
+            self.assertEqual(code, 0, report)
+            self.assertFalse(artifact.exists())
+            self.assertTrue(protected.exists())
+            self.assertIn("llvm-cov-performance-baseline/krr-coverage", report["invalidated_profiles"])
+
+    def test_unknown_nested_profile_name_remains_rejected(self) -> None:
+        from cargo_capacity_guard_lock import retained_profile_paths
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = (Path(directory) / "target").resolve()
+            profile = target / "llvm-cov-performance-baseline" / "custom-profile"
+            profile.mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "known profile scope"):
+                retained_profile_paths(target, [profile])
+
+    @unittest.skipIf(os.name == "nt", "POSIX symlink rejection fixture")
+    def test_profile_locks_does_not_create_target_through_symlink_ancestor(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            outside = root / "outside"
+            outside.mkdir()
+            link = root / "linked-target"
+            link.symlink_to(outside, target_is_directory=True)
+            target = link / "target"
+            with self.assertRaises(OSError):
+                with ProfileLocks(target):
+                    pass
+            self.assertFalse((outside / "target").exists())
+
     def test_profile_locks_release_failure_closes_all_fds_and_state(self) -> None:
         def release_case(invalid_api: bool) -> None:
             with tempfile.TemporaryDirectory() as directory:
@@ -667,7 +739,7 @@ class GuardTests(unittest.TestCase):
             self.assertFalse(report["remaining_over_capacity"])
             self.assertTrue(guard._safe_incomplete_cleanup_below_hardcap(report))
 
-            result, workers, _goal, still_protected, alias_modes = self._run_incomplete_admission_mode("library-alias")
+            result, workers, _goal, still_protected, alias_modes, _retained_paths = self._run_incomplete_admission_mode("library-alias")
             self.assertEqual((result, workers), (1, 0))
             self.assertEqual(still_protected, b"protected")
             self.assertEqual(alias_modes, (False, False))
@@ -1443,15 +1515,66 @@ class GuardTests(unittest.TestCase):
                 self.assertEqual(state.read_bytes(), state_before)
                 self.assertEqual(protected.read_bytes(), b"protected")
 
+    @unittest.skipIf(os.name == "nt", "POSIX real eviction caller fixture")
+    def test_real_eviction_caller_retries_soft_shortfall_at_hardcap(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            target = root / "target"
+            retained = target / "llvm-cov-performance-baseline/krr-coverage"
+            retained.mkdir(parents=True)
+            (retained / "producer-output").write_bytes(b"r" * 16384)
+            candidate = target / "debug/deps"
+            candidate.mkdir(parents=True)
+            fingerprint = target / "debug/.fingerprint/fixture-1111111111111111"
+            fingerprint.mkdir(parents=True)
+            for index in (1, 2):
+                (candidate / f"libfixture-{index:016d}.rlib").write_bytes(b"c" * 8192)
+            state = root / "tmp/.cargo-capacity-guard.json"
+            state.parent.mkdir(parents=True)
+            state.write_text(json.dumps({
+                "baseline_bytes": 8192, "metric": "unique-inode-allocated-bytes",
+                "metric_version": 1, "target": str(target),
+            }))
+            args = argparse.Namespace(
+                target=str(target), target_dir=None, state=str(state), factor=2.0,
+                dry_run=False, print_json=True, protected_ref=[str(retained / "producer-output")], require_capacity=True,
+                retain_profile=[str(retained)], command=[],
+            )
+            output = io.StringIO()
+            with patch("cargo_capacity_guard._root", return_value=root), \
+                    contextlib.redirect_stdout(output):
+                result = run_guard(args)
+            report = json.loads(output.getvalue())
+            self.assertEqual(result, 0, report)
+            self.assertEqual(report["cleanup_attempts"][0]["exit_code"], 1, report)
+            self.assertEqual(report["cleanup_attempts"][0]["eviction_details"]["deleted_files"], 0)
+            self.assertEqual(report["cleanup_attempts"][0]["eviction_details"]["staged_paths"], [])
+            self.assertEqual(report["cleanup_attempts"][0]["eviction_details"]["invalidated_profiles"], [])
+            self.assertEqual(report["finite_cleanup"]["deleted_files"], 2)
+            self.assertFalse((candidate / "libfixture-0000000000000001.rlib").exists())
+            self.assertFalse((candidate / "libfixture-0000000000000002.rlib").exists())
+            self.assertTrue((retained / "producer-output").exists())
+
     def test_incomplete_below_hardcap_predicate_rejects_unsafe_cleanup(self) -> None:
         report: JsonObject = {
             "cleanup_status": "incomplete", "cleanup_goal_reached": False, "clean_exitcode": 0,
-            "metric_available": True, "threshold_bytes": 200, "post_clean_bytes": 150,
+            "metric_available": True, "current_bytes": 300, "threshold_bytes": 200, "post_clean_bytes": 150,
+            "cleanup_goal_bytes": 100,
             "remaining_over_capacity": False,
             "cleanup_attempts": [{"exit_code": 0, "dry_run": False, "post_clean_bytes": 150}],
             "finite_cleanup": {},
         }
         self.assertTrue(guard._safe_incomplete_cleanup_below_hardcap(report))
+        shortfall_attempts: list[JsonObject] = [
+            {"exit_code": 1, "dry_run": False, "post_clean_bytes": 300,
+             "pre_clean_bytes": 300, "maxsize_bytes": 100, "actual_removed_bytes": 0,
+             "classification": "closed-inactive-shortfall", "no_mutation": True,
+             "staged_paths": [], "invalidated_profiles": [],
+             "output": "insufficient closed inactive artifact capacity; active profiles retained"},
+            {"exit_code": 0, "dry_run": False, "post_clean_bytes": 150},
+        ]
+        shortfall = dict(report, cleanup_attempts=shortfall_attempts)
+        self.assertTrue(guard._safe_incomplete_cleanup_below_hardcap(shortfall))
         for field, value in (
             ("clean_exitcode", 1), ("clean_exitcode", False), ("metric_available", False),
             ("post_clean_bytes", 201),
@@ -1459,6 +1582,10 @@ class GuardTests(unittest.TestCase):
             ("cleanup_attempts", [{"exit_code": False, "dry_run": False, "post_clean_bytes": 150}]),
             ("cleanup_attempts", [{"exit_code": 0, "dry_run": False, "post_clean_bytes": 149}]),
             ("finite_cleanup", {"error": "source drift"}),
+            ("cleanup_attempts", [dict(shortfall_attempts[0], no_mutation=False), shortfall_attempts[1]]),
+            ("cleanup_attempts", [dict(shortfall_attempts[0], post_clean_bytes=299), shortfall_attempts[1]]),
+            ("cleanup_attempts", [dict(shortfall_attempts[0], classification="source-drift"), shortfall_attempts[1]]),
+            ("cleanup_attempts", [shortfall_attempts[0], dict(shortfall_attempts[1], exit_code=1)]),
         ):
             with self.subTest(field=field, value=value):
                 changed = dict(report, **{field: value})
@@ -1489,7 +1616,7 @@ class GuardTests(unittest.TestCase):
     def _run_incomplete_admission_mode(
         self, mode: Literal["root-check", "native", "retained", "library-alias",
                             "library-alias-metadata-only", "library-alias-archives-only"],
-    ) -> tuple[int, int, int | None, bytes, tuple[bool, bool] | None]:
+    ) -> tuple[int, int, int | None, bytes, tuple[bool, bool] | None, tuple[str, ...]]:
         with tempfile.TemporaryDirectory() as directory:
             root, target, state, protected = self._admission_mode_fixture(directory)
             profile = target / "debug"
@@ -1544,12 +1671,15 @@ class GuardTests(unittest.TestCase):
                 if mode == "root-check":
                     stack.enter_context(patch("cargo_capacity_guard.check_domain_selection",
                                               return_value=(metadata, lambda: None)))
-                if retained:
+                profile_lookup = None
+                if retained or mode == "root-check":
                     stack.enter_context(patch("cargo_capacity_guard.validate_build_profile"))
                     stack.enter_context(patch("cargo_capacity_guard.validate_build_selection"))
                     stack.enter_context(patch("cargo_capacity_guard.validate_build_executable"))
-                    stack.enter_context(patch("cargo_capacity_guard.current_build_profiles",
-                                              return_value=(profile,)))
+                    profile_lookup = stack.enter_context(patch(
+                        "cargo_capacity_guard.current_build_profiles", return_value=(profile,)
+                    ))
+                if retained:
                     stack.enter_context(patch("cargo_capacity_guard.selected_package_cleanup",
                                               return_value=([], None)))
                 if native:
@@ -1564,12 +1694,18 @@ class GuardTests(unittest.TestCase):
                     result = run_guard(args)
             evict_goal = evict.call_args.args[1] if evict.call_args else None
             classifier_mode = classifier_modes[0] if classifier_modes else None
-            return result, worker.call_count, evict_goal, protected.read_bytes(), classifier_mode
+            retained_paths = tuple(str(path) for path in (
+                evict.call_args.kwargs.get("retained_profiles", ()) if evict.call_args else ()
+            ))
+            if profile_lookup is not None:
+                self.assertEqual(profile_lookup.call_count, 1)
+                self.assertEqual(profile_lookup.call_args.args[2], "debug")
+            return result, worker.call_count, evict_goal, protected.read_bytes(), classifier_mode, retained_paths
 
     def test_incomplete_admission_mode_matrix(self) -> None:
         cases: tuple[tuple[Literal["root-check", "native", "retained", "library-alias",
                                   "library-alias-metadata-only", "library-alias-archives-only"], int, int,
-                           int | None, tuple[bool, bool] | None], ...] = (
+                                  int | None, tuple[bool, bool] | None], ...] = (
             ("root-check", 0, 1, 100, None), ("native", 1, 0, 100, None),
             ("retained", 1, 0, 100, None), ("library-alias", 1, 0, 100, (False, False)),
             ("library-alias-metadata-only", 1, 0, 100, (True, False)),
@@ -1577,12 +1713,14 @@ class GuardTests(unittest.TestCase):
         )
         for mode, expected_result, expected_workers, expected_goal, expected_modes in cases:
             with self.subTest(mode=mode):
-                result, workers, goal, protected, alias_modes = self._run_incomplete_admission_mode(mode)
+                result, workers, goal, protected, alias_modes, retained_paths = self._run_incomplete_admission_mode(mode)
                 self.assertEqual(result, expected_result)
                 self.assertEqual(workers, expected_workers)
                 self.assertEqual(goal, expected_goal)
                 self.assertEqual(protected, b"protected")
                 self.assertEqual(alias_modes, expected_modes)
+                self.assertEqual(len(retained_paths), 1)
+                self.assertTrue(retained_paths[0].endswith("/target/debug"))
 
     def test_require_capacity_rejects_busy_over_capacity_without_child(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -4050,7 +4188,8 @@ class ExpectedStateBindingUnitTests(unittest.TestCase):
 class CoverageDomainUnitTests(unittest.TestCase):
     @contextlib.contextmanager
     def fixture(self, domain: str = "performance-baseline", action: str = "clean",
-                collection: bool = False) -> Iterator[tuple[Path, argparse.Namespace, dict[str, str]]]:
+                collection: bool = False, diagnostic: bool = False,
+                ) -> Iterator[tuple[Path, argparse.Namespace, dict[str, str]]]:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             target = root / "target"
@@ -4067,28 +4206,42 @@ class CoverageDomainUnitTests(unittest.TestCase):
             reference = root / "consumer"
             reference.write_bytes(b"admitted-consumer")
             command = ["cargo", "llvm-cov"]
-            if action == "clean":
+            config: Path | None = None
+            if diagnostic:
+                config = root / "scripts/nextest-diagnostic.toml"
+                config.parent.mkdir(parents=True, exist_ok=True)
+                config.write_text("[nextest]\n")
+                command += ["nextest", "--workspace", "--all-targets", "--all-features", "--locked",
+                            "--cargo-profile", "krr-coverage", "--no-report", "--no-fail-fast", "--retries", "0", "--user-config-file",
+                            str(config)]
+            if action == "clean" and not diagnostic:
                 command.append("clean")
-            if domain != "root":
+            if domain != "root" and not diagnostic:
                 command += ["--manifest-path", "scripts/html/performance-harness/Cargo.toml", "--locked"]
-            command.append("--workspace")
-            if action == "test":
+            if not diagnostic:
+                command.append("--workspace")
+            if action == "test" and not diagnostic:
                 command += ["--all-targets", "--summary-only"]
                 if collection:
                     command += ["--json", "--output-path",
                                 str(root / "tmp/quality/standalone-performance-coverage" /
                                     f"{domain.removeprefix('performance-')}.json")]
+                    if domain != "root":
+                        command += ["--profile", "krr-coverage"]
                 else:
                     command += ["--fail-under-lines", "100", "--fail-uncovered-lines", "0"]
                 command += (["--all-features", "--locked"] if domain == "root" else
                             ["--no-default-features", "--features", domain.removeprefix("performance-")])
             args = argparse.Namespace(target=str(target), target_dir=None, state=None, factor=2.0,
                                       dry_run=False, print_json=True, command=command,
-                                      coverage_domain=None if collection else domain,
-                                      coverage_collection_domain=domain if collection else None,
+                                      coverage_domain=None if collection or diagnostic else domain,
+                                      coverage_collection_domain=domain if collection and not diagnostic else None,
+                                      coverage_diagnostic_domain=domain if diagnostic else None,
                                       expected_state_sha256=None, protected_ref=[str(reference)])
             environment = {"CARGO_TARGET_DIR": str(target), "CARGO_LLVM_COV_TARGET_DIR": str(target / (
-                "llvm-cov-target" if domain == "root" else f"llvm-cov-{domain}"))}
+                "llvm-cov-target" if domain == "root" or diagnostic else f"llvm-cov-{domain}"))}
+            if diagnostic:
+                environment["LLVM_PROFILE_FILE_NAME"] = "krr-nextest-diagnostic-123e4567-e89b-42d3-a456-426614174000-%4m.profraw"
             self.calls: list[list[str]] = []
             self.output = io.StringIO()
             self.errors = io.StringIO()
@@ -4138,7 +4291,152 @@ class CoverageDomainUnitTests(unittest.TestCase):
                 self.assertNotIn("--fail-under-lines", args.command)
                 self.assertNotIn("--fail-uncovered-lines", args.command)
 
+    def test_coverage_diagnostic_root_accepts_only_fixed_initial_nextest_probe(self) -> None:
+        with self.fixture(diagnostic=True) as (root, args, environment):
+            command = args.command
+            with patch("cargo_capacity_guard.cargo_configuration_paths", return_value=[]), \
+                    patch("cargo_capacity_guard.validate_build_selection"):
+                self.assertEqual(guard.coverage_diagnostic_selection(root, Path(environment["CARGO_TARGET_DIR"]),
+                                                                     command, environment),
+                                 ("test", Path(environment["CARGO_TARGET_DIR"]) / "llvm-cov-target"))
+                for suffix in (["--test-threads=2"], ["-E", "test(name)"],
+                               ["--test-threads=2", "-E", "test(name)"]):
+                    with self.subTest(accepted_suffix=suffix):
+                        self.assertEqual(
+                            guard.coverage_diagnostic_selection(root, Path(environment["CARGO_TARGET_DIR"]),
+                                                                 command + suffix, environment),
+                            ("test", Path(environment["CARGO_TARGET_DIR"]) / "llvm-cov-target"),
+                        )
+                for suffix in (["--filter-expr", "class"], ["--report"], ["--fail-under-lines", "100"],
+                               ["--cargo-profile", "dev"], ["--profile", "krr-coverage"], ["--clean"],
+                               ["--test-threads=0"], ["--test-threads=1", "--test-threads=2"],
+                               ["--test-threads", "2"], ["-E", ""], ["-E", "test(name)", "extra"]):
+                    with self.subTest(suffix=suffix), self.assertRaisesRegex(RuntimeError, "fixed|filter|threads"):
+                        guard.coverage_diagnostic_selection(root, Path(environment["CARGO_TARGET_DIR"]),
+                                                            command + suffix, environment)
+                for profile_name in (None, "other.profraw", "krr-nextest-%4m.profraw",
+                                     "krr-nextest-%p-%4m.profraw", "/tmp/krr-nextest-diagnostic-123e4567-e89b-42d3-a456-426614174000-%4m.profraw",
+                                     "krr-nextest-diagnostic-not-a-uuid-%4m.profraw"):
+                    with self.subTest(profile_name=profile_name):
+                        candidate = dict(environment)
+                        if profile_name is None:
+                            candidate.pop("LLVM_PROFILE_FILE_NAME")
+                        else:
+                            candidate["LLVM_PROFILE_FILE_NAME"] = profile_name
+                        with self.assertRaisesRegex(RuntimeError, "fixed .*LLVM"):
+                            guard.coverage_diagnostic_selection(
+                                root, Path(environment["CARGO_TARGET_DIR"]), command, candidate,
+                            )
+                for required in ("--no-report",):
+                    with self.subTest(missing_required=required):
+                        missing = list(command)
+                        missing.remove(required)
+                        with self.assertRaisesRegex(RuntimeError, "fixed (initial probe|Cargo)"):
+                            guard.coverage_diagnostic_selection(
+                                root, Path(environment["CARGO_TARGET_DIR"]), missing, environment,
+                            )
+
+    def test_coverage_collection_rejects_diagnostic_process_pool(self) -> None:
+        with self.fixture(action="test", collection=True) as (root, args, environment):
+            environment["LLVM_PROFILE_FILE_NAME"] = "krr-nextest-diagnostic-123e4567-e89b-42d3-a456-426614174000-%4m.profraw"
+            with self.assertRaisesRegex(RuntimeError, "fixed .*LLVM|coverage directory/profile"):
+                self.execute(root, args, environment)
+            self.assert_no_worker()
+
+    def test_coverage_diagnostic_rejects_symlink_config_and_unknown_tool(self) -> None:
+        with self.fixture(diagnostic=True) as (root, args, environment):
+            target = Path(environment["CARGO_TARGET_DIR"])
+            command = args.command
+            config = Path(command[-1])
+            real = root / "diagnostic-real.toml"
+            real.write_text("[nextest]\n")
+            config.unlink()
+            config.symlink_to(real)
+            with patch("cargo_capacity_guard.cargo_configuration_paths", return_value=[]), \
+                    patch("cargo_capacity_guard.validate_build_selection"), \
+                    self.assertRaisesRegex(RuntimeError, "regular non-symlink|contains a symlink"):
+                guard.coverage_diagnostic_selection(root, target, command, environment)
+            config.unlink()
+            outside = root.parent / "diagnostic-outside.toml"
+            outside.write_text("[nextest]\n")
+            linked = root / "linked"
+            linked.symlink_to(outside.parent, target_is_directory=True)
+            command[-1] = str(linked / ".." / outside.name)
+            with patch("cargo_capacity_guard.cargo_configuration_paths", return_value=[]), \
+                    patch("cargo_capacity_guard.validate_build_selection"), \
+                    self.assertRaisesRegex(RuntimeError, "parent traversal"):
+                guard.coverage_diagnostic_selection(root, target, command, environment)
+            command[-1] = str(linked / outside.name)
+            with patch("cargo_capacity_guard.cargo_configuration_paths", return_value=[]), \
+                    patch("cargo_capacity_guard.validate_build_selection"), \
+                    self.assertRaisesRegex(RuntimeError, "inside the repository|contains a symlink"):
+                guard.coverage_diagnostic_selection(root, target, command, environment)
+            with patch("cargo_capacity_guard.subprocess.run",
+                       return_value=subprocess.CompletedProcess(command, 0,
+                                                                 stdout=b"cargo-nextest 0.9.147 (bad)\n",
+                                                                 stderr=b"")), \
+                    self.assertRaisesRegex(RuntimeError, "0.9.148"):
+                guard.nextest_tool_version(root, command)
+
+            with patch("cargo_capacity_guard.subprocess.run",
+                       return_value=subprocess.CompletedProcess(command, 0,
+                                                                 stdout=b"cargo-nextest 0.9.148 (cd1d6d546 2026-10-07)\nrelease\nhost\n",
+                                                                 stderr=b"")):
+                evidence = guard.nextest_tool_version(root, command)
+                self.assertEqual(evidence["exit"], 0)
+
+    def test_root_nextest_collection_requires_fixed_report_contract(self) -> None:
+        with self.fixture(diagnostic=True) as (root, args, environment):
+            target = Path(environment["CARGO_TARGET_DIR"])
+            config = root / "scripts/release/nextest-local-user.toml"
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text("[nextest]\n")
+            other_config = root / "other-nextest.toml"
+            other_config.write_text("[nextest]\n")
+            output = root / "tmp/quality/standalone-performance-coverage/root.json"
+            command = ["cargo", "llvm-cov", "nextest", "--workspace", "--all-targets", "--all-features",
+                       "--locked", "--cargo-profile", "krr-coverage", "--no-fail-fast", "--retries", "0",
+                       "--user-config-file", str(config), "--json", "--summary-only", "--output-path",
+                       str(output)]
+            environment["LLVM_PROFILE_FILE_NAME"] = "krr-nextest-%4m.profraw"
+            with patch("cargo_capacity_guard.cargo_configuration_paths", return_value=[]), \
+                    patch("cargo_capacity_guard.validate_build_selection"):
+                self.assertEqual(guard.coverage_selection(root, target, "root", command, environment,
+                                                          collection=True),
+                                 ("test", target / "llvm-cov-target"))
+                for replacement in (("--no-report",), ("--filter-expr", "class"), ("-E", "class"),
+                                    ("--cargo-profile", "dev"), ("--profile", "krr-coverage"),
+                                    ("--test-threads=0",), ("--test-threads", "2"),
+                                    ("--config",)):
+                    with self.subTest(replacement=replacement), self.assertRaisesRegex(
+                            RuntimeError, "fixed|contract|test threads"):
+                        candidate = list(command)
+                        if replacement[0] == "--no-report":
+                            candidate[candidate.index("--json"):candidate.index("--output-path")] = ["--no-report"]
+                        elif replacement[0] in ("--filter-expr", "-E"):
+                            candidate.extend(replacement)
+                        elif replacement[0] == "--profile":
+                            candidate.extend(replacement)
+                        elif replacement[0].startswith("--test-threads"):
+                            candidate.extend(replacement)
+                        elif replacement[0] == "--config":
+                            candidate[candidate.index("--user-config-file") + 1] = str(other_config)
+                        else:
+                            index = candidate.index(replacement[0])
+                            candidate[index:index + 2] = list(replacement)
+                        guard.coverage_selection(root, target, "root", candidate, environment, collection=True)
+
     def test_coverage_collection_rejects_thresholds_clean_and_unfixed_output(self) -> None:
+        for profile in (None, "dev", "krr-coverage-extra"):
+            with self.subTest(profile=profile), self.fixture("performance-baseline", "test", collection=True) as (root, args, environment):
+                profile_index = args.command.index("--profile")
+                if profile is None:
+                    del args.command[profile_index:profile_index + 2]
+                else:
+                    args.command[profile_index + 1] = profile
+                with self.assertRaisesRegex(RuntimeError, "profile"):
+                    self.execute(root, args, environment)
+                self.assert_no_worker()
         with self.fixture("root", "test", collection=True) as (root, args, environment):
             args.command += ["--fail-under-lines", "100"]
             with self.assertRaisesRegex(RuntimeError, "threshold"):
@@ -4166,6 +4464,49 @@ class CoverageDomainUnitTests(unittest.TestCase):
             self.assertFalse(report["remaining_over_capacity"])
             self.assertEqual(evict.call_args.args[1], 16_777_216)
             self.assertEqual(self.calls[-1], args.command)
+
+    def test_coverage_soft_goal_shortfall_retries_once_at_hardcap(self) -> None:
+        message = "insufficient closed inactive artifact capacity; active profiles retained"
+        with self.fixture() as (root, args, environment):
+            failure_details: EvictionReport = {
+                "error": message, "candidate_paths": [], "staged_paths": [], "invalidated_profiles": [],
+                "retained_unknown_alias_inodes": 0, "retained_protected_inodes": 0,
+                "estimated_candidate_bytes": 0, "deleted_files": 0, "retained_unknown_entries": 0,
+                "retained_unknown_alias_diagnostics": [],
+            }
+            with patch("cargo_capacity_guard.size_bytes", side_effect=[33_554_433, 33_554_433, 33_554_433, 30_000_000, 30_000_000]), \
+                    patch("cargo_capacity_guard.evict_artifacts", side_effect=[(1, failure_details), (0, {})]) as evict:
+                result = self.execute(root, args, environment)
+            report = json.loads(self.output.getvalue())
+            self.assertEqual(result, 0, report)
+            self.assertEqual(evict.call_count, 2)
+            self.assertEqual(evict.call_args_list[0].args[1], 16_777_216)
+            self.assertEqual(evict.call_args_list[1].args[1], 33_554_432)
+            self.assertEqual(report["cleanup_goal_bytes"], 16_777_216)
+            self.assertFalse(report["cleanup_goal_reached"])
+            self.assertFalse(report["remaining_over_capacity"])
+            self.assertEqual(report["cleanup_status"], "incomplete")
+            self.assertEqual(len(report["cleanup_attempts"]), 2)
+            self.assertEqual(report["cleanup_attempts"][0]["exit_code"], 1)
+            self.assertEqual(report["cleanup_attempts"][0]["classification"], "closed-inactive-shortfall")
+            self.assertTrue(report["cleanup_attempts"][0]["no_mutation"])
+            self.assertEqual(report["cleanup_attempts"][0]["staged_paths"], [])
+            self.assertEqual(report["cleanup_attempts"][0]["invalidated_profiles"], [])
+            self.assertIn(message, report["cleanup_attempts"][0]["output"])
+
+    def test_coverage_soft_goal_shortfall_does_not_retry_other_errors_or_hardcap(self) -> None:
+        message = "insufficient closed inactive artifact capacity; active profiles retained"
+        for errors, expected_calls in (([(1, {"error": "source drift"})], 1),
+                                       ([(1, {"error": message, "deleted_files": 0,
+                                              "staged_paths": [], "invalidated_profiles": []}),
+                                         (1, {"error": message, "deleted_files": 0,
+                                              "staged_paths": [], "invalidated_profiles": []})], 2)):
+            with self.subTest(errors=errors), self.fixture() as (root, args, environment):
+                with patch("cargo_capacity_guard.size_bytes", side_effect=[33_554_433] * 8), \
+                        patch("cargo_capacity_guard.evict_artifacts", side_effect=errors) as evict:
+                    result = self.execute(root, args, environment)
+                self.assertEqual(result, 1)
+                self.assertEqual(evict.call_count, expected_calls)
 
     def test_coverage_fresh_ci_empty_consumer_closure_is_recorded_exactly(self) -> None:
         for declared in (False, True):
@@ -4228,6 +4569,11 @@ class CoverageDomainUnitTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     self.execute(root, args, environment)
                 self.assert_no_worker()
+        with self.fixture() as (root, args, environment):
+            environment["LLVM_PROFILE_FILE_NAME"] = "krr-nextest-%4m.profraw"
+            with self.assertRaises(RuntimeError):
+                self.execute(root, args, environment)
+            self.assert_no_worker()
 
     def test_coverage_unknown_build_configuration_rejects_before_worker(self) -> None:
         for contents in ('[build]\nbuild-dir="elsewhere"\n', '[env]\nCARGO_LLVM_COV_TARGET_DIR="elsewhere"\n',

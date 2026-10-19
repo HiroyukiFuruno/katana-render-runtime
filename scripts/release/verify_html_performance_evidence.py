@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
 from datetime import datetime
-from typing import Protocol, TypedDict, cast
-from collections.abc import Sequence
+from typing import NamedTuple, Protocol, TypedDict, cast
+from collections.abc import Mapping, Sequence
 
 JsonObject = dict[str, object]
 SourceRecords = dict[str, tuple[str, int]]
@@ -28,6 +30,79 @@ class SourceContract(TypedDict):
     head: str
     source: SourceRecords
     snapshot: str
+
+
+class ExpectedBuild(NamedTuple):
+    harness: JsonObject
+    runtime: JsonObject
+    arm: str
+
+
+class CargoCapacityGuard(Protocol):
+    def validate_build_selection(self, root: Path, environment: Mapping[str, str]) -> None: ...
+
+    def validate_build_executable(self, root: Path, command: list[str],
+                                  environment: Mapping[str, str]) -> None: ...
+
+    def cargo_configuration_paths(self, root: Path, environment: Mapping[str, str]) -> list[Path]: ...
+
+
+def _cargo_capacity_guard() -> CargoCapacityGuard:
+    build_directory = str(Path(__file__).resolve().parents[1] / "build")
+    if build_directory not in sys.path:
+        sys.path.insert(0, build_directory)
+    return cast(CargoCapacityGuard, importlib.import_module("cargo_capacity_guard"))
+
+
+def guarded_build_argv(root: Path, harness: Path, cargo: Path, arm: str, state: Path,
+                       state_sha256: str, references: Sequence[str], profiles: Sequence[str]) -> list[str]:
+    argv = [sys.executable, str(root / "scripts/build/cargo_capacity_guard.py"), "--root", str(root),
+            "--target-dir", str(root / "target"), "--state", str(state), "--factor", "2",
+            "--expected-state-sha256", state_sha256]
+    for reference in references:
+        argv.extend(["--protected-ref", reference])
+    for profile in profiles:
+        argv.extend(["--retain-profile", profile])
+    argv.extend(["--", str(cargo), "build", "--release", "--locked", "--manifest-path",
+                 str(harness / "Cargo.toml"), "--target-dir", str(root / "target"),
+                 "--message-format=json", "--no-default-features", "--features", arm])
+    return argv
+
+
+def validate_guarded_build_argv(argv: Sequence[str], root: Path, harness: Path, cargo: Path, arm: str,
+                               state_path: Path, state_sha256: str,
+                               expected_references: Sequence[str]) -> None:
+    fixed_prefix = [sys.executable, str(root / "scripts/build/cargo_capacity_guard.py"), "--root", str(root),
+                    "--target-dir", str(root / "target"), "--state"]
+    require(list(argv[:7]) == fixed_prefix and len(argv) > 12, "build argv guard prefix differs")
+    argv_state_path = Path(argv[7])
+    require(state_path.is_absolute() and str(state_path) == os.path.normpath(str(state_path))
+            and argv_state_path == state_path and argv[7] == str(argv_state_path)
+            and argv[11] == state_sha256
+            and list(argv[8:11]) == ["--factor", "2", "--expected-state-sha256"],
+            "build argv recorded capacity state/factor differs")
+    index, references, profiles = 12, [], []
+    while index < len(argv) and argv[index] == "--protected-ref":
+        require(index + 1 < len(argv), "build argv protected reference is incomplete")
+        references.append(argv[index + 1])
+        index += 2
+    while index < len(argv) and argv[index] == "--retain-profile":
+        require(index + 1 < len(argv), "build argv retained profile is incomplete")
+        profiles.append(argv[index + 1])
+        index += 2
+    require(index < len(argv) and argv[index] == "--" and references == list(expected_references)
+            and len(references) >= 40 and len(set(references)) == len(references),
+            "build argv has missing/duplicate/unbound capacity references")
+    for value in references:
+        path = Path(value)
+        require(path.is_absolute() and str(path) == value,
+                "build argv contains a noncanonical protected reference")
+    for value in profiles:
+        path = Path(value)
+        require(path.is_absolute() and str(path) == value,
+                "build argv contains a noncanonical retained profile")
+    expected = guarded_build_argv(root, harness, cargo, arm, state_path, state_sha256, references, profiles)
+    require(list(argv) == expected, "build argv differs from canonical guarded Cargo command")
 
 
 class Percentiles(TypedDict):
@@ -61,7 +136,7 @@ class ComparisonAggregate(TypedDict):
     comparison: dict[str, dict[str, float]]
 
 VIEWPORTS = ((1280, 900), (960, 720), (620, 900))
-LOCK_SHA = "d55bdde3425b7af3057eb758a2e4241196c7d8e187320b506334aee76af0a4e5"
+LOCK_SHA = "b37946574ec319ad43dfa1af0f1e0757530f57fb2c477e5f9db5c40488abb26b"
 SOURCE_KEYS = ("inventoryDigest", "head", "index", "files", "trackedPaths", "untrackedPaths", "missingTrackedPaths")
 ENDPOINT_FLAGS = ("sourceBeforeEqualsEnd", "inputsBeforeEqualsEnd", "registryBeforeEqualsEnd", "cacheBeforeEqualsEnd", "cacheUnionBeforeEqualsEnd", "cacheUnionScopeRestored", "configBeforeEqualsEnd", "preferenceBeforeEqualsEnd", "toolContextBeforeEqualsEnd")
 HARNESS_ROOT = "scripts/html/performance-harness/"
@@ -464,6 +539,7 @@ class Bundle:
         self.manifest = read_json(self.directory / "bundle.json")
         require(self.manifest["schema"] == "krr-html-performance-release-bundle-v1", "unsupported transport schema")
         self.files: dict[str, tuple[Path, str]] = {}
+        self.relative_files: dict[str, tuple[Path, str, str]] = {}
         used = set()
         for row in _objects(self.manifest["files"], "transport files"):
             original = _text(row["originalPath"], "original path")
@@ -475,6 +551,7 @@ class Bundle:
             digest(checksum)
             require(path.is_file() and sha256(path) == checksum, "transport file hash mismatch")
             self.files[original] = (path, checksum)
+            self.relative_files[relative.as_posix()] = (path, checksum, original)
             used.add(path)
 
     def file(self, reference: object) -> Path:
@@ -486,6 +563,296 @@ class Bundle:
 
     def json(self, ref: object) -> JsonObject:
         return read_json(self.file(ref))
+
+    def relative_reference(self, relative_path: str, checksum: str) -> JsonObject:
+        digest(checksum)
+        row = self.relative_files.get(relative_path)
+        if row is None:
+            raise ValueError("bundle-relative file pin mismatch")
+        require(row[1] == checksum and sha256(row[0]) == checksum,
+                "bundle-relative file pin mismatch")
+        return {"path": row[2], "sha256": checksum}
+
+
+def _canonical_build_file(value: object, label: str) -> Path:
+    path = Path(_text(value, label))
+    require(path.is_absolute() and path.resolve() == path and not path.is_symlink()
+            and path.is_file(), label + " must be a canonical regular file")
+    return path
+
+
+def _canonical_build_path(value: object, label: str) -> Path:
+    path = Path(_text(value, label))
+    require(path.is_absolute() and str(path) == value, label + " must be a canonical absolute path")
+    return path
+
+
+def _validate_build_environment(proof: JsonObject, root: Path, harness: Path, cargo: Path,
+                                environment: Mapping[str, str]) -> list[Path]:
+    recorded_sha = _text(proof.get("buildEnvironmentSha256"), "build environment SHA")
+    digest(recorded_sha)
+    capacity = _cargo_capacity_guard()
+    capacity.validate_build_selection(harness, environment)
+    capacity.validate_build_executable(root, [str(cargo), "build"], environment)
+    return capacity.cargo_configuration_paths(harness, environment)
+
+
+def _runtime_lock_packages(harness: Path) -> dict[str, JsonObject]:
+    from toml_loader import load_toml_parser
+
+    raw = (harness / "Cargo.lock").read_bytes()
+    require(hashlib.sha256(raw).hexdigest() == LOCK_SHA, "common lock pin differs")
+    lock = _object(load_toml_parser().loads(raw.decode("utf8")), "common Cargo lock")
+    packages = [p for p in _objects(lock["package"], "locked packages")
+                if p.get("name") == "katana-render-runtime"]
+    baseline = [p for p in packages if p.get("source") == "registry+https://github.com/rust-lang/crates.io-index"
+                and p.get("version") == "0.4.23"]
+    candidate = [p for p in packages if "source" not in p]
+    require(len(packages) == 2 and len(baseline) == 1 and len(candidate) == 1,
+            "fixed runtime lock packages differ")
+    _text(candidate[0]["version"], "locked candidate version")
+    return {"baseline": baseline[0], "candidate": candidate[0]}
+
+
+def expected_build(root: Path, harness: Path, arm: str, metadata: JsonObject,
+                   environment: Mapping[str, str]) -> ExpectedBuild:
+    from toml_loader import load_toml_parser
+
+    require(_integer(metadata["version"], "metadata schema version") == 1, "metadata schema differs")
+    packages = _objects(metadata["packages"], "standalone Cargo packages")
+    harness_packages = [p for p in packages if p.get("manifest_path") == str(harness / "Cargo.toml")
+                        and p.get("name") == "krr-html-performance-harness"]
+    require(len(harness_packages) == 1, "standalone manifest identity differs")
+    selected_harness = harness_packages[0]
+    harness_manifest = _object(load_toml_parser().loads((harness / "Cargo.toml").read_text()), "harness manifest")
+    harness_package = _object(harness_manifest["package"], "harness package")
+    require(selected_harness["source"] is None
+            and selected_harness.get("version") == _text(harness_package["version"], "harness version"),
+            "harness package version/origin differs")
+    harness_id = _text(selected_harness["id"], "harness package id")
+    require(metadata["workspace_members"] == [harness_id], "standalone workspace members differ")
+    ids = [_text(p["id"], "metadata package id") for p in packages]
+    require(len(set(ids)) == len(ids), "duplicate metadata package id")
+    resolve = _object(metadata["resolve"], "Cargo resolve")
+    require(resolve["root"] == harness_id, "Cargo resolve root differs")
+    nodes = _objects(resolve["nodes"], "Cargo resolve nodes")
+    roots = [node for node in nodes if node.get("id") == harness_id]
+    require(len(roots) == 1 and roots[0].get("features") == [arm], "Cargo arm features differ")
+    dependencies = _objects(roots[0]["deps"], "harness resolved dependencies")
+    arms = [dep for dep in dependencies if dep.get("name") in {"baseline", "candidate"}]
+    require(len(arms) == 1 and arms[0].get("name") == arm, "Cargo resolved arm differs")
+    runtime_id = _text(arms[0]["pkg"], "runtime package id")
+    runtime_packages = [p for p in packages if p.get("id") == runtime_id]
+    require(len(runtime_packages) == 1, "resolved runtime package missing")
+    runtime = dict(runtime_packages[0])
+    runtime_nodes = [node for node in nodes if node.get("id") == runtime_id]
+    require(len(runtime_nodes) == 1, "resolved runtime node missing")
+    runtime["resolvedFeatures"] = [_text(f, "resolved runtime feature")
+                                   for f in _array(runtime_nodes[0]["features"], "resolved runtime features")]
+    locked = _runtime_lock_packages(harness)[arm]
+    require(runtime.get("name") == "katana-render-runtime" and runtime.get("version") == locked["version"],
+            "runtime name/version differs from fixed lock")
+    manifest = _canonical_build_file(runtime["manifest_path"], "runtime manifest")
+    if arm == "baseline":
+        cargo_home = Path(environment.get("CARGO_HOME", str(Path.home() / ".cargo"))).resolve()
+        require(runtime.get("source") == locked["source"]
+                and manifest.is_relative_to(cargo_home / "registry/src")
+                and manifest.parent.name == "katana-render-runtime-0.4.23", "baseline runtime origin differs")
+    else:
+        require(runtime["source"] is None
+                and manifest == root / "crates/katana-render-runtime/Cargo.toml", "candidate runtime origin differs")
+        manifest_value = _object(load_toml_parser().loads(manifest.read_text()), "candidate manifest")
+        package = _object(manifest_value["package"], "candidate package")
+        inherited = _object(package["version"], "candidate inherited version")
+        workspace = _object(load_toml_parser().loads((root / "Cargo.toml").read_text()), "root manifest")
+        workspace_package = _object(_object(workspace["workspace"], "workspace")["package"], "workspace package")
+        require(inherited.get("workspace") is True and workspace_package.get("version") == locked["version"],
+                "candidate version differs from fixed lock")
+    for package, name, kind, source in ((selected_harness, "krr-html-performance-harness", ["bin"], harness / "src/main.rs"),
+                                        (runtime, "katana_render_runtime", ["lib"], manifest.parent / "src/lib.rs")):
+        targets = [t for t in _objects(package["targets"], "Cargo package targets") if t.get("name") == name]
+        require(len(targets) == 1 and targets[0].get("kind") == kind
+                and targets[0].get("crate_types") == kind and targets[0].get("src_path") == str(source),
+                "Cargo package target differs")
+        _canonical_build_file(str(source), "Cargo target source")
+    return ExpectedBuild(selected_harness, runtime, arm)
+
+
+def cargo_build_artifacts(raw: bytes, expected: ExpectedBuild, target: Path) -> tuple[Path, JsonObject]:
+    events: list[JsonObject] = []
+    terminal_seen = False
+    for line in raw.decode("utf8").splitlines():
+        require(not terminal_seen or not line.strip(), "nonterminal build-finished event")
+        candidate = line.lstrip()
+        if not candidate:
+            continue
+        starts_object = candidate.startswith("{")
+        starts_array = candidate.startswith("[")
+        starts_scalar = candidate[0] in '\"tfn-0123456789'
+        if not (starts_object or starts_array or starts_scalar):
+            continue
+        try:
+            decoded = json.loads(candidate, object_pairs_hook=unique_object)
+        except json.JSONDecodeError:
+            require(not starts_object, "malformed Cargo JSON object")
+            continue
+        event = _object(decoded, "Cargo JSON event")
+        reason = _text(event["reason"], "Cargo event reason")
+        events.append(event)
+        terminal_seen = reason == "build-finished"
+    finished = [e for e in events if e.get("reason") == "build-finished"]
+    require(len(finished) == 1 and finished[0].get("success") is True
+            and events[-1] is finished[0], "unique terminal successful build-finished required")
+    selected: list[JsonObject] = []
+    binary: Path | None = None
+    for package, name in ((expected.runtime, "katana_render_runtime"),
+                          (expected.harness, "krr-html-performance-harness")):
+        rows = [e for e in events if e.get("reason") == "compiler-artifact"
+                and _object(e.get("target"), "artifact target").get("name") == name]
+        require(len(rows) == 1, "unique runtime/harness compiler-artifact required")
+        artifact = rows[0]
+        profile = _object(artifact["profile"], "artifact profile")
+        actual_target = _object(artifact["target"], "artifact target")
+        expected_targets = [t for t in _objects(package["targets"], "expected targets") if t.get("name") == name]
+        require(len(expected_targets) == 1, "expected artifact target differs")
+        require(artifact.get("package_id") == package["id"] and artifact.get("manifest_path") == package["manifest_path"]
+                and all(actual_target.get(k) == expected_targets[0][k] for k in ("name", "kind", "crate_types", "src_path")),
+                "artifact package/origin/target differs")
+        require(profile.get("opt_level") == "3" and profile.get("test") is False
+                and type(artifact.get("fresh")) is bool, "artifact is not release non-test")
+        features = [_text(f, "artifact feature") for f in _array(artifact["features"], "artifact features")]
+        if package is expected.runtime:
+            require(sorted(features) == sorted(_text(f, "expected runtime feature")
+                    for f in _array(package["resolvedFeatures"], "expected runtime features")),
+                    "runtime artifact features differ")
+        if package is expected.harness:
+            require(features == [expected.arm], "harness artifact arm features differ")
+            binary = _canonical_build_file(artifact["executable"], "artifact executable")
+            require(binary == target / "release/krr-html-performance-harness"
+                    and str(binary) in [_text(f, "artifact filename") for f in _array(artifact["filenames"], "artifact filenames")],
+                    "artifact executable namespace differs")
+        else:
+            require(artifact["executable"] is None, "runtime library executable differs")
+        selected.append(artifact)
+    require(binary is not None, "artifact executable missing")
+    return _canonical_build_path(str(binary), "artifact executable"), {
+        "runtimeArtifact": selected[0], "binaryArtifact": selected[1], "buildFinished": finished[0]}
+
+
+def _recorded_capacity_state(bundle: Bundle, capacity_input: JsonObject) -> tuple[Path, str]:
+    state_ref = _object(capacity_input.get("stateRef"), "recorded prebuild capacity state")
+    state_path = _canonical_build_path(state_ref.get("path"), "recorded capacity state path")
+    state_sha = _text(state_ref.get("sha256"), "recorded capacity state SHA")
+    bundle.file(state_ref)
+    return state_path, state_sha
+
+
+def _validate_build_proof(bundle: Bundle, root: Path, reference: object, arm: str, *,
+                           git_query: GitQuery | None = None) -> JsonObject:
+    proof_path = bundle.file(reference)
+    proof = read_json(proof_path)
+    require(proof.get("schema") == "krr-html-performance-build-artifact-v1", "unsupported build artifact schema")
+    require(proof.get("arm") == arm and proof.get("buildExit") == 0, "build artifact arm/exit differs")
+    harness = root / HARNESS_ROOT.rstrip("/")
+    require(proof.get("lockSha256") == LOCK_SHA and sha256(harness / "Cargo.lock") == LOCK_SHA,
+            "build artifact lock differs")
+    source_before_ref = _object(proof["sourceBeforeRef"], "build source-before reference")
+    source_before = bundle.json(source_before_ref)
+    current = current_source(root, source_before, git_query=git_query)
+    snapshot_ref = _object(proof["sourceSnapshotRef"], "build source snapshot reference")
+    snapshot = bundle.json(snapshot_ref)
+    snapshot_records = records_map(snapshot["records"])
+    snapshot_digest = hashlib.sha256(json.dumps(snapshot["records"], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    require(snapshot_records == current and snapshot.get("digest") == snapshot_digest
+            and sha256(bundle.file(snapshot_ref)) == _text(snapshot_ref["sha256"], "source snapshot pin"),
+            "build source snapshot differs from current committed source")
+    digest(_text(proof.get("buildEnvironmentSha256"), "build environment SHA"))
+    tool_versions = _object(proof.get("toolVersions"), "build tool versions")
+    actual_environment = dict(os.environ)
+    actual_environment["CARGO_TARGET_DIR"] = str(root / "target")
+    cargo_info = _object(proof.get("cargoExecutable"), "Cargo executable pin")
+    cargo_path = Path(_text(cargo_info.get("path"), "Cargo executable path"))
+    located = shutil.which("cargo")
+    require(located is not None and Path(located).resolve(strict=True) == cargo_path
+            and cargo_path.is_file()
+            and sha256(cargo_path) == _text(cargo_info.get("sha256"), "Cargo executable SHA"),
+            "Cargo executable differs from build receipt")
+    rustc_info = _object(proof.get("rustcExecutable"), "rustc executable pin")
+    rustc_value = _text(actual_environment.get("RUSTC") or shutil.which("rustc"), "rustc executable")
+    rustc_path = Path(rustc_value)
+    if not rustc_path.is_absolute():
+        rustc_located = shutil.which(str(rustc_path))
+        rustc_path = Path(_text(rustc_located, "rustc executable"))
+    rustc_path = rustc_path.resolve(strict=True)
+    require(rustc_info.get("path") == str(rustc_path) and sha256(rustc_path) == _text(rustc_info.get("sha256"), "rustc SHA"),
+            "rustc executable differs from build receipt")
+    cargo_version = subprocess.check_output([str(located), "-vV"], cwd=root, env=actual_environment, text=True)
+    rustc_command = _text(actual_environment.get("RUSTC", "rustc"), "rustc command")
+    rustc_version = subprocess.check_output([rustc_command, "-vV"], cwd=root, env=actual_environment, text=True)
+    require(tool_versions.get("cargo") == cargo_version and tool_versions.get("rustc") == rustc_version,
+            "Cargo/Rustc selected toolchain differs from build receipt")
+    config_pins = _objects(proof.get("cargoConfigPins"), "Cargo configuration pins")
+    config_paths = [Path(_text(item.get("path"), "Cargo configuration path")) for item in config_pins]
+    current_config_paths = _validate_build_environment(proof, root, harness, cargo_path, actual_environment)
+    require(config_paths == current_config_paths, "Cargo configuration selection differs")
+    for item, path in zip(config_pins, config_paths, strict=True):
+        bundle.file(item)
+        require(path.is_file() and not path.is_symlink() and sha256(path) == _text(item.get("sha256"), "Cargo configuration SHA"),
+                "Cargo configuration differs from build receipt")
+    raw_pins = _objects(proof.get("rawPins"), "build raw pins")
+    raw_by_name = {Path(_text(pin["path"], "raw build path")).name: bundle.file(pin) for pin in raw_pins}
+    require(len(raw_by_name) == len(raw_pins) and {"metadata.json", "cargo.jsonl"} <= set(raw_by_name),
+            "build raw metadata/Cargo JSON pins absent")
+    metadata = _object(json.loads(raw_by_name["metadata.json"].read_text(encoding="utf8"), object_pairs_hook=unique_object),
+                       "Cargo metadata")
+    build_expected = expected_build(root, harness, arm, metadata, actual_environment)
+    require(build_expected.harness == _object(proof["expectedHarness"], "expected harness")
+            and build_expected.runtime == _object(proof["expectedRuntime"], "expected runtime"),
+            "expected build package records differ")
+    selected_binary, artifacts = cargo_build_artifacts(raw_by_name["cargo.jsonl"].read_bytes(), build_expected, root / "target")
+    require(artifacts == _object(proof["artifacts"], "build artifacts"), "Cargo JSON artifacts differ from receipt")
+    selected = _object(proof.get("selectedBinary"), "selected binary pin")
+    frozen = _object(proof.get("frozenBinary"), "frozen binary pin")
+    selected_path = _canonical_build_path(selected.get("path"), "selected binary")
+    frozen_path = bundle.file(frozen)
+    binary_sha = _text(selected.get("sha256"), "selected binary SHA")
+    capacity_input = bundle.json(proof["capacityInputRef"])
+    require("stateRef" in capacity_input and "protectedRegistryRef" in capacity_input,
+            "build capacity input refs are missing")
+    registry_ref = _object(capacity_input.get("protectedRegistryRef"), "recorded protected registry")
+    state_path, state_sha = _recorded_capacity_state(bundle, capacity_input)
+    registry = read_json(bundle.file(registry_ref))
+    registry_records = _objects(registry.get("refs"), "recorded protected references")
+    protected_paths = [str(Path(_text(record.get("path"), "protected reference path")))
+                       for record in registry_records]
+    require(registry.get("schema") == "krr-protected-refs-successor-v1"
+            and _integer(registry.get("physicalRefCount"), "protected reference count") == len(protected_paths)
+            and len(protected_paths) >= 40 and len(set(protected_paths)) == len(protected_paths),
+            "recorded protected registry differs")
+    argv = [_text(value, "build argv item") for value in _array(proof.get("argv"), "build argv")]
+    validate_guarded_build_argv(argv, root, harness, cargo_path, arm, state_path, state_sha, protected_paths)
+    require(selected_path == selected_binary
+            and sha256(frozen_path) == binary_sha and frozen.get("sha256") == binary_sha,
+            "selected/frozen binary differs from Cargo artifact")
+    return {"arm": arm, "binarySha256": binary_sha, "head": _text(source_before["head"], "source HEAD"),
+            "sourceSnapshotSha256": _text(snapshot_ref["sha256"], "source snapshot SHA"),
+            "lockSha256": LOCK_SHA, "buildArtifactSha256": sha256(proof_path),
+            "cargoExecutableSha256": _text(cargo_info["sha256"], "Cargo executable SHA")}
+
+
+def validate_candidate_build_proof(directory: Path, root: Path, bundle_manifest_sha256: str,
+                                   artifact_path: str, artifact_sha256: str, *,
+                                   git_query: GitQuery | None = None) -> JsonObject:
+    digest(bundle_manifest_sha256)
+    require(sha256(directory / "bundle.json") == bundle_manifest_sha256,
+            "bundle manifest SHA differs from managed pin")
+    bundle = Bundle(directory)
+    reference = bundle.relative_reference(artifact_path, artifact_sha256)
+    result = _validate_build_proof(bundle, root, reference, "candidate", git_query=git_query)
+    return {"binarySha256": result["binarySha256"], "sourceHead": result["head"],
+            "sourceSnapshotSha256": result["sourceSnapshotSha256"], "lockSha256": result["lockSha256"],
+            "buildArtifactSha256": result["buildArtifactSha256"],
+            "cargoExecutableSha256": result["cargoExecutableSha256"]}
 
 
 def committed_records(root: Path, ref: str = "HEAD", *, git_query: GitQuery | None = None) -> SourceRecords:
@@ -814,7 +1181,8 @@ def aggregate_comparison(report_paths: list[Path], expected: JsonObject) -> Comp
 
 
 def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
-                     git_query: GitQuery | None = None) -> JsonObject:
+                     git_query: GitQuery | None = None,
+                     validated_builds: Mapping[str, JsonObject] | None = None) -> JsonObject:
     expected = bundle.json(attempt["expected"])
     result = bundle.json(attempt["result"])
     manifest = bundle.json(attempt["pairManifest"])
@@ -833,6 +1201,17 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         expected_arm = _object(arm_value, "expected arm")
         for key in ("binary_sha256", "source_snapshot_sha256", "lock_sha256"):
             digest(expected_arm[key])
+    if validated_builds is not None:
+        require(set(validated_builds) == {"baseline", "candidate"}, "validated build arms differ")
+        for raw_arm, arm in (("baseline-0.4.23", "baseline"), ("candidate", "candidate")):
+            expected_arm = _object(expected_arms[raw_arm], "expected arm")
+            build = validated_builds[arm]
+            build_ref = _object(expected_arm.get("build_artifact_ref"), "build artifact reference")
+            require(bundle.file(build_ref).is_file()
+                    and build["binarySha256"] == expected_arm["binary_sha256"]
+                    and build["sourceSnapshotSha256"] == expected_arm["source_snapshot_sha256"]
+                    and build["lockSha256"] == expected_arm["lock_sha256"],
+                    "expected arm differs from validated build artifact")
     digest(provenance["environment_sha256"])
     for tool in ("rustc", "cargo"):
         tool_version = _text(provenance[tool], "tool provenance")
@@ -1088,7 +1467,16 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
         _require_catalog_attempt_set(attempts, first_expected)
     if "catalogCondition" in first_expected:
         require(len(attempts) == 84, "catalog performance requires all 84 conditions")
-        values = [validate_attempt(bundle, root, attempt, git_query=git_query) for attempt in attempts]
+        validated_builds: dict[str, JsonObject] | None = None
+        if not diagnostic_catalog:
+            first_arms = _object(first_expected["arms"], "expected arms")
+            validated_builds = {}
+            for raw_arm, arm in (("baseline-0.4.23", "baseline"), ("candidate", "candidate")):
+                arm_value = _object(first_arms[raw_arm], "expected arm")
+                validated_builds[arm] = _validate_build_proof(
+                    bundle, root, arm_value.get("build_artifact_ref"), arm, git_query=git_query)
+        values = [validate_attempt(bundle, root, attempt, git_query=git_query,
+                                   validated_builds=validated_builds) for attempt in attempts]
         manifest_refs = {json.dumps(value["catalogManifestRef"], sort_keys=True) for value in values}
         plan_refs = {json.dumps(value["catalogPlanRef"], sort_keys=True) for value in values}
         validation_refs = {json.dumps(value["catalogCaptureValidationRef"], sort_keys=True) for value in values}
@@ -1364,9 +1752,23 @@ def main() -> int:
     parser.add_argument("--acquire", action="store_true")
     parser.add_argument("--acquire-current-producer", action="store_true")
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
+    parser.add_argument("--candidate-build-proof")
+    parser.add_argument("--build-artifact-sha256")
+    parser.add_argument("--bundle-manifest-sha256")
     args = parser.parse_args()
     try:
         require(not (args.acquire and args.acquire_current_producer), "ambiguous acquisition mode")
+        require((args.candidate_build_proof is None) == (args.build_artifact_sha256 is None),
+                "candidate build proof path/SHA must be provided together")
+        if args.candidate_build_proof is not None:
+            require(args.bundle_manifest_sha256 is not None,
+                    "bundle manifest SHA is required for candidate build proof")
+            require(not args.acquire and not args.acquire_current_producer,
+                    "candidate build proof cannot be combined with acquisition")
+            result = validate_candidate_build_proof(args.evidence_dir, args.repo.resolve(),
+                args.bundle_manifest_sha256, args.candidate_build_proof, args.build_artifact_sha256)
+            print(json.dumps(result, sort_keys=True))
+            return 0
         if args.acquire or args.acquire_current_producer:
             acquire(args.evidence_dir, args.repo, args.repository, args.acquire_current_producer)
         print(json.dumps(verify(args.evidence_dir, args.repo), sort_keys=True))

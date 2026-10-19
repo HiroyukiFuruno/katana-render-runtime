@@ -1,5 +1,8 @@
 use super::{Fixture, OPAQUE_INPUTS, RUST_INPUTS, inspect_root};
 
+#[path = "materializer_shared_readback_helper_tests.rs"]
+mod helper_tests;
+
 const HELPER: &str = "crates/katana-render-runtime/src/markdown/runtime_assets.rs";
 const OWNER_CONTEXT_VARIANT_COUNT: usize = 5;
 const SHARED: &str = "RuntimeAsset::exists_with_matching_bytes(path, |existing| {\n            Ok(existing == MathJaxRuntimeScripts::runtime_source().as_bytes())\n        })";
@@ -54,6 +57,11 @@ const CALLER_BINDING_MUTATIONS: &[(&str, &str, &str)] = &[
         "shared-import-binding",
     ),
     (
+        "struct MathJaxGeneratedRuntimeAsset;",
+        "impl RuntimeAsset {}\nstruct MathJaxGeneratedRuntimeAsset;",
+        "shared-import-binding",
+    ),
+    (
         "use crate::markdown::runtime_assets::RuntimeAsset;",
         "#[cfg(any())] use crate::markdown::runtime_assets::RuntimeAsset;\nunion RuntimeAsset { marker: () }\nimpl RuntimeAsset { fn exists_with_matching_bytes(_path: &Path, _matches: impl FnOnce(&[u8]) -> Result<bool, String>) -> Result<bool, String> { Ok(true) } }",
         "shared-import-binding",
@@ -73,6 +81,16 @@ const CALLER_BINDING_MUTATIONS: &[(&str, &str, &str)] = &[
         "RuntimeAsset::exists_with_matching_bytes(other_path,",
         "shared-call",
     ),
+    (
+        "RuntimeAsset::exists_with_matching_bytes(path, |existing| {\n            Ok(existing == MathJaxRuntimeScripts::runtime_source().as_bytes())\n        })",
+        "RuntimeAsset::exists_with_matching_bytes(path, |existing| {\n            Ok(existing == MathJaxRuntimeScripts::runtime_source().as_bytes())\n        });",
+        "shared-call-shape",
+    ),
+    (
+        "RuntimeAsset::exists_with_matching_bytes(path, |existing| {\n            Ok(existing == MathJaxRuntimeScripts::runtime_source().as_bytes())\n        })",
+        "RuntimeAsset::exists_with_matching_bytes(path, true)",
+        "shared-predicate",
+    ),
     ("|existing| {", "|other| {", "shared-predicate"),
     (
         "Ok(existing == MathJaxRuntimeScripts::runtime_source().as_bytes())",
@@ -84,71 +102,12 @@ const CALLER_BINDING_MUTATIONS: &[(&str, &str, &str)] = &[
         "|existing| { return Ok(true);",
         "shared-predicate-body",
     ),
-];
-const HELPER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
-        "match std::fs::read(path)",
-        "match std::fs::read(other_path)",
-        "default-materializer:read-shape",
-    ),
-    (
-        "Ok(existing) => matches(&existing)",
-        "Ok(existing) => matches(&other)",
-        "helper-callback-error",
-    ),
-    (
-        "Ok(existing) => matches(&existing)",
-        "Ok(existing) => { matches(&existing)?; matches(&existing) }",
-        "helper-callback-error",
-    ),
-    (
-        "Ok(existing) => matches(&existing)",
-        "Ok(existing) => matches(&existing)?",
-        "helper-callback-error",
-    ),
-    (
-        "std::io::ErrorKind::NotFound => Ok(false)",
-        "std::io::ErrorKind::NotFound => Ok(true)",
-        "not-found-match",
-    ),
-    (
-        "Err(error) => Err(error.to_string())",
-        "Err(error) => Ok(false)",
-        "helper-callback-error",
-    ),
-    (
-        "impl FnOnce(&[u8])",
-        "impl FnMut(&[u8])",
-        "helper-binding-signature",
-    ),
-    (
-        "match std::fs::read(path)",
-        "return Ok(true);\n        match std::fs::read(path)",
-        "helper-read-shape",
-    ),
-    (
-        "pub(super) fn exists_with_matching_bytes(",
-        "#[cfg(any())]\n    pub(super) fn exists_with_matching_bytes(",
-        "helper-binding-signature",
-    ),
-    ("use std::{", "use forged::{", "helper-binding-signature"),
-    (
-        "pub(crate) struct RuntimeAsset {",
-        "type RuntimeAsset = Forged;\npub(crate) struct RuntimeAsset {",
-        "helper-binding-signature",
-    ),
-    (
-        "path::{Path, PathBuf},",
-        "path::{Path, PathBuf}, ffi::CString as Path,",
-        "helper-binding-signature",
-    ),
-    (
-        "use std::{",
-        "#[cfg(any())] use std::{",
-        "helper-binding-signature",
+        "RuntimeAsset::exists_with_matching_bytes(path, |existing| {\n            Ok(existing == MathJaxRuntimeScripts::runtime_source().as_bytes())\n        })",
+        "RuntimeAsset::exists_with_matching_bytes(path, |existing| Ok(existing == MathJaxRuntimeScripts::runtime_source().as_bytes()))",
+        "shared-predicate-body",
     ),
 ];
-
 #[test]
 fn mathjax_shared_readback_ast_linter_binds_current_and_legacy_routes()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -211,14 +170,6 @@ fn mathjax_shared_readback_ast_linter_rejects_caller_binding_mutations()
     let fixture = fixture()?;
     inspect_root(fixture.root())?;
     reject_mutations(&fixture, RUST_INPUTS[0], CALLER_BINDING_MUTATIONS)
-}
-
-#[test]
-fn mathjax_shared_readback_ast_linter_rejects_helper_mutations()
--> Result<(), Box<dyn std::error::Error>> {
-    let fixture = fixture()?;
-    inspect_root(fixture.root())?;
-    reject_mutations(&fixture, HELPER, HELPER_MUTATIONS)
 }
 
 #[test]

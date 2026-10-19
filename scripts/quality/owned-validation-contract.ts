@@ -28,6 +28,7 @@ import {
   generatedRuntimeRustAssetInputPaths,
   generatedRuntimeRustAssetPaths,
 } from "../runtime-assets/runtime-package-asset-compressor";
+import { OFFICIAL_BROWSER_CONSUMER_PINS } from "../runtime-bundles/official-browser-consumer-contract";
 import {
   astObject,
   astSpan,
@@ -71,7 +72,6 @@ const NATIVE_PURE_TYPE_PROFILE = "scripts/quality/tsconfig-owned-native-pure-uti
 const BROWSER_REFERENCE_DIRECTORY =
   "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime";
 const BROWSER_REFERENCE_HELPERS = new Set([
-  `${BROWSER_REFERENCE_DIRECTORY}/browser_text_measure.js`,
   `${BROWSER_REFERENCE_DIRECTORY}/mermaid_zenuml_bridge.js`,
 ]);
 const BROWSER_REFERENCE_HOST = `${BROWSER_REFERENCE_DIRECTORY}/browser_reference_host.d.ts`;
@@ -79,10 +79,7 @@ const BROWSER_REFERENCE_LEAF = "scripts/mermaid/official-renderer-browser-global
 const BROWSER_REFERENCE_PROFILE = "scripts/quality/tsconfig-owned-browser-reference.json";
 // 順序を含む実consumerとhost ABI providerのレビュー後にだけ更新する。
 const BROWSER_REFERENCE_CONSUMERS = {
-  "scripts/mermaid/official-renderer-i18n.ts":
-    "e930ae84f301d413e58ef430b705867b676de75a0d2d4da92471af689bf1da15",
-  "scripts/mermaid/official-renderer.ts":
-    "9417b6982aad961e55b2bfb9ebc4365f85bf22d8f946ccbe555bf21ba9c1c716",
+  ...OFFICIAL_BROWSER_CONSUMER_PINS,
   [`${BROWSER_REFERENCE_DIRECTORY}/dom_text_metrics.js`]:
     "771ded4e5ee2122cffa15516f5eaad6922200af39aead30ff0b75c3d61cedd1b",
 };
@@ -141,7 +138,7 @@ const PARSER_BODY_TEST_RECIPE = "runtime-asset-script-test";
 const PARSER_CHECK_RECIPE_SHA256 =
   "eda84e7b11aa1f40bba22269fd62f33e8acb1f631467d00004c38c47296bbacd";
 const PARSER_TEST_RECIPE_SHA256 =
-  "90ca1650d9a5c0777bb620814bba17612368a577c48d5f7e184c2a3b5762be21";
+  "0e955697c278ac8c2a56c8347cd05c1488cfd50ecfcc21c3177d208d5e8457ed";
 const HTML_FEATURE_CATALOG_TEST = "scripts/html/feature-catalog_test.ts";
 const PLAYWRIGHT_TESTS = [HTML_FEATURE_CATALOG_TEST, "scripts/html/chrome_badge_metrics_test.ts"];
 const PLAYWRIGHT_CONFIG = "scripts/html/playwright.config.ts";
@@ -1386,10 +1383,10 @@ function performanceCoverageCommands(arm: "root" | (typeof PERFORMANCE_ARMS)[num
   const report = root
     ? `--json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"`
     : `--json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${arm}.json"`;
-  return [
-    `${cleanPrefix} clean${manifest} --workspace${root ? "" : " --locked"}`,
-    `${prefix}${manifest} --workspace --all-targets ${selection} --locked ${report}{{TEST_THREAD_ARGS}}`,
-  ];
+  const collector = root
+    ? `NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-root-state" LLVM_PROFILE_FILE_NAME="krr-nextest-%4m.profraw" ${prefix} nextest --workspace --all-targets ${selection} --locked --cargo-profile krr-coverage --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml" ${report}{{NEXTEST_THREAD_ARGS}}`
+    : `${prefix}${manifest} --workspace --all-targets ${selection} --locked --profile krr-coverage ${report}{{TEST_THREAD_ARGS}}`;
+  return [`${cleanPrefix} clean${manifest} --workspace${root ? "" : " --locked"}`, collector];
 }
 function localCoverageCommand(producer: "root" | "performance", phase: "begin" | "finish"): string {
   if (phase === "finish")
@@ -1471,11 +1468,26 @@ function performanceManifestAndLock(context: ContractContext, members: string[])
         })
         .strict(),
       workspace: z.object({}).strict(),
-      profile: z.object({ dev: z.object({ debug: z.literal(1) }).strict() }).strict(),
+      profile: z
+        .object({
+          dev: z.object({ debug: z.literal(1) }).strict(),
+          "krr-coverage": z
+            .object({
+              inherits: z.literal("dev"),
+              debug: z.literal(0),
+              incremental: z.literal(false),
+            })
+            .strict(),
+        })
+        .strict(),
       features: z
         .object({
           baseline: z.tuple([z.literal("dep:baseline")]),
-          candidate: z.tuple([z.literal("dep:candidate")]),
+          candidate: z.tuple([
+            z.literal("dep:candidate"),
+            z.literal("dep:image"),
+            z.literal("dep:url"),
+          ]),
         })
         .strict(),
       dependencies: z
@@ -1486,6 +1498,15 @@ function performanceManifestAndLock(context: ContractContext, members: string[])
           candidate: dependency
             .extend({ path: z.literal("../../../crates/katana-render-runtime") })
             .strict(),
+          image: z
+            .object({
+              version: z.literal("0.25.10"),
+              optional: z.literal(true),
+              "default-features": z.literal(false),
+              features: z.tuple([z.literal("png")]),
+            })
+            .strict(),
+          url: z.object({ version: z.literal("2.5.8"), optional: z.literal(true) }).strict(),
           sha2: z.string(),
           libc: z.string(),
           serde_json: z.string(),
@@ -1514,6 +1535,22 @@ function performanceManifestAndLock(context: ContractContext, members: string[])
     })
     .strict()
     .parse(Bun.TOML.parse(context.read(`${PERFORMANCE_HARNESS}/Cargo.lock`)));
+  const rootLock = z
+    .object({
+      version: z.literal(4),
+      package: z.array(
+        z
+          .object({
+            name: z.string(),
+            version: z.string(),
+            source: z.string().optional(),
+            checksum: z.string().optional(),
+          })
+          .passthrough(),
+      ),
+    })
+    .strict()
+    .parse(Bun.TOML.parse(context.read("Cargo.lock")));
   const version = z
     .string()
     .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/)
@@ -1552,11 +1589,32 @@ function performanceManifestAndLock(context: ContractContext, members: string[])
   }
   const armPackages = lock.package.filter((row) => row.name === "katana-render-runtime");
   const harness = lock.package.filter((row) => row.name === manifest.package.name);
+  const captureDependencies = [
+    ["image", "0.25.10"],
+    ["url", "2.5.8"],
+  ] as const;
+  const registryDependencyPinned = ([name, version]: (typeof captureDependencies)[number]) => {
+    const registry = "registry+https://github.com/rust-lang/crates.io-index";
+    const harnessRows = lock.package.filter((row) => row.name === name);
+    const rootRows = rootLock.package.filter((row) => row.name === name);
+    return (
+      harnessRows.length === 1 &&
+      rootRows.length === 1 &&
+      harnessRows[0]?.version === version &&
+      rootRows[0]?.version === version &&
+      harnessRows[0]?.source === registry &&
+      rootRows[0]?.source === registry &&
+      /^[a-f0-9]{64}$/.test(harnessRows[0]?.checksum ?? "") &&
+      harnessRows[0]?.checksum === rootRows[0]?.checksum &&
+      harness[0]?.dependencies.includes(name) === true
+    );
+  };
   if (
     harness.length !== 1 ||
     harness[0]?.version !== manifest.package.version ||
     !harness[0]?.dependencies.includes("katana-render-runtime 0.4.23") ||
     !harness[0]?.dependencies.includes(`katana-render-runtime ${candidateVersion}`) ||
+    !captureDependencies.every(registryDependencyPinned) ||
     armPackages.length !== 2 ||
     !armPackages.some(
       (row) =>
@@ -1564,7 +1622,12 @@ function performanceManifestAndLock(context: ContractContext, members: string[])
         row.source === "registry+https://github.com/rust-lang/crates.io-index" &&
         /^[a-f0-9]{64}$/.test(row.checksum ?? ""),
     ) ||
-    !armPackages.some((row) => row.version === candidateVersion && row.source === undefined)
+    !armPackages.some(
+      (row) =>
+        row.version === candidateVersion &&
+        row.source === undefined &&
+        captureDependencies.every(([name]) => row.dependencies.includes(name)),
+    )
   ) {
     add(context, "performance-harness-lock-unverified", `${PERFORMANCE_HARNESS}/Cargo.lock`);
   }
@@ -3487,9 +3550,9 @@ function runtimeAssetTestCommands(context: ContractContext): string[] | undefine
   const commands = unconditionalRecipeCommands(runtimeAssetRecipeBody(context));
   const unused = unconditionalRecipeCommands(runtimeUnusedRecipeBody(context));
   if (!unusedRegressionRecipeVerified(context)) return undefined;
-  const testCommand = unused[0];
-  if (!testCommand || !reviewedRuntimeAssetTestCommands(commands, [testCommand])) return undefined;
-  return [...commands, testCommand];
+  const reviewed = reviewedRuntimeAssetTestCommands(commands);
+  if (!reviewed) return undefined;
+  return [...reviewed, ...unused];
 }
 function reviewedRuntimeAssetTestCommands(
   lines: string[],
@@ -3678,11 +3741,25 @@ function removeReviewedRuntimeAssetTests(lines: string[]): string[] | undefined 
   );
   if (!withoutManagedFullCompare) return undefined;
   const withoutFingerprint = removeReviewedRuntimeBundleFingerprintTest(withoutManagedFullCompare);
-  return withoutFingerprint
-    ? removeReviewedNativeSourceManifestTest(withoutFingerprint)
+  if (!withoutFingerprint) return undefined;
+  const withoutNativeSourceManifest = removeReviewedNativeSourceManifestTest(withoutFingerprint);
+  if (!withoutNativeSourceManifest) return undefined;
+  const withoutNativeFrameBuildProof = removeReviewedNativeFrameBuildProofTest(
+    withoutNativeSourceManifest,
+  );
+  if (!withoutNativeFrameBuildProof) return undefined;
+  const withoutNativeFrameEvidence = removeReviewedNativeFrameEvidenceTest(
+    withoutNativeFrameBuildProof,
+  );
+  return withoutNativeFrameEvidence
+    ? removeReviewedNativeRenderBatchTest(withoutNativeFrameEvidence)
     : undefined;
 }
 function removeReviewedRuntimeBundleFingerprintTest(lines: string[]): string[] | undefined {
+  if (
+    !lines.some((line) => unitCommand(line).includes(`./${RUNTIME_BUNDLE_TOOL_FINGERPRINT_TEST}`))
+  )
+    return lines;
   return removeReviewedTestToken(
     lines,
     `./${RUNTIME_BUNDLE_TOOL_FINGERPRINT_TEST}`,
@@ -3696,6 +3773,30 @@ function removeReviewedNativeSourceManifestTest(lines: string[]): string[] | und
     `./${NATIVE_SOURCE_MANIFEST_TEST}`,
     "./scripts/mermaid/native-cli-process_test.ts",
     "./scripts/mermaid/native_render_provenance_test.ts",
+  );
+}
+function removeReviewedNativeRenderBatchTest(lines: string[]): string[] | undefined {
+  return removeReviewedTestToken(
+    lines,
+    "./scripts/mermaid/native-render-batch_test.ts",
+    "./scripts/mermaid/native_render_provenance_test.ts",
+    "./scripts/mermaid/official_reference_mode_test.ts",
+  );
+}
+function removeReviewedNativeFrameEvidenceTest(lines: string[]): string[] | undefined {
+  return removeReviewedTestToken(
+    lines,
+    "./scripts/mermaid/native_frame_evidence_test.ts",
+    "./scripts/mermaid/native_render_provenance_test.ts",
+    "./scripts/mermaid/native-render-batch_test.ts",
+  );
+}
+function removeReviewedNativeFrameBuildProofTest(lines: string[]): string[] | undefined {
+  return removeReviewedTestToken(
+    lines,
+    "./scripts/mermaid/native_frame_build_proof_test.ts",
+    "./scripts/mermaid/native_render_provenance_test.ts",
+    "./scripts/mermaid/native_frame_evidence_test.ts",
   );
 }
 function removeReviewedTestToken(

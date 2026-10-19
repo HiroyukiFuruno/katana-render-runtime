@@ -19,7 +19,7 @@ from typing import cast
 
 SCHEMA = "krr-native-local-coverage-context-v1"
 CONTEXT_STAGE_WORKERS = 3
-TOOLS = ("rustc", "cargo", "cargoLlvmCov", "llvm", "java", "bun", "node", "python", "graphviz", "plantuml")
+TOOLS = ("rustc", "cargo", "cargoLlvmCov", "cargoNextest", "llvm", "java", "bun", "node", "python", "graphviz", "plantuml")
 VOLATILE_ENV = frozenset({
     "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB", "GITHUB_ACTION", "GITHUB_ACTIONS",
     "_", "PWD", "OLDPWD", "SHLVL",
@@ -583,6 +583,7 @@ def _collect_tool_stage(repo: Path, env: Mapping[str, str]) -> tuple[dict[str, s
     tools["rustc"] = _record_command("rustc", ["rustc", "--version"], records, "rustc")
     tools["cargo"] = _record_command("cargo", ["cargo", "--version"], records, "cargo")
     tools["cargoLlvmCov"] = _record_command("cargo-llvm-cov", ["cargo", "llvm-cov", "--version"], records, "cargoLlvmCov")
+    tools["cargoNextest"] = _record_command("cargo-nextest", ["cargo", "nextest", "--version"], records, "cargoNextest")
     tools["llvm"] = ""
     tools["java"] = _record_command("java", ["java", "-version"], records, "java")
     tools["bun"] = _record_command("bun", ["bun", "--version"], records, "bun")
@@ -627,6 +628,13 @@ def _collect_font_stage() -> tuple[dict[str, dict[str, object]], float]:
     records: dict[str, dict[str, object]] = {}
     _record_fonts(records)
     return records, time.perf_counter() - started
+
+
+def collect_font_inventory() -> tuple[str, int]:
+    """Return the validated macOS font inventory digest and record count."""
+    records: dict[str, dict[str, object]] = {}
+    _record_fonts(records)
+    return _sha256(_canonical(records)), len(records)
 
 
 def _merge_stage_records(stage_records: tuple[dict[str, dict[str, object]], ...]) -> dict[str, dict[str, object]]:

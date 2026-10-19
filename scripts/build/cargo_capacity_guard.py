@@ -36,11 +36,12 @@ from cargo_capacity_guard_selected_cache_ownership import (
 from cargo_capacity_guard_library_alias_ownership import LibraryAliasOwnership, create_library_alias_ownership
 from cargo_capacity_guard_debug_object_ownership import PROGRESS_LOGGER_NAME
 from cargo_capacity_guard_lock import (GuardLock, ProfileLocks, busy_processes,
-                                       evict_artifacts, is_successful_build, retained_profile_paths)
+                                       EvictionReport, evict_artifacts, is_successful_build, retained_profile_paths)
 import cargo_capacity_guard_state as capacity_state
 
 DEFAULT_FACTOR = 2.0
 COVERAGE_DOMAINS = ("root", "performance-baseline", "performance-candidate")
+COVERAGE_DIAGNOSTIC_DOMAINS = ("root",)
 CHECK_DOMAINS = COVERAGE_DOMAINS
 CLIPPY_DENY_FLAGS = [
     "-D", "warnings", "-D", "clippy::unwrap_used", "-D", "clippy::expect_used",
@@ -50,6 +51,9 @@ CLIPPY_DENY_FLAGS = [
 ]
 CAPACITY_METRIC = "unique-inode-allocated-bytes"
 CAPACITY_METRIC_VERSION = 1
+DIAGNOSTIC_PROFILE_RE = re.compile(
+    r"krr-nextest-diagnostic-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-%4m\.profraw"
+)
 JsonObject = dict[str, object]
 SWIFTPM_RELEASE_LIBRARIES = {"apple-cf": "AppleCFBridge", "coretext-rs": "CoreTextBridge"}
 SWIFTPM_COVERAGE_TARGETS = frozenset({
@@ -1005,9 +1009,23 @@ def _safe_incomplete_cleanup_below_hardcap(report: object) -> bool:
     if not all(isinstance(item, dict)
                and isinstance(item.get("exit_code"), int)
                and not isinstance(item.get("exit_code"), bool)
-               and item.get("exit_code") == 0
                and item.get("dry_run") is False
                for item in attempts):
+        return False
+    first = _object(attempts[0], "first cleanup attempt")
+    if first.get("exit_code") == 1:
+        if (first.get("classification") != "closed-inactive-shortfall"
+                or first.get("no_mutation") is not True
+                or first.get("output") != "insufficient closed inactive artifact capacity; active profiles retained"
+                or first.get("maxsize_bytes") != value.get("cleanup_goal_bytes")
+                or first.get("pre_clean_bytes") != value.get("current_bytes")
+                or first.get("pre_clean_bytes") != first.get("post_clean_bytes")
+                or first.get("actual_removed_bytes") != 0):
+            return False
+        if first.get("staged_paths") != [] or first.get("invalidated_profiles") != []:
+            return False
+        attempts = attempts[1:]
+    if not attempts or not all(item.get("exit_code") == 0 for item in attempts):
         return False
     last_attempt = _object(attempts[-1], "cleanup attempt")
     last_post = last_attempt.get("post_clean_bytes")
@@ -1054,14 +1072,17 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
     if (environment.get("CARGO_TARGET_DIR") != str(target)
             or environment.get("CARGO_LLVM_COV_TARGET_DIR") != str(selected)):
         raise RuntimeError("coverage target environment differs from its fixed domain")
-    if any(name in environment for name in ("CARGO_LLVM_COV_BUILD_DIR", "CARGO_BUILD_BUILD_DIR",
-                                            "LLVM_PROFILE_FILE_NAME")):
+    if any(name in environment for name in ("CARGO_LLVM_COV_BUILD_DIR", "CARGO_BUILD_BUILD_DIR")):
         raise RuntimeError("coverage directory/profile overrides are unsupported")
     words = list(command)
     if words and Path(words[0]).name == "rtk":
         words.pop(0)
         if words and words[0] == "proxy":
             words.pop(0)
+    if words[1:3] == ["llvm-cov", "nextest"]:
+        if not collection or domain != "root":
+            raise RuntimeError("nextest collection is only admitted for the root collection domain")
+        return _coverage_nextest_collection_selection(root, target, words, environment)
     if len(words) < 2 or Path(words[0]).name != "cargo" or words[1] != "llvm-cov":
         raise RuntimeError("coverage domain requires the fixed Cargo llvm-cov caller")
     words = words[2:]
@@ -1085,7 +1106,7 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
     }
     values = {"--manifest-path"} if action == "clean" else {
         "--manifest-path", "--features", "--fail-under-lines", "--fail-uncovered-lines",
-        "--output-path", "--jobs", "-j",
+        "--output-path", "--jobs", "-j", "--profile",
     }
     options: dict[str, str] = {}
     index = 0
@@ -1102,6 +1123,11 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
             value = words[index]
         options[key] = value
         index += 1
+    if collection and domain != "root":
+        if options.get("--profile") != "krr-coverage":
+            raise RuntimeError("coverage collection requires the fixed krr-coverage profile")
+    elif "--profile" in options:
+        raise RuntimeError("coverage profile override is unsupported outside collection")
     manifest = root / ("Cargo.toml" if domain == "root" else "scripts/html/performance-harness/Cargo.toml")
     manifest_value = options.get("--manifest-path")
     if manifest_value is not None and manifest_value not in {str(manifest), str(manifest.relative_to(root))}:
@@ -1113,6 +1139,8 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
         required |= {"--locked", "--all-targets"}
         if collection:
             required |= {"--json", "--output-path"}
+            if domain != "root":
+                required.add("--profile")
             if "--fail-under-lines" in options or "--fail-uncovered-lines" in options:
                 raise RuntimeError("coverage collection must not specify coverage thresholds")
         else:
@@ -1136,6 +1164,27 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
                 raise RuntimeError("coverage report differs from its fixed domain")
     if not required.issubset(options):
         raise RuntimeError("coverage command omits required domain options")
+    _validate_coverage_environment(root, target, selected, environment, manifest)
+    return action, selected
+
+
+def _validate_coverage_environment(root: Path, target: Path, selected: Path,
+                                   environment: Mapping[str, str], manifest: Path,
+                                   *, profile_pool_name: str | None = None) -> None:
+    if (target != root / "target" or environment.get("CARGO_TARGET_DIR") != str(target)
+            or environment.get("CARGO_LLVM_COV_TARGET_DIR") != str(selected)):
+        raise RuntimeError("coverage target environment differs from its fixed domain")
+    if any(name in environment for name in ("CARGO_LLVM_COV_BUILD_DIR", "CARGO_BUILD_BUILD_DIR")):
+        raise RuntimeError("coverage directory/profile overrides are unsupported")
+    profile_name = environment.get("LLVM_PROFILE_FILE_NAME")
+    if profile_pool_name is not None:
+        valid = (isinstance(profile_name, str)
+                 and DIAGNOSTIC_PROFILE_RE.fullmatch(profile_name) is not None
+                 if profile_pool_name == "diagnostic" else profile_name == profile_pool_name)
+        if not valid:
+            raise RuntimeError("coverage requires the fixed process/profile LLVM pool name")
+    elif profile_name is not None:
+        raise RuntimeError("coverage directory/profile overrides are unsupported")
     _coverage_stamp(manifest, regular=True)
     for config_path in cargo_configuration_paths(root, environment):
         _coverage_stamp(config_path, regular=True)
@@ -1148,7 +1197,109 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
                 "CARGO_TARGET_DIR", "CARGO_LLVM_COV_TARGET_DIR", "CARGO_LLVM_COV_BUILD_DIR",
                 "CARGO_BUILD_BUILD_DIR", "LLVM_PROFILE_FILE_NAME")):
             raise RuntimeError("configured coverage directory/profile overrides are unsupported")
-    return action, selected
+
+
+def _coverage_nextest_collection_selection(root: Path, target: Path, command: list[str],
+                                           environment: Mapping[str, str]) -> tuple[str, Path]:
+    selected = target / "llvm-cov-target"
+    output = root / "tmp/quality/standalone-performance-coverage/root.json"
+    config = root / "scripts/release/nextest-local-user.toml"
+    words = _unwrap_cargo(command)
+    if len(words) not in (18, 19) or Path(words[0]).name != "cargo" or words[1:3] != ["llvm-cov", "nextest"]:
+        raise RuntimeError("root nextest collection requires the fixed Cargo llvm-cov caller")
+    expected = ["cargo", "llvm-cov", "nextest", "--workspace", "--all-targets", "--all-features",
+                "--locked", "--cargo-profile", "krr-coverage", "--no-fail-fast", "--retries", "0",
+                "--user-config-file", str(config), "--json", "--summary-only", "--output-path", str(output)]
+    if words[:18] != expected:
+        raise RuntimeError("root nextest collection command differs from its fixed report contract")
+    _validate_nextest_thread_tail(words[18:], "root nextest collection test threads must be a positive trailing value")
+    _coverage_config_path(root, str(config))
+    _validate_coverage_environment(root, target, selected, environment, root / "Cargo.toml",
+                                   profile_pool_name="krr-nextest-%4m.profraw")
+    return "test", selected
+
+
+def coverage_diagnostic_selection(root: Path, target: Path, command: list[str],
+                                  environment: Mapping[str, str]) -> tuple[str, Path]:
+    selected = target / "llvm-cov-target"
+    words = _unwrap_cargo(command)
+    if len(words) < 15 or Path(words[0]).name != "cargo" or words[1:3] != ["llvm-cov", "nextest"]:
+        raise RuntimeError("coverage diagnostic requires the fixed Cargo llvm-cov nextest caller")
+    expected = ["--workspace", "--all-targets", "--all-features", "--locked",
+                "--cargo-profile", "krr-coverage", "--no-report", "--no-fail-fast", "--retries", "0",
+                "--user-config-file"]
+    if words[3:14] != expected or not words[14]:
+        raise RuntimeError("coverage diagnostic command differs from the fixed initial probe")
+    tail = words[15:]
+    if tail and tail[0].startswith("--test-threads="):
+        _validate_nextest_thread_tail(tail[:1], "coverage diagnostic test threads must be a positive trailing value")
+        tail = tail[1:]
+    if tail and (len(tail) != 2 or tail[0] != "-E" or not tail[1]):
+        raise RuntimeError("coverage diagnostic filter must be one non-empty -E expression")
+    _coverage_config_path(root, words[14])
+    _validate_coverage_environment(root, target, selected, environment, root / "Cargo.toml",
+                                   profile_pool_name="diagnostic")
+    return "test", selected
+
+
+def _validate_nextest_thread_tail(tail: list[str], message: str) -> None:
+    if len(tail) != 1:
+        if tail:
+            raise RuntimeError(message)
+        return
+    option = tail[0]
+    value = option.removeprefix("--test-threads=")
+    if not option.startswith("--test-threads=") or not value.isdecimal() or int(value) < 1:
+        raise RuntimeError(message)
+
+
+def _coverage_config_path(root: Path, value: str) -> Path:
+    config = Path(value)
+    if ".." in config.parts:
+        raise RuntimeError("coverage diagnostic config must not contain parent traversal")
+    if not config.is_absolute():
+        config = root / config
+    root_real = root.resolve()
+    lexical = Path(os.path.abspath(str(config)))
+    try:
+        relative = lexical.relative_to(root_real)
+    except ValueError as error:
+        raise RuntimeError("coverage diagnostic config must be inside the repository") from error
+    cursor = root_real
+    try:
+        for part in relative.parts:
+            cursor /= part
+            if cursor.is_symlink():
+                raise RuntimeError("coverage diagnostic config path contains a symlink")
+        info = config.lstat()
+    except OSError as error:
+        raise RuntimeError("coverage diagnostic config must be a regular non-symlink file") from error
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise RuntimeError("coverage diagnostic config must be a regular non-symlink file")
+    return config
+
+
+def nextest_tool_version(root: Path, command: list[str]) -> JsonObject:
+    words = _unwrap_cargo(command)
+    query = words[:1] + ["nextest", "--version"]
+    evidence: JsonObject = {"argv": query, "stdout_hex": "", "stderr_hex": "", "exit": None}
+    try:
+        result = subprocess.run(query, cwd=root, env=os.environ.copy(), capture_output=True,
+                                timeout=30, check=False)
+        evidence.update(stdout_hex=result.stdout.hex(), stderr_hex=result.stderr.hex(), exit=result.returncode)
+        first_line = result.stdout.decode("utf-8", errors="strict").splitlines()[0] if result.stdout else ""
+        admitted = re.fullmatch(r"cargo(?:-nextest| nextest) 0\.9\.148(?: \([^\r\n]+\))?", first_line)
+        if result.returncode != 0 or admitted is None:
+            raise RuntimeError("coverage diagnostic requires admitted cargo-nextest 0.9.148")
+    except subprocess.TimeoutExpired as error:
+        evidence["failure"] = "timeout"
+        raise RuntimeError("coverage diagnostic tool version query timed out") from error
+    except OSError as error:
+        evidence["failure"] = str(error)
+        raise RuntimeError("coverage diagnostic tool version query is unavailable") from error
+    finally:
+        print(json.dumps({"coverage_diagnostic_tool_query": evidence}, sort_keys=True), file=sys.stderr)
+    return evidence
 
 
 def _unwrap_cargo(command: list[str]) -> list[str]:
@@ -1525,12 +1676,13 @@ def run(args: argparse.Namespace) -> int:
     native_enabled = ("KRR_NATIVE_CLI_GUARD_REQUEST" in os.environ
                       or "KRR_NATIVE_CLI_GUARD_REQUEST_SHA256" in os.environ)
     coverage_collection_value = getattr(args, "coverage_collection_domain", None)
+    coverage_diagnostic_value = getattr(args, "coverage_diagnostic_domain", None)
     if native_enabled:
         from cargo_capacity_guard_native_cli_observation import observe, validate_capacity_report, validate_request
         native_root = _root()
         native_admission = validate_request(native_root, args.command, os.environ)
         if (args.dry_run or getattr(args, "coverage_domain", None) is not None
-            or coverage_collection_value is not None
+            or coverage_collection_value is not None or coverage_diagnostic_value is not None
             or getattr(args, "retain_build_profile", None) != "debug"
             or getattr(args, "retain_profile", [])
             or args.state not in (None, str(native_admission.state))
@@ -1544,11 +1696,15 @@ def run(args: argparse.Namespace) -> int:
         if native_refs != native_admission.protected:
             raise RuntimeError("guard protected references differ from native admission")
     coverage_value: object = getattr(args, "coverage_domain", None)
-    if coverage_value is not None and coverage_collection_value is not None:
-        raise RuntimeError("coverage policy and collection domains are mutually exclusive")
+    if sum(value is not None for value in (coverage_value, coverage_collection_value,
+                                           coverage_diagnostic_value)) > 1:
+        raise RuntimeError("coverage modes are mutually exclusive")
     if coverage_collection_value is not None:
         coverage_value = coverage_collection_value
     coverage_collection = coverage_collection_value is not None
+    coverage_diagnostic = coverage_diagnostic_value is not None
+    if coverage_diagnostic:
+        coverage_value = coverage_diagnostic_value
     check_value: object = getattr(args, "check_domain", None)
     try:
         configured_factor = float(os.environ.get("CARGO_CAPACITY_FACTOR", str(DEFAULT_FACTOR)))
@@ -1626,9 +1782,8 @@ def run(args: argparse.Namespace) -> int:
         if (check_metadata.get("target_directory") != root_metadata.get("target_directory")
                 or check_metadata.get("build_directory") != root_metadata.get("build_directory")):
             raise RuntimeError("check domain metadata differs from resolved root Cargo target")
-        if not protected_refs:
-            verified_build_profiles = current_build_profiles(target, root_metadata, "debug")
-            retained_profiles = tuple(dict.fromkeys((*retained_profiles, *verified_build_profiles)))
+        verified_build_profiles = current_build_profiles(target, root_metadata, "debug")
+        retained_profiles = tuple(dict.fromkeys((*retained_profiles, *verified_build_profiles)))
     auxiliary_only_profiles = (
         verified_build_profiles
         if verified_build_profiles and not protected_refs and coverage_value is None
@@ -1676,11 +1831,17 @@ def run(args: argparse.Namespace) -> int:
     factor = float(os.environ.get("CARGO_CAPACITY_FACTOR", args.factor))
     if not math.isfinite(factor) or factor <= 1.0:
         raise RuntimeError("capacity factor must be finite and greater than 1")
-    coverage = None if coverage_value is None else coverage_selection(
-        root, target, _text(coverage_value, "coverage domain"), args.command, os.environ,
-        collection=coverage_collection,
-    )
-    if coverage is not None and (state_path != root / "tmp/.cargo-capacity-guard.json" or factor != DEFAULT_FACTOR):
+    coverage = None
+    coverage_diagnostic_inputs = None
+    if coverage_diagnostic:
+        coverage_diagnostic_inputs = coverage_diagnostic_selection(root, target, args.command, os.environ)
+    elif coverage_value is not None:
+        coverage = coverage_selection(
+            root, target, _text(coverage_value, "coverage domain"), args.command, os.environ,
+            collection=coverage_collection,
+        )
+    if (coverage is not None or coverage_diagnostic_inputs is not None) and (
+            state_path != root / "tmp/.cargo-capacity-guard.json" or factor != DEFAULT_FACTOR):
         raise RuntimeError("coverage requires the canonical state and existing capacity factor")
     lock_path = root / "tmp/.cargo-capacity-guard.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1701,12 +1862,16 @@ def run(args: argparse.Namespace) -> int:
         )
         if require_capacity and state_identity(state_path) != admission_state_before:
             raise RuntimeError("capacity state changed before eviction")
-        if coverage is not None and (report.get("metric_available", True) is not True
+        if (coverage is not None or coverage_diagnostic_inputs is not None) and (report.get("metric_available", True) is not True
                                      or report["baseline_bytes"] is None):
             raise RuntimeError("coverage capacity admission requires a measured canonical baseline")
         if coverage is not None:
             report["coverage_inputs"] = {"domain": coverage_value, "action": coverage[0],
                                          "target": str(coverage[1]), "protected_references": protected_refs}
+        if coverage_diagnostic_inputs is not None:
+            report["coverage_diagnostic_inputs"] = {"domain": coverage_value, "action": coverage_diagnostic_inputs[0],
+                                                     "target": str(coverage_diagnostic_inputs[1]),
+                                                     "protected_references": protected_refs}
         if native_enabled:
             if (target != native_root / "target" or state_path != native_admission.state
                     or factor != DEFAULT_FACTOR
@@ -1740,21 +1905,78 @@ def run(args: argparse.Namespace) -> int:
                                 load_state(state_path, expected_state_sha256)
                             eviction = (partial(evict_artifacts, library_alias_ownership=library_alias)
                                         if library_alias is not None else evict_artifacts)
-                            code, details = eviction(
-                                target, cleanup_goal,
-                                _integer(report["current_bytes"], "current bytes"), args.dry_run,
-                                protected_refs, epoch, incremental_prefixes=incremental_prefixes,
-                                inactive_prefixes=inactive_prefixes or (), retained_profiles=retained_profiles,
-                                auxiliary_only_profiles=auxiliary_only_profiles,
-                                unselected_incremental_prefixes=unselected_prefixes,
-                                selected_package_profiles=selected_package_profiles,
-                                build_script_ownership=owned_scripts,
-                                selected_cache_ownership=selected_cache,
+                            current_bytes = _integer(report["current_bytes"], "current bytes")
+                            def evict_with_goal(maxsize_bytes: int) -> tuple[int, EvictionReport]:
+                                return eviction(
+                                    target, maxsize_bytes, current_bytes, args.dry_run,
+                                    protected_refs, epoch, incremental_prefixes=incremental_prefixes,
+                                    inactive_prefixes=inactive_prefixes or (), retained_profiles=retained_profiles,
+                                    auxiliary_only_profiles=auxiliary_only_profiles,
+                                    unselected_incremental_prefixes=unselected_prefixes,
+                                    selected_package_profiles=selected_package_profiles,
+                                    build_script_ownership=owned_scripts,
+                                    selected_cache_ownership=selected_cache,
+                                )
+                            code, details = evict_with_goal(cleanup_goal)
+                            retry_message = "insufficient closed inactive artifact capacity; active profiles retained"
+                            retryable_shortfall = (
+                                not args.dry_run
+                                and not auxiliary_only_profiles
+                                and code == 1
+                                and details.get("error") == retry_message
+                                and details.get("deleted_files") == 0
+                                and details.get("staged_paths") == []
+                                and details.get("invalidated_profiles") == []
+                                and size_bytes(target) == current_bytes
                             )
-                            report["finite_cleanup"] = details
-                            record_cleanup_result(
-                                report, target, code, "finite artifact eviction", args.dry_run,
-                            )
+                            if retryable_shortfall:
+                                # soft goal未達の安全な選択拒否だけを、同じepochでhard capへ一度だけ再評価する。
+                                attempts = _array(report.get("cleanup_attempts", []), "cleanup attempts")
+                                attempts.append({
+                                    "attempt": len(attempts) + 1,
+                                    "maxsize_bytes": cleanup_goal,
+                                    "exit_code": code,
+                                    "output": retry_message,
+                                    "classification": "closed-inactive-shortfall",
+                                    "no_mutation": True,
+                                    "staged_paths": [],
+                                    "invalidated_profiles": [],
+                                    "pre_clean_bytes": current_bytes,
+                                    "post_clean_bytes": current_bytes,
+                                    "actual_removed_bytes": 0,
+                                    "eviction_details": details,
+                                    "dry_run": False,
+                                })
+                                report["cleanup_attempts"] = attempts
+                                epoch.verify()
+                                if expected_state_sha256 is not None:
+                                    load_state(state_path, expected_state_sha256)
+                                if busy_processes(target, root):
+                                    raise RuntimeError("capacity cleanup became busy before hard-cap retry")
+                                if size_bytes(target) != current_bytes:
+                                    raise RuntimeError("capacity cleanup changed before hard-cap retry")
+                                hard_cleanup_goal = int(_number(report["threshold_bytes"], "threshold bytes"))
+                                report["active_sweep_maxsize_bytes"] = hard_cleanup_goal
+                                code, details = evict_with_goal(hard_cleanup_goal)
+                                report["finite_cleanup"] = details
+                                record_cleanup_result(
+                                    report, target, code, "finite artifact eviction after soft-goal shortfall", args.dry_run,
+                                )
+                                report["cleanup_goal_bytes"] = cleanup_goal
+                                post_clean = report.get("post_clean_bytes")
+                                report["cleanup_goal_reached"] = (
+                                    isinstance(post_clean, int) and not isinstance(post_clean, bool)
+                                    and post_clean <= cleanup_goal
+                                )
+                                if code == 0 and report.get("remaining_over_capacity") is False:
+                                    report["cleanup_status"] = (
+                                        "completed" if report["cleanup_goal_reached"] else "incomplete"
+                                    )
+                            else:
+                                report["finite_cleanup"] = details
+                                record_cleanup_result(
+                                    report, target, code, "finite artifact eviction", args.dry_run,
+                                )
                             epoch.verify()
                 except BlockingIOError as error:
                     report["clean_skipped"] = "cargo-lock-busy"
@@ -1805,7 +2027,7 @@ def run(args: argparse.Namespace) -> int:
                 return 0
             return 1 if report["cleanup_status"] in {"incomplete", "failed"} else 0
         allow_incomplete_child = (
-            (check_enabled or coverage is not None)
+            (check_enabled or coverage is not None or coverage_diagnostic_inputs is not None)
             and not native_enabled
             and build_profile is None
             and library_alias is None
@@ -1819,7 +2041,15 @@ def run(args: argparse.Namespace) -> int:
             check_input_check()
         if coverage is not None:
             coverage_tool_version(root, args.command)
+            if "nextest" in _unwrap_cargo(args.command):
+                nextest_tool_version(root, args.command)
             coverage_cleanup_preflight(root, target, coverage[1], protected_refs)
+            if expected_state_sha256 is not None:
+                load_state(state_path, expected_state_sha256)
+        if coverage_diagnostic_inputs is not None:
+            coverage_tool_version(root, args.command)
+            nextest_tool_version(root, args.command)
+            coverage_cleanup_preflight(root, target, coverage_diagnostic_inputs[1], protected_refs)
             if expected_state_sha256 is not None:
                 load_state(state_path, expected_state_sha256)
         if native_enabled:
@@ -1849,6 +2079,7 @@ def main() -> int:
     coverage_modes = parser.add_mutually_exclusive_group()
     coverage_modes.add_argument("--coverage-domain", choices=COVERAGE_DOMAINS)
     coverage_modes.add_argument("--coverage-collection-domain", choices=COVERAGE_DOMAINS)
+    coverage_modes.add_argument("--coverage-diagnostic-domain", choices=COVERAGE_DIAGNOSTIC_DOMAINS)
     parser.add_argument("--check-domain", choices=CHECK_DOMAINS, action="append")
     parser.add_argument("--factor", type=float, default=DEFAULT_FACTOR)
     parser.add_argument("--dry-run", action="store_true")

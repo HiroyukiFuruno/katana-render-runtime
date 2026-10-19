@@ -17,9 +17,49 @@ import {
 import { managedBuildSchemaName } from "./native-cli-managed-build-schema";
 import {
   type CliAttestationExpected,
+  parseNativeRenderOptions,
   requireNativeRenderInventory,
   validateCliAttestation,
 } from "./native-render-provenance";
+
+const nativeRenderOptionArgs = [
+  "--fixtures-dir",
+  "/fixture",
+  "--fixture-glob",
+  "*.md",
+  "--output-dir",
+  "/output",
+  "--binary",
+  "/binary",
+  "--runtime",
+  "/runtime",
+  "--build-receipt",
+  "/receipt",
+];
+
+test.each([
+  ["0", "--render-concurrency must be 1 or 2"],
+  ["3", "--render-concurrency must be 1 or 2"],
+  ["abc", "--render-concurrency must be 1 or 2"],
+] as const)("native render options reject concurrency %s", (value, expected) => {
+  expect(() =>
+    parseNativeRenderOptions(nativeRenderOptionArgs.concat("--render-concurrency", value)),
+  ).toThrow(expected);
+});
+
+test("native render options reject a missing concurrency value", () => {
+  expect(() =>
+    parseNativeRenderOptions(nativeRenderOptionArgs.concat("--render-concurrency")),
+  ).toThrow("--render-concurrency must be 1 or 2");
+});
+
+test("native render options reject duplicate concurrency parameters", () => {
+  expect(() =>
+    parseNativeRenderOptions(
+      nativeRenderOptionArgs.concat("--render-concurrency", "1", "--render-concurrency", "2"),
+    ),
+  ).toThrow("--render-concurrency must be specified at most once");
+});
 
 test("native source manifest digest binds sorted path, hash, and size records", () => {
   const records = [
@@ -440,6 +480,8 @@ test("native render inventory rejects legacy receipts and duplicate or unbound t
       externalRuntimeConfigObserved: false,
       rows: [row("flow"), row("flow-copy")],
       skippedEmpty: [],
+      renderConcurrency: 2,
+      errors: [],
     };
     fs.writeFileSync(bindingsPath, JSON.stringify(receipt));
     expect(() => requireNativeRenderInventory(bindingsPath, [fixture], svgDir)).toThrow(

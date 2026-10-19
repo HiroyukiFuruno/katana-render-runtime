@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import native_coverage_linux_context as linux_context
 
@@ -104,6 +105,24 @@ class LinuxCoverageContextTests(unittest.TestCase):
             self.assertEqual(linux_context._record_llvm_version(records, llvm_cov), "llvm 18.1.8")
             self.assertIn("rustup-llvm:llvm-cov-selected", records)
             self.assertNotIn(str(llvm_cov), str(records))
+
+    def test_record_tools_binds_cargo_nextest_to_existing_binary_digest_path(self) -> None:
+        with TemporaryDirectory() as temporary:
+            tool = Path(temporary) / "tool"
+            tool.write_text("tool\n")
+            tool.chmod(0o755)
+            records: dict[str, str] = {}
+            with patch.object(linux_context, "_command_path", return_value=tool), patch.object(
+                linux_context, "_file_digest"
+            ) as record_digest, patch.object(
+                linux_context, "_version", side_effect=lambda argv, label: f"{label} 1.0"
+            ) as record_version, patch.object(
+                linux_context, "_record_llvm_version", return_value="llvm 1.0"
+            ):
+                tools = linux_context._record_tools(records, tool)
+            self.assertEqual(tools["cargoNextest"], "cargoNextest 1.0")
+            record_version.assert_any_call(["cargo", "nextest", "--version"], "cargoNextest")
+            record_digest.assert_any_call(tool, records, "tool:cargoNextest")
 
     def test_record_tree_follows_directory_symlinks_and_rejects_cycles(self) -> None:
         with TemporaryDirectory() as temporary:

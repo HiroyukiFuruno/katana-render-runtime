@@ -87,24 +87,11 @@ class InputAdmissionTests(unittest.TestCase):
             guard.file_record(alias)
 
     def test_capacity_preflight_is_no_child_guard_before_request_environment(self) -> None:
-        attempt = self.root / "tmp" / ("d" * 64)
-        attempt.mkdir(parents=True)
         target = self.root / "target"
-        target.mkdir()
-        stdout = attempt / "stdout.raw"
-        stderr = attempt / "stderr.raw"
         report = {**guard.policy(target), "metric_available": True, "current_bytes": 1024,
                   "over_capacity": False, "removed": ["finite artifact eviction"],
                   "cleanup_status": "completed"}
-        stdout.write_text(json.dumps(report) + "\n")
-        stderr.write_text("")
-        lifecycle = attempt / "lifecycle.json"
-        lifecycle.write_text(json.dumps({"exitCode": 0, "groupClosed": True,
-            "rawFdsClosed": True, "raw": [{"path": str(stdout)}, {"path": str(stderr)}]}))
-        binding = SimpleNamespace(
-            tools={"python3": {"path": sys.executable}},
-            child_environment={"PATH": os.environ["PATH"], "CARGO_CAPACITY_PROTECTED_REFS": "[]"},
-        )
+        attempt, lifecycle, binding = self._preflight_fixture("d", report)
         observed: list[list[str]] = []
 
         def measured(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
@@ -147,6 +134,60 @@ class InputAdmissionTests(unittest.TestCase):
                 producer._capacity_preflight(cast(bindings.Bindings, binding), self.root, attempt)
         self.assertEqual(len(cargo_calls), 1)
         self.assertNotIn("krr-build", cast(list[str], cargo_calls[0]))
+
+    def test_capacity_preflight_retains_existing_debug_profile(self) -> None:
+        target = self.root / "target"
+        report = {**guard.policy(target), "metric_available": True, "current_bytes": 1024,
+                  "over_capacity": False, "removed": [], "cleanup_status": "not-needed"}
+        attempt, lifecycle, binding = self._preflight_fixture("f", report, retain_debug=True)
+        debug_profile = target / "debug"
+        observed: list[list[str]] = []
+
+        def measured(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+            observed.append(argv)
+            cast(Callable[[Path], None], kwargs["lifecycle_sink"])(lifecycle)
+            return subprocess.CompletedProcess(argv, 0, (json.dumps(report) + "\n").encode(), b"")
+
+        with patch.object(owner, "_measurement_command", side_effect=measured):
+            producer._capacity_preflight(cast(bindings.Bindings, binding), self.root, attempt)
+        self.assertEqual(
+            observed[0][observed[0].index("--retain-profile") + 1], str(debug_profile)
+        )
+
+    def _preflight_fixture(
+        self, token: str, report: JsonObject, *, retain_debug: bool = False
+    ) -> tuple[Path, Path, SimpleNamespace]:
+        attempt = self.root / "tmp" / (token * 64)
+        attempt.mkdir(parents=True)
+        target = self.root / "target"
+        target.mkdir()
+        if retain_debug:
+            (target / "debug").mkdir(parents=True)
+        stdout = attempt / "stdout.raw"
+        stderr = attempt / "stderr.raw"
+        stdout.write_text(json.dumps(report) + "\n")
+        stderr.write_text("")
+        lifecycle = attempt / "lifecycle.json"
+        lifecycle.write_text(json.dumps({"exitCode": 0, "groupClosed": True,
+            "rawFdsClosed": True, "raw": [{"path": str(stdout)}, {"path": str(stderr)}]}))
+        binding = SimpleNamespace(
+            tools={"python3": {"path": sys.executable}},
+            child_environment={"PATH": os.environ["PATH"], "CARGO_CAPACITY_PROTECTED_REFS": "[]"},
+        )
+        return attempt, lifecycle, binding
+
+    def test_capacity_preflight_rejects_debug_profile_symlink(self) -> None:
+        attempt = self.root / "tmp" / ("g" * 64)
+        attempt.mkdir(parents=True)
+        target = self.root / "target"
+        target.mkdir()
+        (target / "debug").symlink_to(self.root / "missing-debug", target_is_directory=True)
+        binding = SimpleNamespace(
+            tools={"python3": {"path": sys.executable}},
+            child_environment={"PATH": os.environ["PATH"], "CARGO_CAPACITY_PROTECTED_REFS": "[]"},
+        )
+        with self.assertRaisesRegex(RuntimeError, "retained profile"):
+            producer._capacity_preflight(cast(bindings.Bindings, binding), self.root, attempt)
 
     def _capacity_registry(self) -> tuple[Path, list[JsonObject], Path]:
         (self.root / "tmp").mkdir(exist_ok=True)

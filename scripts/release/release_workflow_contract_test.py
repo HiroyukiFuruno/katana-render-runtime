@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import hashlib
 import os
 import json
 import shlex
@@ -8,6 +9,8 @@ import subprocess
 import tempfile
 import textwrap
 from pathlib import Path
+
+PLANTUML_FIXTURE_SHA256 = hashlib.sha256(b"fixture").hexdigest()
 
 
 class ReleaseWorkflowContractTest(unittest.TestCase):
@@ -171,6 +174,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         assert isinstance(wrapper, dict)
         self.assertEqual(wrapper.get("body"), [
             ["just root-test-and-coverage"], ["just performance-harness-coverage"],
+            ["just coverage-result-check"],
         ])
         expanded = subprocess.run(
             ["just", "--dry-run", "root-test-and-coverage"], cwd=root,
@@ -196,21 +200,53 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "--all-targets",
             "--all-features",
             "--locked",
+            "--cargo-profile",
+            "krr-coverage",
+            "--no-fail-fast",
+            "--retries",
+            "0",
+            "--user-config-file",
+            "--json",
             "--summary-only",
-            "--fail-under-lines",
-            "--fail-uncovered-lines",
+            "--output-path",
         )
         for option in required_options:
             with self.subTest(option=option):
                 self.assertIn(option, coverage)
+        config_index = coverage.index("--user-config-file") + 1
+        self.assertTrue(
+            coverage[config_index].endswith("/scripts/release/nextest-local-user.toml")
+        )
+        output_index = coverage.index("--output-path") + 1
+        self.assertTrue(
+            coverage[output_index].endswith(
+                "/tmp/quality/standalone-performance-coverage/root.json"
+            )
+        )
+        self.assertIn("LLVM_PROFILE_FILE_NAME=krr-nextest-%4m.profraw", coverage)
+        self.assertIn("--coverage-collection-domain", coverage)
+
+        aggregate = subprocess.run(
+            ["just", "--dry-run", "coverage-result-check"], cwd=root,
+            capture_output=True, text=True, check=True,
+        )
+        aggregate_commands = [
+            shlex.split(command)
+            for command in (aggregate.stdout + aggregate.stderr).splitlines()
+            if command.strip()
+        ]
         self.assertEqual(
-            coverage[coverage.index("--fail-under-lines") + 1],
-            "100",
+            aggregate_commands,
+            [[
+                "python3", "scripts/release/native_coverage_local_aggregate.py",
+                "--repo", str(root),
+            ]],
         )
-        self.assertIn(
-            "0",
-            coverage[coverage.index("--fail-uncovered-lines") + 1],
-        )
+        aggregate_source = (
+            root / "scripts/release/native_coverage_local_aggregate.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('failure == "coverage-policy"', aggregate_source)
+        self.assertIn('valid": valid', aggregate_source)
 
         forbidden_options = ("--no-clean", "--no-report", "--no-run")
         for tokens in coverage_commands:
@@ -228,6 +264,69 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 )
             if len(tokens) > 1 and tokens[1] == "clean":
                 self.assertIn("llvm-cov", tokens)
+
+    def test_check_dry_run_uses_two_threads_by_default_and_preserves_override(self) -> None:
+        root = Path(__file__).parents[2]
+        cases: tuple[tuple[str | None, str], ...] = (
+            (None, "2"),
+            ("1", "1"),
+            ("3", "3"),
+        )
+        for supplied, expected in cases:
+            with self.subTest(supplied=supplied):
+                environment = os.environ.copy()
+                if supplied is None:
+                    environment.pop("TEST_THREADS", None)
+                else:
+                    environment["TEST_THREADS"] = supplied
+                completed = subprocess.run(
+                    ["just", "--dry-run", "check"],
+                    cwd=root,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                output = completed.stdout + completed.stderr
+                self.assertIn(f"TEST_THREADS='{expected}'", output)
+
+    def test_native_nextest_diagnostic_supports_scoped_filter_and_prerequisites(self) -> None:
+        root = Path(__file__).parents[2]
+        cases: tuple[tuple[str, tuple[str, ...]], ...] = (
+            ("", ("--test-threads=1",)),
+            ("class diagram [ja]", ("--test-threads=1", "-E", "class diagram [ja]")),
+        )
+        for filter_value, expected_suffix in cases:
+            with self.subTest(filter=filter_value):
+                completed = subprocess.run(
+                    ["just", "--dry-run", "native-nextest-diagnostic", filter_value],
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                commands = [
+                    shlex.split(line)
+                    for line in (completed.stdout + completed.stderr).splitlines()
+                    if "llvm-cov" in line and "nextest" in line
+                ]
+                self.assertEqual(len(commands), 1)
+                command = commands[0]
+                self.assertIn("--workspace", command)
+                self.assertIn("--all-targets", command)
+                self.assertIn("--all-features", command)
+                self.assertIn("--no-report", command)
+                for token in expected_suffix:
+                    self.assertIn(token, command)
+                if filter_value:
+                    self.assertLess(command.index("-E"), len(command) - 1)
+                    self.assertEqual(command[command.index("-E") + 1], filter_value)
+                else:
+                    self.assertNotIn("-E", command)
+                rendered = completed.stdout + completed.stderr
+                self.assertIn("plantuml-lgpl", rendered)
+                self.assertIn("bun run runtime-bundle:check", rendered)
 
     @staticmethod
     def workflow_step(workflow: str, name: str) -> str:
@@ -593,7 +692,9 @@ katana-render-runtime = { workspace = true }
         self.assertIn('\"assets/licenses/drawio/LICENSE\"', release_recipe)
         self.assertIn('\"vendor/drawio/{{DRAWIO_JS_VERSION}}/LICENSE\"', release_recipe)
 
-    def run_plantuml_install(self, failures: int, checksum: str) -> tuple[subprocess.CompletedProcess[str], Path, int]:
+    def run_plantuml_install(
+        self, failures: int, expected_checksum: str, observed_checksum: str
+    ) -> tuple[subprocess.CompletedProcess[str], Path, int]:
         root = Path(__file__).parents[2]
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
@@ -621,7 +722,7 @@ katana-render-runtime = { workspace = true }
         sha256sum = fake_bin / "sha256sum"
         sha256sum.write_text(
             "#!/usr/bin/env bash\n"
-            f"printf '%s  %s\\n' '{checksum}' \"$1\"\n",
+            f"printf '%s  %s\\n' '{observed_checksum}' \"$1\"\n",
             encoding="utf-8",
         )
         curl.chmod(0o755)
@@ -632,7 +733,10 @@ katana-render-runtime = { workspace = true }
             "KRR_PLANTUML_DOWNLOAD_RETRY_DELAY_SECONDS": "0",
         }
         completed = subprocess.run(
-            ["just", "plantuml-install", "1.2026.8", str(output)],
+            [
+                "just", "--set", "PLANTUML_JAR_CHECKSUM", expected_checksum,
+                "plantuml-install", "1.2026.8", str(output),
+            ],
             cwd=root,
             env=environment,
             text=True,
@@ -644,7 +748,8 @@ katana-render-runtime = { workspace = true }
     def test_plantuml_install_recovers_from_a_transient_http_failure(self) -> None:
         completed, output, attempts = self.run_plantuml_install(
             failures=1,
-            checksum="1057dd8b346bed26a48ffebe6054e16fc785dda7c91f37f6c19030a4aab8a942",
+            expected_checksum=PLANTUML_FIXTURE_SHA256,
+            observed_checksum=PLANTUML_FIXTURE_SHA256,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(attempts, 2)
@@ -654,7 +759,8 @@ katana-render-runtime = { workspace = true }
     def test_plantuml_install_fails_closed_after_bounded_retries(self) -> None:
         completed, output, attempts = self.run_plantuml_install(
             failures=3,
-            checksum="1057dd8b346bed26a48ffebe6054e16fc785dda7c91f37f6c19030a4aab8a942",
+            expected_checksum=PLANTUML_FIXTURE_SHA256,
+            observed_checksum=PLANTUML_FIXTURE_SHA256,
         )
         self.assertNotEqual(completed.returncode, 0)
         self.assertEqual(attempts, 3)
@@ -662,7 +768,11 @@ katana-render-runtime = { workspace = true }
         self.assertFalse(output.with_suffix(".jar.tmp").exists())
 
     def test_plantuml_install_keeps_checksum_validation_after_recovery(self) -> None:
-        completed, output, attempts = self.run_plantuml_install(failures=1, checksum="0" * 64)
+        completed, output, attempts = self.run_plantuml_install(
+            failures=1,
+            expected_checksum=PLANTUML_FIXTURE_SHA256,
+            observed_checksum="0" * 64,
+        )
         self.assertNotEqual(completed.returncode, 0)
         self.assertEqual(attempts, 2)
         self.assertFalse(output.exists())

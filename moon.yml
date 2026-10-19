@@ -116,6 +116,12 @@ tasks:
         script: just native-coverage-cache-key root
         hash: stdout
 
+  native-coverage-cache-diagnose:
+    command: ['just', 'native-coverage-cache-diagnose', 'root']
+    inputs: *quality-inputs
+    options:
+      cache: false
+
   runtime-package-asset-check:
     command: ['just', 'runtime-package-asset-check']
     deps: ['unit-test']

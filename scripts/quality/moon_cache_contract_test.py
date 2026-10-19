@@ -230,12 +230,13 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
     assert "root-test-and-coverage: plantuml-install\n" in justfile
     producer = justfile.split("\nroot-test-and-coverage: plantuml-install\n", 1)[1].split("\n\n", 1)[0]
     guard = 'CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-domain root -- {{CARGO}}'
+    collection_guard = 'NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-root-state" LLVM_PROFILE_FILE_NAME="krr-nextest-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root -- {{CARGO}}'
     assert producer.splitlines() == [
         '    mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"',
         '    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer root',
         f"    {guard} llvm-cov clean --workspace",
-        f'    {guard} llvm-cov --workspace --all-targets --all-features --locked --json --summary-only --output-path "{{{{REPO_ROOT}}}}/tmp/quality/standalone-performance-coverage/root.json" --fail-under-lines {{{{COVERAGE_MIN_LINES}}}} --fail-uncovered-lines {{{{COVERAGE_MAX_UNCOVERED_LINES}}}}{{{{TEST_THREAD_ARGS}}}}',
-        '    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-finish --producer root --producer-exit 0',
+        f'    {collection_guard} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-fail-fast --retries 0 --user-config-file "{{{{REPO_ROOT}}}}/scripts/release/nextest-local-user.toml" --json --summary-only --output-path "{{{{REPO_ROOT}}}}/tmp/quality/standalone-performance-coverage/root.json"{{{{NEXTEST_THREAD_ARGS}}}}',
+        '    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer root --producer-exit 0',
     ]
     coverage_recipe = justfile.split("\ncoverage:", 1)[1].split("\n\n", 1)[0]
     coverage_commands = [line for line in coverage_recipe.splitlines() if line]
@@ -268,7 +269,7 @@ def production_task_input_binding(
     declared_path = evidence_dir / "production-declared-inputs.json"
     declared_path.write_text(declared_output)
     declared = moon_json_object(json.loads(declared_output))
-    assert len(declared) == 42, "Production Moon task count changed"
+    assert len(declared) == 43, "Production Moon task count changed"
     validate_root_test_coverage_contract(declared)
     runtime_preflight = moon_json_object(declared.get("runtime-asset-script-preflight"))
     classic_evidence = moon_json_object(declared.get("runtime-classic-generation-evidence"))
@@ -278,7 +279,7 @@ def production_task_input_binding(
     assert runtime_preflight.get("deps") == ["mathjax-owned-evidence"]
     assert classic_evidence.get("deps") == ["runtime-asset-script-preflight"]
     assert runtime_other.get("deps") == ["runtime-classic-generation-evidence"]
-    assert runtime_unused.get("deps") == ["runtime-unused-rust-classic"]
+    assert runtime_unused.get("deps") == ["runtime-unused-rust-classic-producer"]
     assert runtime_unused.get("command") == ["just", "runtime-unused-script-final-verify-run"]
     for index, leaf in enumerate(RUNTIME_UNUSED_LEAF_IDS):
         producer = moon_json_object(declared.get(f"{leaf}-producer"))

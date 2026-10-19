@@ -140,7 +140,7 @@ function verifySupportedEnvironment(): void {
     throw new Error(`unsupported external override: ${unsupported.join(",")}`);
 }
 
-function collectRuntimeBundleToolFingerprint(): RuntimeBundleToolFingerprint {
+export function collectRuntimeBundleToolFingerprint(): RuntimeBundleToolFingerprint {
   verifySupportedEnvironment();
   const just = executablePath("just");
   const node = executablePath("node");
