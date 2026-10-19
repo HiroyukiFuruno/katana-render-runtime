@@ -1,6 +1,10 @@
 import { expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
-import { type DependencyCommandRunner, DependencyUpdateAllCommand } from "./depends-update-all";
+import {
+  type DependencyCommandRunner,
+  DependencyUpdateAllCommand,
+  runtimeAssetNeedsRepair,
+} from "./depends-update-all";
 import { RuntimeAssetCatalog, type RuntimeAssetDefinition } from "./runtime-asset-common";
 
 class LatestVersionStub {
@@ -105,6 +109,39 @@ test("更新が必要なランタイム資産だけを最新バージョンへ�
   expect(commands).toEqual([
     ["bun", "run", "scripts/runtime-assets/update.ts", "mermaid", "11.18.0"],
   ]);
+});
+
+test("Draw.io の同一version更新はvendor LICENSE欠落を修復する", async () => {
+  const drawio = RuntimeAssetCatalog.byKind("drawio");
+  expect(runtimeAssetNeedsRepair(drawio, () => false)).toBe(true);
+  expect(runtimeAssetNeedsRepair(drawio, () => true)).toBe(false);
+
+  const commands: string[][] = [];
+  await new DependencyUpdateAllCommand(
+    [drawio],
+    new LatestVersionStub(new Map([["drawio", drawio.version]])),
+    async (command, args) => {
+      commands.push([command, ...args]);
+    },
+    () => undefined,
+    () => false,
+  ).run();
+
+  expect(commands).toEqual([
+    ["bun", "run", "scripts/runtime-assets/update.ts", "drawio", drawio.version],
+  ]);
+
+  const existingCommands: string[][] = [];
+  await new DependencyUpdateAllCommand(
+    [drawio],
+    new LatestVersionStub(new Map([["drawio", drawio.version]])),
+    async (command, args) => {
+      existingCommands.push([command, ...args]);
+    },
+    () => undefined,
+    () => true,
+  ).run();
+  expect(existingCommands).toEqual([]);
 });
 
 test("patched Mermaid は upstream latest と一致しても通常更新しない", async () => {

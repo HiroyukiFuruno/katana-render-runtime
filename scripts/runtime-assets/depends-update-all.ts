@@ -1,8 +1,11 @@
+import fs from "node:fs";
+import path from "node:path";
 import { LatestVersionClient } from "./latest-check";
 import {
   isPatchedRuntimeAsset,
   RuntimeAssetCatalog,
   type RuntimeAssetDefinition,
+  RuntimeAssetPaths,
   runtimeAssetUpstreamVersion,
 } from "./runtime-asset-common";
 
@@ -10,6 +13,14 @@ export type DependencyCommandRunner = (command: string, args: readonly string[])
 
 interface RuntimeAssetLatestClient {
   latest(definition: RuntimeAssetDefinition): Promise<string>;
+}
+
+export function runtimeAssetNeedsRepair(
+  definition: RuntimeAssetDefinition,
+  exists: (path: string) => boolean = fs.existsSync,
+): boolean {
+  if (definition.kind !== "drawio") return false;
+  return !exists(path.join(RuntimeAssetPaths.vendorDir(definition), "LICENSE"));
 }
 
 class BunCommandRunner {
@@ -37,6 +48,7 @@ export class DependencyUpdateAllCommand {
     private readonly runner: DependencyCommandRunner = (command, args) =>
       new BunCommandRunner().run(command, args),
     private readonly report: (message: string) => void = console.log,
+    private readonly fileExists: (path: string) => boolean = fs.existsSync,
   ) {}
 
   async run(): Promise<void> {
@@ -59,11 +71,15 @@ export class DependencyUpdateAllCommand {
         `${definition.displayName}: patched asset ${definition.version} cannot be replaced by ordinary update ${latest}; use explicit patched adoption`,
       );
     }
-    if (latest === definition.version) {
+    if (latest === definition.version && !runtimeAssetNeedsRepair(definition, this.fileExists)) {
       this.report(`${definition.displayName}: already latest (${latest})`);
       return;
     }
-    this.report(`${definition.displayName}: ${definition.version} -> ${latest}`);
+    const action =
+      latest === definition.version
+        ? "repairing missing files"
+        : `${definition.version} -> ${latest}`;
+    this.report(`${definition.displayName}: ${action}`);
     await this.runner("bun", ["run", "scripts/runtime-assets/update.ts", definition.kind, latest]);
   }
 }

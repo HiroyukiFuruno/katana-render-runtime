@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { DrawioWarExtractor } from "./drawio-war-extractor";
 import { RuntimeAssetCatalog, RuntimeAssetChecksum } from "./runtime-asset-common";
-import { RuntimeSourceUpdater } from "./update";
+import { downloadOfficialDrawioLicense, drawioLicenseUrl, RuntimeSourceUpdater } from "./update";
 
 test("Draw.io WAR から 1MiB を超える viewer.min.js を展開できる", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "katana-drawio-war-"));
@@ -31,6 +31,32 @@ test("Draw.io WAR から 1MiB を超える viewer.min.js を展開できる", ()
     expect(RuntimeAssetChecksum.digestFile(target)).toBe(
       RuntimeAssetChecksum.digestFile(sourceFile),
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Draw.io LICENSE は公式tagから取得し、取得失敗を隠さない", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "katana-drawio-license-"));
+  try {
+    const target = path.join(root, "vendor", "drawio", "LICENSE");
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const requests: string[] = [];
+    const fetcher = async (url: string): Promise<Response> => {
+      requests.push(url);
+      return new Response("official license bytes\n", { status: 200 });
+    };
+
+    await downloadOfficialDrawioLicense("32.5.5", target, fetcher);
+    expect(requests).toEqual([drawioLicenseUrl("32.5.5")]);
+    expect(fs.readFileSync(target, "utf8")).toBe("official license bytes\n");
+
+    const failureTarget = path.join(root, "vendor", "drawio", "missing-license");
+    const failingFetcher = async (): Promise<Response> => new Response("missing", { status: 404 });
+    await expect(
+      downloadOfficialDrawioLicense("32.5.5", failureTarget, failingFetcher),
+    ).rejects.toThrow("Failed to fetch");
+    expect(fs.existsSync(failureTarget)).toBe(false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
