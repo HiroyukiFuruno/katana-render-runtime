@@ -3408,6 +3408,11 @@ function performanceHarnessFixture(): string {
   );
   write(
     root,
+    "scripts/release/native_nextest_root_coverage.py",
+    fs.readFileSync(path.join(actual, "scripts/release/native_nextest_root_coverage.py"), "utf8"),
+  );
+  write(
+    root,
     `${performanceRoot}/Cargo.lock`,
     `version = 4
 [[package]]
@@ -3696,12 +3701,21 @@ test.each([
   ["performance-harness-coverage", "--json", "--no-run --json", "no-run"],
   ["coverage", "just root-test-and-coverage", "echo coverage", "shared root producer"],
   ["coverage", "just coverage-result-check", "echo accepted", "uncached result validation"],
+  ["root-test-and-coverage", "CARGO={{quote(CARGO)}}", "CARGO=cargo", "CARGO override"],
   [
     "root-test-and-coverage",
-    "local-begin --producer root",
-    "local-key --producer root",
-    "producer input snapshot",
+    "TEST_THREADS={{quote(TEST_THREADS)}}",
+    "TEST_THREADS=1",
+    "thread override",
   ],
+  ["root-test-and-coverage", '--repo "{{REPO_ROOT}}"', '--repo "tmp/repo"', "repo binding"],
+  [
+    "root-test-and-coverage",
+    "scripts/release/native_nextest_root_coverage.py",
+    "scripts/release/other_root_coverage.py",
+    "delegated producer",
+  ],
+  ["root-test-and-coverage", "just plantuml-install", "just other-install", "PlantUML dependency"],
   [
     "performance-harness-coverage",
     "--producer-exit 0",
@@ -3710,16 +3724,20 @@ test.each([
   ],
   [
     "root-test-and-coverage",
-    "python3 scripts/build/cargo_capacity_guard.py",
-    "echo success && python3 scripts/build/cargo_capacity_guard.py",
-    "guarded producer",
+    "python3 scripts/release/native_nextest_root_coverage.py",
+    "echo success && python3 scripts/release/native_nextest_root_coverage.py",
+    "masked root producer",
   ],
   ["fmt-check", "{{CARGO}} fmt --all -- --check", "echo formatting", "root format"],
   ["lint", "--all-features", "--no-default-features", "root lint"],
   ["lint", "--check-domain root", "--check-domain performance-baseline", "root lint domain"],
 ])("standalone performance recipe %s rejects %s → %s (%s)", (recipe, before, after) => {
   const root = performanceHarnessFixture();
-  performanceHarnessRecipes(root, { [recipe]: actualRecipeBody(recipe).replace(before, after) });
+  const original = actualRecipeBody(recipe);
+  expect(original).toContain(before);
+  const mutated = original.replace(before, after);
+  expect(mutated).not.toBe(original);
+  performanceHarnessRecipes(root, { [recipe]: mutated });
   expect(inspectStandalonePerformanceRoute(root).issues).toContainEqual(
     expect.objectContaining({ code: "performance-harness-recipe-unverified", path: recipe }),
   );

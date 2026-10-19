@@ -54,6 +54,12 @@ CAPACITY_METRIC_VERSION = 1
 DIAGNOSTIC_PROFILE_RE = re.compile(
     r"krr-nextest-diagnostic-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-%4m\.profraw"
 )
+CANONICAL_UUID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+)
+RETRY_PROFILE_RE = re.compile(
+    r"krr-nextest-retry-(?P<uuid>[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})-%4m\.profraw"
+)
 JsonObject = dict[str, object]
 SWIFTPM_RELEASE_LIBRARIES = {"apple-cf": "AppleCFBridge", "coretext-rs": "CoreTextBridge"}
 SWIFTPM_COVERAGE_TARGETS = frozenset({
@@ -1083,6 +1089,8 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
         if not collection or domain != "root":
             raise RuntimeError("nextest collection is only admitted for the root collection domain")
         return _coverage_nextest_collection_selection(root, target, words, environment)
+    if collection and domain == "root" and words[1:3] == ["llvm-cov", "report"]:
+        return _coverage_report_selection(root, target, words, environment)
     if len(words) < 2 or Path(words[0]).name != "cargo" or words[1] != "llvm-cov":
         raise RuntimeError("coverage domain requires the fixed Cargo llvm-cov caller")
     words = words[2:]
@@ -1104,6 +1112,8 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
         "--workspace", "--locked", "--all-targets", "--all-features", "--no-default-features",
         "--summary-only", "--json",
     }
+    if action == "clean" and domain == "root":
+        switches.add("--profraw-only")
     values = {"--manifest-path"} if action == "clean" else {
         "--manifest-path", "--features", "--fail-under-lines", "--fail-uncovered-lines",
         "--output-path", "--jobs", "-j", "--profile",
@@ -1178,9 +1188,12 @@ def _validate_coverage_environment(root: Path, target: Path, selected: Path,
         raise RuntimeError("coverage directory/profile overrides are unsupported")
     profile_name = environment.get("LLVM_PROFILE_FILE_NAME")
     if profile_pool_name is not None:
-        valid = (isinstance(profile_name, str)
-                 and DIAGNOSTIC_PROFILE_RE.fullmatch(profile_name) is not None
-                 if profile_pool_name == "diagnostic" else profile_name == profile_pool_name)
+        if profile_pool_name == "diagnostic":
+            valid = isinstance(profile_name, str) and DIAGNOSTIC_PROFILE_RE.fullmatch(profile_name) is not None
+        elif profile_pool_name == "retry":
+            valid = isinstance(profile_name, str) and RETRY_PROFILE_RE.fullmatch(profile_name) is not None
+        else:
+            valid = profile_name == profile_pool_name
         if not valid:
             raise RuntimeError("coverage requires the fixed process/profile LLVM pool name")
     elif profile_name is not None:
@@ -1205,6 +1218,8 @@ def _coverage_nextest_collection_selection(root: Path, target: Path, command: li
     output = root / "tmp/quality/standalone-performance-coverage/root.json"
     config = root / "scripts/release/nextest-local-user.toml"
     words = _unwrap_cargo(command)
+    if "--no-report" in words:
+        return _coverage_nextest_retry_selection(root, target, words, environment)
     if len(words) not in (18, 19) or Path(words[0]).name != "cargo" or words[1:3] != ["llvm-cov", "nextest"]:
         raise RuntimeError("root nextest collection requires the fixed Cargo llvm-cov caller")
     expected = ["cargo", "llvm-cov", "nextest", "--workspace", "--all-targets", "--all-features",
@@ -1217,6 +1232,39 @@ def _coverage_nextest_collection_selection(root: Path, target: Path, command: li
     _validate_coverage_environment(root, target, selected, environment, root / "Cargo.toml",
                                    profile_pool_name="krr-nextest-%4m.profraw")
     return "test", selected
+
+
+def _coverage_nextest_retry_selection(root: Path, target: Path, words: list[str],
+                                      environment: Mapping[str, str]) -> tuple[str, Path]:
+    selected = target / "llvm-cov-target"
+    config = root / "scripts/release/nextest-local-user.toml"
+    expected = ["cargo", "llvm-cov", "nextest", "--workspace", "--all-targets", "--all-features",
+                "--locked", "--cargo-profile", "krr-coverage", "--no-report",
+                "--no-fail-fast", "--retries", "0", "--user-config-file", str(config)]
+    if words[:15] != expected:
+        raise RuntimeError("root nextest retry command differs from its fixed no-report contract")
+    tail = words[15:]
+    if tail and tail[0].startswith("--test-threads="):
+        _validate_nextest_thread_tail(tail[:1], "root nextest retry test threads must be a positive trailing value")
+        tail = tail[1:]
+    if tail and (len(tail) != 2 or tail[0] != "-R" or CANONICAL_UUID_RE.fullmatch(tail[1]) is None):
+        raise RuntimeError("root nextest retry requires an optional complete canonical run UUID")
+    _coverage_config_path(root, str(config))
+    _validate_coverage_environment(root, target, selected, environment, root / "Cargo.toml",
+                                   profile_pool_name="retry")
+    return "test", selected
+
+
+def _coverage_report_selection(root: Path, target: Path, words: list[str],
+                               environment: Mapping[str, str]) -> tuple[str, Path]:
+    selected = target / "llvm-cov-target"
+    output = root / "tmp/quality/standalone-performance-coverage/root.json"
+    expected = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
+                "--json", "--summary-only", "--output-path", str(output)]
+    if words != expected:
+        raise RuntimeError("root coverage report differs from its fixed report contract")
+    _validate_coverage_environment(root, target, selected, environment, root / "Cargo.toml")
+    return "report", selected
 
 
 def coverage_diagnostic_selection(root: Path, target: Path, command: list[str],

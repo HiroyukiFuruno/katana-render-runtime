@@ -15,6 +15,8 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import cast
 
+from native_nextest_coverage_commands import nextest_arguments, report_arguments
+
 
 SCHEMA = "krr-native-test-coverage-result-v1"
 AUTHENTICITY = "unsigned-local-result"
@@ -258,10 +260,7 @@ def _coverage_selection() -> Callable[..., tuple[str, Path]]:
 def _domain_command(root: Path, domain: str, report_name: str, threads: str) -> JsonObject:
     argv = ["cargo", "llvm-cov"]
     if domain == "root":
-        argv.extend(["nextest", "--workspace", "--all-targets", "--all-features", "--locked",
-                     "--cargo-profile", "krr-coverage", "--no-fail-fast", "--retries", "0",
-                     "--user-config-file", str(root / "scripts/release/nextest-local-user.toml")])
-        argv.extend(["--json", "--summary-only"])
+        argv = ["cargo", *report_arguments(root)]
         just_target = "root-test-and-coverage"
     else:
         feature = domain.removeprefix("performance-")
@@ -269,31 +268,36 @@ def _domain_command(root: Path, domain: str, report_name: str, threads: str) -> 
                      "--all-targets", "--no-default-features", "--features", feature, "--locked",
                      "--profile", "krr-coverage", "--json"])
         just_target = "performance-harness-coverage"
-    output = str(root / REPORT_DIRECTORY / report_name) if domain == "root" else f"{REPORT_DIRECTORY}/{report_name}"
-    argv.extend(["--output-path", output])
-    if domain == "root" and threads != "default":
-        argv.append(f"--test-threads={threads}")
-    elif threads != "default":
-        argv.extend(["--", f"--test-threads={threads}"])
+        argv.extend(["--output-path", f"{REPORT_DIRECTORY}/{report_name}"])
+        if threads != "default":
+            argv.extend(["--", f"--test-threads={threads}"])
     selected = root / "target" / ("llvm-cov-target" if domain == "root" else f"llvm-cov-{domain}")
     environment = {"CARGO_TARGET_DIR": str(root / "target"), "CARGO_LLVM_COV_TARGET_DIR": str(selected),
                    "CARGO_HOME": str(root / "tmp/cargo-home")}
-    if domain == "root":
-        environment["LLVM_PROFILE_FILE_NAME"] = "krr-nextest-%4m.profraw"
     try:
         # collection と strict の記録は同じcollector argvに束縛し、strict性は行数検証で判定する。
         action, actual_target = _coverage_selection()(root, root / "target", domain, argv, environment,
                                                       collection=True)
     except (OSError, RuntimeError) as error:
         raise CoverageResultError(f"{domain} command fails the existing coverage contract") from error
-    if action != "test" or actual_target != selected:
+    if action != ("report" if domain == "root" else "test") or actual_target != selected:
         raise CoverageResultError(f"{domain} command does not select its fixed coverage target")
     manifest_argv = list(argv)
     if domain == "root":
-        manifest_argv[13] = "scripts/release/nextest-local-user.toml"
-        manifest_argv[17] = f"{REPORT_DIRECTORY}/{report_name}"
-    return {"guardDomain": domain, "justTarget": just_target, "argv": manifest_argv,
-            "selectedTarget": str(selected.relative_to(root))}
+        manifest_argv[manifest_argv.index("--output-path") + 1] = f"{REPORT_DIRECTORY}/{report_name}"
+    record: JsonObject = {
+        "guardDomain": domain, "justTarget": just_target, "argv": manifest_argv,
+        "selectedTarget": str(selected.relative_to(root)),
+    }
+    if domain == "root":
+        test_argv = ["cargo", *nextest_arguments(root, "" if threads == "default" else threads, None)]
+        test_argv[test_argv.index("--user-config-file") + 1] = "scripts/release/nextest-local-user.toml"
+        record["testScope"] = {
+            "initialArgv": test_argv,
+            "retry": "authenticated-full-run-uuid",
+            "artifacts": "complete-nextest-state-and-llvm-cov-target-trees",
+        }
+    return record
 
 
 def _report_record(root: Path, domain: str, threads: str, *, collection: bool = False) -> JsonObject:

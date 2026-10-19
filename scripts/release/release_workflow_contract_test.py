@@ -453,7 +453,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                     )
                     self.assertEqual(calls, expected_calls)
 
-    def test_coverage_uses_official_clean_and_full_gate_without_wiping_build_cache(
+    def test_coverage_delegates_root_collection_without_wiping_build_cache(
         self,
     ) -> None:
         root = Path(__file__).parents[2]
@@ -481,57 +481,24 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         expanded = subprocess.run(
             ["just", "--dry-run", "root-test-and-coverage"],
             cwd=root,
+            env={**os.environ, "CARGO": "cargo", "TEST_THREADS": "2"},
             capture_output=True,
             text=True,
             check=True,
         )
         recipe_commands = (expanded.stdout + expanded.stderr).splitlines()
         parsed_commands = [shlex.split(command) for command in recipe_commands]
-        coverage_commands = [
-            tokens for tokens in parsed_commands if "llvm-cov" in tokens
+        delegated = [
+            tokens for tokens in parsed_commands
+            if "scripts/release/native_nextest_root_coverage.py" in tokens
         ]
-        cleanup_commands = [tokens for tokens in coverage_commands if "clean" in tokens]
-        measurement_commands = [
-            tokens for tokens in coverage_commands if "clean" not in tokens
-        ]
-        self.assertEqual(len(cleanup_commands), 1)
-        self.assertEqual(len(measurement_commands), 1)
-        cleanup = cleanup_commands[0]
-        coverage = measurement_commands[0]
-        self.assertEqual(cleanup[cleanup.index("llvm-cov") + 1], "clean")
-        self.assertIn("--workspace", cleanup)
-        self.assertLess(parsed_commands.index(cleanup), parsed_commands.index(coverage))
-
-        required_options = (
-            "--workspace",
-            "--all-targets",
-            "--all-features",
-            "--locked",
-            "--cargo-profile",
-            "krr-coverage",
-            "--no-fail-fast",
-            "--retries",
-            "0",
-            "--user-config-file",
-            "--json",
-            "--summary-only",
-            "--output-path",
-        )
-        for option in required_options:
-            with self.subTest(option=option):
-                self.assertIn(option, coverage)
-        config_index = coverage.index("--user-config-file") + 1
-        self.assertTrue(
-            coverage[config_index].endswith("/scripts/release/nextest-local-user.toml")
-        )
-        output_index = coverage.index("--output-path") + 1
-        self.assertTrue(
-            coverage[output_index].endswith(
-                "/tmp/quality/standalone-performance-coverage/root.json"
-            )
-        )
-        self.assertIn("LLVM_PROFILE_FILE_NAME=krr-nextest-%4m.profraw", coverage)
-        self.assertIn("--coverage-collection-domain", coverage)
+        self.assertEqual(len(delegated), 1)
+        producer = delegated[0]
+        script_index = producer.index("scripts/release/native_nextest_root_coverage.py")
+        self.assertEqual(producer[script_index + 1:], ["--repo", str(root)])
+        self.assertIn("CARGO=cargo", producer[:script_index])
+        self.assertIn("TEST_THREADS=2", producer[:script_index])
+        self.assertFalse(any("llvm-cov" in tokens for tokens in parsed_commands))
 
         aggregate = subprocess.run(
             ["just", "--dry-run", "coverage-result-check"],
@@ -562,10 +529,6 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn('failure == "coverage-policy"', aggregate_source)
         self.assertIn('valid": valid', aggregate_source)
 
-        forbidden_options = ("--no-clean", "--no-report", "--no-run")
-        for tokens in coverage_commands:
-            for option in forbidden_options:
-                self.assertNotIn(option, tokens)
         for tokens in parsed_commands:
             if tokens and tokens[0] == "rm":
                 self.assertFalse(

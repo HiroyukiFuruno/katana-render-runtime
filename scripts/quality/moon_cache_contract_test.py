@@ -269,14 +269,8 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
     producer = justfile.split("\nroot-test-and-coverage: plantuml-install\n", 1)[
         1
     ].split("\n\n", 1)[0]
-    guard = 'CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-domain root -- {{CARGO}}'
-    collection_guard = 'NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-root-state" LLVM_PROFILE_FILE_NAME="krr-nextest-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root -- {{CARGO}}'
     assert producer.splitlines() == [
-        '    mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"',
-        '    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer root',
-        f"    {guard} llvm-cov clean --workspace",
-        f'    {collection_guard} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-fail-fast --retries 0 --user-config-file "{{{{REPO_ROOT}}}}/scripts/release/nextest-local-user.toml" --json --summary-only --output-path "{{{{REPO_ROOT}}}}/tmp/quality/standalone-performance-coverage/root.json"{{{{NEXTEST_THREAD_ARGS}}}}',
-        '    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer root --producer-exit 0',
+        '    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"',
     ]
     coverage_recipe = justfile.split("\ncoverage:", 1)[1].split("\n\n", 1)[0]
     coverage_commands = [line for line in coverage_recipe.splitlines() if line]

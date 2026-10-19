@@ -108,17 +108,23 @@ class NativeCoverageResultTests(unittest.TestCase):
 
     def test_root_domain_uses_fixed_nextest_report_command_and_maps_threads(self) -> None:
         selected = self.root / "target" / "llvm-cov-target"
-        with patch.object(coverage_result, "_coverage_selection", return_value=lambda *args, **kwargs: ("test", selected)):
+        with patch.object(coverage_result, "_coverage_selection", return_value=lambda *args, **kwargs: ("report", selected)):
             command = coverage_result._domain_command(self.root, "root", "root.json", "3")
         self.assertEqual(command["justTarget"], "root-test-and-coverage")
         self.assertEqual(command["selectedTarget"], "target/llvm-cov-target")
         self.assertEqual(command["argv"], [
-            "cargo", "llvm-cov", "nextest", "--workspace", "--all-targets", "--all-features", "--locked",
-            "--cargo-profile", "krr-coverage", "--no-fail-fast", "--retries", "0",
-            "--user-config-file", "scripts/release/nextest-local-user.toml", "--json", "--summary-only",
-            "--output-path", "tmp/quality/standalone-performance-coverage/root.json",
-            "--test-threads=3",
+            "cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked", "--json",
+            "--summary-only", "--output-path", "tmp/quality/standalone-performance-coverage/root.json",
         ])
+        self.assertEqual(command["testScope"], {
+            "initialArgv": [
+                "cargo", "llvm-cov", "nextest", "--workspace", "--all-targets", "--all-features", "--locked",
+                "--cargo-profile", "krr-coverage", "--no-report", "--no-fail-fast", "--retries", "0",
+                "--user-config-file", "scripts/release/nextest-local-user.toml", "--test-threads=3",
+            ],
+            "retry": "authenticated-full-run-uuid",
+            "artifacts": "complete-nextest-state-and-llvm-cov-target-trees",
+        })
 
     def test_performance_domains_bind_the_fixed_coverage_profile(self) -> None:
         selected = self.root / "target" / "llvm-cov-performance-baseline"

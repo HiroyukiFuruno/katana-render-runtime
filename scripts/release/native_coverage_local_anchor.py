@@ -18,6 +18,7 @@ SCHEMA = "krr-native-local-coverage-anchor-v1"
 DIRECTORY_NAME = "krr-native-coverage-v1"
 PRODUCERS = {
     "root": "root.json",
+    "root-nextest-retry": "root-nextest-retry.json",
     "performance": "performance.json",
     "runtime-asset-script-other": "runtime-asset-script-other.json",
     **{producer: f"{producer}.json" for producer in profiles.accepted_producers()},
@@ -226,15 +227,7 @@ def prepare(repo: Path, producer: str, identity_sha256: str) -> str | None:
     return cast(str, pending["epoch"])
 
 
-def begin_runtime_script(
-    repo: Path, producer: str, identity_sha256: str, epoch: str
-) -> bool:
-    """Invalidate an old success without changing the already computed Moon key."""
-    if producer not in {
-        "runtime-asset-script-other",
-        *profiles.accepted_producers(),
-    }:
-        raise ValueError("invalid runtime-script anchor producer")
+def _begin_existing(repo: Path, producer: str, identity_sha256: str, epoch: str) -> bool:
     directory = _anchor_directory(repo, create=False)
     if directory is None:
         return False
@@ -247,6 +240,25 @@ def begin_runtime_script(
         return False
     # 実行開始時に世代を変えると、事前計算済みのMoonキーと次回キーが毎回ずれる。
     return _write(directory, _pending(producer, identity_sha256, epoch))
+
+
+def begin_runtime_script(
+    repo: Path, producer: str, identity_sha256: str, epoch: str
+) -> bool:
+    """Invalidate an old success without changing the already computed Moon key."""
+    if producer not in {
+        "runtime-asset-script-other",
+        *profiles.accepted_producers(),
+    }:
+        raise ValueError("invalid runtime-script anchor producer")
+    return _begin_existing(repo, producer, identity_sha256, epoch)
+
+
+def begin_root_collection(repo: Path, identity_sha256: str, epoch: str) -> bool:
+    """Invalidate the previous root success while preserving its identity epoch."""
+    if SHA256_RE.fullmatch(identity_sha256) is None:
+        return False
+    return _begin_existing(repo, "root", identity_sha256, epoch)
 
 
 def commit(

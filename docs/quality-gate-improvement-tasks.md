@@ -10,6 +10,10 @@
 
 ## 現在の状態（2026-10-20）
 
+最新Q19検査: R240の実rootは2570成功・release recipe期待値1失敗（exit100、source前後一致）。依存行`plantuml-install`がrecipe抽出に含まれることを期待値へ反映したR245は、標準静的19項目と当該実Rust caseが成功した（source `ce7d3754`一致）。R247の隔離した実Nextest/cargo-llvm-covで、profile-only cleanがprofrawを全削除し、コンパイル成果物とprofdataを保持しながら次reportへ旧実行結果を混入させないことを確認した。この既存機能をroot初回cleanへ限定接続中。変更後の静的検査、本体全件・同一sourceの成功済み再利用、本体100/0、画像・性能・公開は未完了であり、R245の1件や旧root.jsonを全体合格へ代用しない。証跡は`tmp/quality/current-nextest-root-actual-reuse-r240/`、`tmp/quality/current-nextest-root-contract-fix-r245/`、`tmp/quality/current-nextest-profraw-only-library-r247-r2/`。
+
+Q19のroot再試行を既存Nextest record/rerunとcargo-llvm-covへ接続中。R234では実ライブラリを含む25テスト、coverage証跡97テスト、容量ガード173テストが成功した。隔離した実Rust fixtureで初回1成功・1失敗（exit100）、完全UUIDで失敗1件だけ再実行（exit0）、成功済み関数のcoverage保持と実report生成（exit0）を確認した。R232の併用不可オプションは、公式仕様に従い保持を伴う`--no-report`だけへ修正。TSはR234で87成功・旧変異1失敗、その1件を実際の委譲先へ直したR237が成功した。変更したPython/TSのLint・strict型・重複・owned契約はR236で全7項目成功。これらを全体合格へ代用せず、追加したRust側の実行経路契約、標準静的19項目、実KRR root producerと同一sourceでの再利用を検証する。設計は`docs/native-nextest-retry.md`、実証跡は`tmp/quality/current-nextest-retry-failed-scope-regressions-r234/`と`tmp/quality/current-nextest-masked-producer-regression-r237/`。source変更で高価な画像・性能証跡を失効させないよう、coverage100/0の残修正後に最終候補を凍結して正式画像・性能を取得する。
+
 R203は全静的19項目がexit0（180.975秒、source前後`f2c89e8a`一致）。R205ではroot実テスト2571成功・17skip、独立性能harnessはbaseline10件・candidate11件が全成功し、候補CLIの実PNG出力回帰も通過した。一方coverage-policyは実exit1で、root60127/61189行（98.264394%、未計測1062）、baseline717/1107行、candidate721/1114行。producerは今回完了しているが100/0ではなく、画像99・実表示時間/RSS・公開条件の合格には転用しない。検証済みの関心別修正を通常hook付き中間commitへ取り込み、clean-source正式性能・画像producerへ進める。追加の小修正は既存の関連テスト診断経路で先に確認し、完全ゲートは最終候補でまとめて再実行する。
 
 R197は現行の回帰・性能証跡契約修正を含む全静的19項目がexit0（61.367秒、source前後`4a884118`一致）。R194のroot実テストは2570成功・1失敗・17skip、実exit100。失敗は重複coverage呼出しを除いたR141に対し、契約テストが直接の`just coverage`を要求し続けていたもの。必須coverageの推移的な実行経路を維持して契約を修正する。rootのcoverage producerは完了しておらず、残っている旧coverage JSONを今回の結果として扱わない。R200の詳細exportは未計測箇所を調べる診断専用であり、正式な100/0合格ではない。

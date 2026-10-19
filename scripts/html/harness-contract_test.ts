@@ -418,6 +418,17 @@ describe("finite Rust host and MathJax evidence registration", () => {
       expect(guardedFactsRecipeVerified(justfile.replace(body, mutated), recipe)).toBe(false);
     }
   });
+  test("counts top-level facts variables but ignores recipe-local CARGO assignment", () => {
+    expect(justfile).toContain("root-test-and-coverage: plantuml-install");
+    expect(justRecipes(justfile).get("root-test-and-coverage")).toContain("CARGO={{quote(CARGO)}}");
+    expect(guardedFactsRecipeVerified(justfile, "mathjax-consumer-facts")).toBe(true);
+    const globalShadow = justfile.replace(
+      'CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")',
+      'CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")\nCARGO := "cargo"',
+    );
+    expect(globalShadow).not.toBe(justfile);
+    expect(guardedFactsRecipeVerified(globalShadow, "mathjax-consumer-facts")).toBe(false);
+  });
 });
 
 describe("fixed native artifact and Python collector bindings", () => {
@@ -3191,11 +3202,8 @@ function coverageFixtureJustfile(base: string): string {
 COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
 ${runtimeRecipes.join("\n")}
-root-test-and-coverage:
-    mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
-    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer root
-    NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-root-state" LLVM_PROFILE_FILE_NAME="krr-nextest-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root -- {{CARGO}} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml" --json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"{{NEXTEST_THREAD_ARGS}}
-    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-finish --producer root --producer-exit 0
+root-test-and-coverage: plantuml-install
+    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"
 performance-harness-coverage:
     mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer performance
@@ -3276,6 +3284,7 @@ function localCoverageMoonFixture(): HarnessSnapshot {
     "scripts/quality/owned-validation-contract.ts",
     "scripts/release/native_coverage_local_aggregate.py",
     "scripts/release/native_coverage_result_cli.py",
+    "scripts/release/native_nextest_root_coverage.py",
   ]);
   const fixtureRead = snapshot.read;
   snapshot.read = (name) => {
@@ -3403,6 +3412,7 @@ function localCoverageMoonFixture(): HarnessSnapshot {
   snapshot.tracked.add("scripts/release/native_coverage_local_aggregate.py");
   snapshot.tracked.add("scripts/release/native_coverage_local_anchor.py");
   snapshot.tracked.add("scripts/release/native_coverage_local_result.py");
+  snapshot.tracked.add("scripts/release/native_nextest_root_coverage.py");
   for (const name of [...snapshot.graph.local, ...snapshot.graph.ci]) snapshot.tracked.add(name);
   return snapshot;
 }
@@ -3509,6 +3519,7 @@ test("combined coverage producer binds the root and performance arms", () => {
 test.each([
   "old unit leaf",
   "coverage mask",
+  "missing PlantUML dependency",
   "coverage threshold",
   "missing asset dependency",
   "performance profile missing",
@@ -3533,9 +3544,16 @@ test.each([
         snapshot
           .read("Justfile")
           ?.replace(
-            "python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root",
-            "echo python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root",
+            "python3 scripts/release/native_nextest_root_coverage.py",
+            "echo python3 scripts/release/native_nextest_root_coverage.py",
           ) ?? "",
+    });
+  else if (fault === "missing PlantUML dependency")
+    replaceSources(snapshot, {
+      Justfile:
+        snapshot
+          .read("Justfile")
+          ?.replace("root-test-and-coverage: plantuml-install", "root-test-and-coverage:") ?? "",
     });
   else if (fault === "coverage threshold")
     replaceSources(snapshot, {
@@ -3556,6 +3574,18 @@ test.each([
               : "--features baseline --locked --profile wrong-profile --json",
           ) ?? "",
     });
+  expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
+});
+
+test.each([
+  ["CARGO override", "CARGO={{quote(CARGO)}}", "CARGO=cargo"],
+  ["thread override", "TEST_THREADS={{quote(TEST_THREADS)}}", "TEST_THREADS=1"],
+  ["repo override", '--repo "{{REPO_ROOT}}"', '--repo "tmp/repo"'],
+])("root coverage delegation rejects %s", (_name, before, after) => {
+  const snapshot = combinedCoverageMoonFixture();
+  const justfile = snapshot.read("Justfile") ?? "";
+  expect(justfile).toContain(before);
+  replaceSources(snapshot, { Justfile: justfile.replace(before, after) });
   expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
 });
 

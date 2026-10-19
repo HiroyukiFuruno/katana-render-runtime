@@ -232,13 +232,14 @@ fn archive_gate_release_recipe_runs_the_script_contract_test()
 #[test]
 fn coverage_gate_remains_strict_and_includes_integration_targets()
 -> Result<(), Box<dyn std::error::Error>> {
-    let justfile = std::fs::read_to_string(workspace_root()?.join("Justfile"))?;
+    let root = workspace_root()?;
+    let justfile = std::fs::read_to_string(root.join("Justfile"))?;
     let coverage = recipe_body(&justfile, "coverage")?;
     let recipe = recipe_body(&justfile, "root-test-and-coverage")?;
     let aggregate = recipe_body(&justfile, "coverage-result-check")?;
 
     assert_coverage_recipe_arms(coverage);
-    assert_root_coverage_contract(recipe);
+    assert_root_coverage_contract(root, &justfile, recipe)?;
     assert_coverage_aggregate_contract(aggregate);
     assert_coverage_defaults(&justfile);
     Ok(())
@@ -259,19 +260,21 @@ fn assert_coverage_recipe_arms(coverage: &str) {
     );
 }
 
-fn assert_root_coverage_contract(recipe: &str) {
-    assert_contains_all(
-        recipe,
-        &[
-            "--all-targets",
-            "--coverage-collection-domain root",
-            "llvm-cov clean --workspace",
-            "--json --summary-only --output-path",
-            "local-collect-finish --producer root --producer-exit 0",
-        ],
-    );
+fn assert_root_coverage_contract(
+    root: &Path,
+    justfile: &str,
+    recipe: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let producer =
+        std::fs::read_to_string(root.join("scripts/release/native_nextest_root_coverage.py"))?;
+    let commands =
+        std::fs::read_to_string(root.join("scripts/release/native_nextest_coverage_commands.py"))?;
+    assert_root_coverage_recipe(justfile, recipe);
+    assert_root_coverage_producer(&producer);
+    assert_root_coverage_commands(&commands);
+    assert_root_coverage_stage_order(&producer)?;
     assert_contains_none(
-        recipe,
+        &format!("{recipe}\n{producer}\n{commands}"),
         &[
             "--fail-under-lines",
             "--fail-uncovered-lines",
@@ -280,6 +283,66 @@ fn assert_root_coverage_contract(recipe: &str) {
             "--ignore-run-fail",
         ],
     );
+    Ok(())
+}
+
+fn assert_root_coverage_recipe(justfile: &str, recipe: &str) {
+    assert!(
+        justfile
+            .lines()
+            .any(|line| line == "root-test-and-coverage: plantuml-install")
+    );
+    assert_eq!(
+        recipe.trim(),
+        "plantuml-install\n    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo \"{{REPO_ROOT}}\""
+    );
+}
+
+fn assert_root_coverage_producer(producer: &str) {
+    assert_contains_all(
+        producer,
+        &[
+            "cargo = shlex.split(os.environ.get(\"CARGO\", \"cargo\"))",
+            "os.environ.get(\"TEST_THREADS\", \"1\")",
+            "clean_arguments()",
+            "nextest_arguments(repo, threads, parent)",
+            "report_arguments(repo)",
+            "local.local_collect_finish(repo, \"root\", 0)",
+        ],
+    );
+}
+
+fn assert_root_coverage_commands(commands: &str) {
+    assert_contains_all(
+        commands,
+        &[
+            "\"llvm-cov\", \"clean\", \"--workspace\", \"--profraw-only\"",
+            "\"llvm-cov\", \"nextest\", \"--workspace\", \"--all-targets\", \"--all-features\"",
+            "\"--cargo-profile\", \"krr-coverage\", \"--no-report\"",
+            "\"llvm-cov\", \"report\", \"--profile\", \"krr-coverage\"",
+            "\"--summary-only\", \"--output-path\", str(repo / REPORT_DIRECTORY / \"root.json\")",
+        ],
+    );
+}
+
+fn assert_root_coverage_stage_order(producer: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut remaining = producer
+        .split("def run_root(repo: Path) -> int:")
+        .nth(1)
+        .ok_or("root coverage producer must define run_root")?;
+    for stage in [
+        "identity_sha, cacheable = _begin(repo)",
+        "code, run_id = _test(repo, cargo, os.environ.get(\"TEST_THREADS\", \"1\"),",
+        "report = _guarded(repo, \"--coverage-collection-domain\", cargo, report_arguments(repo))",
+        "code = _execute(directory, \"report\", report, repo, _child_environment(repo))",
+        "local.local_collect_finish(repo, \"root\", 0)",
+    ] {
+        let position = remaining
+            .find(stage)
+            .ok_or("missing ordered root coverage stage")?;
+        remaining = &remaining[position + stage.len()..];
+    }
+    Ok(())
 }
 
 fn assert_coverage_aggregate_contract(recipe: &str) {

@@ -4283,6 +4283,27 @@ class CoverageDomainUnitTests(unittest.TestCase):
                     self.assertEqual(bytes.fromhex(evidence['stdout_hex']), b"cargo-llvm-cov 0.9.1\n")
                     self.assertEqual(bytes.fromhex(evidence['stderr_hex']), b"tool-raw\n")
 
+    def test_root_profile_only_clean_is_exact_and_domain_scoped(self) -> None:
+        with self.fixture(domain="root", action="clean") as (root, args, environment):
+            args.command.append("--profraw-only")
+            self.assertEqual(self.execute(root, args, environment), 0)
+            self.assertEqual(self.calls[-1][-3:], ["clean", "--workspace", "--profraw-only"])
+
+        cases = (
+            ("performance-baseline", "clean", ["--profraw-only"]),
+            ("performance-candidate", "clean", ["--profraw-only"]),
+            ("root", "test", ["--profraw-only"]),
+            ("root", "clean", ["--profraw-only", "--profraw-only"]),
+            ("root", "clean", ["--profraw-only", "--profile", "krr-coverage"]),
+        )
+        for domain, action, suffix in cases:
+            with self.subTest(domain=domain, action=action, suffix=suffix), \
+                    self.fixture(domain=domain, action=action) as (root, args, environment):
+                args.command.extend(suffix)
+                with self.assertRaisesRegex(RuntimeError, "coverage|unknown|repeated"):
+                    self.execute(root, args, environment)
+                self.assert_no_worker()
+
     def test_coverage_collection_domains_require_fixed_report_without_thresholds(self) -> None:
         for domain in ("root", "performance-baseline", "performance-candidate"):
             with self.subTest(domain=domain), self.fixture(domain, "test", collection=True) as (root, args, environment):
@@ -4425,6 +4446,73 @@ class CoverageDomainUnitTests(unittest.TestCase):
                             index = candidate.index(replacement[0])
                             candidate[index:index + 2] = list(replacement)
                         guard.coverage_selection(root, target, "root", candidate, environment, collection=True)
+
+    def test_root_nextest_retry_and_report_require_fixed_q19_contracts(self) -> None:
+        run_uuid = "123e4567-e89b-42d3-a456-426614174000"
+        attempt_uuid = "223e4567-e89b-42d3-a456-426614174000"
+        with self.fixture(diagnostic=True) as (root, args, environment):
+            target = Path(environment["CARGO_TARGET_DIR"])
+            config = root / "scripts/release/nextest-local-user.toml"
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text("[nextest]\n")
+            retry = ["cargo", "llvm-cov", "nextest", "--workspace", "--all-targets", "--all-features",
+                     "--locked", "--cargo-profile", "krr-coverage", "--no-report",
+                     "--no-fail-fast", "--retries", "0", "--user-config-file", str(config),
+                     "--test-threads=2", "-R", run_uuid]
+            environment["LLVM_PROFILE_FILE_NAME"] = f"krr-nextest-retry-{attempt_uuid}-%4m.profraw"
+            with patch("cargo_capacity_guard.cargo_configuration_paths", return_value=[]), \
+                    patch("cargo_capacity_guard.validate_build_selection"):
+                self.assertEqual(guard.coverage_selection(root, target, "root", retry, environment,
+                                                          collection=True), ("test", target / "llvm-cov-target"))
+                self.assertEqual(guard.coverage_selection(root, target, "root", retry[:-2], environment,
+                                                          collection=True), ("test", target / "llvm-cov-target"))
+                mutations: tuple[tuple[str, str | None], ...] = (
+                    ("--no-report", None), ("--no-clean", None), ("--filter-expr", "class"),
+                    ("-E", "class"), ("--latest", None), ("-R", "not-a-uuid"),
+                    ("--test-threads=0", None), ("--profile", "krr-coverage"),
+                )
+                for mutation in mutations:
+                    with self.subTest(mutation=mutation), self.assertRaisesRegex(RuntimeError, "fixed|UUID|threads"):
+                        candidate = list(retry)
+                        if mutation[0] == "--no-report":
+                            candidate.remove(mutation[0])
+                        elif mutation[0] == "--no-clean":
+                            candidate.insert(candidate.index("--no-report") + 1, mutation[0])
+                        elif mutation[0] == "-R":
+                            candidate[-1] = mutation[1] or ""
+                        elif mutation[0].startswith("--test-threads"):
+                            thread_index = next(index for index, value in enumerate(candidate)
+                                                if value.startswith("--test-threads="))
+                            candidate[thread_index] = mutation[0]
+                        else:
+                            candidate.append(mutation[0])
+                            if mutation[1] is not None:
+                                candidate.append(mutation[1])
+                        guard.coverage_selection(root, target, "root", candidate, environment, collection=True)
+
+                report = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
+                          "--json", "--summary-only", "--output-path",
+                          str(root / "tmp/quality/standalone-performance-coverage/root.json")]
+                report_environment = {key: value for key, value in environment.items()
+                                      if key != "LLVM_PROFILE_FILE_NAME"}
+                self.assertEqual(guard.coverage_selection(root, target, "root", report,
+                                                          report_environment, collection=True),
+                                 ("report", target / "llvm-cov-target"))
+                report_mutations: tuple[tuple[str, str | None], ...] = (("--profile", "dev"), ("--no-clean", None),
+                                 ("--output-path", str(root / "tmp/quality/other.json")),
+                                 ("--json", None))
+                for mutation in report_mutations:
+                    with self.subTest(report_mutation=mutation), self.assertRaisesRegex(RuntimeError, "fixed"):
+                        candidate = list(report)
+                        if mutation[0] in {"--profile", "--output-path"}:
+                            index = candidate.index(mutation[0])
+                            candidate[index + 1] = mutation[1] or ""
+                        elif mutation[0] == "--json":
+                            candidate.remove(mutation[0])
+                        else:
+                            candidate.append(mutation[0])
+                        guard.coverage_selection(root, target, "root", candidate,
+                                                 report_environment, collection=True)
 
     def test_coverage_collection_rejects_thresholds_clean_and_unfixed_output(self) -> None:
         for profile in (None, "dev", "krr-coverage-extra"):

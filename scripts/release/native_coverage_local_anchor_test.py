@@ -46,6 +46,7 @@ class NativeCoverageLocalAnchorTests(unittest.TestCase):
     def test_fixed_runtime_script_leaf_anchors_are_separate_from_coverage(self) -> None:
         expected_files = {
             "root": "root.json",
+            "root-nextest-retry": "root-nextest-retry.json",
             "performance": "performance.json",
             "runtime-asset-script-other": "runtime-asset-script-other.json",
             "runtime-unused-script-regression": "runtime-unused-script-regression.json",
@@ -90,6 +91,22 @@ class NativeCoverageLocalAnchorTests(unittest.TestCase):
 
         (anchor_directory / "unexpected.json").write_text("{}", encoding="utf-8")
         self.assertIsNone(anchor.prepare(self.root, "runtime-unused-script-regression", "d" * 64))
+
+    def test_root_collection_begin_invalidates_success_without_rotating_epoch(self) -> None:
+        identity = "c" * 64
+        epoch = anchor.prepare(self.root, "root", identity)
+        self.assertIsNotNone(epoch)
+        previous_receipt = b"previous root collection"
+        self.assertTrue(anchor.commit(self.root, "root", identity, epoch or "", previous_receipt))
+        self.assertTrue(anchor.verify(self.root, "root", identity, epoch or "", previous_receipt))
+
+        self.assertTrue(anchor.begin_root_collection(self.root, identity, epoch or ""))
+        self.assertEqual(anchor.prepare(self.root, "root", identity), epoch)
+        self.assertFalse(anchor.verify(self.root, "root", identity, epoch or "", previous_receipt))
+
+        next_receipt = b"new root collection"
+        self.assertTrue(anchor.commit(self.root, "root", identity, epoch or "", next_receipt))
+        self.assertTrue(anchor.verify(self.root, "root", identity, epoch or "", next_receipt))
 
     def test_runtime_script_begin_revokes_success_without_rotating_key_epoch(self) -> None:
         for producer in (

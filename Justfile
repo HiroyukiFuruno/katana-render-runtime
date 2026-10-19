@@ -114,11 +114,7 @@ native-nextest-diagnostic filter="": plantuml-install runtime-bundle-check
       NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-diagnostic-state" LLVM_PROFILE_FILE_NAME="krr-nextest-diagnostic-${diagnostic_run_id}-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-diagnostic-domain root "${retain_args[@]}" -- {{CARGO}} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-report --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml"{{NEXTEST_THREAD_ARGS}}{{if filter == "" { "" } else { " -E " + quote(filter) }}}
 
 root-test-and-coverage: plantuml-install
-    mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
-    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer root
-    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-domain root -- {{CARGO}} llvm-cov clean --workspace
-    NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-root-state" LLVM_PROFILE_FILE_NAME="krr-nextest-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root -- {{CARGO}} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml" --json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"{{NEXTEST_THREAD_ARGS}}
-    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer root --producer-exit 0
+    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"
 
 # 継続利用するPythonは固定版のLintと厳格型検査を両方通す。
 python-lint:

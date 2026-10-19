@@ -1851,7 +1851,7 @@ export function guardedFactsRecipeVerified(
   const names = ["REPO_ROOT", "RTK", "RTK_CMD", "CARGO", "CARGO_BUILD"] as const;
   for (const [index, name] of names.entries()) {
     const definitions = lines.filter((line) =>
-      new RegExp(`^\\s*(?:export\\s+)?${name}\\b`, "u").test(line),
+      new RegExp(`^(?:export\\s+)?${name}\\b`, "u").test(line),
     );
     if (definitions.length !== 1 || definitions[0] !== FACTS_JUST_DEFINITIONS[index + 1])
       return false;
@@ -4124,14 +4124,18 @@ function moonCoverageRecipesVerified(
 ): void {
   const root = recipes.get("root-test-and-coverage") ?? "";
   const performance = recipes.get("performance-harness-coverage") ?? "";
+  const rootCommand =
+    'CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"';
+  const rootCommands = root
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
   const reportLines = (recipe: string) =>
     recipe
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line.includes(" llvm-cov ") && !line.includes(" llvm-cov clean "));
   const suffix = "{{TEST_THREAD_ARGS}}";
-  const rootCommand =
-    'NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-root-state" LLVM_PROFILE_FILE_NAME="krr-nextest-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain root -- {{CARGO}} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml" --json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"{{NEXTEST_THREAD_ARGS}}';
   const performanceCommand = (variant: "baseline" | "candidate") =>
     `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-${variant}" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-${variant} -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features ${variant} --locked --profile krr-coverage --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${variant}.json"` +
     suffix;
@@ -4143,8 +4147,11 @@ function moonCoverageRecipesVerified(
     )
   )
     errors.push("root uncovered-line default differs");
-  const rootReports = reportLines(root);
-  if (rootReports.length !== 1 || rootReports[0] !== rootCommand)
+  if (
+    rootCommands.length !== 2 ||
+    rootCommands[0] !== "just plantuml-install" ||
+    rootCommands[1] !== rootCommand
+  )
     errors.push("root combined coverage producer differs");
   const performanceReports = reportLines(performance);
   if (

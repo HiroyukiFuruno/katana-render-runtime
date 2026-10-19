@@ -1388,21 +1388,16 @@ function rustMembers(context: ContractContext): string[] {
   return [...new Set(members)].sort((left, right) => right.length - left.length);
 }
 
-function performanceCoverageCommands(arm: "root" | (typeof PERFORMANCE_ARMS)[number]): string[] {
-  const root = arm === "root";
-  const directory = root ? "llvm-cov-target" : `llvm-cov-performance-${arm}`;
-  const domain = root ? "root" : `performance-${arm}`;
+function performanceCoverageCommands(arm: (typeof PERFORMANCE_ARMS)[number]): string[] {
+  const directory = `llvm-cov-performance-${arm}`;
+  const domain = `performance-${arm}`;
   const cleanPrefix = `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/${directory}" python3 scripts/build/cargo_capacity_guard.py --coverage-domain ${domain} -- {{CARGO}} llvm-cov`;
   const prefix = `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/${directory}" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain ${domain} -- {{CARGO}} llvm-cov`;
-  const manifest = root ? "" : ` --manifest-path ${PERFORMANCE_MANIFEST}`;
-  const selection = root ? "--all-features" : `--no-default-features --features ${arm}`;
-  const report = root
-    ? `--json --summary-only --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/root.json"`
-    : `--json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${arm}.json"`;
-  const collector = root
-    ? `NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-root-state" LLVM_PROFILE_FILE_NAME="krr-nextest-%4m.profraw" ${prefix} nextest --workspace --all-targets ${selection} --locked --cargo-profile krr-coverage --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml" ${report}{{NEXTEST_THREAD_ARGS}}`
-    : `${prefix}${manifest} --workspace --all-targets ${selection} --locked --profile krr-coverage ${report}{{TEST_THREAD_ARGS}}`;
-  return [`${cleanPrefix} clean${manifest} --workspace${root ? "" : " --locked"}`, collector];
+  const manifest = ` --manifest-path ${PERFORMANCE_MANIFEST}`;
+  const selection = `--no-default-features --features ${arm}`;
+  const report = `--json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${arm}.json"`;
+  const collector = `${prefix}${manifest} --workspace --all-targets ${selection} --locked --profile krr-coverage ${report}{{TEST_THREAD_ARGS}}`;
+  return [`${cleanPrefix} clean${manifest} --workspace --locked`, collector];
 }
 function localCoverageCommand(producer: "root" | "performance", phase: "begin" | "finish"): string {
   if (phase === "finish")
@@ -1443,10 +1438,7 @@ function performanceRecipeCommands(): Record<string, string[]> {
     ],
     "root-test-and-coverage": [
       "just plantuml-install",
-      'mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"',
-      localCoverageCommand("root", "begin"),
-      ...performanceCoverageCommands("root"),
-      localCoverageCommand("root", "finish"),
+      'CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"',
     ],
   };
 }
