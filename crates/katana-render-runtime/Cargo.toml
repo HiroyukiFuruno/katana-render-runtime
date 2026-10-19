@@ -82,4 +82,3 @@ xml = "=1.4.0"
 core-graphics = "=0.25.0"
 core-foundation = "=0.10.1"
 core-text = "=22.0.0"
-skia-safe = { version = "=0.153.3", default-features = false, features = ["binary-cache", "embed-icudtl", "gl", "jpeg", "metal", "pdf", "svg", "textlayout"] }

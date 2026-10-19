@@ -2,10 +2,6 @@ use image::ImageEncoder;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-#[cfg(target_os = "macos")]
-#[path = "svg_rasterize_html_font_skia_tree_c4_diagnostic_tests.rs"]
-mod skia_tree_c4_diagnostic;
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
