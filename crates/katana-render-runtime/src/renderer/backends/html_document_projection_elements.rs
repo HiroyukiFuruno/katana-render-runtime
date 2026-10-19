@@ -40,8 +40,11 @@ impl InteractiveElementProjection<'_> {
         let interaction = self.interaction_state(node_id);
         let (attributes, child_ancestors) = self.attributes_and_ancestors(interaction);
         if self.tag == "svg" {
-            return Some(super::embedded_svg::embedded_svg_node(
-                node_id, self.tag, attributes, self.node,
+            return Some(self.project_embedded_svg(
+                document,
+                node_id,
+                attributes,
+                &child_ancestors,
             ));
         }
         let children = self.children_with_pseudo(document, node_id, interaction, &child_ancestors);
@@ -51,6 +54,27 @@ impl InteractiveElementProjection<'_> {
             attributes,
             children,
         })
+    }
+
+    fn project_embedded_svg(
+        &self,
+        document: &HtmlDocument,
+        node_id: u64,
+        attributes: HtmlAttributes,
+        ancestors: &[CssAncestor],
+    ) -> HtmlDocumentNode {
+        super::embedded_svg::embedded_svg_node(
+            node_id,
+            self.tag.clone(),
+            attributes,
+            self.node,
+            super::embedded_svg::SvgProjectionContext {
+                document,
+                css: self.css,
+                ancestors,
+                state: self.state,
+            },
+        )
     }
 
     fn interaction_state(&self, node_id: u64) -> ElementInteraction {

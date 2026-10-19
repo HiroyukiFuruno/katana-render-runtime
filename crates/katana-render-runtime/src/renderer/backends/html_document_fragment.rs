@@ -290,8 +290,53 @@ mod tests {
         Ok(())
     }
 
+    type AdjacentInsert = fn(&mut HtmlDocument, u64, &str, &str) -> Result<(), String>;
+
+    struct AdjacentContentCase {
+        kind: &'static str,
+        insert: AdjacentInsert,
+        values: [&'static str; 4],
+        expected: &'static str,
+    }
+
+    const ADJACENT_POSITIONS: [&str; 4] = ["beforebegin", "afterbegin", "beforeend", "afterend"];
+    const ADJACENT_CONTENT_CASES: [AdjacentContentCase; 2] = [
+        AdjacentContentCase {
+            kind: "HTML",
+            insert: HtmlDocument::insert_adjacent_html,
+            values: [
+                "<i>before</i>",
+                "<b>first</b>",
+                "<b>last</b>",
+                "<i>after</i>",
+            ],
+            expected: "<i>before</i><p id=\"target\"><b>first</b>Target<b>last</b></p><i>after</i>",
+        },
+        AdjacentContentCase {
+            kind: "Text",
+            insert: HtmlDocument::insert_adjacent_text,
+            values: [
+                "<outer-before>",
+                "<inner-first>",
+                "<inner-last>",
+                "<outer-after>",
+            ],
+            expected: "&lt;outer-before&gt;<p id=\"target\">&lt;inner-first&gt;Target&lt;inner-last&gt;</p>&lt;outer-after&gt;",
+        },
+    ];
+
     #[test]
-    fn insert_adjacent_html_supports_all_element_positions() -> Result<(), String> {
+    fn insert_adjacent_content_supports_all_element_positions() -> Result<(), String> {
+        for case in ADJACENT_CONTENT_CASES {
+            assert_adjacent_content_case(case, &ADJACENT_POSITIONS)?;
+        }
+        Ok(())
+    }
+
+    fn assert_adjacent_content_case(
+        case: AdjacentContentCase,
+        positions: &[&str; 4],
+    ) -> Result<(), String> {
         let mut document = HtmlDocument::parse("<main id=parent><p id=target>Target</p></main>");
         let target = document
             .get_element_by_id("target")
@@ -299,26 +344,16 @@ mod tests {
         let parent = document
             .get_element_by_id("parent")
             .ok_or_else(|| "parent must exist".to_string())?;
-
-        document
-            .insert_adjacent_html(target, "beforebegin", "<i>before</i>")
-            .map_err(|error| format!("unexpected test error: {error}"))?;
-        document
-            .insert_adjacent_html(target, "afterbegin", "<b>first</b>")
-            .map_err(|error| format!("unexpected test error: {error}"))?;
-        document
-            .insert_adjacent_html(target, "beforeend", "<b>last</b>")
-            .map_err(|error| format!("unexpected test error: {error}"))?;
-        document
-            .insert_adjacent_html(target, "afterend", "<i>after</i>")
-            .map_err(|error| format!("unexpected test error: {error}"))?;
-
-        assert_eq!(
-            document
-                .inner_html(parent)
-                .map_err(|error| format!("unexpected test error: {error}"))?,
-            "<i>before</i><p id=\"target\"><b>first</b>Target<b>last</b></p><i>after</i>"
-        );
+        for (position, value) in positions.iter().zip(case.values) {
+            (case.insert)(&mut document, target, position, value)?;
+        }
+        assert_eq!(document.inner_html(parent)?, case.expected, "{}", case.kind);
+        if case.kind == "Text" {
+            assert!(matches!(
+                document.insert_adjacent_text(1, "beforeend", "ignored"),
+                Err(error) if error == "insertAdjacentText target is not an element"
+            ));
+        }
         Ok(())
     }
 

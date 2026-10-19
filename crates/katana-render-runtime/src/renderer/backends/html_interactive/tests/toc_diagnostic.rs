@@ -3,6 +3,8 @@ use super::support::{TestResult, to_string};
 use crate::renderer::backends::html_browser::{
     HtmlBrowserFrame, HtmlBrowserInput, HtmlBrowserSource, HtmlBrowserViewport,
 };
+use crate::renderer::backends::html_css::HtmlAttributes;
+use crate::renderer::backends::html_css_selector::{CssAncestor, CssSelector};
 use crate::renderer::backends::html_document::HtmlDocumentNode;
 use crate::renderer::backends::html_interactive::types::LayoutResult;
 use serde_json::{Value, json};
@@ -499,6 +501,7 @@ struct TocEntry {
 }
 
 fn toc_entries(session: &mut HtmlInteractiveSession, width: f32) -> TestResult<Vec<TocEntry>> {
+    let selectors = toc_selectors()?;
     let no_focused_nodes = HashSet::new();
     let nodes = session
         .runtime
@@ -511,14 +514,30 @@ fn toc_entries(session: &mut HtmlInteractiveSession, width: f32) -> TestResult<V
         .map_err(to_string)?;
     let mut entries = Vec::new();
     for node in &nodes {
-        collect_entries(node, &mut session.runtime, &mut entries);
+        collect_entries(
+            node,
+            &mut session.runtime,
+            &selectors,
+            &mut Vec::new(),
+            &mut entries,
+        );
     }
     Ok(entries)
+}
+
+fn toc_selectors() -> TestResult<[CssSelector; 2]> {
+    let legacy = CssSelector::parse(".sidebar .toc-item[href^='#']")
+        .ok_or_else(|| "invalid legacy TOC selector".to_string())?;
+    let navigation = CssSelector::parse("nav a[href^='#']")
+        .ok_or_else(|| "invalid navigation TOC selector".to_string())?;
+    Ok([legacy, navigation])
 }
 
 fn collect_entries(
     node: &HtmlDocumentNode,
     runtime: &mut crate::renderer::backends::html_runtime::StaticHtmlRuntimeSession,
+    selectors: &[CssSelector],
+    ancestors: &mut Vec<CssAncestor>,
     entries: &mut Vec<TocEntry>,
 ) {
     let HtmlDocumentNode::Element {
@@ -531,23 +550,25 @@ fn collect_entries(
         return;
     };
     if tag == "a" {
-        collect_toc_anchor(*node_id, attributes, runtime, entries);
+        collect_toc_anchor(*node_id, attributes, selectors, ancestors, runtime, entries);
     }
+    ancestors.push(CssAncestor::new_at_state_with_type(
+        tag, attributes, 1, 1, 1, false,
+    ));
     for child in children {
-        collect_entries(child, runtime, entries);
+        collect_entries(child, runtime, selectors, ancestors, entries);
     }
+    ancestors.pop();
 }
 
 fn collect_toc_anchor(
     node_id: u64,
-    attributes: &[(String, String)],
+    attributes: &HtmlAttributes,
+    selectors: &[CssSelector],
+    ancestors: &[CssAncestor],
     runtime: &mut crate::renderer::backends::html_runtime::StaticHtmlRuntimeSession,
     entries: &mut Vec<TocEntry>,
 ) {
-    let is_toc = attributes
-        .iter()
-        .find(|(name, _)| name == "class")
-        .is_some_and(|(_, value)| value.split_whitespace().any(|class| class == "toc-item"));
     let Some(href) = attributes
         .iter()
         .find(|(name, _)| name == "href")
@@ -556,7 +577,7 @@ fn collect_toc_anchor(
     else {
         return;
     };
-    if !is_toc {
+    if !is_toc_anchor(attributes, selectors, ancestors) {
         return;
     }
     let hash = href[1..].to_owned();
@@ -567,4 +588,35 @@ fn collect_toc_anchor(
             hash,
         });
     }
+}
+
+fn is_toc_anchor(
+    attributes: &HtmlAttributes,
+    selectors: &[CssSelector],
+    ancestors: &[CssAncestor],
+) -> bool {
+    selectors
+        .iter()
+        .any(|selector| selector.matches_at_with_type("a", attributes, ancestors, 1, 1, 1))
+}
+
+#[test]
+fn collects_navigation_and_legacy_toc_links_once_in_document_order() -> TestResult {
+    let source = HtmlBrowserSource::new(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/html-harness/toc-selector-contract.html"
+        )),
+        "https://example.test/toc.html",
+    )
+    .map_err(to_string)?;
+    let viewport = HtmlBrowserViewport::new(320, 240, 1.0).map_err(to_string)?;
+    let mut session = HtmlInteractiveSession::start(source, viewport).map_err(to_string)?;
+    let entries = toc_entries(&mut session, 320.0)?;
+    let hashes = entries
+        .iter()
+        .map(|entry| entry.hash.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(hashes, ["legacy", "both", "nav"]);
+    Ok(())
 }

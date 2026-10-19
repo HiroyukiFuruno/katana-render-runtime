@@ -188,6 +188,32 @@ fn public_neutral_inline_keeps_its_declared_text_color() -> Result<(), Box<dyn s
 }
 
 #[test]
+fn public_dom_serialization_drives_a_visible_script_update()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = HtmlBrowserSource::new(
+        r#"<body style="margin:0"><div id="target" data-proof="yes"><span>serialized</span></div><div id="status" style="width:120px;height:32px;background:#ff0000"></div><script>
+const target = document.getElementById('target');
+const outer = target.outerHTML;
+const inner = target.innerHTML;
+const status = document.getElementById('status');
+if (outer.includes('data-proof="yes"') && outer.includes('<span>serialized</span>') && inner === '<span>serialized</span>') {
+  target.innerHTML = '<i id="adjacent">middle</i>';
+  const adjacent = document.getElementById('adjacent');
+  for (const [position, text] of [['beforebegin', '<'], ['afterbegin', 'A'], ['beforeend', 'B'], ['afterend', '>']]) adjacent.insertAdjacentText(position, text);
+  const roundtrip = target.innerHTML === '&lt;<i id="adjacent">AmiddleB</i>&gt;';
+  status.insertAdjacentHTML('beforeend', '<strong> roundtrip</strong>');
+  if (roundtrip && status.innerHTML === '<strong> roundtrip</strong>') status.style.backgroundColor = '#00ff00';
+}
+</script>"#,
+        "https://example.test/dom-serialization.html",
+    )?;
+    let session = HtmlRuntime.open(source, viewport()?)?;
+    let frame = session.latest_frame().ok_or("serialized frame missing")?;
+    assert!(contains_rgb(frame, [0, 255, 0]));
+    Ok(())
+}
+
+#[test]
 fn public_in_flow_input_height_affects_line_box_but_absolute_input_does_not()
 -> Result<(), Box<dyn std::error::Error>> {
     let in_flow = HtmlRuntime.open(

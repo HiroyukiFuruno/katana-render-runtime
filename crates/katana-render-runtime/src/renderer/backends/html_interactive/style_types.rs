@@ -153,6 +153,7 @@ pub(in crate::renderer::backends::html_interactive) struct CssStyle {
     pub(in crate::renderer::backends::html_interactive) min_width: Option<CssLength>,
     pub(in crate::renderer::backends::html_interactive) max_width: Option<CssLength>,
     pub(in crate::renderer::backends::html_interactive) height: Option<f32>,
+    pub(in crate::renderer::backends::html_interactive) explicit_height_auto: bool,
     pub(in crate::renderer::backends::html_interactive) max_height: Option<f32>,
     pub(in crate::renderer::backends::html_interactive) percentage_height_basis: Option<f32>,
     pub(in crate::renderer::backends::html_interactive) position: CssPosition,

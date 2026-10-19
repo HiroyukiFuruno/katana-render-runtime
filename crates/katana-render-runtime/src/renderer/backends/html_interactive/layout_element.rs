@@ -1,5 +1,6 @@
 use super::super::html_document::HtmlDocumentNode;
 use super::layout::HtmlLayoutRenderer;
+use super::layout_flow::ListItemMarker;
 use super::style::{CssPosition, CssStyle};
 use super::types::{DetailsContext, ElementBox, ElementRenderContext, LayoutContext};
 
@@ -21,6 +22,7 @@ mod margin;
 mod styled;
 
 pub(super) use element_box::padding_edge;
+pub(super) use styled::render_styled_list_item_for_measurement;
 
 impl HtmlLayoutRenderer {
     pub(super) fn render_node(
@@ -178,6 +180,15 @@ impl HtmlLayoutRenderer {
         layout: LayoutContext<'_>,
     ) -> f32 {
         styled::render_styled_element(self, element, layout)
+    }
+
+    pub(super) fn render_styled_list_item_element(
+        &mut self,
+        element: ElementRenderContext<'_>,
+        layout: LayoutContext<'_>,
+        marker: ListItemMarker,
+    ) -> f32 {
+        styled::render_styled_list_item_element(self, element, layout, marker)
     }
 }
 

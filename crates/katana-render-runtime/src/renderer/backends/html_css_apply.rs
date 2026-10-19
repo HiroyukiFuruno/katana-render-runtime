@@ -1,4 +1,6 @@
-use super::super::html_css_cascade::{inherited_custom_properties, resolved_css_values};
+use super::super::html_css_cascade::{
+    inherited_custom_properties, resolved_css_values, resolved_css_values_and_variable_overrides,
+};
 use super::super::html_css_rule::CssRule;
 use super::super::html_css_rule::CssRuleMatchState;
 use super::super::html_css_selector::CssAncestor;
@@ -71,10 +73,40 @@ impl StaticCss {
     }
 
     fn resolved_declarations(&self, state: CssRuleMatchState<'_>) -> Vec<String> {
+        let Some(selected) = self.selected_declarations(state) else {
+            return Vec::new();
+        };
+        resolved_css_values(selected)
+    }
+
+    pub(in crate::renderer::backends) fn apply_with_svg_variable_overrides(
+        &self,
+        state: CssRuleMatchState<'_>,
+    ) -> (HtmlAttributes, Vec<String>) {
+        let mut rendered = state
+            .attributes
+            .iter()
+            .filter(|(name, _)| !name.eq_ignore_ascii_case("style"))
+            .cloned()
+            .collect::<HtmlAttributes>();
+        let Some(selected) = self.selected_declarations(state) else {
+            return (rendered, Vec::new());
+        };
+        let (computed, variable_overrides) = resolved_css_values_and_variable_overrides(selected);
+        if !computed.is_empty() {
+            rendered.push(("style".to_string(), computed.join("; ")));
+        }
+        (rendered, variable_overrides)
+    }
+
+    fn selected_declarations(
+        &self,
+        state: CssRuleMatchState<'_>,
+    ) -> Option<Vec<super::super::html_css_cascade::SelectedDeclaration>> {
         let mut selected = inherited_custom_properties(state.ancestors);
         self.select_rule_declarations(state, &mut selected);
         select_inline_declarations(state.attributes, &mut selected);
-        resolved_css_values(selected)
+        (!selected.is_empty()).then_some(selected)
     }
 
     pub(in crate::renderer::backends) fn select_rule_declarations(

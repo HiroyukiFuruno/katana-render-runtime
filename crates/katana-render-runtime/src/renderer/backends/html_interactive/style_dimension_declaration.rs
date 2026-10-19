@@ -7,7 +7,10 @@ impl CssStyle {
     pub(super) fn apply_dimensions(&mut self, name: &str, value: &str) {
         match name {
             "width" | "min-width" | "max-width" => self.apply_width_dimension(name, value),
-            "height" => self.height = self.block_length(value),
+            "height" => {
+                self.explicit_height_auto = value.trim().eq_ignore_ascii_case("auto");
+                self.height = self.block_length(value);
+            }
             "min-height" => self.apply_minimum_height(value),
             "max-height" => self.max_height = self.block_length(value),
             _ => {}

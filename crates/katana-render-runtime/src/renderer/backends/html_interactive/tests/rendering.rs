@@ -953,6 +953,243 @@ fn grid_flow_positions_items_in_declared_columns() -> TestResult {
 }
 
 #[test]
+fn grid_and_flex_lists_keep_item_boxes_markers_and_link_order() -> TestResult {
+    let mut session = start(
+        r#"<style>
+html, body { margin: 0; }
+ol { display: grid; grid-template-columns: 108px 108px; gap: 8px; width: 220px; min-width: 260px; max-width: 280px; box-sizing: border-box; height: 64px; min-height: 120px; margin: 0; padding: 16px; border: 2px solid #123456; background: #abcdef; overflow: hidden; }
+ul { display: flex; gap: 8px; width: 300px; min-width: 260px; max-width: 280px; box-sizing: border-box; height: 64px; min-height: 120px; margin: 8px 0 0; padding: 16px; border: 2px solid #654321; background: #fedcba; overflow: hidden; }
+li { min-height: 40px; margin-top: 5px; border-top: 2px solid #111; padding: 11px 8px 8px; }
+</style>
+<ol id=grid-list><li id=grid-first><a id=grid-link-first href=#grid-first>Grid one</a></li><li style="display:none">Hidden</li><li id=grid-second><a id=grid-link-second href=#grid-second>Grid two</a></li></ol>
+<ul id=flex-list><li id=flex-first><a id=flex-link-first href=#flex-first>Flex one</a></li><li id=flex-second><a id=flex-link-second href=#flex-second>Flex two</a></li></ul>"#,
+    )?;
+    let layout = session.layout().map_err(to_string)?;
+    assert_list_container_boxes(&mut session, &layout.svg)?;
+    assert_grid_list_geometry(&mut session, &layout.svg)?;
+    assert_flex_list_geometry(&mut session, &layout.svg)?;
+    assert_eq!(layout.hit_targets.len(), 4, "{}", layout.svg);
+    assert_link_hit_order(&mut session, &layout.hit_targets, &layout.svg)?;
+    assert_eq!(layout.svg.matches(">1.<").count(), 1, "{}", layout.svg);
+    assert_eq!(layout.svg.matches(">2.<").count(), 1, "{}", layout.svg);
+    assert_eq!(layout.svg.matches(">•<").count(), 2, "{}", layout.svg);
+    Ok(())
+}
+
+#[test]
+fn list_item_measurement_matches_padded_container_height() -> TestResult {
+    let mut session = start(
+        r#"<style>
+html, body { margin: 0; }
+ol { display: grid; grid-template-columns: 144px 144px; gap: 8px; width: 296px; margin: 0; padding: 0; }
+ul { display: flex; flex-direction: column; gap: 8px; width: 144px; margin: 0; padding: 0; }
+li, .reference { box-sizing: border-box; width: 144px; min-height: 42px; margin: 0; padding: 4px; line-height: 24px; font-size: 16px; }
+</style>
+<ol><li id=grid-short>Short</li><li id=grid-wrapped>This label wraps onto two lines</li><li id=grid-next>Next</li></ol>
+<ul><li id=flex-short>Short</li><li id=flex-wrapped>This label wraps onto two lines</li></ul>
+<div id=reference-short class=reference>Short</div><div id=reference-wrapped class=reference>This label wraps onto two lines</div>"#,
+    )?;
+    let _layout = session.layout().map_err(to_string)?;
+    assert_grid_list_items_stretch_to_the_wrapped_row(&mut session)?;
+    assert_list_item_height_pair(&mut session, "flex-short", "flex-wrapped", "flex-wrapped")?;
+    assert_reference_height_pair(&mut session)?;
+    Ok(())
+}
+
+fn assert_grid_list_items_stretch_to_the_wrapped_row(
+    session: &mut super::super::HtmlInteractiveSession,
+) -> TestResult {
+    let short = element_box_for_id(session, "grid-short")?;
+    let wrapped = element_box_for_id(session, "grid-wrapped")?;
+    let reference_wrapped = element_box_for_id(session, "reference-wrapped")?;
+    assert!(
+        (short.height - wrapped.height).abs() < 0.1,
+        "{short:?} {wrapped:?}"
+    );
+    assert!(
+        (wrapped.height - reference_wrapped.height).abs() < 0.1,
+        "{wrapped:?} {reference_wrapped:?}"
+    );
+    assert_following_list_item_position(session, "grid-short", "grid-wrapped", "grid-next")
+}
+
+fn assert_list_item_height_pair(
+    session: &mut super::super::HtmlInteractiveSession,
+    short_id: &str,
+    wrapped_id: &str,
+    following_id: &str,
+) -> TestResult {
+    assert_wrapped_pair(session, short_id, wrapped_id)?;
+    assert_list_item_height_matches_reference(session, short_id, wrapped_id)?;
+    assert_following_list_item_position(session, short_id, wrapped_id, following_id)
+}
+
+fn assert_list_item_height_matches_reference(
+    session: &mut super::super::HtmlInteractiveSession,
+    short_id: &str,
+    wrapped_id: &str,
+) -> TestResult {
+    let short = element_box_for_id(session, short_id)?;
+    let wrapped = element_box_for_id(session, wrapped_id)?;
+    let reference_short = element_box_for_id(session, "reference-short")?;
+    let reference_wrapped = element_box_for_id(session, "reference-wrapped")?;
+    assert!(
+        (short.height - reference_short.height).abs() < 0.1,
+        "{short_id}: {short:?}"
+    );
+    assert!(
+        (wrapped.height - reference_wrapped.height).abs() < 0.1,
+        "{wrapped_id}: {wrapped:?}"
+    );
+    Ok(())
+}
+
+fn assert_following_list_item_position(
+    session: &mut super::super::HtmlInteractiveSession,
+    short_id: &str,
+    wrapped_id: &str,
+    following_id: &str,
+) -> TestResult {
+    let short = element_box_for_id(session, short_id)?;
+    let wrapped = element_box_for_id(session, wrapped_id)?;
+    let following = element_box_for_id(session, following_id)?;
+    if following_id == wrapped_id {
+        assert!(
+            wrapped.y >= short.y + short.height + 8.0,
+            "{wrapped_id}: {wrapped:?}"
+        );
+    } else {
+        assert!(
+            following.y >= wrapped.y + wrapped.height + 8.0,
+            "{following_id}: {following:?}"
+        );
+    }
+    Ok(())
+}
+
+fn assert_reference_height_pair(session: &mut super::super::HtmlInteractiveSession) -> TestResult {
+    assert_wrapped_pair(session, "reference-short", "reference-wrapped")
+}
+
+fn assert_wrapped_pair(
+    session: &mut super::super::HtmlInteractiveSession,
+    short_id: &str,
+    wrapped_id: &str,
+) -> TestResult {
+    let short = element_box_for_id(session, short_id)?;
+    let wrapped = element_box_for_id(session, wrapped_id)?;
+    assert!(short.height >= 42.0, "{short:?}");
+    assert!(
+        wrapped.height >= short.height + 10.0,
+        "{wrapped_id}: {wrapped:?}"
+    );
+    assert!(
+        wrapped.height <= short.height + 32.0,
+        "{wrapped_id}: {wrapped:?}"
+    );
+    Ok(())
+}
+
+fn assert_list_container_boxes(
+    session: &mut super::super::HtmlInteractiveSession,
+    svg: &str,
+) -> TestResult {
+    let grid = element_box_for_id(session, "grid-list")?;
+    let flex = element_box_for_id(session, "flex-list")?;
+    assert!(
+        (grid.width - 260.0).abs() < 0.1 && grid.height >= 120.0,
+        "{svg}"
+    );
+    assert!(
+        (flex.width - 280.0).abs() < 0.1 && (flex.height - 120.0).abs() < 0.1,
+        "{svg}"
+    );
+    for expected in [
+        "#abcdef",
+        "#123456",
+        "#fedcba",
+        "#654321",
+        "<clipPath id=\"krr-clip-",
+    ] {
+        assert!(
+            svg.contains(expected),
+            "missing list container paint {expected}: {svg}"
+        );
+    }
+    Ok(())
+}
+
+fn assert_grid_list_geometry(
+    session: &mut super::super::HtmlInteractiveSession,
+    svg: &str,
+) -> TestResult {
+    let first = element_box_for_id(session, "grid-first")?;
+    let second = element_box_for_id(session, "grid-second")?;
+    let root = element_box_for_id(session, "grid-list")?;
+    let link = element_box_for_id(session, "grid-link-first")?;
+    assert!(first.width > 100.0 && first.height >= 56.0, "{svg}");
+    assert!(
+        second.x > first.x && (second.y - first.y).abs() < 0.1,
+        "{svg}"
+    );
+    assert!(link.x >= first.x + 8.0 && link.y >= first.y + 8.0, "{svg}");
+    assert!(text_x_for(svg, "1.")? < first.x, "{svg}");
+    assert_eq!(
+        text_baseline_for(svg, "1.")?,
+        text_baseline_for(svg, "Grid one")?,
+        "{svg}"
+    );
+    assert!(root.y + root.height >= second.y + second.height, "{svg}");
+    Ok(())
+}
+
+fn assert_flex_list_geometry(
+    session: &mut super::super::HtmlInteractiveSession,
+    svg: &str,
+) -> TestResult {
+    let first = element_box_for_id(session, "flex-first")?;
+    let second = element_box_for_id(session, "flex-second")?;
+    let root = element_box_for_id(session, "flex-list")?;
+    let link = element_box_for_id(session, "flex-link-first")?;
+    assert!(
+        first.x < second.x && (second.y - first.y).abs() < 0.1,
+        "{svg}"
+    );
+    assert!(first.height >= 56.0 && second.height >= 56.0, "{svg}");
+    assert!(link.x >= first.x + 8.0 && link.y >= first.y + 8.0, "{svg}");
+    assert!(text_x_for(svg, "•")? < first.x, "{svg}");
+    assert_eq!(
+        text_baseline_for(svg, "•")?,
+        text_baseline_for(svg, "Flex one")?,
+        "{svg}"
+    );
+    assert!(root.y + root.height >= second.y + second.height, "{svg}");
+    Ok(())
+}
+
+fn assert_link_hit_order(
+    session: &mut super::super::HtmlInteractiveSession,
+    targets: &[super::super::types::HitTarget],
+    svg: &str,
+) -> TestResult {
+    let expected = [
+        "grid-link-first",
+        "grid-link-second",
+        "flex-link-first",
+        "flex-link-second",
+    ];
+    for (target, id) in targets.iter().zip(expected) {
+        let node_id = session
+            .runtime
+            .node_for_element_id(id)
+            .ok_or_else(|| format!("{id} node is missing"))?
+            .0;
+        assert_eq!(target.node_id, node_id, "{svg}");
+    }
+    Ok(())
+}
+
+#[test]
 fn grid_default_alignment_stretches_each_item_to_its_own_row_height() -> TestResult {
     let mut session = start(
         r#"<main style="display:grid;grid-template-columns:100px 100px;gap:10px;width:210px">

@@ -1,13 +1,76 @@
-use super::{CssPosition, ElementRenderContext, HtmlLayoutRenderer, LayoutContext};
+use super::super::layout_flow::ListItemMarker;
+use super::{CssPosition, DetailsContext, ElementRenderContext, HtmlLayoutRenderer, LayoutContext};
 
 pub(super) fn render_styled_element(
     renderer: &mut HtmlLayoutRenderer,
     element: ElementRenderContext<'_>,
     layout: LayoutContext<'_>,
 ) -> f32 {
+    render_styled_element_with_marker(renderer, element, layout, None)
+}
+
+pub(super) fn render_styled_list_item_element(
+    renderer: &mut HtmlLayoutRenderer,
+    element: ElementRenderContext<'_>,
+    layout: LayoutContext<'_>,
+    marker: ListItemMarker,
+) -> f32 {
+    render_styled_element_with_marker(renderer, element, layout, Some(marker))
+}
+
+pub(in crate::renderer::backends::html_interactive) fn render_styled_list_item_for_measurement(
+    renderer: &mut HtmlLayoutRenderer,
+    element: ElementRenderContext<'_>,
+    layout: LayoutContext<'_>,
+) -> f32 {
+    render_styled_element_with_container(renderer, element, layout)
+}
+
+fn render_styled_element_with_marker(
+    renderer: &mut HtmlLayoutRenderer,
+    element: ElementRenderContext<'_>,
+    layout: LayoutContext<'_>,
+    marker: Option<ListItemMarker>,
+) -> f32 {
+    render_styled_element_with_contents(renderer, element, layout, marker, false)
+}
+
+fn render_styled_element_with_container(
+    renderer: &mut HtmlLayoutRenderer,
+    element: ElementRenderContext<'_>,
+    layout: LayoutContext<'_>,
+) -> f32 {
+    render_styled_element_with_contents(renderer, element, layout, None, true)
+}
+
+fn render_styled_element_with_contents(
+    renderer: &mut HtmlLayoutRenderer,
+    element: ElementRenderContext<'_>,
+    layout: LayoutContext<'_>,
+    marker: Option<ListItemMarker>,
+    list_item_container: bool,
+) -> f32 {
     if layout.style.display == taffy::style::Display::None {
         return layout.y;
     }
+    let (element_box_index, target_index) = prepare_styled_element(renderer, element, layout);
+    let bottom = render_styled_contents(renderer, element, layout, marker, list_item_container);
+    finish_styled_element(
+        renderer,
+        element,
+        layout,
+        bottom,
+        element_box_index,
+        target_index,
+    );
+    bottom
+}
+
+fn prepare_styled_element(
+    renderer: &mut HtmlLayoutRenderer,
+    element: ElementRenderContext<'_>,
+    layout: LayoutContext<'_>,
+) -> (usize, Option<usize>) {
     let positioning_context = renderer.element_positioning_context(layout.style.position);
     let positioning_origin_node_id =
         renderer.positioning_origin_node_id(element.node_id, layout.style.position);
@@ -22,12 +85,44 @@ pub(super) fn render_styled_element(
         renderer.element_overflow_clip_axes(element.node_id, layout.style);
     let target_index = renderer.start_click_target(element);
     renderer.record_anchor(element, layout.y + layout.style.margin_top);
-    let bottom = renderer.render_tag(element, layout);
+    (element_box_index, target_index)
+}
+
+fn render_styled_contents(
+    renderer: &mut HtmlLayoutRenderer,
+    element: ElementRenderContext<'_>,
+    layout: LayoutContext<'_>,
+    marker: Option<ListItemMarker>,
+    list_item_container: bool,
+) -> f32 {
+    if list_item_container {
+        return renderer.render_container(
+            element.children,
+            layout.x,
+            layout.y,
+            layout.width,
+            layout.style,
+            DetailsContext::NONE,
+        );
+    }
+    match marker {
+        Some(marker) => renderer.render_list_item_with_marker(element.children, layout, marker),
+        None => renderer.render_tag(element, layout),
+    }
+}
+
+fn finish_styled_element(
+    renderer: &mut HtmlLayoutRenderer,
+    element: ElementRenderContext<'_>,
+    layout: LayoutContext<'_>,
+    bottom: f32,
+    element_box_index: usize,
+    target_index: Option<usize>,
+) {
     renderer.finish_element_box(element_box_index, element.node_id, layout, bottom);
     if let Some(index) = target_index {
         renderer.finish_click_target(index, element.node_id, layout, bottom);
     }
-    bottom
 }
 
 #[cfg(test)]

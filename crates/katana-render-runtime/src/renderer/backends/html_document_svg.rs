@@ -1,5 +1,8 @@
 use html5ever::Attribute;
-use markup5ever_rcdom::{Handle, NodeData};
+
+#[path = "html_document_svg_serialize.rs"]
+mod serialize;
+pub(in crate::renderer::backends) use serialize::serialize_embedded_svg;
 
 pub(in crate::renderer::backends) const EMBEDDED_SVG_MARKUP_ATTRIBUTE: &str =
     "__krr_embedded_svg_markup";
@@ -8,61 +11,6 @@ pub(in crate::renderer::backends) const EMBEDDED_SVG_Y_PLACEHOLDER: &str = "__KR
 pub(in crate::renderer::backends) const EMBEDDED_SVG_WIDTH_PLACEHOLDER: &str = "__KRR_SVG_WIDTH__";
 pub(in crate::renderer::backends) const EMBEDDED_SVG_HEIGHT_PLACEHOLDER: &str =
     "__KRR_SVG_HEIGHT__";
-
-pub(super) fn serialize_embedded_svg(node: &Handle, root_style: Option<&str>) -> String {
-    let mut output = String::new();
-    serialize_svg_node(node, &mut output, true, root_style);
-    output
-}
-
-fn serialize_svg_node(node: &Handle, output: &mut String, root: bool, root_style: Option<&str>) {
-    match &node.data {
-        NodeData::Text { contents } => output.push_str(&escape_xml_text(&contents.borrow())),
-        NodeData::Element { name, attrs, .. } => {
-            let tag = name.local.to_string();
-            output.push('<');
-            output.push_str(&tag);
-            serialize_svg_attributes(&attrs.borrow(), output, root, root_style);
-            output.push('>');
-            for child in node.children.borrow().iter() {
-                serialize_svg_node(child, output, false, None);
-            }
-            output.push_str("</");
-            output.push_str(&tag);
-            output.push('>');
-        }
-        _ => {}
-    }
-}
-
-fn serialize_svg_attributes(
-    attributes: &[Attribute],
-    output: &mut String,
-    root: bool,
-    root_style: Option<&str>,
-) {
-    let has_xmlns = serialize_source_attributes(attributes, output, root);
-    if root {
-        serialize_root_attributes(output, root_style, has_xmlns);
-    }
-}
-
-fn serialize_source_attributes(attributes: &[Attribute], output: &mut String, root: bool) -> bool {
-    let mut has_xmlns = false;
-    for attribute in attributes {
-        let local = attribute.name.local.as_str();
-        has_xmlns |= local.eq_ignore_ascii_case("xmlns");
-        if root && matches_ignore_ascii_case(local, &["x", "y", "width", "height", "style"]) {
-            continue;
-        }
-        push_svg_attribute(
-            output,
-            &qualified_attribute_name(attribute),
-            &attribute.value,
-        );
-    }
-    has_xmlns
-}
 
 fn serialize_root_attributes(output: &mut String, root_style: Option<&str>, has_xmlns: bool) {
     if !has_xmlns {
@@ -153,3 +101,6 @@ mod tests {
 #[cfg(test)]
 #[path = "html_document_svg_quoted_style_tests.rs"]
 mod quoted_style_tests;
+#[cfg(test)]
+#[path = "html_document_svg_variable_tests.rs"]
+mod variable_tests;

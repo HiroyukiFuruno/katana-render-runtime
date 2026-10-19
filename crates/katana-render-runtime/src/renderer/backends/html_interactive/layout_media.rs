@@ -52,17 +52,30 @@ impl HtmlLayoutRenderer {
         layout: LayoutContext<'_>,
     ) -> f32 {
         let start = layout.y + layout.style.margin_top;
-        let x = layout.x + layout.style.margin_left - self.scroll_x;
         let available_width = (layout.width - layout.style.margin_left - layout.style.margin_right)
             .max(MIN_LAYOUT_WIDTH);
         let Some(markup) = attribute(attributes, EMBEDDED_SVG_MARKUP_ATTRIBUTE) else {
             return start + layout.style.margin_bottom;
         };
         let (svg_width, svg_height) = embedded_svg_size(attributes, available_width, layout.style);
+        /* WHY: 自然寸法と幅制約を適用したSVGの実幅からauto marginを解決する。 */
+        let x = embedded_svg_x(layout.x, available_width, svg_width, layout.style) - self.scroll_x;
         let svg = position_embedded_svg(markup, x, start - self.scroll_y, svg_width, svg_height);
         self.svg.push_str(&svg);
         start + svg_height + layout.style.margin_bottom
     }
+}
+
+fn embedded_svg_x(x: f32, available_width: f32, svg_width: f32, style: &CssStyle) -> f32 {
+    let auto_margin_count =
+        usize::from(style.margin_left_auto) + usize::from(style.margin_right_auto);
+    let remaining_width = (available_width - svg_width).max(0.0);
+    let auto_left = if style.margin_left_auto {
+        remaining_width / auto_margin_count as f32
+    } else {
+        0.0
+    };
+    x + style.margin_left + auto_left
 }
 
 pub(super) fn intrinsic_image_width(

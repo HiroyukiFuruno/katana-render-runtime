@@ -32,6 +32,9 @@ impl TableColumnWidths {
             }
             return enforce_minimum_widths(preferred, minimums, available);
         }
+        if declared_widths_need_remainder(&widths, &preferred, available) {
+            return fill_undersubscribed_declared_widths(&widths, &minimums, available);
+        }
         let specified = specified_width(&widths, &minimums, available);
         resolve_flexible_widths(widths, minimums, available, specified)
     }
@@ -81,8 +84,28 @@ fn distribute_percentage_guess(
         .collect()
 }
 
+fn fill_undersubscribed_declared_widths(
+    widths: &[Option<f32>],
+    minimums: &[f32],
+    available: f32,
+) -> Vec<f32> {
+    let mut result = distribute_percentage_guess(widths, minimums, available);
+    let remainder = (available - result.iter().sum::<f32>()).max(0.0);
+    let share = remainder / result.len() as f32;
+    result.iter_mut().for_each(|width| *width += share);
+    result
+}
+
 fn all_widths_declared(widths: &[Option<f32>]) -> bool {
     widths.iter().all(Option::is_some)
+}
+
+fn declared_widths_need_remainder(
+    widths: &[Option<f32>],
+    preferred: &[f32],
+    available: f32,
+) -> bool {
+    !widths.is_empty() && all_widths_declared(widths) && preferred.iter().sum::<f32>() < available
 }
 
 fn declared_width_values(widths: Vec<Option<f32>>) -> Vec<f32> {
@@ -294,6 +317,28 @@ mod column_width_tests {
         let widths = TableColumnWidths::resolve(&rows, 3, AVAILABLE, &inherited);
 
         assert_eq!(widths, [140.8, 416.0, 83.2]);
+    }
+
+    #[test]
+    fn fully_declared_columns_fill_unused_table_width() {
+        const AVAILABLE: f32 = 594.0;
+        const EXPECTED_COLUMN: f32 = 198.0;
+        const DECLARED_WIDTHS: [&str; 2] = ["23%", "1px"];
+        for declared_width in DECLARED_WIDTHS {
+            let row = ["A"; 3]
+                .into_iter()
+                .map(|label| header(label, Some(declared_width)))
+                .collect::<Vec<_>>();
+            let widths =
+                TableColumnWidths::resolve(&[row], 3, AVAILABLE, &CssStyle::browser_default());
+
+            assert!(
+                widths
+                    .iter()
+                    .all(|width| (*width - EXPECTED_COLUMN).abs() < 0.01)
+            );
+            assert!((widths.iter().sum::<f32>() - AVAILABLE).abs() < 0.01);
+        }
     }
 
     #[test]

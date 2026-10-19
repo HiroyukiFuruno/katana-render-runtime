@@ -33,24 +33,77 @@ impl HtmlLayoutRenderer {
         style: &CssStyle,
         details: DetailsContext,
     ) -> f32 {
+        self.render_container_with_list_markers(
+            children,
+            LayoutContext::new(x, y, width, style, details),
+            None,
+        )
+    }
+
+    pub(super) fn render_list_container(
+        &mut self,
+        children: &[HtmlDocumentNode],
+        layout: LayoutContext<'_>,
+        ordered: bool,
+    ) -> f32 {
+        self.render_container_with_list_markers(children, layout, Some(ordered))
+    }
+
+    fn render_container_with_list_markers(
+        &mut self,
+        children: &[HtmlDocumentNode],
+        layout: LayoutContext<'_>,
+        ordered_list: Option<bool>,
+    ) -> f32 {
+        let (x, y, width, style, details) = (
+            layout.x,
+            layout.y,
+            layout.width,
+            layout.style,
+            layout.details,
+        );
         let width = inline_container_width(children, width, style);
         let geometry = container_geometry(x, y, width, style);
         let box_start = self.svg.len();
-        let content_start = self.svg.len();
         let descendant_box_start = self.element_boxes.len();
+        let bottom =
+            self.render_container_content(children, &geometry, style, details, ordered_list);
+        let height = self.resolve_container_height(bottom, geometry.start, style);
+        self.finish_container_paint(box_start, descendant_box_start, &geometry, height, style);
+        geometry.start + height + style.margin_bottom
+    }
+
+    fn render_container_content(
+        &mut self,
+        children: &[HtmlDocumentNode],
+        geometry: &ContainerGeometry,
+        style: &CssStyle,
+        details: DetailsContext,
+        ordered_list: Option<bool>,
+    ) -> f32 {
         let containing_block =
-            self.resolve_container_containing_block(children, &geometry, style, details);
+            self.resolve_container_containing_block(children, geometry, style, details);
         if let Some(block) = containing_block {
             self.push_containing_block(block);
         }
-        let bottom = self.render_container_children(children, &geometry, style, details);
+        let bottom =
+            self.render_container_children(children, geometry, style, details, ordered_list);
         if containing_block.is_some() {
             self.pop_containing_block();
         }
-        let height = self.resolve_container_height(bottom, geometry.start, style);
-        self.record_overflow_clip(descendant_box_start, &geometry, height, style);
-        self.paint_container_box(box_start, content_start, &geometry, height, style);
-        geometry.start + height + style.margin_bottom
+        bottom
+    }
+
+    fn finish_container_paint(
+        &mut self,
+        box_start: usize,
+        descendant_box_start: usize,
+        geometry: &ContainerGeometry,
+        height: f32,
+        style: &CssStyle,
+    ) {
+        self.record_overflow_clip(descendant_box_start, geometry, height, style);
+        self.paint_container_box(box_start, box_start, geometry, height, style);
     }
 
     fn resolve_container_height(&self, bottom: f32, start: f32, style: &CssStyle) -> f32 {
@@ -239,26 +292,50 @@ impl HtmlLayoutRenderer {
         geometry: &ContainerGeometry,
         style: &CssStyle,
         details: DetailsContext,
+        ordered_list: Option<bool>,
     ) -> f32 {
         let mut child_style = style.clone();
         let available_height = style.children_height();
         child_style.percentage_height_basis = available_height;
-        let result = if style.column_count.is_some() || style.column_width.is_some() {
+        let result = if ordered_list.is_none()
+            && (style.column_count.is_some() || style.column_width.is_some())
+        {
             self.render_multicolumn_children(children, geometry, style, details)
         } else {
-            self.render_flow_children(
+            self.render_container_flow_children(
                 children,
-                LayoutContext::new(
-                    geometry.inner_x,
-                    self.container_content_start(geometry, style),
-                    geometry.inner_width,
-                    &child_style,
-                    details,
-                ),
+                geometry,
+                &child_style,
+                details,
                 available_height,
+                ordered_list,
             )
         };
         accept_flow_result(&mut self.layout_error, result, geometry.start)
+    }
+
+    fn render_container_flow_children(
+        &mut self,
+        children: &[HtmlDocumentNode],
+        geometry: &ContainerGeometry,
+        style: &CssStyle,
+        details: DetailsContext,
+        available_height: Option<f32>,
+        ordered_list: Option<bool>,
+    ) -> Result<f32, String> {
+        let layout = LayoutContext::new(
+            geometry.inner_x,
+            self.container_content_start(geometry, style),
+            geometry.inner_width,
+            style,
+            details,
+        );
+        match ordered_list {
+            Some(ordered) => {
+                self.render_list_flow_children(children, layout, available_height, ordered)
+            }
+            None => self.render_flow_children(children, layout, available_height),
+        }
     }
 
     fn container_content_start(&self, geometry: &ContainerGeometry, style: &CssStyle) -> f32 {

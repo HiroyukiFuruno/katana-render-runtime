@@ -36,6 +36,7 @@ const DEFAULT_CSS_VIEWPORT_WIDTH: f32 = 1024.0;
 #[derive(Debug)]
 pub(super) struct StaticCss {
     rules: Vec<CssRule>,
+    has_variable_declarations: bool,
     mode: CssResolutionMode,
     viewport_width: f32,
 }
@@ -63,8 +64,10 @@ impl StaticCss {
         for rule in rules.iter_mut().take(user_agent_count) {
             rule.user_agent = true;
         }
+        let has_variable_declarations = rules_have_variables(&rules);
         Self {
             rules,
+            has_variable_declarations,
             mode: CssResolutionMode::InteractiveRuntime,
             viewport_width,
         }
@@ -72,12 +75,26 @@ impl StaticCss {
 
     fn with_mode(document: &Handle, mode: CssResolutionMode) -> Self {
         let source = inline_styles(document);
+        let rules = parse_rules(&source);
         Self {
-            rules: parse_rules(&source),
+            has_variable_declarations: rules_have_variables(&rules),
+            rules,
             mode,
             viewport_width: DEFAULT_CSS_VIEWPORT_WIDTH,
         }
     }
+
+    pub(super) fn has_variable_declarations(&self) -> bool {
+        self.has_variable_declarations
+    }
+}
+
+fn rules_have_variables(rules: &[CssRule]) -> bool {
+    rules.iter().any(|rule| {
+        rule.declarations
+            .iter()
+            .any(|declaration| declaration.value.contains("var("))
+    })
 }
 
 #[cfg(test)]

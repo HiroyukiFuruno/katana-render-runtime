@@ -40,15 +40,17 @@ pub(super) fn embedded_svg_size(
     let view_box = attribute(attributes, "viewbox").and_then(parse_view_box);
     let natural_width = natural_svg_width(attributes, available_width, view_box);
     let width = used_svg_width(natural_width, available_width, style);
-    /* WHY: SVGの明示height属性は、widthのCSS指定やmax-widthではautoへ変更されない。 */
-    let height = style
-        .height
-        .or_else(|| {
-            attribute(attributes, "height")
-                .and_then(|value| parse_svg_length(value, available_width))
-        })
-        .unwrap_or_else(|| auto_svg_height(width, natural_width, view_box))
-        .max(CONTROL_HEIGHT);
+    /* WHY: CSSのheight:autoはSVGの自然比率を使い、height属性より優先する。 */
+    let height = if let Some(height) = style.height {
+        height
+    } else if style.explicit_height_auto {
+        auto_svg_height(width, natural_width, view_box)
+    } else {
+        attribute(attributes, "height")
+            .and_then(|value| parse_svg_length(value, available_width))
+            .unwrap_or_else(|| auto_svg_height(width, natural_width, view_box))
+    }
+    .max(CONTROL_HEIGHT);
     (width, height)
 }
 

@@ -60,6 +60,33 @@ fn percentage_svg_uses_default_intrinsic_width_in_nested_auto_flex() -> TestResu
 }
 
 #[test]
+fn embedded_svg_auto_margins_position_the_resolved_width() -> TestResult {
+    let cases = [
+        (320, "80", "margin:0 auto", 120.0, 80.0),
+        (320, "80", "margin-left:auto;margin-right:0", 240.0, 80.0),
+        (320, "80", "margin-left:0;margin-right:auto", 0.0, 80.0),
+        (320, "80", "margin-left:12px;margin-right:20px", 12.0, 80.0),
+        (320, "100%", "max-width:120px;margin:0 auto", 100.0, 120.0),
+        (60, "80", "margin:0 auto", 0.0, 60.0),
+    ];
+    for (host_width, svg_width, style, expected_x, expected_width) in cases {
+        let styled_svg = NATURAL_SVG.replacen(
+            "width=\"80\" height=\"50\"",
+            &format!("width=\"{svg_width}\" height=\"50\" style=\"{style}\""),
+            1,
+        );
+        let html = format!(
+            "<style>html,body{{margin:0}}</style><div style=\"width:{host_width}px\">{styled_svg}</div>"
+        );
+        assert_eq!(
+            rendered_svg_x_and_width(&html)?,
+            (expected_x, expected_width)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn explicit_css_width_takes_priority_over_svg_width_attribute() -> TestResult {
     let svg = NATURAL_SVG.replacen(
         "width=\"80\" height=\"50\"",
@@ -78,6 +105,30 @@ fn explicit_css_height_takes_priority_over_svg_height_attribute() -> TestResult 
         1,
     );
     assert_geometry(&capture_html(&svg, true), 160.0, 30.0)
+}
+
+#[test]
+fn css_auto_height_uses_svg_view_box_ratio_instead_of_height_attribute() {
+    let attributes = [
+        ("width".to_owned(), "1144".to_owned()),
+        ("height".to_owned(), "404".to_owned()),
+        ("viewbox".to_owned(), "0 0 1144 404".to_owned()),
+    ];
+    let auto_style = CssStyle::from_attributes(
+        &[("style".to_owned(), "width:1120px;height:auto".to_owned())],
+        &CssStyle::browser_default(),
+    );
+    let auto_size = embedded_svg_size(&attributes, 1120.0, &auto_style);
+    assert!((auto_size.1 - 395.524_48).abs() < 0.001);
+
+    let width_only_style = CssStyle::from_attributes(
+        &[("style".to_owned(), "width:1120px".to_owned())],
+        &CssStyle::browser_default(),
+    );
+    assert_eq!(
+        embedded_svg_size(&attributes, 1120.0, &width_only_style),
+        (1120.0, 404.0)
+    );
 }
 
 #[test]
@@ -187,12 +238,7 @@ fn capture_pixels(html: &str) -> TestResult<Vec<u8>> {
 }
 
 fn assert_geometry(html: &str, width: f32, height: f32) -> TestResult {
-    let document = HtmlDocument::parse(html);
-    let nodes = document.interactive_nodes_with_styles(&HashMap::new());
-    let viewport = HtmlBrowserViewport::new(CAPTURE_WIDTH, CAPTURE_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())?;
-    let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
-    let root = Element::parse(layout.svg.as_bytes()).map_err(|error| error.to_string())?;
+    let root = rendered_svg_document(html)?;
     let svg = find_svg(&root).ok_or("missing embedded SVG")?;
     for (name, expected) in [("width", width), ("height", height)] {
         let actual = svg
@@ -215,4 +261,29 @@ fn find_svg(root: &Element) -> Option<&Element> {
         XMLNode::Element(element) => find_svg(element),
         _ => None,
     })
+}
+
+fn rendered_svg_x_and_width(html: &str) -> TestResult<(f32, f32)> {
+    let root = rendered_svg_document(html)?;
+    let svg = find_svg(&root).ok_or("missing embedded SVG")?;
+    let x = svg_coordinate(svg, "x")?;
+    let width = svg_coordinate(svg, "width")?;
+    Ok((x, width))
+}
+
+fn rendered_svg_document(html: &str) -> TestResult<Element> {
+    let document = HtmlDocument::parse(html);
+    let nodes = document.interactive_nodes_with_styles(&HashMap::new());
+    let viewport = HtmlBrowserViewport::new(CAPTURE_WIDTH, CAPTURE_HEIGHT, 1.0)
+        .map_err(|error| error.to_string())?;
+    let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
+    Element::parse(layout.svg.as_bytes()).map_err(|error| error.to_string())
+}
+
+fn svg_coordinate(svg: &Element, name: &str) -> TestResult<f32> {
+    svg.attributes
+        .get(name)
+        .ok_or_else(|| format!("missing SVG {name}"))?
+        .parse::<f32>()
+        .map_err(|error| error.to_string())
 }

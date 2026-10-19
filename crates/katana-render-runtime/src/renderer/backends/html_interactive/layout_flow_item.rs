@@ -1,10 +1,11 @@
-use super::super::html_browser::HtmlBrowserViewport;
 use super::super::html_document::HtmlDocumentNode;
 use super::layout::HtmlLayoutRenderer;
-use super::layout_measurement_cache::FlowMeasurementKey;
+use super::layout_flow::ListItemMarker;
 use super::style::CssStyle;
-use super::types::{DetailsContext, ElementRenderContext, LayoutContext};
-use std::rc::Rc;
+use super::types::{ElementRenderContext, LayoutContext};
+
+#[path = "layout_flow_item_measure.rs"]
+mod measure;
 
 impl HtmlLayoutRenderer {
     pub(super) fn render_flow_node(
@@ -13,10 +14,29 @@ impl HtmlLayoutRenderer {
         layout: LayoutContext<'_>,
         assigned_height: Option<f32>,
     ) -> f32 {
+        self.render_flow_node_with_list_marker(node, layout, assigned_height, None)
+    }
+
+    pub(super) fn render_flow_node_with_list_marker(
+        &mut self,
+        node: &HtmlDocumentNode,
+        layout: LayoutContext<'_>,
+        assigned_height: Option<f32>,
+        marker: Option<ListItemMarker>,
+    ) -> f32 {
+        self.render_flow_node_with_measurement_mode(node, layout, assigned_height, marker, false)
+    }
+
+    fn render_flow_node_with_measurement_mode(
+        &mut self,
+        node: &HtmlDocumentNode,
+        layout: LayoutContext<'_>,
+        assigned_height: Option<f32>,
+        marker: Option<ListItemMarker>,
+        list_item_container: bool,
+    ) -> f32 {
         match node {
-            HtmlDocumentNode::Text(text) => {
-                self.render_text(text, layout.x, layout.y, layout.width, layout.style)
-            }
+            HtmlDocumentNode::Text(text) => self.render_flow_text_node(text, layout),
             HtmlDocumentNode::Element {
                 node_id,
                 tag,
@@ -31,8 +51,14 @@ impl HtmlLayoutRenderer {
                 },
                 layout,
                 assigned_height,
+                marker,
+                list_item_container,
             ),
         }
+    }
+
+    fn render_flow_text_node(&mut self, text: &str, layout: LayoutContext<'_>) -> f32 {
+        self.render_text(text, layout.x, layout.y, layout.width, layout.style)
     }
 
     fn render_flow_element(
@@ -40,18 +66,24 @@ impl HtmlLayoutRenderer {
         element: ElementRenderContext<'_>,
         layout: LayoutContext<'_>,
         assigned_height: Option<f32>,
+        marker: Option<ListItemMarker>,
+        list_item_container: bool,
     ) -> f32 {
         let style = self.prepare_flow_style(element, layout, assigned_height);
         let (sticky_x, sticky_y) = self.flow_element_position(&style, layout);
         let scope = self.begin_element_paint_scope(element.node_id, &style);
-        let bottom = self.render_styled_element(
+        let element_layout = LayoutContext {
+            style: &style,
+            x: sticky_x,
+            y: sticky_y,
+            ..layout
+        };
+        let bottom = render_flow_element_contents(
+            self,
             element,
-            LayoutContext {
-                style: &style,
-                x: sticky_x,
-                y: sticky_y,
-                ..layout
-            },
+            element_layout,
+            marker,
+            list_item_container,
         );
         self.finish_element_paint_scope(scope, element.node_id, &style);
         layout.y + (bottom - sticky_y)
@@ -85,59 +117,32 @@ impl HtmlLayoutRenderer {
         };
         (sticky_x, sticky_y)
     }
+}
 
-    pub(super) fn measure_flow_node_height(
-        &self,
-        node: &HtmlDocumentNode,
-        width: f32,
-        inherited: &CssStyle,
-        details: DetailsContext,
-    ) -> Result<f32, String> {
-        let cache_key = FlowMeasurementKey::for_node(node, width);
-        if let Some(height) = cache_key.and_then(|key| self.flow_measurements.borrow_mut().get(key))
-        {
-            return Ok(height);
+fn render_flow_element_contents(
+    renderer: &mut HtmlLayoutRenderer,
+    element: ElementRenderContext<'_>,
+    layout: LayoutContext<'_>,
+    marker: Option<ListItemMarker>,
+    list_item_container: bool,
+) -> f32 {
+    match (marker, list_item_container, element.tag) {
+        (None, true, "li") => super::layout_element::render_styled_list_item_for_measurement(
+            renderer, element, layout,
+        ),
+        (Some(marker), _, "li") => {
+            renderer.render_styled_list_item_element(element, layout, marker)
         }
-        let height = self.measure_uncached_flow_node_height(node, width, inherited, details)?;
-        if let Some(key) = cache_key {
-            self.flow_measurements.borrow_mut().insert(key, height);
-        }
-        Ok(height)
-    }
-
-    fn measure_uncached_flow_node_height(
-        &self,
-        node: &HtmlDocumentNode,
-        width: f32,
-        inherited: &CssStyle,
-        details: DetailsContext,
-    ) -> Result<f32, String> {
-        let viewport = HtmlBrowserViewport {
-            width: width.ceil().max(1.0) as u32,
-            height: 1,
-            device_scale_factor: 1.0,
-        };
-        let mut renderer = Self::new_with_measurement_cache(
-            viewport,
-            0.0,
-            &self.input_values,
-            self.focused_input,
-            Rc::clone(&self.flow_measurements),
-        );
-        let bottom = renderer.render_flow_node(
-            node,
-            LayoutContext::new(0.0, 0.0, width, inherited, details),
-            None,
-        );
-        renderer.ensure_layout_succeeded()?;
-        Ok(bottom.max(1.0))
+        _ => renderer.render_styled_element(element, layout),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::types::DetailsContext;
     use super::HtmlLayoutRenderer;
-    use super::{CssStyle, DetailsContext, HtmlBrowserViewport, HtmlDocumentNode};
+    use super::{CssStyle, HtmlDocumentNode};
+    use crate::renderer::backends::html_browser::HtmlBrowserViewport;
     use std::collections::HashMap;
 
     #[test]
@@ -157,6 +162,43 @@ mod tests {
         assert_eq!(second_stats.0, first_stats.0 + 1);
         assert_eq!(second_stats.1, first_stats.1);
         Ok(())
+    }
+
+    #[test]
+    fn list_item_container_measurement_uses_a_distinct_cache_entry() -> Result<(), String> {
+        let node = list_item_node();
+        let renderer = test_renderer();
+        let style = CssStyle::browser_default();
+        let ordinary =
+            renderer.measure_flow_node_height(&node, 144.0, &style, DetailsContext::NONE)?;
+        let ordinary_stats = renderer.flow_measurements.borrow().stats();
+        let list_item = renderer.measure_flow_node_height_with_list_mode(
+            &node,
+            144.0,
+            &style,
+            DetailsContext::NONE,
+            true,
+        )?;
+        let list_stats = renderer.flow_measurements.borrow().stats();
+
+        assert_ne!(ordinary, list_item);
+        assert!(
+            list_stats.1 > ordinary_stats.1,
+            "list mode reused ordinary measurement"
+        );
+        Ok(())
+    }
+
+    fn list_item_node() -> HtmlDocumentNode {
+        HtmlDocumentNode::Element {
+            node_id: 3,
+            tag: "li".to_string(),
+            attributes: vec![(
+                "style".to_string(),
+                "min-height:42px;padding:4px".to_string(),
+            )],
+            children: vec![HtmlDocumentNode::Text("Short".to_string())],
+        }
     }
 
     fn nested_flow_node() -> HtmlDocumentNode {
