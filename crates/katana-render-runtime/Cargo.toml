@@ -62,6 +62,7 @@ xmltree = { workspace = true }
 percent-encoding = { workspace = true }
 taffy = { workspace = true }
 cssparser = { workspace = true }
+simplecss = "=0.2.2"
 svgtypes = "=0.16.1"
 unicode-linebreak = { workspace = true }
 unicode-width = { workspace = true }

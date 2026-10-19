@@ -1,18 +1,25 @@
 use super::MAX_RASTERIZED_SVG_EDGE;
 
+#[path = "svg_rasterize_preprocess_geometry.rs"]
+mod geometry;
 #[path = "svg_rasterize_preprocess_marker.rs"]
 mod marker;
 #[path = "svg_rasterize_preprocess_shadow.rs"]
 mod shadow;
+#[path = "svg_rasterize_preprocess_source_edits.rs"]
+mod source_edits;
 
 const LIGHT_DARK_FUNCTION: &str = "light-dark(";
+const FOREIGN_OBJECT_LOCAL_NAME: &str = "foreignObject";
+const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
 
 pub(super) fn preprocess_for_rasterizer(svg_text: &str) -> String {
     let with_xml_entities = normalize_html_entities_for_xml(svg_text);
     let without_foreign_objects = strip_foreign_objects(&with_xml_entities);
     let with_resolved_colors = resolve_light_dark_functions(&without_foreign_objects);
     let with_normalized_shadows = shadow::normalize_filter_shadow_colors(&with_resolved_colors);
-    marker::normalize_marker_selectors(with_normalized_shadows)
+    let with_normalized_markers = marker::normalize_marker_selectors(with_normalized_shadows);
+    geometry::materialize_geometry_properties(with_normalized_markers)
 }
 
 fn normalize_html_entities_for_xml(svg_text: &str) -> String {
@@ -20,25 +27,40 @@ fn normalize_html_entities_for_xml(svg_text: &str) -> String {
 }
 
 fn strip_foreign_objects(svg_text: &str) -> String {
-    let mut output = String::with_capacity(svg_text.len());
-    let mut remaining = svg_text;
-    while let Some(start) = remaining.to_ascii_lowercase().find("<foreignobject") {
-        output.push_str(&remaining[..start]);
-        let after_open = &remaining[start..];
-        let lower_after_open = after_open.to_ascii_lowercase();
-        if let Some(self_close) = lower_after_open.find("/>") {
-            remaining = &after_open[self_close + "/>".len()..];
-            continue;
-        }
-        let Some(close) = lower_after_open.find("</foreignobject>") else {
-            output.push_str(after_open);
-            return output;
-        };
-        remaining = &after_open[close + "</foreignobject>".len()..];
+    if !svg_text
+        .as_bytes()
+        .windows(FOREIGN_OBJECT_LOCAL_NAME.len())
+        .any(|bytes| bytes.eq_ignore_ascii_case(FOREIGN_OBJECT_LOCAL_NAME.as_bytes()))
+    {
+        return svg_text.to_owned();
     }
-    output.push_str(remaining);
-    output
+    let Ok(document) = resvg::usvg::roxmltree::Document::parse(svg_text) else {
+        return svg_text.to_owned();
+    };
+    let edits = document
+        .descendants()
+        .filter(|node| is_foreign_object(*node))
+        .filter(|node| !node.ancestors().skip(1).any(is_foreign_object))
+        .map(|node| source_edits::SourceEdit::new(node.range(), String::new()))
+        .collect();
+    source_edits::apply_source_edits(svg_text, edits, false)
 }
+
+fn is_foreign_object(node: resvg::usvg::roxmltree::Node<'_, '_>) -> bool {
+    node.is_element()
+        && node
+            .tag_name()
+            .name()
+            .eq_ignore_ascii_case(FOREIGN_OBJECT_LOCAL_NAME)
+        && node
+            .tag_name()
+            .namespace()
+            .is_none_or(|namespace| namespace == SVG_NAMESPACE)
+}
+
+#[cfg(test)]
+#[path = "svg_rasterize_preprocess_foreign_object_tests.rs"]
+mod foreign_object_tests;
 
 fn resolve_light_dark_functions(svg_text: &str) -> String {
     let mut result = String::with_capacity(svg_text.len());
