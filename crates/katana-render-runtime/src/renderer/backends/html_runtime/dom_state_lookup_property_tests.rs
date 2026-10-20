@@ -122,6 +122,28 @@ fn select_value_setter_tracks_selection_and_invalidates_empty_override() -> Resu
     Ok(())
 }
 
+#[test]
+fn select_value_dispatch_reaches_optgroup_options_and_rejects_non_select() -> Result<(), String> {
+    let state = HtmlDomBridgeState::new(HtmlDocument::parse(
+        "<div id=plain><select id=choice><option value=outside>Outside</option><optgroup label=Group><option value=inside>Inside</option></optgroup></select></div>",
+    ));
+    let select = element_id(&state, "choice")?;
+    assert_lookup_string(&state, "value", &select, "outside");
+    assert_dom_undefined(state.dispatch("setSelectValue", &[select.clone(), "inside".to_owned()]));
+    assert_lookup_string(&state, "value", &select, "inside");
+    assert_eq!(
+        state
+            .dispatch(
+                "setSelectValue",
+                &[element_id(&state, "plain")?, "inside".to_owned()],
+            )
+            .err()
+            .as_deref(),
+        Some("select value target is not an HTML select")
+    );
+    Ok(())
+}
+
 fn assert_initial_selection(state: &HtmlDomBridgeState, select: &str) {
     assert_lookup_string(state, "value", select, "first");
     assert_dom_undefined(

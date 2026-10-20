@@ -945,6 +945,7 @@ const nativeBase = "crates/katana-render-runtime/src/markdown/mermaid_renderer/"
 const nativeHelper = `${nativeBase}js_runtime_native_width_helpers.rs`;
 const nativeTrace = `${nativeBase}js_runtime_native_width_trace.js`;
 const nativeScripts = `${nativeBase}js_runtime_scripts.rs`;
+const nativeScriptTests = `${nativeBase}js_runtime_scripts_tests.rs`;
 const nativeRoute = [
   nativeHelper,
   `${nativeBase}js_runtime_native_width_tests.rs`,
@@ -1012,9 +1013,12 @@ test("native width projection consumes actual trace and Rust result literal with
 });
 
 test("native width keeps live source binding but ignores unrelated script test edits", () => {
-  const { nativeRoot } = nativeWidthFixture();
-  const target = path.join(nativeRoot, nativeScripts);
-  const before = fs.readFileSync(target);
+  const { nativeRoot, nativeRaw, nativeOrigin } = nativeWidthFixture();
+  const target = path.join(nativeRoot, nativeScriptTests);
+  expect(fs.existsSync(target)).toBe(false);
+  const before = fs.readFileSync(path.join(browserRoot, nativeScriptTests));
+  const parentTarget = path.join(nativeRoot, nativeScripts);
+  const parentBefore = fs.readFileSync(parentTarget);
   const original = before.toString();
   const changed = original.replace(
     'assert!(scripts.iter().any(|it| it.name == "render-mermaid.js"));',
@@ -1022,21 +1026,55 @@ test("native width keeps live source binding but ignores unrelated script test e
   );
   expect(changed).not.toBe(original);
   try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, changed);
-    const raw = new Map<string, ReturnType<typeof physicalUnusedSource>>();
-    const context = nativeWidthUnusedContext(nativeRoot, raw);
-    const source = raw.get(nativeScripts);
-    expect(source?.sha256).toBe(physicalUnusedSource(fs.readFileSync(target)).sha256);
-    expect(source?.sha256).not.toBe(physicalUnusedSource(before).sha256);
-    const program =
-      context.origin instanceof BrowserUnusedOrigin
-        ? context.origin.programs.find((entry) => entry.role === "rust-result-literal")
-        : undefined;
+    expect(fs.readFileSync(target, "utf8")).toBe(changed);
+    const source = nativeRaw.get(nativeScripts);
+    expect(nativeRaw.has(nativeScriptTests)).toBe(false);
+    expect(source?.sha256).toBe(
+      physicalUnusedSource(fs.readFileSync(path.join(nativeRoot, nativeScripts))).sha256,
+    );
+    expect(source?.sha256).toBe(
+      physicalUnusedSource(fs.readFileSync(path.join(browserRoot, nativeScripts))).sha256,
+    );
+    const program = nativeOrigin.programs.find((entry) => entry.role === "rust-result-literal");
     expect(
       program?.consumerRoute?.find((entry) => entry.sourcePath === nativeScripts)?.sourceSha256,
     ).toBe(source?.sha256);
+    expect(program?.consumerRoute?.some((entry) => entry.sourcePath === nativeScriptTests)).toBe(
+      false,
+    );
+
+    const parentChanged = Buffer.concat([
+      parentBefore,
+      Buffer.from("\n#[cfg(test)]\nfn unrelated_script_test_fixture_marker() {}\n"),
+    ]);
+    fs.writeFileSync(parentTarget, parentChanged);
+    expect(fs.readFileSync(parentTarget).equals(parentBefore)).toBe(false);
+    const changedParentSha = physicalUnusedSource(fs.readFileSync(parentTarget)).sha256;
+    expect(changedParentSha).not.toBe(nativeRaw.get(nativeScripts)?.sha256);
+
+    const changedRaw = new Map<string, ReturnType<typeof physicalUnusedSource>>();
+    const changedContext = nativeWidthUnusedContext(nativeRoot, changedRaw);
+    const changedOrigin = changedContext.origin;
+    if (!(changedOrigin instanceof BrowserUnusedOrigin))
+      throw new Error("missing native width origin after unrelated test helper edit");
+    expect(changedOrigin.assembled).toBe(nativeOrigin.assembled);
+    expect(changedRaw.has(nativeScriptTests)).toBe(false);
+    expect(changedRaw.get(nativeScripts)?.sha256).toBe(changedParentSha);
+    const changedProgram = changedOrigin.programs.find(
+      (entry) => entry.role === "rust-result-literal",
+    );
+    expect(
+      changedProgram?.consumerRoute?.find((entry) => entry.sourcePath === nativeScripts)
+        ?.sourceSha256,
+    ).toBe(changedParentSha);
+    expect(
+      changedProgram?.consumerRoute?.some((entry) => entry.sourcePath === nativeScriptTests),
+    ).toBe(false);
   } finally {
-    fs.writeFileSync(target, before);
+    fs.writeFileSync(parentTarget, parentBefore);
+    fs.rmSync(target, { force: true });
   }
 });
 

@@ -4,6 +4,10 @@ projects:
 versionConstraint: '=2.6.2'
 telemetry: false
 
+hasher:
+  ignorePatterns:
+    - "!/.moon/cache/**"
+
 # 既存の依存導入手順とGit hookをmoonから変更させない。
 pipeline:
   installDependencies: false

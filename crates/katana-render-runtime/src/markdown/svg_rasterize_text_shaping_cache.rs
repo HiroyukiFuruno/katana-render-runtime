@@ -351,6 +351,8 @@ mod tests {
     use resvg::usvg;
     use std::sync::Arc;
 
+    include!("svg_rasterize_text_shaping_cache_svg_metrics_tests.rs");
+
     #[test]
     fn repeated_run_measurements_reuse_the_cached_shaped_width() -> Result<(), String> {
         let database = bundled_font_db();

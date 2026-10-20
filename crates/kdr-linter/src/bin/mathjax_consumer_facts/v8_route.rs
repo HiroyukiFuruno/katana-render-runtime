@@ -183,3 +183,9 @@ fn require_resolve(block: &syn::Block) -> Result<(), String> {
         "v8-compile-order",
     )
 }
+#[cfg(test)]
+#[path = "v8_route_test_support.rs"]
+mod test_support;
+#[cfg(test)]
+#[path = "v8_route_tests.rs"]
+mod tests;

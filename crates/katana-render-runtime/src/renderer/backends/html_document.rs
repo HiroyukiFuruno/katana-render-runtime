@@ -317,3 +317,11 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "html_document_form_test_support.rs"]
+mod form_test_support;
+
+#[cfg(test)]
+#[path = "html_document_form_tests.rs"]
+mod form_tests;

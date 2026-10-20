@@ -65,12 +65,14 @@ class LocalCoverageContextTests(unittest.TestCase):
         first = {
             "PATH": "/tools", "LANG": "en_US.UTF-8", "GITHUB_RUN_ID": "1", "API_TOKEN": "secret-a",
             "TMPDIR": "/tmp/one-run",
+            "CODEX_TOOL_CALL_ID": "first-call",
             "RUSTFLAGS": "-D warnings", "CARGO_TARGET_DIR": "/repo/target",
             "CARGO_LLVM_COV_TARGET_DIR": "/repo/target/llvm-cov-target",
             "KRR_LOCAL_COVERAGE_PROFILE_PATH": "/tmp/profile-one.json", **moon_values,
         }
         same = {
             **first, "GITHUB_RUN_ID": "2",
+            "CODEX_TOOL_CALL_ID": "retry-call",
             "_": "/different/last/command",
             "KRR_LOCAL_COVERAGE_PROFILE_PATH": "/tmp/profile-two.json",
             **{name: f"second-{name}" for name in moon_values},

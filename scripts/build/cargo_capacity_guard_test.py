@@ -4357,6 +4357,67 @@ class CoverageDomainUnitTests(unittest.TestCase):
                                 root, Path(environment["CARGO_TARGET_DIR"]), missing, environment,
                             )
 
+    def test_coverage_diagnostic_root_report_is_fixed_detail_only(self) -> None:
+        with self.fixture(diagnostic=True) as (root, args, environment):
+            environment.pop("LLVM_PROFILE_FILE_NAME")
+            output = root / "tmp/quality/root-coverage-detail.json"
+            output.parent.mkdir(parents=True)
+            command = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
+                       "--json", "--output-path", str(output)]
+            args.command = command
+            self.assertEqual(self.execute(root, args, environment, code=7), 7)
+            self.assertEqual(self.calls[-1], command)
+            self.assertFalse(any("nextest" in item for item in self.calls))
+            candidates = (
+                command + ["--summary-only"],
+                command + ["--fail-under-lines", "100"],
+                [*command[:4], "dev", *command[5:]],
+                [*command[:-1], str(root / "tmp/quality/other.json")],
+                [*command[:-1], str(root / "tmp/quality/../quality/root-coverage-detail.json")],
+                [item for item in command if item != "--locked"],
+            )
+            with patch("cargo_capacity_guard.cargo_configuration_paths", return_value=[]), \
+                    patch("cargo_capacity_guard.validate_build_selection"):
+                for candidate in candidates:
+                    with self.subTest(candidate=candidate), self.assertRaisesRegex(RuntimeError, "fixed"):
+                        guard.coverage_diagnostic_selection(
+                            root, Path(environment["CARGO_TARGET_DIR"]), candidate, environment,
+                        )
+                wrong_profile = {**environment, "LLVM_PROFILE_FILE_NAME": "wrong.profraw"}
+                with self.assertRaisesRegex(RuntimeError, "directory/profile overrides"):
+                    guard.coverage_diagnostic_selection(
+                        root, Path(environment["CARGO_TARGET_DIR"]), command, wrong_profile,
+                    )
+
+    def test_coverage_diagnostic_root_report_rejects_unsafe_output_paths(self) -> None:
+        for kind in ("leaf-symlink", "ancestor-symlink", "directory", "fifo", "hardlink"):
+            with self.subTest(kind=kind), self.fixture(diagnostic=True) as (root, args, environment):
+                environment.pop("LLVM_PROFILE_FILE_NAME")
+                output = root / "tmp/quality/root-coverage-detail.json"
+                output.parent.mkdir(parents=True)
+                command = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
+                           "--json", "--output-path", str(output)]
+                args.command = command
+                if kind == "leaf-symlink":
+                    external = root / "external-report.json"
+                    external.write_text("preserve")
+                    output.symlink_to(external)
+                elif kind == "ancestor-symlink":
+                    real_parent = root / "tmp/quality-real"
+                    real_parent.mkdir()
+                    output.parent.rmdir()
+                    output.parent.symlink_to(real_parent)
+                elif kind == "directory":
+                    output.mkdir()
+                elif kind == "fifo":
+                    os.mkfifo(output)
+                else:
+                    output.write_text("linked")
+                    os.link(output, root / "external-report.json")
+                with self.assertRaisesRegex(RuntimeError, "symlink|directory|single-link"):
+                    self.execute(root, args, environment)
+                self.assertEqual(self.calls, [])
+
     def test_coverage_collection_rejects_diagnostic_process_pool(self) -> None:
         with self.fixture(action="test", collection=True) as (root, args, environment):
             environment["LLVM_PROFILE_FILE_NAME"] = "krr-nextest-diagnostic-123e4567-e89b-42d3-a456-426614174000-%4m.profraw"

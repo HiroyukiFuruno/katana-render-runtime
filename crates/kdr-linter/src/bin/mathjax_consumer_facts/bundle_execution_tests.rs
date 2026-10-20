@@ -16,6 +16,11 @@ const BUNDLE_EXECUTION_MUTATIONS: &[(&str, &str, &str)] = &[
         "katanaRunMathJaxRuntime();",
         "global-invocation:template",
     ),
+    (
+        "format!(\"katanaRunMathJaxRuntime({request_json});\")",
+        "request_json.to_owned()",
+        "global-invocation:format",
+    ),
 ];
 
 const BUNDLE_STRUCTURE_MUTATIONS: &[(&str, &str, &str)] = &[

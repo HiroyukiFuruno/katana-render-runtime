@@ -3,39 +3,24 @@ use super::{
     ResourceFile, SelectedFont,
 };
 use crate::system::ProcessService;
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Output,
-    sync::atomic::{AtomicUsize, Ordering},
-};
-
-static NEXT_TEMP_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
+use std::{fs, path::Path, process::Output};
 
 pub(super) const PROBE_TEST: &str =
     "markdown::chrome_font_identity_probe_tests::chrome_font_identity_probe_cli";
 
-pub(super) struct TempDirectory(PathBuf);
+pub(super) struct TempDirectory(tempfile::TempDir);
 
 impl TempDirectory {
     pub(super) fn new() -> Result<Self, String> {
-        let serial = NEXT_TEMP_DIRECTORY.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "krr-chrome-font-identity-{}-{serial}",
-            std::process::id()
-        ));
-        fs::create_dir(&path).map_err(|error| format!("create temp directory: {error}"))?;
-        Ok(Self(path))
+        tempfile::Builder::new()
+            .prefix("krr-chrome-font-identity-")
+            .tempdir()
+            .map(Self)
+            .map_err(|error| format!("create temp directory: {error}"))
     }
 
     pub(super) fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDirectory {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        self.0.path()
     }
 }
 
@@ -126,3 +111,7 @@ fn read_response(response_path: &Path) -> Result<ProbeResponse, String> {
     let bytes = fs::read(response_path).map_err(|error| format!("read response: {error}"))?;
     serde_json::from_slice(&bytes).map_err(|error| format!("parse response: {error}"))
 }
+
+#[cfg(test)]
+#[path = "test_support_contract_tests.rs"]
+mod contract_tests;

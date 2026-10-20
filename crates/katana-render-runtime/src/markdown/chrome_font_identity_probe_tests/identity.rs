@@ -136,3 +136,7 @@ pub(super) fn unique_file_face(database: &Database) -> Option<(PathBuf, FaceInfo
         supported_font_path(&path).then_some((path, face.clone()))
     })
 }
+
+#[cfg(test)]
+#[path = "identity_contract_tests.rs"]
+mod contract_tests;

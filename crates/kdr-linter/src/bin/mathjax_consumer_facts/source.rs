@@ -183,3 +183,7 @@ fn hex(bytes: &[u8]) -> String {
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "source_tests.rs"]
+mod ast_linter_source_tests;

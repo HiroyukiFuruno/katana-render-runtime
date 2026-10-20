@@ -179,35 +179,44 @@ fn stream_catalog_measurement_dispatches_real_scroll() -> Result<(), Box<dyn std
     Ok(())
 }
 
-#[test]
-fn resize_viewport_one_expands_to_two() -> Result<(), Box<dyn std::error::Error>> {
-    let viewport = HtmlBrowserViewport::new(1, 1, 1.0)?;
-    let resized = super::narrower_resize_viewport(viewport)?;
-    assert_eq!(resized.width, 2);
-    assert_eq!(resized.height, 1);
-    assert!((resized.device_scale_factor - 1.0).abs() < f32::EPSILON);
-    Ok(())
-}
-
-#[test]
-fn resize_one_pixel_session_produces_a_new_raster_frame() -> Result<(), Box<dyn std::error::Error>>
-{
-    let viewport = HtmlBrowserViewport::new(1, 1, 1.0)?;
+fn assert_real_session_resize(
+    width: u32,
+    height: u32,
+    scale: f32,
+    expected_width: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let viewport = HtmlBrowserViewport::new(width, height, scale)?;
     let mut session = open_fixture_at(
         "<html><body>x</body></html>",
         "https://example.test/resize",
         viewport,
     )?;
-    let before = session.latest_frame().ok_or("missing initial frame")?;
-    let generation_before = before.generation;
+    let generation_before = session
+        .latest_frame()
+        .ok_or("missing initial frame")?
+        .generation;
     let resized = super::narrower_resize_viewport(viewport)?;
     session.resize(resized)?;
     let generation_after = super::validate_resized_frame(&session, resized, generation_before)?;
     let frame = session.latest_frame().ok_or("missing resized frame")?;
+    assert_eq!(resized.width, expected_width);
     assert_eq!(frame.viewport, resized);
+    assert_eq!(resized.height, height);
+    assert!((resized.device_scale_factor - scale).abs() < f32::EPSILON);
     assert!(generation_after > generation_before);
     assert!(!frame.pixels.is_empty());
     session.close()?;
+    Ok(())
+}
+
+#[test]
+fn real_session_resize_handles_minimum_regular_and_scaled_viewports(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for (width, height, scale, expected_width) in
+        [(1, 1, 1.0, 2), (1280, 900, 1.0, 960), (1280, 900, 2.0, 960)]
+    {
+        assert_real_session_resize(width, height, scale, expected_width)?;
+    }
     Ok(())
 }
 

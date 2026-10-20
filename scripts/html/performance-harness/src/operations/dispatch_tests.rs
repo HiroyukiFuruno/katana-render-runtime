@@ -278,3 +278,21 @@ fn assert_time_advance_dispatched(
     );
     Ok(())
 }
+
+#[cfg(feature = "candidate")]
+#[test]
+fn closed_session_time_advance_returns_session_closed_error(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut session = open_timer_session()?;
+    session.close()?;
+    let error = dispatch_catalog_input(
+        &mut session,
+        &CatalogInput::AdvanceTime {
+            elapsed_ms: VALID_TIME_ADVANCES_MS[0],
+        },
+    )
+    .err()
+    .ok_or("closed session accepted time advance")?;
+    assert_eq!(error.to_string(), "browser session is closed");
+    Ok(())
+}

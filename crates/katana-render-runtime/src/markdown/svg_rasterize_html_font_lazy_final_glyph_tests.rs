@@ -1,3 +1,6 @@
+use super::test_support::{
+    audit_svg, root_tree, svg_with_many_text_spans, svg_with_repeated_glyph_text,
+};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
 
 #[test]
@@ -35,6 +38,37 @@ fn actual_raster_route_bounds_glyph_layout_sidecar() -> Result<(), String> {
         .ok_or("root glyph tree evidence is absent")?;
     assert_glyph_cap(tree)?;
     assert_eq!(audit["finalGlyphDropped"], 0);
+    Ok(())
+}
+
+#[test]
+fn actual_raster_route_bounds_layout_text_spans() -> Result<(), String> {
+    let svg = svg_with_many_text_spans();
+    let audit = audit_svg(&svg)?;
+    let tree = root_tree(&audit)?;
+    assert_eq!(
+        tree["textSpans"].as_array().map(Vec::len),
+        Some(super::MAX_FINAL_GLYPH_RECORDS)
+    );
+    /* 要求spanとlayout spanは別記録なので、上限超過した各1件を数える。 */
+    assert_eq!(audit["finalGlyphDropped"], 2);
+    Ok(())
+}
+
+#[test]
+fn repeated_glyph_text_keeps_ambiguous_source_span_attribution() -> Result<(), String> {
+    let svg = svg_with_repeated_glyph_text();
+    let audit = audit_svg(&svg)?;
+    let tree = root_tree(&audit)?;
+    let spans = tree["textSpans"]
+        .as_array()
+        .ok_or("text span evidence is absent")?;
+    assert_eq!(spans.len(), 2);
+    for span in spans {
+        assert_eq!(span["requestAssociation"], "ambiguous_text_match");
+        assert!(span["requested"].is_null());
+        assert_eq!(span["requestCandidateIndices"], serde_json::json!([0, 1]));
+    }
     Ok(())
 }
 

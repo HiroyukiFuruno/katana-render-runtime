@@ -21,18 +21,18 @@ fn legacy_inputs(
     changes_pixels: bool,
     expected_state_sha: &str,
 ) -> Result<Inputs, Box<dyn std::error::Error>> {
-    let fixture = temp.0.join("legacy-click.html");
+    let fixture = temp.path().join("legacy-click.html");
     let html = legacy_markup(changes_pixels);
     fs::write(&fixture, html.as_bytes())?;
     let fixture_sha = sha(html.as_bytes());
-    let evidence = temp.0.join("unit-only-state.json");
+    let evidence = temp.path().join("unit-only-state.json");
     fs::write(&evidence, STATE_BYTES)?;
-    let snapshot = temp.0.join("unit-only-source-snapshot.json");
+    let snapshot = temp.path().join("unit-only-source-snapshot.json");
     fs::write(
         &snapshot,
         br#"{"scope":"unit-test-only; not release evidence"}"#,
     )?;
-    let plan = temp.0.join("legacy-operation-plan.json");
+    let plan = temp.path().join("legacy-operation-plan.json");
     write_legacy_plan(&plan, &fixture_sha, &evidence, expected_state_sha)?;
     Ok(Inputs {
         fixture,
@@ -69,7 +69,7 @@ fn assert_legacy_guard_rejected(
     guard_message: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let inputs = legacy_inputs(temp, changes_pixels, expected_state_sha)?;
-    let output = temp.0.join("must-not-exist.json");
+    let output = temp.path().join("must-not-exist.json");
     let result = cli(&inputs, &output)?;
     assert!(!result.status.success());
     let stderr = String::from_utf8_lossy(&result.stderr);
@@ -81,7 +81,7 @@ fn assert_legacy_guard_rejected(
 
 #[test]
 fn cli_rejects_legacy_no_op_click_without_report() -> Result<(), Box<dyn std::error::Error>> {
-    let temp = TempDir::create()?;
+    let temp = super::create_temp_dir()?;
     assert_legacy_guard_rejected(
         &temp,
         false,
@@ -92,7 +92,7 @@ fn cli_rejects_legacy_no_op_click_without_report() -> Result<(), Box<dyn std::er
 
 #[test]
 fn cli_rejects_legacy_wrong_state_sha_without_report() -> Result<(), Box<dyn std::error::Error>> {
-    let temp = TempDir::create()?;
+    let temp = super::create_temp_dir()?;
     assert_legacy_guard_rejected(
         &temp,
         true,

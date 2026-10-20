@@ -102,6 +102,10 @@ mod tests {
         svg_rasterize::SvgRasterizeOps,
     };
 
+    include!("js_runtime_scripts_tests.rs");
+    include!("js_runtime_scripts_geometry_tests.rs");
+    include!("js_runtime_scripts_native_width_assertions_tests.rs");
+
     fn assert_rendered_contains(rendered: &Result<String, String>, expected: &str) {
         assert!(
             rendered.as_ref().is_ok_and(|svg| svg.contains(expected)),
@@ -118,89 +122,10 @@ mod tests {
         DiagramV8Runtime::render(&scripts)
     }
 
-    #[test]
-    fn build_includes_bundle_and_render_script() {
-        let scripts = MermaidRuntimeScripts::build_with_zenuml("bundle", "plugin", "{}");
-        assert!(scripts.iter().any(|it| it.name == "mermaid-runtime.min.js"));
-        assert!(scripts.iter().any(|it| it.name == "mermaid.min.js"));
-        assert!(scripts.iter().any(|it| it.name == "mermaid-zenuml.min.js"));
-        assert!(scripts.iter().any(|it| it.name == "render-mermaid.js"));
-    }
-
-    #[test]
-    fn invalid_request_json_does_not_load_zenuml_runtime() {
-        let scripts = MermaidRuntimeScripts::build_with_zenuml("bundle", "plugin", "not-json");
-
-        assert!(!scripts.iter().any(|it| it.name == "zenuml-runtime.min.js"));
-    }
-
-    #[test]
-    fn zenuml_registration_runs_before_render() {
-        let rendered = render_mermaid_request(
-            fake_mermaid(),
-            fake_zenuml(),
-            r##"{"source":"zenuml\nA.method()","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff","diagramType":"zenuml"}"##,
-        );
-
-        assert_rendered_contains(&rendered, "registered");
-    }
-
-    #[test]
-    fn zenuml_directive_source_registers_external_diagram_without_request_hint() {
-        let rendered = render_mermaid_request(
-            fake_mermaid(),
-            fake_zenuml(),
-            r##"{"source":"%%{init: { \"theme\": \"dark\" }}%%\n%% comment\nzenuml\nA.method()","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff"}"##,
-        );
-
-        assert_rendered_contains(&rendered, "registered");
-    }
-
-    #[test]
-    fn runtime_provides_constructable_style_sheet() {
-        let rendered = render_mermaid_request(
-            fake_mermaid_with_style_sheet(),
-            "",
-            r##"{"source":"graph TD; A-->B","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff"}"##,
-        );
-
-        assert_rendered_contains(&rendered, "font-family: sans-serif");
-    }
-
-    #[test]
-    fn runtime_preserves_c4_description_with_explicit_line_break() {
-        let scripts = MermaidRuntimeScripts::build(
-            mermaid_test_bundle(),
-            r##"{"source":"C4Context\nPerson(customer, \"顧客\", \"1行目<br/> 2行目\")","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff","diagramType":"c4"}"##,
-            MermaidDiagramType::Other,
-        );
-
-        let rendered = DiagramV8Runtime::render(&scripts);
-
-        assert!(
-            rendered.as_ref().is_ok_and(|svg| {
-                svg.contains(">1行目</tspan>") && svg.contains(">2行目</tspan>")
-            }),
-            "{rendered:?}"
-        );
-    }
-
     fn mermaid_test_bundle() -> &'static str {
         must_utf8(std::str::from_utf8(must_asset_bytes(
             RuntimeAsset::mermaid().bytes(),
         )))
-    }
-
-    #[test]
-    #[should_panic(expected = "unexpected test error: boom")]
-    fn must_asset_bytes_reports_unexpected_test_errors() {
-        let _ = must_asset_bytes(Err("boom".to_string()));
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid utf-8")]
-    fn must_utf8_reports_unexpected_test_errors() {
-        let _ = must_utf8(std::str::from_utf8(&[u8::MAX]));
     }
 
     fn must_asset_bytes(result: Result<&'static [u8], String>) -> &'static [u8] {
@@ -219,74 +144,6 @@ mod tests {
 
     fn fail(message: String) -> ! {
         std::panic::resume_unwind(Box::new(message))
-    }
-
-    #[test]
-    fn runtime_measures_horizontal_svg_arcs_like_a_browser() {
-        let rendered = render_mermaid_request(
-            fake_mermaid_measuring_horizontal_svg_arcs(),
-            "",
-            r##"{"source":"C4Container\nContainerDb(db, \"DB\", \"SQL\")","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff","diagramType":"c4"}"##,
-        );
-
-        assert_rendered_contains(&rendered, "0:0:216:121.673");
-    }
-
-    #[test]
-    fn runtime_measures_vertical_svg_arcs_like_a_browser() {
-        let rendered = render_mermaid_request(
-            fake_mermaid_measuring_vertical_svg_arcs(),
-            "",
-            r##"{"source":"C4Context\nSystemQueue(queue, \"Queue\")","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff","diagramType":"c4"}"##,
-        );
-
-        assert_rendered_contains(
-            &rendered,
-            "-9.26887261930837:-73.650734:243.80661785792515:73.650734",
-        );
-    }
-
-    #[test]
-    fn runtime_measures_repeated_relative_curves_from_each_segment_origin() {
-        let rendered = render_mermaid_request(
-            fake_mermaid_measuring_repeated_relative_curves(),
-            "",
-            r##"{"source":"graph TD; A-->B","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff"}"##,
-        );
-
-        assert_rendered_contains(&rendered, "10:10:60:0");
-    }
-
-    #[test]
-    fn runtime_matches_browser_c4_canvas_text_width() {
-        let rendered = render_mermaid_request(
-            fake_mermaid_measuring_c4_canvas_text(),
-            "",
-            r##"{"source":"C4Container\nContainerDb(db, \"DB\", \"SQL\")","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff","diagramType":"c4"}"##,
-        );
-
-        assert_rendered_contains(&rendered, "54.279");
-    }
-
-    #[test]
-    fn c4_wide_svg_width_preserves_native_raw_advance() -> Result<(), String> {
-        assert_c4_native_width_contract(&[(
-            "リレーショナルデータベーススキ",
-            "Open Sans, sans-serif",
-            10.5,
-        )])
-    }
-
-    #[test]
-    fn c4_relation_svg_widths_preserve_native_raw_advance() -> Result<(), String> {
-        assert_c4_native_width_contract(&[
-            ("Uses", "Open Sans, sans-serif", 12.0),
-            ("[HTTPS]", "Open Sans, sans-serif", 12.0),
-            ("Reads from and writes to", "Open Sans, sans-serif", 12.0),
-            ("利用する", "Open Sans, sans-serif", 12.0),
-            ("AVATAR", "Arial", 14.0),
-            ("日本語の幅", "Hiragino Sans", 16.0),
-        ])
     }
 
     const C4_NATIVE_WIDTH_PROBE: &str = r#"
@@ -320,7 +177,7 @@ JSON.stringify(rows);
 "#;
 
     fn assert_c4_native_width_contract(cases: &[(&str, &str, f32)]) -> Result<(), String> {
-        let probe = c4_native_width_probe(cases)?;
+        let probe = c4_native_width_probe(cases);
         let scripts = [
             DiagramRuntimeScript::borrowed("mermaid-runtime.min.js", super::MERMAID_RUNTIME),
             DiagramRuntimeScript::owned("c4-native-width-contract.js", probe),
@@ -333,122 +190,9 @@ JSON.stringify(rows);
         })
     }
 
-    fn c4_native_width_probe(cases: &[(&str, &str, f32)]) -> Result<String, String> {
-        serde_json::to_string(cases)
-            .map(|cases| C4_NATIVE_WIDTH_PROBE.replace("CASES", &cases))
-            .map_err(|error| error.to_string())
-    }
-
-    fn assert_c4_native_width_rows(
-        cases: &[(&str, &str, f32)],
-        rows: &[serde_json::Value],
-    ) -> Result<(), String> {
-        assert!(!cases.is_empty());
-        assert_eq!(rows.len(), cases.len());
-        let mut has_rounding_counterexample = false;
-        let mut has_css_rounding_counterexample = false;
-        for (row, &(text, family, size)) in rows.iter().zip(cases) {
-            let (svg_counterexample, css_counterexample) =
-                assert_c4_native_width_row(row, text, family, size)?;
-            has_rounding_counterexample |= svg_counterexample;
-            has_css_rounding_counterexample |= css_counterexample;
-        }
-        assert!(
-            has_rounding_counterexample,
-            "SVG inputs must distinguish raw advance from CSS ceil64"
-        );
-        assert!(
-            has_css_rounding_counterexample,
-            "CSS inputs must distinguish ceil64 from raw advance"
-        );
-        Ok(())
-    }
-
-    fn assert_c4_native_width_row(
-        row: &serde_json::Value,
-        text: &str,
-        family: &str,
-        size: f32,
-    ) -> Result<(bool, bool), String> {
-        let calls = row["calls"].as_array().ok_or("native calls missing")?;
-        assert_eq!(calls.len(), 2, "{text:?}: {calls:?}");
-        assert_c4_native_call_arguments(calls, text, family, size)?;
-        let svg_advance = assert_c4_native_svg_reference(&calls[0], row, text, family, size)?;
-        let css_raw = SvgRasterizeOps::measure_html_text(text, family, size, 400, false, 0.0, None)
-            .map_err(|error| format!("CSS {text:?}, {family}: {error:?}"))?;
-        assert!(css_raw.is_finite() && css_raw > 1.0);
-        let css_expected = (f64::from(css_raw) * 64.0).ceil() / 64.0;
-        assert_eq!(calls[1]["width"].as_f64(), Some(css_expected), "{text:?}");
-        assert_eq!(row["cssWidth"].as_f64(), Some(css_expected), "{text:?}");
-        let rounded_svg = (f64::from(svg_advance) * 64.0).ceil() / 64.0;
-        Ok((
-            rounded_svg as f32 != svg_advance,
-            f64::from(css_raw) != css_expected,
-        ))
-    }
-
-    fn assert_c4_native_svg_reference(
-        call: &serde_json::Value,
-        row: &serde_json::Value,
-        text: &str,
-        family: &str,
-        size: f32,
-    ) -> Result<f32, String> {
-        let svg = SvgRasterizeOps::measure_svg_text_metrics(text, family, size, 400, false)
-            .map_err(|error| format!("SVG {text:?}, {family}: {error:?}"))?;
-        assert!(
-            svg.advance.is_finite()
-                && svg.advance > 1.0
-                && svg.ascent.is_finite()
-                && svg.descent.is_finite()
-                && svg.ascent + svg.descent > 0.0,
-            "nonzero native SVG reference required: {text:?}, {family}"
-        );
-        assert_c4_svg_metrics(call, row, &svg, text, family)?;
-        Ok(svg.advance)
-    }
-
-    fn assert_c4_native_call_arguments(
-        calls: &[serde_json::Value],
-        text: &str,
-        family: &str,
-        size: f32,
-    ) -> Result<(), String> {
-        for (call, kind) in calls.iter().zip(["svg", "css"]) {
-            assert_eq!(call["kind"].as_str(), Some(kind), "{text:?}");
-            let args = call["args"].as_array().ok_or("arguments missing")?;
-            assert_eq!(args.len(), 5, "{text:?}");
-            assert_eq!(args[0].as_str(), Some(text));
-            assert_eq!(args[1].as_str(), Some(family));
-            assert_eq!(args[2].as_f64(), Some(f64::from(size)));
-            assert_eq!(args[3].as_f64(), Some(400.0));
-            assert_eq!(args[4].as_bool(), Some(false));
-        }
-        Ok(())
-    }
-
-    fn assert_c4_svg_metrics(
-        call: &serde_json::Value,
-        row: &serde_json::Value,
-        expected: &crate::markdown::svg_rasterize::SvgTextRunMetrics,
-        text: &str,
-        family: &str,
-    ) -> Result<(), String> {
-        for (name, metric) in [
-            ("advance", expected.advance),
-            ("ascent", expected.ascent),
-            ("descent", expected.descent),
-        ] {
-            assert_eq!(
-                c4_native_f32(&call["metrics"][name])?,
-                metric,
-                "SVG {name}, {text:?}, {family}"
-            );
-        }
-        /* WHY: callbackのraw値を維持し、DOM APIの幅だけChromeと同じ1/64pxへ切り上げる。 */
-        let expected_dom_width = (f64::from(expected.advance) * 64.0).ceil() / 64.0;
-        assert_eq!(row["width"].as_f64(), Some(expected_dom_width), "{text:?}");
-        Ok(())
+    fn c4_native_width_probe(cases: &[(&str, &str, f32)]) -> String {
+        let cases = serde_json::json!(cases).to_string();
+        C4_NATIVE_WIDTH_PROBE.replace("CASES", &cases)
     }
 
     fn c4_native_f32(value: &serde_json::Value) -> Result<f32, String> {
@@ -462,60 +206,6 @@ JSON.stringify(rows);
             .is_finite()
             .then_some(native)
             .ok_or_else(|| "SVG number exceeds f32 range".into())
-    }
-
-    #[test]
-    fn runtime_respects_nearest_c4_font_weight() {
-        let rendered = render_mermaid_request(
-            fake_mermaid_measuring_nearest_c4_font_weight(),
-            "",
-            r##"{"source":"C4Context\nSystemQueue(queue, \"Queue\")","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff","diagramType":"c4"}"##,
-        );
-
-        assert_rendered_contains(&rendered, ">normal<");
-    }
-
-    #[test]
-    fn runtime_applies_descendant_css_text_anchor_to_text_measurement() {
-        let rendered = render_mermaid_request(
-            fake_mermaid_with_descendant_text_anchor(),
-            "",
-            r##"{"source":"block-beta\nA[\"Markdown\"]","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff"}"##,
-        );
-
-        assert_rendered_contains(&rendered, "<text>-");
-    }
-
-    #[test]
-    fn runtime_preserves_er_vendor_viewbox_and_geometry() -> Result<(), String> {
-        let first = original_synthetic_svg(fake_mermaid_with_er_viewbox())?;
-        let second = vary_synthetic_geometry(&first)?;
-        assert_fake_vendor_svg_geometry_is_source_independent(
-            [first, second],
-            [
-                "erDiagram\nDOCUMENT ||--o{ SECTION : contains",
-                "erDiagram\nREPORT ||--o{ PAGE : contains",
-            ],
-        )
-    }
-
-    #[test]
-    fn runtime_preserves_state_viewbox_and_label_geometry() -> Result<(), String> {
-        let cases = [
-            ("-8 -8 184.711 295", "184.711px", "translate(1, -9.5)", None),
-            (
-                "4 4 173 329",
-                "173px",
-                "translate(-60, -9.5)",
-                Some("start"),
-            ),
-            ("4 0 173 333", "173px", "translate(13.5, 2)", Some("end")),
-            ("0 0 173 333", "173px", "translate(0, -9.5)", Some("middle")),
-        ];
-        for (view_box, max_width, transform, text_anchor) in cases {
-            assert_state_case(view_box, max_width, transform, text_anchor)?;
-        }
-        Ok(())
     }
 
     fn assert_state_case(
@@ -564,183 +254,6 @@ JSON.stringify(rows);
             None if !rendered.contains("text-anchor=") => Ok(()),
             None => Err("state text anchor was added".to_owned()),
         }
-    }
-
-    #[test]
-    fn runtime_normalizes_requirement_viewbox_to_browser_bounds() -> Result<(), String> {
-        let first = original_synthetic_svg(fake_mermaid_with_requirement_viewbox())?;
-        let second = vary_synthetic_geometry(&first)?;
-        assert_fake_svg_geometry_is_source_independent(
-            [first, second],
-            [
-                "requirementDiagram\nrequirement test_req { id: 1 }",
-                "requirementDiagram\nrequirement second_req { id: 2 }",
-            ],
-        )
-    }
-
-    #[test]
-    fn runtime_preserves_fake_raw_class_geometry_and_generic_row_class() -> Result<(), String> {
-        for (first, second, view_box, max_width) in [
-            ("PreviewPane", "RenderedSection", "4 4 311.5 367", "311.5"),
-            ("OtherPane", "OtherSection", "-7 -11 413.25 509.5", "413.25"),
-        ] {
-            let raw = independent_raw_class_geometry(first, second, view_box, max_width);
-            let source =
-                format!("classDiagram\nclass {first}\nclass {second}\n{first} --> {second}");
-            let request = serde_json::json!({
-                "source": source, "svgId": "id", "theme": "dark", "background": "#000",
-                "fill": "#111", "text": "#fff", "stroke": "#fff", "arrow": "#fff",
-            })
-            .to_string();
-            let fake = fake_mermaid_with_class_enumeration_layout(&raw)?;
-            let scripts = MermaidRuntimeScripts::build_with_zenuml(&fake, "", &request);
-            let rendered = DiagramV8Runtime::render(&scripts)?;
-            /* WHY: 一般のrowクラス付与だけを許し、入力定義から独立した形状とpaintの全byteを保持する。 */
-            let expected = raw.replace(
-                "class=\"text-outer-tspan\"",
-                "class=\"text-outer-tspan row\"",
-            );
-            assert_eq!(rendered, expected);
-            assert!(!rendered.contains("235.1796875"));
-            assert!(!rendered.contains("M117.59,146L117.59,150.167"));
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn runtime_normalizes_mindmap_fixture_layout_to_browser_bounds() -> Result<(), String> {
-        let source = "mindmap\n  root((mindmap))";
-        let first = original_mindmap_fixture_svg(0);
-        assert_eq!(svg_attribute_value(&first, "x"), None);
-        let with_x = first.replacen("<path ", "<path x=\"17\" ", 1);
-        assert_eq!(svg_attribute_value(&with_x, "x"), Some("17"));
-        assert_eq!(
-            render_fake_mermaid_for_source(fake_mermaid_with_mindmap_layout(), source)?,
-            render_fake_svg_for_source(&first, source)?,
-        );
-        let normalized = render_fake_svg_for_source(&first, source)?;
-        let namespaced =
-            normalized.replacen("<svg ", "<svg xmlns=\"http://www.w3.org/2000/svg\" ", 1);
-        assert!(matches!(
-            assert_synthetic_svg_contract(&normalized, &namespaced),
-            Err(error) if error.contains("root namespace")
-        ));
-        let second = original_mindmap_fixture_svg(1);
-        assert_fake_svg_geometry_is_source_independent(
-            [first, second],
-            [source, "mindmap\n  root((mindmap revised))"],
-        )
-    }
-
-    #[test]
-    fn runtime_normalizes_simple_mindmap_fixture_layout_to_browser_bounds() -> Result<(), String> {
-        let source = "mindmap\n  root((Mermaid))";
-        let first = original_simple_mindmap_fixture_svg(0);
-        assert_eq!(
-            render_fake_mermaid_for_source(fake_mermaid_with_simple_mindmap_layout(), source)?,
-            render_fake_svg_for_source(&first, source)?,
-        );
-        let second = original_simple_mindmap_fixture_svg(1);
-        assert_fake_svg_geometry_is_source_independent(
-            [first, second],
-            [source, "mindmap\n  root((Mermaid revised))"],
-        )
-    }
-
-    #[test]
-    fn runtime_normalizes_localized_requirement_layout_to_browser_bounds() -> Result<(), String> {
-        let first = original_synthetic_svg(fake_mermaid_with_localized_requirement_layout())?;
-        let second = vary_synthetic_geometry(&first)?;
-        assert_fake_svg_geometry_is_source_independent(
-            [first, second],
-            [
-                "requirementDiagram\nrequirement テスト要件 { id: 1 }",
-                "requirementDiagram\nrequirement   テスト要件 { id: 2 }",
-            ],
-        )
-    }
-
-    #[test]
-    fn runtime_normalizes_japanese_sequence_activation_layout_to_browser_bounds()
-    -> Result<(), String> {
-        let first =
-            original_synthetic_svg(fake_mermaid_with_japanese_sequence_activation_layout())?;
-        let second = vary_synthetic_geometry(&first)?;
-        assert_fake_svg_geometry_is_source_independent(
-            [first, second],
-            [
-                "sequenceDiagram\n田中->>+鈴木: こんにちは鈴木さん、お元気ですか？",
-                "sequenceDiagram\n佐藤->>+高橋: 今日はよろしくお願いします",
-            ],
-        )
-    }
-
-    #[test]
-    fn runtime_normalizes_english_sequence_activation_layout_to_browser_bounds()
-    -> Result<(), String> {
-        let first = original_synthetic_svg(fake_mermaid_with_english_sequence_activation_layout())?;
-        let second = vary_synthetic_geometry(&first)?;
-        assert_fake_svg_geometry_is_source_independent(
-            [first, second],
-            [
-                "sequenceDiagram\nAlice->>+John: Hello John, how are you?",
-                "sequenceDiagram\nMary->>+Paul: Welcome, how are you?",
-            ],
-        )
-    }
-
-    #[test]
-    fn runtime_normalizes_c4_review_keeps_svg_when_source_does_not_match() {
-        let rendered = render_mermaid_request(
-            fake_mermaid_with_c4_review_svg(),
-            "",
-            r##"{"source":"graph TD\nA-->B","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff"}"##,
-        );
-
-        assert!(
-            rendered
-                .as_ref()
-                .is_ok_and(|it| it.contains(r#"style="max-width: 300px;""#)
-                    && it.contains(r#"viewBox="0 0 300 200""#)
-                    && !it.contains(r#"viewBox="0 -70 1148 441""#)),
-            "{rendered:?}"
-        );
-    }
-
-    #[test]
-    fn runtime_normalizes_c4_review_changes_svg_when_source_matches() -> Result<(), String> {
-        let first = original_synthetic_svg(fake_mermaid_with_c4_review_svg())?;
-        let second = vary_synthetic_geometry(&first)?;
-        assert_fake_svg_geometry_is_source_independent(
-            [first, second],
-            [
-                "C4Context\nPerson(a,\"A\")",
-                "C4Context \n Person(b, \"B\")",
-            ],
-        )
-    }
-
-    #[test]
-    fn runtime_reads_html_line_breaks_as_visible_text() {
-        let rendered = render_mermaid_request(
-            fake_mermaid_with_html_line_break(),
-            "",
-            r##"{"source":"mindmap\n  root((mindmap))","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff"}"##,
-        );
-
-        assert_rendered_contains(&rendered, "On effectiveness\nand features");
-    }
-
-    #[test]
-    fn runtime_measures_svg_without_viewbox_with_dom_metrics_helper() {
-        let rendered = render_mermaid_request(
-            fake_mermaid_measuring_svg_without_viewbox(),
-            "",
-            r##"{"source":"graph TD; A-->B","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff"}"##,
-        );
-
-        assert_rendered_contains(&rendered, "800:600");
     }
 
     fn fake_mermaid() -> &'static str {
@@ -1264,7 +777,7 @@ globalThis.mermaid = {
     }
 
     fn render_fake_svg_for_source(raw_svg: &str, source: &str) -> Result<String, String> {
-        let serialized_svg = serde_json::to_string(raw_svg).map_err(|error| error.to_string())?;
+        let serialized_svg = serde_json::Value::String(raw_svg.to_owned()).to_string();
         let fake_mermaid = format!(
             "globalThis.mermaid = {{initialize() {{}}, render: async () => ({{svg: {serialized_svg}}})}};",
         );
@@ -1319,11 +832,11 @@ globalThis.mermaid = {
 "##
     }
 
-    fn fake_mermaid_with_class_enumeration_layout(raw: &str) -> Result<String, String> {
-        let serialized = serde_json::to_string(raw).map_err(|error| error.to_string())?;
-        Ok(format!(
+    fn fake_mermaid_with_class_enumeration_layout(raw: &str) -> String {
+        let serialized = serde_json::Value::String(raw.to_owned()).to_string();
+        format!(
             "globalThis.mermaid = {{initialize() {{}}, render: async () => ({{svg: {serialized}}})}};",
-        ))
+        )
     }
 
     fn independent_raw_class_geometry(
@@ -1468,13 +981,6 @@ globalThis.mermaid = {
         ),
     ];
 
-    #[test]
-    fn synthetic_geometry_helpers_reject_malformed_inputs() -> Result<(), String> {
-        assert_malformed_state_helpers();
-        assert_malformed_svg_attributes()?;
-        assert_malformed_svg_geometry()
-    }
-
     fn assert_malformed_state_helpers() {
         let malformed_state_cases = [
             (
@@ -1523,16 +1029,6 @@ globalThis.mermaid = {
         assert!(original_synthetic_svg("return { svg: `<svg>${value}</svg>` };").is_err());
         assert!(vary_synthetic_child_geometry("<svg/>".into()).is_err());
         assert!(parse_view_box("0 0 NaN 1").is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn removed_fixture_geometry_corrections_preserve_synthetic_svg_geometry() -> Result<(), String>
-    {
-        for (raw, sources) in FIXTURE_SENSITIVE_GEOMETRY_CASES {
-            let varied = vary_synthetic_geometry(raw)?.replacen(r#"y="157""#, r#"y="163""#, 1);
-            assert_fake_svg_geometry_is_source_independent([raw.to_owned(), varied], sources)?;
-        }
         Ok(())
     }
 }

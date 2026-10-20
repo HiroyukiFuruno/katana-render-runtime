@@ -1271,6 +1271,8 @@ def coverage_diagnostic_selection(root: Path, target: Path, command: list[str],
                                   environment: Mapping[str, str]) -> tuple[str, Path]:
     selected = target / "llvm-cov-target"
     words = _unwrap_cargo(command)
+    if words[1:3] == ["llvm-cov", "report"]:
+        return _coverage_diagnostic_report_selection(root, target, words, environment)
     if len(words) < 15 or Path(words[0]).name != "cargo" or words[1:3] != ["llvm-cov", "nextest"]:
         raise RuntimeError("coverage diagnostic requires the fixed Cargo llvm-cov nextest caller")
     expected = ["--workspace", "--all-targets", "--all-features", "--locked",
@@ -1288,6 +1290,32 @@ def coverage_diagnostic_selection(root: Path, target: Path, command: list[str],
     _validate_coverage_environment(root, target, selected, environment, root / "Cargo.toml",
                                    profile_pool_name="diagnostic")
     return "test", selected
+
+
+def _coverage_diagnostic_report_selection(root: Path, target: Path, words: list[str],
+                                          environment: Mapping[str, str]) -> tuple[str, Path]:
+    selected = target / "llvm-cov-target"
+    output = root / "tmp/quality/root-coverage-detail.json"
+    expected = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
+                "--json", "--output-path", str(output)]
+    if words != expected:
+        raise RuntimeError("root coverage diagnostic report differs from its fixed report contract")
+    if not _path_has_no_symlink_components(output, root):
+        raise RuntimeError("root coverage diagnostic output path contains a symlink component")
+    try:
+        if not stat.S_ISDIR(output.parent.lstat().st_mode):
+            raise RuntimeError("root coverage diagnostic output parent must be a directory")
+        try:
+            output_info = output.lstat()
+        except FileNotFoundError:
+            output_info = None
+        if output_info is not None and (
+                not stat.S_ISREG(output_info.st_mode) or output_info.st_nlink != 1):
+            raise RuntimeError("root coverage diagnostic output must be a single-link regular file")
+    except OSError as error:
+        raise RuntimeError("root coverage diagnostic output path is unavailable") from error
+    _validate_coverage_environment(root, target, selected, environment, root / "Cargo.toml")
+    return "report", selected
 
 
 def _validate_nextest_thread_tail(tail: list[str], message: str) -> None:
@@ -2096,7 +2124,8 @@ def run(args: argparse.Namespace) -> int:
                 load_state(state_path, expected_state_sha256)
         if coverage_diagnostic_inputs is not None:
             coverage_tool_version(root, args.command)
-            nextest_tool_version(root, args.command)
+            if "nextest" in _unwrap_cargo(args.command):
+                nextest_tool_version(root, args.command)
             coverage_cleanup_preflight(root, target, coverage_diagnostic_inputs[1], protected_refs)
             if expected_state_sha256 is not None:
                 load_state(state_path, expected_state_sha256)

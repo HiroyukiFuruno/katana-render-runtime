@@ -14,6 +14,7 @@ const REGULAR_FONT_WEIGHT_STYLE: &str = "font-weight:400";
 const INITIAL_MARKUP_RECORDS: usize = 3;
 type FontBytesWeak = Weak<dyn AsRef<[u8]> + Send + Sync>;
 type RealDatabase = (Arc<Database>, ID, FontBytesWeak);
+type MissingCaptureRouteCase = (fn() -> Capture, &'static str);
 
 #[test]
 fn lazy_capture_real_face_enforces_weighted_limit_and_restores_nested_route() -> Result<(), String>
@@ -201,6 +202,82 @@ fn actual_binary_face_audit_keeps_fallback_evidence_and_ignores_missing_ids() ->
     );
     assert_eq!(capture.dropped, 0);
     Ok(())
+}
+
+#[test]
+fn inner_actual_route_panic_restores_outer_diagnostic_scope() {
+    let ((), capture) = with_route(SourceRoute::File, Mode::Audit, || {
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            super::with_actual_route(|| std::panic::resume_unwind(Box::new("inner audit panic")))
+        }));
+        assert!(panic.is_err());
+        assert!(active());
+        assert!(matches!(
+            super::ROUTE.with(std::cell::Cell::get),
+            Some(SourceRoute::File)
+        ));
+        assert!(matches!(
+            super::MODE.with(std::cell::Cell::get),
+            Mode::Audit
+        ));
+        assert!(!super::PASSIVE_AUDIT.with(std::cell::Cell::get));
+        crate::markdown::svg_rasterize::SvgRasterizeOps::record_actual_html_font_markup(
+            "scope restored",
+            REGULAR_FONT_WEIGHT,
+            None,
+            REGULAR_FONT_WEIGHT_STYLE,
+        );
+    });
+    assert!(!active());
+    assert_eq!(capture.html_font_markups.len(), 1);
+    assert_eq!(
+        capture.html_font_markups[0]["computedFamily"],
+        "scope restored"
+    );
+}
+
+#[test]
+fn missing_active_capture_reports_route_error_and_restores_scope() {
+    let cases: [MissingCaptureRouteCase; 2] = [
+        (
+            missing_regular_route_capture,
+            "diagnostic scope missing after operation",
+        ),
+        (
+            missing_actual_route_capture,
+            "actual font audit scope missing after operation",
+        ),
+    ];
+    for (run, expected_error) in cases {
+        let capture = run();
+        assert_eq!(capture.errors, [expected_error]);
+        assert_scope_is_restored();
+    }
+}
+
+fn missing_regular_route_capture() -> Capture {
+    let (_, capture) = with_route(SourceRoute::File, Mode::Audit, remove_active_capture);
+    capture
+}
+
+fn missing_actual_route_capture() -> Capture {
+    let (_, capture) = super::with_actual_route(remove_active_capture);
+    capture
+}
+
+fn remove_active_capture() {
+    let _discarded = super::ACTIVE.with(|active| active.take());
+}
+
+fn assert_scope_is_restored() {
+    assert!(!active());
+    assert!(super::ROUTE.with(std::cell::Cell::get).is_none());
+    assert!(matches!(
+        super::MODE.with(std::cell::Cell::get),
+        Mode::Measure
+    ));
+    assert!(!super::PASSIVE_AUDIT.with(std::cell::Cell::get));
+    assert!(super::ACTIVE.with(|active| active.borrow().is_none()));
 }
 
 #[path = "svg_rasterize_html_font_lazy_diagnostic_file_audit_tests.rs"]

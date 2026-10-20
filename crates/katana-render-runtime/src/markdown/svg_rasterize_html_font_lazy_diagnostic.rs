@@ -221,11 +221,7 @@ pub(super) fn record_actual_selected_face(db: &Database, id: Option<ID>) {
         Some((record, weak)) => (record, weak),
         None => {
             error("selected font source bytes or stable physical stamp could not be audited");
-            let Some(record) = sources::source_record(face, Mode::Measure) else {
-                error("selected font face metadata could not be recorded");
-                return;
-            };
-            record
+            sources::measured_source_record(face)
         }
     };
     let cost = if weak.is_some() { 2 } else { 1 };

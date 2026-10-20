@@ -183,3 +183,7 @@ fn non_finite_geometry() -> String {
 #[cfg(test)]
 #[path = "layout_scroll_extent_geometry_tests.rs"]
 mod geometry_tests;
+
+#[cfg(test)]
+#[path = "layout_scroll_extent_axes_tests.rs"]
+mod axes_tests;

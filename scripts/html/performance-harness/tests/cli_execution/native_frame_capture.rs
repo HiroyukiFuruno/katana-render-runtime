@@ -1,7 +1,7 @@
 use image::ImageReader;
 use std::{fs, path::Path, process::Command};
 
-use super::{fixture_path, sha, TempDir, BIN, HEIGHT, WIDTH};
+use super::{fixture_path, sha, BIN, HEIGHT, WIDTH};
 
 struct FrameRecord {
     path: std::path::PathBuf,
@@ -15,10 +15,10 @@ struct FrameRecord {
 #[test]
 fn candidate_cli_dispatches_native_capture_and_writes_png_frames(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let temp = TempDir::create()?;
+    let temp = super::create_temp_dir()?;
     let fixture = fixture_path()?;
     let fixture_bytes = fs::read(&fixture)?;
-    let output_dir = temp.0.join("native-frames");
+    let output_dir = temp.path().join("native-frames");
     let output = Command::new(BIN)
         .arg("--input")
         .arg(fixture)

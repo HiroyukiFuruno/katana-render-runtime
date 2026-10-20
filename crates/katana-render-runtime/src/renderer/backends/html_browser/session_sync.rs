@@ -189,3 +189,7 @@ impl HtmlBrowserSession {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "session_sync_contract_tests.rs"]
+mod contract_tests;

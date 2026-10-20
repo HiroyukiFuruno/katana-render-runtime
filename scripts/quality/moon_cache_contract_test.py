@@ -880,6 +880,7 @@ def main() -> int:
                     "projects": {"probe": "."},
                     "versionConstraint": "=2.6.2",
                     "telemetry": False,
+                    "hasher": {"ignorePatterns": ["!/.moon/cache/**"]},
                     "pipeline": {
                         "installDependencies": False,
                         "syncProjects": False,

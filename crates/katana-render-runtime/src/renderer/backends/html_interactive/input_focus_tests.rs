@@ -5,9 +5,7 @@ const VIEWPORT_WIDTH: u32 = 320;
 const VIEWPORT_HEIGHT: u32 = 240;
 
 fn start_minimal_session() -> Result<HtmlInteractiveSession, HtmlBrowserError> {
-    let source = HtmlBrowserSource::new("<p>focus coverage</p>", "https://example.com/focus.html")?;
-    let viewport = HtmlBrowserViewport::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, 1.0)?;
-    HtmlInteractiveSession::start(source, viewport)
+    listener_error_session("<p>focus coverage</p>")
 }
 
 fn listener_error_session(html: &str) -> Result<HtmlInteractiveSession, HtmlBrowserError> {
@@ -56,5 +54,103 @@ fn commit_focused_input_propagates_change_listener_errors() -> Result<(), String
     session.dirty_inputs.insert(node_id.0);
     assert!(matches!(session.commit_focused_input(true), Err(error)
         if error.to_string().contains("change failed")));
+    Ok(())
+}
+
+#[test]
+fn pointer_to_keyboard_refocus_renders_visible_focus_for_each_control() -> Result<(), String> {
+    let controls = [
+        ("button", "<button id=target>Focus</button>"),
+        ("link", "<a id=target href=/next>Focus</a>"),
+    ];
+    for (kind, markup) in controls {
+        assert_refocus_visibility(kind, markup)?;
+    }
+    Ok(())
+}
+
+fn assert_refocus_visibility(kind: &str, markup: &str) -> Result<(), String> {
+    let mut session = listener_error_session(markup).map_err(|error| error.to_string())?;
+    let node = session
+        .runtime
+        .node_for_element_id("target")
+        .ok_or_else(|| format!("missing {kind}"))?;
+    session
+        .focus_node(node.0, true, true)
+        .map_err(|error| error.to_string())?;
+    assert!(!session.focus_visible, "pointer focus ring for {kind}");
+    let generation = session.generation;
+    session
+        .focus_node(node.0, false, true)
+        .map_err(|error| error.to_string())?;
+    assert!(session.focus_visible, "keyboard focus for {kind}");
+    assert_eq!(
+        session.latest_frame().map(|frame| frame.generation),
+        Some(generation + 1)
+    );
+    Ok(())
+}
+
+#[test]
+fn focus_listener_errors_propagate_for_pointer_and_keyboard_focus() -> Result<(), String> {
+    for pointer in [true, false] {
+        let html = "<button id=target>Focus</button><script>document.getElementById('target').addEventListener('focus', () => { throw new Error('focus failed'); });</script>";
+        let mut session = listener_error_session(html).map_err(|error| error.to_string())?;
+        let node = session
+            .runtime
+            .node_for_element_id("target")
+            .ok_or("missing focus target")?;
+        let result = session.focus_node(node.0, pointer, false);
+        assert!(matches!(result, Err(error) if error.to_string().contains("focus failed")));
+    }
+    Ok(())
+}
+
+#[test]
+fn key_dispatch_without_body_ignores_keys_and_tab_renders() -> Result<(), String> {
+    let html = r#"<body><script>
+document.addEventListener('keydown', event => {
+  if (event.key === 'ArrowRight') document.body.remove();
+});
+</script></body>"#;
+    let mut session = listener_error_session(html).map_err(|error| error.to_string())?;
+    session
+        .dispatch_key_down("ArrowRight".to_string())
+        .map_err(|error| error.to_string())?;
+    assert!(session.runtime.body_node().is_none());
+    let generation = session.generation;
+    session
+        .dispatch_key_down("ArrowRight".to_string())
+        .map_err(|error| error.to_string())?;
+    assert_eq!(session.generation, generation);
+    session
+        .dispatch_key_down("Tab".to_string())
+        .map_err(|error| error.to_string())?;
+    assert_eq!(session.generation, generation + 1);
+    assert_eq!(session.focused_node, None);
+    Ok(())
+}
+
+#[test]
+fn tab_blurs_focus_after_its_real_dom_target_is_removed() -> Result<(), String> {
+    let html = r#"<button id=target>Focus</button><script>
+document.addEventListener('keydown', event => {
+  if (event.key === 'Tab') document.getElementById('target').remove();
+});
+</script>"#;
+    let mut session = listener_error_session(html).map_err(|error| error.to_string())?;
+    let node = session
+        .runtime
+        .node_for_element_id("target")
+        .ok_or("missing focus target")?;
+    session
+        .focus_node(node.0, false, false)
+        .map_err(|error| error.to_string())?;
+    assert_eq!(session.focused_node, Some(node.0));
+    session
+        .dispatch_key_down("Tab".to_string())
+        .map_err(|error| error.to_string())?;
+    assert_eq!(session.focused_node, None);
+    assert!(!session.focus_visible);
     Ok(())
 }

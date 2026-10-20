@@ -1,10 +1,9 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     process::{Command, Output},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 const BIN: &str = env!("CARGO_BIN_EXE_krr-html-performance-harness");
@@ -18,21 +17,10 @@ const ARM: &str = "baseline-0.4.23";
 #[cfg(feature = "candidate")]
 const ARM: &str = "candidate";
 
-struct TempDir(PathBuf);
+type TempDir = tempfile::TempDir;
 
-impl TempDir {
-    fn create() -> Result<Self, Box<dyn std::error::Error>> {
-        let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let path = env::temp_dir().join(format!("krr-perf-cli-{}-{stamp}", std::process::id()));
-        fs::create_dir(&path)?;
-        Ok(Self(path))
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
+fn create_temp_dir() -> Result<TempDir, Box<dyn std::error::Error>> {
+    Ok(tempfile::Builder::new().prefix("krr-perf-cli-").tempdir()?)
 }
 
 struct Inputs {
@@ -47,9 +35,9 @@ struct Inputs {
 #[test]
 fn cli_measures_five_real_workers_and_records_unit_only_provenance(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let temp = TempDir::create()?;
+    let temp = create_temp_dir()?;
     let inputs = valid_inputs(&temp)?;
-    let output = temp.0.join("measurement.json");
+    let output = temp.path().join("measurement.json");
     let result = cli(&inputs, &output)?;
     assert!(
         result.status.success(),
@@ -63,21 +51,21 @@ fn cli_measures_five_real_workers_and_records_unit_only_provenance(
 
 #[test]
 fn cli_rejects_malformed_plan_without_report() -> Result<(), Box<dyn std::error::Error>> {
-    let temp = TempDir::create()?;
+    let temp = create_temp_dir()?;
     let fixture = fixture_path()?;
-    let plan = temp.0.join("invalid-plan.json");
-    let snapshot = temp.0.join("unit-only-snapshot.json");
+    let plan = temp.path().join("invalid-plan.json");
+    let snapshot = temp.path().join("unit-only-snapshot.json");
     fs::write(&plan, b"{not-json")?;
     fs::write(&snapshot, b"unit-test-only")?;
     let inputs = Inputs {
         fixture,
         plan,
-        evidence: temp.0.join("unused-evidence.json"),
+        evidence: temp.path().join("unused-evidence.json"),
         snapshot,
         fixture_sha: String::new(),
         evidence_bytes: Vec::new(),
     };
-    let output = temp.0.join("must-not-exist.json");
+    let output = temp.path().join("must-not-exist.json");
     let result = cli(&inputs, &output)?;
     assert!(!result.status.success());
     assert!(!output.exists());
@@ -88,17 +76,17 @@ fn cli_rejects_malformed_plan_without_report() -> Result<(), Box<dyn std::error:
 fn valid_inputs(temp: &TempDir) -> Result<Inputs, Box<dyn std::error::Error>> {
     let fixture = fixture_path()?;
     let fixture_sha = sha(&fs::read(&fixture)?);
-    let evidence = temp.0.join("unit-only-dom-state.json");
+    let evidence = temp.path().join("unit-only-dom-state.json");
     let evidence_bytes =
         br#"{"scope":"unit-test-only","states":{"js":{"expanded":true,"result":"opened"}}}"#
             .to_vec();
     fs::write(&evidence, &evidence_bytes)?;
-    let snapshot = temp.0.join("unit-only-source-snapshot.json");
+    let snapshot = temp.path().join("unit-only-source-snapshot.json");
     fs::write(
         &snapshot,
         br#"{"scope":"unit-test-only; not release evidence"}"#,
     )?;
-    let plan = temp.0.join("operation-plan.json");
+    let plan = temp.path().join("operation-plan.json");
     write_plan(&plan, &fixture_sha, &evidence, &evidence_bytes)?;
     Ok(Inputs {
         fixture,

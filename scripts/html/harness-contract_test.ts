@@ -46,6 +46,9 @@ import {
 } from "./harness-contract-graph";
 import { MOON_QUALITY_INPUTS } from "./moon-quality-inputs";
 
+// WHY: 実リポジトリの依存グラフを読むケースには、実測した処理量に応じた上限を設ける。
+const REPOSITORY_GRAPH_TEST_TIMEOUT_MS = 15_000;
+
 function currentMoonConfig(): Record<string, unknown> {
   const source = fs.readFileSync(path.resolve(import.meta.dir, "../../moon.yml"), "utf8");
   return z.record(z.string(), z.unknown()).parse(Bun.YAML.parse(source));
@@ -302,9 +305,9 @@ describe("finite Rust host and MathJax evidence registration", () => {
       fs.readFileSync(path.join(root, "scripts/html/harness-contract-policy.json"), "utf8"),
     ),
   );
-  const graph = (moon: string, recipes = justfile) =>
+  const graph = (moon: string, recipes = justfile, codeRoots = policy.codeRoots) =>
     executionGraph(
-      policy,
+      { ...policy, codeRoots },
       (name) => {
         if (name === "moon.yml") return moon;
         if (name === "Justfile") return recipes;
@@ -314,6 +317,8 @@ describe("finite Rust host and MathJax evidence registration", () => {
       {},
       new Set(),
     );
+  // WHY: Moon設定の改変は、ソースASTを再走査せず同じグラフの依存契約で確認する。
+  const orderGraph = (moon: string) => graph(moon, justfile, []);
   const currentErrors = graph(moonSource).errors;
   const currentOrderErrors = currentErrors.filter((error) => error.includes("order bypass"));
   test.each([
@@ -350,7 +355,9 @@ describe("finite Rust host and MathJax evidence registration", () => {
     const task = changed.tasks[after];
     if (!task) throw new Error("fixture task missing");
     task.deps = task.deps.filter((name) => name !== before);
-    expect(graph(JSON.stringify(changed)).errors).toContain(`${prefix}: ${before} -> ${after}`);
+    expect(orderGraph(JSON.stringify(changed)).errors).toContain(
+      `${prefix}: ${before} -> ${after}`,
+    );
   });
   test("rejects a missing unit dependency through the dependency contract", () => {
     const prefix = "moon contract invalid: ";
@@ -359,7 +366,7 @@ describe("finite Rust host and MathJax evidence registration", () => {
     const task = changed.tasks["unit-test"];
     if (!task) throw new Error("fixture unit-test missing");
     task.deps = ["static"];
-    const errors = graph(JSON.stringify(changed)).errors.filter((error) =>
+    const errors = orderGraph(JSON.stringify(changed)).errors.filter((error) =>
       error.startsWith(prefix),
     );
     expect(errors).toHaveLength(1);
@@ -373,13 +380,13 @@ describe("finite Rust host and MathJax evidence registration", () => {
     const foundation = changed.tasks["source-static-foundation"];
     if (!foundation) throw new Error("fixture foundation missing");
     foundation.deps = foundation.deps.filter((name) => name !== "fmt-check");
-    expect(graph(JSON.stringify(changed)).errors).toContain(
+    expect(orderGraph(JSON.stringify(changed)).errors).toContain(
       "moon foundation leaf missing: fmt-check",
     );
     foundation.deps.push("biome");
-    expect(graph(JSON.stringify(changed)).errors.some((error) => error.includes("cycle"))).toBe(
-      true,
-    );
+    expect(
+      orderGraph(JSON.stringify(changed)).errors.some((error) => error.includes("cycle")),
+    ).toBe(true);
   });
   test.each([
     ["verify", "prepare"],
@@ -387,12 +394,16 @@ describe("finite Rust host and MathJax evidence registration", () => {
     ["runtime-unused-check.ts --gate", "runtime-unused-check.ts"],
     ["runtime-unused-check.ts --gate", "runtime-unused-check.ts --gate --allow-unknown"],
     ["bun scripts/runtime-bundles/runtime-unused-check.ts --gate", "bun run biome"],
-  ])("Biome dispatch rejects %s drift", (before, after) => {
-    const body = justRecipes(justfile).get("biome-run") ?? "";
-    const changed = justfile.replace(body, body.replace(before, after));
-    expect(changed).not.toBe(justfile);
-    expect(graph(moonSource, changed).errors).toContain("Biome bootstrap dispatch differs");
-  });
+  ])(
+    "Biome dispatch rejects %s drift",
+    (before, after) => {
+      const body = justRecipes(justfile).get("biome-run") ?? "";
+      const changed = justfile.replace(body, body.replace(before, after));
+      expect(changed).not.toBe(justfile);
+      expect(graph(moonSource, changed).errors).toContain("Biome bootstrap dispatch differs");
+    },
+    REPOSITORY_GRAPH_TEST_TIMEOUT_MS,
+  );
   test("rejects a wrapper that dispatches back into itself through Moon", () => {
     const changed = justfile.replace(
       "bun run moon exec krr:runtime-asset-script-test",
@@ -2638,6 +2649,30 @@ describe("reviewed native stream unit executable registry", () => {
     expect(bindings[0]?.executions).toHaveLength(3);
   });
 
+  test("rechecks reader bytes when the same wrapper source is analyzed again", () => {
+    const actual = actualNativeUnitSources();
+    let callerBytes = actual.caller;
+    let readerCalls = 0;
+    const references = () =>
+      sourceCode(actual.wrapper, {
+        name: nativeUnitWrapper,
+        importer: nativeUnitCaller,
+        importerSource: actual.caller,
+        read: (name) => {
+          if (name !== nativeUnitCaller) return undefined;
+          readerCalls += 1;
+          return callerBytes;
+        },
+      });
+
+    expect(references()).not.toContain("!unresolved-executable");
+    const priorReaderCalls = readerCalls;
+    callerBytes = actual.caller.replace("process.execPath", "unknownBinary");
+    expect(callerBytes).not.toBe(actual.caller);
+    expect(references()).toContain("!unresolved-executable");
+    expect(readerCalls).toBeGreaterThan(priorReaderCalls);
+  });
+
   test.each([
     ["caller unknown target", "caller", "process.execPath", "unknownBinary"],
     ["caller eval argv", "caller", '"--version"', '"-e"'],
@@ -4387,6 +4422,32 @@ test("runtime bundle cache leaf is authorized in the coverage closure but synthe
     expect(() => verifyMoonRun(fixture.root, request)).toThrow(
       "cached Moon report is not the current on-disk run report",
     );
+  });
+});
+
+test.each([
+  [
+    "additional exclusion",
+    (source: string) =>
+      source.replace('    - "!/.moon/cache/**"', '    - "!/.moon/cache/**"\n    - "!/target/**"'),
+  ],
+  ["broader cache exclusion", (source: string) => source.replace("!/.moon/cache/**", "!/.moon/**")],
+  [
+    "additional hasher setting",
+    (source: string) =>
+      source.replace(
+        "hasher:\n  ignorePatterns:",
+        "hasher:\n  cacheDirectory: .moon/cache\n  ignorePatterns:",
+      ),
+  ],
+] as const)("Moon run contract rejects %s", (_mutation, mutate) => {
+  withTerminalFixture((fixture) => {
+    const workspacePath = path.join(fixture.root, ".moon/workspace.yml");
+    const source = fs.readFileSync(workspacePath, "utf8");
+    const changed = mutate(source);
+    expect(changed).not.toBe(source);
+    fs.writeFileSync(workspacePath, changed);
+    expect(() => moonRunContract(fixture.root)).toThrow();
   });
 });
 

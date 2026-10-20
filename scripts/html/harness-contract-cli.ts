@@ -236,6 +236,9 @@ export function moonRunContract(
     .looseObject({
       projects: z.looseObject({ krr: z.literal(".") }),
       versionConstraint: z.literal("=2.6.2"),
+      hasher: z.strictObject({
+        ignorePatterns: z.tuple([z.literal("!/.moon/cache/**")]),
+      }),
     })
     .parse(Bun.YAML.parse(text(".moon/workspace.yml")));
   z.looseObject({ devDependencies: z.looseObject({ "@moonrepo/cli": z.literal("2.6.2") }) }).parse(

@@ -12,6 +12,9 @@ pub(super) use output::{FinalGlyphError, FinalGlyphTree};
 #[path = "svg_rasterize_html_font_lazy_final_glyph_css_equivalence_tests.rs"]
 mod css_equivalence_tests;
 #[cfg(test)]
+#[path = "svg_rasterize_html_font_lazy_final_glyph_test_support.rs"]
+mod test_support;
+#[cfg(test)]
 #[path = "svg_rasterize_html_font_lazy_final_glyph_tests.rs"]
 mod tests;
 
