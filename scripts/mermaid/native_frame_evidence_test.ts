@@ -20,7 +20,7 @@ import { rasterCaptureHtml } from "./rasterize-svg-dir";
 import { MagickOps } from "./reference_image_ops";
 import { PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA } from "./reference_svg_geometry";
 
-function fixture(language: "en" | "ja" = "en") {
+function fixture(language: "en" | "ja" = "en", requestedSlugs?: string[]) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "krr-native-frame-evidence-"));
   const write = (name: string, body: string) => {
     const file = path.join(root, name);
@@ -34,7 +34,8 @@ function fixture(language: "en" | "ja" = "en") {
   const fontContext = write("font-context.json", "font-context");
   const validPng = makeOnePixelPng();
   const targets =
-    language === "ja" ? PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA : NATIVE_FRAME_TARGETS;
+    requestedSlugs ??
+    (language === "ja" ? PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA : NATIVE_FRAME_TARGETS);
   const rows = targets.map((slug) => ({
     slug,
     inputSvg: write(`${slug}.svg`, `<svg id="${slug}"/>`),
@@ -153,6 +154,27 @@ describe("native frame evidence", () => {
       expect(verifyNativeFrameEvidence(data.value, "ja").rows).toHaveLength(8);
     } finally {
       fs.rmSync(data.root, { recursive: true, force: true });
+    }
+  });
+
+  test("accepts full fixture evidence and rejects the old geometry-only sidecar", () => {
+    const expected = [...NATIVE_FRAME_TARGETS, "native-extra-1"],
+      complete = fixture("en", expected),
+      geometryOnly = fixture();
+    try {
+      expect(verifyNativeFrameEvidence(complete.value, "en", expected).rows).toHaveLength(9);
+      expect(() => verifyNativeFrameEvidence(complete.value, "en", expected.slice(0, -1))).toThrow(
+        "Native frame inventory differs",
+      );
+      expect(() =>
+        verifyNativeFrameEvidence(complete.value, "en", [...expected, expected[0] as string]),
+      ).toThrow("Native frame inventory");
+      expect(() => verifyNativeFrameEvidence(geometryOnly.value, "en", expected)).toThrow(
+        "Native frame inventory differs",
+      );
+    } finally {
+      fs.rmSync(complete.root, { recursive: true, force: true });
+      fs.rmSync(geometryOnly.root, { recursive: true, force: true });
     }
   });
 

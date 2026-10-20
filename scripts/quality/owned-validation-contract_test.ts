@@ -45,6 +45,9 @@ import {
   NATIVE_WIDTH_HASH_INPUTS,
 } from "./owned-validation-contract";
 
+// WHY: 実リポジトリ全体の契約確認は、軽量fixtureとは別の実測に基づく上限で実行する。
+const REPOSITORY_GRAPH_TEST_TIMEOUT_MS = 15_000;
+
 const fixtures: string[] = [];
 let fixtureTemplate: string | undefined;
 const duplication = JSON.parse(
@@ -1308,21 +1311,27 @@ test("scoped NativeWidth binding rejects a changed guarded facts route", () => {
   track(root);
   expectNativeWidthHashRouteFailure(root, "native-width-hash-fact-recipe-unverified");
 });
-test("the actual repository binds the Moon fixture to its real owner in both standard lanes", () => {
-  const report = inspectMoonCacheFixtureRoute(path.resolve(import.meta.dir, "../.."));
-  expect(report.issues.filter((issue) => issue.code.startsWith("moon-cache-fixture-"))).toEqual([]);
-  expect(report.binding.path).toBe("tests/fixtures/quality-cache/moon-cache-subject.test.ts");
-  expect(report.binding.owner).toBe("scripts/quality/moon_cache_contract_test.py");
-  expect(report.binding.ownerAstHelper).toBe("scripts/quality/owned_python_owner_contract.py");
-  expect(report.binding.ownerAstContract).toBe("moon-owner-host-evidence-barrier-v3");
-  expect(report.binding.fixtureVerified).toBe(true);
-  expect(report.binding.ownerAstVerified).toBe(true);
-  expect(report.binding.rootDagVerified).toBe(true);
-  expect(report.binding.localCheckRegistered).toBe(true);
-  expect(report.binding.ciCheckRegistered).toBe(true);
-  expect(report.binding.ownerAstHelperSha256).toMatch(/^[a-f0-9]{64}$/);
-  expect(report.bunUnitRegistered).toBe(true);
-});
+test(
+  "the actual repository binds the Moon fixture to its real owner in both standard lanes",
+  () => {
+    const report = inspectMoonCacheFixtureRoute(path.resolve(import.meta.dir, "../.."));
+    expect(report.issues.filter((issue) => issue.code.startsWith("moon-cache-fixture-"))).toEqual(
+      [],
+    );
+    expect(report.binding.path).toBe("tests/fixtures/quality-cache/moon-cache-subject.test.ts");
+    expect(report.binding.owner).toBe("scripts/quality/moon_cache_contract_test.py");
+    expect(report.binding.ownerAstHelper).toBe("scripts/quality/owned_python_owner_contract.py");
+    expect(report.binding.ownerAstContract).toBe("moon-owner-host-evidence-barrier-v3");
+    expect(report.binding.fixtureVerified).toBe(true);
+    expect(report.binding.ownerAstVerified).toBe(true);
+    expect(report.binding.rootDagVerified).toBe(true);
+    expect(report.binding.localCheckRegistered).toBe(true);
+    expect(report.binding.ciCheckRegistered).toBe(true);
+    expect(report.binding.ownerAstHelperSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(report.bunUnitRegistered).toBe(true);
+  },
+  REPOSITORY_GRAPH_TEST_TIMEOUT_MS,
+);
 const moonRootFixtureConfig = z.object({
   taskOptions: z.record(z.string(), z.unknown()),
   tasks: z.record(
@@ -1585,8 +1594,29 @@ test.each([
     "./scripts/mermaid/native_render_provenance_test.ts",
     "./scripts/mermaid/native_frame_evidence_test.ts",
   ],
+  [
+    "product score",
+    "missing",
+    "./scripts/mermaid/native_product_score_test.ts",
+    "./scripts/quality/duplication-check_test.ts",
+    "./scripts/runtime-bundles/runtime-bundle-checks_test.ts",
+  ],
+  [
+    "product score",
+    "duplicated",
+    "./scripts/mermaid/native_product_score_test.ts",
+    "./scripts/quality/duplication-check_test.ts",
+    "./scripts/runtime-bundles/runtime-bundle-checks_test.ts",
+  ],
+  [
+    "product score",
+    "moved",
+    "./scripts/mermaid/native_product_score_test.ts",
+    "./scripts/quality/duplication-check_test.ts",
+    "./scripts/runtime-bundles/runtime-bundle-checks_test.ts",
+  ],
 ] as const)(
-  "native frame %s registration rejects %s drift",
+  "native %s registration rejects %s drift",
   (_testName, mutation, token, previous, next) => {
     const root = parserFixture();
     const recipe = actualRecipeBody("runtime-asset-script-test");

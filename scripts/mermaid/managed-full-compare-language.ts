@@ -26,8 +26,10 @@ import {
   scoreNativeFramePaintProjection,
   verifyNativeFrameEvidence,
 } from "./native-frame-evidence";
+import { scoreNativeProductRows } from "./native-product-score";
 import { requireNativeRenderInventory } from "./native-render-provenance";
 import { MagickOps } from "./reference_image_ops";
+import type { ReferencePair } from "./reference_pair_repository";
 import { isNeutralGeometryTargetSlug } from "./reference_svg_geometry";
 
 export interface ManagedStep {
@@ -57,6 +59,7 @@ export interface LanguageAcceptance {
   bindingConfig: FilePin;
   nativeFrameEvidence?: FilePin;
   nativeFrameComparison?: FilePin;
+  nativeProductComparison?: FilePin;
   nativeFrameBuildProof: FilePin;
 }
 
@@ -94,6 +97,8 @@ export async function runManagedLanguage(
   let nativeFrameEvidence: FilePin | undefined;
   let nativeEvidenceValue: ReturnType<typeof verifyNativeFrameEvidence> | undefined;
   let nativeFrameComparison: FilePin | undefined;
+  let nativeProductComparison: FilePin | undefined;
+  let nativeProductScore: ReturnType<typeof validateLanguageScoreEvidence> | undefined;
   let nativeFrameAccepted = true;
   assertNativeFrameInputMode(input);
   const capturePins = input.nativeFrameCapture;
@@ -165,22 +170,6 @@ export async function runManagedLanguage(
   if (nativeBindings.size !== slugs.length || slugs.some((slug) => !nativeBindings.has(slug))) {
     throw new Error(`${language} native render receipt differs from the fixed inventory`);
   }
-  if (nativeEvidenceValue !== undefined) {
-    assertNativeFrameInputs(nativeEvidenceValue, svgDirectory, slugs);
-  }
-  if (input.nativeFrameCapture !== undefined) {
-    const captured = captureNativeFrame(
-      request,
-      language,
-      input.nativeFrameCapture,
-      svgDirectory,
-      rasterPairs,
-      workspace,
-    );
-    nativeEvidenceValue = captured.evidence;
-    nativeFrameEvidence = captured.pin;
-  }
-
   runStep(request, outputRoot, steps, `${language}-raster-process`, [
     request.tools.python.path,
     "scripts/mermaid/produce_raster_process_evidence.py",
@@ -206,6 +195,22 @@ export async function runManagedLanguage(
   ]);
   if (!fs.existsSync(rasterEvidence) || !fs.existsSync(rasterReceipt)) {
     throw new Error(`${language} raster producer omitted its process evidence or receipt`);
+  }
+  if (nativeEvidenceValue !== undefined) {
+    assertNativeFrameInputs(nativeEvidenceValue, svgDirectory, rasterPairs, slugs);
+  }
+  if (input.nativeFrameCapture !== undefined) {
+    const captured = captureNativeFrame(
+      request,
+      language,
+      input.nativeFrameCapture,
+      svgDirectory,
+      rasterPairs,
+      workspace,
+      slugs,
+    );
+    nativeEvidenceValue = captured.evidence;
+    nativeFrameEvidence = captured.pin;
   }
 
   const binding = runStep(request, outputRoot, steps, `${language}-comparison-binding`, [
@@ -321,14 +326,27 @@ export async function runManagedLanguage(
     nativeFrameAccepted = [...nativeComparison.scores.values()].every(
       (row) => row.score >= 99 && row.structuralIntegrityAccepted,
     );
+    nativeProductScore = writeNativeProductScores(
+      language,
+      slugs,
+      nativePairs,
+      nativeEvidenceValue.rows,
+      nativeComparison,
+      comparisonDirectory,
+      readJson(path.join(comparisonDirectory, "fixture-inventory.json")),
+    );
+    nativeProductComparison = filePin(
+      path.join(comparisonDirectory, "native-product-comparison", "scores.json"),
+    );
     nativeFrameComparison = filePin(nativeComparison.evidencePath);
   }
+  const requiredNativeProductScore = requireNativeProductScoreEvidence(nativeProductScore);
   return {
     language,
     fixtureCount: score.fixtureCount,
-    minimumScore: score.minimumScore,
-    accepted: score.accepted && nativeFrameAccepted,
-    failedScores: score.scores
+    minimumScore: Math.min(score.minimumScore, requiredNativeProductScore.minimumScore),
+    accepted: score.accepted && nativeFrameAccepted && requiredNativeProductScore.accepted,
+    failedScores: [...score.scores, ...requiredNativeProductScore.scores]
       .filter((row) => !row.passed || row.score < 99)
       .map(({ slug, score, minScore }) => ({ slug, score, minScore })),
     fixtureSources: inventory.sources,
@@ -341,6 +359,7 @@ export async function runManagedLanguage(
     nativeFrameBuildProof: filePin(buildProof.stdoutPath),
     ...(nativeFrameEvidence === undefined ? {} : { nativeFrameEvidence }),
     ...(nativeFrameComparison === undefined ? {} : { nativeFrameComparison }),
+    ...(nativeProductComparison === undefined ? {} : { nativeProductComparison }),
   };
 }
 
@@ -523,6 +542,15 @@ function assertNativeFrameInputMode(input: ManagedFullCompareRequest["languages"
   }
 }
 
+function requireNativeProductScoreEvidence(
+  score: ReturnType<typeof validateLanguageScoreEvidence> | undefined,
+): ReturnType<typeof validateLanguageScoreEvidence> {
+  if (score === undefined) {
+    throw new Error("Formal Mermaid comparison requires native product score evidence");
+  }
+  return score;
+}
+
 function assertNativeFramePins(
   evidence: ReturnType<typeof verifyNativeFrameEvidence>,
   capture:
@@ -563,6 +591,94 @@ function loadNativeFrameEvidence(
   return { evidence, pin: filePin(input.nativeFrameEvidence.path) };
 }
 
+function writeNativeProductScores(
+  language: LanguageName,
+  slugs: readonly string[],
+  pairs: ReferencePair[],
+  frames: ReturnType<typeof verifyNativeFrameEvidence>["rows"],
+  projected: Awaited<ReturnType<typeof scoreNativeFramePaintProjection>>,
+  comparisonDirectory: string,
+  inventory: unknown,
+): ReturnType<typeof validateLanguageScoreEvidence> {
+  const output = buildNativeProductComparison(
+    pairs,
+    frames,
+    projected,
+    comparisonDirectory,
+    slugs.length,
+    inventory,
+  );
+  return validateLanguageScoreEvidence(
+    language,
+    [...slugs],
+    output.scores,
+    inventory,
+    output.context,
+    parsePaintProjectedReferenceEvidence(readJson(output.evidencePath)),
+  );
+}
+
+function buildNativeProductComparison(
+  pairs: ReferencePair[],
+  frames: ReturnType<typeof verifyNativeFrameEvidence>["rows"],
+  projected: Awaited<ReturnType<typeof scoreNativeFramePaintProjection>>,
+  comparisonDirectory: string,
+  expectedSlugCount: number,
+  inventory: unknown,
+) {
+  const directory = path.join(comparisonDirectory, "native-product-comparison");
+  fs.mkdirSync(directory, { mode: 0o700 });
+  const magickDirectory = path.join(directory, "magick"),
+    scores = scoreNativeProductRows(
+      pairs,
+      frames,
+      projected.scores,
+      new MagickOps(magickDirectory, null, "dark"),
+      magickDirectory,
+    ),
+    evidencePath = path.join(directory, "paint-projected-reference-evidence.json"),
+    context = nativeProductContext(expectedSlugCount, evidencePath, projected.evidenceSha256);
+  fs.copyFileSync(projected.evidencePath, evidencePath, fs.constants.COPYFILE_EXCL);
+  writeNativeProductFiles(directory, scores, inventory, context);
+  return { scores, evidencePath, context };
+}
+
+function nativeProductContext(
+  expectedSlugCount: number,
+  evidencePath: string,
+  evidenceSha256: string,
+) {
+  return {
+    mode: "strictVendorOriginal" as const,
+    scope: "formal" as const,
+    expectedSlugCount,
+    emptySlugCount: 0 as const,
+    scoreThreshold: 99 as const,
+    formalAccepted: false as const,
+    independentGold: false as const,
+    scoreSemantics: "rgb-v1+paint-projected-reference-v1" as const,
+    paintProjectedReferenceEvidence: { path: path.basename(evidencePath), sha256: evidenceSha256 },
+  };
+}
+
+function writeNativeProductFiles(
+  directory: string,
+  scores: ReturnType<typeof scoreNativeProductRows>,
+  inventory: unknown,
+  context: ReturnType<typeof nativeProductContext>,
+): void {
+  for (const [name, value] of [
+    ["scores.json", scores],
+    ["fixture-inventory.json", inventory],
+    ["reference-context.json", context],
+  ] as const) {
+    fs.writeFileSync(path.join(directory, name), `${JSON.stringify(value, null, 2)}\n`, {
+      flag: "wx",
+      mode: 0o600,
+    });
+  }
+}
+
 function captureNativeFrame(
   request: ManagedFullCompareRequest,
   language: LanguageName,
@@ -570,6 +686,7 @@ function captureNativeFrame(
   svgDirectory: string,
   rasterDirectory: string,
   workspace: string,
+  slugs: readonly string[],
 ): { evidence: ReturnType<typeof verifyNativeFrameEvidence>; pin: FilePin } {
   const captureDirectory = path.join(workspace, "native-frame"),
     evidence = captureNativeFrameEvidence({
@@ -585,6 +702,7 @@ function captureNativeFrame(
       root: request.repositoryRoot,
       scale: 1,
       scrollY: 0,
+      slugs,
     });
   return { evidence, pin: filePin(path.join(captureDirectory, "native-frame-evidence.json")) };
 }
@@ -592,14 +710,21 @@ function captureNativeFrame(
 function assertNativeFrameInputs(
   evidence: ReturnType<typeof verifyNativeFrameEvidence>,
   svgDirectory: string,
+  rasterDirectory: string,
   slugs: readonly string[],
 ): void {
-  for (const slug of slugs.filter((value) => evidence.rows.some((row) => row.slug === value))) {
+  if (evidence.rows.length !== slugs.length)
+    throw new Error("Native frame input inventory differs");
+  for (const slug of slugs) {
     const row = evidence.rows.find((value) => value.slug === slug);
     if (row === undefined) throw new Error(`Missing native frame input: ${slug}`);
-    const expectedPath = path.resolve(svgDirectory, `${slug}.svg`);
-    if (row.inputSvg.path !== expectedPath || fileSha256(expectedPath) !== row.inputSvg.sha256) {
+    const expectedSvg = path.resolve(svgDirectory, `${slug}.svg`),
+      expectedPng = path.resolve(rasterDirectory, `${slug}.png`);
+    if (row.inputSvg.path !== expectedSvg || fileSha256(expectedSvg) !== row.inputSvg.sha256) {
       throw new Error(`Native frame input differs from current candidate SVG: ${slug}`);
+    }
+    if (row.sourcePng.path !== expectedPng || fileSha256(expectedPng) !== row.sourcePng.sha256) {
+      throw new Error(`Native frame source differs from current raster candidate: ${slug}`);
     }
   }
 }

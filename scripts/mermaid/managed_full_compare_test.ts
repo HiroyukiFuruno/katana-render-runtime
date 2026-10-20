@@ -85,6 +85,26 @@ test("managed native render and raster use the same copied nonempty fixtures", (
   expect(argumentsByProducer.nativeRender[1]).toBe(argumentsByProducer.rasterProcess[1]);
 });
 
+test("managed native frame verification and capture follow raster PNG production", () => {
+  const source = fs.readFileSync(
+      path.join(process.cwd(), "scripts/mermaid/managed-full-compare-language.ts"),
+      "utf8",
+    ),
+    rasterProcess = source.indexOf("-raster-process`"),
+    rasterOutputValidation = source.indexOf(
+      "if (!fs.existsSync(rasterEvidence) || !fs.existsSync(rasterReceipt))",
+    ),
+    sidecarValidation = source.indexOf(
+      "assertNativeFrameInputs(nativeEvidenceValue, svgDirectory, rasterPairs, slugs)",
+    ),
+    frameCapture = source.indexOf("const captured = captureNativeFrame(");
+
+  expect(rasterProcess).toBeGreaterThanOrEqual(0);
+  expect(rasterOutputValidation).toBeGreaterThan(rasterProcess);
+  expect(sidecarValidation).toBeGreaterThan(rasterOutputValidation);
+  expect(frameCapture).toBeGreaterThan(rasterOutputValidation);
+});
+
 test("managed full acceptance rejects partial inventory or any score below 99", () => {
   const en: FullScoreAcceptance = {
     language: "en",

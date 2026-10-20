@@ -3933,8 +3933,15 @@ function removeReviewedRuntimeAssetTests(lines: string[]): string[] | undefined 
   const withoutNativeFrameEvidence = removeReviewedNativeFrameEvidenceTest(
     withoutNativeFrameBuildProof,
   );
-  return withoutNativeFrameEvidence
-    ? removeReviewedNativeRenderBatchTest(withoutNativeFrameEvidence)
+  if (!withoutNativeFrameEvidence) return undefined;
+  const withoutNativeRenderBatch = removeReviewedNativeRenderBatchTest(withoutNativeFrameEvidence);
+  return withoutNativeRenderBatch
+    ? removeReviewedTestToken(
+        withoutNativeRenderBatch,
+        "./scripts/mermaid/native_product_score_test.ts",
+        "./scripts/quality/duplication-check_test.ts",
+        "./scripts/runtime-bundles/runtime-bundle-checks_test.ts",
+      )
     : undefined;
 }
 function removeReviewedRuntimeBundleFingerprintTest(lines: string[]): string[] | undefined {

@@ -77,6 +77,7 @@ export interface NativeFrameCaptureOptions {
   root: string;
   scale: number;
   scrollY: number;
+  slugs?: readonly string[];
 }
 
 export function captureNativeFrameEvidence(
@@ -90,26 +91,37 @@ export function captureNativeFrameEvidence(
     root: path.resolve(options.root),
   };
   fs.mkdirSync(normalized.outputDirectory, { recursive: true, mode: 0o700 });
-  const targets =
-    normalized.language === "ja" ? PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA : NATIVE_FRAME_TARGETS;
-  const rows = targets.map((slug) => captureRow(normalized, slug));
-  const evidence: NativeFrameEvidence = {
-    schema: NATIVE_FRAME_EVIDENCE_SCHEMA,
-    language: normalized.language,
-    probeBinary: normalized.probeBinary,
-    runtime: normalized.runtime,
-    sourceManifest: normalized.sourceManifest,
-    config: normalized.config,
-    fontContext: normalized.fontContext,
-    rows,
-  };
-  const evidencePath = path.join(options.outputDirectory, "native-frame-evidence.json");
+  const targets = requestedFrameTargets(normalized),
+    evidence = buildNativeFrameEvidence(normalized, targets),
+    evidencePath = path.join(options.outputDirectory, "native-frame-evidence.json");
   fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, {
     flag: "wx",
     mode: 0o600,
   });
-  verifyNativeFrameEvidence(evidence, normalized.language);
+  verifyNativeFrameEvidence(evidence, normalized.language, targets);
   return evidence;
+}
+
+function requestedFrameTargets(options: NativeFrameCaptureOptions): readonly string[] {
+  const languageTargets =
+    options.language === "ja" ? PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA : NATIVE_FRAME_TARGETS;
+  return options.slugs ?? languageTargets;
+}
+
+function buildNativeFrameEvidence(
+  options: NativeFrameCaptureOptions,
+  targets: readonly string[],
+): NativeFrameEvidence {
+  return {
+    schema: NATIVE_FRAME_EVIDENCE_SCHEMA,
+    language: options.language,
+    probeBinary: options.probeBinary,
+    runtime: options.runtime,
+    sourceManifest: options.sourceManifest,
+    config: options.config,
+    fontContext: options.fontContext,
+    rows: targets.map((slug) => captureRow(options, slug)),
+  };
 }
 
 function captureRow(
@@ -292,24 +304,11 @@ export function parseNativeFrameEvidence(value: unknown): NativeFrameEvidence {
 export function verifyNativeFrameEvidence(
   value: unknown,
   expectedLanguage: "en" | "ja",
-  expectedSlugs: readonly string[] = NATIVE_FRAME_TARGETS,
+  expectedSlugs?: readonly string[],
 ): NativeFrameEvidence {
   const evidence = parseNativeFrameEvidence(value);
   if (evidence.language !== expectedLanguage) throw new Error("Native frame language differs");
-  const targets = expectedSlugs.filter(isPaintProjectedReferenceTargetSlug);
-  const languageTargets =
-    expectedLanguage === "ja" ? PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA : NATIVE_FRAME_TARGETS;
-  if (targets.length !== languageTargets.length) {
-    throw new Error("Native frame inventory must contain the exact C4/Tree target set");
-  }
-  const slugs = evidence.rows.map((row) => row.slug);
-  if (
-    slugs.length !== targets.length ||
-    new Set(slugs).size !== slugs.length ||
-    JSON.stringify(slugs) !== JSON.stringify(languageTargets)
-  ) {
-    throw new Error("Native frame inventory differs from the fixed C4/Tree target set");
-  }
+  verifyRequestedFrameInventory(evidence, expectedLanguage, expectedSlugs);
   verifyPin(evidence.probeBinary, "native frame probe binary");
   verifyPin(evidence.runtime, "native frame runtime");
   verifyPin(evidence.sourceManifest, "native frame source manifest");
@@ -322,6 +321,32 @@ export function verifyNativeFrameEvidence(
   );
   for (const row of evidence.rows) verifyRow(row, evidence.probeBinary.path, decoder);
   return evidence;
+}
+
+function verifyRequestedFrameInventory(
+  evidence: NativeFrameEvidence,
+  language: "en" | "ja",
+  requestedSlugs?: readonly string[],
+): void {
+  const languageTargets =
+      language === "ja" ? PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA : NATIVE_FRAME_TARGETS,
+    targets = requestedSlugs ?? languageTargets,
+    geometryTargets = targets.filter(isPaintProjectedReferenceTargetSlug),
+    actual = evidence.rows.map((row) => row.slug);
+  if (
+    geometryTargets.length !== languageTargets.length ||
+    languageTargets.some((slug) => !geometryTargets.includes(slug)) ||
+    new Set(targets).size !== targets.length
+  ) {
+    throw new Error("Native frame inventory must contain the exact C4/Tree target set");
+  }
+  if (
+    actual.length !== targets.length ||
+    new Set(actual).size !== actual.length ||
+    JSON.stringify(actual) !== JSON.stringify(targets)
+  ) {
+    throw new Error("Native frame inventory differs from the exact requested fixture set");
+  }
 }
 
 function verifyRow(row: z.infer<typeof rowSchema>, probePath: string, decoder: MagickOps): void {
