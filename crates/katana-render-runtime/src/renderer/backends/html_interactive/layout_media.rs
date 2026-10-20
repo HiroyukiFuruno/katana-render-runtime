@@ -2,7 +2,7 @@ use super::constants::MIN_LAYOUT_WIDTH;
 use super::document::attribute;
 use super::layout::HtmlLayoutRenderer;
 use super::style::CssStyle;
-use super::svg::escape_xml;
+use super::svg::{escape_xml, snap_paint_coordinate};
 use super::types::LayoutContext;
 use crate::renderer::backends::html_document::{
     EMBEDDED_SVG_HEIGHT_PLACEHOLDER, EMBEDDED_SVG_MARKUP_ATTRIBUTE, EMBEDDED_SVG_WIDTH_PLACEHOLDER,
@@ -59,8 +59,15 @@ impl HtmlLayoutRenderer {
         };
         let (svg_width, svg_height) = embedded_svg_size(attributes, available_width, layout.style);
         /* WHY: 自然寸法と幅制約を適用したSVGの実幅からauto marginを解決する。 */
-        let x = embedded_svg_x(layout.x, available_width, svg_width, layout.style) - self.scroll_x;
-        let svg = position_embedded_svg(markup, x, start - self.scroll_y, svg_width, svg_height);
+        /* WHY: SVG原点はCSS座標で丸め、スクロールの小数移動は独立して保持する。 */
+        let x = snap_paint_coordinate(embedded_svg_x(
+            layout.x,
+            available_width,
+            svg_width,
+            layout.style,
+        )) - self.scroll_x;
+        let y = snap_paint_coordinate(start) - self.scroll_y;
+        let svg = position_embedded_svg(markup, x, y, svg_width, svg_height);
         self.svg.push_str(&svg);
         start + svg_height + layout.style.margin_bottom
     }
@@ -163,3 +170,7 @@ mod tests;
 #[cfg(test)]
 #[path = "layout_media_svg_intrinsic_tests.rs"]
 mod svg_intrinsic_tests;
+
+#[cfg(test)]
+#[path = "layout_media_svg_origin_tests.rs"]
+mod svg_origin_tests;

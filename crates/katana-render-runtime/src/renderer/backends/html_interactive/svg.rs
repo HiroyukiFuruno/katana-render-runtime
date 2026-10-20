@@ -44,11 +44,15 @@ pub(super) fn box_svg(
 
 /* WHY: Chrome は CSS box の両端を画素境界へ合わせて塗り、layout の小数座標は保持する。 */
 fn snapped_box_geometry(x: f32, y: f32, width: f32, height: f32) -> (f32, f32, f32, f32) {
-    let left = (x + HALF_PAINT_PIXEL).floor();
-    let top = (y + HALF_PAINT_PIXEL).floor();
-    let right = (x + width + HALF_PAINT_PIXEL).floor();
-    let bottom = (y + height + HALF_PAINT_PIXEL).floor();
+    let left = snap_paint_coordinate(x);
+    let top = snap_paint_coordinate(y);
+    let right = snap_paint_coordinate(x + width);
+    let bottom = snap_paint_coordinate(y + height);
     (left, top, right - left, bottom - top)
+}
+
+pub(super) fn snap_paint_coordinate(value: f32) -> f32 {
+    (value + HALF_PAINT_PIXEL).floor()
 }
 
 pub(super) fn escape_xml(value: &str) -> String {
