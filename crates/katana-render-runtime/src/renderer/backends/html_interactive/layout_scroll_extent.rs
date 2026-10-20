@@ -179,3 +179,7 @@ fn clip_owner<'a>(
 fn non_finite_geometry() -> String {
     "scrollable overflow contains non-finite geometry".to_owned()
 }
+
+#[cfg(test)]
+#[path = "layout_scroll_extent_geometry_tests.rs"]
+mod geometry_tests;
