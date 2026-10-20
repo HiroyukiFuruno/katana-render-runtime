@@ -334,3 +334,6 @@ fn sha(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+
+#[path = "cli_execution/legacy_guard_regressions.rs"]
+mod legacy_guard_regressions;
