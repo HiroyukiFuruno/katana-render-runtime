@@ -1,5 +1,23 @@
 use super::*;
 
+const RENDER_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "let output = DiagramV8Runtime::render(&scripts)?;\n        match parse_response(&output)? {",
+        "let output = DiagramV8Runtime::render(&scripts)?;\n        let _route_contract = &output;\n        match parse_response(&output)? {",
+        "read-render-route:statement-count",
+    ),
+    (
+        "MathJaxRuntimeResponse::Error { message } => Err(message),",
+        "MathJaxRuntimeResponse::Error { message: other } => Err(other),",
+        "read-render-route:response-binding",
+    ),
+    (
+        "MathJaxRuntimeResponse::Error { message } => Err(message),",
+        "MathJaxRuntimeResponse::Error { message } => Err(message),\n            _ => Err(\"unexpected response\".to_string()),",
+        "read-render-route:response-arms",
+    ),
+];
+
 const REQUEST_JSON_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         "request.to_json_value().to_string()",
@@ -120,6 +138,17 @@ fn rejects_request_json_from_wrong_receiver_or_call_arguments()
         &fixture,
         RUST_INPUTS[MATHJAX_JS_RUNTIME_INDEX],
         REQUEST_JSON_MUTATIONS,
+    )
+}
+
+#[test]
+fn rejects_render_route_statement_and_response_shape_changes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    reject_mutations(
+        &fixture,
+        RUST_INPUTS[MATHJAX_JS_RUNTIME_INDEX],
+        RENDER_ROUTE_MUTATIONS,
     )
 }
 
