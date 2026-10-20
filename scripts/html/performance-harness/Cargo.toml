@@ -24,7 +24,7 @@ candidate = ["dep:candidate", "dep:image", "dep:url"]
 baseline = { package = "katana-render-runtime", version = "=0.4.23", registry = "crates-io", optional = true }
 candidate = { package = "katana-render-runtime", path = "../../../crates/katana-render-runtime", optional = true }
 sha2 = "0.11"
-libc = "0.2"
+nix = { version = "0.31.3", default-features = false, features = ["resource"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 image = { version = "0.25.10", default-features = false, features = ["png"], optional = true }

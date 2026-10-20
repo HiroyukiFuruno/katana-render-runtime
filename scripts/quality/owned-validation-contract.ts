@@ -1516,7 +1516,13 @@ function performanceManifestAndLock(context: ContractContext, members: string[])
             .strict(),
           url: z.object({ version: z.literal("2.5.8"), optional: z.literal(true) }).strict(),
           sha2: z.string(),
-          libc: z.string(),
+          nix: z
+            .object({
+              version: z.literal("0.31.3"),
+              "default-features": z.literal(false),
+              features: z.tuple([z.literal("resource")]),
+            })
+            .strict(),
           serde_json: z.string(),
           serde: z
             .object({ version: z.string(), features: z.tuple([z.literal("derive")]) })

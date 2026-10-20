@@ -29,6 +29,9 @@ use process::ProcessService;
 use provenance::{arm_name, hex_digest, provenance};
 
 const SAMPLE_COUNT: usize = 5;
+#[cfg(target_os = "macos")]
+const BYTES_PER_RSS_UNIT: u64 = 1;
+#[cfg(not(target_os = "macos"))]
 const BYTES_PER_RSS_UNIT: u64 = 1024;
 
 fn measure_samples(
@@ -170,16 +173,10 @@ type HtmlBrowserSession = baseline::HtmlBrowserSession;
 type HtmlBrowserSession = candidate::HtmlBrowserSession;
 
 fn peak_rss_bytes() -> Result<u64, Box<dyn std::error::Error>> {
-    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
-    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } != 0 {
-        return Err("getrusage failed".into());
-    }
-    let value = unsafe { usage.assume_init().ru_maxrss } as u64;
-    if cfg!(target_os = "macos") {
-        Ok(value)
-    } else {
-        Ok(value.saturating_mul(BYTES_PER_RSS_UNIT))
-    }
+    /* WHY: 同じgetrusageのピークRSSを保ち、ABIとOSエラー処理は既存ライブラリへ委譲する。 */
+    let usage = nix::sys::resource::getrusage(nix::sys::resource::UsageWho::RUSAGE_SELF)?;
+    let value = u64::try_from(usage.max_rss())?;
+    Ok(value.saturating_mul(BYTES_PER_RSS_UNIT))
 }
 
 #[cfg(test)]

@@ -997,7 +997,7 @@ dependencies = [
  "image",
  "katana-render-runtime 0.4.23",
  "katana-render-runtime 0.4.24",
- "libc",
+ "nix",
  "serde",
  "serde_json",
  "sha2",
