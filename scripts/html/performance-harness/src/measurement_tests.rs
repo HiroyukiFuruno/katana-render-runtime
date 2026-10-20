@@ -6,14 +6,38 @@ use baseline::{HtmlBrowserSource, HtmlRuntime};
 #[cfg(feature = "candidate")]
 use candidate::{HtmlBrowserSource, HtmlRuntime};
 
+#[path = "measurement_legacy_tests.rs"]
+mod legacy_tests;
+
 const VIEWPORT: (u32, u32, f32) = (1280, 900, 1.0);
 
 fn open_fixture(
     markup: &str,
     origin: &str,
 ) -> Result<HtmlBrowserSession, Box<dyn std::error::Error>> {
-    let viewport = HtmlBrowserViewport::new(VIEWPORT.0, VIEWPORT.1, VIEWPORT.2)?;
+    open_fixture_at(
+        markup,
+        origin,
+        HtmlBrowserViewport::new(VIEWPORT.0, VIEWPORT.1, VIEWPORT.2)?,
+    )
+}
+
+fn open_fixture_at(
+    markup: &str,
+    origin: &str,
+    viewport: HtmlBrowserViewport,
+) -> Result<HtmlBrowserSession, Box<dyn std::error::Error>> {
     Ok(HtmlRuntime.open(HtmlBrowserSource::new(markup.to_owned(), origin)?, viewport)?)
+}
+
+fn assert_error_message<T>(
+    result: Result<T, Box<dyn std::error::Error>>,
+    expected: &str,
+    accepted_message: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let actual = result.err().ok_or(accepted_message)?.to_string();
+    assert_eq!(actual, expected);
+    Ok(())
 }
 
 fn catalog_plan(
@@ -150,6 +174,66 @@ fn stream_catalog_measurement_dispatches_real_scroll() -> Result<(), Box<dyn std
     let frame = session.latest_frame().ok_or("missing scroll frame")?;
     assert!(frame.generation > before_generation && frame.scroll_y > 0.0);
     assert!(!frame.pixels.is_empty());
+    let mut session = session;
+    session.close()?;
+    Ok(())
+}
+
+#[test]
+fn resize_viewport_one_expands_to_two() -> Result<(), Box<dyn std::error::Error>> {
+    let viewport = HtmlBrowserViewport::new(1, 1, 1.0)?;
+    let resized = super::narrower_resize_viewport(viewport)?;
+    assert_eq!(resized.width, 2);
+    assert_eq!(resized.height, 1);
+    assert!((resized.device_scale_factor - 1.0).abs() < f32::EPSILON);
+    Ok(())
+}
+
+#[test]
+fn resize_one_pixel_session_produces_a_new_raster_frame() -> Result<(), Box<dyn std::error::Error>>
+{
+    let viewport = HtmlBrowserViewport::new(1, 1, 1.0)?;
+    let mut session = open_fixture_at(
+        "<html><body>x</body></html>",
+        "https://example.test/resize",
+        viewport,
+    )?;
+    let before = session.latest_frame().ok_or("missing initial frame")?;
+    let generation_before = before.generation;
+    let resized = super::narrower_resize_viewport(viewport)?;
+    session.resize(resized)?;
+    let generation_after = super::validate_resized_frame(&session, resized, generation_before)?;
+    let frame = session.latest_frame().ok_or("missing resized frame")?;
+    assert_eq!(frame.viewport, resized);
+    assert!(generation_after > generation_before);
+    assert!(!frame.pixels.is_empty());
+    session.close()?;
+    Ok(())
+}
+
+#[test]
+fn resized_frame_validator_rejects_stale_generation_and_wrong_viewport(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let viewport = HtmlBrowserViewport::new(1, 1, 1.0)?;
+    let session = open_fixture_at(
+        "<html><body>x</body></html>",
+        "https://example.test/resize",
+        viewport,
+    )?;
+    let frame = session.latest_frame().ok_or("missing initial frame")?;
+    let stale = super::validate_resized_frame(&session, viewport, frame.generation);
+    assert_error_message(
+        stale,
+        "resize did not advance frame generation",
+        "stale generation was accepted",
+    )?;
+    let wrong_viewport = HtmlBrowserViewport::new(2, 1, 1.0)?;
+    let mismatch = super::validate_resized_frame(&session, wrong_viewport, 0);
+    assert_error_message(
+        mismatch,
+        "resize produced an invalid raster frame",
+        "wrong viewport was accepted",
+    )?;
     let mut session = session;
     session.close()?;
     Ok(())
