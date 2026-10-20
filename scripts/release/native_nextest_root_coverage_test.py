@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 import uuid
 
@@ -91,6 +93,26 @@ class RootCoverageExecutionTests(unittest.TestCase):
         )
         self.assertEqual(result, (0, run_id))
         self.assertEqual(list(directory.iterdir()), [])
+
+    def test_checkpoint_read_emits_only_the_finite_rejection_reason(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            cached = root_coverage._read_retry_checkpoint(self.repo, "a" * 64, True)
+        self.assertIsNone(cached)
+        self.assertEqual(
+            json.loads(output.getvalue()),
+            {"nextestRetryCheckpointRead": "missing-invalid-payload"},
+        )
+        output = io.StringIO()
+        with patch.object(checkpoint, "inspect_checkpoint") as inspect:
+            with redirect_stdout(output):
+                cached = root_coverage._read_retry_checkpoint(self.repo, "a" * 64, False)
+            inspect.assert_not_called()
+        self.assertIsNone(cached)
+        self.assertEqual(
+            json.loads(output.getvalue()),
+            {"nextestRetryCheckpointRead": "non-cacheable"},
+        )
 
     def test_root_producers_cannot_collect_concurrently(self) -> None:
         lock = self.repo / "root-producer.lock"

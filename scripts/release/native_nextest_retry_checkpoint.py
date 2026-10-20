@@ -36,15 +36,28 @@ def _valid_run_id(value: object) -> bool:
     return isinstance(value, str) and RUN_ID_RE.fullmatch(value) is not None
 
 
-def _read_payload(repo: Path) -> tuple[dict[str, object], bytes] | None:
+def _read_payload(
+    repo: Path,
+) -> tuple[dict[str, object] | None, bytes | None, str | None]:
+    path = repo / CHECKPOINT_PATH
     try:
-        receipt = local_result._read_json_bytes(
-            repo / CHECKPOINT_PATH, "Nextest retry checkpoint"
-        )
+        local_result._ensure_report_directory(repo)
+        receipt = local_result._read_json_bytes(path, "Nextest retry checkpoint")
+    except (OSError, ValueError):
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return None, None, "missing-invalid-payload"
+        except OSError:
+            pass
+        return None, None, "observation-error"
+    try:
         value = json.loads(receipt)
-    except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    return (value, receipt) if isinstance(value, dict) else None
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, None, "missing-invalid-payload"
+    if not isinstance(value, dict):
+        return None, None, "identity-or-shape"
+    return value, receipt, None
 
 
 def _valid_payload(value: dict[str, object], identity_sha256: str) -> bool:
@@ -65,17 +78,17 @@ def _valid_payload(value: dict[str, object], identity_sha256: str) -> bool:
     return isinstance(snapshot, dict) and snapshot.get("runId") == value["nextestRunId"]
 
 
-def read_checkpoint(repo: Path, identity_sha256: str) -> dict[str, object] | None:
+def inspect_checkpoint(
+    repo: Path, identity_sha256: str
+) -> tuple[dict[str, object] | None, str]:
     if not _valid_identity(identity_sha256):
-        return None
+        return None, "identity-or-shape"
     try:
-        local_result._ensure_report_directory(repo)
-        stored = _read_payload(repo)
-        if stored is None:
-            return None
-        value, receipt = stored
+        value, receipt, reason = _read_payload(repo)
+        if value is None or receipt is None:
+            return None, cast(str, reason)
         if not _valid_payload(value, identity_sha256):
-            return None
+            return None, "identity-or-shape"
         if not local_anchor.verify(
             repo,
             PRODUCER,
@@ -83,12 +96,16 @@ def read_checkpoint(repo: Path, identity_sha256: str) -> dict[str, object] | Non
             cast(str, value["anchorEpoch"]),
             receipt,
         ):
-            return None
+            return None, "anchor"
         if not artifacts.verify_snapshot(repo, value["snapshot"]):
-            return None
-        return value
+            return None, "artifacts"
+        return value, "accepted"
     except (OSError, ValueError):
-        return None
+        return None, "observation-error"
+
+
+def read_checkpoint(repo: Path, identity_sha256: str) -> dict[str, object] | None:
+    return inspect_checkpoint(repo, identity_sha256)[0]
 
 
 def write_checkpoint(

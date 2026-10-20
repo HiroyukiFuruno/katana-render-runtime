@@ -156,11 +156,22 @@ def _begin(repo: Path) -> tuple[str, bool]:
     return identity_sha, identity.get("cacheable") is True
 
 
+def _read_retry_checkpoint(
+    repo: Path, identity_sha: str, cacheable: bool
+) -> dict[str, object] | None:
+    if cacheable:
+        cached, reason = checkpoint.inspect_checkpoint(repo, identity_sha)
+    else:
+        cached, reason = None, "non-cacheable"
+    print(json.dumps({"nextestRetryCheckpointRead": reason}), flush=True)
+    return cached
+
+
 def run_root(repo: Path) -> int:
     local._ensure_report_directory(repo)
     with _root_lock(repo / REPORT_DIRECTORY / "root-nextest-producer.lock"):
         identity_sha, cacheable = _begin(repo)
-        cached = checkpoint.read_checkpoint(repo, identity_sha) if cacheable else None
+        cached = _read_retry_checkpoint(repo, identity_sha, cacheable)
         directory = _attempt_directory(repo)
         cargo = shlex.split(os.environ.get("CARGO", "cargo"))
         if not cargo:

@@ -68,6 +68,54 @@ class NativeNextestRetryCheckpointTests(unittest.TestCase):
         profile.write_bytes(b"changed-profile")
         self.assertIsNone(checkpoint.read_checkpoint(self.repo, IDENTITY))
 
+    def test_inspection_reports_finite_rejection_reasons(self) -> None:
+        self.assertEqual(
+            checkpoint.inspect_checkpoint(self.repo, IDENTITY),
+            (None, "missing-invalid-payload"),
+        )
+        self.assertTrue(checkpoint.write_checkpoint(self.repo, IDENTITY, RUN_ID, 0))
+        stored, reason = checkpoint.inspect_checkpoint(self.repo, IDENTITY)
+        self.assertEqual(reason, "accepted")
+        self.assertIsNotNone(stored)
+        self.assertEqual(
+            checkpoint.inspect_checkpoint(self.repo, "b" * 64),
+            (None, "identity-or-shape"),
+        )
+
+        self._checkpoint_path().write_bytes(b"not-json")
+        self.assertEqual(
+            checkpoint.inspect_checkpoint(self.repo, IDENTITY),
+            (None, "missing-invalid-payload"),
+        )
+        self.assertTrue(checkpoint.write_checkpoint(self.repo, IDENTITY, RUN_ID, 0))
+        anchor_path = (
+            self.repo
+            / ".git"
+            / local_anchor.DIRECTORY_NAME
+            / "root-nextest-retry.json"
+        )
+        anchor_value = json.loads(anchor_path.read_bytes())
+        anchor_value["receiptSha256"] = "f" * 64
+        anchor_path.write_text(json.dumps(anchor_value), encoding="utf-8")
+        self.assertEqual(
+            checkpoint.inspect_checkpoint(self.repo, IDENTITY), (None, "anchor")
+        )
+
+        self.assertTrue(checkpoint.write_checkpoint(self.repo, IDENTITY, RUN_ID, 0))
+        profile = self.repo / "target/llvm-cov-target/krr-coverage/profiles/root.profraw"
+        profile.write_bytes(b"changed-profile")
+        self.assertEqual(
+            checkpoint.inspect_checkpoint(self.repo, IDENTITY), (None, "artifacts")
+        )
+
+        checkpoint_path = self._checkpoint_path()
+        checkpoint_path.unlink()
+        checkpoint_path.symlink_to(profile)
+        self.assertEqual(
+            checkpoint.inspect_checkpoint(self.repo, IDENTITY),
+            (None, "observation-error"),
+        )
+
     def test_rejects_checkpoint_receipt_mutation(self) -> None:
         self.assertTrue(checkpoint.write_checkpoint(self.repo, IDENTITY, RUN_ID, 100))
         value = json.loads(self._checkpoint_path().read_bytes())
