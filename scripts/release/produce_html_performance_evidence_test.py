@@ -450,6 +450,7 @@ class CapacityBindingUnitTests(unittest.TestCase):
                                           "size": info.st_size, "dev": info.st_dev,
                                           "ino": info.st_ino, "mode": info.st_mode})
         for label, references in (
+            ("one bound reference", self.references[:1]),
             ("40 references", self.references),
             ("41 references", [*self.references, additional_references[0]]),
             ("44 references", [*self.references, *additional_references]),

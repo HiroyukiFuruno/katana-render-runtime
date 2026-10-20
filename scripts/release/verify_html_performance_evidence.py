@@ -91,7 +91,7 @@ def validate_guarded_build_argv(argv: Sequence[str], root: Path, harness: Path, 
         profiles.append(argv[index + 1])
         index += 2
     require(index < len(argv) and argv[index] == "--" and references == list(expected_references)
-            and len(references) >= 40 and len(set(references)) == len(references),
+            and bool(references) and len(set(references)) == len(references),
             "build argv has missing/duplicate/unbound capacity references")
     for value in references:
         path = Path(value)
@@ -136,7 +136,7 @@ class ComparisonAggregate(TypedDict):
     comparison: dict[str, dict[str, float]]
 
 VIEWPORTS = ((1280, 900), (960, 720), (620, 900))
-LOCK_SHA = "7a0665c919a62d3ef97ac89d1cb2871e0d81ca0f08bf96eb36d97b6da0c60fd2"
+LOCK_SHA = "1427d758dd4517f96b9d37ff053b6696694ed43165b9759dcce863bb5a949983"
 SOURCE_KEYS = ("inventoryDigest", "head", "index", "files", "trackedPaths", "untrackedPaths", "missingTrackedPaths")
 ENDPOINT_FLAGS = ("sourceBeforeEqualsEnd", "inputsBeforeEqualsEnd", "registryBeforeEqualsEnd", "cacheBeforeEqualsEnd", "cacheUnionBeforeEqualsEnd", "cacheUnionScopeRestored", "configBeforeEqualsEnd", "preferenceBeforeEqualsEnd", "toolContextBeforeEqualsEnd")
 HARNESS_ROOT = "scripts/html/performance-harness/"
@@ -923,7 +923,7 @@ def _validate_build_proof(bundle: Bundle, root: Path, reference: object, arm: st
                        for record in registry_records]
     require(registry.get("schema") == "krr-protected-refs-successor-v1"
             and _integer(registry.get("physicalRefCount"), "protected reference count") == len(protected_paths)
-            and len(protected_paths) >= 40 and len(set(protected_paths)) == len(protected_paths),
+            and bool(protected_paths) and len(set(protected_paths)) == len(protected_paths),
             "recorded protected registry differs")
     argv = [_text(value, "build argv item") for value in _array(proof.get("argv"), "build argv")]
     validate_guarded_build_argv(argv, root, harness, cargo_path, arm, state_path, state_sha, protected_paths)

@@ -607,6 +607,37 @@ class BuildArtifactArgvTest(unittest.TestCase):
                     recorded_state_sha, refs)
 
 
+    def test_guarded_build_argv_accepts_one_bound_reference_and_rejects_bad_sets(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            harness = root / "scripts/html/performance-harness"
+            harness.mkdir(parents=True)
+            cargo = root / "cargo"
+            cargo.write_bytes(b"cargo fixture")
+            state = root / "capacity-state.json"
+            state.write_bytes(b"state fixture")
+            paths = [root / name for name in ("protected", "unbound")]
+            for path in paths:
+                path.write_bytes(path.name.encode())
+            protected, unbound = (str(path) for path in paths)
+            expected = [protected]
+            profiles: list[str] = []
+            accepted = gate.guarded_build_argv(root, harness, cargo, "candidate", state,
+                                               gate.sha256(state), expected, profiles)
+            gate.validate_guarded_build_argv(accepted, root, harness, cargo, "candidate", state,
+                                             gate.sha256(state), expected)
+            cases: tuple[tuple[str, list[str], list[str]], ...] = (("zero", [], []), ("missing", expected, []),
+                     ("duplicate", expected, [protected, protected]),
+                     ("unbound", expected, [unbound]))
+            for label, bound, argv_references in cases:
+                with self.subTest(case=label):
+                    argv = gate.guarded_build_argv(root, harness, cargo, "candidate", state,
+                                                   gate.sha256(state), argv_references, profiles)
+                    with self.assertRaisesRegex(ValueError, "missing/duplicate/unbound capacity references"):
+                        gate.validate_guarded_build_argv(argv, root, harness, cargo, "candidate", state,
+                                                         gate.sha256(state), bound)
+
+
 class PerformanceEvidenceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
