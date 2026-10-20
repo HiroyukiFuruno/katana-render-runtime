@@ -196,7 +196,11 @@ fn validate_catalog_operation_stream(
 #[cfg(test)]
 mod tests {
     use super::validate_sample_input;
-    use crate::{options::OperationPlan, provenance::hex_digest, HtmlBrowserViewport};
+    use crate::{
+        options::{CatalogInput, OperationPlan},
+        provenance::hex_digest,
+        HtmlBrowserViewport,
+    };
     use serde_json::{json, Value};
     use std::{
         fs,
@@ -220,18 +224,10 @@ mod tests {
     }
 
     fn operation_report(source_hash: &str, kind: &str) -> Value {
-        json!({
-            "schema": "krr-html84-raw-condition-v1",
-            "status": "observed",
-            "conditionId": "observers/expected-state/1280x900@1",
-            "caseId": "observers",
-            "boundaryState": "expected-state",
-            "operationKind": kind,
-            "executionNonce": "unit-only",
-            "htmlSha256": source_hash,
-            "binarySha256": "b".repeat(64),
-            "viewport": {"width": 1280, "height": 900, "scale": 1.0},
-            "operationEvidence": {
+        operation_report_with_evidence(
+            source_hash,
+            kind,
+            json!({
                 "schema": "krr-html84-operation-evidence-v1",
                 "kind": kind,
                 "status": "observed",
@@ -245,8 +241,45 @@ mod tests {
                     "stateAfter": "ready"
                 }],
                 "delivery": "session-load-settled"
-            }
+            }),
+        )
+    }
+
+    fn operation_report_with_evidence(
+        source_hash: &str,
+        kind: &str,
+        operation_evidence: Value,
+    ) -> Value {
+        json!({
+            "schema": "krr-html84-raw-condition-v1",
+            "status": "observed",
+            "conditionId": "observers/expected-state/1280x900@1",
+            "caseId": "observers",
+            "boundaryState": "expected-state",
+            "operationKind": kind,
+            "executionNonce": "unit-only",
+            "htmlSha256": source_hash,
+            "binarySha256": "b".repeat(64),
+            "viewport": {"width": 1280, "height": 900, "scale": 1.0},
+            "operationEvidence": operation_evidence
         })
+    }
+
+    fn settled_report(source_hash: &str, kind: &str, step: Value) -> Value {
+        let operation_evidence = json!({
+            "schema": "krr-html84-operation-evidence-v1",
+            "kind": kind,
+            "status": "observed",
+            "sourceSha256Before": source_hash,
+            "sourceSha256After": source_hash,
+            "preFrame": {"generation": 1, "scrollY": 0},
+            "postFrame": {"generation": 1, "scrollY": 0},
+            "target": {"selector": "#state", "nodeId": 2, "visible": true},
+            "state": {"before": "ready", "after": "ready"},
+            "steps": [step],
+            "delivery": "session-load-settled"
+        });
+        operation_report_with_evidence(source_hash, kind, operation_evidence)
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -282,13 +315,14 @@ mod tests {
         report_path: PathBuf,
         source_hash: &str,
         evidence_hash: String,
+        operation_kind: &str,
     ) -> Result<OperationPlan, Box<dyn std::error::Error>> {
         Ok(serde_json::from_value(json!({
             "profile": "catalog-plan84",
             "conditionId": "observers/expected-state/1280x900@1",
             "caseId": "observers",
             "state": "expected-state",
-            "operationKind": STATIC_OPERATION_KIND,
+            "operationKind": operation_kind,
             "targetSelector": "#state",
             "fixtureSha256": source_hash,
             "viewport": {"width": 1280, "height": 900, "scale": 1.0},
@@ -302,13 +336,19 @@ mod tests {
     fn case_with_report(
         report: Value,
         source_hash: &str,
+        operation_kind: &str,
     ) -> Result<Case, Box<dyn std::error::Error>> {
         let temp = tempfile::tempdir()?;
         let report_path = temp.path().canonicalize()?.join("catalog-report.json");
         let report_bytes = serde_json::to_vec(&report)?;
         fs::write(&report_path, &report_bytes)?;
         let evidence_hash = hex_digest(&report_bytes);
-        let plan = catalog_plan(report_path.clone(), source_hash, evidence_hash)?;
+        let plan = catalog_plan(
+            report_path.clone(),
+            source_hash,
+            evidence_hash,
+            operation_kind,
+        )?;
         let viewport = HtmlBrowserViewport::new(1280, 900, 1.0)?;
         Ok(Case {
             _temp: temp,
@@ -330,6 +370,7 @@ mod tests {
         case_with_report(
             operation_report(source_hash, STATIC_OPERATION_KIND),
             source_hash,
+            STATIC_OPERATION_KIND,
         )
     }
 
@@ -339,7 +380,7 @@ mod tests {
     ) -> Result<Case, Box<dyn std::error::Error>> {
         let mut report = operation_report(source_hash, STATIC_OPERATION_KIND);
         mutate_report(&mut report, mutation);
-        case_with_report(report, source_hash)
+        case_with_report(report, source_hash, STATIC_OPERATION_KIND)
     }
 
     #[test]
@@ -421,6 +462,92 @@ mod tests {
             plan.operation_evidence_path = alias;
         }
         assert!(validate_sample_input(&case.plan, &case.source_hash, case.viewport).is_err());
+        Ok(())
+    }
+
+    fn settled_operation_cases() -> [(&'static str, Value); 2] {
+        [
+            (
+                "script-await-timer-microtask",
+                json!({
+                    "kind": "host-time-advance",
+                    "elapsedMs": 0,
+                    "timerRan": false,
+                    "microtaskCheckpoint": "runtime-advance-timers",
+                    "stateBefore": "ready",
+                    "stateAfter": "ready",
+                    "fixtureStateVerified": true
+                }),
+            ),
+            (
+                "script-await-resource-font",
+                json!({
+                    "kind": "session-load-settled-resource-state",
+                    "stateBefore": "ready",
+                    "stateAfter": "ready"
+                }),
+            ),
+        ]
+    }
+
+    #[test]
+    fn validates_settled_catalog_operation_kinds_through_sample_input(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source_hash = fixture_source_hash()?;
+        for (kind, step) in settled_operation_cases() {
+            let report = settled_report(&source_hash, kind, step);
+            let case = case_with_report(report, &source_hash, kind)?;
+            assert!(validate_sample_input(
+                &case.plan,
+                &case.source_hash,
+                case.viewport
+            )?);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_catalog_streams_inconsistent_with_operation_kind(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source_hash = fixture_source_hash()?;
+        for (kind, has_stream) in [(STATIC_OPERATION_KIND, true), ("script-real-events", false)] {
+            let mut case =
+                case_with_report(operation_report(&source_hash, kind), &source_hash, kind)?;
+            if let OperationPlan::Catalog(plan) = &mut case.plan {
+                plan.operation_stream = if has_stream {
+                    vec![CatalogInput::Scroll {
+                        delta_x: 0.0,
+                        delta_y: 1.0,
+                    }]
+                } else {
+                    Vec::new()
+                };
+            }
+            let error = validate_sample_input(&case.plan, &case.source_hash, case.viewport)
+                .err()
+                .ok_or("operation kind and stream mismatch must be rejected")?;
+            assert_eq!(
+                error.to_string(),
+                "catalog operation stream does not match its finite operation kind",
+                "kind={kind}, has_stream={has_stream}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_non_object_catalog_viewport() -> Result<(), Box<dyn std::error::Error>> {
+        let source_hash = fixture_source_hash()?;
+        let mut report = operation_report(&source_hash, STATIC_OPERATION_KIND);
+        report["viewport"] = json!("not-an-object");
+        let case = case_with_report(report, &source_hash, STATIC_OPERATION_KIND)?;
+        let error = validate_sample_input(&case.plan, &case.source_hash, case.viewport)
+            .err()
+            .ok_or("non-object viewport must be rejected")?;
+        assert_eq!(
+            error.to_string(),
+            "catalog operation evidence status or identity differs"
+        );
         Ok(())
     }
 }

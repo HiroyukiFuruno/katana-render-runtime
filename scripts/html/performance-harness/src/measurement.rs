@@ -2,6 +2,9 @@ use std::time::Instant;
 
 mod catalog_evidence;
 mod legacy;
+#[cfg(test)]
+#[path = "measurement_tests.rs"]
+mod tests;
 use catalog_evidence::{catalog_condition_report, validate_sample_input};
 use legacy::measure_legacy_post_operation;
 const RESIZE_WIDTH_REDUCTION_DIVISOR: u32 = 4;
