@@ -176,3 +176,7 @@ fn dispatch_supported_time_advance(
 ) -> Result<&'static str, Box<dyn std::error::Error>> {
     Err("baseline does not support catalog time advance".into())
 }
+
+#[cfg(test)]
+#[path = "dispatch_tests.rs"]
+mod tests;

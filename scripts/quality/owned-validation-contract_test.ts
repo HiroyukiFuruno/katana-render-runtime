@@ -3539,6 +3539,17 @@ test.each([
     'url = { version = "2.5.8", optional = true }',
     'url = { version = "2.5.8", optional = true, git = "https://example.invalid/url" }',
   ],
+  ["missing tempfile dev-dependency", '[dev-dependencies]\ntempfile = "3"', "[dev-dependencies]"],
+  [
+    "wrong tempfile dev-dependency version",
+    '[dev-dependencies]\ntempfile = "3"',
+    '[dev-dependencies]\ntempfile = "4"',
+  ],
+  [
+    "unknown tempfile dev-dependency",
+    '[dev-dependencies]\ntempfile = "3"',
+    '[dev-dependencies]\ntempfile = "3"\nunknown = "1"',
+  ],
   [
     "url path source",
     'url = { version = "2.5.8", optional = true }',

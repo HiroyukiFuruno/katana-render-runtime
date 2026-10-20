@@ -1523,6 +1523,7 @@ function performanceManifestAndLock(context: ContractContext, members: string[])
             .strict(),
         })
         .strict(),
+      "dev-dependencies": z.object({ tempfile: z.literal("3") }).strict(),
     })
     .strict()
     .parse(Bun.TOML.parse(context.read(PERFORMANCE_MANIFEST)));

@@ -20,6 +20,8 @@ mod options;
 #[path = "../../../../crates/katana-render-runtime/src/system/process.rs"]
 mod process;
 mod provenance;
+#[cfg(test)]
+mod test_support;
 
 use measurement::measure_one;
 use options::{parse_options, worker_sample, Options};

@@ -192,3 +192,235 @@ fn validate_catalog_operation_stream(
     }
     Ok(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::validate_sample_input;
+    use crate::{options::OperationPlan, provenance::hex_digest, HtmlBrowserViewport};
+    use serde_json::{json, Value};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
+
+    const STATIC_OPERATION_KIND: &str = "script-await-mutation-delivery";
+
+    struct Case {
+        _temp: tempfile::TempDir,
+        report_path: PathBuf,
+        plan: OperationPlan,
+        source_hash: String,
+        viewport: HtmlBrowserViewport,
+    }
+
+    fn fixture_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+        Ok(Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../tests/fixtures/html/aspects/script-observers.html")
+            .canonicalize()?)
+    }
+
+    fn operation_report(source_hash: &str, kind: &str) -> Value {
+        json!({
+            "schema": "krr-html84-raw-condition-v1",
+            "status": "observed",
+            "conditionId": "observers/expected-state/1280x900@1",
+            "caseId": "observers",
+            "boundaryState": "expected-state",
+            "operationKind": kind,
+            "executionNonce": "unit-only",
+            "htmlSha256": source_hash,
+            "binarySha256": "b".repeat(64),
+            "viewport": {"width": 1280, "height": 900, "scale": 1.0},
+            "operationEvidence": {
+                "schema": "krr-html84-operation-evidence-v1",
+                "kind": kind,
+                "status": "observed",
+                "sourceSha256Before": source_hash,
+                "sourceSha256After": source_hash,
+                "target": {"selector": "#state", "nodeId": 2, "visible": true},
+                "state": {"before": "ready", "after": "ready"},
+                "steps": [{
+                    "kind": "session-load-settled-observer-state",
+                    "stateBefore": "ready",
+                    "stateAfter": "ready"
+                }],
+                "delivery": "session-load-settled"
+            }
+        })
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Mutation {
+        Status,
+        Viewport,
+        HtmlSha,
+        EvidenceSourceSha,
+        TargetVisibility,
+        TypedKind,
+    }
+
+    fn mutate_report(report: &mut Value, mutation: Mutation) {
+        match mutation {
+            Mutation::Status => report["status"] = json!("unknown"),
+            Mutation::Viewport => report["viewport"]["scale"] = json!(2.0),
+            Mutation::HtmlSha => report["htmlSha256"] = json!("0".repeat(64)),
+            Mutation::EvidenceSourceSha => {
+                report["operationEvidence"]["sourceSha256After"] = json!("0".repeat(64));
+            }
+            Mutation::TargetVisibility => {
+                report["operationEvidence"]["target"]["visible"] = json!(false)
+            }
+            Mutation::TypedKind => report["operationEvidence"]["kind"] = json!("other-kind"),
+        }
+    }
+
+    fn fixture_source_hash() -> Result<String, Box<dyn std::error::Error>> {
+        Ok(hex_digest(&fs::read(fixture_path()?)?))
+    }
+
+    fn catalog_plan(
+        report_path: PathBuf,
+        source_hash: &str,
+        evidence_hash: String,
+    ) -> Result<OperationPlan, Box<dyn std::error::Error>> {
+        Ok(serde_json::from_value(json!({
+            "profile": "catalog-plan84",
+            "conditionId": "observers/expected-state/1280x900@1",
+            "caseId": "observers",
+            "state": "expected-state",
+            "operationKind": STATIC_OPERATION_KIND,
+            "targetSelector": "#state",
+            "fixtureSha256": source_hash,
+            "viewport": {"width": 1280, "height": 900, "scale": 1.0},
+            "operationEvidencePath": report_path,
+            "operationEvidenceSha256": evidence_hash,
+            "evidenceBinarySha256": "b".repeat(64),
+            "operationStream": []
+        }))?)
+    }
+
+    fn case_with_report(
+        report: Value,
+        source_hash: &str,
+    ) -> Result<Case, Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let report_path = temp.path().canonicalize()?.join("catalog-report.json");
+        let report_bytes = serde_json::to_vec(&report)?;
+        fs::write(&report_path, &report_bytes)?;
+        let evidence_hash = hex_digest(&report_bytes);
+        let plan = catalog_plan(report_path.clone(), source_hash, evidence_hash)?;
+        let viewport = HtmlBrowserViewport::new(1280, 900, 1.0)?;
+        Ok(Case {
+            _temp: temp,
+            report_path,
+            plan,
+            source_hash: source_hash.to_owned(),
+            viewport,
+        })
+    }
+
+    fn case_with_static_report() -> Result<Case, Box<dyn std::error::Error>> {
+        let source_hash = fixture_source_hash()?;
+        case_with_static_report_for_hash(&source_hash)
+    }
+
+    fn case_with_static_report_for_hash(
+        source_hash: &str,
+    ) -> Result<Case, Box<dyn std::error::Error>> {
+        case_with_report(
+            operation_report(source_hash, STATIC_OPERATION_KIND),
+            source_hash,
+        )
+    }
+
+    fn case_with_mutated_static_report(
+        source_hash: &str,
+        mutation: Mutation,
+    ) -> Result<Case, Box<dyn std::error::Error>> {
+        let mut report = operation_report(source_hash, STATIC_OPERATION_KIND);
+        mutate_report(&mut report, mutation);
+        case_with_report(report, source_hash)
+    }
+
+    #[test]
+    fn validates_observed_catalog_report_from_real_fixture_and_file(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let case = case_with_static_report()?;
+        assert!(case.report_path.is_file());
+        assert!(!validate_sample_input(
+            &case.plan,
+            &case.source_hash,
+            case.viewport
+        )?);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_catalog_identity_viewport_typed_fact_and_target_mutations(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source_hash = fixture_source_hash()?;
+        for mutation in [
+            Mutation::Status,
+            Mutation::Viewport,
+            Mutation::HtmlSha,
+            Mutation::EvidenceSourceSha,
+            Mutation::TargetVisibility,
+            Mutation::TypedKind,
+        ] {
+            let case = case_with_mutated_static_report(&source_hash, mutation)?;
+            assert!(
+                validate_sample_input(&case.plan, &case.source_hash, case.viewport).is_err(),
+                "tampered catalog evidence was accepted: {mutation:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_evidence_changed_after_plan_hash_was_pinned(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let case = case_with_static_report()?;
+        fs::write(&case.report_path, b"tampered after the plan was written")?;
+        assert!(validate_sample_input(&case.plan, &case.source_hash, case.viewport).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_plan_when_fixture_sha_does_not_match_input() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut case = case_with_static_report()?;
+        if let OperationPlan::Catalog(plan) = &mut case.plan {
+            plan.fixture_sha256 = "0".repeat(64);
+        }
+        assert!(validate_sample_input(&case.plan, &case.source_hash, case.viewport).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_invalid_json_in_a_correctly_pinned_report_file(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut case = case_with_static_report()?;
+        let bytes = b"{invalid json";
+        fs::write(&case.report_path, bytes)?;
+        if let OperationPlan::Catalog(plan) = &mut case.plan {
+            plan.operation_evidence_sha256 = hex_digest(bytes);
+        }
+        assert!(validate_sample_input(&case.plan, &case.source_hash, case.viewport).is_err());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_catalog_evidence_path() -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+
+        let mut case = case_with_static_report()?;
+        let alias = case.report_path.with_file_name("catalog-report-alias.json");
+        symlink(&case.report_path, &alias)?;
+        if let OperationPlan::Catalog(plan) = &mut case.plan {
+            plan.operation_evidence_path = alias;
+        }
+        assert!(validate_sample_input(&case.plan, &case.source_hash, case.viewport).is_err());
+        Ok(())
+    }
+}
