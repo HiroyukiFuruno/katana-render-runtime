@@ -668,6 +668,26 @@ fn rotated_overflow_clip_keeps_its_shape_in_real_host() -> TestResult {
 }
 
 #[test]
+fn rotated_overflow_clip_bounds_real_session_scroll_extent() -> TestResult {
+    let mut session = start_with_viewport(ROTATED_OVERFLOW_SCROLL_DOCUMENT, 160, 160)?;
+    let expected_extent = 120.0 + 50.0 * (1.0 + std::f32::consts::SQRT_2);
+    assert!((session.scroll_geometry.content_width - expected_extent).abs() < 0.5);
+    assert!((session.scroll_geometry.content_height - expected_extent).abs() < 0.5);
+
+    session
+        .dispatch_input(HtmlBrowserInput::Scroll {
+            delta_x: 400.0,
+            delta_y: 400.0,
+        })
+        .map_err(to_string)?;
+    assert_eq!(session.scroll_geometry.scroll_x, session.max_scroll_x());
+    assert_eq!(session.scroll_geometry.scroll_y, session.max_scroll());
+    assert_eq!(session.max_scroll_x(), 81.0);
+    assert_eq!(session.max_scroll(), 81.0);
+    Ok(())
+}
+
+#[test]
 fn rotated_rounded_overflow_clip_preserves_corner_geometry_in_real_host() -> TestResult {
     let session = start_with_viewport(rotated_rounded_overflow_clip_document(), 180, 180)?;
     let snapshot = session.runtime.snapshot().map_err(to_string)?;
@@ -1424,6 +1444,12 @@ const observer = new IntersectionObserver((entries) => {
 observer.observe(outside);
 observer.observe(inside);
 </script>"##;
+
+const ROTATED_OVERFLOW_SCROLL_DOCUMENT: &str = r##"<style>
+html, body { margin: 0; }
+#clip { position: absolute; left: 120px; top: 120px; width: 100px; height: 100px; overflow: hidden; transform: rotate(45deg); }
+#overflow { position: absolute; left: -20px; top: -20px; width: 300px; height: 300px; }
+</style><div id=clip><div id=overflow>Visible through transformed clip only</div></div>"##;
 
 fn rotated_overflow_clip_document() -> &'static str {
     ROTATED_OVERFLOW_CLIP_DOCUMENT
