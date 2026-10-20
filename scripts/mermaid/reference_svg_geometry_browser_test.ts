@@ -6,6 +6,13 @@ import { expect, test } from "playwright/test";
 import { DiagramTheme } from "./diagram_theme";
 import { fileSha256 } from "./mermaid-pair-manifest";
 import {
+  NATIVE_FRAME_TARGETS,
+  type NativeFrameEvidence,
+  nativeFrameCaptureWrapper,
+  scoreNativeFramePaintProjection,
+  verifyNativeFrameEvidence,
+} from "./native-frame-evidence";
+import {
   type NeutralRasterInput,
   type PaintProjectedReferenceInput,
   rasterizeNeutralSvgBatch,
@@ -16,6 +23,7 @@ import type { FontReadyDocument, PageHandle } from "./official-renderer-types";
 import { assignStrictSvg, resizeSvgCapture } from "./raster-capture-observation";
 import { rasterCaptureHtml } from "./rasterize-svg-dir";
 import { MagickOps } from "./reference_image_ops";
+import type { ReferencePair } from "./reference_pair_repository";
 import { waitForStrictSvgExternalImages } from "./strict-svg-external-images";
 
 const naturalViewBoxSizingCases = [
@@ -249,7 +257,141 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
       ).fullCanvasScore,
     ).toBe(100);
   });
+  for (const variant of [
+    {
+      label: "candidate",
+      path: () => requirePaintProjectionObservation(observation).fixture.input.candidatePngPath,
+      passes: true,
+    },
+    {
+      label: "missing-label",
+      path: () => requirePaintProjectionObservation(observation).fixture.missingLabelPngPath,
+      passes: false,
+    },
+    {
+      label: "missing-edge",
+      path: () => requirePaintProjectionObservation(observation).fixture.missingEdgePngPath,
+      passes: false,
+    },
+  ] as const) {
+    test(`native row.png forwarding preserves paint shape controls: ${variant.label}`, async () => {
+      const currentObservation = requirePaintProjectionObservation(observation);
+      const fixtureRoot = path.dirname(currentObservation.projectedDirectory);
+      const bridgeRoot = path.join(fixtureRoot, variant.label);
+      fs.mkdirSync(bridgeRoot, { recursive: true, mode: 0o700 });
+      const bridge = await createNativeShapeBridgeFixture(
+        currentObservation.fixture,
+        variant.path(),
+        bridgeRoot,
+      );
+      try {
+        verifyNativeFrameEvidence(bridge.evidence, "en");
+        const result = await scoreNativeFramePaintProjection(
+          bridge.pairs,
+          bridge.evidence,
+          bridgeRoot,
+          "dark",
+          new MagickOps(path.join(fixtureRoot, "bridge-magick"), null, "dark"),
+        );
+        expect(result.scores.size).toBe(NATIVE_FRAME_TARGETS.length);
+        for (const score of result.scores.values()) {
+          if (variant.passes) expect(score.score).toBe(100);
+          else expect(score.score).toBeLessThan(99);
+        }
+      } finally {
+        fs.rmSync(bridgeRoot, { recursive: true, force: true });
+      }
+    });
+  }
 });
+
+async function createNativeShapeBridgeFixture(
+  fixture: PaintProjectionFixture,
+  variantPngPath: string,
+  root: string,
+): Promise<{ root: string; evidence: NativeFrameEvidence; pairs: ReferencePair[] }> {
+  const svgPath = fixture.input.candidateSvgPath;
+  const svg = fs.readFileSync(svgPath, "utf8");
+  const sourcePngPath = fixture.input.candidatePngPath;
+  const size = fixture.input.candidatePngPath;
+  const magick = new MagickOps(path.join(root, "bridge-size-magick"), null, "dark");
+  const frameSize = magick.imageSize(size);
+  const frame = { width: frameSize.width, height: frameSize.height, scale: 1, scrollY: 0 };
+  const pin = (name: string, content: string | Buffer) => {
+    const filePath = path.join(root, name);
+    fs.writeFileSync(filePath, content, { flag: "wx", mode: 0o600 });
+    return { path: filePath, sha256: fileSha256(filePath) };
+  };
+  // このピン群はrow.png転送だけを検査するcomponent fixtureであり、native capture receiptではない。
+  const probeBinary = pin("probe", "probe"),
+    runtime = pin("runtime", "runtime"),
+    sourceManifest = pin("source-manifest", "manifest"),
+    config = pin("config", "config"),
+    fontContext = pin("font-context", "font");
+  const rows = NATIVE_FRAME_TARGETS.map((slug) => {
+    const outputDirectory = path.join(root, slug, "frames");
+    fs.mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
+    const wrapper = nativeFrameCaptureWrapper(svg, frame),
+      wrapperHtml = pin(`${slug}-wrapper.html`, wrapper),
+      outputPng = path.join(outputDirectory, `${frame.width}x${frame.height}-scale-1-scroll-0.png`);
+    fs.copyFileSync(variantPngPath, outputPng);
+    const png = { path: outputPng, sha256: fileSha256(outputPng) },
+      stdout = pin(
+        `${slug}-stdout`,
+        `source_sha256=${wrapperHtml.sha256}\nwidth=${frame.width} height=${frame.height} scale=1 scroll_y=0\n`,
+      ),
+      stderr = pin(`${slug}-stderr`, ""),
+      exitEvidence = pin(`${slug}-exit.json`, '{"exitCode":0,"signal":null,"error":null}\n');
+    return {
+      slug,
+      inputSvg: { path: svgPath, sha256: fileSha256(svgPath) },
+      sourcePng: { path: sourcePngPath, sha256: fileSha256(sourcePngPath) },
+      wrapperHtml,
+      png,
+      stdout,
+      stderr,
+      exitEvidence,
+      outputDirectory,
+      frame,
+      argv: [
+        probeBinary.path,
+        "--input",
+        wrapperHtml.path,
+        "--output",
+        outputDirectory,
+        "--width",
+        String(frame.width),
+        "--height",
+        String(frame.height),
+        "--scale",
+        "1",
+        "--scroll-y",
+        "0",
+      ],
+      exitCode: 0 as const,
+    };
+  });
+  return {
+    root,
+    evidence: {
+      schema: "krr-mermaid-native-frame-evidence-v1",
+      language: "en",
+      probeBinary,
+      runtime,
+      sourceManifest,
+      config,
+      fontContext,
+      rows,
+    },
+    pairs: NATIVE_FRAME_TARGETS.map((slug) => ({
+      slug,
+      officialPath: fixture.input.officialPngPath,
+      katanaPath: fixture.input.candidatePngPath,
+      officialSvgPath: fixture.input.officialSvgPath,
+      katanaSvgPath: svgPath,
+    })),
+  };
+}
 
 interface PaintProjectionObservation {
   fixture: PaintProjectionFixture;
