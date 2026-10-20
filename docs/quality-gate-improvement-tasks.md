@@ -10,19 +10,52 @@
 
 ## 現在の状態（2026-10-20）
 
-Draw.io LICENSE欠落はcommit `8d473c04`で修正済み。圧縮実行はexit0、依存更新R132もLICENSE工程を通過したが、完全ゲートはcoverageで失敗した。個別修正と全体合格を区別する。実装統合のHEADは`704caa60`で、現在の追加差分はCI保護参照/lock pin、早期静的チェック、純粋geometryと実CLI拒否回帰である。私有原本・正解画像・合格条件は変更しない。
+R667は現行source前後`845a37a1`一致で標準`html-release-fidelity-check`がexit0。静的286画像は全90以上（最小91.95591）、Mermaid/Draw.ioのHTML内比較22画像も全90以上（最小90.31383/91.22981）。動的15画像と23機能×3幅の69確認、入力状態18画像、全6長文条件の実末尾・目次子項目を確認した。証跡は`tmp/quality/current-html90-acceptance-evidence-r667-retry2/`。これはHTML暫定90の受入であり、表示時間・RSS・Mermaid独立117件99・公開の受入ではない。正式性能producerはclean committed sourceを要求するため、差分レビュー・検査・commitで測定対象を固定してから実行する。
+
+R675の原SVG由来Skia診断では既存のCSS色前処理により4影が復元したが、診断用feDropShadow展開がSourceAlphaではなくSourceGraphicをぼかしていた。96.75157という計測値は残すが、正しい汎用描画の改善結果として採用しない。隔離処理を是正し、既存binaryで比較し直す。本体へのSkia採用・117件99達成は未完了。
+
+R676の是正診断はSourceAlphaをぼかしSourceGraphicをmergeする一般的な展開へ直し、同じ既存binaryで再描画・採点exit0。PNGはR675とbytes一致したが、既存のmarker-selector前処理を省いた別の差（継承矢印の塗り）が残るため、全前処理を含む汎用経路や製品採用の合格にはしない。R677は既存`preprocess_for_rasterizer`全体を直接利用する隔離候補を準備しただけで、未build・未評価。
+
+- [/] MERMAID-NATIVE-CAPTURE-PNG-ORDER: 新規比較ディレクトリのPNGを生成する前にnative capture/sidecar検証へ渡すP1を修正。raster producer完了・receipt確認後に両consumerを実行する。静的順序回帰14件・型検査・対象Biomeが成功（`tmp/quality/current-native-frame-order-fix-r676/report.md`）。実117件のE2E合格とは区別する。
+- [/] Q18-CHECKPOINT-RELEASE-CLEANUP: 全体Biome前の固定容量超過を、既存Cargoのrelease profile整理で回復（`tmp/quality/current-checkpoint-release-profile-cleanup-r678/report.json`）。R19保護44件を前後で検証し、source不変、targetは2,516,492KiBへ減少。固定上限は維持。削除された隔離診断binaryは過去証跡として扱い、再認定しない。全体静的検査は整理後に実行する。
+
+最新実測: R654は全6段階exit0、source前後3830809e一致、root2,618成功/既存17skip。59,839/60,764行=98.4777170693%、未計測925で100/0未達。共有ast_linter helpersを計測へ戻した2ファイルも詳細inventoryで確認した（67/72、99/106）。以下のR609等の数値は旧sourceの履歴として保持する。
+
+R652は同じsourceで本番root recipeを独立呼出しし、checkpoint accepted・prior-all-passed・test stage0・report exit0を実証した（117.285秒、初回446.046秒）。これは同一sourceで全件成功後の省略であり、変更後の部分再実行・Moon出力復元・改変拒否・strict coverage・CI再利用の完了とは区別する。検証時間を製品表示性能へ転用しない。
+
+R659本番Moon seedはroot前のruntime-unused-checkが288成功/1失敗で停止した。テスト分離前の親ファイルにassertionが残ると仮定した検証の不整合を修正し、移動先テスト変更と親へのcfg(test)追加の両方で、投影不変・実SHA更新・fresh consumer route束縛・テストファイル除外を維持した。R662は既定5秒を維持して限定1件と標準全289件が成功（107.13秒、source pins前後一致）。古いhost receiptと重複検査によるtimeoutの失敗も保持し、標準producer更新と重複実行除去で解消した。Moon復元は未認定。
+
+進行是正: 追加coverage細分化・cache検証の反復より、実Mermaid描画診断とHTML受入実測を優先する。基盤の残DoDは削らずリリース前に完了する。R663の固定版Skia SDK隔離診断では、外部の既知bindgen不具合に公式PR1335の限定修正を適用し、生成済みSDKでbindingのみ再試行してexit0。同じbinary・R562明示runs/標準shadow入力でstock96.83144→paint flags補正99.053382（RGB min4）、基準画像/フォント/SVG不変を確認した。R420原入力の対照は90.96607→90.95396で未達。診断99を製品・正式117件の合格にしない。R562前処理の汎用性・参照非依存と、維持可能な公開APIでの実装・性能を確認する。初回失敗時の生成bindings全体SHA未保存は欠落として残す。R665が特定した標準html-release-fidelity-check（今回90点）を現sourceから実行する。旧R113合格は転用しない。
+
+HEADは`19207e5b`、v0.4.24未公開。Draw.io LICENSE欠落は`8d473c04`と実圧縮exit0で修正済み。全117実PNG採点の接続は関連回帰成功だが、Mermaid正式117件99以上は未確認。実製品classのR485/R509 min4=91.93356は未達のまま。raw JS基準・原入力・フォントは変更しない。Skia SVGDOM R562=96.83144、librsvg R576=95.70321は限定診断で、製品採用・正式合格・性能改善の証拠ではない。
+
+R574はsource前後`b9afa617`一致で静的16項目とHTML基盤全703件成功。R575は同sourceでnative41件、R578はV8経路6件成功。R580は意味のあるparser/namespace/f32負例を追加し、Mermaid34件を含むnative36件成功、旧31件の名前・順序を維持し、既存JSON生成とのbytes一致も確認した。R589はsource前後`916a2eb9`一致でRust AST・root/両harness厳格Clippy・依存境界がすべて成功。これらは画像117/HTML全対象・性能・coverage100の代用ではない。
+
+ユーザー承認の「専用テストと判定だけ分離、実装100%維持」に従い、identity/CoreText/CLI・resource audit・Mermaidの専用caseとC4判定を標準`*_tests.rs`へ分離した。共有runtime executor・fixture生成・parser・型ガードは計測に残す。R609は全6段階（source-static/AST/厳格Clippy/依存境界/root/詳細export）がexit0、source前後`c7f72775`一致。rootは2,610成功/既存17skip、59,585/60,527行=98.4436697672%、未計測942。summaryと詳細totalsも一致した。100/0は未達であり、root recipeの449.184秒・実test117.711秒を製品の表示性能へ転用しない。次batchのfont監査・実face width-only cache昇格・parser-pin拒否回帰を追加済み。R647は追加を含むAST32件成功だが全gateはコメント形式違反でexit101、形式を修正してR650で全段階を再検証する。R609 detailでast_linter_tests.rs内の共有helpersが計測対象外だったことも確認し、実行・fixture・mutation処理を計測用test_supportファイル群へ移した。新helperのcoverage inventoryへの出現は新規詳細exportで確認するまで未認定。R609を変更後の合格に読み替えない。
+
+Q19は固定Moon2.6.2の隔離fixture9変種が成功（R583）。root生成cacheだけのself-hash除外と、その厳密なworkspace schema・3変異拒否を追加し、管理入力45 taskを維持した。CLIとPython ownerのreview済みpin更新漏れを是正し、R609の実DAG/owned登録は成功した。MathJax39/39も5秒制限のまま成功（R588）。R603のHTML契約は705成功/NativeWidth1件5秒超、同sourceの限定R604は当該1件3.287秒で成功。これを全706件単一run成功にしない。
+
+R614の手動preflightはcheckpoint判定の前にcontext不一致で終了し、全件再実行はしていない。R619訂正でsource・狭義environment・commandsは一致、contextDigestだけ違うと確認した。R620の独立2呼出しでは全97環境キーのうち`CODEX_TOOL_CALL_ID`だけが変化し、既存context collectorはこの実行管理nonceまで入力としていた。この1キーだけをvolatileへ分類し、R623で独立した2回の本番cache-key recipeが同一fingerprintを返すことを確認した。R626はsource前後a6f69cdc一致でfoundationとautomation全5群が成功（310/688/29/28/7件、既存skip計6）。unknown環境・描画条件・ツール・資源・100/0の検査は維持する。これは実テスト省略・復元の実証とは区別する。production hit/restore/破損拒否/失敗後部分再実行・strict coverage/CI再利用はまだ未認定。
+
+R538のAST cache候補は同条件ABBAで利益を実証できず撤回済み。R569のMoon依存契約9件は、実full-policy正常系と全判定を保持して不要なAST反復を削減し、先頭9.176秒→8.70ms、既定timeout不変で成功した。文書だけでも全Git digestが変わる保守的な無効化は別課題であり、runtime入力閉包の証明なしに拡張子除外しない。
+
+R588では実空き119MiBと既存private clean-allの終了・空き約47GiBを観測し、重複cleanupを避けた。他セッションが実行したcleanの終了コードは自分の成功として扱わない。target内の旧binaryは削除され得るため、履歴ログのSHAを新binaryへ差し替えない。私有原本・保護44参照・固定容量上限4,726,095,872bytesを維持する。
+
+全117/HTML90・全scroll/末尾/全TOC子項目/動的84・consumer XY/resize・表示までの各sample3秒未満と時間/RSS非劣化・coverage100/未計測0・依存更新・最新HEADレビュー/3OS CI/公開/cleanupは未完了。#108/#109/#114は今回、#106最終99は後続。進捗報告や古い/部分的な成功で完了扱いしない。
+
+## 検証履歴（現行ソースの合格へ代用しない）
 
 R410は標準static20項目・実moduleを指定したgeometry/axis8件・harness baseline36件/candidate37件が成功し、source前後`03c09e0b`一致・exit0を確認した。R394で未選択だったaxis2件を実行済み。R407でCLI負例2件が失敗したのはworker Error表示の引用符を無視したassertionで、拒否動作とreport不生成は正しく、test側のみ是正した。R394 cleanup busy・R407 assertion failureの元証跡は保持する。
 
 R368のPython標準suiteはhooks310成功(skip5)、release622件途中のlock不一致1件で停止しquality未実行。依存更新時のverifier固定SHA更新漏れを現HEAD lockへ同期したR377はpin一致/改変拒否/producer成功3件、関連23件、Ruff/strict型が成功した。既存CIの保護対象1件を過去の40件条件が拒否する不整合も是正し、空/重複/未束縛/物理identityの拒否は維持する。早期lock一致検査を名前付きJust recipeとMoon foundationへ登録し、owner ASTをcanonical helperで再束縛したR389はowned issue0・owner契約22成功。これらを全automation合格へ転用しない。
 
-root coverageの最新の完全測定R287は60130/61189行=98.269297%、未計測1059。harness R410はbaseline1547/1592=97.173367%・未計測45、candidate1553/1599=97.123202%・未計測46で、前R349から各9行改善したが100/0未達。収集producer成功は100/0受入ではない。R365はLLVM summaryと物理行unionの集約差を確認したが、unionを公式百分率へ置換せず100/0を維持する。Q19/Q20の安全な部分再実行・coverage/CI再利用は未完了。R391は純static laneに旧R19の44外部参照の独立照合を重ねる必要がないと確認し、既存容量guardを維持したまま約39秒の重複を次回省く。native/performanceの保護条件へ一般化しない。
+root coverageの過去の完全測定R287は60130/61189行=98.269297%、未計測1059。harness R410はbaseline1547/1592=97.173367%・未計測45、candidate1553/1599=97.123202%・未計測46で、前R349から各9行改善したが100/0未達。収集producer成功は100/0受入ではない。R365はLLVM summaryと物理行unionの集約差を確認したが、unionを公式百分率へ置換せず100/0を維持する。Q19/Q20の安全な部分再実行・coverage/CI再利用は未完了。R391は純static laneに旧R19の44外部参照の独立照合を重ねる必要がないと確認し、既存容量guardを維持したまま約39秒の重複を次回省く。native/performanceの保護条件へ一般化しない。
 
-独立raw JS117件はR165でstrict readerが受理したが、KRR native117各99は未合格。local usvg fallback診断R292のJA全図は元寸法union ROI min4で91.67251→95.06449、別protocolの正規化値と混同しない。patchはroot依存へ未採用。R324は6文字列の実faceと基準位置を照合し、最大差x=0.0078125px/y=0。直接SkFont再生R330/R342/R361の診断にはraw node背景45とreplay背景30の差が混入していたことをR378で訂正した。基準を変えずclearだけ45にしたR385はbuild/render成功・pins不変、R387の同じ6文字列cropは83.8151〜94.0100で残差がある。これは全図scoreではない。R373で同じSkia処理へ合流するtext blob試行を省略した。安全な既存CoreText APIを使ったR398は3つのPostScript名の解決先path/bytesがR309と一致し、W6のbold traitも確認したが、Chrome内部のCTFont・synthetic bold状態の実証とは区別する。失敗したR396と元source snapshotを保持する。R405ではChrome Canvasと直接SkFontの6cropがpixel一致した。R413の魚では最小SVGもCanvasと一致する一方、元SVGとの差は残る。SVG一般のraster差とは断定せず、元SVGのtransform/fragment origin経路を切り分ける。R409の実DOM観測で祖先filter/opacity/stroke等の追加paint効果は見つからず、117件99の根拠にはしない。
+独立raw JS117件はR165でstrict readerが受理したが、KRR native117各99は未合格。local usvg fallback診断R292のJA全図は元寸法union ROI min4で91.67251→95.06449、別protocolの正規化値と混同しない。patchはroot依存へ未採用。R324は6文字列の実faceと基準位置を照合し、最大差x=0.0078125px/y=0。直接SkFont再生R330/R342/R361の診断にはraw node背景45とreplay背景30の差が混入していたことをR378で訂正した。基準を変えずclearだけ45にしたR385はbuild/render成功・pins不変、R387の同じ6文字列cropは83.8151〜94.0100で残差がある。これは全図scoreではない。R373で同じSkia処理へ合流するtext blob試行を省略した。安全な既存CoreText APIを使ったR398は3つのPostScript名の解決先path/bytesがR309と一致し、W6のbold traitも確認したが、Chrome内部のCTFont・synthetic bold状態の実証とは区別する。失敗したR396と元source snapshotを保持する。R405ではChrome Canvasと直接SkFontの6cropがpixel一致した。R413の魚では最小SVGもCanvasと一致する一方、元SVGとの差は残る。R428で元root viewport/wrapper geometryを保つ単一textがrawと一致し、R429でそのroot bboxから導いたdx=-0.296875を全97glyphへ1回適用したSkFont診断は6crop全てpixel一致/min4=100となった。これは製品PNG117図の合格ではなく、図名や固定dxを製品へ特例化しない。R430のexact Chrome sourceはSVG root paint時のpixel snapを示すが、DPR/座標系と条件付きdimension補正は製品適用前に区別する。R409の実DOM観測で祖先filter/opacity/stroke等の追加paint効果は見つからず、117件99の根拠にはしない。
 
 HTMLの過去90点台結果やR166 raw84取得を現行の完全受入へ代用しない。全可視領域/末尾/全目次/links/動的84と利用側の両軸・resize契約、実frame時間/RSSは最新HEADで未合格。表示までの時間を最優先とし各sample3秒未満・同条件非劣化を維持する。C4/TreeViewは実native PNG形状99と配色を別評価し、bridgeの欠落拒否回帰成功を全117受入へ代用しない。
 
-最新HEADの完全ゲート、依存鮮度、カバレッジ100/未計測0、正式画像/性能証拠、Draft→最新HEAD review→個別fix/reply/resolve→Ready→必須3OS CI→expected SHA保護merge→GitHub Release/3crate公開→#108/#109 close→安全なcleanupは未完了。中間commitや報告で完了扱いせず、下記の全未対応項目を維持して実行する。
+最新HEADの完全ゲート、依存鮮度、カバレッジ100/未計測0、正式画像/性能証拠、Draft→最新HEAD review→個別fix/reply/resolve→Ready→必須3OS CI→expected SHA保護merge→GitHub Release/3crate公開→#108/#109/#114 close→安全なcleanupは未完了。中間commitや報告で完了扱いせず、下記の全未対応項目を維持して実行する。
 
 - [ ] RELEASE-CLEAN-SOURCE-EVIDENCE-ORDER: 性能producerはcleanなcommit済みソースとHEADを要求する一方、release skillがcommit前のrelease-checkでその証拠を要求して循環していた。両skillの順序を「変更対応の検査・自己レビュー・通常hook付きローカル実装commit → 最新HEADの正式証拠生成 → 完全release gate → push/Draft」へ修正。未完了のスコア・性能・coverage100条件を中間commitの成功へ置き換えず、実際のclean-source producerまで確認する。
 
@@ -278,7 +311,7 @@ Q18/Q19 次の時間短縮は、owned contractテストの不変fixtureを一度
 ## 元のリリース条件を維持する
 
 - [ ] R01 Mermaid の独立 raw JS 正解データを使用し、KRR の縮尺・変換を基準へ混入させない。Live は参考であり色・テーマの継承条件にしない。
-- [ ] R02 Mermaid 117件各99以上、HTML 全対象90以上の暫定リリースを検証する。2026-10-17ユーザー回答により、C4・TreeViewはKRRの配色を維持し、形状と配色を別評価にする。形状は99以上を維持し、配色差は独立した数値として報告する。他の図の既存判定は維持する。独立raw JSの原本・画像は変更せず、欠落した文字・箱・辺、座標・縮尺差を配色差として免除しない。判定方式の回帰・全117再評価が完了するまで未合格とする。HTML 最終99は後続の条件として区別する。
+- [ ] R02 Mermaid 117件各99以上、HTML 全対象90以上の暫定リリースを検証する。 実際のKRR製品PNG全117件を判定へ接続する。C4/Tree以外の101件をSVGのChrome再描画だけで実描画合格とせず、R488/R492の欠落是正と回帰を検証する。2026-10-17ユーザー回答により、C4・TreeViewはKRRの配色を維持し、形状と配色を別評価にする。形状は99以上を維持し、配色差は独立した数値として報告する。他の図の既存判定は維持する。独立raw JSの原本・画像は変更せず、欠落した文字・箱・辺、座標・縮尺差を配色差として免除しない。判定方式の回帰・全117再評価が完了するまで未合格とする。HTML 最終99は後続の条件として区別する。 R509の現行実frame監査はR485とPNG SHAが一致し、最終97glyph中50個のASCII/記号/空白がTrebuchetからW3へ置換されていた。primary selector自体はTrebuchetを選択し、usvgのwhole-run fallback経路と整合する（R512/R513）。3faceのR309はpatched-usvg診断であり現行製品と混同しない。旧局所patchの95.06449、SkFont診断6crop100、Skia SVGDOMのregular CJK欠落を正式採用・99合格にしない。公開ライブラリAPIを優先し、安全な文字組みと全117/時間/RSSの回帰を維持する。
 - [ ] R03 同じHTML・資源・状態のChrome比較で全Yスクロール、実際の末尾、全目次、リンク、JavaScript、Mermaid、draw.ioをカバーする。観点別の検証資料と動的84項目を含め、画像比較のみで合格にしない。
 - [ ] R04 表示精度を改善しても時間・メモリを悪化させない。同じHTML・資源・フォント・viewport・環境で初回表示、再表示、全Yスクロール、操作後を測定し、cold/warmを分ける。描画完了までの時間を優先し、重いビルドと並行したwall-clock値を合否へ使わない。同一sessionのresizeも別に測定する。初回表示（cold/warm）・再表示・操作後・同一sessionのresize後の表示完了は各sampleで3秒未満を必須とし、3秒以上を不合格にする。全Yスクロールは総所要時間と各スクロール後の描画完了時間を区別し、末尾確認後の先頭復帰も含む1回の最大描画時間が3秒以上なら不合格にする。プロセス終了・cleanupの期限と表示完了時間は区別し、従来の時間・RSS非劣化条件も維持する。時間の主指標と報告は秒数とし、各phaseの変更前・変更後・差分秒を同じ集計方法で示す。百分率だけで説明せず、未計測の秒数を推定しない。フォント関連のライブラリ採用もKRRへ組み込んだ実測で判断する。
 - [ ] R05 ビルド成果物は約2回分を超えたときに既存の安全な容量ガードで整理する。毎回削除する方式や容量閾値の引き上げに変えない。2026-10-17の回答でも固定上限4,726,095,872Bを維持し、整理設計を改善する方針が再確認された。
