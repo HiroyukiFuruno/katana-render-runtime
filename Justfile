@@ -127,6 +127,10 @@ python-typecheck:
 duplication-check:
     bun scripts/quality/duplication-check.ts
 
+# harness lockと明示pinの同期を個別に早期確認する。
+html-performance-lock-pin-check:
+    python3 -m unittest scripts.release.verify_html_performance_evidence_test.PerformanceEvidenceTest.test_current_harness_lock_matches_explicit_pin
+
 # 検証コードの管理・解析範囲・標準導線の登録漏れを拒否する。
 html-harness-contract-check:
     bun scripts/html/harness-contract-cli.ts

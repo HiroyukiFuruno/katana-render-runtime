@@ -70,11 +70,13 @@ SCHEDULER_DEPENDENCIES: dict[str, list[str]] = {
         "typecheck",
         "python-lint",
         "python-typecheck",
+        "html-performance-lock-pin-check",
         "duplication-check",
         "html-harness-contract-check",
         "owned-validation-contract-check",
         "mathjax-import-pin-preflight",
     ],
+    "html-performance-lock-pin-check": [],
     "mathjax-import-pin-preflight": [],
     "runtime-bundle-check": [],
     "runtime-asset-check": [],
@@ -109,6 +111,7 @@ SCHEDULER_EVENT_PHASES = (
     "typecheck",
     "python-lint",
     "python-typecheck",
+    "html-performance-lock-pin-check",
     "duplication-check",
     "html-harness-contract-check",
     "owned-validation-contract-check",
@@ -134,8 +137,8 @@ SCHEDULER_EVENT_PHASES = (
     "runtime-asset-script-test",
     "unit-test",
 )
-SCHEDULER_FOUNDATION_PHASES = SCHEDULER_EVENT_PHASES[:10]
-SCHEDULER_PRE_LINT_PHASES = SCHEDULER_EVENT_PHASES[:13]
+SCHEDULER_FOUNDATION_PHASES = SCHEDULER_EVENT_PHASES[:11]
+SCHEDULER_PRE_LINT_PHASES = SCHEDULER_EVENT_PHASES[:14]
 SCHEDULER_BARRIER_PHASES = (
     "lint",
     "ast-lint",
@@ -308,7 +311,7 @@ def production_task_input_binding(
     declared_path = evidence_dir / "production-declared-inputs.json"
     declared_path.write_text(declared_output)
     declared = moon_json_object(json.loads(declared_output))
-    assert len(declared) == 44, "Production Moon task count changed"
+    assert len(declared) == 45, "Production Moon task count changed"
     validate_root_test_coverage_contract(declared)
     runtime_preflight = moon_json_object(declared.get("runtime-asset-script-preflight"))
     classic_evidence = moon_json_object(
@@ -328,10 +331,17 @@ def production_task_input_binding(
     pin_preflight = moon_json_object(declared.get("mathjax-import-pin-preflight"))
     assert pin_preflight.get("command") == ["just", "mathjax-import-pin-preflight"]
     assert pin_preflight.get("deps", []) == []
+    lock_pin_check = moon_json_object(declared.get("html-performance-lock-pin-check"))
+    assert lock_pin_check.get("command") == [
+        "just",
+        "html-performance-lock-pin-check",
+    ]
+    assert lock_pin_check.get("deps", []) == []
     foundation = moon_json_object(declared.get("source-static-foundation"))
     foundation_deps = foundation.get("deps")
     assert isinstance(foundation_deps, list)
     assert "mathjax-import-pin-preflight" in foundation_deps
+    assert "html-performance-lock-pin-check" in foundation_deps
     for index, leaf in enumerate(RUNTIME_UNUSED_LEAF_IDS):
         producer = moon_json_object(declared.get(f"{leaf}-producer"))
         previous = (
@@ -1447,7 +1457,7 @@ def main() -> int:
                 "passed": True,
                 "production_task_count": len(SCHEDULER_DEPENDENCIES),
                 "event_phases": success_phases,
-                "verified": "foundation precedes host prebuild, Biome, AST, Clippy, dependency leak, evidence acquisition, Bun consumer, and native unit",
+                "verified": "foundation including the explicit harness lock pin check precedes host prebuild, Biome, AST, Clippy, dependency leak, evidence acquisition, Bun consumer, and native unit",
             }
         )
 
