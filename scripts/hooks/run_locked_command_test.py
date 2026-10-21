@@ -1,16 +1,93 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from local_review_lock import review_lock
 from run_locked_command import run_locked_command
 
 
 class LockedCommandTest(unittest.TestCase):
+    def _fake_rtk(self, root: Path, marker: Path) -> Path:
+        executable = root / "bin/rtk"
+        executable.parent.mkdir(parents=True)
+        executable.write_text(
+            f"#!{sys.executable}\n"
+            "import sys\n"
+            "from pathlib import Path\n"
+            "if sys.argv[1:] != ['proxy', 'cargo', 'clean']:\n"
+            "    raise SystemExit(99)\n"
+            f"Path({str(marker)!r}).write_text('ran', encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        executable.chmod(0o755)
+        return executable
+
+    def _run_protected_clean(self, root: Path, rtk: Path, producer_lock: Path) -> int:
+        return run_locked_command(
+            ["--protect-root-producer", "--", str(rtk), "proxy", "cargo", "clean"],
+            root / "outer/review.lock",
+            producer_lock,
+            root,
+        )
+
+    def test_protected_clean_without_references_preserves_relative_target_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / "child-ran"
+            rtk = self._fake_rtk(root, marker)
+            with patch.dict(os.environ, {"PATH": str(rtk.parent), "CARGO_TARGET_DIR": "relative-target"}):
+                os.environ.pop("CARGO_CAPACITY_PROTECTED_REFS", None)
+                status = self._run_protected_clean(root, rtk, root / "producer/lock")
+            self.assertEqual(status, 0)
+            self.assertTrue(marker.exists())
+
+    def test_protected_clean_rejects_target_reference_before_child(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.mkdir()
+            reserved = target / "debug/krr"
+            reserved.parent.mkdir()
+            reserved.write_text("binary", encoding="utf-8")
+            marker = root / "child-ran"
+            rtk = self._fake_rtk(root, marker)
+            with patch.dict(os.environ, {
+                "PATH": str(rtk.parent),
+                "CARGO_TARGET_DIR": str(target),
+                "CARGO_CAPACITY_PROTECTED_REFS": json.dumps([str(reserved)]),
+            }):
+                status = self._run_protected_clean(root, rtk, root / "producer/lock")
+            self.assertEqual(status, 1)
+            self.assertFalse(marker.exists())
+            self.assertEqual(reserved.read_text(encoding="utf-8"), "binary")
+
+    def test_protected_clean_allows_reference_outside_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.mkdir()
+            external = root / "reserved/krr"
+            external.parent.mkdir()
+            external.write_text("binary", encoding="utf-8")
+            marker = root / "child-ran"
+            rtk = self._fake_rtk(root, marker)
+            with patch.dict(os.environ, {
+                "PATH": str(rtk.parent),
+                "CARGO_TARGET_DIR": str(target),
+                "CARGO_CAPACITY_PROTECTED_REFS": json.dumps([str(external)]),
+            }):
+                status = self._run_protected_clean(root, rtk, root / "producer/lock")
+            self.assertEqual(status, 0)
+            self.assertTrue(marker.exists())
+            self.assertEqual(external.read_text(encoding="utf-8"), "binary")
+
     def test_lock_is_held_for_child_and_released_after_success(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             lock = Path(directory) / "krr-terminal-report.lock"

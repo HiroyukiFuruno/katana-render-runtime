@@ -14,6 +14,8 @@
 
 ## 現在の状態（2026-10-22）
 
+- [/] R963/R966 証跡生成と予約成果物の整理保護：R963はCargo build前にENOSPCとなり、child終了記録とfinal.jsonは欠落として保持した。同じGit object batch（376,975,704 bytes）の反復保存を検出し、完全な40/64桁object ID列だけを実行内の標準LRUで再利用する。HEAD・status・index・作業ファイルは毎回再検証し、symbolic HEADと更新後object ID列は再取得する。candidate validatorも同じqueryを使う。privateの既存clean-allはactual0だったが、予約refを渡しても明示cleanがバイナリを削除したため、既存collectorを使い予約target内refがあるcleanを拒否する回帰を追加した。R966はfoundationと変更Python2moduleの全テストがactual0、source前後一致、62.860秒、全raw/closure照合済み（`tmp/quality/current-proof-cache-and-clean-static-r966/main-physical-review.json`）。R965の実Git fixture重複は共通化済みで、重複ゲートの基準は維持。R962の84再採取は185.144秒で成功したが、依存binary消失後は過去証跡として扱い、新しい正式build・receipt・採取を行う。新HEADでの画像・性能・117・coverage・公開は未完了。
+
 - [/] R960 修正後の統合検証：macOS専用処理のcfg境界とCoreText identity取得の重複を是正した。Mermaid候補のbuild proofをHTML性能受入れと独立して生成する入口は、既存source/capacity snapshot・bundle writer・厳格reader・排他lockを再利用し、HTML性能をnot-evaluatedと明記する。foundation（型・重複を含む）・producer全54単体テスト・AST・本体/性能両armのstrict Clippy・native17件・linter bin1件が全actual0、source前後一致、142.847秒。全29観測のraw SHAとprocess/FD閉鎖を照合した（`tmp/quality/current-coretext-product-integration-r960/main-physical-review.json`）。R958の残参照名3件、R959の新規testの型narrow不足は原失敗を保持して修正済み。新しいbuild-only入口の実build証明、fresh84、性能、117、完全coverageと公開は未完了。
 
 - [/] R957 CoreText製品経路の限定回帰：解決済みInterface familyも既存CoreText登録へ通し、実HTML最終glyphのW4/W6・英字SFNSと実layout weight軸を検証した。foundation・AST・本体/性能baseline/candidateのstrict Clippy、実catalog17件とlinter binの分離1件が全actual0、source前後一致、230.839秒。全28観測のraw SHA・process/FD閉鎖を主担当が照合した（`tmp/quality/current-coretext-product-integration-r957/main-physical-review.json`）。この成功後に、crossOS読取レビューが検出したmacOS専用呼出しのcfg不足を修正中。現行84再採取・表示時間/RSS・117件・coverage100/0・公開はまだ未完了で、この限定成功へ代用しない。
