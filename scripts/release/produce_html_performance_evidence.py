@@ -18,11 +18,11 @@ import subprocess
 import sys
 import time
 import tempfile
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from types import FrameType
 from typing import BinaryIO, Literal, NamedTuple, TypedDict, cast, overload
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
 import verify_html_performance_evidence as gate
 
@@ -30,6 +30,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "build"))
 LOCAL_CAPACITY_BASELINE = 2363047936
 LOCAL_CAPACITY_THRESHOLD = 4726095872
 PROTECTED_REGISTRY_SCHEMA = "krr-protected-refs-successor-v1"
+
+
+@contextmanager
+def candidate_build_locks(root: Path) -> Iterator[None]:
+    hooks = str(Path(__file__).resolve().parents[1] / "hooks")
+    sys.path.insert(0, hooks)
+    try:
+        from local_review_lock import review_lock
+    finally:
+        sys.path.remove(hooks)
+    with ExitStack() as locks:
+        lock_paths = (
+            root / ".moon/cache/krr-terminal-report.lock",
+            root / "tmp/quality/standalone-performance-coverage/root-nextest-producer.lock",
+        )
+        for path in lock_paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        for path in lock_paths:
+            locks.enter_context(review_lock(path))
+        yield
 
 
 class FilePin(TypedDict):
@@ -464,6 +484,26 @@ def write(path: Path, value: object) -> FilePin:
     path.write_bytes(encoded(value))
     return {"path": str(path.resolve()), "sha256": gate.sha256(path)}
 
+
+def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
+                           attempts: list[dict[str, FilePin]]) -> dict[str, str]:
+    transport_files: list[gate.JsonObject] = []
+    relative_paths: dict[str, str] = {}
+    transport: gate.JsonObject = {"schema": "krr-html-performance-release-bundle-v1", "head": head,
+                                  "files": transport_files, "attempts": attempts}
+    bundle.mkdir()
+    unique = {ref["path"]: ref for ref in refs}
+    for index, ref in enumerate(unique.values()):
+        original = Path(ref["path"])
+        relative = f"payload/{index}/{original.name}"
+        destination = bundle / relative
+        destination.parent.mkdir(parents=True)
+        shutil.copyfile(original, destination)
+        transport_files.append({"originalPath": ref["path"], "relativePath": relative,
+                                "sha256": ref["sha256"]})
+        relative_paths[ref["path"]] = relative
+    write(bundle / "bundle.json", transport)
+    return relative_paths
 
 MeasurementRole = Literal["tool-query", "metadata", "preflight", "build", "worker"]
 # 軽いquery、graph解決、同期検査、release build、単一workerに別の停止上限を置く。
@@ -927,6 +967,103 @@ def source(root: Path, *, git_query: gate.GitQuery | None = None) -> gate.JsonOb
     return payload
 
 
+class BuildSourceInputs(NamedTuple):
+    source_before: FilePin
+    capacity_input: FilePin
+    snapshot: FilePin
+    source_records: gate.SourceRecords
+
+
+def write_build_source_inputs(root: Path, output: Path, initial: gate.JsonObject,
+                              binding: CapacityBinding, *, git_query: gate.GitQuery | None = None,
+                              extra_capacity_inputs: Mapping[str, FilePin] | None = None) -> BuildSourceInputs:
+    source_before = write(output / "source-before.json", initial)
+    capacity_input_value: gate.JsonObject = {
+        "sourceBeforeRef": source_before,
+        "bindingRef": {"path": str(binding.document), "sha256": binding.document_sha256},
+        "stateRef": {"path": str(binding.state), "sha256": binding.state_sha256},
+        "protectedRegistryRef": {"path": str(binding.registry), "sha256": binding.registry_sha256},
+        "protectedReferenceCount": len(binding.references), "target": str(root / "target"),
+        "baselineBytes": LOCAL_CAPACITY_BASELINE, "factor": 2, "thresholdBytes": LOCAL_CAPACITY_THRESHOLD,
+    }
+    if extra_capacity_inputs is not None:
+        capacity_input_value.update(extra_capacity_inputs)
+    capacity_input = write(output / "capacity-inputs.json", capacity_input_value)
+    snapshot_rows = [{**row, "path": str(Path(gate._text(row["path"], "source path")).relative_to(root))}
+                     for row in gate._objects(initial["files"], "source files")]
+    snapshot = write(output / "shared-source-snapshot.json", {
+        "records": snapshot_rows,
+        "digest": hashlib.sha256(encoded(snapshot_rows)).hexdigest(),
+    })
+    source_records = gate.current_source(root, initial, git_query=git_query)
+    return BuildSourceInputs(source_before, capacity_input, snapshot, source_records)
+
+
+def produce_candidate_build_proof(root: Path, output: Path, capacity_document: Path,
+                                 capacity_document_sha256: str) -> gate.JsonObject:
+    gate.require(platform.system() == "Darwin" and platform.machine() == "arm64",
+                 "measurement lane requires macOS Apple Silicon")
+    tmp_root = root / "tmp"
+    gate.require(not tmp_root.is_symlink() and output.is_relative_to(tmp_root)
+                 and not output.exists() and not output.is_symlink(),
+                 "fresh ignored owned output required")
+    lifecycle = output.parent / f"{output.name}.lifecycle"
+    gate.require(not lifecycle.exists() and not lifecycle.is_symlink(),
+                 "fresh measurement lifecycle output required")
+    os.environ["GIT_OPTIONAL_LOCKS"] = "0"
+    git_query = _make_git_query(lifecycle)
+    initial = source(root, git_query=git_query)
+    _measurement_command(["just", "runtime-bundle-check"], cwd=root,
+                         role="preflight", log_directory=lifecycle)
+    gate.require(source(root, git_query=git_query) == initial,
+                 "source changed during runtime bundle check")
+    binding = load_capacity_binding(root, capacity_document, capacity_document_sha256)
+    output.mkdir(parents=True)
+    build_inputs = write_build_source_inputs(root, output, initial, binding, git_query=git_query)
+    harness = root / gate.HARNESS_ROOT
+    gate.require(gate.sha256(harness / "Cargo.lock") == gate.LOCK_SHA, "common lock pin differs")
+    build = guarded_arm_build(root, harness, "candidate", binding, build_inputs.source_records,
+                              output / "builds" / "candidate")
+    build.proof.update({"sourceBeforeRef": build_inputs.source_before,
+                        "sourceSnapshotRef": build_inputs.snapshot,
+                        "capacityInputRef": build_inputs.capacity_input})
+    artifact_pin = write(output / "builds" / "candidate" / "build-artifact.json", build.proof)
+    source_end = write(output / "source-end.json", source(root, git_query=git_query))
+    gate.require(gate.read_json(Path(source_end["path"])) == initial,
+                 "source changed during candidate build")
+    refs: list[FilePin] = [build_inputs.source_before, source_end, build_inputs.snapshot,
+                           build_inputs.capacity_input, artifact_pin, *build.pins,
+                           {"path": str(build.binary), "sha256": build.binary_sha256},
+                           {"path": str(binding.document), "sha256": binding.document_sha256},
+                           {"path": str(binding.state), "sha256": binding.state_sha256},
+                           {"path": str(binding.registry), "sha256": binding.registry_sha256}]
+    for log_directory in (lifecycle, *(output / "builds").glob("*.lifecycle")):
+        for path in sorted(log_directory.rglob("*")):
+            if path.is_file():
+                refs.append({"path": str(path), "sha256": gate.sha256(path)})
+    bundle = output / "bundle"
+    relative_paths = write_transport_bundle(bundle, gate._text(initial["head"], "source HEAD"), refs, [])
+    bundle_sha256 = gate.sha256(bundle / "bundle.json")
+    relative_artifact = relative_paths[artifact_pin["path"]]
+    facts = gate.validate_candidate_build_proof(
+        bundle, root, bundle_sha256, relative_artifact, artifact_pin["sha256"],
+    )
+    gate.require(source(root, git_query=git_query) == initial,
+                 "source changed during candidate build proof validation")
+    relative_binary = relative_paths[str(build.binary)]
+    return {
+        "schema": "krr-html-candidate-build-proof-result-v1",
+        "buildProofValidated": True,
+        "htmlPerformanceAcceptance": "not-evaluated",
+        "bundleManifest": {"path": str(bundle / "bundle.json"), "sha256": bundle_sha256},
+        "candidateBuildArtifact": {"path": str(bundle / relative_artifact),
+                                   "sha256": artifact_pin["sha256"]},
+        "candidateProbeBinary": {"path": str(bundle / relative_binary),
+                                  "sha256": build.binary_sha256},
+        "candidateBuildFacts": facts,
+    }
+
+
 def inventory(path: Path) -> gate.JsonObject:
     # 計測区間ではregistryと容量ガード対象target全体の内容変化を検出する。
     if not path.exists():
@@ -1302,28 +1439,18 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         plan = {"fixture_sha256": gate.sha256(fixture), "operation": "action-button-toggle", "x": 100.0, "y": 100.0, "expected_dom_state_path": str(dom), "expected_dom_state_sha256": gate.sha256(dom)}
         plan_path = output / "operation-plan.json"
         plan_pin = write(plan_path, plan)
-    source_before = write(output / "source-before.json", initial)
-    capacity_input_value: gate.JsonObject = {
-        "sourceBeforeRef": source_before,
-        "bindingRef": {"path": str(binding.document), "sha256": binding.document_sha256},
-        "stateRef": {"path": str(binding.state), "sha256": binding.state_sha256},
-        "protectedRegistryRef": {"path": str(binding.registry), "sha256": binding.registry_sha256},
-        "protectedReferenceCount": len(binding.references), "target": str(root / "target"),
-        "baselineBytes": LOCAL_CAPACITY_BASELINE, "factor": 2, "thresholdBytes": LOCAL_CAPACITY_THRESHOLD,
-    }
+    extra_capacity_inputs: dict[str, FilePin] = {}
     if catalog_manifest_pin is not None:
-        capacity_input_value["catalogManifestRef"] = catalog_manifest_pin
+        extra_capacity_inputs["catalogManifestRef"] = catalog_manifest_pin
     if catalog_plan_pin is not None:
-        capacity_input_value["catalogPlanRef"] = catalog_plan_pin
-    capacity_input_pin = write(output / "capacity-inputs.json", capacity_input_value)
+        extra_capacity_inputs["catalogPlanRef"] = catalog_plan_pin
+    build_inputs = write_build_source_inputs(root, output, initial, binding,
+        git_query=git_query, extra_capacity_inputs=extra_capacity_inputs)
     approved = write(output / "approved-source.json", initial)
     head = gate._text(initial["head"], "source HEAD")
     inventory_digest = gate._text(initial["inventoryDigest"], "source inventory digest")
-    snapshot_rows = [{**row, "path": str(Path(gate._text(row["path"], "source path")).relative_to(root))}
-                     for row in gate._objects(initial["files"], "source files")]
-    snapshot_pin = write(output / "shared-source-snapshot.json", {"records": snapshot_rows, "digest": hashlib.sha256(encoded(snapshot_rows)).hexdigest()})
     target = root / "target"
-    source_records = gate.current_source(root, initial, git_query=git_query)
+    source_records = build_inputs.source_records
     if catalog_manifest_path is not None:
         manifest_value = gate.read_json(catalog_manifest_path)
         feature_catalog_path = Path(gate._text(manifest_value.get("catalogPath"), "feature catalog path"))
@@ -1343,8 +1470,9 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     for arm in ("baseline", "candidate"):
         build = guarded_arm_build(root, harness, arm, binding, source_records, output / "builds" / arm)
         capacity_configs = build.configs
-        build.proof.update({"sourceBeforeRef": source_before, "sourceSnapshotRef": snapshot_pin,
-                            "capacityInputRef": capacity_input_pin})
+        build.proof.update({"sourceBeforeRef": build_inputs.source_before,
+                            "sourceSnapshotRef": build_inputs.snapshot,
+                            "capacityInputRef": build_inputs.capacity_input})
         build_artifact_pin = write(output / "builds" / arm / "build-artifact.json", build.proof)
         build_artifact_refs[arm] = build_artifact_pin
         build_pins.extend([*build.pins, build_artifact_pin])
@@ -1416,13 +1544,11 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                    binding.document, binding.state, binding.registry, *capacity_configs,
                    *[Path(pin["path"]) for pin in build_pins]]
     input_paths = list(dict.fromkeys(input_paths))
-    arms = expected_arm_pins(builds, snapshot_pin["sha256"], build_artifact_refs)
+    arms = expected_arm_pins(builds, build_inputs.snapshot["sha256"], build_artifact_refs)
     before_context = context(root, target, input_paths, lifecycle, git_query=git_query)
     before_pin = write(output / "context-before.json", before_context)
     environment_sha = before_pin["sha256"]
-    transport_files: list[gate.JsonObject] = []
     transport_attempts: list[dict[str, FilePin]] = []
-    transport: gate.JsonObject = {"schema": "krr-html-performance-release-bundle-v1", "head": head, "files": transport_files, "attempts": transport_attempts}
     expected_all: list[tuple[Path, ExpectedPerformance, gate.JsonObject, FilePin]] = []
     for row in measurement_rows:
         fixture = cast(Path, row["fixture"])
@@ -1467,7 +1593,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 binary = binaries[arm]
                 report_path = folder / "reports" / f"{arm}-{pair}.json"
                 raw_arm = "baseline-0.4.23" if arm == "baseline" else arm
-                environment = _performance_worker_environment(expected["provenance"]["rustc"], expected["provenance"]["cargo"], environment_sha, lock, snapshot_pin)
+                environment = _performance_worker_environment(expected["provenance"]["rustc"], expected["provenance"]["cargo"], environment_sha, lock, build_inputs.snapshot)
                 samples: list[gate.JsonObject] = []
                 loads: list[dict[str, float]] = []
                 for sample in range(5):
@@ -1479,7 +1605,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                     payload = worker_sample(stdout, sample, viewport_value)
                     samples.append(payload)
                     loads.append({"before": load_before, "after": load_after})
-                report: gate.JsonObject = {"arm": raw_arm, "pair_index": pair, "measurement_executed": True, "sample_count": 5, "source_sha256": expected["fixture_sha256"], "operation_plan_sha256": expected["operation_plan_sha256"], "operation": expected["operation"], "expected_dom_state_sha256": expected["expected_dom_state_sha256"], "viewport": viewport_value, "provenance": {**expected["provenance"], "binary_sha256": arms[raw_arm]["binary_sha256"], "source_snapshot_sha256": snapshot_pin["sha256"], "deps_lock_sha256": gate.LOCK_SHA}, "samples": samples}
+                report: gate.JsonObject = {"arm": raw_arm, "pair_index": pair, "measurement_executed": True, "sample_count": 5, "source_sha256": expected["fixture_sha256"], "operation_plan_sha256": expected["operation_plan_sha256"], "operation": expected["operation"], "expected_dom_state_sha256": expected["expected_dom_state_sha256"], "viewport": viewport_value, "provenance": {**expected["provenance"], "binary_sha256": arms[raw_arm]["binary_sha256"], "source_snapshot_sha256": build_inputs.snapshot["sha256"], "deps_lock_sha256": gate.LOCK_SHA}, "samples": samples}
                 if row["catalog"]:
                     report.update({"condition_id": row["condition_id"], "case_id": row["case_id"],
                         "state": row["state"], "operation_kind": row["operation_kind"],
@@ -1506,7 +1632,9 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     before_endpoint: Mapping[str, object] = before_context
     after_endpoint: Mapping[str, object] = after_context
     flags = {name: before_endpoint[key] == after_endpoint[key] for name, key in mapping.items()}
-    refs: list[FilePin] = [source_before, source_end, approved, snapshot_pin, before_pin, end_pin, capacity_input_pin, *build_pins, *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in binaries.values()]]
+    refs: list[FilePin] = [build_inputs.source_before, source_end, approved, build_inputs.snapshot,
+                           before_pin, end_pin, build_inputs.capacity_input, *build_pins,
+                           *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in binaries.values()]]
     for row in measurement_rows:
         refs.append(FilePin(path=str(row["plan_path"]), sha256=gate.sha256(cast(Path, row["plan_path"]))))
         if row["dom"] is not None:
@@ -1527,7 +1655,9 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     if catalog_capture_validation_pin is not None:
         refs.append(catalog_capture_validation_pin)
     for folder, expected, result, manifest_pin in expected_all:
-        expected["sourcePair"] = {"before": source_before, "end": source_end, "approvedSourceRef": approved, "inputPins": [approved, capacity_input_pin], "approvedInventoryDigest": inventory_digest, "snapshot": snapshot_pin}
+        expected["sourcePair"] = {"before": build_inputs.source_before, "end": source_end,
+            "approvedSourceRef": approved, "inputPins": [approved, build_inputs.capacity_input],
+            "approvedInventoryDigest": inventory_digest, "snapshot": build_inputs.snapshot}
         expected["endpointRefs"] = {"before": before_pin, "end": end_pin}
         result.update(flags)
         expected_pin = write(folder / "expected-enriched.json", expected)
@@ -1539,18 +1669,9 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         for path in sorted(log_directory.rglob("*")):
             if path.is_file():
                 refs.append(FilePin(path=str(path), sha256=gate.sha256(path)))
-    unique = {ref["path"]: ref for ref in refs}
     # 生成物だけを輸送し、巨大なCargo targetは公開artifactへ混入させない。
     bundle = output / "bundle"
-    bundle.mkdir()
-    for index, ref in enumerate(unique.values()):
-        original = Path(ref["path"])
-        relative = f"payload/{index}/{original.name}"
-        destination = bundle / relative
-        destination.parent.mkdir(parents=True)
-        shutil.copyfile(original, destination)
-        transport_files.append({"originalPath": ref["path"], "relativePath": relative, "sha256": ref["sha256"]})
-    write(bundle / "bundle.json", transport)
+    write_transport_bundle(bundle, head, refs, transport_attempts)
     if catalog_manifest_path is None:
         gate._verify_legacy_diagnostic(bundle, root, git_query=git_query)
     elif _allow_catalog_diagnostic:
@@ -1566,8 +1687,21 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=Path("tmp/html-performance-producer"))
     parser.add_argument("--capacity-binding", type=Path)
     parser.add_argument("--capacity-binding-sha256")
-    parser.add_argument("--catalog-plan", type=Path, required=True)
+    parser.add_argument("--catalog-plan", type=Path)
+    parser.add_argument("--candidate-build-only", action="store_true")
     args = parser.parse_args()
+    if args.candidate_build_only:
+        if args.catalog_plan is not None or args.capacity_binding is None or args.capacity_binding_sha256 is None:
+            parser.error("candidate build-only mode requires capacity binding pins and no catalog plan")
+        repo = args.repo.resolve()
+        with candidate_build_locks(repo):
+            result = produce_candidate_build_proof(
+                repo, args.output.resolve(), args.capacity_binding, args.capacity_binding_sha256,
+            )
+        print(json.dumps(result, sort_keys=True))
+        return
+    if args.catalog_plan is None:
+        parser.error("--catalog-plan is required for HTML performance production")
     produce(args.repo.resolve(), args.output.resolve(), args.capacity_binding, args.capacity_binding_sha256,
             args.catalog_plan.resolve())
 

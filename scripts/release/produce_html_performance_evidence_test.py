@@ -80,6 +80,29 @@ class CatalogProducerOperationTest(unittest.TestCase):
             run.assert_called_once_with(root.resolve(), output.resolve(), capacity,
                                         "b" * 64, manifest.resolve())
 
+    def test_candidate_build_cli_forwards_pinned_capacity_without_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output = root / "tmp/candidate-build"
+            capacity = root / "capacity.json"
+            with patch.object(producer.sys, "argv", [
+                "produce_html_performance_evidence.py", "--repo", str(root),
+                "--output", str(output), "--capacity-binding", str(capacity),
+                "--capacity-binding-sha256", "c" * 64, "--candidate-build-only",
+            ]), patch.object(producer.sys, "stdout", io.StringIO()), \
+                 patch.object(producer, "produce_candidate_build_proof",
+                              return_value={"buildProofValidated": True}) as run:
+                producer.main()
+            run.assert_called_once_with(root, output, capacity, "c" * 64)
+
+    def test_candidate_build_cli_rejects_existing_review_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            with producer.candidate_build_locks(root):
+                with self.assertRaisesRegex(RuntimeError, "another local review is active"):
+                    with producer.candidate_build_locks(root):
+                        self.fail("competing candidate producer entered its critical section")
+
     def test_producer_reuses_strict_observed_pointer_mapping(self) -> None:
         evidence: gate.JsonObject = {"steps": [
             {"kind": kind, "targetNodeId": 4, "x": 14.0, "y": 22.0}
@@ -93,6 +116,25 @@ class CatalogProducerOperationTest(unittest.TestCase):
     def test_unknown_catalog_kind_fails_before_any_build(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsupported finite catalog operation"):
             producer._catalog_operation_stream("future-operation", {"steps": []})
+
+
+class TransportBundleUnitTests(unittest.TestCase):
+    def test_shared_bundle_writer_keeps_release_bundle_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / "source.json"
+            source.write_text("{}")
+            pin = {"path": str(source), "sha256": gate.sha256(source)}
+            attempts = [{"expected": pin, "result": pin, "pairManifest": pin}]
+            bundle = root / "bundle"
+            relative_paths = producer.write_transport_bundle(bundle, "a" * 40, [pin, pin], attempts)
+            manifest = gate.Bundle(bundle)
+            self.assertEqual(manifest.manifest["schema"], "krr-html-performance-release-bundle-v1")
+            self.assertEqual(manifest.manifest["head"], "a" * 40)
+            self.assertEqual(manifest.manifest["attempts"], attempts)
+            self.assertEqual(len(gate._array(manifest.manifest["files"], "bundle files")), 1)
+            self.assertEqual(relative_paths[str(source)], "payload/0/source.json")
+            self.assertEqual(manifest.file(pin).read_text(), "{}")
 
 
 class RuntimeSyncPreflightTest(unittest.TestCase):
@@ -667,6 +709,58 @@ class CapacityBindingUnitTests(unittest.TestCase):
         self.assertIn("--message-format=json", self.commands[3])
         self.assertNotIn("--print-json", self.commands[3])
 
+
+    def test_candidate_build_only_validates_bundle_without_html_acceptance(self) -> None:
+        initial: gate.JsonObject = {"head": "a" * 40, "files": [], "inventoryDigest": "b" * 64}
+        facts: gate.JsonObject = {"binarySha256": "c" * 64, "buildArtifactSha256": "d" * 64}
+        output = self.root / "tmp/candidate-proof"
+        binding = self.binding()
+
+        def build(_root: Path, _harness: Path, arm: str, _binding: object,
+                  _records: gate.SourceRecords, build_output: Path) -> typed_producer.ArmBuildResult:
+            self.assertEqual(arm, "candidate")
+            binary = build_output / "binary" / "krr-html-performance-harness"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"candidate binary")
+            raw = build_output / "cargo.jsonl"
+            raw.write_bytes(b"build raw")
+            return typed_producer.ArmBuildResult([], binary, gate.sha256(binary),
+                {"schema": "krr-html-performance-build-artifact-v1", "arm": arm},
+                [{"path": str(raw), "sha256": gate.sha256(raw)}])
+
+        with patch.object(producer.platform, "system", return_value="Darwin"), \
+             patch.object(producer.platform, "machine", return_value="arm64"), \
+             patch.object(producer, "_make_git_query",
+                          return_value=lambda *_args, **_kwargs: ""), \
+             patch.object(producer, "source", side_effect=[initial, initial, initial, initial]), \
+             patch.object(producer, "_measurement_command",
+                          return_value=subprocess.CompletedProcess(
+                              ["just", "runtime-bundle-check"], 0, b"", b"",
+                          )) as command, \
+             patch.object(producer, "load_capacity_binding", return_value=binding), \
+             patch.object(producer, "guarded_arm_build", side_effect=build) as build_call, \
+             patch.object(producer.gate, "current_source", return_value={}), \
+             patch.object(producer.gate, "LOCK_SHA", self.lock_sha), \
+             patch.object(producer.gate, "validate_candidate_build_proof",
+                          return_value=facts) as validate, \
+             patch.object(producer, "_validate_catalog_capture_envelope",
+                          side_effect=AssertionError), \
+             patch.object(producer.gate, "verify", side_effect=AssertionError), \
+             patch.object(producer, "await_quiet", side_effect=AssertionError):
+            result = producer.produce_candidate_build_proof(
+                self.root, output, self.document, gate.sha256(self.document),
+            )
+
+        self.assertEqual(build_call.call_args.args[2], "candidate")
+        self.assertEqual(command.call_args.args[0], ["just", "runtime-bundle-check"])
+        self.assertEqual(validate.call_count, 1)
+        self.assertEqual(result["htmlPerformanceAcceptance"], "not-evaluated")
+        self.assertNotIn("performanceAccepted", result)
+        self.assertNotIn("acceptance", result)
+        self.assertEqual(result["candidateBuildFacts"], facts)
+        binary_pin = gate._object(result["candidateProbeBinary"], "candidate binary pin")
+        binary_path = Path(gate._text(binary_pin["path"], "candidate binary path"))
+        self.assertEqual(binary_path.read_bytes(), b"candidate binary")
 
 class ProducerJsonBoundaryUnitTests(unittest.TestCase):
     def test_missing_or_invalid_no_follow_api_rejects_without_open(self) -> None:
