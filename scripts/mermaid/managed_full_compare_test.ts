@@ -21,6 +21,7 @@ import {
 } from "./managed-full-compare-results";
 import { fileSha256 } from "./mermaid-pair-manifest";
 import { digestFileRecords } from "./native-build-receipt";
+import type { ReferenceScoreRow } from "./reference_score";
 import { ReferenceScorePolicy } from "./reference_score_policy";
 
 test("managed full aggregation requires exactly EN59 and JA58 strict scores at least 99", () => {
@@ -264,25 +265,55 @@ test("managed full aggregation rejects incomplete inventories and lowered score 
   ).toThrow();
 });
 
-test("managed projected-reference semantics bind four projected metrics and preserve RGB separately", () => {
+test("managed native semantics bind actual PNG edge support and projected metrics separately from RGB", () => {
   const expected = slugs(59);
   expected[0] = "08-04-c4-component";
   const evidence = validGeometryEvidence(expected);
-  const accepted = validateLanguageScoreEvidence(
-    "en",
-    expected,
-    evidence.scores,
-    evidence.inventory,
-    evidence.context,
-    evidence.geometry,
-  );
+  const accepted = validateNativeGeometryEvidence(expected, evidence);
   expect(accepted.accepted).toBe(true);
   expect(accepted.scores[0]).toMatchObject({
     score: 99,
     rgbScore: 80,
-    scoreSemantics: "paint-projected-reference-v1",
+    scoreSemantics: "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1",
+    actualPngShape: {
+      policy: "rgb-channel-edge-support-v1",
+      score: 99,
+      officialPngSha256: "a".repeat(64),
+      actualPngSha256: "f".repeat(64),
+    },
   });
 
+  const oldProjectedOnlyScores = evidence.scores.map((row) => {
+    if (row.actualPngShape === undefined) return row;
+    const { actualPngShape: _actualPngShape, ...projectedOnly } = row;
+    return { ...projectedOnly, scoreSemantics: "paint-projected-reference-v1" };
+  });
+  const legacyNativeContext = { ...evidence.context } as Record<string, unknown>;
+  delete legacyNativeContext.comparisonRole;
+  legacyNativeContext.scoreSemantics = "rgb-v1+paint-projected-reference-v1";
+
+  const referenceContext = { ...evidence.context } as Record<string, unknown>;
+  delete referenceContext.comparisonRole;
+  referenceContext.scoreSemantics = "rgb-v1+paint-projected-reference-v1";
+  const referenceScores = evidence.scores.map((row) => {
+    if (row.paintProjectedReference === undefined) return row;
+    const { actualPngShape: _actualPngShape, ...projected } = row;
+    return {
+      ...projected,
+      score: row.paintProjectedReference.score,
+      passed: row.paintProjectedReference.structuralIntegrityAccepted,
+      scoreSemantics: "paint-projected-reference-v1",
+    };
+  });
+
+  const outOfCanvasScores = evidence.scores.map((row, index) =>
+    index === 0 && row.actualPngShape !== undefined
+      ? {
+          ...row,
+          actualPngShape: { ...row.actualPngShape, roi: { x: 319, y: 219, width: 2, height: 2 } },
+        }
+      : row,
+  );
   const wrongMetrics = {
     ...evidence.geometry,
     pairs: evidence.geometry.pairs.map((pair) => ({
@@ -290,16 +321,57 @@ test("managed projected-reference semantics bind four projected metrics and pres
       projectedMetrics: { ...pair.projectedMetrics, contentMaeScore: 80, score: 80 },
     })),
   };
-  expect(() =>
+  const legacyNeutralEvidence = {
+    ...evidence.geometry,
+    schema: "krr-mermaid-neutral-geometry-evidence-v1",
+    policy: "neutral-svg-geometry-v1",
+  };
+  const missingNativePins = new Map<string, string>(),
+    mismatchedNativePins = nativePngPins(expected);
+  mismatchedNativePins.set(expected[0] ?? "", "0".repeat(64));
+  const rejectedMutations: Array<{
+    name: string;
+    scores?: unknown | undefined;
+    context?: unknown | undefined;
+    geometry?: unknown | undefined;
+    pins?: ReadonlyMap<string, string>;
+    message?: string;
+  }> = [
+    { name: "shape ROI outside canvas", scores: outOfCanvasScores },
+    { name: "projected-only native row", scores: oldProjectedOnlyScores },
+    {
+      name: "unmarked legacy native context",
+      scores: oldProjectedOnlyScores,
+      context: legacyNativeContext,
+      message: "comparison role does not match its trusted caller",
+    },
+    { name: "projected metric mismatch", geometry: wrongMetrics },
+    { name: "legacy neutral geometry evidence", geometry: legacyNeutralEvidence },
+    { name: "missing native PNG pin", pins: missingNativePins },
+    { name: "mismatched native PNG pin", pins: mismatchedNativePins },
+  ];
+  for (const mutation of rejectedMutations) {
+    const reject = () =>
+      validateNativeGeometryEvidence(expected, evidence, {
+        ...(mutation.scores === undefined ? {} : { scores: mutation.scores }),
+        ...(mutation.context === undefined ? {} : { context: mutation.context }),
+        ...(mutation.geometry === undefined ? {} : { geometry: mutation.geometry }),
+        ...(mutation.pins === undefined ? {} : { pins: mutation.pins }),
+      });
+    if (mutation.message === undefined) expect(reject, mutation.name).toThrow();
+    else expect(reject, mutation.name).toThrow(mutation.message);
+  }
+
+  expect(
     validateLanguageScoreEvidence(
       "en",
       expected,
-      evidence.scores,
+      referenceScores,
       evidence.inventory,
-      evidence.context,
-      wrongMetrics,
-    ),
-  ).toThrow();
+      referenceContext,
+      evidence.geometry,
+    ).accepted,
+  ).toBe(true);
 
   const belowProjectedThreshold = {
     ...evidence.geometry,
@@ -310,8 +382,10 @@ test("managed projected-reference semantics bind four projected metrics and pres
   };
   const belowProjectedScores = evidence.scores.map((row, index) => {
     if (index !== 0) return row;
-    if (row.scoreSemantics !== "paint-projected-reference-v1") {
-      throw new Error("Projected reference score semantics are missing");
+    if (
+      row.scoreSemantics !== "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1"
+    ) {
+      throw new Error("Actual PNG edge support or projected reference semantics are missing");
     }
     const projected = row.paintProjectedReference;
     if (projected === undefined) throw new Error("Projected reference score is missing");
@@ -320,34 +394,20 @@ test("managed projected-reference semantics bind four projected metrics and pres
       score: 98.5,
       passed: false,
       paintProjectedReference: { ...projected, contentMaeScore: 98.5, score: 98.5 },
+      actualPngShape: {
+        ...row.actualPngShape,
+        score: 99,
+        fullCanvasScore: 99,
+        foregroundUnionScore: 99,
+      },
     };
   });
-  const rejected = validateLanguageScoreEvidence(
-    "en",
-    expected,
-    belowProjectedScores,
-    evidence.inventory,
-    evidence.context,
-    belowProjectedThreshold,
-  );
+  const rejected = validateNativeGeometryEvidence(expected, evidence, {
+    scores: belowProjectedScores,
+    geometry: belowProjectedThreshold,
+  });
   expect(rejected.accepted).toBe(false);
   expect(rejected.minimumScore).toBe(98.5);
-
-  const legacyNeutralEvidence = {
-    ...evidence.geometry,
-    schema: "krr-mermaid-neutral-geometry-evidence-v1",
-    policy: "neutral-svg-geometry-v1",
-  };
-  expect(() =>
-    validateLanguageScoreEvidence(
-      "en",
-      expected,
-      evidence.scores,
-      evidence.inventory,
-      evidence.context,
-      legacyNeutralEvidence,
-    ),
-  ).toThrow();
 });
 
 test("managed geometry evidence keeps structural mismatches as failed scores", () => {
@@ -361,6 +421,7 @@ test("managed geometry evidence keeps structural mismatches as failed scores", (
     evidence.inventory,
     evidence.context,
     evidence.geometry,
+    { role: "native-product", pngSha256BySlug: nativePngPins(expected) },
   );
   expect(result.accepted).toBe(false);
   expect(result.minimumScore).toBe(99);
@@ -470,6 +531,27 @@ function expectManagedToolRejections(
   ).toThrow();
 }
 
+function validateNativeGeometryEvidence(
+  expected: string[],
+  evidence: ReturnType<typeof validGeometryEvidence>,
+  overrides: {
+    scores?: unknown;
+    context?: unknown;
+    geometry?: unknown;
+    pins?: ReadonlyMap<string, string>;
+  } = {},
+): ReturnType<typeof validateLanguageScoreEvidence> {
+  return validateLanguageScoreEvidence(
+    "en",
+    expected,
+    overrides.scores ?? evidence.scores,
+    evidence.inventory,
+    overrides.context ?? evidence.context,
+    overrides.geometry ?? evidence.geometry,
+    { role: "native-product", pngSha256BySlug: overrides.pins ?? nativePngPins(expected) },
+  );
+}
+
 function slugs(count: number): string[] {
   const values = Array.from(
     { length: count },
@@ -477,6 +559,10 @@ function slugs(count: number): string[] {
   );
   values[0] = "20-02-sankey-beta";
   return values;
+}
+
+function nativePngPins(expected: string[]): Map<string, string> {
+  return new Map(expected.map((slug) => [slug, "f".repeat(64)]));
 }
 
 function validEvidence(expected: string[]) {
@@ -523,18 +609,30 @@ function validGeometryEvidence(expected: string[], accepted = true) {
     evidenceSha256 = "b".repeat(64),
     score = 99,
     roi = { x: 10, y: 10, width: 300, height: 200 };
-  const scores = base.scores.map((row, index) =>
+  const scores: ReferenceScoreRow[] = base.scores.map((row, index) =>
     index === 0
       ? {
           ...row,
           score,
           rgbScore: 80,
-          scoreSemantics: "paint-projected-reference-v1" as const,
+          scoreSemantics:
+            "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1" as const,
           canvasRmseScore: 80,
           canvasMaeScore: 80,
           contentRmseScore: 80,
           contentMaeScore: 80,
           passed: accepted,
+          actualPngShape: {
+            policy: "rgb-channel-edge-support-v1" as const,
+            score,
+            fullCanvasScore: 99,
+            foregroundUnionScore: 99,
+            officialPngSha256: "a".repeat(64),
+            actualPngSha256: "f".repeat(64),
+            width: 320,
+            height: 220,
+            roi,
+          },
           paintProjectedReference: {
             policy: "raw-svg-geometry-candidate-computed-paint-v1" as const,
             score,
@@ -584,7 +682,8 @@ function validGeometryEvidence(expected: string[], accepted = true) {
     inventory: base.inventory,
     context: {
       ...base.context,
-      scoreSemantics: "rgb-v1+paint-projected-reference-v1",
+      comparisonRole: "native-product",
+      scoreSemantics: "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1",
       paintProjectedReferenceEvidence: {
         path: "paint-projected-reference-evidence.json",
         sha256: evidenceSha256,

@@ -93,7 +93,7 @@ def guard_environment(base: dict[str, str], root: Path) -> dict[str, str]:
 def validate_just(root: Path) -> None:
     text = (root / "Justfile").read_text()
     required = ['set shell := ["bash", "-uc"]',
-                'CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")',
+                'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
                 'CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO',
                 'export RUSTFLAGS := env_var_or_default("RUSTFLAGS", "-D warnings")',
                 'krr-build:\n    {{CARGO_BUILD}} build -p katana-render-runtime-cli\n',

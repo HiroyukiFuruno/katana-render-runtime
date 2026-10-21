@@ -20,7 +20,11 @@ const scoreRowSchema = z
     slug: z.string().min(1),
     score: z.number().finite().min(0).max(100),
     rgbScore: z.number().finite().min(0).max(100),
-    scoreSemantics: z.enum(["rgb-v1", "paint-projected-reference-v1"]),
+    scoreSemantics: z.enum([
+      "rgb-v1",
+      "paint-projected-reference-v1",
+      "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1",
+    ]),
     canvasRmseScore: z.number().finite().min(0).max(100),
     canvasMaeScore: z.number().finite().min(0).max(100),
     contentRmseScore: z.number().finite().min(0).max(100),
@@ -40,6 +44,18 @@ const scoreRowSchema = z
         contentRmseScore: z.number().finite().min(0).max(100),
         contentMaeScore: z.number().finite().min(0).max(100),
         evidenceSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        ...projectedRasterBoundsFields,
+      })
+      .strict()
+      .optional(),
+    actualPngShape: z
+      .object({
+        policy: z.literal("rgb-channel-edge-support-v1"),
+        score: z.number().finite().min(0).max(100),
+        fullCanvasScore: z.number().finite().min(0).max(100),
+        foregroundUnionScore: z.number().finite().min(0).max(100),
+        officialPngSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        actualPngSha256: z.string().regex(/^[a-f0-9]{64}$/),
         ...projectedRasterBoundsFields,
       })
       .strict()
@@ -141,7 +157,12 @@ const contextSchema = z
     scoreThreshold: z.literal(99),
     formalAccepted: z.literal(false),
     independentGold: z.literal(false),
-    scoreSemantics: z.enum(["rgb-v1", "rgb-v1+paint-projected-reference-v1"]),
+    comparisonRole: z.enum(["reference", "native-product"]).optional(),
+    scoreSemantics: z.enum([
+      "rgb-v1",
+      "rgb-v1+paint-projected-reference-v1",
+      "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1",
+    ]),
     paintProjectedReferenceEvidence: z
       .object({
         path: z.literal("paint-projected-reference-evidence.json"),
@@ -203,84 +224,34 @@ export function validateLanguageScoreEvidence(
   inventoryValue: unknown,
   contextValue: unknown,
   paintProjectedReferenceEvidenceValue?: unknown,
+  expectation: ScoreEvidenceExpectation = { role: "reference" },
 ): LanguageScoreAcceptance {
+  const expectedRole = expectation.role,
+    expectedNativePngSha256 =
+      expectation.role === "native-product" ? expectation.pngSha256BySlug : undefined;
   const expectedCount = language === "en" ? 59 : 58;
-  if (expectedSlugs.length !== expectedCount || new Set(expectedSlugs).size !== expectedCount) {
-    throw new Error(`${language} expected fixture inventory is not the fixed complete inventory`);
-  }
+  validateExpectedSlugSet(language, expectedSlugs, expectedCount);
   const scores = z.array(scoreRowSchema).parse(scoresValue);
   const inventory = inventorySchema.parse(inventoryValue);
   const context = contextSchema.parse(contextValue);
   const geometrySlugs = expectedSlugs.filter(isNeutralGeometryTargetSlug);
+  validateScoreContext(language, context, geometrySlugs, expectedRole, expectedNativePngSha256);
   const projectedEvidence =
     geometrySlugs.length > 0
       ? parsePaintProjectedReferenceEvidence(paintProjectedReferenceEvidenceValue)
       : null;
-  if (
-    (geometrySlugs.length > 0 &&
-      (context.scoreSemantics !== "rgb-v1+paint-projected-reference-v1" ||
-        context.paintProjectedReferenceEvidence === undefined)) ||
-    (geometrySlugs.length === 0 &&
-      (context.scoreSemantics !== "rgb-v1" ||
-        context.paintProjectedReferenceEvidence !== undefined))
-  ) {
-    throw new Error(`${language} comparison score semantics are incomplete`);
-  }
   if (projectedEvidence !== null) validateProjectedManifest(projectedEvidence, geometrySlugs);
-  const scorePolicy = new ReferenceScorePolicy(99);
   if (
-    !sameStrings(inventory.expected, expectedSlugs) ||
-    !sameStrings(inventory.scored, expectedSlugs) ||
-    inventory.skippedEmpty.length !== 0 ||
-    context.expectedSlugCount !== expectedCount ||
-    scores.length !== expectedCount ||
-    !sameStrings(
-      scores.map((row) => row.slug),
+    !isAcceptedScoreSet(
+      scores,
+      inventory,
       expectedSlugs,
-    ) ||
-    scores.some((row) => {
-      const threshold = scorePolicy.thresholdFor(row.slug);
-      const geometryTarget = isNeutralGeometryTargetSlug(row.slug),
-        projected = row.paintProjectedReference,
-        evidencePair = projectedEvidence?.pairs.find((pair) => pair.slug === row.slug),
-        rgbMinimum = Math.min(
-          row.canvasRmseScore,
-          row.canvasMaeScore,
-          row.contentRmseScore,
-          row.contentMaeScore,
-        ),
-        projectedScore = projected === undefined ? undefined : expectedProjectedScore(projected),
-        rowSemanticsValid = geometryTarget
-          ? row.scoreSemantics === "paint-projected-reference-v1" &&
-            projected !== undefined &&
-            evidencePair !== undefined &&
-            context.paintProjectedReferenceEvidence?.sha256 === projected.evidenceSha256 &&
-            projected.score === projectedScore &&
-            projected.structuralIntegrityAccepted === evidencePair.structuralIntegrity.accepted &&
-            sameStrings(projected.reasons, evidencePair.structuralIntegrity.reasons) &&
-            projected.maxTransformDelta === evidencePair.structuralIntegrity.maxTransformDelta &&
-            projected.fullCanvasRmseScore === evidencePair.projectedMetrics.fullCanvasRmseScore &&
-            projected.fullCanvasMaeScore === evidencePair.projectedMetrics.fullCanvasMaeScore &&
-            projected.contentRmseScore === evidencePair.projectedMetrics.contentRmseScore &&
-            projected.contentMaeScore === evidencePair.projectedMetrics.contentMaeScore &&
-            projected.width === evidencePair.projectedMetrics.width &&
-            projected.height === evidencePair.projectedMetrics.height &&
-            projected.roi.x === evidencePair.projectedMetrics.roi.x &&
-            projected.roi.y === evidencePair.projectedMetrics.roi.y &&
-            projected.roi.width === evidencePair.projectedMetrics.roi.width &&
-            projected.roi.height === evidencePair.projectedMetrics.roi.height &&
-            evidencePair.projectedMetrics.score === projectedScore
-          : row.scoreSemantics === "rgb-v1" && projected === undefined;
-      return (
-        row.minScore !== threshold.minScore ||
-        row.exceptionReason !== threshold.reason ||
-        row.rgbScore !== rgbMinimum ||
-        !rowSemanticsValid ||
-        (geometryTarget ? row.score !== projectedScore : row.score !== rgbMinimum) ||
-        row.passed !==
-          (row.score >= row.minScore && (projected?.structuralIntegrityAccepted ?? true))
-      );
-    })
+      expectedCount,
+      projectedEvidence,
+      context,
+      expectedRole,
+      expectedNativePngSha256,
+    )
   ) {
     throw new Error(`${language} comparison did not score the exact strict inventory`);
   }
@@ -290,6 +261,216 @@ export function validateLanguageScoreEvidence(
     accepted: scores.every((row) => row.score >= 99 && row.passed),
     scores,
   };
+}
+
+function validateExpectedSlugSet(
+  language: "en" | "ja",
+  expectedSlugs: string[],
+  expectedCount: number,
+): void {
+  if (expectedSlugs.length !== expectedCount || new Set(expectedSlugs).size !== expectedCount) {
+    throw new Error(`${language} expected fixture inventory is not the fixed complete inventory`);
+  }
+}
+
+function validateScoreContext(
+  language: "en" | "ja",
+  context: z.infer<typeof contextSchema>,
+  geometrySlugs: string[],
+  expectedRole: "reference" | "native-product",
+  expectedNativePngSha256: ReadonlyMap<string, string> | undefined,
+): void {
+  if (
+    (expectedRole === "native-product" && context.comparisonRole !== "native-product") ||
+    (expectedRole === "reference" && context.comparisonRole === "native-product")
+  ) {
+    throw new Error(`${language} comparison role does not match its trusted caller`);
+  }
+  if (
+    expectedRole === "native-product" &&
+    geometrySlugs.some((slug) => expectedNativePngSha256?.has(slug) !== true)
+  ) {
+    throw new Error(`${language} native PNG pins are incomplete for geometry acceptance`);
+  }
+  const expectedSemantics =
+    geometrySlugs.length === 0
+      ? "rgb-v1"
+      : expectedRole === "native-product"
+        ? "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1"
+        : "rgb-v1+paint-projected-reference-v1";
+  if (
+    context.scoreSemantics !== expectedSemantics ||
+    (geometrySlugs.length === 0) === (context.paintProjectedReferenceEvidence !== undefined)
+  ) {
+    throw new Error(`${language} comparison score semantics are incomplete`);
+  }
+}
+
+function isAcceptedScoreSet(
+  scores: ScoreRow[],
+  inventory: z.infer<typeof inventorySchema>,
+  expectedSlugs: string[],
+  expectedCount: number,
+  projectedEvidence: z.infer<typeof paintProjectedReferenceEvidenceSchema> | null,
+  context: z.infer<typeof contextSchema>,
+  expectedRole: "reference" | "native-product",
+  expectedNativePngSha256: ReadonlyMap<string, string> | undefined,
+): boolean {
+  if (
+    !sameStrings(inventory.expected, expectedSlugs) ||
+    !sameStrings(inventory.scored, expectedSlugs) ||
+    inventory.skippedEmpty.length !== 0 ||
+    context.expectedSlugCount !== expectedCount ||
+    scores.length !== expectedCount ||
+    !sameStrings(
+      scores.map((row) => row.slug),
+      expectedSlugs,
+    )
+  ) {
+    return false;
+  }
+  return !scores.some((row) =>
+    scoreRowIsInvalid(row, projectedEvidence, context, expectedRole, expectedNativePngSha256),
+  );
+}
+
+type ScoreRow = z.infer<typeof scoreRowSchema>;
+type ProjectedPair = z.infer<typeof paintProjectedReferenceEvidenceSchema>["pairs"][number];
+type ProjectedScore = NonNullable<ScoreRow["paintProjectedReference"]>;
+type ScoreEvidenceExpectation =
+  | { role: "reference" }
+  | { role: "native-product"; pngSha256BySlug: ReadonlyMap<string, string> };
+
+function scoreRowIsInvalid(
+  row: ScoreRow,
+  projectedEvidence: z.infer<typeof paintProjectedReferenceEvidenceSchema> | null,
+  context: z.infer<typeof contextSchema>,
+  expectedRole: "reference" | "native-product",
+  expectedNativePngSha256: ReadonlyMap<string, string> | undefined,
+): boolean {
+  const threshold = new ReferenceScorePolicy(99).thresholdFor(row.slug),
+    geometry = isNeutralGeometryTargetSlug(row.slug),
+    projected = row.paintProjectedReference,
+    shape = row.actualPngShape,
+    projectedScore = projected === undefined ? undefined : expectedProjectedScore(projected),
+    shapeScore =
+      shape === undefined ? undefined : Math.min(shape.fullCanvasScore, shape.foregroundUnionScore),
+    rgbScore = Math.min(
+      row.canvasRmseScore,
+      row.canvasMaeScore,
+      row.contentRmseScore,
+      row.contentMaeScore,
+    ),
+    pair = projectedEvidence?.pairs.find((item) => item.slug === row.slug),
+    semanticsValid = geometry
+      ? expectedRole === "native-product"
+        ? isNativeGeometryScoreValid(
+            row,
+            projected,
+            shape,
+            pair,
+            projectedScore,
+            shapeScore,
+            context,
+            expectedNativePngSha256,
+          )
+        : isReferenceGeometryScoreValid(row, projected, shape, pair, projectedScore, context)
+      : row.scoreSemantics === "rgb-v1" && projected === undefined && shape === undefined;
+  return (
+    row.minScore !== threshold.minScore ||
+    row.exceptionReason !== threshold.reason ||
+    row.rgbScore !== rgbScore ||
+    !semanticsValid ||
+    row.score !==
+      (geometry
+        ? expectedRole === "native-product"
+          ? Math.min(projectedScore ?? 0, shapeScore ?? 0)
+          : projectedScore
+        : rgbScore) ||
+    row.passed !==
+      (row.score >= row.minScore &&
+        (projected?.structuralIntegrityAccepted ?? true) &&
+        (shape === undefined || shape.score >= row.minScore))
+  );
+}
+
+function isNativeGeometryScoreValid(
+  row: ScoreRow,
+  projected: ProjectedScore | undefined,
+  shape: NonNullable<ScoreRow["actualPngShape"]> | undefined,
+  pair: ProjectedPair | undefined,
+  projectedScore: number | undefined,
+  shapeScore: number | undefined,
+  context: z.infer<typeof contextSchema>,
+  expectedNativePngSha256: ReadonlyMap<string, string> | undefined,
+): boolean {
+  return (
+    row.scoreSemantics === "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1" &&
+    projected !== undefined &&
+    shape !== undefined &&
+    pair !== undefined &&
+    context.paintProjectedReferenceEvidence?.sha256 === projected.evidenceSha256 &&
+    projected.score === projectedScore &&
+    shape.policy === "rgb-channel-edge-support-v1" &&
+    shape.score === shapeScore &&
+    shape.officialPngSha256 === pair.official.sourcePngSha256 &&
+    expectedNativePngSha256?.get(row.slug) === shape.actualPngSha256 &&
+    shape.width === pair.projectedMetrics.width &&
+    shape.height === pair.projectedMetrics.height &&
+    isRasterBoundsInsideCanvas(shape) &&
+    projectedMatchesEvidence(projected, pair, projectedScore)
+  );
+}
+
+function isRasterBoundsInsideCanvas(raster: NonNullable<ScoreRow["actualPngShape"]>): boolean {
+  return (
+    raster.roi.x + raster.roi.width <= raster.width &&
+    raster.roi.y + raster.roi.height <= raster.height
+  );
+}
+
+function isReferenceGeometryScoreValid(
+  row: ScoreRow,
+  projected: ProjectedScore | undefined,
+  shape: NonNullable<ScoreRow["actualPngShape"]> | undefined,
+  pair: ProjectedPair | undefined,
+  projectedScore: number | undefined,
+  context: z.infer<typeof contextSchema>,
+): boolean {
+  return (
+    row.scoreSemantics === "paint-projected-reference-v1" &&
+    projected !== undefined &&
+    shape === undefined &&
+    pair !== undefined &&
+    context.paintProjectedReferenceEvidence?.sha256 === projected.evidenceSha256 &&
+    projectedMatchesEvidence(projected, pair, projectedScore)
+  );
+}
+
+function projectedMatchesEvidence(
+  projected: ProjectedScore,
+  pair: ProjectedPair,
+  projectedScore: number | undefined,
+): boolean {
+  const metrics = pair.projectedMetrics,
+    integrity = pair.structuralIntegrity;
+  return (
+    projected.score === projectedScore &&
+    projected.structuralIntegrityAccepted === integrity.accepted &&
+    sameStrings(projected.reasons, integrity.reasons) &&
+    projected.maxTransformDelta === integrity.maxTransformDelta &&
+    projected.fullCanvasRmseScore === metrics.fullCanvasRmseScore &&
+    projected.fullCanvasMaeScore === metrics.fullCanvasMaeScore &&
+    projected.contentRmseScore === metrics.contentRmseScore &&
+    projected.contentMaeScore === metrics.contentMaeScore &&
+    projected.width === metrics.width &&
+    projected.height === metrics.height &&
+    projected.roi.x === metrics.roi.x &&
+    projected.roi.y === metrics.roi.y &&
+    projected.roi.width === metrics.roi.width &&
+    projected.roi.height === metrics.roi.height &&
+    metrics.score === projectedScore
+  );
 }
 
 function validateProjectedManifest(

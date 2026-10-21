@@ -22,7 +22,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from types import FrameType
 from typing import BinaryIO, Literal, NamedTuple, TypedDict, cast, overload
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 import verify_html_performance_evidence as gate
 
@@ -482,6 +482,12 @@ def _measurement_exit(process: subprocess.Popen[bytes]) -> bool:
     return True
 
 
+def _signal_interruption(signum: int) -> BaseException:
+    if signum == signal.SIGINT:
+        return KeyboardInterrupt()
+    return InterruptedError(f"measurement interrupted by signal {signum}")
+
+
 def _measurement_group_exists(pid: int) -> bool:
     try:
         os.killpg(pid, 0)
@@ -658,28 +664,23 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
     result: subprocess.CompletedProcess[bytes] | None = None
     primary: BaseException | None = None
     cleanup_failure: BaseException | None = None
+    cleanup_errors: list[BaseException] = []
     lifecycle_failure: BaseException | None = None
     started = time.monotonic()
     closed = False
     raw_closed = False
     identity: gate.JsonObject = {}
-    previous_mask: set[int | signal.Signals] | None = None
+    previous_mask: Iterable[int] | None = None
     previous_handlers: dict[int, Callable[[int, FrameType | None], object] | int | None] = {}
     pending: list[int] = []
     signal_observations: list[str] = []
-    armed = False
     raw_identities: list[tuple[int, int]] = []
     native_closure: gate.JsonObject | None = None
     cleanup_deadline: float | None = None
 
     def interrupted(signum: int, frame: FrameType | None) -> None:
         del frame
-        if not armed:
-            pending.append(signum)
-        elif signum == signal.SIGINT:
-            raise KeyboardInterrupt
-        else:
-            raise InterruptedError(f"measurement interrupted by signal {signum}")
+        pending.append(signum)
 
     try:
         with ExitStack() as stack:
@@ -711,11 +712,12 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
                             "observationLimit": "trusted dedicated session/group; non-atomic PID observations"}
                 gate.require(identity["sessionId"] == process.pid and identity["processGroupId"] == process.pid,
                              "measurement process ownership differs")
-                armed = True
-                if pending:
-                    interrupted(pending[0], None)
                 deadline = started + MEASUREMENT_LIMITS[role]
                 while True:
+                    if pending:
+                        pending_signum = pending.pop(0)
+                        signal_observations.append(f"signal {pending_signum} received while command was active")
+                        raise _signal_interruption(pending_signum)
                     if time.monotonic() >= deadline:
                         raise subprocess.TimeoutExpired(list(args), MEASUREMENT_LIMITS[role])
                     if _measurement_exit(process):
@@ -725,16 +727,16 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
                 primary = error
             finally:
                 if process is not None:
+                    cleanup_deadline = time.monotonic() + MEASUREMENT_CLEANUP_SECONDS
                     try:
                         previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
-                        if native_attempt_token is not None:
-                            cleanup_deadline = time.monotonic() + MEASUREMENT_CLEANUP_SECONDS
-                            signal_observations = _close_measurement_group(process, cleanup_deadline)
-                        else:
-                            signal_observations = _close_measurement_group(process)
+                    except BaseException as error:
+                        cleanup_errors.append(error)
+                    try:
+                        signal_observations.extend(_close_measurement_group(process, cleanup_deadline))
                         closed = True
                     except BaseException as error:
-                        cleanup_failure = error
+                        cleanup_errors.append(error)
         raw_closed = True
         if native_attempt_token is not None:
             raw_closed = False
@@ -746,9 +748,27 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
                 gate.require(native_closure["holders"] == [], "native raw output has unknown writable holders; no unknown PID is signalled")
                 raw_closed = True
             except BaseException as error:
-                cleanup_failure = error
+                cleanup_errors.append(error)
                 if primary is None:
                     primary = error
+        mask_to_restore = previous_mask
+        if mask_to_restore is not None:
+            try:
+                signal.pthread_sigmask(signal.SIG_SETMASK, mask_to_restore)
+                previous_mask = None
+            except BaseException as error:
+                cleanup_errors.append(error)
+                try:
+                    signal.pthread_sigmask(signal.SIG_SETMASK, mask_to_restore)
+                    previous_mask = None
+                except BaseException as retry_error:
+                    cleanup_errors.append(retry_error)
+        if pending:
+            signal_observations.extend(f"signal {pending_signum} deferred until cleanup completed"
+                                       for pending_signum in pending)
+            if primary is None:
+                primary = _signal_interruption(pending[0])
+            pending.clear()
         if primary is None:
             if process is None or not closed:
                 raise ValueError("measurement process closure missing")
@@ -760,8 +780,18 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
         if primary is None:
             primary = error
         else:
-            cleanup_failure = error
+            cleanup_errors.append(error)
     finally:
+        if previous_mask is not None:
+            try:
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+                previous_mask = None
+            except BaseException as error:
+                cleanup_errors.append(error)
+        if cleanup_errors:
+            cleanup_failure = RuntimeError(
+                "measurement cleanup failed: " + "; ".join(repr(error) for error in cleanup_errors)
+            )
         try:
             write(folder / "lifecycle.json", {
                 "schema": "krr-performance-command-lifecycle-v1", "argv": list(args), "role": role,
@@ -785,8 +815,11 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
         finally:
             for restored_signum, handler in previous_handlers.items():
                 signal.signal(restored_signum, handler)
-            if previous_mask is not None:
-                signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+            if pending and primary is None:
+                # lifecycle.jsonの記録境界後の割込みは記録を書き換えず、呼出元へ必ず伝える。
+                pending_signum = pending.pop(0)
+                signal_observations.append(f"signal {pending_signum} received while lifecycle was being recorded")
+                primary = _signal_interruption(pending_signum)
     if cleanup_failure is not None or lifecycle_failure is not None:
         failures = [label + ": " + repr(error) for label, error in (
             ("primary", primary), ("cleanup", cleanup_failure), ("lifecycle record", lifecycle_failure)

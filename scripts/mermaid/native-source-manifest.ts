@@ -35,6 +35,25 @@ export function captureNativeSourceManifest(
   return manifest;
 }
 
+export function captureNativeCoverageSourceInputs(repositoryRoot: string): {
+  schema: "krr-native-coverage-source-inputs-v1";
+  sourceDigest: string;
+  coverageInputDigest: string;
+} {
+  const manifest = captureNativeSourceManifest(repositoryRoot);
+  const ledgerPath = path.join(repositoryRoot, "docs/quality-gate-improvement-tasks.md");
+  const ledgerRecords = manifest.files.filter((file) => file.path === ledgerPath);
+  if (ledgerRecords.length !== 1) {
+    throw new Error("Native coverage source inputs require exactly one quality task ledger");
+  }
+  const coverageFiles = manifest.files.filter((file) => file.path !== ledgerPath);
+  return {
+    schema: "krr-native-coverage-source-inputs-v1",
+    sourceDigest: manifest.digest,
+    coverageInputDigest: digestFileRecords(coverageFiles),
+  };
+}
+
 function canonicalDirectory(directory: string): string {
   if (!path.isAbsolute(directory) || path.resolve(directory) !== directory) {
     throw new Error("Native source repository root must be absolute and canonical");
@@ -148,16 +167,19 @@ if (import.meta.main) {
   try {
     const { values, positionals } = parseArgs({
       args: process.argv.slice(2),
-      options: { root: { type: "string" } },
+      options: { root: { type: "string" }, "coverage-inputs": { type: "boolean" } },
       strict: true,
       allowPositionals: false,
     });
     if (positionals.length !== 0 || typeof values.root !== "string") {
       throw new Error(
-        "Usage: bun run scripts/mermaid/native-source-manifest.ts --root ABSOLUTE_CANONICAL_ROOT",
+        "Usage: bun run scripts/mermaid/native-source-manifest.ts --root ABSOLUTE_CANONICAL_ROOT [--coverage-inputs]",
       );
     }
-    process.stdout.write(`${JSON.stringify(captureNativeSourceManifest(values.root))}\n`);
+    const result = values["coverage-inputs"]
+      ? captureNativeCoverageSourceInputs(values.root)
+      : captureNativeSourceManifest(values.root);
+    process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     process.stderr.write(`${detail}\n`);

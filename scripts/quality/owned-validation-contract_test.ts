@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -116,8 +116,11 @@ const fixtureJustDefinitions = [
   'RTK_CMD := if RTK == "" { "" } else { RTK + " " }',
   'CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")',
   'CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO',
+  'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
 ].join("\n");
 const cargoCapacityGuardPath = "scripts/build/cargo_capacity_guard.py";
+const capacityGuardUnitCommand =
+  "{{RTK_PROXY_CMD}}python3 -m unittest discover -s scripts/build -p 'cargo_capacity_guard*test.py' -v";
 const runtimeAssetUnitFixtureSource =
   'import { test } from "bun:test";\ntest("canonical recipe fixture source", () => {});\n';
 const playwrightGeometryTestPath = "scripts/mermaid/reference_svg_geometry_browser_test.ts";
@@ -138,6 +141,7 @@ afterEach(cleanupFixtures);
 beforeAll(() => {
   try {
     fixtureTemplate = buildFixture();
+    expect(inspectOwnedValidationContract(fixtureTemplate).issues).toEqual([]);
     const templateIndex = fixtures.indexOf(fixtureTemplate);
     if (templateIndex < 0) throw new Error("fixture template was not registered");
     fixtures.splice(templateIndex, 1);
@@ -668,6 +672,17 @@ function fixture(): string {
   });
   return root;
 }
+function capacityRegistrationFixture(): string {
+  const root = fixture();
+  write(
+    root,
+    "scripts/build/cargo_capacity_guard_active_profile_test.py",
+    "import unittest\nclass TestCapacityGuardActiveProfile(unittest.TestCase):\n    def test_active_profile(self):\n        self.assertTrue(True)\n",
+  );
+  recipes(root, { unit: `${recipeBodies.unit}\n${capacityGuardUnitCommand}` });
+  track(root);
+  return root;
+}
 function parserFixture(): string {
   return fixture();
 }
@@ -742,6 +757,105 @@ test("runtime asset registration uses Playwright without dropping sibling Bun te
     expect(actualRuntimeAssetUnitPaths()).not.toContain(playwrightUnit);
   expect(actualRuntimeAssetUnitPaths()).toEqual(expect.arrayContaining(pureHtmlTests));
 });
+
+test.each([
+  ["empty", ""],
+  ["configured", "rtk"],
+] as const)("Just RTK proxy prefixes render correctly when RTK is %s", (_name, rtk) => {
+  const root = path.resolve(import.meta.dir, "../..");
+  const env: NodeJS.ProcessEnv = { ...process.env, RTK: rtk };
+  delete env.CARGO;
+  const expectedPrefix = rtk === "" ? "" : "rtk proxy ";
+
+  const result = spawnSync(
+    "just",
+    [
+      "--dry-run",
+      "html-input-state-fidelity-check",
+      "html-input-state-fidelity-interim-check",
+      "html-dynamic-fidelity-check",
+      "html-dynamic-fidelity-interim-check",
+      "html-fidelity-check",
+      "html-fidelity-interim-check",
+      "build-capacity-check",
+    ],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env,
+    },
+  );
+  expect(result.status).toBe(0);
+  const output = `${result.stdout}\n${result.stderr}`.split(/\r?\n/);
+  const buildCommands = output.filter((line) =>
+    line.includes("cargo test --release -p katana-render-runtime --lib --no-run"),
+  );
+  expect(buildCommands).toHaveLength(6);
+  expect(buildCommands.every((line) => line.startsWith(`${expectedPrefix}cargo test `))).toBe(true);
+
+  const capacityCommands = output.filter((line) =>
+    line.includes("python3 -m unittest discover -s scripts/build"),
+  );
+  expect(capacityCommands).toHaveLength(1);
+  expect(capacityCommands[0]?.startsWith(`${expectedPrefix}python3 -m unittest `)).toBe(true);
+});
+
+test("owned Python registration accepts capacity tests with the exact RTK proxy definition", () => {
+  const root = capacityRegistrationFixture();
+  const capacityTest = "scripts/build/cargo_capacity_guard_active_profile_test.py";
+  const report = inspectOwnedValidationContract(root);
+  expect(report.units.python).toContain(capacityTest);
+  expect(
+    report.issues.filter(
+      (issue) =>
+        issue.path === capacityTest &&
+        ["unit-local-missing", "unit-ci-missing"].includes(issue.code),
+    ),
+  ).toEqual([]);
+});
+
+test.each([
+  [
+    "RTK default changed",
+    'RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)',
+    'RTK := env_var_or_default("RTK", "rtk")',
+  ],
+  [
+    "empty RTK semantics changed",
+    'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
+    'RTK_PROXY_CMD := RTK + " proxy "',
+  ],
+  [
+    "duplicate RTK definition",
+    'RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)',
+    'RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)\nRTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)',
+  ],
+  [
+    "duplicate definition",
+    'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
+    'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }\nRTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
+  ],
+] as const)(
+  "owned Python registration rejects RTK proxy definition mutation: %s",
+  (_name, before, after) => {
+    const root = capacityRegistrationFixture();
+    const justfilePath = path.join(root, "Justfile");
+    const justfile = fs.readFileSync(justfilePath, "utf8");
+    const changed = justfile.replace(before, after);
+    expect(changed).not.toBe(justfile);
+    write(root, "Justfile", changed);
+    track(root);
+
+    const capacityTest = "scripts/build/cargo_capacity_guard_active_profile_test.py";
+    const report = inspectOwnedValidationContract(root);
+    expect(report.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "unit-local-missing", path: capacityTest }),
+        expect.objectContaining({ code: "unit-ci-missing", path: capacityTest }),
+      ]),
+    );
+  },
+);
 
 test.each(["current", "previous canonical"] as const)(
   "owned validation accepts runtime asset command order: %s",
@@ -1177,6 +1291,20 @@ test("owned validation checks root and standalone Cargo lock resolution before h
     '{{CARGO}} metadata --locked --no-default-features --features baseline --format-version 1 --manifest-path "{{REPO_ROOT}}/scripts/html/performance-harness/Cargo.toml" > /dev/null',
     '{{CARGO}} metadata --locked --no-default-features --features candidate --format-version 1 --manifest-path "{{REPO_ROOT}}/scripts/html/performance-harness/Cargo.toml" > /dev/null',
   ]);
+});
+test("clean and sweep take the root producer lock without dependencies or ignored failures", () => {
+  const actualRoot = path.resolve(import.meta.dir, "../..");
+  const justfile = fs.readFileSync(path.join(actualRoot, "Justfile"), "utf8");
+  expect(justfile).toMatch(/^sweep:\s*$/m);
+  expect(justfile).toMatch(/^clean:\s*$/m);
+  expect(actualRecipeBody("sweep")).toBe(
+    "python3 scripts/hooks/run_locked_command.py --protect-root-producer -- {{CARGO}} sweep --time 7",
+  );
+  expect(actualRecipeBody("clean")).toBe(
+    "python3 scripts/hooks/run_locked_command.py --protect-root-producer -- {{CARGO}} clean",
+  );
+  expect(actualRecipeBody("sweep")).not.toMatch(/\|\|\s*true/);
+  expect(actualRecipeBody("clean")).not.toMatch(/\|\|\s*true/);
 });
 const nativeWidthJustMutations = [
   ["shell mode", fixtureJustDefinitions.split("\n")[0] ?? "", 'set shell := ["sh", "-c"]'],

@@ -3,6 +3,7 @@ set shell := ["bash", "-uc"]
 REPO_ROOT := justfile_directory()
 RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)
 RTK_CMD := if RTK == "" { "" } else { RTK + " " }
+RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }
 JOBS := env_var_or_default("JOBS", "2")
 CHECK_JOBS := env_var_or_default("CHECK_JOBS", "3")
 FIXTURE_JOBS := env_var_or_default("FIXTURE_JOBS", JOBS)
@@ -11,7 +12,7 @@ TEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " -- --test-threads=" + 
 NEXTEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " --test-threads=" + TEST_THREADS }
 RUNTIME_UPDATE_LOG_DIR := env_var_or_default("RUNTIME_UPDATE_LOG_DIR", "tmp/runtime-update-logs")
 export RUSTFLAGS := env_var_or_default("RUSTFLAGS", "-D warnings")
-CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")
+CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")
 HTML84_CARGO := if RTK == "" { "cargo" } else { RTK + " proxy cargo" }
 CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO
 KRR_BIN := env_var_or_default("KRR_BIN", REPO_ROOT + "/target/debug/krr")
@@ -118,7 +119,7 @@ root-test-and-coverage: plantuml-install
 
 # WHY: 未計測行の診断用詳細JSONを正式なroot.jsonと分離し、閾値判定には使わない。
 native-root-coverage-detail:
-    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-diagnostic-domain root -- {{CARGO}} llvm-cov report --profile krr-coverage --locked --json --output-path "{{REPO_ROOT}}/tmp/quality/root-coverage-detail.json"
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-diagnostic-domain root -- {{CARGO}} llvm-cov report --profile krr-coverage --locked --json --show-missing-lines --output-path "{{REPO_ROOT}}/tmp/quality/root-coverage-detail.json"
 
 # 継続利用するPythonは固定版のLintと厳格型検査を両方通す。
 python-lint:
@@ -375,25 +376,25 @@ rust-facts-host-metadata root=REPO_ROOT:
 # Compare every input-state boundary operation against Chrome at the immutable 99 threshold.
 html-input-state-fidelity-check:
     mkdir -p tmp/html-fidelity/input-state
-    {{RTK_CMD}}proxy cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/input-state/test-build.jsonl
+    {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/input-state/test-build.jsonl
     bun scripts/html/fidelity-acceptance-cli.ts input-state-final tmp/html-fidelity/input-state/test-build.jsonl
 
 # Interim input-state release gate; final fidelity remains fixed at 99.
 html-input-state-fidelity-interim-check:
     mkdir -p tmp/html-fidelity/input-state-interim
-    {{RTK_CMD}}proxy cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/input-state-interim/test-build.jsonl
+    {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/input-state-interim/test-build.jsonl
     bun scripts/html/fidelity-acceptance-cli.ts input-state-interim tmp/html-fidelity/input-state-interim/test-build.jsonl
 
 # Compare every script-state case against Chrome at the immutable 99 threshold.
 html-dynamic-fidelity-check:
     mkdir -p tmp/html-fidelity/dynamic
-    {{RTK_CMD}}proxy cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/dynamic/test-build.jsonl
+    {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/dynamic/test-build.jsonl
     bun scripts/html/fidelity-acceptance-cli.ts dynamic-final tmp/html-fidelity/dynamic/test-build.jsonl
 
 # Interim dynamic-state release gate; final script-feature results remain fixed at 99.
 html-dynamic-fidelity-interim-check:
     mkdir -p tmp/html-fidelity/dynamic-interim
-    {{RTK_CMD}}proxy cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/dynamic-interim/test-build.jsonl
+    {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/dynamic-interim/test-build.jsonl
     bun scripts/html/fidelity-acceptance-cli.ts dynamic-interim tmp/html-fidelity/dynamic-interim/test-build.jsonl
 
 html-fidelity-probe-build:
@@ -408,7 +409,7 @@ html-diagram-consumer-check phase output:
 
 html-fidelity-check: html-fidelity-probe-build
     mkdir -p tmp/html-fidelity
-    {{RTK_CMD}}proxy cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/toc-test-build.jsonl
+    {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/toc-test-build.jsonl
     @status=0; \
       just browser-contract-test || status=1; \
       bun test --path-ignore-patterns 'tmp/**' ./scripts/html/visual-state-fidelity_test.ts || status=1; \
@@ -422,7 +423,7 @@ html-fidelity-check: html-fidelity-probe-build
 # Explicit v0.4.24 interim release; the final recipe above retains its 99 gate.
 html-fidelity-interim-check: html-fidelity-probe-build
     mkdir -p tmp/html-fidelity/interim
-    {{RTK_CMD}}proxy cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/interim/toc-test-build.jsonl
+    {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/interim/toc-test-build.jsonl
     @status=0; \
       just browser-contract-test || status=1; \
       bun test --path-ignore-patterns 'tmp/**' ./scripts/html/interim-feature-results_test.ts || status=1; \
@@ -441,8 +442,8 @@ html-release-fidelity-check:
 # Interaction evidence supplements the final 99-point visual and performance contract.
 html-interaction-check:
     mkdir -p "$(dirname '{{HTML_INTERACTION_REPORT}}')" "{{HTML_INTERACTION_OUTPUT}}"
-    KRR_HTML_INTERACTION_REPORT="{{HTML_INTERACTION_REPORT}}" {{CARGO}} test -p katana-render-runtime interaction_state_is_derived_from_the_runtime_snapshot -- --nocapture
-    bun scripts/html/interaction-suite.ts --html "{{REPO_ROOT}}/tests/fixtures/html/interaction-fidelity.html" --krr-report "{{HTML_INTERACTION_REPORT}}" --output "{{HTML_INTERACTION_OUTPUT}}"
+    KRR_HTML_INTERACTION_REPORT="{{HTML_INTERACTION_REPORT}}" {{CARGO}} test --release --locked -p katana-render-runtime --lib interaction_state_is_derived_from_the_runtime_snapshot -- --nocapture
+    bun scripts/html/interaction-suite.ts --html "{{REPO_ROOT}}/tests/fixtures/html/interaction-fidelity.html" --krr-report "{{HTML_INTERACTION_REPORT}}" --output "{{HTML_INTERACTION_OUTPUT}}" --max-performance-ms 3000
     @echo "HTML interaction evidence completed; the final 99-point visual and performance gates still apply."
 
 [private]
@@ -527,15 +528,15 @@ check-contracts:
 
 # 容量超過・使用中lock・実Cargo targetの安全条件を独立projectで検証する。
 build-capacity-check:
-    {{RTK_CMD}}proxy python3 -m unittest discover -s scripts/build -p 'cargo_capacity_guard*test.py' -v
+    {{RTK_PROXY_CMD}}python3 -m unittest discover -s scripts/build -p 'cargo_capacity_guard*test.py' -v
 
 # Sweep old build artifacts locally (older than 7 days)
 sweep:
-    @{{CARGO}} sweep --time 7 || true
+    python3 scripts/hooks/run_locked_command.py --protect-root-producer -- {{CARGO}} sweep --time 7
 
 # Remove build artifacts
-clean: sweep
-    {{CARGO}} clean
+clean:
+    python3 scripts/hooks/run_locked_command.py --protect-root-producer -- {{CARGO}} clean
 
 # Verify VERSION follows the remote release line
 release-target-check:
@@ -652,6 +653,17 @@ krr-build:
 
 # Force-update all Rust and JavaScript dependencies plus pinned runtime assets, then run required checks
 depends-update-all:
+    python3 scripts/hooks/run_locked_command.py --protect-root-producer -- just depends-update-mutations
+    just check
+    just mermaid-reference-all
+    just mermaid-compare-full
+    just mermaid-compare-ci
+    just drawio-reference-all
+    just drawio-compare-full
+    just drawio-compare-ci
+
+[private]
+depends-update-mutations:
     {{CARGO}} upgrade -i allow --pinned allow --exclude skrifa
     python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"
     {{CARGO}} update
@@ -662,13 +674,6 @@ depends-update-all:
     bun run scripts/runtime-assets/runtime-package-asset-compressor.ts --write
     just fmt
     just runtime-bundle-build
-    just check
-    just mermaid-reference-all
-    just mermaid-compare-full
-    just mermaid-compare-ci
-    just drawio-reference-all
-    just drawio-compare-full
-    just drawio-compare-ci
 
 # Install pinned PlantUML LGPL JAR into the PlantUML cache
 plantuml-install version=PLANTUML_JAR_VERSION output=PLANTUML_CACHE_JAR:

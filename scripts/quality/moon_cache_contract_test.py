@@ -20,6 +20,7 @@ ASSESSMENT = ROOT / "tmp/html-fidelity/test-cache-library-assessment-20261012-r1
 DIRECT_INPUT_EVIDENCE = ROOT / "tmp/quality/moon-tmp-durable-regression-r1"
 DIRECT_INPUTS: list[str] = [
     "**/*",
+    "!/docs/quality-gate-improvement-tasks.md",
     "!/tmp/**",
     "!/.moon/cache/**",
     "!/target/**",
@@ -494,8 +495,12 @@ def direct_input_run_record(
         "source.txt",
         "scripts/tmp/managed.txt",
         "scripts/.moon/cache/managed.txt",
+        "docs/coverage-policy.md",
     }
     assert required <= set(inputs), f"{label}: managed inputs escaped Moon hashing"
+    assert "docs/quality-gate-improvement-tasks.md" not in inputs, (
+        f"{label}: human progress ledger entered execution inputs"
+    )
     excluded = (
         "tmp/",
         ".moon/cache/",
@@ -575,6 +580,14 @@ def scheduler_failure_barrier_is_closed(phases: list[str]) -> bool:
     return all(phase not in phases for phase in SCHEDULER_BARRIER_PHASES)
 
 
+def requested_scope(args: argparse.Namespace) -> str:
+    if args.cas_integrity_only:
+        return "cas-integrity"
+    if args.direct_inputs_only:
+        return "direct-inputs"
+    return "full"
+
+
 def initialize_isolated_git(workspace_dir: Path) -> None:
     subprocess.run(
         ["git", "init", "--quiet", "--initial-branch=master", str(workspace_dir)],
@@ -598,7 +611,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--moon", nargs="+", required=True)
     parser.add_argument("--bun", type=Path, default=Path(shutil.which("bun") or "bun"))
-    parser.add_argument("--cas-integrity-only", action="store_true")
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--cas-integrity-only", action="store_true")
+    scope.add_argument("--direct-inputs-only", action="store_true")
     args = parser.parse_args()
     moon_command: list[str] = args.moon
     bun = args.bun.resolve()
@@ -895,6 +910,11 @@ def main() -> int:
             )
         )
         (workspace_dir / "source.txt").write_text("baseline source\n")
+        ledger = workspace_dir / "docs/quality-gate-improvement-tasks.md"
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text("baseline progress\n")
+        policy_document = workspace_dir / "docs/coverage-policy.md"
+        policy_document.write_text("baseline policy\n")
         root_tmp = workspace_dir / "tmp/generated.txt"
         root_tmp.write_text("baseline generated data\n")
         managed_tmp = workspace_dir / "scripts/tmp/managed.txt"
@@ -983,6 +1003,10 @@ def main() -> int:
         for label, generated_path in generated_inputs.items():
             generated_path.write_text(f"changed {label}\n")
         generated_ignored = run("generated-paths-only-change")
+        ledger.write_text("updated human progress\n")
+        ledger_ignored = run("progress-ledger-only-change")
+        policy_document.write_text("updated policy\n")
+        document_changed = run("other-document-change")
         source = workspace_dir / "source.txt"
         source.write_text("changed root source\n")
         source_changed = run("root-source-change")
@@ -1019,9 +1043,19 @@ def main() -> int:
                 "Generated target/tool-cache changes affected direct inputs"
             )
         if (
-            source_changed["hash"] == generated_ignored["hash"]
+            ledger_ignored["hash"] != generated_ignored["hash"]
+            or ledger_ignored["execution_count"] != generated_ignored["execution_count"]
+        ):
+            failures.append("Human progress ledger invalidated task")
+        if (
+            document_changed["hash"] == ledger_ignored["hash"]
+            or document_changed["execution_count"] != ledger_ignored["execution_count"] + 1
+        ):
+            failures.append("Other document change did not invalidate task")
+        if (
+            source_changed["hash"] == document_changed["hash"]
             or source_changed["execution_count"]
-            != generated_ignored["execution_count"] + 1
+            != document_changed["execution_count"] + 1
         ):
             failures.append("Root source change did not invalidate task")
         if (
@@ -1355,6 +1389,12 @@ def main() -> int:
 
     status = "failed"
     try:
+        if args.direct_inputs_only:
+            results.append(
+                {"label": "durable-direct-input-exclusion", **verify_direct_input_contract()}
+            )
+            status = "passed"
+            return 0
         settings()
         miss("unit-first")
         before = events("unit")
@@ -1643,6 +1683,7 @@ def main() -> int:
             ).strip(),
             "platform": {"system": platform.system(), "machine": platform.machine()},
             "fixture_only": True,
+            "requested_scope": requested_scope(args),
             "krr_coverage_achievement": False,
             "other_native_platforms_verified": False,
             "fixture_root": str(fixture_root),

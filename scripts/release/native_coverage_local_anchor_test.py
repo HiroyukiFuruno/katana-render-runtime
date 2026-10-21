@@ -165,7 +165,9 @@ class NativeCoverageLocalAnchorTests(unittest.TestCase):
         )
         context = self._make_context()
         with (
-            patch.object(local_result, "_source_digest", return_value="a" * 64),
+            patch.object(
+                local_result, "_source_state", return_value=self._make_source_state()
+            ),
             patch.object(local_result, "_local_context", return_value=context),
             patch.dict(os.environ, {"MOON_TASK_ID": "krr:unit-test"}, clear=True),
         ):
@@ -177,6 +179,14 @@ class NativeCoverageLocalAnchorTests(unittest.TestCase):
             local_result.local_key(self.root, "root")
             with self.assertRaises(local_result.LocalCoverageError):
                 local_result.local_validate(self.root, "root")
+
+    @staticmethod
+    def _make_source_state() -> dict[str, str]:
+        return {
+            "schema": local_result.SOURCE_INPUTS_SCHEMA,
+            "sourceDigest": "a" * 64,
+            "coverageInputDigest": "b" * 64,
+        }
 
     def _make_context(self) -> dict[str, object]:
         context: dict[str, object] = {
@@ -256,7 +266,9 @@ class NativeCoverageLocalAnchorTests(unittest.TestCase):
         for domain in ("root", "baseline", "candidate"):
             fixture_helpers.write_fixture_report(self.root, domain)
         with (
-            patch.object(local_result, "_source_digest", return_value="a" * 64),
+            patch.object(
+                local_result, "_source_state", return_value=self._make_source_state()
+            ),
             patch.object(
                 local_result, "_local_context", return_value=self._make_context()
             ),

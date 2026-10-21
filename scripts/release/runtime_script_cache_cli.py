@@ -23,7 +23,11 @@ PRODUCER = "runtime-unused-script-regression"
 def bound_identity(repo: Path, producer: str = PRODUCER) -> tuple[str, str]:
     report = identity_collector.collect_identity_report(repo, producer)
     identity = report["identitySha256"]
-    if report["cacheable"] is not True or not isinstance(identity, str):
+    if (
+        report["schema"] != identity_collector.SCHEMA
+        or report["cacheable"] is not True
+        or not isinstance(identity, str)
+    ):
         raise result.RuntimeScriptResultError(
             "runtime-script cache identity is unavailable: "
             + ",".join(report["missReasons"])
@@ -57,9 +61,14 @@ def _validate_report(
 ) -> dict[str, str | bool]:
     if (
         not isinstance(report, dict)
+        or report.get("schema") != identity_collector.SCHEMA
         or report.get("producer") != producer
         or report.get("cacheable") is not True
         or not isinstance(report.get("identitySha256"), str)
+        or not isinstance(report.get("sourceManifestSha256"), str)
+        or identity_collector.SHA256_RE.fullmatch(report["sourceManifestSha256"]) is None
+        or not isinstance(report.get("sourceInputsSha256"), str)
+        or identity_collector.SHA256_RE.fullmatch(report["sourceInputsSha256"]) is None
     ):
         raise result.RuntimeScriptResultError("fixed producer identity is unavailable")
     identity = report["identitySha256"]
@@ -124,7 +133,8 @@ def run_current(repo: Path, producer: str = PRODUCER) -> dict[str, object]:
     before = identity_collector.collect_execution_snapshot(repo, producer)
     input_digest = before["inputSha256"]
     if (
-        before["cacheable"] is not True
+        before["schema"] != identity_collector.SCHEMA
+        or before["cacheable"] is not True
         or before.get("producer") != producer
         or not isinstance(input_digest, str)
     ):
@@ -137,13 +147,15 @@ def run_current(repo: Path, producer: str = PRODUCER) -> dict[str, object]:
     identity_fields = (
         "producer",
         "sourceManifestSha256",
+        "sourceInputsSha256",
         "recipeSha256",
         "toolEnvironmentSha256",
         "inputSha256",
         "identitySha256",
     )
     if (
-        after["cacheable"] is not True
+        after["schema"] != identity_collector.SCHEMA
+        or after["cacheable"] is not True
         or any(before.get(field) != after.get(field) for field in identity_fields)
         or after.get("identitySha256") != run.identity_sha256
     ):

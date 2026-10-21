@@ -16,6 +16,9 @@ import runtime_script_result as result
 
 PRODUCER = "runtime-unused-script-regression"
 SOURCE = "a" * 64
+SOURCE_INPUTS = "f" * 64
+OTHER_SOURCE = "e" * 64
+OTHER_INPUTS = "9" * 64
 RECIPE = "b" * 64
 TOOLS = "c" * 64
 INPUT = "d" * 64
@@ -28,13 +31,15 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory).resolve()
             with (
-                patch.object(identity, "_source_digest", return_value=SOURCE) as source,
+                patch.object(
+                    identity, "_source_state", return_value=(SOURCE, SOURCE_INPUTS)
+                ) as source,
                 patch.object(identity, "_tool_fingerprint", return_value={}) as tool,
                 patch.object(recipe_reader, "read_runtime_script_recipe", return_value=recipe),
             ):
                 snapshot = identity.collect_execution_snapshot(repo, producer)
             with (
-                patch.object(identity, "_source_digest", side_effect=[SOURCE, SOURCE]),
+                patch.object(identity, "_source_state", side_effect=[(SOURCE, SOURCE_INPUTS)] * 2),
                 patch.object(identity, "_tool_fingerprint", return_value={}),
                 patch.object(recipe_reader, "read_runtime_script_recipe", return_value=recipe),
             ):
@@ -46,7 +51,7 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
 
     def test_execution_snapshot_rejects_unknown_profile_before_reading_facts(self) -> None:
         with tempfile.TemporaryDirectory() as directory, patch.object(
-            identity, "_source_digest"
+            identity, "_source_state"
         ) as source:
             report = identity.collect_execution_snapshot(
                 Path(directory).resolve(), "unknown-runtime-producer"
@@ -60,7 +65,7 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
         recipe = recipe_reader.RuntimeScriptRecipe(profiles.producer_recipe(producer), RECIPE, ())
         with tempfile.TemporaryDirectory() as directory:
             with (
-                patch.object(identity, "_source_digest", return_value=SOURCE),
+                patch.object(identity, "_source_state", return_value=(SOURCE, SOURCE_INPUTS)),
                 patch.object(
                     identity,
                     "_tool_fingerprint",
@@ -79,7 +84,7 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             with (
-                patch.object(identity, "_source_digest", return_value=SOURCE),
+                patch.object(identity, "_source_state", return_value=(SOURCE, SOURCE_INPUTS)),
                 patch.object(identity, "_tool_fingerprint", return_value={}),
                 patch.object(recipe_reader, "read_runtime_script_recipe", return_value=recipe),
             ):
@@ -96,7 +101,9 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
                 for producer in profiles.RUNTIME_SCRIPT_PROFILES
             }
             with (
-                patch.object(identity, "_source_digest", side_effect=[SOURCE, SOURCE]) as source,
+                patch.object(
+                    identity, "_source_state", side_effect=[(SOURCE, SOURCE_INPUTS)] * 2
+                ) as source,
                 patch.object(identity, "_tool_fingerprint", return_value={}) as tool,
                 patch.object(
                     recipe_reader,
@@ -115,7 +122,11 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
     def test_fixed_leaf_collection_fails_closed_for_stale_source_and_cross_profile_recipe(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with (
-                patch.object(identity, "_source_digest", side_effect=[SOURCE, "f" * 64]),
+                patch.object(
+                    identity,
+                    "_source_state",
+                    side_effect=[(SOURCE, SOURCE_INPUTS), (OTHER_SOURCE, SOURCE_INPUTS)],
+                ),
                 patch.object(identity, "_tool_fingerprint", return_value={}),
                 patch.object(
                     recipe_reader,
@@ -137,7 +148,7 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
     def test_fixed_leaf_collection_rejects_cross_profile_recipe_before_after_reads(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with (
-                patch.object(identity, "_source_digest", return_value=SOURCE),
+                patch.object(identity, "_source_state", return_value=(SOURCE, SOURCE_INPUTS)),
                 patch.object(identity, "_tool_fingerprint", return_value={}),
                 patch.object(
                     recipe_reader,
@@ -164,13 +175,13 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
                 profiles.producer_recipe(producer), RECIPE, ()
             )
             with (
-                patch.object(identity, "_source_digest", side_effect=[SOURCE, SOURCE]),
+                patch.object(identity, "_source_state", side_effect=[(SOURCE, SOURCE_INPUTS)] * 2),
                 patch.object(recipe_reader, "read_runtime_script_recipe", return_value=recipe),
                 patch.object(identity, "_tool_fingerprint", return_value={}),
             ):
                 single = identity.collect_identity_report(repo, producer)
             with (
-                patch.object(identity, "_source_digest", side_effect=[SOURCE, SOURCE]),
+                patch.object(identity, "_source_state", side_effect=[(SOURCE, SOURCE_INPUTS)] * 2),
                 patch.object(
                     recipe_reader,
                     "read_runtime_script_recipe",
@@ -284,7 +295,7 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
         for field in ("mathjaxEvidenceFingerprint", "rustFactsHostFingerprint"):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
                 with (
-                    patch.object(identity, "_source_digest", side_effect=[SOURCE, SOURCE]),
+                    patch.object(identity, "_source_state", side_effect=[(SOURCE, SOURCE_INPUTS)] * 2),
                     patch.object(
                         recipe_reader,
                         "read_runtime_script_recipe",
@@ -308,7 +319,7 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
             repo = Path(directory).resolve()
             with (
                 patch.dict(os.environ, {}, clear=True),
-                patch.object(identity, "_source_digest", side_effect=[SOURCE, SOURCE]),
+                patch.object(identity, "_source_state", side_effect=[(SOURCE, SOURCE_INPUTS)] * 2),
                 patch.object(
                     recipe_reader,
                     "read_runtime_script_recipe",
@@ -327,15 +338,51 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
         assert final_identity is not None
         expected_input = identity._canonical_digest(
             {
-                "schema": "krr-runtime-script-producer-input-v1",
+                "schema": "krr-runtime-script-producer-input-v2",
                 "producer": PRODUCER,
-                "sourceManifestSha256": SOURCE,
+                "sourceInputsSha256": SOURCE_INPUTS,
                 "recipeSha256": RECIPE,
                 "toolEnvironmentSha256": identity._canonical_digest({}),
             }
         )
         self.assertEqual(input_digest, expected_input)
         self.assertEqual(final_identity, result.build_identity(PRODUCER, input_digest))
+
+    def test_ledger_only_change_keeps_cache_identity_and_reports_full_source(self) -> None:
+        first = self._collect_for_source_state((SOURCE, SOURCE_INPUTS))
+        changed_ledger = self._collect_for_source_state((OTHER_SOURCE, SOURCE_INPUTS))
+
+        self.assertEqual(first["sourceInputsSha256"], SOURCE_INPUTS)
+        self.assertEqual(changed_ledger["sourceInputsSha256"], SOURCE_INPUTS)
+        self.assertEqual(first["sourceManifestSha256"], SOURCE)
+        self.assertEqual(changed_ledger["sourceManifestSha256"], OTHER_SOURCE)
+        self.assertEqual(first["inputSha256"], changed_ledger["inputSha256"])
+        self.assertEqual(first["identitySha256"], changed_ledger["identitySha256"])
+
+    def test_non_ledger_source_change_invalidates_cache_identity(self) -> None:
+        first = self._collect_for_source_state((SOURCE, SOURCE_INPUTS))
+        changed_source = self._collect_for_source_state((OTHER_SOURCE, OTHER_INPUTS))
+
+        self.assertNotEqual(first["sourceInputsSha256"], changed_source["sourceInputsSha256"])
+        self.assertNotEqual(first["inputSha256"], changed_source["inputSha256"])
+        self.assertNotEqual(first["identitySha256"], changed_source["identitySha256"])
+
+    def _collect_for_source_state(self, state: tuple[str, str]) -> identity.IdentityReport:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory).resolve()
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch.object(identity, "_source_state", side_effect=[state, state]),
+                patch.object(
+                    recipe_reader,
+                    "read_runtime_script_recipe",
+                    return_value=recipe_reader.RuntimeScriptRecipe(
+                        profiles.producer_recipe(PRODUCER), RECIPE, ()
+                    ),
+                ),
+                patch.object(identity, "_tool_fingerprint", return_value={}),
+            ):
+                return identity.collect_identity_report(repo, PRODUCER)
 
     def test_moon_task_metadata_does_not_change_semantic_identity(self) -> None:
         reports = [self._collect_for_task(task_id) for task_id in ("krr:leaf", "krr:aggregate")]
@@ -352,7 +399,7 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
                     {"MOON_TASK_ID": task_id, "MOON_TASK_HASH": moon_hash},
                     clear=True,
                 ),
-                patch.object(identity, "_source_digest", side_effect=[SOURCE, SOURCE]),
+                patch.object(identity, "_source_state", side_effect=[(SOURCE, SOURCE_INPUTS)] * 2),
                 patch.object(
                     recipe_reader,
                     "read_runtime_script_recipe",
@@ -365,7 +412,11 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
     def test_source_change_during_collection_is_a_miss(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with (
-                patch.object(identity, "_source_digest", side_effect=[SOURCE, "f" * 64]),
+                patch.object(
+                    identity,
+                    "_source_state",
+                    side_effect=[(SOURCE, SOURCE_INPUTS), (OTHER_SOURCE, SOURCE_INPUTS)],
+                ),
                 patch.object(
                     recipe_reader,
                     "read_runtime_script_recipe",
@@ -379,12 +430,15 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
         self.assertIsNone(report["identitySha256"])
 
     def test_unknown_producer_is_a_miss_without_running_collectors(self) -> None:
-        with patch.object(identity, "_source_digest") as manifest:
+        with patch.object(identity, "_source_state") as manifest:
             report = identity.collect_identity_report(Path.cwd(), "unknown")
         self.assertEqual(report["missReasons"], ["unknown_profile"])
         manifest.assert_not_called()
 
-    def test_source_digest_delegates_to_existing_canonical_helper(self) -> None:
-        with patch("runtime_script_identity.coverage_context._source_digest", return_value=SOURCE) as load:
-            self.assertEqual(identity._source_digest(Path("/repo")), SOURCE)
+    def test_source_state_delegates_to_existing_canonical_helper(self) -> None:
+        state = {"sourceDigest": SOURCE, "coverageInputDigest": SOURCE_INPUTS}
+        with patch(
+            "runtime_script_identity.coverage_context._source_state", return_value=state
+        ) as load:
+            self.assertEqual(identity._source_state(Path("/repo")), (SOURCE, SOURCE_INPUTS))
         load.assert_called_once_with(Path("/repo"))

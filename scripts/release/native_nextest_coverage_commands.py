@@ -33,5 +33,5 @@ def nextest_arguments(repo: Path, threads: str, parent: str | None) -> list[str]
 def report_arguments(repo: Path) -> list[str]:
     return [
         "llvm-cov", "report", "--profile", "krr-coverage", "--locked", "--json",
-        "--summary-only", "--output-path", str(repo / REPORT_DIRECTORY / "root.json"),
+        "--show-missing-lines", "--output-path", str(repo / REPORT_DIRECTORY / "root.json"),
     ]

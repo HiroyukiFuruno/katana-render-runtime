@@ -18,7 +18,7 @@ import runtime_script_recipe as recipe_reader
 import runtime_script_result as result
 
 
-SCHEMA = "krr-runtime-script-identity-v1"
+SCHEMA = "krr-runtime-script-identity-v2"
 PROFILE = profiles.DEFAULT_PRODUCER
 TOOL_FINGERPRINT = "scripts/runtime-bundles/runtime-bundle-tool-fingerprint.ts"
 RUST_FACTS_HOST = "scripts/runtime-bundles/runtime-rust-facts-host.ts"
@@ -34,6 +34,7 @@ class IdentityReport(TypedDict):
     cacheable: bool
     missReasons: list[str]
     sourceManifestSha256: str | None
+    sourceInputsSha256: str | None
     recipeSha256: str | None
     toolEnvironmentSha256: str | None
     inputSha256: str | None
@@ -63,6 +64,7 @@ def _miss(producer: str, reason: str, moon_task_hash: str | None = None) -> Iden
         "cacheable": False,
         "missReasons": [reason],
         "sourceManifestSha256": None,
+        "sourceInputsSha256": None,
         "recipeSha256": None,
         "toolEnvironmentSha256": None,
         "inputSha256": None,
@@ -95,11 +97,21 @@ def _run_json(
         raise _CollectionFailure(failure_reason) from error
 
 
-def _source_digest(repo: Path) -> str:
+def _source_state(repo: Path) -> tuple[str, str]:
     try:
-        return coverage_context._source_digest(repo)
+        state = coverage_context._source_state(repo)
     except (OSError, ValueError) as error:
         raise _CollectionFailure("source_manifest_unavailable") from error
+    source_digest = state.get("sourceDigest")
+    source_inputs_digest = state.get("coverageInputDigest")
+    if (
+        not isinstance(source_digest, str)
+        or SHA256_RE.fullmatch(source_digest) is None
+        or not isinstance(source_inputs_digest, str)
+        or SHA256_RE.fullmatch(source_inputs_digest) is None
+    ):
+        raise _CollectionFailure("source_manifest_unavailable")
+    return source_digest, source_inputs_digest
 
 
 def _strict_fingerprint(
@@ -190,6 +202,7 @@ def _moon_context() -> tuple[str | None, str | None]:
 def _identity_from_facts(
     producer: str,
     source_digest: str,
+    source_inputs_digest: str,
     recipe: recipe_reader.RuntimeScriptRecipe,
     fingerprint: dict[str, object],
     moon_task_hash: str | None,
@@ -197,9 +210,9 @@ def _identity_from_facts(
     tool_digest = _canonical_digest(fingerprint)
     input_digest = _canonical_digest(
         {
-            "schema": "krr-runtime-script-producer-input-v1",
+            "schema": "krr-runtime-script-producer-input-v2",
             "producer": producer,
-            "sourceManifestSha256": source_digest,
+            "sourceInputsSha256": source_inputs_digest,
             "recipeSha256": recipe.recipe_sha256,
             "toolEnvironmentSha256": tool_digest,
         }
@@ -214,6 +227,7 @@ def _identity_from_facts(
         "cacheable": True,
         "missReasons": [],
         "sourceManifestSha256": source_digest,
+        "sourceInputsSha256": source_inputs_digest,
         "recipeSha256": recipe.recipe_sha256,
         "toolEnvironmentSha256": tool_digest,
         "inputSha256": input_digest,
@@ -224,10 +238,16 @@ def _identity_from_facts(
 
 def _collect_facts(
     repo: Path, producers: tuple[str, ...]
-) -> tuple[str, dict[str, recipe_reader.RuntimeScriptRecipe], dict[str, object], str | None]:
+) -> tuple[
+    str,
+    str,
+    dict[str, recipe_reader.RuntimeScriptRecipe],
+    dict[str, object],
+    str | None,
+]:
     if not repo.is_absolute() or repo.resolve(strict=True) != repo:
         raise _CollectionFailure("repository_root_not_canonical")
-    source_before = _source_digest(repo)
+    source_before, inputs_before = _source_state(repo)
     tool_before = _tool_fingerprint(repo)
     recipes = {
         producer: recipe_reader.read_runtime_script_recipe(repo, producer)
@@ -236,24 +256,28 @@ def _collect_facts(
     for producer, recipe in recipes.items():
         if recipe.recipe_name != profiles.producer_recipe(producer):
             raise _CollectionFailure("recipe_profile_mismatch")
-    source_after = _source_digest(repo)
+    source_after, inputs_after = _source_state(repo)
     tool_after = _tool_fingerprint(repo)
-    if source_before != source_after or tool_before != tool_after:
+    if (
+        source_before != source_after
+        or inputs_before != inputs_after
+        or tool_before != tool_after
+    ):
         raise _CollectionFailure("source_changed_during_collection")
     _, moon_task_hash = _moon_context()
-    return source_before, recipes, tool_before, moon_task_hash
+    return source_before, inputs_before, recipes, tool_before, moon_task_hash
 
 
 def _read_execution_facts(
     repo: Path, producer: str
-) -> tuple[str, recipe_reader.RuntimeScriptRecipe, dict[str, object]]:
+) -> tuple[str, str, recipe_reader.RuntimeScriptRecipe, dict[str, object]]:
     if not repo.is_absolute() or repo.resolve(strict=True) != repo:
         raise _CollectionFailure("repository_root_not_canonical")
-    source_digest = _source_digest(repo)
+    source_digest, source_inputs_digest = _source_state(repo)
     recipe = recipe_reader.read_runtime_script_recipe(repo, producer)
     if recipe.recipe_name != profiles.producer_recipe(producer):
         raise _CollectionFailure("recipe_profile_mismatch")
-    return source_digest, recipe, _tool_fingerprint(repo)
+    return source_digest, source_inputs_digest, recipe, _tool_fingerprint(repo)
 
 
 def collect_execution_snapshot(repo: Path, producer: str) -> IdentityReport:
@@ -262,23 +286,38 @@ def collect_execution_snapshot(repo: Path, producer: str) -> IdentityReport:
         return _miss(producer, "unknown_profile")
     _, moon_task_hash = _moon_context()
     try:
-        source_digest, recipe, fingerprint = _read_execution_facts(repo, producer)
+        source_digest, source_inputs_digest, recipe, fingerprint = _read_execution_facts(
+            repo, producer
+        )
     except (OSError, _CollectionFailure, recipe_reader.RuntimeScriptRecipeError) as error:
         return _miss(producer, _collection_miss_reason(error), moon_task_hash)
-    return _identity_from_facts(producer, source_digest, recipe, fingerprint, moon_task_hash)
+    return _identity_from_facts(
+        producer, source_digest, source_inputs_digest, recipe, fingerprint, moon_task_hash
+    )
 
 
 def collect_fixed_leaf_identity_reports(repo: Path) -> dict[str, IdentityReport]:
     """Collect all fixed leaf identities behind one conservative stability window."""
     producers = tuple(profiles.RUNTIME_SCRIPT_PROFILES)
     try:
-        source_digest, recipes, fingerprint, moon_task_hash = _collect_facts(repo, producers)
+        (
+            source_digest,
+            source_inputs_digest,
+            recipes,
+            fingerprint,
+            moon_task_hash,
+        ) = _collect_facts(repo, producers)
     except (OSError, _CollectionFailure, recipe_reader.RuntimeScriptRecipeError) as error:
         reason = _collection_miss_reason(error)
         return {producer: _miss(producer, reason) for producer in producers}
     return {
         producer: _identity_from_facts(
-            producer, source_digest, recipes[producer], fingerprint, moon_task_hash
+            producer,
+            source_digest,
+            source_inputs_digest,
+            recipes[producer],
+            fingerprint,
+            moon_task_hash,
         )
         for producer in producers
     }
@@ -301,10 +340,18 @@ def collect_identity_report(repo: Path, producer: str) -> IdentityReport:
     moon_task_hash: str | None = None
     try:
         _, moon_task_hash = _moon_context()
-        before, recipes, fingerprint, moon_task_hash = _collect_facts(repo, (producer,))
+        (
+            before,
+            source_inputs_digest,
+            recipes,
+            fingerprint,
+            moon_task_hash,
+        ) = _collect_facts(repo, (producer,))
     except (OSError, _CollectionFailure, recipe_reader.RuntimeScriptRecipeError) as error:
         return _miss(producer, _collection_miss_reason(error), moon_task_hash)
-    return _identity_from_facts(producer, before, recipes[producer], fingerprint, moon_task_hash)
+    return _identity_from_facts(
+        producer, before, source_inputs_digest, recipes[producer], fingerprint, moon_task_hash
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -9,7 +9,10 @@ import {
   digestFileRecords,
   verifyFileRecord,
 } from "./native-build-receipt";
-import { captureNativeSourceManifest } from "./native-source-manifest";
+import {
+  captureNativeCoverageSourceInputs,
+  captureNativeSourceManifest,
+} from "./native-source-manifest";
 
 test("captures current bytes and detects source changes with an unchanged HEAD", () => {
   withGitRepository((root) => {
@@ -123,14 +126,83 @@ test("uses the native manifest sort and digest convention and verifies captured 
   });
 });
 
+test("coverage source digest ignores only the quality task ledger bytes", () => {
+  withGitRepository((root) => {
+    fs.mkdirSync(path.join(root, "docs"));
+    fs.writeFileSync(path.join(root, "docs/quality-gate-improvement-tasks.md"), "ledger one");
+    fs.writeFileSync(path.join(root, "docs/other.md"), "other docs one");
+    fs.writeFileSync(path.join(root, "source.rs"), "source one");
+    commitFiles(root, ["docs/quality-gate-improvement-tasks.md", "docs/other.md", "source.rs"]);
+
+    const initialManifest = captureNativeSourceManifest(root);
+    const initialCoverage = captureNativeCoverageSourceInputs(root);
+    expect(initialCoverage).toEqual({
+      schema: "krr-native-coverage-source-inputs-v1",
+      sourceDigest: initialManifest.digest,
+      coverageInputDigest: digestFileRecords(
+        initialManifest.files.filter(
+          (file) => file.path !== path.join(root, "docs/quality-gate-improvement-tasks.md"),
+        ),
+      ),
+    });
+
+    const mutations = [
+      {
+        path: "docs/quality-gate-improvement-tasks.md",
+        content: "ledger two",
+        fullDigestChanges: true,
+        coverageDigestChanges: false,
+      },
+      {
+        path: "source.rs",
+        content: "source two",
+        fullDigestChanges: true,
+        coverageDigestChanges: true,
+      },
+      {
+        path: "docs/other.md",
+        content: "other docs two",
+        fullDigestChanges: true,
+        coverageDigestChanges: true,
+      },
+    ];
+    let previous = initialCoverage;
+    for (const mutation of mutations) {
+      fs.writeFileSync(path.join(root, mutation.path), mutation.content);
+      const manifest = captureNativeSourceManifest(root);
+      const coverage = captureNativeCoverageSourceInputs(root);
+      expect(manifest.digest !== previous.sourceDigest).toBe(mutation.fullDigestChanges);
+      expect(coverage.coverageInputDigest !== previous.coverageInputDigest).toBe(
+        mutation.coverageDigestChanges,
+      );
+      previous = coverage;
+    }
+
+    git(root, ["rm", "--cached", "--", "docs/quality-gate-improvement-tasks.md"]);
+    fs.unlinkSync(path.join(root, "docs/quality-gate-improvement-tasks.md"));
+    expect(() => captureNativeCoverageSourceInputs(root)).toThrow(
+      "Native coverage source inputs require exactly one quality task ledger",
+    );
+  });
+});
+
 test("CLI requires --root and prints one captured JSON manifest", () => {
   withGitRepository((root) => {
+    fs.mkdirSync(path.join(root, "docs"));
+    fs.writeFileSync(path.join(root, "docs/quality-gate-improvement-tasks.md"), "ledger");
     fs.writeFileSync(path.join(root, "source.rs"), "source");
-    commitFiles(root, ["source.rs"]);
+    commitFiles(root, ["docs/quality-gate-improvement-tasks.md", "source.rs"]);
     const success = runNativeSourceManifestCli(["--root", root]);
     expect(success.exitCode).toBe(0);
     expect(success.stderr.toString("utf8")).toBe("");
     expect(JSON.parse(success.stdout.toString("utf8"))).toEqual(captureNativeSourceManifest(root));
+
+    const coverageInputs = runNativeSourceManifestCli(["--root", root, "--coverage-inputs"]);
+    expect(coverageInputs.exitCode).toBe(0);
+    expect(coverageInputs.stderr.toString("utf8")).toBe("");
+    expect(JSON.parse(coverageInputs.stdout.toString("utf8"))).toEqual(
+      captureNativeCoverageSourceInputs(root),
+    );
 
     const missingRoot = runNativeSourceManifestCli([]);
     expect(missingRoot.exitCode).toBe(1);

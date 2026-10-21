@@ -956,28 +956,42 @@ const nativeRoute = [
   "crates/katana-render-runtime/src/v8_script.rs",
   ...RUST_CLASSIC_INPUT_PATHS,
 ].filter((sourcePath, index, route) => route.indexOf(sourcePath) === index);
-interface NativeWidthFixture {
+interface NativeWidthSources {
   nativeRoot: string;
   nativeRaw: Map<string, ReturnType<typeof physicalUnusedSource>>;
+}
+
+interface NativeWidthFixture extends NativeWidthSources {
   nativeContext: ReturnType<typeof nativeWidthUnusedContext>;
   nativeOrigin: BrowserUnusedOrigin;
+}
+
+let nativeWidthSourcesValue: NativeWidthSources | undefined;
+function nativeWidthSources(): NativeWidthSources {
+  if (nativeWidthSourcesValue !== undefined) return nativeWidthSourcesValue;
+  const nativeRoot = fs.mkdtempSync(path.join(directory, "native-width-"));
+  const nativeRaw = new Map<string, ReturnType<typeof physicalUnusedSource>>();
+  for (const name of new Set([...nativeRoute, ...RUST_CLASSIC_INPUT_PATHS])) {
+    const target = path.join(nativeRoot, name);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(browserRoot, name), target);
+    if (nativeRoute.includes(name))
+      nativeRaw.set(name, physicalUnusedSource(fs.readFileSync(target)));
+  }
+  nativeWidthSourcesValue = { nativeRoot, nativeRaw };
+  return nativeWidthSourcesValue;
 }
 
 let nativeWidthFixtureValue: NativeWidthFixture | undefined;
 function nativeWidthFixture(): NativeWidthFixture {
   if (nativeWidthFixtureValue !== undefined) return nativeWidthFixtureValue;
-  const nativeRoot = fs.mkdtempSync(path.join(directory, "native-width-"));
-  for (const name of new Set([...nativeRoute, ...RUST_CLASSIC_INPUT_PATHS])) {
-    const target = path.join(nativeRoot, name);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(path.join(browserRoot, name), target);
-  }
-  const nativeRaw = new Map<string, ReturnType<typeof physicalUnusedSource>>();
+  const sources = nativeWidthSources();
+  const { nativeRoot, nativeRaw } = sources;
   const nativeContext = nativeWidthUnusedContext(nativeRoot, nativeRaw);
   const nativeOrigin = nativeContext.origin;
   if (!(nativeOrigin instanceof BrowserUnusedOrigin))
     throw new Error("missing native width origin");
-  nativeWidthFixtureValue = { nativeRoot, nativeRaw, nativeContext, nativeOrigin };
+  nativeWidthFixtureValue = { ...sources, nativeContext, nativeOrigin };
   return nativeWidthFixtureValue;
 }
 
@@ -1113,7 +1127,7 @@ const nativeScriptRouteMutations = [
 test.each(nativeScriptRouteMutations)(
   "native width rejects Mermaid script %s tampering through existing Rust facts",
   (_kind, expectedFactError, mutate) => {
-    const { nativeRoot } = nativeWidthFixture();
+    const { nativeRoot } = nativeWidthSources();
     const target = path.join(nativeRoot, nativeScripts);
     const before = fs.readFileSync(target);
     const original = before.toString();
@@ -1228,7 +1242,7 @@ const nativeDiagramRouteMutations = new Map<string, (source: string) => string>(
 test.each([...nativeDiagramRouteMutations])(
   "native width rejects changed diagram route: %s",
   (_kind, mutate) => {
-    const { nativeRoot } = nativeWidthFixture();
+    const { nativeRoot } = nativeWidthSources();
     const target = path.join(
       nativeRoot,
       "crates/katana-render-runtime/src/markdown/diagram_js_runtime.rs",
@@ -1251,7 +1265,7 @@ test.each([...nativeDiagramRouteMutations])(
 test.each(nativeRoute.filter((name) => name !== nativeScripts))(
   "native width rejects changed consumer/trace %s",
   (name) => {
-    const { nativeRoot } = nativeWidthFixture();
+    const { nativeRoot } = nativeWidthSources();
     const target = path.join(nativeRoot, name);
     const before = fs.readFileSync(target);
     try {
@@ -1271,7 +1285,7 @@ test.each(nativeRoute.filter((name) => name !== nativeScripts))(
 test.each(["unknown producer", "missing", "duplicate", "different callee", "comment", "escape"])(
   "native width result rejects %s",
   (kind) => {
-    const { nativeRaw } = nativeWidthFixture();
+    const { nativeRaw } = nativeWidthSources();
     const raw = nativeRaw.get(nativeHelper);
     if (!raw) throw new Error("missing Rust helper");
     let code = raw.code;

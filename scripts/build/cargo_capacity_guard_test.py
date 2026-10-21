@@ -4363,7 +4363,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
             output = root / "tmp/quality/root-coverage-detail.json"
             output.parent.mkdir(parents=True)
             command = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
-                       "--json", "--output-path", str(output)]
+                       "--json", "--show-missing-lines", "--output-path", str(output)]
             args.command = command
             self.assertEqual(self.execute(root, args, environment, code=7), 7)
             self.assertEqual(self.calls[-1], command)
@@ -4375,6 +4375,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
                 [*command[:-1], str(root / "tmp/quality/other.json")],
                 [*command[:-1], str(root / "tmp/quality/../quality/root-coverage-detail.json")],
                 [item for item in command if item != "--locked"],
+                [item for item in command if item != "--show-missing-lines"],
             )
             with patch("cargo_capacity_guard.cargo_configuration_paths", return_value=[]), \
                     patch("cargo_capacity_guard.validate_build_selection"):
@@ -4396,7 +4397,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
                 output = root / "tmp/quality/root-coverage-detail.json"
                 output.parent.mkdir(parents=True)
                 command = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
-                           "--json", "--output-path", str(output)]
+                           "--json", "--show-missing-lines", "--output-path", str(output)]
                 args.command = command
                 if kind == "leaf-symlink":
                     external = root / "external-report.json"
@@ -4552,7 +4553,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
                         guard.coverage_selection(root, target, "root", candidate, environment, collection=True)
 
                 report = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
-                          "--json", "--summary-only", "--output-path",
+                          "--json", "--show-missing-lines", "--output-path",
                           str(root / "tmp/quality/standalone-performance-coverage/root.json")]
                 report_environment = {key: value for key, value in environment.items()
                                       if key != "LLVM_PROFILE_FILE_NAME"}
@@ -4561,14 +4562,15 @@ class CoverageDomainUnitTests(unittest.TestCase):
                                  ("report", target / "llvm-cov-target"))
                 report_mutations: tuple[tuple[str, str | None], ...] = (("--profile", "dev"), ("--no-clean", None),
                                  ("--output-path", str(root / "tmp/quality/other.json")),
-                                 ("--json", None))
+                                 ("--json", None), ("--summary-only", None),
+                                 ("--show-missing-lines", None))
                 for mutation in report_mutations:
                     with self.subTest(report_mutation=mutation), self.assertRaisesRegex(RuntimeError, "fixed"):
                         candidate = list(report)
                         if mutation[0] in {"--profile", "--output-path"}:
                             index = candidate.index(mutation[0])
                             candidate[index + 1] = mutation[1] or ""
-                        elif mutation[0] == "--json":
+                        elif mutation[0] in {"--json", "--show-missing-lines"}:
                             candidate.remove(mutation[0])
                         else:
                             candidate.append(mutation[0])
@@ -4928,13 +4930,48 @@ class CoverageDomainUnitTests(unittest.TestCase):
 
     def test_coverage_busy_and_lock_failure_do_not_run_child(self) -> None:
         from cargo_capacity_guard import coverage_cleanup_preflight
-        for kind in ("busy", "lock", "unavailable"):
-            with self.subTest(kind=kind), self.fixture() as (root, args, environment):
-                busy = ["inspection unavailable"] if kind == "unavailable" else ["consumer busy"] if kind == "busy" else []
-                with patch("cargo_capacity_guard.busy_processes", return_value=busy), \
-                        patch("cargo_capacity_guard.ProfileLocks", side_effect=BlockingIOError("held")):
-                    with self.assertRaises(RuntimeError):
-                        coverage_cleanup_preflight(root, root / "target", Path(environment['CARGO_LLVM_COV_TARGET_DIR']), args.protected_ref)
+
+        @contextlib.contextmanager
+        def profile_lock(_target: Path) -> Iterator[object]:
+            yield SimpleNamespace(verify=lambda: None)
+
+        cases: tuple[
+            tuple[
+                str,
+                list[list[str]],
+                BlockingIOError | Callable[[Path], contextlib.AbstractContextManager[object]],
+                str,
+            ],
+            ...,
+        ] = (
+            (
+                "busy",
+                [["pid 123: target in command"]],
+                BlockingIOError("held"),
+                "coverage cleanup target is in use or inspection is unavailable: pid 123: target in command",
+            ),
+            (
+                "unavailable",
+                [["inspection unavailable"]],
+                BlockingIOError("held"),
+                "coverage cleanup target is in use or inspection is unavailable: inspection unavailable",
+            ),
+            (
+                "became-busy",
+                [[], ["pid 456: build target in use"]],
+                profile_lock,
+                "coverage cleanup target became busy: pid 456: build target in use",
+            ),
+            ("lock", [[]], BlockingIOError("held"), "coverage cleanup Cargo lock is busy"),
+        )
+        for kind, busy_results, profile_effect, message in cases:
+            with self.subTest(kind=kind), self.fixture() as (root, args, environment), \
+                    patch("cargo_capacity_guard.busy_processes", side_effect=busy_results), \
+                    patch("cargo_capacity_guard.ProfileLocks", side_effect=profile_effect):
+                with self.assertRaisesRegex(RuntimeError, message):
+                    coverage_cleanup_preflight(
+                        root, root / "target", Path(environment['CARGO_LLVM_COV_TARGET_DIR']), args.protected_ref,
+                    )
 
     def test_coverage_profile_probe_releases_before_child_while_guard_lock_is_held(self) -> None:
         events: list[str] = []

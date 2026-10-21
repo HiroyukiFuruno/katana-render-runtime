@@ -1,4 +1,5 @@
 import path from "node:path";
+import { fileSha256 } from "./mermaid-pair-manifest";
 import type { MagickOps } from "./reference_image_ops";
 import type { ReferencePair } from "./reference_pair_repository";
 import type { PaintProjectedReferenceScore, ReferenceScoreRow } from "./reference_score";
@@ -7,7 +8,7 @@ import { isNeutralGeometryTargetSlug } from "./reference_svg_geometry";
 
 export interface NativeProductFrame {
   slug: string;
-  png: { path: string };
+  png: { path: string; sha256: string };
 }
 
 export function scoreNativeProductRows(
@@ -60,6 +61,10 @@ function scoreNativeProductRow(
   policy: ReferenceScorePolicy,
 ): ReferenceScoreRow {
   if (frame === undefined) throw new Error(`Missing native product PNG: ${pair.slug}`);
+  const actualPngSha256 = fileSha256(frame.png.path);
+  if (actualPngSha256 !== frame.png.sha256) {
+    throw new Error(`Native product PNG digest differs from its evidence: ${pair.slug}`);
+  }
   const metrics = magick.comparePaintProjectedImages(
       pair.officialPath,
       frame.png.path,
@@ -70,30 +75,57 @@ function scoreNativeProductRow(
   if (isNeutralGeometryTargetSlug(pair.slug) && projected === undefined) {
     throw new Error(`Missing native geometry score: ${pair.slug}`);
   }
-  return buildNativeProductScoreRow(pair.slug, metrics, projected, policy);
+  const actualPngShape = isNeutralGeometryTargetSlug(pair.slug)
+    ? magick.compareRgbChannelEdgeSupportImages(
+        pair.officialPath,
+        frame.png.path,
+        workDirectory,
+        pair.slug,
+      )
+    : undefined;
+  return buildNativeProductScoreRow(
+    pair.slug,
+    metrics,
+    projected,
+    actualPngShape === undefined
+      ? undefined
+      : {
+          ...actualPngShape,
+          officialPngSha256: fileSha256(pair.officialPath),
+          actualPngSha256,
+        },
+    policy,
+  );
 }
 
 function buildNativeProductScoreRow(
   slug: string,
   metrics: ReturnType<MagickOps["comparePaintProjectedImages"]>,
   projected: PaintProjectedReferenceScore | undefined,
+  actualPngShape: ReferenceScoreRow["actualPngShape"],
   policy: ReferenceScorePolicy,
 ): ReferenceScoreRow {
   const geometry = isNeutralGeometryTargetSlug(slug),
     threshold = policy.thresholdFor(slug),
-    score = geometry ? (projected?.score ?? 0) : metrics.score;
+    score = geometry ? Math.min(projected?.score ?? 0, actualPngShape?.score ?? 0) : metrics.score;
   return {
     slug,
     score,
     rgbScore: metrics.score,
-    scoreSemantics: geometry ? "paint-projected-reference-v1" : "rgb-v1",
+    scoreSemantics: geometry
+      ? "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1"
+      : "rgb-v1",
     canvasRmseScore: metrics.fullCanvasRmseScore,
     canvasMaeScore: metrics.fullCanvasMaeScore,
     contentRmseScore: metrics.contentRmseScore,
     contentMaeScore: metrics.contentMaeScore,
     minScore: threshold.minScore,
     exceptionReason: threshold.reason,
-    passed: score >= threshold.minScore && (projected?.structuralIntegrityAccepted ?? true),
+    passed:
+      score >= threshold.minScore &&
+      (projected?.structuralIntegrityAccepted ?? true) &&
+      (actualPngShape === undefined || actualPngShape.score >= threshold.minScore),
     ...(geometry && projected !== undefined ? { paintProjectedReference: projected } : {}),
+    ...(geometry && actualPngShape !== undefined ? { actualPngShape } : {}),
   };
 }

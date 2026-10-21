@@ -48,6 +48,12 @@ describe("interaction suite contract", () => {
     expect(evaluateInteractionEvidence(comparisons, undefined, 60).passed).toBe(false);
     expect(evaluateInteractionEvidence(comparisons, metrics, 39).passed).toBe(false);
     expect(
+      evaluateInteractionEvidence(comparisons, { ...metrics, closeMs: 30 }, 60).performancePassed,
+    ).toBe(false);
+    expect(
+      evaluateInteractionEvidence(comparisons, { ...metrics, closeMs: 29.999 }, 60).passed,
+    ).toBe(true);
+    expect(
       evaluateInteractionEvidence(compareInteractionStates(states, {}), metrics, 60).passed,
     ).toBe(false);
   });

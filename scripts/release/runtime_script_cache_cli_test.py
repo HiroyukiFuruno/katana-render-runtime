@@ -19,6 +19,7 @@ import runtime_script_result_verify as result_verify
 PRODUCER = cache_cli.PRODUCER
 IDENTITY = "a" * 64
 SOURCE_MANIFEST = "b" * 64
+SOURCE_INPUTS = "f" * 64
 RECIPE = "c" * 64
 TOOLS = "d" * 64
 
@@ -28,16 +29,23 @@ def identity_report(
     *,
     producer: str = PRODUCER,
     cacheable: bool = True,
+    source_manifest: str = SOURCE_MANIFEST,
+    source_inputs: str = SOURCE_INPUTS,
+    recipe: str = RECIPE,
+    tools: str = TOOLS,
+    input_digest: str = "e" * 64,
+    schema: str = "krr-runtime-script-identity-v2",
 ) -> dict[str, object]:
     return {
-        "schema": "krr-runtime-script-identity-v1",
+        "schema": schema,
         "producer": producer,
         "cacheable": cacheable,
         "missReasons": [] if cacheable else ["collector_unavailable"],
-        "sourceManifestSha256": SOURCE_MANIFEST,
-        "recipeSha256": RECIPE,
-        "toolEnvironmentSha256": TOOLS,
-        "inputSha256": "e" * 64,
+        "sourceManifestSha256": source_manifest,
+        "sourceInputsSha256": source_inputs,
+        "recipeSha256": recipe,
+        "toolEnvironmentSha256": tools,
+        "inputSha256": input_digest,
         "identitySha256": identity if cacheable else None,
         "moonTaskHash": None,
     }
@@ -92,6 +100,43 @@ class RuntimeScriptCacheCliTests(unittest.TestCase):
             )
 
         return run
+
+    def assert_run_current_rejects_identity_change(
+        self,
+        before: dict[str, object],
+        after: dict[str, object],
+        run_identity: str,
+    ) -> None:
+        with (
+            patch.object(
+                identity_collector,
+                "collect_execution_snapshot",
+                side_effect=[before, after],
+            ),
+            patch.object(
+                recipe_reader, "read_runtime_script_recipe", return_value=self.recipe()
+            ),
+            patch.object(
+                producer_runner,
+                "run_runtime_script",
+                side_effect=self.fake_run(run_identity),
+            ),
+            self.assertRaisesRegex(
+                result.RuntimeScriptResultError, "changed during execution"
+            ),
+        ):
+            cache_cli.run_current(self.root)
+
+        anchor_dir = self.git_directory() / local_anchor.DIRECTORY_NAME
+        current = local_anchor._read(anchor_dir, PRODUCER)
+        self.assertIsNotNone(current)
+        self.assertEqual(current["state"] if current else None, "pending")
+        current_epoch = str(current["epoch"] if current else "")
+        self.assertFalse(
+            local_anchor.verify(
+                self.root, PRODUCER, run_identity, current_epoch, b"fresh-success"
+            )
+        )
 
     def test_same_source_current_key_is_stable_and_binds_source_pins(self) -> None:
         with patch.object(
@@ -200,6 +245,61 @@ class RuntimeScriptCacheCliTests(unittest.TestCase):
             ), self.assertRaises(result.RuntimeScriptResultError):
                 cache_cli.validate_all(self.root)
 
+    def test_legacy_identity_report_schema_is_rejected(self) -> None:
+        legacy = identity_report(schema="krr-runtime-script-identity-v1")
+        for entry in (
+            "bound_identity",
+            "validate_current",
+            "run_current_before",
+            "run_current_after",
+        ):
+            with self.subTest(entry=entry):
+                self.setUp()
+                if entry == "bound_identity":
+                    with (
+                        patch.object(
+                            identity_collector,
+                            "collect_identity_report",
+                            return_value=legacy,
+                        ),
+                        self.assertRaisesRegex(
+                            result.RuntimeScriptResultError, "identity is unavailable"
+                        ),
+                    ):
+                        cache_cli.bound_identity(self.root)
+                elif entry == "validate_current":
+                    with (
+                        patch.object(
+                            identity_collector,
+                            "collect_identity_report",
+                            return_value=legacy,
+                        ),
+                        self.assertRaisesRegex(
+                            result.RuntimeScriptResultError, "identity is unavailable"
+                        ),
+                    ):
+                        cache_cli.validate_current(self.root)
+                elif entry == "run_current_before":
+                    with (
+                        patch.object(
+                            identity_collector,
+                            "collect_execution_snapshot",
+                            return_value=legacy,
+                        ),
+                        patch.object(producer_runner, "run_runtime_script") as run,
+                        self.assertRaisesRegex(
+                            result.RuntimeScriptResultError,
+                            "current producer inputs are unavailable",
+                        ),
+                    ):
+                        cache_cli.run_current(self.root)
+                    run.assert_not_called()
+                else:
+                    run_identity = result.build_identity(PRODUCER, "e" * 64)
+                    self.assert_run_current_rejects_identity_change(
+                        identity_report(run_identity), legacy, run_identity
+                    )
+
     def test_ensure_all_uses_one_batch_when_every_leaf_is_valid(self) -> None:
         reports = {
             producer: identity_report(f"{index + 1:064x}", producer=producer)
@@ -259,23 +359,25 @@ class RuntimeScriptCacheCliTests(unittest.TestCase):
         anchor_dir = self.git_directory() / local_anchor.DIRECTORY_NAME
         self.assertFalse(anchor_dir.exists())
 
-    def test_run_current_invalidates_anchor_when_source_changes_after_run(self) -> None:
+    def test_run_current_invalidates_anchor_when_identity_fields_change(self) -> None:
+        changed_fields = (
+            "sourceManifestSha256",
+            "sourceInputsSha256",
+            "recipeSha256",
+            "toolEnvironmentSha256",
+            "inputSha256",
+            "identitySha256",
+        )
         run_identity = result.build_identity(PRODUCER, "e" * 64)
-        reports = [identity_report(run_identity), identity_report("f" * 64)]
-        with (
-            patch.object(identity_collector, "collect_execution_snapshot", side_effect=reports),
-            patch.object(recipe_reader, "read_runtime_script_recipe", return_value=self.recipe()),
-            patch.object(producer_runner, "run_runtime_script", side_effect=self.fake_run(run_identity)),
-            self.assertRaisesRegex(result.RuntimeScriptResultError, "changed during execution"),
-        ):
-            cache_cli.run_current(self.root)
 
-        anchor_dir = self.git_directory() / local_anchor.DIRECTORY_NAME
-        current = local_anchor._read(anchor_dir, PRODUCER)
-        self.assertIsNotNone(current)
-        self.assertEqual(current["state"] if current else None, "pending")
-        current_epoch = str(current["epoch"] if current else "")
-        self.assertFalse(local_anchor.verify(self.root, PRODUCER, run_identity, current_epoch, b"fresh-success"))
+        for field in changed_fields:
+            with self.subTest(field=field):
+                self.setUp()
+                after = identity_report(run_identity)
+                after[field] = "9" * 64
+                self.assert_run_current_rejects_identity_change(
+                    identity_report(run_identity), after, run_identity
+                )
 
     def run_ensure_after_corrupt_receipt(
         self, postverify_error: str | None

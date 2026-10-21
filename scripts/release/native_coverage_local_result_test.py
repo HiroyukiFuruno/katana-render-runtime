@@ -26,6 +26,12 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         fixture_helpers.initialize_fixture_repository(self.root)
         self.source_digest = "a" * 64
+        self.coverage_input_digest = "f" * 64
+        self.source_state = {
+            "schema": local_result.SOURCE_INPUTS_SCHEMA,
+            "sourceDigest": self.source_digest,
+            "coverageInputDigest": self.coverage_input_digest,
+        }
         self.context = self.make_context(True)
 
     @staticmethod
@@ -55,19 +61,143 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         for domain in ("root", "baseline", "candidate"):
             fixture_helpers.write_fixture_report(self.root, domain)
 
-    def test_source_manifest_failure_preserves_exit_and_stderr(self) -> None:
+    def test_source_inputs_failure_preserves_exit_and_stderr(self) -> None:
         failed = subprocess.CompletedProcess(
-            args=["bun", "run", "native-source-manifest.ts"],
+            args=["bun", "run", "native-source-manifest.ts", "--coverage-inputs"],
             returncode=17,
             stdout="",
             stderr="manifest verification detail",
         )
-        with patch.object(subprocess, "run", return_value=failed):
-            with self.assertRaisesRegex(
+        with (
+            patch.object(subprocess, "run", return_value=failed),
+            self.assertRaisesRegex(
                 local_result.LocalCoverageError,
                 r"exit 17: manifest verification detail",
+            ),
+        ):
+            local_result._source_state(self.root)
+
+    def test_source_inputs_require_exact_schema_and_sha256_fields(self) -> None:
+        malformed = subprocess.CompletedProcess(
+            args=["bun", "run", "native-source-manifest.ts", "--coverage-inputs"],
+            returncode=0,
+            stdout=json.dumps({
+                "schema": local_result.SOURCE_INPUTS_SCHEMA,
+                "sourceDigest": self.source_digest,
+                "coverageInputDigest": "short",
+            }),
+            stderr="",
+        )
+        with (
+            patch.object(subprocess, "run", return_value=malformed) as run,
+            self.assertRaisesRegex(local_result.LocalCoverageError, "invalid shape"),
+        ):
+            local_result._source_state(self.root)
+        self.assertEqual(run.call_args.args[0][-1], "--coverage-inputs")
+
+    def test_full_source_digest_uses_default_manifest_mode(self) -> None:
+        self.assertFalse(
+            (self.root / "docs/quality-gate-improvement-tasks.md").exists()
+        )
+        manifest = {
+            "schema": "krr-native-build-source-manifest-v1",
+            "digest": self.source_digest,
+            "files": [{"path": "src/lib.rs", "sha256": "b" * 64}],
+        }
+        completed = subprocess.CompletedProcess(
+            args=["bun", "run", "native-source-manifest.ts", "--root", str(self.root)],
+            returncode=0,
+            stdout=json.dumps(manifest),
+            stderr="",
+        )
+        with patch.object(subprocess, "run", return_value=completed) as run:
+            self.assertEqual(local_result._source_digest(self.root), self.source_digest)
+        self.assertNotIn("--coverage-inputs", run.call_args.args[0])
+
+    def test_full_source_digest_rejects_malformed_manifest(self) -> None:
+        valid = {
+            "schema": "krr-native-build-source-manifest-v1",
+            "digest": self.source_digest,
+            "files": [{"path": "src/lib.rs", "sha256": "b" * 64}],
+        }
+        malformed_manifests = (
+            {**valid, "schema": "wrong-schema"},
+            {**valid, "digest": "short"},
+            {**valid, "files": []},
+            {**valid, "unexpected": True},
+        )
+        for manifest in malformed_manifests:
+            with self.subTest(manifest=manifest):
+                completed = subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=json.dumps(manifest), stderr=""
+                )
+                with patch.object(subprocess, "run", return_value=completed):
+                    with self.assertRaisesRegex(
+                        local_result.LocalCoverageError, "invalid shape"
+                    ):
+                        local_result._source_digest(self.root)
+
+    def test_identity_uses_coverage_inputs_but_not_full_source_digest(self) -> None:
+        current_source = [self.source_state]
+        with (
+            patch.object(
+                local_result, "_source_state", side_effect=lambda _: current_source[0]
+            ),
+            patch.object(local_result, "_local_context", return_value=self.context),
+        ):
+            initial = local_result.local_key(self.root, "root")
+            current_source[0] = {**self.source_state, "sourceDigest": "d" * 64}
+            ledger_only = local_result.local_key(self.root, "root")
+            self.assertEqual(initial["fingerprint"], ledger_only["fingerprint"])
+            self.assertEqual(ledger_only["coverageInputDigest"], self.coverage_input_digest)
+            self.assertNotIn("sourceDigest", ledger_only)
+
+            current_source[0] = {
+                **current_source[0],
+                "sourceDigest": "e" * 64,
+                "coverageInputDigest": "9" * 64,
+            }
+            changed_source = local_result.local_key(self.root, "root")
+            self.assertNotEqual(initial["fingerprint"], changed_source["fingerprint"])
+
+    def test_ledger_change_during_producer_rejects_finish(self) -> None:
+        self.prepare_reports()
+        current_source = [self.source_state]
+        with (
+            patch.object(
+                local_result, "_source_state", side_effect=lambda _: current_source[0]
+            ),
+            patch.object(local_result, "_local_context", return_value=self.context),
+            patch.dict(os.environ, {"MOON_TASK_ID": "krr:unit-test"}, clear=True),
+        ):
+            self.begin_producer("root")
+            current_source[0] = {**self.source_state, "sourceDigest": "d" * 64}
+            with self.assertRaisesRegex(
+                local_result.LocalCoverageError, "inputs changed between begin and finish"
             ):
-                local_result._source_digest(self.root)
+                local_result.local_finish(self.root, "root", 0)
+
+    def test_cached_receipt_survives_later_ledger_only_change(self) -> None:
+        self.prepare_reports()
+        current_source = [self.source_state]
+        with (
+            patch.object(
+                local_result, "_source_state", side_effect=lambda _: current_source[0]
+            ),
+            patch.object(local_result, "_local_context", return_value=self.context),
+        ):
+            self.begin_producer("root")
+            local_result.local_finish(self.root, "root", 0)
+            receipt_path = (
+                self.root / coverage_result.REPORT_DIRECTORY / "root-local-result.json"
+            )
+            receipt_bytes = receipt_path.read_bytes()
+            current_source[0] = {**self.source_state, "sourceDigest": "d" * 64}
+            self.assertTrue(local_result.local_validate(self.root, "root")["valid"])
+            self.assertTrue(
+                local_result.local_collection_validate(self.root, "root")["valid"]
+            )
+            self.assertEqual(receipt_path.read_bytes(), receipt_bytes)
 
     def begin_producer(self, producer: str) -> None:
         local_result.local_key(self.root, producer)
@@ -77,7 +207,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         self.prepare_reports()
         with (
             patch.object(
-                local_result, "_source_digest", side_effect=lambda _: self.source_digest
+                local_result, "_source_state", side_effect=lambda _: self.source_state
             ),
             patch.object(
                 local_result, "_local_context", side_effect=lambda _: self.context
@@ -110,7 +240,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         self.prepare_reports()
         with (
             patch.object(
-                local_result, "_source_digest", return_value=self.source_digest
+                local_result, "_source_state", return_value=self.source_state
             ),
             patch.object(local_result, "_local_context", return_value=self.context),
         ):
@@ -132,11 +262,11 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
 
     def test_changed_source_context_or_report_bytes_reject(self) -> None:
         self.prepare_reports()
-        current_source = [self.source_digest]
+        current_source = [self.source_state]
         current_context = [self.context]
         with (
             patch.object(
-                local_result, "_source_digest", side_effect=lambda _: current_source[0]
+                local_result, "_source_state", side_effect=lambda _: current_source[0]
             ),
             patch.object(
                 local_result, "_local_context", side_effect=lambda _: current_context[0]
@@ -144,15 +274,23 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
             patch.dict(os.environ, {"MOON_TASK_ID": "krr:unit-test"}, clear=True),
         ):
             local_result.local_key(self.root, "root")
-            current_source[0] = "d" * 64
+            current_source[0] = {
+                **self.source_state,
+                "sourceDigest": "d" * 64,
+                "coverageInputDigest": "e" * 64,
+            }
             with self.assertRaises(local_result.LocalCoverageError):
                 local_result.local_begin(self.root, "root")
-            current_source[0] = self.source_digest
+            current_source[0] = self.source_state
             self.begin_producer("root")
-            current_source[0] = "d" * 64
+            current_source[0] = {
+                **self.source_state,
+                "sourceDigest": "d" * 64,
+                "coverageInputDigest": "e" * 64,
+            }
             with self.assertRaises(local_result.LocalCoverageError):
                 local_result.local_finish(self.root, "root", 0)
-            current_source[0] = self.source_digest
+            current_source[0] = self.source_state
             self.begin_producer("root")
             current_context[0] = self.make_context(False)
             with self.assertRaises(local_result.LocalCoverageError):
@@ -179,7 +317,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         self.prepare_reports()
         with (
             patch.object(
-                local_result, "_source_digest", return_value=self.source_digest
+                local_result, "_source_state", return_value=self.source_state
             ),
             patch.object(local_result, "_local_context", return_value=self.context),
             patch.dict(os.environ, {}, clear=True),
@@ -192,7 +330,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         self.prepare_reports()
         with (
             patch.object(
-                local_result, "_source_digest", return_value=self.source_digest
+                local_result, "_source_state", return_value=self.source_state
             ),
             patch.object(local_result, "_local_context", return_value=self.context),
             patch.dict(os.environ, {"MOON_TASK_ID": "krr:unit-test"}, clear=True),
@@ -206,7 +344,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         self.prepare_reports()
         with (
             patch.object(
-                local_result, "_source_digest", return_value=self.source_digest
+                local_result, "_source_state", return_value=self.source_state
             ),
             patch.object(local_result, "_local_context", return_value=self.context),
         ):
@@ -225,7 +363,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
     def test_collection_receipt_accepts_partial_and_strict_wrapper_rejects(self) -> None:
         fixture_helpers.write_fixture_report(self.root, "root", count=10, covered=9, percent=90.0)
         with (
-            patch.object(local_result, "_source_digest", return_value=self.source_digest),
+            patch.object(local_result, "_source_state", return_value=self.source_state),
             patch.object(local_result, "_local_context", return_value=self.context),
         ):
             self.begin_producer("root")
@@ -248,7 +386,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
     def test_collection_validation_rejects_malformed_report(self) -> None:
         self.prepare_reports()
         with (
-            patch.object(local_result, "_source_digest", return_value=self.source_digest),
+            patch.object(local_result, "_source_state", return_value=self.source_state),
             patch.object(local_result, "_local_context", return_value=self.context),
         ):
             self.begin_producer("root")
@@ -266,7 +404,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
     def test_strict_policy_uses_rows_authenticated_before_report_mutation(self) -> None:
         fixture_helpers.write_fixture_report(self.root, "root", count=10, covered=9, percent=90.0)
         with (
-            patch.object(local_result, "_source_digest", return_value=self.source_digest),
+            patch.object(local_result, "_source_state", return_value=self.source_state),
             patch.object(local_result, "_local_context", return_value=self.context) as context_mock,
         ):
             self.begin_producer("root")
@@ -292,7 +430,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
     def test_collection_receipt_symlink_is_rejected(self) -> None:
         self.prepare_reports()
         with (
-            patch.object(local_result, "_source_digest", return_value=self.source_digest),
+            patch.object(local_result, "_source_state", return_value=self.source_state),
             patch.object(local_result, "_local_context", return_value=self.context),
         ):
             self.begin_producer("root")
@@ -310,7 +448,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         candidate = self.root / coverage_result.REPORT_DIRECTORY / "candidate.json"
         with (
             patch.object(
-                local_result, "_source_digest", return_value=self.source_digest
+                local_result, "_source_state", return_value=self.source_state
             ),
             patch.object(local_result, "_local_context", return_value=self.context),
         ):
@@ -331,7 +469,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         current_context = [self.context]
         with (
             patch.object(
-                local_result, "_source_digest", return_value=self.source_digest
+                local_result, "_source_state", return_value=self.source_state
             ),
             patch.object(
                 local_result, "_local_context", side_effect=lambda _: current_context[0]
@@ -365,7 +503,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         self.prepare_reports()
         with (
             patch.object(
-                local_result, "_source_digest", return_value=self.source_digest
+                local_result, "_source_state", return_value=self.source_state
             ),
             patch.object(local_result, "_local_context", return_value=self.context),
         ):
@@ -392,7 +530,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         self.context = self.make_context(False)
         with (
             patch.object(
-                local_result, "_source_digest", return_value=self.source_digest
+                local_result, "_source_state", return_value=self.source_state
             ),
             patch.object(local_result, "_local_context", return_value=self.context),
         ):
@@ -413,7 +551,7 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         fake_module = types.SimpleNamespace(collect_local_context=lambda _: bad_context)
         with (
             patch.object(
-                local_result, "_source_digest", return_value=self.source_digest
+                local_result, "_source_state", return_value=self.source_state
             ),
             patch.object(importlib, "import_module", return_value=fake_module),
         ):

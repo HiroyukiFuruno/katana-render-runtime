@@ -21,7 +21,10 @@ export interface ReferenceScoreRow {
   slug: string;
   score: number;
   rgbScore: number;
-  scoreSemantics: "rgb-v1" | "paint-projected-reference-v1";
+  scoreSemantics:
+    | "rgb-v1"
+    | "paint-projected-reference-v1"
+    | "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1";
   canvasRmseScore: number;
   canvasMaeScore: number;
   contentRmseScore: number;
@@ -30,6 +33,17 @@ export interface ReferenceScoreRow {
   exceptionReason: string;
   passed: boolean;
   paintProjectedReference?: PaintProjectedReferenceScore;
+  actualPngShape?: {
+    policy: "rgb-channel-edge-support-v1";
+    score: number;
+    fullCanvasScore: number;
+    foregroundUnionScore: number;
+    officialPngSha256: string;
+    actualPngSha256: string;
+    roi: { x: number; y: number; width: number; height: number };
+    width: number;
+    height: number;
+  };
 }
 
 export const ReferenceScores = {

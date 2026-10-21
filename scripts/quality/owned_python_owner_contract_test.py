@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import ast
+import argparse
 import sys
 import subprocess
 import unittest
@@ -57,6 +58,17 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         result = self.inspect(self.source)
         self.assertIs(result["valid"], True)
         self.assertEqual(result["contract"], "moon-owner-host-evidence-barrier-v3")
+
+    def test_receipt_scope_distinguishes_fixture_subsets_from_full_run(self) -> None:
+        owner, _ = self.scheduler_owner_phases()
+        cases = (
+            ("CAS subset", argparse.Namespace(cas_integrity_only=True, direct_inputs_only=False), "cas-integrity"),
+            ("direct-input subset", argparse.Namespace(cas_integrity_only=False, direct_inputs_only=True), "direct-inputs"),
+            ("full fixture", argparse.Namespace(cas_integrity_only=False, direct_inputs_only=False), "full"),
+        )
+        for label, args, expected in cases:
+            with self.subTest(scope=label):
+                self.assertEqual(owner.requested_scope(args), expected)
 
     def test_main_rejects_direct_early_success(self) -> None:
         mutated = self.source.replace(

@@ -1,5 +1,11 @@
 # katana-diagram-renderer Agent Rules
 
+## 調査専任エージェントの報告保存
+
+- 読み取り専任のsubagentは調査結果をメッセージ本文だけで返す。報告ファイルの生成を担当に含めず、主担当が必要な記録を`apply_patch`で保存する。実装担当も、報告文をシェル引数へ埋め込んで保存しない。
+- アンチパターンは、コマンド例のバッククォートを含む文章をシェルの二重引用符へ入れ、説明中の検査を意図せず実行すること。報告内容と実行するargvを分離し、調査・文書作成から検査を起動しない。
+- 誤起動した場合は追加検査を止め、元のtool呼出しと観測出力を保存する。PID・実終了コード・開始時刻・target差分を取得できなかった範囲は未取得と記録し、再実行による置き換えや品質合格への転用をしない。検索語: `report command substitution`, `read-only report text only`, `backtick accidental execution`。
+
 ## 外部依存に由来する検査例外
 
 - 外部ライブラリのAPI形式・型宣言に由来し、KRR側では変更できない検査指摘は、ユーザーへの再確認なしで必要な例外を判断してよい。対象ファイルまたは依存境界、理由、維持する検査範囲を記録し、範囲を限定する。
@@ -12,18 +18,27 @@
 - 既存の標準レシピと `--path-ignore-patterns 'tmp/**'` を維持し、実際に実行されたファイル・件数を証跡へ記録する。退避先・過去コピーを含む結果は現行ソースの合格へ転用しない。
 - 異常に長い検査は実プロセスの対象パスを確認する。対象逸脱が判明した実行は結果を保存して中断し、対象を修正する。固定待機やタイムアウト延長で放置しない。
 
+## 限定検査の依存範囲
+
+- タスク名だけで「静的のみ」「Cargoなし」と判断しない。実行前にMoonの推移依存と各recipeを確認し、事前buildも含めた実行範囲を資源調整へ渡す。対象逸脱を検知したら、専用process groupの同一性を確認して停止し、実終了・残process・容量差を記録する。
+- 現行の`source-static`は`biome`から`rust-facts-host-prebuild`へ到達する。コンパイルを許可しない実行では`source-static-foundation`の依存閉包を確認して使い、`source-static`へ広げない。DAG変更後は分類を再確認する。
+
 ## 検査証跡の保存
 
 - 品質判定へ使う検査は、開始前にコマンド・対象ソース・stdout/stderr・実終了コードの保存先を決める。物理ログの取得には `rtk proxy` を使い、RTKの表示用要約を未加工のprocess logとして扱わない。
 - 再試行は新しいrunディレクトリへ記録し、command・stdout・stderr・終了コードを上書き拒否で保存する。既存の検査ログを次の実行へ再利用しない。既存の計測実行処理と同じ排他的作成を使い、記録漏れは欠落として残す。
 - 保存するargvと実行するargvは同じ配列から渡し、別のシェル文字列へ手作業で転記しない。保護参照も検証済みregistryから同じ配列へ組み立てる。不一致が判明した記録は保持し、実プロセスまたは元のtool呼出しから確認できた実argvと、その回で保証できた範囲を別途記録する。
 - 保護refと容量stateの事前検証は `just protected-capacity-admission <registry>` の既存validatorを使い、返された `environmentValue` を子プロセスへ渡す。registry schema、`size`、完全な `st_mode`、物理stampの検査を一時コードへ複製しない。この出力をbuildやcleanupの合格として扱わない。
+- 診断の再実行には検査本体の実行観測に保存した環境を内部で使う。admission後に追加する `CARGO_CAPACITY_PROTECTED_REFS` もhostの環境fingerprint対象であり、source-beforeの環境と同一とはみなさない。環境全体を表示・Git登録・公開せず、差分の項目名とdigestだけを記録する。
 - ソース集合は既存のnative source manifestを優先し、ソース内容digest・manifestファイルSHA・独自serializationのSHAを区別して記録する。異なる算出方式の値を同じdigestとして照合・報告しない。
 - 取得済みの結果が要約だけなら、観測したtool出力と終了コードを保全し、未取得の範囲を明記する。欠けた個別結果を再構成しない。ソースが変わった場合は、再検証した範囲と変更前の成功を区別する。
 
 ## 限定Rust検証の実行条件
 
+- Cargoを伴わない予備の直接rustfmt検査も、対象manifestのeditionを明示する（現workspaceは`--edition 2024`）。既定editionによる整形成功を`cargo fmt`と同条件の成功に扱わず、不要な既存整形差分を混入させない。正式判定では既存`fmt-check`を維持する。
 - 絞り込み検証も既存recipeを優先する。引数を受けるrecipeがない場合は `just --command cargo ...` を使い、Justfileの作業場所・dotenv・export済みの `RUSTFLAGS` 等を保持する。既存ゲートと同じworkspace・features・targetsを保ち、libtestのcase filterで絞る。変更が必要なら別fingerprintとなる範囲を明記し、別条件の成功を元ゲートへ転用しない。別条件の直接Cargo実行で依存物を再コンパイルしない。既存binaryの診断実行は、同じbinaryの物理SHAと対象caseを記録し、ソース変更後の合格へ転用しない。
+- Rustのmodule名とcase名をファイル名から推測しない。importは実際の`mod`宣言と可視性へ照合し、限定caseの完全名は同条件のコンパイル済みbinaryの`--list`等、既存runnerの実catalogへ照合する。catalogのbinary SHAとrawを保存し、選択した各caseが意図した件数だけ実行されたことを確認する。0件や未選択のcaseを成功に含めない。
+- 結果の件数判定をsummary文の単数形・複数形や色付けへの完全一致へ依存させない。既存runnerの構造化結果があれば優先し、実終了コード・個別case結果・実行件数を照合する。後処理の失敗と検査本体の失敗を区別し、原失敗を保持して実rawから訂正する。訂正で未実行caseを補完しない。
 
 ## 容量不足時の回復手順
 
@@ -31,9 +46,11 @@
 - 独自の調査や容量ガードの変更より先に、既存の `just clean` で回復できるか判断する。使用中のbuild・登録worktree・保護対象を確認し、必要な証跡を保持して実行する。実ディスクの空きも不足する場合は、明示承認済みの範囲で上位privateの `just clean-all` を使う。閾値の引き上げや基準のリセットで通過させない。
 - clean後は実ディスクと対象生成物を再測定し、本来の検証へ戻る。削除されたbinaryに依存する証跡は過去のものとして保持し、必要なbuild・registry・receiptを正式producerで新規生成する。古い証跡を書き換えて再利用しない。
 - 上位のcleanが対象にしない入れ子のworktreeも容量調査では確認するが、大きさだけを理由に一括削除しない。定型的な回復で解消する問題に、追加の容量基盤や診断の反復を持ち込まない。
+- 共有workspaceのclean前は、各ownerと実行中buildだけでなく、予約済み検証が再利用するbinaryの保持も照合する。再生成可能であることだけを理由に予約済みのwarm成果物を削除しない。共有clean後は実path/SHAを再確認し、消失していればwarm前提の時間・容量枠で起動せず、cold条件へ調整する。全体exitが非0でも部分削除は起こり得る。
 
 ## 基準・候補の証跡を混同しない
 
+- 未改変のライブラリ経路はpackage版だけで認定しない。実際のSDK差込環境・リンク先・binary-cacheの選択も確認し、保持SDKを公開配布物による対照として扱わない。
 - 基準データの診断はディレクトリ名だけで対象を判断しない。既存の厳格readerを使い、実入力パス、receiptのschemaとrole、fixture inventoryを確認してから結論を出す。official rasterとcandidate nativeの証跡は別契約として扱う。
 - candidate nativeの`sourceCurrentPins`不一致をofficial raw JS基準の無効理由へ転用しない。基準の再利用可否はその基準を束縛するreceipt・process・tool・資源・設定の実証跡で判定し、reader未実行の推論と実際の拒否を区別する。
 - 誤った調査は元証跡を保持して訂正する。新しいSHAへの差し替えや過去画像の再認定で不一致を隠さない。

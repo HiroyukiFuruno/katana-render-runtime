@@ -1,5 +1,6 @@
 export const MOON_QUALITY_INPUTS = [
   "**/*",
+  "!/docs/quality-gate-improvement-tasks.md",
   "!/tmp/**",
   "!/.moon/cache/**",
   "!/target/**",

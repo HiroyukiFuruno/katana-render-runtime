@@ -434,11 +434,29 @@ describe("finite Rust host and MathJax evidence registration", () => {
     expect(justRecipes(justfile).get("root-test-and-coverage")).toContain("CARGO={{quote(CARGO)}}");
     expect(guardedFactsRecipeVerified(justfile, "mathjax-consumer-facts")).toBe(true);
     const globalShadow = justfile.replace(
-      'CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")',
-      'CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")\nCARGO := "cargo"',
+      'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+      'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")\nCARGO := "cargo"',
     );
     expect(globalShadow).not.toBe(justfile);
     expect(guardedFactsRecipeVerified(globalShadow, "mathjax-consumer-facts")).toBe(false);
+    const duplicateProxy = justfile.replace(
+      'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
+      'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }\nRTK_PROXY_CMD := ""',
+    );
+    expect(duplicateProxy).not.toBe(justfile);
+    expect(guardedFactsRecipeVerified(duplicateProxy, "mathjax-consumer-facts")).toBe(false);
+    const proxyBypassesRtk = justfile.replace(
+      'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
+      'RTK_PROXY_CMD := if RTK == "" { "" } else { "rtk proxy " }',
+    );
+    expect(proxyBypassesRtk).not.toBe(justfile);
+    expect(guardedFactsRecipeVerified(proxyBypassesRtk, "mathjax-consumer-facts")).toBe(false);
+    const cargoBypassesProxy = justfile.replace(
+      'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+      'CARGO := env_var_or_default("CARGO", "cargo")',
+    );
+    expect(cargoBypassesProxy).not.toBe(justfile);
+    expect(guardedFactsRecipeVerified(cargoBypassesProxy, "mathjax-consumer-facts")).toBe(false);
   });
 });
 
@@ -508,6 +526,38 @@ describe("fixed native artifact and Python collector bindings", () => {
           ? "node:child_process"
           : "!execute-local:browser-process-observe.py",
       );
+    }
+  });
+
+  test("resolves only the owned literal RTK dry-run recipe inventory", () => {
+    const name = "scripts/quality/owned-validation-contract_test.ts";
+    const read = (file: string) =>
+      fs.readFileSync(path.join(import.meta.dir, "../..", file), "utf8");
+    const source = read(name);
+    const context = { name, read };
+    expect(sourceCode(source, context)).not.toContain("!unresolved-executable");
+    for (const [label, mutate] of [
+      ["operation", (value: string) => value.replace('"--dry-run"', '"--evaluate"')],
+      [
+        "spread executable",
+        (value: string) => value.replace('    "just",\n    [', '    ..."just",\n    ['),
+      ],
+      [
+        "spread option",
+        (value: string) => value.replace('      "--dry-run",', '      ..."--dry-run",'),
+      ],
+      [
+        "recipe inventory",
+        (value: string) => value.replace('"build-capacity-check",', '"other-recipe",'),
+      ],
+      [
+        "spread argument",
+        (value: string) => value.replace('"build-capacity-check",', "...recipeNames,"),
+      ],
+    ] as const) {
+      const changed = mutate(source);
+      expect(changed, label).not.toBe(source);
+      expect(sourceCode(changed, context), label).toContain("!unresolved-executable");
     }
   });
 
@@ -3173,7 +3223,7 @@ function coverageFixtureJustfile(base: string): string {
     "set shell",
     "REPO_ROOT",
     "RTK",
-    "RTK_CMD",
+    "RTK_PROXY_CMD",
     "CARGO",
     "CARGO_BUILD",
   ] as const;
@@ -4235,6 +4285,7 @@ test("runtime bundle named entry binds the one cache-enabled fingerprint leaf", 
   });
   expect(config.tasks["runtime-bundle-check"]?.inputs).toEqual([
     "**/*",
+    "!/docs/quality-gate-improvement-tasks.md",
     "!/tmp/**",
     "!/.moon/cache/**",
     "!/target/**",
@@ -4266,20 +4317,23 @@ test("runtime bundle named entry binds the one cache-enabled fingerprint leaf", 
   expect(() =>
     moonStaticTaskProjection(JSON.stringify(candidate), "krr", "runtime-bundle-check"),
   ).toThrow("runtime bundle cache inputs changed");
-  runtimeTask.inputs = [
-    "**/*",
-    "!/tmp/**",
-    "!/.moon/cache/**",
-    "!/target/**",
-    "!/crates/katana-render-runtime/target/**",
-    "!**/.ruff_cache/**",
-    "!**/.mypy_cache/**",
-    "!**/.pytest_cache/**",
-    "!/tests/fixtures/quality-cache/.moon/cache/**",
+  const ledgerExclusion = "!/docs/quality-gate-improvement-tasks.md";
+  const outputExclusion = "!/tests/fixtures/quality-cache/.outputs/**";
+  const invalidInputProjections = [
+    MOON_QUALITY_INPUTS.filter((input) => input !== ledgerExclusion),
+    [
+      MOON_QUALITY_INPUTS[0],
+      "!/docs/**",
+      ...MOON_QUALITY_INPUTS.slice(1).filter((input) => input !== ledgerExclusion),
+    ],
+    MOON_QUALITY_INPUTS.filter((input) => input !== outputExclusion),
   ];
-  expect(() =>
-    moonStaticTaskProjection(JSON.stringify(candidate), "krr", "runtime-bundle-check"),
-  ).toThrow("runtime bundle cache inputs changed");
+  for (const inputs of invalidInputProjections) {
+    runtimeTask.inputs = inputs;
+    expect(() =>
+      moonStaticTaskProjection(JSON.stringify(candidate), "krr", "runtime-bundle-check"),
+    ).toThrow("runtime bundle cache inputs changed");
+  }
   runtimeTask.inputs = config.tasks["runtime-bundle-check"]?.inputs;
   runtimeTask.checks = [{ check: "unknown", script: "true", hash: "stdout" }];
   expect(() =>

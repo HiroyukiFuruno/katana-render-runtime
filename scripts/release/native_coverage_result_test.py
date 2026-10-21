@@ -114,7 +114,7 @@ class NativeCoverageResultTests(unittest.TestCase):
         self.assertEqual(command["selectedTarget"], "target/llvm-cov-target")
         self.assertEqual(command["argv"], [
             "cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked", "--json",
-            "--summary-only", "--output-path", "tmp/quality/standalone-performance-coverage/root.json",
+            "--show-missing-lines", "--output-path", "tmp/quality/standalone-performance-coverage/root.json",
         ])
         self.assertEqual(command["testScope"], {
             "initialArgv": [
@@ -241,6 +241,25 @@ class NativeCoverageResultTests(unittest.TestCase):
         self.assertEqual(collected["unmeasured"], 1)
         with self.assertRaisesRegex(coverage_result.CoverageResultError, "100/0"):
             coverage_result._line_totals(report, "root")
+
+    def test_collected_root_lines_accept_full_export_with_function_details(self) -> None:
+        report = {
+            "type": "llvm.coverage.json.export",
+            "version": "2.0.1",
+            "data": [{
+                "files": [{"filename": "source.rs", "summary": {}}],
+                "functions": [{
+                    "name": "f",
+                    "count": 1,
+                    "filenames": ["source.rs"],
+                    "regions": [[1, 1, 1, 2, 1, 0, 0, 0]],
+                }],
+                "totals": {"lines": {"count": 12, "covered": 12, "percent": 100.0}},
+            }],
+        }
+        self.assertEqual(coverage_result._collected_line_totals(report, "root"), {
+            "count": 12, "covered": 12, "unmeasured": 0, "percent": 100.0,
+        })
 
     def test_authenticated_collection_rows_raise_typed_policy_error(self) -> None:
         partial = {"domain": "root", "lines": {

@@ -320,7 +320,7 @@ fn assert_root_coverage_commands(commands: &str) {
             "\"llvm-cov\", \"nextest\", \"--workspace\", \"--all-targets\", \"--all-features\"",
             "\"--cargo-profile\", \"krr-coverage\", \"--no-report\"",
             "\"llvm-cov\", \"report\", \"--profile\", \"krr-coverage\"",
-            "\"--summary-only\", \"--output-path\", str(repo / REPORT_DIRECTORY / \"root.json\")",
+            "\"--show-missing-lines\", \"--output-path\", str(repo / REPORT_DIRECTORY / \"root.json\")",
         ],
     );
 }
@@ -539,7 +539,7 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
     let root = workspace_root()?;
     let justfile = std::fs::read_to_string(root.join("Justfile"))?;
     let recipe = recipe_body(&justfile, "depends-update-all")?;
-    let commands = recipe
+    let commands = recipe_body(&justfile, "depends-update-mutations")?
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
@@ -550,7 +550,7 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
     let scheduler = std::fs::read_to_string(root.join("scripts/hooks/run_parallel_checks.py"))?;
     let moon = std::fs::read_to_string(root.join("moon.yml"))?;
     let moon_workspace = std::fs::read_to_string(root.join(".moon/workspace.yml"))?;
-    assert_dependency_update_quality_gates(recipe, &scheduler, &moon, &moon_workspace);
+    assert_dependency_update_quality_gates(recipe, &commands, &scheduler, &moon, &moon_workspace);
     Ok(())
 }
 
@@ -624,26 +624,51 @@ fn assert_usvg_skrifa_pair_order(commands: &[&str], lockfile_update: usize, pair
 
 fn assert_dependency_update_quality_gates(
     recipe: &str,
+    mutations: &[&str],
     scheduler: &str,
     moon: &str,
     moon_workspace: &str,
 ) {
+    assert_ordered_dependency_update_stages(recipe);
+    assert_dependency_mutation_commands(mutations);
+    assert_eq!(recipe.matches("just check").count(), 1);
+    assert!(!recipe.contains("just coverage"));
+    assert_moon_quality_dag(moon, scheduler, moon_workspace);
+}
+
+fn assert_ordered_dependency_update_stages(recipe: &str) {
+    let ordered_stages = [
+        "python3 scripts/hooks/run_locked_command.py --protect-root-producer -- just depends-update-mutations",
+        "just check",
+        "just mermaid-compare-full",
+        "just drawio-compare-full",
+    ]
+    .map(|stage| recipe.find(stage));
+    assert!(
+        ordered_stages.iter().all(Option::is_some),
+        "depends-update-all is missing a required stage: {ordered_stages:?}"
+    );
+    assert!(
+        ordered_stages.windows(2).all(|pair| pair[0] < pair[1]),
+        "dependency mutations, quality checks, and full comparisons must stay ordered"
+    );
+}
+
+fn assert_dependency_mutation_commands(mutations: &[&str]) {
     for required in [
         "{{CARGO}} update",
         "bun update --latest",
         "runtime-assets/depends-update-all.ts",
-        "just mermaid-compare-full",
-        "just drawio-compare-full",
-        "just check",
+        "scripts/drawio/resource-update.ts",
+        "runtime-package-asset-compressor.ts --write",
+        "just fmt",
+        "just runtime-bundle-build",
     ] {
         assert!(
-            recipe.contains(required),
-            "depends-update-all must require {required}"
+            mutations.iter().any(|command| command.contains(required)),
+            "depends-update-mutations must require {required}"
         );
     }
-    assert_eq!(recipe.matches("just check").count(), 1);
-    assert!(!recipe.contains("just coverage"));
-    assert_moon_quality_dag(moon, scheduler, moon_workspace);
 }
 
 #[test]

@@ -21,6 +21,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from collections.abc import Callable, Mapping
+from types import FrameType
 
 import produce_html_performance_evidence as typed_producer
 import verify_html_performance_evidence as gate
@@ -847,7 +848,7 @@ class FrozenBinaryCarryUnitTests(unittest.TestCase):
 
 
 def _lifecycle_fixture(mode: str) -> int:
-    if mode not in {"exit", "nonzero", "wait", "ignore", "parent"}:
+    if mode not in {"exit", "nonzero", "wait", "ignore", "parent", "interrupt-parent-on-term"}:
         raise ValueError("unknown lifecycle fixture mode")
     os.write(1, b"fixture stdout\n")
     os.write(2, b"fixture stderr\n")
@@ -857,6 +858,15 @@ def _lifecycle_fixture(mode: str) -> int:
     elif mode in {"wait", "ignore"}:
         if mode == "ignore":
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        time.sleep(30)
+    elif mode == "interrupt-parent-on-term":
+        def interrupt_parent(signum: int, frame: FrameType | None) -> None:
+            del signum, frame
+            os.kill(os.getppid(), signal.SIGINT)
+            raise SystemExit(0)
+
+        signal.signal(signal.SIGTERM, interrupt_parent)
+        os.kill(os.getppid(), signal.SIGINT)
         time.sleep(30)
     return 7 if mode == "nonzero" else 0
 
@@ -868,10 +878,13 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.logs = Path(self.temporary.name) / "raw"
 
-    def invoke(self, mode: str) -> subprocess.CompletedProcess[bytes]:
+    def invoke(self, mode: str, *, native: bool = False) -> subprocess.CompletedProcess[bytes]:
         return typed_producer._measurement_command(
             [sys.executable, str(Path(__file__).resolve()), "--lifecycle-fixture", mode],
             role="worker", log_directory=self.logs,
+            cwd=Path(self.temporary.name).resolve() if native else None,
+            env={"PATH": os.environ["PATH"]} if native else None,
+            native_attempt_token="f" * 64 if native else None,
         )
 
     def evidence(self) -> gate.JsonObject:
@@ -932,6 +945,15 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
             timer.cancel()
             timer.join(timeout=1)
         self.assertIn("KeyboardInterrupt", gate._text(self.evidence()["failure"], "failure"))
+
+    def test_native_cleanup_interrupt_is_deferred_until_raw_closure(self) -> None:
+        with self.assertRaises(KeyboardInterrupt):
+            self.invoke("interrupt-parent-on-term", native=True)
+        evidence = self.evidence()
+        self.assertIn("KeyboardInterrupt", gate._text(evidence["failure"], "failure"))
+        self.assertTrue(evidence["rawFdsClosed"])
+        closure = gate._object(evidence["nativeRawFdClosure"], "native closure")
+        self.assertEqual(gate._array(closure["holders"], "raw holders"), [])
 
     def test_binary_stdin_uses_regular_file_and_reaches_child(self) -> None:
         payload = b"complete object-id batch input\n"

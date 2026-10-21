@@ -23,6 +23,11 @@ export interface GeometryImageComparison {
   height: number;
 }
 
+export interface RgbChannelEdgeSupportComparison extends GeometryImageComparison {
+  policy: "rgb-channel-edge-support-v1";
+  score: number;
+}
+
 export interface PaintProjectedImageComparison {
   fullCanvasRmseScore: number;
   fullCanvasMaeScore: number;
@@ -121,6 +126,29 @@ export class MagickOps {
     };
   }
 
+  compareRgbChannelEdgeSupportImages(
+    officialPng: string,
+    actualPng: string,
+    workDir: string,
+    slug: string,
+  ): RgbChannelEdgeSupportComparison {
+    const officialSize = this.imageSize(officialPng),
+      actualSize = this.imageSize(actualPng);
+    if (officialSize.width !== actualSize.width || officialSize.height !== actualSize.height) {
+      throw new Error(`Actual PNG dimensions differ for ${slug}`);
+    }
+    const officialEdges = path.join(workDir, `${slug}-official-rgb-edges.png`),
+      actualEdges = path.join(workDir, `${slug}-actual-rgb-edges.png`);
+    this.writeRgbChannelEdgeSupport(officialPng, officialEdges);
+    this.writeRgbChannelEdgeSupport(actualPng, actualEdges);
+    const comparison = this.compareGeometryImages(officialEdges, actualEdges, workDir, slug);
+    return {
+      policy: "rgb-channel-edge-support-v1",
+      ...comparison,
+      score: Math.min(comparison.fullCanvasScore, comparison.foregroundUnionScore),
+    };
+  }
+
   comparePaintProjectedImages(
     projectedReference: string,
     candidate: string,
@@ -190,6 +218,31 @@ export class MagickOps {
 
   private scoreMetric(metric: string, left: string, right: string): number {
     return Math.max(0, 100 * (1 - this.compareNormalizedError(metric, left, right)));
+  }
+
+  private writeRgbChannelEdgeSupport(input: string, output: string) {
+    // RGB各chのEdgeを結合し、明度差や色相差を形状scoreへ混ぜず輪郭位置を残す。
+    this.magick([
+      input,
+      "-background",
+      this.theme.canvasBackground,
+      "-alpha",
+      "remove",
+      "-alpha",
+      "off",
+      "-channel",
+      "RGB",
+      "-separate",
+      "+channel",
+      "-morphology",
+      "Edge",
+      "Diamond:1",
+      "-evaluate-sequence",
+      "max",
+      "-threshold",
+      "0",
+      output,
+    ]);
   }
 
   private foregroundBounds(input: string): { x: number; y: number; width: number; height: number } {

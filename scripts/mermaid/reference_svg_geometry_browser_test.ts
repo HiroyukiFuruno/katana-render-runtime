@@ -173,21 +173,38 @@ const paintProjectionScoreCases: readonly PaintProjectionScoreCase[] = [
 test.describe("paint projection evaluates actual candidate pixels", () => {
   let root: string | undefined;
   let observation: PaintProjectionObservation | undefined;
+  let fixturePage: PageHandle | undefined;
 
-  test.beforeAll(async () => {
+  test.beforeAll(async ({ browser }) => {
     const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "krr-paint-projection-"));
     root = fixtureRoot;
-    const fixture = await createPaintProjectionFixture(fixtureRoot),
-      projected = await rasterizePaintProjectedReferenceBatch(
-        [fixture.input],
-        path.join(fixtureRoot, "projected"),
-        "dark",
-      ),
-      neutral = await rasterizeNeutralSvgBatch(
-        [fixture.neutralOfficial, fixture.neutralCandidate],
-        path.join(fixtureRoot, "neutral"),
-        "dark",
-      ),
+    fixturePage = await browser.newPage({
+      viewport: { width: 1520, height: 845 },
+      deviceScaleFactor: 1,
+    });
+    const fixture = await createPaintProjectionFixture(fixtureRoot, fixturePage),
+      [projectedResult, neutralResult] = await Promise.allSettled([
+        rasterizePaintProjectedReferenceBatch(
+          [fixture.input],
+          path.join(fixtureRoot, "projected"),
+          "dark",
+        ),
+        rasterizeNeutralSvgBatch(
+          [fixture.neutralOfficial, fixture.neutralCandidate],
+          path.join(fixtureRoot, "neutral"),
+          "dark",
+        ),
+      ] as const);
+    if (projectedResult.status === "rejected" && neutralResult.status === "rejected") {
+      throw new AggregateError(
+        [projectedResult.reason, neutralResult.reason],
+        "Paint projection raster batches failed",
+      );
+    }
+    if (projectedResult.status === "rejected") throw projectedResult.reason;
+    if (neutralResult.status === "rejected") throw neutralResult.reason;
+    const projected = projectedResult.value,
+      neutral = neutralResult.value,
       magick = new MagickOps(path.join(fixtureRoot, "magick"), null, "dark"),
       projectedRecord = projected.records[0],
       neutralOfficial = neutral.records.find((record) => record.role === "official"),
@@ -210,7 +227,7 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
     };
   });
 
-  test.afterAll(() => {
+  test.afterAll(async () => {
     try {
       if (observation !== undefined) {
         expect(observation.fixture.input.candidateSvgSha256).toBe(
@@ -218,7 +235,11 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
         );
       }
     } finally {
-      if (root !== undefined) fs.rmSync(root, { recursive: true, force: true });
+      try {
+        await fixturePage?.close();
+      } finally {
+        if (root !== undefined) fs.rmSync(root, { recursive: true, force: true });
+      }
     }
   });
 
@@ -464,7 +485,10 @@ interface PaintProjectionFixture {
   missingEdgePngPath: string;
 }
 
-async function createPaintProjectionFixture(root: string): Promise<PaintProjectionFixture> {
+async function createPaintProjectionFixture(
+  root: string,
+  page: PageHandle,
+): Promise<PaintProjectionFixture> {
   const officialSvg = paintProjectionSvg("#444444", "#222222"),
     candidateSvg = paintProjectionSvg("#4682d8", "#e8edf4"),
     paths = paintProjectionPaths(root),
@@ -475,6 +499,7 @@ async function createPaintProjectionFixture(root: string): Promise<PaintProjecti
       paths.candidatePngPath,
       paths.missingLabelPngPath,
       paths.missingEdgePngPath,
+      page,
     );
   fs.writeFileSync(paths.officialSvgPath, officialSvg, { flag: "wx" });
   fs.writeFileSync(paths.candidateSvgPath, candidateSvg, { flag: "wx" });
@@ -534,29 +559,16 @@ async function renderPaintProjectionFixture(
   candidatePngPath: string,
   missingLabelPngPath: string,
   missingEdgePngPath: string,
+  page: PageHandle,
 ) {
-  const playwright = await new PlaywrightLoader().load(),
-    browser = await playwright.chromium.launch({ headless: true });
-  try {
-    const page = await browser.newPage({
-      viewport: { width: 1520, height: 845 },
-      deviceScaleFactor: 1,
-    });
-    try {
-      const variants = [
-        { svg: officialSvg, outputPath: officialPngPath, removeElement: null },
-        { svg: candidateSvg, outputPath: candidatePngPath, removeElement: null },
-        { svg: candidateSvg, outputPath: missingLabelPngPath, removeElement: "text" },
-        { svg: candidateSvg, outputPath: missingEdgePngPath, removeElement: "line" },
-      ] as const;
-      for (const variant of variants) {
-        await renderProjectionPng(page, variant.svg, variant.outputPath, variant.removeElement);
-      }
-    } finally {
-      await page.close();
-    }
-  } finally {
-    await browser.close();
+  const variants = [
+    { svg: officialSvg, outputPath: officialPngPath, removeElement: null },
+    { svg: candidateSvg, outputPath: candidatePngPath, removeElement: null },
+    { svg: candidateSvg, outputPath: missingLabelPngPath, removeElement: "text" },
+    { svg: candidateSvg, outputPath: missingEdgePngPath, removeElement: "line" },
+  ] as const;
+  for (const variant of variants) {
+    await renderProjectionPng(page, variant.svg, variant.outputPath, variant.removeElement);
   }
   return {
     officialPngSha256: fileSha256(officialPngPath),

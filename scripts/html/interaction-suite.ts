@@ -265,7 +265,7 @@ export function evaluateInteractionEvidence(
         Number.isFinite(performance.closeMs) &&
         performance.firstFrameMs >= 0 &&
         performance.closeMs >= 0 &&
-        performance.firstFrameMs + performance.closeMs <= maxPerformanceMs;
+        performance.firstFrameMs + performance.closeMs < maxPerformanceMs;
   return {
     evidenceKind: "supplemental-interaction-regression",
     matchedInteractions,

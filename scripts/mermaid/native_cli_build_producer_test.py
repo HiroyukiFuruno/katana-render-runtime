@@ -318,6 +318,14 @@ class JustEnvironmentTests(unittest.TestCase):
             root = Path(temporary).resolve()
             (root / "Justfile").write_text(text)
             bindings.validate_just(root)
+            proxy_route = 'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")\n'
+            (root / "Justfile").write_text(text.replace(
+                proxy_route,
+                'CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")\n',
+            ))
+            with self.assertRaisesRegex(RuntimeError, "fixed Just route differs"):
+                bindings.validate_just(root)
+            (root / "Justfile").write_text(text)
             (root / "Justfile").write_text(text.replace("{{CARGO_BUILD}} build -p katana-render-runtime-cli\n",
                 "{{CARGO_BUILD}} build -p katana-render-runtime-cli\n    echo unexpected\n"))
             with self.assertRaisesRegex(RuntimeError, "extra Just build command"):

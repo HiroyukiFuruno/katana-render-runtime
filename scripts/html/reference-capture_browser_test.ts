@@ -2,6 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect, test } from "playwright/test";
+import { DiagramTheme } from "../mermaid/diagram_theme";
+import { nativeFrameCaptureWrapper } from "../mermaid/native-frame-evidence";
+import type { PageHandle } from "../mermaid/official-renderer-types";
+import { assignStrictSvg, resizeSvgCapture } from "../mermaid/raster-capture-observation";
+import { rasterCaptureHtml } from "../mermaid/rasterize-svg-dir";
 import {
   type CaptureOptions,
   createCaptureBrowser,
@@ -67,3 +72,76 @@ test("static capture isolates contexts, scores real PNGs, and survives a failed 
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+const nativeFrameSizingCases = [
+  {
+    relativePath: "tests/fixtures/mermaid/en/official-dark/08-01-c4-context-simple.svg",
+    viewBox: [0, -70, 1148, 441],
+  },
+  {
+    relativePath: "tests/fixtures/mermaid/en/official-dark/22-01-tree-view-simple.svg",
+    viewBox: [-0.5, 0, 124.828125, 232],
+  },
+] as const;
+
+test("native wrapper uses the same natural viewBox as formal Chrome capture", async ({ page }) => {
+  await page.setViewportSize({ width: 1520, height: 845 });
+  for (const target of nativeFrameSizingCases) await compareNativeAndFormalSizing(page, target);
+  for (const viewBox of ["0 0 20", "0 0 0 20", "0 0 -1 20", "0 0 20 10 5"]) {
+    await expectInvalidBrowserViewBox(page, viewBox);
+  }
+});
+
+async function compareNativeAndFormalSizing(
+  page: PageHandle,
+  fixture: (typeof nativeFrameSizingCases)[number],
+) {
+  const svg = fs.readFileSync(path.join(process.cwd(), fixture.relativePath), "utf8"),
+    frame = {
+      width: Math.ceil(fixture.viewBox[2]) + 24,
+      height: Math.ceil(fixture.viewBox[3]) + 24,
+    };
+  await page.setContent(nativeFrameCaptureWrapper(svg, frame), { waitUntil: "load" });
+  const native = await readBrowserGeometry(page);
+  await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
+  const loaded = await assignStrictSvg(page, svg);
+  expect(loaded.assignedSvgSerialization).toBe(native.svgHtml);
+  await resizeSvgCapture(page, true, "strictViewBox");
+  const formal = await readBrowserGeometry(page);
+  expect(native.capture).toEqual(frame);
+  expect(native.diagram).toEqual(formal.diagram);
+  expect(native.svgBox).toEqual(formal.svgBox);
+  expect(native.capture).toEqual(formal.capture);
+  expect(native.svgHtml).toBe(loaded.expectedSvgSerialization);
+  expect(native.rootFontSize).toBe("16px");
+}
+
+function readBrowserGeometry(page: PageHandle) {
+  return page.evaluate(() => {
+    const capture = document.getElementById("capture") as HTMLElement,
+      diagram = document.getElementById("diagram") as HTMLElement,
+      svg = document.querySelector("#diagram svg") as SVGSVGElement,
+      captureBox = capture.getBoundingClientRect(),
+      diagramBox = diagram.getBoundingClientRect(),
+      svgBox = svg.getBoundingClientRect();
+    return {
+      capture: { width: captureBox.width, height: captureBox.height },
+      diagram: { width: diagramBox.width, height: diagramBox.height },
+      svgBox: { width: svgBox.width, height: svgBox.height },
+      svgHtml: svg.outerHTML,
+      rootFontSize: getComputedStyle(svg).fontSize,
+    };
+  });
+}
+
+async function expectInvalidBrowserViewBox(page: PageHandle, viewBox: string) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}"/>`;
+  expect(() => nativeFrameCaptureWrapper(svg, { width: 44, height: 44 })).toThrow(
+    "invalid SVG viewBox",
+  );
+  await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
+  await assignStrictSvg(page, svg);
+  await expect(resizeSvgCapture(page, true, "strictViewBox")).rejects.toThrow(
+    "SVG viewBox is invalid",
+  );
+}

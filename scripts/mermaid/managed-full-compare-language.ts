@@ -615,6 +615,10 @@ function writeNativeProductScores(
     inventory,
     output.context,
     parsePaintProjectedReferenceEvidence(readJson(output.evidencePath)),
+    {
+      role: "native-product",
+      pngSha256BySlug: new Map(frames.map((frame) => [frame.slug, frame.png.sha256])),
+    },
   );
 }
 
@@ -656,7 +660,8 @@ function nativeProductContext(
     scoreThreshold: 99 as const,
     formalAccepted: false as const,
     independentGold: false as const,
-    scoreSemantics: "rgb-v1+paint-projected-reference-v1" as const,
+    comparisonRole: "native-product" as const,
+    scoreSemantics: "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1" as const,
     paintProjectedReferenceEvidence: { path: path.basename(evidencePath), sha256: evidenceSha256 },
   };
 }

@@ -17,9 +17,11 @@ import native_coverage_result as coverage_result
 import native_coverage_local_anchor as local_anchor
 
 
-KEY_SCHEMA = "krr-native-local-coverage-key-v1"
-RUN_SCHEMA = "krr-native-local-coverage-run-v1"
-COLLECTION_RECEIPT_SCHEMA = "krr-native-local-coverage-collection-receipt-v1"
+KEY_SCHEMA = "krr-native-local-coverage-key-v2"
+RUN_SCHEMA = "krr-native-local-coverage-run-v2"
+COLLECTION_RECEIPT_SCHEMA = "krr-native-local-coverage-collection-receipt-v2"
+PROBE_SCHEMA = "krr-native-local-coverage-probe-v2"
+SOURCE_INPUTS_SCHEMA = "krr-native-coverage-source-inputs-v1"
 LOCAL_CONTEXT_SCHEMA = "krr-native-local-coverage-context-v1"
 LOCAL_HOST_KEYS = {"os", "productVersion", "buildVersion", "architecture"}
 LOCAL_TOOL_KEYS = {
@@ -75,11 +77,15 @@ def _producer_domains(producer: object) -> tuple[str, ...]:
     return PRODUCERS[producer]
 
 
-def _source_digest(repo: Path) -> str:
+def _source_query(repo: Path, *, coverage_inputs: bool) -> object:
     script = Path(__file__).resolve().parents[1] / "mermaid/native-source-manifest.ts"
+    command = ["bun", "run", str(script), "--root", str(repo)]
+    if coverage_inputs:
+        command.append("--coverage-inputs")
+    label = "native coverage source inputs" if coverage_inputs else "native source manifest"
     try:
         result = subprocess.run(
-            ["bun", "run", str(script), "--root", str(repo)],
+            command,
             cwd=repo,
             text=True,
             capture_output=True,
@@ -96,28 +102,46 @@ def _source_digest(repo: Path) -> str:
             diagnostic = diagnostic[-2048:]
         suffix = " [stderr tail truncated]" if truncated else ""
         raise LocalCoverageError(
-            f"canonical native source manifest command failed with exit {result.returncode}: "
+            f"canonical {label} command failed with exit {result.returncode}: "
             f"{diagnostic}{suffix}"
         )
     try:
-        manifest = json.loads(result.stdout)
+        return json.loads(result.stdout)
     except json.JSONDecodeError as error:
         raise LocalCoverageError(
-            "canonical native source manifest is invalid JSON"
+            f"canonical {label} is invalid JSON"
         ) from error
+
+
+def _source_state(repo: Path) -> JsonObject:
+    source_state = _source_query(repo, coverage_inputs=True)
+    if (
+        not isinstance(source_state, dict)
+        or set(source_state) != {"schema", "sourceDigest", "coverageInputDigest"}
+        or source_state.get("schema") != SOURCE_INPUTS_SCHEMA
+        or not isinstance(source_state.get("sourceDigest"), str)
+        or SHA256_RE.fullmatch(source_state["sourceDigest"]) is None
+        or not isinstance(source_state.get("coverageInputDigest"), str)
+        or SHA256_RE.fullmatch(source_state["coverageInputDigest"]) is None
+    ):
+        raise LocalCoverageError("canonical native coverage source inputs have an invalid shape")
+    return cast(JsonObject, source_state)
+
+
+def _source_digest(repo: Path) -> str:
+    manifest = _source_query(repo, coverage_inputs=False)
     if (
         not isinstance(manifest, dict)
         or set(manifest) != {"schema", "digest", "files"}
         or manifest.get("schema") != "krr-native-build-source-manifest-v1"
         or not isinstance(manifest.get("files"), list)
         or not manifest["files"]
-        or not isinstance(manifest.get("digest"), str)
-        or SHA256_RE.fullmatch(manifest["digest"]) is None
     ):
-        raise LocalCoverageError(
-            "canonical native source manifest has an invalid shape"
-        )
-    return cast(str, manifest["digest"])
+        raise LocalCoverageError("canonical native source manifest has an invalid shape")
+    digest = manifest.get("digest")
+    if not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None:
+        raise LocalCoverageError("canonical native source manifest has an invalid shape")
+    return digest
 
 
 def _local_context(repo: Path) -> JsonObject:
@@ -242,17 +266,16 @@ def _execution_environment_digest() -> str:
     return _digest(values)
 
 
-def _identity(repo: Path, producer: str) -> JsonObject:
+def _identity(repo: Path, producer: str, source_state: JsonObject) -> JsonObject:
     _producer_domains(producer)
     _fixed_coverage_policy()
-    source_digest = _source_digest(repo)
     context = _local_context(repo)
     command_rows = _commands(repo, producer)
     context_digest = cast(str, context["hostContextSha256"])
     payload: JsonObject = {
         "schema": KEY_SCHEMA,
         "producer": producer,
-        "sourceDigest": source_digest,
+        "coverageInputDigest": source_state["coverageInputDigest"],
         "contextDigest": context_digest,
         "environmentDigest": _execution_environment_digest(),
         "commands": command_rows,
@@ -265,8 +288,8 @@ def _identity(repo: Path, producer: str) -> JsonObject:
     }
 
 
-def _bound_identity(repo: Path, producer: str) -> JsonObject:
-    base = _identity(repo, producer)
+def _bound_identity(repo: Path, producer: str, source_state: JsonObject) -> JsonObject:
+    base = _identity(repo, producer, source_state)
     base_digest = cast(str, base["identitySha256"])
     epoch = (
         local_anchor.prepare(repo, producer, base_digest)
@@ -361,7 +384,8 @@ def _write_atomic(path: Path, value: object) -> None:
 
 
 def local_key(repo: Path, producer: str) -> JsonObject:
-    identity = _bound_identity(repo, producer)
+    source_state = _source_state(repo)
+    identity = _bound_identity(repo, producer, source_state)
     fingerprint = cast(str, identity["identitySha256"])
     if identity["cacheable"] is False:
         _ensure_report_directory(repo)
@@ -373,7 +397,7 @@ def local_key(repo: Path, producer: str) -> JsonObject:
     _write_atomic(
         _paths(repo, producer)["probe"],
         {
-            "schema": "krr-native-local-coverage-probe-v1",
+            "schema": PROBE_SCHEMA,
             "producer": producer,
             "identitySha256": identity["identitySha256"],
             "cacheable": identity["cacheable"],
@@ -385,7 +409,7 @@ def local_key(repo: Path, producer: str) -> JsonObject:
         "producer": producer,
         "cacheable": identity["cacheable"],
         "fingerprint": fingerprint,
-        "sourceDigest": identity["sourceDigest"],
+        "coverageInputDigest": identity["coverageInputDigest"],
         "contextDigest": identity["contextDigest"],
         "commandDigest": _digest(identity["commands"]),
     }
@@ -396,7 +420,7 @@ def _read_key_probe(repo: Path, producer: str, identity: JsonObject) -> str | No
     if (
         not isinstance(probe, dict)
         or set(probe) != {"schema", "producer", "identitySha256", "cacheable", "token"}
-        or probe.get("schema") != "krr-native-local-coverage-probe-v1"
+        or probe.get("schema") != PROBE_SCHEMA
         or probe.get("producer") != producer
         or probe.get("identitySha256") != identity["identitySha256"]
         or probe.get("cacheable") is not identity["cacheable"]
@@ -424,7 +448,8 @@ def _probe_token(repo: Path, producer: str, identity: JsonObject) -> str | None:
 
 def local_begin(repo: Path, producer: str) -> JsonObject:
     _ensure_report_directory(repo)
-    identity = _bound_identity(repo, producer)
+    source_state = _source_state(repo)
+    identity = _bound_identity(repo, producer, source_state)
     moon_managed = "MOON_TASK_ID" in os.environ or "MOON_TASK_HASH" in os.environ
     probe_path = _paths(repo, producer)["probe"]
     if not moon_managed:
@@ -432,7 +457,7 @@ def local_begin(repo: Path, producer: str) -> JsonObject:
         _write_atomic(
             probe_path,
             {
-                "schema": "krr-native-local-coverage-probe-v1",
+                "schema": PROBE_SCHEMA,
                 "producer": producer,
                 "identitySha256": identity["identitySha256"],
                 "cacheable": identity["cacheable"],
@@ -446,6 +471,7 @@ def local_begin(repo: Path, producer: str) -> JsonObject:
         "producer": producer,
         "runId": uuid.uuid4().hex,
         "probeToken": token,
+        "sourceManifestDigest": source_state["sourceDigest"],
         "identity": identity,
     }
     _write_atomic(_paths(repo, producer)["run"], run)
@@ -453,15 +479,25 @@ def local_begin(repo: Path, producer: str) -> JsonObject:
 
 
 def _current_run(repo: Path, producer: str) -> tuple[JsonObject, JsonObject, str | None]:
-    identity = _bound_identity(repo, producer)
+    source_state = _source_state(repo)
+    identity = _bound_identity(repo, producer, source_state)
     token = _probe_token(repo, producer, identity)
     run = coverage_result._object(
         _read_json(_paths(repo, producer)["run"], "local run"), "local run"
     )
     if (
-        set(run) != {"schema", "producer", "runId", "probeToken", "identity"}
+        set(run)
+        != {
+            "schema",
+            "producer",
+            "runId",
+            "probeToken",
+            "sourceManifestDigest",
+            "identity",
+        }
         or run.get("schema") != RUN_SCHEMA
         or run.get("producer") != producer
+        or run.get("sourceManifestDigest") != source_state["sourceDigest"]
         or run.get("identity") != identity
         or run.get("probeToken") != token
     ):
@@ -495,8 +531,14 @@ def _collection_receipt(
     receipt = coverage_result._object(receipt, "collection receipt")
     required = {
         "schema", "role", "authenticity", "producer", "producerExit", "cacheable",
-        "probeToken", "identity", "domains",
+        "probeToken", "sourceManifestDigest", "identity", "domains",
     }
+    source_manifest_digest = receipt.get("sourceManifestDigest")
+    if (
+        not isinstance(source_manifest_digest, str)
+        or SHA256_RE.fullmatch(source_manifest_digest) is None
+    ):
+        raise LocalCoverageError("collection receipt identity or report differs")
     if (
         set(receipt) != required
         or receipt.get("schema") != COLLECTION_RECEIPT_SCHEMA
@@ -518,7 +560,8 @@ def _collection_receipt(
 def _authenticated_collection(
     repo: Path, producer: str
 ) -> tuple[JsonObject, JsonObject]:
-    identity = _bound_identity(repo, producer)
+    source_state = _source_state(repo)
+    identity = _bound_identity(repo, producer, source_state)
     token = _probe_token(repo, producer, identity)
     receipt_path = _paths(repo, producer)["receipt"]
     try:
@@ -573,7 +616,7 @@ def local_collect_finish(repo: Path, producer: str, producer_exit: int) -> JsonO
     _ensure_report_directory(repo)
     if type(producer_exit) is not int or producer_exit != 0:
         raise LocalCoverageError("coverage collection producer did not exit successfully")
-    _run, identity, token = _current_run(repo, producer)
+    run, identity, token = _current_run(repo, producer)
     receipt: JsonObject = {
         "schema": COLLECTION_RECEIPT_SCHEMA,
         "role": "collection",
@@ -582,6 +625,7 @@ def local_collect_finish(repo: Path, producer: str, producer_exit: int) -> JsonO
         "producerExit": 0,
         "cacheable": identity["cacheable"],
         "probeToken": token,
+        "sourceManifestDigest": run["sourceManifestDigest"],
         "identity": identity,
         "domains": _collection_report_records(repo, producer),
     }

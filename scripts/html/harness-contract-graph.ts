@@ -455,6 +455,59 @@ function processMethod(
     : undefined;
 }
 
+const RTK_PROXY_DRY_RUN_RECIPES = [
+  "html-input-state-fidelity-check",
+  "html-input-state-fidelity-interim-check",
+  "html-dynamic-fidelity-check",
+  "html-dynamic-fidelity-interim-check",
+  "html-fidelity-check",
+  "html-fidelity-interim-check",
+  "build-capacity-check",
+] as const;
+
+function ownedRtkProxyDryRunCallVerified(
+  node: Record<string, unknown>,
+  context: SourceCodeContext | undefined,
+  processes: Map<string, ProcessBinding>,
+): boolean {
+  const binding = processMethod(object(node.callee), processes);
+  const args = Array.isArray(node.arguments) ? node.arguments : [];
+  const recipes = object(object(args[1])?.expression);
+  const recipeElements = Array.isArray(recipes?.elements) ? recipes.elements : [];
+  const options = object(object(args[2])?.expression);
+  const properties = Array.isArray(options?.properties)
+    ? options.properties.map(object).filter((item): item is Record<string, unknown> => !!item)
+    : [];
+  const option = (name: string) =>
+    properties.find((item) => item.type === "KeyValueProperty" && object(item.key)?.value === name);
+  const environment = properties.find((item) => item.type === "Identifier" && item.value === "env");
+  return (
+    context?.name === "scripts/quality/owned-validation-contract_test.ts" &&
+    binding?.api === "node" &&
+    binding.method === "spawnSync" &&
+    args.length === 3 &&
+    args.every((argument) => !object(argument)?.spread) &&
+    literal(object(args[0])?.expression) === "just" &&
+    recipes?.type === "ArrayExpression" &&
+    recipeElements.length === RTK_PROXY_DRY_RUN_RECIPES.length + 1 &&
+    recipeElements.every((element) => !object(element)?.spread) &&
+    recipeElements.every((element, index) =>
+      index === 0
+        ? literal(object(element)?.expression) === "--dry-run"
+        : literal(object(element)?.expression) === RTK_PROXY_DRY_RUN_RECIPES[index - 1],
+    ) &&
+    options?.type === "ObjectExpression" &&
+    properties.length === 3 &&
+    properties.every((property) =>
+      ["KeyValueProperty", "Identifier"].includes(String(property.type)),
+    ) &&
+    object(option("cwd")?.value)?.type === "Identifier" &&
+    object(option("cwd")?.value)?.value === "root" &&
+    literal(option("encoding")?.value) === "utf8" &&
+    environment !== undefined
+  );
+}
+
 function importDirectoryJoin(value: unknown, bindings: Set<string>): string | undefined {
   const node = object(value);
   const callee = object(node?.callee);
@@ -1828,8 +1881,8 @@ const FACTS_JUST_DEFINITIONS = [
   'set shell := ["bash", "-uc"]',
   "REPO_ROOT := justfile_directory()",
   'RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)',
-  'RTK_CMD := if RTK == "" { "" } else { RTK + " " }',
-  'CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")',
+  'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
+  'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
   'CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO',
 ] as const;
 const FACTS_BUILD_COMMAND =
@@ -1848,7 +1901,7 @@ export function guardedFactsRecipeVerified(
   const lines = source.split(/\r?\n/u);
   const settings = lines.filter((line) => /^\s*set\s+shell(?:\s|:|=)/u.test(line));
   if (settings.length !== 1 || settings[0] !== FACTS_JUST_DEFINITIONS[0]) return false;
-  const names = ["REPO_ROOT", "RTK", "RTK_CMD", "CARGO", "CARGO_BUILD"] as const;
+  const names = ["REPO_ROOT", "RTK", "RTK_PROXY_CMD", "CARGO", "CARGO_BUILD"] as const;
   for (const [index, name] of names.entries()) {
     const definitions = lines.filter((line) =>
       new RegExp(`^(?:export\\s+)?${name}\\b`, "u").test(line),
@@ -3607,9 +3660,13 @@ function sourceCodeFromModule(
     ...semanticFixtureImports(moduleRecord, context),
     ...duplicationExecutions.calls,
   ]);
-  const registeredTools = new Set([
+  const ownedRtkProxyDryRunCalls = astNodes(moduleRecord).filter((node) =>
+    ownedRtkProxyDryRunCallVerified(node, context, processes),
+  );
+  const registeredExternalCalls = new Set([
     ...standardBiomeToolCommands(moduleRecord, context),
     ...gitSourceInventoryCalls(moduleRecord, context),
+    ...(ownedRtkProxyDryRunCalls.length === 1 ? ownedRtkProxyDryRunCalls : []),
   ]);
   const standardBiomeCommand = biomeContextCommand(
     moduleRecord,
@@ -3632,7 +3689,7 @@ function sourceCodeFromModule(
   };
   const referencesForCall = (node: Record<string, unknown>): string[] => {
     if (fixtureImports.has(node)) return fixtureImports.get(node) ?? [];
-    if (registeredTools.has(node)) return [];
+    if (registeredExternalCalls.has(node)) return [];
     if (nativeCall?.calls.has(node)) return [nativeCall.entrypoint];
     if (bindExternalCall(node, toolCall, moduleRecord, source, context)) return [];
     if (node === biomeCommand?.call)

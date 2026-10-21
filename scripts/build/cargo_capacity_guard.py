@@ -1260,7 +1260,7 @@ def _coverage_report_selection(root: Path, target: Path, words: list[str],
     selected = target / "llvm-cov-target"
     output = root / "tmp/quality/standalone-performance-coverage/root.json"
     expected = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
-                "--json", "--summary-only", "--output-path", str(output)]
+                "--json", "--show-missing-lines", "--output-path", str(output)]
     if words != expected:
         raise RuntimeError("root coverage report differs from its fixed report contract")
     _validate_coverage_environment(root, target, selected, environment, root / "Cargo.toml")
@@ -1297,7 +1297,7 @@ def _coverage_diagnostic_report_selection(root: Path, target: Path, words: list[
     selected = target / "llvm-cov-target"
     output = root / "tmp/quality/root-coverage-detail.json"
     expected = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
-                "--json", "--output-path", str(output)]
+                "--json", "--show-missing-lines", "--output-path", str(output)]
     if words != expected:
         raise RuntimeError("root coverage diagnostic report differs from its fixed report contract")
     if not _path_has_no_symlink_components(output, root):
@@ -1677,12 +1677,17 @@ def coverage_cleanup_preflight(root: Path, target: Path, selected: Path,
         if stat.S_ISDIR(value[2]):
             for child in path.iterdir():
                 visit(child)
-    if busy_processes(target, root):
-        raise RuntimeError("coverage cleanup target is in use or inspection is unavailable")
+    busy = busy_processes(target, root)
+    if busy:
+        raise RuntimeError(
+            "coverage cleanup target is in use or inspection is unavailable: "
+            + "; ".join(busy)
+        )
     try:
         with ProfileLocks(target) as epoch:
-            if busy_processes(target, root):
-                raise RuntimeError("coverage cleanup target became busy")
+            busy = busy_processes(target, root)
+            if busy:
+                raise RuntimeError("coverage cleanup target became busy: " + "; ".join(busy))
             for path in footprint:
                 visit(path)
             _verify_swiftpm_aliases(aliases, target)

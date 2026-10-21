@@ -12,6 +12,8 @@ tasks:
     command: ['just', 'fmt-check']
     inputs: &quality-inputs
       - '**/*'
+      # 人間向けの進捗記録は実装・検査の入力ではない。
+      - '!/docs/quality-gate-improvement-tasks.md'
       - '!/tmp/**'
       - '!/.moon/cache/**'
       - '!/target/**'

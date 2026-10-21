@@ -236,7 +236,7 @@ class UpdateUsvgSkrifaPairTest(unittest.TestCase):
 
     def test_depends_update_all_orders_usvg_pair_after_lock_update_and_before_bun(self) -> None:
         justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
-        recipe = justfile.split("depends-update-all:\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
+        recipe = justfile.split("depends-update-mutations:\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
         commands = [line.strip() for line in recipe.splitlines() if line.strip()]
         broad_upgrade = "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa"
         html_pair = "python3 scripts/release/update_html5ever_pair.py --cargo \"{{CARGO}}\""

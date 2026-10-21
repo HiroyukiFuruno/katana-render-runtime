@@ -512,6 +512,7 @@ interface ContractContext {
   ciRecipes: Set<string>;
   local: Set<string>;
   ci: Set<string>;
+  rtkProxyCommandVerified: boolean;
   issues: OwnedValidationIssue[];
   moonCacheFixtureBinding?: OwnedValidationReport["moonCacheFixture"];
   parserBodyOnloadBinding?: OwnedValidationReport["parserBodyOnload"];
@@ -598,6 +599,7 @@ function metadata(
     ciRecipes: graph.ciRecipes ?? new Set(),
     local: graph.localRecipes ?? new Set(),
     ci: graph.ciRecipes ?? new Set(),
+    rtkProxyCommandVerified: rtkProxyCommandVerified(readMemoized("Justfile")),
     issues: [],
     read: readMemoized,
   };
@@ -1903,11 +1905,33 @@ function pythonSelection(context: ContractContext, words: string[], name: string
     ),
   );
 }
-function unitCommand(line: string): string[] {
+const RTK_PROXY_COMMAND_DEFINITIONS = [
+  'RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)',
+  'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
+] as const;
+function rtkProxyCommandVerified(source: string): boolean {
+  const lines = source.split(/\r?\n/u);
+  const [rtkDefinition, proxyDefinition] = RTK_PROXY_COMMAND_DEFINITIONS;
+  const rtkLines = lines.filter((line) => /^\s*(?:export\s+)?RTK\s*:=/u.test(line));
+  const proxyLines = lines.filter((line) => /^\s*(?:export\s+)?RTK_PROXY_CMD\s*:=/u.test(line));
+  return (
+    rtkLines.length === 1 &&
+    rtkLines[0] === rtkDefinition &&
+    proxyLines.length === 1 &&
+    proxyLines[0] === proxyDefinition
+  );
+}
+function unitCommand(line: string, allowRtkProxyCommand = false): string[] {
   if (/[;|&`$<>\\]/.test(line)) return [];
   const words = shellWords(line.trim().replace(/^@/, ""));
   if (words[0] === "rtk" && words[1] === "proxy") return words.slice(2);
   if (words[0] === "{{RTK_CMD}}proxy") return words.slice(1);
+  const proxyPrefix = "{{RTK_PROXY_CMD}}";
+  const prefixedCommand = words[0]?.startsWith(proxyPrefix)
+    ? words[0].slice(proxyPrefix.length)
+    : undefined;
+  if (allowRtkProxyCommand && prefixedCommand === "python3")
+    return [prefixedCommand, ...words.slice(1)];
   return words;
 }
 function canonicalBunTestLine(line: string): string | undefined {
@@ -2158,6 +2182,7 @@ function unitRegisteredInRecipeBodies(
   language: "bun" | "python" | "playwright",
   lane: Set<string>,
 ): boolean {
+  const allowRtkProxyCommand = context.rtkProxyCommandVerified;
   return [...lane].some((recipe) => {
     const bodies =
       recipe === MOON_CACHE_RECIPE
@@ -2169,8 +2194,8 @@ function unitRegisteredInRecipeBodies(
         language === "bun" ? (removeClassicGenerationEvidenceCommands(lines) ?? lines) : lines;
       return registeredLines.some((line) =>
         language === "bun"
-          ? bunSelection(context, unitCommand(line), name)
-          : pythonSelection(context, unitCommand(line), name),
+          ? bunSelection(context, unitCommand(line, allowRtkProxyCommand), name)
+          : pythonSelection(context, unitCommand(line, allowRtkProxyCommand), name),
       );
     });
   });
