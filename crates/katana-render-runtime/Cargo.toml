@@ -72,6 +72,8 @@ nix = { version = "0.31.3", default-features = false, features = ["fs"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 fontique = { version = "=0.12.0", default-features = false, features = ["std"] }
+objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFString", "CFURL"] }
+objc2-core-text = { version = "=0.3.2", default-features = false, features = ["CTFont", "CTFontDescriptor", "CTFontTraits"] }
 
 [build-dependencies]
 brotli-decompressor = { workspace = true }

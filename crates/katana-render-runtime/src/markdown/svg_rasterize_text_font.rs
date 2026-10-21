@@ -33,12 +33,21 @@ use resvg::usvg;
 use score::fallback_face_attribute_score;
 #[cfg(test)]
 use score::{css_stretch_match_rank, css_style_match_rank, fallback_attribute_score};
+const INTERFACE_BOLD_WEIGHT: u16 = 700;
 pub(super) fn matching_font_face(
     database: &usvg::fontdb::Database,
     font_family: &str,
     font_weight: u16,
     italic: bool,
 ) -> Option<usvg::fontdb::ID> {
+    #[cfg(target_os = "macos")]
+    if contains_internal_family_name(font_family) {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(selected) = interface_bold_override(database, font_family, font_weight, italic) {
+        return Some(selected);
+    }
     let names = css_font_family_names(font_family);
     let families = names
         .iter()
@@ -54,6 +63,34 @@ pub(super) fn matching_font_face(
             usvg::fontdb::Style::Normal
         },
     })
+}
+
+#[cfg(target_os = "macos")]
+fn contains_internal_family_name(name: &str) -> bool {
+    super::super::font::is_internal_family(name)
+        || css_font_family_names(name)
+            .iter()
+            .any(|family| super::super::font::is_internal_family(family))
+}
+
+#[cfg(target_os = "macos")]
+fn interface_bold_override(
+    database: &usvg::fontdb::Database,
+    name: &str,
+    weight: u16,
+    italic: bool,
+) -> Option<usvg::fontdb::ID> {
+    let name = name.trim().to_ascii_lowercase();
+    if weight != INTERFACE_BOLD_WEIGHT
+        || italic
+        || !matches!(
+            name.as_str(),
+            ".hiragino kaku gothic interface" | "hiragino kaku gothic interface"
+        )
+    {
+        return None;
+    }
+    super::super::font::bold_alias_id(database)
 }
 
 fn fontdb_family_for_database<'a>(
@@ -139,17 +176,179 @@ pub(super) fn matching_fallback_with_probe(
     requested_italic: bool,
     probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
 ) -> (Option<usvg::fontdb::ID>, bool) {
+    #[cfg(target_os = "macos")]
+    return matching_fallback_macos(
+        database,
+        base_face_id,
+        character,
+        requested_weight,
+        requested_italic,
+        probe,
+    );
+    #[cfg(not(target_os = "macos"))]
+    matching_fallback_nonmacos(
+        database,
+        base_face_id,
+        character,
+        requested_weight,
+        requested_italic,
+        probe,
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn matching_fallback_nonmacos(
+    database: &usvg::fontdb::Database,
+    base_face_id: usvg::fontdb::ID,
+    character: char,
+    requested_weight: u16,
+    requested_italic: bool,
+    probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> (Option<usvg::fontdb::ID>, bool) {
     if database.face(base_face_id).is_none() {
         return (None, false);
     }
+    matching_fallback_regular(
+        database,
+        base_face_id,
+        character,
+        requested_weight,
+        requested_italic,
+        false,
+        probe,
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn matching_fallback_macos(
+    database: &usvg::fontdb::Database,
+    base_face_id: usvg::fontdb::ID,
+    character: char,
+    requested_weight: u16,
+    requested_italic: bool,
+    mut probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> (Option<usvg::fontdb::ID>, bool) {
+    let Some(base_face) = database.face(base_face_id) else {
+        return (None, false);
+    };
+    let alias_probe = system_ui_bold_alias(
+        database,
+        base_face,
+        character,
+        requested_weight,
+        requested_italic,
+        &mut probe,
+    );
+    finish_macos_fallback(
+        database,
+        base_face_id,
+        character,
+        requested_weight,
+        requested_italic,
+        alias_probe,
+        probe,
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn finish_macos_fallback(
+    database: &usvg::fontdb::Database,
+    base_face_id: usvg::fontdb::ID,
+    character: char,
+    requested_weight: u16,
+    requested_italic: bool,
+    alias_probe: AliasProbe,
+    probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> (Option<usvg::fontdb::ID>, bool) {
+    let interface_face_is_required = match alias_probe {
+        AliasProbe::Selected(id) => return (Some(id), true),
+        AliasProbe::Unavailable => return (None, false),
+        AliasProbe::NoGlyph => true,
+        AliasProbe::NotNeeded => false,
+    };
+    matching_fallback_regular(
+        database,
+        base_face_id,
+        character,
+        requested_weight,
+        requested_italic,
+        interface_face_is_required,
+        probe,
+    )
+}
+
+fn matching_fallback_regular(
+    database: &usvg::fontdb::Database,
+    base_face_id: usvg::fontdb::ID,
+    character: char,
+    requested_weight: u16,
+    requested_italic: bool,
+    interface_face_is_required: bool,
+    mut probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> (Option<usvg::fontdb::ID>, bool) {
+    #[cfg(not(target_os = "macos"))]
+    let _ = interface_face_is_required;
     scan_fallback_faces(
         database,
         base_face_id,
         character,
         requested_font_style(requested_italic),
         usvg::fontdb::Weight(requested_weight),
-        probe,
+        |id, glyph| {
+            #[cfg(target_os = "macos")]
+            if interface_face_is_required
+                && database
+                    .face(id)
+                    .is_some_and(super::super::font::is_interface_face)
+            {
+                return Some(false);
+            }
+            probe(id, glyph)
+        },
     )
+}
+
+#[cfg(target_os = "macos")]
+enum AliasProbe {
+    NotNeeded,
+    Selected(usvg::fontdb::ID),
+    NoGlyph,
+    Unavailable,
+}
+
+#[cfg(target_os = "macos")]
+fn system_ui_bold_alias(
+    database: &usvg::fontdb::Database,
+    base_face: &usvg::fontdb::FaceInfo,
+    character: char,
+    requested_weight: u16,
+    requested_italic: bool,
+    probe: &mut impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> AliasProbe {
+    let required = requested_interface_fallback(base_face, requested_weight, requested_italic)
+        && super::super::font::has_native_interface_candidate(database);
+    if !required {
+        return AliasProbe::NotNeeded;
+    }
+    let Some(id) = super::super::font::bold_alias_id(database) else {
+        return AliasProbe::Unavailable;
+    };
+    match probe(id, character) {
+        Some(true) => AliasProbe::Selected(id),
+        Some(false) => AliasProbe::NoGlyph,
+        None => AliasProbe::Unavailable,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn requested_interface_fallback(
+    base_face: &usvg::fontdb::FaceInfo,
+    requested_weight: u16,
+    requested_italic: bool,
+) -> bool {
+    requested_weight == INTERFACE_BOLD_WEIGHT
+        && !requested_italic
+        && super::super::font::is_system_ui_primary(base_face)
 }
 
 fn scan_fallback_faces(
@@ -242,6 +441,9 @@ fn system_font_family() -> usvg::fontdb::Family<'static> {
 #[cfg(test)]
 #[path = "svg_rasterize_text_font_db_token_tests.rs"]
 mod db_token_tests;
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_text_font_interface_bold_tests.rs"]
+mod interface_bold_tests;
 
 #[cfg(test)]
 mod tests {

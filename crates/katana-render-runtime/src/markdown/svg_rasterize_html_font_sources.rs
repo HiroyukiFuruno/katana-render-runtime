@@ -29,6 +29,15 @@ mod known_builder;
 pub(super) use known_builder::build as build_known_html_font_db;
 
 #[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_font_interface_bold.rs"]
+mod interface_bold;
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use interface_bold::{
+    bold_alias_id, has_native_interface_candidate, is_interface_face, is_internal_family,
+    is_system_ui_primary, register_interface_bold,
+};
+
+#[cfg(target_os = "macos")]
 const MAX_HIRAGINO_WEIGHT_INDEX: u16 = 9;
 
 /* WHY: macOSのブラウザ別名を実System Fontへ解決し、SVGと計測のfamily選択を揃える。 */
@@ -51,7 +60,13 @@ pub(super) fn build_html_font_db(request: &HtmlFontRequest) -> usvg::fontdb::Dat
     );
     load_fallback_font_paths(request, &mut database, &mut loaded_paths);
     /* WHY: ChromeのmacOS CSS weightはHiraginoのW番号をOS/2 weightと別に解釈する。 */
-    normalize_macos_hiragino_weights(&mut database);
+    #[cfg(target_os = "macos")]
+    {
+        normalize_macos_hiragino_weights(&mut database);
+        if interface_bold_cjk_request(request) {
+            let _ = register_interface_bold(&mut database);
+        }
+    }
     configure_html_generic_families(&mut database);
     database
 }
@@ -71,7 +86,7 @@ fn normalize_macos_hiragino_weights(database: &mut usvg::fontdb::Database) {
                 usvg::fontdb::Source::File(path)
                     if path.to_string_lossy().starts_with("/System/Library/Fonts/")
             );
-            if is_hiragino && is_native {
+            if is_hiragino && is_native && face.weight.0 != weight {
                 Some((face.clone(), weight))
             } else {
                 None
@@ -84,6 +99,19 @@ fn normalize_macos_hiragino_weights(database: &mut usvg::fontdb::Database) {
         database.remove_face(id);
         database.push_face_info(face);
     }
+}
+
+fn interface_bold_cjk_request(request: &HtmlFontRequest) -> bool {
+    request.needs_cjk
+        && request.families.iter().any(|family| {
+            matches!(
+                family.as_str(),
+                "system-ui"
+                    | "-apple-system"
+                    | "blinkmacsystemfont"
+                    | ".hiragino kaku gothic interface"
+            )
+        })
 }
 
 #[cfg(target_os = "macos")]
@@ -139,12 +167,7 @@ fn cjk_fallback_font_paths(request: &HtmlFontRequest) -> Vec<&'static str> {
     } else {
         CJK_FONT_PATHS.to_vec()
     };
-    if request.families.iter().any(|family| {
-        matches!(
-            family.as_str(),
-            "system-ui" | "-apple-system" | "blinkmacsystemfont"
-        )
-    }) {
+    if interface_bold_cjk_request(request) {
         /* WHY: CoreTextのsystem UIは通常CJK書体ではなく1083 UPMのinterface faceを使う。 */
         SYSTEM_CJK_FONT_PATHS.iter().copied().chain(paths).collect()
     } else {

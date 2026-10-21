@@ -6,7 +6,10 @@ pub(super) fn capture(
     selected_records: Records,
     fallback_records: Records,
 ) -> Result<serde_json::Value, String> {
-    let tree = resvg::usvg::Tree::from_str(svg, options).map_err(|error| error.to_string())?;
+    let tree = crate::markdown::svg_rasterize::text_shaping::with_validated_tree_parse(|| {
+        resvg::usvg::Tree::from_str(svg, options)
+    })
+    .map_err(|error| error.to_string())?;
     let text = match tree.node_by_id("weight-runs") {
         Some(resvg::usvg::Node::Text(text)) => text,
         _ => return Err("mixed-weight SVG text node missing".into()),

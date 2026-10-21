@@ -4,6 +4,9 @@ use resvg::usvg::{
 };
 use std::sync::Arc;
 
+#[cfg(target_os = "macos")]
+const INTERFACE_BOLD_FONT_WEIGHT: u16 = 700;
+
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 #[path = "svg_rasterize_text_usvg_system_selector.rs"]
 mod system_selector;
@@ -19,6 +22,10 @@ pub(in super::super) fn html_selector() -> usvg::FallbackSelectionFn<'static> {
 pub(in super::super) fn html_font_selector() -> usvg::FontSelectionFn<'static> {
     let stock = usvg::FontResolver::default_font_selector();
     Box::new(move |font, database| {
+        #[cfg(target_os = "macos")]
+        if let Some(selection) = select_macos_html_font_override(font, database) {
+            return selection;
+        }
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         if font.families().iter().any(|family| match family {
             usvg::FontFamily::Named(name) => matches!(
@@ -31,6 +38,37 @@ pub(in super::super) fn html_font_selector() -> usvg::FontSelectionFn<'static> {
         }
         select_font_case_insensitively(font, database).or_else(|| stock(font, database))
     })
+}
+
+#[cfg(target_os = "macos")]
+fn select_macos_html_font_override(
+    font: &usvg::Font,
+    database: &fontdb::Database,
+) -> Option<Option<ID>> {
+    if font.families().iter().any(|family| {
+        matches!(
+            family,
+            usvg::FontFamily::Named(name)
+                if super::super::super::font::is_internal_family(name)
+        )
+    }) {
+        return Some(None);
+    }
+    if is_interface_bold_request(font) {
+        return super::super::super::font::bold_alias_id(database).map(Some);
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn is_interface_bold_request(font: &usvg::Font) -> bool {
+    font.weight() == INTERFACE_BOLD_FONT_WEIGHT
+        && matches!(font.style(), usvg::FontStyle::Normal)
+        && font.families().first().is_some_and(|family| {
+            matches!(family, usvg::FontFamily::Named(name)
+                if matches!(name.trim().to_ascii_lowercase().as_str(),
+                    "hiragino kaku gothic interface" | ".hiragino kaku gothic interface"))
+        })
 }
 
 fn select_font_case_insensitively(font: &usvg::Font, database: &fontdb::Database) -> Option<ID> {

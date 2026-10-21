@@ -4,8 +4,13 @@ use resvg::usvg;
 #[path = "svg_rasterize_html_font.rs"]
 mod html;
 
-pub(super) use html::{
+pub(in crate::markdown::svg_rasterize) use html::{
     DatabaseKey, DiscoveryMode, html_font_db_for_measured_text, measured_database,
+};
+#[cfg(target_os = "macos")]
+pub(super) use html::{
+    bold_alias_id, has_native_interface_candidate, is_interface_face, is_internal_family,
+    is_system_ui_primary,
 };
 
 pub(super) use html::HtmlFontRequest;

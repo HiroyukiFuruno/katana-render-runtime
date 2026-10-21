@@ -12,6 +12,11 @@ mod entities;
 mod request;
 #[path = "svg_rasterize_html_font_sources.rs"]
 mod sources;
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use sources::{
+    bold_alias_id, has_native_interface_candidate, is_interface_face, is_internal_family,
+    is_system_ui_primary,
+};
 #[path = "svg_rasterize_html_font_system.rs"]
 mod system;
 

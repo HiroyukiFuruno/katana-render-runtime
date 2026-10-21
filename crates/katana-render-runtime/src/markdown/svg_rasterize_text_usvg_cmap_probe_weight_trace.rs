@@ -20,6 +20,6 @@ pub(super) fn run() -> Result<serde_json::Value, String> {
     let selected = Arc::new(std::sync::Mutex::new(Vec::new()));
     let fallback = Arc::new(std::sync::Mutex::new(Vec::new()));
     selectors::install(&mut options, Arc::clone(&selected), Arc::clone(&fallback));
-    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="240" height="48"><text id="weight-runs" x="0" y="32" font-family="system-ui" font-size="16"><tspan font-weight="400">日本</tspan><tspan font-weight="700">日本</tspan></text></svg>"#;
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="360" height="48"><text id="weight-runs" x="0" y="32" font-family="system-ui" font-size="16"><tspan font-weight="400">A日本</tspan><tspan font-weight="700">A日本</tspan><tspan font-family="'.Hiragino Kaku Gothic Interface'" font-weight="700">日本</tspan></text></svg>"#;
     spans::capture(svg, &options, selected, fallback)
 }

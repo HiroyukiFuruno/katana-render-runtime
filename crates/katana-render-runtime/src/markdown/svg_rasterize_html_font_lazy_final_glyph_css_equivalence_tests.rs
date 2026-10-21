@@ -37,6 +37,9 @@ fn actual_html_session_records_final_glyph_fonts() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_font_lazy_final_glyph_css_equivalence_macos_tests.rs"]
+mod macos_interface;
 fn assert_frame_font_evidence(
     session: &crate::HtmlBrowserSession,
     audit: &serde_json::Value,

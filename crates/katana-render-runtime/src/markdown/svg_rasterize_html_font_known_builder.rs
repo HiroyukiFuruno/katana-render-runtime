@@ -16,6 +16,11 @@ pub(in super::super) fn build(request: &HtmlFontRequest) -> (Database, CreationP
             proof.load(&mut database, sources::paths_for_font_family(family));
         }
     }
+    if sources::interface_bold_cjk_request(request) {
+        proof.load(&mut database, sources::SYSTEM_CJK_FONT_PATHS);
+        sources::normalize_macos_hiragino_weights(&mut database);
+        let _ = sources::register_interface_bold(&mut database);
+    }
     proof.capture_prefix(&database);
     load_fallbacks(&mut database, &mut proof, request);
     sources::normalize_macos_hiragino_weights(&mut database);
