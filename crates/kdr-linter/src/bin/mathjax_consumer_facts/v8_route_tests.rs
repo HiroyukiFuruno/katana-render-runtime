@@ -138,6 +138,7 @@ const EXECUTION_CASES: &[Rejection] = &[
         "v8-compile-order:resolve",
     ),
 ];
+
 const INVALID_CASE: &[Rejection] = &[(
     "invalid statement source",
     0,
@@ -242,3 +243,7 @@ fn v8_route_ast_linter_reports_source_constant_drift() -> Result<(), String> {
     );
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "v8_route_origin_tests.rs"]
+mod origin_helper_tests;

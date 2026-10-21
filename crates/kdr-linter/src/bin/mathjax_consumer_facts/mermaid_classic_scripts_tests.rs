@@ -3,6 +3,16 @@ use super::test_support::Fixture;
 use serde_json::Value;
 const SCRIPT_PRODUCER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "            DiagramRuntimeScript::borrowed(\"mermaid-runtime.min.js\", MERMAID_RUNTIME),",
+        "            MERMAID_RUNTIME,",
+        "mermaid-scripts:entry",
+    ),
+    (
+        "            DiagramRuntimeScript::borrowed(\"mermaid-zenuml.min.js\", zenuml_bundle),\n",
+        "",
+        "mermaid-scripts:base-count",
+    ),
+    (
         "diagram_type == MermaidDiagramType::Zenuml",
         "diagram_type != MermaidDiagramType::Zenuml",
         "mermaid-scripts:forward",
@@ -63,6 +73,11 @@ const SCRIPT_PRODUCER_MUTATIONS: &[(&str, &str, &str)] = &[
         "mermaid-scripts:format",
     ),
     (
+        "format!(\"katanaRunMermaidRuntime({request_json});\")",
+        "format!(\"{:?}\", \"katanaRunMermaidRuntime({request_json});\")",
+        "mermaid-scripts:format",
+    ),
+    (
         "env!(\"OUT_DIR\")",
         "env!(\"HOME\")",
         "mermaid-scripts:plugin-env",
@@ -113,6 +128,26 @@ const LIVE_CALLER_BINDING_MUTATIONS: &[(&str, &str, &str)] = &[
         "let request_json =",
         "let request_json @ shadow =",
         "mermaid-request-route:binding:request_json",
+    ),
+];
+const REALM_CONTEXT_SCOPE_REJECTION: &str = "mermaid-classic-realm:context-scope";
+const REALM_LOOP_REJECTION: &str = "mermaid-classic-realm:loop";
+const REALM_ALLOCATION_REJECTION: &str = "mermaid-classic-realm:allocation";
+const REALM_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "let context_scope = &mut v8::ContextScope::new(handle_scope, context);\n        v8::tc_scope!(let scope, &mut **context_scope);\n        diagram_font_bridge::install(scope)?;",
+        "let context_scope = &v8::ContextScope::new(handle_scope, context);\n        v8::tc_scope!(let scope, &mut **context_scope);\n        diagram_font_bridge::install(scope)?;",
+        REALM_CONTEXT_SCOPE_REJECTION,
+    ),
+    (
+        "for script in scripts",
+        "for script in other_scripts",
+        REALM_LOOP_REJECTION,
+    ),
+    (
+        "Self::ensure_initialized();\n\n        let mut isolate = v8::Isolate::new(Default::default());",
+        "Self::ensure_initialized();\n\n        let mut isolate = v8::OtherIsolate::new(Default::default());",
+        REALM_ALLOCATION_REJECTION,
     ),
 ];
 
@@ -225,13 +260,29 @@ fn mermaid_classic_ast_linter_rejects_actual_script_producer_mutations()
     Ok(())
 }
 #[test]
-fn mermaid_classic_ast_linter_rejects_live_caller_binding_mutations()
+fn mermaid_classic_ast_linter_rejects_caller_and_realm_mutations()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = Fixture::copy_mermaid_classic_inputs(INPUTS)?;
     mermaid_classic_scripts::inspect_root(fixture.root())?;
     reject_mutations(&fixture, INPUTS[1], LIVE_CALLER_BINDING_MUTATIONS)?;
+    reject_mutations(&fixture, INPUTS[2], REALM_MUTATIONS)?;
     Ok(())
 }
+
+#[test]
+fn mermaid_classic_cli_reports_verified_and_rejected_sources()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::copy_mermaid_classic_inputs(INPUTS)?;
+    assert_eq!(mermaid_classic_scripts::run(fixture.root()), Ok(()));
+    let (original, replacement, _) = SCRIPT_PRODUCER_MUTATIONS[0];
+    fixture.replace(INPUTS[0], original, replacement)?;
+    assert_eq!(
+        mermaid_classic_scripts::run(fixture.root()),
+        Err("Mermaid classic source route rejected".to_string())
+    );
+    Ok(())
+}
+
 #[path = "mermaid_classic_capture_tests.rs"]
 mod capture;
 fn reject_mutations(

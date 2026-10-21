@@ -6,29 +6,20 @@ const MATHJAX_RUNTIME_PATH_RESOLVER_INDEX: usize = 3;
 const DIAGRAM_JS_RUNTIME_INDEX: usize = 5;
 const V8_SCRIPT_ORIGIN_HELPER_INDEX: usize = 6;
 const LIB_MODULE_REGISTRATION_INDEX: usize = 7;
-const PLANTUML_MUTATIONS: &[(&str, &str, &str)] = &[
-    (
-        "PlantUmlRendererOps::default_jar_path",
-        "FakePlantUmlRendererOps::default_jar_path",
-        "runtime-path-resolver:plantuml-default",
-    ),
-    (
-        ".map_or_else(PlantUmlRendererOps::default_jar_path",
-        ".map_or(PlantUmlRendererOps::default_jar_path",
-        "runtime-path-resolver:plantuml-map-or-else",
-    ),
-    (
-        "PlantUmlRendererOps::default_jar_path_for_cache_dir(&path)",
-        "PlantUmlRendererOps::default_jar_path_for_cache_dir(path)",
-        "runtime-path-resolver:plantuml-cache",
-    ),
-    (
-        "PlantUmlRendererOps::default_jar_path_for_cache_dir(&path)",
-        "PlantUmlRendererOps::default_jar_path_for_cache_dir(&path.join(\"nested\"))",
-        "runtime-path-resolver:plantuml-cache",
-    ),
-];
+#[path = "runtime_v8_route_plantuml_tests.rs"]
+mod plantuml_tests;
+
 const RESOLVER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "if let Some(path) = runtime_path {\n            return Ok(path);\n        }",
+        "match runtime_path {\n            Some(path) => return Ok(path),\n            None => {}\n        }",
+        "runtime-path-resolver:early-return",
+    ),
+    (
+        "if let Some(path) = runtime_path {\n            return Ok(path);\n        }",
+        "if runtime_path.is_some() { return Ok(PathBuf::new()); }",
+        "runtime-path-resolver:early-return",
+    ),
     (
         "match kind {",
         "let _extra = (); match kind {",
@@ -48,6 +39,46 @@ const RESOLVER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
         "return Ok(path);",
         "return Ok(PathBuf::new());",
         "runtime-path-resolver:early-return",
+    ),
+    (
+        "            DiagramKind::PlantUml => Ok(plantuml_cache_dir\n                .map_or_else(PlantUmlRendererOps::default_jar_path, |path| {\n                    PlantUmlRendererOps::default_jar_path_for_cache_dir(&path)\n                })),\n",
+        "",
+        "runtime-path-resolver:dispatch-shape",
+    ),
+    (
+        "            DiagramKind::MathJax => MathJaxRendererOps::resolve_mathjax_js(),\n",
+        "            DiagramKind::MathJax => MathJaxRendererOps::resolve_mathjax_js(),\n            DiagramKind::Mermaid => MermaidBinaryOps::resolve_mermaid_js(),\n",
+        "runtime-path-resolver:dispatch-shape",
+    ),
+    (
+        "map_err(RenderError::RuntimeResolution)",
+        "map_err()",
+        "runtime-path-resolver:map-err",
+    ),
+    (
+        "map_err(RenderError::RuntimeResolution)",
+        "map_err(RenderError::RuntimeResolution, ForgedError::RuntimeResolution)",
+        "runtime-path-resolver:map-err",
+    ),
+    (
+        ".map_err(RenderError::RuntimeResolution)",
+        "",
+        "runtime-path-resolver:dispatch",
+    ),
+    (
+        "map_err(RenderError::RuntimeResolution)",
+        "map(RenderError::RuntimeResolution)",
+        "runtime-path-resolver:map-err",
+    ),
+    (
+        "DiagramKind::PlantUml => Ok(plantuml_cache_dir",
+        "DiagramKind::PlantUml => Some(plantuml_cache_dir",
+        "runtime-path-resolver:plantuml-arm",
+    ),
+    (
+        "DiagramKind::PlantUml => Ok(plantuml_cache_dir",
+        "DiagramKind::MathJax => Ok(plantuml_cache_dir",
+        "runtime-path-resolver:arm:DiagramKind::PlantUml",
     ),
 ];
 
@@ -77,20 +108,7 @@ fn reject_resolver_arm_and_dispatch(
     fixture.reject("runtime-path-resolver:dispatch-shape")?;
     fixture.restore_from(resolver, &original)?;
 
-    reject_plantuml_mutations(fixture, resolver, &original)
-}
-
-fn reject_plantuml_mutations(
-    fixture: &Fixture,
-    resolver: &str,
-    original: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    for (before, after, expected) in PLANTUML_MUTATIONS {
-        fixture.replace(resolver, before, after)?;
-        fixture.reject(expected)?;
-        fixture.restore_from(resolver, original)?;
-    }
-    Ok(())
+    plantuml_tests::reject_mutations(fixture, resolver, &original)
 }
 
 fn reject_resolver_error_and_early_return(
@@ -136,6 +154,23 @@ fn reject_resolver_shape_mutations(
         })?;
         fixture.restore_from(resolver, original)?;
     }
+    reject_non_match_dispatch_receiver(fixture, resolver, original)?;
+    Ok(())
+}
+
+fn reject_non_match_dispatch_receiver(
+    fixture: &Fixture,
+    resolver: &str,
+    original: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    fixture.replace(resolver, "match kind {", "(match kind {")?;
+    fixture.replace(
+        resolver,
+        "        }\n        .map_err(RenderError::RuntimeResolution)",
+        "        })\n        .map_err(RenderError::RuntimeResolution)",
+    )?;
+    fixture.reject("runtime-path-resolver:dispatch")?;
+    fixture.restore_from(resolver, original)?;
     Ok(())
 }
 

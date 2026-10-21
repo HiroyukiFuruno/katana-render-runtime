@@ -19,6 +19,12 @@ mod shared_readback;
 #[path = "call_binding_tests.rs"]
 mod call_binding_tests;
 
+#[path = "backend_route_tests.rs"]
+mod backend_route_tests;
+
+#[path = "consumer_tests.rs"]
+mod consumer_tests;
+
 #[path = "bundle_execution_tests.rs"]
 mod bundle_execution_tests;
 

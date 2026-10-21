@@ -37,14 +37,7 @@ pub(super) use super::ast_lookup::{
 };
 
 pub(super) fn source(root: &Path, relative: &str) -> Result<Source, String> {
-    let candidate = root.join(relative);
-    let path = candidate
-        .canonicalize()
-        .map_err(|error| format!("missing-source:{relative}:{error}"))?;
-    if !path.starts_with(root) || path != candidate {
-        return Err(format!("unsafe-source-path:{relative}"));
-    }
-    let bytes = fs::read(&path).map_err(|error| format!("read-source:{relative}:{error}"))?;
+    let bytes = opaque_bytes(root, relative)?;
     let text = String::from_utf8(bytes.clone()).map_err(|_| format!("invalid-utf8:{relative}"))?;
     let sha256 = sha256(&bytes);
     let ast = syn::parse_file(&text).map_err(|error| format!("parse-source:{relative}:{error}"))?;

@@ -180,3 +180,6 @@ mod native_width_hash_ast_linter_tests;
 #[cfg(test)]
 #[path = "mathjax_consumer_facts/test_support.rs"]
 mod test_support;
+#[cfg(test)]
+#[path = "mathjax_consumer_facts/test_support_verdict_tests.rs"]
+mod test_support_verdict_tests;

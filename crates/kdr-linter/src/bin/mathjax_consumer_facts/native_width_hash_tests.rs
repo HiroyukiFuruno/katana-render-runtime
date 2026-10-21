@@ -1,6 +1,9 @@
 use super::native_width_hash;
 use super::test_support::Fixture;
 
+#[path = "native_width_hash_contract_tests.rs"]
+mod contract_tests;
+
 const SVG_ID_SIGNATURE: &str = "fn svg_id(source: &str, preset: &DiagramColorPreset) -> String";
 const CACHE_SIGNATURE: &str = "fn cache_file_path_with_zenuml_key(\n        source: &str,\n        mermaid_js: &Path,\n        preset: &DiagramColorPreset,\n        mode: DiagramRuntimeMode,\n        zenuml_plugin_key: (&str, &str),\n    ) -> PathBuf";
 const SVG_SIGNATURE_MUTATIONS: &[(&str, &str)] = &[
@@ -53,6 +56,18 @@ const CACHE_SIGNATURE_MUTATIONS: &[(&str, &str)] = &[
 ];
 const INPUT_SHAPE_MUTATIONS: &[(usize, &str, &str, &str)] = &[
     (
+        0,
+        "preset.background.hash(hasher);",
+        "let _background = preset.background;",
+        "hash-fields:order",
+    ),
+    (
+        1,
+        "DefaultHasher::new()",
+        "DefaultHasher::default()",
+        "svg-id-hash-route:hasher",
+    ),
+    (
         1,
         "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
         "stringify!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
@@ -87,6 +102,18 @@ const INPUT_SHAPE_MUTATIONS: &[(usize, &str, &str, &str)] = &[
         "mode.mermaid_cache_extension()",
         "mode.to_string()",
         "render-cache-hash-route:filename",
+    ),
+    (
+        2,
+        "mermaid_js.hash(&mut hasher);",
+        "source.hash(&mut hasher);",
+        "render-cache-hash-route:prefix:mermaid_js:method=hash,receiver=source,args=1",
+    ),
+    (
+        2,
+        "preset.dark_mode.hash(&mut hasher);",
+        "preset.light_mode.hash(&mut hasher);",
+        "render-cache-hash-route:dark-mode:method=hash,receiver=preset.light_mode,args=1",
     ),
 ];
 

@@ -125,16 +125,12 @@ impl Fixture {
             Inspector::NativeWidth => super::native_width_hash::inspect_root(&self.root),
             Inspector::MermaidClassic => super::mermaid_classic_scripts::inspect_root(&self.root),
         };
-        let Err(error) = result else {
-            let message = match self.inspector {
-                Inspector::MathJax => "mutated route was accepted",
-                Inspector::NativeWidth => "mutated NativeWidth hash route was accepted",
-                Inspector::MermaidClassic => "mutated Mermaid classic route was accepted",
-            };
-            return Err(message.into());
+        let accepted_message = match self.inspector {
+            Inspector::MathJax => "mutated route was accepted",
+            Inspector::NativeWidth => "mutated NativeWidth hash route was accepted",
+            Inspector::MermaidClassic => "mutated Mermaid classic route was accepted",
         };
-        assert!(error.contains(expected), "unexpected rejection: {error}");
-        Ok(())
+        super::test_support_verdict_tests::assert_rejected(result, expected, accepted_message)
     }
 }
 

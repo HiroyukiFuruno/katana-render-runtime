@@ -1,4 +1,5 @@
 use super::super::test_support::Fixture;
+use std::fs;
 
 const INPUT_PATHS: &[&str] = &["Cargo.toml", "Cargo.lock", "crates/kdr-linter/Cargo.toml"];
 const WORKSPACE: &str = "[workspace]\n[workspace.dependencies]\nsyn = { version = \"3\", features = [\"full\", \"visit\"] }\n";
@@ -11,6 +12,81 @@ struct ParserPinCase {
     lock: &'static str,
     expected: &'static str,
 }
+
+#[derive(Clone, Copy)]
+enum AstLookupKind {
+    Function,
+    Method,
+    TraitMethod,
+}
+
+struct AstLookupRejection {
+    source: &'static str,
+    kind: AstLookupKind,
+    trait_name: &'static str,
+    owner: &'static str,
+    name: &'static str,
+    expected: &'static str,
+}
+
+const AST_LOOKUP_REJECTIONS: &[AstLookupRejection] = &[
+    AstLookupRejection {
+        source: "fn run() {} fn run() {}",
+        kind: AstLookupKind::Function,
+        trait_name: "",
+        owner: "",
+        name: "run",
+        expected: "ambiguous-function:run",
+    },
+    AstLookupRejection {
+        source: "struct Owner; impl Owner {}",
+        kind: AstLookupKind::Method,
+        trait_name: "",
+        owner: "Owner",
+        name: "run",
+        expected: "missing-method:Owner::run",
+    },
+    AstLookupRejection {
+        source: "struct Owner; struct Other; impl Other { fn run(&self) {} }",
+        kind: AstLookupKind::Method,
+        trait_name: "",
+        owner: "Owner",
+        name: "run",
+        expected: "missing-method:Owner::run",
+    },
+    AstLookupRejection {
+        source: "struct Owner; impl Owner { fn run(&self) {} } impl Owner { fn run(&self) {} }",
+        kind: AstLookupKind::Method,
+        trait_name: "",
+        owner: "Owner",
+        name: "run",
+        expected: "ambiguous-method:Owner::run",
+    },
+    AstLookupRejection {
+        source: "struct Owner; trait Action {} impl Action for Owner { fn run(&self) {} } impl Action for Owner { fn run(&self) {} }",
+        kind: AstLookupKind::TraitMethod,
+        trait_name: "Action",
+        owner: "Owner",
+        name: "run",
+        expected: "ambiguous-trait-method:Action for Owner::run",
+    },
+    AstLookupRejection {
+        source: "struct Owner; trait Action {} trait Other { fn run(&self); } impl Other for Owner { fn run(&self) {} }",
+        kind: AstLookupKind::TraitMethod,
+        trait_name: "Action",
+        owner: "Owner",
+        name: "run",
+        expected: "missing-trait-method:Action for Owner::run",
+    },
+    AstLookupRejection {
+        source: "trait Action {} impl Action for (u8, u8) { fn run(&self) {} }",
+        kind: AstLookupKind::TraitMethod,
+        trait_name: "Action",
+        owner: "Owner",
+        name: "run",
+        expected: "missing-trait-method:Action for Owner::run",
+    },
+];
 
 const REJECTIONS: &[ParserPinCase] = &[
     ParserPinCase {
@@ -104,6 +180,66 @@ const REJECTIONS: &[ParserPinCase] = &[
         expected: "parser-pin:locked-syn-ambiguous",
     },
 ];
+
+#[test]
+fn mathjax_consumer_facts_ast_linter_rejects_invalid_opaque_source_paths()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::copy_mathjax_inputs(INPUT_PATHS)?;
+    fs::create_dir(fixture.root().join("source-directory"))?;
+    let cases = [
+        ("missing-source.rs", "missing-source:"),
+        ("source-directory", "read-source:"),
+        ("source-directory/../Cargo.toml", "unsafe-source-path:"),
+    ];
+    for (relative, expected) in cases {
+        let Err(error) = super::opaque_text(fixture.root(), relative) else {
+            return Err(format!("opaque source path was accepted: {relative}").into());
+        };
+        assert!(error.starts_with(expected), "unexpected error: {error}");
+    }
+    Ok(())
+}
+
+#[test]
+fn mathjax_consumer_facts_ast_lookup_rejects_missing_or_ambiguous_items() -> Result<(), String> {
+    for case in AST_LOOKUP_REJECTIONS {
+        let file = syn::parse_file(case.source).map_err(|error| error.to_string())?;
+        let actual = match case.kind {
+            AstLookupKind::Function => super::free_function(&file, case.name).map(|_| ()),
+            AstLookupKind::Method => super::method(&file, case.owner, case.name).map(|_| ()),
+            AstLookupKind::TraitMethod => {
+                super::trait_method(&file, case.trait_name, case.owner, case.name).map(|_| ())
+            }
+        };
+        assert_eq!(actual.err().as_deref(), Some(case.expected));
+    }
+    Ok(())
+}
+
+#[test]
+fn mathjax_consumer_facts_ast_lookup_rejects_nonmatching_expression_shapes() -> Result<(), String> {
+    for (source, expected) in [
+        ("value;", "route-statement:target"),
+        ("let other = value;", "route-binding:target"),
+        ("let target;", "route-initializer:target"),
+    ] {
+        let block = syn::parse_str::<syn::Block>(&format!("{{ {source} }}"))
+            .map_err(|error| error.to_string())?;
+        assert_eq!(
+            super::local(&block, 0, "target").err().as_deref(),
+            Some(expected)
+        );
+    }
+    let call = syn::parse_str::<syn::Expr>("(factory())()").map_err(|error| error.to_string())?;
+    assert_eq!(super::call_path(&call), None);
+    let call = syn::parse_str::<syn::Expr>("factory()").map_err(|error| error.to_string())?;
+    assert_eq!(super::call_path(&call).as_deref(), Some("factory"));
+    let field = syn::parse_str::<syn::Expr>("item.0").map_err(|error| error.to_string())?;
+    assert_eq!(super::path_name_from_expr(&field), "");
+    let field = syn::parse_str::<syn::Expr>("(item.field)").map_err(|error| error.to_string())?;
+    assert_eq!(super::path_name_from_expr(&field), "item.field");
+    Ok(())
+}
 
 #[test]
 fn mathjax_consumer_facts_ast_linter_accepts_current_parser_pin() -> Result<(), String> {

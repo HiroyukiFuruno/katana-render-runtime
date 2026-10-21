@@ -1,7 +1,40 @@
 use super::{Fixture, MATHJAX_RENDERER_INDEX, OPAQUE_INPUTS, RUST_INPUTS, shared_readback};
 use std::path::Path;
 
+#[path = "materializer_body_mutation_support.rs"]
+mod body_mutations;
+
 pub(super) const DEFAULT_MATERIALIZATION_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "pub fn resolve_mathjax_js() -> Result<PathBuf, String> {",
+        "#[inline]\n    pub fn resolve_mathjax_js() -> Result<PathBuf, String> {",
+        "default-materializer:renderer-method-attributes",
+    ),
+    (
+        "pub fn resolve_mathjax_js() -> Result<PathBuf, String> {\n",
+        "pub fn resolve_mathjax_js() -> Result<PathBuf, String> {\n        let _ = ();\n",
+        "explicit-override:statement-count",
+    ),
+    (
+        "    fn resolve_mathjax_js_with_env(\n        env_value: Option<std::ffi::OsString>,\n        bundled_path: Option<PathBuf>,\n    ) -> Result<PathBuf, String> {\n        if let Some(path) = Self::env_mathjax_js_from(env_value)? {",
+        "    fn resolve_mathjax_js_with_env(\n        env_value: Option<std::ffi::OsString>,\n        bundled_path: Option<PathBuf>,\n    ) -> Result<PathBuf, String> {\n        let _shape_guard = ();\n        if let Some(path) = Self::env_mathjax_js_from(env_value)? {",
+        "default-materialize:statement-count",
+    ),
+    (
+        "std::env::var_os(\"MATHJAX_JS\")",
+        "std::env::var(\"MATHJAX_JS\")",
+        "explicit-override:default-call",
+    ),
+    (
+        "Self::resolve_mathjax_js_with_env(\n            std::env::var_os(\"MATHJAX_JS\"),\n            Self::default_install_path(),\n        )",
+        "Self::resolve_mathjax_js_with_env",
+        "explicit-override:call",
+    ),
+    (
+        "Self::resolve_mathjax_js_with_env(\n            std::env::var_os(\"MATHJAX_JS\"),\n            Self::default_install_path(),\n        )",
+        "Self::resolve_mathjax_js_with_env(\n            std::env::var_os(\"MATHJAX_JS\"),\n            None,\n        )",
+        "explicit-override:default-call",
+    ),
     (
         "if let Some(path) = Self::env_mathjax_js_from(env_value)? {",
         "if let Ok(path) = Self::env_mathjax_js_from(env_value) {",
@@ -84,6 +117,7 @@ pub(super) fn reject_default_materialization_shape_changes(
         fixture.reject(expected)?;
         fixture.restore_from(renderer, original)?;
     }
+    body_mutations::reject(fixture, original, renderer)?;
     Ok(())
 }
 

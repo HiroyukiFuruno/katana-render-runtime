@@ -135,13 +135,11 @@ fn require_render_dispatch(block: &syn::Block) -> Result<(), String> {
         return Err("backend-runtime-path:render-dispatch".into());
     };
     if !matches!(&*dispatch.expr, syn::Expr::MethodCall(call) if call.method == "render_block" && ident(&call.receiver, "self") && call.args.len() == 1 && ident(&call.args[0], "input"))
-        || dispatch.arms.len() != 2
     {
         return Err("backend-runtime-path:render-dispatch".into());
     }
-    let arms = dispatch.arms.iter().collect::<Vec<_>>();
-    let [success, warning] = arms.as_slice() else {
-        return Err("backend-runtime-path:render-arms".into());
+    let [success, warning] = dispatch.arms.as_slice() else {
+        return Err("backend-runtime-path:render-dispatch".into());
     };
     if !tuple_binding(&success.pat, "Ok", "svg")
         || !require_success_render(&success.body)
@@ -182,4 +180,34 @@ fn require_diagram_block(block: &syn::Block) -> Result<(), String> {
 }
 fn method_chain(expression: &syn::Expr, method_name: &str, receiver: &str) -> bool {
     matches!(expression, syn::Expr::MethodCall(call) if call.method == method_name && call.args.is_empty() && super::source::path_name_from_expr(&call.receiver) == receiver)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::require_render_dispatch;
+
+    const PREFIX: &str = "if input.kind != DiagramKind::MathJax { return Err(RenderError::UnsupportedKind); } let runtime = RuntimeDescriptor::mathjax();";
+    const DISPATCH: &str = "match self.render_block(input) { Ok(svg) => RenderOutputFactory::from_diagram_result(input, crate::markdown::DiagramResult::Ok(svg), runtime), Err(warning) => Ok(RenderOutputFactory::from_raw_string(input, input.source.clone(), warning, runtime)), }";
+
+    #[test]
+    fn render_dispatch_rejects_wrong_arm_counts_with_dispatch_diagnostic() -> Result<(), String> {
+        let accepted = syn::parse_str::<syn::Block>(&format!("{{ {PREFIX} {DISPATCH} }}"))
+            .map_err(|error| error.to_string())?;
+        assert_eq!(require_render_dispatch(&accepted), Ok(()));
+        for arms in [
+            "",
+            "Ok(svg) => RenderOutputFactory::from_diagram_result(input, crate::markdown::DiagramResult::Ok(svg), runtime),",
+            "Ok(svg) => RenderOutputFactory::from_diagram_result(input, crate::markdown::DiagramResult::Ok(svg), runtime), Err(warning) => Ok(RenderOutputFactory::from_raw_string(input, input.source.clone(), warning, runtime)), _ => Err(RenderError::UnsupportedKind)",
+        ] {
+            let block = syn::parse_str::<syn::Block>(&format!(
+                "{{ {PREFIX} match self.render_block(input) {{ {arms} }} }}"
+            ))
+            .map_err(|error| error.to_string())?;
+            assert_eq!(
+                require_render_dispatch(&block).err().as_deref(),
+                Some("backend-runtime-path:render-dispatch")
+            );
+        }
+        Ok(())
+    }
 }

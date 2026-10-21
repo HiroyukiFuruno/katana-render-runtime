@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 use syn::spanned::Spanned;
 
 const RUNTIME_RESOLVER_STATEMENTS: usize = 2;
-const RUNTIME_KIND_ARM_COUNT: usize = 4;
 const RUNTIME_PATH_INPUT_INDEX: usize = 3;
 
 pub(super) fn inspect_runtime_resolver(
@@ -55,16 +54,14 @@ fn runtime_dispatch_expression(block: &syn::Block) -> Result<&syn::ExprMatch, St
     let Some(syn::Stmt::Expr(syn::Expr::MethodCall(map_err), _)) = block.stmts.get(1) else {
         return Err("runtime-path-resolver:dispatch".into());
     };
-    if map_err.method != "map_err"
-        || map_err.args.len() != 1
-        || !ident(
-            map_err
-                .args
-                .first()
-                .ok_or("runtime-path-resolver:map-err")?,
-            "RenderError::RuntimeResolution",
-        )
-    {
+    if map_err.method != "map_err" {
+        return Err("runtime-path-resolver:map-err".into());
+    }
+    let mut arguments = map_err.args.iter();
+    let Some(argument) = arguments.next() else {
+        return Err("runtime-path-resolver:map-err".into());
+    };
+    if arguments.next().is_some() || !ident(argument, "RenderError::RuntimeResolution") {
         return Err("runtime-path-resolver:map-err".into());
     }
     let syn::Expr::Match(dispatch) = map_err.receiver.as_ref() else {
@@ -73,12 +70,11 @@ fn runtime_dispatch_expression(block: &syn::Block) -> Result<&syn::ExprMatch, St
     Ok(dispatch)
 }
 fn require_runtime_dispatch(dispatch: &syn::ExprMatch) -> Result<(), String> {
-    if !ident(&dispatch.expr, "kind") || dispatch.arms.len() != RUNTIME_KIND_ARM_COUNT {
+    if !ident(&dispatch.expr, "kind") {
         return Err("runtime-path-resolver:dispatch-shape".into());
     }
-    let arms = dispatch.arms.iter().collect::<Vec<_>>();
-    let [mermaid, drawio, mathjax, plantuml] = arms.as_slice() else {
-        return Err("runtime-path-resolver:dispatch-count".into());
+    let [mermaid, drawio, mathjax, plantuml] = dispatch.arms.as_slice() else {
+        return Err("runtime-path-resolver:dispatch-shape".into());
     };
     require_standard_dispatches(mermaid, drawio, mathjax)?;
     require_dispatch_plantuml(plantuml)

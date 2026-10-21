@@ -12,13 +12,48 @@ const RENDER_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
         "read-render-route:response-binding",
     ),
     (
+        "MathJaxRuntimeResponse::Svg { svg } => Ok(svg),",
+        "MathJaxRuntimeResponse::Svg(svg) => Ok(svg),",
+        "read-render-route:response-pattern",
+    ),
+    (
+        "MathJaxRuntimeResponse::Svg { svg } => Ok(svg),",
+        "MathJaxRuntimeResponse::Error { svg } => Ok(svg),",
+        "read-render-route:response-pattern",
+    ),
+    (
         "MathJaxRuntimeResponse::Error { message } => Err(message),",
         "MathJaxRuntimeResponse::Error { message } => Err(message),\n            _ => Err(\"unexpected response\".to_string()),",
         "read-render-route:response-arms",
     ),
+    (
+        "let scripts = MathJaxRuntimeScripts::build(mathjax_source, &request_json);",
+        "let scripts = MathJaxRuntimeScripts::build(&request_json, mathjax_source);",
+        "read-render-route:argument:mathjax_source",
+    ),
+    (
+        "let output = DiagramV8Runtime::render(&scripts)?;",
+        "let output = DiagramV8Runtime::render(&request_json)?;",
+        "read-render-route:argument:scripts",
+    ),
+    (
+        "match parse_response(&output)? {\n            MathJaxRuntimeResponse::Svg { svg } => Ok(svg),\n            MathJaxRuntimeResponse::Error { message } => Err(message),\n        }",
+        "if output.is_empty() { Ok(String::new()) } else { Err(String::new()) }",
+        "read-render-route:response-match",
+    ),
 ];
 
 const REQUEST_JSON_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "request.to_json_value().to_string()",
+        "request",
+        "read-render-route:request-json",
+    ),
+    (
+        "request.to_json_value().to_string()",
+        "(request.to_json_value()).to_string()",
+        "read-render-route:request-json",
+    ),
     (
         "request.to_json_value().to_string()",
         "other.to_json_value().to_string()",
@@ -38,6 +73,26 @@ const REQUEST_JSON_MUTATIONS: &[(&str, &str, &str)] = &[
 
 const SOURCE_READER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "Err(error) => Err(format!(",
+        "Ok(error) => Err(format!(",
+        "read-render-route:source-reader-other-pattern",
+    ),
+    (
+        "error.kind() == std::io::ErrorKind::NotFound",
+        "error",
+        "read-render-route:source-reader-not-found-pattern",
+    ),
+    (
+        "Err(format!(",
+        "Ok(format!(",
+        "read-render-route:source-reader-not-found-error",
+    ),
+    (
+        "Err(format!(",
+        "Err(concat!(",
+        "read-render-route:source-reader-not-found-error",
+    ),
+    (
         "fn runtime_source_from(mathjax_js: &Path) -> Result<String, String> {\n    match",
         "fn runtime_source_from(mathjax_js: &Path) -> Result<String, String> {\n    let _ = mathjax_js;\n    match",
         "read-render-route:source-reader-body",
@@ -45,6 +100,11 @@ const SOURCE_READER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         "std::fs::read_to_string(mathjax_js)",
         "std::fs::read_to_string(other_path)",
+        "read-render-route:source-reader-call",
+    ),
+    (
+        "std::fs::read_to_string(mathjax_js)",
+        "source_result",
         "read-render-route:source-reader-call",
     ),
     (
@@ -92,44 +152,6 @@ const SOURCE_READER_PERMISSION_ARM: &str = concat!(
     "Err(\"permission denied\".to_string()),\n",
 );
 
-const BACKEND_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
-    (
-        "DiagramColorPreset::for_render_input(input)",
-        "DiagramColorPreset::for_render_input(other_input)",
-        "backend-runtime-path:preset-input",
-    ),
-    (
-        "MathJaxRendererOps::render_mathjax_with_runtime_path(",
-        "MathJaxRendererOps::render_mathjax_with_runtime(",
-        "backend-runtime-path:arguments",
-    ),
-    (
-        "MathJaxRenderConfig::display(input)",
-        "MathJaxRenderConfig::display(other_input)",
-        "backend-runtime-path:arguments",
-    ),
-    (
-        "if input.kind != DiagramKind::MathJax {",
-        "if input.kind == DiagramKind::MathJax {",
-        "backend-runtime-path:render-kind-check",
-    ),
-    (
-        "RuntimeDescriptor::mathjax()",
-        "RuntimeDescriptor::native()",
-        "backend-runtime-path:render-runtime",
-    ),
-    (
-        "Ok(svg) => RenderOutputFactory::from_diagram_result(",
-        "Err(svg) => RenderOutputFactory::from_diagram_result(",
-        "backend-runtime-path:render-arm-flow",
-    ),
-    (
-        "kind: crate::markdown::DiagramKind::MathJax,",
-        "kind: input.kind,",
-        "backend-runtime-path:block-fields",
-    ),
-];
-
 #[test]
 fn rejects_request_json_from_wrong_receiver_or_call_arguments()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -164,26 +186,31 @@ fn rejects_runtime_source_reader_body_and_error_route_changes()
 }
 
 #[test]
+fn rejects_source_reader_nonmatch_and_noncall_ast_shapes() -> Result<(), Box<dyn std::error::Error>>
+{
+    for (source, expected) in [
+        ("fn other() {}", "missing-function:runtime_source_from"),
+        (
+            "fn runtime_source_from() { Ok(()) }",
+            "read-render-route:source-reader-match",
+        ),
+        (
+            "fn runtime_source_from() { match source_result { _ => Ok(()) } }",
+            "read-render-route:source-reader-call",
+        ),
+    ] {
+        let file = syn::parse_file(source)?;
+        let rejection = super::super::call_binding::require_runtime_source_reader(&file).err();
+        assert_eq!(rejection.as_deref(), Some(expected));
+    }
+    Ok(())
+}
+
+#[test]
 fn rejects_runtime_source_reader_arm_counts_with_the_call_diagnostic()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = mathjax_fixture()?;
     reject_runtime_source_reader_arm_counts(&fixture)
-}
-
-#[test]
-fn rejects_backend_route_changes_at_their_contract_boundary()
--> Result<(), Box<dyn std::error::Error>> {
-    let fixture = mathjax_fixture()?;
-    let relative = RUST_INPUTS[4];
-    let source = std::fs::read_to_string(repository_root()?.join(relative))?;
-    for (before, _, _) in BACKEND_ROUTE_MUTATIONS {
-        assert_eq!(
-            source.matches(before).count(),
-            1,
-            "mutation anchor: {before}"
-        );
-    }
-    reject_mutations(&fixture, relative, BACKEND_ROUTE_MUTATIONS)
 }
 
 fn reject_runtime_source_reader_arm_counts(
@@ -211,7 +238,7 @@ fn reject_runtime_source_reader_arm_counts(
     Ok(())
 }
 
-fn reject_mutations(
+pub(super) fn reject_mutations(
     fixture: &Fixture,
     relative: &str,
     mutations: &[(&str, &str, &str)],

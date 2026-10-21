@@ -1,5 +1,7 @@
 use super::{Fixture, OPAQUE_INPUTS, RUST_INPUTS, inspect_root, repository_root};
 
+#[path = "materializer_consumer_guard_tests.rs"]
+mod consumer_guard_tests;
 #[path = "materializer_shared_readback_helper_tests.rs"]
 mod helper_tests;
 

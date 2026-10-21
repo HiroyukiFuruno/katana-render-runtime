@@ -26,6 +26,10 @@ pub(super) fn materialize_body(block: &syn::Block) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
+#[path = "materializer_body_tests.rs"]
+mod tests;
+
 fn same_bytes_guard(statement: Option<&syn::Stmt>) -> bool {
     let Some(syn::Stmt::Expr(syn::Expr::If(branch), _)) = statement else {
         return false;

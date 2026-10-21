@@ -81,6 +81,31 @@ const EVALUATION_CAPTURE_MUTATIONS: &[(&str, &str, &str)] = &[
 ];
 const SHARED_REALM_COMPILER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "Self::ensure_initialized();",
+        "Self::initialize();",
+        "mermaid-classic-realm:callee:Self::ensure_initialized",
+    ),
+    (
+        "Self::ensure_initialized();\n\n        let mut isolate = v8::Isolate::new(Default::default());",
+        "Self::ensure_initialized();\n\n        let mut isolate = v8::Isolate;",
+        "mermaid-classic-realm:allocation",
+    ),
+    (
+        "Self::ensure_initialized();\n\n        let mut isolate = v8::Isolate::new(Default::default());",
+        "Self::ensure_initialized();\n\n        let mut isolate = v8::Isolate::new(Other::default());",
+        "mermaid-classic-realm:callee:Default::default",
+    ),
+    (
+        "let context_scope = &mut v8::ContextScope::new(handle_scope, context);\n        v8::tc_scope!(let scope, &mut **context_scope);\n        diagram_font_bridge::install(scope)?;",
+        "let context_scope = &v8::ContextScope::new(handle_scope, context);\n        v8::tc_scope!(let scope, &mut **context_scope);\n        diagram_font_bridge::install(scope)?;",
+        "mermaid-classic-realm:context-scope",
+    ),
+    (
+        "            name,\n            code: Cow::Borrowed(code),",
+        "            name: \"other\",\n            code: Cow::Borrowed(code),",
+        "mermaid-classic-realm:constructor",
+    ),
+    (
         "for script in scripts {",
         "for script in scripts.iter().rev() {",
         "mermaid-classic-realm:loop",
