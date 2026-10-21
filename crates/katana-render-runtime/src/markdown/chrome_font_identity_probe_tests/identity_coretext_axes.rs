@@ -90,3 +90,7 @@ pub(super) fn reject_duplicate_ids(mut ids: impl Iterator<Item = u32>) -> Result
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "identity_coretext_axes_tests.rs"]
+mod tests;

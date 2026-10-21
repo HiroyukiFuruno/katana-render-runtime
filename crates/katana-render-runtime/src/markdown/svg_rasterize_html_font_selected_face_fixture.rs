@@ -9,16 +9,14 @@ use resvg::usvg::{
 };
 use std::{
     path::PathBuf,
-    sync::{
-        Arc, Weak,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, Weak},
 };
+use tempfile::TempDir;
 
 type ProvenDatabase = (Arc<Database>, Arc<CreationProof>);
+const REAL_FONT_PATH_COUNT: usize = 3;
 
 pub(super) type WeakBytes = Weak<dyn AsRef<[u8]> + Send + Sync>;
-static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
 pub(super) struct Fixture {
     pub(super) context: Arc<Context>,
@@ -26,24 +24,16 @@ pub(super) struct Fixture {
     pub(super) b: ID,
     pub(super) ttc: ID,
     pub(super) root: PathBuf,
+    _tempdir: TempDir,
 }
 
 impl Fixture {
     pub(super) fn new() -> Result<Self, String> {
-        let root = std::env::temp_dir().join(format!(
-            "krr-selected-face-{}-{}",
-            std::process::id(),
-            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir(&root).map_err(|e| e.to_string())?;
-        let result = Self::load(root.clone());
-        if result.is_err() {
-            std::fs::remove_dir_all(root).map_err(|e| e.to_string())?;
-        }
-        result
+        let tempdir = tempfile::tempdir().map_err(|error| error.to_string())?;
+        Self::load(tempdir.path().to_path_buf(), tempdir)
     }
 
-    fn load(root: PathBuf) -> Result<Self, String> {
+    fn load(root: PathBuf, tempdir: TempDir) -> Result<Self, String> {
         let (a, b, ttc) = write_real_fonts(&root)?;
         let (database, proof) = fixture_database(&root, [&a, &b, &ttc])?;
         let a_id = file_face(&database, &a, "Noto face missing")?;
@@ -57,6 +47,7 @@ impl Fixture {
             b: b_id,
             ttc: ttc_id,
             root,
+            _tempdir: tempdir,
         })
     }
 
@@ -118,12 +109,6 @@ impl Fixture {
     }
 }
 
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
-    }
-}
-
 fn admitted(database: &Arc<Database>, proof: &CreationProof, face: &FaceInfo) -> Option<ID> {
     let family = &face.families.first()?.0;
     admission::admit(
@@ -152,7 +137,7 @@ fn write_real_fonts(root: &std::path::Path) -> Result<(PathBuf, PathBuf, PathBuf
 
 fn fixture_database(
     root: &std::path::Path,
-    paths: [&PathBuf; 3],
+    paths: [&PathBuf; REAL_FONT_PATH_COUNT],
 ) -> Result<ProvenDatabase, String> {
     let absent = root.join("absent.ttf");
     let mut database = Database::new();

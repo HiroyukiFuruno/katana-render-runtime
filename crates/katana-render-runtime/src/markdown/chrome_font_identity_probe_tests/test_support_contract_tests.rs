@@ -1,7 +1,9 @@
+use super::super::test_support::{TempDirectory, read_response};
 use super::super::{
     CaptureRequest, CaptureResult, ProbeRequest, ProbeResponse, REQUEST_SCHEMA, RESPONSE_SCHEMA,
 };
 use super::{request_sha256, verified_single_capture};
+use std::fs;
 
 const CONDITION_ID: &str = "identity-contract-case";
 const INVALID_CAPTURE_RESPONSE_CASE_COUNT: usize = 5;
@@ -80,5 +82,26 @@ fn verified_single_capture_enforces_schema_binding_count_and_condition() -> Resu
         .map_err(|error| format!("valid single capture was rejected: {error}"))?;
     assert_eq!(capture.condition_id, CONDITION_ID);
     assert_eq!(capture.status, "ok");
+    Ok(())
+}
+
+#[test]
+fn response_reader_reports_missing_and_malformed_files() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let missing = read_response(&temp.path().join("missing.json"));
+    assert!(
+        missing
+            .err()
+            .is_some_and(|error| error.starts_with("read response:"))
+    );
+
+    let malformed_path = temp.path().join("malformed.json");
+    fs::write(&malformed_path, b"{").map_err(|error| error.to_string())?;
+    let malformed = read_response(&malformed_path);
+    assert!(
+        malformed
+            .err()
+            .is_some_and(|error| error.starts_with("parse response:"))
+    );
     Ok(())
 }

@@ -132,3 +132,7 @@ fn verify_descriptor_name(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "identity_coretext_binding_tests.rs"]
+mod binding_tests;

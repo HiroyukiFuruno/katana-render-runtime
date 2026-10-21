@@ -1,12 +1,12 @@
 use std::{
     io::Write,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicUsize, Ordering},
 };
 
-static NEXT_TEMP_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
-
-pub(crate) struct TempProbeDirectory(PathBuf);
+pub(crate) struct TempProbeDirectory {
+    root: PathBuf,
+    _owner: tempfile::TempDir,
+}
 
 impl TempProbeDirectory {
     pub(crate) fn create() -> Result<Self, Box<dyn std::error::Error>> {
@@ -17,17 +17,17 @@ impl TempProbeDirectory {
             .ok_or("workspace root missing")?;
         let temp_root = root.join("tmp/html-fidelity");
         std::fs::create_dir_all(&temp_root)?;
-        let path = temp_root.join(format!(
-            "text-probe-test-{}-{}",
-            std::process::id(),
-            NEXT_TEMP_DIRECTORY.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir(&path)?;
-        Ok(Self(path))
+        let owner = tempfile::Builder::new()
+            .prefix("text-probe-test-")
+            .tempdir_in(temp_root)?;
+        Ok(Self {
+            root: owner.path().to_path_buf(),
+            _owner: owner,
+        })
     }
 
     pub(crate) fn file(&self, name: &str) -> PathBuf {
-        self.0.join(name)
+        self.root.join(name)
     }
 }
 
@@ -51,10 +51,4 @@ pub(super) fn write_fresh(path: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::
         .open(target)?;
     file.write_all(bytes)?;
     Ok(())
-}
-
-impl Drop for TempProbeDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
 }

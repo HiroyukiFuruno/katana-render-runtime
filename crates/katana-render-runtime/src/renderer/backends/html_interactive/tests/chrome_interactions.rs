@@ -1,11 +1,15 @@
 use super::super::HtmlInteractiveSession;
 use super::support::{TestResult, click_element, to_string};
 use crate::renderer::backends::html_browser::{
-    HtmlBrowserInput, HtmlBrowserSource, HtmlBrowserViewport,
+    HtmlBrowserInput, HtmlBrowserSource, HtmlBrowserViewport, HtmlRuntime,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::time::Instant;
+
+const MILLIS_PER_SECOND: f64 = 1000.0;
+const INTERACTION_CONTRACT_MAX_MS: u32 = 3000;
 
 const INTERACTION_FIXTURE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -83,7 +87,29 @@ fn scroll_metrics() -> TestResult<(f32, f32)> {
     Ok((frame.scroll_y, frame.content_height))
 }
 
+fn interaction_performance() -> TestResult<(f64, f64)> {
+    let (source, viewport) = interaction_fixture()?;
+    let started = Instant::now();
+    let mut session = HtmlRuntime.open(source, viewport).map_err(to_string)?;
+    let first_frame_ms = started.elapsed().as_secs_f64() * MILLIS_PER_SECOND;
+    let frame = session
+        .latest_frame()
+        .ok_or_else(|| "initial interaction performance frame is missing".to_string())?;
+    if frame.pixels.is_empty() {
+        return Err("initial interaction performance frame has no pixels".to_string());
+    }
+    let close_started = Instant::now();
+    session.close().map_err(to_string)?;
+    let close_ms = close_started.elapsed().as_secs_f64() * MILLIS_PER_SECOND;
+    Ok((first_frame_ms, close_ms))
+}
+
 fn session() -> TestResult<HtmlInteractiveSession> {
+    let (source, viewport) = interaction_fixture()?;
+    HtmlInteractiveSession::start(source, viewport).map_err(to_string)
+}
+
+fn interaction_fixture() -> TestResult<(HtmlBrowserSource, HtmlBrowserViewport)> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/fixtures/html/interaction-fidelity.html")
         .canonicalize()
@@ -92,7 +118,7 @@ fn session() -> TestResult<HtmlInteractiveSession> {
         url::Url::from_file_path(path).map_err(|()| "invalid fixture origin".to_string())?;
     let source = HtmlBrowserSource::new(INTERACTION_FIXTURE, origin.as_str()).map_err(to_string)?;
     let viewport = HtmlBrowserViewport::new(1280, 900, 1.0).map_err(to_string)?;
-    HtmlInteractiveSession::start(source, viewport).map_err(to_string)
+    Ok((source, viewport))
 }
 
 fn state_from_snapshot(snapshot: &str) -> TestResult<SemanticState> {
@@ -133,6 +159,7 @@ fn write_report_if_requested(
         return Ok(());
     };
     let input_sha256 = interaction_fixture_sha256()?;
+    let performance = interaction_performance()?;
     let report = interaction_report(
         input_sha256,
         link_url,
@@ -140,6 +167,7 @@ fn write_report_if_requested(
         form_state,
         scroll_y,
         content_height,
+        performance,
     );
     write_interaction_report(report_path, &report)
 }
@@ -177,10 +205,12 @@ fn interaction_report(
     form_state: &SemanticState,
     scroll_y: f32,
     content_height: f32,
+    performance: (f64, f64),
 ) -> serde_json::Value {
     let report = json!({
         "inputSha256": input_sha256,
         "browser": { "name": "KRR HtmlRuntime", "version": "test", "viewport": { "width": 1280, "height": 900 }, "scale": 1 },
+        "performance": { "firstFrameMs": performance.0, "closeMs": performance.1, "contractMaxMs": INTERACTION_CONTRACT_MAX_MS },
         "states": {
             "link": { "url": link_url },
             "scroll": { "scrollY": scroll_y, "contentHeight": content_height, "viewportHeight": 900 },

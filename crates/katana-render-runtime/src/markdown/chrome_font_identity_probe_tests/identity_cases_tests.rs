@@ -139,3 +139,35 @@ pub(in super::super) fn changed_custom_resource_bytes_are_rejected() -> Result<(
     assert!(load_resource_database(&[stale_resource]).is_err());
     Ok(())
 }
+
+#[test]
+fn resource_database_rejects_invalid_path_contracts_before_loading() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let absolute = temp.path().join("resource.ttf");
+    fs::write(
+        &absolute,
+        include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf"),
+    )
+    .map_err(|error| error.to_string())?;
+    let (_, digest, _) = physical_file(&absolute)?;
+    let empty_url = ResourceFile {
+        url: String::new(),
+        body_path: absolute.clone(),
+        bytes_sha256: digest.clone(),
+    };
+    assert_eq!(
+        load_resource_database(&[empty_url]).err().as_deref(),
+        Some("resource must have a URL and absolute body path")
+    );
+
+    let relative = ResourceFile {
+        url: "https://probe.invalid/font".to_string(),
+        body_path: PathBuf::from("relative-font.ttf"),
+        bytes_sha256: digest,
+    };
+    assert_eq!(
+        load_resource_database(&[relative]).err().as_deref(),
+        Some("resource must have a URL and absolute body path")
+    );
+    Ok(())
+}

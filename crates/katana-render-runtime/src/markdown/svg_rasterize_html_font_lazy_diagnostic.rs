@@ -14,6 +14,11 @@ use std::{
     time::Instant,
 };
 
+#[cfg(test)]
+type TestRasterResult = Result<crate::markdown::svg_rasterize::RasterizedSvg, String>;
+#[cfg(test)]
+type TestAuditedRasterResult = Result<(TestRasterResult, serde_json::Value), String>;
+
 const MAX_CAPTURED_RECORDS: usize = 512;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SourceRoute {
@@ -199,11 +204,7 @@ pub(super) fn begin_final_glyph_paint_call() -> Option<u64> {
 }
 
 #[cfg(test)]
-pub(super) fn record_final_glyph_tree(
-    tree: &resvg::usvg::Tree,
-    source_svg: &str,
-    paint_call: Option<u64>,
-) {
+pub(super) fn record_final_glyph_tree(tree: &resvg::usvg::Tree, source_svg: &str, paint_call: u64) {
     if !PASSIVE_AUDIT.with(Cell::get) {
         return;
     }
@@ -270,97 +271,23 @@ fn error(message: &str) {
 mod boundary_tests;
 
 #[cfg(test)]
-mod passive_actual_route_tests {
-    use super::{MODE, Mode, ROUTE, active};
-    use std::cell::Cell;
-
-    #[test]
-    fn passive_source_audit_preserves_normal_raster_route_and_pixels() -> Result<(), String> {
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="160" height="32"><text x="2" y="24" font-family="Arial" font-size="20">actual route</text></svg>"#;
-        let baseline = rasterize_normally(svg)?;
-        let (audited, audit) = rasterize_with_audit(svg)?;
-        assert_normal_route_is_restored();
-        assert_same_raster(&baseline, &audited);
-        assert_audit_contains_font_evidence(&audit);
-        assert_final_glyph_evidence(&audit, svg)?;
-        Ok(())
-    }
-
-    fn rasterize_normally(
-        svg: &str,
-    ) -> Result<crate::markdown::svg_rasterize::RasterizedSvg, String> {
-        crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_html_svg(svg, 1.0)
-            .map_err(|error| error.to_string())
-    }
-
-    fn rasterize_with_audit(
-        svg: &str,
-    ) -> Result<
-        (
-            crate::markdown::svg_rasterize::RasterizedSvg,
-            serde_json::Value,
-        ),
-        String,
-    > {
-        let (audited, audit) =
-            crate::markdown::svg_rasterize::SvgRasterizeOps::with_actual_font_source_audit(|| {
-                assert!(!active());
-                assert_eq!(ROUTE.with(Cell::get), None);
-                assert!(matches!(MODE.with(Cell::get), Mode::Audit));
-                crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_html_svg(svg, 1.0)
-            })
-            .map_err(|error| error.to_string())?;
-        Ok((audited.map_err(|error| error.to_string())?, audit))
-    }
-
-    fn assert_normal_route_is_restored() {
-        assert!(!active());
-        assert_eq!(ROUTE.with(Cell::get), None);
-    }
-
-    fn assert_same_raster(
-        baseline: &crate::markdown::svg_rasterize::RasterizedSvg,
-        audited: &crate::markdown::svg_rasterize::RasterizedSvg,
-    ) {
-        assert_eq!(
-            (baseline.width, baseline.height),
-            (audited.width, audited.height)
-        );
-        assert_eq!(baseline.rgba, audited.rgba);
-    }
-
-    fn assert_audit_contains_font_evidence(audit: &serde_json::Value) {
-        assert!(
-            audit["faces"]
-                .as_array()
-                .is_some_and(|faces| !faces.is_empty())
-                || audit["errors"]
-                    .as_array()
-                    .is_some_and(|errors| !errors.is_empty())
-        );
-        assert_eq!(audit["dropped"], 0);
-    }
-
-    fn assert_final_glyph_evidence(audit: &serde_json::Value, svg: &str) -> Result<(), String> {
-        use sha2::{Digest, Sha256};
-        let expected_sha = Sha256::digest(svg.as_bytes())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        let trees = audit["finalGlyphTrees"]
-            .as_array()
-            .ok_or_else(|| "final glyph tree evidence is absent".to_owned())?;
-        assert_eq!(trees.len(), 1);
-        assert_eq!(trees[0]["paintCall"], 1);
-        assert_eq!(trees[0]["treePath"], "root");
-        assert_eq!(trees[0]["sourceSvgSha256"], expected_sha);
-        assert!(
-            trees[0]["faces"]
-                .as_array()
-                .is_some_and(|faces| !faces.is_empty())
-        );
-        assert!(audit["finalGlyphErrors"].is_array());
-        assert_eq!(audit["finalGlyphDropped"], 0);
-        Ok(())
-    }
+fn rasterize_normally(svg: &str) -> Result<crate::markdown::svg_rasterize::RasterizedSvg, String> {
+    crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_html_svg(svg, 1.0)
+        .map_err(|error| error.to_string())
 }
+
+#[cfg(test)]
+fn rasterize_with_audit(svg: &str, observe: impl FnOnce()) -> TestAuditedRasterResult {
+    let (audited, audit) =
+        crate::markdown::svg_rasterize::SvgRasterizeOps::with_actual_font_source_audit(|| {
+            observe();
+            crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_html_svg(svg, 1.0)
+                .map_err(|error| error.to_string())
+        })
+        .map_err(|error| error.to_string())?;
+    Ok((audited, audit))
+}
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_font_lazy_diagnostic_passive_actual_route_tests.rs"]
+mod passive_actual_route_tests;

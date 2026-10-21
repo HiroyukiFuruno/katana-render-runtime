@@ -15,7 +15,8 @@ pub(super) fn verify(fixture: &CliFixture) -> Result<(), String> {
         .first()
         .ok_or("local capture response missing")?;
     assert_eq!(capture.status, "resolved");
-    assert_provenance(capture, &fixture.family_name, fixture.face.index)
+    assert_provenance(capture, &fixture.family_name, fixture.face.index);
+    Ok(())
 }
 
 fn local_font_request(fixture: &CliFixture) -> ProbeRequest {
@@ -34,21 +35,13 @@ fn local_font_request(fixture: &CliFixture) -> ProbeRequest {
     }
 }
 
-fn assert_provenance(
-    capture: &super::super::CaptureResult,
-    family_name: &str,
-    face_index: u32,
-) -> Result<(), String> {
-    let [mapped] = capture.font_provenance.as_slice() else {
-        return Err("local font provenance count differs".to_string());
-    };
+fn assert_provenance(capture: &super::super::CaptureResult, family_name: &str, face_index: u32) {
+    assert_eq!(capture.font_provenance.len(), 1);
+    let mapped = &capture.font_provenance[0];
     assert_eq!(mapped.scope, "capture");
     assert_eq!(mapped.family, family_name);
-    if !Path::new(&mapped.file_path).is_absolute() {
-        return Err("resolved font path is not absolute".to_string());
-    }
+    assert!(Path::new(&mapped.file_path).is_absolute());
     assert_eq!(mapped.face_index, face_index);
     assert_eq!(mapped.selected_node_id, None);
     assert!(mapped.selected && mapped.file_bytes_verified);
-    Ok(())
 }

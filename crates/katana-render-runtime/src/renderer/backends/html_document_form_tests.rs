@@ -5,6 +5,8 @@ use super::{
 
 const FORM_DEFAULTS: &str = "<input id=checkbox type=checkbox><input id=radio type=RADIO><input id=text type=text><select><option id=plain>Fallback label</option></select>";
 const SELECT_OPTIONS: &str = "<select id=choice><optgroup id=group><option id=first value=duplicate>First</option><option id=second value=duplicate selected>Second</option><option id=other value=other>Other</option></optgroup></select>";
+const ROOT_NODE_ID: u64 = 1;
+const MISSING_NODE_ID: u64 = 999;
 
 #[test]
 fn form_values_use_input_defaults_and_option_text() -> Result<(), String> {
@@ -61,5 +63,33 @@ fn nested_select_options_do_not_become_outer_select_values() -> Result<(), Strin
     append_nested_select(&mut document, group)?;
 
     assert_eq!(document.form_value(select)?, Some("duplicate".to_string()));
+    Ok(())
+}
+
+#[test]
+fn form_consumer_rejects_invalid_and_non_html_targets() -> Result<(), String> {
+    let mut document = HtmlDocument::parse(
+        "<input id=text><svg id=vector><foreignObject><input id=nested></foreignObject></svg>",
+    );
+    let text = node_id(&mut document, "text")?;
+    let vector = node_id(&mut document, "vector")?;
+
+    assert_eq!(
+        document.form_value(ROOT_NODE_ID),
+        Err("value target is not an element".to_string())
+    );
+    assert_eq!(document.form_value(vector)?, None);
+    let invalid_select_targets = [
+        (ROOT_NODE_ID, "value target is not an element"),
+        (text, "select value target is not an HTML select"),
+        (MISSING_NODE_ID, "HTML node 999 does not exist"),
+    ];
+    for (node_id, expected_error) in invalid_select_targets {
+        assert_eq!(
+            document.set_select_value(node_id, "new"),
+            Err(expected_error.to_string()),
+            "node {node_id}"
+        );
+    }
     Ok(())
 }

@@ -58,32 +58,6 @@ impl HtmlLayoutRenderer {
         });
     }
 
-    pub(super) fn wrap_painted_range(&mut self, start: usize, opacity: f32) {
-        if self.svg.len() == start {
-            return;
-        }
-        self.svg
-            .insert_str(start, &format!(r#"<g opacity="{opacity}">"#));
-        self.svg.push_str("</g>");
-    }
-
-    pub(super) fn wrap_rotated_range(
-        &mut self,
-        start: usize,
-        degrees: f32,
-        center_x: f32,
-        center_y: f32,
-    ) {
-        if self.svg.len() == start {
-            return;
-        }
-        self.svg.insert_str(
-            start,
-            &format!(r#"<g transform="rotate({degrees} {center_x} {center_y})">"#),
-        );
-        self.svg.push_str("</g>");
-    }
-
     pub(super) fn finish_deferred_paint(&mut self) {
         self.deferred_paint
             .sort_by_key(|paint| (paint.z_index, paint.order));
@@ -100,10 +74,6 @@ impl HtmlLayoutRenderer {
         self.svg.push_str(&foreground);
     }
 }
-
-#[cfg(test)]
-#[path = "layout_paint_order_coverage_gap_tests.rs"]
-mod coverage_gaps;
 
 #[cfg(test)]
 mod tests {
@@ -125,31 +95,6 @@ mod tests {
     }
 
     #[test]
-    fn wrapping_empty_range_is_a_noop() {
-        let mut renderer = renderer();
-        let start = renderer.svg.len();
-
-        renderer.wrap_painted_range(start, 0.5);
-
-        assert_eq!(renderer.svg.len(), start);
-    }
-
-    #[test]
-    fn rotated_range_uses_the_supplied_transform_origin() {
-        let mut renderer = renderer();
-        let start = renderer.svg.len();
-        renderer.svg.push_str("content");
-
-        renderer.wrap_rotated_range(start, 90.0, 20.0, 30.0);
-
-        assert!(
-            renderer
-                .svg
-                .contains(r#"<g transform="rotate(90 20 30)">content</g>"#)
-        );
-    }
-
-    #[test]
     fn deferred_paint_places_negative_layers_behind_document() {
         let mut renderer = renderer();
         renderer.svg.push_str("document");
@@ -166,15 +111,5 @@ mod tests {
 
         assert!(renderer.svg.ends_with("foreground"));
         assert!(renderer.svg.find("negative") < renderer.svg.find("document"));
-    }
-
-    #[test]
-    fn rotating_an_empty_range_is_a_noop() {
-        let mut renderer = renderer();
-        let start = renderer.svg.len();
-
-        renderer.wrap_rotated_range(start, 90.0, 0.0, 0.0);
-
-        assert_eq!(renderer.svg.len(), start);
     }
 }

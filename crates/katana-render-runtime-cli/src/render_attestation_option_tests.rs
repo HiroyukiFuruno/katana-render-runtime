@@ -32,6 +32,26 @@ fn attestation_cli_flags_require_output_and_attempt_token() {
     );
 }
 
+#[test]
+fn fixture_tempdirs_are_unique_and_raii_cleaned() -> anyhow::Result<()> {
+    let first = Fixture::new("first")?;
+    let first_root = first.root.clone();
+    let second = Fixture::new("second")?;
+    let second_root = second.root.clone();
+
+    assert_ne!(first_root, second_root);
+    assert!(first_root.is_dir());
+    assert!(second_root.is_dir());
+
+    drop(first);
+    assert!(!first_root.exists());
+    assert!(second_root.is_dir());
+
+    drop(second);
+    assert!(!second_root.exists());
+    Ok(())
+}
+
 fn render_options(cli: Cli) -> anyhow::Result<DiagramSourceOptions> {
     let Commands::Mermaid {
         action: DiagramAction::Render { source_options, .. },

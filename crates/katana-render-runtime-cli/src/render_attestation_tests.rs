@@ -6,11 +6,10 @@ use katana_render_runtime::{
 };
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static SEQUENCE: AtomicU64 = AtomicU64::new(1);
+use tempfile::TempDir;
 
 struct Fixture {
+    _tempdir: TempDir,
     root: PathBuf,
     input: PathBuf,
     runtime: PathBuf,
@@ -23,13 +22,10 @@ impl Fixture {
         let parent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tmp/html-fidelity/frame-capacity-independent-review-r1/native-input-svg-attestation-implementation-r1/unit-artifacts");
         fs::create_dir_all(&parent)?;
         let parent = fs::canonicalize(parent)?;
-        let root = parent.join(format!(
-            "{}-{}",
-            std::process::id(),
-            SEQUENCE.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&root)?;
+        let tempdir = TempDir::new_in(parent)?;
+        let root = tempdir.path().to_path_buf();
         let fixture = Self {
+            _tempdir: tempdir,
             input: root.join("input.mmd"),
             runtime: root.join("runtime.js"),
             output: root.join("output.svg"),

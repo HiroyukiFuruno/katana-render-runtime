@@ -2,6 +2,9 @@ use super::test_support::{
     audit_svg, root_tree, svg_with_many_text_spans, svg_with_repeated_glyph_text,
 };
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
+use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
+use resvg::usvg::fontdb::{Database, Source};
+use std::sync::Arc;
 
 #[test]
 fn actual_raster_route_retains_each_top_and_embedded_svg_tree() -> Result<(), String> {
@@ -118,6 +121,32 @@ fn glyph_layout_rejects_non_finite_values() -> Result<(), String> {
             Err(error) => assert!(error.contains("non-finite glyph layout")),
         }
     }
+    Ok(())
+}
+
+#[test]
+fn glyph_font_evidence_caps_unique_loaded_font_faces() -> Result<(), String> {
+    let mut database = Database::new();
+    let shared_font_bytes = Arc::new(FONT_BYTES.to_vec());
+    let mut ids = Vec::new();
+    for _ in 0..=super::MAX_FINAL_GLYPH_RECORDS {
+        let loaded = database.load_font_source(Source::Binary(shared_font_bytes.clone()));
+        if loaded.len() != 1 {
+            return Err("bundled font did not load as exactly one real font face".into());
+        }
+        ids.push(loaded[0]);
+    }
+
+    let mut evidence = super::TreeEvidence::default();
+    for id in &ids {
+        super::record_glyph_font(*id, &mut evidence);
+    }
+    assert_eq!(evidence.faces.len(), super::MAX_FINAL_GLYPH_RECORDS);
+    assert_eq!(evidence.dropped, 1);
+
+    super::record_glyph_font(ids[0], &mut evidence);
+    assert_eq!(evidence.faces.get(&ids[0]), Some(&2));
+    assert_eq!(evidence.dropped, 1);
     Ok(())
 }
 

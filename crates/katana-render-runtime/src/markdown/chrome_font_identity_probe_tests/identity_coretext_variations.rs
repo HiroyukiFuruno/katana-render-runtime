@@ -22,6 +22,10 @@ mod axis_values;
 const WEIGHT_AXIS: u32 = u32::from_be_bytes(*b"wght");
 const POSTSCRIPT_CHECK_SIZE: f64 = 12.0;
 
+#[cfg(test)]
+#[path = "identity_coretext_variation_tests.rs"]
+mod tests;
+
 pub(super) fn verify_ctfont_descriptor_name(
     descriptor: &CTFontDescriptor,
     descriptor_postscript_name: &str,

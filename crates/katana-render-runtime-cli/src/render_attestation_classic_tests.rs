@@ -1,15 +1,14 @@
 use super::{CaptureState, CaptureSubscriber, TARGET, write_capture};
 use anyhow::{Context, ensure};
 use serde_json::json;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use tempfile::TempDir;
 
 #[path = "render_attestation_classic_typed_fields_tests.rs"]
 mod typed_fields;
 
 const SOURCE: &str = "flowchart TD\n  A[日本語] --> B";
-static SEQUENCE: AtomicU64 = AtomicU64::new(1);
-
+const CLASSIC_PROGRAM_COUNT: u64 = 4;
 fn request_json(zenuml: bool) -> String {
     json!({"source":SOURCE,"svgId":"protocol-only","theme":"default",
         "background":"white","fill":"white","text":"black","stroke":"black",
@@ -139,6 +138,47 @@ fn wrong_order_duplicate_and_extra_events_are_rejected() -> anyhow::Result<()> {
 }
 
 #[test]
+fn later_valid_event_does_not_clear_first_protocol_error() -> anyhow::Result<()> {
+    let value = request_json(false);
+    rejected(
+        observe(|| {
+            script("mermaid.min.js", "out of order");
+            request(&value, 4);
+        })?,
+        "script precedes request",
+    )
+}
+
+#[test]
+fn poisoned_capture_lock_discards_tracing_event() -> anyhow::Result<()> {
+    let state = Arc::new(Mutex::new(CaptureState::new()));
+    let poison_target = Arc::clone(&state);
+    let poison = std::thread::spawn(move || {
+        let Ok(_guard) = poison_target.lock() else {
+            return;
+        };
+        std::panic::resume_unwind(Box::new("poison capture lock for regression"));
+    })
+    .join();
+    ensure!(poison.is_err(), "poisoning thread unexpectedly succeeded");
+
+    let subscriber = CaptureSubscriber {
+        state: Arc::clone(&state),
+    };
+    let value = request_json(false);
+    tracing::subscriber::with_default(subscriber, || request(&value, 4));
+    let state = Arc::try_unwrap(state)
+        .map_err(|_| anyhow::anyhow!("poisoned subscriber escaped"))?
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    ensure!(
+        state.request.is_none(),
+        "event recorded through poisoned lock"
+    );
+    rejected(state, "not observed")
+}
+
+#[test]
 fn completion_without_script_and_double_completion_are_rejected() -> anyhow::Result<()> {
     rejected(observe(complete)?, "has no script")?;
     let value = request_json(false);
@@ -216,19 +256,16 @@ fn verify_artifact_bytes_and_reject_existing_destination(
         "../../tmp/quality/mermaid-attestation-classic-capture-implementation-r1/unit-artifacts",
     );
     std::fs::create_dir_all(&parent)?;
-    let root = std::fs::canonicalize(parent)?.join(format!(
-        "{}-{}",
-        std::process::id(),
-        SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir(&root)?;
-    let capture = write_capture(&root, state)?;
+    let parent = std::fs::canonicalize(parent)?;
+    let tempdir = TempDir::new_in(parent)?;
+    let root = tempdir.path();
+    let capture = write_capture(root, state)?;
     capture.verify()?;
     ensure!(
         std::fs::read_to_string(root.join("classic-request.json"))? == value,
         "request changed"
     );
-    reject_changed_or_overwritten_artifacts(&root, value, || capture.verify())
+    reject_changed_or_overwritten_artifacts(root, value, || capture.verify())
 }
 
 fn reject_changed_or_overwritten_artifacts(
@@ -239,7 +276,7 @@ fn reject_changed_or_overwritten_artifacts(
     std::fs::write(root.join("classic-script-00.js"), "changed")?;
     ensure!(verify_capture().is_err(), "changed artifact accepted");
     let state = observe(|| {
-        request(value, 4);
+        request(value, CLASSIC_PROGRAM_COUNT);
         programs(value, false);
     })?;
     ensure!(

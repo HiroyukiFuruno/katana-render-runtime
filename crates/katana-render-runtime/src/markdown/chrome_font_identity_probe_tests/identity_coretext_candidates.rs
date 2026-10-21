@@ -109,3 +109,7 @@ pub(super) fn verify_single_font_data(bytes: &[u8], face_index: u32) -> Result<(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "identity_coretext_candidates_tests.rs"]
+mod tests;

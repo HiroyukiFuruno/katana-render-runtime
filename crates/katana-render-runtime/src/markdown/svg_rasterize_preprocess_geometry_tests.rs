@@ -66,6 +66,30 @@ fn geometry_attribute_selector_preserves_original_svg_bytes() {
 }
 
 #[test]
+fn ancestor_sibling_and_first_child_selectors_survive_geometry_materialization() {
+    let cases = [
+        (
+            "ancestor",
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><style>.wrapper > rect.target { rx: 12px; }</style><g class="wrapper"><rect class="target" rx="5"/></g></svg>"#,
+        ),
+        (
+            "previous sibling",
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><style>.before + rect.target { rx: 12px; }</style><g><rect class="before"/><rect class="target" rx="5"/></g></svg>"#,
+        ),
+        (
+            "first child",
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><style>rect.target:first-child { rx: 12px; }</style><g><rect class="target" rx="5"/><rect/></g></svg>"#,
+        ),
+    ];
+    for (selector_kind, source) in cases {
+        assert!(
+            preprocess(source).contains("rx=\"12px\""),
+            "{selector_kind} selector changed during geometry materialization"
+        );
+    }
+}
+
+#[test]
 fn no_namespace_svg_markup_keeps_supported_attribute_selectors_unchanged() {
     let source =
         r#"<svg><style>rect[rx="5"] { fill: red; } rect { rx: 12px; }</style><rect rx="5"/></svg>"#;

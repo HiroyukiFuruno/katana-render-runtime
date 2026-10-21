@@ -19,12 +19,20 @@ fn deferred_z_child_obeys_non_stacking_rounded_overflow_clip() -> TestResult {
 }
 
 #[test]
-fn zero_width_axis_clip_hides_deferred_paint_from_html_layout() -> TestResult {
-    assert_deferred_clip_pixels(
-        "position:absolute;left:0;top:0;width:20px;height:20px;background:red;z-index:1",
-        "position:relative;width:0;height:40px;overflow-x:clip",
-        &[(1, 10, [255, 255, 255, 255])],
-    )
+fn zero_sized_active_clip_axes_hide_deferred_paint() -> TestResult {
+    let cases = [
+        ("width:0;height:40px;overflow-x:clip", (1, 10)),
+        ("width:40px;height:0;overflow-y:clip", (10, 1)),
+        ("width:0;height:0;overflow-x:clip;overflow-y:clip", (1, 1)),
+    ];
+    for (clip_style, (x, y)) in cases {
+        assert_deferred_clip_pixels(
+            "position:absolute;left:0;top:0;width:20px;height:20px;background:red;z-index:1",
+            &format!("position:relative;{clip_style}"),
+            &[(x, y, [255, 255, 255, 255])],
+        )?;
+    }
+    Ok(())
 }
 
 #[test]

@@ -31,10 +31,7 @@ struct TreeEvidence {
     glyph_layout_errors: Vec<String>,
 }
 
-pub(super) fn record(tree: &Tree, source_svg: &str, paint_call: Option<u64>) {
-    let Some(paint_call) = paint_call else {
-        return;
-    };
+pub(super) fn record(tree: &Tree, source_svg: &str, paint_call: u64) {
     let source_svg_sha256 = output::sha256(source_svg.as_bytes());
     record_tree(
         tree,

@@ -69,12 +69,12 @@ fn assert_custom_provenance(
         .font_provenance
         .first()
         .ok_or("custom font provenance missing")?;
-    if !provenance
-        .source
-        .contains("captured Chrome resource response body")
-    {
-        return Err("custom font source does not identify captured response".to_string());
-    }
+    assert!(
+        provenance
+            .source
+            .contains("captured Chrome resource response body"),
+        "custom font source must identify the captured response"
+    );
     let expected_path = fs::canonicalize(custom_path)
         .map_err(|error| format!("canonicalize custom response: {error}"))?;
     assert_eq!(provenance.file_path, expected_path.display().to_string());

@@ -2,7 +2,7 @@ use super::super::html_document::HtmlDocumentNode;
 use super::layout::HtmlLayoutRenderer;
 use super::layout_flow::ListItemMarker;
 use super::style::{CssPosition, CssStyle};
-use super::types::{DetailsContext, ElementBox, ElementRenderContext, LayoutContext};
+use super::types::{DetailsContext, ElementRenderContext, LayoutContext};
 
 pub(super) struct ElementPaintScope {
     paint_start: usize,
@@ -137,42 +137,7 @@ impl HtmlLayoutRenderer {
             );
             return;
         }
-        self.rotate_element_range(
-            scope.paint_start,
-            scope.element_box_start,
-            node_id,
-            style.rotation_degrees,
-        );
-        if style.opacity < 1.0 {
-            self.wrap_painted_range(scope.paint_start, style.opacity);
-        }
         self.defer_auto_clip_paint(scope.paint_start, node_id, scope.auto_clip_paint_order);
-    }
-
-    fn rotate_element_range(
-        &mut self,
-        paint_start: usize,
-        element_box_start: usize,
-        node_id: u64,
-        rotation_degrees: f32,
-    ) {
-        if rotation_degrees == 0.0 {
-            return;
-        }
-        let Some((center_x, center_y)) =
-            ElementBox::center_after(&self.element_boxes, element_box_start, node_id)
-        else {
-            return;
-        };
-        self.wrap_rotated_range(
-            paint_start,
-            rotation_degrees,
-            center_x - self.scroll_x,
-            center_y - self.scroll_y,
-        );
-        for element_box in &mut self.element_boxes[element_box_start..] {
-            element_box.rotate_about(rotation_degrees, center_x, center_y);
-        }
     }
     pub(super) fn render_styled_element(
         &mut self,
@@ -361,14 +326,6 @@ mod tests {
                 &[2, 1]
             ))
         );
-    }
-
-    #[test]
-    fn absent_rotated_element_box_leaves_paint_unchanged() {
-        let mut renderer = test_renderer();
-        let paint_start = renderer.svg.len();
-        renderer.rotate_element_range(paint_start, 0, 1, HALF_TURN_DEGREES);
-        assert_eq!(renderer.svg.len(), paint_start);
     }
 
     #[test]

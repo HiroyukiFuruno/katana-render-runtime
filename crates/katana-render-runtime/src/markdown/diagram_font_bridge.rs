@@ -271,3 +271,7 @@ mod boundary_tests {
         assert!(matches!(result.as_deref(), Ok("true")));
     }
 }
+
+#[cfg(test)]
+#[path = "diagram_font_bridge_numeric_boundary_tests.rs"]
+mod numeric_boundary_tests;

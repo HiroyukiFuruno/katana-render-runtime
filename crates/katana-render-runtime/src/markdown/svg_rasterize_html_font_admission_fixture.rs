@@ -1,10 +1,12 @@
 use super::{CreationProof, Database, HtmlFontRequest, REGULAR_TEXT, sources};
 use resvg::usvg::fontdb::{ID, Language, Source, Stretch, Style, Weight};
 use std::{path::PathBuf, sync::Arc};
+use tempfile::TempDir;
 
 pub(super) struct OwnedFontCopy {
     pub(super) directory: PathBuf,
     pub(super) path: PathBuf,
+    _tempdir: TempDir,
 }
 
 impl OwnedFontCopy {
@@ -41,27 +43,18 @@ impl OwnedFontCopy {
                     })
             })
             .ok_or_else(|| "no real Arial File face".to_string())?;
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let sequence = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let directory = std::env::temp_dir().join(format!(
-            "krr-font-admission-{}-{sequence}",
-            std::process::id()
-        ));
-        std::fs::create_dir(&directory).map_err(|error| error.to_string())?;
+        let tempdir = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let directory = tempdir.path().to_path_buf();
         let copied = Self {
             path: directory.join("Arial.ttf"),
             directory,
+            _tempdir: tempdir,
         };
         std::fs::copy(source, &copied.path).map_err(|error| error.to_string())?;
         Ok(copied)
     }
 }
 
-impl Drop for OwnedFontCopy {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.directory);
-    }
-}
 pub(super) fn copied_arial_database()
 -> Result<(Arc<Database>, CreationProof, OwnedFontCopy), String> {
     let copied = OwnedFontCopy::from_real_arial()?;

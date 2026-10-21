@@ -3,12 +3,55 @@ use super::{
     ResourceFile, SelectedFont,
 };
 use crate::system::ProcessService;
-use std::{fs, path::Path, process::Output};
+use resvg::usvg::fontdb::{Database, Source};
+use std::{fs, path::Path, process::Output, sync::Arc};
 
 pub(super) const PROBE_TEST: &str =
     "markdown::chrome_font_identity_probe_tests::chrome_font_identity_probe_cli";
 
 pub(super) struct TempDirectory(tempfile::TempDir);
+
+const PHYSICAL_FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf");
+
+pub(super) fn physical_font_fixture() -> Result<(TempDirectory, Database, SelectedFont), String> {
+    let temp = TempDirectory::new()?;
+    let path = temp.path().join("physical-font.ttf");
+    fs::write(&path, PHYSICAL_FONT_BYTES).map_err(|error| error.to_string())?;
+    let mut database = Database::new();
+    database
+        .load_font_file(&path)
+        .map_err(|error| error.to_string())?;
+    let face = database
+        .faces()
+        .next()
+        .ok_or("fontdb did not load the font")?;
+    let family_name = face
+        .families
+        .first()
+        .map(|(family, _)| family.clone())
+        .ok_or("bundled font has no family name")?;
+    let selected = SelectedFont {
+        family_name,
+        post_script_name: face.post_script_name.clone(),
+        glyph_count: 1,
+        is_custom_font: false,
+    };
+    Ok((temp, database, selected))
+}
+
+pub(super) fn shared_physical_font_fixture(
+    append_byte: bool,
+) -> Result<(TempDirectory, Database, Vec<u8>), String> {
+    let (temp, _file_database, _) = physical_font_fixture()?;
+    let path = temp.path().join("physical-font.ttf");
+    let mut source_bytes = PHYSICAL_FONT_BYTES.to_vec();
+    if append_byte {
+        source_bytes.push(0);
+    }
+    let mut database = Database::new();
+    database.load_font_source(Source::SharedFile(path, Arc::new(source_bytes.clone())));
+    Ok((temp, database, source_bytes))
+}
 
 impl TempDirectory {
     pub(super) fn new() -> Result<Self, String> {

@@ -177,7 +177,9 @@ mod diagnostic {
         let rendered = lazy_diagnostic::measure("render_tree", || {
             super::super::super::super::SvgRasterizeOps::render_tree(&tree, scale)
         });
-        if rendered.is_ok() {
+        if rendered.is_ok()
+            && let Some(paint_call) = paint_call
+        {
             lazy_diagnostic::record_final_glyph_tree(&tree, svg, paint_call);
         }
         rendered

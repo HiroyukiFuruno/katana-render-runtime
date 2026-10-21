@@ -1,5 +1,10 @@
 use super::super::diagnostic_binary_fixture::real_database as shared_real_database;
-use super::{MAX_EVENTS, Scope, admission_result};
+use super::{
+    MAX_EVENTS, Scope, TreeParseTiming, admission_result, eager_attempt, eager_reparse,
+    eager_result, install_eager, known_attempt, known_fallback, known_result, known_return,
+    prepare_ascii_unavailable, prepare_known_unavailable, prepare_ready, prepare_unavailable,
+    reject_family, reject_stretch, reject_style,
+};
 use crate::markdown::svg_rasterize::font::BUNDLED_SANS_SERIF_FONT;
 use resvg::usvg::fontdb::{Database, ID};
 use std::sync::{Arc, Weak};
@@ -179,4 +184,51 @@ fn assert_nested_json_boundary(observer: &Scope, database: &Database, overflow: 
     drop(inner);
     assert_eq!(observer.snapshot().events, outer.events);
     assert_eq!(observer.snapshot().dropped, outer.dropped);
+}
+
+#[test]
+fn event_serialization_records_parse_and_admission_boundary_events() -> Result<(), String> {
+    let observer = Scope::enter();
+    let valid = std::sync::atomic::AtomicBool::new(true);
+    let selected = std::sync::atomic::AtomicBool::new(false);
+    let timing = TreeParseTiming::default();
+
+    known_result(false, &valid, &selected, &timing);
+    eager_reparse(&valid, &selected);
+    known_attempt();
+    eager_attempt();
+    known_return();
+    eager_result(true);
+    prepare_unavailable();
+    prepare_ascii_unavailable();
+    prepare_known_unavailable();
+    prepare_ready();
+    reject_family();
+    reject_stretch();
+    reject_style();
+
+    let events = observer.snapshot().events;
+    assert_eq!(events.len(), 13);
+    assert_eq!(events[0]["stage"], "known_parse_result");
+    assert_eq!(events[1]["route"], "eager_reparse");
+    assert_eq!(events[5]["success"], true);
+    assert_eq!(events[12]["reason"], "style_not_normal_or_italic");
+    Ok(())
+}
+
+#[test]
+fn raster_observer_records_real_known_fallback_and_eager_fallback() -> Result<(), String> {
+    let (mut database, id, _bytes) = real_database()?;
+    let observer = Scope::enter();
+    known_fallback('A', &[id], &database, None);
+
+    let mut options = resvg::usvg::Options::default();
+    install_eager(&mut options);
+    let _ = (options.font_resolver.select_fallback)('A', &[id], &mut database);
+
+    let events = observer.snapshot().events;
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["route"], "known_probe");
+    assert_eq!(events[1]["route"], "eager");
+    Ok(())
 }

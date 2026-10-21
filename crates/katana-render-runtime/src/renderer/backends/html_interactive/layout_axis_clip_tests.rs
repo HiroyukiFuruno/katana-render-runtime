@@ -1,6 +1,42 @@
 use super::{axis_x, axis_y, polygon_path};
 
 #[test]
+fn finalize_missing_paint_clip_owner_returns_specific_error() {
+    use super::super::layout::{DeferredAxisClip, HtmlLayoutRenderer};
+    use super::super::types::OverflowClip;
+    use super::finalize;
+
+    let mut renderer = HtmlLayoutRenderer::default();
+    renderer.deferred_axis_clips.push(DeferredAxisClip {
+        id: 17,
+        owner_node_id: 91,
+        source_owner: (0.0, 0.0, 10.0, 10.0),
+        clip: OverflowClip::new(91, 0.0, 0.0, 4.0, 4.0, 0.0, 0.0),
+    });
+
+    assert_eq!(
+        finalize(&mut renderer).err().as_deref(),
+        Some("missing paint clip owner 91")
+    );
+}
+
+#[test]
+fn finalize_with_empty_pending_clips_preserves_svg() {
+    use super::super::layout::HtmlLayoutRenderer;
+    use super::finalize;
+
+    let mut renderer = HtmlLayoutRenderer {
+        svg: "<svg><path d=\"M 1 2\"/></svg>".to_string(),
+        ..HtmlLayoutRenderer::default()
+    };
+
+    assert!(finalize(&mut renderer).is_ok());
+
+    assert_eq!(renderer.svg, "<svg><path d=\"M 1 2\"/></svg>");
+    assert!(renderer.deferred_axis_clips.is_empty());
+}
+
+#[test]
 fn zero_area_polygon_is_empty_clip_path() {
     assert_eq!(polygon_path(&[]), "M 0 0 Z");
 }

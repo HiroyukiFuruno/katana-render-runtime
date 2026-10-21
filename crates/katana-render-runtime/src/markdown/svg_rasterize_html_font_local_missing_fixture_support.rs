@@ -6,6 +6,10 @@ use std::{
 
 use super::{ACTIVE, Fixture, Mutation, Scope};
 
+fn local_io<T>(context: &str, result: std::io::Result<T>) -> Result<T, String> {
+    result.map_err(|error| format!("{context}: {error}"))
+}
+
 pub(super) fn require_absent(path: &Path) -> Result<(), String> {
     if path.exists() {
         return Err(format!(
@@ -67,34 +71,40 @@ pub(super) fn validate_fixture(database: &Database, mutation: &Mutation) -> Resu
 pub(super) fn create_missing_font(path: &Path) -> Result<(), String> {
     use std::io::Write;
 
-    let mut file = std::fs::OpenOptions::new()
+    let file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(path)
-        .map_err(|error| format!("create local missing font: {error}"))?;
-    file.write_all(crate::markdown::svg_rasterize::font::BUNDLED_SANS_SERIF_FONT)
-        .map_err(|error| format!("write local missing font bytes: {error}"))
+        .open(path);
+    let mut file = local_io("create local missing font", file)?;
+    local_io(
+        "write local missing font bytes",
+        file.write_all(crate::markdown::svg_rasterize::font::BUNDLED_SANS_SERIF_FONT),
+    )
 }
 
 pub(super) fn replace_selected_font(selected: &Path, replacement: &Path) -> Result<(), String> {
     use std::io::Write;
 
     let staged = selected.with_extension("admission-replacement");
-    let mut input = std::fs::File::open(replacement)
-        .map_err(|error| format!("open copied public replacement font: {error}"))?;
-    let mut output = std::fs::OpenOptions::new()
+    let mut input = local_io(
+        "open copied public replacement font",
+        std::fs::File::open(replacement),
+    )?;
+    let output = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&staged)
-        .map_err(|error| format!("create local replacement staging file: {error}"))?;
-    std::io::copy(&mut input, &mut output)
-        .map_err(|error| format!("copy local replacement bytes: {error}"))?;
-    output
-        .flush()
-        .map_err(|error| format!("flush local replacement bytes: {error}"))?;
+        .open(&staged);
+    let mut output = local_io("create local replacement staging file", output)?;
+    local_io(
+        "copy local replacement bytes",
+        std::io::copy(&mut input, &mut output),
+    )?;
+    local_io("flush local replacement bytes", output.flush())?;
     drop(output);
-    std::fs::rename(staged, selected)
-        .map_err(|error| format!("replace local selected font: {error}"))
+    local_io(
+        "replace local selected font",
+        std::fs::rename(staged, selected),
+    )
 }
 
 impl Scope {

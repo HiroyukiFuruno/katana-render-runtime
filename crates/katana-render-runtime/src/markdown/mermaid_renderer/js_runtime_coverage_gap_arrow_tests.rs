@@ -64,6 +64,31 @@ fn block_arrow_validator_reports_nonfinite_polygon_coordinates() {
 }
 
 #[test]
+fn block_arrow_validator_reports_malformed_polygon_points() {
+    let cases = [
+        (
+            arrow("", "classic", LABEL),
+            "Block arrow polygon is missing",
+        ),
+        (
+            arrow(r#"<polygon points="0 10,-10 10,0"/>"#, "classic", LABEL),
+            "invalid Block arrow polygon point",
+        ),
+        (
+            arrow(r#"<polygon points="x,-10 10,-10 10,0"/>"#, "classic", LABEL),
+            "invalid float literal",
+        ),
+        (
+            arrow(r#"<polygon points="0,x 10,-10 10,0"/>"#, "classic", LABEL),
+            "invalid float literal",
+        ),
+    ];
+    for (svg, expected) in cases {
+        assert_error(&svg, expected);
+    }
+}
+
+#[test]
 fn block_arrow_validator_reports_wrong_orientation() {
     assert_error(
         &arrow(
