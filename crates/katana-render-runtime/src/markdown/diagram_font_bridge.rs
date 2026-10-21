@@ -198,79 +198,8 @@ fn throw_svg_metric_error(scope: &mut v8::PinScope, message: &str) {
 }
 
 #[cfg(test)]
-mod boundary_tests {
-    use crate::markdown::diagram_js_runtime::{DiagramRuntimeScript, DiagramV8Runtime};
-
-    #[test]
-    fn real_svg_bridge_distinguishes_true_zero_from_positive_f64_underflow() -> Result<(), String> {
-        use crate::markdown::svg_rasterize::SvgRasterizeOps;
-
-        let zero = SvgRasterizeOps::measure_svg_text_metrics("DB", "Noto Sans", 0.0, 400, false)
-            .map_err(|error| format!("true zero SVG request failed: {error:?}"))?;
-        assert_eq!([zero.advance, zero.ascent, zero.descent], [0.0; 3]);
-        let script = r#"(() => {
-            const svg = globalThis.__katanaMeasureSvgTextMetrics;
-            const css = globalThis.__katanaMeasureText;
-            const normal = svg('DB', 'Noto Sans', 16, 400, false);
-            const zero = svg('DB', 'Noto Sans', 0, 400, false);
-            const tiny = 1e-100;
-            let rejected = false;
-            try { svg('DB', 'Noto Sans', tiny, 400, false); }
-            catch (error) { rejected = error instanceof Error; }
-            return [normal.advance > 0 && normal.ascent + normal.descent > 0,
-                [zero.advance, zero.ascent, zero.descent].every(value => value === 0),
-                tiny > 0 && Math.fround(tiny) === 0,
-                rejected, css('DB', 'Noto Sans', tiny, 400, false) === undefined,
-                css('DB', 'Noto Sans', 0, 400, false) === undefined].join(',');
-        })()"#;
-        let result = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
-            "bridge-svg-zero-positive-underflow",
-            script,
-        )])?;
-        assert_eq!(result, "true,true,true,true,true,true");
-        Ok(())
-    }
-
-    #[test]
-    fn finite_javascript_size_outside_f32_request_range_returns_undefined() -> Result<(), String> {
-        let script = r#"(() => {
-            const measure = globalThis.__katanaMeasureText;
-            const ordinary = measure('WWWW', 'Noto Sans', 16, 400, false);
-            const large = 1e100;
-            const rejected = measure('WWWW', 'Noto Sans', large, 400, false);
-            return [Number.isFinite(ordinary) && ordinary > 0,
-                Number.isFinite(large) && !Number.isFinite(Math.fround(large)),
-                rejected === undefined].join(',');
-        })()"#;
-        let result = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
-            "bridge-f32-request-range",
-            script,
-        )])?;
-        assert_eq!(result, "true,true,true");
-        Ok(())
-    }
-
-    #[test]
-    fn nul_text_with_empty_family_returns_parse_error_and_undefined() {
-        use crate::markdown::svg_rasterize::{SvgRasterizeError, SvgRasterizeOps};
-
-        let invalid = SvgRasterizeOps::measure_html_text("\0", "", 16.0, 400, false, 0.0, None);
-        assert!(matches!(invalid, Err(SvgRasterizeError::ParseFailed(_))));
-        assert!(matches!(
-            SvgRasterizeOps::measure_html_text("A", "", 16.0, 400, false, 0.0, None),
-            Ok(width) if width.is_finite() && width >= 0.0
-        ));
-        let script = r#"(() => {
-            const measure = globalThis.__katanaMeasureText;
-            return measure('\u0000', '', 16, 400, false) === undefined;
-        })()"#;
-        let result = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
-            "bridge-nul-empty-family-measurement",
-            script,
-        )]);
-        assert!(matches!(result.as_deref(), Ok("true")));
-    }
-}
+#[path = "diagram_font_bridge_boundary_tests.rs"]
+mod boundary_tests;
 
 #[cfg(test)]
 #[path = "diagram_font_bridge_numeric_boundary_tests.rs"]
