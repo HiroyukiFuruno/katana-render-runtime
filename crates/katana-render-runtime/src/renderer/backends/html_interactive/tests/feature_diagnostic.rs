@@ -4,7 +4,7 @@ use crate::renderer::backends::html_browser::{HtmlBrowserSource, HtmlBrowserView
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 const MAX_JS_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -509,11 +509,63 @@ fn merge_font_audits(
     mut initial: serde_json::Value,
     mut operation: serde_json::Value,
 ) -> serde_json::Value {
+    let paint_call_offset = initial
+        .get("finalGlyphPaintCalls")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    offset_paint_calls(&mut operation, "finalGlyphTrees", paint_call_offset);
+    offset_paint_calls(&mut operation, "finalGlyphErrors", paint_call_offset);
     merge_audit_arrays(&mut initial, &mut operation, "faces");
     merge_audit_arrays(&mut initial, &mut operation, "errors");
-    let dropped = audit_drop_count(&initial) + audit_drop_count(&operation);
-    initial["dropped"] = json!(dropped);
+    merge_audit_arrays(&mut initial, &mut operation, "finalGlyphTrees");
+    merge_audit_arrays(&mut initial, &mut operation, "finalGlyphErrors");
+    merge_audit_arrays(&mut initial, &mut operation, "htmlFontMarkups");
+    merge_audit_counters(&mut initial, &operation);
     initial
+}
+
+fn merge_audit_counters(initial: &mut serde_json::Value, operation: &serde_json::Value) {
+    for key in ["dropped", "finalGlyphDropped", "htmlFontMarkupsDropped"] {
+        let initial_count = initial.get(key).and_then(serde_json::Value::as_u64);
+        let operation_count = operation.get(key).and_then(serde_json::Value::as_u64);
+        initial[key] = match (initial_count, operation_count) {
+            (Some(initial), Some(operation)) => json!(initial.saturating_add(operation)),
+            _ => serde_json::Value::Null,
+        };
+    }
+    merge_paint_call_count(initial, operation);
+}
+
+fn merge_paint_call_count(initial: &mut serde_json::Value, operation: &serde_json::Value) {
+    let counts = (
+        initial
+            .get("finalGlyphPaintCalls")
+            .and_then(serde_json::Value::as_u64),
+        operation
+            .get("finalGlyphPaintCalls")
+            .and_then(serde_json::Value::as_u64),
+    );
+    initial["finalGlyphPaintCalls"] = match counts {
+        (Some(initial), Some(operation)) => initial
+            .checked_add(operation)
+            .map_or(serde_json::Value::Null, |count| json!(count)),
+        _ => serde_json::Value::Null,
+    };
+}
+
+fn offset_paint_calls(audit: &mut serde_json::Value, key: &str, offset: u64) {
+    let Some(rows) = audit.get_mut(key).and_then(serde_json::Value::as_array_mut) else {
+        return;
+    };
+    for row in rows {
+        if let Some(paint_call) = row.get_mut("paintCall")
+            && let Some(value) = paint_call.as_u64()
+        {
+            *paint_call = value
+                .checked_add(offset)
+                .map_or(serde_json::Value::Null, |count| json!(count));
+        }
+    }
 }
 
 fn merge_audit_arrays(
@@ -521,13 +573,24 @@ fn merge_audit_arrays(
     operation: &mut serde_json::Value,
     key: &str,
 ) {
-    let initial_faces = initial
-        .get_mut(key)
-        .and_then(serde_json::Value::as_array_mut);
-    let operation_faces = operation.get(key).and_then(serde_json::Value::as_array);
-    if let (Some(initial_faces), Some(operation_faces)) = (initial_faces, operation_faces) {
-        initial_faces.extend(operation_faces.iter().cloned());
-    }
+    let Some(mut initial_rows) = initial
+        .get(key)
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+    else {
+        initial[key] = serde_json::Value::Null;
+        return;
+    };
+    let Some(operation_rows) = operation
+        .get(key)
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+    else {
+        initial[key] = serde_json::Value::Null;
+        return;
+    };
+    initial_rows.extend(operation_rows);
+    initial[key] = serde_json::Value::Array(initial_rows);
 }
 
 fn audit_drop_count(audit: &serde_json::Value) -> u64 {
@@ -1403,17 +1466,105 @@ fn catalog_target_geometry(session: &HtmlInteractiveSession, node_id: u64) -> se
 }
 
 fn catalog_font_provenance(font_audit: &serde_json::Value) -> serde_json::Value {
-    let Some(faces) = font_audit
-        .get("faces")
-        .and_then(serde_json::Value::as_array)
-    else {
+    let Some(records) = final_frame_font_records(font_audit) else {
         return json!([]);
     };
-    let records = faces
-        .iter()
-        .filter_map(catalog_font_record)
-        .collect::<Vec<_>>();
     json!(records)
+}
+
+fn final_frame_font_records(font_audit: &serde_json::Value) -> Option<Vec<serde_json::Value>> {
+    let trees = font_audit.get("finalGlyphTrees")?.as_array()?;
+    let selected_trees = final_paint_trees(font_audit, trees)?;
+    collect_final_font_records(selected_trees)
+}
+
+fn final_paint_trees<'a>(
+    audit: &serde_json::Value,
+    trees: &'a [serde_json::Value],
+) -> Option<Vec<&'a serde_json::Value>> {
+    let paint_call = latest_root_paint_call(trees)?;
+    if !final_paint_audit_is_complete(audit, paint_call)? {
+        return None;
+    }
+    let selected = trees
+        .iter()
+        .filter(|tree| {
+            tree.get("paintCall").and_then(serde_json::Value::as_u64) == Some(paint_call)
+        })
+        .collect::<Vec<_>>();
+    valid_final_tree_paths(&selected).then_some(selected)
+}
+
+fn latest_root_paint_call(trees: &[serde_json::Value]) -> Option<u64> {
+    trees
+        .iter()
+        .filter(|tree| tree.get("treePath").and_then(serde_json::Value::as_str) == Some("root"))
+        .filter_map(|tree| tree.get("paintCall").and_then(serde_json::Value::as_u64))
+        .max()
+}
+
+fn final_paint_audit_is_complete(audit: &serde_json::Value, paint_call: u64) -> Option<bool> {
+    Some(
+        audit
+            .get("finalGlyphPaintCalls")
+            .and_then(serde_json::Value::as_u64)
+            == Some(paint_call)
+            && audit.get("finalGlyphErrors")?.as_array()?.is_empty()
+            && audit
+                .get("finalGlyphDropped")
+                .and_then(serde_json::Value::as_u64)
+                == Some(0),
+    )
+}
+
+fn valid_final_tree_paths(trees: &[&serde_json::Value]) -> bool {
+    trees
+        .iter()
+        .filter(|tree| tree_path(tree) == Some("root"))
+        .count()
+        == 1
+        && trees.iter().all(|tree| {
+            tree_path(tree).is_some_and(|path| path == "root" || path.starts_with("root/"))
+        })
+}
+
+fn tree_path(tree: &serde_json::Value) -> Option<&str> {
+    tree.get("treePath").and_then(serde_json::Value::as_str)
+}
+
+fn collect_final_font_records(trees: Vec<&serde_json::Value>) -> Option<Vec<serde_json::Value>> {
+    let mut records = BTreeMap::new();
+    for tree in trees {
+        for face in tree.get("faces")?.as_array()? {
+            collect_verified_face(&mut records, face)?;
+        }
+    }
+    (!records.is_empty()).then(|| records.into_values().collect())
+}
+
+fn collect_verified_face(
+    records: &mut BTreeMap<(String, u64, String), serde_json::Value>,
+    face: &serde_json::Value,
+) -> Option<()> {
+    if face.get("identity").and_then(serde_json::Value::as_str) != Some("physical_verified")
+        || face.get("glyphCount").and_then(serde_json::Value::as_u64)? == 0
+    {
+        return None;
+    }
+    let record = catalog_font_record(face.get("source")?)?;
+    let key = (
+        record["filePath"].as_str()?.to_owned(),
+        record["faceIndex"].as_u64()?,
+        record["fileSha256"].as_str()?.to_owned(),
+    );
+    match records.get(&key) {
+        Some(existing) if existing != &record => None,
+        Some(_) => Some(()),
+        None => {
+            records.insert(key, record);
+            Some(())
+        }
+    }
 }
 
 fn catalog_font_record(face: &serde_json::Value) -> Option<serde_json::Value> {
@@ -1528,9 +1679,18 @@ fn catalog_font_audit_complete(
     !faces.is_empty()
         && errors.is_empty()
         && dropped == 0
+        && faces.iter().all(|face| catalog_font_record(face).is_some())
+        && audit
+            .get("finalGlyphErrors")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && audit
+            .get("finalGlyphDropped")
+            .and_then(serde_json::Value::as_u64)
+            == Some(0)
         && physical_faces
             .as_array()
-            .is_some_and(|records| records.len() == faces.len())
+            .is_some_and(|records| !records.is_empty())
 }
 
 fn operation_unknown_reason(evidence: &serde_json::Value) -> String {
@@ -1826,6 +1986,7 @@ fn dispatch_pointer_pair(session: &mut HtmlInteractiveSession, x: f32, y: f32) -
 #[cfg(test)]
 mod tests {
     use super::{CatalogOperation, CatalogViewport, FeatureRequest, feature_report};
+    use serde_json::json;
     use std::path::PathBuf;
 
     const ACTION_POINTER_VIEWPORTS: [(u32, u32); 3] = [(1280, 900), (960, 720), (620, 900)];
@@ -2148,24 +2309,46 @@ mod tests {
     }
 
     fn assert_catalog_font_audit_contract() {
-        let complete_audit = serde_json::json!({"faces":[{"kind":"fontdb","path":"/font.ttf","bytes_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","index":0,"families":["Example"]}],"errors":[],"dropped":0});
-        let physical = super::catalog_font_provenance(&complete_audit);
-        assert!(super::catalog_font_audit_complete(
-            &complete_audit,
-            &physical
-        ));
-        let incomplete_audit = serde_json::json!({"faces":[{"kind":"fontdb","path":"/font.ttf","bytes_sha256":"bad","index":0,"families":["Example"]}],"errors":[],"dropped":0});
-        let incomplete_physical = super::catalog_font_provenance(&incomplete_audit);
-        assert!(!super::catalog_font_audit_complete(
-            &incomplete_audit,
-            &incomplete_physical
-        ));
-        let missing_drop_count = serde_json::json!({"faces":[{"kind":"fontdb","path":"/font.ttf","bytes_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","index":0,"families":["Example"]} ],"errors":[]});
-        let physical = super::catalog_font_provenance(&missing_drop_count);
-        assert!(!super::catalog_font_audit_complete(
-            &missing_drop_count,
-            &physical
-        ));
+        let complete_audit = complete_catalog_font_audit();
+        assert_complete_catalog_font_audit(&complete_audit);
+        assert_invalid_catalog_font_audit(&complete_audit);
+        assert_missing_drop_count_is_rejected(&complete_audit);
+    }
+
+    fn complete_catalog_font_audit() -> serde_json::Value {
+        let source = json!({
+            "kind":"File", "path":"/font.ttf",
+            "bytes_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "index":0, "families":["Example"]
+        });
+        json!({
+            "faces":[source.clone()], "errors":[], "dropped":0,
+            "finalGlyphTrees":[{"paintCall":1,"treePath":"root","faces":[{
+                "identity":"physical_verified", "glyphCount":3, "source":source
+            }]}],
+            "finalGlyphErrors":[], "finalGlyphDropped":0, "finalGlyphPaintCalls":1
+        })
+    }
+
+    fn assert_complete_catalog_font_audit(audit: &serde_json::Value) {
+        let physical = super::catalog_font_provenance(audit);
+        assert!(super::catalog_font_audit_complete(audit, &physical));
+    }
+
+    fn assert_invalid_catalog_font_audit(audit: &serde_json::Value) {
+        let mut incomplete = audit.clone();
+        incomplete["faces"][0]["bytes_sha256"] = json!("bad");
+        let physical = super::catalog_font_provenance(&incomplete);
+        assert!(!super::catalog_font_audit_complete(&incomplete, &physical));
+    }
+
+    fn assert_missing_drop_count_is_rejected(audit: &serde_json::Value) {
+        let mut missing = audit.clone();
+        if let Some(object) = missing.as_object_mut() {
+            object.remove("dropped");
+        }
+        let physical = super::catalog_font_provenance(&missing);
+        assert!(!super::catalog_font_audit_complete(&missing, &physical));
     }
 
     #[test]
@@ -2261,6 +2444,10 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "feature_diagnostic_final_font_frame_tests.rs"]
+mod final_font_frame_tests;
 
 #[cfg(test)]
 mod child_process_tests {

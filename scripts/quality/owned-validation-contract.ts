@@ -3940,8 +3940,15 @@ function removeReviewedRuntimeAssetTests(lines: string[]): string[] | undefined 
   if (!withoutGeometry) return undefined;
   const restoredBrowserInvocation = restoreReviewedFeatureCatalogTestProcess(withoutGeometry);
   if (!restoredBrowserInvocation) return undefined;
-  const withoutManagedFullCompare = removeReviewedTestToken(
+  const withoutCatalogFontEquivalence = removeReviewedTestToken(
     restoredBrowserInvocation,
+    "./scripts/html/catalog-font-equivalence_test.ts",
+    "./scripts/html/stage-score-suite_test.ts",
+    "./scripts/html/catalog-capture-producer-context_test.ts",
+  );
+  if (!withoutCatalogFontEquivalence) return undefined;
+  const withoutManagedFullCompare = removeReviewedTestToken(
+    withoutCatalogFontEquivalence,
     `./${MANAGED_FULL_COMPARE_TEST}`,
     "./scripts/mermaid/dom_plain_text_measure_contract_test.ts",
     "./scripts/mermaid/mermaid_pair_manifest_test.ts",

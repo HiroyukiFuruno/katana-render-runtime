@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { runDynamicFidelity } from "./dynamic-fidelity";
+import { catalogFontAcceptance, compareCatalogFontFaces } from "./catalog-font-equivalence";
+import { runDynamicFidelity, stableJson } from "./dynamic-fidelity";
 import { type JsonValue, jsonRecords } from "./dynamic-state";
 import { assertFeatureResultReportsComplete, loadFeatureCatalog } from "./feature-catalog";
 import { assertInterimFeatureResultReportsComplete } from "./interim-feature-results";
@@ -15,9 +16,12 @@ import {
 import { tocBinaryFromBuildReport } from "./toc-fidelity";
 import {
   type CatalogStage90ResumeOptions,
+  jsonResourceFiles,
   runCatalogStage90Captures,
   runInputStateFidelity,
 } from "./visual-state-fidelity";
+
+export { jsonResourceFiles };
 
 const modeSchema = z.enum([
   "input-state-final",
@@ -83,6 +87,20 @@ interface CatalogValidateCapturesPlan {
   kind: "catalog-stage90-validate-captures";
   captureManifest: string;
   conditionPlan: string;
+}
+
+interface CatalogFontProbeValidation {
+  report: JsonValue;
+  request: PinnedProbeFile;
+  response: PinnedProbeFile;
+  requestCaptures: Array<{ [key: string]: JsonValue }>;
+  responseCaptures: Array<{ [key: string]: JsonValue }>;
+}
+
+interface PinnedProbeFile {
+  path: string;
+  sha256: string;
+  size?: number;
 }
 
 export type FidelityAcceptancePlan =
@@ -265,21 +283,19 @@ function writeCatalogStage90Plan(output: string): void {
 
 if (import.meta.main) await runFidelityAcceptance(process.argv.slice(2));
 
-function validateCatalogChromeCaptures(
+export function validateCatalogChromeCaptures(
   captureManifestPath: string,
   conditionPlanPath: string,
 ): JsonValue {
-  const { manifest, manifestPath, manifestSha256, planPath, planSha256 } = readCatalogChromeInputs(
-    captureManifestPath,
-    conditionPlanPath,
-  );
-  const fontIdentityProbe = validateCatalogFontProbe(manifest);
+  const { manifest, manifestPath, manifestSha256, plan, planPath, planSha256 } =
+    readCatalogChromeInputs(captureManifestPath, conditionPlanPath);
   const captures = jsonRecords(manifest.conditions, "capture conditions");
   const scores = validateCatalogRawStage90Captures(
     manifest,
     JSON.parse(fs.readFileSync(planPath, "utf8")) as JsonValue,
     planPath,
   );
+  const fontProbe = validateCatalogFontProbe(manifest);
   const capturesById = new Map(
     captures.map((capture) => [jsonText(capture.conditionId, "condition id"), capture]),
   );
@@ -288,13 +304,25 @@ function validateCatalogChromeCaptures(
     if (!capture) throw new Error(`catalog capture is missing: ${score.conditionId}`);
     return validatedCatalogScoreCondition(capture, score);
   });
+  const fontEquivalence = validateCatalogFontEquivalence(
+    plan.conditions.map((condition) => condition.conditionId),
+    captures,
+    fontProbe,
+  );
+  const acceptance = catalogFontAcceptance(
+    scores.map((score) => score.score),
+    plan.conditions.length,
+    fontEquivalence.established,
+    fontEquivalence.rejected,
+  );
   return {
     schema: "krr-html84-independent-stage90-validation-v1",
-    acceptance: false,
+    acceptance: acceptance.acceptance,
     threshold: 90,
     measurement: "not-performed",
-    fontIdentityEquivalence: "not-established",
-    fontIdentityProbe,
+    fontIdentityEquivalence: acceptance.fontIdentityEquivalence,
+    fontIdentityDiagnostics: fontEquivalence.rejected,
+    fontIdentityProbe: fontProbe.report,
     manifestPath,
     manifestSha256,
     planPath,
@@ -303,11 +331,22 @@ function validateCatalogChromeCaptures(
   } as unknown as JsonValue;
 }
 
-function validateCatalogFontProbe(manifest: { [key: string]: JsonValue }): JsonValue {
+function validateCatalogFontProbe(manifest: {
+  [key: string]: JsonValue;
+}): CatalogFontProbeValidation {
   const probe = jsonRecord(manifest.fontIdentityProbe ?? null, "font identity probe pins");
   const request = validateProbeFile(probe.request, "font identity request", true);
   const response = validateProbeFile(probe.response, "font identity response", true);
   const binary = validateProbeFile(probe.binary, "font identity probe binary", false);
+  const requestBody = jsonRecord(
+    JSON.parse(
+      fs.readFileSync(jsonText(request.path, "font identity request path"), "utf8"),
+    ) as JsonValue,
+    "font identity request",
+  );
+  if (requestBody.schema !== "krr-chrome-font-identity-request-v1")
+    throw new Error("font identity request schema is invalid");
+  const requestCaptures = jsonRecords(requestBody.captures, "font identity request captures");
   const responseBody = jsonRecord(
     JSON.parse(
       fs.readFileSync(jsonText(response.path, "font identity response path"), "utf8"),
@@ -319,20 +358,226 @@ function validateCatalogFontProbe(manifest: { [key: string]: JsonValue }): JsonV
     responseBody.requestSha256 !== jsonText(request.sha256, "font identity request SHA")
   )
     throw new Error("font identity response does not bind its request");
-  return {
+  const report = {
     request,
     response,
     binary,
     inventoryMethod: jsonText(responseBody.inventoryMethod, "font inventory method"),
     inventoryLimit: jsonText(responseBody.inventoryLimit, "font inventory limit"),
   } as unknown as JsonValue;
+  return {
+    report,
+    request,
+    response,
+    requestCaptures,
+    responseCaptures: jsonRecords(responseBody.captures, "font identity response captures"),
+  };
+}
+
+function validateCatalogFontEquivalence(
+  conditionIds: readonly string[],
+  captures: readonly { [key: string]: JsonValue }[],
+  probe: CatalogFontProbeValidation,
+): { established: boolean; rejected: Array<{ conditionId: string; reason: string }> } {
+  const rejected: Array<{ conditionId: string; reason: string }> = [];
+  if (conditionIds.length !== 84 || new Set(conditionIds).size !== conditionIds.length)
+    return rejectAllFontConditions(conditionIds, "condition plan is incomplete or duplicated");
+  let indexed: FontIdentityConditionIndex;
+  try {
+    indexed = indexFontIdentityConditions(captures, probe);
+  } catch {
+    return rejectAllFontConditions(
+      conditionIds,
+      "font identity condition records are duplicated or invalid",
+    );
+  }
+  if (
+    indexed.captures.size !== conditionIds.length ||
+    indexed.requests.size !== conditionIds.length ||
+    indexed.responses.size !== conditionIds.length ||
+    !sameConditionOrder(captures, conditionIds) ||
+    !sameConditionOrder(probe.requestCaptures, conditionIds) ||
+    !sameConditionOrder(probe.responseCaptures, conditionIds)
+  )
+    return rejectAllFontConditions(conditionIds, "font identity condition coverage is incomplete");
+
+  for (const conditionId of conditionIds) {
+    const capture = indexed.captures.get(conditionId);
+    const requestCapture = indexed.requests.get(conditionId);
+    const responseCapture = indexed.responses.get(conditionId);
+    if (!capture || !requestCapture || !responseCapture) {
+      rejected.push({ conditionId, reason: "font identity condition is missing" });
+      continue;
+    }
+    const reason = validateFontIdentityCondition(
+      conditionId,
+      capture,
+      requestCapture,
+      responseCapture,
+      probe,
+    );
+    if (reason !== null) rejected.push({ conditionId, reason });
+  }
+  return { established: rejected.length === 0, rejected };
+}
+
+type FontIdentityConditionIndex = {
+  captures: Map<string, { [key: string]: JsonValue }>;
+  requests: Map<string, { [key: string]: JsonValue }>;
+  responses: Map<string, { [key: string]: JsonValue }>;
+};
+
+function rejectAllFontConditions(conditionIds: readonly string[], reason: string) {
+  return {
+    established: false,
+    rejected: conditionIds.map((conditionId) => ({ conditionId, reason })),
+  };
+}
+
+function indexFontIdentityConditions(
+  captures: readonly { [key: string]: JsonValue }[],
+  probe: CatalogFontProbeValidation,
+): FontIdentityConditionIndex {
+  return {
+    captures: indexFontIdentityRows(captures, "capture"),
+    requests: indexFontIdentityRows(probe.requestCaptures, "request"),
+    responses: indexFontIdentityRows(probe.responseCaptures, "response"),
+  };
+}
+
+function indexFontIdentityRows(
+  rows: readonly { [key: string]: JsonValue }[],
+  label: string,
+): Map<string, { [key: string]: JsonValue }> {
+  const result = new Map<string, { [key: string]: JsonValue }>();
+  for (const row of rows) {
+    const conditionId = jsonText(row.conditionId, `${label} condition id`);
+    if (result.has(conditionId)) throw new Error(`${label} conditions are duplicated`);
+    result.set(conditionId, row);
+  }
+  return result;
+}
+
+function validateFontIdentityCondition(
+  conditionId: string,
+  capture: { [key: string]: JsonValue },
+  requestCapture: { [key: string]: JsonValue },
+  responseCapture: { [key: string]: JsonValue },
+  probe: CatalogFontProbeValidation,
+): string | null {
+  try {
+    assertFontIdentityRequestBinding(conditionId, capture, requestCapture, responseCapture, probe);
+    const reason = compareFontIdentityReceipts(conditionId, capture, responseCapture);
+    return reason;
+  } catch (error) {
+    return error instanceof Error ? error.message : "font identity is invalid";
+  }
+}
+
+function assertFontIdentityRequestBinding(
+  conditionId: string,
+  capture: { [key: string]: JsonValue },
+  requestCapture: { [key: string]: JsonValue },
+  responseCapture: { [key: string]: JsonValue },
+  probe: CatalogFontProbeValidation,
+): void {
+  const observationValue = capture.fontIdentityObservation;
+  const resourceValue = capture.resourceProvenance;
+  if (observationValue === undefined || resourceValue === undefined)
+    throw new Error("font observation or resource provenance is missing");
+  const observation = jsonRecord(observationValue, "font observation");
+  const resources = jsonRecord(resourceValue, "resource provenance");
+  if (
+    capture.status !== "captured" ||
+    capture.fontIdentityRequestConditionId !== conditionId ||
+    capture.fontIdentityRequestPath !== probe.request.path ||
+    capture.fontIdentityRequestSha256 !== probe.request.sha256 ||
+    capture.fontIdentityRequestSizeBytes !== probe.request.size ||
+    capture.fontIdentityResponsePath !== probe.response.path ||
+    capture.fontIdentityResponseSha256 !== probe.response.sha256 ||
+    capture.fontIdentityResponseSizeBytes !== probe.response.size ||
+    observation.status !== "observed" ||
+    resources.inventoryComplete !== true ||
+    !hasNoStringReasons(capture.fontIdentityUnknownReasons) ||
+    !hasNoStringReasons(observation.unknownReasons) ||
+    !sameJson(requestCapture.selectedFonts, observation.selectedFonts) ||
+    !sameJson(
+      requestCapture.resourceFiles,
+      jsonResourceFiles(resources.requests) as unknown as JsonValue,
+    ) ||
+    jsonRecords(requestCapture.selectedFonts, "requested selected fonts").length !==
+      jsonRecords(responseCapture.fontProvenance, "response font provenance").length ||
+    responseCapture.status !== "resolved" ||
+    !hasNoStringReasons(responseCapture.unknownReasons)
+  )
+    throw new Error("font identity request/response binding is not established");
+}
+
+function compareFontIdentityReceipts(
+  conditionId: string,
+  capture: { [key: string]: JsonValue },
+  responseCapture: { [key: string]: JsonValue },
+): string | null {
+  const krr = readPinnedJsonRecord(
+    jsonText(capture.krrReportPath, "KRR report path"),
+    jsonText(capture.krrReportSha256, "KRR report SHA"),
+  );
+  const chrome = readPinnedJsonRecord(
+    jsonText(capture.chromeReceiptPath, "Chrome receipt path"),
+    jsonText(capture.chromeReceiptSha256, "Chrome receipt SHA"),
+  );
+  if (
+    krr.conditionId !== conditionId ||
+    chrome.conditionId !== conditionId ||
+    chrome.status !== "observed" ||
+    !sameJson(chrome.resourceProvenance, capture.resourceProvenance) ||
+    !sameJson(chrome.fontProvenance, responseCapture.fontProvenance)
+  )
+    throw new Error("font identity response differs from the strict Chrome receipt");
+  const comparison = compareCatalogFontFaces(krr.fontProvenance, chrome.fontProvenance);
+  return comparison.established
+    ? null
+    : (comparison.reason ?? "physical font equivalence is not established");
+}
+
+function readPinnedJsonRecord(
+  filePath: string,
+  expectedSha256: string,
+): { [key: string]: JsonValue } {
+  if (
+    path.resolve(filePath) !== filePath ||
+    fs.realpathSync(filePath) !== filePath ||
+    fs.lstatSync(filePath).isSymbolicLink() ||
+    !fs.statSync(filePath).isFile() ||
+    sha256File(filePath) !== expectedSha256
+  )
+    throw new Error("font receipt physical pin differs");
+  return jsonRecord(JSON.parse(fs.readFileSync(filePath, "utf8")) as JsonValue, "font receipt");
+}
+
+function sameJson(left: JsonValue | undefined, right: JsonValue | undefined): boolean {
+  return left !== undefined && right !== undefined && stableJson(left) === stableJson(right);
+}
+
+function hasNoStringReasons(value: JsonValue | undefined): boolean {
+  return Array.isArray(value) && value.length === 0;
+}
+
+function sameConditionOrder(
+  rows: readonly { [key: string]: JsonValue }[],
+  expected: readonly string[],
+): boolean {
+  return (
+    rows.length === expected.length &&
+    rows.every((row, index) => row.conditionId === expected[index])
+  );
 }
 
 function validateProbeFile(
   value: JsonValue | undefined,
   name: string,
   withSize: boolean,
-): { [key: string]: JsonValue } {
+): PinnedProbeFile {
   const pin = jsonRecord(value ?? null, name);
   const filePath = jsonText(pin.path, `${name} path`);
   const checksum = jsonText(pin.sha256, `${name} SHA`);

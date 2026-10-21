@@ -14,6 +14,14 @@
 
 ## 現在の状態（2026-10-22）
 
+- [/] R923/R924 最終frame font限定契約：正常・不一致を共通のparameterized testに分け、各caseのraw84検証を1回にして既定timeoutを維持した。R923でTS28件・登録関連48件が成功後、Rust testのmacro import不足/unused importでcompile101となった。実行履歴を保持して2importだけ修正し、TSを重ねずR924でfoundation・release build・実catalogに照合したnative14case（新最終frame4件を含む）が全成功、actual0・source前後一致・全92.625秒。mainが個別case結果・raw SHA・owner終了を照合（`tmp/quality/current-font-equivalence-native-r924/main-physical-review.json`）。R917のNativeWidth失敗は新test欠落でなく、fixtureの旧RTK_CMD/CARGO定義が現RTK_PROXY_CMDに未同期だったことが根因で、現定義と負例を同期した。R918/R919/R920/R921/R922のfixture順序/型/format/timeout拒否は原runへ保持し、合格へ転用しない。fresh84・paired性能・117件・完全coverage/公開は未完了。
+
+  R925の通常commitはAST/Clippyが行数・複雑度を拒否して不成立。基準を変えず責務ごとの小helperへ整理し、R927でfoundation・AST・release build・同じnative14caseがactual0、source前後一致、89.522秒。計測対象のfixture supportと純assertの区別を維持し、TSは不変のR923成功範囲と区別する。証跡は`tmp/quality/current-font-equivalence-native-r927/`。この限定成功はfresh84や性能合格ではない。
+
+- [ ] R916/R917 最終frame font検証の回帰：R916は新testの厳密登録照合でactual1、重い検査は未起動。既存canonical recipe検証を新登録へ同期したR917はfoundation成功後、Bun全589件のうち562成功・27失敗、actual1（全538.493秒）、source前後一致。正常系fixtureのrequest condition ID欠落と、既存NativeWidth fixtureの旧recipe登録を検出した。判定を緩めずfixtureを同期し、修正後は失敗範囲を先行確認する。実native build・fresh84・paired性能は未実行。原raw・終了/FD閉鎖・SHA照合は各runの`main-physical-review.json`、R916の閉鎖キー訂正は`main-closure-review.json`へ保存した。
+
+- [ ] R911/R912/R913 現行HTML84と同font受入：127差分pathを依存2dc921f7・runtime c841a785・linter b16c8002・quality369e3b20へ通常precommit経由で取り込み、clean sourceを確認。HEAD369e3b20を固定したR911は84native/84Chrome画像とmanifest採取actual0、source前後一致（`tmp/quality/current-clean-source-html84-captures-r911/main-physical-review.json`）。R912の独立画像検査は全84件90以上・最低91.52422だったが、同font正式受入が未成立として性能測定前にactual1で拒否された（`tmp/quality/current-clean-source-paired-performance-r912/main-physical-review.json`）。CLIが常に未成立を返す未接続に加え、native側は初期と操作中のfont選択履歴を累積しており、Chrome最終DOMとの観測範囲も異なる。既存finalGlyphTreesを使う最終frame観測と、物理font同等性の厳密判定への接続を分担修正する。全履歴・error/dropの保持、unknown拒否、同font条件は維持し、flagsの単純true化はしない。W7/W6の選択差が最終glyphにも存在するかは修正後の実captureで判断する。paired時間/RSS・Mermaid117・全体coverage100/0・公開は未完了。
+
 - [ ] R906/R907 runtime cache実証：重複testを共通化後、CLI12件と正式Moon依存DAGがactual0、source前後一致、全303.836秒。静的検査・AST・Clippy・host準備・MathJax evidence・generationを標準順序で通り、対象leafの実task executionは24.293秒、fingerprint等を含むleaf全体45.227秒だった（`tmp/quality/current-runtime-cache-canonical-first-r906/main-physical-review.json`）。2つの既存根拠付き重複例外だけを維持し、新規例外は追加していない。この台帳更新後、同じleafのhash・実cache hit・receipt維持を確認する。全producerの最終verify、描画・性能・公開の合格ではない。
 
   R907はupstream noneへ起動条件を変えたため、R906とMoon hashが異なり実producerが再実行された。actual0/source前後一致だがcache hitとは扱わない（`tmp/quality/current-runtime-cache-ledger-hit-r907/main-physical-review.json`）。次はR907と同じ起動条件を固定し、この実測結果を追記した台帳だけが変わる条件で比較する。異なる起動条件の所要時間を性能改善の証明へ転用しない。

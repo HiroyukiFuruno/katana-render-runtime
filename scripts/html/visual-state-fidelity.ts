@@ -155,7 +155,7 @@ function jsonSelectedFonts(value: JsonValue | undefined): ChromeSelectedFont[] {
   });
 }
 
-function jsonResourceFiles(
+export function jsonResourceFiles(
   value: JsonValue | undefined,
 ): ChromeFontIdentityCapture["resourceFiles"] {
   if (!Array.isArray(value)) throw new Error("Chrome resource file observations are missing");

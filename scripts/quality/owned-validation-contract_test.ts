@@ -109,14 +109,16 @@ const recipeBodies: Record<string, string> = {
     "fi",
   ].join("\n"),
 };
+const fixtureCargoBuildDefinition =
+  'CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO';
 const fixtureJustDefinitions = [
   'set shell := ["bash", "-uc"]',
   "REPO_ROOT := justfile_directory()",
   'RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)',
   'RTK_CMD := if RTK == "" { "" } else { RTK + " " }',
-  'CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")',
-  'CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO',
   'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
+  'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+  fixtureCargoBuildDefinition,
 ].join("\n");
 const cargoCapacityGuardPath = "scripts/build/cargo_capacity_guard.py";
 const capacityGuardUnitCommand =
@@ -740,8 +742,19 @@ test("runtime asset registration uses Playwright without dropping sibling Bun te
     "scripts/html/dynamic-fidelity_test.ts",
     "scripts/html/interim-feature-results_test.ts",
   ];
+  const catalogFontTest = "scripts/html/catalog-font-equivalence_test.ts";
+  const catalogInvocation = invocations.find((paths) => paths.includes(catalogFontTest));
 
   expect(invocations.filter((paths) => paths.includes(chromeTest))).toEqual([]);
+  expect(catalogInvocation).toEqual([
+    "scripts/html/harness-contract_test.ts",
+    "scripts/html/stage-score_test.ts",
+    "scripts/html/stage-score-suite_test.ts",
+    catalogFontTest,
+    "scripts/html/catalog-capture-producer-context_test.ts",
+    "scripts/html/anonymized-fixture_test.ts",
+    "scripts/html/compare-toc-evidence_test.ts",
+  ]);
   expect(invocations.find((paths) => paths.includes(pureHtmlTests[0] ?? ""))).toEqual(
     pureHtmlTests,
   );
@@ -756,6 +769,23 @@ test("runtime asset registration uses Playwright without dropping sibling Bun te
   for (const playwrightUnit of playwrightUnitPaths)
     expect(actualRuntimeAssetUnitPaths()).not.toContain(playwrightUnit);
   expect(actualRuntimeAssetUnitPaths()).toEqual(expect.arrayContaining(pureHtmlTests));
+});
+
+test("runtime asset registration rejects a missing catalog font equivalence test", () => {
+  const recipe = actualRecipeBody("runtime-asset-script-other-run");
+  const catalogFontTest = " ./scripts/html/catalog-font-equivalence_test.ts";
+  const mutated = recipe.replace(catalogFontTest, "");
+  expect(mutated).not.toBe(recipe);
+
+  const root = strictUnusedRegistrationFixture();
+  recipes(root, { "runtime-asset-script-other-run": mutated });
+  track(root);
+
+  const report = inspectMathJaxUnusedAuditRoute(root);
+  expect(report.binding.standardCommandVerified).toBe(false);
+  expect(report.issues.map((issue) => issue.code)).toContain(
+    "mathjax-host-evidence-registration-unverified",
+  );
 });
 
 test.each([
@@ -1314,37 +1344,37 @@ const nativeWidthJustMutations = [
     'RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)',
     'RTK := env_var_or_default("RTK", "rtk")',
   ],
-  ["RTK command chain", 'RTK_CMD := if RTK == "" { "" } else { RTK + " " }', 'RTK_CMD := "rtk "'],
+  [
+    "RTK proxy command changed",
+    'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
+    'RTK_PROXY_CMD := RTK + " proxy "',
+  ],
   [
     "CARGO environment chain",
-    'CARGO := env_var_or_default("CARGO", RTK_CMD + "cargo")',
+    'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
     'CARGO := env_var_or_default("CARGO", "cargo")',
   ],
-  [
-    "guard command replaced with cargo",
-    fixtureJustDefinitions.split("\n")[5] ?? "",
-    'CARGO_BUILD := "cargo"',
-  ],
+  ["guard command replaced with cargo", fixtureCargoBuildDefinition, 'CARGO_BUILD := "cargo"'],
   [
     "guard command replaced with shell",
-    fixtureJustDefinitions.split("\n")[5] ?? "",
+    fixtureCargoBuildDefinition,
     'CARGO_BUILD := "sh -c echo forged"',
   ],
   [
     "guard profile changed",
-    fixtureJustDefinitions.split("\n")[5] ?? "",
-    fixtureJustDefinitions.split("\n")[5]?.replace("debug --", "release --") ?? "",
+    fixtureCargoBuildDefinition,
+    fixtureCargoBuildDefinition.replace("debug --", "release --"),
   ],
   [
     "guard separator removed",
-    fixtureJustDefinitions.split("\n")[5] ?? "",
-    fixtureJustDefinitions.split("\n")[5]?.replace("debug -- ", "debug ") ?? "",
+    fixtureCargoBuildDefinition,
+    fixtureCargoBuildDefinition.replace("debug -- ", "debug "),
   ],
-  ["missing CARGO_BUILD definition", fixtureJustDefinitions.split("\n")[5] ?? "", ""],
+  ["missing CARGO_BUILD definition", fixtureCargoBuildDefinition, ""],
   [
     "duplicate CARGO_BUILD definition",
-    fixtureJustDefinitions.split("\n")[5] ?? "",
-    `${fixtureJustDefinitions.split("\n")[5] ?? ""}\n${fixtureJustDefinitions.split("\n")[5] ?? ""}`,
+    fixtureCargoBuildDefinition,
+    `${fixtureCargoBuildDefinition}\n${fixtureCargoBuildDefinition}`,
   ],
 ] as const;
 test.each(nativeWidthJustMutations)(

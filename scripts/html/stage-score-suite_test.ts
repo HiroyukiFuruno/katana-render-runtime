@@ -6,6 +6,7 @@ import { collectRuntimeBundleToolFingerprint } from "../runtime-bundles/runtime-
 import type { CatalogCaptureProducerContext } from "./catalog-capture-producer-context";
 import type { JsonValue } from "./dynamic-state";
 import { type CatalogCase, loadFeatureCatalog, readExpectedState } from "./feature-catalog";
+import { jsonResourceFiles, validateCatalogChromeCaptures } from "./fidelity-acceptance-cli";
 import { sha256File } from "./reference-capture";
 import {
   assertCatalogCaptureIdentity,
@@ -561,6 +562,27 @@ test("validates 84 real receipt pairs and scores every independent raw image", (
   }
 });
 
+test.each([
+  ["matching physical font", false],
+  ["physical font mismatch", true],
+] as const)("CLI validates %s evidence", (_label, mismatch) => {
+  const fixture = rawCaptureFixture();
+  try {
+    const paths = addFontIdentityEvidence(fixture);
+    if (mismatch) introducePhysicalFontMismatch(fixture, paths);
+    const result = requireJsonObject(
+      validateCatalogChromeCaptures(paths.manifestPath, fixture.planPath),
+      "CLI result",
+    );
+    expect(result.acceptance).toBe(!mismatch);
+    expect(result.fontIdentityEquivalence).toBe(mismatch ? "not-established" : "established");
+    if (mismatch) expect(result.fontIdentityDiagnostics).not.toEqual([]);
+    else expect(result.fontIdentityDiagnostics).toEqual([]);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("raw stage90 adapter rejects a capture that is not strictly observed", () => {
   const fixture = rawCaptureFixture();
   try {
@@ -574,6 +596,184 @@ test("raw stage90 adapter rejects a capture that is not strictly observed", () =
     fixture.cleanup();
   }
 });
+
+interface FontIdentityFixturePaths {
+  manifestPath: string;
+  requestPath: string;
+  responsePath: string;
+}
+
+function introducePhysicalFontMismatch(
+  fixture: ReturnType<typeof rawCaptureFixture>,
+  paths: FontIdentityFixturePaths,
+): void {
+  const first = objectConditions(fixture.manifest)[0];
+  if (!first) throw new Error("missing mismatch fixture condition");
+  const alternate = path.resolve(
+    "crates/katana-render-runtime/assets/test-fixtures/font-probes/recursive-latin-crsv-normal.ttf",
+  );
+  const receiptPath = requiredString(first.chromeReceiptPath, "Chrome receipt path");
+  const receipt = readJsonObject(receiptPath);
+  receipt.fontProvenance = [physicalFont(alternate)];
+  writePinnedJson(receipt, receiptPath);
+  first.chromeReceiptSha256 = sha256File(receiptPath);
+  const response = readJsonObject(paths.responsePath);
+  const responseRows = response.captures;
+  if (!Array.isArray(responseRows)) throw new Error("missing font identity response rows");
+  const firstResponse = responseRows[0];
+  if (typeof firstResponse !== "object" || firstResponse === null || Array.isArray(firstResponse))
+    throw new Error("invalid font identity response row");
+  firstResponse.fontProvenance = receipt.fontProvenance;
+  writePinnedJson(response, paths.responsePath);
+  const responseSha256 = sha256File(paths.responsePath);
+  for (const condition of objectConditions(fixture.manifest)) {
+    condition.fontIdentityResponseSha256 = responseSha256;
+    condition.fontIdentityResponseSizeBytes = fs.statSync(paths.responsePath).size;
+  }
+  const probe = requireJsonObject(fixture.manifest.fontIdentityProbe, "font identity probe");
+  const responsePin = requireJsonObject(probe.response, "font response pin");
+  responsePin.sha256 = responseSha256;
+  responsePin.sizeBytes = fs.statSync(paths.responsePath).size;
+  writePinnedManifest(fixture, paths.manifestPath);
+}
+
+function addFontIdentityEvidence(
+  fixture: ReturnType<typeof rawCaptureFixture>,
+): FontIdentityFixturePaths {
+  const capturesById = new Map(
+    objectConditions(fixture.manifest).map((condition) => [condition.conditionId, condition]),
+  );
+  fixture.manifest.conditions = objectConditions(fixture.plan).map((condition) => {
+    const capture = capturesById.get(condition.conditionId);
+    if (!capture) throw new Error("missing planned font fixture condition");
+    return capture;
+  });
+  const directory = path.dirname(fixture.planPath);
+  const requestPath = path.join(directory, "font-request.json");
+  const responsePath = path.join(directory, "font-response.json");
+  const requestRows: JsonObject[] = [];
+  const responseRows: JsonObject[] = [];
+  const fontPath = path.resolve("crates/katana-render-runtime/assets/fonts/NotoSans-Regular.ttf");
+  const font = physicalFont(fontPath);
+  const selectedFont: JsonObject = {
+    familyName: "Noto Sans",
+    postScriptName: "NotoSans-Regular",
+    glyphCount: 1,
+    isCustomFont: true,
+  };
+  for (const condition of objectConditions(fixture.manifest)) {
+    const krrPath = requiredString(condition.krrReportPath, "KRR report path");
+    const krr = readJsonObject(krrPath);
+    krr.fontProvenance = [font];
+    writePinnedJson(krr, krrPath);
+    condition.krrReportSha256 = sha256File(krrPath);
+    const chromePath = requiredString(condition.chromeReceiptPath, "Chrome receipt path");
+    const chrome = readJsonObject(chromePath);
+    chrome.fontProvenance = [font];
+    writePinnedJson(chrome, chromePath);
+    condition.chromeReceiptSha256 = sha256File(chromePath);
+    const resourceProvenance = requireJsonObject(
+      chrome.resourceProvenance,
+      "Chrome resource provenance",
+    );
+    condition.resourceProvenance = resourceProvenance;
+    condition.fontIdentityObservation = {
+      status: "observed",
+      selectedFonts: [selectedFont],
+      unknownReasons: [],
+    };
+    condition.fontIdentityUnknownReasons = [];
+    requestRows.push({
+      conditionId: requiredString(condition.conditionId, "condition ID"),
+      selectedFonts: [selectedFont],
+      resourceFiles: jsonResourceFiles(resourceProvenance.requests) as unknown as JsonValue,
+    });
+    responseRows.push({
+      conditionId: requiredString(condition.conditionId, "condition ID"),
+      status: "resolved",
+      fontProvenance: [font],
+      unknownReasons: [],
+    });
+  }
+  writePinnedJson(
+    { schema: "krr-chrome-font-identity-request-v1", captures: requestRows },
+    requestPath,
+  );
+  const requestSha256 = sha256File(requestPath);
+  writePinnedJson(
+    {
+      schema: "krr-chrome-font-identity-response-v1",
+      requestSha256,
+      inventoryMethod: "fixture",
+      inventoryLimit: "fixture physical inventory",
+      captures: responseRows,
+    },
+    responsePath,
+  );
+  const responseSha256 = sha256File(responsePath);
+  for (const condition of objectConditions(fixture.manifest)) {
+    condition.fontIdentityRequestConditionId = requiredString(
+      condition.conditionId,
+      "condition ID",
+    );
+    condition.fontIdentityRequestPath = requestPath;
+    condition.fontIdentityRequestSha256 = requestSha256;
+    condition.fontIdentityRequestSizeBytes = fs.statSync(requestPath).size;
+    condition.fontIdentityResponsePath = responsePath;
+    condition.fontIdentityResponseSha256 = responseSha256;
+    condition.fontIdentityResponseSizeBytes = fs.statSync(responsePath).size;
+  }
+  fixture.manifest.fontIdentityProbe = {
+    request: { path: requestPath, sha256: requestSha256, sizeBytes: fs.statSync(requestPath).size },
+    response: {
+      path: responsePath,
+      sha256: responseSha256,
+      sizeBytes: fs.statSync(responsePath).size,
+    },
+    binary: { path: fs.realpathSync(process.execPath), sha256: sha256File(process.execPath) },
+  };
+  const manifestPath = path.join(directory, "capture-manifest.json");
+  writePinnedManifest(fixture, manifestPath);
+  return { manifestPath, requestPath, responsePath };
+}
+
+function physicalFont(filePath: string): JsonObject {
+  return {
+    scope: "capture",
+    family: "Noto Sans",
+    source: "test-fixture-font",
+    filePath,
+    fileSha256: sha256File(filePath),
+    faceIndex: 0,
+    selected: true,
+    fileBytesVerified: true,
+  };
+}
+
+function readJsonObject(filePath: string): JsonObject {
+  const value = JSON.parse(fs.readFileSync(filePath, "utf8")) as JsonValue;
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new Error("fixture JSON is not an object");
+  return value;
+}
+
+function requireJsonObject(value: JsonValue | undefined, label: string): JsonObject {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new Error(`${label} is not an object`);
+  return value;
+}
+
+function writePinnedJson(value: JsonObject, filePath: string): void {
+  fs.writeFileSync(filePath, `${JSON.stringify(value)}\n`);
+}
+
+function writePinnedManifest(
+  fixture: ReturnType<typeof rawCaptureFixture>,
+  manifestPath: string,
+): string {
+  writePinnedJson(fixture.manifest, manifestPath);
+  return manifestPath;
+}
 
 test("raw stage90 reuse inspection accepts only current binary and Chrome receipts", () => {
   const fixture = rawCaptureFixture();
