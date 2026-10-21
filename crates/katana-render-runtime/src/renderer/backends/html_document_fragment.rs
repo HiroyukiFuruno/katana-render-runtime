@@ -231,6 +231,50 @@ mod tests {
     }
 
     #[test]
+    fn empty_html_mutations_preserve_empty_content_and_tree_revision() -> Result<(), String> {
+        let cases = [
+            ("set_inner_html", EmptyHtmlMutation::SetInnerHtml),
+            (
+                "insert_adjacent_html",
+                EmptyHtmlMutation::InsertAdjacentHtml,
+            ),
+        ];
+        for (name, mutation) in cases {
+            let mut document = HtmlDocument::parse("<div id=target></div>");
+            let target = document
+                .get_element_by_id("target")
+                .ok_or("target element was not indexed")?;
+            let content_before = document.inner_html(target)?;
+            let revision_before = document.tree_revision();
+
+            run_empty_html_mutation(&mut document, target, mutation)?;
+
+            assert_eq!(document.inner_html(target)?, content_before, "{name}");
+            assert_eq!(document.tree_revision(), revision_before, "{name}");
+        }
+        Ok(())
+    }
+
+    #[derive(Clone, Copy)]
+    enum EmptyHtmlMutation {
+        SetInnerHtml,
+        InsertAdjacentHtml,
+    }
+
+    fn run_empty_html_mutation(
+        document: &mut HtmlDocument,
+        target: u64,
+        mutation: EmptyHtmlMutation,
+    ) -> Result<(), String> {
+        match mutation {
+            EmptyHtmlMutation::SetInnerHtml => document.set_inner_html(target, ""),
+            EmptyHtmlMutation::InsertAdjacentHtml => {
+                document.insert_adjacent_html(target, "beforeend", "")
+            }
+        }
+    }
+
+    #[test]
     fn list_inner_html_attaches_items_without_a_document_wrapper() -> Result<(), String> {
         let mut document = HtmlDocument::parse("<ul id=target></ul>");
         let target_id = document
@@ -265,6 +309,39 @@ mod tests {
             document.inner_html(999),
             Err("HTML node 999 does not exist".to_string())
         );
+    }
+
+    #[test]
+    fn fragment_mutations_reject_missing_nodes() {
+        let cases = [
+            ("set_inner_html", FragmentMutation::SetInnerHtml),
+            ("insert_adjacent_html", FragmentMutation::InsertAdjacentHtml),
+            ("insert_adjacent_text", FragmentMutation::InsertAdjacentText),
+        ];
+        for (name, mutation) in cases {
+            let mut document = HtmlDocument::parse("<p id=target>Visible</p>");
+            let result = match mutation {
+                FragmentMutation::SetInnerHtml => document.set_inner_html(999, "<b>x</b>"),
+                FragmentMutation::InsertAdjacentHtml => {
+                    document.insert_adjacent_html(999, "beforeend", "<b>x</b>")
+                }
+                FragmentMutation::InsertAdjacentText => {
+                    document.insert_adjacent_text(999, "beforeend", "x")
+                }
+            };
+            assert_eq!(
+                result,
+                Err("HTML node 999 does not exist".to_string()),
+                "{name}"
+            );
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum FragmentMutation {
+        SetInnerHtml,
+        InsertAdjacentHtml,
+        InsertAdjacentText,
     }
 
     #[test]
@@ -492,3 +569,7 @@ mod tests {
         assert!(Rc::ptr_eq(&root, &dom.document));
     }
 }
+
+#[cfg(test)]
+#[path = "html_document_fragment_boundary_tests.rs"]
+mod boundary_tests;
