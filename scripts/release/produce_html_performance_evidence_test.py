@@ -20,7 +20,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 
 import produce_html_performance_evidence as typed_producer
@@ -728,10 +728,14 @@ class CapacityBindingUnitTests(unittest.TestCase):
                 {"schema": "krr-html-performance-build-artifact-v1", "arm": arm},
                 [{"path": str(raw), "sha256": gate.sha256(raw)}])
 
+        def git_query(_root: Path, _args: Sequence[str],
+                      _input_bytes: bytes | None, _text: bool) -> str:
+            return ""
+
         with patch.object(producer.platform, "system", return_value="Darwin"), \
              patch.object(producer.platform, "machine", return_value="arm64"), \
              patch.object(producer, "_make_git_query",
-                          return_value=lambda *_args, **_kwargs: ""), \
+                          return_value=git_query), \
              patch.object(producer, "source", side_effect=[initial, initial, initial, initial]), \
              patch.object(producer, "_measurement_command",
                           return_value=subprocess.CompletedProcess(
@@ -754,6 +758,7 @@ class CapacityBindingUnitTests(unittest.TestCase):
         self.assertEqual(build_call.call_args.args[2], "candidate")
         self.assertEqual(command.call_args.args[0], ["just", "runtime-bundle-check"])
         self.assertEqual(validate.call_count, 1)
+        self.assertIs(validate.call_args.kwargs["git_query"], git_query)
         self.assertEqual(result["htmlPerformanceAcceptance"], "not-evaluated")
         self.assertNotIn("performanceAccepted", result)
         self.assertNotIn("acceptance", result)
@@ -972,6 +977,23 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.logs = Path(self.temporary.name) / "raw"
 
+    def create_git_fixture(self, parent: Path) -> tuple[Path, Path]:
+        root = parent / "repo"
+        root.mkdir()
+        source_path = root / "source.py"
+        source_path.write_text("value = 1\n")
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        self.commit_git_fixture(root, "fixture")
+        return root, source_path
+
+    def commit_git_fixture(self, root: Path, message: str) -> None:
+        subprocess.run(["git", "-C", str(root), "add", "source.py"], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+             "commit", "-qm", message],
+            check=True,
+        )
+
     def invoke(self, mode: str, *, native: bool = False) -> subprocess.CompletedProcess[bytes]:
         return typed_producer._measurement_command(
             [sys.executable, str(Path(__file__).resolve()), "--lifecycle-fixture", mode],
@@ -1064,28 +1086,47 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
 
     def test_producer_git_query_reads_real_temporary_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "repo"
-            root.mkdir()
-            source_path = root / "source.py"
-            source_path.write_text("value = 1\n")
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
-            subprocess.run(["git", "-C", str(root), "add", "source.py"], check=True)
-            subprocess.run(
-                ["git", "-C", str(root), "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
-                 "commit", "-qm", "fixture"],
-                check=True,
-            )
-            snapshot = typed_producer.source(root, git_query=typed_producer._make_git_query(self.logs))
+            root, source_path = self.create_git_fixture(Path(temporary))
+            git_query = typed_producer._make_git_query(self.logs)
+            snapshot = typed_producer.source(root, git_query=git_query)
+            self.assertEqual(typed_producer.source(root, git_query=git_query), snapshot)
             self.assertEqual(snapshot["head"], gate.git(root, "rev-parse", "HEAD").strip())
             records = gate.records_map(snapshot["files"])
             self.assertIn(str(source_path), records)
             self.assertEqual(records[str(source_path)], (gate.sha256(source_path), source_path.stat().st_size))
             lifecycle_records = list(self.logs.glob("tool-query-*/lifecycle.json"))
-            self.assertGreaterEqual(len(lifecycle_records), 8)
+            cat_file_calls = [path for path in lifecycle_records
+                              if gate._array(gate.read_json(path)["argv"], "Git argv")[-2:]
+                              == ["cat-file", "--batch"]]
+            self.assertEqual(len(cat_file_calls), 1)
             for path in lifecycle_records:
                 row = gate.read_json(path)
                 self.assertTrue(row["groupClosed"])
                 self.assertTrue(row["rawFdsClosed"])
+            source_path.write_text("value = 2\n")
+            self.commit_git_fixture(root, "updated fixture")
+            updated = typed_producer.source(root, git_query=git_query)
+            self.assertNotEqual(updated["head"], snapshot["head"])
+            updated_lifecycles = list(self.logs.glob("tool-query-*/lifecycle.json"))
+            updated_cat_file_calls = [path for path in updated_lifecycles
+                                      if gate._array(gate.read_json(path)["argv"], "Git argv")[-2:]
+                                      == ["cat-file", "--batch"]]
+            self.assertEqual(len(updated_cat_file_calls), 2)
+
+    def test_symbolic_cat_file_batch_input_is_never_cached(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source_path = self.create_git_fixture(Path(temporary))
+            query = typed_producer._make_git_query(self.logs)
+            first = query(root, ("cat-file", "--batch"), b"HEAD\n", False)
+            source_path.write_text("value = 2\n")
+            self.commit_git_fixture(root, "updated fixture")
+            second = query(root, ("cat-file", "--batch"), b"HEAD\n", False)
+            self.assertNotEqual(first, second)
+            lifecycle_records = list(self.logs.glob("tool-query-*/lifecycle.json"))
+            symbolic_calls = [path for path in lifecycle_records
+                              if gate._array(gate.read_json(path)["argv"], "Git argv")[-2:]
+                              == ["cat-file", "--batch"]]
+            self.assertEqual(len(symbolic_calls), 2)
 
     def test_lifecycle_record_write_failure_keeps_primary_command_failure(self) -> None:
         original_write = typed_producer.write

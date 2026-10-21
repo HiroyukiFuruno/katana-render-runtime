@@ -19,6 +19,7 @@ import sys
 import time
 import tempfile
 from contextlib import ExitStack, contextmanager
+from functools import lru_cache
 from pathlib import Path
 from types import FrameType
 from typing import BinaryIO, Literal, NamedTuple, TypedDict, cast, overload
@@ -944,13 +945,32 @@ def command(args: Sequence[str], *, text: bool = False, cwd: Path | None = None,
 
 
 def _make_git_query(log_directory: Path) -> gate.GitQuery:
-    def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> str | bytes:
+    def execute(root: Path, args: Sequence[str], input_bytes: bytes | None,
+                text: bool) -> str | bytes:
         completed = _measurement_command(["git", "-C", str(root), *args], role="tool-query",
                                          log_directory=log_directory, cwd=root, input_bytes=input_bytes)
         if text:
             with io.TextIOWrapper(io.BytesIO(completed.stdout)) as stream:
                 return gate._text(stream.read(), "Git query stdout")
         return completed.stdout
+
+    @lru_cache(maxsize=1)
+    def cached_cat_file_batch(root_path: str, args: tuple[str, ...], input_bytes: bytes) -> bytes:
+        result = execute(Path(root_path), args, input_bytes, False)
+        if not isinstance(result, bytes):
+            raise ValueError("Git batch query returned text output")
+        return result
+
+    def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> str | bytes:
+        argv = tuple(args)
+        object_ids = input_bytes[:-1].split(b"\n") if input_bytes and input_bytes.endswith(b"\n") else []
+        stable_object_batch = bool(object_ids) and all(
+            re.fullmatch(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})", object_id) is not None
+            for object_id in object_ids
+        )
+        if argv == ("cat-file", "--batch") and stable_object_batch and input_bytes is not None and not text:
+            return cached_cat_file_batch(str(root.resolve()), argv, input_bytes)
+        return execute(root, args, input_bytes, text)
 
     return query
 
@@ -1047,6 +1067,7 @@ def produce_candidate_build_proof(root: Path, output: Path, capacity_document: P
     relative_artifact = relative_paths[artifact_pin["path"]]
     facts = gate.validate_candidate_build_proof(
         bundle, root, bundle_sha256, relative_artifact, artifact_pin["sha256"],
+        git_query=git_query,
     )
     gate.require(source(root, git_query=git_query) == initial,
                  "source changed during candidate build proof validation")
