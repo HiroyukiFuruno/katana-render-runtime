@@ -14,6 +14,12 @@
 
 ## 現在の状態（2026-10-22）
 
+- [/] 並列修正の統合：言語別比較の失敗後も共有入力が不変なら後続言語を実行し、共有入力変更時は既得結果と原エラーを保持して停止する修正を`a9273d40`へ確定した。空文字・非表示要素によるSVG範囲の混入と、安全なC4隣接文字列のnative shapingを`75ed61a2`へ確定した。通常commit hookを通過したローカルcommitであり、push・公開完了ではない。
+
+- [/] R1076 限定統合：標準source foundation、対象Bun22件、現行compiled catalogの実V8/製品描画3件が全件成功し、source前後一致、統合69.744秒。Mindmap-simpleとTreemap-nestedはR1063独立raw viewBoxへ照合し、C4はnative shapingと位置指定・RTL・bidi・font変更の分離を確認した（`tmp/quality/current-native-svg-product-integration-r1076/final.json`）。その後の変更はAST指摘に従うテスト配列長の定数化だけで、通常commit hookを再実行した。R1073のENOSPC・R1075の型エラー・commit hookの容量/AST失敗は保持し、成功へ書き換えない。全117採点・HTML84・性能・coverage100/0の合格へ転用しない。
+
+- [ ] R1067 現行117比較の残差：独立raw reader・candidate buildを通過し、英語59図のSVG比較は50件合格、最低90.28659へ改善した。実native PNGはMindmapの寸法差で停止し、日本語58図は未実行（`tmp/quality/current-managed117-owner-r1067/final.json`）。R1076の範囲修正と比較継続修正を含む新sourceで全117を再採点する。C4の微小座標差、Architecture、Ishikawa等の残差も未合格として維持する。
+
 - [/] 成果のコミット確定：容量整理の保護修正を`a624048e`、Mermaidの実フォント指標・SVG境界計測と回帰を`b1fff609`、HTML二重解析除去を`dd1388db`、既存性能診断のCLI接続を`eac901ce`へ確定した。通常hookを通過したローカルcommitであり、push・PR・公開完了ではない。診断CLIは通常のrelease verifierに受け入れられず、正式フォント完全一致・性能非劣化条件を維持する。変更Python4fileのRuff・厳格Mypyと4回帰は成功し、R1060の全source foundationも成功した（`tmp/quality/html-diagnostic-cli-validation-r2/`）。
 
 - [/] R1048/R1051 Mermaid製品回帰：Trebuchetの実字形metricによるx-height補完後、残差2件と実V8フォント2件の計4件が成功。続く全rootは2,693件成功・17skip、source前後一致だった。証跡は`tmp/quality/current-native-svg-product-integration-r1048/final.json`と`current-native-svg-product-integration-r1051/final.json`。カバレッジは60,349/61,119行、未計測770行であり、100%・未計測0は未達。後続のHTML変更にこの成功を転用しない。
@@ -22,7 +28,7 @@
 
 - [/] R1060/R1061 SVG変換の異常系回帰：有限入力の計算結果がoverflowする場合を実V8 callbackで拒否し、正常boundsの4propertyも既存許容差で検証した。R1060は全source foundationとCargo catalog生成が成功したが、後処理のpath抽出が失敗したためテスト未実行として保持する。R1061は変更前後source一致を照合して静的結果を再利用し、現在のcompiled catalogとbinary SHAを記録した上で実1件が成功した。これは通常dev profileの限定診断であり、coverageや全117比較の成功ではない（`tmp/quality/current-native-svg-product-integration-r1061/final.json`）。完了済み検査の記録を残し、既存`just clean`で固定上限を超えた再生成可能な成果物を整理した。整理後は過去binaryを次の検査へ再利用しない。
 
-- [ ] R1053 独立raw JS見本の更新：既存の厳格official readerはR977のEN/JAとも実endpoint不一致を拒否した。対象は変更された`official-renderer.ts`の物理pinであり、過去画像を差し替えたり再認定せず、現行ソースで全117件を新規生成する。`diagnosticOnly=true`自体は拒否理由ではない。証跡は`tmp/quality/current-official-raw-reader-r1053/result.json`。
+- [/] R1053/R1063 独立raw JS見本の更新：厳格official readerがR977の実endpoint不一致を拒否した原結果を保持し、R1063でEN59・JA58の独立rawを新規生成した。両言語actual0・source前後一致・149.786秒、後続R1067の厳格readerも受理した（`tmp/quality/fresh-official-raw117-r1063/final.json`）。過去画像の差し替え・再認定はせず、`diagnosticOnly=true`自体を拒否理由としない。次回再利用時も既存readerで実入力・資源・endpointを検査する。
 
 - [/] R1043現行4case限定検証：foundation・AST・厳格Clippy・SVGと登録契約はactual0。現行compiled catalog・binary SHAに結び付けた実4caseはJourneyと無効transformの2件成功、TimelineとIshikawaの2件失敗（本体2.824秒、統合95.140秒、source前後一致、actual100、`tmp/quality/current-native-svg-product-integration-r1043/final.json`）。観測でTrebuchetのx-heightが未取得となりCSSの0.5emへ落ち、Timelineが32px（独立Chromeは33.4688px）、middleが3.5pxとなることを確認した。既存フォントライブラリの実字形metricで補完し、基準・許容差を変更せず検証する。 後続R1048/R1051で局所実装と回帰の失敗を解消した。元失敗の証跡は保持し、正式117score・HTML総合と性能・coverage100/0・公開は別の未完了条件とする。
 
