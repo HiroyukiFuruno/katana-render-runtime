@@ -14,6 +14,44 @@
 
 ## 現在の状態（2026-10-22）
 
+- [/] R1170で現行foundation・AST・全Clippy（performance両armを含む）・関連Bunと実Mach-O unit15件が成功し、source前後一致・224.134秒を確認した（`tmp/quality/svg-font-macho-static-r1170/final.json`）。不正なTOML依存情報の欠落でpanicする分岐を実行回帰で検出し、安全なgetと欠落catalog/checksum回帰へ修正、`d3d4c1a5`へ通常hookで確定した。R1167の13成功/1失敗は原runへ保持する。
+
+- [ ] SVG namespace限定のgetBBox返却4成分をChromiumのfloat API契約へ合わせ、HTML寸法を保持する変更を`4a31dfa3`へ確定した。primitive端点を先に丸める未確定案は採用せず、内部union全体の完全再現とは主張しない。新規の実V8回帰とfont property/x-height境界回帰はコンパイル・静的検査まで成功、実行は次の全rootで確認する。R1170の静的成功を117図の合格へ代用しない。追加のChrome `data:`診断はURL policyに拒否され、迂回せず中止した。
+
+- [/] 元の`a.hash`と`querySelector(a.hash)`で目次3リンクすべての本文参照を確認する回帰を`f05dbae5`へ確定した。R1155の実2件とR1158の全rootで成功した範囲であり、Chrome84条件の再取得・全scroll・全目次の正式受入れは未完了である。
+
+- [/] R1164はroot/baseline Clippy成功後にcandidateの固定容量上限で拒否された。R1158のimmutable reportを保持し、完了済みinstrumented targetだけを既存Cargo cleanで整理したR1166がactual0、実空き83,816,996,864Bから86,796,877,824Bへ回復した。R1167/R1170は両armのClippyを再完了した。閾値4,726,095,872Bは不変で、次のrootはcold条件として扱う。R1168の親コマンド構文エラーは検査本体未開始として`tmp/quality/svg-font-macho-static-r1168-parent-failure/`へ原コマンドと観測結果を保持した。
+
+- [ ] 検証専用Chromium環境：Xcode27.1・SDK27.0・clang・初回設定をactual0で確認した。公式mirrorの固定commit `0e66b94549a8bd85f03fbdf189b752d6e7b63c32` のsyncとGN生成が成功。必須Metal Toolchain取得後、同じGN設定・出力先でheadless_shellをコンパイル中。直近観測は2,032/47,674 actions、実空き約92.8GiB。global xcode-selectは不変、iOS等の追加platformは取得していない。OSにより消失する既知web-test PNGは異常記録を保持し、headless_shell依存閉包外であることを確認した。全checkout clean・観測の非干渉性・HTMLフォント完全一致の合格とは扱わない。
+
+- [/] 製品SVGの名前空間・computed style・空要素bbox・SVGLength・全文フォント計測を`1310d407`へ、Mach-O専用出力とmanaged build証跡検査を`d996b23c`へ通常hookで確定した。R1149はfoundation・AST・Clippy・関連Bunが成功し、R1150のnative21件も全成功した。R1143以前のArchitecture失敗は局所回帰で解消したが、全117件の再採点は未完了である。
+
+- [/] R1147で実Mach-O 141 endpoint・N_OSO 3,189件を既存LLVM経路と照合し、全件一致・actual0・対象ソース不変を確認した（`tmp/quality/current-compact-parity-r1147-owner/result.json`、`tmp/quality/compact-parity-r1147/result.json`）。専用出力のparity成功を全品質・表示性能の合格へ代用しない。
+
+- [/] R1154のfoundation・AST・Clippy・Bunと、R1155の実V8変換異常系・HTML目次合成の2回帰が成功した。目次3リンクは元の`a.hash`と`querySelector(a.hash)`で本文まで取得でき、比較式の変更は不要だった。
+
+- [ ] R1158で現行全Rustテスト2,717件成功・17skip、source前後一致、root producer actual0を確認した（`tmp/quality/current-root-coverage-r1158/final.json`）。coverageは60,540/61,502行（98.4358%）、未計測962行で100%・未計測0は未達。現行reportは同runの`root-snapshot.json`（SHA256 `a25d7247a353cebec0ec7a92be6d655146ce6f8055e44c4bd70666ea8cc7c8ed`）へ保持した。新規Mach-O entry・pin検証の主要未計測経路の回帰を追加中。R1156は固定容量上限でtests前に拒否され、既存cleanで終了済みdev成果物を整理したR1157後に新runとして実施した。閾値は変更していない。
+
+- [ ] 全件採点の直近結果R1082は英語59件中49件合格・10件未合格、日本語58件未実行で、未合格または未実行は計68件。C4はSVG点数99以上でも実PNGの形状評価が完了していないため合格に含めない。後続の限定回帰をこの残数から差し引かず、新しい全117件の正式採点で更新する。
+
+- [/] R1144で現行compact Mach-O用Rust facts hostを正式producerから準備し、actual0・対象ソース前後一致・14.377秒を確認した。実Mach-OとLLVMのparityは別担当が実行中で、準備成功を最適化の完了にしない（`tmp/quality/current-compact-host-prepare-r1144/result.json`）。
+
+- [/] R1143の統合限定検証は実native17件中16件成功・Architectureのみ失敗、source前後一致、197.639秒だった。原失敗は保持し、後続R1150の実21件全成功で局所回帰の失敗を解消した。全117採点・coverage100/0・HTML性能・公開の合格ではない（`tmp/quality/parallel-product-native-integration-r1143/final.json`、`tmp/quality/parallel-product-native-integration-r1150/final.json`）。
+
+- [/] CIとローカルmacOS証跡のBunを1.4.3へ同期し、`60da6dc8`へコミットした。R1107のruntime query・変更拒否・release pin、R1108のlocal evidence、R1112のsource foundation成功を確認した範囲であり、公開完了ではない。
+
+- [/] raw Mermaid生成時の寸法観測と原SVGハッシュ一致検査・標準テスト登録を`a62274be`へコミットした。診断結果は常にaccepted=falseで、基準データを置換しない。R1124でsource foundation・AST・Clippy（performance harnessを含む）・関連Bun11件が成功、source前後一致。通常commit hookも成功。公開・製品117件合格とは区別する。
+
+- [ ] R1124の実native限定回帰14件は12成功・2失敗、本体6.082秒、静的検査とcold buildを含む全体242.549秒。ER simple/multiとC4・Treemap・Ishikawa・SVGLength・Mach-O4件は成功したが、Architectureが未解消、空の位置指定textを保持する変更でMindmapに後退が出たため製品修正は未完了。図種特例なしで空要素のChrome契約を調査する。R1122はperformance-harness-lint直前の固定容量上限で失敗、既存cleanのR1123がactual0で回復した。続くcommit時の容量拒否は終了済みcoverage profileだけを既存Cargo cleanで整理したR1125（actual0）で回復し、閾値は不変。削除済みnative binaryの過去証跡は現行binaryとして再利用しない。
+
+- [ ] R1118の実native限定回帰は7件中5件成功・2件失敗、source前後一致、41.504秒。SVGLengthのf32座標とMach-O正常・異常4件は成功。ERとArchitectureは独立rawとのviewBox差が残る。ERは位置指定を持つ空textの原点が親bboxから落ちる差を追跡中。raw診断のコミットは通常hookが未commitのMach-O実装のAST責務境界・公開関数・magic number・Clippy型複雑度を拒否したため未成立で、基準を変えず並列修正する。R1116のobserver参照誤り、R1117の差分照合パス誤りは原runへ保持する。
+
+- [/] R1115で未参照の古い重複解析cache770件をSHA照合付きで可逆圧縮し、16,143,158,318Bから1,180,505,482Bへ整理した。原内容は`tmp/quality/duplication/reports/retired-lossless/`へ保持し、空き20,961,206,272Bを確認した。固定容量閾値は変更していない。自動retentionと全管理外領域の整理完了には代用しない（`tmp/quality/generated-cache-archive-r1115/result.json`）。
+
+- [ ] R1082後の並列是正：Chrome実測に基づきdisplay:noneのgだけintrinsic bboxを保持し、ERの後退を修正した。C4の根拠未確立のowner結合を戻し、canonical fixtureを実描画する回帰を追加した。R1089のBun8件は成功、実native回帰・全117件は未検証。R1098では独立raw生成中の寸法観測を追加し、生成SVGのSHAがR1063と完全一致した。C4のUser上端1.0000009536743164を取得したが、原因の確定・修正は未完了である（`tmp/quality/raw-c4-original-generation-r1098/capture/diagnostic.json`）。基準の変更や許容差の拡大は行わない。
+
+- [ ] compact Mach-O検証：1回の検証で約2.4GiBに達するdsymutil全symbol出力を、object 0.40.0によるN_OSO専用出力へ置き換える変更を並列実装した。通常経路と実LLVMとの差分診断を分離し、既存の所有権・archive・実体照合を維持する。R1100の所有権55件とR1103のmanaged reader66件・producer20件は成功。実Mach-O全件parity、native compile、完全ゲートは未実施であり、最適化完了としない。R1095の重複拒否、R1097/R1100のfixture不整合、R1101のraw-FD時刻不整合は原runに保持した。R1102は型・Ruff・厳格mypy・重複0等が成功したが、harnessの未解決実行経路1件でactual1・source前後一致。登録・追跡の修正を継続する。
+
 - [/] 並列修正の統合：言語別比較の失敗後も共有入力が不変なら後続言語を実行し、共有入力変更時は既得結果と原エラーを保持して停止する修正を`a9273d40`へ確定した。空文字・非表示要素によるSVG範囲の混入と、安全なC4隣接文字列のnative shapingを`75ed61a2`へ確定した。通常commit hookを通過したローカルcommitであり、push・公開完了ではない。
 
 - [/] R1076 限定統合：標準source foundation、対象Bun22件、現行compiled catalogの実V8/製品描画3件が全件成功し、source前後一致、統合69.744秒。Mindmap-simpleとTreemap-nestedはR1063独立raw viewBoxへ照合し、C4はnative shapingと位置指定・RTL・bidi・font変更の分離を確認した（`tmp/quality/current-native-svg-product-integration-r1076/final.json`）。その後の変更はAST指摘に従うテスト配列長の定数化だけで、通常commit hookを再実行した。R1073のENOSPC・R1075の型エラー・commit hookの容量/AST失敗は保持し、成功へ書き換えない。全117採点・HTML84・性能・coverage100/0の合格へ転用しない。
