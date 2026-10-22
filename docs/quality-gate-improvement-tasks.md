@@ -14,6 +14,38 @@
 
 ## 現在の状態（2026-10-22）
 
+- [/] 成果のコミット確定：容量整理の保護修正を`a624048e`、Mermaidの実フォント指標・SVG境界計測と回帰を`b1fff609`、HTML二重解析除去を`dd1388db`、既存性能診断のCLI接続を`eac901ce`へ確定した。通常hookを通過したローカルcommitであり、push・PR・公開完了ではない。診断CLIは通常のrelease verifierに受け入れられず、正式フォント完全一致・性能非劣化条件を維持する。変更Python4fileのRuff・厳格Mypyと4回帰は成功し、R1060の全source foundationも成功した（`tmp/quality/html-diagnostic-cli-validation-r2/`）。
+
+- [/] R1048/R1051 Mermaid製品回帰：Trebuchetの実字形metricによるx-height補完後、残差2件と実V8フォント2件の計4件が成功。続く全rootは2,693件成功・17skip、source前後一致だった。証跡は`tmp/quality/current-native-svg-product-integration-r1048/final.json`と`current-native-svg-product-integration-r1051/final.json`。カバレッジは60,349/61,119行、未計測770行であり、100%・未計測0は未達。後続のHTML変更にこの成功を転用しない。
+
+- [/] R1055 HTML二重解析の除去：静的描画で解析済み文書を内部開始処理へ渡し、再parseを除去した。テスト専用開始helperの可視性を既存兄弟テストに合わせて維持した。現行compiled catalog・binary SHAへ束縛したlifecycle・JavaScript状態・consumer resizeの11件が全件成功、本体0.205秒、統合108.557秒、source前後一致。証跡は`tmp/quality/current-native-svg-product-integration-r1055/final.json`。表示時間・RSSの同条件実測は別の未完了条件である。
+
+- [/] R1060/R1061 SVG変換の異常系回帰：有限入力の計算結果がoverflowする場合を実V8 callbackで拒否し、正常boundsの4propertyも既存許容差で検証した。R1060は全source foundationとCargo catalog生成が成功したが、後処理のpath抽出が失敗したためテスト未実行として保持する。R1061は変更前後source一致を照合して静的結果を再利用し、現在のcompiled catalogとbinary SHAを記録した上で実1件が成功した。これは通常dev profileの限定診断であり、coverageや全117比較の成功ではない（`tmp/quality/current-native-svg-product-integration-r1061/final.json`）。完了済み検査の記録を残し、既存`just clean`で固定上限を超えた再生成可能な成果物を整理した。整理後は過去binaryを次の検査へ再利用しない。
+
+- [ ] R1053 独立raw JS見本の更新：既存の厳格official readerはR977のEN/JAとも実endpoint不一致を拒否した。対象は変更された`official-renderer.ts`の物理pinであり、過去画像を差し替えたり再認定せず、現行ソースで全117件を新規生成する。`diagnosticOnly=true`自体は拒否理由ではない。証跡は`tmp/quality/current-official-raw-reader-r1053/result.json`。
+
+- [/] R1043現行4case限定検証：foundation・AST・厳格Clippy・SVGと登録契約はactual0。現行compiled catalog・binary SHAに結び付けた実4caseはJourneyと無効transformの2件成功、TimelineとIshikawaの2件失敗（本体2.824秒、統合95.140秒、source前後一致、actual100、`tmp/quality/current-native-svg-product-integration-r1043/final.json`）。観測でTrebuchetのx-heightが未取得となりCSSの0.5emへ落ち、Timelineが32px（独立Chromeは33.4688px）、middleが3.5pxとなることを確認した。既存フォントライブラリの実字形metricで補完し、基準・許容差を変更せず検証する。 後続R1048/R1051で局所実装と回帰の失敗を解消した。元失敗の証跡は保持し、正式117score・HTML総合と性能・coverage100/0・公開は別の未完了条件とする。
+
+- [/] R1042予約warm成果物を保持した容量回復：R1041は静的工程成功後、native linkでENOSPC・実101となり4case未実行。既存guardで44保護refと現行warm V8 archiveの物理identityを検証した45ref registryを作り、承認済みprivate clean-allへ渡した。root cleanは保護refにより拒否され、全体actual1として保持する一方、他の既存cleanで空き11,271,131,136Bへ回復した。予約warm archive不変・KRR target4,095,537,152B・固定閾値不変（`tmp/quality/current-warm-preserving-capacity-recovery-r1042/final.json`）。部分回復をclean-all全体成功にしない。次のR1043は再コンパイル15.78秒で4case実行へ到達した。
+
+- [/] R1031/R1032の静的残指摘の追確認：R1043の現行foundation・AST・厳格Clippyが成功し、文順・責務境界・定数・型の当該指摘は解消した。元の失敗記録は保持する。描画残差・全件coverage・117score・HTML・性能・公開は未完了であり、この静的成功へ代用しない。
+
+- [ ] 検証専用Chromium（2026-10-22ユーザー承認）：描画・フォント選択を変更せず、最終screen paintとcacheで実使用されたfont face・variation instanceを観測する専用Chromiumの開発・比較元への採用を承認済み。stock Chromeの公開API不足を完全一致条件の緩和理由にしない。専用版の実装、ビルド環境、観測の完全性・非干渉性、KRRとの全条件一致は未検証。別repoの編集はIssueを先に作成し許可へ記録する。
+
+- [/] R1040 Clippyによる予約coverage消失の是正：canonical root coverage profileが物理ディレクトリで存在する場合だけ既存retain指定を渡し、guardでroot domain・正規path・重複・symlinkを検証する。固定閾値は不変。Ruff・strict mypy・対象unit1件・Justfile parseがactual0（`tmp/quality/current-retained-root-profile-r1040-r3/`、`-r4/`、`-r5/`）。本修正後の重い統合検証と容量実測は未完了。
+
+- [ ] R1038/R1039限定再検証：R1038 foundation・ASTはactual0、Clippyがdefault分岐の記述と観測helper引数型を拒否しactual101。該当箇所を修正した。R1039はshellの一時file作成ENOSPCでchild開始前に失敗し、検査成功へ数えない。privateの既存clean-all actual0でroot targetが消失したため次回はcold条件。過去のcatalog/binary消失を成功証跡で補完しない。4caseの正式再検証から続行する。
+
+- [ ] HTML出力fontの完全一致（2026-10-22ユーザー回答）：比較入力のCSS/file/loadingを揃えるだけでなく、最終出力のfont face・実適用instanceの完全一致を必須とする。可変font未証明12条件を画像90以上で代替しない。公開CDPはPS名等のみでvariation実座標を返さず、標準screen SKPもmacOS system fontでは座標を保存しないことを固定Chromium/Skia一次ソースで確認した。再構成CoreText座標やSKP再読込を実出力証明へ格上げしない。既存Fridaによる所有検査Chromeの実glyph API観測可否を限定調査し、成功してもframe/run/cacheとの対応と未観測0まではnot-establishedを維持する。署名変更・SIP変更・権限緩和を前提にしない。正式時間/RSSは観測instrumentationと別の無計装runで評価する。
+
+- [/] R1034現行全Rust検査：foundation・AST・本体と性能両armの厳格Clippy・対象Bun・登録回帰はactual0。全rootは2,692件中2,688成功・4失敗・17skip、本体132.463秒、統合472.791秒、source前後一致でactual100（`tmp/quality/current-native-svg-product-integration-r1034/final.json`）。GitGraph回転と実x-height橋渡しは成功した。残る4件はTimeline上端1px、Ishikawa上端約0.1875px、JourneyのXML entity内semicolonによるstyle破損、既存の無効transform恒等契約である。独立raw oracleを変更せず観測・修正し、まず失敗caseへ限定して検証する。全件成功・coverage100/0・117score・性能・公開の合格ではない。 後続R1048/R1051で局所実装と回帰の失敗を解消した。元失敗の証跡は保持し、正式117score・HTML総合と性能・coverage100/0・公開は別の未完了条件とする。
+
+- [/] R1031/R1032 Rust統合の静的残指摘（当時の失敗は保持、現行R1043で静的解消を確認）：両runのfoundationはactual0。R1031はgeometry bridge追加後のrealm文数・順序契約が未更新でAST101となった。同一scopeでfont→geometry→scriptsの順を要求し、欠落・逆順・誤scopeの負例を追加した。R1032でこの契約は通ったが、追加コード5fileの責務境界とmagic numberをASTが拒否した（actual101、source前後一致、`tmp/quality/current-native-svg-product-integration-r1032/final.json`）。規約を無効化せず、x-height処理・raw oracle helper・geometry契約を責務ごとに分割し、定数化して再検証する。ブラウザ補助経路25件とscoped型検査はtool結果0を観測したが物理raw・source前後は未取得のため、正式統合runで再実行する。Rust製品テスト・117件・coverage・性能・公開は未合格。
+
+- [/] R1030/R1031 SVG修正の統合検証：相対ex、Journeyの代替文字font、非表示/縮退要素の境界、回転、middle baselineを実装し、代替文字計測の補正漏れも是正した。共有transform helperの型・重複・Bun19件はactual0、主担当がraw SHAと16file前後一致を照合した（`tmp/quality/dom-svg-transform-shared-helper-postfix-01a15f3f/main-physical-review.json`）。middle代替経路のBun16件は正式observerでactual0（`tmp/quality/current-middle-baseline-fallback/formal-observer/metadata-pevn6msd/`）。R1030 foundationは新しいcfg(test) module登録後のconsumer SHA未更新を拒否したためactual1・source前後一致・重い検査未起動。既存cfg/include経路を確認して該当pinだけ同期し、正の契約case1件がactual0（`tmp/quality/native-width-contract-pin-r1030-focused-02/`）。誤って広く起動した契約全fileは中断要求SIGINTと実終了-15を区別し、途中504件を合格へ転用せずrawを保持した。担当へ渡す検査はfileだけでなくcase selectorまで指定し、限定検証を全fileへ拡大しない。補助的な非strictブラウザ正規化にもSVG標準APIによるtransform providerを接続した。独立strict raw経路は不変。これらの局所確認は製品117件・coverage・性能・公開の合格ではなく、R1031で現行全静的検査から統合する。 後続R1048/R1051で局所実装と回帰の失敗を解消した。元失敗の証跡は保持し、正式117score・HTML総合と性能・coverage100/0・公開は別の未完了条件とする。
+
+- [/] R1020/R1021 製品のSVG境界・文字の残差修正：R997の残差から、Timelineのex未対応、JourneyのHTMLラベルとSVG代替文字の実font/size不一致、Treemapのinline非表示要素の混入、ERの縮退文字の境界欠落を特定し実装した。GitGraphの回転とIshikawaのmiddle baselineも差分量が数式と一致し、既存svgtypesとフォントcacheで修正中。原本・基準canvasを補正しない。R1020のfoundationは新規test未追跡を拒否、stage後のR1021は新規test追加による既存コマンド隣接契約の不整合を拒否した。各actual1・source前後一致・rawを保持し、重い検査は未起動。隣接契約を限定更新して再検証する。新しいスコア・現行coverage・性能は未取得であり、実装を合格としない。 後続R1048/R1051で局所実装と回帰の失敗を解消した。元失敗の証跡は保持し、正式117score・HTML総合と性能・coverage100/0・公開は別の未完了条件とする。
+
 - [/] R999 輸送binaryの実行権限と比較前処理：bundleのcopyfile後に元fileのmodeを保持し、probeのX_OKを高コスト工程前に検査する。native PNG形状比較の専用出力root作成漏れも修正した。foundation・producer・verifier・managed比較unitが全actual0、source前後一致、76.344秒。mainが全7観測のraw SHAとgroup/FD閉鎖を確認した（`tmp/quality/current-transport-preflight-static-r999/main-physical-review.json`）。117件・性能・公開合格とは区別する。
 
 - [ ] R997 Mermaid現行比較の残差：HEAD b938ec87で英語59件のnative SVG/raster採取と厳格比較まで到達し、43件が99以上、最低83.6451だった。C4の実native PNG形状工程で専用root不在のENOENTとなり、日本語58件は未実行。元失敗と全rawを保持する（`tmp/quality/current-managed117-owner-r997/final.json`、`current-managed-full117-r997/en/comparison/scores.json`）。Timelineのtitle属性4exに対しnative viewBox上端が-45、独立rawは-61であり、製品の相対font単位解決を調査中。基準画像やcanvasを補正して通過させない。
