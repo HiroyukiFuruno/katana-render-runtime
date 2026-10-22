@@ -504,6 +504,16 @@ test("initial official session CLI seeds strict config without a prior template"
   expect(fs.readFileSync(input.configPath)).toEqual(bytes);
 });
 
+test("initial official session excludes empty Mermaid fences from its inventory", () => {
+  const f = sessionFixture(),
+    input = officialSeedFixture(f);
+  fs.writeFileSync(path.join(input.fixturesDir, "empty.md"), "# empty\n\n```mermaid\n \n\t\n```\n");
+  const result = runOfficialSeedCli(input);
+  expect(result.exitCode).toBe(0);
+  const config = JSON.parse(fs.readFileSync(input.configPath, "utf8")) as JsonObject;
+  expect(config.inventory).toEqual(["alpha", "zeta"]);
+});
+
 test("official seed API derives tool options only from its pinned seed file", () => {
   const f = sessionFixture(),
     input = officialSeedFixture(f),

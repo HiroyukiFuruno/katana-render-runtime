@@ -426,7 +426,10 @@ function rasterSessionOptions(
   ) {
     throw new Error("Raster config, attempt and output paths must remain separate");
   }
-  const inventory = new FixtureRepository(fixturesDir).list().map((fixture) => fixture.slug);
+  const inventory = new FixtureRepository(fixturesDir)
+    .list()
+    .filter((fixture) => (fixture.originalFenceSource ?? "").trim() !== "")
+    .map((fixture) => fixture.slug);
   if (inventory.length === 0 || new Set(inventory).size !== inventory.length) {
     throw new Error("Candidate fixture inventory must be nonempty and unique");
   }
