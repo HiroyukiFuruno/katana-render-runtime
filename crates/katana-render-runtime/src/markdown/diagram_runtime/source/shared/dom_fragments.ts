@@ -20,6 +20,10 @@ export const SharedDomFragments = {
       RuntimeFragmentFactory.verbatim("dom-selector.js", `${MERMAID_JS_RUNTIME}/dom_selector.js`),
       RuntimeFragmentFactory.verbatim("dom-document.js", `${MERMAID_JS_RUNTIME}/dom_document.js`),
       RuntimeFragmentFactory.verbatim("dom-tree.js", `${MERMAID_JS_RUNTIME}/dom_tree.js`),
+      RuntimeFragmentFactory.verbatim(
+        "svg-transform-bounds.js",
+        `${MERMAID_JS_RUNTIME}/svg_transform_bounds.js`,
+      ),
       RuntimeFragmentFactory.verbatim("dom-layout.js", `${MERMAID_JS_RUNTIME}/dom_layout.js`),
       RuntimeFragmentFactory.verbatim("dom-metrics.js", `${MERMAID_JS_RUNTIME}/dom_metrics.js`),
       RuntimeFragmentFactory.verbatim(

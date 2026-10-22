@@ -54,6 +54,7 @@ test("置換なしtemplate literalのeval payloadを検査する", () => {
 
 const root = path.resolve(import.meta.dir, "../..");
 const utilityFiles = [
+  "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_transform_bounds.js",
   "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_bounds_attrs.js",
   "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_group_utils.js",
   "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/drawio_svg_shape_colors.js",

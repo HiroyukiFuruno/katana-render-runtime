@@ -68,6 +68,16 @@ const sources = {
   "crates/demo/src/lib.rs": "mod deep;\n",
   "crates/demo/src/deep/regular.rs": "pub const VALUE: u32 = 1;\n",
 };
+const rootLintRecipe = [
+  "set -euo pipefail; \\",
+  'retained_profile="{{REPO_ROOT}}/target/llvm-cov-target/krr-coverage"; \\',
+  "retained_args=(); \\",
+  'if [[ -d "$retained_profile" && ! -L "$retained_profile" ]]; then \\',
+  'retained_args=(--retain-profile "$retained_profile"); \\',
+  "fi; \\",
+  `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity`,
+  "just performance-harness-lint",
+].join("\n");
 const recipeBodies: Record<string, string> = {
   check: "python3 scripts/local.py",
   "check-standard":
@@ -76,7 +86,7 @@ const recipeBodies: Record<string, string> = {
   typecheck: "bun run typecheck",
   "python-lint": "uvx --from ruff==0.16.10 ruff check --select F,E4,E7,E9,B,UP scripts",
   "python-typecheck": "uvx --from mypy==2.4.0 mypy --strict scripts",
-  lint: 'RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity',
+  lint: rootLintRecipe,
   unit: "bun test --path-ignore-patterns 'tmp/**' ./scripts\npython3 -m unittest discover -s scripts -p '*_test.py'",
   "runtime-asset-script-test":
     "python3 scripts/quality/moon_cache_contract_test.py --moon bun run moon",
@@ -499,8 +509,18 @@ const nativeWidthHashTestPath = "scripts/runtime-bundles/runtime-unused-native-w
 const mathJaxUnusedTestPath = "scripts/runtime-bundles/runtime-unused-mathjax_test.ts";
 const managedFullCompareTestPath = "scripts/mermaid/managed_full_compare_test.ts";
 const managedFullComparePreviousTestPath =
-  "scripts/mermaid/dom_plain_text_measure_contract_test.ts";
+  "scripts/mermaid/dom_svg_bbox_visibility_contract_test.ts";
 const managedFullCompareNextTestPath = "scripts/mermaid/mermaid_pair_manifest_test.ts";
+test("NativeWidth route rejects a duplicated SVG bbox regression registration", () => {
+  expectNativeWidthRegistrationRejected(
+    (body) =>
+      body.replace(
+        ` ./${managedFullComparePreviousTestPath}`,
+        ` ./${managedFullComparePreviousTestPath} ./${managedFullComparePreviousTestPath}`,
+      ),
+    "runtime-asset-script-other-run",
+  );
+});
 function moveNativeWidthToFirstTestCommand(body: string): string {
   const lines = body.split("\n");
   const nativeIndex = lines.findIndex((line) => line.includes(nativeWidthHashTestPath));
@@ -2592,8 +2612,8 @@ test("browser reference adapters bind real consumers and exact isolated compiler
 test.each([
   [
     "scripts/mermaid/official-renderer-i18n.ts",
-    '"dom_text_metrics.js",\n  "svg_bounds_attrs.js",',
-    '"svg_bounds_attrs.js",\n  "dom_text_metrics.js",',
+    '"svg_transform_bounds.js",\n  "dom_text_metrics.js",\n  "svg_bounds_attrs.js",',
+    '"dom_text_metrics.js",\n  "svg_transform_bounds.js",\n  "svg_bounds_attrs.js",',
   ],
   [
     "scripts/mermaid/official-renderer.ts",
@@ -2766,7 +2786,7 @@ test("actual Rust native width test trace remains mandatory with isolated strict
   expect(report.nativeWidthTrace.consumerSources).toEqual([
     {
       path: `${nativeWidthTraceDirectory}/js_runtime.rs`,
-      sha256: "f72e281fa5ebc48344c43a872014b8fdcea898eacfcd7ea0685454b02d9e4385",
+      sha256: "b3d10ef7896536ae924c2188b338bafeb3ff9642a3f557e5cf6ecec35a93291f",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
@@ -3648,6 +3668,27 @@ checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
   track(root);
   return root;
 }
+test("root Clippy route retains only the canonical coverage profile", () => {
+  expect(inspectOwnedValidationContract(performanceHarnessFixture()).issues).not.toContainEqual(
+    expect.objectContaining({ code: "performance-harness-recipe-unverified", path: "lint" }),
+  );
+});
+test.each([
+  ["profile path", "target/llvm-cov-target/krr-coverage", "target/debug"],
+  ["check domain", "--check-domain root", "--check-domain performance-baseline"],
+  ["physical-directory guard", '&& ! -L "$retained_profile"', ""],
+  ["retention flag", '--retain-profile "$retained_profile"', "--retain-build-profile debug"],
+])("root Clippy route rejects changed retention contract: %s", (_label, before, after) => {
+  const root = performanceHarnessFixture();
+  const actual = actualRecipeBody("lint");
+  expect(actual).toContain(before);
+  const mutated = actual.replace(before, after);
+  expect(mutated).not.toBe(actual);
+  performanceHarnessRecipes(root, { lint: mutated });
+  expect(inspectOwnedValidationContract(root).issues).toContainEqual(
+    expect.objectContaining({ code: "performance-harness-recipe-unverified", path: "lint" }),
+  );
+});
 test("standalone performance harness binds both owned Rust arms without executing coverage", () => {
   const root = performanceHarnessFixture();
   const manifest = Bun.TOML.parse(fs.readFileSync(path.join(root, performanceManifest), "utf8"));

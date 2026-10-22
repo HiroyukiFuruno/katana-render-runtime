@@ -13,8 +13,11 @@ pub(super) use line_metrics::{
 
 #[path = "svg_rasterize_text_svg_run_metrics.rs"]
 mod svg_run_metrics;
+#[path = "svg_rasterize_text_svg_x_height.rs"]
+mod svg_x_height;
 pub(crate) use svg_run_metrics::{SvgInkBounds, SvgTextRunMetrics};
 pub(super) use svg_run_metrics::{shape_svg_run_metrics_with_face, svg_run_endpoints_with_face};
+pub(super) use svg_x_height::svg_run_x_height_with_face;
 
 const HARFRUST_SCALE: f32 = 65_536.0;
 const FONT_VARIATION_COUNT: usize = 3;

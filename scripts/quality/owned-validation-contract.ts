@@ -90,7 +90,7 @@ const NATIVE_WIDTH_TYPE_PROFILE = "scripts/quality/tsconfig-owned-native-width-t
 // 更新には実cfg(test)→helper→include/result-scriptのcontextレビューが必要。
 const NATIVE_WIDTH_TEST_CONSUMERS = {
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime.rs`]:
-    "f72e281fa5ebc48344c43a872014b8fdcea898eacfcd7ea0685454b02d9e4385",
+    "b3d10ef7896536ae924c2188b338bafeb3ff9642a3f557e5cf6ecec35a93291f",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`]:
     "64cfc2be0e4369098cde79d1faad8e8539fc5681945bf15fc6ed4d4d267603c0",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_helpers.rs`]:
@@ -99,6 +99,7 @@ const NATIVE_WIDTH_TEST_CONSUMERS = {
     "a52369ca8ded04fe4043bfd79962266621efef8518bfb06ff19180ff5230dc92",
 };
 const NATIVE_TYPED_UTILITIES = new Set([
+  "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_transform_bounds.js",
   "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_bounds_attrs.js",
   "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_group_utils.js",
   "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/drawio_svg_shape_colors.js",
@@ -1406,6 +1407,33 @@ function localCoverageCommand(producer: "root" | "performance", phase: "begin" |
     return `python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer ${producer} --producer-exit 0`;
   return `python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer ${producer}`;
 }
+function rootLintRecipeLines(context: ContractContext): string[] {
+  return (context.recipes.get("lint") ?? "")
+    .split("\n")
+    .map((line) => line.trim().replace(/^@/, ""))
+    .filter(Boolean);
+}
+function expectedRootLintRecipeLines(): string[] {
+  const deny = PERFORMANCE_CLIPPY_DENY.map((name) => `-D ${name}`).join(" ");
+  return [
+    "set -euo pipefail; \\",
+    'retained_profile="{{REPO_ROOT}}/target/llvm-cov-target/krr-coverage"; \\',
+    "retained_args=(); \\",
+    'if [[ -d "$retained_profile" && ! -L "$retained_profile" ]]; then \\',
+    'retained_args=(--retain-profile "$retained_profile"); \\',
+    "fi; \\",
+    `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- ${deny}`,
+    "just performance-harness-lint",
+  ];
+}
+function rootLintCargoCommand(context: ContractContext): string | undefined {
+  const actual = rootLintRecipeLines(context);
+  const expected = expectedRootLintRecipeLines();
+  return actual.length === expected.length &&
+    actual.every((line, index) => line === expected[index])
+    ? actual[6]
+    : undefined;
+}
 function performanceRecipeCommands(): Record<string, string[]> {
   const deny = PERFORMANCE_CLIPPY_DENY.map((name) => `-D ${name}`).join(" ");
   return {
@@ -1426,10 +1454,6 @@ function performanceRecipeCommands(): Record<string, string[]> {
       localCoverageCommand("performance", "finish"),
     ],
     "fmt-check": ["{{CARGO}} fmt --all -- --check", `just ${PERFORMANCE_RECIPES.format}`],
-    lint: [
-      `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- ${deny}`,
-      `just ${PERFORMANCE_RECIPES.lint}`,
-    ],
     coverage: [
       "just root-test-and-coverage",
       `just ${PERFORMANCE_RECIPES.coverage}`,
@@ -1649,11 +1673,16 @@ function performanceManifestAndLock(context: ContractContext, members: string[])
     add(context, "performance-harness-lock-unverified", `${PERFORMANCE_HARNESS}/Cargo.lock`);
   }
 }
-function performanceRoutes(context: ContractContext): void {
+function checkPerformanceRecipeCommands(context: ContractContext): void {
   for (const [recipe, expected] of Object.entries(performanceRecipeCommands())) {
     if (!exactPerformanceRecipe(context, recipe, expected))
       add(context, "performance-harness-recipe-unverified", recipe);
   }
+}
+function performanceRoutes(context: ContractContext): void {
+  checkPerformanceRecipeCommands(context);
+  if (rootLintCargoCommand(context) === undefined)
+    add(context, "performance-harness-recipe-unverified", "lint");
   for (const [lane, recipe] of Object.entries(PERFORMANCE_RECIPES)) {
     if (!registered(context, recipe))
       add(context, "performance-harness-recipe-unregistered", recipe);
@@ -1777,10 +1806,10 @@ function rustStatic(context: ContractContext, name: string, members: string[]): 
     .object({ package: z.record(z.string(), z.unknown()).optional() })
     .parse(Bun.TOML.parse(context.read(member === "." ? "Cargo.toml" : `${member}/Cargo.toml`)));
   if (!manifest.package) add(context, "rust-member-package-missing", name);
-  const lintBody = (context.recipes.get(context.policy.rust?.lintRecipe ?? "") ?? "").trim();
+  const lintBody = rootLintCargoCommand(context) ?? "";
   const lint = shellWords(lintBody);
   const command =
-    /^RUSTFLAGS="-D warnings"\s+CARGO_TARGET_DIR="\{\{REPO_ROOT\}\}\/target"\s+python3 scripts\/build\/cargo_capacity_guard\.py --check-domain root -- (?:cargo|\{\{CARGO\}\}) clippy(?:\s|$)/.test(
+    /^RUSTFLAGS="-D warnings"\s+CARGO_TARGET_DIR="\{\{REPO_ROOT\}\}\/target"\s+python3 scripts\/build\/cargo_capacity_guard\.py (?:"\$\{retained_args\[@\]\}" )?--check-domain root -- (?:cargo|\{\{CARGO\}\}) clippy(?:\s|$)/.test(
       lintBody,
     );
   if (
@@ -3931,8 +3960,18 @@ function restoreReviewedFeatureCatalogTestProcess(lines: string[]): string[] | u
   return restored;
 }
 function removeReviewedRuntimeAssetTests(lines: string[]): string[] | undefined {
+  const bboxTest = "./scripts/mermaid/dom_svg_bbox_visibility_contract_test.ts";
+  const withoutBbox = lines.some((line) => unitCommand(line).includes(bboxTest))
+    ? removeReviewedTestToken(
+        lines,
+        bboxTest,
+        "./scripts/mermaid/dom_plain_text_measure_contract_test.ts",
+        `./${MANAGED_FULL_COMPARE_TEST}`,
+      )
+    : lines;
+  if (!withoutBbox) return undefined;
   const withoutGeometry = removeReviewedTestToken(
-    lines,
+    withoutBbox,
     "./scripts/mermaid/reference_svg_geometry_test.ts",
     "./scripts/mermaid/reference_score_policy_test.ts",
     "./scripts/mermaid/split_markdown_fixtures_test.ts",

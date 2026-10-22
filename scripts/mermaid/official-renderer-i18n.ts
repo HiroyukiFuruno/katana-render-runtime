@@ -3,6 +3,7 @@ import path from "node:path";
 
 const I18N_RUNTIME_DIR = "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime";
 const RUNTIME_SCRIPTS = [
+  "svg_transform_bounds.js",
   "dom_text_metrics.js",
   "svg_bounds_attrs.js",
   "svg_path_bezier_bounds.js",

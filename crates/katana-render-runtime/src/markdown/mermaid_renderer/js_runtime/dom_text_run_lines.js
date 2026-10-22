@@ -58,7 +58,7 @@ function katanaRunTextPosition(node, name, font) {
 }
 
 function katanaSameTextRunFont(left, right) {
-  const keys = ["family", "size", "weight", "italic"];
+  const keys = ["family", "size", "weight", "italic", "dominantBaseline"];
   if (katanaMermaidNativeAdvanceRuntime()) {
     keys.push(
       "letterSpacing",
@@ -200,9 +200,13 @@ function katanaPositionedTextRunBox(run, offset) {
   const height =
     katanaExplicitHtmlLineHeight(run.node, run.font.size) ??
     katanaBrowserTextBoxHeight(run.font.size);
+  const baselineOffset =
+    run.node?.namespaceURI === "http://www.w3.org/2000/svg"
+      ? katanaSvgDominantBaselineOffset(run.font)
+      : 0;
   return katanaBox(
     run.x + offset,
-    run.y - height * katanaTextBoxBaselineRatio(),
+    run.y + baselineOffset - height * katanaTextBoxBaselineRatio(),
     Math.max(1, run.width),
     height,
   );

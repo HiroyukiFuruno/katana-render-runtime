@@ -77,6 +77,20 @@ test("existing pixel units remain idempotent without changing arbitrary geometry
   }
 });
 
+test("Journey fallback removes entity-escaped font declarations as whole attributes", () => {
+  const normalize = createNormalizer();
+  const input =
+    '<svg aria-roledescription="journey"><text class="task" style="text-anchor: middle;font-family: &quot;Open Sans&quot;, sans-serif;font-size:16px" dominant-baseline="central">Label</text></svg>';
+
+  const normalized = normalize("katanaNormalizeJourneySvg", input, "journey\nA");
+
+  expect(normalized).toContain('style="text-anchor: middle"');
+  expect(normalized).toContain('dominant-baseline="central"');
+  expect(normalized).not.toContain("Open Sans");
+  expect(normalized).not.toContain("font-family:");
+  expect(normalized).not.toContain("font-size:");
+});
+
 test("C4 Container review normalization preserves all independent Mermaid geometry", () => {
   const normalize = createNormalizer();
   const body =
@@ -269,6 +283,7 @@ function serializationResult(expression: string, input: string): string {
     "dom_node.js",
     "dom_html.js",
     "dom_node_html.js",
+    "svg_transform_bounds.js",
     "dom_layout.js",
     "dom_layout_prototype.js",
     "dom_document.js",

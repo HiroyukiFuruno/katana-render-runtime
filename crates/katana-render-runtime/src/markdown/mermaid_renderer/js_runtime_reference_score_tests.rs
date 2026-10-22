@@ -76,37 +76,6 @@ const GIT_FONT_OBSERVER: &str = r#"(() => {
       };
     })();"#;
 
-const SVG_CSS_VARIABLE_FIXTURE: &str = r#"(() => {
-      globalThis.__katanaMermaidDiagramType = 'gitGraph';
-      const ns = 'http://www.w3.org/2000/svg';
-      const parent = document.createElementNS(ns, 'g');
-      parent.style.cssText = '--base: Noto Sans; --family: var(--base); font-family: var(--family)';
-      document.body.appendChild(parent);
-      const text = document.createElementNS(ns, 'text');
-      text.style.cssText = '--base: serif; font-family: var(--family)';
-      text.textContent = 'main';
-      parent.appendChild(text);
-      const verifyFamily = (family) => {
-        const computed = getComputedStyle(text);
-        if (computed.fontFamily !== family || computed.getPropertyValue('font-family') !== family) {
-          throw new Error('computed font-family mismatch: ' + computed.fontFamily + ' / expected ' + family);
-        }
-        const expected = globalThis.__katanaMeasureSvgTextMetrics('main', family, 16, 400, false);
-        const actual = text.getBBox();
-        /* WHY: DOM配置幅は独立Chrome観測と同じ1/64px切り上げで、生の計測値とは区別する。 */
-        const expectedWidth = Math.ceil(expected.advance * 64) / 64;
-        if (!(actual.width > 0) || actual.width !== expectedWidth || !(actual.height > 0)) {
-          throw new Error('resolved SVG family did not use native metrics with DOM placement precision');
-        }
-      };
-      verifyFamily('Noto Sans');
-      text.style.cssText = '--a:var(--b) var(--c);--b:var(--a);--c:var(--b,serif);font-family:var(--a,var(--c,monospace))';
-      verifyFamily('monospace');
-      text.style.cssText = '--family:16px;font-family:var(--family,Arial)';
-      verifyFamily('Noto Sans');
-      parent.remove();
-    })();"#;
-
 #[test]
 fn runtime_normalizes_git_graph_browser_bounds() -> Result<(), String> {
     let rendered = render_mermaid_svg(GIT_GRAPH_SOURCE);
@@ -221,6 +190,22 @@ fn render_mermaid_svg(source: &str) -> Result<String, String> {
         })
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn real_timeline_ex_title_matches_independent_official_view_box() -> Result<(), String> {
+    let source = mermaid_fixture_source(oracle::TIMELINE_MARKDOWN)?;
+    let (actual, observations) = native_font_observer::render_with_native_font_observations(
+        &source,
+        DiagramColorPreset::dark(),
+    )?;
+    let result = assert_view_box_matches(
+        &actual,
+        oracle::TIMELINE_RAW_VIEW_BOX,
+        oracle::TIMELINE_RAW_SOURCE_SHA256,
+    );
+    result.map_err(|error| format!("{error}; native font observations: {observations}"))
+}
+
 fn assert_svg_contains(rendered: &Result<String, String>, expected: &str) {
     assert!(
         rendered.as_ref().is_ok_and(|svg| svg.contains(expected)),
@@ -262,10 +247,10 @@ fn real_svg_text_css_font_variable_scope_reaches_native_metrics() -> Result<(), 
     let request_json = request.to_json_value().to_string();
     let mut scripts =
         super::MermaidRuntimeScripts::build(&bundle, &request_json, request.diagram_type);
-    let fixture = SVG_CSS_VARIABLE_FIXTURE;
+    let fixture = oracle::svg_css_variable_fixture();
     scripts.insert(
         1,
-        DiagramRuntimeScript::borrowed("svg-css-font-variable-native-boundary", fixture),
+        DiagramRuntimeScript::borrowed("svg-css-font-variable-native-boundary", &fixture),
     );
     let svg = DiagramV8Runtime::render(&scripts)?;
     geometry_contract::GeometryContract::git_graph(&svg)
@@ -273,3 +258,13 @@ fn real_svg_text_css_font_variable_scope_reaches_native_metrics() -> Result<(), 
 
 #[path = "js_runtime_reference_score_geometry_boundary_tests.rs"]
 mod geometry_boundary_tests;
+#[cfg(target_os = "macos")]
+#[path = "js_runtime_native_font_observer.rs"]
+mod native_font_observer;
+#[path = "js_runtime_reference_score_oracle.rs"]
+mod oracle;
+
+#[cfg(target_os = "macos")]
+pub(super) use native_font_observer::render_with_native_font_observations;
+#[cfg(target_os = "macos")]
+pub(super) use oracle::{assert_view_box_matches, mermaid_fixture_source};

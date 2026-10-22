@@ -1,13 +1,23 @@
 function katanaAnchoredTextNodeBox(node, text, x, y, parts) {
-  if (!parts?.length) {
-    const metrics = katanaNativeSvgRunMetrics(node, text);
-    if (metrics !== null) return katanaSvgRawMetricCell(metrics, x, y, katanaTextAnchor(node));
+  const isSvgText = node?.namespaceURI === "http://www.w3.org/2000/svg";
+  const font = isSvgText ? katanaResolvedNodeTextFont(node) : null;
+  if (
+    !parts?.length &&
+    isSvgText &&
+    katanaMermaidNativeAdvanceRuntime() &&
+    typeof globalThis.__katanaMeasureSvgTextMetrics === "function"
+  ) {
+    const metrics = katanaNativeSvgRunMetrics(node, text, font);
+    if (metrics !== null) {
+      return katanaSvgRawMetricCell(metrics, x, y, katanaTextAnchor(node), font);
+    }
   }
   const width = Math.max(1, katanaTextLineWidth(node, text, parts));
   const height = katanaLineHeight(node);
+  const baselineOffset = font ? katanaSvgDominantBaselineOffset(font) : 0;
   return katanaBox(
     katanaAnchoredTextLeft(katanaTextAnchor(node), x, width),
-    y - height * katanaTextBoxBaselineRatio(),
+    y + baselineOffset - height * katanaTextBoxBaselineRatio(),
     width,
     height,
   );
@@ -93,25 +103,7 @@ function katanaLineHeightFontSize(node) {
 }
 
 function katanaInheritedFontSize(node) {
-  if (!node) {
-    return 16;
-  }
-  const value = [
-    node.style?.getPropertyValue?.("font-size"),
-    katanaCssComputedStyleValue(node, "font-size"),
-    node.getAttribute?.("font-size"),
-  ].find(Boolean);
-  if (!value) {
-    return katanaInheritedFontSize(node.parentNode);
-  }
-  const match = String(value)
-    .trim()
-    .match(/^(-?\d+(?:\.\d+)?)(em|px)?$/);
-  if (!match) {
-    return katanaInheritedFontSize(node.parentNode);
-  }
-  const number = Number(match[1]);
-  return match[2] === "em" ? number * katanaInheritedFontSize(node.parentNode) : number;
+  return katanaResolvedNodeTextFontSize(node);
 }
 
 function katanaFiniteFontSize(fontSize) {
@@ -444,11 +436,12 @@ function katanaNativeSvgRunMetrics(node, text, font) {
   return measured;
 }
 
-function katanaSvgRawMetricCell(metrics, x, y, anchor) {
+function katanaSvgRawMetricCell(metrics, x, y, anchor, font) {
   // 字形が行領域や送り幅からはみ出す部分も、同じshape結果の境界として含める。
   const advance = katanaSvgAdvance(metrics.advance);
   const left = Math.min(0, metrics.inkLeft ?? 0);
   const right = Math.max(advance, metrics.inkRight ?? 0);
+  const baselineOffset = katanaSvgDominantBaselineOffset(font);
   const hasLayoutAscent = Object.hasOwn(metrics, "layoutAscent");
   const layoutAscent = hasLayoutAscent ? metrics.layoutAscent : Math.round(metrics.ascent);
   if (!Number.isFinite(layoutAscent) || layoutAscent < 0) {
@@ -458,10 +451,25 @@ function katanaSvgRawMetricCell(metrics, x, y, anchor) {
   const bottom = Math.max(Math.round(metrics.descent), metrics.inkBottom ?? 0);
   return katanaBox(
     katanaAnchoredTextLeft(anchor, x, advance) + left,
-    y + top,
+    y + baselineOffset + top,
     right - left,
     bottom - top,
   );
+}
+
+function katanaSvgDominantBaselineOffset(font) {
+  if (font?.dominantBaseline !== "middle" || font.size === 0) return 0;
+  /* WHY: SVG 1.1のmiddle baselineをx-height中央へ置き、他の値には補正しない。
+   * 仕様: https://www.w3.org/TR/SVG11/text.html#DominantBaselineProperty
+   */
+  const measure = globalThis.__katanaMeasureSvgFontXHeight;
+  if (typeof measure !== "function") throw new Error("SVG font x-height bridge unavailable");
+  const xHeight = measure(font.family, font.size, font.weight, font.italic);
+  if (xHeight === undefined) return font.size * 0.25;
+  if (!Number.isFinite(xHeight) || xHeight <= 0) {
+    throw new Error("SVG font x-height metric is invalid");
+  }
+  return xHeight / 2;
 }
 
 function katanaSvgAdvance(value) {
@@ -473,5 +481,5 @@ function katanaRunLayoutAdvance(run, width = run.width) {
 }
 
 function katanaSvgRawPositionedRunCell(run, anchorOffset) {
-  return katanaSvgRawMetricCell(run.svgMetrics, run.x + anchorOffset, run.y, "start");
+  return katanaSvgRawMetricCell(run.svgMetrics, run.x + anchorOffset, run.y, "start", run.font);
 }

@@ -1506,6 +1506,16 @@ def _verify_check_domain_tool_pins(
         raise RuntimeError("check domain physical toolchain changed during cleanup")
 
 
+def check_domain_retained_profiles(root: Path, domain: str, values: list[str]) -> tuple[Path, ...]:
+    if not values:
+        return ()
+    target = root / "target"
+    profile = target / "llvm-cov-target/krr-coverage"
+    if domain != "root" or values != [str(profile)]:
+        raise RuntimeError("check domain only permits the canonical root coverage profile")
+    return retained_profile_paths(target, values)
+
+
 def check_domain_selection(root: Path, target: Path, domain: str, command: list[str],
                            environment: Mapping[str, str]) -> tuple[JsonObject, Callable[[], None]]:
     if domain not in CHECK_DOMAINS or target != root / "target":
@@ -1791,9 +1801,13 @@ def run(args: argparse.Namespace) -> int:
         configured_factor = float(os.environ.get("CARGO_CAPACITY_FACTOR", str(DEFAULT_FACTOR)))
     except ValueError as error:
         raise RuntimeError("capacity factor must be numeric") from error
+    retained_check_profiles = getattr(args, "retain_profile", [])
+    if check_value is not None and retained_check_profiles:
+        check_domain_retained_profiles(
+            _root(), _text(check_value, "check domain"), retained_check_profiles,
+        )
     if check_value is not None and (native_enabled or coverage_value is not None
                                     or getattr(args, "library_alias_cache", False)
-                                    or getattr(args, "retain_profile", [])
                                     or getattr(args, "retain_build_profile", None) is not None):
         raise RuntimeError("check domain cannot be combined with another ownership mode")
     if check_value is not None and (

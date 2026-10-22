@@ -18,6 +18,7 @@ const KATANA_DEFAULT_TEXT_FONT = {
   fontFeatureSettings: "normal",
   fontVariationSettings: "normal",
   nativeAdvanceEligible: true,
+  dominantBaseline: "auto",
 };
 
 function katanaTextFontContext(node) {
@@ -46,23 +47,43 @@ function katanaInheritedTextValue(value, inherited, initial) {
 
 function katanaResolveTextFont(node, inherited, css) {
   if (node.nodeType === 3) return inherited;
+  const metrics = katanaResolvedTextFontMetrics(node, inherited, css);
+  return {
+    ...metrics,
+    anchor: katanaInheritedTextValue(
+      katanaOwnTextFontValue(node, "text-anchor", css),
+      inherited.anchor,
+      "start",
+    ),
+    dominantBaseline: katanaInheritedTextValue(
+      katanaOwnTextFontValue(node, "dominant-baseline", css),
+      inherited.dominantBaseline,
+      "auto",
+    ),
+    ...katanaTextAdvanceProperties(node, inherited, css),
+  };
+}
+
+function katanaResolvedTextFontMetrics(node, inherited, css, preserveLegacySize = false) {
+  if (node.nodeType === 3) return inherited;
   const value = (name) => katanaOwnTextFontValue(node, name, css);
   const style = katanaInheritedTextValue(
     value("font-style"),
     inherited.italic ? "italic" : "normal",
     "normal",
   );
+  const family = katanaInheritedTextValue(
+    katanaResolvedTextFamilyValue(node, value("font-family"), css),
+    inherited.family,
+    KATANA_DEFAULT_TEXT_FONT.family,
+  );
+  const weight = katanaResolvedTextFontWeight(value("font-weight"), inherited.weight);
+  const italic = /^(italic|oblique)(\s|$)/i.test(style);
   return {
-    family: katanaInheritedTextValue(
-      katanaResolvedTextFamilyValue(node, value("font-family"), css),
-      inherited.family,
-      KATANA_DEFAULT_TEXT_FONT.family,
-    ),
-    size: katanaResolvedTextFontSize(value("font-size"), inherited.size),
-    weight: katanaResolvedTextFontWeight(value("font-weight"), inherited.weight),
-    italic: /^(italic|oblique)(\s|$)/i.test(style),
-    anchor: katanaInheritedTextValue(value("text-anchor"), inherited.anchor, "start"),
-    ...katanaTextAdvanceProperties(node, inherited, css),
+    family,
+    size: katanaResolvedTextFontSize(value("font-size"), inherited, preserveLegacySize),
+    weight,
+    italic,
   };
 }
 
@@ -104,12 +125,37 @@ function katanaNativeAdvancePropertiesAreDefault(
   );
 }
 
-function katanaResolvedTextFontSize(value, inherited) {
-  if (value.toLowerCase() === "initial") return KATANA_DEFAULT_TEXT_FONT.size;
-  const match = value.match(/^(\d+(?:\.\d+)?)(em|px)?$/i);
-  if (!match) return inherited;
-  const size = Number(match[1]) * (match[2]?.toLowerCase() === "em" ? inherited : 1);
-  return Number.isFinite(size) && size >= 0 ? size : inherited;
+function katanaResolvedTextFontSize(value, inherited, preserveLegacySize = false) {
+  if (value.toLowerCase() === "initial") {
+    return preserveLegacySize ? inherited.size : KATANA_DEFAULT_TEXT_FONT.size;
+  }
+  const match = value.match(
+    preserveLegacySize ? /^(-?\d+(?:\.\d+)?)(em|ex|px)?$/i : /^(\d+(?:\.\d+)?)(em|ex|px)?$/i,
+  );
+  if (!match) return inherited.size;
+  const unit = match[2]?.toLowerCase();
+  const coefficient = Number(match[1]);
+  if (!Number.isFinite(coefficient)) return inherited.size;
+  if (unit === "ex") {
+    if (coefficient < 0) return inherited.size;
+    if (coefficient === 0) return 0;
+    if (inherited.size <= 0) return inherited.size;
+    const measure = globalThis.__katanaMeasureSvgFontXHeight;
+    if (typeof measure !== "function") throw new Error("SVG font x-height bridge unavailable");
+    const xHeight = measure(inherited.family, inherited.size, inherited.weight, inherited.italic);
+    if (xHeight === undefined) {
+      /* WHY: CSS Valuesではx-heightが取得できない書体のexを0.5emとする。 https://www.w3.org/TR/css-values-4/ */
+      const fallbackSize = coefficient * inherited.size * 0.5;
+      return Number.isFinite(fallbackSize) ? fallbackSize : inherited.size;
+    }
+    if (!Number.isFinite(xHeight) || xHeight <= 0) {
+      throw new Error("SVG font x-height metric is invalid");
+    }
+    const size = coefficient * xHeight;
+    return Number.isFinite(size) ? size : inherited.size;
+  }
+  const size = coefficient * (unit === "em" ? inherited.size : 1);
+  return Number.isFinite(size) && (preserveLegacySize || size >= 0) ? size : inherited.size;
 }
 
 function katanaResolvedTextFontWeight(value, inherited) {
@@ -146,4 +192,20 @@ function katanaRelativeLighterWeight(inherited) {
 function katanaResolvedNodeTextFont(node) {
   const context = katanaTextFontContext(node);
   return katanaResolveTextFont(node, context.inherited, context.css);
+}
+
+function katanaResolvedNodeTextFontSize(node) {
+  if (!node) return KATANA_DEFAULT_TEXT_FONT.size;
+  const css = katanaCssText(node);
+  const ancestors = [];
+  for (let parent = node.parentNode; parent; parent = parent.parentNode) {
+    ancestors.push(parent);
+  }
+  const inherited = ancestors
+    .reverse()
+    .reduce(
+      (font, parent) => katanaResolvedTextFontMetrics(parent, font, css, true),
+      KATANA_DEFAULT_TEXT_FONT,
+    );
+  return katanaResolvedTextFontMetrics(node, inherited, css, true).size;
 }

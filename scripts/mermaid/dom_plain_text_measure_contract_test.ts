@@ -31,7 +31,7 @@ type SvgShapeCase = {
 
 function measureSvgShapes(cases: SvgShapeCase[]) {
   const context = createContext({ KatanaNode: class {}, shapeCases: cases });
-  for (const name of ["dom_layout.js", "dom_measure.js"]) {
+  for (const name of ["svg_transform_bounds.js", "dom_layout.js", "dom_measure.js"]) {
     runInContext(readFileSync(new URL(name, RUNTIME_DIRECTORY), "utf8"), context);
   }
   return runInContext(
@@ -101,24 +101,17 @@ type SvgMetrics = {
   inkBottom?: number;
 };
 
-function measureNativeSvgMetricCell(metrics: SvgMetrics): SvgMetricCell {
-  const context = createContext({
-    KatanaNode: class {},
-    __katanaMermaidDiagramType: "flowchart",
-    __katanaMeasureSvgTextMetrics: () => metrics,
-    metricNode: {
-      namespaceURI: "http://www.w3.org/2000/svg",
-      nodeType: 1,
-      localName: "text",
-      parentNode: null,
-      children: [],
-      style: { getPropertyValue: () => "", getPropertyPriority: () => "" },
-      getAttribute: () => "",
-    },
-  });
+function measureNativeSvgMetricCell(
+  metrics: SvgMetrics,
+  dominantBaseline = "auto",
+  xHeight?: number,
+): SvgMetricCell {
+  const { context } = svgMetricContext(metrics, dominantBaseline, xHeight);
   for (const name of [
     "dom_css_style.js",
+    "dom_text_metrics.js",
     "dom_text_font_context.js",
+    "svg_transform_bounds.js",
     "dom_layout.js",
     "dom_text_measure.js",
   ]) {
@@ -129,6 +122,153 @@ function measureNativeSvgMetricCell(metrics: SvgMetrics): SvgMetricCell {
     context,
   ) as SvgMetricCell;
   return { x: box.x, y: box.y, width: box.width, height: box.height };
+}
+
+function measureSvgFallbackMetricCell(
+  metrics: SvgMetrics,
+  dominantBaseline: string,
+  xHeight: number,
+  positioned: boolean,
+): { box: SvgMetricCell; nativeMetricCalls: number } {
+  const { context, nativeMetricCalls } = svgMetricContext(
+    metrics,
+    dominantBaseline,
+    xHeight,
+    false,
+  );
+  for (const name of [
+    "dom_css_style.js",
+    "dom_text_metrics.js",
+    "dom_text_font_context.js",
+    "svg_transform_bounds.js",
+    "dom_layout.js",
+    "dom_text_measure.js",
+    "dom_text_run_lines.js",
+  ]) {
+    runInContext(readFileSync(new URL(name, RUNTIME_DIRECTORY), "utf8"), context);
+  }
+  const expression = positioned
+    ? `(() => {
+        const font = katanaResolvedNodeTextFont(metricNode);
+        return katanaPositionedTextRunBox({ node: metricNode, font, x: 10, y: 20, width: 10 }, 0);
+      })()`
+    : 'katanaAnchoredTextNodeBox(metricNode, "x", 10, 20)';
+  const box = runInContext(expression, context) as SvgMetricCell;
+  return {
+    box: { x: box.x, y: box.y, width: box.width, height: box.height },
+    nativeMetricCalls: nativeMetricCalls.length,
+  };
+}
+
+function svgMetricContext(
+  metrics: SvgMetrics,
+  dominantBaseline: string,
+  xHeight?: number,
+  nativeAdvanceEligible = true,
+) {
+  const nativeMetricCalls: number[] = [];
+  const context = createContext({
+    KatanaNode: class {},
+    KATANA_HTML_NAMESPACE: "http://www.w3.org/1999/xhtml",
+    __katanaMermaidDiagramType: "flowchart",
+    __katanaMeasureSvgTextMetrics: () => {
+      nativeMetricCalls.push(1);
+      return metrics;
+    },
+    __katanaMeasureSvgFontXHeight: () => xHeight,
+    parentNode: {
+      nodeType: 1,
+      parentNode: null,
+      style: {
+        getPropertyValue: (name: string) => {
+          if (name === "dominant-baseline") return dominantBaseline;
+          if (name === "letter-spacing" && !nativeAdvanceEligible) return "1px";
+          return "";
+        },
+        getPropertyPriority: () => "",
+      },
+      getAttribute: () => null,
+    },
+    metricNode: {
+      namespaceURI: "http://www.w3.org/2000/svg",
+      nodeType: 1,
+      localName: "text",
+      parentNode: null as object | null,
+      children: [],
+      style: { getPropertyValue: () => "", getPropertyPriority: () => "" },
+      getAttribute: () => "",
+    },
+  });
+  runInContext("metricNode.parentNode = parentNode", context);
+  return { context, nativeMetricCalls };
+}
+
+function mockFontStyle(values: Record<string, string>) {
+  return {
+    getPropertyValue: (name: string) => values[name] ?? "",
+    getPropertyPriority: () => "",
+  };
+}
+
+function svgExContext(
+  size: string,
+  xHeight: number | undefined,
+  calls: unknown[][],
+  inheritedSize = "16px",
+) {
+  const root = {
+    nodeType: 1,
+    parentNode: null as object | null,
+    style: mockFontStyle({ "font-family": "Noto Sans", "font-size": inheritedSize }),
+    getAttribute: () => null,
+  };
+  const node = {
+    nodeType: 1,
+    parentNode: root,
+    style: mockFontStyle({ "font-size": size }),
+    getAttribute: () => null,
+  };
+  return createContext({
+    KatanaNode: class {},
+    KATANA_HTML_NAMESPACE: "http://www.w3.org/1999/xhtml",
+    metricNode: node,
+    katanaCssText: () => "",
+    katanaCascadedStyleValue: (target: typeof root, name: string) =>
+      target.style.getPropertyValue(name),
+    katanaResolvedTextFamilyValue: (_target: typeof root, value: string) => value,
+    katanaMermaidNativeAdvanceRuntime: () => true,
+    __katanaMeasureSvgFontXHeight: (
+      family: string,
+      fontSize: number,
+      weight: number,
+      italic: boolean,
+    ) => {
+      calls.push([family, fontSize, weight, italic]);
+      return xHeight;
+    },
+  });
+}
+
+function resolveSvgExSize(size: string, xHeight: number | undefined) {
+  const calls: unknown[][] = [];
+  const context = svgExContext(size, xHeight, calls);
+  for (const name of ["dom_text_font_context.js", "dom_text_measure.js"]) {
+    runInContext(readFileSync(new URL(name, RUNTIME_DIRECTORY), "utf8"), context);
+  }
+  const result = runInContext(
+    `({fontSize: katanaResolvedNodeTextFont(metricNode).size,
+      lineHeightSize: katanaInheritedFontSize(metricNode)})`,
+    context,
+  ) as { fontSize: number; lineHeightSize: number };
+  return { ...result, calls };
+}
+
+function resolveLegacySvgFontSize(size: string, inheritedSize: string) {
+  const context = svgExContext(size, 7.5, [], inheritedSize);
+  for (const name of ["dom_text_font_context.js", "dom_text_measure.js"]) {
+    runInContext(readFileSync(new URL(name, RUNTIME_DIRECTORY), "utf8"), context);
+  }
+  return runInContext("katanaInheritedFontSize(metricNode)", context) as number;
 }
 
 test("DOM and Canvas measure entity-looking plain text literally for every diagram", () => {
@@ -172,6 +312,56 @@ test("optional layout ascent changes the SVG cell top without replacing ink boun
   expect(adjusted).toEqual({ x: 8, y: 5, width: 24, height: 19 });
   expect(zero).toEqual({ x: 8, y: 12, width: 24, height: 12 });
   expect(overhang).toEqual({ x: 8, y: 0, width: 24, height: 24 });
+});
+
+test("dominant baseline middle shifts native SVG metrics by half the selected font x-height", () => {
+  const metrics = { advance: 10, ascent: 8, descent: 2 };
+  const baseline = measureNativeSvgMetricCell(metrics, "alphabetic");
+  const middle = measureNativeSvgMetricCell(metrics, "middle", 7.3125);
+  const missingMetric = measureNativeSvgMetricCell(metrics, "middle");
+  const unsupported = measureNativeSvgMetricCell(metrics, "central", 7.3125);
+
+  expect(middle.y).toBeCloseTo(baseline.y + 7.3125 / 2, 10);
+  expect(missingMetric.y).toBeCloseTo(baseline.y + 16 * 0.25, 10);
+  expect(unsupported.y).toBe(baseline.y);
+});
+
+test("middle baseline offset is preserved in SVG metric and positioned-run fallbacks", () => {
+  const metrics = { advance: 10, ascent: 8, descent: 2 };
+  for (const positioned of [false, true]) {
+    const baseline = measureSvgFallbackMetricCell(metrics, "alphabetic", 7.3125, positioned);
+    const middle = measureSvgFallbackMetricCell(metrics, "middle", 7.3125, positioned);
+
+    expect(baseline.nativeMetricCalls).toBe(0);
+    expect(middle.nativeMetricCalls).toBe(0);
+    assertMiddleBaselineShift(middle.box, baseline.box, 7.3125 / 2);
+  }
+});
+
+function assertMiddleBaselineShift(actual: SvgMetricCell, baseline: SvgMetricCell, offset: number) {
+  expect(actual.y).toBeCloseTo(baseline.y + offset, 10);
+}
+
+test("SVG ex size uses inherited font x-height in both layout paths", () => {
+  const resolved = resolveSvgExSize("4ex", 7.5);
+  expect(resolved.fontSize).toBe(30);
+  expect(resolved.lineHeightSize).toBe(30);
+  expect(resolved.calls).toEqual([
+    ["Noto Sans", 16, 400, false],
+    ["Noto Sans", 16, 400, false],
+  ]);
+});
+
+test("SVG ex uses the CSS fallback only when the selected font has no x-height", () => {
+  const resolved = resolveSvgExSize("4ex", undefined);
+  expect(resolved.fontSize).toBe(32);
+  expect(resolved.lineHeightSize).toBe(32);
+});
+
+test("legacy line-height size keeps negative values and cascades invalid values", () => {
+  expect(resolveLegacySvgFontSize("-2em", "16px")).toBe(-32);
+  expect(resolveLegacySvgFontSize("invalid", "20px")).toBe(20);
+  expect(resolveLegacySvgFontSize("initial", "20px")).toBe(20);
 });
 
 test.each([

@@ -733,14 +733,15 @@ if (!browserPrograms) throw new Error("missing browser program metadata");
 
 test("official browser provider order and callback modes retain actual producer programs", () => {
   const providers = browserPrograms.filter((program) => program.role === "provider");
-  expect(providers).toHaveLength(25);
-  expect(providers[0]?.sourcePath.endsWith("/dom_text_metrics.js")).toBe(true);
-  expect(providers[1]?.sourcePath.endsWith("/svg_bounds_attrs.js")).toBe(true);
-  expect(providers[24]?.sourcePath.endsWith("/mermaid_zenuml_bridge.js")).toBe(true);
+  expect(providers).toHaveLength(26);
+  expect(providers[0]?.sourcePath.endsWith("/svg_transform_bounds.js")).toBe(true);
+  expect(providers[1]?.sourcePath.endsWith("/dom_text_metrics.js")).toBe(true);
+  expect(providers[2]?.sourcePath.endsWith("/svg_bounds_attrs.js")).toBe(true);
+  expect(providers[25]?.sourcePath.endsWith("/mermaid_zenuml_bridge.js")).toBe(true);
   const physicalProviders = [...browserRaw].filter(([sourcePath]) =>
     sourcePath.startsWith("crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/"),
   );
-  expect(physicalProviders).toHaveLength(31);
+  expect(physicalProviders).toHaveLength(32);
   expect(physicalProviders.filter(([, source]) => source.code.length === 0)).toHaveLength(6);
   expect(providers.every((program) => program.start < program.end)).toBe(true);
   expect(providers.map((program) => program.sourcePath)).toEqual(
@@ -766,7 +767,7 @@ test("official browser provider order and callback modes retain actual producer 
   ).toBe(true);
   expect(browserContext.stages).toEqual(["assembled"]);
   expect(browserContext.codeBytesEqual).toBe(false);
-  expect(browserContext.origin.coverage("assembled")).toHaveLength(31);
+  expect(browserContext.origin.coverage("assembled")).toHaveLength(32);
   verifyUnusedSources(browserRoot, browserRaw);
 });
 

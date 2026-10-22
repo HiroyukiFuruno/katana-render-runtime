@@ -85,9 +85,23 @@ function katanaNormalizeJourneySvg(svg, request) {
   if (!svg.includes('aria-roledescription="journey"')) {
     return svg;
   }
-  return svg
+  return katanaJourneySvgFallbackUsesInheritedTypography(svg)
     .replace(/<text\b([^>]*?)\sfill=""([^>]*)>/g, `<text$1 fill="${request.text}"$2>`)
     .replace(/(<line\b[^>]*\bstroke=")black(")/g, `$1${request.text}$2`);
+}
+
+function katanaJourneySvgFallbackUsesInheritedTypography(svg) {
+  return svg.replace(
+    /(<text\b(?=[^>]*\bclass="[^"]*\b(?:task|journey-section)\b[^"]*")[^>]*\bstyle=")([^"]*)(")/g,
+    (_match, start, style, end) => `${start}${katanaJourneyTextStyleWithoutDomFont(style)}${end}`,
+  );
+}
+
+function katanaJourneyTextStyleWithoutDomFont(style) {
+  return style.replace(
+    /(?:^|;)\s*font-(?:family|size)\s*:(?:(?:&(?:#[0-9]+|#x[\da-f]+|[a-z][\da-z.-]*);)|[^;])*/gi,
+    "",
+  );
 }
 
 function katanaNormalizePieSvg(svg) {

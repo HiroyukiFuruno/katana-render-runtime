@@ -74,7 +74,7 @@ fn svg_text_run_metrics(
     })
 }
 
-fn validate_shaping_size(size: f32) -> Option<()> {
+pub(super) fn validate_shaping_size(size: f32) -> Option<()> {
     let shaping_scale = size * HARFRUST_SCALE;
     if !size.is_finite()
         || size <= 0.0

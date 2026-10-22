@@ -144,6 +144,35 @@ class CheckDomainTests(unittest.TestCase):
             with self.subTest(command=command), self.assertRaises(RuntimeError):
                 guard._check_domain_command(Path("/repo"), "performance-baseline", command)
 
+    def test_check_domain_retains_only_canonical_root_coverage_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            target = root / "target"
+            profile = target / "llvm-cov-target/krr-coverage"
+            profile.mkdir(parents=True)
+
+            self.assertEqual(
+                guard.check_domain_retained_profiles(root, "root", [str(profile)]),
+                (profile,),
+            )
+            self.assertEqual(guard.check_domain_retained_profiles(root, "root", []), ())
+
+            rejected = (
+                ("unsupported-domain", "performance-baseline", [str(profile)]),
+                ("arbitrary-profile", "root", [str(target / "debug")]),
+                ("duplicate-profile", "root", [str(profile), str(profile)]),
+            )
+            for label, domain, values in rejected:
+                with self.subTest(case=label), self.assertRaisesRegex(RuntimeError, "canonical root coverage"):
+                    guard.check_domain_retained_profiles(root, domain, values)
+
+            shutil.rmtree(profile)
+            external = root / "external-profile"
+            external.mkdir()
+            profile.symlink_to(external, target_is_directory=True)
+            with self.assertRaisesRegex(RuntimeError, "directory kind or device boundary"):
+                guard.check_domain_retained_profiles(root, "root", [str(profile)])
+
     @staticmethod
     def create_real_workspace(root: Path) -> dict[str, str]:
         runtime = root / "crates/katana-render-runtime"

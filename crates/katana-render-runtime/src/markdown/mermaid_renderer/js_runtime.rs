@@ -115,6 +115,9 @@ fn rendered_svg(svg: String) -> Result<String, String> {
 }
 
 #[cfg(test)]
+#[path = "js_runtime_dominant_baseline_tests.rs"]
+mod dominant_baseline_tests;
+#[cfg(test)]
 #[path = "js_runtime_native_width_tests.rs"]
 mod native_width_tests;
 #[cfg(test)]

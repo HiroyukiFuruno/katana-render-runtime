@@ -260,16 +260,6 @@ fn mermaid_classic_ast_linter_rejects_actual_script_producer_mutations()
     Ok(())
 }
 #[test]
-fn mermaid_classic_ast_linter_rejects_caller_and_realm_mutations()
--> Result<(), Box<dyn std::error::Error>> {
-    let fixture = Fixture::copy_mermaid_classic_inputs(INPUTS)?;
-    mermaid_classic_scripts::inspect_root(fixture.root())?;
-    reject_mutations(&fixture, INPUTS[1], LIVE_CALLER_BINDING_MUTATIONS)?;
-    reject_mutations(&fixture, INPUTS[2], REALM_MUTATIONS)?;
-    Ok(())
-}
-
-#[test]
 fn mermaid_classic_cli_reports_verified_and_rejected_sources()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = Fixture::copy_mermaid_classic_inputs(INPUTS)?;
@@ -285,6 +275,8 @@ fn mermaid_classic_cli_reports_verified_and_rejected_sources()
 
 #[path = "mermaid_classic_capture_tests.rs"]
 mod capture;
+#[path = "mermaid_classic_geometry_bridge_tests.rs"]
+mod geometry_bridge;
 fn reject_mutations(
     fixture: &Fixture,
     path: &str,

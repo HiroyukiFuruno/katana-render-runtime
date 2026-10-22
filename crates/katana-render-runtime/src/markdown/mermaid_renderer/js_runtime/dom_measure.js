@@ -38,12 +38,19 @@ function katanaDirectMeasuredBox(node) {
 }
 
 function katanaChildTextBox(node) {
-  const childBox = katanaUnionBox(katanaVisibleChildBoxes(node));
+  const childBoxes = katanaVisibleChildBoxes(node);
+  const childBox = katanaUnionBox(childBoxes);
   if (katanaIsMermaidClassDiagram() && (node.children ?? []).length > 0) {
     return childBox;
   }
   const text = katanaMeasuredNodeText(node, childBox);
-  return katanaUnionBox([childBox, katanaOptionalTextBox(node, text)].filter(katanaHasArea));
+  const boxes = [katanaOptionalTextBox(node, text)];
+  if (katanaHasArea(childBox) || childBoxes.length > 0) {
+    boxes.push(childBox);
+  }
+  return katanaUnionBox(
+    boxes.filter((box) => katanaHasArea(box) || (box === childBox && childBoxes.length > 0)),
+  );
 }
 
 function katanaIsMermaidClassDiagram() {

@@ -47,6 +47,17 @@ impl SvgRasterizeOps {
         })
     }
 
+    pub(crate) fn measure_svg_font_x_height(
+        family: &str,
+        size: f32,
+        weight: u16,
+        italic: bool,
+    ) -> Result<Option<f32>, SvgRasterizeError> {
+        text_shaping::shaped_svg_font_x_height(family, size, weight, italic).ok_or_else(|| {
+            SvgRasterizeError::RasterizeFailed("SVG font x-height unavailable".into())
+        })
+    }
+
     pub(crate) fn measure_html_text(
         text: &str,
         font_family: &str,

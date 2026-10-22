@@ -172,7 +172,10 @@ pub(super) fn html_text_font_runs(
 mod harfrust;
 #[path = "svg_rasterize_text_shaping_svg_metrics.rs"]
 mod svg_metrics;
+#[path = "svg_rasterize_text_shaping_x_height.rs"]
+mod svg_x_height;
 pub(super) use svg_metrics::shaped_svg_text_metrics;
+pub(super) use svg_x_height::shaped_svg_font_x_height;
 
 #[cfg(test)]
 pub(super) use super::font::html_font_db_for_text;

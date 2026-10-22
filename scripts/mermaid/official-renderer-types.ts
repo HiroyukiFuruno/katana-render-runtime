@@ -93,6 +93,13 @@ export interface MermaidI18nNormalizeResult {
 
 export interface MermaidI18nWindow extends MermaidWindow, MermaidZenumlBrowserGlobals {
   __katanaOfficialReference?: boolean;
+  __katanaTransformSvgBox?: (
+    transform: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ) => { x: number; y: number; width: number; height: number };
   katanaMermaidDiagramType?: (source: string) => string;
   katanaNormalizeMermaidSourceI18n?: (source: string) => MermaidI18nNormalizeResult;
   katanaRestoreMermaidI18nText?: (svg: string, replacements: MermaidI18nReplacement[]) => string;

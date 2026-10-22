@@ -83,14 +83,38 @@ function katanaUnionBox(boxes) {
 }
 
 function katanaVisibleChildBoxes(node) {
-  return (node.children ?? [])
-    .filter((child) => !KATANA_HIDDEN_LAYOUT_TAGS.has(child.localName))
-    .map((child) => {
-      const box = child.getBBox();
-      const offset = katanaNodeTranslate(child);
-      return katanaBox(box.x + offset[0], box.y + offset[1], box.width, box.height);
-    })
-    .filter(katanaHasArea);
+  const children = node.children ?? [];
+  return children.flatMap((child) => {
+    if (KATANA_HIDDEN_LAYOUT_TAGS.has(child.localName) || katanaIsDisplayNone(child)) {
+      return [];
+    }
+    const box = child.getBBox();
+    if (!katanaHasArea(box) && !katanaHasDegenerateGeometry(child)) {
+      return [];
+    }
+    return [katanaTransformChildBox(child, box)];
+  });
+}
+
+function katanaIsDisplayNone(node) {
+  const inlineDisplay = node?.style?.getPropertyValue?.("display") ?? node?.style?.display ?? "";
+  const display = String(inlineDisplay || node?.getAttribute?.("display") || "")
+    .trim()
+    .toLowerCase();
+  return display === "none";
+}
+
+function katanaHasDegenerateGeometry(node) {
+  if (!node || KATANA_HIDDEN_LAYOUT_TAGS.has(node.localName) || katanaIsDisplayNone(node)) {
+    return false;
+  }
+  if (["text", "tspan", "line"].includes(node.localName)) {
+    return true;
+  }
+  if (node.localName === "path" && String(node.getAttribute?.("d") ?? "").trim()) {
+    return true;
+  }
+  return (node.children ?? []).some((child) => katanaHasDegenerateGeometry(child));
 }
 
 function katanaMeasuredBox(node) {
@@ -213,18 +237,16 @@ function katanaIsRoundSvgShape(node) {
   return ["circle", "ellipse"].includes(node.localName);
 }
 
-function katanaNodeTranslate(node) {
-  const number = "[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][-+]?\\d+)?";
-  const match = katanaTransformValue(node).match(
-    new RegExp(`translate\\(\\s*(${number})(?:[,\\s]+(${number}))?\\s*\\)`),
-  );
-  if (match) {
-    const values = [Number(match[1]), Number(match[2] ?? 0)];
-    if (values.every(Number.isFinite)) {
-      return values;
-    }
+function katanaTransformChildBox(node, box) {
+  const transform = katanaTransformValue(node).trim();
+  if (!transform) return box;
+  const translation = katanaSimpleSvgTranslation(transform);
+  if (translation) {
+    return katanaBox(box.x + translation[0], box.y + translation[1], box.width, box.height);
   }
-  return [0, 0];
+  const transformed = katanaTransformSvgBox(transform, box.x, box.y, box.width, box.height);
+  if (!transformed) throw new Error("SVG child transform returned no bounds");
+  return katanaBox(transformed.x, transformed.y, transformed.width, transformed.height);
 }
 
 function katanaTransformValue(node) {

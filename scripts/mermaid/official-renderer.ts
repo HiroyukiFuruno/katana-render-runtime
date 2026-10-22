@@ -317,6 +317,7 @@ export class OfficialMermaidRenderer {
   }
 
   private async installRuntime(page: PageHandle) {
+    await installSvgTransformBoundsBridge(page);
     for (const scriptPath of MermaidRuntimeScripts.paths()) {
       await page.addScriptTag({ path: scriptPath });
     }
@@ -626,6 +627,50 @@ html,body{margin:0;background:${this.theme.canvasBackground};color:${this.theme.
 #diagram svg{max-width:100%;max-height:100%}
 </style></head><body><div id="capture"><div id="diagram"></div></div></body></html>`;
   }
+}
+
+export async function installSvgTransformBoundsBridge(page: PageHandle): Promise<void> {
+  await page.evaluate(() => {
+    const host = window as MermaidI18nWindow;
+    if (host.__katanaTransformSvgBox !== undefined) {
+      throw new Error("SVG transform bounds bridge is already registered");
+    }
+    host.__katanaTransformSvgBox = (transform, x, y, width, height) => {
+      if (![x, y, width, height].every(Number.isFinite) || width < 0 || height < 0) {
+        throw new Error("SVG transform bounds input must be finite and non-negative");
+      }
+      const element = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      element.setAttribute("transform", transform);
+      const transformList = element.transform.baseVal;
+      if (transformList.numberOfItems === 0) return { x, y, width, height };
+      const consolidated = transformList.consolidate();
+      if (consolidated === null) return { x, y, width, height };
+      const sourceMatrix = consolidated.matrix;
+      const matrix = new DOMMatrix([
+        sourceMatrix.a,
+        sourceMatrix.b,
+        sourceMatrix.c,
+        sourceMatrix.d,
+        sourceMatrix.e,
+        sourceMatrix.f,
+      ]);
+      const points = [
+        matrix.transformPoint(new DOMPoint(x, y)),
+        matrix.transformPoint(new DOMPoint(x + width, y)),
+        matrix.transformPoint(new DOMPoint(x, y + height)),
+        matrix.transformPoint(new DOMPoint(x + width, y + height)),
+      ];
+      const coordinates = points.flatMap((point) => [point.x, point.y]);
+      if (!coordinates.every(Number.isFinite)) {
+        throw new Error("SVG transformed bounds must be finite");
+      }
+      const left = Math.min(...points.map((point) => point.x));
+      const top = Math.min(...points.map((point) => point.y));
+      const right = Math.max(...points.map((point) => point.x));
+      const bottom = Math.max(...points.map((point) => point.y));
+      return { x: left, y: top, width: right - left, height: bottom - top };
+    };
+  });
 }
 
 function officialRuntimeAssets(document: JsonValue): Array<{ path: string; sha256: string }> {

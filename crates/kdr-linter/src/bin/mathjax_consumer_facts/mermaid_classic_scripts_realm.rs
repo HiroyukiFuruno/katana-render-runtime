@@ -5,15 +5,16 @@ use serde_json::Value;
 use syn::{Expr, Stmt, spanned::Spanned};
 
 const REALM: &str = "mermaid-classic-realm";
-const CLASSIC_REALM_STATEMENTS: usize = 10;
+const CLASSIC_REALM_STATEMENTS: usize = 11;
 const REALM_ISOLATE_STATEMENT_INDEX: usize = 1;
 const REALM_SCOPE_MACRO_INDEX: usize = 2;
 const REALM_CONTEXT_STATEMENT_INDEX: usize = 3;
 const REALM_CONTEXT_SCOPE_STATEMENT_INDEX: usize = 4;
 const REALM_TC_SCOPE_MACRO_INDEX: usize = 5;
-const REALM_INSTALL_STATEMENT_INDEX: usize = 6;
-const REALM_RENDERED_STATEMENT_INDEX: usize = 7;
-const REALM_SCRIPT_LOOP_INDEX: usize = 8;
+const REALM_FONT_INSTALL_STATEMENT_INDEX: usize = 6;
+const REALM_GEOMETRY_INSTALL_STATEMENT_INDEX: usize = 7;
+const REALM_RENDERED_STATEMENT_INDEX: usize = 8;
+const REALM_SCRIPT_LOOP_INDEX: usize = 9;
 
 pub(super) fn inspect_realm(source: &Source, facts: &mut Vec<Value>) -> Result<(), String> {
     let render = method(&source.ast, "DiagramV8Runtime", "render")?;
@@ -79,10 +80,22 @@ fn context_scope(block: &syn::Block) -> Result<(), String> {
 }
 
 fn render_scripts(block: &syn::Block) -> Result<(), String> {
-    let Some(Stmt::Expr(install, Some(_))) = block.stmts.get(REALM_INSTALL_STATEMENT_INDEX) else {
+    let Some(Stmt::Expr(install, Some(_))) = block.stmts.get(REALM_FONT_INSTALL_STATEMENT_INDEX)
+    else {
         return Err("mermaid-classic-realm:install".into());
     };
     require_direct_call(install, "diagram_font_bridge::install", &["scope"], REALM)?;
+    let Some(Stmt::Expr(install, Some(_))) =
+        block.stmts.get(REALM_GEOMETRY_INSTALL_STATEMENT_INDEX)
+    else {
+        return Err("mermaid-classic-realm:geometry-install".into());
+    };
+    require_direct_call(
+        install,
+        "diagram_geometry_bridge::install",
+        &["scope"],
+        "mermaid-classic-realm:geometry-install",
+    )?;
     require_direct_call(
         local(block, REALM_RENDERED_STATEMENT_INDEX, "rendered")?,
         "String::new",

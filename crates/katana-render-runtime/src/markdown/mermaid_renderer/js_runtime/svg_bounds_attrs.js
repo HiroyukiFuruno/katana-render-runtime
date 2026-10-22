@@ -1,10 +1,28 @@
-/** @param {string} tag @returns {[number, number]} */
-function katanaTranslate(tag) {
-  const match = tag.match(/transform="translate\(([-\d.]+)[,\s]+([-\d.]+)\)/);
-  if (match) {
-    return [Number(match[1]), Number(match[2])];
+/** @param {[number, number, number, number] | null} box @param {string} transform */
+function katanaTransformSvgBounds(box, transform) {
+  if (!box) return null;
+  const translation = katanaSimpleSvgTranslation(transform);
+  if (translation) {
+    return [
+      box[0] + translation[0],
+      box[1] + translation[1],
+      box[2] + translation[0],
+      box[3] + translation[1],
+    ];
   }
-  return [0, 0];
+  const transformed = katanaTransformSvgBox(
+    transform,
+    box[0],
+    box[1],
+    box[2] - box[0],
+    box[3] - box[1],
+  );
+  return [
+    transformed.x,
+    transformed.y,
+    transformed.x + transformed.width,
+    transformed.y + transformed.height,
+  ];
 }
 
 /** @param {string} tag @param {string} name @returns {number | null} */

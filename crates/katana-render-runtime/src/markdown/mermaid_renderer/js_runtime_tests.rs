@@ -69,6 +69,13 @@ fn runtime_preserves_treemap_value_geometry() -> Result<(), String> {
 #[path = "js_runtime_tests_block_geometry.rs"]
 mod block_geometry;
 
+#[path = "js_runtime_tests_journey.rs"]
+mod journey;
+
+#[cfg(target_os = "macos")]
+#[path = "js_runtime_tests_gitgraph_rotation.rs"]
+mod gitgraph_rotation;
+
 fn assert_zenuml_v8_svg(rendered: &Result<String, String>) {
     assert!(
         rendered

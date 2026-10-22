@@ -22,14 +22,7 @@ pub(super) fn install(scope: &mut DiagramTryCatchScope<'_, '_, '_, '_>) -> Resul
     global
         .set(scope, name.into(), callback.into())
         .ok_or_else(|| "font measure bridge registration failed".to_string())?;
-    let svg_name = v8::String::new(scope, "__katanaMeasureSvgTextMetrics")
-        .ok_or_else(|| "SVG font metric bridge name allocation failed".to_string())?;
-    let svg_callback = v8::Function::new(scope, svg_font_measure_callback)
-        .ok_or_else(|| "SVG font metric bridge callback allocation failed".to_string())?;
-    global
-        .set(scope, svg_name.into(), svg_callback.into())
-        .ok_or_else(|| "SVG font metric bridge registration failed".to_string())?;
-    Ok(())
+    super::diagram_svg_font_bridge::install(scope)
 }
 
 fn font_measure_callback(
@@ -60,12 +53,12 @@ fn font_measure_callback(
     }
 }
 
-struct FontMeasureRequest {
-    text: String,
-    family: String,
-    size: f32,
-    weight: u16,
-    italic: bool,
+pub(super) struct FontMeasureRequest {
+    pub(super) text: String,
+    pub(super) family: String,
+    pub(super) size: f32,
+    pub(super) weight: u16,
+    pub(super) italic: bool,
 }
 
 fn font_measure_request(
@@ -75,7 +68,7 @@ fn font_measure_request(
     font_measure_request_with_size_policy(scope, args, false)
 }
 
-fn font_measure_request_with_size_policy(
+pub(super) fn font_measure_request_with_size_policy(
     scope: &mut v8::PinScope,
     args: &v8::FunctionCallbackArguments,
     allow_zero: bool,
@@ -101,7 +94,7 @@ fn font_measure_request_with_size_policy(
     })
 }
 
-fn font_measure_number(
+pub(super) fn font_measure_number(
     scope: &mut v8::PinScope,
     args: &v8::FunctionCallbackArguments,
     index: i32,
@@ -115,88 +108,6 @@ fn font_measure_number(
     value.is_finite().then_some(value)
 }
 
-fn svg_font_measure_callback(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
-    mut return_value: v8::ReturnValue<v8::Value>,
-) {
-    let metrics = match svg_font_metrics(scope, &args) {
-        Ok(metrics) => metrics,
-        Err(message) => {
-            throw_svg_metric_error(scope, message);
-            return;
-        }
-    };
-    let object = v8::Object::new(scope);
-    if let Err(message) = set_svg_metric_properties(scope, object, metrics) {
-        throw_svg_metric_error(scope, message);
-        return;
-    }
-    return_value.set(object.into());
-}
-
-fn set_svg_metric_properties(
-    scope: &mut v8::PinScope,
-    object: v8::Local<v8::Object>,
-    metrics: crate::markdown::svg_rasterize::SvgTextRunMetrics,
-) -> Result<(), &'static str> {
-    let properties = [
-        ("advance", f64::from(metrics.advance)),
-        ("ascent", f64::from(metrics.ascent)),
-        ("descent", f64::from(metrics.descent)),
-    ]
-    .into_iter()
-    .chain(metrics.ink_bounds.into_iter().flat_map(|bounds| {
-        ["inkLeft", "inkTop", "inkRight", "inkBottom"]
-            .into_iter()
-            .zip(bounds)
-    }));
-    for (name, value) in properties {
-        set_svg_metric_property(scope, object, name, value)?;
-    }
-    if let Some(ascent) = metrics.layout_ascent {
-        set_svg_metric_property(scope, object, "layoutAscent", f64::from(ascent))?;
-    }
-    Ok(())
-}
-
-fn svg_font_metrics(
-    scope: &mut v8::PinScope,
-    args: &v8::FunctionCallbackArguments,
-) -> Result<crate::markdown::svg_rasterize::SvgTextRunMetrics, &'static str> {
-    let request = font_measure_request_with_size_policy(scope, args, true)
-        .ok_or("Invalid SVG font metric request")?;
-    crate::markdown::svg_rasterize::SvgRasterizeOps::measure_svg_text_metrics(
-        &request.text,
-        &request.family,
-        request.size,
-        request.weight,
-        request.italic,
-    )
-    .map_err(|_| "SVG font metric measurement failed")
-}
-
-fn set_svg_metric_property(
-    scope: &mut v8::PinScope,
-    object: v8::Local<v8::Object>,
-    name: &str,
-    value: f64,
-) -> Result<(), &'static str> {
-    let key = v8::String::new(scope, name).ok_or("SVG font metric key allocation failed")?;
-    let value = v8::Number::new(scope, value);
-    if object.set(scope, key.into(), value.into()) != Some(true) {
-        return Err("SVG font metric result allocation failed");
-    }
-    Ok(())
-}
-
-fn throw_svg_metric_error(scope: &mut v8::PinScope, message: &str) {
-    if let Some(message) = v8::String::new(scope, message) {
-        let error = v8::Exception::error(scope, message);
-        scope.throw_exception(error);
-    }
-}
-
 #[cfg(test)]
 #[path = "diagram_font_bridge_boundary_tests.rs"]
 mod boundary_tests;
@@ -204,3 +115,6 @@ mod boundary_tests;
 #[cfg(test)]
 #[path = "diagram_font_bridge_numeric_boundary_tests.rs"]
 mod numeric_boundary_tests;
+#[cfg(test)]
+#[path = "diagram_font_bridge_x_height_tests.rs"]
+mod x_height_tests;

@@ -4,10 +4,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
 import { FixtureRepository } from "./diagram_update_fixtures";
-import { PlaywrightLoader } from "./official-renderer";
+import { installSvgTransformBoundsBridge, PlaywrightLoader } from "./official-renderer";
 import { resolveOfficialRendererAssetInputs } from "./official-renderer-asset-inputs";
 import { MermaidRuntimeScripts } from "./official-renderer-i18n";
-import type { BrowserHandle, MermaidWindow, PageHandle } from "./official-renderer-types";
+import type {
+  BrowserHandle,
+  MermaidI18nWindow,
+  MermaidWindow,
+  PageHandle,
+} from "./official-renderer-types";
 
 const runtimeScriptNames = MermaidRuntimeScripts.paths().map((it) => path.basename(it));
 
@@ -268,3 +273,84 @@ describe("raw Mermaid parser", () => {
     },
   );
 });
+
+test("non-strict browser normalization supports SVG transform lists and ignores invalid syntax", async () => {
+  const { chromium } = await new PlaywrightLoader().load();
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({
+    viewport: { width: 1520, height: 845 },
+    deviceScaleFactor: 1,
+  });
+  try {
+    await page.setContent("<!doctype html><html><body></body></html>", { waitUntil: "load" });
+    await installSvgTransformBoundsBridge(page);
+    for (const scriptPath of MermaidRuntimeScripts.paths()) {
+      await page.addScriptTag({ path: scriptPath });
+    }
+    await page.evaluate(() => {
+      (window as MermaidI18nWindow).__katanaOfficialReference = true;
+    });
+
+    const boxes = await page.evaluate(() => {
+      const host = window as MermaidI18nWindow;
+      const transformBox = host.__katanaTransformSvgBox;
+      if (transformBox === undefined) throw new Error("SVG transform bridge was not installed");
+      return [
+        transformBox("translate(10 20)", 1, 2, 3, 4),
+        transformBox("rotate(90 5 7)", 1, 2, 3, 4),
+        transformBox("translate(10 20) rotate(90 5 7) scale(2 3)", 1, 2, 3, 4),
+      ];
+    });
+    const [translationBox, rotationBox, composedBox] = boxes;
+    if (translationBox === undefined || rotationBox === undefined || composedBox === undefined) {
+      throw new Error("SVG transform cases did not produce all bounds");
+    }
+    expectSvgBox(translationBox, { x: 11, y: 22, width: 3, height: 4 });
+    expectSvgBox(rotationBox, { x: 6, y: 3, width: 4, height: 3 });
+    expectSvgBox(composedBox, { x: 4, y: 24, width: 12, height: 6 });
+
+    const gitGraphPath = path.join(
+      cwd,
+      "tests/fixtures/mermaid/en/official-dark/12-01-git-graph-simple.svg",
+    );
+    const gitGraphSvg = fs.readFileSync(gitGraphPath, "utf8");
+    expect(gitGraphSvg).toContain("rotate(-45");
+    const normalizedGitGraph = await page.evaluate((svg) => {
+      const normalize = (window as MermaidI18nWindow).katanaNormalizeMermaidSvg;
+      if (normalize === undefined) throw new Error("official SVG normalizer was not installed");
+      return normalize(svg, {
+        theme: "default",
+        text: "#333333",
+        fill: "#ffffff",
+        stroke: "#555555",
+        arrow: "#555555",
+        source: "gitGraph\ncommit",
+        background: "#ffffff",
+      });
+    }, gitGraphSvg);
+    expect(normalizedGitGraph).toContain('aria-roledescription="gitGraph"');
+    const ignoredTransforms = await page.evaluate(() => {
+      const transformBox = (window as MermaidI18nWindow).__katanaTransformSvgBox;
+      if (transformBox === undefined) throw new Error("SVG transform bridge was not installed");
+      return ["rotate(not-a-number)", "translate(1) garbage", "rotate(90, 5, nope)"].map(
+        (transform) => transformBox(transform, 0, 0, 1, 1),
+      );
+    });
+    for (const box of ignoredTransforms) {
+      expectSvgBox(box, { x: 0, y: 0, width: 1, height: 1 });
+    }
+  } finally {
+    await page.close();
+    await browser.close();
+  }
+});
+
+function expectSvgBox(
+  actual: { x: number; y: number; width: number; height: number },
+  expected: { x: number; y: number; width: number; height: number },
+) {
+  expect(actual.x).toBeCloseTo(expected.x, 9);
+  expect(actual.y).toBeCloseTo(expected.y, 9);
+  expect(actual.width).toBeCloseTo(expected.width, 9);
+  expect(actual.height).toBeCloseTo(expected.height, 9);
+}

@@ -5,6 +5,10 @@ use crate::v8_script::ScriptCompiler;
 
 #[path = "diagram_font_bridge.rs"]
 mod diagram_font_bridge;
+#[path = "diagram_geometry_bridge.rs"]
+mod diagram_geometry_bridge;
+#[path = "diagram_svg_font_bridge.rs"]
+mod diagram_svg_font_bridge;
 
 static V8_INIT: OnceLock<()> = OnceLock::new();
 const SOURCE_ALLOC_ERR: &str = "source allocation failed";
@@ -59,6 +63,7 @@ impl DiagramV8Runtime {
         let context_scope = &mut v8::ContextScope::new(handle_scope, context);
         v8::tc_scope!(let scope, &mut **context_scope);
         diagram_font_bridge::install(scope)?;
+        diagram_geometry_bridge::install(scope)?;
 
         let mut rendered = String::new();
         for script in scripts {

@@ -36,7 +36,7 @@ fn empty_svg_text_metrics(ascent: f32, descent: f32) -> SvgTextRunMetrics {
     }
 }
 
-fn validated_svg_font_shape(size: f32, weight: u16, italic: bool) -> Option<FontShape> {
+pub(super) fn validated_svg_font_shape(size: f32, weight: u16, italic: bool) -> Option<FontShape> {
     let font = FontShape::new(size, weight, italic);
     let shaping_scale = font.size * HARFRUST_SCALE;
     if !font.size.is_finite()
