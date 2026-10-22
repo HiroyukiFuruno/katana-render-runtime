@@ -20,7 +20,7 @@ import {
   runManagedCommand,
   writeExclusive,
 } from "./managed-full-compare-process";
-import { requireFullScoreAcceptance } from "./managed-full-compare-results";
+import { type FullScoreFailure, requireFullScoreAcceptance } from "./managed-full-compare-results";
 import { fileSha256, sha256 } from "./mermaid-pair-manifest";
 import {
   parseSourceManifest,
@@ -35,6 +35,8 @@ interface BuildResponse {
   receipt: string;
 }
 
+export type LanguageResult = LanguageAcceptance | FullScoreFailure;
+
 export interface RunReceipt {
   schema: "krr-mermaid-managed-full-run-v1";
   status: "completed" | "failed";
@@ -44,7 +46,7 @@ export interface RunReceipt {
   receiptPath: string;
   source: { path: string; sha256: string; digest: string; fileCount: number } | null;
   buildReceipt: { path: string; sha256: string } | null;
-  languages: LanguageAcceptance[];
+  languages: LanguageResult[];
   steps: ManagedStep[];
   acceptance: { R01: boolean; R02: boolean };
   error: string | null;
@@ -66,7 +68,7 @@ export async function runManagedFullComparison(
   }
   createRunRoot(request.outputRoot);
   const steps: ManagedStep[] = [];
-  const languages: LanguageAcceptance[] = [];
+  const languages: LanguageResult[] = [];
   const receipt = initialReceipt(
     requestPath,
     requestSha256,
@@ -85,9 +87,9 @@ export async function runManagedFullComparison(
       steps,
     );
     receipt.buildReceipt = { path: buildReceiptPath, sha256: fileSha256(buildReceiptPath) };
-    for (const language of ["en", "ja"] as const) {
-      languages.push(
-        await runManagedLanguage(
+    await runLanguageComparisons(
+      async (language) =>
+        runManagedLanguage(
           request,
           language,
           buildReceiptPath,
@@ -95,8 +97,19 @@ export async function runManagedFullComparison(
           steps,
           pins.fixtureSources[language],
         ),
-      );
-    }
+      () =>
+        verifyFinalState(
+          request,
+          pins,
+          requestPath,
+          requestSha256,
+          requestFile.identity,
+          expectedSource.digest,
+          expectedSource.files,
+          buildReceiptPath,
+        ),
+      (result) => languages.push(result),
+    );
     verifyFinalState(
       request,
       pins,
@@ -117,6 +130,32 @@ export async function runManagedFullComparison(
   }
   writeExclusive(path.join(request.outputRoot, "receipt.json"), receipt);
   return receipt;
+}
+
+export async function runLanguageComparisons(
+  runLanguage: (language: "en" | "ja") => Promise<LanguageAcceptance>,
+  verifyAfterFailure: () => void,
+  onResult?: (result: LanguageResult) => void,
+): Promise<LanguageResult[]> {
+  const results: LanguageResult[] = [];
+  for (const language of ["en", "ja"] as const) {
+    try {
+      const result = await runLanguage(language);
+      results.push(result);
+      onResult?.(result);
+    } catch (error) {
+      const result: FullScoreFailure = {
+        kind: "failure",
+        language,
+        error: error instanceof Error ? error.message : String(error),
+        accepted: false,
+      };
+      results.push(result);
+      onResult?.(result);
+      verifyAfterFailure();
+    }
+  }
+  return results;
 }
 
 function validateOfficialBaselines(request: ManagedFullCompareRequest, pins: PinnedInputs): void {
@@ -263,7 +302,7 @@ function initialReceipt(
   requestPath: string,
   requestSha256: string,
   steps: ManagedStep[],
-  languages: LanguageAcceptance[],
+  languages: LanguageResult[],
   request: ManagedFullCompareRequest,
   sourceDigest: string,
   fileCount: number,

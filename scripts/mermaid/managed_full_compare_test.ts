@@ -1,13 +1,18 @@
 import { expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { assertCallerSourceBinding } from "./managed-full-compare";
+import {
+  assertCallerSourceBinding,
+  type LanguageResult,
+  runLanguageComparisons,
+} from "./managed-full-compare";
 import {
   assertManagedOutputRoot,
   captureCanonicalFixtureSources,
   parseManagedFullCompareRequest,
   validatePinnedInputs,
 } from "./managed-full-compare-input";
+import type { LanguageAcceptance } from "./managed-full-compare-language";
 import { candidateFixtureArgumentPairs } from "./managed-full-compare-language";
 import {
   type ManagedCommandResult,
@@ -24,6 +29,25 @@ import { fileSha256 } from "./mermaid-pair-manifest";
 import { digestFileRecords } from "./native-build-receipt";
 import type { ReferenceScoreRow } from "./reference_score";
 import { ReferenceScorePolicy } from "./reference_score_policy";
+
+function typedLanguageAcceptance(language: "en" | "ja"): LanguageAcceptance {
+  const pin = { path: `/tmp/${language}-fixture`, sha256: "0".repeat(64), size: 0 };
+  return {
+    language,
+    fixtureCount: language === "en" ? 59 : 58,
+    minimumScore: 100,
+    accepted: true,
+    failedScores: [],
+    fixtureSources: [],
+    buildReceipt: pin.path,
+    nativeBindings: pin,
+    rasterReceipt: pin,
+    rasterProcessEvidence: pin,
+    comparison: pin,
+    bindingConfig: pin,
+    nativeFrameBuildProof: pin,
+  };
+}
 
 test("managed full aggregation requires exactly EN59 and JA58 strict scores at least 99", () => {
   for (const [language, count] of [
@@ -42,6 +66,74 @@ test("managed full aggregation requires exactly EN59 and JA58 strict scores at l
     expect(result.fixtureCount).toBe(count);
     expect(result.minimumScore).toBe(99);
   }
+});
+
+test("language failure is recorded before the next language runs and keeps acceptance false", async () => {
+  const calls: string[] = [],
+    verifications: string[] = [];
+  const results = await runLanguageComparisons(
+    async (language): Promise<LanguageAcceptance> => {
+      calls.push(language);
+      if (language === "en") throw new Error("EN native PNG dimensions differ");
+      return typedLanguageAcceptance(language);
+    },
+    () => {
+      verifications.push("verified");
+    },
+  );
+  expect(calls).toEqual(["en", "ja"]);
+  expect(verifications).toEqual(["verified"]);
+  expect(results[0]).toEqual({
+    kind: "failure",
+    language: "en",
+    error: "EN native PNG dimensions differ",
+    accepted: false,
+  });
+  expect(results[0]).toBeDefined();
+  expect(results[0]?.accepted).toBe(false);
+});
+
+test("shared state failure after a language error stops the next language", async () => {
+  const calls: string[] = [];
+  await expect(
+    runLanguageComparisons(
+      async (language): Promise<LanguageAcceptance> => {
+        calls.push(language);
+        throw new Error("language-local failure");
+      },
+      () => {
+        throw new Error("source or build state changed");
+      },
+    ),
+  ).rejects.toThrow("source or build state changed");
+  expect(calls).toEqual(["en"]);
+});
+
+test("shared state failure after a later language error preserves prior results", async () => {
+  const calls: string[] = [],
+    retained: LanguageResult[] = [];
+  await expect(
+    runLanguageComparisons(
+      async (language): Promise<LanguageAcceptance> => {
+        calls.push(language);
+        if (language === "ja") throw new Error("JA native comparison failed");
+        return typedLanguageAcceptance(language);
+      },
+      () => {
+        throw new Error("source or build state changed");
+      },
+      (result) => retained.push(result),
+    ),
+  ).rejects.toThrow("source or build state changed");
+  expect(calls).toEqual(["en", "ja"]);
+  expect(retained).toHaveLength(2);
+  expect(retained[0]).toMatchObject({ language: "en", accepted: true });
+  expect(retained[1]).toEqual({
+    kind: "failure",
+    language: "ja",
+    error: "JA native comparison failed",
+    accepted: false,
+  });
 });
 
 test("managed build binds source records and digest, not source-manifest serialization", () => {
@@ -187,7 +279,9 @@ test("managed probe preflight follows Node X_OK semantics before expensive work"
     if (process.platform === "win32") {
       expect(() => validatePinnedInputs(request)).not.toThrow();
     } else {
-      expect(() => validatePinnedInputs(request)).toThrow("native frame probe binary is not executable");
+      expect(() => validatePinnedInputs(request)).toThrow(
+        "native frame probe binary is not executable",
+      );
     }
     for (const language of ["en", "ja"] as const) {
       const probe = request.languages[language].nativeFrameCapture?.probeBinary;

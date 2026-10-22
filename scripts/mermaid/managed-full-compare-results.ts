@@ -195,7 +195,16 @@ export interface FullScoreAcceptance {
   accepted: boolean;
 }
 
-export function requireFullScoreAcceptance(languages: FullScoreAcceptance[]): void {
+export interface FullScoreFailure {
+  kind: "failure";
+  language: "en" | "ja";
+  error: string;
+  accepted: false;
+}
+
+export type FullScoreResult = FullScoreAcceptance | FullScoreFailure;
+
+export function requireFullScoreAcceptance(languages: FullScoreResult[]): void {
   const expected = [
     { language: "en", fixtureCount: 59 },
     { language: "ja", fixtureCount: 58 },
@@ -204,8 +213,11 @@ export function requireFullScoreAcceptance(languages: FullScoreAcceptance[]): vo
     languages.length !== expected.length ||
     expected.some((row, index) => {
       const actual = languages[index];
+      if (!actual || "kind" in actual) {
+        return true;
+      }
       return (
-        actual?.language !== row.language ||
+        actual.language !== row.language ||
         actual.fixtureCount !== row.fixtureCount ||
         !Number.isFinite(actual.minimumScore) ||
         actual.minimumScore < 99 ||
