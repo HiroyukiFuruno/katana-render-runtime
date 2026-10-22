@@ -89,8 +89,8 @@ function katanaAppendOrderedTextRun(node, text, font, state) {
   if (
     state.pending &&
     (!katanaSameTextRunFont(state.pending.font, font) ||
-      ((!katanaCanMergeNativeTextOwners(state.pending.node) ||
-        !katanaCanMergeNativeTextOwners(owner)) &&
+      ((!katanaCanMergeNativeTextRunOwners(state.pending.node) ||
+        !katanaCanMergeNativeTextRunOwners(owner)) &&
         state.pending.node !== owner))
   )
     katanaFlushOrderedTextRun(state);
@@ -117,7 +117,7 @@ function katanaMeasuredPendingTextRuns(pending, text) {
     return [katanaMeasuredTextRun(pending.node, text, pending.font)];
   }
   const svgMetrics =
-    pending.svgNativeEligible && katanaCanMergeNativeTextOwners(pending)
+    pending.svgNativeEligible && katanaCanMergeNativeTextRunOwners(pending)
       ? katanaNativeSvgRunMetrics(pending.node, text, pending.font)
       : null;
   if (svgMetrics !== null)
@@ -128,6 +128,36 @@ function katanaMeasuredPendingTextRuns(pending, text) {
   return native !== null
     ? [{ node: pending.node, text, width: native }]
     : pending.fragments.map((run) => katanaFallbackTextFragment(run, pending.font));
+}
+
+function katanaCanMergeNativeTextRunOwners(nodeOrPending) {
+  return (
+    katanaCanMergeNativeTextOwners(nodeOrPending) ||
+    katanaCanMergeNativeSvgTextOwners(nodeOrPending)
+  );
+}
+
+/* WHY: C4の連続tspanはSVG shapingだけを共有し、fallbackのowner補正は共有しない。 */
+function katanaCanMergeNativeSvgTextOwners(nodeOrPending) {
+  if (
+    !katanaIsC4Diagram() ||
+    !katanaMermaidNativeAdvanceRuntime() ||
+    typeof globalThis.__katanaMeasureSvgTextMetrics !== "function"
+  )
+    return false;
+  if (Array.isArray(nodeOrPending?.fragments)) {
+    const nodes = nodeOrPending.fragments.map((fragment) => fragment.node);
+    return nodes.length > 1 && nodes.every(katanaIsNativeSvgTextOwnerMergeSafe);
+  }
+  return katanaIsNativeSvgTextOwnerMergeSafe(nodeOrPending);
+}
+
+function katanaIsNativeSvgTextOwnerMergeSafe(node) {
+  if (node?.namespaceURI !== "http://www.w3.org/2000/svg") return false;
+  for (const name of ["x", "y", "dx", "dy", "rotate", "textLength", "lengthAdjust"]) {
+    if (String(node.getAttribute?.(name) ?? "").trim()) return false;
+  }
+  return katanaIsNativeTextOwnerDirectionSafe(node);
 }
 
 /* WHY: fallback/C4の幅補正はowner依存なので、Nativeで測れない文字を別ownerへ波及させない。 */
@@ -154,6 +184,10 @@ function katanaIsBlockDiagram() {
 }
 
 function katanaIsBlockTextOwnerMergeSafe(node) {
+  return katanaIsNativeTextOwnerDirectionSafe(node);
+}
+
+function katanaIsNativeTextOwnerDirectionSafe(node) {
   for (let current = node; current; current = current.parentNode) {
     const direction = String(
       current.style?.getPropertyValue?.("direction") ||

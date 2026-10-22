@@ -1,5 +1,5 @@
 function katanaMeasuredBoxAccurate(node) {
-  if (KATANA_HIDDEN_LAYOUT_TAGS.has(node.localName)) {
+  if (KATANA_HIDDEN_LAYOUT_TAGS.has(node.localName) || katanaIsDisplayNone(node)) {
     return katanaBox(0, 0, 0, 0);
   }
   return katanaVisibleMeasuredBoxAccurate(node);

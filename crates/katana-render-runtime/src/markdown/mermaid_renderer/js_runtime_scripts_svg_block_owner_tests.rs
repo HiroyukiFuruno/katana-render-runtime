@@ -147,6 +147,53 @@ globalThis.mermaid = {
 };
 "##;
 
+const C4_SAME_FONT_OWNER_FIXTURE: &str = r##"
+globalThis.mermaid = {
+  initialize() {},
+  render: async () => {
+    globalThis.__katanaMermaidDiagramType = 'c4dynamic';
+    const ns = 'http://www.w3.org/2000/svg';
+    const family = 'trebuchet ms, verdana, arial, sans-serif';
+    const textValue = 'Banking Customer A';
+    const expected = globalThis.__katanaMeasureSvgTextMetrics(textValue, family, 16, 400, false).advance;
+    const make = (attrs = {}, style = {}) => {
+      const text = document.createElementNS(ns, 'text');
+      text.style.setProperty('font-family', family);
+      text.style.setProperty('font-size', '16px');
+      for (const [name, value] of Object.entries(attrs)) text.setAttribute(name, value);
+      for (const [name, value] of Object.entries(style)) text.style.setProperty(name, value);
+      for (const part of ['Banking', ' Customer', ' A']) {
+        const tspan = document.createElementNS(ns, 'tspan');
+        tspan.setAttribute('class', 'c4-name');
+        tspan.textContent = part;
+        text.appendChild(tspan);
+      }
+      return text;
+    };
+    const ltr = make();
+    const ltrLines = katanaOrderedTextLines(ltr);
+    const positioned = make();
+    positioned.children[1].setAttribute('x', '40');
+    const positionedLines = katanaOrderedTextLines(positioned);
+    const rtl = make({ direction: 'rtl' });
+    const rtlLines = katanaOrderedTextLines(rtl);
+    const bidi = make({}, { 'unicode-bidi': 'bidi-override' });
+    const bidiLines = katanaOrderedTextLines(bidi);
+    const styled = make();
+    styled.children[1].style.setProperty('font-weight', '700');
+    const styledLines = katanaOrderedTextLines(styled);
+    const result = ltrLines.length === 1 && ltrLines[0].parts.length === 1
+      && ltrLines[0].parts[0].text === textValue
+      && Math.abs(ltrLines[0].parts[0].width - expected) < 0.0001
+      && positionedLines.length === 2
+      && rtlLines.flatMap(line => line.parts).length === 3
+      && bidiLines.flatMap(line => line.parts).length === 3
+      && styledLines.flatMap(line => line.parts).length === 3;
+    return { svg: '<svg data-c4-run-merge-guards="' + result + '"></svg>' };
+  }
+};
+"##;
+
 #[test]
 fn block_same_font_owners_shape_as_one_run_only_for_ltr_normal_bidi() -> Result<(), String> {
     let rendered = render_svg_fixture(BLOCK_SAME_FONT_OWNER_FIXTURE)?;
@@ -163,6 +210,16 @@ fn block_beta_raw_request_uses_native_owner_merge_guard() -> Result<(), String> 
         render_svg_fixture_with_source(BLOCK_BETA_RAW_REQUEST_FIXTURE, "block-beta\nA[AVA]")?;
     assert!(
         rendered.contains(r##"data-block-beta-raw-route="true""##),
+        "{rendered}"
+    );
+    Ok(())
+}
+
+#[test]
+fn c4_same_font_owners_shape_as_one_svg_run_only_for_safe_ltr_text() -> Result<(), String> {
+    let rendered = render_svg_fixture(C4_SAME_FONT_OWNER_FIXTURE)?;
+    assert!(
+        rendered.contains(r##"data-c4-run-merge-guards="true"##),
         "{rendered}"
     );
     Ok(())

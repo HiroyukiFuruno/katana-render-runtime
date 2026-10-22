@@ -37,7 +37,7 @@ function katanaLayoutTextChildren(node) {
 }
 
 function katanaIsHiddenLayoutNode(node) {
-  return [!node, KATANA_HIDDEN_LAYOUT_TAGS.has(node?.localName)].includes(true);
+  return !node || KATANA_HIDDEN_LAYOUT_TAGS.has(node.localName) || katanaIsDisplayNone(node);
 }
 
 function katanaNodeValue(value) {
@@ -108,7 +108,10 @@ function katanaHasDegenerateGeometry(node) {
   if (!node || KATANA_HIDDEN_LAYOUT_TAGS.has(node.localName) || katanaIsDisplayNone(node)) {
     return false;
   }
-  if (["text", "tspan", "line"].includes(node.localName)) {
+  if (["text", "tspan"].includes(node.localName)) {
+    return katanaLayoutTextContent(node).trim().length > 0;
+  }
+  if (node.localName === "line") {
     return true;
   }
   if (node.localName === "path" && String(node.getAttribute?.("d") ?? "").trim()) {
