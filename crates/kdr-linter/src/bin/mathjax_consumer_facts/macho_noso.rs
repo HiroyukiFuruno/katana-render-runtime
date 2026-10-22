@@ -138,3 +138,7 @@ fn is_sha256(value: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
+
+#[cfg(test)]
+#[path = "macho_noso_tests_private.rs"]
+mod private_tests;
