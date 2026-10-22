@@ -6,6 +6,9 @@ use super::test_support::{
 };
 use crate::markdown::color_preset::DiagramColorPreset;
 
+#[path = "js_runtime_html_dom_visible_text_tests.rs"]
+mod visible_text;
+
 #[test]
 fn fake_bundle_wraps_drawio_html_text_within_its_explicit_frame() {
     let path = temp_runtime_path("kdr-drawio-html-wrap-unit");
@@ -45,74 +48,6 @@ fn fake_bundle_honors_numeric_html_line_height() {
             .as_ref()
             .is_ok_and(|svg| svg.contains(r#"data-html-line-height="36""#)),
         "{rendered:?}"
-    );
-}
-
-fn visible_text_fixture(parent: &str, visible: &str, trailing: &str, hidden: &str) -> String {
-    format!(
-        r#"  const label = document.createElement("div");
-  label.textContent = "{visible}";
-  const lineBreak = document.createElement("br");
-  label.appendChild(lineBreak);
-  const trailing = document.createElement("span");
-  trailing.textContent = "{trailing}";
-  label.appendChild(trailing);
-  const hidden = document.createElement("span");
-  hidden.setAttribute("style", "display: none");
-  hidden.textContent = "{hidden}";
-  label.appendChild(hidden);
-  {parent}.appendChild(label);
-"#,
-    )
-}
-
-#[test]
-fn fake_bundle_preserves_text_content_priority_for_box_measurement() {
-    let path = temp_runtime_path("kdr-drawio-visible-inner-text-box-unit");
-    let hidden = "hidden text remains part of textContent".repeat(4);
-    let body = format!(
-        r#"{}  const empty = document.createElement("div");
-  svg.appendChild(empty);
-  svg.setAttribute("data-visible-inner-text", label.innerText.replace("\n", "|"));
-  svg.setAttribute("data-empty-inner-text", empty.innerText);
-  svg.setAttribute("data-text-content-box-width", String(label.getBBox().width > 80));
-"#,
-        visible_text_fixture("svg", "v", "a", &hidden),
-    );
-    let bundle = fake_bundle().replace("  svg.appendChild(text);", &body);
-    assert!(std::fs::write(&path, bundle).is_ok());
-
-    let rendered =
-        DrawioJsRuntimeOps::render("<mxGraphModel />", &path, DiagramColorPreset::light());
-
-    assert!(rendered.as_ref().is_ok_and(|svg| {
-        svg.contains(r#"data-visible-inner-text="v|a""#)
-            && svg.contains(r#"data-empty-inner-text="""#)
-            && svg.contains(r#"data-text-content-box-width="true""#)
-    }));
-}
-
-#[test]
-fn fake_bundle_uses_visible_inner_text_for_drawio_error() {
-    let path = temp_runtime_path("kdr-drawio-visible-inner-text-error-unit");
-    let label = visible_text_fixture("_container", "visible", "after", "hidden");
-    let bundle = fake_bundle()
-        .replace(
-            "GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {",
-            &format!(
-                "GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {{\n{label}"
-            ),
-        )
-        .replace("  callback({\n", "  return;\n  callback({\n");
-    assert!(std::fs::write(&path, bundle).is_ok());
-
-    let rendered =
-        DrawioJsRuntimeOps::render("<mxGraphModel />", &path, DiagramColorPreset::light());
-
-    assert!(
-        rendered
-            .as_ref()
-            .is_err_and(|error| error == "Draw.io viewer failed: visible\nafter")
     );
 }
 

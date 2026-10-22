@@ -12,7 +12,21 @@
 
   続く型修正後に標準型検査全11構成、対象2fileの全20件96assert、Biome・重複1,473ソース0・diff検査がactual0（`tmp/quality/managed-reader-typecheck-s9t73yb0/`、`managed-reader-tests-xo7oh5z7/`、`managed-reader-static-57248y3a/`）。主担当がraw・exit・テストSHA`7e81a12d`と型だけの差分を確認し、採点判定への接続と欠落拒否の修正項目を対応済みとする。現行製品117件の各99・完全ゲート・性能・公開は別の未完了項目であり、この局所成功へ代用しない。
 
-## 現在の状態（2026-10-22）
+## 現在の状態（2026-10-23）
+
+- [ ] R1293の現行全rootはactual0、2,735件すべて成功・17skip、source前後一致。テスト本体137.618秒。coverageは60,839/61,629行（98.7181%）、未計測790行で100%・未計測0は未達。前回の7失敗を解消し、reportも正式producerで取得したが、完全品質・画像・性能・公開の合格にしない。原reportを`tmp/quality/current-root-coverage-r1293/root-snapshot.json`（SHA256 `55dc1d124cea867861e7f4e42f36b44d744693d66345e50f405e567372d8d802`）へ上書き拒否で保持した。
+
+- [ ] 可視テキスト回帰を専用子moduleへ分離し、fixture生成・実行・判定を共有した。R1291で整形・ASTが成功、R1292で標準Biome DAG（型・重複・資源・所有契約・host準備を含む）がactual0。新規ソースをstage前のR1291は所有契約がuntracked-sourceとして拒否した原失敗を保持し、Gitの検査対象へ登録後に再実行した。R1287〜R1290の長さ・magic number違反は除外や上限変更で回避していない。分割後の全root・coverageは次の実行で確認する。
+
+- [ ] R1286の修正後限定native回帰は24件すべて成功・2,728未選択、actual0・source前後一致。Drawio2件とrelease snapshotを含む局所回帰の合格であり、全root・coverage・117図・性能・公開は未合格。R1284は容量整理busyでテスト前に終了2、終了済みdev profileを既存Cargo cleanで整理したR1285 actual0の後、R1286で結果を取得した。上限は変更していない。
+
+- [ ] R1281の限定native回帰はactual100、実際は24件実行・21成功・3失敗・2,728未選択、source前後一致。事前の13件見積りを実行件数にしない。Frozen V8書込み拒否、f32 arc境界、font metrics、SVG内部背景のmultiplyは成功した。Drawioのhidden文字列をbboxへ含める誤期待とError接頭辞を修正し、残るrelease snapshot失敗は既存manifest同期レシピでR1283 actual0へ更新した。修正後の再検証・完全ゲート・公開は未完了。
+
+- [ ] R1282の独立Chrome診断3条件はactual0。外側背景に対する通常inline SVGのmultiply画素は28、明示isolation:isolateでは224、SVG内部背景では28だった。現行の新回帰は内部背景だけを検証し、外側背景の分離を正解と固定していない。R1265の製品不具合断定の撤回は維持するが、仕様文だけからChromeの実挙動を推定せず、この実測とSankeyの差を既存描画経路で追う。診断は正解raw・採点入力・合格条件を変更しない（`tmp/quality/svg-blend-browser-execution-r1282/`）。
+
+- [ ] R1265の現行rootは実終了100、2,735件実行中2,728成功・7失敗・17skip。失敗時はcoverage集計へ進めず、原rawを保持した。R1263の標準foundation・型・重複・資源・契約・host準備・BiomeとR1264のAST検査は変更前ソースでactual0。multiplyの新回帰はSVG 2 §3.10のroot isolation規定を見落とした期待値だったため、製品不具合という主張を撤回し、内部背景の有無を区別する仕様回帰へ訂正した。resvg #1069は別のroot背景問題であり同一不具合とは扱わない。正解raw・R1261の正式採点・99下限は不変。R1266で現行binaryの2,497 unittest case catalog、R1267でflowchartの実glyph監査をactual0で取得した。TrebuchetMSの実faceと16pxを確認したが、Chromeの実glyph・variationとの一致、全117件の合格や性能の改善は未証明。修正後の再検証を継続する。
+
+- [ ] R1261現行HEAD `38eb974d` の正式117比較はactual1。独立rawとcurrent managed buildの照合を通過し、両言語の候補を生成したが、実native PNGを含む正式判定はEN 0/59、JAは`09-01-architecture-beta`のpaint projected raster寸法不一致で未完。SVG側だけのEN57/59・JA52/58を製品合格数にしない。EN実native PNGの最低75.9008、通常flowchartも97.44473であり、2図のSVG差だけを直して完了する状況ではない。全体のraster差とJA寸法契約を既存PNG・producer証跡で分離して修正する。ユーザーへ伝えたEN57図合格は部分値だったと訂正済み。正解画像・99下限・配色別評価方針は不変（`tmp/quality/current-managed-full117-r1261/receipt.json`）。
 
 - [/] managed host照合の親子環境不一致を`2cc08c7e`へ確定した。R1251の153回帰、R1254の標準foundation・型・重複・資源・契約・host準備・Biome、R1255の通常commit hooksがactual0。既存defaultは維持し、明示child環境にBunがなければ親binaryへfallbackしない。元のR1247/R1249/R1252/R1253失敗は保持する。現行ソースの全117図採点は次のfresh proof/runで取得し、局所修正完了と製品合格を区別する。
 

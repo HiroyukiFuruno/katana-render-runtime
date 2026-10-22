@@ -14,6 +14,10 @@ const MARKER_ID_SELECTOR: &str = "#fixture #head-tip";
 const MARKER_TEMPLATE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" id="fixture" width="100" height="80" viewBox="0 0 100 80"><style>#fixture .marker{fill:#aaa;stroke:#aaa}__SELECTOR__{fill:transparent!important;stroke:#aaa!important;stroke-width:2}</style><defs><marker id="head-tip" class="marker" markerWidth="10" markerHeight="10" refX="0" refY="5" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10Z"/></marker></defs><rect width="100" height="80" fill="white"/><path d="M10 40H70" stroke="#aaa" stroke-width="2" marker-end="url(#head-tip)"/></svg>"##;
 const SHADOW_TEMPLATE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80" viewBox="0 0 100 80"><style>.box{fill:#888;filter:drop-shadow(1px 2px 2px rgba(185,185,185,1))}__UNUSED__</style><rect width="100" height="80" fill="white"/><rect class="box" x="20" y="20" width="20" height="20"/></svg>"##;
 const UNUSED_QUOTED_RULE: &str = r##"[data-label="unused"]{fill:red}"##;
+const MULTIPLY_INTERIOR_X: usize = 30;
+const MULTIPLY_INTERIOR_Y: usize = 30;
+const INTERNAL_MULTIPLY_FILL: [u8; RGBA_CHANNELS] = [28, 28, 28, 255];
+const MULTIPLY_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80" viewBox="0 0 100 80"><rect width="100" height="80" fill="#202020"/><g style="mix-blend-mode:multiply"><rect x="20" y="20" width="20" height="20" fill="#e0e0e0"/></g></svg>"##;
 
 #[test]
 fn inline_svg_quoted_marker_selector_keeps_triangle_interior_empty() {
@@ -64,6 +68,23 @@ fn inline_svg_unused_quoted_css_keeps_shadow_pixels_unchanged() {
                     "inline/native shadow pixels differ"
                 );
             });
+        });
+    });
+}
+
+#[test]
+fn inline_svg_multiply_preserves_its_explicit_internal_backdrop() {
+    with_native_pixels(MULTIPLY_SVG, |native| {
+        assert_eq!(
+            pixel_at(&native, MULTIPLY_INTERIOR_X, MULTIPLY_INTERIOR_Y),
+            Some(INTERNAL_MULTIPLY_FILL.as_slice())
+        );
+        with_inline_pixels(MULTIPLY_SVG, |actual| {
+            assert_eq!(
+                pixel_at(&actual, MULTIPLY_INTERIOR_X, MULTIPLY_INTERIOR_Y),
+                Some(INTERNAL_MULTIPLY_FILL.as_slice()),
+                "inline SVG must preserve multiplication against its internal background"
+            );
         });
     });
 }

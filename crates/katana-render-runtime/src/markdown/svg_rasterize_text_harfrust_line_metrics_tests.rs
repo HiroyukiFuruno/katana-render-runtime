@@ -8,8 +8,11 @@ const SFNT_HEADER_LENGTH: usize = 12;
 const SFNT_TABLE_RECORD_LENGTH: usize = 16;
 const SFNT_TAG_LENGTH: usize = 4;
 const OS2_TYPO_GAP_OFFSET: usize = 72;
+const OS2_FS_SELECTION_OFFSET: usize = 62;
+const U16_BYTE_WIDTH: usize = 2;
 const I16_BYTE_WIDTH: usize = 2;
 const TEST_TYPO_LINE_GAP: i16 = 200;
+const USE_TYPO_METRICS_FLAG: u16 = 1 << 7;
 
 #[test]
 fn library_table_line_metrics_match_full_parser_for_real_static_face() -> Result<(), String> {
@@ -64,7 +67,7 @@ fn directory_fallback_metrics(duplicate: bool) -> Result<(), String> {
         for size in LINE_METRIC_TEST_SIZES {
             check_directory_fallback(&database, id, size, &reference)?;
             if !duplicate {
-                check_unguarded_os2_loss(&database, id, size, &reference)?;
+                check_unsorted_os2_metrics(&database, id, size, &reference)?;
             }
         }
         Ok(())
@@ -158,22 +161,41 @@ fn metric_reference_font(duplicate: bool) -> Result<Vec<u8>, String> {
         .find(|record| record.tag() == read_fonts::types::Tag::new(b"OS/2"))
         .ok_or("real OS2 absent")?
         .offset() as usize;
-    /* WHY: 実Notoのtypo値とhhea値が同じなので、旧typo選択の取りこぼしをline gapで検出する。 */
+    /* WHY: typo値を明示選択し、実NotoのOS/2 line gapが計測に反映されるfixtureにする。 */
     let typo_gap_start = offset + OS2_TYPO_GAP_OFFSET;
     let typo_gap_end = typo_gap_start + I16_BYTE_WIDTH;
     data.get_mut(typo_gap_start..typo_gap_end)
         .ok_or("real OS2 typo gap absent")?
         .copy_from_slice(&TEST_TYPO_LINE_GAP.to_be_bytes());
+    let selection_start = offset + OS2_FS_SELECTION_OFFSET;
+    let selection_end = selection_start + U16_BYTE_WIDTH;
+    let selection = data
+        .get(selection_start..selection_end)
+        .ok_or("real OS2 selection absent")?;
+    let flags = u16::from_be_bytes([selection[0], selection[1]]) | USE_TYPO_METRICS_FLAG;
+    data.get_mut(selection_start..selection_end)
+        .ok_or("real OS2 selection absent")?
+        .copy_from_slice(&flags.to_be_bytes());
     Ok(data)
 }
 
-fn check_unguarded_os2_loss(
+fn check_unsorted_os2_metrics(
     database: &Database,
     id: resvg::usvg::fontdb::ID,
     size: f32,
     reference: &[u8],
 ) -> Result<(), String> {
     let expected = legacy_metrics(reference, 0, size).ok_or("reference metrics absent")?;
+    let original = legacy_metrics(
+        include_bytes!("../../assets/fonts/NotoSans-Regular.ttf"),
+        0,
+        size,
+    )
+    .ok_or("original real metrics absent")?;
+    assert_ne!(
+        expected, original,
+        "OS/2 fixture must affect legacy metrics"
+    );
     let font = database
         .with_face_data(id, |data, index| {
             harfrust::font::Font::new(data.to_vec(), index)
@@ -182,6 +204,6 @@ fn check_unguarded_os2_loss(
         .ok_or("unguarded real font absent")?;
     let unguarded = super::metrics_from_tables(font.tables(), size)
         .ok_or("unguarded mandatory metrics absent")?;
-    assert_ne!(unguarded, expected);
+    assert_eq!(unguarded, expected);
     Ok(())
 }

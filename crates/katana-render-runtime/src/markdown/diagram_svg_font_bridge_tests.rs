@@ -79,7 +79,21 @@ fn assert_property_presence(
 fn frozen_v8_object_rejects_metric_property_write() {
     DiagramV8Runtime::ensure_initialized();
     DiagramV8Runtime::with_empty_try_catch(|scope| {
-        let object = v8::Object::new(scope);
+        for initial_advance in [None, Some(0.0)] {
+            assert_frozen_write_rejected(scope, initial_advance);
+        }
+    });
+}
+
+fn assert_frozen_write_rejected(scope: &mut v8::PinScope<'_, '_>, initial_advance: Option<f64>) {
+    let object = v8::Object::new(scope);
+    let key = v8::String::new(scope, "advance");
+    assert!(key.is_some(), "key allocation");
+    if let Some(key) = key {
+        if let Some(value) = initial_advance {
+            let value = v8::Number::new(scope, value);
+            assert_eq!(object.set(scope, key.into(), value.into()), Some(true));
+        }
         assert_eq!(
             object.set_integrity_level(scope, v8::IntegrityLevel::Frozen),
             Some(true)
@@ -88,7 +102,38 @@ fn frozen_v8_object_rejects_metric_property_write() {
             set_svg_metric_property(scope, object, "advance", 1.0),
             Err("SVG font metric result allocation failed")
         );
+        match initial_advance {
+            Some(value) => {
+                assert_number_property(scope, object, "advance", value);
+                assert_frozen_advance_descriptor(scope, object, key.into());
+            }
+            None => assert_property_presence(scope, object, "advance", false),
+        }
+    }
+}
+
+fn assert_frozen_advance_descriptor(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    key: v8::Local<'_, v8::Name>,
+) {
+    let descriptor = object
+        .get_own_property_descriptor(scope, key)
+        .and_then(|value| value.to_object(scope));
+    let descriptor_values = descriptor.and_then(|descriptor| {
+        let value_key = v8::String::new(scope, "value")?;
+        let writable_key = v8::String::new(scope, "writable")?;
+        let configurable_key = v8::String::new(scope, "configurable")?;
+        let value = descriptor.get(scope, value_key.into())?;
+        let writable = descriptor.get(scope, writable_key.into())?;
+        let configurable = descriptor.get(scope, configurable_key.into())?;
+        Some((
+            value.number_value(scope),
+            writable.boolean_value(scope),
+            configurable.boolean_value(scope),
+        ))
     });
+    assert_eq!(descriptor_values, Some((Some(0.0), false, false)));
 }
 
 #[test]

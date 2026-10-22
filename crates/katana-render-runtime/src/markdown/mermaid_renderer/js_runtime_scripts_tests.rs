@@ -96,10 +96,14 @@ fn runtime_measures_vertical_svg_arcs_like_a_browser() {
         r##"{"source":"C4Context\nSystemQueue(queue, \"Queue\")","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff","diagramType":"c4"}"##,
     );
 
-    assert_rendered_contains(
-        &rendered,
-        "-9.26887261930837:-73.650734:243.80661785792515:73.650734",
+    let expected = format!(
+        "{}:{}:{}:{}",
+        f64::from(-9.26887261930837_f64 as f32),
+        f64::from(-73.650734_f64 as f32),
+        f64::from(243.80661785792515_f64 as f32),
+        f64::from(73.650734_f64 as f32),
     );
+    assert_rendered_contains(&rendered, &expected);
 }
 
 #[test]

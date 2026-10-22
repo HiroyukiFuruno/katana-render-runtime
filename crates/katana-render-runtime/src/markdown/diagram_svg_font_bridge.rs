@@ -151,7 +151,7 @@ fn set_svg_metric_property(
 ) -> Result<(), &'static str> {
     let key = v8::String::new(scope, name).ok_or("SVG font metric key allocation failed")?;
     let value = v8::Number::new(scope, value);
-    if object.set(scope, key.into(), value.into()) != Some(true) {
+    if object.create_data_property(scope, key.into(), value.into()) != Some(true) {
         return Err("SVG font metric result allocation failed");
     }
     Ok(())
