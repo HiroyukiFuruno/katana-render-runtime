@@ -363,15 +363,26 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
             raise ValueError("capacity environment factor differs") from error
     capacity.validate_build_selection(harness, environment)
     configs = capacity.cargo_configuration_paths(harness, environment)
-    cargo_value = shutil.which("cargo")
-    gate.require(cargo_value is not None, "Cargo executable is unavailable")
-    cargo = Path(gate._text(cargo_value, "Cargo executable")).resolve(strict=True)
+    lifecycle_logs = output.parent / f"{output.name}.lifecycle"
+
+    def rustup_query(argv: Sequence[str], cwd: Path, environment: Mapping[str, str]) -> str:
+        return command(argv, text=True, cwd=cwd, env=environment, role="tool-query",
+                       log_directory=lifecycle_logs)
+
+    def resolve_tool(name: str, cwd: Path) -> gate.RustTool:
+        return gate.resolve_rust_tool(root, name, environment, cwd=cwd, query=rustup_query)
+
+    cargo_tool = resolve_tool("cargo", root)
+    rustc_tool = resolve_tool("rustc", root)
+    gate.require(cargo_tool == resolve_tool("cargo", harness)
+                 and rustc_tool == resolve_tool("rustc", harness),
+                 "Rust toolchain selection differs between repository and harness")
+    cargo, rustc = cargo_tool.executable, rustc_tool.executable
+    cargo_launcher_pin = gate.rust_tool_launcher_pin(cargo_tool)
+    rustc_launcher_pin = gate.rust_tool_launcher_pin(rustc_tool)
     cargo_info = {"path": str(cargo), "sha256": gate.sha256(cargo)}
-    rustc_value = environment.get("RUSTC") or shutil.which("rustc", path=environment.get("PATH"))
-    gate.require(rustc_value is not None, "rustc executable is unavailable")
-    rustc = Path(gate._text(rustc_value, "rustc executable")).resolve(strict=True)
     rustc_info = {"path": str(rustc), "sha256": gate.sha256(rustc)}
-    capacity.validate_build_executable(root, [str(cargo), "build"])
+    capacity.validate_build_executable(root, [str(cargo_tool.launcher), "build"], environment)
     required = [harness / "Cargo.toml", harness / "Cargo.lock", root / "scripts/build/cargo_capacity_guard.py",
                 root / "scripts/build/cargo_capacity_guard_lock.py", harness / "src/main.rs",
                 root / "Cargo.toml", root / "crates/katana-render-runtime/Cargo.toml"]
@@ -383,10 +394,10 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
     gate.require(gate.sha256(harness / "Cargo.lock") == gate.LOCK_SHA, "common lock pin differs")
     config_pins = [(path, gate.sha256(path)) for path in configs]
     metadata = _measurement_command(
-        [str(cargo), "metadata", "--format-version", "1", "--locked", "--manifest-path",
+        [str(cargo_tool.launcher), "metadata", "--format-version", "1", "--locked", "--manifest-path",
          str(harness / "Cargo.toml"), "--no-default-features", "--features", arm],
         cwd=harness, env=environment, role="metadata",
-        log_directory=output.parent / f"{output.name}.lifecycle",
+        log_directory=lifecycle_logs,
     )
     gate.require(gate._integer(metadata.returncode, "metadata exit") == 0, "metadata failed")
     metadata_stdout = _bytes(metadata.stdout, "metadata stdout")
@@ -403,16 +414,16 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
                      and source_records[str(path.relative_to(root))] == (gate.sha256(path), path.stat().st_size),
                      "capacity/manifest source changed during metadata")
     expected = expected_build(root, harness, arm, value, environment)
-    cargo_version = command([gate._text(cargo_value, "Cargo executable"), "-vV"], text=True,
-        cwd=root, env=environment, role="tool-query", log_directory=output.parent / f"{output.name}.lifecycle")
-    rustc_version = command([gate._text(rustc_value, "rustc executable"), "-vV"], text=True,
-        cwd=root, env=environment, role="tool-query", log_directory=output.parent / f"{output.name}.lifecycle")
+    cargo_version = command([str(cargo_tool.launcher), "-vV"], text=True,
+        cwd=root, env=environment, role="tool-query", log_directory=lifecycle_logs)
+    rustc_version = command([str(rustc_tool.launcher), "-vV"], text=True,
+        cwd=root, env=environment, role="tool-query", log_directory=lifecycle_logs)
     load_capacity_binding(root, binding.document, binding.document_sha256)
-    argv = gate.guarded_build_argv(root, harness, cargo, arm, binding.state, binding.state_sha256,
+    argv = gate.guarded_build_argv(root, harness, cargo_tool.launcher, arm, binding.state, binding.state_sha256,
                                    references, [str(profile) for profile in retained])
     output.mkdir(parents=True, exist_ok=False)
     result = _measurement_command(argv, cwd=root, env=environment, check=False, role="build",
-                                  log_directory=output.parent / f"{output.name}.lifecycle")
+                                  log_directory=lifecycle_logs)
     raw_stdout = _bytes(result.stdout, "guard stdout")
     raw_stderr = _bytes(result.stderr, "guard stderr")
     stdout_path, stderr_path, metadata_path = output / "cargo.jsonl", output / "guard-cargo.stderr", output / "metadata.json"
@@ -435,22 +446,32 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
         gate.require(not path.is_symlink() and path.resolve() == path
                      and source_records[str(path.relative_to(root))] == (gate.sha256(path), path.stat().st_size),
                      "capacity/manifest source changed during build")
-    cargo_version_after = command([gate._text(cargo_value, "Cargo executable"), "-vV"], text=True,
-        cwd=root, env=environment, role="tool-query", log_directory=output.parent / f"{output.name}.lifecycle")
-    rustc_version_after = command([gate._text(rustc_value, "rustc executable"), "-vV"], text=True,
-        cwd=root, env=environment, role="tool-query", log_directory=output.parent / f"{output.name}.lifecycle")
-    gate.require(cargo_version_after == cargo_version and rustc_version_after == rustc_version
+    cargo_version_after = command([str(cargo_tool.launcher), "-vV"], text=True,
+        cwd=root, env=environment, role="tool-query", log_directory=lifecycle_logs)
+    rustc_version_after = command([str(rustc_tool.launcher), "-vV"], text=True,
+        cwd=root, env=environment, role="tool-query", log_directory=lifecycle_logs)
+    cargo_tool_after = resolve_tool("cargo", root)
+    rustc_tool_after = resolve_tool("rustc", root)
+    cargo_harness_after = resolve_tool("cargo", harness)
+    rustc_harness_after = resolve_tool("rustc", harness)
+    gate.require(cargo_tool_after == cargo_tool and rustc_tool_after == rustc_tool
+                 and cargo_harness_after == cargo_tool_after and rustc_harness_after == rustc_tool_after
+                 and cargo_version_after == cargo_version and rustc_version_after == rustc_version
+                 and gate.sha256(cargo_tool.dispatcher) == cargo_launcher_pin["sha256"]
+                 and gate.sha256(rustc_tool.dispatcher) == rustc_launcher_pin["sha256"]
                  and gate.sha256(cargo) == cargo_info["sha256"] and gate.sha256(rustc) == rustc_info["sha256"],
                  "Cargo/Rustc executable changed during build")
     frozen = output / "binary" / "krr-html-performance-harness"
     checksum = freeze_binary(binary, frozen)
-    proof: gate.JsonObject = {"schema": "krr-html-performance-build-artifact-v1", "arm": arm,
+    proof: gate.JsonObject = {"schema": "krr-html-performance-build-artifact-v2", "arm": arm,
         "argv": argv, "buildExit": build_exit, "expectedHarness": expected.harness,
         "expectedRuntime": expected.runtime, "artifacts": artifacts, "rawPins": pins,
         "lockSha256": gate.LOCK_SHA, "selectedBinary": {"path": str(binary), "sha256": checksum},
-        "frozenBinary": {"path": str(frozen), "sha256": checksum}, "cargoExecutable": cargo_info,
+        "frozenBinary": {"path": str(frozen), "sha256": checksum},
+        "cargoLauncher": cargo_launcher_pin, "cargoExecutable": cargo_info,
         "cargoConfigPins": [{"path": str(path), "sha256": pin} for path, pin in config_pins],
-        "rustcExecutable": rustc_info, "buildEnvironmentSha256": _environment_sha256(environment),
+        "rustcLauncher": rustc_launcher_pin, "rustcExecutable": rustc_info,
+        "buildEnvironmentSha256": _environment_sha256(environment),
         "toolVersions": {"cargo": cargo_version, "rustc": rustc_version}}
     config_file_pins: list[FilePin] = [{"path": str(path), "sha256": pin} for path, pin in config_pins]
     return ArmBuildResult(configs, frozen, checksum, proof, [*pins, *config_file_pins])

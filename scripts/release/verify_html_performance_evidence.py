@@ -38,6 +38,72 @@ class ExpectedBuild(NamedTuple):
     arm: str
 
 
+class RustTool(NamedTuple):
+    launcher: Path
+    dispatcher: Path
+    executable: Path
+    resolution_argv: tuple[str, ...]
+
+
+class RustupQuery(Protocol):
+    def __call__(self, argv: Sequence[str], cwd: Path, environment: Mapping[str, str]) -> str: ...
+
+
+def resolve_rust_tool(root: Path, name: str, environment: Mapping[str, str], *,
+                      cwd: Path | None = None, query: RustupQuery | None = None) -> RustTool:
+    require(name in {"cargo", "rustc"}, "unsupported Rust tool")
+    value = environment.get("RUSTC") if name == "rustc" else None
+    value = value or shutil.which(name, path=environment.get("PATH"))
+    if value is None:
+        raise ValueError(name + " executable is unavailable")
+    launcher = Path(value)
+    if not launcher.is_absolute():
+        located = shutil.which(value, path=environment.get("PATH")) if len(launcher.parts) == 1 else None
+        launcher = Path(located) if located is not None else (cwd or root) / launcher
+    launcher = Path(os.path.abspath(launcher))
+    require(launcher.is_file() and os.access(launcher, os.X_OK), name + " launcher is not executable")
+    physical_launcher = launcher.resolve(strict=True)
+    rustup_value = shutil.which("rustup", path=environment.get("PATH"))
+    rustup = Path(rustup_value).resolve(strict=True) if rustup_value is not None else None
+    resolution_argv: tuple[str, ...] = ()
+    if physical_launcher.name == "rustup":
+        if rustup is None or rustup != physical_launcher:
+            raise ValueError(name + " Rustup proxy cannot be identified")
+        command = [str(rustup), "which", name]
+        resolution_argv = tuple(command)
+        selected_output = (query(command, cwd or root, environment) if query is not None else
+                           subprocess.check_output(command, cwd=cwd or root, env=dict(environment), text=True))
+        selected = selected_output.strip()
+        executable = Path(selected)
+        require(selected == str(executable) and executable.is_absolute()
+                and executable.resolve(strict=True) == executable and executable.is_file()
+                and os.access(executable, os.X_OK), name + " rustup toolchain path is invalid")
+    else:
+        executable = physical_launcher
+    return RustTool(launcher, physical_launcher, executable, resolution_argv)
+
+
+def validate_rust_tool_pin(proof: JsonObject, name: str, tool: RustTool) -> None:
+    launcher_info = _object(proof.get(name + "Launcher"), name + " launcher pin")
+    launcher = _canonical_build_path(launcher_info.get("path"), name + " launcher path")
+    dispatcher = _canonical_build_file(launcher_info.get("resolvedPath"), name + " dispatcher path")
+    resolution_argv = [_text(item, name + " resolver argv") for item
+                       in _array(launcher_info.get("resolutionArgv"), name + " resolver argv")]
+    executable_info = _object(proof.get(name + "Executable"), name + " executable pin")
+    executable = _canonical_build_file(executable_info.get("path"), name + " executable path")
+    require(launcher == tool.launcher and dispatcher == tool.dispatcher
+            and resolution_argv == list(tool.resolution_argv)
+            and sha256(dispatcher) == _text(launcher_info.get("sha256"), name + " dispatcher SHA")
+            and executable == tool.executable
+            and sha256(executable) == _text(executable_info.get("sha256"), name + " executable SHA"),
+            name + " executable differs from build receipt")
+
+
+def rust_tool_launcher_pin(tool: RustTool) -> JsonObject:
+    return {"path": str(tool.launcher), "resolvedPath": str(tool.dispatcher),
+            "sha256": sha256(tool.dispatcher), "resolutionArgv": list(tool.resolution_argv)}
+
+
 class CargoCapacityGuard(Protocol):
     def validate_build_selection(self, root: Path, environment: Mapping[str, str]) -> None: ...
 
@@ -847,7 +913,7 @@ def _validate_build_proof(bundle: Bundle, root: Path, reference: object, arm: st
                            git_query: GitQuery | None = None) -> JsonObject:
     proof_path = bundle.file(reference)
     proof = read_json(proof_path)
-    require(proof.get("schema") == "krr-html-performance-build-artifact-v1", "unsupported build artifact schema")
+    require(proof.get("schema") == "krr-html-performance-build-artifact-v2", "unsupported build artifact schema")
     require(proof.get("arm") == arm and proof.get("buildExit") == 0, "build artifact arm/exit differs")
     harness = root / HARNESS_ROOT.rstrip("/")
     require(proof.get("lockSha256") == LOCK_SHA and sha256(harness / "Cargo.lock") == LOCK_SHA,
@@ -866,30 +932,23 @@ def _validate_build_proof(bundle: Bundle, root: Path, reference: object, arm: st
     tool_versions = _object(proof.get("toolVersions"), "build tool versions")
     actual_environment = dict(os.environ)
     actual_environment["CARGO_TARGET_DIR"] = str(root / "target")
+    cargo_tool = resolve_rust_tool(root, "cargo", actual_environment)
+    rustc_tool = resolve_rust_tool(root, "rustc", actual_environment)
+    require(cargo_tool == resolve_rust_tool(root, "cargo", actual_environment, cwd=harness)
+            and rustc_tool == resolve_rust_tool(root, "rustc", actual_environment, cwd=harness),
+            "Rust toolchain selection differs between repository and harness")
+    validate_rust_tool_pin(proof, "cargo", cargo_tool)
+    validate_rust_tool_pin(proof, "rustc", rustc_tool)
     cargo_info = _object(proof.get("cargoExecutable"), "Cargo executable pin")
-    cargo_path = Path(_text(cargo_info.get("path"), "Cargo executable path"))
-    located = shutil.which("cargo")
-    require(located is not None and Path(located).resolve(strict=True) == cargo_path
-            and cargo_path.is_file()
-            and sha256(cargo_path) == _text(cargo_info.get("sha256"), "Cargo executable SHA"),
-            "Cargo executable differs from build receipt")
-    rustc_info = _object(proof.get("rustcExecutable"), "rustc executable pin")
-    rustc_value = _text(actual_environment.get("RUSTC") or shutil.which("rustc"), "rustc executable")
-    rustc_path = Path(rustc_value)
-    if not rustc_path.is_absolute():
-        rustc_located = shutil.which(str(rustc_path))
-        rustc_path = Path(_text(rustc_located, "rustc executable"))
-    rustc_path = rustc_path.resolve(strict=True)
-    require(rustc_info.get("path") == str(rustc_path) and sha256(rustc_path) == _text(rustc_info.get("sha256"), "rustc SHA"),
-            "rustc executable differs from build receipt")
-    cargo_version = subprocess.check_output([str(located), "-vV"], cwd=root, env=actual_environment, text=True)
-    rustc_command = _text(actual_environment.get("RUSTC", "rustc"), "rustc command")
-    rustc_version = subprocess.check_output([rustc_command, "-vV"], cwd=root, env=actual_environment, text=True)
+    cargo_launcher = cargo_tool.launcher
+    rustc_launcher = rustc_tool.launcher
+    cargo_version = subprocess.check_output([str(cargo_launcher), "-vV"], cwd=root, env=actual_environment, text=True)
+    rustc_version = subprocess.check_output([str(rustc_launcher), "-vV"], cwd=root, env=actual_environment, text=True)
     require(tool_versions.get("cargo") == cargo_version and tool_versions.get("rustc") == rustc_version,
             "Cargo/Rustc selected toolchain differs from build receipt")
     config_pins = _objects(proof.get("cargoConfigPins"), "Cargo configuration pins")
     config_paths = [Path(_text(item.get("path"), "Cargo configuration path")) for item in config_pins]
-    current_config_paths = _validate_build_environment(proof, root, harness, cargo_path, actual_environment)
+    current_config_paths = _validate_build_environment(proof, root, harness, cargo_launcher, actual_environment)
     require(config_paths == current_config_paths, "Cargo configuration selection differs")
     for item, path in zip(config_pins, config_paths, strict=True):
         bundle.file(item)
@@ -926,7 +985,7 @@ def _validate_build_proof(bundle: Bundle, root: Path, reference: object, arm: st
             and bool(protected_paths) and len(set(protected_paths)) == len(protected_paths),
             "recorded protected registry differs")
     argv = [_text(value, "build argv item") for value in _array(proof.get("argv"), "build argv")]
-    validate_guarded_build_argv(argv, root, harness, cargo_path, arm, state_path, state_sha, protected_paths)
+    validate_guarded_build_argv(argv, root, harness, cargo_launcher, arm, state_path, state_sha, protected_paths)
     require(selected_path == selected_binary
             and sha256(frozen_path) == binary_sha and frozen.get("sha256") == binary_sha,
             "selected/frozen binary differs from Cargo artifact")

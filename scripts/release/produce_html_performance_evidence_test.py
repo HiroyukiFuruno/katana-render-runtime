@@ -780,7 +780,7 @@ class CapacityBindingUnitTests(unittest.TestCase):
             raw = build_output / "cargo.jsonl"
             raw.write_bytes(b"build raw")
             return typed_producer.ArmBuildResult([], binary, gate.sha256(binary),
-                {"schema": "krr-html-performance-build-artifact-v1", "arm": arm},
+                {"schema": "krr-html-performance-build-artifact-v2", "arm": arm},
                 [{"path": str(raw), "sha256": gate.sha256(raw)}])
 
         def git_query(_root: Path, _args: Sequence[str],

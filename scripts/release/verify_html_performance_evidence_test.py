@@ -534,6 +534,119 @@ def violate_quiet_load(manifest: JsonObject) -> None:
 
 
 class BuildArtifactArgvTest(unittest.TestCase):
+    def test_rustup_launcher_and_selected_toolchain_are_pinned_separately(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            binary_directory = root / "bin"
+            toolchain = root / "toolchain"
+            toolchain.mkdir()
+            binary_directory.mkdir()
+            for name in ("cargo", "rustc"):
+                executable = toolchain / name
+                executable.write_text(name + " fixture")
+                executable.chmod(0o755)
+            cargo_selector = root / "selected-cargo"
+            rustc_selector = root / "selected-rustc"
+            cargo_selector.write_text(str(toolchain / "cargo") + "\n")
+            rustc_selector.write_text(str(toolchain / "rustc") + "\n")
+            rustup = binary_directory / "rustup"
+            rustup.write_text(
+                "#!/bin/sh\ncase \"$2\" in\n"
+                + "cargo) selector='" + str(cargo_selector) + "' ;;\n"
+                + "rustc) selector='" + str(rustc_selector) + "' ;;\n"
+                + "*) exit 9 ;;\nesac\n"
+                + "IFS= read -r selected < \"$selector\"\n"
+                + "printf '%s\\n' \"$selected\"\n"
+            )
+            rustup_source = rustup.read_text()
+            rustup.chmod(0o755)
+            for name in ("cargo", "rustc"):
+                (binary_directory / name).symlink_to(rustup)
+            environment = {"PATH": str(binary_directory)}
+
+            first = gate.resolve_rust_tool(root, "cargo", environment)
+            proof: JsonObject = {
+                "cargoLauncher": gate.rust_tool_launcher_pin(first),
+                "cargoExecutable": {"path": str(first.executable), "sha256": gate.sha256(first.executable)},
+            }
+            gate.validate_rust_tool_pin(proof, "cargo", first)
+            self.assertEqual(first.launcher, binary_directory / "cargo")
+            self.assertEqual(first.dispatcher, rustup)
+            self.assertEqual(first.executable, toolchain / "cargo")
+            self.assertEqual(first.resolution_argv, (str(rustup), "which", "cargo"))
+            self.assertEqual(proof["cargoLauncher"], gate.rust_tool_launcher_pin(first))
+            rustc_tool = gate.resolve_rust_tool(root, "rustc", environment)
+            self.assertEqual(rustc_tool.launcher, binary_directory / "rustc")
+            self.assertEqual(rustc_tool.dispatcher, rustup)
+            self.assertEqual(rustc_tool.executable, toolchain / "rustc")
+
+            rustup.write_text(rustup.read_text() + "# changed dispatcher\n")
+            changed_dispatcher = gate.resolve_rust_tool(root, "cargo", environment)
+            with self.assertRaisesRegex(ValueError, "cargo executable differs"):
+                gate.validate_rust_tool_pin(proof, "cargo", changed_dispatcher)
+
+            alternate = root / "alternate-cargo"
+            alternate.write_text("alternate cargo fixture")
+            alternate.chmod(0o755)
+            rustup.write_text(rustup_source)
+            cargo_selector.write_text(str(alternate) + "\n")
+            changed = gate.resolve_rust_tool(root, "cargo", environment)
+            with self.assertRaisesRegex(ValueError, "cargo executable differs"):
+                gate.validate_rust_tool_pin(proof, "cargo", changed)
+
+    def test_direct_rust_tool_and_guarded_argv_keep_the_launcher_token(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            binary_directory = root / "bin"
+            binary_directory.mkdir()
+            cargo = binary_directory / "cargo"
+            rustc = binary_directory / "rustc"
+            alternate_cargo = binary_directory / "alternate-cargo"
+            cargo.write_text("direct cargo fixture")
+            cargo.chmod(0o755)
+            rustc.write_text("direct rustc fixture")
+            rustc.chmod(0o755)
+            alternate_cargo.write_text("alternate cargo fixture")
+            alternate_cargo.chmod(0o755)
+            harness = root / "scripts/html/performance-harness"
+            harness.mkdir(parents=True)
+            state = root / "capacity.json"
+            state.write_bytes(b"state")
+            launcher = gate.resolve_rust_tool(root, "cargo", {"PATH": str(binary_directory)})
+            rustc_tool = gate.resolve_rust_tool(root, "rustc", {"PATH": str(binary_directory)})
+            self.assertEqual(launcher.executable, cargo)
+            self.assertEqual(rustc_tool.executable, rustc)
+            self.assertEqual(launcher.resolution_argv, ())
+            argv = gate.guarded_build_argv(root, harness, launcher.launcher, "candidate", state,
+                                           gate.sha256(state), [str(state)], [])
+            gate.validate_guarded_build_argv(argv, root, harness, launcher.launcher, "candidate",
+                                             state, gate.sha256(state), [str(state)])
+            command_start = argv.index("--") + 1
+            self.assertEqual(argv[command_start], str(launcher.launcher))
+            argv[command_start] = str(alternate_cargo)
+            with self.assertRaisesRegex(ValueError, "canonical guarded Cargo command"):
+                gate.validate_guarded_build_argv(argv, root, harness, launcher.launcher, "candidate",
+                                                 state, gate.sha256(state), [str(state)])
+
+    def test_relative_rustc_is_resolved_from_each_invocation_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            harness = root / "harness"
+            for directory, contents in ((root, "root rustc"), (harness, "harness rustc")):
+                tool_directory = directory / "bin"
+                tool_directory.mkdir(parents=True)
+                rustc = tool_directory / "rustc"
+                rustc.write_text(contents)
+                rustc.chmod(0o755)
+
+            environment = {"RUSTC": "bin/rustc"}
+            root_tool = gate.resolve_rust_tool(root, "rustc", environment, cwd=root)
+            harness_tool = gate.resolve_rust_tool(root, "rustc", environment, cwd=harness)
+
+            self.assertEqual(root_tool.launcher, root / "bin/rustc")
+            self.assertEqual(harness_tool.launcher, harness / "bin/rustc")
+            self.assertNotEqual(root_tool.executable, harness_tool.executable)
+
     def test_build_reader_reuses_policy_without_matching_consumer_volatile_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -753,7 +866,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "original pin mismatch"):
             gate._recorded_capacity_state(bundle, bundle.json(invalid_input_ref))
 
-    def test_old_build_receipt_without_tool_observations_is_rejected(self) -> None:
+    def test_previous_build_receipt_schema_is_rejected(self) -> None:
         expected = json.loads(self.expected_paths[0].read_text())
         source_pair = json_object(expected["sourcePair"])
         proof = {
@@ -767,7 +880,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
         ref = self.add_file("/captured/old-build.json", "old/build.json", proof)
         self.save_transport()
         bundle = gate.Bundle(self.bundle)
-        with self.assertRaisesRegex(ValueError, "build environment SHA must be text"):
+        with self.assertRaisesRegex(ValueError, "unsupported build artifact schema"):
             gate._validate_build_proof(bundle, self.root, ref, "candidate")
 
     def make_attempt(self, index: int, width: int, height: int) -> None:
