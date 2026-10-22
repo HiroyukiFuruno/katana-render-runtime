@@ -12,10 +12,57 @@ import { writeFile } from "./native-classic-capture-test-fixture";
 import { duplicateManagedFixtureJson } from "./native-cli-managed-build-input-test-fixture";
 import { createManagedReaderFixture } from "./native-cli-managed-build-test-fixture";
 import { verifyManagedCapacity } from "./native-cli-managed-cargo";
+import { managedControlNames, parseManagedControlManifest } from "./native-cli-managed-inputs";
 import { parseManagedJson } from "./native-cli-managed-json";
 import { read } from "./native-cli-managed-process";
 
 type Fixture = ReturnType<typeof createManagedReaderFixture>;
+const controlManifest = {
+  schema: "krr-native-cli-managed-control-inputs-v1",
+  control: [...managedControlNames],
+};
+for (const [name, value] of Object.entries({
+  unknown: { ...controlManifest, unexpected: true },
+  schema: { ...controlManifest, schema: "other" },
+  empty: { ...controlManifest, control: [] },
+  duplicate: {
+    ...controlManifest,
+    control: [...controlManifest.control.slice(0, -1), controlManifest.control[0]],
+  },
+  absolute: { ...controlManifest, control: ["/tmp/escape", ...controlManifest.control.slice(1)] },
+  traversal: {
+    ...controlManifest,
+    control: ["scripts/../escape", ...controlManifest.control.slice(1)],
+  },
+  "windows drive": {
+    ...controlManifest,
+    control: ["C:/escape", ...controlManifest.control.slice(1)],
+  },
+  backslash: {
+    ...controlManifest,
+    control: ["scripts\\escape", ...controlManifest.control.slice(1)],
+  },
+  "missing self": {
+    ...controlManifest,
+    control: [
+      ...controlManifest.control.filter(
+        (name) => name !== "scripts/mermaid/native-cli-managed-control-inputs.json",
+      ),
+      "scripts/mermaid/other.json",
+    ],
+  },
+}))
+  test(`managed control manifest rejects ${name}`, () => {
+    expect(() => parseManagedControlManifest(JSON.stringify(value))).toThrow();
+  });
+test("managed control manifest rejects duplicate JSON keys", () => {
+  expect(() =>
+    parseManagedControlManifest(
+      '{"schema":"krr-native-cli-managed-control-inputs-v1","schema":"other"}',
+    ),
+  ).toThrow();
+});
+
 function verify(fixture: Fixture) {
   writeFile(fixture.receiptPath, JSON.stringify(fixture.receipt));
   return verifyNativeBuildReceipt(

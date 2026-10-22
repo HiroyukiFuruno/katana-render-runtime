@@ -10,33 +10,37 @@ import {
   verifyFileRecord,
 } from "./native-build-receipt";
 import { type ManagedReceipt, managedSourceSchema } from "./native-cli-managed-build-schema";
+import { parseManagedJson } from "./native-cli-managed-json";
 import { read, requireBound, same } from "./native-cli-managed-process";
 
-const controlNames = [
-  "Justfile",
-  "scripts/build/cargo_capacity_guard.py",
-  "scripts/build/cargo_capacity_guard_lock.py",
-  "scripts/build/cargo_capacity_guard_native_cli_observation.py",
-  "scripts/build/cargo_capacity_guard_build_script_ownership.py",
-  "scripts/build/cargo_capacity_guard_selected_cache_ownership.py",
-  "scripts/build/cargo_capacity_guard_library_alias_ownership.py",
-  "scripts/build/cargo_capacity_guard_different_flags_ownership.py",
-  "scripts/mermaid/produce_native_cli_build_receipt.py",
-  "scripts/mermaid/native_cli_build_bindings.py",
-  "scripts/mermaid/native-build-receipt.ts",
-  "scripts/mermaid/native-cli-managed-build.ts",
-  "scripts/mermaid/native-cli-managed-build-schema.ts",
-  "scripts/mermaid/native-cli-managed-input-schema.ts",
-  "scripts/mermaid/native-cli-managed-inputs.ts",
-  "scripts/mermaid/native-cli-managed-process.ts",
-  "scripts/mermaid/native-cli-managed-cargo.ts",
-  "scripts/mermaid/native-cli-managed-json.ts",
-  "scripts/mermaid/native-cli-managed-raw-fd.ts",
-
-  "scripts/release/produce_html_performance_evidence.py",
-  "scripts/release/verify_html_performance_evidence.py",
-  "scripts/release/toml_loader.py",
-];
+const CONTROL_MANIFEST_NAME = "scripts/mermaid/native-cli-managed-control-inputs.json";
+const managedControlManifestSchema = z
+  .object({
+    schema: z.literal("krr-native-cli-managed-control-inputs-v1"),
+    control: z.array(z.string().min(1)).length(27),
+  })
+  .strict();
+export function parseManagedControlManifest(serialized: string): readonly string[] {
+  const control = managedControlManifestSchema.parse(
+    parseManagedJson(serialized, "managed control inventory"),
+  ).control;
+  if (
+    new Set(control).size !== control.length ||
+    control.some(
+      (name) =>
+        !/^[A-Za-z0-9_./-]+$/.test(name) ||
+        path.posix.isAbsolute(name) ||
+        name.split("/").some((part) => part === "" || part === "." || part === ".."),
+    ) ||
+    !control.includes(CONTROL_MANIFEST_NAME)
+  ) {
+    throw new Error("managed control inventory is not canonical");
+  }
+  return control;
+}
+export const managedControlNames = parseManagedControlManifest(
+  fs.readFileSync(path.join(import.meta.dir, "native-cli-managed-control-inputs.json"), "utf8"),
+);
 const emptySelectors = [
   "KRR_BUILD_RECEIPT",
   "MERMAID_RASTER_SESSION_CONFIG",
@@ -71,7 +75,7 @@ export function verifyManagedInputs(receipt: ManagedReceipt): void {
   assertCurrentGitSourceSet(root, expected.files, snapshot.tools.git.path, snapshot.environment);
   same(
     snapshot.control.map((pin) => pin.path),
-    controlNames.map((name) => path.join(root, name)),
+    managedControlNames.map((name) => path.join(root, name)),
     "managed code inventory",
   );
   for (const pin of snapshot.control)

@@ -99,6 +99,7 @@ export const CLASSIC_GENERATION_CONTROL_INPUTS = [
     "native-cli-managed-json",
     "native-cli-managed-raw-fd",
   ].map((name) => `scripts/mermaid/${name}.ts`),
+  "scripts/mermaid/native-cli-managed-control-inputs.json",
   "crates/katana-render-runtime/src/markdown/diagram_runtime/source/shared/runtime_bundle.ts",
   ...["mermaid", "drawio", "zenuml", "mathjax"].map(
     (name) =>

@@ -6,6 +6,7 @@ import { sha256 } from "./mermaid-pair-manifest";
 import { digestFileRecords, digestStringRecord } from "./native-build-receipt";
 import { writeFile } from "./native-classic-capture-test-fixture";
 import { managedOwnedSchema } from "./native-cli-managed-build-schema";
+import { managedControlNames } from "./native-cli-managed-inputs";
 
 function inventory(source: string, name: string): string[] {
   const block = source.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\];`));
@@ -37,7 +38,7 @@ export function createManagedReaderInputs() {
     path.join(process.cwd(), "scripts/mermaid/native-cli-managed-inputs.ts"),
     "utf8",
   );
-  const control = inventory(literalSource, "controlNames").map((name) =>
+  const control = managedControlNames.map((name) =>
     save(name, fs.readFileSync(path.join(process.cwd(), name), "utf8")),
   );
   save(".gitignore", "tmp/\ntarget/\n");

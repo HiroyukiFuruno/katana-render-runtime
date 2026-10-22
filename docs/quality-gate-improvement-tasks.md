@@ -14,13 +14,19 @@
 
 ## 現在の状態（2026-10-22）
 
+- [/] managed buildのcontrol一覧をTS/Pythonから単一のGit JSONへ統合し、JSON自身も生成証跡の入力に含めた。両readerは同じschema・27件・重複・自己参照・相対パスを検査し、JSON重複キーも既存strict parserで拒否する。R1231標準DAGと早期Python22件が成功し、R1232のreader全76件も成功した。strict JSON境界追加後の影響範囲11件はR1234で成功したが、完全ゲートと新sourceの正式117採点は別途実行する。
+
+- [/] R1218で独立raw JSの正解画像EN59・JA58、計117図を再生成し、全工程actual0・source前後一致・167.996秒を確認した。R1220の正式`validateOfficialRole` readerも両言語すべてを受理した。R1219は検証requestの旧official templateを参照してBun1.4.2欠落を拒否した記録として保持し、正解画像を書き換えずに新template/receipt/process/outputの全pinへ修正した。基準取得の合格であり、KRRの117図99以上の合格ではない。
+
+- [ ] R1223でHEAD `e54dcb35` のcandidate build proof生成がactual0。R1225は比較用CLIのproducer buildとreceipt生成まで成功したが、readerがPython26対TS22のcontrol inventory不一致を画像生成前に拒否した。scoreは0件で、旧R1082の残数を更新しない。生成側・検証側の二重一覧をGit管理の単一JSONへ統合し、早期foundationの既存recipeでproducer回帰を実行する修正中。R1228のinline subprocess案は実行契約に拒否されたため採用しない。R1229のPython21回帰は2.729秒で成功したが、その後の共有manifest検証とsource変更を含む正式build/採点は新runで再取得する。
+
 - [/] raw画像seedとrendererの非空fixture inventoryを一致させる修正を`4fb0d393`へ確定した。元の空入力は削除せず、inventoryから除く回帰22件・95assertがR1193で成功した。R1209の標準DAGは型・重複・資源・実行契約・Rust facts host準備・Biomeを含みactual0。正解画像117件の再取得成功や製品採点の合格とは区別する。
 
 - [ ] R1207の限定Bunは319成功・22失敗・1error、actual1。ブラウザーcallbackの既知bridgeを実AST spanで区別し、未知callbackと順序変更の拒否回帰は成功したが、別環境のRust facts host証跡がstaleとなる解析系の失敗と時間切れを保持した。同条件の標準DAGによるhost再準備とLint成功はR1209で確認済み。全テスト成功へ読み替えず、正式テスト導線で再検証する。原ログは`tmp/quality/current-lint-regressions-r1207/`へ保持する。
 
 - [/] 依存更新と独立performance harnessのlock同期を`e0c48147`へ確定した。Rust/JS/ZenUML Coreの更新後、R1183でfoundation・AST・全Clippyと現行release契約4件が成功、source前後一致。同期producerのunit8件とlock pin照合もR1177/R1180で成功した。Moon2.6.3は要求するmacOS実行packageが未公開で実行不能だったため採用せず、2.6.2を維持した。依存の最終freshness・完全ゲート・性能の合格とは扱わない。新必須commitを含まない旧snapshotを拒否するguardを`2ddd26c1`へ確定した。
 
-- [ ] 現行raw117再取得：R1184の既存strict readerは旧Bun1.4.2実体の欠落を拒否した。旧receiptを再認定せず保持する。R1186は無関係な旧Rust保護ref4,231,576,288Bのadmissionで120秒timeout・実child終了-15、group/raw FD閉鎖を確認し、描画未開始。Cargoを使わないraw生成からこの前処理を外した。R1187の未作成attempt directoryを修正後、R1188は正規seedが空fixtureをinventoryへ含めるためrendererの非空inventoryと不一致になる実装不具合を検出した。両者を同じ非空基準へ揃える修正を4fb0d393へ確定し、R1193の22件・95assertが成功した。画像の再取得は未完了。R1190はその検査前のsource観測が120秒timeoutし、合格には数えない。R1189で既存1refのcapacity bindingを正規validatorが受理したが、旧interaction reportを現行HTML受入れへ転用しない。各runは`tmp/quality/`へ原ログを保持する。
+- [/] raw117再取得の過去失敗履歴（完了は上記R1218/R1220）：R1184の既存strict readerは旧Bun1.4.2実体の欠落を拒否した。旧receiptを再認定せず保持する。R1186は無関係な旧Rust保護ref4,231,576,288Bのadmissionで120秒timeout・実child終了-15、group/raw FD閉鎖を確認し、描画未開始。Cargoを使わないraw生成からこの前処理を外した。R1187の未作成attempt directoryを修正後、R1188は正規seedが空fixtureをinventoryへ含めるためrendererの非空inventoryと不一致になる実装不具合を検出した。両者を同じ非空基準へ揃える修正を4fb0d393へ確定し、R1193の22件・95assertが成功した。画像の再取得は未完了。R1190はその検査前のsource観測が120秒timeoutし、合格には数えない。R1189で既存1refのcapacity bindingを正規validatorが受理したが、旧interaction reportを現行HTML受入れへ転用しない。各runは`tmp/quality/`へ原ログを保持する。
 
 - [/] R1170で現行foundation・AST・全Clippy（performance両armを含む）・関連Bunと実Mach-O unit15件が成功し、source前後一致・224.134秒を確認した（`tmp/quality/svg-font-macho-static-r1170/final.json`）。不正なTOML依存情報の欠落でpanicする分岐を実行回帰で検出し、安全なgetと欠落catalog/checksum回帰へ修正、`d3d4c1a5`へ通常hookで確定した。R1167の13成功/1失敗は原runへ保持する。
 

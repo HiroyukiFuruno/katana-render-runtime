@@ -1337,6 +1337,7 @@ test("the NativeWidth facts recipe requires its canonical root parameters and sa
 test("owned validation checks root and standalone Cargo lock resolution before heavy lanes", () => {
   expect(actualRecipeBody("owned-validation-contract-check").split("\n")).toEqual([
     "bun scripts/quality/owned-validation-contract.ts",
+    "python3 -m unittest discover -s scripts/mermaid -p native_cli_build_producer_test.py --failfast",
     '{{CARGO}} metadata --locked --all-features --format-version 1 --manifest-path "{{REPO_ROOT}}/Cargo.toml" > /dev/null',
     '{{CARGO}} metadata --locked --no-default-features --features baseline --format-version 1 --manifest-path "{{REPO_ROOT}}/scripts/html/performance-harness/Cargo.toml" > /dev/null',
     '{{CARGO}} metadata --locked --no-default-features --features candidate --format-version 1 --manifest-path "{{REPO_ROOT}}/scripts/html/performance-harness/Cargo.toml" > /dev/null',

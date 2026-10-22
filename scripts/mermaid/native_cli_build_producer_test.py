@@ -31,6 +31,35 @@ class InputAdmissionTests(unittest.TestCase):
         self.expected: JsonObject = {"schema": "krr-native-build-source-manifest-v1",
             "files": self.records, "digest": guard.source_digest(self.records)}
 
+    def test_control_is_loaded_from_the_repository_inventory(self) -> None:
+        manifest_path = Path(bindings.__file__).with_name("native-cli-managed-control-inputs.json")
+        manifest = json.loads(manifest_path.read_text())
+        self.assertEqual(manifest["schema"], "krr-native-cli-managed-control-inputs-v1")
+        self.assertEqual(bindings.CONTROL, tuple(manifest["control"]))
+        self.assertEqual(len(bindings.CONTROL), 27)
+        self.assertIn(str(manifest_path.relative_to(Path(__file__).parents[2])), bindings.CONTROL)
+
+    def test_control_manifest_rejects_noncanonical_inventory(self) -> None:
+        manifest_path = Path(bindings.__file__).with_name("native-cli-managed-control-inputs.json")
+        valid = json.loads(manifest_path.read_text())
+        cases = {
+            "unknown": {**valid, "unexpected": True},
+            "schema": {**valid, "schema": "other"},
+            "empty": {**valid, "control": []},
+            "duplicate": {**valid, "control": [*valid["control"][:-1], valid["control"][0]]},
+            "absolute": {**valid, "control": ["/tmp/escape", *valid["control"][1:]]},
+            "traversal": {**valid, "control": ["scripts/../escape", *valid["control"][1:]]},
+            "windows drive": {**valid, "control": ["C:/escape", *valid["control"][1:]]},
+            "backslash": {**valid, "control": ["scripts\\escape", *valid["control"][1:]]},
+            "missing self": {**valid, "control": [
+                *(name for name in valid["control"] if name != bindings.CONTROL_MANIFEST_NAME),
+                "scripts/mermaid/other.json",
+            ]},
+        }
+        for name, value in cases.items():
+            with self.subTest(case=name), self.assertRaises(RuntimeError):
+                bindings.parse_control_manifest(value)
+
     def test_independently_admitted_current_bytes(self) -> None:
         bindings.admit_source(self.expected, self.records)
         self.source.write_text("fn main() { panic!(); }\n")

@@ -26,30 +26,30 @@ from cargo_capacity_guard import (
 )
 
 SCHEMA = "krr-native-cli-managed-build-v1"
-CONTROL = (
-    "Justfile", "scripts/build/cargo_capacity_guard.py", "scripts/build/cargo_capacity_guard_lock.py",
-    "scripts/build/cargo_capacity_guard_debug_object_ownership.py",
-    "scripts/build/cargo_capacity_guard_native_cli_observation.py",
-    "scripts/build/cargo_capacity_guard_build_script_ownership.py",
-    "scripts/build/cargo_capacity_guard_selected_cache_ownership.py",
-    "scripts/build/cargo_capacity_guard_library_alias_ownership.py",
-    "scripts/build/cargo_capacity_guard_different_flags_ownership.py",
-    "scripts/mermaid/produce_native_cli_build_receipt.py", "scripts/mermaid/native_cli_build_bindings.py",
-    "scripts/mermaid/native-build-receipt.ts", "scripts/mermaid/native-cli-managed-build.ts",
-    "scripts/mermaid/native-cli-managed-build-schema.ts",
-    "scripts/mermaid/native-cli-managed-input-schema.ts",
-    "scripts/mermaid/native-cli-managed-inputs.ts",
-    "scripts/mermaid/native-cli-managed-process.ts",
-    "scripts/mermaid/native-cli-managed-cargo.ts",
-    "scripts/mermaid/native-cli-managed-json.ts",
-    "scripts/mermaid/native-cli-managed-raw-fd.ts",
-    "scripts/runtime-bundles/runtime-rust-facts-host.ts",
-    "scripts/runtime-bundles/runtime-rust-facts-host-protocol.ts",
-    "scripts/runtime-bundles/runtime-rust-facts-host-inputs.ts",
+CONTROL_MANIFEST_SCHEMA = "krr-native-cli-managed-control-inputs-v1"
+CONTROL_MANIFEST_NAME = "scripts/mermaid/native-cli-managed-control-inputs.json"
+CONTROL_MANIFEST = Path(__file__).with_name("native-cli-managed-control-inputs.json")
 
-    "scripts/release/produce_html_performance_evidence.py",
-    "scripts/release/verify_html_performance_evidence.py", "scripts/release/toml_loader.py",
-)
+
+def parse_control_manifest(value: object) -> tuple[str, ...]:
+    manifest = guard.exact(value, {"schema", "control"}, "managed control inventory")
+    guard.require(manifest["schema"] == CONTROL_MANIFEST_SCHEMA,
+                  "managed control inventory schema differs")
+    values = tuple(_text(item, "managed control path")
+                   for item in _array(manifest["control"], "managed control paths"))
+    guard.require(len(values) == 27 and len(set(values)) == len(values),
+                  "managed control inventory is empty or duplicated")
+    for name in values:
+        parts = name.split("/")
+        guard.require(re.fullmatch(r"[A-Za-z0-9_./-]+", name) is not None
+                      and not Path(name).is_absolute()
+                      and all(part not in {"", ".", ".."} for part in parts),
+                      "managed control path is not canonical relative ASCII")
+    guard.require(CONTROL_MANIFEST_NAME in values, "managed control inventory omits itself")
+    return values
+
+
+CONTROL = parse_control_manifest(guard.parse_json(CONTROL_MANIFEST.read_bytes()))
 
 
 def current_source(root: Path, query: owner.NativeCliCommandEvidence,
