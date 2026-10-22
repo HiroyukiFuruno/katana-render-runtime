@@ -319,7 +319,10 @@ export function requireRustFactsHostSuccess(proof: z.infer<typeof hostProcessSch
     throw new Error("Rust facts host process observation differs");
 }
 
-export function hostEnvironmentDigest(root: string): string {
+export function hostEnvironmentDigest(
+  root: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
   if (
     [
       "RUSTC",
@@ -327,27 +330,29 @@ export function hostEnvironmentDigest(root: string): string {
       "RUSTC_WORKSPACE_WRAPPER",
       "RUSTC_BOOTSTRAP",
       "CARGO_ENCODED_RUSTFLAGS",
-    ].some((name) => process.env[name])
+    ].some((name) => environment[name])
   )
     throw new Error("Rust facts host tool override is unsupported");
   const rtk =
-    process.env.RTK ?? Bun.which("rtk", { cwd: root, PATH: process.env.PATH ?? "" }) ?? "";
+    environment.RTK ?? Bun.which("rtk", { cwd: root, PATH: environment.PATH ?? "" }) ?? "";
   const cargo = rtk === "" ? "cargo" : `${rtk} cargo`;
-  if (process.env.CARGO && process.env.CARGO !== cargo)
+  if (environment.CARGO && environment.CARGO !== cargo)
     throw new Error("Rust facts host Cargo override is unsupported");
   if (
-    process.env.CARGO_TARGET_DIR &&
-    path.resolve(process.env.CARGO_TARGET_DIR) !== path.join(root, "target")
+    environment.CARGO_TARGET_DIR &&
+    path.resolve(environment.CARGO_TARGET_DIR) !== path.join(root, "target")
   )
     throw new Error("Rust facts host target override is unsupported");
-  const entries = Object.entries(process.env).filter(([name]) =>
+  const entries = Object.entries(environment).filter(([name]) =>
     /^(?:CARGO_|RUST|RTK$|CC$|AR$|PATH$|HOME$|LANG$|LC_|SOURCE_DATE_EPOCH$)/u.test(name),
   );
-  const environment = Object.fromEntries(entries);
-  environment.CARGO = cargo;
-  environment.CARGO_TARGET_DIR = path.join(root, "target");
-  environment.RUSTFLAGS ??= "-D warnings";
+  const selectedEnvironment = Object.fromEntries(entries);
+  selectedEnvironment.CARGO = cargo;
+  selectedEnvironment.CARGO_TARGET_DIR = path.join(root, "target");
+  selectedEnvironment.RUSTFLAGS ??= "-D warnings";
   return sha256(
-    Buffer.from(JSON.stringify(Object.entries(environment).sort(([a], [b]) => a.localeCompare(b)))),
+    Buffer.from(
+      JSON.stringify(Object.entries(selectedEnvironment).sort(([a], [b]) => a.localeCompare(b))),
+    ),
   );
 }

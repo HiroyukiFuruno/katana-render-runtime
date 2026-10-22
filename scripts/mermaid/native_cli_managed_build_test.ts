@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { verifyRustFactsHost } from "../runtime-bundles/runtime-rust-facts-host";
 import { fileSha256 } from "./mermaid-pair-manifest";
 import { verifyNativeBuildReceipt } from "./native-build-receipt";
 import { writeFile } from "./native-classic-capture-test-fixture";
@@ -174,6 +175,21 @@ describe("managed CLI strict unit boundaries; no actual build evidence", () => {
     expect(() =>
       verifyManagedArtifactRolePins([record(first)], path.join(directory, "other")),
     ).toThrow(/outside owned attempt/);
+  });
+
+  test("host verification uses the admitted child environment", () => {
+    const fixture = createManagedReaderFixture();
+    try {
+      expect(() =>
+        verifyRustFactsHost(fixture.root, fixture.hostReceiptPath, fixture.request.environment),
+      ).not.toThrow();
+      const invalidEnvironment = { ...fixture.request.environment, PATH: "/missing" };
+      expect(() =>
+        verifyRustFactsHost(fixture.root, fixture.hostReceiptPath, invalidEnvironment),
+      ).toThrow(/missing Rust facts host tool|prepared inputs are stale/);
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
   });
 });
 

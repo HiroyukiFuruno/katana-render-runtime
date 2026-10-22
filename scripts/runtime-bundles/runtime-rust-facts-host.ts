@@ -155,6 +155,7 @@ export function prepareRustFactsHost(
 export function verifyRustFactsHost(
   root: string,
   receipt = defaultRustFactsHostReceipt(root),
+  environment: NodeJS.ProcessEnv = process.env,
 ): RustFactsHostReceipt {
   const receiptRecord = hostFileRecord(receipt);
   const value = rustFactsHostReceiptSchema.parse(JSON.parse(fs.readFileSync(receipt, "utf8")));
@@ -187,7 +188,10 @@ export function verifyRustFactsHost(
   const after = parseRustFactsHostMetadata(fs.readFileSync(value.metadataAfter.stdout.path));
   if (
     !isDeepStrictEqual(metadata, after) ||
-    !isDeepStrictEqual(currentRustFactsHostInputs(root, metadata, value.inputs.tools), value.inputs)
+    !isDeepStrictEqual(
+      currentRustFactsHostInputs(root, metadata, value.inputs.tools, environment),
+      value.inputs,
+    )
   )
     throw new Error("Rust facts host prepared inputs are stale");
   assertRustFactsHostBinaryRecord(value.binary);

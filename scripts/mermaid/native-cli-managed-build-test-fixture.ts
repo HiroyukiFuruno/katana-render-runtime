@@ -273,7 +273,7 @@ export function createManagedReaderFixture() {
     environment,
     { startedNs: "25", endedNs: "29" },
   );
-  const fixtureHost = hostFixtureInputs(root);
+  const fixtureHost = hostFixtureInputs(root, environment);
   const hostMetadata = fixtureHost.metadata;
   const hostTools = Object.fromEntries(
     Object.entries(fixtureHost.tools).map(([name]) => [
@@ -284,7 +284,7 @@ export function createManagedReaderFixture() {
       },
     ]),
   ) as ReturnType<typeof hostFixtureInputs>["tools"];
-  const hostInputs = currentRustFactsHostInputs(root, hostMetadata, hostTools);
+  const hostInputs = currentRustFactsHostInputs(root, hostMetadata, hostTools, environment);
   const hostReceiptPath = path.join(root, "tmp/quality/rust-facts-host/current/receipt.json");
   const hostAttempt = "00000000-0000-4000-8000-000000000002";
   createRustFactsHostAttemptDirectory(root, hostReceiptPath, hostAttempt);
@@ -322,7 +322,7 @@ export function createManagedReaderFixture() {
     status: "prepared",
     root,
     attempt: hostAttempt,
-    inputs: { ...hostInputs, environmentSha256: hostEnvironmentDigest(root) },
+    inputs: { ...hostInputs, environmentSha256: hostEnvironmentDigest(root, environment) },
     buildOutput: hostBuildOutput,
     binary: hostBinary,
     metadataBefore: hostProof("rust-facts-host-metadata", "metadata-before"),
@@ -368,6 +368,7 @@ export function createManagedReaderFixture() {
     root,
     receipt,
     request,
+    hostReceiptPath,
     observation,
     receiptPath,
     binaryPath: binary.path,

@@ -14,6 +14,10 @@
 
 ## 現在の状態（2026-10-22）
 
+- [ ] R1246でHEAD `d5905d4f` のcandidate build proofがactual0、R1245のstrict readerも独立raw EN59/JA58を再受理した。R1247/R1249はCLI producer actual0の後、Rust facts hostのprepare子環境と検証親環境の不一致で画像生成前に拒否、採点0件。R1249診断ではsource file差分0、子環境でのhost検証成功を確認し、親だけのAR・RUST_LOGとPATH差を特定した。検証済みchild environmentを純粋な引数としてhost照合へ渡す修正後、R1251の関連4file・153件・271assertが152.80秒でactual0、独立差分レビューP0/P1も0件。R1252標準DAGは変更されたhost実装の既存AST pin不一致を`!unresolved-executable`として拒否しactual1、後続をスキップした。レビューした3実装だけ既存正規化方式のpinを同期し、R1253は契約・型・重複・host準備を成功、最後の新test import順1件でactual1となった。import順を是正して同じ標準DAGを再確認する。検査除外や基準変更は追加していない。現在の117図合格数は未更新であり、準備・局所回帰の成功を採点成功へ代用しない。
+
+- [/] R1248で承認済みprivateの既存clean-allを、KRRの予約済みCLI/probe 2本を保護refへ渡して実行した。KRR cleanは保護拒否のため全体actual1を保持し、他の既存cleanで実空き16,699,863,040Bから39,463,403,520Bへ回復、2本の物理SHA不変を確認した。専用Chromium repoはJustfileを持たず対象外で、実行中のrun6を継続した。部分回復をclean-all全体成功として扱わない（`tmp/quality/private-clean-all-r1248/result.json`）。固定閾値は変更していない。
+
 - [/] managed buildのcontrol一覧をTS/Pythonから単一のGit JSONへ統合し、JSON自身も生成証跡の入力に含めた。両readerは同じschema・27件・重複・自己参照・相対パスを検査し、JSON重複キーも既存strict parserで拒否する。R1231標準DAGと早期Python22件が成功し、R1232のreader全76件も成功した。strict JSON境界追加後の影響範囲11件はR1234で成功したが、完全ゲートと新sourceの正式117採点は別途実行する。
 
 - [/] R1218で独立raw JSの正解画像EN59・JA58、計117図を再生成し、全工程actual0・source前後一致・167.996秒を確認した。R1220の正式`validateOfficialRole` readerも両言語すべてを受理した。R1219は検証requestの旧official templateを参照してBun1.4.2欠落を拒否した記録として保持し、正解画像を書き換えずに新template/receipt/process/outputの全pinへ修正した。基準取得の合格であり、KRRの117図99以上の合格ではない。

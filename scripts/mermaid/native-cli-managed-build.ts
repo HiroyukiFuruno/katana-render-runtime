@@ -204,7 +204,7 @@ function verifyHostPrebuild(receipt: ManagedReceipt, request: ManagedRequest): v
     "host prebuild receipt path differs",
   );
   verifyFileRecord(receipt.hostPrebuild.receipt, "managed Rust facts host receipt");
-  verifyRustFactsHost(receipt.cwd, receipt.hostPrebuild.receipt.path);
+  verifyRustFactsHost(receipt.cwd, receipt.hostPrebuild.receipt.path, request.environment);
   same(proof.environment, request.environment, "host prebuild environment");
   same(
     proof.argv,

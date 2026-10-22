@@ -72,8 +72,9 @@ function sourceFiles(directory: string): string[] {
     });
 }
 
-function configurationFiles(root: string): string[] {
-  const bases = [process.env.CARGO_HOME ?? path.join(os.homedir(), ".cargo")];
+function configurationFiles(root: string, environment: NodeJS.ProcessEnv): string[] {
+  const home = environment.HOME ?? os.homedir();
+  const bases = [environment.CARGO_HOME ?? path.join(home, ".cargo")];
   const ancestors: string[] = [];
   let directory = root;
   for (;;) {
@@ -94,37 +95,43 @@ function configurationFiles(root: string): string[] {
       .filter((file) => fs.lstatSync(file, { throwIfNoEntry: false }) !== undefined),
   );
   const settings = path.join(
-    process.env.RUSTUP_HOME ?? path.join(os.homedir(), ".rustup"),
+    environment.RUSTUP_HOME ?? path.join(home, ".rustup"),
     "settings.toml",
   );
   if (fs.lstatSync(settings, { throwIfNoEntry: false }) !== undefined) files.push(settings);
   return files;
 }
 
-function toolLocation(root: string, name: keyof RustFactsHostInputs["tools"]): string | null {
-  const options = { cwd: root, PATH: process.env.PATH ?? "" };
-  if (name === "bun") return process.execPath;
-  if (name === "rtk" && process.env.RTK !== undefined)
-    return process.env.RTK === "" ? null : Bun.which(process.env.RTK, options);
+function toolLocation(
+  root: string,
+  name: keyof RustFactsHostInputs["tools"],
+  environment: NodeJS.ProcessEnv,
+): string | null {
+  const options = { cwd: root, PATH: environment.PATH ?? "" };
+  if (name === "rtk" && environment.RTK !== undefined)
+    return environment.RTK === "" ? null : Bun.which(environment.RTK, options);
+  if (name === "bun")
+    return environment === process.env ? process.execPath : Bun.which("bun", options);
   return Bun.which(name, options);
 }
 
 function currentTools(
   root: string,
   prepared?: RustFactsHostInputs["tools"],
+  environment: NodeJS.ProcessEnv = process.env,
 ): RustFactsHostInputs["tools"] {
   const names = ["just", "cargo", "rustc", "rtk", "python3", "bun"] as const;
   return hostInputsSchema.shape.tools.parse(
     Object.fromEntries(
       names.map((name) => {
-        const located = toolLocation(root, name);
+        const located = toolLocation(root, name, environment);
         if (!located) {
-          if (name === "rtk" && !process.env.RTK) return [name, null];
+          if (name === "rtk" && !environment.RTK) return [name, null];
           throw new Error(`missing Rust facts host tool: ${name}`);
         }
         const launcher = hostFileRecord(fs.realpathSync(located));
         let file = prepared?.[name]?.executable.path ?? launcher.path;
-        const rustup = Bun.which("rustup", { cwd: root, PATH: process.env.PATH ?? "" });
+        const rustup = Bun.which("rustup", { cwd: root, PATH: environment.PATH ?? "" });
         if (
           !prepared &&
           ["cargo", "rustc"].includes(name) &&
@@ -134,6 +141,7 @@ function currentTools(
           file = execFileSync(fs.realpathSync(rustup), ["which", name], {
             encoding: "utf8",
             cwd: root,
+            env: environment,
           }).trim();
         return [name, { launcher, executable: hostFileRecord(file) }];
       }),
@@ -145,6 +153,7 @@ export function currentRustFactsHostInputs(
   root: string,
   metadata: unknown,
   preparedTools?: RustFactsHostInputs["tools"],
+  environment: NodeJS.ProcessEnv = process.env,
 ): RustFactsHostInputs {
   if (!path.isAbsolute(root) || fs.realpathSync(root) !== root || !fs.lstatSync(root).isDirectory())
     throw new Error("Rust facts host root is not canonical");
@@ -171,11 +180,11 @@ export function currentRustFactsHostInputs(
     ...sourceFiles(path.join(root, "scripts/build")).filter((file) => file.endsWith(".py")),
     ...sourceFiles(path.join(root, "scripts/release")).filter((file) => file.endsWith(".py")),
     ...authority.map((relative) => path.join(root, relative)),
-    ...configurationFiles(root),
+    ...configurationFiles(root, environment),
   ];
   return hostInputsSchema.parse({
     files: [...new Set(files)].sort().map(hostFileRecord),
-    tools: currentTools(root, preparedTools),
-    environmentSha256: hostEnvironmentDigest(root),
+    tools: currentTools(root, preparedTools, environment),
+    environmentSha256: hostEnvironmentDigest(root, environment),
   });
 }
