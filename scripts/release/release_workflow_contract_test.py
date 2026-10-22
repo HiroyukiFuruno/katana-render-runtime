@@ -710,7 +710,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.release[self.release.index("  release:\n") :],
         ):
             self.assertIn("uses: oven-sh/setup-bun@v2", job)
-            self.assertIn("bun-version: 1.4.2", job)
+            self.assertIn("bun-version: 1.4.3", job)
             self.assertIn("run: bun install --frozen-lockfile", job)
 
     def test_release_target_check_requires_dependency_freshness_before_tagging(

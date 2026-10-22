@@ -135,8 +135,8 @@ MAX_JUST_BINARY_BYTES = 32 * 1024 * 1024
 MAX_JUST_ARCHIVE_ENTRIES = 128
 MAX_JUST_ARCHIVE_CONTENT_BYTES = 16 * 1024 * 1024
 BUN_RELEASE_REPOSITORY = "oven-sh/bun"
-BUN_RELEASE_TAG = "bun-v1.4.2"
-BUN_VERSION = "1.4.2"
+BUN_RELEASE_TAG = "bun-v1.4.3"
+BUN_VERSION = "1.4.3"
 BUN_ASSET_NAME = "bun-darwin-aarch64.zip"
 MAX_BUN_ASSET_BYTES = 32 * 1024 * 1024
 MAX_BUN_BINARY_BYTES = 80 * 1024 * 1024
@@ -1207,7 +1207,7 @@ def validate_pinned_tools(versions: Any) -> None:
     if not isinstance(java_home, str) or not Path(java_home).is_absolute():
         raise EvidenceError("local proof requires a validated absolute Java home")
     if versions.get("bun") != BUN_VERSION:
-        raise EvidenceError("local proof requires Bun 1.4.2, matching the macOS CI setup")
+        raise EvidenceError("local proof requires Bun 1.4.3, matching the macOS CI setup")
     if (
         versions.get("bun_release") != BUN_RELEASE_TAG
         or versions.get("bun_asset") != BUN_ASSET_NAME
