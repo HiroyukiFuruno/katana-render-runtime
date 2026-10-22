@@ -57,6 +57,16 @@ def _capacity_preflight(bindings: Bindings, root: Path, attempt: Path) -> JsonOb
     return evidence
 
 
+def _prebuild_rust_facts_host(bindings: Bindings) -> owner.NativeCliCommandEvidence:
+    environment = bindings.child_environment
+    guard.require(guard.REQUEST_ENV not in environment and guard.REQUEST_SHA_ENV not in environment,
+                  "Rust facts host prebuild must precede the CLI request")
+    rtk = _text(bindings.tools["rtk"]["path"], "RTK path")
+    just = _text(bindings.tools["just"]["path"], "Just path")
+    return bindings.run([rtk, "proxy", just, "rust-facts-host-prebuild"],
+                        "build", "rust-facts-host-prebuild")
+
+
 def completed_observation(value: JsonObject, request: JsonObject, build: JsonObject,
                           lifecycle: JsonObject, admission: guard.Admission) -> None:
     guard.exact(value, {"schema", "status", "diagnosticOnly", "accepted", "attemptToken", "request",
@@ -108,6 +118,8 @@ def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path
     bindings = construct_bindings(root, attempt, expected_source, expected_sha, registry, registry_sha, cargo, rustc)
     initial = bindings.snapshot()
     _capacity_preflight(bindings, root, attempt)
+    host_prebuild = _prebuild_rust_facts_host(bindings)
+    host_receipt = guard.file_record(root / "tmp/quality/rust-facts-host/current/receipt.json")
     bindings = construct_bindings(root, attempt, expected_source, expected_sha, registry, registry_sha, cargo, rustc)
     after_preflight = bindings.snapshot()
     for key in ("source", "tools", "control", "environment", "environmentSha256", "toolchainFiles", "toolchainAbsent"):
@@ -181,6 +193,8 @@ def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path
         "cwd": str(root), "expectedSource": guard.file_record(expected_source),
         "expectedProtectedRegistry": guard.file_record(registry), "request": request_pin,
         "observation": observation_pin, "metadataLifecycle": metadata_run.lifecycle,
+        "hostPrebuild": {"observation": host_prebuild.observation, "lifecycle": host_prebuild.lifecycle,
+                         "receipt": host_receipt},
         "buildLifecycle": build.lifecycle, "buildObservation": build.observation,
         "snapshotBefore": before, "snapshotAfter": after, "binary": binary,
         "runtimeAssetPins": [runtime_pin], "toolProbes": probes,

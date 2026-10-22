@@ -4,6 +4,7 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { justRecipes } from "../html/harness-contract-graph";
+import { canonicalRegularFile } from "../mermaid/native-build-receipt";
 import {
   currentRustFactsHostInputs,
   parseRustFactsHostMetadata,
@@ -201,12 +202,7 @@ export function runRustFactsHost(
   receipt = defaultRustFactsHostReceipt(root),
 ) {
   const prepared = verifyRustFactsHost(root, receipt);
-  if (
-    !path.isAbsolute(sourceRoot) ||
-    fs.realpathSync(sourceRoot) !== sourceRoot ||
-    !fs.lstatSync(sourceRoot).isDirectory()
-  )
-    throw new Error("Rust facts source root is not canonical");
+  assertModeInput(mode, sourceRoot);
   const directory = hostAttemptDirectory(root, receipt);
   const result = observeRustFactsHostBinary(
     root,
@@ -221,6 +217,14 @@ export function runRustFactsHost(
   if (!isDeepStrictEqual(prepared, current))
     throw new Error("Rust facts host receipt changed during inspection");
   return result;
+}
+
+function assertModeInput(mode: RustFactsHostMode, input: string): void {
+  if (!path.isAbsolute(input) || fs.realpathSync(input) !== input)
+    throw new Error("Rust facts input is not canonical");
+  if (mode === "macho-noso") canonicalRegularFile(input, "Rust facts manifest");
+  if (mode !== "macho-noso" && !fs.lstatSync(input).isDirectory())
+    throw new Error("Rust facts source root is not a directory");
 }
 
 export function runRustFactsHostPair(
@@ -289,7 +293,7 @@ if (import.meta.main) {
   } else if (
     command === "run" &&
     sourceRoot &&
-    ["mathjax", "native-width", "classic"].includes(modeOrReceipt ?? "")
+    ["mathjax", "native-width", "classic", "macho-noso"].includes(modeOrReceipt ?? "")
   ) {
     const result = runRustFactsHost(root, modeOrReceipt as RustFactsHostMode, sourceRoot, receipt);
     process.stdout.write(result.stdout);

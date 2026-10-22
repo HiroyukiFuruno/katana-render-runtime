@@ -11,7 +11,7 @@ import re
 import shutil
 import sys
 
-from cargo_capacity_guard_build_script_ownership import file_stamp, source_pin
+from cargo_capacity_guard_build_script_ownership import SourcePin, file_stamp, source_pin
 from cargo_capacity_guard_debug_object_ownership import DebugObjectOwnership, create_debug_object_ownership
 from cargo_capacity_guard_selected_cache_ownership import SelectedCacheOwnership, create_selected_cache_ownership
 from cargo_capacity_guard_different_flags_ownership import (
@@ -45,6 +45,119 @@ def _combined_verification(cache: SelectedCacheOwnership, alias_verify: Callable
         original_cache_check()
         alias_verify()
     return combined
+
+
+def _macho_noso_records(value: object, expected: Sequence[Path], manifest_pin: dict[str, object]) -> dict[Path, tuple[str, ...]]:
+    from cargo_capacity_guard import _array
+    import cargo_capacity_guard_native_cli_observation as native_guard
+
+    report = native_guard.exact(value, {"schema", "status", "parser", "manifest", "files"},
+                                "compact Mach-O facts")
+    native_guard.require(report["schema"] == "kdr-linter/macho-noso-facts/v1"
+                         and report["status"] == "verified", "compact Mach-O facts status differs")
+    parser = native_guard.exact(report["parser"], {"crate", "version", "checksum", "features"},
+                                "compact Mach-O parser pin")
+    native_guard.require(parser == {"crate": "object", "version": "0.40.0",
+                         "checksum": parser["checksum"], "features": ["read", "std"]}
+                         and isinstance(parser["checksum"], str)
+                         and len(parser["checksum"]) == 64
+                         and all(char in "0123456789abcdef" for char in parser["checksum"]),
+                         "compact Mach-O parser pin differs")
+    manifest = native_guard.exact(report["manifest"], {"path", "sha256"}, "compact input manifest")
+    native_guard.require(manifest == {"path": manifest_pin["path"], "sha256": manifest_pin["sha256"]},
+                         "compact input manifest pin differs")
+    rows = _array(report["files"], "compact Mach-O files")
+    if len(rows) != len(expected):
+        raise RuntimeError("compact Mach-O file count differs")
+    return _macho_noso_file_rows(rows, expected)
+
+
+def _macho_noso_file_rows(rows: Sequence[object], expected: Sequence[Path]) -> dict[Path, tuple[str, ...]]:
+    from cargo_capacity_guard import _array
+    import cargo_capacity_guard_native_cli_observation as native_guard
+
+    result: dict[Path, tuple[str, ...]] = {}
+    for row, path in zip(rows, expected, strict=True):
+        item = native_guard.exact(row, {"path", "size", "sha256", "format", "nOso"},
+                                  "compact Mach-O file")
+        native_guard.require(item["path"] == str(path)
+                             and item["format"] in ("MachO32", "MachO64"),
+                             "compact Mach-O file identity differs")
+        pin = source_pin(path)
+        native_guard.require(item["size"] == pin.stamp[4] and item["sha256"] == pin.sha256,
+                             "compact Mach-O input pin differs")
+        symbols = _array(item["nOso"], "compact N_OSO records")
+        result[path] = _macho_noso_names(symbols)
+    return result
+
+
+def _macho_noso_names(symbols: Sequence[object]) -> tuple[str, ...]:
+    from cargo_capacity_guard import _integer, _text
+    import cargo_capacity_guard_native_cli_observation as native_guard
+
+    names: list[str] = []
+    indices: set[int] = set()
+    for value in symbols:
+        row = native_guard.exact(value, {"symbolIndex", "name"}, "compact N_OSO record")
+        index = _integer(row["symbolIndex"], "N_OSO symbol index")
+        name = _text(row["name"], "N_OSO symbol name")
+        if index in indices:
+            raise RuntimeError("compact N_OSO symbol index repeats")
+        indices.add(index)
+        names.append(name)
+    return tuple(names)
+
+
+def _make_compact_noso_query(
+    root: Path,
+    logs: Path,
+    environment: dict[str, str],
+) -> tuple[Callable[[Sequence[Path]], dict[Path, tuple[str, ...]]], tuple[SourcePin, ...]]:
+    import cargo_capacity_guard_native_cli_observation as native_guard
+    from produce_html_performance_evidence import command
+
+    bun = shutil.which("bun")
+    rtk = shutil.which("rtk")
+    receipt = root / "tmp/quality/rust-facts-host/current/receipt.json"
+    runner = root / "scripts/runtime-bundles/runtime-rust-facts-host.ts"
+    if bun is None or rtk is None:
+        raise RuntimeError("compact Mach-O facts host tools are unavailable")
+    pins = tuple(source_pin(Path(item).resolve(strict=True)) for item in (bun, rtk, receipt, runner))
+    bun_path, rtk_path, receipt_path, runner_path = (pin.path for pin in pins)
+
+    def execute(paths: Sequence[Path]) -> dict[Path, tuple[str, ...]]:
+        if not paths:
+            return {}
+        rows = [_macho_noso_input_row(path) for path in paths]
+        logs.mkdir(parents=True, exist_ok=True)
+        manifest_path = logs / "macho-noso-input.json"
+        manifest = {"schema": "krr-macho-noso-input/v1", "files": rows}
+        manifest_pin = native_guard.exclusive_json(manifest_path, manifest)
+        argv = [str(rtk_path), "proxy", str(bun_path), str(runner_path), "run", str(root),
+                "macho-noso", str(manifest_path), str(receipt_path)]
+        output = command(argv, text=True, cwd=root, env=environment, role="metadata", log_directory=logs)
+        report = native_guard.parse_json(output.encode("utf-8"))
+        return _macho_noso_records(report, paths, manifest_pin)
+
+    return execute, pins
+
+
+def _macho_noso_input_row(path: Path) -> dict[str, object]:
+    pin = source_pin(path)
+    return {"path": str(pin.path), "size": pin.stamp[4], "sha256": pin.sha256}
+
+
+def _bind_compact_noso_verification(
+    query: Callable[[Sequence[Path]], dict[Path, tuple[str, ...]]],
+    verify: Callable[[], None],
+) -> Callable[[Sequence[Path]], dict[Path, tuple[str, ...]]]:
+    def execute(paths: Sequence[Path]) -> dict[Path, tuple[str, ...]]:
+        verify()
+        result = query(paths)
+        verify()
+        return result
+
+    return execute
 
 
 def classifier_paths(raw: str, target: Path, *, sweep: bool) -> frozenset[Path]:
@@ -87,6 +200,7 @@ def _checked_sweep_paths(raw: str, target: Path, toolchain: str | None = None) -
 def create_library_alias_ownership(
     root: Path, target: Path, metadata: dict[str, object], cargo: str, logs: Path,
     *, metadata_only: bool = False, archives_only: bool = False,
+    legacy_llvm_diagnostic: bool = False,
 ) -> LibraryAliasOwnership:
     from cargo_capacity_guard import _array, _object, _selected_input_check, _text, selected_namespace_supported
 
@@ -146,11 +260,17 @@ def create_library_alias_ownership(
     if Path(command.__code__.co_filename).resolve() != parser_root / "produce_html_performance_evidence.py":
         raise RuntimeError("library alias process owner has a foreign origin")
 
+    compact_query = None
+    compact_inputs: tuple[SourcePin, ...] = ()
+    if sys.platform == "darwin" and not metadata_only and not legacy_llvm_diagnostic:
+        compact_query, compact_inputs = _make_compact_noso_query(root, logs, environment)
+
     cache: SelectedCacheOwnership | None = None
     def verify() -> None:
         check()
         if (dict(os.environ) != environment
-                or any(file_stamp(pin.path.lstat()) != pin.stamp or pin.path.resolve() != pin.path for pin in pins + tuple(sources))
+                or any(file_stamp(pin.path.lstat()) != pin.stamp or pin.path.resolve() != pin.path
+                       for pin in pins + tuple(sources) + compact_inputs)
                 or cache is not None and any(file_stamp(pin.path.lstat()) != pin.stamp
                     for item in cache.owners for pin in (item.manifest, item.source))):
             raise RuntimeError("library alias classifier inputs changed")
@@ -164,6 +284,9 @@ def create_library_alias_ownership(
                          log_directory=logs, text=True)
         verify()
         return result
+
+    if compact_query is not None:
+        compact_query = _bind_compact_noso_verification(compact_query, verify)
 
     if query([str(sweep_path), "--version"]).strip() != "cargo-sweep 0.8.0":
         raise RuntimeError("library alias Sweep version differs")
@@ -200,9 +323,10 @@ def create_library_alias_ownership(
     if metadata_only:
         debug_objects = None
     elif archives_only:
-        debug_objects = create_debug_object_ownership(target, query, verify, archives=True)
+        debug_objects = create_debug_object_ownership(target, query, verify, archives=True,
+                                                     compact_query=compact_query)
     else:
-        debug_objects = create_debug_object_ownership(target, query, verify)
+        debug_objects = create_debug_object_ownership(target, query, verify, compact_query=compact_query)
     def complete() -> None:
         combined()
         different.verify()

@@ -46,7 +46,7 @@ export const hostProcessSchema = z.strictObject({
   stdout: hostFileRecordSchema,
   stderr: hostFileRecordSchema,
 });
-export type RustFactsHostMode = "mathjax" | "native-width" | "classic";
+export type RustFactsHostMode = "mathjax" | "native-width" | "classic" | "macho-noso";
 
 export function rustFactsHostBinaryPath(root: string): string {
   return (
@@ -300,6 +300,7 @@ export function observeRustFactsHostBinary(
     mathjax: [],
     "native-width": ["--native-width-hash"],
     classic: ["--mermaid-classic-scripts"],
+    "macho-noso": ["--macho-noso"],
   };
   if (!Object.hasOwn(modes, mode)) throw new Error("unknown Rust facts host mode");
   return runObserved(root, [binary.path, ...modes[mode], sourceRoot], directory, "facts");

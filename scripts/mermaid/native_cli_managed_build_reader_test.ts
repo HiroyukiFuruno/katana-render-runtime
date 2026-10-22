@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import {
+  assertCurrentGitSourceSet,
   digestStringRecord,
   validateCapacityReport,
   verifyNativeBuildReceipt,
@@ -221,19 +222,42 @@ test("full managed reader accepts an explicitly synthetic data graph; native rem
   }
 });
 
+test("managed reader rejects a legacy empty Rust facts host receipt", () => {
+  const fixture = createManagedReaderFixture();
+  try {
+    fixture.receipt.hostPrebuild.receipt = writeFile(
+      fixture.receipt.hostPrebuild.receipt.path,
+      JSON.stringify({ schema: "krr-rust-facts-host-v1", status: "prepared" }),
+    );
+    expect(() => verify(fixture)).toThrow(/krr-rust-facts-host\/v2/);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("managed current source query uses pinned Git despite a fake parent PATH", () => {
   const fixture = createManagedReaderFixture();
-  const original = process.env.PATH;
   try {
     const directory = path.join(fixture.root, "tmp/fake-parent");
     fs.mkdirSync(directory);
     const fake = path.join(directory, "git");
     fs.writeFileSync(fake, "#!/bin/sh\nexit 99\n");
     fs.chmodSync(fake, 0o700);
-    process.env.PATH = `${directory}${path.delimiter}${original}`;
+    const snapshot = fixture.receipt.snapshotAfter;
+    const environment = {
+      ...snapshot.environment,
+      PATH: `${directory}${path.delimiter}${snapshot.environment.PATH ?? ""}`,
+    };
+    expect(() =>
+      assertCurrentGitSourceSet(
+        fixture.root,
+        snapshot.source,
+        snapshot.tools.git.path,
+        environment,
+      ),
+    ).not.toThrow();
     expect(verify(fixture).sourceFileCount).toBe(fixture.receipt.snapshotAfter.source.length);
   } finally {
-    process.env.PATH = original;
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
 });
@@ -255,6 +279,11 @@ const negatives: Array<[string, (fixture: Fixture) => void, RegExp]> = [
     "selected tool bytes drift",
     (f) => fs.appendFileSync(f.receipt.snapshotAfter.tools.cargo.path, "changed"),
     /managed input changed/,
+  ],
+  [
+    "current Rust facts host receipt bytes drift",
+    (f) => fs.appendFileSync(f.receipt.hostPrebuild.receipt.path, "changed"),
+    /managed Rust facts host receipt changed/,
   ],
   [
     "saved capacity baseline is raised with a current physical pin",

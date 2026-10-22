@@ -10,6 +10,12 @@ mod consumer;
 mod default_materialize;
 #[path = "mathjax_consumer_facts/default_route.rs"]
 mod default_route;
+#[path = "mathjax_consumer_facts/macho_noso.rs"]
+mod macho_noso;
+#[path = "mathjax_consumer_facts/macho_noso_binary.rs"]
+mod macho_noso_binary;
+#[path = "mathjax_consumer_facts/macho_noso_parser_pin.rs"]
+mod macho_noso_parser_pin;
 #[path = "mathjax_consumer_facts/materializer.rs"]
 mod materializer;
 #[path = "mathjax_consumer_facts/materializer_body.rs"]
@@ -135,6 +141,11 @@ fn run() -> Result<(), String> {
     {
         return native_width_hash::run(&PathBuf::from(root));
     }
+    if let [mode, manifest] = args.as_slice()
+        && mode == "--macho-noso"
+    {
+        return macho_noso::MachoNoso::run(&PathBuf::from(manifest));
+    }
     let [root] = args.as_slice() else {
         return Err("usage: mathjax_consumer_facts <repo-root>".into());
     };
@@ -168,6 +179,12 @@ fn main() {
     }
 }
 
+#[cfg(test)]
+#[path = "mathjax_consumer_facts/macho_noso_test_support.rs"]
+mod macho_noso_test_support;
+#[cfg(test)]
+#[path = "mathjax_consumer_facts/macho_noso_tests.rs"]
+mod macho_noso_tests;
 #[cfg(test)]
 #[path = "mathjax_consumer_facts/ast_linter_tests.rs"]
 mod mathjax_facts_ast_linter_tests;

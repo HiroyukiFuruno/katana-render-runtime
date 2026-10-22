@@ -121,16 +121,17 @@ function compilerPackageIdentity(): void {
 }
 
 function compilerRuntime(): ExternalToolBinding["runtime"] {
+  const version = Bun.version;
   const physical = fs.realpathSync(process.execPath);
   if (
     physical !== process.execPath ||
     !fs.lstatSync(physical).isFile() ||
     fs.lstatSync(process.execPath).isSymbolicLink() ||
-    process.versions.bun !== "1.4.2" ||
-    Bun.version !== process.versions.bun
+    process.versions.bun !== "1.4.3" ||
+    version !== process.versions.bun
   )
     throw new Error("unverified TypeScript Bun runtime");
-  return { kind: "bun", version: Bun.version, path: physical, sha256: fileSha256(physical) };
+  return { kind: "bun", version, path: physical, sha256: fileSha256(physical) };
 }
 
 function compilerRequestMatches(root: string, request: ExternalToolRequest): boolean {

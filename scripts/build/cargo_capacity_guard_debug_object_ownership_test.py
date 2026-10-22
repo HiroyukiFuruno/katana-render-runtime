@@ -874,6 +874,35 @@ class DebugObjectOwnershipTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "LLVM query failed"):
             self.capture(proof, (self.endpoint,))
 
+    def test_compact_records_skip_llvm_unless_diagnostic_comparison_is_requested(self) -> None:
+        query_calls: list[list[str]] = []
+
+        def query(argv: list[str]) -> str:
+            query_calls.append(argv)
+            return _symtab(str(self.protected))
+
+        def compact(paths: Sequence[Path]) -> dict[Path, tuple[str, ...]]:
+            return {path: (str(self.object),) for path in paths}
+
+        normal = DebugObjectOwnership(
+            self.target, self.tool_pin, query, lambda: None, compact_query=compact
+        )
+        self.capture(normal)
+        self.assertEqual(query_calls, [])
+
+        diagnostic = DebugObjectOwnership(
+            self.target, self.tool_pin, query, lambda: None,
+            compact_query=compact, compare_compact=True,
+        )
+        with self.assertRaisesRegex(RuntimeError, "compact Mach-O differs from dsymutil"):
+            self.capture(diagnostic)
+        self.assertEqual(len(query_calls), 1)
+
+        with self.assertRaisesRegex(ValueError, "requires compact records"):
+            DebugObjectOwnership(
+                self.target, self.tool_pin, query, lambda: None, compare_compact=True
+            )
+
     def test_factory_requires_darwin_and_both_llvm_tools(self) -> None:
         for platform, available, expected in (
             ("linux", True, None),
@@ -1118,7 +1147,12 @@ class ActualLLVMFiniteTransactionTests(unittest.TestCase):
             raise RuntimeError("fixture metadata is not an object")
         (self.root / "logs").mkdir()
         self.proof = create_library_alias_ownership(
-            self.root, self.target, metadata, str(self.cargo), self.root / "logs"
+            self.root,
+            self.target,
+            metadata,
+            str(self.cargo),
+            self.root / "logs",
+            legacy_llvm_diagnostic=True,
         )
 
     def run_tool(self, argv: list[str]) -> str:
@@ -1296,7 +1330,12 @@ class ActualLLVMFiniteTransactionTests(unittest.TestCase):
         if not isinstance(metadata, dict):
             self.fail("fixture metadata is not an object after the second Cargo build")
         self.proof = create_library_alias_ownership(
-            self.root, self.target, metadata, str(self.cargo), self.root / "logs"
+            self.root,
+            self.target,
+            metadata,
+            str(self.cargo),
+            self.root / "logs",
+            legacy_llvm_diagnostic=True,
         )
         flags = self.proof.different_flags
         self.assertIsNotNone(flags)

@@ -162,6 +162,13 @@ export const managedReceiptSchema = z
     request: managedFileSchema,
     observation: managedFileSchema,
     metadataLifecycle: managedFileSchema,
+    hostPrebuild: z
+      .object({
+        observation: managedOwnedSchema,
+        lifecycle: managedFileSchema,
+        receipt: managedFileSchema,
+      })
+      .strict(),
     buildLifecycle: managedFileSchema,
     buildObservation: managedOwnedSchema,
     snapshotBefore: managedSnapshotSchema,

@@ -286,6 +286,30 @@ class InputAdmissionTests(unittest.TestCase):
                             registry, str(guard.file_record(registry)["sha256"]), toolchain / "cargo", toolchain / "rustc", self.source)
                     run.assert_not_called()
 
+    def test_rust_facts_host_bootstrap_precedes_request_tokens(self) -> None:
+        calls: list[tuple[list[str], str, str]] = []
+        marker = cast(owner.NativeCliCommandEvidence, object())
+
+        def run(argv: list[str], role: owner.MeasurementRole, label: str,
+                *, environment: dict[str, str] | None = None) -> owner.NativeCliCommandEvidence:
+            self.assertIsNone(environment)
+            calls.append((argv, role, label))
+            return marker
+
+        binding = SimpleNamespace(
+            child_environment={"PATH": "/bin"},
+            tools={"rtk": {"path": "/bin/rtk"}, "just": {"path": "/bin/just"}},
+            run=run,
+        )
+        result = producer._prebuild_rust_facts_host(cast(bindings.Bindings, binding))
+        self.assertIs(result, marker)
+        self.assertEqual(calls, [(["/bin/rtk", "proxy", "/bin/just", "rust-facts-host-prebuild"],
+                                  "build", "rust-facts-host-prebuild")])
+        binding.child_environment[guard.REQUEST_ENV] = "/tmp/request.json"
+        with self.assertRaisesRegex(RuntimeError, "must precede the CLI request"):
+            producer._prebuild_rust_facts_host(cast(bindings.Bindings, binding))
+        self.assertEqual(len(calls), 1)
+
 
 class JustEnvironmentTests(unittest.TestCase):
     def test_exact_environment_overlay_and_no_parent_mutation(self) -> None:
@@ -329,6 +353,17 @@ class JustEnvironmentTests(unittest.TestCase):
             (root / "Justfile").write_text(text.replace("{{CARGO_BUILD}} build -p katana-render-runtime-cli\n",
                 "{{CARGO_BUILD}} build -p katana-render-runtime-cli\n    echo unexpected\n"))
             with self.assertRaisesRegex(RuntimeError, "extra Just build command"):
+                bindings.validate_just(root)
+            host_route = (
+                "rust-facts-host-prebuild:\n"
+                "    bun scripts/runtime-bundles/runtime-rust-facts-host.ts prepare "
+                "{{quote(REPO_ROOT)}} "
+                '{{quote(REPO_ROOT + "/tmp/quality/rust-facts-host/current/receipt.json")}}\n'
+            )
+            (root / "Justfile").write_text(
+                text.replace(host_route, host_route + "    echo unexpected\n")
+            )
+            with self.assertRaisesRegex(RuntimeError, "fixed Rust facts host prebuild route differs"):
                 bindings.validate_just(root)
 
 

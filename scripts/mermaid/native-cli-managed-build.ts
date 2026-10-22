@@ -13,9 +13,12 @@ import {
   managedReceiptSchema,
   managedRequestSchema,
   managedSourceSchema,
+  type ManagedReceipt,
+  type ManagedRequest,
 } from "./native-cli-managed-build-schema";
 import { verifyManagedCargo } from "./native-cli-managed-cargo";
 import { verifyManagedInputs } from "./native-cli-managed-inputs";
+import { verifyRustFactsHost } from "../runtime-bundles/runtime-rust-facts-host";
 import {
   owned,
   read,
@@ -112,6 +115,7 @@ export function verifyManagedNativeBuildReceipt(
       receipt.buildObservation.label === "probe-6-native-cli-build",
     "outer build attempt binding differs",
   );
+  verifyHostPrebuild(receipt, request);
   same(request.cargo, receipt.snapshotAfter.tools.cargo, "request Cargo tool");
   requireBound(/^\/[a-z0-9_@%+=:,./-]+$/i.test(request.cargo.path), "Cargo shell path differs");
   same(request.capacityAdmission, receipt.snapshotAfter.capacityAdmission, "request capacity");
@@ -186,4 +190,34 @@ export function verifyManagedNativeBuildReceipt(
     cargoLockSha256: cargoLock.sha256,
     runtimeAssetPins: receipt.runtimeAssetPins,
   };
+}
+
+function verifyHostPrebuild(receipt: ManagedReceipt, request: ManagedRequest): void {
+  const proof = receipt.hostPrebuild.observation;
+  owned(proof, receipt.hostPrebuild.lifecycle, "build");
+  const expectedReceiptPath = path.join(receipt.cwd, "tmp/quality/rust-facts-host/current/receipt.json");
+  requireBound(
+    receipt.hostPrebuild.receipt.path === expectedReceiptPath,
+    "host prebuild receipt path differs",
+  );
+  verifyFileRecord(receipt.hostPrebuild.receipt, "managed Rust facts host receipt");
+  verifyRustFactsHost(receipt.cwd, receipt.hostPrebuild.receipt.path);
+  same(proof.environment, request.environment, "host prebuild environment");
+  same(
+    proof.argv,
+    [
+      receipt.snapshotAfter.tools.rtk.path,
+      "proxy",
+      receipt.snapshotAfter.tools.just.path,
+      "rust-facts-host-prebuild",
+    ],
+    "host prebuild argv",
+  );
+  requireBound(
+    proof.attemptToken === receipt.attemptToken &&
+      proof.cwd === receipt.cwd &&
+      proof.label === "rust-facts-host-prebuild" &&
+      BigInt(proof.endedNs) < BigInt(receipt.buildObservation.startedNs),
+    "host prebuild order/attempt differs",
+  );
 }

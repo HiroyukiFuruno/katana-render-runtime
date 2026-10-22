@@ -2,6 +2,18 @@ import fs from "node:fs";
 import path from "node:path";
 import type { FileRecord } from "./native-build-receipt";
 import { createManagedReaderInputs } from "./native-cli-managed-build-input-test-fixture";
+import { rustFactsHostReceiptSchema } from "../runtime-bundles/runtime-rust-facts-host";
+import {
+  currentRustFactsHostInputs,
+  hostFileRecord,
+} from "../runtime-bundles/runtime-rust-facts-host-inputs";
+import {
+  createRustFactsHostAttemptDirectory,
+  hostBuildOutputRecord,
+  hostEnvironmentDigest,
+  publishRustFactsHostBinary,
+} from "../runtime-bundles/runtime-rust-facts-host-protocol";
+import { hostFixtureInputs } from "../runtime-bundles/runtime-rust-facts-host-test-fixture";
 import {
   managedObservationSchema,
   managedReceiptSchema,
@@ -251,6 +263,82 @@ export function createManagedReaderFixture() {
       "unit version output",
     ),
   );
+  const hostPrebuildEvidence = owned(
+    "build",
+    "host-prebuild",
+    [tool("rtk").path, "proxy", tool("just").path, "rust-facts-host-prebuild"],
+    100,
+    "rust-facts-host-prebuild",
+    "",
+    environment,
+    { startedNs: "25", endedNs: "29" },
+  );
+  const fixtureHost = hostFixtureInputs(root);
+  const hostMetadata = fixtureHost.metadata;
+  const hostTools = Object.fromEntries(
+    Object.entries(fixtureHost.tools).map(([name]) => [
+      name,
+      {
+        launcher: tool(name),
+        executable: tool(name),
+      },
+    ]),
+  ) as ReturnType<typeof hostFixtureInputs>["tools"];
+  const hostInputs = currentRustFactsHostInputs(root, hostMetadata, hostTools);
+  const hostReceiptPath = path.join(root, "tmp/quality/rust-facts-host/current/receipt.json");
+  const hostAttempt = "00000000-0000-4000-8000-000000000002";
+  createRustFactsHostAttemptDirectory(root, hostReceiptPath, hostAttempt);
+  const hostBinarySource = save(
+    "target/debug/mathjax_consumer_facts",
+    "unexecuted Rust facts host unit binary data",
+  );
+  const hostBuildOutput = hostBuildOutputRecord(hostBinarySource.path);
+  const hostBinary = publishRustFactsHostBinary(
+    root,
+    hostReceiptPath,
+    hostAttempt,
+    hostBuildOutput,
+  );
+  const hostProof = (label: string, suffix: string) => {
+    const stdout = save(
+      `tmp/${token}/rust-facts-host/${suffix}.stdout`,
+      JSON.stringify(hostMetadata),
+    );
+    const stderr = save(`tmp/${token}/rust-facts-host/${suffix}.stderr`, "");
+    const proof = {
+      argv: [hostTools.just.executable.path, label, root],
+      cwd: root,
+      exitCode: 0,
+      signal: null,
+      error: null,
+      stdout,
+      stderr,
+    };
+    save(
+      `tmp/${token}/rust-facts-host/${suffix}.process.json`,
+      JSON.stringify(proof),
+    );
+    return proof;
+  };
+  const hostValue = rustFactsHostReceiptSchema.parse({
+    schema: "krr-rust-facts-host/v2",
+    status: "prepared",
+    root,
+    attempt: hostAttempt,
+    inputs: { ...hostInputs, environmentSha256: hostEnvironmentDigest(root) },
+    buildOutput: hostBuildOutput,
+    binary: hostBinary,
+    metadataBefore: hostProof("rust-facts-host-metadata", "metadata-before"),
+    build: hostProof("rust-facts-host-build", "build"),
+    metadataAfter: hostProof("rust-facts-host-metadata", "metadata-after"),
+  });
+  fs.mkdirSync(path.dirname(hostReceiptPath), { recursive: true });
+  fs.writeFileSync(hostReceiptPath, JSON.stringify(hostValue));
+  const hostReceipt = hostFileRecord(hostReceiptPath);
+  const hostPrebuild = {
+    ...hostPrebuildEvidence,
+    receipt: hostReceipt,
+  };
   const receipt = managedReceiptSchema.parse({
     schema: "krr-native-cli-managed-build-v1",
     status: "completed",
@@ -262,6 +350,7 @@ export function createManagedReaderFixture() {
     request: requestPin,
     observation: observationPin,
     metadataLifecycle: metadata.lifecycle,
+    hostPrebuild,
     buildLifecycle: build.lifecycle,
     buildObservation: build.observation,
     snapshotBefore: snapshot,

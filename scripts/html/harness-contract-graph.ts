@@ -83,7 +83,7 @@ export interface ExternalToolBinding extends ExternalToolRequest {
   verification: "observed-local-pins";
   artifactVerified: false;
   inputPins: Array<{ name: string; physicalPath: string; sha256: string }>;
-  runtime: { kind: "bun"; version: string; path: string; sha256: string };
+  runtime: { kind: "bun"; version: "1.4.3"; path: string; sha256: string };
   lockIdentities: Array<{
     name: string;
     version: string;
@@ -1164,14 +1164,14 @@ function canonicalNativeUnitAstDigest(
 
 // 実queryとsafeFileのレビュー済みASTに限定する。変更時は同じ境界の再レビューが必要。
 const TYPESCRIPT_QUERY_AST_SHA256 =
-  "2f86771e099cb671a0a7f184ca9a9188e63f541f2479636fc4812e521e0fa213";
+  "4f66c4d94ea69ec348387a0840f292b7705e821a4b9fff46db845537025934a9";
 
 function typeScriptQueryCall(
   module: Record<string, unknown>,
   context: SourceCodeContext | undefined,
 ): Record<string, unknown> | undefined {
   if (context?.name !== "scripts/quality/owned-type-projects.ts") return undefined;
-  const names = ["safeRelative", "safeFile", "queryTypeProject"];
+  const names = ["safeRelative", "safeFile", "queryTypeProject", "compilerRuntime"];
   const functions = names.map((name) => functionNamed(module, name));
   if (functions.some((fn) => !fn)) return undefined;
   const moduleNodes = astNodes(module);
@@ -1558,6 +1558,7 @@ export function externalToolBindingMatches(
       (pin) => pin.physicalPath.length > 0 && /^[a-f0-9]{64}$/.test(pin.sha256),
     ) &&
     binding.runtime.kind === "bun" &&
+    binding.runtime.version === "1.4.3" &&
     binding.runtime.path.length > 0 &&
     /^[a-f0-9]{64}$/.test(binding.runtime.sha256) &&
     binding.lockIdentities.length > 0 &&
@@ -3595,11 +3596,11 @@ const HOST_EVIDENCE_SOURCE_AST_SHA256: Record<string, string> = {
   "scripts/runtime-bundles/runtime-unused-native-width-hash.ts":
     "0e5850eca32f88bbf854a3056e903819e27199e8a1afde65fc451579a118ae5f",
   "scripts/runtime-bundles/runtime-rust-facts-host.ts":
-    "f566a806f2058aa715aa15822981f8303d70cad4dc55547c84895dc0e4a8ccd5",
+    "0706d304ea3909177490d59e9f7012216202a402f150c7bd3495a83ebcf5b067",
   "scripts/runtime-bundles/runtime-rust-facts-host-inputs.ts":
     "bcaf3428addb3de7f87054b0871bfc9eb3497f97aec0fd74ee7bc3e82aed99a6",
   "scripts/runtime-bundles/runtime-rust-facts-host-protocol.ts":
-    "8dbc5f4231e9756d4e5f77cb91ab688e59459f288e2115660c273180fb62558e",
+    "360e014cb20082bcee99b3275eb5b7a5dcd164af7ff16b6fbc2c41ff9bc2abfb",
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts":
     "4484139b289df41f69436936caa5a09477a132822f25b9c35dd68282332dadca",
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence-inputs.ts":

@@ -38,6 +38,7 @@ anyhow = "1"
 tracing = "0.1"
 clap = { version = "4", features = ["derive"] }
 ignore = "0.4"
+object = { version = "0.40.0", default-features = false, features = ["read", "std"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "3", features = ["full", "visit"] }
 toml = "1.1"

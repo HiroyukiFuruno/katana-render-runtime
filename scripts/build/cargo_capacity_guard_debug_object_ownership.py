@@ -106,8 +106,7 @@ def _debug_paths(raw: str) -> tuple[frozenset[Path], frozenset[ArchiveMember]]:
         "----------------------------------------------------------------------\nSymbol table for:"
     ):
         raise RuntimeError("debug consumer symbol table framing differs")
-    paths: set[Path] = set()
-    archives: set[ArchiveMember] = set()
+    names = []
     for line in raw.splitlines():
         if re.search(r"\bN_OSO\b", line) is None:
             continue
@@ -118,7 +117,16 @@ def _debug_paths(raw: str) -> tuple[frozenset[Path], frozenset[ArchiveMember]]:
         )
         if match is None:
             raise RuntimeError("debug consumer N_OSO record is malformed")
-        name = match[1]
+        names.append(match[1])
+    return _debug_paths_from_names(names)
+
+
+def _debug_paths_from_names(names: Sequence[str]) -> tuple[frozenset[Path], frozenset[ArchiveMember]]:
+    paths: set[Path] = set()
+    archives: set[ArchiveMember] = set()
+    for name in names:
+        if not name or "\0" in name:
+            raise RuntimeError("debug consumer N_OSO name is invalid")
         archive = re.fullmatch(r"(.+\.(?:rlib|a))\(([^()]+)\)", name)
         path = Path(archive[1] if archive else name)
         if not path.is_absolute() or ".." in path.parts:
@@ -159,13 +167,19 @@ class DebugObjectOwnership:
         input_check: Callable[[], None],
         finder: SourcePin | None = None,
         archive_tool: SourcePin | None = None,
+        compact_query: Callable[[Sequence[Path]], Mapping[Path, tuple[str, ...]]] | None = None,
+        compare_compact: bool = False,
     ) -> None:
+        if compare_compact and compact_query is None:
+            raise ValueError("compact diagnostic comparison requires compact records")
         self.target = target
         self.tool = tool
         self.query = query
         self.input_check = input_check
         self.finder = finder
         self.archive_tool = archive_tool
+        self.compact_query = compact_query
+        self.compare_compact = compare_compact
         self.snapshot: ConsumerSnapshot | None = None
         self.absent: set[Path] = set()
         self.expected: dict[Path, FileStamp] = {}
@@ -518,15 +532,24 @@ class DebugObjectOwnership:
         missing: set[Path] = set()
         archive_references: set[ArchiveReference] = set()
         query_paths = sorted(endpoints)
+        compact_records = self.compact_query(query_paths) if self.compact_query is not None else None
+        if compact_records is not None and set(compact_records) != set(query_paths):
+            raise RuntimeError("debug consumer compact Mach-O endpoint set differs")
         if progress:
             _PROGRESS_LOGGER.info(
                 "phase=llvm_queries state=start total=%d", len(query_paths)
             )
         query_completed = 0
         for path in query_paths:
-            direct, archives = _debug_paths(
-                self.query([str(self.tool.path), "--symtab", str(path)])
-            )
+            if compact_records is not None and not self.compare_compact:
+                direct, archives = _debug_paths_from_names(compact_records[path])
+            else:
+                raw = self.query([str(self.tool.path), "--symtab", str(path)])
+                direct, archives = _debug_paths(raw)
+                if compact_records is not None:
+                    compact_direct, compact_archives = _debug_paths_from_names(compact_records[path])
+                    if (compact_direct, compact_archives) != (direct, archives):
+                        raise RuntimeError("debug consumer compact Mach-O differs from dsymutil")
             consumed.update(direct)
             for object_path in direct:
                 try:
@@ -795,7 +818,11 @@ def create_debug_object_ownership(
     input_check: Callable[[], None],
     *,
     archives: bool = False,
+    compact_query: Callable[[Sequence[Path]], Mapping[Path, tuple[str, ...]]] | None = None,
+    compare_compact: bool = False,
 ) -> DebugObjectOwnership | None:
+    if compare_compact and compact_query is None:
+        raise ValueError("compact diagnostic comparison requires compact records")
     if (
         sys.platform != "darwin"
         or shutil.which("dsymutil") is None
@@ -824,5 +851,6 @@ def create_debug_object_ownership(
             raise RuntimeError("debug consumer archive reader is not canonical")
         archive_tool = _official_tool_pin(archive)
     return DebugObjectOwnership(
-        target, _official_tool_pin(tool), query, input_check, finder, archive_tool
+        target, _official_tool_pin(tool), query, input_check, finder, archive_tool,
+        compact_query, compare_compact
     )

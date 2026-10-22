@@ -34,6 +34,7 @@ import {
   type ExternalToolRequest,
   executionGraph,
   guardedFactsRecipeVerified,
+  hostEvidenceSourceVerified,
   justRecipes,
   moonStaticTaskProjection,
   type NativeConsumerBinding,
@@ -48,6 +49,28 @@ import { MOON_QUALITY_INPUTS } from "./moon-quality-inputs";
 
 // WHY: 実リポジトリの依存グラフを読むケースには、実測した処理量に応じた上限を設ける。
 const REPOSITORY_GRAPH_TEST_TIMEOUT_MS = 15_000;
+
+test.each([
+  [
+    "runtime",
+    "runtime-rust-facts-host.ts",
+    '["mathjax", "native-width", "classic", "macho-noso"].includes(modeOrReceipt ?? "")',
+    '["mathjax", "native-width", "classic"].includes(modeOrReceipt ?? "")',
+  ],
+  [
+    "protocol",
+    "runtime-rust-facts-host-protocol.ts",
+    '    "macho-noso": ["--macho-noso"],\n',
+    "",
+  ],
+])("Rust facts host %s source pin rejects compact-query drift", (_label, basename, before, after) => {
+  const name = `scripts/runtime-bundles/${basename}`;
+  const source = fs.readFileSync(path.resolve(import.meta.dir, `../runtime-bundles/${basename}`), "utf8");
+  expect(hostEvidenceSourceVerified(name, source)).toBe(true);
+  const drifted = source.replace(before, after);
+  expect(drifted).not.toBe(source);
+  expect(hostEvidenceSourceVerified(name, drifted)).toBe(false);
+});
 
 function currentMoonConfig(): Record<string, unknown> {
   const source = fs.readFileSync(path.resolve(import.meta.dir, "../../moon.yml"), "utf8");
@@ -4354,7 +4377,7 @@ test("Moon v2.6.2 cache manifest binds the observed string version", () => {
     platform: "darwin",
     arch: "arm64",
     tools: {
-      bun: { version: "1.4.2", executableSha256: "1".repeat(64) },
+      bun: { version: "1.4.3", executableSha256: "1".repeat(64) },
       just: { version: "1.46.0", executableSha256: "2".repeat(64) },
       node: { version: "v24.0.0", executableSha256: "3".repeat(64) },
       bash: { version: "5.2", executableSha256: "4".repeat(64) },
@@ -4663,7 +4686,7 @@ function observedUnitTool(request: ExternalToolRequest): ExternalToolBinding {
     verification: "observed-local-pins",
     artifactVerified: false,
     inputPins: [{ name: "unit-observation", physicalPath: "/unit/tool", sha256: "0".repeat(64) }],
-    runtime: { kind: "bun", version: "unit", path: "/unit/bun", sha256: "1".repeat(64) },
+    runtime: { kind: "bun", version: "1.4.3", path: "/unit/bun", sha256: "1".repeat(64) },
     lockIdentities: [
       { name: "typescript", version: "7.0.2", defaultRegistry: true, integrity: "sha512-unit" },
     ],
@@ -4787,6 +4810,11 @@ test.each([
     "const authorities = typeAuthorities(root, name);",
     'execFileSync(process.execPath, ["unknown.ts"]); const authorities = typeAuthorities(root, name);',
   ],
+  [
+    "compiler runtime pin drift",
+    'process.versions.bun !== "1.4.3"',
+    'process.versions.bun !== "1.4.4"',
+  ],
 ])("external tool rejects changed actual route %s", (_name, before, after) => {
   const actual = fs.readFileSync(
     path.join(import.meta.dir, "../quality/owned-type-projects.ts"),
@@ -4802,6 +4830,7 @@ test.each([
   "missing resolver",
   "undefined record",
   "changed pins",
+  "changed runtime version",
   "changed caller",
   "untracked caller",
 ])("external tool rejects post-graph %s", (kind) => {
@@ -4811,8 +4840,14 @@ test.each([
   else if (kind === "changed pins")
     snapshot.externalToolResolver = (request) => ({
       ...observedUnitTool(request),
-      runtime: { kind: "bun", version: "unit", path: "/different/bun", sha256: "2".repeat(64) },
+      runtime: { kind: "bun", version: "1.4.3", path: "/different/bun", sha256: "2".repeat(64) },
     });
+  else if (kind === "changed runtime version")
+    snapshot.externalToolResolver = (request) => {
+      const binding = observedUnitTool(request);
+      Reflect.set(binding.runtime, "version", "1.4.4");
+      return binding;
+    };
   else if (kind === "changed caller") {
     const prior = snapshot.read;
     snapshot.read = (name) =>

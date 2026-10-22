@@ -28,6 +28,7 @@ from cargo_capacity_guard import (
 SCHEMA = "krr-native-cli-managed-build-v1"
 CONTROL = (
     "Justfile", "scripts/build/cargo_capacity_guard.py", "scripts/build/cargo_capacity_guard_lock.py",
+    "scripts/build/cargo_capacity_guard_debug_object_ownership.py",
     "scripts/build/cargo_capacity_guard_native_cli_observation.py",
     "scripts/build/cargo_capacity_guard_build_script_ownership.py",
     "scripts/build/cargo_capacity_guard_selected_cache_ownership.py",
@@ -42,6 +43,9 @@ CONTROL = (
     "scripts/mermaid/native-cli-managed-cargo.ts",
     "scripts/mermaid/native-cli-managed-json.ts",
     "scripts/mermaid/native-cli-managed-raw-fd.ts",
+    "scripts/runtime-bundles/runtime-rust-facts-host.ts",
+    "scripts/runtime-bundles/runtime-rust-facts-host-protocol.ts",
+    "scripts/runtime-bundles/runtime-rust-facts-host-inputs.ts",
 
     "scripts/release/produce_html_performance_evidence.py",
     "scripts/release/verify_html_performance_evidence.py", "scripts/release/toml_loader.py",
@@ -96,6 +100,7 @@ def validate_just(root: Path) -> None:
                 'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
                 'CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO',
                 'export RUSTFLAGS := env_var_or_default("RUSTFLAGS", "-D warnings")',
+                'rust-facts-host-prebuild:\n    bun scripts/runtime-bundles/runtime-rust-facts-host.ts prepare {{quote(REPO_ROOT)}} {{quote(REPO_ROOT + "/tmp/quality/rust-facts-host/current/receipt.json")}}\n',
                 'krr-build:\n    {{CARGO_BUILD}} build -p katana-render-runtime-cli\n',
                 'protected-capacity-admission protected_registry:\n'
                 '    python3 scripts/mermaid/native_cli_build_bindings.py --repo {{quote(REPO_ROOT)}} '
@@ -103,6 +108,11 @@ def validate_just(root: Path) -> None:
     required += [f'export {key} := env_var_or_default("{key}", "")'
                  for key in guard.EMPTY_JUST_ENVIRONMENT_KEYS]
     guard.require(all(text.count(line) == 1 for line in required), "fixed Just route differs")
+    host_prebuild = re.search(r"^rust-facts-host-prebuild:\n((?:[ \t]+.*\n|\n)*)", text, re.MULTILINE)
+    guard.require(host_prebuild is not None and host_prebuild[1].strip()
+                  == 'bun scripts/runtime-bundles/runtime-rust-facts-host.ts prepare {{quote(REPO_ROOT)}} '
+                     '{{quote(REPO_ROOT + "/tmp/quality/rust-facts-host/current/receipt.json")}}',
+                  "fixed Rust facts host prebuild route differs")
     recipe = re.search(r"^krr-build:\n((?:[ \t]+.*\n|\n)*)", text, re.MULTILINE)
     guard.require(recipe is not None and recipe[1].strip()
                   == "{{CARGO_BUILD}} build -p katana-render-runtime-cli", "extra Just build command")

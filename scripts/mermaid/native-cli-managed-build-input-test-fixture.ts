@@ -33,6 +33,44 @@ export function createManagedReaderInputs() {
   save(".gitignore", "tmp/\ntarget/\n");
   save("Cargo.lock", "version = 4\n");
   save("Cargo.toml", '[workspace]\nmembers=["crates/katana-render-runtime-cli"]\n');
+  const copyHostSourceTree = (directory: string) => {
+    const source = path.join(process.cwd(), directory);
+    const visit = (current: string) => {
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        const file = path.join(current, entry.name);
+        if (entry.isDirectory()) visit(file);
+        else if (entry.isFile() && file.endsWith(".py")) {
+          const relative = path.relative(process.cwd(), file);
+          if (!fs.existsSync(path.join(root, relative)))
+            save(relative, `unit Rust facts host input: ${relative}\n`);
+        }
+      }
+    };
+    visit(source);
+  };
+  copyHostSourceTree("scripts/build");
+  copyHostSourceTree("scripts/release");
+  for (const name of [
+    "crates/kdr-linter/Cargo.toml",
+    "crates/kdr-linter/src/bin/mathjax_consumer_facts.rs",
+    "dependency/Cargo.toml",
+    "dependency/src/lib.rs",
+    "moon.yml",
+    "package.json",
+    "bun.lock",
+    "scripts/runtime-bundles/runtime-rust-facts-host.ts",
+    "scripts/runtime-bundles/runtime-rust-facts-host-inputs.ts",
+    "scripts/runtime-bundles/runtime-rust-facts-host-protocol.ts",
+    "scripts/runtime-bundles/runtime-unused-mathjax.ts",
+    "scripts/runtime-bundles/runtime-unused-native-width-hash.ts",
+    "scripts/runtime-bundles/runtime-unused-rust-classic.ts",
+    "scripts/html/harness-contract-graph.ts",
+    "scripts/html/harness-contract-policy.json",
+    "scripts/quality/owned-validation-contract.ts",
+  ]) {
+    if (!fs.existsSync(path.join(root, name)))
+      save(name, `unit Rust facts host input: ${name}\n`);
+  }
   const manifest = save(
     "crates/katana-render-runtime-cli/Cargo.toml",
     '[package]\nname="katana-render-runtime-cli"\n',
@@ -160,10 +198,13 @@ export function createManagedReaderInputs() {
     label: string,
     bytes: string,
     env: { [key: string]: string } = environment,
+    time?: { startedNs: string; endedNs: string },
   ) => {
     const folder = `tmp/${token}/lifecycle/${name}`;
     const stdout = save(`${folder}/stdout.raw`, bytes),
       stderr = save(`${folder}/stderr.raw`, "");
+    const startedNs = time?.startedNs ?? (role === "build" ? "30" : "10");
+    const endedNs = time?.endedNs ?? (role === "build" ? "50" : "20");
     const observation = managedOwnedSchema.parse({
       argv,
       stdout,
@@ -175,8 +216,8 @@ export function createManagedReaderInputs() {
       environmentSha256: digestStringRecord(env),
       pid,
       actualExit: 0,
-      startedNs: role === "build" ? "30" : "10",
-      endedNs: role === "build" ? "50" : "20",
+      startedNs,
+      endedNs,
       reaped: true,
       errors: [],
     });
@@ -215,8 +256,8 @@ export function createManagedReaderInputs() {
           processGroupId: pid + 10000,
         },
         actualExit: 1,
-        startedNs: role === "build" ? "31" : "11",
-        endedNs: role === "build" ? "32" : "12",
+        startedNs: String(BigInt(startedNs) + 1n),
+        endedNs: String(BigInt(startedNs) + 2n),
         reaped: true,
         groupClosed: true,
         rawFdsClosed: true,

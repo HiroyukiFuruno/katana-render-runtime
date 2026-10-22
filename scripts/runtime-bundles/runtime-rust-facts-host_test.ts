@@ -16,7 +16,6 @@ import {
   currentRustFactsHostInputs,
   hostFileRecord,
   parseRustFactsHostMetadata,
-  type RustFactsHostInputs,
 } from "./runtime-rust-facts-host-inputs";
 import {
   createRustFactsHostAttemptDirectory,
@@ -25,6 +24,7 @@ import {
   publishRustFactsHostBinary,
   rustFactsHostArtifactName,
 } from "./runtime-rust-facts-host-protocol";
+import { hostFixtureInputs } from "./runtime-rust-facts-host-test-fixture";
 
 const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rust-facts-host-unit-")));
 afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -75,36 +75,7 @@ export function fixture(nested = false) {
       '    @CARGO_TARGET_DIR={{quote(root + "/target")}} {{CARGO}} metadata --locked --format-version 1',
     ].join("\n"),
   );
-  const metadata = {
-    target_directory: path.join(root, "target"),
-    packages: [
-      {
-        id: "host",
-        name: "kdr-linter",
-        manifest_path: path.join(root, "crates/kdr-linter/Cargo.toml"),
-      },
-      {
-        id: "dependency",
-        name: "host-dependency",
-        manifest_path: path.join(root, "dependency/Cargo.toml"),
-      },
-    ],
-    resolve: {
-      nodes: [
-        { id: "host", dependencies: ["dependency"] },
-        { id: "dependency", dependencies: [] },
-      ],
-    },
-  };
-  const names = ["just", "cargo", "rustc", "rtk", "python3", "bun"] as const;
-  const tools = Object.fromEntries(
-    names.map((name) => {
-      const located = name === "bun" ? process.execPath : Bun.which(name);
-      if (!located) throw new Error(`missing fixture tool ${name}`);
-      const record = hostFileRecord(fs.realpathSync(located));
-      return [name, { launcher: record, executable: record }];
-    }),
-  ) as RustFactsHostInputs["tools"];
+  const { metadata, tools } = hostFixtureInputs(root);
   const inputs = currentRustFactsHostInputs(root, metadata, tools);
   const proofDirectory = "tmp/quality/rust-facts-host/current/unit-proof";
   const processProof = (label: string) => {
@@ -447,6 +418,19 @@ test("host command runs the verified immutable copy after the target output chan
   expect(result.stdout).toEqual(Buffer.from("immutable host ran\n"));
   expect(result.proof.argv[0]).toBe(binary.path);
   expect(fs.readFileSync(binary.path, "utf8")).toBe(executable);
+});
+
+test("Mach-O facts mode passes a canonical manifest file to the verified host", () => {
+  const f = fixture();
+  const executable = '#!/bin/sh\nprintf "%s\\n" "$@"\n';
+  const { binary } = publishFixtureExecutable(f, executable);
+  const manifest = path.join(f.root, "macho-input.json");
+  fs.writeFileSync(manifest, '{"schema":"krr-macho-noso-input/v1","files":[]}\n');
+
+  const result = runRustFactsHost(f.root, "macho-noso", manifest, f.receipt);
+  expect(result.proof.argv).toEqual([binary.path, "--macho-noso", manifest]);
+  expect(result.stdout.toString("utf8")).toContain("--macho-noso\n");
+  expect(result.proof.exitCode).toBe(0);
 });
 
 test("paired host command runs native-width then classic with separate physical proofs", () => {
