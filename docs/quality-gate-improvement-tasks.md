@@ -14,6 +14,14 @@
 
 ## 現在の状態（2026-10-22）
 
+- [/] raw画像seedとrendererの非空fixture inventoryを一致させる修正を`4fb0d393`へ確定した。元の空入力は削除せず、inventoryから除く回帰22件・95assertがR1193で成功した。R1209の標準DAGは型・重複・資源・実行契約・Rust facts host準備・Biomeを含みactual0。正解画像117件の再取得成功や製品採点の合格とは区別する。
+
+- [ ] R1207の限定Bunは319成功・22失敗・1error、actual1。ブラウザーcallbackの既知bridgeを実AST spanで区別し、未知callbackと順序変更の拒否回帰は成功したが、別環境のRust facts host証跡がstaleとなる解析系の失敗と時間切れを保持した。同条件の標準DAGによるhost再準備とLint成功はR1209で確認済み。全テスト成功へ読み替えず、正式テスト導線で再検証する。原ログは`tmp/quality/current-lint-regressions-r1207/`へ保持する。
+
+- [/] 依存更新と独立performance harnessのlock同期を`e0c48147`へ確定した。Rust/JS/ZenUML Coreの更新後、R1183でfoundation・AST・全Clippyと現行release契約4件が成功、source前後一致。同期producerのunit8件とlock pin照合もR1177/R1180で成功した。Moon2.6.3は要求するmacOS実行packageが未公開で実行不能だったため採用せず、2.6.2を維持した。依存の最終freshness・完全ゲート・性能の合格とは扱わない。新必須commitを含まない旧snapshotを拒否するguardを`2ddd26c1`へ確定した。
+
+- [ ] 現行raw117再取得：R1184の既存strict readerは旧Bun1.4.2実体の欠落を拒否した。旧receiptを再認定せず保持する。R1186は無関係な旧Rust保護ref4,231,576,288Bのadmissionで120秒timeout・実child終了-15、group/raw FD閉鎖を確認し、描画未開始。Cargoを使わないraw生成からこの前処理を外した。R1187の未作成attempt directoryを修正後、R1188は正規seedが空fixtureをinventoryへ含めるためrendererの非空inventoryと不一致になる実装不具合を検出した。両者を同じ非空基準へ揃える修正を4fb0d393へ確定し、R1193の22件・95assertが成功した。画像の再取得は未完了。R1190はその検査前のsource観測が120秒timeoutし、合格には数えない。R1189で既存1refのcapacity bindingを正規validatorが受理したが、旧interaction reportを現行HTML受入れへ転用しない。各runは`tmp/quality/`へ原ログを保持する。
+
 - [/] R1170で現行foundation・AST・全Clippy（performance両armを含む）・関連Bunと実Mach-O unit15件が成功し、source前後一致・224.134秒を確認した（`tmp/quality/svg-font-macho-static-r1170/final.json`）。不正なTOML依存情報の欠落でpanicする分岐を実行回帰で検出し、安全なgetと欠落catalog/checksum回帰へ修正、`d3d4c1a5`へ通常hookで確定した。R1167の13成功/1失敗は原runへ保持する。
 
 - [ ] SVG namespace限定のgetBBox返却4成分をChromiumのfloat API契約へ合わせ、HTML寸法を保持する変更を`4a31dfa3`へ確定した。primitive端点を先に丸める未確定案は採用せず、内部union全体の完全再現とは主張しない。新規の実V8回帰とfont property/x-height境界回帰はコンパイル・静的検査まで成功、実行は次の全rootで確認する。R1170の静的成功を117図の合格へ代用しない。追加のChrome `data:`診断はURL policyに拒否され、迂回せず中止した。
@@ -22,7 +30,7 @@
 
 - [/] R1164はroot/baseline Clippy成功後にcandidateの固定容量上限で拒否された。R1158のimmutable reportを保持し、完了済みinstrumented targetだけを既存Cargo cleanで整理したR1166がactual0、実空き83,816,996,864Bから86,796,877,824Bへ回復した。R1167/R1170は両armのClippyを再完了した。閾値4,726,095,872Bは不変で、次のrootはcold条件として扱う。R1168の親コマンド構文エラーは検査本体未開始として`tmp/quality/svg-font-macho-static-r1168-parent-failure/`へ原コマンドと観測結果を保持した。
 
-- [ ] 検証専用Chromium環境：Xcode27.1・SDK27.0・clang・初回設定をactual0で確認した。公式mirrorの固定commit `0e66b94549a8bd85f03fbdf189b752d6e7b63c32` のsyncとGN生成が成功。必須Metal Toolchain取得後、同じGN設定・出力先でheadless_shellをコンパイル中。直近観測は2,032/47,674 actions、実空き約92.8GiB。global xcode-selectは不変、iOS等の追加platformは取得していない。OSにより消失する既知web-test PNGは異常記録を保持し、headless_shell依存閉包外であることを確認した。全checkout clean・観測の非干渉性・HTMLフォント完全一致の合格とは扱わない。
+- [ ] 検証専用Chromium環境：Xcode27.1・SDK27.0・clang・初回設定をactual0で確認した。公式mirrorの固定commit `0e66b94549a8bd85f03fbdf189b752d6e7b63c32` のsyncとGN生成が成功。必須Metal Toolchain取得後、同じGN設定・出力先でheadless_shellをコンパイル中。現在は同一出力先の再利用を維持し4並列で継続中。KRR検査と同時実行中の実空きは29GiBで、コンパイル完了・12フォント条件の証明は未完了。global xcode-selectは不変、iOS等の追加platformは取得していない。OSにより消失する既知web-test PNGは異常記録を保持し、headless_shell依存閉包外であることを確認した。全checkout clean・観測の非干渉性・HTMLフォント完全一致の合格とは扱わない。
 
 - [/] 製品SVGの名前空間・computed style・空要素bbox・SVGLength・全文フォント計測を`1310d407`へ、Mach-O専用出力とmanaged build証跡検査を`d996b23c`へ通常hookで確定した。R1149はfoundation・AST・Clippy・関連Bunが成功し、R1150のnative21件も全成功した。R1143以前のArchitecture失敗は局所回帰で解消したが、全117件の再採点は未完了である。
 

@@ -1,9 +1,4 @@
-function parseInnerHtml(
-  source,
-  xmlMode = false,
-  contextNamespace = null,
-  contextLocalName = null,
-) {
+function parseInnerHtml(source, xmlMode = false, contextNamespace = null, contextLocalName = null) {
   const root = {
     localName: contextLocalName ?? "#root",
     namespaceURI: contextNamespace,

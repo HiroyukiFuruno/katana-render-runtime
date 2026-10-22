@@ -7,7 +7,7 @@ KatanaNode.prototype.getBBox = function getBBox() {
 };
 
 function katanaNodeTextForBox(node) {
-  return String(katanaFirstTextValue([node.textContent, node.innerText]));
+  return String(katanaFirstTextValue([katanaTextContent(node), katanaInnerText(node)]));
 }
 
 function katanaFirstTextValue(values) {

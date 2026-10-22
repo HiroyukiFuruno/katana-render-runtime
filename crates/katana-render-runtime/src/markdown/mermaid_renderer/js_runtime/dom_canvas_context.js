@@ -55,9 +55,7 @@ function katanaCanvasNativeTextWidth(text, font) {
 
 function katanaCanvasFontMetrics(font) {
   const value = String(font ?? "").trim();
-  const sizeMatch = value.match(
-    /(?:^|\s)(\d+(?:\.\d+)?|\.\d+)px(?:\/[^\s]+)?(?=\s|$)/i,
-  );
+  const sizeMatch = value.match(/(?:^|\s)(\d+(?:\.\d+)?|\.\d+)px(?:\/[^\s]+)?(?=\s|$)/i);
   if (!sizeMatch) {
     return null;
   }

@@ -136,26 +136,28 @@ function katanaResolvedTextFontSize(value, inherited, preserveLegacySize = false
   const unit = match[2]?.toLowerCase();
   const coefficient = Number(match[1]);
   if (!Number.isFinite(coefficient)) return inherited.size;
-  if (unit === "ex") {
-    if (coefficient < 0) return inherited.size;
-    if (coefficient === 0) return 0;
-    if (inherited.size <= 0) return inherited.size;
-    const measure = globalThis.__katanaMeasureSvgFontXHeight;
-    if (typeof measure !== "function") throw new Error("SVG font x-height bridge unavailable");
-    const xHeight = measure(inherited.family, inherited.size, inherited.weight, inherited.italic);
-    if (xHeight === undefined) {
-      /* WHY: CSS Valuesではx-heightが取得できない書体のexを0.5emとする。 https://www.w3.org/TR/css-values-4/ */
-      const fallbackSize = coefficient * inherited.size * 0.5;
-      return Number.isFinite(fallbackSize) ? fallbackSize : inherited.size;
-    }
-    if (!Number.isFinite(xHeight) || xHeight <= 0) {
-      throw new Error("SVG font x-height metric is invalid");
-    }
-    const size = coefficient * xHeight;
-    return Number.isFinite(size) ? size : inherited.size;
-  }
+  if (unit === "ex") return katanaResolvedTextExSize(coefficient, inherited);
   const size = coefficient * (unit === "em" ? inherited.size : 1);
   return Number.isFinite(size) && (preserveLegacySize || size >= 0) ? size : inherited.size;
+}
+
+function katanaResolvedTextExSize(coefficient, inherited) {
+  if (coefficient < 0) return inherited.size;
+  if (coefficient === 0) return 0;
+  if (inherited.size <= 0) return inherited.size;
+  const measure = globalThis.__katanaMeasureSvgFontXHeight;
+  if (typeof measure !== "function") throw new Error("SVG font x-height bridge unavailable");
+  const xHeight = measure(inherited.family, inherited.size, inherited.weight, inherited.italic);
+  if (xHeight === undefined) {
+    /* WHY: CSS Valuesではx-heightが取得できない書体のexを0.5emとする。 https://www.w3.org/TR/css-values-4/ */
+    const fallbackSize = coefficient * inherited.size * 0.5;
+    return Number.isFinite(fallbackSize) ? fallbackSize : inherited.size;
+  }
+  if (!Number.isFinite(xHeight) || xHeight <= 0) {
+    throw new Error("SVG font x-height metric is invalid");
+  }
+  const size = coefficient * xHeight;
+  return Number.isFinite(size) ? size : inherited.size;
 }
 
 function katanaResolvedTextFontWeight(value, inherited) {
@@ -178,7 +180,7 @@ function katanaRelativeBolderWeight(inherited) {
   if (inherited < KATANA_RELATIVE_FONT_WEIGHT_BOUNDARIES.normal)
     return KATANA_TEXT_FONT_WEIGHTS.normal;
   if (inherited < KATANA_RELATIVE_FONT_WEIGHT_BOUNDARIES.bold) return KATANA_TEXT_FONT_WEIGHTS.bold;
-  return inherited < KATANA_TEXT_FONT_WEIGHTS.heavy ? KATANA_TEXT_FONT_WEIGHTS.heavy : inherited;
+  return Math.max(KATANA_TEXT_FONT_WEIGHTS.heavy, inherited);
 }
 
 function katanaRelativeLighterWeight(inherited) {
