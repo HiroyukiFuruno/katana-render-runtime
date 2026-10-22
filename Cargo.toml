@@ -43,15 +43,15 @@ proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "3", features = ["full", "visit"] }
 toml = "1.1"
 base64 = "0.23"
-brotli-decompressor = "6.1.0"
+brotli-decompressor = "6.1.1"
 include_dir = "0.7.4"
 jni = { version = "0.22.4", features = ["invocation"] }
 resvg = "0.48"
 rustybuzz = "0.20.1"
-harfrust = "0.14.0"
+harfrust = "0.15.0"
 sha2 = "0.11"
 tiny-skia = "0.12"
-ureq = { version = "3.4", default-features = false, features = ["rustls"] }
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 v8 = "=152.2.0"
 html5ever = "0.40"
 markup5ever = "0.40"

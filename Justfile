@@ -42,7 +42,7 @@ MERMAID_JS_VERSION := "12.2.0-krr.pr6823.1"
 MERMAID_ZENUML_JS_VERSION := "1.0.1"
 DRAWIO_JS_VERSION := "32.5.5"
 MATHJAX_JS_VERSION := "4.1.3"
-ZENUML_CORE_JS_VERSION := "4.7.2"
+ZENUML_CORE_JS_VERSION := "4.10.1"
 PLANTUML_JAR_VERSION := "1.2026.9"
 PLANTUML_JAR_CHECKSUM := "1dbb847646f0f440595fecd5f991e902aae47dc3391a01f64bab548089241a46"
 MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-render-runtime/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
@@ -678,6 +678,7 @@ depends-update-mutations:
     python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"
     {{CARGO}} update
     python3 scripts/release/update_usvg_skrifa_pair.py --cargo "{{CARGO}}"
+    python3 scripts/release/update_html_performance_harness_lock.py --cargo "{{CARGO}}"
     bun update --latest
     bun run scripts/runtime-assets/depends-update-all.ts
     bun run scripts/drawio/resource-update.ts --resources "{{DRAWIO_RESOURCE_DIR}}" --manifest "{{DRAWIO_RESOURCE_MANIFEST}}"
