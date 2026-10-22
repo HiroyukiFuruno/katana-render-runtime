@@ -93,7 +93,7 @@ const NATIVE_WIDTH_TEST_CONSUMERS = {
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime.rs`]:
     "b3d10ef7896536ae924c2188b338bafeb3ff9642a3f557e5cf6ecec35a93291f",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`]:
-    "544cc51402f5b518ef02b722cb46ea11d258c7449b9271abf2e31402ec2e6e81",
+    "71756764df09b0c0d3b2c015cea2628ad36a1ff828c1bc4a45bafb7f0fe764a3",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_helpers.rs`]:
     "fe94f65de29ced98302d2174d7fb212a6526074601fc0019f8894c5b9e49b85d",
   [NATIVE_WIDTH_BBOX_TRACE]: "a1c72bb7a16e809b52fbd98a79a079749e4ceb1154ada17781b1007ede8a64cf",

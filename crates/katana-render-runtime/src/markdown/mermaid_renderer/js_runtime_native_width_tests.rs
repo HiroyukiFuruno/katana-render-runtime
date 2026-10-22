@@ -37,6 +37,8 @@ title Runtime width probe
 Container(spa, "Single Page Application", "javascript and react")
 Container(api, "API Application", "Java and Spring Boot")
 Rel(spa, api, "Uses", "JSON/HTTPS")"#;
+const ARCHITECTURE_BETA_FIXTURE_MARKDOWN: &str =
+    include_str!("../../../../../tests/fixtures/mermaid/ja/09-02-architecture-beta.md");
 
 #[test]
 fn nonclass_flowchart_uses_native_advance_for_noto_and_weighted_cjk_runs() -> Result<(), String> {
@@ -106,6 +108,37 @@ fn localized_architecture_service_bbox_includes_wide_label() -> Result<(), Strin
     assert!(
         localized_width > original_width,
         "localized service bbox did not grow for the wider label: english={original_width}, localized={localized_width}"
+    );
+    Ok(())
+}
+
+#[test]
+fn architecture_beta_fixture_records_native_service_bbox_inputs() -> Result<(), String> {
+    let source = ARCHITECTURE_BETA_FIXTURE_MARKDOWN
+        .split("~~~mermaid\n")
+        .nth(1)
+        .and_then(|value| value.split("\n~~~").next())
+        .ok_or("architecture-beta fixture Mermaid source missing")?;
+    let result = render_fixture(source)?;
+    let labels = ["データベース", "ストレージ", "サーバー"];
+    for label in labels {
+        assert!(
+            result.calls.iter().any(|call| call_text(call) == label),
+            "native bridge did not measure architecture label {label:?}: {:?}",
+            result.calls
+        );
+        assert!(
+            result.calls.iter().any(|call| {
+                call_text(call) == label && call.get("kind").and_then(Value::as_str) == Some("css")
+            }),
+            "Canvas native bridge did not measure architecture label {label:?}: {:?}",
+            result.calls
+        );
+        service_bbox(&result, label)?;
+    }
+    println!(
+        "architecture_beta_bbox_observation={}",
+        serde_json::json!({"boxes": &result.boxes, "calls": &result.calls})
     );
     Ok(())
 }
