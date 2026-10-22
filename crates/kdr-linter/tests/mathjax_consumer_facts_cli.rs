@@ -1,8 +1,10 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
+use tempfile::TempDir;
 
 #[derive(Clone, Copy)]
 enum FactsMode {
@@ -52,13 +54,12 @@ fn workspace_root() -> Result<PathBuf, String> {
 }
 
 fn run_facts_mode(mode: FactsMode, root: &Path) -> Result<Value, String> {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_mathjax_consumer_facts"));
+    let mut arguments = Vec::new();
     if let Some(argument) = mode.argument() {
-        command.arg(argument);
+        arguments.push(OsString::from(argument));
     }
-    let output = command
-        .arg(root)
-        .output()
+    arguments.push(root.as_os_str().to_owned());
+    let output = run_cli(&arguments)
         .map_err(|error| format!("{} facts mode did not spawn: {error}", mode.name()))?;
     if !output.status.success() {
         return Err(format!(
@@ -72,6 +73,37 @@ fn run_facts_mode(mode: FactsMode, root: &Path) -> Result<Value, String> {
         .map_err(|error| format!("{} facts mode emitted non-UTF-8 JSON: {error}", mode.name()))?;
     serde_json::from_str(&stdout)
         .map_err(|error| format!("{} facts mode emitted invalid JSON: {error}", mode.name()))
+}
+
+fn run_cli(arguments: &[OsString]) -> Result<Output, String> {
+    Command::new(env!("CARGO_BIN_EXE_mathjax_consumer_facts"))
+        .args(arguments)
+        .output()
+        .map_err(|error| format!("mathjax_consumer_facts did not spawn: {error}"))
+}
+
+fn assert_exit_one(output: &Output, label: &str) -> Result<(), String> {
+    if output.status.code() != Some(1) {
+        return Err(format!("{label} status was {:?}", output.status.code()));
+    }
+    Ok(())
+}
+
+fn assert_rejected_report(report: &Value) -> Result<(), String> {
+    if report["schema"] != "kdr-linter/mathjax-static-facts/v1" || report["status"] != "rejected" {
+        return Err(format!("invalid-root report header differed: {report}"));
+    }
+    let errors = report["errors"]
+        .as_array()
+        .ok_or_else(|| "invalid-root report errors missing".to_owned())?;
+    if errors.is_empty()
+        || errors
+            .iter()
+            .any(|error| error.as_str().map(|value| value.is_empty()).unwrap_or(true))
+    {
+        return Err(format!("invalid-root report errors differed: {report}"));
+    }
+    Ok(())
 }
 
 fn assert_fact_provenance(mode: FactsMode, report: &Value) -> Result<&[Value], String> {
@@ -190,6 +222,60 @@ fn mathjax_consumer_facts_cli_verifies_real_workspace_modes() -> Result<(), Stri
         let report = run_facts_mode(mode, &root)?;
         assert_common_report(mode, &report, &root)?;
         assert_mode_contract(mode, &report)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn mathjax_consumer_facts_cli_without_arguments_prints_usage_and_exits_one() -> Result<(), String> {
+    let output = run_cli(&[])?;
+    assert_exit_one(&output, "usage invocation")?;
+    if !output.stdout.is_empty() {
+        return Err("usage invocation unexpectedly wrote stdout".to_owned());
+    }
+    let stderr = String::from_utf8(output.stderr)
+        .map_err(|error| format!("usage stderr was not UTF-8: {error}"))?;
+    if !stderr.contains("usage: mathjax_consumer_facts <repo-root>") {
+        return Err(format!("usage stderr did not contain usage text: {stderr}"));
+    }
+    Ok(())
+}
+
+fn held_nonexistent_root() -> Result<(TempDir, PathBuf), String> {
+    let directory =
+        tempfile::tempdir().map_err(|error| format!("temp root did not create: {error}"))?;
+    let root = directory.path().join("missing-repository-root");
+    Ok((directory, root))
+}
+
+#[test]
+fn mathjax_consumer_facts_cli_rejects_a_nonexistent_absolute_root() -> Result<(), String> {
+    let (_directory, root) = held_nonexistent_root()?;
+    let output = run_cli(&[root.as_os_str().to_owned()])?;
+    assert_exit_one(&output, "invalid-root invocation")?;
+    let report: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("invalid-root stdout was not JSON: {error}"))?;
+    assert_rejected_report(&report)?;
+    if output.stderr.is_empty() {
+        return Err("invalid-root stderr was empty".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn mathjax_consumer_facts_cli_rejects_a_nonexistent_macho_noso_manifest() -> Result<(), String> {
+    let (_directory, manifest) = held_nonexistent_root()?;
+    let arguments = vec![
+        OsString::from("--macho-noso"),
+        manifest.as_os_str().to_owned(),
+    ];
+    let output = run_cli(&arguments)?;
+    assert_exit_one(&output, "macho-noso invocation")?;
+    if !output.stdout.is_empty() {
+        return Err("macho-noso rejection unexpectedly wrote stdout".to_owned());
+    }
+    if output.stderr.is_empty() {
+        return Err("macho-noso stderr was empty".to_owned());
     }
     Ok(())
 }

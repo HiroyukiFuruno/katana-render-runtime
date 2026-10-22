@@ -1,4 +1,4 @@
-use super::super::test_support::{TempDirectory, read_response};
+use super::super::test_support::{PROBE_TEST, TempDirectory, read_response, run_probe_child};
 use super::super::{
     CaptureRequest, CaptureResult, ProbeRequest, ProbeResponse, REQUEST_SCHEMA, RESPONSE_SCHEMA,
 };
@@ -103,5 +103,30 @@ fn response_reader_reports_missing_and_malformed_files() -> Result<(), String> {
             .err()
             .is_some_and(|error| error.starts_with("parse response:"))
     );
+    Ok(())
+}
+
+#[test]
+fn probe_child_rejects_reused_response_path() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let response_path = temp.path().join("response.json");
+    fs::write(&response_path, b"existing").map_err(|error| error.to_string())?;
+    let error = run_probe_child(&request(), &response_path, PROBE_TEST)
+        .err()
+        .ok_or("reused response path must be rejected")?;
+    assert_eq!(error, "probe request and response paths must be fresh");
+    Ok(())
+}
+
+#[test]
+fn probe_child_propagates_real_request_validation_failure() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let response_path = temp.path().join("invalid-response.json");
+    let mut invalid = request();
+    invalid.captures[0].condition_id.clear();
+    let error = run_probe_child(&invalid, &response_path, PROBE_TEST)
+        .err()
+        .ok_or("invalid request must fail in the ignored probe child")?;
+    assert!(error.starts_with("ignored font probe failed with status Some("));
     Ok(())
 }
