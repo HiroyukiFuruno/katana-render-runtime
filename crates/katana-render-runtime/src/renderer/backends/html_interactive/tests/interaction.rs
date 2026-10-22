@@ -34,6 +34,8 @@ main { margin-left: 80px; }
 <main><div class=spacer></div><section id=s15 class=target>Target</section><div class=tail></div></main>"#;
 const ANCHOR_HASH_DOCUMENT: &str = "<a id=relative href='guide#part%20one'>Relative</a><a id=absolute href='https://other.test/page#target'>Absolute</a><a id=empty href=''>Empty</a><a id=missing>Missing</a><area id=area href='#map'><div id=plain href='#ignored'></div>";
 const ANCHOR_HASH_SCRIPT: &str = "({relative:document.querySelector('#relative').hash,absolute:document.querySelector('#absolute').hash,empty:document.querySelector('#empty').hash,missing:document.querySelector('#missing').hash,area:document.querySelector('#area').hash,plainType:typeof document.querySelector('#plain').hash})";
+const NAVIGATION_DOCUMENT: &str =
+    include_str!("../../../../../../../tests/fixtures/html/aspects/navigation.html");
 
 #[test]
 fn button_click_runs_v8_handler_and_repaints() -> TestResult {
@@ -627,6 +629,28 @@ fn anchor_hash_resolves_href_against_the_current_document_location() -> TestResu
         .observe_feature_state("document.querySelector('#empty').hash")
         .map_err(to_string)?;
     assert_eq!(after_location_change, "");
+    Ok(())
+}
+
+#[test]
+fn navigation_all_toc_links_composes_anchor_hash_and_target_lookup() -> TestResult {
+    let mut session = start(NAVIGATION_DOCUMENT)?;
+    let state = session
+        .runtime
+        .observe_feature_state(
+            "({links:[...document.querySelectorAll('.toc-item[href^=\"#\"]')].map(a=>({hash:a.hash,text:a.textContent,target:document.querySelector(a.hash)?.textContent||\"\"}))})",
+        )
+        .map_err(to_string)?;
+    assert_eq!(
+        state,
+        serde_json::json!({
+            "links": [
+                {"hash":"#a","text":"第一節","target":"第一節上位項目の架空本文。"},
+                {"hash":"#b","text":"第二節","target":"第二節中間位置の架空本文。"},
+                {"hash":"#c","text":"第三節","target":"第三節最下部の架空本文。"}
+            ]
+        })
+    );
     Ok(())
 }
 
