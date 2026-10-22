@@ -14,6 +14,12 @@
 
 ## 現在の状態（2026-10-22）
 
+- [/] R999 輸送binaryの実行権限と比較前処理：bundleのcopyfile後に元fileのmodeを保持し、probeのX_OKを高コスト工程前に検査する。native PNG形状比較の専用出力root作成漏れも修正した。foundation・producer・verifier・managed比較unitが全actual0、source前後一致、76.344秒。mainが全7観測のraw SHAとgroup/FD閉鎖を確認した（`tmp/quality/current-transport-preflight-static-r999/main-physical-review.json`）。117件・性能・公開合格とは区別する。
+
+- [ ] R997 Mermaid現行比較の残差：HEAD b938ec87で英語59件のnative SVG/raster採取と厳格比較まで到達し、43件が99以上、最低83.6451だった。C4の実native PNG形状工程で専用root不在のENOENTとなり、日本語58件は未実行。元失敗と全rawを保持する（`tmp/quality/current-managed117-owner-r997/final.json`、`current-managed-full117-r997/en/comparison/scores.json`）。Timelineのtitle属性4exに対しnative viewBox上端が-45、独立rawは-61であり、製品の相対font単位解決を調査中。基準画像やcanvasを補正して通過させない。
+
+- [/] R995 管理外の容量整理：退避済みの旧Cargo targetだけを構成・保護ref・実行中processと照合し、対象2ディレクトリを削除した。空き15,056,674,816Bへ回復し、source clean、固定閾値は不変（`tmp/quality/retired-trash-target-cleanup-r995/result.json`）。再生成可能なtargetをtrashへ移すだけでは容量回復にならない。今後もソース・私有資料・証跡と区別し、未使用の旧生成物は既存整理手順で実際に容量を回収する。
+
 - [/] R985 凍結build artifactの読取是正：Cargo JSONのexecutableはcanonical path・所定namespace・filenames対応を構造検証し、元targetの生存確認を輸送readerから外した。build直後のproducerは既存freeze処理による実file・symlink拒否・identity安定性・SHA照合を維持する。foundation（厳格型・重複検査を含む）・producer56件・verifier84件が全actual0、source前後一致、55.555秒。全6観測のraw SHA・group/FD閉鎖をmain確認した（`tmp/quality/current-proof-cache-and-clean-static-r985/main-physical-review.json`）。新unitは欠落したlive binaryのfreeze拒否と凍結輸送SHA/改変拒否の部分回帰であり、完全proof fixtureではない。fresh current-source build proofを生成し、元target整理後の実reader・117比較で全経路を再確認する。製品117・HTML総合・性能・coverage・公開は未完了のまま。
 
 - [/] R974/R972/R973 現行ソースの候補build証明とHTML画像：HEAD `f5c10010` の独立candidate build proofは厳格readerまでactual0、source前後一致、35.284秒。実行時44保護refとbindingの不一致は、固定state・容量上限を変えず、同じ44refをpinする新bindingで是正した。続くChrome/KRR全84条件の採取はactual0・195.893秒、一括検証はactual0・33.121秒、全84画像スコア90以上・最低91.50584。ただし可変font instanceを証明できない12条件が残り、font equivalenceはnot-established、総合acceptanceはfalse、性能はnot-performedである。画像成功をHTML総合・性能・公開合格に転用しない。証跡は `tmp/quality/current-independent-candidate-build-r974/final.json`、`current-clean-source-html84-captures-r972/final.json`、`current-html84-score-validation-r973/final.json`。後続の承認済みrelease profile整理で元target内バイナリは失われており、R972/R973は採取時点の証跡として保持する。

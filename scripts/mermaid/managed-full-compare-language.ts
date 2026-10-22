@@ -316,10 +316,15 @@ export async function runManagedLanguage(
       officialSvgPath: path.join(input.officialPairDirectory, `${slug}.svg`),
       katanaSvgPath: path.join(svgDirectory, `${slug}.svg`),
     }));
+    const nativeProjectionDirectory = path.join(
+      comparisonDirectory,
+      "native-frame-paint-projection",
+    );
+    createEmptyDirectory(nativeProjectionDirectory);
     const nativeComparison = await scoreNativeFramePaintProjection(
       nativePairs,
       nativeEvidenceValue,
-      path.join(comparisonDirectory, "native-frame-paint-projection"),
+      nativeProjectionDirectory,
       "dark",
       new MagickOps(path.join(comparisonDirectory, "native-frame-paint-magick"), null, "dark"),
     );

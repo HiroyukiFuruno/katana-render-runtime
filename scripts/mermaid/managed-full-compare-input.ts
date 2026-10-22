@@ -113,6 +113,10 @@ export function validatePinnedInputs(request: ManagedFullCompareRequest): Pinned
   const filePins = allFilePins(request);
   const files = new Map<string, RasterFileIdentity>();
   for (const pin of filePins.values()) files.set(pin.path, assertFilePin(pin));
+  for (const language of ["en", "ja"] as const) {
+    const probe = request.languages[language].nativeFrameCapture?.probeBinary;
+    if (probe !== undefined) assertExecutableProbeBinary(probe.path, language);
+  }
   const ignoreFile = path.join(request.repositoryRoot, ".gitignore");
   const ignoreIdentity = assertFilePin({ path: ignoreFile, sha256: fileSha256(ignoreFile) });
   if (files.has(ignoreFile)) throw new Error("Repository ignore file conflicts with an input pin");
@@ -289,6 +293,14 @@ function assertFilePin(pin: { path: string; sha256: string }): RasterFileIdentit
   if (identity.sha256 !== pin.sha256)
     throw new Error(`Pinned input changed while reading: ${pin.path}`);
   return identity;
+}
+
+function assertExecutableProbeBinary(filePath: string, language: LanguageName): void {
+  try {
+    fs.accessSync(filePath, fs.constants.X_OK);
+  } catch {
+    throw new Error(`${language} native frame probe binary is not executable: ${filePath}`);
+  }
 }
 
 export function assertManagedOutputRoot(outputRoot: string, repositoryRoot: string): void {

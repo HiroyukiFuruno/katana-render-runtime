@@ -7,6 +7,7 @@ import json
 import errno
 import io
 import os
+import stat
 import platform
 import shutil
 import sys
@@ -135,6 +136,31 @@ class TransportBundleUnitTests(unittest.TestCase):
             self.assertEqual(len(gate._array(manifest.manifest["files"], "bundle files")), 1)
             self.assertEqual(relative_paths[str(source)], "payload/0/source.json")
             self.assertEqual(manifest.file(pin).read_text(), "{}")
+
+    def test_shared_bundle_writer_preserves_executable_and_private_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            executable = root / "candidate"
+            private = root / "private.raw"
+            executable.write_bytes(b"candidate bytes")
+            private.write_bytes(b"private bytes")
+            executable.chmod(0o555)
+            private.chmod(0o600)
+            pins = [
+                {"path": str(path), "sha256": gate.sha256(path)}
+                for path in (executable, private)
+            ]
+            bundle = root / "bundle"
+            relative_paths = producer.write_transport_bundle(bundle, "a" * 40, pins, [])
+            transported_executable = bundle / relative_paths[str(executable)]
+            transported_private = bundle / relative_paths[str(private)]
+            self.assertEqual(stat.S_IMODE(transported_executable.stat().st_mode), 0o555)
+            self.assertEqual(stat.S_IMODE(transported_private.stat().st_mode), 0o600)
+            if os.name != "nt":
+                self.assertTrue(os.access(transported_executable, os.X_OK))
+                self.assertFalse(os.access(transported_private, os.X_OK))
+            self.assertEqual(gate.sha256(transported_executable), pins[0]["sha256"])
+            self.assertEqual(gate.sha256(transported_private), pins[1]["sha256"])
 
 
 class RuntimeSyncPreflightTest(unittest.TestCase):

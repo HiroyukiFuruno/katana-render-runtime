@@ -6,6 +6,7 @@ import {
   assertManagedOutputRoot,
   captureCanonicalFixtureSources,
   parseManagedFullCompareRequest,
+  validatePinnedInputs,
 } from "./managed-full-compare-input";
 import { candidateFixtureArgumentPairs } from "./managed-full-compare-language";
 import {
@@ -175,6 +176,27 @@ test("managed full input pins canonical fixture bytes and ignored output roots",
     ).toThrow();
   } finally {
     fs.rmSync(tempParent, { recursive: true, force: true });
+  }
+});
+
+test("managed probe preflight follows Node X_OK semantics before expensive work", () => {
+  const root = path.resolve(process.cwd());
+  const parent = fs.mkdtempSync(path.join(root, "tmp", "managed-probe-executable-"));
+  try {
+    const request = executableProbeRequest(root, parent);
+    if (process.platform === "win32") {
+      expect(() => validatePinnedInputs(request)).not.toThrow();
+    } else {
+      expect(() => validatePinnedInputs(request)).toThrow("native frame probe binary is not executable");
+    }
+    for (const language of ["en", "ja"] as const) {
+      const probe = request.languages[language].nativeFrameCapture?.probeBinary;
+      if (probe === undefined) throw new Error(`${language} probe fixture is missing`);
+      fs.chmodSync(probe.path, 0o755);
+    }
+    expect(() => validatePinnedInputs(request)).not.toThrow();
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 
@@ -747,4 +769,57 @@ function validRequest() {
     },
     languages: { en: language("en"), ja: language("ja") },
   };
+}
+
+function executableProbeRequest(repositoryRoot: string, parent: string) {
+  const pin = (name: string) => pinnedFile(parent, name),
+    language = (code: "en" | "ja") => executableProbeLanguage(repositoryRoot, parent, code);
+  return parseManagedFullCompareRequest({
+    schema: "krr-mermaid-managed-full-run-request-v1",
+    repositoryRoot,
+    outputRoot: path.join(parent, "run"),
+    sourceManifest: pin("source.json"),
+    protectedRegistry: pin("protected.json"),
+    binary: path.join(repositoryRoot, "target/debug/krr"),
+    runtime: pin("runtime.js"),
+    tools: {
+      cargo: pin("tools/cargo"),
+      rustc: pin("tools/rustc"),
+      python: pin("tools/python"),
+      bun: pin("tools/bun"),
+      mermaidJs: pin("tools/mermaid.js"),
+      mermaidZenUmlJs: pin("tools/zenuml.js"),
+    },
+    languages: { en: language("en"), ja: language("ja") },
+  });
+}
+
+function executableProbeLanguage(repositoryRoot: string, parent: string, code: "en" | "ja") {
+  const pairDirectory = path.join(parent, `${code}-pairs`);
+  fs.mkdirSync(pairDirectory);
+  return {
+    fixtures: path.join(repositoryRoot, "tests/fixtures/mermaid", code),
+    officialTemplate: pinnedFile(parent, `${code}/official-template.json`),
+    officialReceipt: pinnedFile(parent, `${code}/official-receipt.json`),
+    officialProcessEvidence: pinnedFile(parent, `${code}/official-process.json`),
+    officialPairDirectory: pairDirectory,
+    nativeFrameCapture: {
+      probeBinary: pinnedFile(parent, `${code}/probe`, 0o644),
+      config: pinnedFile(parent, `${code}/config.json`),
+      fontContext: pinnedFile(parent, `${code}/font-context.json`),
+      buildProof: {
+        bundleManifest: pinnedFile(parent, `${code}/bundle/bundle.json`),
+        artifactPath: "candidate/bin",
+        artifactSha256: "b".repeat(64),
+      },
+    },
+  };
+}
+
+function pinnedFile(parent: string, name: string, mode = 0o600) {
+  const filePath = path.join(parent, name);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, name, { flag: "wx", mode });
+  fs.chmodSync(filePath, mode);
+  return { path: filePath, sha256: fileSha256(filePath) };
 }

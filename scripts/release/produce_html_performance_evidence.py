@@ -500,6 +500,7 @@ def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
         destination = bundle / relative
         destination.parent.mkdir(parents=True)
         shutil.copyfile(original, destination)
+        os.chmod(destination, stat.S_IMODE(original.stat().st_mode))
         transport_files.append({"originalPath": ref["path"], "relativePath": relative,
                                 "sha256": ref["sha256"]})
         relative_paths[ref["path"]] = relative
