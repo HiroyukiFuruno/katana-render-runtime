@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from local_review_lock import review_lock
-from run_locked_command import run_locked_command
+from run_locked_command import _cargo_clean_target, run_locked_command
 
 
 class LockedCommandTest(unittest.TestCase):
@@ -21,7 +22,7 @@ class LockedCommandTest(unittest.TestCase):
             f"#!{sys.executable}\n"
             "import sys\n"
             "from pathlib import Path\n"
-            "if sys.argv[1:] != ['proxy', 'cargo', 'clean']:\n"
+            "if sys.argv[1:3] != ['proxy', 'cargo'] or sys.argv[3] != 'clean':\n"
             "    raise SystemExit(99)\n"
             f"Path({str(marker)!r}).write_text('ran', encoding='utf-8')\n",
             encoding="utf-8",
@@ -36,6 +37,38 @@ class LockedCommandTest(unittest.TestCase):
             producer_lock,
             root,
         )
+
+    def _run_clean_with_refs(
+        self,
+        root: Path,
+        executable: str,
+        options: list[str],
+        producer_lock: Path,
+        protected_refs: list[Path],
+        path: str | None = None,
+    ) -> int:
+        environment = {"CARGO_TARGET_DIR": str(root / "target")}
+        if protected_refs:
+            environment["CARGO_CAPACITY_PROTECTED_REFS"] = json.dumps(
+                [str(reference) for reference in protected_refs]
+            )
+        if path is not None:
+            environment["PATH"] = path
+        with patch.dict(os.environ, environment):
+            return run_locked_command(
+                [
+                    "--protect-root-producer",
+                    "--",
+                    executable,
+                    "proxy",
+                    "cargo",
+                    "clean",
+                    *options,
+                ],
+                root / "outer/review.lock",
+                producer_lock,
+                root,
+            )
 
     def test_protected_clean_without_references_preserves_relative_target_dir(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -87,6 +120,109 @@ class LockedCommandTest(unittest.TestCase):
             self.assertEqual(status, 0)
             self.assertTrue(marker.exists())
             self.assertEqual(external.read_text(encoding="utf-8"), "binary")
+
+    def test_profile_dev_clean_rejects_reserved_debug_reference_before_child(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            reserved = target / "debug/krr"
+            reserved.parent.mkdir(parents=True)
+            reserved.write_text("binary", encoding="utf-8")
+            marker = root / "child-ran"
+            rtk = self._fake_rtk(root, marker)
+            status = self._run_clean_with_refs(
+                root,
+                str(rtk),
+                ["--profile", "dev"],
+                root / "producer/lock",
+                [reserved],
+                str(rtk.parent),
+            )
+            self.assertEqual(status, 1)
+            self.assertFalse(marker.exists())
+            self.assertEqual(reserved.read_text(encoding="utf-8"), "binary")
+
+    def test_profile_dev_exact_selectors_narrow_only_the_debug_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.mkdir()
+            alternate = root / "alternate-target"
+            with patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target)}):
+                for options in (["--profile", "dev"], ["--profile=dev"]):
+                    command = ["--", "rtk", "proxy", "cargo", "clean", *options]
+                    self.assertEqual(
+                        _cargo_clean_target(command, root), (target / "debug").resolve()
+                    )
+                command = [
+                    "--",
+                    "rtk",
+                    "proxy",
+                    "cargo",
+                    "clean",
+                    "--target-dir",
+                    str(alternate),
+                    "--profile",
+                    "dev",
+                ]
+                self.assertEqual(
+                    _cargo_clean_target(command, root), (alternate / "debug").resolve()
+                )
+            linked_debug = target / "debug"
+            linked_debug.symlink_to(root / "external-debug", target_is_directory=True)
+            with patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target)}):
+                command = ["--", "rtk", "proxy", "cargo", "clean", "--profile", "dev"]
+                self.assertEqual(_cargo_clean_target(command, root), target.resolve())
+
+    def test_real_profile_dev_clean_preserves_reserved_coverage_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "Cargo.toml").write_text(
+                '[package]\nname = "clean-scope-probe"\nversion = "0.1.0"\nedition = "2024"\n',
+                encoding="utf-8",
+            )
+            (root / "src/main.rs").write_text("fn main() {}\n", encoding="utf-8")
+            target = root / "target"
+            debug_marker = target / "debug/probe"
+            coverage_marker = target / "llvm-cov-target/krr-coverage/probe"
+            debug_marker.parent.mkdir(parents=True)
+            coverage_marker.parent.mkdir(parents=True)
+            debug_marker.write_text("debug", encoding="utf-8")
+            coverage_marker.write_text("coverage", encoding="utf-8")
+            rtk = shutil.which("rtk")
+            if rtk is None:
+                self.fail("rtk executable missing for the real Cargo clean regression")
+            status = self._run_clean_with_refs(
+                root,
+                rtk,
+                ["--profile", "dev"],
+                root / "producer/lock",
+                [coverage_marker],
+            )
+            self.assertEqual(status, 0)
+            self.assertFalse(debug_marker.exists())
+            self.assertEqual(coverage_marker.read_text(encoding="utf-8"), "coverage")
+
+    def test_profile_dev_unrecognized_selectors_keep_whole_target_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            options = [
+                ["--profile", "dev", "--doc"],
+                ["--profile=dev", "--target", "aarch64-apple-darwin"],
+                ["--profile", "dev", "-p", "probe"],
+                ["--profile", "release"],
+            ]
+            with patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target)}):
+                for extra in options:
+                    with self.subTest(extra=extra):
+                        command = ["--", "rtk", "proxy", "cargo", "clean", *extra]
+                        self.assertEqual(
+                            _cargo_clean_target(command, root), target.resolve()
+                        )
 
     def test_lock_is_held_for_child_and_released_after_success(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

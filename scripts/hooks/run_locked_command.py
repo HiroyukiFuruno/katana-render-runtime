@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from contextlib import ExitStack
 import os
-from pathlib import Path
 import subprocess
 import sys
+from contextlib import ExitStack
+from pathlib import Path
 
 from local_review_lock import review_lock
-
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCK_PATH = ROOT / ".moon/cache/krr-terminal-report.lock"
@@ -35,7 +34,25 @@ def _cargo_clean_target(command_arguments: list[str], root: Path) -> Path | None
             target = Path(argument.partition("=")[2])
     if not target.is_absolute():
         target = root / target
+    target = target.resolve()
+    if _is_dev_profile_clean(words[2:]) and not (target / "debug").is_symlink():
+        target /= "debug"
     return target.resolve()
+
+
+def _is_dev_profile_clean(options: list[str]) -> bool:
+    selectors: list[str] = []
+    index = 0
+    while index < len(options):
+        option = options[index]
+        if option == "--target-dir":
+            index += 2
+        elif option.startswith("--target-dir="):
+            index += 1
+        else:
+            selectors.append(option)
+            index += 1
+    return selectors in (["--profile", "dev"], ["--profile=dev"])
 
 
 def _protected_clean_reference(command_arguments: list[str], root: Path) -> Path | None:
