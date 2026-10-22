@@ -13,6 +13,7 @@ globalThis.__katanaMeasureText = (...args) => {
   }
   return width;
 };
+
 globalThis.__katanaMeasureSvgTextMetrics = (...args) => {
   globalThis.__krrBridgeCalls += 1;
   const metrics = svgBridge(...args);

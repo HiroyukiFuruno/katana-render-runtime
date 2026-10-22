@@ -673,6 +673,7 @@ export function officialStrictUnusedContext(
 const nativeWidthBase = "crates/katana-render-runtime/src/markdown/mermaid_renderer/";
 const nativeWidthHelper = `${nativeWidthBase}js_runtime_native_width_helpers.rs`;
 const nativeWidthTrace = `${nativeWidthBase}js_runtime_native_width_trace.js`;
+const nativeWidthBBoxTrace = `${nativeWidthBase}js_runtime_native_width_bbox_trace.js`;
 const nativeWidthV8Script = "crates/katana-render-runtime/src/v8_script.rs";
 const nativeWidthLibrary = "crates/katana-render-runtime/src/lib.rs";
 const nativeWidthDiagramRuntime = "crates/katana-render-runtime/src/markdown/diagram_js_runtime.rs";
@@ -684,10 +685,11 @@ const nativeWidthV8Import = "use crate::v8_script::ScriptCompiler;";
 const nativeWidthV8CompileCall = "v8::Script::compile(scope, source, Some(&origin))";
 const nativeWidthV8CompilerCall = "ScriptCompiler::compile_with_origin(scope, source, origin_name)";
 const nativeWidthLegacyRoute = {
-  [nativeWidthHelper]: "3564e66c024a3540569e41c495d07bd49de2f72363b085277a61af54ab3622fc",
+  [nativeWidthHelper]: "fe94f65de29ced98302d2174d7fb212a6526074601fc0019f8894c5b9e49b85d",
   [`${nativeWidthBase}js_runtime_native_width_tests.rs`]:
-    "64cfc2be0e4369098cde79d1faad8e8539fc5681945bf15fc6ed4d4d267603c0",
-  [nativeWidthTrace]: "e54fb01b584a80837685f95ce8e467c399985c0e20ac153aa4e5526f590c4628",
+    "544cc51402f5b518ef02b722cb46ea11d258c7449b9271abf2e31402ec2e6e81",
+  [nativeWidthTrace]: "7f16ff359f8964f894e34a1d1cff49964eb06c3607c40fd6c4231a244e01bc8b",
+  [nativeWidthBBoxTrace]: "a1c72bb7a16e809b52fbd98a79a079749e4ceb1154ada17781b1007ede8a64cf",
 } as const;
 const nativeWidthRoute = [
   ...new Set([
@@ -758,7 +760,7 @@ export function inspectNativeWidthResultLiteral(sourcePath: string, code: string
     end < start ||
     /["\\\r\n]/u.test(literal) ||
     literal !==
-      "JSON.stringify({ calls: globalThis.__krrActualWidths, probes: nativeWidthProbeResult() })"
+      "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, probes: nativeWidthProbeResult() })"
   )
     throw new Error("unknown native width result literal shape");
   parseSync(literal, { syntax: "ecmascript" });
@@ -799,8 +801,9 @@ export function nativeWidthUnusedContext(
     return { sourcePath, sourceSha256: source.sha256 };
   });
   const helper = raw.get(nativeWidthHelper),
-    trace = raw.get(nativeWidthTrace);
-  if (!helper || !trace) throw new Error("missing native width physical input");
+    trace = raw.get(nativeWidthTrace),
+    bboxTrace = raw.get(nativeWidthBBoxTrace);
+  if (!helper || !trace || !bboxTrace) throw new Error("missing native width physical input");
   const programs: BrowserUnusedProgram[] = [
     {
       sourcePath: nativeWidthTrace,
@@ -808,6 +811,17 @@ export function nativeWidthUnusedContext(
       role: "native-test-trace",
       start: 0,
       end: trace.code.length,
+      mode: "rust-native-test",
+      removals: [],
+      data: null,
+      consumerRoute: route,
+    },
+    {
+      sourcePath: nativeWidthBBoxTrace,
+      sourceSha256: bboxTrace.sha256,
+      role: "native-test-trace",
+      start: 0,
+      end: bboxTrace.code.length,
       mode: "rust-native-test",
       removals: [],
       data: null,

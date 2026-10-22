@@ -54,6 +54,7 @@ import {
 import { NATIVE_WIDTH_HASH_INPUT_PATHS } from "./runtime-unused-native-width-hash";
 import {
   BrowserUnusedOrigin,
+  type BrowserUnusedProgram,
   inspectSharedSvgCaptureCallback,
   inspectSharedSvgCaptureCallers,
   inspectSharedSvgCaptureProgram,
@@ -969,12 +970,14 @@ test("actual imported PageHandle receiver keeps surviving callback AST identitie
 const nativeBase = "crates/katana-render-runtime/src/markdown/mermaid_renderer/";
 const nativeHelper = `${nativeBase}js_runtime_native_width_helpers.rs`;
 const nativeTrace = `${nativeBase}js_runtime_native_width_trace.js`;
+const nativeBBoxTrace = `${nativeBase}js_runtime_native_width_bbox_trace.js`;
 const nativeScripts = `${nativeBase}js_runtime_scripts.rs`;
 const nativeScriptTests = `${nativeBase}js_runtime_scripts_tests.rs`;
 const nativeRoute = [
   nativeHelper,
   `${nativeBase}js_runtime_native_width_tests.rs`,
   nativeTrace,
+  nativeBBoxTrace,
   ...NATIVE_WIDTH_HASH_INPUT_PATHS,
   "crates/katana-render-runtime/src/markdown/diagram_js_runtime.rs",
   "crates/katana-render-runtime/src/lib.rs",
@@ -1024,14 +1027,15 @@ test("native width projection consumes actual trace and Rust result literal with
   const { nativeRoot, nativeRaw, nativeContext, nativeOrigin } = nativeWidthFixture();
   expect(nativeOrigin.programs.map((program) => program.role)).toEqual([
     "native-test-trace",
+    "native-test-trace",
     "rust-result-literal",
   ]);
   expect(nativeContext.codeBytesEqual).toBe(false);
-  const program = nativeOrigin.programs[1];
+  const program = nativeOrigin.programs.find((entry) => entry.sourcePath === nativeHelper);
   const helper = nativeRaw.get(nativeHelper);
   if (!program || !helper) throw new Error("missing Rust result metadata");
   expect(helper.code.slice(program.start, program.end)).toBe(
-    "JSON.stringify({ calls: globalThis.__krrActualWidths, probes: nativeWidthProbeResult() })",
+    "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, probes: nativeWidthProbeResult() })",
   );
   expect(program.consumerRoute?.map(({ sourcePath }) => sourcePath)).toEqual(nativeRoute);
   expect(
@@ -1049,6 +1053,47 @@ test("native width projection consumes actual trace and Rust result literal with
   expect(metadata.externalProgramsUnmapped).not.toContain("options.mermaidJs");
   expect("executionVerified" in metadata && metadata.executionVerified).toBe(false);
   verifyUnusedSources(nativeRoot, nativeRaw);
+});
+
+const nativeWidthProgramMutations: readonly [
+  string,
+  (programs: readonly BrowserUnusedProgram[]) => BrowserUnusedProgram[],
+][] = [
+  ["missing bbox trace", (programs) => programs.filter((_, index) => index !== 1)],
+  [
+    "wrong bbox role",
+    (programs) =>
+      programs.map((program, index) =>
+        index === 1 ? { ...program, role: "rust-result-literal" } : program,
+      ),
+  ],
+  [
+    "unexpected extra program",
+    (programs) => {
+      const first = programs[0];
+      if (!first) throw new Error("missing native trace program");
+      return [...programs, first];
+    },
+  ],
+  [
+    "changed bbox source path",
+    (programs) =>
+      programs.map((program, index) =>
+        index === 1 ? { ...program, sourcePath: nativeTrace } : program,
+      ),
+  ],
+  [
+    "changed bbox consumer route",
+    (programs) =>
+      programs.map((program, index) => (index === 1 ? { ...program, consumerRoute: [] } : program)),
+  ],
+];
+
+test.each(nativeWidthProgramMutations)("native width rejects %s metadata", (_label, mutate) => {
+  const { nativeOrigin } = nativeWidthFixture();
+  expect(() =>
+    unusedProgramMetadata("rust-native-width-test-result", mutate(nativeOrigin.programs)),
+  ).toThrow("unknown unused program realm");
 });
 
 test("native width keeps live source binding but ignores unrelated script test edits", () => {

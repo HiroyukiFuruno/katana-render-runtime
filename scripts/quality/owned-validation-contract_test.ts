@@ -2706,6 +2706,7 @@ test.each(["extra-owned", "DOM"] as const)(
 
 const nativeWidthTraceDirectory = "crates/katana-render-runtime/src/markdown/mermaid_renderer";
 const nativeWidthTracePath = `${nativeWidthTraceDirectory}/js_runtime_native_width_trace.js`;
+const nativeWidthBBoxTracePath = `${nativeWidthTraceDirectory}/js_runtime_native_width_bbox_trace.js`;
 const nativeWidthHostPath = `${nativeWidthTraceDirectory}/js_runtime_native_width_trace_host.d.ts`;
 const nativeWidthProfilePath = "scripts/quality/tsconfig-owned-native-width-trace.json";
 function nativeWidthTraceFixture(): string {
@@ -2713,6 +2714,7 @@ function nativeWidthTraceFixture(): string {
   const actual = path.resolve(import.meta.dir, "../..");
   for (const name of [
     nativeWidthTracePath,
+    nativeWidthBBoxTracePath,
     nativeWidthHostPath,
     `${nativeWidthTraceDirectory}/js_runtime.rs`,
     `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
@@ -2751,6 +2753,7 @@ test("native width isolated compiler rejects wrong bridge, node and DOM contract
     extends: path.join(actual, nativeWidthProfilePath),
     files: [
       path.join(actual, nativeWidthTracePath),
+      path.join(actual, nativeWidthBBoxTracePath),
       path.join(actual, nativeWidthHostPath),
       negative,
     ],
@@ -2791,11 +2794,15 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
-      sha256: "64cfc2be0e4369098cde79d1faad8e8539fc5681945bf15fc6ed4d4d267603c0",
+      sha256: "544cc51402f5b518ef02b722cb46ea11d258c7449b9271abf2e31402ec2e6e81",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_helpers.rs`,
-      sha256: "3564e66c024a3540569e41c495d07bd49de2f72363b085277a61af54ab3622fc",
+      sha256: "fe94f65de29ced98302d2174d7fb212a6526074601fc0019f8894c5b9e49b85d",
+    },
+    {
+      path: nativeWidthBBoxTracePath,
+      sha256: "a1c72bb7a16e809b52fbd98a79a079749e4ceb1154ada17781b1007ede8a64cf",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,
@@ -2803,6 +2810,7 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
   ]);
   expect(report.javascriptTypeCoverage.mandatoryPaths).toContain(nativeWidthTracePath);
+  expect(report.javascriptTypeCoverage.mandatoryPaths).toContain(nativeWidthBBoxTracePath);
   expect(report.javascriptTypeCoverage.deferredProductPaths).not.toContain(nativeWidthTracePath);
   expect(report.issues.filter((issue) => issue.code.startsWith("native-test-trace-"))).toEqual([]);
 });
@@ -2853,6 +2861,7 @@ test.each([
 
 test.each([
   nativeWidthTracePath,
+  nativeWidthBBoxTracePath,
   `${nativeWidthTraceDirectory}/js_runtime_native_width_helpers.rs`,
   `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,
 ])("Rust test trace rejects missing reviewed input: %s", (name) => {

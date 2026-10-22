@@ -85,6 +85,7 @@ const BROWSER_REFERENCE_CONSUMERS = {
 };
 const NATIVE_WIDTH_DIRECTORY = "crates/katana-render-runtime/src/markdown/mermaid_renderer";
 const NATIVE_WIDTH_TRACE = `${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_trace.js`;
+const NATIVE_WIDTH_BBOX_TRACE = `${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_bbox_trace.js`;
 const NATIVE_WIDTH_HOST = `${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_trace_host.d.ts`;
 const NATIVE_WIDTH_TYPE_PROFILE = "scripts/quality/tsconfig-owned-native-width-trace.json";
 // 更新には実cfg(test)→helper→include/result-scriptのcontextレビューが必要。
@@ -92,9 +93,10 @@ const NATIVE_WIDTH_TEST_CONSUMERS = {
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime.rs`]:
     "b3d10ef7896536ae924c2188b338bafeb3ff9642a3f557e5cf6ecec35a93291f",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`]:
-    "64cfc2be0e4369098cde79d1faad8e8539fc5681945bf15fc6ed4d4d267603c0",
+    "544cc51402f5b518ef02b722cb46ea11d258c7449b9271abf2e31402ec2e6e81",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_helpers.rs`]:
-    "3564e66c024a3540569e41c495d07bd49de2f72363b085277a61af54ab3622fc",
+    "fe94f65de29ced98302d2174d7fb212a6526074601fc0019f8894c5b9e49b85d",
+  [NATIVE_WIDTH_BBOX_TRACE]: "a1c72bb7a16e809b52fbd98a79a079749e4ceb1154ada17781b1007ede8a64cf",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_oracle_boundary_tests.rs`]:
     "a52369ca8ded04fe4043bfd79962266621efef8518bfb06ff19180ff5230dc92",
 };
@@ -803,7 +805,10 @@ function isolatedStrictJsProfile(
 }
 
 function nativeWidthTypeProfile(scope: TypeScope | undefined): boolean {
-  return isolatedStrictJsProfile(scope, new Set([NATIVE_WIDTH_TRACE, NATIVE_WIDTH_HOST]));
+  return isolatedStrictJsProfile(
+    scope,
+    new Set([NATIVE_WIDTH_TRACE, NATIVE_WIDTH_BBOX_TRACE, NATIVE_WIDTH_HOST]),
+  );
 }
 
 function nativeWidthTraceBinding(
@@ -1058,6 +1063,7 @@ function javascriptTypeScope(
     name === PARSER_BODY_OUTPUT ||
     name === MATHJAX_RUNTIME ||
     name === NATIVE_WIDTH_TRACE ||
+    name === NATIVE_WIDTH_BBOX_TRACE ||
     BROWSER_REFERENCE_HELPERS.has(name) ||
     NATIVE_TYPED_UTILITIES.has(name);
   if (mandatory) coverage.mandatoryPaths.push(name);

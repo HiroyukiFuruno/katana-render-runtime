@@ -9,14 +9,39 @@ interface NativeWidthTraceCall {
   width: number | undefined;
   metrics?: NativeWidthSvgMetrics;
 }
+interface NativeWidthTraceBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+interface NativeWidthTraceNodeSnapshot {
+  localName: string;
+  namespaceURI: string | null;
+  id: string | null;
+  className: string | null;
+  text: string;
+  childSvgWidths: Array<string | null>;
+}
+interface NativeWidthTraceBBoxObservation {
+  node: NativeWidthTraceNodeSnapshot;
+  parent: NativeWidthTraceNodeSnapshot | null;
+  bbox: NativeWidthTraceBox;
+}
 interface NativeWidthTraceNode {
   namespaceURI: string | null;
-  textContent: string;
+  localName: string;
+  id: string;
+  className: string;
+  textContent: string | null;
+  parentNode: NativeWidthTraceNode | null;
+  children: NativeWidthTraceNode[];
   style: {
     setProperty(name: unknown, value: unknown, priority?: unknown): undefined;
   };
+  getAttribute(name: string): string | null;
   appendChild(child: NativeWidthTraceNode): NativeWidthTraceNode;
-  getBBox(): { width: number };
+  getBBox(...args: unknown[]): NativeWidthTraceBox;
 }
 interface NativeWidthTraceDocument {
   documentElement: NativeWidthTraceNode;
@@ -28,6 +53,9 @@ declare var __katanaMeasureText: (...args: unknown[]) => number | undefined;
 declare var __katanaMeasureSvgTextMetrics: (...args: unknown[]) => NativeWidthSvgMetrics;
 declare var __katanaMermaidDiagramType: string | undefined;
 declare var __krrActualWidths: NativeWidthTraceCall[];
+declare var __krrActualBBoxes: NativeWidthTraceBBoxObservation[];
+declare var __krrActualBBoxTraceOverflow: boolean;
+declare var __krrActualBBoxTraceFailure: string | null;
 declare var __krrProbeWidths: NativeWidthTraceCall[];
 declare var __krrBridgeCalls: number;
 // traceが使う実KatanaNodeだけを投影し、標準Chrome DOMの契約は導入しない。

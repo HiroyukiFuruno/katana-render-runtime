@@ -3,11 +3,11 @@ use super::super::super::{
 };
 use crate::markdown::diagram_js_runtime::{DiagramRuntimeScript, DiagramV8Runtime};
 use crate::markdown::runtime_assets::RuntimeAsset;
-use crate::markdown::svg_rasterize::SvgRasterizeOps;
 use serde_json::Value;
 
 pub(super) struct MeasurementFixture {
     pub(super) calls: Vec<Value>,
+    pub(super) boxes: Vec<Value>,
     pub(super) probes: Value,
 }
 
@@ -22,19 +22,30 @@ pub(super) fn render_fixture(source: &str) -> Result<MeasurementFixture, String>
         "native-width-result.js",
         result_script().into(),
     ));
-    SvgRasterizeOps::with_html_font_render_scope(|| {
-        let output = DiagramV8Runtime::render(&scripts)?;
-        let result: Value = serde_json::from_str(&output).map_err(|error| error.to_string())?;
-        let calls = result
-            .get("calls")
-            .and_then(Value::as_array)
-            .cloned()
-            .ok_or("actual native width calls are missing")?;
-        let probes = result
-            .get("probes")
-            .cloned()
-            .ok_or("probe metadata missing")?;
-        Ok(MeasurementFixture { calls, probes })
+    let output = DiagramV8Runtime::render(&scripts)?;
+    decode_fixture(&output)
+}
+
+fn decode_fixture(output: &str) -> Result<MeasurementFixture, String> {
+    let result: Value = serde_json::from_str(output).map_err(|error| error.to_string())?;
+    let calls = result
+        .get("calls")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or("actual native width calls are missing")?;
+    let boxes = result
+        .get("boxes")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or("actual getBBox observations are missing")?;
+    let probes = result
+        .get("probes")
+        .cloned()
+        .ok_or("probe metadata missing")?;
+    Ok(MeasurementFixture {
+        calls,
+        boxes,
+        probes,
     })
 }
 
@@ -59,9 +70,16 @@ fn insert_trace(scripts: &mut Vec<DiagramRuntimeScript<'_>>) -> Result<(), Strin
             include_str!("js_runtime_native_width_trace.js"),
         ),
     );
+    scripts.insert(
+        index + 1,
+        DiagramRuntimeScript::borrowed(
+            "native-width-bbox-trace.js",
+            include_str!("js_runtime_native_width_bbox_trace.js"),
+        ),
+    );
     Ok(())
 }
 
 fn result_script() -> &'static str {
-    "JSON.stringify({ calls: globalThis.__krrActualWidths, probes: nativeWidthProbeResult() })"
+    "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, probes: nativeWidthProbeResult() })"
 }

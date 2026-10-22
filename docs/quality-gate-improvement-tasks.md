@@ -14,7 +14,13 @@
 
 ## 現在の状態（2026-10-23）
 
-- [ ] R1293の現行全rootはactual0、2,735件すべて成功・17skip、source前後一致。テスト本体137.618秒。coverageは60,839/61,629行（98.7181%）、未計測790行で100%・未計測0は未達。前回の7失敗を解消し、reportも正式producerで取得したが、完全品質・画像・性能・公開の合格にしない。原reportを`tmp/quality/current-root-coverage-r1293/root-snapshot.json`（SHA256 `55dc1d124cea867861e7f4e42f36b44d744693d66345e50f405e567372d8d802`）へ上書き拒否で保持した。
+- [ ] R1315は標準静的DAG（62.884秒）・同一Just環境host準備・関連Bun79件・日本語source保持7件・現行catalogに束縛したNative23件がすべてactual0。source前後SHAは`f1333349126daebae9ac12bafb5cda3328e706f76953b5e5ce52ea0f3221075f`で一致。Native本体3.592秒、binary SHAは`4b5ac08692996277d53b2cbafed0b6d562e46e53eff336828de9409f171fd77c`。局所回帰の成功で、全体ゲート・117図・性能・公開の成功ではない。R1309の全863件828成功・35失敗とR1310〜R1314の失敗は原runへ保持し、部分成功で上書きしない（`tmp/quality/ordered-static-native-r1315/run-summary.json`）。
+
+- [/] 日本語Architectureのplaceholder化と本番にないテスト専用font scopeを除去した。R1310の実生成は`KI000`/`KI001`を計測していたが、R1315は元の日本語をnative bridgeへ渡し、`SVGキャッシュ`のservice bbox幅107.921875が独立raw R1294と一致した。R1311の生成bundle更新漏れは既存`runtime-bundle-build`のR1312 actual0で同期した。観測器はservice/labelのみを記録し、64件上限を維持。型・mandatory所有登録と3-program realmの厳密判定・5負例もR1315で成功した。原本・正解画像・99下限は不変。正式117件と実PNGの採点は未完了（`tmp/quality/ordered-static-native-r1315/architecture_bbox_observation.json`）。
+
+- [ ] R1308の候補outline再描画診断はactual0。対応PNGがR1262監査とR1261正式生成で同一SHAであることを照合し、同一輪郭をChromeで描くとnativeとの差RMSEは0.00942517、独立rawとの差は0.0227865だった。これは描画差の切り分けだけで、正式スコア・Chromeの実フォント一致・性能改善の証明にはしない（実行証跡はR1309内）。
+
+- [ ] 直近完了した全rootのR1293はactual0、2,735件すべて成功・17skip、source前後一致。後続の変更は含まない。テスト本体137.618秒。coverageは60,839/61,629行（98.7181%）、未計測790行で100%・未計測0は未達。前回の7失敗を解消し、reportも正式producerで取得したが、完全品質・画像・性能・公開の合格にしない。原reportを`tmp/quality/current-root-coverage-r1293/root-snapshot.json`（SHA256 `55dc1d124cea867861e7f4e42f36b44d744693d66345e50f405e567372d8d802`）へ上書き拒否で保持した。
 
 - [ ] 可視テキスト回帰を専用子moduleへ分離し、fixture生成・実行・判定を共有した。R1291で整形・ASTが成功、R1292で標準Biome DAG（型・重複・資源・所有契約・host準備を含む）がactual0。新規ソースをstage前のR1291は所有契約がuntracked-sourceとして拒否した原失敗を保持し、Gitの検査対象へ登録後に再実行した。R1287〜R1290の長さ・magic number違反は除外や上限変更で回避していない。分割後の全root・coverageは次の実行で確認する。
 

@@ -17,12 +17,10 @@ pub(super) fn assert_bridge_widths_match_rust(calls: &[Value]) -> Result<(), Str
             .any(|call| call.get("kind").and_then(Value::as_str) == Some("svg")),
         "eligible SVG runs did not invoke the raw metric bridge: {calls:?}"
     );
-    SvgRasterizeOps::with_html_font_render_scope(|| {
-        for call in calls {
-            assert_call(call)?;
-        }
-        Ok(())
-    })
+    for call in calls {
+        assert_call(call)?;
+    }
+    Ok(())
 }
 
 fn assert_call(call: &Value) -> Result<(), String> {

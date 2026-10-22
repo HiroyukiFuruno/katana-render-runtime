@@ -49,7 +49,9 @@ test.each([
   "26-01-wardley-beta",
   "26-02-wardley-beta",
   "27-02-xy",
-])("quoted Japanese source reaches the vendor unchanged: %s", (slug) => {
+  "09-01-architecture-beta",
+  "09-02-architecture-beta",
+])("Japanese source reaches the vendor unchanged: %s", (slug) => {
   const fixture = new FixtureRepository("tests/fixtures/mermaid/ja").read(`${slug}.md`);
   expectSourcePreserved(fixture.source);
 });

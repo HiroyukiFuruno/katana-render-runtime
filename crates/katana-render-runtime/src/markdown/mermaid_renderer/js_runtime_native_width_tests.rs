@@ -83,6 +83,59 @@ fn nonclass_architecture_uses_native_advance() -> Result<(), String> {
 }
 
 #[test]
+fn localized_architecture_service_bbox_includes_wide_label() -> Result<(), String> {
+    let original = render_fixture(ARCHITECTURE_SOURCE)?;
+    let source = ARCHITECTURE_SOURCE
+        .replace("[Renderer]", "[レンダラー]")
+        .replace("[SVG cache]", "[SVGキャッシュ]");
+    let result = render_fixture(&source)?;
+    println!(
+        "architecture_bbox_observation={}",
+        serde_json::json!({"boxes": &result.boxes, "calls": &result.calls})
+    );
+    for expected in ["レンダラー", "SVGキャッシュ"] {
+        assert!(
+            result.calls.iter().any(|call| call_text(call) == expected),
+            "native bridge did not measure original architecture label {expected:?}: {:?}",
+            result.calls
+        );
+    }
+    let (original_id, original_width) = service_bbox(&original, "SVG cache")?;
+    let (localized_id, localized_width) = service_bbox(&result, "SVGキャッシュ")?;
+    assert_eq!(original_id, localized_id, "service identity changed");
+    assert!(
+        localized_width > original_width,
+        "localized service bbox did not grow for the wider label: english={original_width}, localized={localized_width}"
+    );
+    Ok(())
+}
+
+fn service_bbox(
+    result: &helpers::MeasurementFixture,
+    label: &str,
+) -> Result<(String, f64), String> {
+    let service = result
+        .boxes
+        .iter()
+        .find(|entry| {
+            entry["node"]["className"] == "architecture-service"
+                && entry["node"]["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains(label))
+        })
+        .ok_or("architecture service getBBox observation missing")?;
+    let id = service["node"]["id"]
+        .as_str()
+        .ok_or("architecture service id missing")?
+        .to_owned();
+    let service_width = service["bbox"]["width"]
+        .as_f64()
+        .filter(|width| width.is_finite() && *width > 0.0)
+        .ok_or("architecture service bbox width missing or invalid")?;
+    Ok((id, service_width))
+}
+
+#[test]
 fn nonclass_c4_uses_native_advance_for_svg_text() -> Result<(), String> {
     let result = render_fixture(C4_SOURCE)?;
     assert!(
