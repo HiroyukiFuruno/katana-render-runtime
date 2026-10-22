@@ -1854,9 +1854,19 @@ def main() -> int:
     parser.add_argument("--candidate-build-proof")
     parser.add_argument("--build-artifact-sha256")
     parser.add_argument("--bundle-manifest-sha256")
+    parser.add_argument(
+        "--diagnostic-only",
+        action="store_true",
+        help="verify a catalog-bound diagnostic bundle while retaining acceptance=false",
+    )
     args = parser.parse_args()
     try:
         require(not (args.acquire and args.acquire_current_producer), "ambiguous acquisition mode")
+        require(not (args.diagnostic_only and (args.acquire or args.acquire_current_producer
+                                               or args.candidate_build_proof is not None
+                                               or args.build_artifact_sha256 is not None
+                                               or args.bundle_manifest_sha256 is not None)),
+                "diagnostic-only mode cannot be combined with acquisition or candidate build proof")
         require((args.candidate_build_proof is None) == (args.build_artifact_sha256 is None),
                 "candidate build proof path/SHA must be provided together")
         if args.candidate_build_proof is not None:
@@ -1870,7 +1880,9 @@ def main() -> int:
             return 0
         if args.acquire or args.acquire_current_producer:
             acquire(args.evidence_dir, args.repo, args.repository, args.acquire_current_producer)
-        print(json.dumps(verify(args.evidence_dir, args.repo), sort_keys=True))
+        result = (_verify_catalog_diagnostic(args.evidence_dir, args.repo)
+                  if args.diagnostic_only else verify(args.evidence_dir, args.repo))
+        print(json.dumps(result, sort_keys=True))
         return 0
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
         print(f"HTML performance release gate failed: {error}", file=sys.stderr)

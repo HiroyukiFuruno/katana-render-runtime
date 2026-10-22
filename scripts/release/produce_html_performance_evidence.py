@@ -1711,9 +1711,15 @@ def main() -> None:
     parser.add_argument("--capacity-binding-sha256")
     parser.add_argument("--catalog-plan", type=Path)
     parser.add_argument("--candidate-build-only", action="store_true")
+    parser.add_argument(
+        "--diagnostic-only",
+        action="store_true",
+        help="produce a catalog-bound diagnostic bundle while retaining acceptance=false",
+    )
     args = parser.parse_args()
     if args.candidate_build_only:
-        if args.catalog_plan is not None or args.capacity_binding is None or args.capacity_binding_sha256 is None:
+        if (args.catalog_plan is not None or args.capacity_binding is None
+                or args.capacity_binding_sha256 is None or args.diagnostic_only):
             parser.error("candidate build-only mode requires capacity binding pins and no catalog plan")
         repo = args.repo.resolve()
         with candidate_build_locks(repo):
@@ -1724,8 +1730,12 @@ def main() -> None:
         return
     if args.catalog_plan is None:
         parser.error("--catalog-plan is required for HTML performance production")
-    produce(args.repo.resolve(), args.output.resolve(), args.capacity_binding, args.capacity_binding_sha256,
-            args.catalog_plan.resolve())
+    arguments = (args.repo.resolve(), args.output.resolve(), args.capacity_binding,
+                 args.capacity_binding_sha256, args.catalog_plan.resolve())
+    if args.diagnostic_only:
+        produce(*arguments, _allow_catalog_diagnostic=True)
+    else:
+        produce(*arguments)
 
 
 if __name__ == "__main__":

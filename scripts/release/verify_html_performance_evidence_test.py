@@ -1581,6 +1581,20 @@ class PerformanceJsonBoundaryTest(unittest.TestCase):
             require_catalog=True, diagnostic_catalog=True,
         )
 
+    def test_diagnostic_cli_reaches_catalog_diagnostic_verifier(self) -> None:
+        result: JsonObject = {
+            "htmlStage90": {"acceptance": False, "fontIdentityEquivalence": "not-established"},
+            "performanceNonregression": True,
+        }
+        with patch.object(gate.sys, "argv", [
+            "verify_html_performance_evidence.py", "--repo", "repo",
+            "--evidence-dir", "bundle", "--diagnostic-only",
+        ]), patch.object(gate.sys, "stdout", io.StringIO()) as stdout, \
+             patch.object(gate, "_verify_catalog_diagnostic", return_value=result) as verify:
+            self.assertEqual(gate.main(), 0)
+        verify.assert_called_once_with(Path("bundle"), Path("repo"))
+        self.assertEqual(json.loads(stdout.getvalue()), result)
+
     def test_formal_release_result_requires_visual_font_and_performance_acceptance(self) -> None:
         accepted: JsonObject = {
             "htmlStage90": {"acceptance": True, "fontIdentityEquivalence": "established"},

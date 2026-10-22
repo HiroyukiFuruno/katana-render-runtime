@@ -81,6 +81,22 @@ class CatalogProducerOperationTest(unittest.TestCase):
             run.assert_called_once_with(root.resolve(), output.resolve(), capacity,
                                         "b" * 64, manifest.resolve())
 
+    def test_diagnostic_cli_forwards_catalog_manifest_without_formal_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output = root / "tmp/evidence"
+            capacity = root / "capacity.json"
+            manifest = root / "catalog-stage90-captures.json"
+            with patch.object(producer.sys, "argv", [
+                "produce_html_performance_evidence.py", "--repo", str(root),
+                "--output", str(output), "--capacity-binding", str(capacity),
+                "--capacity-binding-sha256", "d" * 64, "--catalog-plan", str(manifest),
+                "--diagnostic-only",
+            ]), patch.object(producer, "produce") as run:
+                producer.main()
+            run.assert_called_once_with(root, output, capacity, "d" * 64, manifest,
+                                        _allow_catalog_diagnostic=True)
+
     def test_candidate_build_cli_forwards_pinned_capacity_without_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
