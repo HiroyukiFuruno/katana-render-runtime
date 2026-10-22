@@ -14,6 +14,8 @@
 
 ## 現在の状態（2026-10-22）
 
+- [/] managed host照合の親子環境不一致を`2cc08c7e`へ確定した。R1251の153回帰、R1254の標準foundation・型・重複・資源・契約・host準備・Biome、R1255の通常commit hooksがactual0。既存defaultは維持し、明示child環境にBunがなければ親binaryへfallbackしない。元のR1247/R1249/R1252/R1253失敗は保持する。現行ソースの全117図採点は次のfresh proof/runで取得し、局所修正完了と製品合格を区別する。
+
 - [ ] R1246でHEAD `d5905d4f` のcandidate build proofがactual0、R1245のstrict readerも独立raw EN59/JA58を再受理した。R1247/R1249はCLI producer actual0の後、Rust facts hostのprepare子環境と検証親環境の不一致で画像生成前に拒否、採点0件。R1249診断ではsource file差分0、子環境でのhost検証成功を確認し、親だけのAR・RUST_LOGとPATH差を特定した。検証済みchild environmentを純粋な引数としてhost照合へ渡す修正後、R1251の関連4file・153件・271assertが152.80秒でactual0、独立差分レビューP0/P1も0件。R1252標準DAGは変更されたhost実装の既存AST pin不一致を`!unresolved-executable`として拒否しactual1、後続をスキップした。レビューした3実装だけ既存正規化方式のpinを同期し、R1253は契約・型・重複・host準備を成功、最後の新test import順1件でactual1となった。import順を是正して同じ標準DAGを再確認する。検査除外や基準変更は追加していない。現在の117図合格数は未更新であり、準備・局所回帰の成功を採点成功へ代用しない。
 
 - [/] R1248で承認済みprivateの既存clean-allを、KRRの予約済みCLI/probe 2本を保護refへ渡して実行した。KRR cleanは保護拒否のため全体actual1を保持し、他の既存cleanで実空き16,699,863,040Bから39,463,403,520Bへ回復、2本の物理SHA不変を確認した。専用Chromium repoはJustfileを持たず対象外で、実行中のrun6を継続した。部分回復をclean-all全体成功として扱わない（`tmp/quality/private-clean-all-r1248/result.json`）。固定閾値は変更していない。
