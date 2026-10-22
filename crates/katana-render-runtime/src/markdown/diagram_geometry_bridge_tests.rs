@@ -1,3 +1,4 @@
+use super::super::{DiagramRuntimeScript, DiagramV8Runtime};
 use super::transformed_box;
 
 const BOUNDS_TOLERANCE: f64 = 1e-10;
@@ -24,6 +25,33 @@ fn svg_transform_ignores_malformed_syntax_but_rejects_non_finite_bounds() {
     );
     assert!(transformed_box("rotate(45)", [f64::NAN, 0.0, 1.0, 1.0]).is_err());
     assert!(transformed_box("scale(2)", [0.0, 0.0, -1.0, 1.0]).is_err());
+}
+
+#[test]
+fn v8_transform_callback_returns_bounds_and_rejects_finite_input_overflow() -> Result<(), String> {
+    let script = format!(
+        r#"(() => {{
+        const transform = globalThis.__katanaTransformSvgBox;
+        const bounds = transform('rotate(90, 1, 1)', 0, 0, 2, 1);
+        const keys = ['x', 'y', 'width', 'height'];
+        const expected = [1, 0, 1, 2];
+        const normal = keys.every((key, index) =>
+            Math.abs(bounds[key] - expected[index]) < {BOUNDS_TOLERANCE});
+        let overflow = '';
+        try {{
+            transform('translate(1e308, 0)', 1e308, 0, 1, 1);
+        }} catch (error) {{
+            overflow = error.message;
+        }}
+        return [normal, overflow].join(',');
+    }})()"#
+    );
+    let result = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
+        "geometry-bridge-overflow-boundary",
+        &script,
+    )])?;
+    assert_eq!(result, "true,Non-finite SVG transformed bounds");
+    Ok(())
 }
 
 fn assert_bounds(
