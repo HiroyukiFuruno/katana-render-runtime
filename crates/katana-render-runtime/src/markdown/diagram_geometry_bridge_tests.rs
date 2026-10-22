@@ -3,6 +3,25 @@ use super::transformed_box;
 
 const BOUNDS_TOLERANCE: f64 = 1e-10;
 
+const V8_BOUNDARY_CASES_SCRIPT: &str = r#"(() => {
+    const transform = globalThis.__katanaTransformSvgBox;
+    const cases = [
+        ['missing', () => transform('translate(1)', 0, 0)],
+        ['nan', () => transform('translate(1)', NaN, 0, 1, 1)],
+        ['infinite', () => transform('translate(1)', 0, 0, Infinity, 1)],
+        ['negative', () => transform('translate(1)', 0, 0, -1, 1)],
+        ['malformed-transform', () => transform('rotate(nope)', 2, 3, 4, 5)],
+    ];
+    return cases.map(([name, call]) => {
+        try {
+            const box = call();
+            return `${name}:${box.x},${box.y},${box.width},${box.height}`;
+        } catch (error) {
+            return `${name}:error:${error.message}`;
+        }
+    }).join('|');
+})()"#;
+
 #[test]
 fn svg_rotation_pivot_transforms_all_four_box_corners() {
     let bounds = transformed_box("rotate(90, 1, 1)", [0.0, 0.0, 2.0, 1.0]);
@@ -51,6 +70,21 @@ fn v8_transform_callback_returns_bounds_and_rejects_finite_input_overflow() -> R
         &script,
     )])?;
     assert_eq!(result, "true,Non-finite SVG transformed bounds");
+    Ok(())
+}
+
+#[test]
+fn v8_transform_callback_handles_boundary_case_table() -> Result<(), String> {
+    let result = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
+        "geometry-bridge-boundary-cases",
+        V8_BOUNDARY_CASES_SCRIPT,
+    )])?;
+    assert_eq!(
+        result,
+        "missing:error:Invalid SVG child bounds|nan:error:Invalid SVG child bounds|\
+         infinite:error:Invalid SVG child bounds|negative:error:Invalid SVG child bounds|\
+         malformed-transform:2,3,4,5"
+    );
     Ok(())
 }
 

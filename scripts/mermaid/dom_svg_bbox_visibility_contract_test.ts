@@ -51,7 +51,7 @@ function node(localName: string, input: NodeInput = {}): TestNode {
   return result;
 }
 
-function measure(source: TestNode, target: TestNode) {
+function createMeasurementContext(source: TestNode, target: TestNode) {
   const context = createContext({
     KatanaNode: class {},
     katanaAnchoredTextNodeBox: (_node: TestNode, text: string, x: number, y: number) => ({
@@ -72,19 +72,38 @@ function measure(source: TestNode, target: TestNode) {
   ]) {
     runInContext(readFileSync(new URL(name, RUNTIME_DIRECTORY), "utf8"), context);
   }
-  const result = runInContext(
+  return context;
+}
+
+function runMeasurement(source: TestNode, target: TestNode, expression: string) {
+  return runInContext(expression, createMeasurementContext(source, target));
+}
+
+function boxValues(box: Box) {
+  return {
+    x: box.x,
+    y: box.y,
+    width: box.width,
+    height: box.height,
+  };
+}
+
+function measure(source: TestNode, target: TestNode) {
+  const result = runMeasurement(
+    source,
+    target,
     "({ childBoxes: katanaVisibleChildBoxes(target), measured: katanaVisibleMeasuredBoxAccurate(target) })",
-    context,
   ) as { childBoxes: Box[]; measured: Box };
   return {
-    childBoxes: result.childBoxes.map(({ x, y, width, height }) => ({ x, y, width, height })),
-    measured: {
-      x: result.measured.x,
-      y: result.measured.y,
-      width: result.measured.width,
-      height: result.measured.height,
-    },
+    childBoxes: result.childBoxes.map(boxValues),
+    measured: boxValues(result.measured),
   };
+}
+
+function measureAccurate(source: TestNode, target: TestNode) {
+  return boxValues(
+    runMeasurement(source, target, "katanaMeasuredBoxAccurate(target)") as Box,
+  );
 }
 
 test("SVG child boxes omit authored display:none subtrees but retain visibility:hidden geometry", () => {
@@ -112,6 +131,59 @@ test("SVG child boxes omit authored display:none subtrees but retain visibility:
   expect(result.childBoxes).toEqual([{ x: 30, y: 40, width: 5, height: 6 }]);
   expect(result.measured).toEqual({ x: 30, y: 40, width: 5, height: 6 });
   expect(measure(source, hiddenShape).measured).toEqual({ x: 10, y: 20, width: 7, height: 9 });
+});
+
+test("display:none SVG groups retain intrinsic boxes while hidden self geometry is zero", () => {
+  const hiddenGroup = node("g", {
+    attributes: { "style:display": "none" },
+    children: [
+      node("rect", { box: { x: 10, y: 20, width: 100, height: 50 } }),
+      node("text", { box: { x: 20, y: 26, width: 32.90625, height: 18 } }),
+    ],
+  });
+  const hiddenSelfNodes = [
+    node("rect", {
+      attributes: { "style:display": "none" },
+      box: { x: 30, y: 40, width: 80, height: 60 },
+    }),
+    node("text", {
+      attributes: { "style:display": "none" },
+      box: { x: 20, y: 26, width: 32.90625, height: 18 },
+    }),
+    node("tspan", {
+      attributes: { "style:display": "none" },
+      box: { x: 20, y: 26, width: 32.90625, height: 18 },
+    }),
+    node("a", {
+      attributes: { "style:display": "none" },
+      children: [node("rect", { box: { x: 10, y: 20, width: 100, height: 50 } })],
+    }),
+    node("switch", {
+      attributes: { "style:display": "none" },
+      children: [node("rect", { box: { x: 10, y: 20, width: 100, height: 50 } })],
+    }),
+    node("svg", {
+      attributes: { "style:display": "none" },
+      children: [node("rect", { box: { x: 10, y: 20, width: 100, height: 50 } })],
+    }),
+  ];
+  const source = node("svg", { children: [hiddenGroup, ...hiddenSelfNodes] });
+
+  expect(measureAccurate(source, hiddenGroup)).toEqual({
+    x: 10,
+    y: 20,
+    width: 100,
+    height: 50,
+  });
+  for (const hiddenSelfNode of hiddenSelfNodes) {
+    expect(measureAccurate(source, hiddenSelfNode)).toEqual({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+    });
+  }
+  expect(measure(source, source).childBoxes).toEqual([]);
 });
 
 test("SVG child unions omit empty text points and retain painted text and degenerate geometry", () => {
@@ -148,6 +220,42 @@ test("SVG child unions omit empty text points and retain painted text and degene
     { x: 40, y: 70, width: 0, height: 0 },
   ]);
   expect(result.measured).toEqual({ x: 20, y: 70, width: 20, height: 0 });
+});
+
+test("SVG child unions follow Chrome positioned empty text container depth", () => {
+  const positionedEmptyText = () =>
+    node("text", {
+      attributes: { y: "-10.1" },
+      children: [node("tspan", { attributes: { x: "0", y: "-0.1em", dy: "1.1em" } })],
+    });
+  const directText = positionedEmptyText();
+  const oneContainer = node("g", {
+    attributes: { transform: "translate(82.765625 -9.5)" },
+    children: [positionedEmptyText()],
+  });
+  const twoContainers = node("g", {
+    attributes: { transform: "translate(120 0)" },
+    children: [node("g", { children: [positionedEmptyText()] })],
+  });
+  const threeContainers = node("g", {
+    attributes: { transform: "translate(150 0)" },
+    children: [node("g", { children: [node("g", { children: [positionedEmptyText()] })] })],
+  });
+  const hiddenPositionedEmptyLabel = node("g", {
+    attributes: { "style:display": "none", transform: "translate(180 0)" },
+    children: [positionedEmptyText()],
+  });
+  const source = node("svg", {
+    children: [directText, oneContainer, twoContainers, threeContainers, hiddenPositionedEmptyLabel],
+  });
+
+  expect(measure(source, source)).toEqual({
+    childBoxes: [
+      { x: 0, y: 0, width: 0, height: 0 },
+      { x: 82.765625, y: -9.5, width: 0, height: 0 },
+    ],
+    measured: { x: 0, y: -9.5, width: 82.765625, height: 9.5 },
+  });
 });
 
 test("parent text fallback excludes display:none child labels", () => {

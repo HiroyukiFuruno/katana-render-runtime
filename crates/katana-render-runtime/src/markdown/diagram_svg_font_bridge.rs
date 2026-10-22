@@ -163,3 +163,7 @@ fn throw_svg_metric_error(scope: &mut v8::PinScope, message: &str) {
         scope.throw_exception(error);
     }
 }
+
+#[cfg(test)]
+#[path = "diagram_svg_font_bridge_tests.rs"]
+mod tests;

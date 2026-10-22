@@ -1,6 +1,8 @@
 use super::MermaidRuntimeScripts;
 use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
 
+#[path = "js_runtime_scripts_svg_bbox_float_tests.rs"]
+mod bbox_float;
 #[path = "js_runtime_scripts_canvas_context_tests.rs"]
 mod canvas_context;
 #[path = "js_runtime_scripts_svg_computed_style_tests.rs"]

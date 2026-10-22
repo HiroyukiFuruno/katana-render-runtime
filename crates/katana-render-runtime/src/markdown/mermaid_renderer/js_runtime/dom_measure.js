@@ -188,5 +188,13 @@ function katanaFragmentText(node) {
 }
 
 KatanaNode.prototype.getBBox = function getBBox() {
-  return katanaMeasuredBoxAccurate(this);
+  const box = katanaMeasuredBoxAccurate(this);
+  // WHY: ChromiumのSVGRectTearOffはgfx::RectFのfloat4成分を返す。
+  if (this.namespaceURI !== KATANA_SVG_NAMESPACE) return box;
+  return katanaBox(
+    Math.fround(box.x),
+    Math.fround(box.y),
+    Math.fround(box.width),
+    Math.fround(box.height),
+  );
 };
