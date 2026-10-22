@@ -669,6 +669,19 @@ class CapacityBindingUnitTests(unittest.TestCase):
                 with self.subTest(arm=arm, cardinality=changed), self.assertRaises(ValueError):
                     typed_producer.cargo_build_artifacts(b"\n".join(json.dumps(e).encode() for e in changed), expected, self.target)
 
+    def test_artifact_reader_allows_removed_target_but_live_freeze_rejects_it(self) -> None:
+        expected = self.expected("candidate")
+        events = self.arm_events("candidate")
+        executable = self.target / "release/krr-html-performance-harness"
+        executable.unlink()
+        selected, _ = typed_producer.cargo_build_artifacts(
+            b"\n".join(json.dumps(event).encode() for event in events), expected, self.target,
+        )
+        self.assertEqual(selected, executable)
+        self.assertFalse(executable.exists())
+        with self.assertRaisesRegex(ValueError, "selected binary must be a canonical regular file"):
+            typed_producer.freeze_binary(selected, self.root / "tmp/missing-target/frozen")
+
     def test_observed_candidate_version_cannot_replace_fixed_lock_binding(self) -> None:
         metadata = self.arm_metadata("candidate")
         gate._objects(metadata["packages"], "unit packages")[1]["version"] = "9.0.0"

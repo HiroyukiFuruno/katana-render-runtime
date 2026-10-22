@@ -823,7 +823,7 @@ def cargo_build_artifacts(raw: bytes, expected: ExpectedBuild, target: Path) -> 
                     "runtime artifact features differ")
         if package is expected.harness:
             require(features == [expected.arm], "harness artifact arm features differ")
-            binary = _canonical_build_file(artifact["executable"], "artifact executable")
+            binary = _canonical_build_path(artifact["executable"], "artifact executable")
             require(binary == target / "release/krr-html-performance-harness"
                     and str(binary) in [_text(f, "artifact filename") for f in _array(artifact["filenames"], "artifact filenames")],
                     "artifact executable namespace differs")

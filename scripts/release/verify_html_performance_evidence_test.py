@@ -713,6 +713,25 @@ class PerformanceEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "bundle-relative file pin mismatch"):
             bundle.relative_reference(row["relativePath"], "0" * 64)
 
+    def test_frozen_binary_transport_survives_removed_target_and_rejects_tampering(self) -> None:
+        selected_path = self.root / "target/release/krr-html-performance-harness"
+        frozen_source = self.root / "tmp/frozen/krr-html-performance-harness"
+        frozen_source.parent.mkdir(parents=True)
+        frozen_source.write_bytes(b"frozen candidate binary")
+        checksum = gate.sha256(frozen_source)
+        frozen_ref = self.add_file(str(frozen_source), "build/candidate-binary", frozen_source.read_bytes())
+        selected_pin = {"path": str(selected_path), "sha256": checksum}
+        self.save_transport()
+        selected_path.unlink(missing_ok=True)
+        bundle = gate.Bundle(self.bundle)
+        self.assertEqual(gate._canonical_build_path(selected_pin["path"], "selected binary"), selected_path)
+        transported = bundle.file(frozen_ref)
+        self.assertEqual(gate.sha256(transported), selected_pin["sha256"])
+        self.assertFalse(selected_path.exists())
+        transported.write_bytes(b"tampered frozen candidate binary")
+        with self.assertRaisesRegex(ValueError, "original pin mismatch"):
+            bundle.file(frozen_ref)
+
     def test_recorded_capacity_state_requires_its_transported_bytes(self) -> None:
         state_ref = self.add_file("/captured/capacity-state.json", "capacity/state.json", b"prebuild state")
         valid_input_ref = self.add_file(
