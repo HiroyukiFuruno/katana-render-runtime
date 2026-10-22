@@ -4491,6 +4491,12 @@ const classicGenerationRecipeMutations = [
     "./scripts/runtime-bundles/runtime-unused-check_test.ts",
     "runtime-asset-script-test",
   ],
+  [
+    "official raw metrics diagnostic test binding",
+    "./scripts/mermaid/official_raw_metrics_diagnostic_test.ts",
+    "./scripts/mermaid/official_reference_mode_test.ts",
+    "runtime-asset-script-test",
+  ],
 ] satisfies readonly RecipeMutation[];
 
 test.each(classicGenerationRecipeMutations)(

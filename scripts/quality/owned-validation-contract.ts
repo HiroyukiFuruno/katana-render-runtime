@@ -4006,9 +4006,16 @@ function removeReviewedRuntimeAssetTests(lines: string[]): string[] | undefined 
   );
   if (!withoutNativeFrameEvidence) return undefined;
   const withoutNativeRenderBatch = removeReviewedNativeRenderBatchTest(withoutNativeFrameEvidence);
-  return withoutNativeRenderBatch
+  if (!withoutNativeRenderBatch) return undefined;
+  const withoutOfficialRawMetrics = removeReviewedTestToken(
+    withoutNativeRenderBatch,
+    "./scripts/mermaid/official_raw_metrics_diagnostic_test.ts",
+    "./scripts/mermaid/official_reference_mode_test.ts",
+    "./scripts/mermaid/official_renderer_provenance_test.ts",
+  );
+  return withoutOfficialRawMetrics
     ? removeReviewedTestToken(
-        withoutNativeRenderBatch,
+        withoutOfficialRawMetrics,
         "./scripts/mermaid/native_product_score_test.ts",
         "./scripts/quality/duplication-check_test.ts",
         "./scripts/runtime-bundles/runtime-bundle-checks_test.ts",
