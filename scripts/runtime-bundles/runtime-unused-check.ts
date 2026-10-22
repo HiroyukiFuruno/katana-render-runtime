@@ -615,7 +615,7 @@ function standardBiomeTools(root: string) {
       .parse(JSON.parse(fs.readFileSync(packagePin.physicalPath, "utf8")));
   // この公式launcherの有限platform選択を使い、未知wrapperからnative経路を推定しない。
   if (
-    wrapper.sha256 !== "7ffb4d217e5ddefcc19ca6afe76bb982f5eb36c9a124448105195fbcfc84bd77" ||
+    wrapper.sha256 !== "604b5fb4a8a461602c7d15dca699bd654ee5543dd580a2e986032aaa7bb6cfe3" ||
     alias.physicalPath !== wrapper.physicalPath ||
     bun.physicalPath !== runtime.physicalPath
   )

@@ -967,11 +967,11 @@ function pageBindingTargets(node: Record<string, unknown>): unknown[] {
 export const sharedSvgCaptureRoute = [
   {
     sourcePath: "scripts/mermaid/official-renderer.ts",
-    sourceSha256: "9417b6982aad961e55b2bfb9ebc4365f85bf22d8f946ccbe555bf21ba9c1c716",
+    sourceSha256: "913e1b18087b394e3672c4180d463e02731b8ae51dadc75fe7d2d618f5cf51ef",
   },
   {
     sourcePath: "scripts/mermaid/rasterize-svg-dir.ts",
-    sourceSha256: "b9ab42f3fcc4753ce410dd66840bee25a86e56c484342e67294e2c321a274eec",
+    sourceSha256: "bf088033942817d097fb2ef957c6c62634f179aebf474c86536321d8687fce3e",
   },
   {
     sourcePath: "scripts/mermaid/raster-capture-observation.ts",
@@ -979,7 +979,7 @@ export const sharedSvgCaptureRoute = [
   },
   {
     sourcePath: "scripts/mermaid/official-renderer-types.ts",
-    sourceSha256: "a9b927eaac4cae8d6f07dab25dc6db0e95721db7d149470947120d3c8731811f",
+    sourceSha256: "7c79bb7f95bfdf504d9095378fb2cf53ae1ac23f7bdb5ec902de230546edc9c3",
   },
 ] as const;
 

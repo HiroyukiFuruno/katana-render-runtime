@@ -57,20 +57,21 @@ test.each([
     '["mathjax", "native-width", "classic", "macho-noso"].includes(modeOrReceipt ?? "")',
     '["mathjax", "native-width", "classic"].includes(modeOrReceipt ?? "")',
   ],
-  [
-    "protocol",
-    "runtime-rust-facts-host-protocol.ts",
-    '    "macho-noso": ["--macho-noso"],\n',
-    "",
-  ],
-])("Rust facts host %s source pin rejects compact-query drift", (_label, basename, before, after) => {
-  const name = `scripts/runtime-bundles/${basename}`;
-  const source = fs.readFileSync(path.resolve(import.meta.dir, `../runtime-bundles/${basename}`), "utf8");
-  expect(hostEvidenceSourceVerified(name, source)).toBe(true);
-  const drifted = source.replace(before, after);
-  expect(drifted).not.toBe(source);
-  expect(hostEvidenceSourceVerified(name, drifted)).toBe(false);
-});
+  ["protocol", "runtime-rust-facts-host-protocol.ts", '    "macho-noso": ["--macho-noso"],\n', ""],
+])(
+  "Rust facts host %s source pin rejects compact-query drift",
+  (_label, basename, before, after) => {
+    const name = `scripts/runtime-bundles/${basename}`;
+    const source = fs.readFileSync(
+      path.resolve(import.meta.dir, `../runtime-bundles/${basename}`),
+      "utf8",
+    );
+    expect(hostEvidenceSourceVerified(name, source)).toBe(true);
+    const drifted = source.replace(before, after);
+    expect(drifted).not.toBe(source);
+    expect(hostEvidenceSourceVerified(name, drifted)).toBe(false);
+  },
+);
 
 function currentMoonConfig(): Record<string, unknown> {
   const source = fs.readFileSync(path.resolve(import.meta.dir, "../../moon.yml"), "utf8");

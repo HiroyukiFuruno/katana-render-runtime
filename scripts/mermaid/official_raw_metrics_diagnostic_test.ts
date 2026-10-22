@@ -16,7 +16,7 @@ test("raw metrics diagnostics keep text geometry separate from vendor bbox error
   expect(source).toContain("valueInSpecifiedUnits");
   expect(source).toContain("unitType");
   expect(source).toContain('"empty text"');
-  expect(source).toContain("originalGetBBox.apply(element, args)");
+  expect(source).toContain("originalGetBBox.apply(this, args)");
 });
 
 test("raw metrics diagnostics require an exact raw SVG digest match", () => {

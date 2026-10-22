@@ -198,7 +198,28 @@ export function inspectOfficialUnusedCallbacks(
     new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, at - module.span.start))
       .length;
   const nodes = browserAstNodes(module);
+  const standaloneBridgeSpans = new Set(
+    module.body
+      .map((statement) =>
+        statement.type === "ExportDeclaration" ? statement.declaration : statement,
+      )
+      .filter(
+        (statement) =>
+          statement.type === "FunctionDeclaration" &&
+          statement.identifier.type === "Identifier" &&
+          statement.identifier.value === "installSvgTransformBoundsBridge",
+      )
+      .flatMap((statement) =>
+        browserAstNodes(statement).flatMap(({ node }) => {
+          const span = astSpan.safeParse(node.span);
+          return span.success ? [`${span.data.start}:${span.data.end}`] : [];
+        }),
+      ),
+  );
   const found = nodes.filter(({ node }) => {
+    const span = astSpan.safeParse(node.span);
+    if (span.success && standaloneBridgeSpans.has(`${span.data.start}:${span.data.end}`))
+      return false;
     if (node.type !== "MemberExpression") return false;
     const object = astObject.parse(node.object);
     if (object.type !== "Identifier" || object.value !== "page") return false;
@@ -656,7 +677,7 @@ const nativeWidthV8Script = "crates/katana-render-runtime/src/v8_script.rs";
 const nativeWidthLibrary = "crates/katana-render-runtime/src/lib.rs";
 const nativeWidthDiagramRuntime = "crates/katana-render-runtime/src/markdown/diagram_js_runtime.rs";
 const nativeWidthDiagramProjectionSha256 =
-  "054f9cabf6932db93f2a78e3079327f20fd028b41dc25ee51628a559d9c88740";
+  "7c8f590e31555dba41d4536163fce4a68cf73cd5686ecd79ae2a917451811752";
 const nativeWidthV8ScriptSha256 =
   "5ebae43ec806441146dca8edca9a8b9b04b3d259ea0dfb966827f7bee90464dc";
 const nativeWidthV8Import = "use crate::v8_script::ScriptCompiler;";

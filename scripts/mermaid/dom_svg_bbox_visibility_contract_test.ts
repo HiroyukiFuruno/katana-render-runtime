@@ -101,9 +101,7 @@ function measure(source: TestNode, target: TestNode) {
 }
 
 function measureAccurate(source: TestNode, target: TestNode) {
-  return boxValues(
-    runMeasurement(source, target, "katanaMeasuredBoxAccurate(target)") as Box,
-  );
+  return boxValues(runMeasurement(source, target, "katanaMeasuredBoxAccurate(target)") as Box);
 }
 
 test("SVG child boxes omit authored display:none subtrees but retain visibility:hidden geometry", () => {
@@ -246,7 +244,13 @@ test("SVG child unions follow Chrome positioned empty text container depth", () 
     children: [positionedEmptyText()],
   });
   const source = node("svg", {
-    children: [directText, oneContainer, twoContainers, threeContainers, hiddenPositionedEmptyLabel],
+    children: [
+      directText,
+      oneContainer,
+      twoContainers,
+      threeContainers,
+      hiddenPositionedEmptyLabel,
+    ],
   });
 
   expect(measure(source, source)).toEqual({

@@ -13,6 +13,16 @@ function inventory(source: string, name: string): string[] {
   return [...block[1].matchAll(/"([^"\n]+)"/g)].map((match) => match[1] ?? "");
 }
 
+function pythonHostSources(directory: string): string[] {
+  const files: string[] = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...pythonHostSources(file));
+    else if (entry.isFile() && file.endsWith(".py")) files.push(file);
+  }
+  return files;
+}
+
 export function createManagedReaderInputs() {
   // 全reader入口の単体data graph。Cargo/native/コピーしたTSを実行しない。
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "managed-reader-unit-")));
@@ -35,18 +45,11 @@ export function createManagedReaderInputs() {
   save("Cargo.toml", '[workspace]\nmembers=["crates/katana-render-runtime-cli"]\n');
   const copyHostSourceTree = (directory: string) => {
     const source = path.join(process.cwd(), directory);
-    const visit = (current: string) => {
-      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-        const file = path.join(current, entry.name);
-        if (entry.isDirectory()) visit(file);
-        else if (entry.isFile() && file.endsWith(".py")) {
-          const relative = path.relative(process.cwd(), file);
-          if (!fs.existsSync(path.join(root, relative)))
-            save(relative, `unit Rust facts host input: ${relative}\n`);
-        }
-      }
-    };
-    visit(source);
+    for (const file of pythonHostSources(source)) {
+      const relative = path.relative(process.cwd(), file);
+      if (fs.existsSync(path.join(root, relative))) continue;
+      save(relative, `unit Rust facts host input: ${relative}\n`);
+    }
   };
   copyHostSourceTree("scripts/build");
   copyHostSourceTree("scripts/release");
@@ -68,8 +71,7 @@ export function createManagedReaderInputs() {
     "scripts/html/harness-contract-policy.json",
     "scripts/quality/owned-validation-contract.ts",
   ]) {
-    if (!fs.existsSync(path.join(root, name)))
-      save(name, `unit Rust facts host input: ${name}\n`);
+    if (!fs.existsSync(path.join(root, name))) save(name, `unit Rust facts host input: ${name}\n`);
   }
   const manifest = save(
     "crates/katana-render-runtime-cli/Cargo.toml",

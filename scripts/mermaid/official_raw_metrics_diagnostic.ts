@@ -1,13 +1,13 @@
-import { parseArgs } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
+import { parseArgs } from "node:util";
 import { DiagramTheme, type DiagramThemeName, type MermaidThemeName } from "./diagram_theme";
-import { fileSha256, parseJsonValue, sha256, type JsonValue } from "./mermaid-pair-manifest";
-import { referenceMode, type OfficialReferenceMode } from "./official-reference-mode";
-import { OfficialRendererDeterminism } from "./official-renderer-determinism";
-import { OfficialMermaidRenderer, PlaywrightLoader } from "./official-renderer";
-import type { MermaidConfig, MermaidI18nWindow, PageHandle } from "./official-renderer-types";
+import { fileSha256, type JsonValue, parseJsonValue, sha256 } from "./mermaid-pair-manifest";
 import { canonicalRegularFile } from "./native-build-receipt";
+import { type OfficialReferenceMode, referenceMode } from "./official-reference-mode";
+import { OfficialMermaidRenderer, PlaywrightLoader } from "./official-renderer";
+import { OfficialRendererDeterminism } from "./official-renderer-determinism";
+import type { MermaidConfig, MermaidI18nWindow, PageHandle } from "./official-renderer-types";
 
 const VIEWPORT = { width: 1520, height: 845, deviceScaleFactor: 1 } as const;
 const OUTPUT_FILES = {
@@ -319,6 +319,29 @@ async function installRawMetricsObserver(page: PageHandle): Promise<void> {
         };
       }
     };
+    const unavailableStartPosition = (message: string) => ({
+      startPosition: null,
+      startPositionDiagnosticError: message,
+    });
+    const measureStartPosition = (node: SVGTextPositioningElement) => {
+      try {
+        const point = node.getStartPositionOfChar(0);
+        const x = finiteNumber(point.x);
+        const y = finiteNumber(point.y);
+        if (x === null || y === null)
+          return unavailableStartPosition("getStartPositionOfChar returned non-finite coordinates");
+        return { startPosition: { x, y }, startPositionDiagnosticError: null };
+      } catch (error) {
+        return unavailableStartPosition(error instanceof Error ? error.message : String(error));
+      }
+    };
+    const readStartPosition = (node: SVGTextPositioningElement) => {
+      if (node.textContent === null || node.textContent.length === 0)
+        return unavailableStartPosition("empty text");
+      if (typeof node.getStartPositionOfChar !== "function")
+        return unavailableStartPosition("getStartPositionOfChar API unavailable");
+      return measureStartPosition(node);
+    };
     const readTextGeometry = (
       element: SVGGraphicsElement,
     ): { observations: SvgTextGeometryObservation[]; error: string | null } => {
@@ -333,29 +356,7 @@ async function installRawMetricsObserver(page: PageHandle): Promise<void> {
         return {
           observations: nodes.map((node) => {
             const text = node.textContent;
-            const textIsEmpty = text === null || text.length === 0;
-            let startPosition: { x: number; y: number } | null = null;
-            let startPositionDiagnosticError: string | null = null;
-            if (textIsEmpty) {
-              startPositionDiagnosticError = "empty text";
-            } else if (typeof node.getStartPositionOfChar !== "function") {
-              startPositionDiagnosticError = "getStartPositionOfChar API unavailable";
-            } else {
-              try {
-                const point = node.getStartPositionOfChar(0);
-                const x = finiteNumber(point.x);
-                const y = finiteNumber(point.y);
-                if (x === null || y === null) {
-                  startPositionDiagnosticError =
-                    "getStartPositionOfChar returned non-finite coordinates";
-                } else {
-                  startPosition = { x, y };
-                }
-              } catch (error) {
-                startPositionDiagnosticError =
-                  error instanceof Error ? error.message : String(error);
-              }
-            }
+            const { startPosition, startPositionDiagnosticError } = readStartPosition(node);
             const lengths = {
               x: readLengthList(node, "x"),
               y: readLengthList(node, "y"),
@@ -377,8 +378,7 @@ async function installRawMetricsObserver(page: PageHandle): Promise<void> {
               ...lengths,
               startPosition,
               startPositionDiagnosticError,
-              diagnosticError:
-                diagnosticErrors.length === 0 ? null : diagnosticErrors.join("; "),
+              diagnosticError: diagnosticErrors.length === 0 ? null : diagnosticErrors.join("; "),
             };
           }),
           error: null,
@@ -391,13 +391,12 @@ async function installRawMetricsObserver(page: PageHandle): Promise<void> {
       }
     };
     SVGGraphicsElement.prototype.getBBox = function (...args) {
-      const element = this;
-      const style = getComputedStyle(element);
+      const style = getComputedStyle(this);
       try {
-        const box = originalGetBBox.apply(element, args);
-        const textGeometry = readTextGeometry(element);
+        const box = originalGetBBox.apply(this, args);
+        const textGeometry = readTextGeometry(this);
         recordBBox(
-          element,
+          this,
           style,
           { x: box.x, y: box.y, width: box.width, height: box.height },
           null,
@@ -406,9 +405,9 @@ async function installRawMetricsObserver(page: PageHandle): Promise<void> {
         );
         return box;
       } catch (error) {
-        const textGeometry = readTextGeometry(element);
+        const textGeometry = readTextGeometry(this);
         recordBBox(
-          element,
+          this,
           style,
           null,
           error instanceof Error ? error.message : String(error),

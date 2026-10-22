@@ -798,6 +798,15 @@ test("actual callback identifier retains original physical TS span after type er
   expect(() => browserContext.origin.resolve(diagnosticAt(code, label, 4), "assembled")).toThrow();
 });
 
+test("known standalone SVG bridge stays outside the callback inventory", () => {
+  const code = browserRaw.get("scripts/mermaid/official-renderer.ts")?.code;
+  if (!code) throw new Error("missing actual producer");
+  const callbacks = inspectOfficialUnusedCallbacks("scripts/mermaid/official-renderer.ts", code);
+  expect(code).toContain("installSvgTransformBoundsBridge");
+  expect(callbacks).toHaveLength(6);
+  expect(callbacks.every((callback) => callback.method.length > 0)).toBe(true);
+});
+
 test.each([
   ["unknown producer", "scripts/mermaid/not-the-producer.ts", (code: string) => code],
   [
@@ -823,6 +832,21 @@ test.each([
     "spread callback",
     "scripts/mermaid/official-renderer.ts",
     (code: string) => code.replace("page.evaluate(() =>", "page.evaluate(...() =>"),
+  ],
+  [
+    "unknown standalone page evaluate",
+    "scripts/mermaid/official-renderer.ts",
+    (code: string) =>
+      `${code}\nexport function unexpectedPageCall(page: PageHandle) {\n  return page.evaluate(() => document.title);\n}\n`,
+  ],
+  [
+    "callback order drift",
+    "scripts/mermaid/official-renderer.ts",
+    (code: string) =>
+      code
+        .replace("private installStorage(", "private __temporaryInstallStorage(")
+        .replace("private capture(", "private installStorage(")
+        .replace("private __temporaryInstallStorage(", "private capture("),
   ],
 ])("browser callback boundary rejects %s", (label, sourcePath, change) => {
   expect(label.length).toBeGreaterThan(0);

@@ -1342,7 +1342,7 @@ function standardBiomeToolCommands(
     canonicalNativeUnitAstDigest(pin) !==
       "d9d214d772554d23b0c51d9dae5ad038bd6536665d246acdf07525496cf72460" ||
     canonicalNativeUnitAstDigest(tools) !==
-      "12f01534b71031c731490becfd02df1cec63cdb94558e2050c63137013ceb6ae"
+      "7d2985e670a841690d9bdc94255068882f1070783166ad2ee686f8b6c5c32e17"
   )
     return result;
   const nativePackage = functionNamed(module, "standardBiomeNativePackage");

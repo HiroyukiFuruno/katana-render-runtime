@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { hostFileRecord } from "./runtime-rust-facts-host-inputs";
 import type { RustFactsHostInputs } from "./runtime-rust-facts-host-inputs";
+import { hostFileRecord } from "./runtime-rust-facts-host-inputs";
 
 export function hostFixtureInputs(root: string) {
   const metadata = {

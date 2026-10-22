@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { verifyRustFactsHost } from "../runtime-bundles/runtime-rust-facts-host";
 import { fileSha256 } from "./mermaid-pair-manifest";
 import {
   canonicalRegularFile,
@@ -9,16 +10,15 @@ import {
   verifyFileRecord,
 } from "./native-build-receipt";
 import {
+  type ManagedReceipt,
+  type ManagedRequest,
   managedObservationSchema,
   managedReceiptSchema,
   managedRequestSchema,
   managedSourceSchema,
-  type ManagedReceipt,
-  type ManagedRequest,
 } from "./native-cli-managed-build-schema";
 import { verifyManagedCargo } from "./native-cli-managed-cargo";
 import { verifyManagedInputs } from "./native-cli-managed-inputs";
-import { verifyRustFactsHost } from "../runtime-bundles/runtime-rust-facts-host";
 import {
   owned,
   read,
@@ -195,7 +195,10 @@ export function verifyManagedNativeBuildReceipt(
 function verifyHostPrebuild(receipt: ManagedReceipt, request: ManagedRequest): void {
   const proof = receipt.hostPrebuild.observation;
   owned(proof, receipt.hostPrebuild.lifecycle, "build");
-  const expectedReceiptPath = path.join(receipt.cwd, "tmp/quality/rust-facts-host/current/receipt.json");
+  const expectedReceiptPath = path.join(
+    receipt.cwd,
+    "tmp/quality/rust-facts-host/current/receipt.json",
+  );
   requireBound(
     receipt.hostPrebuild.receipt.path === expectedReceiptPath,
     "host prebuild receipt path differs",

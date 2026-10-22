@@ -1,7 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { FileRecord } from "./native-build-receipt";
-import { createManagedReaderInputs } from "./native-cli-managed-build-input-test-fixture";
 import { rustFactsHostReceiptSchema } from "../runtime-bundles/runtime-rust-facts-host";
 import {
   currentRustFactsHostInputs,
@@ -14,6 +12,8 @@ import {
   publishRustFactsHostBinary,
 } from "../runtime-bundles/runtime-rust-facts-host-protocol";
 import { hostFixtureInputs } from "../runtime-bundles/runtime-rust-facts-host-test-fixture";
+import type { FileRecord } from "./native-build-receipt";
+import { createManagedReaderInputs } from "./native-cli-managed-build-input-test-fixture";
 import {
   managedObservationSchema,
   managedReceiptSchema,
@@ -314,10 +314,7 @@ export function createManagedReaderFixture() {
       stdout,
       stderr,
     };
-    save(
-      `tmp/${token}/rust-facts-host/${suffix}.process.json`,
-      JSON.stringify(proof),
-    );
+    save(`tmp/${token}/rust-facts-host/${suffix}.process.json`, JSON.stringify(proof));
     return proof;
   };
   const hostValue = rustFactsHostReceiptSchema.parse({
