@@ -171,15 +171,11 @@ class VerifyReleaseTargetTests(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), PUBLISHED_V0422_RELEASE_MANIFEST)
 
     def test_accepts_v0424_after_published_v0423(self) -> None:
-        result = self.run_check(
-            "v0.4.24", "v0.4.23", CURRENT_RELEASE_VALIDATION_SNAPSHOT
-        )
+        result = self.run_check("v0.4.24", "v0.4.23")
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_allows_idempotent_retry_after_v0424(self) -> None:
-        result = self.run_check(
-            "v0.4.24", "v0.4.24", CURRENT_RELEASE_VALIDATION_SNAPSHOT
-        )
+        result = self.run_check("v0.4.24", "v0.4.24")
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rejects_v0424_before_v0423_is_published(self) -> None:
@@ -200,11 +196,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
 
-    def test_accepts_the_v0424_release_validation_snapshot(self) -> None:
+    def test_rejects_the_old_v0424_release_validation_snapshot(self) -> None:
         result = self.run_check(
             "v0.4.24", "v0.4.23", CURRENT_RELEASE_VALIDATION_SNAPSHOT
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("required release candidate ancestor", result.stderr)
 
     def test_rejects_head_missing_a_v0424_candidate_ancestor(self) -> None:
         for commit in REQUIRED_CANDIDATE_ANCESTORS:
