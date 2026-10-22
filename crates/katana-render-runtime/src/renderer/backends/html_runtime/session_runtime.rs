@@ -20,15 +20,17 @@ impl StaticHtmlRuntime {
         if !Self::requires_runtime(&document, &scripts) {
             return Ok(document.render());
         }
-        self.start(source)?.snapshot()
+        self.start_document(document)?.snapshot()
     }
 
     fn requires_runtime(document: &HtmlDocument, scripts: &[HtmlDocumentScript]) -> bool {
         !scripts.is_empty() || contains_lifecycle_handler(&document.document)
     }
 
-    pub(crate) fn start(&self, source: &str) -> Result<StaticHtmlRuntimeSession, HtmlRuntimeError> {
-        let document = HtmlDocument::parse(source);
+    fn start_document(
+        &self,
+        document: HtmlDocument,
+    ) -> Result<StaticHtmlRuntimeSession, HtmlRuntimeError> {
         let scripts = document
             .inline_scripts()
             .map_err(HtmlRuntimeError::ExternalScript)?;
@@ -85,6 +87,15 @@ mod tests {
     use crate::renderer::backends::HtmlBrowserSource;
     use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
     use crate::renderer::backends::html_runtime_lifecycle_tests::LATER_BODY_ONLOAD_CASES;
+
+    impl StaticHtmlRuntime {
+        pub(crate) fn start(
+            &self,
+            source: &str,
+        ) -> Result<super::StaticHtmlRuntimeSession, HtmlRuntimeError> {
+            self.start_document(HtmlDocument::parse(source))
+        }
+    }
 
     fn must_result<T, E>(result: Result<T, E>) -> T {
         assert!(result.is_ok());
