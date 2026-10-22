@@ -263,6 +263,7 @@ mod geometry_boundary_tests;
 mod native_font_observer;
 #[path = "js_runtime_reference_score_oracle.rs"]
 mod oracle;
+pub(super) use oracle::SVG_DOM_PLACEMENT_SCALE;
 
 #[cfg(target_os = "macos")]
 pub(super) use native_font_observer::render_with_native_font_observations;

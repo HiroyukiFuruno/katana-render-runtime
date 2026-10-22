@@ -1,6 +1,12 @@
-function parseInnerHtml(source, xmlMode = false) {
+function parseInnerHtml(
+  source,
+  xmlMode = false,
+  contextNamespace = null,
+  contextLocalName = null,
+) {
   const root = {
-    localName: "#root",
+    localName: contextLocalName ?? "#root",
+    namespaceURI: contextNamespace,
     children: [],
     appendChild(child) {
       this.children.push(child);
@@ -38,7 +44,8 @@ function appendHtmlTag(stack, match, xmlMode) {
 }
 
 function appendHtmlStartTag(stack, match, xmlMode) {
-  const node = new KatanaNode(match[1], katanaHtmlNamespace(xmlMode));
+  const parent = stack[stack.length - 1];
+  const node = new KatanaNode(match[1], katanaHtmlNamespace(xmlMode, parent, match[1]));
   node.ownerDocument = document;
   parseAttributes(match[2]).forEach(([name, value]) => {
     node.setAttribute(name, value);
@@ -47,9 +54,17 @@ function appendHtmlStartTag(stack, match, xmlMode) {
   pushHtmlElementIfOpen(stack, node, match[0], match[1]);
 }
 
-function katanaHtmlNamespace(xmlMode) {
-  return xmlMode ? "katana-xml" : KATANA_HTML_NAMESPACE;
+function katanaHtmlNamespace(xmlMode, parent, tagName) {
+  if (xmlMode) return "katana-xml";
+  const normalizedTagName = String(tagName).toLowerCase();
+  if (normalizedTagName === "svg") return KATANA_SVG_NAMESPACE;
+  if (parent?.namespaceURI === KATANA_SVG_NAMESPACE) {
+    return parent.localName === "foreignobject" ? KATANA_HTML_NAMESPACE : KATANA_SVG_NAMESPACE;
+  }
+  return KATANA_HTML_NAMESPACE;
 }
+
+const KATANA_SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
 function pushHtmlElementIfOpen(stack, node, fullTag, tagName) {
   if (katanaIsOpenHtmlTag(fullTag, tagName)) {

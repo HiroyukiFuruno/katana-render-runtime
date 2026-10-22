@@ -1,10 +1,13 @@
 globalThis.getComputedStyle = (node) => katanaComputedStyle(node);
 
 function katanaComputedStyle(node) {
-  const box = katanaComputedStyleBox(node);
   return {
-    width: `${box.width}px`,
-    height: `${box.height}px`,
+    get width() {
+      return `${katanaComputedStyleBox(node).width}px`;
+    },
+    get height() {
+      return `${katanaComputedStyleBox(node).height}px`;
+    },
     display: "block",
     fontSize: katanaComputedFontSize(node),
     get fontFamily() {

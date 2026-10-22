@@ -155,7 +155,6 @@ globalThis.mermaid = {
     const ns = 'http://www.w3.org/2000/svg';
     const family = 'trebuchet ms, verdana, arial, sans-serif';
     const textValue = 'Banking Customer A';
-    const expected = globalThis.__katanaMeasureSvgTextMetrics(textValue, family, 16, 400, false).advance;
     const make = (attrs = {}, style = {}) => {
       const text = document.createElementNS(ns, 'text');
       text.style.setProperty('font-family', family);
@@ -182,9 +181,9 @@ globalThis.mermaid = {
     const styled = make();
     styled.children[1].style.setProperty('font-weight', '700');
     const styledLines = katanaOrderedTextLines(styled);
-    const result = ltrLines.length === 1 && ltrLines[0].parts.length === 1
-      && ltrLines[0].parts[0].text === textValue
-      && Math.abs(ltrLines[0].parts[0].width - expected) < 0.0001
+    const result = ltrLines.length === 1 && ltrLines[0].parts.length === 3
+      && ltrLines[0].parts.map(part => part.text).join('') === textValue
+      && ltrLines[0].parts.every(part => part.node?.getAttribute('class') === 'c4-name')
       && positionedLines.length === 2
       && rtlLines.flatMap(line => line.parts).length === 3
       && bidiLines.flatMap(line => line.parts).length === 3
@@ -216,7 +215,7 @@ fn block_beta_raw_request_uses_native_owner_merge_guard() -> Result<(), String> 
 }
 
 #[test]
-fn c4_same_font_owners_shape_as_one_svg_run_only_for_safe_ltr_text() -> Result<(), String> {
+fn c4_same_font_owners_keep_owner_boundaries_even_with_same_font() -> Result<(), String> {
     let rendered = render_svg_fixture(C4_SAME_FONT_OWNER_FIXTURE)?;
     assert!(
         rendered.contains(r##"data-c4-run-merge-guards="true"##),

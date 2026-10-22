@@ -3,7 +3,7 @@ use resvg::usvg::roxmltree::Document;
 
 #[cfg(target_os = "macos")]
 pub(super) const VIEW_BOX_COMPONENT_COUNT: usize = 4;
-pub(super) const SVG_DOM_PLACEMENT_SCALE: u32 = 64;
+pub(in crate::markdown::mermaid_renderer::js_runtime) const SVG_DOM_PLACEMENT_SCALE: u32 = 64;
 
 #[cfg(target_os = "macos")]
 const VIEW_BOX_SERIALIZATION_TOLERANCE: f64 = 1.0 / SVG_DOM_PLACEMENT_SCALE as f64;

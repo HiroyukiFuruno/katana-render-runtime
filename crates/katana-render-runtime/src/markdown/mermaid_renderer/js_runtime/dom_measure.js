@@ -1,5 +1,9 @@
 function katanaMeasuredBoxAccurate(node) {
-  if (KATANA_HIDDEN_LAYOUT_TAGS.has(node.localName) || katanaIsDisplayNone(node)) {
+  // Native SVGはdisplay:noneのgだけ子のintrinsic bboxを返すため、gは再帰計測へ進める。
+  if (
+    KATANA_HIDDEN_LAYOUT_TAGS.has(node.localName) ||
+    (katanaIsDisplayNone(node) && node.localName !== "g")
+  ) {
     return katanaBox(0, 0, 0, 0);
   }
   return katanaVisibleMeasuredBoxAccurate(node);
@@ -166,6 +170,13 @@ function katanaTextFragmentBox(node) {
     );
   }
   return katanaBox(0, 0, 0, 0);
+}
+
+function katanaHasPositionedSvgText(node) {
+  if (!node || !["text", "tspan"].includes(node.localName)) {
+    return false;
+  }
+  return ["x", "y", "dx", "dy"].some((name) => node.getAttribute?.(name) !== null);
 }
 
 function katanaTextFragmentParent(node) {

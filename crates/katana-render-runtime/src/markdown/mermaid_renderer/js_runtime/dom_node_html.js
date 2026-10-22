@@ -53,7 +53,10 @@ Object.defineProperty(KatanaNode.prototype, "innerHTML", {
   },
   set(value) {
     katanaClearInnerHtml(this);
-    katanaApplyInnerHtml(this, parseInnerHtml(String(value)));
+    katanaApplyInnerHtml(
+      this,
+      parseInnerHtml(String(value), false, this.namespaceURI, this.localName),
+    );
   },
 });
 

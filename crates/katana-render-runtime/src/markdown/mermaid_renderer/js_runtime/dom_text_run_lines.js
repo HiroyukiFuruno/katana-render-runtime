@@ -41,8 +41,12 @@ function katanaPositionTextRuns(node, state, font) {
   const dx = katanaRunTextPosition(node, "dx", font);
   const dy = katanaRunTextPosition(node, "dy", font);
   if ([x, y, dx, dy].some((value) => value !== null)) katanaFlushOrderedTextRun(state);
-  state.x = (x ?? state.x) + (dx ?? 0);
-  state.y = (y ?? state.y) + (dy ?? 0);
+  const nextX = Math.fround((x ?? state.x) + (dx ?? 0));
+  const nextY = Math.fround((y ?? state.y) + (dy ?? 0));
+  if (!Number.isFinite(nextX) || !Number.isFinite(nextY))
+    throw new RangeError("SVG text position overflow");
+  state.x = nextX;
+  state.y = nextY;
   if (!state.current || x !== null || y !== null || (dy ?? 0) !== 0) {
     state.current = { node, text: "", parts: [], x: state.x, y: state.y, anchor: font.anchor };
     state.lines.push(state.current);
@@ -53,7 +57,9 @@ function katanaRunTextPosition(node, name, font) {
   const value = String(node.getAttribute?.(name) ?? "").trim();
   const match = value.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(px|em)?$/i);
   if (!match) return null;
-  const pixels = Number(match[1]) * (match[2]?.toLowerCase() === "em" ? font.size : 1);
+  const valueInUnits = Math.fround(Number(match[1]));
+  const scale = match[2]?.toLowerCase() === "em" ? Math.fround(font.size) : 1;
+  const pixels = Math.fround(valueInUnits * scale);
   return Number.isFinite(pixels) ? pixels : null;
 }
 
@@ -89,8 +95,8 @@ function katanaAppendOrderedTextRun(node, text, font, state) {
   if (
     state.pending &&
     (!katanaSameTextRunFont(state.pending.font, font) ||
-      ((!katanaCanMergeNativeTextRunOwners(state.pending.node) ||
-        !katanaCanMergeNativeTextRunOwners(owner)) &&
+      ((!katanaCanMergeNativeTextOwners(state.pending.node) ||
+        !katanaCanMergeNativeTextOwners(owner)) &&
         state.pending.node !== owner))
   )
     katanaFlushOrderedTextRun(state);
@@ -117,7 +123,7 @@ function katanaMeasuredPendingTextRuns(pending, text) {
     return [katanaMeasuredTextRun(pending.node, text, pending.font)];
   }
   const svgMetrics =
-    pending.svgNativeEligible && katanaCanMergeNativeTextRunOwners(pending)
+    pending.svgNativeEligible && katanaCanMergeNativeTextOwners(pending)
       ? katanaNativeSvgRunMetrics(pending.node, text, pending.font)
       : null;
   if (svgMetrics !== null)
@@ -128,36 +134,6 @@ function katanaMeasuredPendingTextRuns(pending, text) {
   return native !== null
     ? [{ node: pending.node, text, width: native }]
     : pending.fragments.map((run) => katanaFallbackTextFragment(run, pending.font));
-}
-
-function katanaCanMergeNativeTextRunOwners(nodeOrPending) {
-  return (
-    katanaCanMergeNativeTextOwners(nodeOrPending) ||
-    katanaCanMergeNativeSvgTextOwners(nodeOrPending)
-  );
-}
-
-/* WHY: C4の連続tspanはSVG shapingだけを共有し、fallbackのowner補正は共有しない。 */
-function katanaCanMergeNativeSvgTextOwners(nodeOrPending) {
-  if (
-    !katanaIsC4Diagram() ||
-    !katanaMermaidNativeAdvanceRuntime() ||
-    typeof globalThis.__katanaMeasureSvgTextMetrics !== "function"
-  )
-    return false;
-  if (Array.isArray(nodeOrPending?.fragments)) {
-    const nodes = nodeOrPending.fragments.map((fragment) => fragment.node);
-    return nodes.length > 1 && nodes.every(katanaIsNativeSvgTextOwnerMergeSafe);
-  }
-  return katanaIsNativeSvgTextOwnerMergeSafe(nodeOrPending);
-}
-
-function katanaIsNativeSvgTextOwnerMergeSafe(node) {
-  if (node?.namespaceURI !== "http://www.w3.org/2000/svg") return false;
-  for (const name of ["x", "y", "dx", "dy", "rotate", "textLength", "lengthAdjust"]) {
-    if (String(node.getAttribute?.(name) ?? "").trim()) return false;
-  }
-  return katanaIsNativeTextOwnerDirectionSafe(node);
 }
 
 /* WHY: fallback/C4の幅補正はowner依存なので、Nativeで測れない文字を別ownerへ波及させない。 */

@@ -104,12 +104,16 @@ function katanaIsDisplayNone(node) {
   return display === "none";
 }
 
-function katanaHasDegenerateGeometry(node) {
+function katanaHasDegenerateGeometry(node, positionedTextGroupDepth = 0) {
   if (!node || KATANA_HIDDEN_LAYOUT_TAGS.has(node.localName) || katanaIsDisplayNone(node)) {
     return false;
   }
   if (["text", "tspan"].includes(node.localName)) {
-    return katanaLayoutTextContent(node).trim().length > 0;
+    // Chromeの空文字点は自身または1段のg経由まで親bboxへ伝播する。
+    return (
+      katanaLayoutTextContent(node).trim().length > 0 ||
+      (positionedTextGroupDepth <= 1 && katanaHasPositionedSvgText(node))
+    );
   }
   if (node.localName === "line") {
     return true;
@@ -117,7 +121,11 @@ function katanaHasDegenerateGeometry(node) {
   if (node.localName === "path" && String(node.getAttribute?.("d") ?? "").trim()) {
     return true;
   }
-  return (node.children ?? []).some((child) => katanaHasDegenerateGeometry(child));
+  const nextPositionedTextGroupDepth =
+    node.localName === "g" ? positionedTextGroupDepth + 1 : positionedTextGroupDepth;
+  return (node.children ?? []).some((child) =>
+    katanaHasDegenerateGeometry(child, nextPositionedTextGroupDepth),
+  );
 }
 
 function katanaMeasuredBox(node) {
