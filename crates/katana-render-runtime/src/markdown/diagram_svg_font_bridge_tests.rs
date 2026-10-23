@@ -34,6 +34,24 @@ const INVALID_X_HEIGHT_REQUEST_SCRIPT: &str = r#"(() => {
     }).join(',');
 })()"#;
 
+const X_HEIGHT_MEASUREMENT_FAILURE_SCRIPT: &str = r#"(() => {
+    const measure = globalThis.__katanaMeasureSvgFontXHeight;
+    const cases = [
+        ['missing-family', () => measure('KRR Missing SVG Font Family', 16, 400, false)],
+        ['empty-family', () => measure('', 16, 400, false)],
+        ['omitted-family', () => measure()],
+    ];
+    return cases.map(([name, invoke]) => {
+        try {
+            invoke();
+            return [name, 'resolved'].join(':');
+        }
+        catch (error) {
+            return [name, error instanceof Error ? error.message : String(error)].join(':');
+        }
+    }).join(',');
+})()"#;
+
 fn metric_fixture(include_optional: bool) -> SvgTextRunMetrics {
     SvgTextRunMetrics {
         layout_ascent: include_optional.then_some(OPTIONAL_LAYOUT_ASCENT),
@@ -185,5 +203,24 @@ fn real_v8_x_height_bridge_rejects_invalid_numeric_requests() -> Result<(), Stri
     .collect::<Vec<_>>()
     .join(",");
     assert_eq!(observed, expected);
+    Ok(())
+}
+
+#[test]
+fn real_v8_x_height_bridge_rejects_missing_family_measurements() -> Result<(), String> {
+    let observed = DiagramV8Runtime::render(&[
+        crate::markdown::diagram_js_runtime::DiagramRuntimeScript::borrowed(
+            "bridge-x-height-measurement-failure-table",
+            X_HEIGHT_MEASUREMENT_FAILURE_SCRIPT,
+        ),
+    ])?;
+    assert_eq!(
+        observed,
+        concat!(
+            "missing-family:SVG font x-height measurement failed,",
+            "empty-family:SVG font x-height measurement failed,",
+            "omitted-family:SVG font x-height measurement failed"
+        )
+    );
     Ok(())
 }

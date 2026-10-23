@@ -2806,7 +2806,7 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,
-      sha256: "a52369ca8ded04fe4043bfd79962266621efef8518bfb06ff19180ff5230dc92",
+      sha256: "f4375e4ca17e4d1931efbf21020b7b48bf06079ed9ae00de3ea160d31683731f",
     },
   ]);
   expect(report.javascriptTypeCoverage.mandatoryPaths).toContain(nativeWidthTracePath);
@@ -2834,8 +2834,8 @@ test.each([
   ["js_runtime_native_width_helpers.rs", "probes: nativeWidthProbeResult()", "probes: {}"],
   [
     "js_runtime_native_width_oracle_boundary_tests.rs",
-    "DiagramRuntimeScript::borrowed(script_label, script)",
-    'DiagramRuntimeScript::borrowed("unreviewed-native-width.js", script)',
+    "script_label,\n            RAW_BRIDGE_SCRIPT,",
+    '"unreviewed-native-width.js",\n            RAW_BRIDGE_SCRIPT,',
   ],
   [
     "js_runtime_native_width_oracle_boundary_tests.rs",

@@ -1,27 +1,69 @@
+use std::panic::AssertUnwindSafe;
+
+use serde_json::{Value, json};
+
 use super::oracle::assert_bridge_widths_match_rust;
 use crate::markdown::diagram_js_runtime::{DiagramRuntimeScript, DiagramV8Runtime};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
-use serde_json::{Value, json};
 
-pub(super) fn actual_v8_calls(script_label: &'static str) -> Result<Vec<Value>, String> {
-    let script = r#"
+const CANVAS_SEGMENTS_ARGUMENT_INDEX: usize = 5;
+const CANVAS_WHOLE_ARGUMENT_COUNT: usize = 5;
+const CANVAS_SEGMENTED_ARGUMENT_COUNT: usize = 6;
+const CANVAS_SEGMENT_COUNT: usize = 2;
+const RAW_BRIDGE_SCRIPT: &str = r#"
+const CANVAS_SEGMENTS_ARGUMENT_INDEX = 5;
 const cssArgs = ['AV', 'Noto Sans', 16, 400, false];
 const svgArgs = ['AV', 'Noto Sans', 16, 400, false];
+const canvasArgs = ['AV', 'Noto Sans', 16, 400, false];
+const canvasSegmentsArgs = ['AV', 'Noto Sans', 16, 400, false, ['A', 'V']];
 const cssWidth = globalThis.__katanaMeasureText(...cssArgs);
 const svgMetrics = globalThis.__katanaMeasureSvgTextMetrics(...svgArgs);
+const canvasWidth = globalThis.__katanaMeasureCanvasText(...canvasArgs);
+const canvasSegmentsWidth = globalThis.__katanaMeasureCanvasText(...canvasSegmentsArgs);
 JSON.stringify([
   {kind: 'css', args: cssArgs, width: cssWidth},
   {kind: 'svg', args: svgArgs, width: svgMetrics.advance, metrics: svgMetrics},
+  {kind: 'canvas', args: canvasArgs, width: canvasWidth},
+  {
+    kind: 'canvas',
+    args: canvasSegmentsArgs,
+    width: canvasSegmentsWidth,
+    segments: canvasSegmentsArgs[CANVAS_SEGMENTS_ARGUMENT_INDEX],
+  },
 ]);
 "#;
+
+pub(super) fn actual_v8_calls(script_label: &'static str) -> Result<Vec<Value>, String> {
     let output = SvgRasterizeOps::with_html_font_render_scope(|| {
-        DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(script_label, script)])
+        DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
+            script_label,
+            RAW_BRIDGE_SCRIPT,
+        )])
     })?;
     let calls: Vec<Value> = serde_json::from_str(&output).map_err(|error| error.to_string())?;
-    assert!(calls.iter().any(|call| call["kind"] == "css"));
-    assert!(calls.iter().any(|call| call["kind"] == "svg"));
+    assert_actual_call_shapes(&calls);
     assert_bridge_widths_match_rust(&calls)?;
     Ok(calls)
+}
+
+fn assert_actual_call_shapes(calls: &[Value]) {
+    assert!(calls.iter().any(|call| call["kind"] == "css"));
+    assert!(calls.iter().any(|call| call["kind"] == "svg"));
+    assert!(calls.iter().any(|call| {
+        call["kind"] == "canvas"
+            && call["args"]
+                .as_array()
+                .is_some_and(|args| args.len() == CANVAS_WHOLE_ARGUMENT_COUNT)
+    }));
+    assert!(calls.iter().any(|call| {
+        call["kind"] == "canvas"
+            && call["args"]
+                .as_array()
+                .is_some_and(|args| args.len() == CANVAS_SEGMENTED_ARGUMENT_COUNT)
+            && call["segments"]
+                .as_array()
+                .is_some_and(|segments| segments.len() == CANVAS_SEGMENT_COUNT)
+    }));
 }
 
 #[test]
@@ -55,6 +97,40 @@ fn raw_v8_svg_call_rejects_kind_arguments_width_and_metric_corruption() -> Resul
         .ok_or("raw V8 SVG call missing")?;
     assert_svg_corruptions_rejected(&calls, svg_index);
     Ok(())
+}
+
+#[test]
+fn raw_v8_canvas_call_rejects_malformed_segments() -> Result<(), String> {
+    let calls = actual_v8_calls("native-width-oracle-boundary.js")?;
+    let canvas_index = calls
+        .iter()
+        .position(|call| {
+            call["kind"] == "canvas"
+                && call["args"]
+                    .as_array()
+                    .is_some_and(|args| args.len() == CANVAS_SEGMENTED_ARGUMENT_COUNT)
+        })
+        .ok_or("segmented Canvas call missing")?;
+    for malformed in [
+        json!(["A", 1]),
+        json!(["A", "", "V"]),
+        json!(["A"]),
+        Value::Null,
+        json!("AV"),
+    ] {
+        assert_canvas_rejection(&calls, canvas_index, malformed);
+    }
+    Ok(())
+}
+
+fn assert_canvas_rejection(calls: &[Value], canvas_index: usize, segments: Value) {
+    let mut corrupted = calls.to_vec();
+    corrupted[canvas_index]["args"][CANVAS_SEGMENTS_ARGUMENT_INDEX] = segments;
+    let rejected = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        assert_bridge_widths_match_rust(&corrupted)
+    }))
+    .map_or(true, |result| result.is_err());
+    assert!(rejected, "malformed Canvas segments were accepted");
 }
 
 fn assert_svg_corruptions_rejected(calls: &[Value], svg_index: usize) {

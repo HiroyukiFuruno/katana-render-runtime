@@ -27,6 +27,9 @@ fn assert_segmented_canvas_call(segments: &[Value], parsed: ParsedCall<'_>) -> R
     let mut expected = 0.0_f64;
     for segment in segments {
         let segment = segment.as_str().ok_or("Canvas segment is not text")?;
+        if segment.is_empty() {
+            return Err("Canvas segment is empty".to_string());
+        }
         text.push_str(segment);
         expected += f64::from(measure_html_text(&parsed, segment)?);
     }

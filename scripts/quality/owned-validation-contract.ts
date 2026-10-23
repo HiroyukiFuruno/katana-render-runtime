@@ -98,7 +98,7 @@ const NATIVE_WIDTH_TEST_CONSUMERS = {
     "a21a8b260625067348d8531512c8a489d3c71ec651e3b6710c1c69c4bb4da45b",
   [NATIVE_WIDTH_BBOX_TRACE]: "a1c72bb7a16e809b52fbd98a79a079749e4ceb1154ada17781b1007ede8a64cf",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_oracle_boundary_tests.rs`]:
-    "a52369ca8ded04fe4043bfd79962266621efef8518bfb06ff19180ff5230dc92",
+    "f4375e4ca17e4d1931efbf21020b7b48bf06079ed9ae00de3ea160d31683731f",
 };
 const NATIVE_TYPED_UTILITIES = new Set([
   "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_transform_bounds.js",
