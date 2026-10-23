@@ -251,7 +251,9 @@ fn assert_default_route(snapshot: &raster_observer::Snapshot) {
 }
 
 fn assert_standalone_pixels(clone: &usvg::Tree, svg: &str) -> Result<(), String> {
-    let actual = SvgRasterizeOps::render_tree(clone, 1.0).map_err(|e| e.to_string())?;
+    let compatible = SvgRasterizeOps::preprocess_for_rasterizer(svg);
+    let actual =
+        SvgRasterizeOps::render_tree(clone, 1.0, &compatible).map_err(|e| e.to_string())?;
     let options = crate::markdown::svg_rasterize::font::html::html_rasterizer_options(svg);
     let expected =
         SvgRasterizeOps::rasterize_with_options(svg, 1.0, &options).map_err(|e| e.to_string())?;

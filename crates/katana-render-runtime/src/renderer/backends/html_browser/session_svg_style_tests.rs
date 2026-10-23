@@ -18,6 +18,11 @@ const MULTIPLY_INTERIOR_X: usize = 30;
 const MULTIPLY_INTERIOR_Y: usize = 30;
 const INTERNAL_MULTIPLY_FILL: [u8; RGBA_CHANNELS] = [28, 28, 28, 255];
 const MULTIPLY_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80" viewBox="0 0 100 80"><rect width="100" height="80" fill="#202020"/><g style="mix-blend-mode:multiply"><rect x="20" y="20" width="20" height="20" fill="#e0e0e0"/></g></svg>"##;
+const EXTERNAL_MULTIPLY_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80" viewBox="0 0 100 80"><g style="mix-blend-mode:multiply"><rect x="20" y="20" width="20" height="20" fill="#e0e0e0"/></g></svg>"##;
+const EXTERNAL_SOURCE_OVER_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80" viewBox="0 0 100 80"><rect x="20" y="20" width="20" height="20" fill="#e0e0e0"/></svg>"##;
+const EXTERNAL_ISOLATED_MULTIPLY_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80" viewBox="0 0 100 80"><g style="isolation:isolate"><rect x="20" y="20" width="20" height="20" fill="#e0e0e0" style="mix-blend-mode:multiply"/></g></svg>"##;
+const EXTERNAL_MULTIPLY_FILL: [u8; RGBA_CHANNELS] = [28, 28, 28, 255];
+const EXTERNAL_SOURCE_OVER_FILL: [u8; RGBA_CHANNELS] = [224, 224, 224, 255];
 
 #[test]
 fn inline_svg_quoted_marker_selector_keeps_triangle_interior_empty() {
@@ -89,6 +94,31 @@ fn inline_svg_multiply_preserves_its_explicit_internal_backdrop() {
     });
 }
 
+#[test]
+fn inline_svg_multiply_uses_external_html_backdrop_without_isolation() {
+    with_inline_external_background_pixels(EXTERNAL_MULTIPLY_SVG, |actual| {
+        assert_eq!(
+            pixel_at(&actual, MULTIPLY_INTERIOR_X, MULTIPLY_INTERIOR_Y),
+            Some(EXTERNAL_MULTIPLY_FILL.as_slice()),
+            "inline SVG multiply must use the external HTML backdrop"
+        );
+    });
+    with_inline_external_background_pixels(EXTERNAL_SOURCE_OVER_SVG, |actual| {
+        assert_eq!(
+            pixel_at(&actual, MULTIPLY_INTERIOR_X, MULTIPLY_INTERIOR_Y),
+            Some(EXTERNAL_SOURCE_OVER_FILL.as_slice()),
+            "source-over must leave the external HTML backdrop unchanged"
+        );
+    });
+    with_inline_external_background_pixels(EXTERNAL_ISOLATED_MULTIPLY_SVG, |actual| {
+        assert_eq!(
+            pixel_at(&actual, MULTIPLY_INTERIOR_X, MULTIPLY_INTERIOR_Y),
+            Some(EXTERNAL_SOURCE_OVER_FILL.as_slice()),
+            "isolated multiply must not blend with the external HTML backdrop"
+        );
+    });
+}
+
 fn with_native_pixels(svg: &str, action: impl FnOnce(Vec<u8>)) {
     with_success(
         SvgRasterizeOps::rasterize_svg(svg, 1.0),
@@ -108,6 +138,17 @@ fn with_inline_pixels(svg: &str, action: impl FnOnce(Vec<u8>)) {
     let html = format!(
         "<!doctype html><html><head><style>html,body{{margin:0;width:{WIDTH}px;height:{HEIGHT}px}}</style></head><body>{svg}</body></html>"
     );
+    with_inline_html(html, action);
+}
+
+fn with_inline_external_background_pixels(svg: &str, action: impl FnOnce(Vec<u8>)) {
+    let html = format!(
+        "<!doctype html><html><head><style>html,body{{margin:0;width:{WIDTH}px;height:{HEIGHT}px;background:#202020}}</style></head><body>{svg}</body></html>"
+    );
+    with_inline_html(html, action);
+}
+
+fn with_inline_html(html: String, action: impl FnOnce(Vec<u8>)) {
     let source = HtmlBrowserSource::new(html, "https://example.test/quoted-svg-css.html");
     with_success(source, "HTML source", |source| {
         let viewport = HtmlBrowserViewport::new(WIDTH, HEIGHT, 1.0);

@@ -127,7 +127,9 @@ fn real_mode_token_hit_survives_nested_scope_and_restores_outer_memo() -> Result
 }
 
 fn assert_same_real_pixels(tree: &resvg::usvg::Tree) -> Result<(), String> {
-    let actual = SvgRasterizeOps::render_tree(tree, 1.0).map_err(|error| error.to_string())?;
+    let compatible = SvgRasterizeOps::preprocess_for_rasterizer(SVG);
+    let actual =
+        SvgRasterizeOps::render_tree(tree, 1.0, &compatible).map_err(|error| error.to_string())?;
     let eager = super::super::html_rasterizer_options(SVG);
     let expected = SvgRasterizeOps::rasterize_with_options(SVG, 1.0, &eager)
         .map_err(|error| error.to_string())?;

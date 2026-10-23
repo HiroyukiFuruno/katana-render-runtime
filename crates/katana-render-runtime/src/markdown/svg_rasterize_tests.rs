@@ -27,10 +27,12 @@ fn rasterize_svg_returns_pixels_for_simple_svg() {
 #[test]
 fn rasterize_svg_renders_text_with_the_bundled_font() -> Result<(), String> {
     let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="96" height="32"><rect width="96" height="32" fill="#fff"/><text x="4" y="24" font-family="Noto Sans, sans-serif" font-size="20" fill="#14532d">KRR</text></svg>"##;
+    let compatible_svg = SvgRasterizeOps::preprocess_for_rasterizer(svg);
     let options = rasterizer_options_with_font_db(bundled_font_db());
-    let tree = usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
+    let tree =
+        usvg::Tree::from_str(&compatible_svg, &options).map_err(|error| error.to_string())?;
     let image = RasterTarget::new(tree.size(), 1.0)
-        .render(&tree)
+        .render(&tree, &compatible_svg)
         .map_err(|error| error.to_string())?;
 
     assert!(
@@ -225,7 +227,8 @@ fn render_zenuml_test_svg() -> Result<String, ()> {
 #[test]
 fn raster_target_reports_pixmap_allocation_failure() {
     let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>"##;
-    let tree = resvg::usvg::Tree::from_str(svg, &rasterizer_options());
+    let compatible_svg = SvgRasterizeOps::preprocess_for_rasterizer(svg);
+    let tree = resvg::usvg::Tree::from_str(&compatible_svg, &rasterizer_options());
     let target = RasterTarget {
         display_width: 1.0,
         display_height: 1.0,
@@ -234,5 +237,8 @@ fn raster_target_reports_pixmap_allocation_failure() {
         height: 0,
     };
 
-    assert!(tree.as_ref().is_ok_and(|it| target.render(it).is_err()));
+    assert!(
+        tree.as_ref()
+            .is_ok_and(|it| target.render(it, &compatible_svg).is_err())
+    );
 }

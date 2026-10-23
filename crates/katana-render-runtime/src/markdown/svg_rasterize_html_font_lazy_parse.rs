@@ -87,7 +87,7 @@ pub(in crate::markdown::svg_rasterize) fn rasterize(
     let compatible = super::super::super::SvgRasterizeOps::preprocess_for_rasterizer(svg);
     let tree = parse(&compatible, svg)
         .map_err(|error| super::super::super::SvgRasterizeError::ParseFailed(error.to_string()))?;
-    super::super::super::SvgRasterizeOps::render_tree(&tree, scale)
+    super::super::super::SvgRasterizeOps::render_tree(&tree, scale, &compatible)
 }
 
 type KnownOptions = (
@@ -175,7 +175,7 @@ mod diagnostic {
                 super::super::super::super::SvgRasterizeError::ParseFailed(error.to_string())
             })?;
         let rendered = lazy_diagnostic::measure("render_tree", || {
-            super::super::super::super::SvgRasterizeOps::render_tree(&tree, scale)
+            super::super::super::super::SvgRasterizeOps::render_tree(&tree, scale, &compatible)
         });
         if rendered.is_ok()
             && let Some(paint_call) = paint_call

@@ -1,7 +1,7 @@
-use super::super::RasterTarget;
 use super::super::font::{
     current_process_rss_kib, html_font_memory_snapshot, html_rasterizer_options,
 };
+use super::super::{RasterTarget, SvgRasterizeOps};
 use resvg::usvg;
 
 #[test]
@@ -45,11 +45,13 @@ fn run_cold_html_font_memory_in_child() -> Result<(), Box<dyn std::error::Error>
 }
 
 fn render_cold_html_svg(svg: &str) -> Result<super::super::font::HtmlFontMemorySnapshot, String> {
-    let options = html_rasterizer_options(svg);
+    let compatible_svg = SvgRasterizeOps::preprocess_for_rasterizer(svg);
+    let options = html_rasterizer_options(&compatible_svg);
     let memory = html_font_memory_snapshot(&options.fontdb);
-    let tree = usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
+    let tree =
+        usvg::Tree::from_str(&compatible_svg, &options).map_err(|error| error.to_string())?;
     let image = RasterTarget::new(tree.size(), 1.0)
-        .render(&tree)
+        .render(&tree, &compatible_svg)
         .map_err(|error| error.to_string())?;
     drop(tree);
     drop(options);

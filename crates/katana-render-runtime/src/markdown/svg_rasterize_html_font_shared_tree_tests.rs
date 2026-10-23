@@ -122,7 +122,9 @@ fn assert_persistent_file_in_scope() -> Result<(), String> {
 }
 
 fn assert_real_render(tree: &usvg::Tree) -> Result<(), String> {
-    let actual = SvgRasterizeOps::render_tree(tree, 1.0).map_err(|error| error.to_string())?;
+    let compatible = SvgRasterizeOps::preprocess_for_rasterizer(SVG);
+    let actual =
+        SvgRasterizeOps::render_tree(tree, 1.0, &compatible).map_err(|error| error.to_string())?;
     let request = HtmlFontRequest::from_text("Arial", TEXT);
     let database = Arc::new(sources::build_html_font_db(&request));
     let mut options = super::super::super::super::rasterizer_options_with_font_db(database);

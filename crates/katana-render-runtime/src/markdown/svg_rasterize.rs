@@ -2,9 +2,11 @@
 Uses `resvg` + `usvg` to convert SVG text to an RGBA pixel buffer.
 Returns the result as raw bytes compatible with egui's `ColorImage`. */
 
-use resvg::{render, usvg};
+use resvg::usvg;
 use tiny_skia::Pixmap;
 
+#[path = "svg_rasterize_composite.rs"]
+mod composite;
 #[path = "svg_rasterize_font.rs"]
 mod font;
 #[cfg(test)]
@@ -16,6 +18,8 @@ mod measurement_api;
 pub(crate) mod measurement_diagnostic;
 #[path = "svg_rasterize_preprocess.rs"]
 mod preprocess;
+#[path = "svg_rasterize_composite_provenance.rs"]
+mod provenance;
 #[path = "svg_rasterize_text.rs"]
 mod text;
 #[path = "svg_rasterize_text_shaping.rs"]
@@ -160,14 +164,18 @@ impl SvgRasterizeOps {
             result
         })
         .map_err(|e| SvgRasterizeError::ParseFailed(e.to_string()))?;
-        Self::render_tree(&tree, scale)
+        Self::render_tree(&tree, scale, &compatible_svg)
     }
 
-    fn render_tree(tree: &usvg::Tree, scale: f32) -> Result<RasterizedSvg, SvgRasterizeError> {
+    fn render_tree(
+        tree: &usvg::Tree,
+        scale: f32,
+        compatible_svg: &str,
+    ) -> Result<RasterizedSvg, SvgRasterizeError> {
         let raster = RasterTarget::new(tree.size(), scale);
         #[cfg(all(test, target_os = "macos"))]
         font::observation::count(font::observation::Metric::RasterAttempt);
-        let pixmap = raster.render(tree)?;
+        let pixmap = raster.render(tree, compatible_svg)?;
         #[cfg(all(test, target_os = "macos"))]
         font::observation::count(font::observation::Metric::RasterSuccess);
         Ok(RasterizedSvg {
@@ -202,7 +210,7 @@ impl RasterTarget {
         }
     }
 
-    fn render(&self, tree: &usvg::Tree) -> Result<Pixmap, SvgRasterizeError> {
+    fn render(&self, tree: &usvg::Tree, compatible_svg: &str) -> Result<Pixmap, SvgRasterizeError> {
         let Some(mut pixmap) = Pixmap::new(self.width, self.height) else {
             return Err(SvgRasterizeError::RasterizeFailed(
                 "failed to allocate SVG pixmap".to_string(),
@@ -210,7 +218,18 @@ impl RasterTarget {
         };
         let transform =
             tiny_skia::Transform::from_scale(self.effective_scale, self.effective_scale);
-        render(tree, transform, &mut pixmap.as_mut());
+        let authored_clip_info = if composite::SvgCompositeRenderer::needs_authored_clip_ids(tree) {
+            provenance::authored_clip_ids(compatible_svg)?
+        } else {
+            provenance::AuthoredClipInfo::default()
+        };
+        composite::SvgCompositeRenderer::render(
+            tree,
+            transform,
+            &mut pixmap.as_mut(),
+            &authored_clip_info,
+        )
+        .map_err(SvgRasterizeError::RasterizeFailed)?;
         Ok(pixmap)
     }
 }
