@@ -14,6 +14,18 @@
 
 ## 現在の状態（2026-10-23）
 
+- [ ] 最新checkpointは背景混色`2220e789`・日本語W5候補`ff69082e`・予約warm保持`5b1f3839`・既存初回font診断の保持`838d1652`。全て通常commit hook成功、公開は未実施。初回font診断はR1499のAST/厳格Clippyでcompile確認のみ、追加caseの実行は次のrelease test binaryで回収する。既存raw基準・99/90・性能非劣化・coverage100%条件は不変。次はclean committed sourceの候補buildと、代表実画像・全117の再測定へ戻る。
+
+- [ ] 製品描画の2修正を通常hook成功後にcommitした。overflow clip内の背景混色は`2220e789`、太さ600の日本語fallback候補補完は`ff69082e`。R1494はAST・native25件がactual0、source前後一致。実Ishikawaラベルのadvanceは51.708/77.562から独立Chromeと同じ56/84へ、物理file/faceもHiraginoSans-W5・TTC index0へ一致した。図全体の寸法と99到達件数は次の正式画像比較で確認し、現時点で未合格117件という判定は変えない（`tmp/quality/hiragino-fallback-regressions-r1494/result.json`、`overflow-backdrop-checkpoint-commit-r1496/result.json`、`hiragino-fallback-checkpoint-commit-r1497/result.json`）。
+- [ ] 予約済みcoverageを維持したままのR1492 commitは実target5.107GBで固定cap4.726GBを超えて拒否された。検査完了・以後のnative予約なしを確認し、終了済みcoverageだけを既存Cargo cleanで整理したR1495はactual0。次のnativeはcold条件とし、閾値引上げ・証跡再認定・容量だけの停止はしない。R1496/1497の通常commitはその後actual0。
+
+- [ ] R1489はAST・root/harness厳格Clippy・native25件がactual0、source前後一致。R1482で期待28に対し実224だったoverflow clip内multiply回帰は成功し、author clip/透明度/DPR回帰も保持した。実117画像スコアの改善件数はまだ未測定。日本語Ishikawaの実SVG計測faceは両図とも`.HiraKakuInterface-W6`、物理TTC index1（SHA495faf728470c011…）。advance51.7081909/77.5622864を取得し、独立Chromeの56/84との差を実faceから追う。R1484/1485/1486/1488のAST/compile/Clippy失敗を保持し、修正後の成功と区別する（`tmp/quality/overflow-provenance-regressions-r1489/result.json`）。
+- [ ] R1489のharness lintが予約済みroot coverageを2.65GB削除し、直後のnativeをcold再buildさせていた。既存retain-profileを両harness laneまで同一shellで伝達し、既存validatorは3domainともcanonical root profileだけを受理するよう是正。固定容量閾値は維持。R1490のPython Lint・厳格型・profile契約回帰・Justレシピ解析はactual0、source前後一致。修正後の実lintでwarm保持されるかは次の実行で確認する（`tmp/quality/warm-profile-propagation-regressions-r1490/result.json`）。
+
+- [ ] R1481の正式117図は115図が99未満、2図が実寸法不一致で、受入は0/117。EN59図のnative PNGはR1439と全件SHA一致し、今回の合成変更が実データを改善したとは認定しない。JAの寸法差は13-01-3が400→398、13-02-4が687→679（高さ605）。原本・閾値は不変、source前後一致、actual1を保持する（`tmp/quality/current-managed117-controller-r1481/result.json`、`current-managed-full117-r1481/receipt.json`）。
+- [ ] R1482で実HTMLのoverflow clipとSVG multiplyの組合せを再現。native5件中4成功・1失敗、期待RGBA28に対し実224。controllerのsucceededは観測処理の正常終了だけであり、nativeActualExit100・受入NGを維持する。HTML生成clipと作者SVG clipの型付きprovenanceを区別して製品描画を修正し、代表実PNGの改善確認を全117再実行より先行する（`tmp/quality/overflow-backdrop-red-r1482/result.json`と同runのnative raw）。
+- [ ] 専用Chromiumのdescriptor配列順をTTC物理face indexへ誤認しない。既存smokeは63event・observer/control PNG byte一致だが、physicalFaceDescriptorIndexの観測だけではfont12条件の受入を満たさない。既存ライブラリで物理font各faceのtable照合が可能かを調査中。R1478候補buildはactual0だが、以後のsource変更後の正式合格には再利用しない（`tmp/quality/current-candidate-build-controller-r1478/build-result.json`）。
+
 - [ ] 通常hookを通して4 checkpointをcommitした。製品SVG合成`fcf9abd0`、font観測`2dddb52c`、寸法差を保持した全件採点`a274d042`、SHA固定Chrome指定`329f6b6c`。公開や正式117合格ではない。R1467の容量拒否後は終了済みcoverage profileだけをR1468で整理し、閾値を維持してR1469/1470/1471/1472の通常commitがactual0。修正済みsourceをcleanへ固定し、現行候補build証跡と正式画像比較へ進む。
 
 - [ ] R1466は標準AST、静的foundation12タスク、root/harness厳格Clippy、Bun71件442assert、native33件をactual0、source前後一致で通過した。R1458の通常commit拒否を受けた責務分割・関数長・型・importsの修正を含む。主担当レビューでmask helperのsource/backdrop混同も是正し、viewport外へ溢れる子図形の非漏出を回帰へ追加した。局所実装の合格で、正式117/HTML84/性能/100%coverage/公開は未完了。終了済みcoverage profileは既存Cargo cleanで整理し、次回はcold再buildとした（`tmp/quality/common-render-and-font-regressions-r1466/result.json`、`closed-coverage-profile-clean-r1459/result.json`）。
