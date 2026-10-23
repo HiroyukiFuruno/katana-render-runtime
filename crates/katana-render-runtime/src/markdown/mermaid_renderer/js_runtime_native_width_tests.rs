@@ -1,5 +1,7 @@
 #[path = "js_runtime_native_width_helpers.rs"]
 mod helpers;
+#[path = "js_runtime_native_width_ishikawa_tests.rs"]
+mod ishikawa_tests;
 #[path = "js_runtime_native_width_oracle.rs"]
 mod oracle;
 #[path = "js_runtime_native_width_oracle_boundary_tests.rs"]

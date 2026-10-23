@@ -75,6 +75,8 @@ fn accumulate_svg_font_run_metrics(
     let mut advance_offset = 0.0_f64;
     let mut includes_primary = false;
     for (id, run) in resolved_font_runs(database, base, family, text, font.weight, font.italic) {
+        #[cfg(all(test, target_os = "macos"))]
+        crate::markdown::svg_rasterize::font::record_actual_selected_face(database, Some(id));
         let metrics = cache::cached_svg_run(database, id, &run, font)?;
         includes_primary |= id == base;
         result.ink_bounds = union_ink_bounds(
