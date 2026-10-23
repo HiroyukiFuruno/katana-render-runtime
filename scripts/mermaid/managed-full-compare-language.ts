@@ -26,7 +26,7 @@ import {
   scoreNativeFramePaintProjection,
   verifyNativeFrameEvidence,
 } from "./native-frame-evidence";
-import { scoreNativeProductRows } from "./native-product-score";
+import { type NativeProductDimensionFailure, scoreNativeProductRows } from "./native-product-score";
 import { requireNativeRenderInventory } from "./native-render-provenance";
 import { MagickOps } from "./reference_image_ops";
 import type { ReferencePair } from "./reference_pair_repository";
@@ -50,6 +50,12 @@ export interface LanguageAcceptance {
   minimumScore: number;
   accepted: boolean;
   failedScores: Array<{ slug: string; score: number; minScore: number }>;
+  failures: Array<{
+    slug: string;
+    reason: string;
+    official: { width: number; height: number };
+    actual: { width: number; height: number };
+  }>;
   fixtureSources: FixtureSourcePin[];
   buildReceipt: string;
   nativeBindings: FilePin;
@@ -60,6 +66,7 @@ export interface LanguageAcceptance {
   nativeFrameEvidence?: FilePin;
   nativeFrameComparison?: FilePin;
   nativeProductComparison?: FilePin;
+  nativeProductFailures?: FilePin;
   nativeFrameBuildProof: FilePin;
 }
 
@@ -98,6 +105,7 @@ export async function runManagedLanguage(
   let nativeEvidenceValue: ReturnType<typeof verifyNativeFrameEvidence> | undefined;
   let nativeFrameComparison: FilePin | undefined;
   let nativeProductComparison: FilePin | undefined;
+  let nativeProductFailures: FilePin | undefined;
   let nativeProductScore: ReturnType<typeof validateLanguageScoreEvidence> | undefined;
   let nativeFrameAccepted = true;
   assertNativeFrameInputMode(input);
@@ -343,6 +351,9 @@ export async function runManagedLanguage(
     nativeProductComparison = filePin(
       path.join(comparisonDirectory, "native-product-comparison", "scores.json"),
     );
+    nativeProductFailures = filePin(
+      path.join(comparisonDirectory, "native-product-comparison", "failures.json"),
+    );
     nativeFrameComparison = filePin(nativeComparison.evidencePath);
   }
   const requiredNativeProductScore = requireNativeProductScoreEvidence(nativeProductScore);
@@ -354,6 +365,7 @@ export async function runManagedLanguage(
     failedScores: [...score.scores, ...requiredNativeProductScore.scores]
       .filter((row) => !row.passed || row.score < 99)
       .map(({ slug, score, minScore }) => ({ slug, score, minScore })),
+    failures: requiredNativeProductScore.failures,
     fixtureSources: inventory.sources,
     buildReceipt: buildReceiptPath,
     nativeBindings: filePin(path.join(svgDirectory, "render-bindings.json")),
@@ -365,6 +377,7 @@ export async function runManagedLanguage(
     ...(nativeFrameEvidence === undefined ? {} : { nativeFrameEvidence }),
     ...(nativeFrameComparison === undefined ? {} : { nativeFrameComparison }),
     ...(nativeProductComparison === undefined ? {} : { nativeProductComparison }),
+    ...(nativeProductFailures === undefined ? {} : { nativeProductFailures }),
   };
 }
 
@@ -624,6 +637,7 @@ function writeNativeProductScores(
       role: "native-product",
       pngSha256BySlug: new Map(frames.map((frame) => [frame.slug, frame.png.sha256])),
     },
+    output.failures,
   );
 }
 
@@ -638,7 +652,7 @@ function buildNativeProductComparison(
   const directory = path.join(comparisonDirectory, "native-product-comparison");
   fs.mkdirSync(directory, { mode: 0o700 });
   const magickDirectory = path.join(directory, "magick"),
-    scores = scoreNativeProductRows(
+    scoreBatch = scoreNativeProductRows(
       pairs,
       frames,
       projected.scores,
@@ -648,8 +662,8 @@ function buildNativeProductComparison(
     evidencePath = path.join(directory, "paint-projected-reference-evidence.json"),
     context = nativeProductContext(expectedSlugCount, evidencePath, projected.evidenceSha256);
   fs.copyFileSync(projected.evidencePath, evidencePath, fs.constants.COPYFILE_EXCL);
-  writeNativeProductFiles(directory, scores, inventory, context);
-  return { scores, evidencePath, context };
+  writeNativeProductFiles(directory, scoreBatch.scores, scoreBatch.failures, inventory, context);
+  return { scores: scoreBatch.scores, failures: scoreBatch.failures, evidencePath, context };
 }
 
 function nativeProductContext(
@@ -673,12 +687,14 @@ function nativeProductContext(
 
 function writeNativeProductFiles(
   directory: string,
-  scores: ReturnType<typeof scoreNativeProductRows>,
+  scores: ReturnType<typeof scoreNativeProductRows>["scores"],
+  failures: NativeProductDimensionFailure[],
   inventory: unknown,
   context: ReturnType<typeof nativeProductContext>,
 ): void {
   for (const [name, value] of [
     ["scores.json", scores],
+    ["failures.json", failures],
     ["fixture-inventory.json", inventory],
     ["reference-context.json", context],
   ] as const) {

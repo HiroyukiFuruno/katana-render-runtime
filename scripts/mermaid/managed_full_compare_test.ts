@@ -38,6 +38,7 @@ function typedLanguageAcceptance(language: "en" | "ja"): LanguageAcceptance {
     minimumScore: 100,
     accepted: true,
     failedScores: [],
+    failures: [],
     fixtureSources: [],
     buildReceipt: pin.path,
     nativeBindings: pin,
@@ -544,6 +545,58 @@ test("managed geometry evidence keeps structural mismatches as failed scores", (
   expect(result.scores[0]?.passed).toBe(false);
 });
 
+test("managed native validation records dimension failures without invented metrics", () => {
+  const expected = slugs(59);
+  const targetSlug = "08-04-c4-component";
+  expected[0] = targetSlug;
+  const evidence = validGeometryEvidence(expected);
+  const failures = [
+    {
+      slug: targetSlug,
+      reason: "paint-projected-raster-dimensions-differ",
+      official: { width: 400, height: 605 },
+      actual: { width: 398, height: 605 },
+    },
+  ] satisfies NonNullable<Parameters<typeof validateNativeGeometryEvidence>[2]>["knownFailures"];
+  const dimensionFailure = failures[0];
+  if (dimensionFailure === undefined) throw new Error("dimension failure fixture is missing");
+  const result = validateNativeGeometryEvidence(expected, evidence, {
+    scores: evidence.scores.slice(1),
+    knownFailures: failures,
+  });
+  expect(result.accepted).toBe(false);
+  expect(result.minimumScore).toBe(0);
+  expect(result.fixtureCount).toBe(59);
+  expect(result.scores.map((row) => row.slug)).toEqual(expected.slice(1));
+  expect(result.failures).toEqual(failures);
+  const allFailures = expected.map((slug) => ({
+    slug,
+    reason: "paint-projected-raster-dimensions-differ" as const,
+    official: { width: 400, height: 605 },
+    actual: { width: 398, height: 605 },
+  }));
+  const allFailedResult = validateNativeGeometryEvidence(expected, evidence, {
+    scores: [],
+    knownFailures: allFailures,
+  });
+  expect(allFailedResult.fixtureCount).toBe(59);
+  expect(allFailedResult.accepted).toBe(false);
+  expect(allFailedResult.scores).toEqual([]);
+  expect(allFailedResult.failures).toEqual(allFailures);
+  expect(() =>
+    validateNativeGeometryEvidence(expected, evidence, {
+      scores: evidence.scores.slice(1),
+      knownFailures: [{ ...dimensionFailure, actual: { width: 400, height: 605 } }],
+    }),
+  ).toThrow();
+  expect(() =>
+    validateNativeGeometryEvidence(expected, evidence, {
+      scores: evidence.scores.slice(2),
+      knownFailures: [dimensionFailure, dimensionFailure],
+    }),
+  ).toThrow();
+});
+
 test("managed Python route pins the resolved tool and preserves raw logs", () => {
   const root = fs.mkdtempSync(path.join(process.cwd(), "tmp", "managed-python-route-"));
   const outputRoot = path.join(root, "run");
@@ -655,6 +708,12 @@ function validateNativeGeometryEvidence(
     context?: unknown;
     geometry?: unknown;
     pins?: ReadonlyMap<string, string>;
+    knownFailures?: Array<{
+      slug: string;
+      reason: "paint-projected-raster-dimensions-differ";
+      official: { width: number; height: number };
+      actual: { width: number; height: number };
+    }>;
   } = {},
 ): ReturnType<typeof validateLanguageScoreEvidence> {
   return validateLanguageScoreEvidence(
@@ -665,6 +724,7 @@ function validateNativeGeometryEvidence(
     overrides.context ?? evidence.context,
     overrides.geometry ?? evidence.geometry,
     { role: "native-product", pngSha256BySlug: overrides.pins ?? nativePngPins(expected) },
+    overrides.knownFailures ?? [],
   );
 }
 

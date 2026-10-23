@@ -39,6 +39,22 @@ export interface PaintProjectedImageComparison {
   height: number;
 }
 
+export class PaintProjectedRasterDimensionsError extends Error {
+  readonly referenceSize: ImageSize;
+  readonly actualSize: ImageSize;
+
+  constructor(
+    readonly slug: string,
+    referenceSize: ImageSize,
+    actualSize: ImageSize,
+  ) {
+    super(`Paint projected raster dimensions differ for ${slug}`);
+    this.name = "PaintProjectedRasterDimensionsError";
+    this.referenceSize = referenceSize;
+    this.actualSize = actualSize;
+  }
+}
+
 export class MagickOps {
   private workDir: string;
   private theme: DiagramTheme;
@@ -161,7 +177,7 @@ export class MagickOps {
       referenceSize.width !== candidateSize.width ||
       referenceSize.height !== candidateSize.height
     ) {
-      throw new Error(`Paint projected raster dimensions differ for ${slug}`);
+      throw new PaintProjectedRasterDimensionsError(slug, referenceSize, candidateSize);
     }
     const bounds = [this.foregroundBounds(projectedReference), this.foregroundBounds(candidate)];
     if (bounds.some((bound) => bound.width < 2 || bound.height < 2)) {

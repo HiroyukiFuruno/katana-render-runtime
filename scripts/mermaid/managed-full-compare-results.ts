@@ -173,11 +173,38 @@ const contextSchema = z
   })
   .strict();
 
+const nativeProductFailureSchema = z
+  .object({
+    slug: z.string().min(1),
+    reason: z.literal("paint-projected-raster-dimensions-differ"),
+    official: z
+      .object({ width: z.number().int().positive(), height: z.number().int().positive() })
+      .strict(),
+    actual: z
+      .object({ width: z.number().int().positive(), height: z.number().int().positive() })
+      .strict(),
+  })
+  .strict()
+  .refine(
+    (failure) =>
+      failure.official.width !== failure.actual.width ||
+      failure.official.height !== failure.actual.height,
+    {
+      message: "known dimension failure must contain a dimension mismatch",
+    },
+  );
+
 export interface LanguageScoreAcceptance {
   fixtureCount: number;
   minimumScore: number;
   accepted: boolean;
   scores: Array<z.infer<typeof scoreRowSchema>>;
+  failures: Array<{
+    slug: string;
+    reason: string;
+    official: { width: number; height: number };
+    actual: { width: number; height: number };
+  }>;
 }
 
 export type PaintProjectedReferenceEvidence = z.infer<typeof paintProjectedReferenceEvidenceSchema>;
@@ -237,11 +264,16 @@ export function validateLanguageScoreEvidence(
   contextValue: unknown,
   paintProjectedReferenceEvidenceValue?: unknown,
   expectation: ScoreEvidenceExpectation = { role: "reference" },
+  knownFailures: LanguageScoreAcceptance["failures"] = [],
 ): LanguageScoreAcceptance {
   const expectedRole = expectation.role,
     expectedNativePngSha256 =
       expectation.role === "native-product" ? expectation.pngSha256BySlug : undefined;
   const expectedCount = language === "en" ? 59 : 58;
+  if (knownFailures.length > 0 && expectedRole !== "native-product") {
+    throw new Error(`${language} reference score cannot contain native product failures`);
+  }
+  const failures = z.array(nativeProductFailureSchema).parse(knownFailures);
   validateExpectedSlugSet(language, expectedSlugs, expectedCount);
   const scores = z.array(scoreRowSchema).parse(scoresValue);
   const inventory = inventorySchema.parse(inventoryValue);
@@ -263,15 +295,17 @@ export function validateLanguageScoreEvidence(
       context,
       expectedRole,
       expectedNativePngSha256,
+      failures,
     )
   ) {
     throw new Error(`${language} comparison did not score the exact strict inventory`);
   }
   return {
-    fixtureCount: scores.length,
-    minimumScore: Math.min(...scores.map((row) => row.score)),
-    accepted: scores.every((row) => row.score >= 99 && row.passed),
+    fixtureCount: scores.length + failures.length,
+    minimumScore: failures.length === 0 ? Math.min(...scores.map((row) => row.score)) : 0,
+    accepted: failures.length === 0 && scores.every((row) => row.score >= 99 && row.passed),
     scores,
+    failures,
   };
 }
 
@@ -327,16 +361,19 @@ function isAcceptedScoreSet(
   context: z.infer<typeof contextSchema>,
   expectedRole: "reference" | "native-product",
   expectedNativePngSha256: ReadonlyMap<string, string> | undefined,
+  knownFailures: LanguageScoreAcceptance["failures"],
 ): boolean {
   if (
     !sameStrings(inventory.expected, expectedSlugs) ||
     !sameStrings(inventory.scored, expectedSlugs) ||
     inventory.skippedEmpty.length !== 0 ||
     context.expectedSlugCount !== expectedCount ||
-    scores.length !== expectedCount ||
+    scores.length + knownFailures.length !== expectedCount ||
+    new Set([...scores.map((row) => row.slug), ...knownFailures.map((failure) => failure.slug)])
+      .size !== expectedCount ||
     !sameStrings(
-      scores.map((row) => row.slug),
-      expectedSlugs,
+      [...scores.map((row) => row.slug), ...knownFailures.map((failure) => failure.slug)].sort(),
+      [...expectedSlugs].sort(),
     )
   ) {
     return false;

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileSha256 } from "./mermaid-pair-manifest";
-import type { MagickOps } from "./reference_image_ops";
+import { type MagickOps, PaintProjectedRasterDimensionsError } from "./reference_image_ops";
 import type { ReferencePair } from "./reference_pair_repository";
 import type { PaintProjectedReferenceScore, ReferenceScoreRow } from "./reference_score";
 import { ReferenceScorePolicy } from "./reference_score_policy";
@@ -11,27 +11,56 @@ export interface NativeProductFrame {
   png: { path: string; sha256: string };
 }
 
+export interface NativeProductDimensionFailure {
+  slug: string;
+  reason: "paint-projected-raster-dimensions-differ";
+  official: { width: number; height: number };
+  actual: { width: number; height: number };
+}
+
+export interface NativeProductScoreBatch {
+  scores: ReferenceScoreRow[];
+  failures: NativeProductDimensionFailure[];
+}
+
 export function scoreNativeProductRows(
   pairs: readonly ReferencePair[],
   frames: readonly NativeProductFrame[],
   projectedScores: ReadonlyMap<string, PaintProjectedReferenceScore>,
   magick: MagickOps,
   outputDirectory: string,
-): ReferenceScoreRow[] {
+): NativeProductScoreBatch {
   const framesBySlug = indexFrames(pairs, frames);
   magick.prepare();
   const policy = new ReferenceScorePolicy(99),
     workDirectory = path.join(outputDirectory, "work");
-  return pairs.map((pair) =>
-    scoreNativeProductRow(
-      pair,
-      framesBySlug.get(pair.slug),
-      projectedScores,
-      magick,
-      workDirectory,
-      policy,
-    ),
-  );
+  const scores: ReferenceScoreRow[] = [],
+    failures: NativeProductDimensionFailure[] = [];
+  for (const pair of pairs) {
+    try {
+      scores.push(
+        scoreNativeProductRow(
+          pair,
+          framesBySlug.get(pair.slug),
+          projectedScores,
+          magick,
+          workDirectory,
+          policy,
+        ),
+      );
+    } catch (error) {
+      if (!(error instanceof PaintProjectedRasterDimensionsError)) {
+        throw error;
+      }
+      failures.push({
+        slug: error.slug,
+        reason: "paint-projected-raster-dimensions-differ",
+        official: error.referenceSize,
+        actual: error.actualSize,
+      });
+    }
+  }
+  return { scores, failures };
 }
 
 function indexFrames(

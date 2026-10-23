@@ -137,7 +137,7 @@ function scoreFixture(fixture: Fixture, actualPng: string, runName: string) {
     new Map([[fixture.pair.slug, projected]]),
     new MagickOps(directory, null, "dark"),
     directory,
-  )[0];
+  ).scores[0];
 }
 
 test("native C4 shape score uses actual PNG RGB edge support and keeps RGB separate", () =>
@@ -248,3 +248,42 @@ test("native product RGB score reads actual frame PNG and rejects missing frames
       ),
     ).toThrow("Native product frame inventory differs");
   }, "native-product-score-fixture"));
+
+test("native product scoring records known dimension failures and continues the batch", () =>
+  withFixture((fixture) => {
+    const wrongSize = path.join(fixture.root, "wrong-size-native.png");
+    drawDiagram(wrongSize, { width: WIDTH - 1 });
+    const batch = scoreNativeProductRows(
+      [fixture.pair],
+      [{ slug: fixture.pair.slug, png: { path: wrongSize, sha256: fileSha256(wrongSize) } }],
+      new Map(),
+      new MagickOps(path.join(fixture.root, "known-dimension-failure"), null, "dark"),
+      path.join(fixture.root, "known-dimension-failure"),
+    );
+    expect(batch.scores).toEqual([]);
+    expect(batch.failures).toEqual([
+      {
+        slug: fixture.pair.slug,
+        reason: "paint-projected-raster-dimensions-differ",
+        official: { width: WIDTH, height: HEIGHT },
+        actual: { width: WIDTH - 1, height: HEIGHT },
+      },
+    ]);
+  }, "native-product-known-dimension-failure"));
+
+test("native product scoring rethrows non-dimension failures", () =>
+  withFixture((fixture) => {
+    const frame = {
+      slug: fixture.pair.slug,
+      png: { path: fixture.officialPath, sha256: "0".repeat(64) },
+    };
+    expect(() =>
+      scoreNativeProductRows(
+        [fixture.pair],
+        [frame],
+        new Map(),
+        new MagickOps(path.join(fixture.root, "unexpected-failure"), null, "dark"),
+        path.join(fixture.root, "unexpected-failure"),
+      ),
+    ).toThrow("Native product PNG digest differs from its evidence");
+  }, "native-product-unexpected-failure"));
