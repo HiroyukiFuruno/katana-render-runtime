@@ -1,10 +1,13 @@
 import { afterAll, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { verifyRustFactsHost } from "./runtime-rust-facts-host";
+import { rustFactsHostInputDifferences, verifyRustFactsHost } from "./runtime-rust-facts-host";
 import { fixture as hostFixture } from "./runtime-rust-facts-host_test";
 import { currentRustFactsHostInputs, hostFileRecord } from "./runtime-rust-facts-host-inputs";
-import { hostEnvironmentDigest } from "./runtime-rust-facts-host-protocol";
+import {
+  hostEnvironmentDiagnostics,
+  hostEnvironmentDigest,
+} from "./runtime-rust-facts-host-protocol";
 
 const fixtureParents = new Set<string>();
 afterAll(() => {
@@ -155,9 +158,67 @@ test.each(["", ...(selectedRtk ? [selectedRtk] : [])])(
   },
 );
 
+test("host environment diagnostics expose selected names and value digests only", () => {
+  const root = path.resolve(import.meta.dir, "../..");
+  const environment = {
+    RTK: "",
+    PATH: "/diagnostic/path",
+    HOME: "/diagnostic/home",
+    CARGO_PRIVATE_VALUE: "private-marker",
+    UNSELECTED_PRIVATE_VALUE: "must-not-appear",
+  };
+  const diagnostic = hostEnvironmentDiagnostics(root, environment);
+  expect(diagnostic.environmentSha256).toBe(hostEnvironmentDigest(root, environment));
+  expect(diagnostic.selected.map(({ name }) => name)).toEqual([
+    "CARGO",
+    "CARGO_PRIVATE_VALUE",
+    "CARGO_TARGET_DIR",
+    "HOME",
+    "PATH",
+    "RTK",
+    "RUSTFLAGS",
+  ]);
+  const serialized = JSON.stringify(diagnostic);
+  expect(serialized).not.toContain("/diagnostic/path");
+  expect(serialized).not.toContain("/diagnostic/home");
+  expect(serialized).not.toContain("private-marker");
+  expect(serialized).not.toContain("must-not-appear");
+  expect(
+    diagnostic.selected.every(
+      ({ valueSha256 }) => valueSha256 === null || /^[a-f0-9]{64}$/u.test(valueSha256),
+    ),
+  ).toBe(true);
+});
+
 test("missing repository root fails before any tool selection", () => {
   const f = fixture();
   expect(() =>
     currentRustFactsHostInputs(path.join(f.root, "missing"), f.metadata, f.value.inputs.tools),
   ).toThrow();
+});
+
+test("stale input diagnostics expose field names and digests only", () => {
+  const f = fixture();
+  const expected = f.value.inputs;
+  const actual = structuredClone(expected);
+  actual.environmentSha256 = "a".repeat(64);
+  actual.tools.cargo.executable.sha256 = "b".repeat(64);
+  const firstFile = actual.files[0];
+  if (!firstFile) throw new Error("host fixture has no file inputs");
+  firstFile.sha256 = "c".repeat(64);
+
+  const differences = rustFactsHostInputDifferences(expected, actual);
+  expect(differences.map(({ field }) => field)).toEqual([
+    "environmentSha256",
+    "tools.cargo.executable",
+    "files[000000]",
+  ]);
+  expect(
+    differences.every(
+      ({ expectedSha256, actualSha256 }) =>
+        (expectedSha256 === null || /^[a-f0-9]{64}$/u.test(expectedSha256)) &&
+        (actualSha256 === null || /^[a-f0-9]{64}$/u.test(actualSha256)),
+    ),
+  ).toBe(true);
+  expect(JSON.stringify(differences)).not.toContain(firstFile.path);
 });

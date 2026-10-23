@@ -19,6 +19,7 @@ import {
   hostBinaryRecordSchema,
   hostBuildOutputRecord,
   hostBuildOutputRecordSchema,
+  hostEnvironmentDiagnostics,
   hostFileRecord,
   hostInputsSchema,
   hostProcessSchema,
@@ -46,6 +47,11 @@ export const rustFactsHostReceiptSchema = z.strictObject({
 });
 export type RustFactsHostReceipt = z.infer<typeof rustFactsHostReceiptSchema>;
 export type RustFactsHostRun = ReturnType<typeof observeRustFactsHostBinary>;
+export type RustFactsHostInputDifference = {
+  field: string;
+  expectedSha256: string | null;
+  actualSha256: string | null;
+};
 
 export type RustFactsHostPairRun = {
   nativeWidth: RustFactsHostRun;
@@ -54,6 +60,89 @@ export type RustFactsHostPairRun = {
 
 export function defaultRustFactsHostReceipt(root: string): string {
   return path.join(root, "tmp/quality/rust-facts-host/current/receipt.json");
+}
+
+function diagnosticDigest(value: unknown): string {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new Error("Rust facts host diagnostic value is not JSON");
+  return createHash("sha256").update(serialized).digest("hex");
+}
+
+function appendInputDifference(
+  differences: RustFactsHostInputDifference[],
+  field: string,
+  expected: unknown,
+  actual: unknown,
+  directDigest = false,
+): void {
+  if (isDeepStrictEqual(expected, actual)) return;
+  differences.push({
+    field,
+    expectedSha256:
+      expected === null ? null : directDigest ? String(expected) : diagnosticDigest(expected),
+    actualSha256: actual === null ? null : directDigest ? String(actual) : diagnosticDigest(actual),
+  });
+}
+
+function appendToolInputDifferences(
+  differences: RustFactsHostInputDifference[],
+  expected: RustFactsHostReceipt["inputs"]["tools"],
+  actual: RustFactsHostReceipt["inputs"]["tools"],
+): void {
+  for (const name of ["just", "cargo", "rustc", "python3", "bun", "rtk"] as const) {
+    const expectedTool = expected[name];
+    const actualTool = actual[name];
+    if (expectedTool === null || actualTool === null) {
+      appendInputDifference(differences, `tools.${name}`, expectedTool, actualTool);
+      continue;
+    }
+    appendInputDifference(
+      differences,
+      `tools.${name}.launcher`,
+      expectedTool.launcher,
+      actualTool.launcher,
+    );
+    appendInputDifference(
+      differences,
+      `tools.${name}.executable`,
+      expectedTool.executable,
+      actualTool.executable,
+    );
+  }
+}
+
+function appendFileInputDifferences(
+  differences: RustFactsHostInputDifference[],
+  expected: RustFactsHostReceipt["inputs"]["files"],
+  actual: RustFactsHostReceipt["inputs"]["files"],
+): void {
+  const fileCount = Math.max(expected.length, actual.length);
+  for (let index = 0; index < fileCount; index += 1) {
+    appendInputDifference(
+      differences,
+      `files[${String(index).padStart(6, "0")}]`,
+      expected[index] ?? null,
+      actual[index] ?? null,
+    );
+  }
+}
+
+/** WHY: 差分の原因を特定できるようにしつつ、パスや環境値は公開しない。 */
+export function rustFactsHostInputDifferences(
+  expected: RustFactsHostReceipt["inputs"],
+  actual: RustFactsHostReceipt["inputs"],
+): RustFactsHostInputDifference[] {
+  const differences: RustFactsHostInputDifference[] = [];
+  appendInputDifference(
+    differences,
+    "environmentSha256",
+    expected.environmentSha256,
+    actual.environmentSha256,
+    true,
+  );
+  appendToolInputDifferences(differences, expected.tools, actual.tools);
+  appendFileInputDifferences(differences, expected.files, actual.files);
+  return differences;
 }
 
 export function rustFactsHostFingerprint(
@@ -186,14 +275,15 @@ export function verifyRustFactsHost(
   }
   const metadata = parseRustFactsHostMetadata(fs.readFileSync(value.metadataBefore.stdout.path));
   const after = parseRustFactsHostMetadata(fs.readFileSync(value.metadataAfter.stdout.path));
-  if (
-    !isDeepStrictEqual(metadata, after) ||
-    !isDeepStrictEqual(
-      currentRustFactsHostInputs(root, metadata, value.inputs.tools, environment),
-      value.inputs,
-    )
-  )
-    throw new Error("Rust facts host prepared inputs are stale");
+  const currentInputs = currentRustFactsHostInputs(root, metadata, value.inputs.tools, environment);
+  if (!isDeepStrictEqual(metadata, after)) throw new Error("Rust facts host metadata is stale");
+  if (!isDeepStrictEqual(currentInputs, value.inputs)) {
+    throw new Error(
+      `Rust facts host prepared inputs are stale: ${JSON.stringify(
+        rustFactsHostInputDifferences(value.inputs, currentInputs),
+      )}`,
+    );
+  }
   assertRustFactsHostBinaryRecord(value.binary);
   assertHostPhysicalRecord(receiptRecord);
   return value;
@@ -287,8 +377,15 @@ if (import.meta.main) {
   const [command, root, modeOrReceipt, sourceRoot, receipt] = process.argv.slice(2);
   if (!root)
     throw new Error("Usage: prepare/verify ROOT [RECEIPT] | run ROOT MODE SOURCE_ROOT [RECEIPT]");
-  if (command === "prepare") prepareRustFactsHost(root, modeOrReceipt);
-  else if (command === "verify") verifyRustFactsHost(root, modeOrReceipt);
+  if (command === "prepare") {
+    const environment = hostEnvironmentDiagnostics(root);
+    const prepared = prepareRustFactsHost(root, modeOrReceipt);
+    if (prepared.inputs.environmentSha256 !== environment.environmentSha256)
+      throw new Error("Rust facts host environment changed during preparation");
+    process.stdout.write(
+      `${JSON.stringify({ schema: "krr-rust-facts-host-environment-diagnostic-v1", ...environment })}\n`,
+    );
+  } else if (command === "verify") verifyRustFactsHost(root, modeOrReceipt);
   else if (command === "fingerprint") {
     const fingerprint = rustFactsHostFingerprint(root, modeOrReceipt);
     process.stdout.write(

@@ -3596,11 +3596,11 @@ const HOST_EVIDENCE_SOURCE_AST_SHA256: Record<string, string> = {
   "scripts/runtime-bundles/runtime-unused-native-width-hash.ts":
     "0e5850eca32f88bbf854a3056e903819e27199e8a1afde65fc451579a118ae5f",
   "scripts/runtime-bundles/runtime-rust-facts-host.ts":
-    "554edf9963ff933a64763e8cd3e6ab16461ac8debd7580c4b76d295139362b19",
+    "2061efe1c89dbba078fba37fbebfd8cb90bfb562b9b312933b02c0e16343f21a",
   "scripts/runtime-bundles/runtime-rust-facts-host-inputs.ts":
     "40df14dfcb4405647185a8816425a6fbd1eb7898d6729e28cc2af72e4ebb85ad",
   "scripts/runtime-bundles/runtime-rust-facts-host-protocol.ts":
-    "240704472aa1c39b58c6acc0f812ad3303f6d5cbd59ff50e47142c7aaf2727a4",
+    "4f141845a1c95e429678baaa9cfb0d9920ee99c51066ec7d215f94d71e2c61b5",
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts":
     "4484139b289df41f69436936caa5a09477a132822f25b9c35dd68282332dadca",
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence-inputs.ts":

@@ -319,10 +319,10 @@ export function requireRustFactsHostSuccess(proof: z.infer<typeof hostProcessSch
     throw new Error("Rust facts host process observation differs");
 }
 
-export function hostEnvironmentDigest(
+function selectedHostEnvironment(
   root: string,
   environment: NodeJS.ProcessEnv = process.env,
-): string {
+): NodeJS.ProcessEnv {
   if (
     [
       "RUSTC",
@@ -350,9 +350,34 @@ export function hostEnvironmentDigest(
   selectedEnvironment.CARGO = cargo;
   selectedEnvironment.CARGO_TARGET_DIR = path.join(root, "target");
   selectedEnvironment.RUSTFLAGS ??= "-D warnings";
+  return selectedEnvironment;
+}
+
+function digestSelectedHostEnvironment(environment: NodeJS.ProcessEnv): string {
   return sha256(
-    Buffer.from(
-      JSON.stringify(Object.entries(selectedEnvironment).sort(([a], [b]) => a.localeCompare(b))),
-    ),
+    Buffer.from(JSON.stringify(Object.entries(environment).sort(([a], [b]) => a.localeCompare(b)))),
   );
+}
+
+export function hostEnvironmentDigest(
+  root: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return digestSelectedHostEnvironment(selectedHostEnvironment(root, environment));
+}
+
+export function hostEnvironmentDiagnostics(
+  root: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): { environmentSha256: string; selected: Array<{ name: string; valueSha256: string | null }> } {
+  const selectedEnvironment = selectedHostEnvironment(root, environment);
+  return {
+    environmentSha256: digestSelectedHostEnvironment(selectedEnvironment),
+    selected: Object.entries(selectedEnvironment)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, value]) => ({
+        name,
+        valueSha256: value === undefined ? null : sha256(Buffer.from(value)),
+      })),
+  };
 }
