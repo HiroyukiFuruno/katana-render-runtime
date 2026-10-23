@@ -84,7 +84,7 @@ fn write_interactive_request(
 ) -> TestResult {
     let Some(operation) = &request.operation else {
         apply_case_operation(session, &request.case_id)?;
-        return write_feature_report(request, html, session);
+        return write_feature_report(request, html, session, font_audit);
     };
     validate_operation_request(operation, request)?;
     let (evidence, _pre_frame, operation_audit) =
@@ -406,8 +406,10 @@ fn write_feature_report(
     request: &FeatureRequest,
     html: &str,
     session: &mut HtmlInteractiveSession,
+    initial_frame_font_audit: serde_json::Value,
 ) -> TestResult {
-    let report = observe_feature_report(request, html, session)?;
+    let mut report = observe_feature_report(request, html, session)?;
+    attach_initial_frame_font_audit(&mut report, initial_frame_font_audit);
     validate_feature_source_pin(request)?;
     persist_feature_report(request, &report)
 }
@@ -449,6 +451,13 @@ fn persist_feature_report(request: &FeatureRequest, report: &serde_json::Value) 
         serde_json::to_vec_pretty(report).map_err(to_string)?,
     )
     .map_err(to_string)
+}
+
+fn attach_initial_frame_font_audit(
+    report: &mut serde_json::Value,
+    initial_frame_font_audit: serde_json::Value,
+) {
+    report["initialFrameFontAudit"] = initial_frame_font_audit;
 }
 
 fn save_feature_capture(
@@ -2386,6 +2395,21 @@ mod tests {
                 .as_array()
                 .is_some_and(|items| items.is_empty())
         );
+    }
+
+    #[test]
+    fn initial_frame_font_audit_is_attached_without_changing_existing_fields() {
+        let mut report = serde_json::json!({
+            "caseId": "input-state:empty",
+            "geometry": [],
+        });
+        super::attach_initial_frame_font_audit(
+            &mut report,
+            serde_json::json!({"audit": "initial"}),
+        );
+        assert_eq!(report["caseId"], "input-state:empty");
+        assert_eq!(report["geometry"], serde_json::json!([]));
+        assert_eq!(report["initialFrameFontAudit"]["audit"], "initial");
     }
 
     #[test]
