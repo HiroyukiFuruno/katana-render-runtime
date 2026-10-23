@@ -25,6 +25,62 @@ fn element_children_reads_live_element_order_and_revision_after_mutations() -> R
     Ok(())
 }
 
+#[test]
+fn request_text_rejects_missing_arguments_before_host_io() {
+    let state = HtmlDomBridgeState::new(HtmlDocument::parse("<main></main>"));
+
+    assert!(matches!(state.request_text(&[]), Err(error) if error == "missing DOM argument 0"));
+    assert!(matches!(
+        state.request_text(&["GET".to_string()]),
+        Err(error) if error == "missing DOM argument 1"
+    ));
+    assert!(
+        !state
+            .host_io_active()
+            .load(std::sync::atomic::Ordering::SeqCst)
+    );
+}
+
+#[test]
+fn request_text_rejects_non_get_and_get_without_loader_as_response_values() -> Result<(), String> {
+    let state = HtmlDomBridgeState::new(HtmlDocument::parse("<main></main>"));
+    for (method, expected_status) in [
+        ("POST", "dynamic request method is not allowed: POST"),
+        ("GET", "dynamic requests require an interactive session"),
+    ] {
+        assert_request_status(&state, method, expected_status)?;
+    }
+    Ok(())
+}
+
+fn assert_request_status(
+    state: &HtmlDomBridgeState,
+    method: &str,
+    expected_status: &str,
+) -> Result<(), String> {
+    let response = state.request_text(&[method.to_string(), "/resource".to_string()])?;
+    let DomValue::String(response) = response else {
+        return Err("request_text must return a serialized response".to_string());
+    };
+    let status = response_status(&response)?;
+    assert_eq!(status, expected_status);
+    assert!(
+        !state
+            .host_io_active()
+            .load(std::sync::atomic::Ordering::SeqCst)
+    );
+    Ok(())
+}
+
+fn response_status(response: &str) -> Result<String, String> {
+    serde_json::from_str::<serde_json::Value>(response)
+        .map_err(|error| error.to_string())?
+        .get("statusText")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "response statusText must be a string".to_string())
+}
+
 fn assert_child_collection_replacements(
     state: &HtmlDomBridgeState,
     scope: &str,

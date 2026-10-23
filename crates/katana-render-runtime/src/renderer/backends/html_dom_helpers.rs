@@ -98,6 +98,26 @@ mod tests {
     use super::{attribute_value, detach, script_is_executable, text_content};
     use crate::renderer::backends::html_document::HtmlDocument;
 
+    fn assert_script_type_cases(cases: &[(Option<&str>, bool)]) -> Result<(), String> {
+        for (type_attribute, expected) in cases {
+            let source = match type_attribute {
+                Some(value) => format!(r#"<script type="{value}"></script>"#),
+                None => "<script></script>".to_string(),
+            };
+            let mut document = HtmlDocument::parse(&source);
+            let script_id = document
+                .query_selector("script")
+                .ok_or("script must be indexed")?;
+            let script = document.node(script_id)?;
+            assert_eq!(
+                script_is_executable(&script),
+                *expected,
+                "{type_attribute:?}"
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     fn helper_boundaries_handle_text_nodes_and_detach_without_parent() -> Result<(), String> {
         let mut document =
@@ -120,5 +140,18 @@ mod tests {
         detach(&text);
         assert_eq!(attribute_value(&[], "missing"), None);
         Ok(())
+    }
+
+    #[test]
+    fn script_type_table_distinguishes_executable_and_inert_values() -> Result<(), String> {
+        assert_script_type_cases(&[
+            (None, true),
+            (Some(""), true),
+            (Some(" \t\n "), true),
+            (Some("MoDuLe"), true),
+            (Some("TEXT/JAVASCRIPT"), true),
+            (Some("application/json"), false),
+            (Some("text/javascript; charset=utf-8"), false),
+        ])
     }
 }

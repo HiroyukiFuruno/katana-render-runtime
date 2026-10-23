@@ -99,3 +99,27 @@ fn axis_aligned_extent_accepts_finite_degenerate_and_rejects_empty_or_invalid_bo
         Some(NON_FINITE_GEOMETRY_ERROR)
     );
 }
+
+#[test]
+fn polygon_right_bottom_returns_finite_extrema_for_unordered_points() {
+    let cases = [
+        (
+            "positive rectangle",
+            &[(1.25, 4.5), (8.75, 4.5), (8.75, 11.25), (1.25, 11.25)][..],
+            Some((8.75, 11.25)),
+        ),
+        (
+            "negative rectangle",
+            &[(-12.5, -8.25), (-4.75, -1.5), (-12.5, -1.5), (-4.75, -8.25)][..],
+            Some((-4.75, -1.5)),
+        ),
+    ];
+
+    for (name, polygon, expected) in cases {
+        assert_eq!(
+            axis_aligned::polygon_right_bottom(polygon),
+            Ok(expected),
+            "{name} extrema"
+        );
+    }
+}

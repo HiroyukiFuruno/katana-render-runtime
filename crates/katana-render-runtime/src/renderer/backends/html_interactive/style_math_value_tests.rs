@@ -1,5 +1,15 @@
 use super::{css_resolved_px, split_top_level_commas, split_top_level_whitespace};
 
+fn assert_resolved_cases(cases: &[(&str, Option<f32>)]) {
+    for (value, expected) in cases {
+        assert_eq!(
+            css_resolved_px(value, 16.0, 100.0, 50.0, false),
+            *expected,
+            "{value}"
+        );
+    }
+}
+
 #[test]
 fn relative_lengths_keep_decimal_precision_until_resolution() {
     assert_eq!(
@@ -16,6 +26,21 @@ fn relative_lengths_keep_decimal_precision_until_resolution() {
 #[test]
 fn math_function_rejects_unresolvable_nested_values() {
     assert!(css_resolved_px("min(1px, invalid)", 16.0, 100.0, 50.0, false).is_none());
+}
+
+#[test]
+fn named_math_functions_cover_bounds_and_reject_invalid_arities() {
+    assert_resolved_cases(&[
+        ("min(4px, 8px)", Some(4.0)),
+        ("max(4px, 8px)", Some(8.0)),
+        ("clamp(4px, 2px, 12px)", Some(4.0)),
+        ("clamp(4px, 8px, 12px)", Some(8.0)),
+        ("clamp(4px, 14px, 12px)", Some(12.0)),
+        ("min()", None),
+        ("max()", None),
+        ("clamp(4px, 8px)", None),
+        ("clamp(4px, 8px, 12px, 16px)", None),
+    ]);
 }
 
 #[test]
