@@ -14,6 +14,20 @@
 
 ## 現在の状態（2026-10-23）
 
+- [ ] 通常hookを通して4 checkpointをcommitした。製品SVG合成`fcf9abd0`、font観測`2dddb52c`、寸法差を保持した全件採点`a274d042`、SHA固定Chrome指定`329f6b6c`。公開や正式117合格ではない。R1467の容量拒否後は終了済みcoverage profileだけをR1468で整理し、閾値を維持してR1469/1470/1471/1472の通常commitがactual0。修正済みsourceをcleanへ固定し、現行候補build証跡と正式画像比較へ進む。
+
+- [ ] R1466は標準AST、静的foundation12タスク、root/harness厳格Clippy、Bun71件442assert、native33件をactual0、source前後一致で通過した。R1458の通常commit拒否を受けた責務分割・関数長・型・importsの修正を含む。主担当レビューでmask helperのsource/backdrop混同も是正し、viewport外へ溢れる子図形の非漏出を回帰へ追加した。局所実装の合格で、正式117/HTML84/性能/100%coverage/公開は未完了。終了済みcoverage profileは既存Cargo cleanで整理し、次回はcold再buildとした（`tmp/quality/common-render-and-font-regressions-r1466/result.json`、`closed-coverage-profile-clean-r1459/result.json`）。
+
+- [ ] R1457は静的foundation全12タスク、関連Bun71件442assert、製品native32件がactual0、source前後一致。nested SVG multiplyの旧失敗を解消し、authored clip/isolation/半透明/小数境界/DPRと既存resvg対照を維持した。合成用バッファはcanvas全体から既存layer bboxへ限定し、逆maskは既存ライブラリAPIを使用する。HTMLのderived font座標もrequested値と分離した。これは局所回帰の成功であり、正式117画像・HTML84/実font12・性能・coverage100%は未完了。R1455の候補build証跡はclean committed source前提でbuild前に拒否され、未実行の成功へ転用しない（`tmp/quality/common-render-and-font-regressions-r1457/result.json`、`current-candidate-build-controller-r1455/result.json`）。
+
+- [ ] 旧99以上の結果を下回る劣化は受け入れない。同じ入力・描画経路・採点条件の証跡で比較する。R725の99.859821は単一625×404の低層描画診断であり、正式117製品PNGの合格へ代用しない。独立raw JSはR1436で旧117画像と全件SHA一致。R1448の実Chrome診断ではnested SVGのmultiplyは28、authored clipとisolationは224であり、この意味を保った製品合成修正を検証する。
+- [ ] R1449はHTML capture関数の複雑度22で整形段階actual1。責務分割後R1450の型検査・Rust整形は成功したが、合成回帰テストの重複1組で静的DAG actual1となり、後続Bun/nativeを開始していない。重複を抽象化して新runで再検証する。旧失敗・rawを保持し、部分成功を完全合格へ転用しない（`tmp/quality/common-render-and-font-regressions-r1449/result.json`、`common-render-and-font-regressions-r1450/result.json`）。
+
+- [ ] R1436/R1439: 独立raw JSを新規採取し、EN59/JA58の全117 PNGが旧基準とSHA一致。HEAD `62da7f01` の全117 native PNGも生成したが、ENは99以上0/59、JAは`13-01-3`の実寸法差（公式400×605、候補398×605）で最終採点が中断し、全体actual1。基準・閾値は不変。Sankeyの暗色背景に対するmultiply合成差と文字描画差を分離して調査する。`tmp/quality/current-managed-full117-r1439/receipt.json`を保持し、未採点を成功としない。
+- [ ] 寸法差の既知失敗を構造化し、他のnative図の採点を継続する修正を実装中。未計算RMSE/MAEは生成せず、失敗を含むexact inventoryは受入NGのまま。R1441の型エラー履歴を保持し、修正後R1442は整形・型検査と2ファイル27テスト118assertがactual0。製品描画の合格ではない（`tmp/quality/dimension-failure-regressions-r1442/result.json`）。
+- [ ] Chromiumの既存5観測パッチは、境界許可内で公式HexEncodeへ修正してincremental build成功。attempt03はactual0/reaped、smokeもactual0、63イベント・control/observer PNGがbyte一致・descriptor/scaler/strike結合あり。単独fixtureの証明で、font12条件やcompositor frameの合格ではない（`tmp/quality/chromium-instrumented-build-r1436/build-attempt03/result.json`、`tmp/quality/chromium-observer-smoke-r1436/run01/smoke/summary.json`）。未証明12件はtypographyのfractional-metrics/ja-en-mixed/long-line/nowrap各3viewportのvariable instance identityであり、pointer frame契約と混同しない。
+- [ ] R1433の私有原本による初回フレームは1.489秒、process全体2.177秒、正常close。原本はGit外・byte不変。この単一初回測定は再open/resize/RSSや旧arm非劣化の代用にしない。R1440のCAS再試行は対話中断後にexec handleを失い、foundation出力はあるが最終exit/source-afterなし・実CAS未実行として保持する。再開時は実process不在を確認し、古い出力へ終了コードを補完しない。
+
 - [ ] 実装checkpointを関心事別に通常commitした。SVGパス長`dae31e9e`、依存・bundle同期`930442f4`、SVG/Canvas異常系`cce62bf1`、HTML境界回帰`539db1b3`、Moon実CAS診断・証跡境界`8181062e`。全て通常hook actual0。依存のBun/Python限定回帰もR1424でactual0。ただし実CAS腐敗・復元の通過、最新117図、HTML font12/性能、coverage100%、完全gate/PR/公開は未完了。次の正式採取へ進むためsourceをcommit済みcleanへ整える。R1420の全2759成功と98.7549%はそのsourceに限定し、最新HEAD全体合格へ転用しない。
 
 - [ ] Mermaidの`getTotalLength`実装を通常hook成功後`dae31e9e`へコミットした。既存kurboで計測し、実V8の直線・曲線・空/不正入力回帰を維持。R1420はsource前後`3794d9e6…`一致、全2759件成功・18skip、coverageは61074/61844＝98.75493176%、未計測770行。実装100%は未達。後続の契約テスト記法だけをOption::zipへ修正したR1422はsource前後`9e8c6b6f…`一致、fmt・strict Clippy・AST回帰がactual0。全117画像・HTML font12・実frame性能・公開は未完了。実証跡は`tmp/quality/current-root-regressions-r1420/coverage-readback.json`とimmutable coverage snapshot、`current-precommit-rust-gates-r1422/result.json`、`svg-pathlength-commit-r1423/result.json`。新commitは公開前の実装checkpointである。
