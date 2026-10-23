@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { readChromiumFontBinding } from "./chromium-font-binding";
 import { validateFontProvenance } from "./coretext-font-provenance";
 import { readKrrDynamicCapture } from "./dynamic-fidelity";
 import { assertExpectedStateMatches, type JsonValue } from "./dynamic-state";
@@ -86,6 +87,7 @@ export function assertStrictHtml84ChromeReceipt(
       "boundary",
       "resourceProvenance",
       "fontProvenance",
+      "traceBinding",
       "unknownReason",
     ],
     "Chrome raw receipt",
@@ -118,6 +120,16 @@ export function assertStrictHtml84ChromeReceipt(
   );
   const captureSha256 = strictText(receipt.captureSha256, "Chrome capture SHA");
   if (sha256File(capturePath) !== captureSha256) throw new Error("Chrome capture PNG SHA differs");
+  if (receipt.traceBinding !== undefined)
+    readChromiumFontBinding(receipt.traceBinding, {
+      conditionId: expected.conditionId,
+      sourceSha256: expected.sourceSha256,
+      viewport: expected.viewport,
+      browserExecutablePath: browserPath,
+      browserExecutableSha256: strictText(receipt.browserExecutableSha256, "Chrome executable SHA"),
+      capturePath,
+      captureSha256,
+    });
   return {
     capturePath,
     captureSha256,

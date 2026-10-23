@@ -14,6 +14,12 @@
 
 ## 現在の状態（2026-10-23）
 
+- [ ] observer付き正式84撮影を標準recipeへ接続した。旧traceなしreceiptをobserver resumeへ流用するP1をレビューで発見し、元unknown/最終observed receiptのtrace一致・実pin検証を必須にした。R1551の関連48件と標準recipeのdry-runがactual0。R1550の複雑度/未使用、R1552の自作fixture型エラーを修正後、R1553のfoundation全12taskとR1554の関連8件がactual0・source前後一致。共通trace fixtureはGit管理のtest-supportへ抽象化した。次はclean committed sourceの正式84撮影・全出力font一致を実測し、局所8件を正式84へ代用しない（`tmp/quality/observer-resume-regressions-r1551/result.json`、`current-font-observation-static-r1553/result.json`、`observer-resume-final-recheck-r1554/result.json`）。
+
+- [ ] R1547では現行EN継承図の実初回font監査が保存した571×404の`resolvedTextSvg`を公開Skiaで描き、R1511と同じ独立raw画像に対し99.852593（stock設定98.08669）を実測した。現行製品R1511の同図96.25943との差が共通文字描画設定で縮むことを確認した。入力・原本は不変、既存のSourceAlpha shadow展開のみで図形・文字・寸法を変えていない。これは診断backendであり製品117件の合格へ代用しない（`tmp/quality/public-skia-current-class-r1547/input-lineage.json`、`result.json`、`scores.json`）。
+
+- [ ] 全軸font観測・trace結合・双方向instance集合照合を`bcd6bcba`へ通常hook成功でcommitした。R1540の初回commitは終了済み全targetコンパイル成果物が固定capを超え拒否されたため、所有者・検査終了を確認しR1541の標準`just clean`（actual0、8.2GiB整理）後に通常commitを再実行した。閾値引上げ・検査回避はない。R1545の標準foundation全12task・厳格型・重複検査が成功し、R1548では新しい条件別Playwright observer撮影→実process exit0→trace/PNG/入力/viewport/binary/argv結合readerまで実行成功、実4font instanceを取得した。R1546のreceipt関連39件成功・1件失敗はtmpのsymlinkを正規pathとしていなかった自作fixtureに限定し、修正後reader/font5件とCLI1件を再実行成功。正式84条件・font完全一致・性能の受入は未完了（`tmp/quality/font-instance-checkpoint-commit-r1542/result.json`、`current-font-observation-static-r1545/result.json`、`current-observer-capture-smoke-r1548/result.json`）。
+
 - [ ] 既存99以上からの劣化を許容しない。R1533では公開Skia 0.153.3の未改変配布SDKと公開C++ APIだけで、旧R725と同一入力・独立raw画像の代表1図を99.859821へ再現した（stock文字設定96.94723）。SDK改変・基準画像変更は不要と実証したが、これは診断1図であり正式117図の受入ではない。製品への統合では既存寸法・clip/blend/filter・font/cache契約を保ち、全117と性能を改めて確認する（`tmp/quality/public-skia-adapter-r1533/result.json`、`score-0/result.json`、`score-1/result.json`）。
 - [ ] HTMLの全軸design座標出力は、R1535のAST・root/harness厳格Clippy、R1536の現行全workspace/all-targets/all-featuresコンパイル、R1537の実binary catalogから選んだ関連18回帰がactual0。R1536/1537はsource前後一致。R1529の構文、R1530の可視性、R1534の不要borrow、R1535の誤ったcheck-domain付きtest起動は失敗記録を保持し修正した。Chrome実trace12条件は4instance全件取得済みだが、標準capture/receiptと双方向instance完全一致への接続は未完了。
 

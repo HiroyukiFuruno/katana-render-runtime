@@ -14,6 +14,7 @@ const CORETEXT_TEST_AXIS_OUT_OF_RANGE = 901;
 const CORETEXT_TEST_U32_OVERFLOW = 4_294_967_296;
 
 import type { Page, Request, Response } from "playwright";
+import { buildJoinedStaticFontTrace } from "./chromium-font-test-support";
 import {
   captureDynamicStatePair,
   captureKrrState,
@@ -30,9 +31,11 @@ import {
 } from "./feature-catalog";
 import { fidelityAcceptancePlan, runFidelityAcceptance } from "./fidelity-acceptance-cli";
 import { sha256File } from "./reference-capture";
+import { createCatalogStage90ConditionPlan } from "./stage-score-suite";
 import {
   ChromeResourceBodyCollector,
   type ChromeResourceProvenance,
+  filterObserverReusableConditions,
 } from "./visual-state-fidelity";
 
 const SOURCE_COMMENT = "\n<!-- html-pair-input-review-marker -->\n";
@@ -1586,6 +1589,25 @@ describe("fixed fidelity acceptance CLI routes", () => {
 
     const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
     const chromeSha256 = "a".repeat(64);
+    const pinnedChrome = [
+      "--chrome-executable",
+      chromePath,
+      "--chrome-executable-sha256",
+      chromeSha256,
+    ];
+    expect(fidelityAcceptancePlan([...argv, ...pinnedChrome, "--font-observer"])).toMatchObject({
+      chromeExecutable: {
+        executablePath: chromePath,
+        executableSha256: chromeSha256,
+        fontObserver: true,
+      },
+    });
+    for (const invalid of [
+      [...argv, "--font-observer"],
+      [...argv, "--font-observer", ...pinnedChrome],
+      [...argv, ...pinnedChrome, "--font-observer", "--font-observer"],
+    ])
+      expect(() => fidelityAcceptancePlan(invalid)).toThrow();
     expect(
       fidelityAcceptancePlan([
         ...argv,
@@ -1609,6 +1631,191 @@ describe("fixed fidelity acceptance CLI routes", () => {
         "not-a-sha256",
       ]),
     ).toThrow();
+  });
+
+  test("observer resume rejects an old receipt without a trace binding", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "catalog-observer-resume-"));
+    try {
+      const plan = createCatalogStage90ConditionPlan();
+      const tuple = plan.conditions[0];
+      if (!tuple) throw new Error("catalog plan has no conditions");
+      const receiptPath = path.join(directory, "chrome-receipt.json");
+      const receipt = {
+        schema: "krr-html84-chrome-condition-v1",
+        status: "observed",
+        conditionId: tuple.conditionId,
+        caseId: tuple.caseId,
+        boundaryState: tuple.state,
+        operationKind: tuple.operationKind,
+        sourceSha256: tuple.sourceSha256,
+        binarySha256: sha256File(process.execPath),
+        viewport: tuple.viewport,
+      };
+      fs.writeFileSync(receiptPath, JSON.stringify(receipt));
+      const row = {
+        ...tuple,
+        binarySha256: receipt.binarySha256,
+        chromeReceiptPath: receiptPath,
+        chromeReceiptSha256: sha256File(receiptPath),
+      } as unknown as JsonValue;
+      const result = filterObserverReusableConditions(
+        plan,
+        [tuple.conditionId],
+        new Map([[tuple.conditionId, row]]),
+        new Map([[tuple.conditionId, row]]),
+        {
+          chromeExecutablePath: process.execPath,
+          chromeExecutableSha256: receipt.binarySha256,
+        },
+      );
+      expect(result.reusableConditionIds).toEqual([]);
+      expect(result.rejected).toEqual([
+        {
+          conditionId: tuple.conditionId,
+          reason: "finalized Chrome receipt has no observer trace binding",
+        },
+      ]);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("observer resume accepts only a finalized receipt with the same trace binding", () => {
+    const directory = fs.mkdtempSync(path.resolve("tmp/catalog-observer-resume-positive-"));
+    try {
+      const plan = createCatalogStage90ConditionPlan();
+      const tuple = plan.conditions[0];
+      if (!tuple) throw new Error("catalog plan has no conditions");
+      const executablePath = fs.realpathSync(process.execPath);
+      const executableSha256 = sha256File(executablePath);
+      const capturePath = path.join(directory, "capture.png");
+      const tracePath = path.join(directory, "trace.json");
+      fs.writeFileSync(capturePath, "observer capture");
+      const sessionId = "observer-resume-session";
+      const descriptorSha256 = "0".repeat(64);
+      const trace = buildJoinedStaticFontTrace({
+        sessionId,
+        processId: 1,
+        physicalFilePath: executablePath,
+        physicalFileSha256: executableSha256,
+        descriptorSha256,
+        descriptorLength: 1,
+        postScriptName: "Bun-Regular",
+      });
+      fs.writeFileSync(tracePath, JSON.stringify({ traceEvents: trace.events }));
+      const traceSha256 = sha256File(tracePath);
+      const binding = {
+        schema: "krr-chromium-font-capture-v1",
+        conditionId: tuple.conditionId,
+        sourceSha256: tuple.sourceSha256,
+        viewport: tuple.viewport,
+        browserExecutablePath: executablePath,
+        browserExecutableSha256: executableSha256,
+        capturePath: fs.realpathSync(capturePath),
+        captureSha256: sha256File(capturePath),
+        tracePath: fs.realpathSync(tracePath),
+        traceSha256,
+        sessionId,
+        argv: [
+          executablePath,
+          "--trace-startup=katana.font-observer",
+          "--trace-startup-format=json",
+          `--trace-startup-file=${fs.realpathSync(tracePath)}`,
+          `--katana-actual-font-observer-session=${sessionId}`,
+        ],
+        processId: 1,
+        actualExitCode: 0,
+      };
+      const receiptBase = {
+        schema: "krr-html84-chrome-condition-v1",
+        status: "observed",
+        conditionId: tuple.conditionId,
+        caseId: tuple.caseId,
+        boundaryState: tuple.state,
+        operationKind: tuple.operationKind,
+        sourceSha256: tuple.sourceSha256,
+        binarySha256: executableSha256,
+        viewport: tuple.viewport,
+        browserExecutablePath: executablePath,
+        browserExecutableSha256: executableSha256,
+        capturePath: fs.realpathSync(capturePath),
+        captureSha256: sha256File(capturePath),
+        state: {},
+        boundary: {},
+        resourceProvenance: { inventoryComplete: true, requests: [] },
+        fontProvenance: [
+          {
+            scope: "capture",
+            family: "fixture",
+            source: "fixture",
+            filePath: executablePath,
+            fileSha256: executableSha256,
+            faceIndex: 0,
+            selected: true,
+            fileBytesVerified: true,
+          },
+        ],
+        traceBinding: binding,
+      };
+      const finalizedReceiptPath = path.join(directory, "finalized-receipt.json");
+      const observationReceiptPath = path.join(directory, "observation-receipt.json");
+      const observationReceipt = {
+        ...receiptBase,
+        status: "unknown",
+        unknownReason: "fixture unknown receipt",
+        fontProvenance: [],
+      };
+      fs.writeFileSync(finalizedReceiptPath, JSON.stringify(receiptBase));
+      fs.writeFileSync(observationReceiptPath, JSON.stringify(observationReceipt));
+      const finalizedRow = {
+        ...tuple,
+        binarySha256: executableSha256,
+        chromeReceiptPath: finalizedReceiptPath,
+        chromeReceiptSha256: sha256File(finalizedReceiptPath),
+      } as unknown as JsonValue;
+      const observationRow = {
+        ...tuple,
+        binarySha256: executableSha256,
+        chromeReceiptPath: observationReceiptPath,
+        chromeReceiptSha256: sha256File(observationReceiptPath),
+      } as unknown as Record<string, JsonValue>;
+      const accepted = filterObserverReusableConditions(
+        plan,
+        [tuple.conditionId],
+        new Map([[tuple.conditionId, finalizedRow]]),
+        new Map([[tuple.conditionId, observationRow]]),
+        { chromeExecutablePath: executablePath, chromeExecutableSha256: executableSha256 },
+      );
+      expect(accepted.rejected).toEqual([]);
+      expect(accepted.reusableConditionIds).toEqual([tuple.conditionId]);
+
+      const changed = {
+        ...observationReceipt,
+        traceBinding: { ...binding, sessionId: "changed" },
+      };
+      fs.writeFileSync(observationReceiptPath, JSON.stringify(changed));
+      const rejected = filterObserverReusableConditions(
+        plan,
+        [tuple.conditionId],
+        new Map([[tuple.conditionId, finalizedRow]]),
+        new Map([
+          [
+            tuple.conditionId,
+            {
+              ...observationRow,
+              chromeReceiptSha256: sha256File(observationReceiptPath),
+            } as unknown as JsonValue,
+          ],
+        ]),
+        { chromeExecutablePath: executablePath, chromeExecutableSha256: executableSha256 },
+      );
+      expect(rejected.reusableConditionIds).toEqual([]);
+      expect(rejected.rejected[0]?.reason).toBe(
+        "prior Chrome receipt trace binding differs from finalized receipt",
+      );
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("catalog plan CLI writes the exact physical 84 tuples without overwriting", () => {

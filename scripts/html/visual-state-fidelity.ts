@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Page, type Request, type Response } from "playwright";
@@ -8,6 +8,7 @@ import {
   captureCatalogProducerContext,
   sameCatalogProducerContext,
 } from "./catalog-capture-producer-context";
+import { withObserverBrowser } from "./chromium-font-capture";
 import { assertCoreTextPostScriptOrder, validateFontProvenance } from "./coretext-font-provenance";
 import { applyEventsInteraction } from "./dynamic-events";
 import {
@@ -88,7 +89,13 @@ export interface CatalogStage90ResumeOptions {
 export interface CatalogStage90ChromeExecutablePin {
   executablePath: string;
   executableSha256: string;
+  fontObserver?: true;
 }
+type ResolvedCatalogChromeExecutable = {
+  path: string;
+  sha256: string;
+  fontObserver?: true;
+};
 
 export interface ChromeFontIdentityRequest {
   schema: "krr-chrome-font-identity-request-v1";
@@ -779,7 +786,7 @@ async function captureCatalogStage90WithBrowser(
   binarySha256: string,
   producerContext: CatalogCaptureProducerContext,
   resume: CatalogStage90ResumeOptions | undefined,
-  requestedChrome: { path: string; sha256: string } | undefined,
+  requestedChrome: ResolvedCatalogChromeExecutable | undefined,
 ): Promise<
   Pick<CatalogStage90Capture, "conditions" | "fontIdentityCaptures" | "chromeRuntimeVersion">
 > {
@@ -797,6 +804,7 @@ async function captureCatalogStage90WithBrowser(
           binaryPath: path.resolve(binary),
           chromeExecutablePath: chromeIdentity.path,
           chromeExecutableSha256: chromeIdentity.sha256,
+          fontObserver: chromeIdentity.fontObserver === true,
           producerContext,
           chromeRuntimeVersion,
         })
@@ -824,8 +832,8 @@ async function captureCatalogStage90WithBrowser(
 
 function assertLaunchedChromeIdentity(
   server: Awaited<ReturnType<typeof chromium.launchServer>>,
-  requestedChrome: { path: string; sha256: string } | undefined,
-): { path: string; sha256: string } {
+  requestedChrome: ResolvedCatalogChromeExecutable | undefined,
+): ResolvedCatalogChromeExecutable {
   const chromeProcess = server.process();
   if (!chromeProcess.spawnfile)
     throw new Error("Chrome server process did not expose its executable path");
@@ -833,7 +841,11 @@ function assertLaunchedChromeIdentity(
   const sha256 = sha256File(pathValue);
   if (requestedChrome && (pathValue !== requestedChrome.path || sha256 !== requestedChrome.sha256))
     throw new Error("launched Chrome executable does not match the requested pin");
-  return { path: pathValue, sha256 };
+  return {
+    path: pathValue,
+    sha256,
+    ...(requestedChrome?.fontObserver ? { fontObserver: true } : {}),
+  };
 }
 
 function writeCatalogStage90ResumeReports(
@@ -895,7 +907,7 @@ async function collectCatalogConditions(
   binary: string,
   binarySha256: string,
   outputDirectory: string,
-  chromeExecutable: { path: string; sha256: string },
+  chromeExecutable: ResolvedCatalogChromeExecutable,
   prior: CatalogStage90ResumeState | undefined,
 ): Promise<{ conditions: JsonValue[]; fontIdentityCaptures: ChromeFontIdentityCapture[] }> {
   const conditions: JsonValue[] = [];
@@ -1007,6 +1019,7 @@ function sha256Bytes(bytes: Buffer): string {
 function resolveCatalogChromeExecutable(pin: CatalogStage90ChromeExecutablePin): {
   path: string;
   sha256: string;
+  fontObserver?: true;
 } {
   if (
     pin.executablePath.length === 0 ||
@@ -1018,7 +1031,7 @@ function resolveCatalogChromeExecutable(pin: CatalogStage90ChromeExecutablePin):
     sha256 = sha256File(pathValue);
   if (sha256 !== pin.executableSha256)
     throw new Error("catalog Chrome executable pin does not match the physical file");
-  return { path: pathValue, sha256 };
+  return { path: pathValue, sha256, ...(pin.fontObserver ? { fontObserver: true } : {}) };
 }
 
 function readCatalogStage90Resume(
@@ -1028,6 +1041,7 @@ function readCatalogStage90Resume(
     binaryPath: string;
     chromeExecutablePath: string;
     chromeExecutableSha256: string;
+    fontObserver: boolean;
     producerContext: CatalogCaptureProducerContext;
     chromeRuntimeVersion: string;
   },
@@ -1098,11 +1112,121 @@ function readCatalogStage90Resume(
       return [jsonText(row.conditionId, "prior observation condition id"), row] as const;
     }),
   );
+  const observerReuse = context.fontObserver
+    ? filterObserverReusableConditions(
+        currentPlan,
+        reuse.reusableConditionIds,
+        finalizedById,
+        observationById,
+        context,
+      )
+    : { reusableConditionIds: reuse.reusableConditionIds, rejected: [] };
   return {
-    reusableConditionIds: new Set(reuse.reusableConditionIds),
+    reusableConditionIds: new Set(observerReuse.reusableConditionIds),
     finalizedById,
     observationById,
-    rejected: reuse.rejected,
+    rejected: [...reuse.rejected, ...observerReuse.rejected],
+  };
+}
+
+export function filterObserverReusableConditions(
+  plan: CatalogStage90ConditionPlan,
+  reusableConditionIds: readonly string[],
+  finalizedById: ReadonlyMap<string, JsonValue>,
+  observationById: ReadonlyMap<string, JsonValue>,
+  context: {
+    chromeExecutablePath: string;
+    chromeExecutableSha256: string;
+  },
+): { reusableConditionIds: string[]; rejected: Array<{ conditionId: string; reason: string }> } {
+  const reusable: string[] = [];
+  const rejected: Array<{ conditionId: string; reason: string }> = [];
+  for (const conditionId of reusableConditionIds) {
+    try {
+      assertObserverReusableCondition(plan, conditionId, finalizedById, observationById, context);
+      reusable.push(conditionId);
+    } catch (error) {
+      rejected.push({
+        conditionId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { reusableConditionIds: reusable, rejected };
+}
+
+function assertObserverReusableCondition(
+  plan: CatalogStage90ConditionPlan,
+  conditionId: string,
+  finalizedById: ReadonlyMap<string, JsonValue>,
+  observationById: ReadonlyMap<string, JsonValue>,
+  context: { chromeExecutablePath: string; chromeExecutableSha256: string },
+): void {
+  const tuple = plan.conditions.find((condition) => condition.conditionId === conditionId);
+  if (!tuple) throw new Error("observer resume condition is absent from the current plan");
+  const finalized = jsonRecord(
+    finalizedById.get(conditionId),
+    "prior finalized condition for observer resume",
+  );
+  const observation = jsonRecord(
+    observationById.get(conditionId),
+    "prior observation condition for observer resume",
+  );
+  const expected: Html84ConditionIdentity = {
+    conditionId,
+    caseId: jsonText(finalized.caseId, "prior case id"),
+    state: jsonText(finalized.state, "prior state"),
+    operationKind: jsonText(finalized.operationKind, "prior operation kind"),
+    ...(finalized.targetSelector === undefined
+      ? {}
+      : { targetSelector: jsonText(finalized.targetSelector, "prior target selector") }),
+    viewport: tuple.viewport,
+    sourceSha256: tuple.sourceSha256,
+    binarySha256: jsonText(finalized.binarySha256, "prior binary SHA"),
+  };
+  const finalizedReceipt = readCatalogResumeReceipt(
+    finalized,
+    "finalized Chrome receipt for observer resume",
+  );
+  const observationReceipt = readCatalogResumeReceipt(
+    observation,
+    "prior Chrome receipt for observer resume",
+  );
+  if (finalizedReceipt.value.traceBinding === undefined)
+    throw new Error("finalized Chrome receipt has no observer trace binding");
+  if (observationReceipt.value.traceBinding === undefined)
+    throw new Error("prior Chrome receipt has no observer trace binding");
+  if (!sameJson(finalizedReceipt.value.traceBinding, observationReceipt.value.traceBinding))
+    throw new Error("prior Chrome receipt trace binding differs from finalized receipt");
+  assertStrictHtml84ChromeReceipt(finalizedReceipt.path, finalizedReceipt.sha256, expected);
+  const receiptValue = finalizedReceipt.value;
+  const browserExecutablePath = jsonText(
+    receiptValue.browserExecutablePath,
+    "prior Chrome executable path for observer resume",
+  );
+  const browserExecutableSha256 = jsonText(
+    receiptValue.browserExecutableSha256,
+    "prior Chrome executable SHA for observer resume",
+  );
+  if (
+    browserExecutablePath !== context.chromeExecutablePath ||
+    browserExecutableSha256 !== context.chromeExecutableSha256
+  )
+    throw new Error("prior Chrome receipt executable pin differs from the current browser");
+}
+
+function readCatalogResumeReceipt(
+  row: Record<string, JsonValue>,
+  label: string,
+): { path: string; sha256: string; value: Record<string, JsonValue> } {
+  const receiptPath = jsonText(row.chromeReceiptPath, `${label} path`);
+  const receiptSha256 = jsonText(row.chromeReceiptSha256, `${label} SHA`);
+  const receiptBytes = fs.readFileSync(receiptPath);
+  if (sha256Bytes(receiptBytes) !== receiptSha256) throw new Error(`${label} SHA differs`);
+  return {
+    path: receiptPath,
+    sha256: receiptSha256,
+    value: jsonRecord(JSON.parse(receiptBytes.toString("utf8")) as JsonValue, label),
   };
 }
 
@@ -1575,7 +1699,7 @@ async function captureCatalogCondition(
   binary: string,
   binarySha256: string,
   outputDirectory: string,
-  chromeExecutable: { path: string; sha256: string },
+  chromeExecutable: ResolvedCatalogChromeExecutable,
 ): Promise<{ condition: JsonValue; fontIdentityRequest: ChromeFontIdentityCapture }> {
   const entry = [...catalog.visualAspects, ...catalog.scriptCases].find(
     (candidate) => candidate.id === tuple.caseId,
@@ -1641,17 +1765,57 @@ async function executeCatalogCondition(
   chromePath: string,
   reportPath: string,
   chromeReceiptPath: string,
-  chromeExecutable: { path: string; sha256: string },
+  chromeExecutable: ResolvedCatalogChromeExecutable,
 ): Promise<JsonValue> {
-  const chrome = await captureChromeCatalogCondition(
-    browser,
-    entry,
-    tuple.state,
-    chromePath,
-    tuple.viewport,
-    tuple.conditionId,
-    fixtureSha,
-  );
+  let traceBinding: JsonValue | undefined;
+  let chrome: Awaited<ReturnType<typeof captureChromeCatalogCondition>>;
+  if (chromeExecutable.fontObserver) {
+    const tracePath = `${chromePath}.trace.json`;
+    const sessionId = randomUUID();
+    const observed = await withObserverBrowser({
+      executablePath: chromeExecutable.path,
+      executableSha256: chromeExecutable.sha256,
+      tracePath,
+      sessionId,
+      capture: (observedBrowser) =>
+        captureChromeCatalogCondition(
+          observedBrowser,
+          entry,
+          tuple.state,
+          chromePath,
+          tuple.viewport,
+          tuple.conditionId,
+          fixtureSha,
+        ),
+    });
+    chrome = observed.value;
+    traceBinding = {
+      schema: "krr-chromium-font-capture-v1",
+      conditionId: tuple.conditionId,
+      sourceSha256: fixtureSha,
+      viewport: { ...tuple.viewport },
+      browserExecutablePath: chromeExecutable.path,
+      browserExecutableSha256: chromeExecutable.sha256,
+      capturePath: path.resolve(chromePath),
+      captureSha256: sha256File(chromePath),
+      tracePath: path.resolve(tracePath),
+      traceSha256: sha256File(tracePath),
+      sessionId,
+      argv: observed.argv,
+      processId: observed.processId,
+      actualExitCode: observed.actualExitCode,
+    } as unknown as JsonValue;
+  } else {
+    chrome = await captureChromeCatalogCondition(
+      browser,
+      entry,
+      tuple.state,
+      chromePath,
+      tuple.viewport,
+      tuple.conditionId,
+      fixtureSha,
+    );
+  }
   const spec = catalogOperationSpec(entry, tuple.state);
   if (spec.operationKind !== tuple.operationKind || spec.targetSelector !== tuple.targetSelector)
     throw new Error(`Catalog operation definition differs: ${tuple.conditionId}`);
@@ -1672,6 +1836,7 @@ async function executeCatalogCondition(
     chromePath,
     chromeExecutable,
     chrome.resourceProvenance,
+    traceBinding,
   );
   if (krr.status === "unknown")
     return unknownCatalogCondition(
@@ -1736,6 +1901,7 @@ function writeUnknownChromeReceipt(
   capturePath: string,
   chromeExecutable: { path: string; sha256: string },
   resourceProvenance: ChromeResourceProvenance,
+  traceBinding?: JsonValue,
 ): void {
   const receipt = {
     schema: "krr-html84-chrome-condition-v1",
@@ -1758,6 +1924,7 @@ function writeUnknownChromeReceipt(
     boundary: chrome.boundary,
     resourceProvenance,
     fontProvenance: [],
+    ...(traceBinding === undefined ? {} : { traceBinding }),
   };
   fs.writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
 }

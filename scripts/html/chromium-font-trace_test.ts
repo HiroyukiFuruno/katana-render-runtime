@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { readChromiumFontBinding } from "./chromium-font-binding";
+import { observerLaunchArguments } from "./chromium-font-capture";
+import { buildJoinedStaticFontTrace } from "./chromium-font-test-support";
 import { readChromiumFontTrace } from "./chromium-font-trace";
 
 const sessionId = "fixture-session";
@@ -22,7 +25,7 @@ function event(
 }
 
 test("Chromium font trace join is strict and table-driven", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "krr-font-trace-"));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "krr-font-trace-")));
   try {
     const fontPath = path.join(root, "font.bin");
     const fontBytes = Buffer.from("fixture-font-bytes");
@@ -59,26 +62,14 @@ test("Chromium font trace join is strict and table-driven", () => {
         coordinates: [{ identifier: 1196445523, value: 700 }],
       }),
     };
-    const valid = [
-      event("retained-paint", {
-        paintSerial: 1,
-        paintPhase: "begin",
-        transformRowMajor: JSON.stringify(
-          Array(16)
-            .fill(0)
-            .map((_, i) => (i === 0 || i === 5 || i === 10 || i === 15 ? 1 : 0)),
-        ),
-      }),
-      event("strike-cache", {
-        paintSerial: 1,
-        cacheHit: false,
-        descriptorSHA256: descriptorSha,
-        descriptorLength: fontBytes.length,
-        descriptorChecksum: 1,
-      }),
-      event("scaler-font", { paintSerial: 0, ...base }),
-      event("retained-paint", { paintSerial: 1, paintPhase: "end" }),
-    ];
+    const valid = buildJoinedStaticFontTrace({
+      sessionId,
+      processId,
+      physicalFilePath: fontPath,
+      physicalFileSha256: physicalSha,
+      descriptorSha256: descriptorSha,
+      descriptorLength: fontBytes.length,
+    }).events;
     const variableValid = valid.map((item) =>
       item.name === "scaler-font"
         ? { ...item, args: { ...(item.args as Record<string, unknown>), ...variableBase } }
@@ -207,6 +198,8 @@ test("Chromium font trace join is strict and table-driven", () => {
         expect(result.instances).toHaveLength(1);
         expect(result.instances[0]?.paintSerials).toEqual([1]);
         expect(result.instances[0]?.fvarTablePresent).toBe(fixture.expectedFvar);
+        if (fixture.name === "joined static instance")
+          assertCaptureBinding(fontPath, physicalSha, tracePath, traceSha256);
       } else {
         expect(() => readChromiumFontTrace({ tracePath, traceSha256, sessionId })).toThrow();
       }
@@ -215,3 +208,42 @@ test("Chromium font trace join is strict and table-driven", () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+function assertCaptureBinding(
+  filePath: string,
+  fileSha: string,
+  tracePath: string,
+  traceSha256: string,
+): void {
+  const expected = {
+    conditionId: "fixture-condition",
+    sourceSha256: fileSha,
+    viewport: { width: 320, height: 240, scale: 1 },
+    browserExecutablePath: filePath,
+    browserExecutableSha256: fileSha,
+    capturePath: filePath,
+    captureSha256: fileSha,
+  };
+  const binding = {
+    ...expected,
+    schema: "krr-chromium-font-capture-v1",
+    tracePath,
+    traceSha256,
+    sessionId,
+    argv: [filePath, ...observerLaunchArguments(sessionId, tracePath)],
+    processId,
+    actualExitCode: 0,
+  };
+  expect(readChromiumFontBinding(binding, expected).instances).toHaveLength(1);
+  for (const mutation of [
+    { conditionId: "other-condition" },
+    { sourceSha256: "b".repeat(64) },
+    { viewport: { ...expected.viewport, scale: 2 } },
+    { actualExitCode: 1 },
+    { processId: 0 },
+    { traceSha256: "b".repeat(64) },
+    { argv: binding.argv.slice(0, -1) },
+    { unexpected: true },
+  ])
+    expect(() => readChromiumFontBinding({ ...binding, ...mutation }, expected)).toThrow();
+}

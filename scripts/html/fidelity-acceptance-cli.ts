@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { catalogFontAcceptance, compareCatalogFontFaces } from "./catalog-font-equivalence";
+import {
+  catalogFontAcceptance,
+  compareCatalogFontFaces,
+  compareChromiumFontInstancesToLayoutRuns,
+} from "./catalog-font-equivalence";
+import { readChromiumFontBinding } from "./chromium-font-binding";
 import { runDynamicFidelity, stableJson } from "./dynamic-fidelity";
 import { type JsonValue, jsonRecords } from "./dynamic-state";
 import { assertFeatureResultReportsComplete, loadFeatureCatalog } from "./feature-catalog";
@@ -218,6 +223,7 @@ function catalogAcceptancePlan(
 }
 
 function catalogCapturePlan(argv: readonly string[]): CatalogCapturePlan {
+  if (argv.includes("--font-observer")) return catalogObserverCapturePlan(argv);
   if (
     ![4, 6, 8, 10].includes(argv.length) ||
     argv.slice(1).some((argument) => argument.length === 0)
@@ -263,6 +269,17 @@ function catalogCapturePlan(argv: readonly string[]): CatalogCapturePlan {
         }
       : {}),
   };
+}
+
+function catalogObserverCapturePlan(argv: readonly string[]): CatalogCapturePlan {
+  if (
+    argv.at(-1) !== "--font-observer" ||
+    argv.filter((value) => value === "--font-observer").length !== 1
+  )
+    throw new Error("font observer requires one final explicit flag");
+  const plan = catalogCapturePlan(argv.slice(0, -1));
+  if (!plan.chromeExecutable) throw new Error("font observer requires a pinned executable");
+  return { ...plan, chromeExecutable: { ...plan.chromeExecutable, fontObserver: true } };
 }
 
 export async function runFidelityAcceptance(argv: readonly string[]): Promise<void> {
@@ -576,7 +593,27 @@ function compareFontIdentityReceipts(
     !sameJson(chrome.fontProvenance, responseCapture.fontProvenance)
   )
     throw new Error("font identity response differs from the strict Chrome receipt");
-  const comparison = compareCatalogFontFaces(krr.fontProvenance, chrome.fontProvenance);
+  const comparison =
+    chrome.traceBinding === undefined
+      ? compareCatalogFontFaces(krr.fontProvenance, chrome.fontProvenance)
+      : compareChromiumFontInstancesToLayoutRuns(
+          readChromiumFontBinding(chrome.traceBinding, {
+            conditionId,
+            sourceSha256: jsonText(capture.sourceSha256, "condition source SHA"),
+            viewport: z
+              .object({ width: z.number(), height: z.number(), scale: z.number() })
+              .strict()
+              .parse(chrome.viewport),
+            browserExecutablePath: jsonText(chrome.browserExecutablePath, "Chrome executable"),
+            browserExecutableSha256: jsonText(
+              chrome.browserExecutableSha256,
+              "Chrome executable SHA",
+            ),
+            capturePath: jsonText(chrome.capturePath, "Chrome capture"),
+            captureSha256: jsonText(chrome.captureSha256, "Chrome capture SHA"),
+          }).instances,
+          krr.fontProvenance,
+        );
   return comparison.established
     ? null
     : (comparison.reason ?? "physical font equivalence is not established");

@@ -609,11 +609,18 @@ html-performance-evidence-acquire:
     python3 scripts/release/verify_html_performance_evidence.py --acquire
 
 # 既存catalog CLIで84条件のstage90 raw capture manifestを作る。
-html-performance-catalog-captures output_root prior_observation='' prior_finalized='':
+html-performance-catalog-captures output_root prior_observation='' prior_finalized='' chrome_executable='' chrome_sha256='' font_observer='false':
     @set -euo pipefail; \
       output_relative={{quote(output_root)}}; \
       prior_observation={{quote(prior_observation)}}; \
       prior_finalized={{quote(prior_finalized)}}; \
+      chrome_executable={{quote(chrome_executable)}}; \
+      chrome_sha256={{quote(chrome_sha256)}}; \
+      font_observer={{quote(font_observer)}}; \
+      if [[ "$font_observer" != true && "$font_observer" != false ]]; then echo "font observer must be true or false" >&2; exit 2; fi; \
+      if [[ -n "$chrome_executable" || -n "$chrome_sha256" ]]; then \
+        if [[ "$chrome_executable" != /* || ! -f "$chrome_executable" || ! "$chrome_sha256" =~ ^[a-f0-9]{64}$ ]]; then echo "Chrome requires an absolute executable path and SHA-256 pin" >&2; exit 2; fi; \
+      elif [[ "$font_observer" == true ]]; then echo "font observer requires a pinned Chrome executable" >&2; exit 2; fi; \
       if [[ -n "$prior_observation" || -n "$prior_finalized" ]]; then \
         if [[ -z "$prior_observation" || -z "$prior_finalized" || ! -f "$prior_observation" || ! -f "$prior_finalized" || -L "$prior_observation" || -L "$prior_finalized" ]]; then echo "resume requires both regular prior observation and finalized manifests" >&2; exit 2; fi; \
       fi; \
@@ -634,6 +641,8 @@ html-performance-catalog-captures output_root prior_observation='' prior_finaliz
       python3 scripts/build/cargo_capacity_guard.py --root {{quote(REPO_ROOT)}} --target {{quote(REPO_ROOT + "/target")}} --state {{quote(REPO_ROOT + "/tmp/.cargo-capacity-guard.json")}} -- {{HTML84_CARGO}} test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$run_root/test-build.jsonl"; \
       capture_args=(catalog-stage90-capture "$run_root/test-build.jsonl" "$run_root/plan.json" "$run_root/captures"); \
       if [[ -n "$prior_observation" ]]; then capture_args+=("$prior_observation" "$prior_finalized"); fi; \
+      if [[ -n "$chrome_executable" ]]; then capture_args+=(--chrome-executable "$chrome_executable" --chrome-executable-sha256 "$chrome_sha256"); fi; \
+      if [[ "$font_observer" == true ]]; then capture_args+=(--font-observer); fi; \
       bun scripts/html/fidelity-acceptance-cli.ts "${capture_args[@]}"; \
       test -s "$run_root/captures/catalog-stage90-captures.json"
 
