@@ -48,6 +48,34 @@ fn runtime_provides_constructable_style_sheet() {
 }
 
 #[test]
+fn runtime_query_selector_list_preserves_document_order_and_quoted_commas() {
+    let bundle = r#"
+globalThis.mermaid = {
+  initialize() {},
+  render: async (id) => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("id", id);
+    for (const [nodeId, className] of [["first", "first"], ["comma,id", "ignored"], ["second", "second"]]) {
+      const node = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      node.setAttribute("id", nodeId);
+      node.setAttribute("class", className);
+      node.textContent = nodeId;
+      svg.appendChild(node);
+    }
+    const selected = svg.querySelectorAll('.second, [id="comma,id"], .first, .first');
+    return { svg: `<svg id="${id}"><text>${selected.map((node) => node.textContent).join(",")}</text></svg>` };
+  }
+};
+"#;
+    let rendered = render_mermaid_request(
+        bundle,
+        "",
+        r##"{"source":"graph TD; A-->B","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff"}"##,
+    );
+    assert_rendered_contains(&rendered, ">first,comma,id,second<");
+}
+
+#[test]
 fn runtime_preserves_c4_description_with_explicit_line_break() {
     let scripts = MermaidRuntimeScripts::build(
         mermaid_test_bundle(),

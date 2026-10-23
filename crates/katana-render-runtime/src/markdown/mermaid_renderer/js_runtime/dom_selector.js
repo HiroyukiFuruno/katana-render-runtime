@@ -112,9 +112,75 @@ function katanaMatchesTag(node, selector) {
 }
 
 function queryCompoundSelector(root, selector) {
-  const parts = selector.split(/\s+/).filter(Boolean);
+  const alternatives = splitSelectorList(selector);
+  if (alternatives.length > 1) {
+    return querySelectorAlternatives(root, alternatives);
+  }
+  const parts = (alternatives[0] ?? selector).split(/\s+/).filter(Boolean);
   if (parts.length <= 1) {
     return null;
+  }
+  return katanaQuerySelectorParts([root], parts);
+}
+
+function querySelectorAlternatives(root, alternatives) {
+  const selected = new Set(
+    alternatives.flatMap((alternative) => querySelectorAlternative(root, alternative)),
+  );
+  const ordered = [];
+  const visit = (node) => {
+    node.children.forEach((child) => {
+      if (selected.has(child)) ordered.push(child);
+      visit(child);
+    });
+  };
+  visit(root);
+  return ordered;
+}
+
+function splitSelectorList(selector) {
+  const alternatives = [];
+  const state = { start: 0, quote: "", brackets: 0, parentheses: 0, escaped: false };
+  for (let index = 0; index < selector.length; index += 1) {
+    if (advanceSelectorScan(state, selector[index])) {
+      const alternative = selector.slice(state.start, index).trim();
+      if (alternative) alternatives.push(alternative);
+      state.start = index + 1;
+    }
+  }
+  const finalAlternative = selector.slice(state.start).trim();
+  if (finalAlternative) alternatives.push(finalAlternative);
+  return alternatives;
+}
+
+function advanceSelectorScan(state, character) {
+  if (state.escaped) {
+    state.escaped = false;
+    return false;
+  }
+  if (character === "\\") {
+    state.escaped = true;
+    return false;
+  }
+  if (state.quote) {
+    if (character === state.quote) state.quote = "";
+    return false;
+  }
+  if (character === '"' || character === "'") {
+    state.quote = character;
+    return false;
+  }
+  if (character === "[") state.brackets += 1;
+  if (character === "]") state.brackets = Math.max(0, state.brackets - 1);
+  if (character === "(") state.parentheses += 1;
+  if (character === ")") state.parentheses = Math.max(0, state.parentheses - 1);
+  return character === "," && state.brackets === 0 && state.parentheses === 0;
+}
+
+function querySelectorAlternative(root, selector) {
+  const parts = selector.split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) {
+    return querySimpleSelector(root, selector);
   }
   return katanaQuerySelectorParts([root], parts);
 }

@@ -91,7 +91,7 @@ const NATIVE_WIDTH_TYPE_PROFILE = "scripts/quality/tsconfig-owned-native-width-t
 // 更新には実cfg(test)→helper→include/result-scriptのcontextレビューが必要。
 const NATIVE_WIDTH_TEST_CONSUMERS = {
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime.rs`]:
-    "b3d10ef7896536ae924c2188b338bafeb3ff9642a3f557e5cf6ecec35a93291f",
+    "184b6738bd8d38d9e8e02f64cc42aa561bc4349282caa341bc171431a234c265",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`]:
     "bf9bfcd14bbe08f98dabb4ed0978eb861701c5d24a814b31f8d00fa88ef8fdbd",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_ishikawa_tests.rs`]:
