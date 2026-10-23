@@ -5,6 +5,12 @@ use super::super::constants::{
 };
 use super::CssStyle;
 
+const RELATIVE_FONT_SIZE_SCALE: f64 = 1.2;
+
+#[cfg(test)]
+#[path = "style_tag_defaults_tests.rs"]
+mod tests;
+
 impl CssStyle {
     pub(super) fn apply_tag_metrics(&mut self, tag: &str) {
         if is_phrasing_tag(tag) {
@@ -23,6 +29,8 @@ impl CssStyle {
                 self.margin_bottom = self.font_size;
             }
             "b" | "strong" | "th" => self.font_weight = FONT_WEIGHT_BOLD,
+            "small" => self.apply_relative_font_size(false),
+            "big" => self.apply_relative_font_size(true),
             "thead" | "tbody" | "tfoot" => {
                 self.vertical_align = super::CssVerticalAlign::Middle;
             }
@@ -30,6 +38,16 @@ impl CssStyle {
             "code" => self.font_family = "monospace".to_string(),
             _ => {}
         }
+    }
+
+    fn apply_relative_font_size(&mut self, enlarge: bool) {
+        if enlarge {
+            self.font_size = (f64::from(self.font_size) * RELATIVE_FONT_SIZE_SCALE) as f32;
+        } else {
+            self.font_size = (f64::from(self.font_size) / RELATIVE_FONT_SIZE_SCALE) as f32;
+        }
+        /* WHY: 単位なしline-heightはUA相対font-sizeへ再計算し、px指定は保持する。 */
+        self.resolve_inherited_line_height();
     }
 
     pub(super) fn refresh_tag_margins(&mut self, tag: &str) {
