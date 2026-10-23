@@ -3,9 +3,12 @@ use super::super::super::super::style::{CssStyle, CssWhiteSpace};
 
 #[path = "layout_table_inline_metrics.rs"]
 mod inline_metrics;
+#[path = "layout_table_nowrap_intrinsic.rs"]
+mod nowrap_intrinsic;
+#[cfg(test)]
+use inline_metrics::child_style;
 use inline_metrics::{
-    child_style, normal_children_min_content_width, table_min_content_text_width,
-    table_no_wrap_text_width,
+    normal_children_min_content_width, table_min_content_text_width, table_no_wrap_text_width,
 };
 
 #[cfg(test)]
@@ -20,10 +23,7 @@ impl TableIntrinsic {
             return match node {
                 HtmlDocumentNode::Text(text) => table_no_wrap_text_width(text, style),
                 HtmlDocumentNode::Element { children, .. } => {
-                    let width = children
-                        .iter()
-                        .map(|child| Self::min_content_width(child, &child_style(child, style)))
-                        .sum();
+                    let width = nowrap_intrinsic::min_content_width(children, style);
                     style.intrinsic_outer_width(width)
                 }
             };
