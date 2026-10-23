@@ -187,6 +187,7 @@ pub(super) enum HitTargetKind {
 
 pub(super) struct LayoutResult {
     pub(super) svg: String,
+    pub(super) generated_clip_provenance: crate::markdown::svg_rasterize::GeneratedClipProvenance,
     pub(super) hit_targets: Vec<HitTarget>,
     pub(super) element_boxes: Vec<ElementBox>,
     pub(super) anchor_positions: HashMap<String, f32>,

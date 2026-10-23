@@ -56,7 +56,8 @@ impl HtmlInteractiveSession {
             }
             render = self.traced_layout(generation)?;
         }
-        let pixels = self.traced_rasterize(generation, &render.svg)?;
+        let pixels =
+            self.traced_rasterize(generation, &render.svg, &render.generated_clip_provenance)?;
         Ok((render, pixels))
     }
 

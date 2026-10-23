@@ -32,7 +32,7 @@ fn rasterize_svg_renders_text_with_the_bundled_font() -> Result<(), String> {
     let tree =
         usvg::Tree::from_str(&compatible_svg, &options).map_err(|error| error.to_string())?;
     let image = RasterTarget::new(tree.size(), 1.0)
-        .render(&tree, &compatible_svg)
+        .render(&tree, &compatible_svg, &Default::default())
         .map_err(|error| error.to_string())?;
 
     assert!(
@@ -237,8 +237,9 @@ fn raster_target_reports_pixmap_allocation_failure() {
         height: 0,
     };
 
-    assert!(
-        tree.as_ref()
-            .is_ok_and(|it| target.render(it, &compatible_svg).is_err())
-    );
+    assert!(tree.as_ref().is_ok_and(|it| {
+        target
+            .render(it, &compatible_svg, &Default::default())
+            .is_err()
+    }));
 }

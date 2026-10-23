@@ -3,7 +3,6 @@ Uses `resvg` + `usvg` to convert SVG text to an RGBA pixel buffer.
 Returns the result as raw bytes compatible with egui's `ColorImage`. */
 
 use resvg::usvg;
-use tiny_skia::Pixmap;
 
 #[path = "svg_rasterize_composite.rs"]
 mod composite;
@@ -20,6 +19,8 @@ pub(crate) mod measurement_diagnostic;
 mod preprocess;
 #[path = "svg_rasterize_composite_provenance.rs"]
 mod provenance;
+#[path = "svg_rasterize_render.rs"]
+mod render;
 #[path = "svg_rasterize_text.rs"]
 mod text;
 #[path = "svg_rasterize_text_shaping.rs"]
@@ -32,6 +33,8 @@ use font::rasterizer_options;
 #[cfg(test)]
 use preprocess::parse_light_dark_function;
 use preprocess::{effective_scale, preprocess_for_rasterizer};
+pub(crate) use provenance::{GeneratedClip, GeneratedClipProvenance};
+use render::RasterTarget;
 pub(crate) use text_shaping::{
     HtmlTextMeasurementToken, HtmlTextMeasurementTokenKey, SvgTextRunMetrics,
 };
@@ -100,14 +103,32 @@ impl SvgRasterizeOps {
         Self::rasterize_with_options(svg_text, scale, &rasterizer_options())
     }
 
+    #[cfg(test)]
     pub(crate) fn rasterize_html_svg(
         svg_text: &str,
         scale: f32,
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
+        Self::rasterize_html_svg_with_provenance(
+            svg_text,
+            scale,
+            &GeneratedClipProvenance::default(),
+        )
+    }
+
+    pub(crate) fn rasterize_html_svg_with_provenance(
+        svg_text: &str,
+        scale: f32,
+        provenance: &GeneratedClipProvenance,
+    ) -> Result<RasterizedSvg, SvgRasterizeError> {
         #[cfg(target_os = "macos")]
-        return font::rasterize_html_known_or_eager(svg_text, scale);
+        return font::rasterize_html_known_or_eager(svg_text, scale, provenance);
         #[cfg(not(target_os = "macos"))]
-        Self::rasterize_with_options(svg_text, scale, &html_rasterizer_options(svg_text))
+        Self::rasterize_with_options_and_provenance(
+            svg_text,
+            scale,
+            &html_rasterizer_options(svg_text),
+            provenance,
+        )
     }
 
     pub(crate) fn shape_html_text_dx(
@@ -155,6 +176,20 @@ impl SvgRasterizeOps {
         scale: f32,
         options: &usvg::Options<'_>,
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
+        Self::rasterize_with_options_and_provenance(
+            svg_text,
+            scale,
+            options,
+            &GeneratedClipProvenance::default(),
+        )
+    }
+
+    fn rasterize_with_options_and_provenance(
+        svg_text: &str,
+        scale: f32,
+        options: &usvg::Options<'_>,
+        provenance: &GeneratedClipProvenance,
+    ) -> Result<RasterizedSvg, SvgRasterizeError> {
         let compatible_svg = Self::preprocess_for_rasterizer(svg_text);
         let tree = text_shaping::with_validated_tree_parse(|| {
             #[cfg(all(test, target_os = "macos"))]
@@ -164,18 +199,33 @@ impl SvgRasterizeOps {
             result
         })
         .map_err(|e| SvgRasterizeError::ParseFailed(e.to_string()))?;
-        Self::render_tree(&tree, scale, &compatible_svg)
+        Self::render_tree_with_provenance(&tree, scale, &compatible_svg, provenance)
     }
 
+    #[cfg(test)]
     fn render_tree(
         tree: &usvg::Tree,
         scale: f32,
         compatible_svg: &str,
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
+        Self::render_tree_with_provenance(
+            tree,
+            scale,
+            compatible_svg,
+            &GeneratedClipProvenance::default(),
+        )
+    }
+
+    pub(crate) fn render_tree_with_provenance(
+        tree: &usvg::Tree,
+        scale: f32,
+        compatible_svg: &str,
+        provenance: &GeneratedClipProvenance,
+    ) -> Result<RasterizedSvg, SvgRasterizeError> {
         let raster = RasterTarget::new(tree.size(), scale);
         #[cfg(all(test, target_os = "macos"))]
         font::observation::count(font::observation::Metric::RasterAttempt);
-        let pixmap = raster.render(tree, compatible_svg)?;
+        let pixmap = raster.render(tree, compatible_svg, provenance)?;
         #[cfg(all(test, target_os = "macos"))]
         font::observation::count(font::observation::Metric::RasterSuccess);
         Ok(RasterizedSvg {
@@ -185,52 +235,6 @@ impl SvgRasterizeOps {
             display_height: raster.display_height,
             rgba: pixmap.take(),
         })
-    }
-}
-
-struct RasterTarget {
-    display_width: f32,
-    display_height: f32,
-    effective_scale: f32,
-    width: u32,
-    height: u32,
-}
-
-impl RasterTarget {
-    fn new(size: usvg::Size, scale: f32) -> Self {
-        let display_width = size.width();
-        let display_height = size.height();
-        let effective_scale = effective_scale(display_width, display_height, scale);
-        Self {
-            display_width,
-            display_height,
-            effective_scale,
-            width: ((display_width * effective_scale).ceil() as u32).max(1),
-            height: ((display_height * effective_scale).ceil() as u32).max(1),
-        }
-    }
-
-    fn render(&self, tree: &usvg::Tree, compatible_svg: &str) -> Result<Pixmap, SvgRasterizeError> {
-        let Some(mut pixmap) = Pixmap::new(self.width, self.height) else {
-            return Err(SvgRasterizeError::RasterizeFailed(
-                "failed to allocate SVG pixmap".to_string(),
-            ));
-        };
-        let transform =
-            tiny_skia::Transform::from_scale(self.effective_scale, self.effective_scale);
-        let authored_clip_info = if composite::SvgCompositeRenderer::needs_authored_clip_ids(tree) {
-            provenance::authored_clip_ids(compatible_svg)?
-        } else {
-            provenance::AuthoredClipInfo::default()
-        };
-        composite::SvgCompositeRenderer::render(
-            tree,
-            transform,
-            &mut pixmap.as_mut(),
-            &authored_clip_info,
-        )
-        .map_err(SvgRasterizeError::RasterizeFailed)?;
-        Ok(pixmap)
     }
 }
 

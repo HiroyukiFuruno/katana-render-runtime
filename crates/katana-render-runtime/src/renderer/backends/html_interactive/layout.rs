@@ -6,6 +6,7 @@ use super::layout_measurement_cache::FlowMeasurementCache;
 use super::layout_paint_order::{PaintClip, PaintFragment};
 use super::layout_viewport_overflow::HtmlViewportOverflowPolicy;
 use super::types::{ElementBox, HitTarget, LayoutResult};
+use crate::markdown::svg_rasterize::{GeneratedClip, GeneratedClipProvenance};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 #[derive(Default)]
@@ -23,6 +24,7 @@ pub(super) struct HtmlLayoutRenderer {
     pub(super) viewport_height: f32,
     pub(super) viewport_width: f32,
     pub(super) next_clip_id: u64,
+    pub(super) generated_clip_provenance: GeneratedClipProvenance,
     pub(super) next_gradient_id: u64,
     pub(super) ownership: LayoutOwnership,
     pub(super) clickable_nodes: std::collections::HashSet<u64>,
@@ -78,6 +80,12 @@ pub(super) struct LayoutOwnership {
 }
 
 impl HtmlLayoutRenderer {
+    pub(super) fn record_generated_clip(&mut self, id: u64, shape: String) {
+        self.generated_clip_provenance.clips.push(GeneratedClip {
+            id: format!("krr-clip-{id}"),
+            shape,
+        });
+    }
     pub(super) fn current_element_owner(&self) -> Option<u64> {
         self.ownership.rendering_elements.last().copied()
     }
@@ -128,6 +136,7 @@ impl HtmlLayoutRenderer {
         self.svg.push_str("</svg>");
         LayoutResult {
             svg: self.svg,
+            generated_clip_provenance: self.generated_clip_provenance,
             hit_targets: self.hit_targets,
             element_boxes: self.element_boxes,
             anchor_positions: self.anchor_positions,

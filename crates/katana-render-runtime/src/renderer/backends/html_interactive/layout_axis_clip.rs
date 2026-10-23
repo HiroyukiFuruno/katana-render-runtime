@@ -16,11 +16,13 @@ pub(super) fn finalize(renderer: &mut HtmlLayoutRenderer) -> Result<(), String> 
 }
 
 fn render_clip(
-    renderer: &HtmlLayoutRenderer,
+    renderer: &mut HtmlLayoutRenderer,
     descriptor: DeferredAxisClip,
 ) -> Result<String, String> {
     if active_dimension_is_zero(&descriptor.clip) {
-        return Ok(empty_clip(descriptor.id));
+        let rendered = empty_clip(descriptor.id);
+        renderer.record_generated_clip(descriptor.id, r#"<path d="M 0 0 Z"/>"#.to_string());
+        return Ok(rendered);
     }
     let owner = renderer
         .ownership
@@ -31,6 +33,7 @@ fn render_clip(
     let transform = owner_transform(descriptor.source_owner, &owner.transformed_corners)?;
     let world_clip = transform_clip(descriptor.clip, transform)?;
     let path = transformed_clip_path(renderer, &world_clip, transform)?;
+    renderer.record_generated_clip(descriptor.id, format!(r#"<path d="{}"/>"#, path));
     Ok(format!(
         r#"<clipPath id="krr-clip-{}"><path d="{}"/></clipPath>"#,
         descriptor.id, path

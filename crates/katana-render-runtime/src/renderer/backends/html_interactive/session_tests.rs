@@ -202,6 +202,8 @@ fn raster_and_frame_failures_are_mapped_to_runtime_errors() -> TestResult {
 fn empty_viewport_layout(viewport: HtmlBrowserViewport) -> LayoutResult {
     LayoutResult {
         svg: String::new(),
+        generated_clip_provenance: crate::markdown::svg_rasterize::GeneratedClipProvenance::default(
+        ),
         hit_targets: Vec::new(),
         element_boxes: Vec::new(),
         anchor_positions: HashMap::new(),

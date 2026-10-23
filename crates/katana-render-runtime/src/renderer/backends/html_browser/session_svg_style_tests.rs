@@ -119,6 +119,20 @@ fn inline_svg_multiply_uses_external_html_backdrop_without_isolation() {
     });
 }
 
+#[test]
+fn inline_svg_multiply_uses_external_backdrop_inside_overflow_clip() {
+    let html = format!(
+        "<!doctype html><html><head><style>html,body{{margin:0;width:{WIDTH}px;height:{HEIGHT}px;background:#202020}}#capture{{width:{WIDTH}px;height:{HEIGHT}px;overflow:hidden}}</style></head><body><div id=\"capture\">{EXTERNAL_MULTIPLY_SVG}</div></body></html>"
+    );
+    with_inline_html(html, |actual| {
+        assert_eq!(
+            pixel_at(&actual, MULTIPLY_INTERIOR_X, MULTIPLY_INTERIOR_Y),
+            Some(EXTERNAL_MULTIPLY_FILL.as_slice()),
+            "inline SVG multiply must use the external backdrop inside overflow clipping"
+        );
+    });
+}
+
 fn with_native_pixels(svg: &str, action: impl FnOnce(Vec<u8>)) {
     with_success(
         SvgRasterizeOps::rasterize_svg(svg, 1.0),

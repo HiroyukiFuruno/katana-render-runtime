@@ -83,11 +83,17 @@ fn decoded_ascii(svg: &str) -> Option<String> {
 pub(in crate::markdown::svg_rasterize) fn rasterize(
     svg: &str,
     scale: f32,
+    provenance: &super::super::super::GeneratedClipProvenance,
 ) -> Result<super::super::super::RasterizedSvg, super::super::super::SvgRasterizeError> {
     let compatible = super::super::super::SvgRasterizeOps::preprocess_for_rasterizer(svg);
     let tree = parse(&compatible, svg)
         .map_err(|error| super::super::super::SvgRasterizeError::ParseFailed(error.to_string()))?;
-    super::super::super::SvgRasterizeOps::render_tree(&tree, scale, &compatible)
+    super::super::super::SvgRasterizeOps::render_tree_with_provenance(
+        &tree,
+        scale,
+        &compatible,
+        provenance,
+    )
 }
 
 type KnownOptions = (
@@ -163,6 +169,7 @@ mod diagnostic {
     pub(in crate::markdown::svg_rasterize) fn rasterize(
         svg: &str,
         scale: f32,
+        provenance: &super::super::super::super::GeneratedClipProvenance,
     ) -> Result<
         super::super::super::super::RasterizedSvg,
         super::super::super::super::SvgRasterizeError,
@@ -175,7 +182,12 @@ mod diagnostic {
                 super::super::super::super::SvgRasterizeError::ParseFailed(error.to_string())
             })?;
         let rendered = lazy_diagnostic::measure("render_tree", || {
-            super::super::super::super::SvgRasterizeOps::render_tree(&tree, scale, &compatible)
+            super::super::super::super::SvgRasterizeOps::render_tree_with_provenance(
+                &tree,
+                scale,
+                &compatible,
+                provenance,
+            )
         });
         if rendered.is_ok()
             && let Some(paint_call) = paint_call

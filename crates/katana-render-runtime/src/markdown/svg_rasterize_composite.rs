@@ -1,6 +1,5 @@
 use super::provenance::AuthoredClipInfo;
 use resvg::usvg;
-use std::collections::HashSet;
 use tiny_skia::Transform;
 
 #[path = "svg_rasterize_composite_layers.rs"]
@@ -24,14 +23,14 @@ impl SvgCompositeRenderer {
     }
 
     pub(crate) fn needs_authored_clip_ids(tree: &usvg::Tree) -> bool {
-        contains_clip_ancestor_blend(tree.root(), false, &HashSet::new())
+        contains_clip_ancestor_blend(tree.root(), false, &AuthoredClipInfo::default())
     }
 }
 
 fn contains_clip_ancestor_blend(
     group: &usvg::Group,
     clip_ancestor: bool,
-    authored_clip_ids: &HashSet<String>,
+    authored_clip_info: &AuthoredClipInfo,
 ) -> bool {
     for node in group.children() {
         let usvg::Node::Group(child) = node else {
@@ -43,12 +42,12 @@ fn contains_clip_ancestor_blend(
             }
             continue;
         }
-        let generated_clip = generated_viewport_clip(child, authored_clip_ids);
+        let generated_clip = generated_viewport_clip(child, authored_clip_info);
         if child.clip_path().is_some() && !generated_clip {
             continue;
         }
         let has_clip = clip_ancestor || generated_clip;
-        if contains_clip_ancestor_blend(child, has_clip, authored_clip_ids) {
+        if contains_clip_ancestor_blend(child, has_clip, authored_clip_info) {
             return true;
         }
     }
@@ -73,10 +72,10 @@ fn has_nonisolating_blend(group: &usvg::Group, clip_ancestor: bool) -> bool {
         && group.clip_path().is_none()
 }
 
-fn generated_viewport_clip(group: &usvg::Group, authored_clip_ids: &HashSet<String>) -> bool {
+fn generated_viewport_clip(group: &usvg::Group, authored_clip_info: &AuthoredClipInfo) -> bool {
     group
         .clip_path()
-        .is_some_and(|clip| is_generated_viewport_clip(clip, authored_clip_ids))
+        .is_some_and(|clip| is_generated_viewport_clip(clip, authored_clip_info))
 }
 
 fn render_children(
@@ -117,7 +116,7 @@ fn render_traversable_group(
     authored_clip_info: &AuthoredClipInfo,
 ) -> Result<(), String> {
     let child_transform = transform.pre_concat(group.transform());
-    if generated_viewport_clip(group, &authored_clip_info.ids) {
+    if generated_viewport_clip(group, authored_clip_info) {
         return layers::render_clipped_group(group, child_transform, pixmap, authored_clip_info);
     }
     if group.clip_path().is_none() {
@@ -127,8 +126,12 @@ fn render_traversable_group(
     Ok(())
 }
 
-fn is_generated_viewport_clip(clip: &usvg::ClipPath, authored_clip_ids: &HashSet<String>) -> bool {
-    !authored_clip_ids.contains(clip.id()) && clip.transform().is_identity()
+fn is_generated_viewport_clip(
+    clip: &usvg::ClipPath,
+    authored_clip_info: &AuthoredClipInfo,
+) -> bool {
+    authored_clip_info.generated_ids.contains(clip.id())
+        || (!authored_clip_info.ids.contains(clip.id()) && clip.transform().is_identity())
 }
 
 #[cfg(test)]
@@ -359,6 +362,7 @@ mod tests {
                 .filter_map(|node| node.attribute("id"))
                 .map(str::to_owned)
                 .collect::<HashSet<_>>(),
+            generated_ids: HashSet::new(),
             has_object_bounding_box: clip_nodes
                 .iter()
                 .any(|node| node.attribute("clipPathUnits") == Some("objectBoundingBox")),

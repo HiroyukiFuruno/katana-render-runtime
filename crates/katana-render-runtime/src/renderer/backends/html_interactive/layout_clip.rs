@@ -45,6 +45,7 @@ impl HtmlLayoutRenderer {
             self.scroll_y,
             clip.corner_radii,
         );
+        self.record_generated_clip(id, clip_shape.clone());
         self.svg.insert_str(
             index,
             &format!(

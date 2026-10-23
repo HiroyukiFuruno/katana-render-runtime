@@ -51,7 +51,7 @@ fn render_cold_html_svg(svg: &str) -> Result<super::super::font::HtmlFontMemoryS
     let tree =
         usvg::Tree::from_str(&compatible_svg, &options).map_err(|error| error.to_string())?;
     let image = RasterTarget::new(tree.size(), 1.0)
-        .render(&tree, &compatible_svg)
+        .render(&tree, &compatible_svg, &Default::default())
         .map_err(|error| error.to_string())?;
     drop(tree);
     drop(options);
