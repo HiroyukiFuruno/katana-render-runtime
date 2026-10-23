@@ -157,8 +157,16 @@ class CheckDomainTests(unittest.TestCase):
             )
             self.assertEqual(guard.check_domain_retained_profiles(root, "root", []), ())
 
+            accepted_domains = ("performance-baseline", "performance-candidate")
+            for domain in accepted_domains:
+                with self.subTest(domain=domain):
+                    self.assertEqual(
+                        guard.check_domain_retained_profiles(root, domain, [str(profile)]),
+                        (profile,),
+                    )
+
             rejected = (
-                ("unsupported-domain", "performance-baseline", [str(profile)]),
+                ("unsupported-domain", "unsupported-domain", [str(profile)]),
                 ("arbitrary-profile", "root", [str(target / "debug")]),
                 ("duplicate-profile", "root", [str(profile), str(profile)]),
             )

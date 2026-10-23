@@ -80,12 +80,14 @@ html-first-frame-check input expected_sha256 report="tmp/html-first-frame.json":
 lint:
     @set -euo pipefail; \
       retained_profile="{{REPO_ROOT}}/target/llvm-cov-target/krr-coverage"; \
+      retained_profile_arg=""; \
       retained_args=(); \
       if [[ -d "$retained_profile" && ! -L "$retained_profile" ]]; then \
         retained_args=(--retain-profile "$retained_profile"); \
+        retained_profile_arg="$retained_profile"; \
       fi; \
-      RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity
-    just performance-harness-lint
+      RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \
+      just performance-harness-lint "$retained_profile_arg"
 
 # Run Rust syntax based structural checks
 ast-lint:
@@ -168,9 +170,12 @@ coverage-result-check:
 performance-harness-fmt-check:
     {{CARGO}} fmt --manifest-path scripts/html/performance-harness/Cargo.toml --all -- --check
 
-performance-harness-lint:
-    RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py --check-domain performance-baseline -- {{CARGO}} clippy -j {{JOBS}} --manifest-path scripts/html/performance-harness/Cargo.toml --all-targets --no-default-features --features baseline --locked -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity
-    RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py --check-domain performance-candidate -- {{CARGO}} clippy -j {{JOBS}} --manifest-path scripts/html/performance-harness/Cargo.toml --all-targets --no-default-features --features candidate --locked -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity
+performance-harness-lint retained_profile="":
+    @set -euo pipefail; \
+      retained_args=(); \
+      if [[ -n {{quote(retained_profile)}} ]]; then retained_args=(--retain-profile {{quote(retained_profile)}}); fi; \
+      RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "${retained_args[@]}" --check-domain performance-baseline -- {{CARGO}} clippy -j {{JOBS}} --manifest-path scripts/html/performance-harness/Cargo.toml --all-targets --no-default-features --features baseline --locked -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \
+      RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "${retained_args[@]}" --check-domain performance-candidate -- {{CARGO}} clippy -j {{JOBS}} --manifest-path scripts/html/performance-harness/Cargo.toml --all-targets --no-default-features --features candidate --locked -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity
 
 # profileは分離し、全出力は同じroot targetの固定aggregate容量へ含める。
 performance-harness-coverage:

@@ -1511,7 +1511,7 @@ def check_domain_retained_profiles(root: Path, domain: str, values: list[str]) -
         return ()
     target = root / "target"
     profile = target / "llvm-cov-target/krr-coverage"
-    if domain != "root" or values != [str(profile)]:
+    if domain not in CHECK_DOMAINS or values != [str(profile)]:
         raise RuntimeError("check domain only permits the canonical root coverage profile")
     return retained_profile_paths(target, values)
 
