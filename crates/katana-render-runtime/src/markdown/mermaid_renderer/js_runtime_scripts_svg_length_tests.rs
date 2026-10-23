@@ -85,3 +85,41 @@ fn svg_length_position_overflow_is_rejected() -> Result<(), String> {
     }
     Ok(())
 }
+
+const SVG_PATH_LENGTH_FIXTURE: &str = r##"
+globalThis.mermaid = {
+  initialize() {},
+  render: async () => {
+    const ns = 'http://www.w3.org/2000/svg';
+    const paths = [
+      { d: 'M280,55L280,154', expected: 99, tolerance: 0.00001 },
+      { d: 'M280,207L280,243', expected: 36, tolerance: 0.00001 },
+      { d: 'M242.75,378.7499260902405L242.75,416L242.75,428.9289321881345Q242.75,436 235.67893218813452,436L95.07106781186548,436Q88,436 88,443.0710678118655L88,515', expected: 285.6717529296875, tolerance: 0.001 },
+    ];
+    const observed = paths.map(({ d, expected, tolerance }) => {
+      const path = document.createElementNS(ns, 'path');
+      path.setAttribute('d', d);
+      const actual = path.getTotalLength();
+      return { actual, expected, matches: Math.abs(actual - expected) < tolerance };
+    });
+    const empty = document.createElementNS(ns, 'path');
+    const invalid = document.createElementNS(ns, 'path');
+    invalid.setAttribute('d', 'not-a-path');
+    const passed = observed.every(({ matches }) => matches)
+      && empty.getTotalLength() === 0
+      && invalid.getTotalLength() === 0;
+    const details = JSON.stringify(observed).replaceAll('&', '&amp;').replaceAll('"', '&quot;');
+    return { svg: '<svg data-svg-path-length="' + passed + '" data-svg-path-length-details="' + details + '"></svg>' };
+  }
+};
+"##;
+
+#[test]
+fn svg_path_total_length_matches_official_edge_geometry() -> Result<(), String> {
+    let rendered = render_svg_fixture(SVG_PATH_LENGTH_FIXTURE)?;
+    assert!(
+        rendered.contains(r##"data-svg-path-length="true"##),
+        "{rendered}"
+    );
+    Ok(())
+}

@@ -1287,6 +1287,7 @@ dependencies = [
  "include_dir",
  "jni",
  "katana-render-runtime-assets",
+ "kurbo",
  "log",
  "markup5ever",
  "nix",
