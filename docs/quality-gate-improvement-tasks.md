@@ -14,6 +14,13 @@
 
 ## 現在の状態（2026-10-23）
 
+- [ ] 既存99以上からの劣化を許容しない。R1533では公開Skia 0.153.3の未改変配布SDKと公開C++ APIだけで、旧R725と同一入力・独立raw画像の代表1図を99.859821へ再現した（stock文字設定96.94723）。SDK改変・基準画像変更は不要と実証したが、これは診断1図であり正式117図の受入ではない。製品への統合では既存寸法・clip/blend/filter・font/cache契約を保ち、全117と性能を改めて確認する（`tmp/quality/public-skia-adapter-r1533/result.json`、`score-0/result.json`、`score-1/result.json`）。
+- [ ] HTMLの全軸design座標出力は、R1535のAST・root/harness厳格Clippy、R1536の現行全workspace/all-targets/all-featuresコンパイル、R1537の実binary catalogから選んだ関連18回帰がactual0。R1536/1537はsource前後一致。R1529の構文、R1530の可視性、R1534の不要borrow、R1535の誤ったcheck-domain付きtest起動は失敗記録を保持し修正した。Chrome実trace12条件は4instance全件取得済みだが、標準capture/receiptと双方向instance完全一致への接続は未完了。
+
+- [ ] R1511の正式117図は全件実PNG生成・採点を完了したが99以上0/117で未合格。R1481と比較可能な115図にスコア低下はなく、Sankey英日4図が11.26〜22.39点改善、日本語Ishikawa2図の実寸法不一致も解消した。source前後一致・actual1を保持する。背景混色とW5選択の製品修正が実画像に反映されたが、共通の文字ラスタ差を解消するまで受入しない（`tmp/quality/current-managed117-controller-r1511/result.json`、`previous-score-readback.json`、`current-managed-full117-r1511/receipt.json`）。
+- [ ] R1504の候補buildはclean committed HEAD `e9b5764b`で成功。R1506の実初回font観測13件と通常probeのR1507画像は全件SHA完全一致・AE0。R1507の初回集計はAE文字列表記`0 (0)`を`0`と完全一致させた誤りで0件としたため、元記録を保持して`sha-readback.json`へ13件の完全一致を訂正した。HTML typography12条件は独立Chrome実画像に対して94.93508〜96.41139、全12件90以上（R1512）だが、正式84・全スクロール・性能の代用にはしない。Chromeのjoin済み物理face・全SFNS実variation座標とKRRのclamp後座標の対応も確認し、標準reader/captureへの接続を進める。
+- [ ] HTML観測の全軸design座標を既存skrifa.filterへ委譲し、Chrome traceを既存retained/strike/descriptor/scaler結合で読むadapterを実装中。R1514は新コードのGit/CI/local未登録、R1515は登録修正の引数誤り、R1516は既存warmprofile/子module契約の不追従、R1519はvalidator修正の文字列構文エラーで失敗し、重い後続検査を起動していない。R1517の自作回帰4件成功だけでは実trace12件が読めず、R1518もSFNS2instanceだけでstatic日本語faceを欠落していたため正式受入には使わない。実4instance全件・不完全join拒否と標準静的検査へ接続してからnative回帰を行う。
+
 - [ ] 最新checkpointは背景混色`2220e789`・日本語W5候補`ff69082e`・予約warm保持`5b1f3839`・既存初回font診断の保持`838d1652`。全て通常commit hook成功、公開は未実施。初回font診断はR1499のAST/厳格Clippyでcompile確認のみ、追加caseの実行は次のrelease test binaryで回収する。既存raw基準・99/90・性能非劣化・coverage100%条件は不変。次はclean committed sourceの候補buildと、代表実画像・全117の再測定へ戻る。
 
 - [ ] 製品描画の2修正を通常hook成功後にcommitした。overflow clip内の背景混色は`2220e789`、太さ600の日本語fallback候補補完は`ff69082e`。R1494はAST・native25件がactual0、source前後一致。実Ishikawaラベルのadvanceは51.708/77.562から独立Chromeと同じ56/84へ、物理file/faceもHiraginoSans-W5・TTC index0へ一致した。図全体の寸法と99到達件数は次の正式画像比較で確認し、現時点で未合格117件という判定は変えない（`tmp/quality/hiragino-fallback-regressions-r1494/result.json`、`overflow-backdrop-checkpoint-commit-r1496/result.json`、`hiragino-fallback-checkpoint-commit-r1497/result.json`）。

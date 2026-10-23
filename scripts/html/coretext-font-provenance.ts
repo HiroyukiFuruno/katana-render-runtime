@@ -37,15 +37,22 @@ const layoutRunSchema = z
     glyphCount: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     layoutVariations: z.array(layoutVariationSchema),
     derivedEffectiveVariations: z.array(layoutVariationSchema),
+    derivedAppliedDesignCoordinates: z.array(layoutVariationSchema),
     derivedNormalizedCoords: z.array(z.number().finite()),
   })
   .strict()
   .superRefine((run, context) => {
-    const tags = new Set<string>();
-    for (const variation of run.layoutVariations) {
-      if (tags.has(variation.tag))
-        context.addIssue({ code: "custom", message: "duplicate layout variation tag" });
-      tags.add(variation.tag);
+    for (const variations of [
+      run.layoutVariations,
+      run.derivedEffectiveVariations,
+      run.derivedAppliedDesignCoordinates,
+    ]) {
+      const tags = new Set<string>();
+      for (const variation of variations) {
+        if (tags.has(variation.tag))
+          context.addIssue({ code: "custom", message: "duplicate layout variation tag" });
+        tags.add(variation.tag);
+      }
     }
   });
 

@@ -71,12 +71,14 @@ const sources = {
 const rootLintRecipe = [
   "set -euo pipefail; \\",
   'retained_profile="{{REPO_ROOT}}/target/llvm-cov-target/krr-coverage"; \\',
+  'retained_profile_arg=""; \\',
   "retained_args=(); \\",
   'if [[ -d "$retained_profile" && ! -L "$retained_profile" ]]; then \\',
   'retained_args=(--retain-profile "$retained_profile"); \\',
+  'retained_profile_arg="$retained_profile"; \\',
   "fi; \\",
-  `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity`,
-  "just performance-harness-lint",
+  `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \\`,
+  'just performance-harness-lint "$retained_profile_arg"',
 ].join("\n");
 const recipeBodies: Record<string, string> = {
   check: "python3 scripts/local.py",
@@ -771,6 +773,7 @@ test("runtime asset registration uses Playwright without dropping sibling Bun te
     "scripts/html/stage-score_test.ts",
     "scripts/html/stage-score-suite_test.ts",
     catalogFontTest,
+    "scripts/html/chromium-font-trace_test.ts",
     "scripts/html/catalog-capture-producer-context_test.ts",
     "scripts/html/anonymized-fixture_test.ts",
     "scripts/html/compare-toc-evidence_test.ts",
@@ -791,22 +794,24 @@ test("runtime asset registration uses Playwright without dropping sibling Bun te
   expect(actualRuntimeAssetUnitPaths()).toEqual(expect.arrayContaining(pureHtmlTests));
 });
 
-test("runtime asset registration rejects a missing catalog font equivalence test", () => {
-  const recipe = actualRecipeBody("runtime-asset-script-other-run");
-  const catalogFontTest = " ./scripts/html/catalog-font-equivalence_test.ts";
-  const mutated = recipe.replace(catalogFontTest, "");
-  expect(mutated).not.toBe(recipe);
+for (const requiredTest of ["catalog-font-equivalence", "chromium-font-trace"]) {
+  test(`runtime asset registration rejects a missing ${requiredTest} test`, () => {
+    const recipe = actualRecipeBody("runtime-asset-script-other-run");
+    const token = ` ./scripts/html/${requiredTest}_test.ts`;
+    const mutated = recipe.replace(token, "");
+    expect(mutated).not.toBe(recipe);
 
-  const root = strictUnusedRegistrationFixture();
-  recipes(root, { "runtime-asset-script-other-run": mutated });
-  track(root);
+    const root = strictUnusedRegistrationFixture();
+    recipes(root, { "runtime-asset-script-other-run": mutated });
+    track(root);
 
-  const report = inspectMathJaxUnusedAuditRoute(root);
-  expect(report.binding.standardCommandVerified).toBe(false);
-  expect(report.issues.map((issue) => issue.code)).toContain(
-    "mathjax-host-evidence-registration-unverified",
-  );
-});
+    const report = inspectMathJaxUnusedAuditRoute(root);
+    expect(report.binding.standardCommandVerified).toBe(false);
+    expect(report.issues.map((issue) => issue.code)).toContain(
+      "mathjax-host-evidence-registration-unverified",
+    );
+  });
+}
 
 test.each([
   ["empty", ""],
@@ -2718,6 +2723,7 @@ function nativeWidthTraceFixture(): string {
     nativeWidthHostPath,
     `${nativeWidthTraceDirectory}/js_runtime.rs`,
     `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
+    `${nativeWidthTraceDirectory}/js_runtime_native_width_ishikawa_tests.rs`,
     `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,
     `${nativeWidthTraceDirectory}/js_runtime_native_width_helpers.rs`,
     nativeWidthProfilePath,
@@ -2794,7 +2800,11 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
-      sha256: "9e439a26308c37df0f1fb5d25bcd43d9fecf79810899eaa13f4c0fc0a7c2c9e5",
+      sha256: "bf9bfcd14bbe08f98dabb4ed0978eb861701c5d24a814b31f8d00fa88ef8fdbd",
+    },
+    {
+      path: `${nativeWidthTraceDirectory}/js_runtime_native_width_ishikawa_tests.rs`,
+      sha256: "8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_helpers.rs`,
@@ -2825,6 +2835,11 @@ test.each([
     "js_runtime_native_width_tests.rs",
     '#[path = "js_runtime_native_width_helpers.rs"]',
     '#[path = "unreviewed_helpers.rs"]',
+  ],
+  [
+    "js_runtime_native_width_ishikawa_tests.rs",
+    "use helpers::render_fixture_with_font_audit;",
+    "use helpers::render_fixture_with_font_audit_without_trace;",
   ],
   [
     "js_runtime_native_width_helpers.rs",
@@ -2863,6 +2878,7 @@ test.each([
   nativeWidthTracePath,
   nativeWidthBBoxTracePath,
   `${nativeWidthTraceDirectory}/js_runtime_native_width_helpers.rs`,
+  `${nativeWidthTraceDirectory}/js_runtime_native_width_ishikawa_tests.rs`,
   `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,
 ])("Rust test trace rejects missing reviewed input: %s", (name) => {
   const root = nativeWidthTraceFixture();
@@ -3597,7 +3613,7 @@ function performanceHarnessRecipes(root: string, overrides: Record<string, strin
     "performance-harness-lint",
     "performance-harness-coverage",
   ];
-  const commands = Object.fromEntries(names.map((name) => [name, actualRecipeBody(name)]));
+  const commands = Object.fromEntries(names.map((name) => [name, actualRecipeBody(name, true)]));
   recipes(root, {
     ...commands,
     "check-standard": `${fixtureRecipeBodies()["check-standard"]}\njust fmt-check\njust coverage`,
@@ -3699,6 +3715,29 @@ test.each([
     expect.objectContaining({ code: "performance-harness-recipe-unverified", path: "lint" }),
   );
 });
+test.each([
+  [
+    "profile forwarding omitted",
+    'just performance-harness-lint "$retained_profile_arg"',
+    "just performance-harness-lint",
+  ],
+  [
+    "profile forwarding alias changed",
+    'retained_profile_arg="$retained_profile"',
+    'retained_profile_arg="forged"',
+  ],
+])(
+  "root Clippy route rejects unsafe performance profile forwarding: %s",
+  (_label, before, after) => {
+    const root = performanceHarnessFixture();
+    const actual = actualRecipeBody("lint");
+    expect(actual).toContain(before);
+    performanceHarnessRecipes(root, { lint: actual.replace(before, after) });
+    expect(inspectOwnedValidationContract(root).issues).toContainEqual(
+      expect.objectContaining({ code: "performance-harness-recipe-unverified", path: "lint" }),
+    );
+  },
+);
 test("standalone performance harness binds both owned Rust arms without executing coverage", () => {
   const root = performanceHarnessFixture();
   const manifest = Bun.TOML.parse(fs.readFileSync(path.join(root, performanceManifest), "utf8"));
@@ -3893,12 +3932,7 @@ test.each([
     "--check-domain performance-candidate",
     "domain",
   ],
-  [
-    "performance-harness-lint",
-    "cargo_capacity_guard.py --check-domain performance-baseline -- {{CARGO}}",
-    "cargo_capacity_guard.py -- {{CARGO}}",
-    "missing domain",
-  ],
+  ["performance-harness-lint", "--check-domain performance-baseline", "", "missing domain"],
   ["performance-harness-lint", "--all-targets", "--lib", "targets"],
   ["performance-harness-lint", "--locked", "", "locked"],
   ["performance-harness-lint", "-D clippy::panic", "", "deny"],

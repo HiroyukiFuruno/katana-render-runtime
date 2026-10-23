@@ -93,7 +93,9 @@ const NATIVE_WIDTH_TEST_CONSUMERS = {
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime.rs`]:
     "b3d10ef7896536ae924c2188b338bafeb3ff9642a3f557e5cf6ecec35a93291f",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`]:
-    "9e439a26308c37df0f1fb5d25bcd43d9fecf79810899eaa13f4c0fc0a7c2c9e5",
+    "bf9bfcd14bbe08f98dabb4ed0978eb861701c5d24a814b31f8d00fa88ef8fdbd",
+  [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_ishikawa_tests.rs`]:
+    "8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_helpers.rs`]:
     "a21a8b260625067348d8531512c8a489d3c71ec651e3b6710c1c69c4bb4da45b",
   [NATIVE_WIDTH_BBOX_TRACE]: "a1c72bb7a16e809b52fbd98a79a079749e4ceb1154ada17781b1007ede8a64cf",
@@ -1424,12 +1426,14 @@ function expectedRootLintRecipeLines(): string[] {
   return [
     "set -euo pipefail; \\",
     'retained_profile="{{REPO_ROOT}}/target/llvm-cov-target/krr-coverage"; \\',
+    'retained_profile_arg=""; \\',
     "retained_args=(); \\",
     'if [[ -d "$retained_profile" && ! -L "$retained_profile" ]]; then \\',
     'retained_args=(--retain-profile "$retained_profile"); \\',
+    'retained_profile_arg="$retained_profile"; \\',
     "fi; \\",
-    `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- ${deny}`,
-    "just performance-harness-lint",
+    `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- ${deny}; \\`,
+    'just performance-harness-lint "$retained_profile_arg"',
   ];
 }
 function rootLintCargoCommand(context: ContractContext): string | undefined {
@@ -1437,7 +1441,7 @@ function rootLintCargoCommand(context: ContractContext): string | undefined {
   const expected = expectedRootLintRecipeLines();
   return actual.length === expected.length &&
     actual.every((line, index) => line === expected[index])
-    ? actual[6]
+    ? actual[8]
     : undefined;
 }
 function performanceRecipeCommands(): Record<string, string[]> {
@@ -1449,10 +1453,13 @@ function performanceRecipeCommands(): Record<string, string[]> {
     [PERFORMANCE_RECIPES.format]: [
       `{{CARGO}} fmt --manifest-path ${PERFORMANCE_MANIFEST} --all -- --check`,
     ],
-    [PERFORMANCE_RECIPES.lint]: PERFORMANCE_ARMS.map(
-      (arm) =>
-        `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py --check-domain performance-${arm} -- {{CARGO}} clippy -j {{JOBS}} --manifest-path ${PERFORMANCE_MANIFEST} --all-targets --no-default-features --features ${arm} --locked -- ${deny}`,
-    ),
+    [PERFORMANCE_RECIPES.lint]: [
+      "@set -euo pipefail; \\",
+      "retained_args=(); \\",
+      "if [[ -n {{quote(retained_profile)}} ]]; then retained_args=(--retain-profile {{quote(retained_profile)}}); fi; \\",
+      `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain performance-baseline -- {{CARGO}} clippy -j {{JOBS}} --manifest-path ${PERFORMANCE_MANIFEST} --all-targets --no-default-features --features baseline --locked -- ${deny}; \\`,
+      `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain performance-candidate -- {{CARGO}} clippy -j {{JOBS}} --manifest-path ${PERFORMANCE_MANIFEST} --all-targets --no-default-features --features candidate --locked -- ${deny}`,
+    ],
     [PERFORMANCE_RECIPES.coverage]: [
       'mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"',
       localCoverageCommand("performance", "begin"),
@@ -1483,14 +1490,7 @@ function exactPerformanceRecipe(
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-  return (
-    lines.length === expected.length &&
-    lines.every(
-      (line, index) =>
-        !/[;|&`$<>\\]/.test(line) &&
-        shellWords(line).join("\0") === shellWords(expected[index] ?? "").join("\0"),
-    )
-  );
+  return lines.length === expected.length && lines.every((line, index) => line === expected[index]);
 }
 function performanceManifestAndLock(context: ContractContext, members: string[]): void {
   const dependency = z.object({
@@ -1685,6 +1685,11 @@ function checkPerformanceRecipeCommands(context: ContractContext): void {
       add(context, "performance-harness-recipe-unverified", recipe);
   }
 }
+function performanceParentSuffix(lane: string, recipe: string): string[] {
+  if (lane === "coverage") return [`just ${recipe}`, "just coverage-result-check"];
+  if (lane === "lint") return [`just ${recipe} "$retained_profile_arg"`];
+  return [`just ${recipe}`];
+}
 function performanceRoutes(context: ContractContext): void {
   checkPerformanceRecipeCommands(context);
   if (rootLintCargoCommand(context) === undefined)
@@ -1694,8 +1699,7 @@ function performanceRoutes(context: ContractContext): void {
       add(context, "performance-harness-recipe-unregistered", recipe);
     const parent = lane === "format" ? "fmt-check" : lane;
     const lines = (context.recipes.get(parent) ?? "").split("\n").map((line) => line.trim());
-    const suffix =
-      lane === "coverage" ? [`just ${recipe}`, "just coverage-result-check"] : [`just ${recipe}`];
+    const suffix = performanceParentSuffix(lane, recipe);
     if (lines.slice(-suffix.length).join("\0") !== suffix.join("\0"))
       add(context, "performance-harness-parent-unverified", parent);
   }
@@ -3985,8 +3989,15 @@ function removeReviewedRuntimeAssetTests(lines: string[]): string[] | undefined 
   if (!withoutGeometry) return undefined;
   const restoredBrowserInvocation = restoreReviewedFeatureCatalogTestProcess(withoutGeometry);
   if (!restoredBrowserInvocation) return undefined;
-  const withoutCatalogFontEquivalence = removeReviewedTestToken(
+  const withoutChromiumFontTrace = removeReviewedTestToken(
     restoredBrowserInvocation,
+    "./scripts/html/chromium-font-trace_test.ts",
+    "./scripts/html/catalog-font-equivalence_test.ts",
+    "./scripts/html/catalog-capture-producer-context_test.ts",
+  );
+  if (!withoutChromiumFontTrace) return undefined;
+  const withoutCatalogFontEquivalence = removeReviewedTestToken(
+    withoutChromiumFontTrace,
     "./scripts/html/catalog-font-equivalence_test.ts",
     "./scripts/html/stage-score-suite_test.ts",
     "./scripts/html/catalog-capture-producer-context_test.ts",

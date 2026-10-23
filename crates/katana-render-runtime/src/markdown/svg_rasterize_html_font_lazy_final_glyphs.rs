@@ -254,12 +254,13 @@ fn span_face_evidence(
                 .iter()
                 .find(|glyph| glyph.font == face_id)
                 .ok_or_else(|| format!("missing glyph for final font face {face_id:?}"))?;
-            let (effective_variations, normalized_coords) =
+            let (effective_variations, design_coordinates, normalized_coords) =
                 variations::face_observation(fontdb, span, face_id, glyph)?;
             Ok(output::FinalGlyphSpanFace {
                 face_id: face_id.to_string(),
                 glyph_count,
                 effective_variations: output::variation_evidence(&effective_variations),
+                derived_applied_design_coordinates: output::variation_evidence(&design_coordinates),
                 normalized_coords,
             })
         })

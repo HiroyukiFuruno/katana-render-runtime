@@ -1642,28 +1642,49 @@ fn layout_run_for_face(
     span: &serde_json::Value,
     face_id: &str,
 ) -> Option<Option<serde_json::Value>> {
-    let span_face = span
-        .get("faces")?
-        .as_array()?
-        .iter()
-        .find(|face| face.get("faceId").and_then(serde_json::Value::as_str) == Some(face_id));
+    let span_face = span_face(span, face_id);
     let Some(span_face) = span_face else {
         return Some(None);
     };
-    let glyph_count = span_face
-        .get("glyphCount")
-        .and_then(serde_json::Value::as_u64)?;
+    let glyph_count = span_face.get("glyphCount")?.as_u64()?;
     if glyph_count == 0 {
         return None;
     }
-    Some(Some(json!({
+    Some(Some(layout_run_value(
+        tree,
+        span,
+        span_face,
+        face_id,
+        glyph_count,
+    )?))
+}
+
+fn span_face<'a>(span: &'a serde_json::Value, face_id: &str) -> Option<&'a serde_json::Value> {
+    span.get("faces")?
+        .as_array()?
+        .iter()
+        .find(|face| face.get("faceId").and_then(serde_json::Value::as_str) == Some(face_id))
+}
+
+fn layout_run_value(
+    tree: &serde_json::Value,
+    span: &serde_json::Value,
+    span_face: &serde_json::Value,
+    face_id: &str,
+    glyph_count: u64,
+) -> Option<serde_json::Value> {
+    Some(json!({
         "paintCall": tree.get("paintCall").and_then(serde_json::Value::as_u64)?,
         "treePath": tree.get("treePath").and_then(serde_json::Value::as_str)?,
         "faceId": face_id, "glyphCount": glyph_count,
         "layoutVariations": span.get("layoutVariations")?.as_array()?.clone(),
         "derivedEffectiveVariations": span_face.get("effectiveVariations")?.as_array()?.clone(),
+        "derivedAppliedDesignCoordinates": span_face
+            .get("derivedAppliedDesignCoordinates")?
+            .as_array()?
+            .clone(),
         "derivedNormalizedCoords": span_face.get("normalizedCoords")?.as_array()?.clone(),
-    })))
+    }))
 }
 
 fn same_catalog_font_identity(left: &serde_json::Value, right: &serde_json::Value) -> bool {
@@ -2451,10 +2472,10 @@ mod tests {
         audit["finalGlyphTrees"][0]["faces"][0]["faceId"] = json!("face-0");
         audit["finalGlyphTrees"][0]["textSpans"] = json!([
             {"faces":[{"faceId":"face-0","glyphCount":2,
-                         "effectiveVariations":[],"normalizedCoords":[]}],
+                         "effectiveVariations":[],"derivedAppliedDesignCoordinates":[],"normalizedCoords":[]}],
              "layoutVariations":[{"tag":"wght","value":700.0}]},
             {"faces":[{"faceId":"face-0","glyphCount":1,
-                         "effectiveVariations":[],"normalizedCoords":[]}],
+                         "effectiveVariations":[],"derivedAppliedDesignCoordinates":[],"normalizedCoords":[]}],
              "layoutVariations":[{"tag":"wdth","value":90.0}]}
         ]);
         let records = super::catalog_font_provenance(&audit);

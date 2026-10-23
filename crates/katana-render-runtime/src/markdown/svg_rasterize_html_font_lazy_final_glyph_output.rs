@@ -1,8 +1,9 @@
-use super::super::{Capture, sources};
+use super::super::sources;
 use resvg::usvg::{Text, Tree, WriteOptions};
 use serde::Serialize;
 
-const MAX_FINAL_GLYPH_RECORDS: usize = 512;
+#[path = "svg_rasterize_html_font_lazy_final_glyph_output_buffer.rs"]
+mod buffer;
 pub(super) use super::layout::{
     FinalGlyphLayout, TRANSFORM_COMPONENTS, ensure_finite_layout, transform_is_finite,
     transform_values,
@@ -27,9 +28,9 @@ pub(super) fn requested_text_spans(text: &Text) -> (Vec<RequestedTextSpan>, usiz
                     requested_span(chunk_index, span_index, chunk, source_span)
                 })
         })
-        .take(MAX_FINAL_GLYPH_RECORDS)
+        .take(super::MAX_FINAL_GLYPH_RECORDS)
         .collect();
-    (spans, total.saturating_sub(MAX_FINAL_GLYPH_RECORDS))
+    (spans, total.saturating_sub(super::MAX_FINAL_GLYPH_RECORDS))
 }
 
 fn requested_span(
@@ -117,6 +118,7 @@ pub(super) struct FinalGlyphSpanFace {
     pub(super) face_id: String,
     pub(super) glyph_count: u64,
     pub(super) effective_variations: Vec<FontVariationEvidence>,
+    pub(super) derived_applied_design_coordinates: Vec<FontVariationEvidence>,
     pub(super) normalized_coords: Vec<f32>,
 }
 
@@ -137,52 +139,7 @@ pub(in super::super) struct FinalGlyphError {
     pub(super) face_id: Option<String>,
     pub(super) reason: String,
 }
-pub(super) fn append_tree(
-    tree: FinalGlyphTree,
-    errors: Vec<FinalGlyphError>,
-    owners: Vec<sources::ByteWeak>,
-    dropped: usize,
-) {
-    super::super::ACTIVE.with(|active| {
-        let mut active = active.borrow_mut();
-        let Some(capture) = active.as_mut() else {
-            return;
-        };
-        capture.final_glyph_dropped += dropped;
-        if !append_tree_row(capture, tree) {
-            capture.final_glyph_dropped += 1 + errors.len();
-            return;
-        }
-        append_errors(capture, errors);
-        capture.final_glyph_shared_byte_owners.extend(owners);
-    });
-}
-
-fn append_tree_row(capture: &mut Capture, tree: FinalGlyphTree) -> bool {
-    if capture.final_glyph_record_count >= MAX_FINAL_GLYPH_RECORDS {
-        capture.final_glyph_dropped += tree.faces.len();
-        return false;
-    }
-    let capacity = MAX_FINAL_GLYPH_RECORDS - capture.final_glyph_record_count - 1;
-    let mut faces = tree.faces;
-    capture.final_glyph_dropped += faces.len().saturating_sub(capacity);
-    faces.truncate(capacity);
-    capture.final_glyph_record_count += faces.len() + 1;
-    capture
-        .final_glyph_trees
-        .push(FinalGlyphTree { faces, ..tree });
-    true
-}
-fn append_errors(capture: &mut Capture, errors: Vec<FinalGlyphError>) {
-    for error in errors {
-        if capture.final_glyph_record_count >= MAX_FINAL_GLYPH_RECORDS {
-            capture.final_glyph_dropped += 1;
-        } else {
-            capture.final_glyph_errors.push(error);
-            capture.final_glyph_record_count += 1;
-        }
-    }
-}
+pub(super) use buffer::append_tree;
 
 pub(super) fn sha256(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};

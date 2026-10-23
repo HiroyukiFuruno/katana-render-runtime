@@ -4,7 +4,11 @@ use resvg::usvg::{
 };
 use skrifa::{FontRef, MetadataProvider, Tag};
 
-type FaceVariationObservation = (Vec<FontVariation>, Vec<f32>);
+#[path = "svg_rasterize_html_font_lazy_final_variation_design.rs"]
+mod design;
+pub(super) use design::applied_design_coordinates;
+
+type FaceVariationObservation = (Vec<FontVariation>, Vec<FontVariation>, Vec<f32>);
 
 pub(super) fn face_observation(
     fontdb: &Database,
@@ -22,8 +26,9 @@ pub(super) fn face_observation(
         .map_err(|error| format!("{error} for face {face_id:?}"))?;
     let variations = effective_variations(fontdb, span, glyph)?;
     let applied = applied_variations(fontdb, face_id, &variations)?;
-    let normalized = normalized_coords(fontdb, face_id, &applied)?;
-    Ok((applied, normalized))
+    let design = applied_design_coordinates(fontdb, face_id, &applied)?;
+    let normalized = normalized_coords(fontdb, face_id, &design)?;
+    Ok((applied, design, normalized))
 }
 
 pub(super) fn validate_observation_inputs(
