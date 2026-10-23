@@ -1,2 +1,4 @@
 /Users/hiroyuki_furuno/.codex/skills/krr-pr-governance-bootstrap | issue=https://github.com/HiroyukiFuruno/katana-render-runtime/issues/64
 /Users/hiroyuki_furuno/works/private/katana-chromium-font-observer | issue=https://github.com/HiroyukiFuruno/katana-chromium-font-observer/issues/1
+# ユーザー承認済みの既存5パッチ適用・再ビルドだけの期限付き例外。
+/Users/hiroyuki_furuno/works/private/katana-chromium-font-observer/build/chromium-github-checkout-155-r1154/src | exempt-until=2026-10-24
