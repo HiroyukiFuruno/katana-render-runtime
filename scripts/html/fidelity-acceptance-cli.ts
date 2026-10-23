@@ -15,6 +15,7 @@ import {
 } from "./stage-score-suite";
 import { tocBinaryFromBuildReport } from "./toc-fidelity";
 import {
+  type CatalogStage90ChromeExecutablePin,
   type CatalogStage90ResumeOptions,
   jsonResourceFiles,
   runCatalogStage90Captures,
@@ -69,6 +70,7 @@ interface CatalogCapturePlan {
   threshold: 90;
   acceptance: false;
   resume?: CatalogStage90ResumeOptions;
+  chromeExecutable?: CatalogStage90ChromeExecutablePin;
 }
 
 interface CatalogPlanWrite {
@@ -216,10 +218,27 @@ function catalogAcceptancePlan(
 }
 
 function catalogCapturePlan(argv: readonly string[]): CatalogCapturePlan {
-  if (![4, 6].includes(argv.length) || argv.slice(1).some((argument) => argument.length === 0))
+  if (
+    ![4, 6, 8, 10].includes(argv.length) ||
+    argv.slice(1).some((argument) => argument.length === 0)
+  )
     throw new Error(
-      "catalog capture requires build report, exact plan, output, and optionally both prior observation and finalized manifests",
+      "catalog capture requires build report, exact plan, output, optional resume manifests, and optional Chrome executable path/SHA",
     );
+  const chromeOptions = argv.length >= 8;
+  if (
+    argv.length === 6 &&
+    (argv[4] === "--chrome-executable" ||
+      argv[5] === "--chrome-executable-sha256" ||
+      (path.isAbsolute(argv[4] as string) && /^[a-f0-9]{64}$/.test(argv[5] as string)))
+  )
+    throw new Error("catalog Chrome executable options require both explicit path/SHA flags");
+  if (
+    chromeOptions &&
+    (argv[argv.length - 4] !== "--chrome-executable" ||
+      argv[argv.length - 2] !== "--chrome-executable-sha256")
+  )
+    throw new Error("catalog Chrome executable options must use the explicit path/SHA flags");
   return {
     kind: "catalog-stage90-capture",
     buildReport: argv[1] as string,
@@ -227,12 +246,20 @@ function catalogCapturePlan(argv: readonly string[]): CatalogCapturePlan {
     output: argv[3] as string,
     threshold: 90,
     acceptance: false,
-    ...(argv.length === 6
+    ...(argv.length === 6 || argv.length === 10
       ? {
           resume: {
             observationManifestPath: argv[4] as string,
             finalizedManifestPath: argv[5] as string,
           },
+        }
+      : {}),
+    ...(chromeOptions
+      ? {
+          chromeExecutable: parseCatalogChromeExecutable(
+            argv[argv.length - 3] as string,
+            argv[argv.length - 1] as string,
+          ),
         }
       : {}),
   };
@@ -264,13 +291,28 @@ export async function runFidelityAcceptance(argv: readonly string[]): Promise<vo
   }
   if (plan.kind === "catalog-stage90-capture") {
     const binary = tocBinaryFromBuildReport(plan.buildReport);
-    await runCatalogStage90Captures(binary, plan.conditionPlan, plan.output, plan.resume);
+    await runCatalogStage90Captures(
+      binary,
+      plan.conditionPlan,
+      plan.output,
+      plan.resume,
+      plan.chromeExecutable,
+    );
     return;
   }
   const binary = tocBinaryFromBuildReport(plan.buildReport);
   const capture = plan.kind === "input-state" ? runInputStateFidelity : runDynamicFidelity;
   if (plan.options) await capture(binary, plan.output, plan.threshold, plan.options);
   else await capture(binary, plan.output, plan.threshold);
+}
+
+function parseCatalogChromeExecutable(
+  executablePath: string,
+  executableSha256: string,
+): CatalogStage90ChromeExecutablePin {
+  if (!path.isAbsolute(executablePath) || !/^[a-f0-9]{64}$/.test(executableSha256))
+    throw new Error("catalog Chrome executable option requires an absolute path and SHA-256 pin");
+  return { executablePath, executableSha256 };
 }
 
 function writeCatalogStage90Plan(output: string): void {

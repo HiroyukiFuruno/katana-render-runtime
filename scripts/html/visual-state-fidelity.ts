@@ -85,6 +85,11 @@ export interface CatalogStage90ResumeOptions {
   finalizedManifestPath: string;
 }
 
+export interface CatalogStage90ChromeExecutablePin {
+  executablePath: string;
+  executableSha256: string;
+}
+
 export interface ChromeFontIdentityRequest {
   schema: "krr-chrome-font-identity-request-v1";
   captures: ChromeFontIdentityCapture[];
@@ -624,90 +629,26 @@ export async function runCatalogStage90Captures(
   planPath: string,
   outputDirectory: string,
   resume?: CatalogStage90ResumeOptions,
+  chromeExecutable?: CatalogStage90ChromeExecutablePin,
 ): Promise<JsonValue> {
   outputDirectory = path.resolve(outputDirectory);
-  const catalog = loadFeatureCatalog();
-  assertCatalogComplete(catalog);
-  const plan = assertCatalogStage90ConditionPlan(
-    JSON.parse(fs.readFileSync(path.resolve(planPath), "utf8")) as JsonValue,
+  const capture = await captureCatalogStage90(
+    binary,
+    planPath,
+    outputDirectory,
+    resume,
+    chromeExecutable,
   );
-  const binarySha256 = sha256File(binary);
-  const catalogSha256 = sha256File("tests/fixtures/html/feature-catalog.json");
-  if (fs.existsSync(outputDirectory))
-    throw new Error("Catalog stage90 capture output directory already exists");
-  fs.mkdirSync(outputDirectory);
-  const producerContext = captureCatalogProducerContext(outputDirectory, "before");
-  const server = await chromium.launchServer({ channel: "chrome", headless: true });
-  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
-  const conditions: JsonValue[] = [];
-  const fontIdentityCaptures: ChromeFontIdentityCapture[] = [];
-  let chromeRuntimeVersion = "";
-  try {
-    const chromeProcess = server.process();
-    if (!chromeProcess.spawnfile)
-      throw new Error("Chrome server process did not expose its executable path");
-    const chromeExecutablePath = fs.realpathSync(chromeProcess.spawnfile);
-    const chromeExecutableSha256 = sha256File(chromeExecutablePath);
-    const connected = await chromium.connect(server.wsEndpoint());
-    browser = connected;
-    chromeRuntimeVersion = requireChromeRuntimeVersion(connected);
-    const prior = resume
-      ? readCatalogStage90Resume(resume, planPath, {
-          binaryPath: path.resolve(binary),
-          chromeExecutablePath,
-          chromeExecutableSha256,
-          producerContext,
-          chromeRuntimeVersion,
-        })
-      : undefined;
-    if (prior?.rejectionReason)
-      fs.writeFileSync(
-        path.join(outputDirectory, "catalog-stage90-resume-rejection.json"),
-        `${JSON.stringify({ reason: prior.rejectionReason }, null, 2)}\n`,
-        { flag: "wx" },
-      );
-    if (prior)
-      fs.writeFileSync(
-        path.join(outputDirectory, "catalog-stage90-resume-report.json"),
-        `${JSON.stringify(
-          {
-            reusedConditionIds: [...prior.reusableConditionIds],
-            recapturedConditionIds: plan.conditions
-              .map((condition) => condition.conditionId)
-              .filter((conditionId) => !prior.reusableConditionIds.has(conditionId)),
-            rejected: prior.rejected ?? [],
-            ...(prior.rejectionReason ? { rejectionReason: prior.rejectionReason } : {}),
-          },
-          null,
-          2,
-        )}\n`,
-        { flag: "wx" },
-      );
-    const captured = await collectCatalogConditions(
-      connected,
-      catalog,
-      plan,
-      binary,
-      binarySha256,
-      outputDirectory,
-      { path: chromeExecutablePath, sha256: chromeExecutableSha256 },
-      prior,
-    );
-    conditions.push(...captured.conditions);
-    fontIdentityCaptures.push(...captured.fontIdentityCaptures);
-  } finally {
-    try {
-      if (browser) await browser.close();
-    } finally {
-      await server.close();
-    }
-  }
-  if (sha256File(binary) !== binarySha256)
-    throw new Error("Catalog probe binary changed during capture");
-  if (sha256File("tests/fixtures/html/feature-catalog.json") !== catalogSha256)
-    throw new Error("Feature catalog changed during capture");
-  const producerContextAfter = captureCatalogProducerContext(outputDirectory, "after");
-  assertCatalogProducerContextStable(producerContext, producerContextAfter);
+  const {
+    catalogSha256,
+    binarySha256,
+    producerContext,
+    plan,
+    conditions,
+    fontIdentityCaptures,
+    producerContextAfter,
+    chromeRuntimeVersion,
+  } = capture;
   const request = createChromeFontIdentityRequest(
     fontIdentityCaptures,
     plan.conditions.map((condition) => condition.conditionId),
@@ -773,6 +714,156 @@ export async function runCatalogStage90Captures(
   )
     throw new Error("Catalog stage90 capture has unverified conditions; acceptance remains false");
   return finalized;
+}
+
+interface CatalogStage90Capture {
+  catalogSha256: string;
+  binarySha256: string;
+  producerContext: CatalogCaptureProducerContext;
+  plan: CatalogStage90ConditionPlan;
+  conditions: JsonValue[];
+  fontIdentityCaptures: ChromeFontIdentityCapture[];
+  producerContextAfter: CatalogCaptureProducerContext;
+  chromeRuntimeVersion: string;
+}
+
+async function captureCatalogStage90(
+  binary: string,
+  planPath: string,
+  outputDirectory: string,
+  resume: CatalogStage90ResumeOptions | undefined,
+  chromeExecutable: CatalogStage90ChromeExecutablePin | undefined,
+): Promise<CatalogStage90Capture> {
+  const catalog = loadFeatureCatalog();
+  assertCatalogComplete(catalog);
+  const plan = assertCatalogStage90ConditionPlan(
+    JSON.parse(fs.readFileSync(path.resolve(planPath), "utf8")) as JsonValue,
+  );
+  const binarySha256 = sha256File(binary);
+  const catalogSha256 = sha256File("tests/fixtures/html/feature-catalog.json");
+  if (fs.existsSync(outputDirectory))
+    throw new Error("Catalog stage90 capture output directory already exists");
+  fs.mkdirSync(outputDirectory);
+  const producerContext = captureCatalogProducerContext(outputDirectory, "before");
+  const requestedChrome = chromeExecutable
+    ? resolveCatalogChromeExecutable(chromeExecutable)
+    : undefined;
+  const captured = await captureCatalogStage90WithBrowser(
+    catalog,
+    plan,
+    binary,
+    planPath,
+    outputDirectory,
+    binarySha256,
+    producerContext,
+    resume,
+    requestedChrome,
+  );
+  if (sha256File(binary) !== binarySha256)
+    throw new Error("Catalog probe binary changed during capture");
+  if (requestedChrome !== undefined && sha256File(requestedChrome.path) !== requestedChrome.sha256)
+    throw new Error("requested Chrome executable changed during capture");
+  if (sha256File("tests/fixtures/html/feature-catalog.json") !== catalogSha256)
+    throw new Error("Feature catalog changed during capture");
+  const producerContextAfter = captureCatalogProducerContext(outputDirectory, "after");
+  assertCatalogProducerContextStable(producerContext, producerContextAfter);
+  return { catalogSha256, binarySha256, producerContext, plan, ...captured, producerContextAfter };
+}
+
+async function captureCatalogStage90WithBrowser(
+  catalog: ReturnType<typeof loadFeatureCatalog>,
+  plan: CatalogStage90ConditionPlan,
+  binary: string,
+  planPath: string,
+  outputDirectory: string,
+  binarySha256: string,
+  producerContext: CatalogCaptureProducerContext,
+  resume: CatalogStage90ResumeOptions | undefined,
+  requestedChrome: { path: string; sha256: string } | undefined,
+): Promise<
+  Pick<CatalogStage90Capture, "conditions" | "fontIdentityCaptures" | "chromeRuntimeVersion">
+> {
+  const server = requestedChrome
+    ? await chromium.launchServer({ executablePath: requestedChrome.path, headless: true })
+    : await chromium.launchServer({ channel: "chrome", headless: true });
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  try {
+    const chromeIdentity = assertLaunchedChromeIdentity(server, requestedChrome);
+    const connected = await chromium.connect(server.wsEndpoint());
+    browser = connected;
+    const chromeRuntimeVersion = requireChromeRuntimeVersion(connected);
+    const prior = resume
+      ? readCatalogStage90Resume(resume, planPath, {
+          binaryPath: path.resolve(binary),
+          chromeExecutablePath: chromeIdentity.path,
+          chromeExecutableSha256: chromeIdentity.sha256,
+          producerContext,
+          chromeRuntimeVersion,
+        })
+      : undefined;
+    writeCatalogStage90ResumeReports(outputDirectory, plan, prior);
+    const captured = await collectCatalogConditions(
+      connected,
+      catalog,
+      plan,
+      binary,
+      binarySha256,
+      outputDirectory,
+      chromeIdentity,
+      prior,
+    );
+    return { ...captured, chromeRuntimeVersion };
+  } finally {
+    try {
+      if (browser) await browser.close();
+    } finally {
+      await server.close();
+    }
+  }
+}
+
+function assertLaunchedChromeIdentity(
+  server: Awaited<ReturnType<typeof chromium.launchServer>>,
+  requestedChrome: { path: string; sha256: string } | undefined,
+): { path: string; sha256: string } {
+  const chromeProcess = server.process();
+  if (!chromeProcess.spawnfile)
+    throw new Error("Chrome server process did not expose its executable path");
+  const pathValue = fs.realpathSync(chromeProcess.spawnfile);
+  const sha256 = sha256File(pathValue);
+  if (requestedChrome && (pathValue !== requestedChrome.path || sha256 !== requestedChrome.sha256))
+    throw new Error("launched Chrome executable does not match the requested pin");
+  return { path: pathValue, sha256 };
+}
+
+function writeCatalogStage90ResumeReports(
+  outputDirectory: string,
+  plan: CatalogStage90ConditionPlan,
+  prior: CatalogStage90ResumeState | undefined,
+): void {
+  if (prior?.rejectionReason)
+    fs.writeFileSync(
+      path.join(outputDirectory, "catalog-stage90-resume-rejection.json"),
+      `${JSON.stringify({ reason: prior.rejectionReason }, null, 2)}\n`,
+      { flag: "wx" },
+    );
+  if (!prior) return;
+  fs.writeFileSync(
+    path.join(outputDirectory, "catalog-stage90-resume-report.json"),
+    `${JSON.stringify(
+      {
+        reusedConditionIds: [...prior.reusableConditionIds],
+        recapturedConditionIds: plan.conditions
+          .map((condition) => condition.conditionId)
+          .filter((conditionId) => !prior.reusableConditionIds.has(conditionId)),
+        rejected: prior.rejected ?? [],
+        ...(prior.rejectionReason ? { rejectionReason: prior.rejectionReason } : {}),
+      },
+      null,
+      2,
+    )}\n`,
+    { flag: "wx" },
+  );
 }
 
 function requireChromeRuntimeVersion(browser: { version(): string }): string {
@@ -911,6 +1002,23 @@ function assertReusableRowsMatch(
 
 function sha256Bytes(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function resolveCatalogChromeExecutable(pin: CatalogStage90ChromeExecutablePin): {
+  path: string;
+  sha256: string;
+} {
+  if (
+    pin.executablePath.length === 0 ||
+    !path.isAbsolute(pin.executablePath) ||
+    !/^[a-f0-9]{64}$/.test(pin.executableSha256)
+  )
+    throw new Error("catalog Chrome executable pin is incomplete");
+  const pathValue = fs.realpathSync(pin.executablePath),
+    sha256 = sha256File(pathValue);
+  if (sha256 !== pin.executableSha256)
+    throw new Error("catalog Chrome executable pin does not match the physical file");
+  return { path: pathValue, sha256 };
 }
 
 function readCatalogStage90Resume(

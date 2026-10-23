@@ -1583,6 +1583,32 @@ describe("fixed fidelity acceptance CLI routes", () => {
       [observationManifestPath, finalizedManifestPath, "extra"],
     ])
       expect(() => fidelityAcceptancePlan([...argv, ...incomplete])).toThrow();
+
+    const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    const chromeSha256 = "a".repeat(64);
+    expect(
+      fidelityAcceptancePlan([
+        ...argv,
+        "--chrome-executable",
+        chromePath,
+        "--chrome-executable-sha256",
+        chromeSha256,
+      ]),
+    ).toMatchObject({
+      chromeExecutable: { executablePath: chromePath, executableSha256: chromeSha256 },
+    });
+    expect(() => fidelityAcceptancePlan([...argv, "--chrome-executable", chromePath])).toThrow();
+    expect(() =>
+      fidelityAcceptancePlan([
+        ...argv,
+        observationManifestPath,
+        finalizedManifestPath,
+        "--chrome-executable",
+        chromePath,
+        "--chrome-executable-sha256",
+        "not-a-sha256",
+      ]),
+    ).toThrow();
   });
 
   test("catalog plan CLI writes the exact physical 84 tuples without overwriting", () => {
