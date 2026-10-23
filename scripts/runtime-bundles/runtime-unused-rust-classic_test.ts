@@ -10,6 +10,8 @@ const temporaryRoot = fs.realpathSync(
   fs.mkdtempSync(path.join(os.tmpdir(), "rust-classic-adapter-managed-")),
 );
 let facts: ReturnType<typeof inspectRustClassicScriptFacts>;
+// 実Rust facts変異の準備・拒否検証だけを既存の結合検査予算へ合わせる。純粋な境界assertionは5秒のままにする。
+const RUST_FACTS_INTEGRATION_TIMEOUT_MS = 30_000;
 
 beforeAll(() => {
   facts = inspectRustClassicScriptFacts(repositoryRoot);
@@ -127,6 +129,7 @@ test.each([
     replaceExactlyOnce(sourceRoot, String(relativePath), String(before), String(after));
     expectRustRejection(sourceRoot, String(diagnostic));
   },
+  RUST_FACTS_INTEGRATION_TIMEOUT_MS,
 );
 
 test("the public adapter rejects a symlinked physical input before invoking Rust", () => {

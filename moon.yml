@@ -189,6 +189,13 @@ tasks:
     deps: ['runtime-unused-rust-classic-producer']
     inputs: *quality-inputs
 
+  runtime-script-cas-diagnostic:
+    command: ['just', 'runtime-script-cas-diagnostic-run']
+    deps: ['runtime-unused-script-regression']
+    inputs: *quality-inputs
+    options:
+      cache: false
+
   runtime-unused-fragment-loader-producer:
     command: ['just', 'runtime-unused-script-producer-run', 'runtime-unused-fragment-loader']
     deps: ['runtime-classic-generation-evidence']

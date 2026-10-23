@@ -70,6 +70,46 @@ pub(super) const DEFAULT_MATERIALIZATION_SHAPE_MUTATIONS: &[(&str, &str, &str)] 
         "std::path::PathBuf::new()",
         "default-materialize:install-path-temp-dir",
     ),
+    (
+        "std::env::var_os(\"MATHJAX_JS\")",
+        "env_value",
+        "explicit-override:default-call",
+    ),
+    (
+        "if let Some(path) = Self::env_mathjax_js_from(env_value)? {\n            return Ok(path);\n        }",
+        "if Self::env_mathjax_js_from(env_value)?.is_some() {}",
+        "default-materialize:env-branch",
+    ),
+    (
+        "if let Some(path) = Self::env_mathjax_js_from(env_value)? {\n            return Ok(path);\n        }",
+        "let _path = ();",
+        "default-materialize:env-branch",
+    ),
+    (
+        "let Some(path) = bundled_path else {\n            return Err(\"bundled MathJax path is unavailable\".to_string());\n        };",
+        "if bundled_path.is_none() {}",
+        "default-materialize:path-binding",
+    ),
+    (
+        "let Some(path) = bundled_path else {\n            return Err(\"bundled MathJax path is unavailable\".to_string());\n        };",
+        "let path;",
+        "default-materialize:path-binding",
+    ),
+    (
+        "let Some(path) = value else {\n            return Ok(None);\n        };",
+        "if value.is_none() {}",
+        "explicit-override:env-bind",
+    ),
+    (
+        "if path.is_empty() {\n            return Err(\"MATHJAX_JS is empty\".to_string());\n        }",
+        "let _check = ();",
+        "explicit-override:empty-check",
+    ),
+    (
+        "if path.is_empty() {\n            return Err(\"MATHJAX_JS is empty\".to_string());\n        }",
+        "if path.is_empty() {}",
+        "explicit-override:path-conversion",
+    ),
 ];
 
 pub(in super::super) fn mathjax_fixture() -> Result<Fixture, Box<dyn std::error::Error>> {

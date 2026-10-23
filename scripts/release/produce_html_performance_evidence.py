@@ -905,7 +905,8 @@ class NativeCliCommandEvidence(NamedTuple):
 
 def observe_native_cli_command(args: Sequence[str], *, role: MeasurementRole,
                                log_directory: Path, cwd: Path, env: Mapping[str, str],
-                               attempt_token: str, label: str) -> NativeCliCommandEvidence:
+                               attempt_token: str, label: str,
+                               check: bool = True) -> NativeCliCommandEvidence:
     """CLI専用producerへ、既存ownerが閉じたraw記録だけを返す。"""
     gate.require(role in ("tool-query", "metadata", "preflight", "build"),
                  "native CLI command role differs")
@@ -914,14 +915,17 @@ def observe_native_cli_command(args: Sequence[str], *, role: MeasurementRole,
     paths: list[Path] = []
     started = time.time_ns()
     result = _measurement_command(args, role=role, log_directory=log_directory, cwd=cwd,
-                                  env=env, lifecycle_sink=paths.append, native_attempt_token=attempt_token)
+                                  env=env, check=check, lifecycle_sink=paths.append,
+                                  native_attempt_token=attempt_token)
     ended = time.time_ns()
     gate.require(len(paths) == 1, "native CLI lifecycle must be unique")
     lifecycle_path = paths[0]
     lifecycle = gate._object(gate.read_json(lifecycle_path), "native CLI lifecycle")
     gate.require(lifecycle.get("groupClosed") is True and lifecycle.get("rawFdsClosed") is True
                  and lifecycle.get("failure") is None and lifecycle.get("cleanupFailure") is None
-                 and lifecycle.get("exitCode") == 0, "native CLI command closure differs")
+                 and lifecycle.get("exitCode") == result.returncode,
+                 "native CLI command closure differs")
+    gate.require(not check or result.returncode == 0, "native CLI command failed")
     identity = gate._object(lifecycle["identity"], "native CLI process identity")
     raw = [gate._object(row, "native CLI raw") for row in gate._array(lifecycle["raw"], "raw")]
     pins: list[gate.JsonObject] = []
@@ -935,7 +939,8 @@ def observe_native_cli_command(args: Sequence[str], *, role: MeasurementRole,
     return NativeCliCommandEvidence({"argv": list(args), "stdout": pins[0], "stderr": pins[1],
         "label": label, "cwd": str(cwd), "attemptToken": attempt_token,
         "environment": environment, "environmentSha256": _environment_sha256(environment),
-        "pid": identity["pid"], "actualExit": 0, "startedNs": str(started), "endedNs": str(ended),
+        "pid": identity["pid"], "actualExit": result.returncode,
+        "startedNs": str(started), "endedNs": str(ended),
         "reaped": True, "errors": []},
         {"path": str(lifecycle_path), "sha256": gate.sha256(lifecycle_path),
          "size": lifecycle_path.stat().st_size})

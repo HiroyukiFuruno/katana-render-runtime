@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -134,6 +134,8 @@ function diagnosticAt(code: string, start: number, length = 12): UnusedDiagnosti
 }
 
 const repositoryRoot = path.resolve(import.meta.dir, "../..");
+// 外部facts準備の子プロセス予算だけを既存の120秒契約へ合わせる。各assertionの5秒予算は変更しない。
+const EXTERNAL_FACTS_SETUP_TIMEOUT_MS = 120_000;
 // 実Rollupで全4 bundleを生成しguarded CLIも動かすintegrationは15.26秒の実測だった。これはテスト用の有限予算で、製品性能の受入値ではない。
 const MATHJAX_PRODUCER_INTEGRATION_TIMEOUT_MS = 30_000;
 let mathJaxInspection: Promise<RuntimeRollupInspection> | undefined;
@@ -292,49 +294,64 @@ test("checked MathJax bundle boundary rejects content, checksum, and definition 
   });
 });
 
-test("Rust facts validator rejects a mutated generated MathJax source pin", () => {
-  const facts = structuredClone(inspectMathJaxRustFacts(repositoryRoot));
-  facts.inputSha256[MATHJAX_GENERATED_OUTPUT_PATH] = "0".repeat(64);
-  expect(() => validateMathJaxRustFacts(repositoryRoot, facts)).toThrow(
-    `MathJax Rust facts input hash drift: ${MATHJAX_GENERATED_OUTPUT_PATH}`,
-  );
-});
+test(
+  "Rust facts validator rejects a mutated generated MathJax source pin",
+  () => {
+    const facts = structuredClone(inspectMathJaxRustFacts(repositoryRoot));
+    facts.inputSha256[MATHJAX_GENERATED_OUTPUT_PATH] = "0".repeat(64);
+    expect(() => validateMathJaxRustFacts(repositoryRoot, facts)).toThrow(
+      `MathJax Rust facts input hash drift: ${MATHJAX_GENERATED_OUTPUT_PATH}`,
+    );
+  },
+  MATHJAX_PRODUCER_INTEGRATION_TIMEOUT_MS,
+);
 
-test("isolated real MathJax fixture rejects source and generation-input drift", async () => {
-  const root = await isolatedMathJaxRoot();
-  const previousCwd = process.cwd();
-  process.chdir(root);
-  let inspector: MathJaxModuleInspector;
-  let candidate: MathJaxModuleInspectionInput;
-  try {
-    inspector = await createMathJaxModuleInspector(root);
-    candidate = structuredClone(
-      await new RuntimeRollupBundler(root).inspect(MathJaxRuntimeBundleDefinition.create()),
-    ) as MathJaxModuleInspectionInput;
-  } finally {
-    process.chdir(previousCwd);
-  }
-  const drift = (sourcePath: string, change: (source: Buffer) => Buffer, message: string) => {
-    const target = path.join(root, sourcePath);
-    const original = fs.readFileSync(target);
-    try {
-      fs.writeFileSync(target, change(original));
-      expect(() => inspector.inspectCanonical(), message).toThrow();
-      expect(() => inspector.inspect(candidate), message).toThrow();
-    } finally {
-      fs.writeFileSync(target, original);
-    }
-  };
-  drift(
-    MATHJAX_SOURCE_PATH,
-    (source) => Buffer.concat([source, Buffer.from("\n")]),
-    "mapped render source drift",
+describe("isolated real MathJax fixture", () => {
+  let root: string | undefined;
+  let inspector: MathJaxModuleInspector | undefined;
+  let candidate: MathJaxModuleInspectionInput | undefined;
+  beforeAll(
+    async () => {
+      const fixtureRoot = await isolatedMathJaxRoot();
+      inspector = await createMathJaxModuleInspector(fixtureRoot);
+      candidate = structuredClone(
+        await new RuntimeRollupBundler(fixtureRoot).inspect(
+          MathJaxRuntimeBundleDefinition.create(),
+        ),
+      ) as MathJaxModuleInspectionInput;
+      root = fixtureRoot;
+    },
+    { timeout: EXTERNAL_FACTS_SETUP_TIMEOUT_MS },
   );
-  drift(
-    "package.json",
-    (source) => Buffer.concat([source, Buffer.from("\n")]),
-    "generation input drift",
-  );
+
+  test("rejects source and generation-input drift", () => {
+    if (!root || !inspector || !candidate)
+      throw new Error("isolated MathJax fixture was not prepared");
+    const preparedRoot = root;
+    const preparedInspector = inspector;
+    const preparedCandidate = candidate;
+    const drift = (sourcePath: string, change: (source: Buffer) => Buffer, message: string) => {
+      const target = path.join(preparedRoot, sourcePath);
+      const original = fs.readFileSync(target);
+      try {
+        fs.writeFileSync(target, change(original));
+        expect(() => preparedInspector.inspectCanonical(), message).toThrow();
+        expect(() => preparedInspector.inspect(preparedCandidate), message).toThrow();
+      } finally {
+        fs.writeFileSync(target, original);
+      }
+    };
+    drift(
+      MATHJAX_SOURCE_PATH,
+      (source) => Buffer.concat([source, Buffer.from("\n")]),
+      "mapped render source drift",
+    );
+    drift(
+      "package.json",
+      (source) => Buffer.concat([source, Buffer.from("\n")]),
+      "generation input drift",
+    );
+  });
 });
 
 test.each([
@@ -967,489 +984,516 @@ test("actual imported PageHandle receiver keeps surviving callback AST identitie
   }
 });
 
-const nativeBase = "crates/katana-render-runtime/src/markdown/mermaid_renderer/";
-const nativeHelper = `${nativeBase}js_runtime_native_width_helpers.rs`;
-const nativeTrace = `${nativeBase}js_runtime_native_width_trace.js`;
-const nativeBBoxTrace = `${nativeBase}js_runtime_native_width_bbox_trace.js`;
-const nativeScripts = `${nativeBase}js_runtime_scripts.rs`;
-const nativeScriptTests = `${nativeBase}js_runtime_scripts_tests.rs`;
-const nativeRoute = [
-  nativeHelper,
-  `${nativeBase}js_runtime_native_width_tests.rs`,
-  nativeTrace,
-  nativeBBoxTrace,
-  ...NATIVE_WIDTH_HASH_INPUT_PATHS,
-  "crates/katana-render-runtime/src/markdown/diagram_js_runtime.rs",
-  "crates/katana-render-runtime/src/lib.rs",
-  "crates/katana-render-runtime/src/v8_script.rs",
-  ...RUST_CLASSIC_INPUT_PATHS,
-].filter((sourcePath, index, route) => route.indexOf(sourcePath) === index);
-interface NativeWidthSources {
-  nativeRoot: string;
-  nativeRaw: Map<string, ReturnType<typeof physicalUnusedSource>>;
-}
-
-interface NativeWidthFixture extends NativeWidthSources {
-  nativeContext: ReturnType<typeof nativeWidthUnusedContext>;
-  nativeOrigin: BrowserUnusedOrigin;
-}
-
-let nativeWidthSourcesValue: NativeWidthSources | undefined;
-function nativeWidthSources(): NativeWidthSources {
-  if (nativeWidthSourcesValue !== undefined) return nativeWidthSourcesValue;
-  const nativeRoot = fs.mkdtempSync(path.join(directory, "native-width-"));
-  const nativeRaw = new Map<string, ReturnType<typeof physicalUnusedSource>>();
-  for (const name of new Set([...nativeRoute, ...RUST_CLASSIC_INPUT_PATHS])) {
-    const target = path.join(nativeRoot, name);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(path.join(browserRoot, name), target);
-    if (nativeRoute.includes(name))
-      nativeRaw.set(name, physicalUnusedSource(fs.readFileSync(target)));
-  }
-  nativeWidthSourcesValue = { nativeRoot, nativeRaw };
-  return nativeWidthSourcesValue;
-}
-
-let nativeWidthFixtureValue: NativeWidthFixture | undefined;
-function nativeWidthFixture(): NativeWidthFixture {
-  if (nativeWidthFixtureValue !== undefined) return nativeWidthFixtureValue;
-  const sources = nativeWidthSources();
-  const { nativeRoot, nativeRaw } = sources;
-  const nativeContext = nativeWidthUnusedContext(nativeRoot, nativeRaw);
-  const nativeOrigin = nativeContext.origin;
-  if (!(nativeOrigin instanceof BrowserUnusedOrigin))
-    throw new Error("missing native width origin");
-  nativeWidthFixtureValue = { ...sources, nativeContext, nativeOrigin };
-  return nativeWidthFixtureValue;
-}
-
-test("native width projection consumes actual trace and Rust result literal with source-only route", () => {
-  const { nativeRoot, nativeRaw, nativeContext, nativeOrigin } = nativeWidthFixture();
-  expect(nativeOrigin.programs.map((program) => program.role)).toEqual([
-    "native-test-trace",
-    "native-test-trace",
-    "rust-result-literal",
-  ]);
-  expect(nativeContext.codeBytesEqual).toBe(false);
-  const program = nativeOrigin.programs.find((entry) => entry.sourcePath === nativeHelper);
-  const helper = nativeRaw.get(nativeHelper);
-  if (!program || !helper) throw new Error("missing Rust result metadata");
-  expect(helper.code.slice(program.start, program.end)).toBe(
-    "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, probes: nativeWidthProbeResult() })",
-  );
-  expect(program.consumerRoute?.map(({ sourcePath }) => sourcePath)).toEqual(nativeRoute);
-  expect(
-    program.consumerRoute?.map(({ sourcePath, sourceSha256 }) => ({ sourcePath, sourceSha256 })),
-  ).toEqual(
-    nativeRoute.map((sourcePath) => {
-      const source = nativeRaw.get(sourcePath);
-      if (!source) throw new Error(`missing native route source: ${sourcePath}`);
-      return { sourcePath, sourceSha256: source.sha256 };
-    }),
-  );
-  expect(program.sourceSha256).toBe(helper.sha256);
-  const metadata = unusedProgramMetadata(nativeContext.name, nativeOrigin.programs);
-  expect(metadata.realm).toBe("Rust native-width test, shared V8 classic-script context");
-  expect(metadata.externalProgramsUnmapped).not.toContain("options.mermaidJs");
-  expect("executionVerified" in metadata && metadata.executionVerified).toBe(false);
-  verifyUnusedSources(nativeRoot, nativeRaw);
-});
-
-const nativeWidthProgramMutations: readonly [
-  string,
-  (programs: readonly BrowserUnusedProgram[]) => BrowserUnusedProgram[],
-][] = [
-  ["missing bbox trace", (programs) => programs.filter((_, index) => index !== 1)],
-  [
-    "wrong bbox role",
-    (programs) =>
-      programs.map((program, index) =>
-        index === 1 ? { ...program, role: "rust-result-literal" } : program,
-      ),
-  ],
-  [
-    "unexpected extra program",
-    (programs) => {
-      const first = programs[0];
-      if (!first) throw new Error("missing native trace program");
-      return [...programs, first];
-    },
-  ],
-  [
-    "changed bbox source path",
-    (programs) =>
-      programs.map((program, index) =>
-        index === 1 ? { ...program, sourcePath: nativeTrace } : program,
-      ),
-  ],
-  [
-    "changed bbox consumer route",
-    (programs) =>
-      programs.map((program, index) => (index === 1 ? { ...program, consumerRoute: [] } : program)),
-  ],
-];
-
-test.each(nativeWidthProgramMutations)("native width rejects %s metadata", (_label, mutate) => {
-  const { nativeOrigin } = nativeWidthFixture();
-  expect(() =>
-    unusedProgramMetadata("rust-native-width-test-result", mutate(nativeOrigin.programs)),
-  ).toThrow("unknown unused program realm");
-});
-
-test("native width keeps live source binding but ignores unrelated script test edits", () => {
-  const { nativeRoot, nativeRaw, nativeOrigin } = nativeWidthFixture();
-  const target = path.join(nativeRoot, nativeScriptTests);
-  expect(fs.existsSync(target)).toBe(false);
-  const before = fs.readFileSync(path.join(browserRoot, nativeScriptTests));
-  const parentTarget = path.join(nativeRoot, nativeScripts);
-  const parentBefore = fs.readFileSync(parentTarget);
-  const original = before.toString();
-  const changed = original.replace(
-    'assert!(scripts.iter().any(|it| it.name == "render-mermaid.js"));',
-    'assert!(scripts.iter().any(|it| it.name == "mermaid-runtime.min.js"));',
-  );
-  expect(changed).not.toBe(original);
-  try {
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, changed);
-    expect(fs.readFileSync(target, "utf8")).toBe(changed);
-    const source = nativeRaw.get(nativeScripts);
-    expect(nativeRaw.has(nativeScriptTests)).toBe(false);
-    expect(source?.sha256).toBe(
-      physicalUnusedSource(fs.readFileSync(path.join(nativeRoot, nativeScripts))).sha256,
-    );
-    expect(source?.sha256).toBe(
-      physicalUnusedSource(fs.readFileSync(path.join(browserRoot, nativeScripts))).sha256,
-    );
-    const program = nativeOrigin.programs.find((entry) => entry.role === "rust-result-literal");
-    expect(
-      program?.consumerRoute?.find((entry) => entry.sourcePath === nativeScripts)?.sourceSha256,
-    ).toBe(source?.sha256);
-    expect(program?.consumerRoute?.some((entry) => entry.sourcePath === nativeScriptTests)).toBe(
-      false,
-    );
-
-    const parentChanged = Buffer.concat([
-      parentBefore,
-      Buffer.from("\n#[cfg(test)]\nfn unrelated_script_test_fixture_marker() {}\n"),
-    ]);
-    fs.writeFileSync(parentTarget, parentChanged);
-    expect(fs.readFileSync(parentTarget).equals(parentBefore)).toBe(false);
-    const changedParentSha = physicalUnusedSource(fs.readFileSync(parentTarget)).sha256;
-    expect(changedParentSha).not.toBe(nativeRaw.get(nativeScripts)?.sha256);
-
-    const changedRaw = new Map<string, ReturnType<typeof physicalUnusedSource>>();
-    const changedContext = nativeWidthUnusedContext(nativeRoot, changedRaw);
-    const changedOrigin = changedContext.origin;
-    if (!(changedOrigin instanceof BrowserUnusedOrigin))
-      throw new Error("missing native width origin after unrelated test helper edit");
-    expect(changedOrigin.assembled).toBe(nativeOrigin.assembled);
-    expect(changedRaw.has(nativeScriptTests)).toBe(false);
-    expect(changedRaw.get(nativeScripts)?.sha256).toBe(changedParentSha);
-    const changedProgram = changedOrigin.programs.find(
-      (entry) => entry.role === "rust-result-literal",
-    );
-    expect(
-      changedProgram?.consumerRoute?.find((entry) => entry.sourcePath === nativeScripts)
-        ?.sourceSha256,
-    ).toBe(changedParentSha);
-    expect(
-      changedProgram?.consumerRoute?.some((entry) => entry.sourcePath === nativeScriptTests),
-    ).toBe(false);
-  } finally {
-    fs.writeFileSync(parentTarget, parentBefore);
-    fs.rmSync(target, { force: true });
-  }
-});
-
-const nativeScriptRouteMutations = [
-  [
-    "constructor",
-    "mermaid-scripts:entry",
-    (source: string) =>
-      source.replace(
-        'DiagramRuntimeScript::borrowed("mermaid-runtime.min.js", MERMAID_RUNTIME)',
-        'DiagramRuntimeScript::owned("mermaid-runtime.min.js", MERMAID_RUNTIME)',
-      ),
-  ],
-  [
-    "call",
-    "mermaid-scripts:forward",
-    (source: string) =>
-      source.replace(
-        "diagram_type == MermaidDiagramType::Zenuml",
-        "diagram_type != MermaidDiagramType::Zenuml",
-      ),
-  ],
-  [
-    "bundle",
-    "mermaid-scripts:entry-code",
-    (source: string) =>
-      source.replace('"mermaid.min.js", bundle', '"mermaid.min.js", zenuml_bundle'),
-  ],
-  [
-    "entrypoint",
-    "mermaid-scripts:format",
-    (source: string) => source.replace("katanaRunMermaidRuntime", "changedMermaidRuntime"),
-  ],
-] as const;
-
-test.each(nativeScriptRouteMutations)(
-  "native width rejects Mermaid script %s tampering through existing Rust facts",
-  (_kind, expectedFactError, mutate) => {
-    const { nativeRoot } = nativeWidthSources();
-    const target = path.join(nativeRoot, nativeScripts);
-    const before = fs.readFileSync(target);
-    const original = before.toString();
-    const changed = mutate(original);
-    expect(changed).not.toBe(original);
-    try {
-      fs.writeFileSync(target, changed);
-      expect(() => nativeWidthUnusedContext(nativeRoot, new Map())).toThrow(expectedFactError);
-    } finally {
-      fs.writeFileSync(target, before);
-    }
-  },
-);
-
-test.each(["trace declaration", "Rust result call"])(
-  "native width mapping restores %s full raw span",
-  (site) => {
-    const { nativeRaw, nativeOrigin } = nativeWidthFixture();
-    const code = nativeOrigin.assembled;
-    const marker = "nativeWidthProbeResult";
-    const start = site === "trace declaration" ? code.indexOf(marker) : code.lastIndexOf(marker);
-    const origin = nativeOrigin.resolve(diagnosticAt(code, start, marker.length), "assembled");
-    expect(origin.sourcePath).toBe(site === "trace declaration" ? nativeTrace : nativeHelper);
-    expect(nativeRaw.get(origin.sourcePath)?.code.slice(origin.start, origin.end)).toBe(marker);
-    expect(() =>
-      nativeOrigin.resolve(diagnosticAt(code, start, marker.length), "normalized"),
-    ).toThrow();
-  },
-);
-
-const nativeRouteMutations = new Map<string, (source: string) => string>([
-  [
-    "crates/katana-render-runtime/src/markdown/mermaid_renderer/mod.rs",
-    (source) => source.replace("source: &str", "source: &String"),
-  ],
-  [
-    `${nativeBase}js_runtime.rs`,
-    (source) => source.replace('"mermaid-svg-id-v1"', '"changed-mermaid-svg-id"'),
-  ],
-  [
-    `${nativeBase}render.rs`,
-    (source) =>
-      source.replace(
-        "MERMAID_RENDER_CACHE_SCHEMA.hash(&mut hasher);",
-        "CHANGED_RENDER_CACHE_SCHEMA.hash(&mut hasher);",
-      ),
-  ],
-  [
+describe("native width fixture", () => {
+  const nativeBase = "crates/katana-render-runtime/src/markdown/mermaid_renderer/";
+  const nativeHelper = `${nativeBase}js_runtime_native_width_helpers.rs`;
+  const nativeTrace = `${nativeBase}js_runtime_native_width_trace.js`;
+  const nativeBBoxTrace = `${nativeBase}js_runtime_native_width_bbox_trace.js`;
+  const nativeScripts = `${nativeBase}js_runtime_scripts.rs`;
+  const nativeScriptTests = `${nativeBase}js_runtime_scripts_tests.rs`;
+  const nativeRoute = [
+    nativeHelper,
+    `${nativeBase}js_runtime_native_width_tests.rs`,
+    nativeTrace,
+    nativeBBoxTrace,
+    ...NATIVE_WIDTH_HASH_INPUT_PATHS,
     "crates/katana-render-runtime/src/markdown/diagram_js_runtime.rs",
-    (source) =>
-      source.replace(
-        "rendered = evaluate(scope, script)?;",
-        "let separate_context = v8::Context::new(scope, Default::default()); let mut separate_scope = v8::ContextScope::new(scope, separate_context); rendered = evaluate(&mut separate_scope, script)?;",
-      ),
-  ],
-  [
-    `${nativeBase}js_runtime_native_width_helpers.rs`,
-    (source) => source.replace("scripts.push", "other_scripts.push"),
-  ],
-  [
     "crates/katana-render-runtime/src/lib.rs",
-    (source) => source.replace("mod v8_script;", "pub mod v8_script;"),
-  ],
-  [
     "crates/katana-render-runtime/src/v8_script.rs",
-    (source) =>
-      source.replace(
-        "v8::Script::compile(scope, source, Some(&origin))",
-        "v8::Script::compile(scope, source, None)",
-      ),
-  ],
-]);
+    ...RUST_CLASSIC_INPUT_PATHS,
+  ].filter((sourcePath, index, route) => route.indexOf(sourcePath) === index);
+  interface NativeWidthSources {
+    nativeRoot: string;
+    nativeRaw: Map<string, ReturnType<typeof physicalUnusedSource>>;
+  }
 
-const nativeDiagramRouteMutations = new Map<string, (source: string) => string>([
-  [
-    "trace target",
-    (source) =>
-      source.replace(
-        "katana_render_runtime::mermaid_classic_capture",
-        "changed::mermaid_classic_capture",
-      ),
-  ],
-  ["trace phase", (source) => source.replace('phase = "script"', 'phase = "changed"')],
-  ["source", (source) => source.replace("code = script_code", "code = script.name")],
-  ["name", (source) => source.replace("name = script.name", "name = script_code")],
-  [
-    "compile target",
-    (source) =>
-      source.replace(
-        "compile_with_origin(scope, source, origin_name)",
-        "compile_with_origin(scope, source, source)",
-      ),
-  ],
-  [
-    "complete before resolve",
-    (source) =>
-      source.replace(
-        '    let resolved = resolve_value(scope, value)?;\n    tracing::event!(\n        target: "katana_render_runtime::mermaid_classic_capture",\n        tracing::Level::TRACE,\n        phase = "complete",\n    );',
-        '    tracing::event!(\n        target: "katana_render_runtime::mermaid_classic_capture",\n        tracing::Level::TRACE,\n        phase = "complete",\n    );\n    let resolved = resolve_value(scope, value)?;',
-      ),
-  ],
-  [
-    "skip resolve",
-    (source) =>
-      source.replace(
-        "let resolved = resolve_value(scope, value)?;",
-        "let resolved = value.to_rust_string_lossy(scope);",
-      ),
-  ],
-]);
+  interface NativeWidthFixture extends NativeWidthSources {
+    nativeContext: ReturnType<typeof nativeWidthUnusedContext>;
+    nativeOrigin: BrowserUnusedOrigin;
+  }
 
-test.each([...nativeDiagramRouteMutations])(
-  "native width rejects changed diagram route: %s",
-  (_kind, mutate) => {
-    const { nativeRoot } = nativeWidthSources();
-    const target = path.join(
-      nativeRoot,
-      "crates/katana-render-runtime/src/markdown/diagram_js_runtime.rs",
+  let nativeWidthSourcesValue: NativeWidthSources | undefined;
+  function nativeWidthSources(): NativeWidthSources {
+    if (nativeWidthSourcesValue !== undefined) return nativeWidthSourcesValue;
+    const nativeRoot = fs.mkdtempSync(path.join(directory, "native-width-"));
+    const nativeRaw = new Map<string, ReturnType<typeof physicalUnusedSource>>();
+    for (const name of new Set([...nativeRoute, ...RUST_CLASSIC_INPUT_PATHS])) {
+      const target = path.join(nativeRoot, name);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(path.join(browserRoot, name), target);
+      if (nativeRoute.includes(name))
+        nativeRaw.set(name, physicalUnusedSource(fs.readFileSync(target)));
+    }
+    nativeWidthSourcesValue = { nativeRoot, nativeRaw };
+    return nativeWidthSourcesValue;
+  }
+
+  let nativeWidthFixtureValue: NativeWidthFixture | undefined;
+  let nativeWidthFixtureFailure: unknown;
+  beforeAll(
+    () => {
+      try {
+        nativeWidthFixture();
+      } catch (error) {
+        nativeWidthFixtureFailure = error;
+      }
+    },
+    { timeout: EXTERNAL_FACTS_SETUP_TIMEOUT_MS },
+  );
+  function nativeWidthFixture(): NativeWidthFixture {
+    if (nativeWidthFixtureFailure !== undefined) throw nativeWidthFixtureFailure;
+    if (nativeWidthFixtureValue !== undefined) return nativeWidthFixtureValue;
+    const sources = nativeWidthSources();
+    const { nativeRoot, nativeRaw } = sources;
+    const nativeContext = nativeWidthUnusedContext(nativeRoot, nativeRaw);
+    const nativeOrigin = nativeContext.origin;
+    if (!(nativeOrigin instanceof BrowserUnusedOrigin))
+      throw new Error("missing native width origin");
+    nativeWidthFixtureValue = { ...sources, nativeContext, nativeOrigin };
+    return nativeWidthFixtureValue;
+  }
+
+  test("native width projection consumes actual trace and Rust result literal with source-only route", () => {
+    const { nativeRoot, nativeRaw, nativeContext, nativeOrigin } = nativeWidthFixture();
+    expect(nativeOrigin.programs.map((program) => program.role)).toEqual([
+      "native-test-trace",
+      "native-test-trace",
+      "rust-result-literal",
+    ]);
+    expect(nativeContext.codeBytesEqual).toBe(false);
+    const program = nativeOrigin.programs.find((entry) => entry.sourcePath === nativeHelper);
+    const helper = nativeRaw.get(nativeHelper);
+    if (!program || !helper) throw new Error("missing Rust result metadata");
+    expect(helper.code.slice(program.start, program.end)).toBe(
+      "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, probes: nativeWidthProbeResult() })",
     );
-    const before = fs.readFileSync(target);
-    try {
+    expect(program.consumerRoute?.map(({ sourcePath }) => sourcePath)).toEqual(nativeRoute);
+    expect(
+      program.consumerRoute?.map(({ sourcePath, sourceSha256 }) => ({ sourcePath, sourceSha256 })),
+    ).toEqual(
+      nativeRoute.map((sourcePath) => {
+        const source = nativeRaw.get(sourcePath);
+        if (!source) throw new Error(`missing native route source: ${sourcePath}`);
+        return { sourcePath, sourceSha256: source.sha256 };
+      }),
+    );
+    expect(program.sourceSha256).toBe(helper.sha256);
+    const metadata = unusedProgramMetadata(nativeContext.name, nativeOrigin.programs);
+    expect(metadata.realm).toBe("Rust native-width test, shared V8 classic-script context");
+    expect(metadata.externalProgramsUnmapped).not.toContain("options.mermaidJs");
+    expect("executionVerified" in metadata && metadata.executionVerified).toBe(false);
+    verifyUnusedSources(nativeRoot, nativeRaw);
+  });
+
+  const nativeWidthProgramMutations: readonly [
+    string,
+    (programs: readonly BrowserUnusedProgram[]) => BrowserUnusedProgram[],
+  ][] = [
+    ["missing bbox trace", (programs) => programs.filter((_, index) => index !== 1)],
+    [
+      "wrong bbox role",
+      (programs) =>
+        programs.map((program, index) =>
+          index === 1 ? { ...program, role: "rust-result-literal" } : program,
+        ),
+    ],
+    [
+      "unexpected extra program",
+      (programs) => {
+        const first = programs[0];
+        if (!first) throw new Error("missing native trace program");
+        return [...programs, first];
+      },
+    ],
+    [
+      "changed bbox source path",
+      (programs) =>
+        programs.map((program, index) =>
+          index === 1 ? { ...program, sourcePath: nativeTrace } : program,
+        ),
+    ],
+    [
+      "changed bbox consumer route",
+      (programs) =>
+        programs.map((program, index) =>
+          index === 1 ? { ...program, consumerRoute: [] } : program,
+        ),
+    ],
+  ];
+
+  test.each(nativeWidthProgramMutations)("native width rejects %s metadata", (_label, mutate) => {
+    const { nativeOrigin } = nativeWidthFixture();
+    expect(() =>
+      unusedProgramMetadata("rust-native-width-test-result", mutate(nativeOrigin.programs)),
+    ).toThrow("unknown unused program realm");
+  });
+
+  test(
+    "native width keeps live source binding but ignores unrelated script test edits",
+    () => {
+      const { nativeRoot, nativeRaw, nativeOrigin } = nativeWidthFixture();
+      const target = path.join(nativeRoot, nativeScriptTests);
+      expect(fs.existsSync(target)).toBe(false);
+      const before = fs.readFileSync(path.join(browserRoot, nativeScriptTests));
+      const parentTarget = path.join(nativeRoot, nativeScripts);
+      const parentBefore = fs.readFileSync(parentTarget);
+      const original = before.toString();
+      const changed = original.replace(
+        'assert!(scripts.iter().any(|it| it.name == "render-mermaid.js"));',
+        'assert!(scripts.iter().any(|it| it.name == "mermaid-runtime.min.js"));',
+      );
+      expect(changed).not.toBe(original);
+      try {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, changed);
+        expect(fs.readFileSync(target, "utf8")).toBe(changed);
+        const source = nativeRaw.get(nativeScripts);
+        expect(nativeRaw.has(nativeScriptTests)).toBe(false);
+        expect(source?.sha256).toBe(
+          physicalUnusedSource(fs.readFileSync(path.join(nativeRoot, nativeScripts))).sha256,
+        );
+        expect(source?.sha256).toBe(
+          physicalUnusedSource(fs.readFileSync(path.join(browserRoot, nativeScripts))).sha256,
+        );
+        const program = nativeOrigin.programs.find((entry) => entry.role === "rust-result-literal");
+        expect(
+          program?.consumerRoute?.find((entry) => entry.sourcePath === nativeScripts)?.sourceSha256,
+        ).toBe(source?.sha256);
+        expect(
+          program?.consumerRoute?.some((entry) => entry.sourcePath === nativeScriptTests),
+        ).toBe(false);
+
+        const parentChanged = Buffer.concat([
+          parentBefore,
+          Buffer.from("\n#[cfg(test)]\nfn unrelated_script_test_fixture_marker() {}\n"),
+        ]);
+        fs.writeFileSync(parentTarget, parentChanged);
+        expect(fs.readFileSync(parentTarget).equals(parentBefore)).toBe(false);
+        const changedParentSha = physicalUnusedSource(fs.readFileSync(parentTarget)).sha256;
+        expect(changedParentSha).not.toBe(nativeRaw.get(nativeScripts)?.sha256);
+
+        const changedRaw = new Map<string, ReturnType<typeof physicalUnusedSource>>();
+        const changedContext = nativeWidthUnusedContext(nativeRoot, changedRaw);
+        const changedOrigin = changedContext.origin;
+        if (!(changedOrigin instanceof BrowserUnusedOrigin))
+          throw new Error("missing native width origin after unrelated test helper edit");
+        expect(changedOrigin.assembled).toBe(nativeOrigin.assembled);
+        expect(changedRaw.has(nativeScriptTests)).toBe(false);
+        expect(changedRaw.get(nativeScripts)?.sha256).toBe(changedParentSha);
+        const changedProgram = changedOrigin.programs.find(
+          (entry) => entry.role === "rust-result-literal",
+        );
+        expect(
+          changedProgram?.consumerRoute?.find((entry) => entry.sourcePath === nativeScripts)
+            ?.sourceSha256,
+        ).toBe(changedParentSha);
+        expect(
+          changedProgram?.consumerRoute?.some((entry) => entry.sourcePath === nativeScriptTests),
+        ).toBe(false);
+      } finally {
+        fs.writeFileSync(parentTarget, parentBefore);
+        fs.rmSync(target, { force: true });
+      }
+    },
+    MATHJAX_PRODUCER_INTEGRATION_TIMEOUT_MS,
+  );
+
+  const nativeScriptRouteMutations = [
+    [
+      "constructor",
+      "mermaid-scripts:entry",
+      (source: string) =>
+        source.replace(
+          'DiagramRuntimeScript::borrowed("mermaid-runtime.min.js", MERMAID_RUNTIME)',
+          'DiagramRuntimeScript::owned("mermaid-runtime.min.js", MERMAID_RUNTIME)',
+        ),
+    ],
+    [
+      "call",
+      "mermaid-scripts:forward",
+      (source: string) =>
+        source.replace(
+          "diagram_type == MermaidDiagramType::Zenuml",
+          "diagram_type != MermaidDiagramType::Zenuml",
+        ),
+    ],
+    [
+      "bundle",
+      "mermaid-scripts:entry-code",
+      (source: string) =>
+        source.replace('"mermaid.min.js", bundle', '"mermaid.min.js", zenuml_bundle'),
+    ],
+    [
+      "entrypoint",
+      "mermaid-scripts:format",
+      (source: string) => source.replace("katanaRunMermaidRuntime", "changedMermaidRuntime"),
+    ],
+  ] as const;
+
+  test.each(nativeScriptRouteMutations)(
+    "native width rejects Mermaid script %s tampering through existing Rust facts",
+    (_kind, expectedFactError, mutate) => {
+      const { nativeRoot } = nativeWidthSources();
+      const target = path.join(nativeRoot, nativeScripts);
+      const before = fs.readFileSync(target);
       const original = before.toString();
       const changed = mutate(original);
       expect(changed).not.toBe(original);
-      fs.writeFileSync(target, changed);
-      expect(() => nativeWidthUnusedContext(nativeRoot, new Map())).toThrow(
-        "changed native width consumer",
-      );
-    } finally {
-      fs.writeFileSync(target, before);
-    }
-  },
-);
+      try {
+        fs.writeFileSync(target, changed);
+        expect(() => nativeWidthUnusedContext(nativeRoot, new Map())).toThrow(expectedFactError);
+      } finally {
+        fs.writeFileSync(target, before);
+      }
+    },
+    MATHJAX_PRODUCER_INTEGRATION_TIMEOUT_MS,
+  );
 
-test.each(nativeRoute.filter((name) => name !== nativeScripts))(
-  "native width rejects changed consumer/trace %s",
-  (name) => {
-    const { nativeRoot } = nativeWidthSources();
-    const target = path.join(nativeRoot, name);
-    const before = fs.readFileSync(target);
+  test.each(["trace declaration", "Rust result call"])(
+    "native width mapping restores %s full raw span",
+    (site) => {
+      const { nativeRaw, nativeOrigin } = nativeWidthFixture();
+      const code = nativeOrigin.assembled;
+      const marker = "nativeWidthProbeResult";
+      const start = site === "trace declaration" ? code.indexOf(marker) : code.lastIndexOf(marker);
+      const origin = nativeOrigin.resolve(diagnosticAt(code, start, marker.length), "assembled");
+      expect(origin.sourcePath).toBe(site === "trace declaration" ? nativeTrace : nativeHelper);
+      expect(nativeRaw.get(origin.sourcePath)?.code.slice(origin.start, origin.end)).toBe(marker);
+      expect(() =>
+        nativeOrigin.resolve(diagnosticAt(code, start, marker.length), "normalized"),
+      ).toThrow();
+    },
+  );
+
+  const nativeRouteMutations = new Map<string, (source: string) => string>([
+    [
+      "crates/katana-render-runtime/src/markdown/mermaid_renderer/mod.rs",
+      (source) => source.replace("source: &str", "source: &String"),
+    ],
+    [
+      `${nativeBase}js_runtime.rs`,
+      (source) => source.replace('"mermaid-svg-id-v1"', '"changed-mermaid-svg-id"'),
+    ],
+    [
+      `${nativeBase}render.rs`,
+      (source) =>
+        source.replace(
+          "MERMAID_RENDER_CACHE_SCHEMA.hash(&mut hasher);",
+          "CHANGED_RENDER_CACHE_SCHEMA.hash(&mut hasher);",
+        ),
+    ],
+    [
+      "crates/katana-render-runtime/src/markdown/diagram_js_runtime.rs",
+      (source) =>
+        source.replace(
+          "rendered = evaluate(scope, script)?;",
+          "let separate_context = v8::Context::new(scope, Default::default()); let mut separate_scope = v8::ContextScope::new(scope, separate_context); rendered = evaluate(&mut separate_scope, script)?;",
+        ),
+    ],
+    [
+      `${nativeBase}js_runtime_native_width_helpers.rs`,
+      (source) => source.replace("scripts.push", "other_scripts.push"),
+    ],
+    [
+      "crates/katana-render-runtime/src/lib.rs",
+      (source) => source.replace("mod v8_script;", "pub mod v8_script;"),
+    ],
+    [
+      "crates/katana-render-runtime/src/v8_script.rs",
+      (source) =>
+        source.replace(
+          "v8::Script::compile(scope, source, Some(&origin))",
+          "v8::Script::compile(scope, source, None)",
+        ),
+    ],
+  ]);
+
+  const nativeDiagramRouteMutations = new Map<string, (source: string) => string>([
+    [
+      "trace target",
+      (source) =>
+        source.replace(
+          "katana_render_runtime::mermaid_classic_capture",
+          "changed::mermaid_classic_capture",
+        ),
+    ],
+    ["trace phase", (source) => source.replace('phase = "script"', 'phase = "changed"')],
+    ["source", (source) => source.replace("code = script_code", "code = script.name")],
+    ["name", (source) => source.replace("name = script.name", "name = script_code")],
+    [
+      "compile target",
+      (source) =>
+        source.replace(
+          "compile_with_origin(scope, source, origin_name)",
+          "compile_with_origin(scope, source, source)",
+        ),
+    ],
+    [
+      "complete before resolve",
+      (source) =>
+        source.replace(
+          '    let resolved = resolve_value(scope, value)?;\n    tracing::event!(\n        target: "katana_render_runtime::mermaid_classic_capture",\n        tracing::Level::TRACE,\n        phase = "complete",\n    );',
+          '    tracing::event!(\n        target: "katana_render_runtime::mermaid_classic_capture",\n        tracing::Level::TRACE,\n        phase = "complete",\n    );\n    let resolved = resolve_value(scope, value)?;',
+        ),
+    ],
+    [
+      "skip resolve",
+      (source) =>
+        source.replace(
+          "let resolved = resolve_value(scope, value)?;",
+          "let resolved = value.to_rust_string_lossy(scope);",
+        ),
+    ],
+  ]);
+
+  test.each([...nativeDiagramRouteMutations])(
+    "native width rejects changed diagram route: %s",
+    (_kind, mutate) => {
+      const { nativeRoot } = nativeWidthSources();
+      const target = path.join(
+        nativeRoot,
+        "crates/katana-render-runtime/src/markdown/diagram_js_runtime.rs",
+      );
+      const before = fs.readFileSync(target);
+      try {
+        const original = before.toString();
+        const changed = mutate(original);
+        expect(changed).not.toBe(original);
+        fs.writeFileSync(target, changed);
+        expect(() => nativeWidthUnusedContext(nativeRoot, new Map())).toThrow(
+          "changed native width consumer",
+        );
+      } finally {
+        fs.writeFileSync(target, before);
+      }
+    },
+    MATHJAX_PRODUCER_INTEGRATION_TIMEOUT_MS,
+  );
+
+  test.each(nativeRoute.filter((name) => name !== nativeScripts))(
+    "native width rejects changed consumer/trace %s",
+    (name) => {
+      const { nativeRoot } = nativeWidthSources();
+      const target = path.join(nativeRoot, name);
+      const before = fs.readFileSync(target);
+      try {
+        const original = before.toString();
+        const changed =
+          nativeRouteMutations.get(name)?.(original) ?? `${original}\n// changed consumer\n`;
+        fs.writeFileSync(target, changed);
+        expect(() => nativeWidthUnusedContext(nativeRoot, new Map())).toThrow(
+          "changed native width consumer",
+        );
+      } finally {
+        fs.writeFileSync(target, before);
+      }
+    },
+    MATHJAX_PRODUCER_INTEGRATION_TIMEOUT_MS,
+  );
+
+  test.each(["unknown producer", "missing", "duplicate", "different callee", "comment", "escape"])(
+    "native width result rejects %s",
+    (kind) => {
+      const { nativeRaw } = nativeWidthSources();
+      const raw = nativeRaw.get(nativeHelper);
+      if (!raw) throw new Error("missing Rust helper");
+      let code = raw.code;
+      if (kind === "missing") code = code.replace("fn result_script()", "fn other_script()");
+      if (kind === "duplicate") code += code;
+      if (kind === "different callee")
+        code = code.replace("probes: nativeWidthProbeResult()", "probes: otherResult()");
+      if (kind === "comment")
+        code = code.replace(
+          "probes: nativeWidthProbeResult()",
+          "probes: /* nativeWidthProbeResult() */ null",
+        );
+      if (kind === "escape")
+        code = code.replace("JSON.stringify({ calls:", "JSON.stringify({\\n calls:");
+      expect(() =>
+        inspectNativeWidthResultLiteral(
+          kind === "unknown producer" ? "other.rs" : nativeHelper,
+          code,
+        ),
+      ).toThrow();
+    },
+  );
+
+  test("native width input drift and generated labels remain unmapped", () => {
+    const { nativeRoot, nativeRaw, nativeOrigin } = nativeWidthFixture();
+    const trace = nativeRaw.get(nativeTrace);
+    if (!trace) throw new Error("missing trace");
+    const target = path.join(nativeRoot, nativeTrace);
     try {
-      const original = before.toString();
-      const changed =
-        nativeRouteMutations.get(name)?.(original) ?? `${original}\n// changed consumer\n`;
-      fs.writeFileSync(target, changed);
-      expect(() => nativeWidthUnusedContext(nativeRoot, new Map())).toThrow(
-        "changed native width consumer",
-      );
+      fs.appendFileSync(target, "\n// drift");
+      expect(() => verifyUnusedSources(nativeRoot, nativeRaw)).toThrow();
     } finally {
-      fs.writeFileSync(target, before);
+      fs.writeFileSync(target, trace.code);
     }
-  },
-);
-
-test.each(["unknown producer", "missing", "duplicate", "different callee", "comment", "escape"])(
-  "native width result rejects %s",
-  (kind) => {
-    const { nativeRaw } = nativeWidthSources();
-    const raw = nativeRaw.get(nativeHelper);
-    if (!raw) throw new Error("missing Rust helper");
-    let code = raw.code;
-    if (kind === "missing") code = code.replace("fn result_script()", "fn other_script()");
-    if (kind === "duplicate") code += code;
-    if (kind === "different callee")
-      code = code.replace("probes: nativeWidthProbeResult()", "probes: otherResult()");
-    if (kind === "comment")
-      code = code.replace(
-        "probes: nativeWidthProbeResult()",
-        "probes: /* nativeWidthProbeResult() */ null",
-      );
-    if (kind === "escape")
-      code = code.replace("JSON.stringify({ calls:", "JSON.stringify({\\n calls:");
     expect(() =>
-      inspectNativeWidthResultLiteral(
-        kind === "unknown producer" ? "other.rs" : nativeHelper,
-        code,
-      ),
+      nativeOrigin.resolve(diagnosticAt(nativeOrigin.assembled, 0, 4), "assembled"),
     ).toThrow();
-  },
-);
+  });
 
-test("native width input drift and generated labels remain unmapped", () => {
-  const { nativeRoot, nativeRaw, nativeOrigin } = nativeWidthFixture();
-  const trace = nativeRaw.get(nativeTrace);
-  if (!trace) throw new Error("missing trace");
-  const target = path.join(nativeRoot, nativeTrace);
-  try {
-    fs.appendFileSync(target, "\n// drift");
-    expect(() => verifyUnusedSources(nativeRoot, nativeRaw)).toThrow();
-  } finally {
-    fs.writeFileSync(target, trace.code);
-  }
-  expect(() =>
-    nativeOrigin.resolve(diagnosticAt(nativeOrigin.assembled, 0, 4), "assembled"),
-  ).toThrow();
+  test.each(["metadata-browser", "metadata-native", "metadata-unknown", "origin-browser"])(
+    "native/browser realm swap rejects %s",
+    (kind) => {
+      const { nativeRaw, nativeOrigin } = nativeWidthFixture();
+      expect(() => {
+        if (kind === "metadata-browser")
+          return unusedProgramMetadata("official-mermaid-browser", nativeOrigin.programs);
+        if (kind === "metadata-native")
+          return unusedProgramMetadata("rust-native-width-test-result", browserPrograms);
+        if (kind === "metadata-unknown")
+          return unusedProgramMetadata("unknown", nativeOrigin.programs);
+        return new BrowserUnusedOrigin(
+          nativeOrigin.assembled,
+          nativeOrigin.map,
+          nativeOrigin.programs,
+          nativeRaw,
+        );
+      }).toThrow();
+    },
+  );
+
+  test.each(["source-hash", "map-content", "map-gap"])(
+    "native width source-map rejects %s",
+    (kind) => {
+      const { nativeRaw, nativeOrigin } = nativeWidthFixture();
+      const raw = new Map(nativeRaw);
+      let map = nativeOrigin.map;
+      if (kind === "source-hash") {
+        const source = raw.get(nativeTrace);
+        if (!source) throw new Error("missing trace source");
+        raw.set(nativeTrace, { ...source, sha256: "0".repeat(64) });
+      } else {
+        const value = z
+          .object({ sourcesContent: z.array(z.string()), mappings: z.string() })
+          .passthrough()
+          .parse(JSON.parse(map));
+        if (kind === "map-content") value.sourcesContent[0] = "different raw input";
+        else value.mappings = "";
+        map = JSON.stringify(value);
+      }
+      expect(() => {
+        const origin = new BrowserUnusedOrigin(
+          nativeOrigin.assembled,
+          map,
+          nativeOrigin.programs,
+          raw,
+          "rust-native-width",
+        );
+        return origin.resolve(
+          diagnosticAt(
+            origin.assembled,
+            origin.assembled.lastIndexOf("nativeWidthProbeResult"),
+            22,
+          ),
+          "assembled",
+        );
+      }).toThrow();
+    },
+  );
 });
-
-test.each(["metadata-browser", "metadata-native", "metadata-unknown", "origin-browser"])(
-  "native/browser realm swap rejects %s",
-  (kind) => {
-    const { nativeRaw, nativeOrigin } = nativeWidthFixture();
-    expect(() => {
-      if (kind === "metadata-browser")
-        return unusedProgramMetadata("official-mermaid-browser", nativeOrigin.programs);
-      if (kind === "metadata-native")
-        return unusedProgramMetadata("rust-native-width-test-result", browserPrograms);
-      if (kind === "metadata-unknown")
-        return unusedProgramMetadata("unknown", nativeOrigin.programs);
-      return new BrowserUnusedOrigin(
-        nativeOrigin.assembled,
-        nativeOrigin.map,
-        nativeOrigin.programs,
-        nativeRaw,
-      );
-    }).toThrow();
-  },
-);
-
-test.each(["source-hash", "map-content", "map-gap"])(
-  "native width source-map rejects %s",
-  (kind) => {
-    const { nativeRaw, nativeOrigin } = nativeWidthFixture();
-    const raw = new Map(nativeRaw);
-    let map = nativeOrigin.map;
-    if (kind === "source-hash") {
-      const source = raw.get(nativeTrace);
-      if (!source) throw new Error("missing trace source");
-      raw.set(nativeTrace, { ...source, sha256: "0".repeat(64) });
-    } else {
-      const value = z
-        .object({ sourcesContent: z.array(z.string()), mappings: z.string() })
-        .passthrough()
-        .parse(JSON.parse(map));
-      if (kind === "map-content") value.sourcesContent[0] = "different raw input";
-      else value.mappings = "";
-      map = JSON.stringify(value);
-    }
-    expect(() => {
-      const origin = new BrowserUnusedOrigin(
-        nativeOrigin.assembled,
-        map,
-        nativeOrigin.programs,
-        raw,
-        "rust-native-width",
-      );
-      return origin.resolve(
-        diagnosticAt(origin.assembled, origin.assembled.lastIndexOf("nativeWidthProbeResult"), 22),
-        "assembled",
-      );
-    }).toThrow();
-  },
-);
 
 const functionBase = "crates/katana-render-runtime/src/renderer/backends/html_runtime/";
 const functionRoute = [`${functionBase}dom_bootstrap_test.js`, `${functionBase}dom_bootstrap.js`];
@@ -2634,24 +2678,111 @@ function standardGateFixture(
   };
 }
 
-test("standard unused gate resolves actual full Biome cross-fragment diagnostic in one batched pair", () => {
-  const item = standardGateFixture(),
-    run = item.collect(),
-    result = item.inspect(run);
-  expect(run.exitCode).toBe(1);
-  expect(run.argv).toEqual([
-    "bun",
-    "run",
-    "biome",
-    "--reporter=json",
-    `--reporter-file=${run.reportPath}`,
-    "--max-diagnostics=none",
-  ]);
-  expect(result.lintAccepted).toBe(true);
-  expect(result.counts.resolved).toBe(1);
-  expect(result.groups.length).toBe(1);
-  expect(result.acceptedConsumerClosure).toBe(false);
-  expect(result.fullRuntimeAcceptance).toBe(false);
+describe("standard default raw Biome run", () => {
+  let defaultFixture: ReturnType<typeof standardGateFixture> | undefined;
+  let defaultRawRun: ReturnType<ReturnType<typeof standardGateFixture>["collect"]> | undefined;
+
+  beforeAll(
+    () => {
+      const fixture = standardGateFixture();
+      defaultFixture = fixture;
+      defaultRawRun = fixture.collect();
+    },
+    { timeout: EXTERNAL_FACTS_SETUP_TIMEOUT_MS },
+  );
+
+  const defaultFixtureOrThrow = () => {
+    if (!defaultFixture || !defaultRawRun) throw new Error("default raw fixture was not collected");
+    return { item: defaultFixture, run: defaultRawRun };
+  };
+
+  test("standard unused gate resolves actual full Biome cross-fragment diagnostic in one batched pair", () => {
+    const { item, run } = defaultFixtureOrThrow(),
+      result = item.inspect(run);
+    expect(run.exitCode).toBe(1);
+    expect(run.argv).toEqual([
+      "bun",
+      "run",
+      "biome",
+      "--reporter=json",
+      `--reporter-file=${run.reportPath}`,
+      "--max-diagnostics=none",
+    ]);
+    expect(result.lintAccepted).toBe(true);
+    expect(result.counts.resolved).toBe(1);
+    expect(result.groups.length).toBe(1);
+    expect(result.acceptedConsumerClosure).toBe(false);
+    expect(result.fullRuntimeAcceptance).toBe(false);
+  });
+
+  describe("standard raw Biome boundary validation", () => {
+    type RawBoundaryKind =
+      | "missing"
+      | "count"
+      | "truncated"
+      | "exit"
+      | "outside scan"
+      | "unknown severity";
+    const rawBoundaryRunOrThrow = () => {
+      return defaultFixtureOrThrow().run;
+    };
+
+    const tamperRawBoundaryReport = (
+      kind: RawBoundaryKind,
+      parsed: {
+        summary: Record<string, unknown>;
+        diagnostics: Record<string, unknown>[];
+      },
+      sourceCount: number,
+    ) => {
+      switch (kind) {
+        case "missing":
+          delete parsed.summary.warnings;
+          break;
+        case "count":
+          parsed.summary.warnings = 10;
+          break;
+        case "truncated":
+          parsed.summary.diagnosticsNotPrinted = 1;
+          break;
+        case "outside scan":
+          parsed.summary.unchanged = sourceCount + 1;
+          break;
+        case "unknown severity":
+          if (parsed.diagnostics[0]) parsed.diagnostics[0].severity = "unknown";
+          break;
+        case "exit":
+          break;
+      }
+    };
+
+    for (const kind of [
+      "missing",
+      "count",
+      "truncated",
+      "exit",
+      "outside scan",
+      "unknown severity",
+    ] as const)
+      test(`standard unused gate raw boundary rejects ${kind}`, () => {
+        const run = rawBoundaryRunOrThrow(),
+          report: unknown = JSON.parse(fs.readFileSync(run.reportPath, "utf8")),
+          parsed = z
+            .object({
+              summary: z.record(z.string(), z.unknown()),
+              diagnostics: z.array(z.record(z.string(), z.unknown())),
+            })
+            .parse(report);
+        tamperRawBoundaryReport(kind, parsed, run.snapshot.sources.length);
+        expect(() =>
+          inspectStandardUnusedRawReport(
+            parsed,
+            kind === "exit" ? 0 : run.exitCode,
+            run.snapshot.sources.length,
+          ),
+        ).toThrow();
+      });
+  });
 });
 
 test("standard unused gate resolves the actual finite VM literal consumer", () => {
@@ -2800,39 +2931,6 @@ for (const kind of [
       }
       expect(() => item.inspect(run)).toThrow();
     }
-  });
-
-for (const kind of [
-  "missing",
-  "count",
-  "truncated",
-  "exit",
-  "outside scan",
-  "unknown severity",
-] as const)
-  test(`standard unused gate raw boundary rejects ${kind}`, () => {
-    const item = standardGateFixture(),
-      run = item.collect(),
-      report: unknown = JSON.parse(fs.readFileSync(run.reportPath, "utf8")),
-      parsed = z
-        .object({
-          summary: z.record(z.string(), z.unknown()),
-          diagnostics: z.array(z.record(z.string(), z.unknown())),
-        })
-        .parse(report);
-    if (kind === "missing") delete parsed.summary.warnings;
-    if (kind === "count") parsed.summary.warnings = 10;
-    if (kind === "truncated") parsed.summary.diagnosticsNotPrinted = 1;
-    if (kind === "outside scan") parsed.summary.unchanged = run.snapshot.sources.length + 1;
-    if (kind === "unknown severity" && parsed.diagnostics[0])
-      parsed.diagnostics[0].severity = "unknown";
-    expect(() =>
-      inspectStandardUnusedRawReport(
-        parsed,
-        kind === "exit" ? 0 : run.exitCode,
-        run.snapshot.sources.length,
-      ),
-    ).toThrow();
   });
 
 test("standard raw Biome info severity preserves summary and other diagnostics", () => {

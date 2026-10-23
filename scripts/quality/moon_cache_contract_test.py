@@ -312,7 +312,7 @@ def production_task_input_binding(
     declared_path = evidence_dir / "production-declared-inputs.json"
     declared_path.write_text(declared_output)
     declared = moon_json_object(json.loads(declared_output))
-    assert len(declared) == 45, "Production Moon task count changed"
+    assert len(declared) == 46, "Production Moon task count changed"
     validate_root_test_coverage_contract(declared)
     runtime_preflight = moon_json_object(declared.get("runtime-asset-script-preflight"))
     classic_evidence = moon_json_object(
@@ -320,6 +320,9 @@ def production_task_input_binding(
     )
     runtime_other = moon_json_object(declared.get("runtime-asset-script-other"))
     runtime_unused = moon_json_object(declared.get("runtime-unused-script-regression"))
+    runtime_cas_diagnostic = moon_json_object(
+        declared.get("runtime-script-cas-diagnostic")
+    )
     runtime_aggregate = moon_json_object(declared.get("runtime-asset-script-test"))
     assert runtime_preflight.get("deps") == ["mathjax-owned-evidence"]
     assert classic_evidence.get("deps") == ["runtime-asset-script-preflight"]
@@ -329,6 +332,14 @@ def production_task_input_binding(
         "just",
         "runtime-unused-script-final-verify-run",
     ]
+    assert runtime_cas_diagnostic.get("command") == [
+        "just",
+        "runtime-script-cas-diagnostic-run",
+    ]
+    assert runtime_cas_diagnostic.get("deps") == [
+        "runtime-unused-script-regression"
+    ]
+    assert moon_json_object(runtime_cas_diagnostic.get("options")).get("cache") is False
     pin_preflight = moon_json_object(declared.get("mathjax-import-pin-preflight"))
     assert pin_preflight.get("command") == ["just", "mathjax-import-pin-preflight"]
     assert pin_preflight.get("deps", []) == []

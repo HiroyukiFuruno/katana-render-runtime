@@ -1337,6 +1337,27 @@ class NativeCliOwnerHookTests(unittest.TestCase):
             self.assertTrue(lifecycle["groupClosed"])
             self.assertTrue(lifecycle["rawFdsClosed"])
 
+    def test_unchecked_nonzero_returns_closed_actual_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            evidence = typed_producer.observe_native_cli_command(
+                [sys.executable, "-c", "import os;os.write(1,b'out');os.write(2,b'err');raise SystemExit(7)"],
+                role="tool-query", cwd=root, env={"PATH": os.environ["PATH"]},
+                log_directory=root / "logs", attempt_token="f" * 64,
+                label="probe-nonzero-closed", check=False,
+            )
+            record = evidence.observation
+            lifecycle = gate.read_json(Path(gate._text(evidence.lifecycle["path"], "lifecycle")))
+            self.assertEqual(record["actualExit"], 7)
+            self.assertIs(record["reaped"], True)
+            self.assertEqual(record["errors"], [])
+            self.assertEqual(lifecycle["exitCode"], 7)
+            self.assertIs(lifecycle["groupClosed"], True)
+            self.assertIs(lifecycle["rawFdsClosed"], True)
+            for key, expected in (("stdout", b"out"), ("stderr", b"err")):
+                pin = gate._object(record[key], key)
+                self.assertEqual(Path(gate._text(pin["path"], key)).read_bytes(), expected)
+
 
 @unittest.skipUnless(os.name == "posix", "POSIX ownership boundary unit only")
 class MeasurementLifecycleUnitTests(unittest.TestCase):

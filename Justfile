@@ -311,6 +311,10 @@ runtime-unused-script-regression:
 runtime-unused-script-regression-run:
     bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-fragment-loader_test.ts ./scripts/runtime-bundles/runtime-bundle-definitions_test.ts ./scripts/runtime-bundles/runtime-unused-check_test.ts ./scripts/runtime-bundles/runtime-bundle-tool-fingerprint_test.ts ./scripts/runtime-bundles/runtime-unused-mathjax_test.ts ./scripts/runtime-bundles/runtime-unused-native-width-hash_test.ts ./scripts/runtime-bundles/runtime-unused-rust-classic_test.ts
 
+runtime-script-cas-diagnostic-run:
+    python3 -m unittest discover -s scripts/quality -p runtime_script_moon_cas_test.py --failfast
+    python3 scripts/quality/runtime_script_moon_cas_diagnostic.py --moon bun run moon
+
 runtime-unused-script-producer-run producer="runtime-unused-script-regression":
     python3 scripts/release/runtime_script_cache_cli.py run --repo {{ quote(REPO_ROOT) }} --producer {{ quote(producer) }}
 

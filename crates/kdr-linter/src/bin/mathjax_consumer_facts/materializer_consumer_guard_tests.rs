@@ -61,6 +61,49 @@ const READBACK_BODY_MUTATIONS: &[(&str, &str, &str)] = &[
     ),
 ];
 
+const SIGNATURE_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "fn materialize_at(path: PathBuf) -> Result<PathBuf, String>",
+        "fn materialize_at(other: PathBuf) -> Result<PathBuf, String>",
+        "default-materializer:materialize-signature",
+    ),
+    (
+        "fn materialize_at(path: PathBuf) -> Result<PathBuf, String>",
+        "fn materialize_at(path: PathBuf, extra: PathBuf) -> Result<PathBuf, String>",
+        "default-materializer:materialize-signature",
+    ),
+    (
+        "fn materialize_at(path: PathBuf) -> Result<PathBuf, String>",
+        "fn materialize_at(path: String) -> Result<PathBuf, String>",
+        "default-materializer:materialize-signature",
+    ),
+    (
+        "fn materialize_at(path: PathBuf) -> Result<PathBuf, String>",
+        "fn materialize_at(path: PathBuf) -> PathBuf",
+        "default-materializer:materialize-signature",
+    ),
+    (
+        "fn exists_with_same_bytes(path: &Path) -> Result<bool, String>",
+        "fn exists_with_same_bytes(other: &Path) -> Result<bool, String>",
+        "default-materializer:same-bytes-signature",
+    ),
+    (
+        "fn exists_with_same_bytes(path: &Path) -> Result<bool, String>",
+        "fn exists_with_same_bytes(path: &Path, extra: &Path) -> Result<bool, String>",
+        "default-materializer:same-bytes-signature",
+    ),
+    (
+        "fn exists_with_same_bytes(path: &Path) -> Result<bool, String>",
+        "fn exists_with_same_bytes(path: String) -> Result<bool, String>",
+        "default-materializer:same-bytes-signature",
+    ),
+    (
+        "fn exists_with_same_bytes(path: &Path) -> Result<bool, String>",
+        "fn exists_with_same_bytes(path: &Path) -> bool",
+        "default-materializer:same-bytes-signature",
+    ),
+];
+
 #[test]
 fn rejects_noncanonical_asset_owner_declarations() -> Result<(), Box<dyn std::error::Error>> {
     let fixture = fixture()?;
@@ -74,6 +117,19 @@ fn rejects_readback_branch_shape_and_result_changes() -> Result<(), Box<dyn std:
     inspect_root(fixture.root())?;
     for (before, after, expected) in READBACK_BODY_MUTATIONS {
         legacy_readback(&fixture, RUST_INPUTS[0])?;
+        fixture.replace(RUST_INPUTS[0], before, after)?;
+        fixture.reject(expected)?;
+        fixture.restore(RUST_INPUTS[0])?;
+        inspect_root(fixture.root())?;
+    }
+    Ok(())
+}
+
+#[test]
+fn rejects_materializer_signature_input_variants() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = fixture()?;
+    inspect_root(fixture.root())?;
+    for (before, after, expected) in SIGNATURE_MUTATIONS {
         fixture.replace(RUST_INPUTS[0], before, after)?;
         fixture.reject(expected)?;
         fixture.restore(RUST_INPUTS[0])?;
