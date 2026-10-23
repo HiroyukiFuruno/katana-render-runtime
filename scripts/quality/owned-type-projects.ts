@@ -127,7 +127,7 @@ function compilerRuntime(): ExternalToolBinding["runtime"] {
     physical !== process.execPath ||
     !fs.lstatSync(physical).isFile() ||
     fs.lstatSync(process.execPath).isSymbolicLink() ||
-    process.versions.bun !== "1.4.3" ||
+    process.versions.bun !== "1.4.4" ||
     version !== process.versions.bun
   )
     throw new Error("unverified TypeScript Bun runtime");

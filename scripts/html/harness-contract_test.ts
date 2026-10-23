@@ -4378,7 +4378,7 @@ test("Moon v2.6.2 cache manifest binds the observed string version", () => {
     platform: "darwin",
     arch: "arm64",
     tools: {
-      bun: { version: "1.4.3", executableSha256: "1".repeat(64) },
+      bun: { version: "1.4.4", executableSha256: "1".repeat(64) },
       just: { version: "1.46.0", executableSha256: "2".repeat(64) },
       node: { version: "v24.0.0", executableSha256: "3".repeat(64) },
       bash: { version: "5.2", executableSha256: "4".repeat(64) },
@@ -4687,7 +4687,7 @@ function observedUnitTool(request: ExternalToolRequest): ExternalToolBinding {
     verification: "observed-local-pins",
     artifactVerified: false,
     inputPins: [{ name: "unit-observation", physicalPath: "/unit/tool", sha256: "0".repeat(64) }],
-    runtime: { kind: "bun", version: "1.4.3", path: "/unit/bun", sha256: "1".repeat(64) },
+    runtime: { kind: "bun", version: "1.4.4", path: "/unit/bun", sha256: "1".repeat(64) },
     lockIdentities: [
       { name: "typescript", version: "7.0.2", defaultRegistry: true, integrity: "sha512-unit" },
     ],
@@ -4813,8 +4813,8 @@ test.each([
   ],
   [
     "compiler runtime pin drift",
-    'process.versions.bun !== "1.4.3"',
     'process.versions.bun !== "1.4.4"',
+    'process.versions.bun !== "1.4.5"',
   ],
 ])("external tool rejects changed actual route %s", (_name, before, after) => {
   const actual = fs.readFileSync(
@@ -4841,12 +4841,12 @@ test.each([
   else if (kind === "changed pins")
     snapshot.externalToolResolver = (request) => ({
       ...observedUnitTool(request),
-      runtime: { kind: "bun", version: "1.4.3", path: "/different/bun", sha256: "2".repeat(64) },
+      runtime: { kind: "bun", version: "1.4.4", path: "/different/bun", sha256: "2".repeat(64) },
     });
   else if (kind === "changed runtime version")
     snapshot.externalToolResolver = (request) => {
       const binding = observedUnitTool(request);
-      Reflect.set(binding.runtime, "version", "1.4.4");
+      Reflect.set(binding.runtime, "version", "1.4.5");
       return binding;
     };
   else if (kind === "changed caller") {
@@ -4857,6 +4857,22 @@ test.each([
         : prior(name);
   } else snapshot.tracked.delete("scripts/quality/owned-type-projects.ts");
   expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
+});
+
+test("keeps an unverified TypeScript executable external while rejecting the failed binding", () => {
+  const snapshot = typeScriptGraphFixture();
+  snapshot.externalToolResolver = (request) => {
+    const binding = observedUnitTool(request);
+    Reflect.set(binding.runtime, "version", "1.4.5");
+    return binding;
+  };
+  expect(snapshot.graph.local.has("node_modules/typescript/bin/tsc")).toBe(false);
+  expect(snapshot.graph.ci.has("node_modules/typescript/bin/tsc")).toBe(false);
+  expect(checkHarnessContract(snapshot)).toEqual(
+    expect.arrayContaining([
+      "external tool binding changed/unverified: node_modules/typescript/bin/tsc",
+    ]),
+  );
 });
 
 function actualBiomeContext(): string {

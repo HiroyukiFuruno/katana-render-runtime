@@ -83,7 +83,7 @@ export interface ExternalToolBinding extends ExternalToolRequest {
   verification: "observed-local-pins";
   artifactVerified: false;
   inputPins: Array<{ name: string; physicalPath: string; sha256: string }>;
-  runtime: { kind: "bun"; version: "1.4.3"; path: string; sha256: string };
+  runtime: { kind: "bun"; version: "1.4.4"; path: string; sha256: string };
   lockIdentities: Array<{
     name: string;
     version: string;
@@ -1164,7 +1164,7 @@ function canonicalNativeUnitAstDigest(
 
 // 実queryとsafeFileのレビュー済みASTに限定する。変更時は同じ境界の再レビューが必要。
 const TYPESCRIPT_QUERY_AST_SHA256 =
-  "4f66c4d94ea69ec348387a0840f292b7705e821a4b9fff46db845537025934a9";
+  "5e2913016a164b4824c127629e34b0a32d73a38a4ab4285cfb7a5ca8628558be";
 
 function typeScriptQueryCall(
   module: Record<string, unknown>,
@@ -1558,7 +1558,7 @@ export function externalToolBindingMatches(
       (pin) => pin.physicalPath.length > 0 && /^[a-f0-9]{64}$/.test(pin.sha256),
     ) &&
     binding.runtime.kind === "bun" &&
-    binding.runtime.version === "1.4.3" &&
+    binding.runtime.version === "1.4.4" &&
     binding.runtime.path.length > 0 &&
     /^[a-f0-9]{64}$/.test(binding.runtime.sha256) &&
     binding.lockIdentities.length > 0 &&
@@ -3688,11 +3688,7 @@ function sourceCodeFromModule(
     }
     return callStaticBindings(node, staticContext.bindings, staticContext.blocks);
   };
-  const referencesForCall = (node: Record<string, unknown>): string[] => {
-    if (fixtureImports.has(node)) return fixtureImports.get(node) ?? [];
-    if (registeredExternalCalls.has(node)) return [];
-    if (nativeCall?.calls.has(node)) return [nativeCall.entrypoint];
-    if (bindExternalCall(node, toolCall, moduleRecord, source, context)) return [];
+  const regularCallReferences = (node: Record<string, unknown>): string[] => {
     if (node === biomeCommand?.call)
       return childCode(biomeCommand.array, bindings, staticForCall(node));
     if (node === standardBiomeCommand?.call) return [];
@@ -3700,6 +3696,17 @@ function sourceCodeFromModule(
     return preparedSource
       ? references.filter((name) => name !== "!unresolved-executable")
       : references;
+  };
+  const externalToolReferences = (node: Record<string, unknown>): string[] =>
+    bindExternalCall(node, toolCall, moduleRecord, source, context)
+      ? []
+      : ["!unresolved-external-tool"];
+  const referencesForCall = (node: Record<string, unknown>): string[] => {
+    if (fixtureImports.has(node)) return fixtureImports.get(node) ?? [];
+    if (registeredExternalCalls.has(node)) return [];
+    if (nativeCall?.calls.has(node)) return [nativeCall.entrypoint];
+    if (node === toolCall) return externalToolReferences(node);
+    return regularCallReferences(node);
   };
   const escaped = (
     node: Record<string, unknown>,
