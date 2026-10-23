@@ -44,6 +44,10 @@ REQUIRED_RELEASE_COMMITS = (
     "536658729364519837b50b10e1fb2ad8139ced1e",
     "dae31e9e94e2171d38b2950be302df1c032c7418",
     "930442f4e693462a058bf834d644e56c48577a98",
+    "fcf9abd00e58c0da19584d2d602e23656984f944",
+    "2dddb52c28cbf9cb9c424e885919a1d8e8ef5070",
+    "a274d0421ffb13cac8c45d8a8a80de53a1bfd96c",
+    "329f6b6c334e83a8784245bb240dfe5eadda64a2",
 )
 # 公開snapshotが旧版の必須commitを全て含むため、今回のcommitだけを追加確認する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -61,7 +65,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0423_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "4818978b331494d151c6eaa2402be2374a6b3bf361a1184605b2c94ef6737f6f"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "306fe8eca6b2e44da696402971df93dc18690a89091905fe5573e0f54754311b"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
