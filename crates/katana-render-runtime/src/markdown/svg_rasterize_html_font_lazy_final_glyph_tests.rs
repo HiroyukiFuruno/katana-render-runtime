@@ -206,6 +206,17 @@ fn assert_glyph_layout(trees: &[serde_json::Value], call: u64) -> Result<(), Str
     for span in spans {
         assert!(span["textPath"].is_string());
         assert_finite_transform(span, "textAbsTransform")?;
+        let faces = span["faces"].as_array().ok_or("span faces are absent")?;
+        for face in faces {
+            assert!(face["faceId"].is_string());
+            assert!(face["glyphCount"].as_u64().is_some_and(|count| count > 0));
+            assert!(face["effectiveVariations"].is_array());
+            assert!(face["normalizedCoords"].as_array().is_some_and(|coords| {
+                coords
+                    .iter()
+                    .all(|coord| coord.as_f64().is_some_and(f64::is_finite))
+            }));
+        }
         assert_span_glyphs(span)?;
     }
     Ok(())

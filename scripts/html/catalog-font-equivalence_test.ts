@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { catalogFontAcceptance, compareCatalogFontFaces } from "./catalog-font-equivalence";
+import { validateFontProvenance } from "./coretext-font-provenance";
 import type { JsonValue } from "./dynamic-state";
 
 type JsonObject = { [key: string]: JsonValue };
@@ -67,4 +68,93 @@ test("establishes only matching verified physical font-face sets", () => {
     established: false,
     reason: "variable font instance identity is not established",
   });
+});
+
+test("accepts layout runs only with finite four-character variation tags", () => {
+  const filePath = path.resolve("crates/katana-render-runtime/assets/fonts/NotoSans-Regular.ttf");
+  const face = {
+    scope: "capture" as const,
+    family: "Fixture",
+    source: "captured-font",
+    filePath,
+    fileSha256: createHash("sha256").update(fs.readFileSync(filePath)).digest("hex"),
+    faceIndex: 0,
+    selected: true as const,
+    fileBytesVerified: true as const,
+  };
+  expect(
+    validateFontProvenance([
+      {
+        ...face,
+        layoutRuns: [
+          {
+            paintCall: 2,
+            treePath: "root/0",
+            faceId: "face-0",
+            glyphCount: 3,
+            layoutVariations: [{ tag: "wght", value: 700 }],
+            derivedEffectiveVariations: [{ tag: "wght", value: 700 }],
+            derivedNormalizedCoords: [0.5],
+          },
+        ],
+      },
+    ])[0]?.layoutRuns?.[0]?.faceId,
+  ).toBe("face-0");
+  expect(() =>
+    validateFontProvenance([
+      {
+        ...face,
+        layoutRuns: [
+          {
+            paintCall: 2,
+            treePath: "root/0",
+            faceId: "face-0",
+            glyphCount: 3,
+            layoutVariations: [
+              { tag: "wght", value: 700 },
+              { tag: "wght", value: 701 },
+            ],
+            derivedEffectiveVariations: [{ tag: "wght", value: 700 }],
+            derivedNormalizedCoords: [0.5],
+          },
+        ],
+      },
+    ]),
+  ).toThrow();
+  expect(() =>
+    validateFontProvenance([
+      {
+        ...face,
+        layoutRuns: [
+          {
+            paintCall: 2,
+            treePath: "root/0",
+            faceId: "face-0",
+            glyphCount: 3,
+            layoutVariations: [{ tag: "bad", value: 700 }],
+            derivedEffectiveVariations: [{ tag: "bad", value: 700 }],
+            derivedNormalizedCoords: [0.5],
+          },
+        ],
+      },
+    ]),
+  ).toThrow();
+  expect(() =>
+    validateFontProvenance([
+      {
+        ...face,
+        layoutRuns: [
+          {
+            paintCall: 2,
+            treePath: "root/0",
+            faceId: "face-0",
+            glyphCount: 3,
+            layoutVariations: [{ tag: "wght", value: 700 }],
+            derivedEffectiveVariations: [{ tag: "wght", value: 700 }],
+            derivedNormalizedCoords: [Number.POSITIVE_INFINITY],
+          },
+        ],
+      },
+    ]),
+  ).toThrow();
 });

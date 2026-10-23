@@ -1536,38 +1536,62 @@ fn collect_final_font_records(trees: Vec<&serde_json::Value>) -> Option<Vec<serd
     let mut records = BTreeMap::new();
     for tree in trees {
         for face in tree.get("faces")?.as_array()? {
-            collect_verified_face(&mut records, face)?;
+            collect_verified_face(&mut records, face, tree)?;
         }
     }
     (!records.is_empty()).then(|| records.into_values().collect())
 }
 
+type CatalogFontRecords = BTreeMap<(String, u64, String), serde_json::Value>;
+
 fn collect_verified_face(
-    records: &mut BTreeMap<(String, u64, String), serde_json::Value>,
+    records: &mut CatalogFontRecords,
     face: &serde_json::Value,
+    tree: &serde_json::Value,
 ) -> Option<()> {
     if face.get("identity").and_then(serde_json::Value::as_str) != Some("physical_verified")
         || face.get("glyphCount").and_then(serde_json::Value::as_u64)? == 0
     {
         return None;
     }
-    let record = catalog_font_record(face.get("source")?)?;
+    let layout_runs = face
+        .get("faceId")
+        .and_then(serde_json::Value::as_str)
+        .map_or(Some(Vec::new()), |face_id| {
+            layout_runs_for_face(tree, face_id)
+        })?;
+    let record = catalog_font_record(face.get("source")?, layout_runs)?;
     let key = (
         record["filePath"].as_str()?.to_owned(),
         record["faceIndex"].as_u64()?,
         record["fileSha256"].as_str()?.to_owned(),
     );
-    match records.get(&key) {
-        Some(existing) if existing != &record => None,
-        Some(_) => Some(()),
+    merge_catalog_font_record(records, key, record)
+}
+
+fn merge_catalog_font_record(
+    records: &mut CatalogFontRecords,
+    key: (String, u64, String),
+    record: serde_json::Value,
+) -> Option<()> {
+    match records.get_mut(&key) {
+        Some(existing) if existing == &record => Some(()),
+        Some(existing) if same_catalog_font_identity(existing, &record) => {
+            merge_layout_runs(existing, &record)?;
+            Some(())
+        }
         None => {
             records.insert(key, record);
             Some(())
         }
+        _ => None,
     }
 }
 
-fn catalog_font_record(face: &serde_json::Value) -> Option<serde_json::Value> {
+fn catalog_font_record(
+    face: &serde_json::Value,
+    layout_runs: Vec<serde_json::Value>,
+) -> Option<serde_json::Value> {
     let family = face.get("families")?.as_array()?.first()?.as_str()?;
     let source = face.get("kind")?.as_str()?;
     let file_path = face.get("path")?.as_str()?;
@@ -1581,10 +1605,82 @@ fn catalog_font_record(face: &serde_json::Value) -> Option<serde_json::Value> {
     {
         return None;
     }
-    Some(json!({
+    let mut record = json!({
         "family":family, "source":source, "filePath":file_path, "faceIndex":face_index,
         "fileSha256":file_sha, "scope":"capture", "selected":true, "fileBytesVerified":true
-    }))
+    });
+    if !layout_runs.is_empty() {
+        record["layoutRuns"] = serde_json::Value::Array(layout_runs);
+    }
+    Some(record)
+}
+
+fn layout_runs_for_face(tree: &serde_json::Value, face_id: &str) -> Option<Vec<serde_json::Value>> {
+    let mut runs = Vec::new();
+    let Some(spans) = tree.get("textSpans").and_then(serde_json::Value::as_array) else {
+        return Some(runs);
+    };
+    for span in spans {
+        if let Some(run) = layout_run_for_face(tree, span, face_id)? {
+            runs.push(run);
+        }
+    }
+    Some(runs)
+}
+
+fn layout_run_for_face(
+    tree: &serde_json::Value,
+    span: &serde_json::Value,
+    face_id: &str,
+) -> Option<Option<serde_json::Value>> {
+    let span_face = span
+        .get("faces")?
+        .as_array()?
+        .iter()
+        .find(|face| face.get("faceId").and_then(serde_json::Value::as_str) == Some(face_id));
+    let Some(span_face) = span_face else {
+        return Some(None);
+    };
+    let glyph_count = span_face
+        .get("glyphCount")
+        .and_then(serde_json::Value::as_u64)?;
+    if glyph_count == 0 {
+        return None;
+    }
+    Some(Some(json!({
+        "paintCall": tree.get("paintCall").and_then(serde_json::Value::as_u64)?,
+        "treePath": tree.get("treePath").and_then(serde_json::Value::as_str)?,
+        "faceId": face_id, "glyphCount": glyph_count,
+        "layoutVariations": span.get("layoutVariations")?.as_array()?.clone(),
+        "derivedEffectiveVariations": span_face.get("effectiveVariations")?.as_array()?.clone(),
+        "derivedNormalizedCoords": span_face.get("normalizedCoords")?.as_array()?.clone(),
+    })))
+}
+
+fn same_catalog_font_identity(left: &serde_json::Value, right: &serde_json::Value) -> bool {
+    [
+        "family",
+        "source",
+        "filePath",
+        "faceIndex",
+        "fileSha256",
+        "scope",
+        "selected",
+        "fileBytesVerified",
+    ]
+    .iter()
+    .all(|key| left.get(*key) == right.get(*key))
+}
+
+fn merge_layout_runs(existing: &mut serde_json::Value, incoming: &serde_json::Value) -> Option<()> {
+    let incoming_runs = incoming.get("layoutRuns")?.as_array()?;
+    let existing_runs = existing
+        .as_object_mut()?
+        .entry("layoutRuns")
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()))
+        .as_array_mut()?;
+    existing_runs.extend(incoming_runs.iter().cloned());
+    Some(())
 }
 
 fn is_sha256(value: &str) -> bool {
@@ -1679,18 +1775,24 @@ fn catalog_font_audit_complete(
     !faces.is_empty()
         && errors.is_empty()
         && dropped == 0
-        && faces.iter().all(|face| catalog_font_record(face).is_some())
-        && audit
-            .get("finalGlyphErrors")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(Vec::is_empty)
+        && faces
+            .iter()
+            .all(|face| catalog_font_record(face, Vec::new()).is_some())
+        && final_glyph_audit_complete(audit)
+        && physical_faces
+            .as_array()
+            .is_some_and(|records| !records.is_empty())
+}
+
+fn final_glyph_audit_complete(audit: &serde_json::Value) -> bool {
+    audit
+        .get("finalGlyphErrors")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(Vec::is_empty)
         && audit
             .get("finalGlyphDropped")
             .and_then(serde_json::Value::as_u64)
             == Some(0)
-        && physical_faces
-            .as_array()
-            .is_some_and(|records| !records.is_empty())
 }
 
 fn operation_unknown_reason(evidence: &serde_json::Value) -> String {
@@ -2287,9 +2389,10 @@ mod tests {
     }
 
     #[test]
-    fn catalog_writer_requires_operation_resource_font_and_capture_evidence() {
+    fn catalog_writer_requires_operation_resource_font_and_capture_evidence() -> super::TestResult {
         assert_catalog_evidence_matrix();
-        assert_catalog_font_audit_contract();
+        assert_catalog_font_audit_contract()?;
+        Ok(())
     }
 
     fn assert_catalog_evidence_matrix() {
@@ -2308,11 +2411,38 @@ mod tests {
         ));
     }
 
-    fn assert_catalog_font_audit_contract() {
+    fn assert_catalog_font_audit_contract() -> super::TestResult {
         let complete_audit = complete_catalog_font_audit();
         assert_complete_catalog_font_audit(&complete_audit);
+        assert_catalog_layout_runs_are_face_bound_and_preserved(&complete_audit)?;
         assert_invalid_catalog_font_audit(&complete_audit);
         assert_missing_drop_count_is_rejected(&complete_audit);
+        Ok(())
+    }
+
+    fn assert_catalog_layout_runs_are_face_bound_and_preserved(
+        audit: &serde_json::Value,
+    ) -> super::TestResult {
+        let mut audit = audit.clone();
+        audit["finalGlyphTrees"][0]["faces"][0]["faceId"] = json!("face-0");
+        audit["finalGlyphTrees"][0]["textSpans"] = json!([
+            {"faces":[{"faceId":"face-0","glyphCount":2,
+                         "effectiveVariations":[],"normalizedCoords":[]}],
+             "layoutVariations":[{"tag":"wght","value":700.0}]},
+            {"faces":[{"faceId":"face-0","glyphCount":1,
+                         "effectiveVariations":[],"normalizedCoords":[]}],
+             "layoutVariations":[{"tag":"wdth","value":90.0}]}
+        ]);
+        let records = super::catalog_font_provenance(&audit);
+        let runs = records
+            .get(0)
+            .and_then(|record| record["layoutRuns"].as_array())
+            .ok_or("layout runs")?;
+        assert_eq!(runs.len(), 2);
+        assert!(runs.iter().all(|run| run["faceId"] == "face-0"));
+        assert_eq!(runs[0]["paintCall"], 1);
+        assert_eq!(runs[1]["glyphCount"], 1);
+        Ok(())
     }
 
     fn complete_catalog_font_audit() -> serde_json::Value {

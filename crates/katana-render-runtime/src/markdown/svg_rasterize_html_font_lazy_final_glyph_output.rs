@@ -111,12 +111,13 @@ pub(super) struct FontVariationEvidence {
     pub(super) tag: String,
     pub(super) value: f32,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct FinalGlyphSpanFace {
     pub(super) face_id: String,
     pub(super) glyph_count: u64,
+    pub(super) effective_variations: Vec<FontVariationEvidence>,
+    pub(super) normalized_coords: Vec<f32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -172,7 +173,6 @@ fn append_tree_row(capture: &mut Capture, tree: FinalGlyphTree) -> bool {
         .push(FinalGlyphTree { faces, ..tree });
     true
 }
-
 fn append_errors(capture: &mut Capture, errors: Vec<FinalGlyphError>) {
     for error in errors {
         if capture.final_glyph_record_count >= MAX_FINAL_GLYPH_RECORDS {

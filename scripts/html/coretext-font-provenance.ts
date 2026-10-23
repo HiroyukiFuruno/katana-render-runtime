@@ -25,6 +25,30 @@ const variationCoordinateSchema = z
   .object({ identifier: z.number().int().min(0).max(U32_MAX), value: z.number().finite() })
   .strict();
 
+const layoutVariationSchema = z
+  .object({ tag: z.string().regex(/^[\x20-\x7e]{4}$/), value: z.number().finite() })
+  .strict();
+
+const layoutRunSchema = z
+  .object({
+    paintCall: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    treePath: z.string().min(1),
+    faceId: z.string().min(1),
+    glyphCount: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    layoutVariations: z.array(layoutVariationSchema),
+    derivedEffectiveVariations: z.array(layoutVariationSchema),
+    derivedNormalizedCoords: z.array(z.number().finite()),
+  })
+  .strict()
+  .superRefine((run, context) => {
+    const tags = new Set<string>();
+    for (const variation of run.layoutVariations) {
+      if (tags.has(variation.tag))
+        context.addIssue({ code: "custom", message: "duplicate layout variation tag" });
+      tags.add(variation.tag);
+    }
+  });
+
 const coreTextDescriptorSchema = z
   .object({
     urlPath: z.string().min(1),
@@ -74,6 +98,7 @@ const fontProvenanceSchema = z
     selected: z.literal(true),
     fileBytesVerified: z.literal(true),
     coreTextDescriptor: coreTextDescriptorSchema.optional(),
+    layoutRuns: z.array(layoutRunSchema).min(1).optional(),
   })
   .strict()
   .superRefine((face, context) => {
