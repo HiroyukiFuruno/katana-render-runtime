@@ -97,6 +97,32 @@ class CatalogProducerOperationTest(unittest.TestCase):
             run.assert_called_once_with(root, output, capacity, "d" * 64, manifest,
                                         _allow_catalog_diagnostic=True)
 
+    def test_full_cli_holds_canonical_locks_during_production(self) -> None:
+        for diagnostic in (False, True):
+            with self.subTest(diagnostic_only=diagnostic), \
+                 tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                output = root / "tmp/evidence"
+                capacity = root / "capacity.json"
+                manifest = root / "catalog-stage90-captures.json"
+
+                def assert_lock_is_held(*_args: object, _root: Path = root,
+                                         **_kwargs: object) -> None:
+                    with self.assertRaisesRegex(RuntimeError, "another local review is active"):
+                        with producer.candidate_build_locks(_root):
+                            self.fail("full producer entered without the canonical lock")
+
+                argv = [
+                    "produce_html_performance_evidence.py", "--repo", str(root),
+                    "--output", str(output), "--capacity-binding", str(capacity),
+                    "--capacity-binding-sha256", "e" * 64, "--catalog-plan", str(manifest),
+                ]
+                if diagnostic:
+                    argv.append("--diagnostic-only")
+                with patch.object(producer.sys, "argv", argv), \
+                     patch.object(producer, "produce", side_effect=assert_lock_is_held):
+                    producer.main()
+
     def test_candidate_build_cli_forwards_pinned_capacity_without_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

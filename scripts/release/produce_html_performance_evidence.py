@@ -1756,12 +1756,14 @@ def main() -> None:
         return
     if args.catalog_plan is None:
         parser.error("--catalog-plan is required for HTML performance production")
-    arguments = (args.repo.resolve(), args.output.resolve(), args.capacity_binding,
+    repo = args.repo.resolve()
+    arguments = (repo, args.output.resolve(), args.capacity_binding,
                  args.capacity_binding_sha256, args.catalog_plan.resolve())
-    if args.diagnostic_only:
-        produce(*arguments, _allow_catalog_diagnostic=True)
-    else:
-        produce(*arguments)
+    with candidate_build_locks(repo):
+        if args.diagnostic_only:
+            produce(*arguments, _allow_catalog_diagnostic=True)
+        else:
+            produce(*arguments)
 
 
 if __name__ == "__main__":

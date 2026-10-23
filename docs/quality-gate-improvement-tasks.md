@@ -14,7 +14,13 @@
 
 ## 現在の状態（2026-10-23）
 
-- [ ] observer付き正式84撮影を標準recipeへ接続した。旧traceなしreceiptをobserver resumeへ流用するP1をレビューで発見し、元unknown/最終observed receiptのtrace一致・実pin検証を必須にした。R1551の関連48件と標準recipeのdry-runがactual0。R1550の複雑度/未使用、R1552の自作fixture型エラーを修正後、R1553のfoundation全12taskとR1554の関連8件がactual0・source前後一致。共通trace fixtureはGit管理のtest-supportへ抽象化した。次はclean committed sourceの正式84撮影・全出力font一致を実測し、局所8件を正式84へ代用しない（`tmp/quality/observer-resume-regressions-r1551/result.json`、`current-font-observation-static-r1553/result.json`、`observer-resume-final-recheck-r1554/result.json`）。
+- [/] R1556/R1557でHEAD `0f7c87c4`の正式HTML84撮影と厳密readerを実行し、84/84が90以上（最低91.49827）、出力font物理face・全実適用座標の双方向一致を確認した。actual0・source前後一致、`html84Acceptance=true`・`fontIdentityEquivalence=established`・診断空。性能・原資料の全Y走査・consumer受入・公開は未完了であり、画像/fontの成功で代用しない（`tmp/quality/current-html84-observer-validation-r1557/result.json`、`validation.json`、`tmp/html-performance-stage90/r1556/captures/catalog-stage90-captures.json`）。
+
+- [ ] R1558で全117図の監査付き実PNGがR1511の通常製品PNGとSHA完全一致した。R1560の公開Skia全SVG診断は105図を採点、13図が99以上、通常製品と比較して改善23・悪化82、残る12図はfilter非対応8・font物理identity未証明4で未採点。全SVG置換は採用しない。正解画像・99条件・寸法を維持し、文字と既存形状の責務を分けて修正する。中間candidate-SVG比較の115/117合格を実nativeの合格へ転用しない（`tmp/quality/current-mermaid117-glyph-audit-r1558/result.json`、`public-skia-current117-r1560/result.json`、`scores.json`）。
+
+- [ ] 正式HTML性能のR1561は既存immutable bindingディレクトリへの再作成で測定前に失敗し、R1562は既存bindingを厳格producerで検証した後、baseline build actual0・実行ファイルfreeze中に元targetが消失して失敗した。全体の終了コードは1、性能値は未取得・非劣化未証明。full CLIにcanonical owner lockがない不備を修正し、formal/diagnostic両経路の所有権回帰を追加した。R1563の静的検査は回帰コードのRuff B023で停止したため修正し、R1564で標準foundation全12taskとproducer操作回帰9件がactual0・source前後一致。失敗証跡を保持し、通常commit後に正式測定を再開する（`tmp/quality/current-html-performance-r1561/result.json`、`current-html-performance-r1562/result.json`、`performance-owner-regression-r1563/result.json`、`performance-owner-regression-r1564/result.json`）。
+
+- [/] observer付き正式84撮影を標準recipeへ接続した。旧traceなしreceiptをobserver resumeへ流用するP1をレビューで発見し、元unknown/最終observed receiptのtrace一致・実pin検証を必須にした。R1551の関連48件と標準recipeのdry-runがactual0。R1550の複雑度/未使用、R1552の自作fixture型エラーを修正後、R1553のfoundation全12taskとR1554の関連8件がactual0・source前後一致。共通trace fixtureはGit管理のtest-supportへ抽象化した。続くR1556/R1557でclean committed sourceの正式84撮影・全出力font一致も実測成功した（`tmp/quality/observer-resume-regressions-r1551/result.json`、`current-font-observation-static-r1553/result.json`、`observer-resume-final-recheck-r1554/result.json`、`current-html84-observer-validation-r1557/result.json`）。
 
 - [ ] R1547では現行EN継承図の実初回font監査が保存した571×404の`resolvedTextSvg`を公開Skiaで描き、R1511と同じ独立raw画像に対し99.852593（stock設定98.08669）を実測した。現行製品R1511の同図96.25943との差が共通文字描画設定で縮むことを確認した。入力・原本は不変、既存のSourceAlpha shadow展開のみで図形・文字・寸法を変えていない。これは診断backendであり製品117件の合格へ代用しない（`tmp/quality/public-skia-current-class-r1547/input-lineage.json`、`result.json`、`scores.json`）。
 
