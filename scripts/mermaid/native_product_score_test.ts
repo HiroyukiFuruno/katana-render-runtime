@@ -15,6 +15,7 @@ const HEIGHT = 100;
 interface Fixture {
   root: string;
   officialPath: string;
+  projectedPath: string;
   pair: ReferencePair;
 }
 
@@ -90,11 +91,14 @@ function drawDiagram(output: string, options: DiagramOptions = {}): void {
 
 function createFixture(slug = GEOMETRY_SLUG): Fixture {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "krr-native-product-edge-score-")),
-    officialPath = path.join(root, "official.png");
+    officialPath = path.join(root, "official.png"),
+    projectedPath = path.join(root, "projected-reference.png");
   drawDiagram(officialPath);
+  drawDiagram(projectedPath);
   return {
     root,
     officialPath,
+    projectedPath,
     pair: {
       slug,
       officialPath,
@@ -131,10 +135,17 @@ function scoreFixture(fixture: Fixture, actualPng: string, runName: string) {
       height: HEIGHT,
       evidenceSha256: "a".repeat(64),
     };
+  const projectedReference = {
+    projectedPng: { path: fixture.projectedPath, sha256: fileSha256(fixture.projectedPath) },
+    officialPngSha256: fileSha256(fixture.officialPath),
+    actualPngSha256: fileSha256(actualPng),
+    evidenceSha256: projected.evidenceSha256,
+  };
   return scoreNativeProductRows(
     [fixture.pair],
     [frame],
     new Map([[fixture.pair.slug, projected]]),
+    new Map([[fixture.pair.slug, projectedReference]]),
     new MagickOps(directory, null, "dark"),
     directory,
   ).scores[0];
@@ -143,15 +154,54 @@ function scoreFixture(fixture: Fixture, actualPng: string, runName: string) {
 test("native C4 shape score uses actual PNG RGB edge support and keeps RGB separate", () =>
   withFixture((fixture) => {
     const recolored = path.join(fixture.root, "recolored.png");
+    drawDiagram(fixture.projectedPath, { inverted: true });
     drawDiagram(recolored, { inverted: true });
     const row = scoreFixture(fixture, recolored, "palette-inversion");
     expect(row?.actualPngShape?.score).toBe(100);
     expect(row?.rgbScore).toBeLessThan(99);
     expect(row?.passed).toBe(true);
-    expect(row?.actualPngShape?.policy).toBe("rgb-channel-edge-support-v1");
+    expect(row?.actualPngShape?.policy).toBe("paint-aligned-rgb-channel-edge-support-v2");
     expect(row?.scoreSemantics).toBe(
-      "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1",
+      "actual-png-paint-aligned-rgb-channel-edge-support-v2+paint-projected-reference-v1",
     );
+    expect(row?.actualPngShape?.projectedReferencePngSha256).toBe(
+      fileSha256(fixture.projectedPath),
+    );
+  }));
+
+test("native C4 shape score rejects an unpinned projected reference", () =>
+  withFixture((fixture) => {
+    const actual = path.join(fixture.root, "unverified-reference.png");
+    drawDiagram(actual);
+    const frame = { slug: fixture.pair.slug, png: { path: actual, sha256: fileSha256(actual) } };
+    expect(() =>
+      scoreNativeProductRows(
+        [fixture.pair],
+        [frame],
+        new Map([
+          [
+            fixture.pair.slug,
+            {
+              policy: "raw-svg-geometry-candidate-computed-paint-v1" as const,
+              score: 100,
+              structuralIntegrityAccepted: true,
+              reasons: [],
+              maxTransformDelta: 0,
+              fullCanvasRmseScore: 100,
+              fullCanvasMaeScore: 100,
+              contentRmseScore: 100,
+              contentMaeScore: 100,
+              width: WIDTH,
+              height: HEIGHT,
+              evidenceSha256: "a".repeat(64),
+            },
+          ],
+        ]),
+        new Map(),
+        new MagickOps(path.join(fixture.root, "unverified-reference"), null, "dark"),
+        path.join(fixture.root, "unverified-reference"),
+      ),
+    ).toThrow("Missing native paint reference pin");
   }));
 
 test("native C4 shape score rejects missing interior text despite projected score 100", () =>
@@ -192,6 +242,7 @@ test("native C4 edge support retains a quantized equal-luminance RGB boundary", 
       );
     expect(gray8("#ff0000")).toBe(gray8("#004b00"));
     drawDiagram(fixture.officialPath, { splitPalette: "red-green" });
+    drawDiagram(fixture.projectedPath, { splitPalette: "red-green" });
     drawDiagram(swapped, { splitPalette: "green-red" });
     drawDiagram(removed, { splitPalette: "red-red" });
     expect(scoreFixture(fixture, swapped, "equal-luminance-swapped")?.actualPngShape?.score).toBe(
@@ -243,6 +294,7 @@ test("native product RGB score reads actual frame PNG and rejects missing frames
         [fixture.pair],
         [],
         new Map(),
+        new Map(),
         new MagickOps(path.join(fixture.root, "missing"), null, "dark"),
         path.join(fixture.root, "missing"),
       ),
@@ -256,6 +308,7 @@ test("native product scoring records known dimension failures and continues the 
     const batch = scoreNativeProductRows(
       [fixture.pair],
       [{ slug: fixture.pair.slug, png: { path: wrongSize, sha256: fileSha256(wrongSize) } }],
+      new Map(),
       new Map(),
       new MagickOps(path.join(fixture.root, "known-dimension-failure"), null, "dark"),
       path.join(fixture.root, "known-dimension-failure"),
@@ -281,6 +334,7 @@ test("native product scoring rethrows non-dimension failures", () =>
       scoreNativeProductRows(
         [fixture.pair],
         [frame],
+        new Map(),
         new Map(),
         new MagickOps(path.join(fixture.root, "unexpected-failure"), null, "dark"),
         path.join(fixture.root, "unexpected-failure"),

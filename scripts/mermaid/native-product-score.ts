@@ -11,6 +11,15 @@ export interface NativeProductFrame {
   png: { path: string; sha256: string };
 }
 
+export interface NativeProductPaintReference {
+  projectedPng: { path: string; sha256: string };
+  officialPngSha256: string;
+  actualPngSha256: string;
+  evidenceSha256: string;
+}
+
+type NativeProductActualPngShape = NonNullable<ReferenceScoreRow["actualPngShape"]>;
+
 export interface NativeProductDimensionFailure {
   slug: string;
   reason: "paint-projected-raster-dimensions-differ";
@@ -27,6 +36,7 @@ export function scoreNativeProductRows(
   pairs: readonly ReferencePair[],
   frames: readonly NativeProductFrame[],
   projectedScores: ReadonlyMap<string, PaintProjectedReferenceScore>,
+  projectedReferences: ReadonlyMap<string, NativeProductPaintReference>,
   magick: MagickOps,
   outputDirectory: string,
 ): NativeProductScoreBatch {
@@ -43,6 +53,7 @@ export function scoreNativeProductRows(
           pair,
           framesBySlug.get(pair.slug),
           projectedScores,
+          projectedReferences,
           magick,
           workDirectory,
           policy,
@@ -85,6 +96,7 @@ function scoreNativeProductRow(
   pair: ReferencePair,
   frame: NativeProductFrame | undefined,
   projectedScores: ReadonlyMap<string, PaintProjectedReferenceScore>,
+  projectedReferences: ReadonlyMap<string, NativeProductPaintReference>,
   magick: MagickOps,
   workDirectory: string,
   policy: ReferenceScorePolicy,
@@ -100,31 +112,70 @@ function scoreNativeProductRow(
       workDirectory,
       pair.slug,
     ),
-    projected = projectedScores.get(pair.slug);
+    projected = projectedScores.get(pair.slug),
+    projectedReference = projectedReferences.get(pair.slug);
   if (isNeutralGeometryTargetSlug(pair.slug) && projected === undefined) {
     throw new Error(`Missing native geometry score: ${pair.slug}`);
   }
-  const actualPngShape = isNeutralGeometryTargetSlug(pair.slug)
-    ? magick.compareRgbChannelEdgeSupportImages(
-        pair.officialPath,
-        frame.png.path,
-        workDirectory,
-        pair.slug,
-      )
+  const paintReference = isNeutralGeometryTargetSlug(pair.slug)
+    ? assertPaintReference(pair, actualPngSha256, projected, projectedReference)
     : undefined;
-  return buildNativeProductScoreRow(
-    pair.slug,
-    metrics,
-    projected,
-    actualPngShape === undefined
+  const actualPngShape =
+    paintReference === undefined
       ? undefined
-      : {
-          ...actualPngShape,
-          officialPngSha256: fileSha256(pair.officialPath),
-          actualPngSha256,
-        },
-    policy,
+      : buildPaintAlignedShape(pair, frame, actualPngSha256, paintReference, magick, workDirectory);
+  return buildNativeProductScoreRow(pair.slug, metrics, projected, actualPngShape, policy);
+}
+
+function buildPaintAlignedShape(
+  pair: ReferencePair,
+  frame: NativeProductFrame,
+  actualPngSha256: string,
+  paintReference: {
+    projected: PaintProjectedReferenceScore;
+    reference: NativeProductPaintReference;
+  },
+  magick: MagickOps,
+  workDirectory: string,
+): NativeProductActualPngShape {
+  const comparison = magick.compareRgbChannelEdgeSupportImages(
+    paintReference.reference.projectedPng.path,
+    frame.png.path,
+    workDirectory,
+    pair.slug,
   );
+  return {
+    ...comparison,
+    officialPngSha256: fileSha256(pair.officialPath),
+    actualPngSha256,
+    projectedReferencePngSha256: paintReference.reference.projectedPng.sha256,
+    projectionEvidenceSha256: paintReference.projected.evidenceSha256,
+    policy: "paint-aligned-rgb-channel-edge-support-v2",
+  };
+}
+
+function assertPaintReference(
+  pair: ReferencePair,
+  actualPngSha256: string,
+  projected: PaintProjectedReferenceScore | undefined,
+  reference: NativeProductPaintReference | undefined,
+): { projected: PaintProjectedReferenceScore; reference: NativeProductPaintReference } {
+  if (projected === undefined || reference === undefined) {
+    throw new Error(`Missing native paint reference pin: ${pair.slug}`);
+  }
+  if (fileSha256(pair.officialPath) !== reference.officialPngSha256) {
+    throw new Error(`Native paint reference official PNG differs from its evidence: ${pair.slug}`);
+  }
+  if (fileSha256(reference.projectedPng.path) !== reference.projectedPng.sha256) {
+    throw new Error(`Native paint reference projected PNG differs from its evidence: ${pair.slug}`);
+  }
+  if (reference.actualPngSha256 !== actualPngSha256) {
+    throw new Error(`Native paint reference actual PNG differs from its evidence: ${pair.slug}`);
+  }
+  if (reference.evidenceSha256 !== projected.evidenceSha256) {
+    throw new Error(`Native paint reference evidence differs from its score: ${pair.slug}`);
+  }
+  return { projected, reference };
 }
 
 function buildNativeProductScoreRow(
@@ -142,7 +193,7 @@ function buildNativeProductScoreRow(
     score,
     rgbScore: metrics.score,
     scoreSemantics: geometry
-      ? "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1"
+      ? "actual-png-paint-aligned-rgb-channel-edge-support-v2+paint-projected-reference-v1"
       : "rgb-v1",
     canvasRmseScore: metrics.fullCanvasRmseScore,
     canvasMaeScore: metrics.fullCanvasMaeScore,

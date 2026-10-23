@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { expect, test } from "playwright/test";
 import { DiagramTheme } from "./diagram_theme";
+import { parsePaintProjectedReferenceEvidence } from "./managed-full-compare-results";
 import { fileSha256 } from "./mermaid-pair-manifest";
 import {
   NATIVE_FRAME_TARGETS,
@@ -12,6 +13,7 @@ import {
   scoreNativeFramePaintProjection,
   verifyNativeFrameEvidence,
 } from "./native-frame-evidence";
+import { scoreNativeProductRows } from "./native-product-score";
 import {
   type NeutralRasterInput,
   type PaintProjectedReferenceInput,
@@ -24,6 +26,7 @@ import { assignStrictSvg, resizeSvgCapture } from "./raster-capture-observation"
 import { rasterCaptureHtml } from "./rasterize-svg-dir";
 import { MagickOps } from "./reference_image_ops";
 import type { ReferencePair } from "./reference_pair_repository";
+import { scorePaintProjectedReferenceTargets } from "./reference_svg_geometry_scoring";
 import { waitForStrictSvgExternalImages } from "./strict-svg-external-images";
 
 const naturalViewBoxSizingCases = [
@@ -36,6 +39,112 @@ const naturalViewBoxSizingCases = [
     viewBox: [-0.5, 0, 124.828125, 232],
   },
 ] as const;
+
+test("low-contrast C4 color changes pass the paint-aligned actual PNG gate", async ({
+  browser,
+}) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "krr-c4-low-contrast-control-"));
+  const page = await browser.newPage({
+    viewport: { width: 1520, height: 845 },
+    deviceScaleFactor: 1,
+  });
+  try {
+    const pair = await captureLowContrastC4Control(root, page);
+    await expectLowContrastC4ProductScore(root, pair);
+  } finally {
+    await page.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+async function captureLowContrastC4Control(root: string, page: PageHandle): Promise<ReferencePair> {
+  const sourcePath = path.resolve("tests/fixtures/mermaid/en/official-dark/08-04-c4-component.svg");
+  const storedSource = fs.readFileSync(sourcePath, "utf8");
+  const source = storedSource.replaceAll("#e0e0e0", "#444444");
+  const colored = source.replaceAll("#444444", "#e0e0e0");
+  expect(colored).not.toBe(source);
+  const pair = {
+    slug: "08-04-c4-component",
+    officialSvgPath: path.join(root, "official.svg"),
+    officialPath: path.join(root, "official.png"),
+    katanaSvgPath: path.join(root, "candidate.svg"),
+    katanaPath: path.join(root, "actual.png"),
+  };
+  fs.writeFileSync(pair.officialSvgPath, source, { flag: "wx" });
+  fs.writeFileSync(pair.katanaSvgPath, colored, { flag: "wx" });
+  await renderAaColorControl(page, source, pair.officialPath);
+  const originalGeometry = await readColorControlGeometry(page);
+  await renderAaColorControl(page, colored, pair.katanaPath);
+  expect(await readColorControlGeometry(page)).toEqual(originalGeometry);
+  expect(fs.readFileSync(sourcePath, "utf8")).toBe(storedSource);
+  return pair;
+}
+
+function readColorControlGeometry(page: PageHandle) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("#diagram svg text"), (node) => {
+      const text = node as SVGTextElement;
+      const box = text.getBBox();
+      const matrix = text.getScreenCTM();
+      if (matrix === null) throw new Error("C4 control text has no screen transform");
+      const style = getComputedStyle(text);
+      return {
+        text: text.textContent,
+        box: [box.x, box.y, box.width, box.height],
+        matrix: [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f],
+        font: [style.fontFamily, style.fontSize, style.fontWeight, style.fontStyle],
+      };
+    }),
+  );
+}
+
+async function expectLowContrastC4ProductScore(root: string, pair: ReferencePair) {
+  const projectionDirectory = path.join(root, "projection");
+  fs.mkdirSync(projectionDirectory);
+  const projectionMagick = new MagickOps(path.join(root, "projection-metrics"), null, "dark");
+  projectionMagick.prepare();
+  const projected = await scorePaintProjectedReferenceTargets(
+    [pair],
+    projectionDirectory,
+    "dark",
+    projectionMagick,
+  );
+  const evidence = parsePaintProjectedReferenceEvidence(
+    JSON.parse(fs.readFileSync(projected.evidencePath, "utf8")),
+  );
+  const expected = evidence.pairs[0];
+  if (expected === undefined) throw new Error("C4 control produced no paint projection");
+  const frame = {
+    slug: pair.slug,
+    png: { path: pair.katanaPath, sha256: fileSha256(pair.katanaPath) },
+  };
+  const bindings = new Map([
+    [
+      pair.slug,
+      {
+        projectedPng: {
+          path: expected.projectedReference.pngPath,
+          sha256: expected.projectedReference.pngSha256,
+        },
+        officialPngSha256: fileSha256(pair.officialPath),
+        actualPngSha256: frame.png.sha256,
+        evidenceSha256: projected.evidenceSha256,
+      },
+    ],
+  ]);
+  const directory = path.join(root, "native-score");
+  const row = scoreNativeProductRows(
+    [pair],
+    [frame],
+    projected.scores,
+    bindings,
+    new MagickOps(directory, null, "dark"),
+    directory,
+  ).scores[0];
+  expect(row?.rgbScore).toBeLessThan(99);
+  expect(row?.actualPngShape?.score).toBeGreaterThanOrEqual(99);
+  expect(row?.passed).toBe(true);
+}
 
 test("strict raster sizing preserves SVG markup and resolves percentage width from the viewBox", async () => {
   const playwright = await new PlaywrightLoader().load(),
@@ -56,6 +165,75 @@ test("strict raster sizing preserves SVG markup and resolves percentage width fr
     await browser.close();
   }
 });
+
+test("Chrome AA color-only changes preserve edge support while geometry shifts do not", async ({
+  browser,
+}) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "krr-chrome-aa-color-control-"));
+  const page = await browser.newPage({
+    viewport: { width: 160, height: 80 },
+    deviceScaleFactor: 1,
+  });
+  try {
+    await runAaColorControl(root, page);
+  } finally {
+    await page.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+async function runAaColorControl(root: string, page: PageHandle) {
+  const images = await captureAaColorControl(root, page),
+    comparisonRoot = path.join(root, "comparison"),
+    magick = new MagickOps(comparisonRoot, null, "dark");
+  magick.prepare();
+  const colorOnly = magick.compareRgbChannelEdgeSupportImages(
+      images.official,
+      images.recolored,
+      comparisonRoot,
+      "chrome-aa-color-only",
+    ),
+    geometryShift = magick.compareRgbChannelEdgeSupportImages(
+      images.official,
+      images.shifted,
+      comparisonRoot,
+      "chrome-aa-geometry-shift",
+    );
+  expect(colorOnly.score).toBeGreaterThanOrEqual(99);
+  expect(
+    magick.comparePaintProjectedImages(
+      images.official,
+      images.recolored,
+      comparisonRoot,
+      "chrome-aa-color-rgb",
+    ).score,
+  ).toBeLessThan(99);
+  expect(geometryShift.score).toBeLessThan(99);
+}
+
+async function captureAaColorControl(root: string, page: PageHandle) {
+  const images = {
+    official: path.join(root, "official.png"),
+    recolored: path.join(root, "recolored.png"),
+    shifted: path.join(root, "shifted.png"),
+  };
+  await renderAaColorControl(page, aaColorControlSvg("#29415f", "#f2f4f8", 0), images.official);
+  await renderAaColorControl(page, aaColorControlSvg("#8d3b5a", "#ffe29a", 0), images.recolored);
+  await renderAaColorControl(page, aaColorControlSvg("#8d3b5a", "#ffe29a", 1), images.shifted);
+  return images;
+}
+
+async function renderAaColorControl(page: PageHandle, svg: string, output: string) {
+  await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
+  await assignStrictSvg(page, svg);
+  await resizeSvgCapture(page, true, "strictViewBox");
+  await page.evaluate(() => (document as FontReadyDocument).fonts.ready);
+  await page.locator("#capture").screenshot({ path: output, omitBackground: false });
+}
+
+function aaColorControlSvg(panel: string, text: string, shift: number): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80" viewBox="0 0 160 80"><defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="2" dy="2" stdDeviation="1.5" flood-color="${text}" flood-opacity="0.45"/></filter></defs><rect width="160" height="80" fill="#111827"/><g transform="translate(${shift},0)" filter="url(#shadow)"><rect x="12" y="12" width="112" height="42" rx="6" fill="${panel}" stroke="${text}" stroke-width="2"/><line x1="18" y1="62" x2="118" y2="62" stroke="${text}" stroke-width="3"/><text x="20" y="38" fill="${text}" font-family="Arial, sans-serif" font-size="16">日本語 AA</text></g></svg>`;
+}
 
 async function expectNaturalViewBoxSizing(
   page: PageHandle,

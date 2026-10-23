@@ -23,7 +23,7 @@ const scoreRowSchema = z
     scoreSemantics: z.enum([
       "rgb-v1",
       "paint-projected-reference-v1",
-      "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1",
+      "actual-png-paint-aligned-rgb-channel-edge-support-v2+paint-projected-reference-v1",
     ]),
     canvasRmseScore: z.number().finite().min(0).max(100),
     canvasMaeScore: z.number().finite().min(0).max(100),
@@ -50,12 +50,14 @@ const scoreRowSchema = z
       .optional(),
     actualPngShape: z
       .object({
-        policy: z.literal("rgb-channel-edge-support-v1"),
+        policy: z.literal("paint-aligned-rgb-channel-edge-support-v2"),
         score: z.number().finite().min(0).max(100),
         fullCanvasScore: z.number().finite().min(0).max(100),
         foregroundUnionScore: z.number().finite().min(0).max(100),
         officialPngSha256: z.string().regex(/^[a-f0-9]{64}$/),
         actualPngSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        projectedReferencePngSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        projectionEvidenceSha256: z.string().regex(/^[a-f0-9]{64}$/),
         ...projectedRasterBoundsFields,
       })
       .strict()
@@ -161,7 +163,7 @@ const contextSchema = z
     scoreSemantics: z.enum([
       "rgb-v1",
       "rgb-v1+paint-projected-reference-v1",
-      "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1",
+      "actual-png-paint-aligned-rgb-channel-edge-support-v2+paint-projected-reference-v1",
     ]),
     paintProjectedReferenceEvidence: z
       .object({
@@ -342,7 +344,7 @@ function validateScoreContext(
     geometrySlugs.length === 0
       ? "rgb-v1"
       : expectedRole === "native-product"
-        ? "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1"
+        ? "actual-png-paint-aligned-rgb-channel-edge-support-v2+paint-projected-reference-v1"
         : "rgb-v1+paint-projected-reference-v1";
   if (
     context.scoreSemantics !== expectedSemantics ||
@@ -454,16 +456,19 @@ function isNativeGeometryScoreValid(
   expectedNativePngSha256: ReadonlyMap<string, string> | undefined,
 ): boolean {
   return (
-    row.scoreSemantics === "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1" &&
+    row.scoreSemantics ===
+      "actual-png-paint-aligned-rgb-channel-edge-support-v2+paint-projected-reference-v1" &&
     projected !== undefined &&
     shape !== undefined &&
     pair !== undefined &&
     context.paintProjectedReferenceEvidence?.sha256 === projected.evidenceSha256 &&
     projected.score === projectedScore &&
-    shape.policy === "rgb-channel-edge-support-v1" &&
+    shape.policy === "paint-aligned-rgb-channel-edge-support-v2" &&
     shape.score === shapeScore &&
     shape.officialPngSha256 === pair.official.sourcePngSha256 &&
     expectedNativePngSha256?.get(row.slug) === shape.actualPngSha256 &&
+    shape.projectedReferencePngSha256 === pair.projectedReference.pngSha256 &&
+    shape.projectionEvidenceSha256 === projected?.evidenceSha256 &&
     shape.width === pair.projectedMetrics.width &&
     shape.height === pair.projectedMetrics.height &&
     isRasterBoundsInsideCanvas(shape) &&

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { sha256 } from "./mermaid-pair-manifest";
@@ -39,7 +40,13 @@ export function parseManagedControlManifest(serialized: string): readonly string
   return control;
 }
 export const managedControlNames = parseManagedControlManifest(
-  fs.readFileSync(path.join(import.meta.dir, "native-cli-managed-control-inputs.json"), "utf8"),
+  fs.readFileSync(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "native-cli-managed-control-inputs.json",
+    ),
+    "utf8",
+  ),
 );
 const emptySelectors = [
   "KRR_BUILD_RECEIPT",

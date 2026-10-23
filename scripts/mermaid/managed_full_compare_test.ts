@@ -391,12 +391,15 @@ test("managed native semantics bind actual PNG edge support and projected metric
   expect(accepted.scores[0]).toMatchObject({
     score: 99,
     rgbScore: 80,
-    scoreSemantics: "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1",
+    scoreSemantics:
+      "actual-png-paint-aligned-rgb-channel-edge-support-v2+paint-projected-reference-v1",
     actualPngShape: {
-      policy: "rgb-channel-edge-support-v1",
+      policy: "paint-aligned-rgb-channel-edge-support-v2",
       score: 99,
       officialPngSha256: "a".repeat(64),
       actualPngSha256: "f".repeat(64),
+      projectedReferencePngSha256: "c".repeat(64),
+      projectionEvidenceSha256: "b".repeat(64),
     },
   });
 
@@ -500,7 +503,8 @@ test("managed native semantics bind actual PNG edge support and projected metric
   const belowProjectedScores = evidence.scores.map((row, index) => {
     if (index !== 0) return row;
     if (
-      row.scoreSemantics !== "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1"
+      row.scoreSemantics !==
+      "actual-png-paint-aligned-rgb-channel-edge-support-v2+paint-projected-reference-v1"
     ) {
       throw new Error("Actual PNG edge support or projected reference semantics are missing");
     }
@@ -792,19 +796,21 @@ function validGeometryEvidence(expected: string[], accepted = true) {
           score,
           rgbScore: 80,
           scoreSemantics:
-            "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1" as const,
+            "actual-png-paint-aligned-rgb-channel-edge-support-v2+paint-projected-reference-v1" as const,
           canvasRmseScore: 80,
           canvasMaeScore: 80,
           contentRmseScore: 80,
           contentMaeScore: 80,
           passed: accepted,
           actualPngShape: {
-            policy: "rgb-channel-edge-support-v1" as const,
+            policy: "paint-aligned-rgb-channel-edge-support-v2" as const,
             score,
             fullCanvasScore: 99,
             foregroundUnionScore: 99,
             officialPngSha256: "a".repeat(64),
             actualPngSha256: "f".repeat(64),
+            projectedReferencePngSha256: "c".repeat(64),
+            projectionEvidenceSha256: evidenceSha256,
             width: 320,
             height: 220,
             roi,
@@ -859,7 +865,8 @@ function validGeometryEvidence(expected: string[], accepted = true) {
     context: {
       ...base.context,
       comparisonRole: "native-product",
-      scoreSemantics: "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1",
+      scoreSemantics:
+        "actual-png-paint-aligned-rgb-channel-edge-support-v2+paint-projected-reference-v1",
       paintProjectedReferenceEvidence: {
         path: "paint-projected-reference-evidence.json",
         sha256: evidenceSha256,

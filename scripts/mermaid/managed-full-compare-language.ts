@@ -26,7 +26,11 @@ import {
   scoreNativeFramePaintProjection,
   verifyNativeFrameEvidence,
 } from "./native-frame-evidence";
-import { type NativeProductDimensionFailure, scoreNativeProductRows } from "./native-product-score";
+import {
+  type NativeProductDimensionFailure,
+  type NativeProductPaintReference,
+  scoreNativeProductRows,
+} from "./native-product-score";
 import { requireNativeRenderInventory } from "./native-render-provenance";
 import { MagickOps } from "./reference_image_ops";
 import type { ReferencePair } from "./reference_pair_repository";
@@ -401,8 +405,10 @@ function assertPaintProjectedReferenceFilePins(
   officialDirectory: string,
   candidatePngDirectory: string,
   candidateSvgDirectory: string,
+  projectedDirectory = comparisonDirectory,
+  candidatePngBySlug?: ReadonlyMap<string, { path: string; sha256: string }>,
 ) {
-  const derivativeDirectory = path.join(comparisonDirectory, "paint-projected-reference");
+  const derivativeDirectory = path.join(projectedDirectory, "paint-projected-reference");
   for (const pair of evidence.pairs) {
     const stem = pair.slug;
     assertPinnedFile(
@@ -420,10 +426,11 @@ function assertPaintProjectedReferenceFilePins(
       path.join(candidateSvgDirectory, `${stem}.svg`),
       pair.candidate.svgSha256,
     );
+    const candidatePng = candidatePngBySlug?.get(stem);
     assertPinnedFile(
       pair.candidate.sourcePngPath,
-      path.join(candidatePngDirectory, `${stem}.png`),
-      pair.candidate.sourcePngSha256,
+      candidatePng?.path ?? path.join(candidatePngDirectory, `${stem}.png`),
+      candidatePng?.sha256 ?? pair.candidate.sourcePngSha256,
     );
     assertPinnedFile(
       pair.projectedReference.svgPath,
@@ -651,11 +658,31 @@ function buildNativeProductComparison(
 ) {
   const directory = path.join(comparisonDirectory, "native-product-comparison");
   fs.mkdirSync(directory, { mode: 0o700 });
+  if (fileSha256(projected.evidencePath) !== projected.evidenceSha256) {
+    throw new Error("Native projected reference evidence differs from its score pin");
+  }
+  const projectedEvidence = parsePaintProjectedReferenceEvidence(readJson(projected.evidencePath));
+  const nativePngBySlug = new Map(frames.map((frame) => [frame.slug, frame.png]));
+  assertPaintProjectedReferenceFilePins(
+    projectedEvidence,
+    directory,
+    path.dirname(pairs[0]?.officialPath ?? directory),
+    path.dirname(pairs[0]?.katanaPath ?? directory),
+    path.dirname(pairs[0]?.katanaSvgPath ?? directory),
+    path.dirname(projected.evidencePath),
+    nativePngBySlug,
+  );
+  const projectedReferences = buildNativePaintReferences(
+    projectedEvidence,
+    frames,
+    projected.evidenceSha256,
+  );
   const magickDirectory = path.join(directory, "magick"),
     scoreBatch = scoreNativeProductRows(
       pairs,
       frames,
       projected.scores,
+      projectedReferences,
       new MagickOps(magickDirectory, null, "dark"),
       magickDirectory,
     ),
@@ -664,6 +691,40 @@ function buildNativeProductComparison(
   fs.copyFileSync(projected.evidencePath, evidencePath, fs.constants.COPYFILE_EXCL);
   writeNativeProductFiles(directory, scoreBatch.scores, scoreBatch.failures, inventory, context);
   return { scores: scoreBatch.scores, failures: scoreBatch.failures, evidencePath, context };
+}
+
+function buildNativePaintReferences(
+  evidence: PaintProjectedReferenceEvidence,
+  frames: ReturnType<typeof verifyNativeFrameEvidence>["rows"],
+  evidenceSha256: string,
+): ReadonlyMap<string, NativeProductPaintReference> {
+  const framesBySlug = new Map(frames.map((frame) => [frame.slug, frame]));
+  return new Map(
+    evidence.pairs.map((pair) => {
+      const frame = framesBySlug.get(pair.slug);
+      if (frame === undefined) {
+        throw new Error(`Missing native frame for projected reference: ${pair.slug}`);
+      }
+      if (
+        path.resolve(pair.candidate.sourcePngPath) !== path.resolve(frame.png.path) ||
+        pair.candidate.sourcePngSha256 !== frame.png.sha256
+      ) {
+        throw new Error(`Projected candidate PNG is not the native frame: ${pair.slug}`);
+      }
+      return [
+        pair.slug,
+        {
+          projectedPng: {
+            path: pair.projectedReference.pngPath,
+            sha256: pair.projectedReference.pngSha256,
+          },
+          officialPngSha256: pair.official.sourcePngSha256,
+          actualPngSha256: frame.png.sha256,
+          evidenceSha256,
+        },
+      ] as const;
+    }),
+  );
 }
 
 function nativeProductContext(
@@ -680,7 +741,8 @@ function nativeProductContext(
     formalAccepted: false as const,
     independentGold: false as const,
     comparisonRole: "native-product" as const,
-    scoreSemantics: "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1" as const,
+    scoreSemantics:
+      "actual-png-paint-aligned-rgb-channel-edge-support-v2+paint-projected-reference-v1" as const,
     paintProjectedReferenceEvidence: { path: path.basename(evidencePath), sha256: evidenceSha256 },
   };
 }

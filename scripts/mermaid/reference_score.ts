@@ -24,7 +24,8 @@ export interface ReferenceScoreRow {
   scoreSemantics:
     | "rgb-v1"
     | "paint-projected-reference-v1"
-    | "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1";
+    | "actual-png-rgb-channel-edge-support-v1+paint-projected-reference-v1"
+    | "actual-png-paint-aligned-rgb-channel-edge-support-v2+paint-projected-reference-v1";
   canvasRmseScore: number;
   canvasMaeScore: number;
   contentRmseScore: number;
@@ -34,12 +35,14 @@ export interface ReferenceScoreRow {
   passed: boolean;
   paintProjectedReference?: PaintProjectedReferenceScore;
   actualPngShape?: {
-    policy: "rgb-channel-edge-support-v1";
+    policy: "rgb-channel-edge-support-v1" | "paint-aligned-rgb-channel-edge-support-v2";
     score: number;
     fullCanvasScore: number;
     foregroundUnionScore: number;
     officialPngSha256: string;
     actualPngSha256: string;
+    projectedReferencePngSha256?: string;
+    projectionEvidenceSha256?: string;
     roi: { x: number; y: number; width: number; height: number };
     width: number;
     height: number;
