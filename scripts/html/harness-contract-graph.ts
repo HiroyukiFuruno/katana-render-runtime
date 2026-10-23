@@ -1112,7 +1112,7 @@ const NATIVE_UNIT_PROGRAM = {
   caller: "scripts/mermaid/native-cli-process_test.ts",
   callerSourceSha256: "aab01ce01af2d99be294032112a0e61fb3926c84928b0a0865600cd6596d1c0f",
   callerAstSha256: "35a7bd9aa284fdc3a94f0fe7aab8f793c3b5ccd75a5e230703c4b22d15e5c93f",
-  swcVersion: "1.16.18",
+  swcVersion: "1.16.20",
 };
 
 // 呼出し回数だけでは別binaryや別programも通るため、実行する既知のunit本文を束縛する。
@@ -1128,7 +1128,7 @@ const RUNTIME_ASSET_COMPRESSOR_UNIT_PROGRAM = {
   wrapper: "scripts/runtime-assets/runtime-package-asset-compressor.ts",
   wrapperSourceSha256: "1eae43d7e77deaf44bda83585159c5ccde6dcd24d0d524d395d031c081621f48",
   wrapperAstSha256: "b3b54b4f989cc4afa735785789688131dcc9f04916a2dbd24755e6208d211f85",
-  swcVersion: "1.16.18",
+  swcVersion: "1.16.20",
 };
 
 const CHROME_FONT_IDENTITY_PROBE_IMPORTERS: readonly string[] = [
@@ -1143,7 +1143,7 @@ const CHROME_FONT_IDENTITY_PROBE = {
   importers: CHROME_FONT_IDENTITY_PROBE_IMPORTERS,
   functionName: "runChromeFontIdentityProbe",
   functionAstSha256: "c267370fec379e37b093c1731fffa134fabec63260763ce53ca6a9246ed6b4bf",
-  swcVersion: "1.16.18",
+  swcVersion: "1.16.20",
 } as const;
 
 function sourceDigest(source: string): string {
@@ -3610,7 +3610,7 @@ const HOST_EVIDENCE_SOURCE_AST_SHA256: Record<string, string> = {
 };
 export function hostEvidenceSourceVerified(name: string, source: string): boolean {
   const expected = HOST_EVIDENCE_SOURCE_AST_SHA256[name];
-  if (!expected || swcVersion !== "1.16.18") return false;
+  if (!expected || swcVersion !== "1.16.20") return false;
   try {
     const ast = parseSync(source, { syntax: "typescript", tsx: false });
     const normalized = JSON.stringify(ast, (key: string, value: unknown) =>

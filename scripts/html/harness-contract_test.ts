@@ -3010,7 +3010,7 @@ describe("reviewed Mermaid CLI source route and runtime compressor unit", () => 
       artifactVerified: false,
       caller: compressorCaller,
       wrapper: compressorScript,
-      swcVersion: "1.16.18",
+      swcVersion: "1.16.20",
       executions: [
         {
           kind: "unit-runtime-asset-compressor-cli",

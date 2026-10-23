@@ -158,6 +158,7 @@ export class RuntimeRollupBundler {
       const result = await bundle.generate({
         format: "iife",
         name: this.iifeName(definition),
+        dir: this.root,
         sourcemap: generation ? "hidden" : false,
         strict: false,
       });
@@ -201,6 +202,7 @@ export class RuntimeRollupBundler {
       await bundle.generate({
         format: "iife",
         name: this.iifeName(definition),
+        dir: this.root,
         sourcemap: true,
         strict: false,
       });

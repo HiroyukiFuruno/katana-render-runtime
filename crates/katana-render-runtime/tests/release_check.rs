@@ -616,9 +616,16 @@ fn assert_usvg_skrifa_pair_order(commands: &[&str], lockfile_update: usize, pair
         lockfile_update < pair_update
             && commands
                 .iter()
-                .position(|line| *line == "bun update --latest")
-                .is_some_and(|bun_update| pair_update < bun_update),
-        "dependency updates must synchronize both Rust pairs around the lockfile update before Bun"
+                .position(|line| {
+                    *line == "python3 scripts/release/update_html_performance_harness_lock.py --cargo \"{{CARGO}}\""
+                })
+                .zip(commands
+                    .iter()
+                    .position(|line| *line == "bun update --latest '!@moonrepo/*'"))
+                .is_some_and(|(harness_lock_update, bun_update)| {
+                    pair_update < harness_lock_update && harness_lock_update < bun_update
+                }),
+        "dependency updates must synchronize both Rust pairs and the harness lock before Bun"
     );
 }
 

@@ -2280,7 +2280,7 @@ function emptyParserBodyOnloadBinding(inputs: string[]): OwnedValidationReport["
 const MATHJAX_EVIDENCE_CONSUMER_AST_SHA256 =
   "8b47146db5270840e71f73dd276d099750e181928bb0834e58ffd9bc0e99ebb1";
 function mathJaxEvidenceConsumerVerified(source: string): boolean {
-  if (swcVersion !== "1.16.18") return false;
+  if (swcVersion !== "1.16.20") return false;
   try {
     const ast = parseSync(source, { syntax: "typescript", tsx: false });
     return (
@@ -3668,7 +3668,7 @@ function parserProducerVerified(content: Map<string, string>, inputsSafe: boolea
 }
 // 実 producer のレビュー済み形状だけを受け入れ、未知の実行辺は推論しない。
 // 更新時は producer のレビューと実生成回帰を先に行い、自動で基準を更新しない。
-const PARSER_PRODUCER_SWC_VERSION = "1.16.18";
+const PARSER_PRODUCER_SWC_VERSION = "1.16.20";
 const PARSER_PRODUCER_AST_SHA256 =
   "0b5842612fbaf3e92e09748da33fa5d10ff74e67442de5e49761ffe86fb8474d";
 function parserProducerAstSupported(source: string): boolean {
