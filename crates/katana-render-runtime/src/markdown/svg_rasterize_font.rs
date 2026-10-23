@@ -17,6 +17,8 @@ pub(super) use html::HtmlFontRequest;
 #[cfg(test)]
 pub(super) use html::html_font_db_for_text;
 pub(super) use html::html_rasterizer_options;
+#[cfg(all(test, target_os = "macos"))]
+pub(super) use html::record_actual_selected_face;
 #[cfg(test)]
 pub(super) use html::{
     HtmlFontMemorySnapshot, current_process_rss_kib, html_font_db_for_markup,

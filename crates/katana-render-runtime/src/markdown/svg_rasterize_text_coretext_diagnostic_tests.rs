@@ -1,6 +1,6 @@
 use super::{
-    CASES, DIAGNOSTIC_FONT_SIZE, FontShape, HARFRUST_SCALE, Result, digest_hex, face_cache,
-    harfrust_records, read_request, shape_font, write_fresh,
+    CASES, DIAGNOSTIC_FONT_SIZE, FontShape, HARFRUST_SCALE, Request, Result, digest_hex,
+    face_cache, harfrust_records, read_request, shape_font, write_fresh,
 };
 use core_graphics::base::kCGImageAlphaPremultipliedLast;
 use core_graphics::color_space::CGColorSpace;
@@ -24,15 +24,7 @@ type CaseFontData = (harfrust::Buffer, Vec<u8>, u32, String);
 #[test]
 #[ignore = "diagnostic only; requires macOS system Trebuchet and a fresh request JSON"]
 fn records_coretext_tree_glyph_raster_and_krr_reference() -> Result<()> {
-    let request = read_request()?;
-    let input = std::fs::read(&request.input)?;
-    if digest_hex(&input) != request.expected_source_sha256 {
-        return Err("input SHA mismatch".into());
-    }
-    if request.output.exists() {
-        return Err("diagnostic output must be fresh".into());
-    }
-    std::fs::create_dir(&request.output)?;
+    let (request, input) = prepare_diagnostic()?;
     let mut rows = Vec::new();
     for (index, (text, weight)) in CASES.into_iter().enumerate() {
         rows.push(coretext_case(&request.output, index, text, weight)?);
@@ -53,6 +45,22 @@ fn records_coretext_tree_glyph_raster_and_krr_reference() -> Result<()> {
     serde_json::to_writer_pretty(file, &report)?;
     Ok(())
 }
+
+fn prepare_diagnostic() -> Result<(Request, Vec<u8>)> {
+    let request = read_request()?;
+    let input = std::fs::read(&request.input)?;
+    if digest_hex(&input) != request.expected_source_sha256 {
+        return Err("input SHA mismatch".into());
+    }
+    if request.output.exists() {
+        return Err("diagnostic output must be fresh".into());
+    }
+    std::fs::create_dir(&request.output)?;
+    Ok((request, input))
+}
+
+#[path = "svg_rasterize_text_hiragino_shaping_diagnostic_tests.rs"]
+mod hiragino_shaping_diagnostic;
 
 fn coretext_case(output: &Path, index: usize, text: &str, weight: u16) -> Result<Value> {
     let svg = case_svg(text, weight);

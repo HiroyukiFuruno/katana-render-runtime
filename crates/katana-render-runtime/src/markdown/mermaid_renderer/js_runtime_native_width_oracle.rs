@@ -2,6 +2,8 @@ use crate::markdown::svg_rasterize::SvgRasterizeOps;
 use serde_json::Value;
 #[path = "js_runtime_native_width_oracle_call.rs"]
 mod call;
+#[path = "js_runtime_native_width_oracle_canvas.rs"]
+mod canvas;
 use call::ParsedCall;
 
 const TEXT_METRIC_WEIGHT_ARGUMENT_INDEX: usize = 3;
@@ -27,6 +29,7 @@ fn assert_call(call: &Value) -> Result<(), String> {
     let parsed = ParsedCall::from_json(call)?;
     match call.get("kind").and_then(Value::as_str) {
         Some("css") => assert_css_call(parsed),
+        Some("canvas") => canvas::assert_call(call, parsed),
         Some("svg") => assert_svg_call(call, parsed),
         _ => Err("native endpoint kind missing or invalid".into()),
     }

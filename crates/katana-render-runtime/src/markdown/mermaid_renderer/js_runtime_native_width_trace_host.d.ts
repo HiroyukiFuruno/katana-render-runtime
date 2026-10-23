@@ -4,9 +4,11 @@ interface NativeWidthSvgMetrics {
   descent: number;
 }
 interface NativeWidthTraceCall {
-  kind: "css" | "svg";
+  kind: "css" | "canvas" | "svg";
   args: unknown[];
   width: number | undefined;
+  // 未指定と、指定されたが契約外の値(null)を区別して記録する。
+  segments?: string[] | null;
   metrics?: NativeWidthSvgMetrics;
 }
 interface NativeWidthTraceBox {
@@ -50,6 +52,7 @@ interface NativeWidthTraceDocument {
 
 // 実Rust callbackはCSS失敗時undefined、SVG失敗時throw、成功時3数値を返す。
 declare var __katanaMeasureText: (...args: unknown[]) => number | undefined;
+declare var __katanaMeasureCanvasText: (...args: unknown[]) => number | undefined;
 declare var __katanaMeasureSvgTextMetrics: (...args: unknown[]) => NativeWidthSvgMetrics;
 declare var __katanaMermaidDiagramType: string | undefined;
 declare var __krrActualWidths: NativeWidthTraceCall[];

@@ -211,7 +211,10 @@ pub(super) fn record_final_glyph_tree(tree: &resvg::usvg::Tree, source_svg: &str
     final_glyphs::record(tree, source_svg, paint_call);
 }
 
-pub(super) fn record_actual_selected_face(db: &Database, id: Option<ID>) {
+pub(in crate::markdown::svg_rasterize) fn record_actual_selected_face(
+    db: &Database,
+    id: Option<ID>,
+) {
     if !PASSIVE_AUDIT.with(Cell::get) {
         return;
     }

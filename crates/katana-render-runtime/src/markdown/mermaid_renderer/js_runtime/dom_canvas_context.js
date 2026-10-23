@@ -26,7 +26,6 @@ function katanaCanvasTextWidth(text, font) {
 
 function katanaCanvasNativeTextWidth(text, font) {
   if (
-    typeof globalThis.__katanaMeasureText !== "function" ||
     typeof katanaMermaidNativeAdvanceRuntime !== "function" ||
     !katanaMermaidNativeAdvanceRuntime() ||
     /* C4は既存のASCII補正と幅表を使うため、native測定を適用しない。 */
@@ -38,19 +37,104 @@ function katanaCanvasNativeTextWidth(text, font) {
   if (!resolved) {
     return null;
   }
+  const value = String(text);
+  const canvasMeasure = globalThis.__katanaMeasureCanvasText;
+  const useCanvas = typeof canvasMeasure === "function";
+  const segmented = useCanvas && /\P{ASCII}/u.test(value);
+  const measure = useCanvas ? canvasMeasure : globalThis.__katanaMeasureText;
+  if (typeof measure !== "function") {
+    return null;
+  }
+  const segments = segmented ? katanaCanvasTextSegments(value) : undefined;
   const measured = Number(
-    globalThis.__katanaMeasureText(
-      String(text),
+    measure(
+      value,
       resolved.family,
       resolved.size,
       resolved.weight,
       resolved.italic,
+      ...(segments ? [segments] : []),
     ),
   );
   if (!Number.isFinite(measured) || measured < 0) {
     throw new Error("native Canvas font measurement is invalid");
   }
   return measured;
+}
+
+const KATANA_CANVAS_CJK_RE =
+  /[\p{Script_Extensions=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script_Extensions=Bopomofo}]/u;
+const KATANA_CANVAS_COMMON_RE = /[\p{Script=Common}\p{Script=Inherited}]/u;
+const KATANA_CANVAS_MARK_RE = /[\p{Mark}\p{Modifier_Letter}\p{Modifier_Symbol}]/u;
+const KATANA_CANVAS_EMOJI_RE = /[\p{Emoji}\p{Extended_Pictographic}]/u;
+const KATANA_CANVAS_EMOJI_COMPONENT_RE = /\p{Emoji_Component}/u;
+const KATANA_CANVAS_PICTOGRAPHIC_RE = /\p{Extended_Pictographic}/u;
+const KATANA_CANVAS_CJK_MIN_CODE_POINT = 0x2c7;
+
+function katanaCanvasTextSegments(text) {
+  // Canvas の CJK 単位の文字組みを、通常の HTML 全文計測へ混入させない。
+  const chars = Array.from(text);
+  const segments = [];
+  for (let start = 0; start < chars.length; ) {
+    const end = katanaCanvasNextWordEnd(chars, start);
+    segments.push(chars.slice(start, end).join(""));
+    start = end;
+  }
+  return segments;
+}
+
+function katanaCanvasNextWordEnd(chars, start) {
+  const first = chars[start];
+  if (katanaCanvasIsDelimiter(first)) return start + 1;
+  if (!katanaCanvasIsCjkOrSymbol(first)) {
+    return katanaCanvasNonCjkWordEnd(chars, start + 1);
+  }
+  return katanaCanvasCjkWordEnd(chars, start + 1, !KATANA_CANVAS_COMMON_RE.test(first));
+}
+
+function katanaCanvasNonCjkWordEnd(chars, end) {
+  for (; end < chars.length; end += 1) {
+    const char = chars[end];
+    if (
+      katanaCanvasIsDelimiter(char) ||
+      (katanaCanvasIsCjkOrSymbol(char) && !KATANA_CANVAS_MARK_RE.test(char))
+    ) {
+      return end;
+    }
+  }
+  return end;
+}
+
+function katanaCanvasCjkWordEnd(chars, end, hasScript) {
+  for (; end < chars.length; end += 1) {
+    const char = chars[end];
+    if (katanaCanvasCjkContinuation(char)) continue;
+    if (!katanaCanvasIsCjkOrSymbol(char)) return end;
+    if (KATANA_CANVAS_COMMON_RE.test(char)) continue;
+    if (hasScript) return end;
+    hasScript = true;
+  }
+  return end;
+}
+
+function katanaCanvasCjkContinuation(char) {
+  return (
+    KATANA_CANVAS_MARK_RE.test(char) ||
+    char === "\u200d" ||
+    KATANA_CANVAS_EMOJI_COMPONENT_RE.test(char) ||
+    KATANA_CANVAS_PICTOGRAPHIC_RE.test(char)
+  );
+}
+
+function katanaCanvasIsCjkOrSymbol(char) {
+  return (
+    char.codePointAt(0) >= KATANA_CANVAS_CJK_MIN_CODE_POINT &&
+    (KATANA_CANVAS_CJK_RE.test(char) || KATANA_CANVAS_EMOJI_RE.test(char))
+  );
+}
+
+function katanaCanvasIsDelimiter(char) {
+  return char === " " || char === "\t" || char === "\u200b";
 }
 
 function katanaCanvasFontMetrics(font) {

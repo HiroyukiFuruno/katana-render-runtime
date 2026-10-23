@@ -50,6 +50,26 @@ fn finite_javascript_size_outside_f32_request_range_returns_undefined() -> Resul
 }
 
 #[test]
+fn canvas_bridge_rejects_non_string_or_empty_segments() -> Result<(), String> {
+    let script = r#"(() => {
+        const measure = globalThis.__katanaMeasureCanvasText;
+        const invalid = [
+            measure('AB', 'Noto Sans', 16, 400, false, ['A', 1]),
+            measure('AB', 'Noto Sans', 16, 400, false, ['A', '']),
+            measure('AB', 'Noto Sans', 16, 400, false, ['A']),
+        ];
+        const empty = measure('', 'Noto Sans', 16, 400, false, []);
+        return invalid.every(value => value === undefined) && empty === 0;
+    })()"#;
+    let result = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
+        "bridge-canvas-segment-contract",
+        script,
+    )])?;
+    assert_eq!(result, "true");
+    Ok(())
+}
+
+#[test]
 fn nul_text_with_empty_family_returns_parse_error_and_undefined() {
     use crate::markdown::svg_rasterize::{SvgRasterizeError, SvgRasterizeOps};
 

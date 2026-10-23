@@ -2794,11 +2794,11 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
-      sha256: "71756764df09b0c0d3b2c015cea2628ad36a1ff828c1bc4a45bafb7f0fe764a3",
+      sha256: "9e439a26308c37df0f1fb5d25bcd43d9fecf79810899eaa13f4c0fc0a7c2c9e5",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_helpers.rs`,
-      sha256: "fe94f65de29ced98302d2174d7fb212a6526074601fc0019f8894c5b9e49b85d",
+      sha256: "a21a8b260625067348d8531512c8a489d3c71ec651e3b6710c1c69c4bb4da45b",
     },
     {
       path: nativeWidthBBoxTracePath,

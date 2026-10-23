@@ -5,7 +5,7 @@ mod oracle;
 #[path = "js_runtime_native_width_oracle_boundary_tests.rs"]
 mod oracle_boundary_tests;
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
-use helpers::render_fixture;
+use helpers::{render_fixture, render_fixture_with_font_audit};
 use oracle::{
     assert_bridge_widths_match_rust, assert_inherited_cjk, call_text, call_weight, rounded_width,
 };
@@ -114,12 +114,32 @@ fn localized_architecture_service_bbox_includes_wide_label() -> Result<(), Strin
 
 #[test]
 fn architecture_beta_fixture_records_native_service_bbox_inputs() -> Result<(), String> {
-    let source = ARCHITECTURE_BETA_FIXTURE_MARKDOWN
+    let source = architecture_beta_source()?;
+    let (result, font_audit) = render_fixture_with_font_audit(source)?;
+    assert_architecture_beta_labels(&result)?;
+    println!(
+        "architecture_beta_bbox_observation={}",
+        serde_json::json!({"boxes": &result.boxes, "calls": &result.calls, "fontAudit": &font_audit})
+    );
+    #[cfg(target_os = "macos")]
+    assert!(
+        font_audit["faces"]
+            .as_array()
+            .is_some_and(|faces| !faces.is_empty()),
+        "actual CSS shaping did not record a selected physical face: {font_audit}"
+    );
+    Ok(())
+}
+
+fn architecture_beta_source() -> Result<&'static str, String> {
+    ARCHITECTURE_BETA_FIXTURE_MARKDOWN
         .split("~~~mermaid\n")
         .nth(1)
         .and_then(|value| value.split("\n~~~").next())
-        .ok_or("architecture-beta fixture Mermaid source missing")?;
-    let result = render_fixture(source)?;
+        .ok_or_else(|| "architecture-beta fixture Mermaid source missing".to_string())
+}
+
+fn assert_architecture_beta_labels(result: &helpers::MeasurementFixture) -> Result<(), String> {
     let labels = ["データベース", "ストレージ", "サーバー"];
     for label in labels {
         assert!(
@@ -129,17 +149,17 @@ fn architecture_beta_fixture_records_native_service_bbox_inputs() -> Result<(), 
         );
         assert!(
             result.calls.iter().any(|call| {
-                call_text(call) == label && call.get("kind").and_then(Value::as_str) == Some("css")
+                call_text(call) == label
+                    && matches!(
+                        call.get("kind").and_then(Value::as_str),
+                        Some("css") | Some("canvas")
+                    )
             }),
             "Canvas native bridge did not measure architecture label {label:?}: {:?}",
             result.calls
         );
-        service_bbox(&result, label)?;
+        service_bbox(result, label)?;
     }
-    println!(
-        "architecture_beta_bbox_observation={}",
-        serde_json::json!({"boxes": &result.boxes, "calls": &result.calls})
-    );
     Ok(())
 }
 

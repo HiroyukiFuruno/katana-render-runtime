@@ -3,6 +3,7 @@ globalThis.__krrProbeWidths = [];
 globalThis.__krrBridgeCalls = 0;
 let actualPhase = true;
 const bridge = globalThis.__katanaMeasureText;
+const canvasBridge = globalThis.__katanaMeasureCanvasText;
 const svgBridge = globalThis.__katanaMeasureSvgTextMetrics;
 globalThis.__katanaMeasureText = (...args) => {
   globalThis.__krrBridgeCalls += 1;
@@ -10,6 +11,38 @@ globalThis.__katanaMeasureText = (...args) => {
   if (Number.isFinite(width)) {
     const widths = actualPhase ? globalThis.__krrActualWidths : globalThis.__krrProbeWidths;
     widths.push({ kind: "css", args, width });
+  }
+  return width;
+};
+
+/**
+ * @param {unknown[]} args
+ * @returns {string[] | null | undefined}
+ */
+function canvasSegmentsForTrace(args) {
+  if (args.length <= 5) return undefined;
+  const candidate = args[5];
+  if (!Array.isArray(candidate)) return null;
+  /** @type {string[]} */
+  const segments = [];
+  for (const segment of candidate) {
+    if (typeof segment !== "string") return null;
+    segments.push(segment);
+  }
+  return segments;
+}
+
+globalThis.__katanaMeasureCanvasText = (...args) => {
+  globalThis.__krrBridgeCalls += 1;
+  const width = canvasBridge(...args);
+  if (Number.isFinite(width)) {
+    const widths = actualPhase ? globalThis.__krrActualWidths : globalThis.__krrProbeWidths;
+    const segments = canvasSegmentsForTrace(args);
+    widths.push(
+      segments === undefined
+        ? { kind: "canvas", args, width }
+        : { kind: "canvas", args, width, segments },
+    );
   }
   return width;
 };

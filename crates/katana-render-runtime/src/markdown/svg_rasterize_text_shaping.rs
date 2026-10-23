@@ -137,14 +137,19 @@ fn shaped_runs_advance(
     font_feature_settings: Option<&str>,
 ) -> Option<f32> {
     let mut advance = 0.0;
-    for (face_id, run) in resolved_font_runs(
+    let runs = resolved_font_runs(
         database,
         base_face_id,
         font_family,
         text,
         shape.weight,
         shape.italic,
-    ) {
+    );
+    #[cfg(all(test, target_os = "macos"))]
+    for (face_id, _) in &runs {
+        super::font::record_actual_selected_face(database, Some(*face_id));
+    }
+    for (face_id, run) in runs {
         advance += cached_shaped_run(database, face_id, &run, shape, font_feature_settings)?;
     }
     Some(advance)

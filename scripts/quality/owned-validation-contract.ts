@@ -93,9 +93,9 @@ const NATIVE_WIDTH_TEST_CONSUMERS = {
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime.rs`]:
     "b3d10ef7896536ae924c2188b338bafeb3ff9642a3f557e5cf6ecec35a93291f",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`]:
-    "71756764df09b0c0d3b2c015cea2628ad36a1ff828c1bc4a45bafb7f0fe764a3",
+    "9e439a26308c37df0f1fb5d25bcd43d9fecf79810899eaa13f4c0fc0a7c2c9e5",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_helpers.rs`]:
-    "fe94f65de29ced98302d2174d7fb212a6526074601fc0019f8894c5b9e49b85d",
+    "a21a8b260625067348d8531512c8a489d3c71ec651e3b6710c1c69c4bb4da45b",
   [NATIVE_WIDTH_BBOX_TRACE]: "a1c72bb7a16e809b52fbd98a79a079749e4ceb1154ada17781b1007ede8a64cf",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_oracle_boundary_tests.rs`]:
     "a52369ca8ded04fe4043bfd79962266621efef8518bfb06ff19180ff5230dc92",

@@ -685,10 +685,10 @@ const nativeWidthV8Import = "use crate::v8_script::ScriptCompiler;";
 const nativeWidthV8CompileCall = "v8::Script::compile(scope, source, Some(&origin))";
 const nativeWidthV8CompilerCall = "ScriptCompiler::compile_with_origin(scope, source, origin_name)";
 const nativeWidthLegacyRoute = {
-  [nativeWidthHelper]: "fe94f65de29ced98302d2174d7fb212a6526074601fc0019f8894c5b9e49b85d",
+  [nativeWidthHelper]: "a21a8b260625067348d8531512c8a489d3c71ec651e3b6710c1c69c4bb4da45b",
   [`${nativeWidthBase}js_runtime_native_width_tests.rs`]:
-    "71756764df09b0c0d3b2c015cea2628ad36a1ff828c1bc4a45bafb7f0fe764a3",
-  [nativeWidthTrace]: "7f16ff359f8964f894e34a1d1cff49964eb06c3607c40fd6c4231a244e01bc8b",
+    "9e439a26308c37df0f1fb5d25bcd43d9fecf79810899eaa13f4c0fc0a7c2c9e5",
+  [nativeWidthTrace]: "eb3d446b8a44c890b5ac2d7e77f42493dffc10627df81986aca9e6953c50c6b0",
   [nativeWidthBBoxTrace]: "a1c72bb7a16e809b52fbd98a79a079749e4ceb1154ada17781b1007ede8a64cf",
 } as const;
 const nativeWidthRoute = [

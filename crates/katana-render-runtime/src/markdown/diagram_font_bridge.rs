@@ -12,17 +12,44 @@ const CSS_LAYOUT_SUBPIXEL_SCALE: f64 = 64.0;
 type DiagramTryCatchScope<'pin, 'scope, 'object, 'isolate> =
     v8::PinnedRef<'pin, v8::TryCatch<'scope, 'object, v8::HandleScope<'isolate>>>;
 
+#[path = "diagram_canvas_font_bridge.rs"]
+mod canvas;
+
 pub(super) fn install(scope: &mut DiagramTryCatchScope<'_, '_, '_, '_>) -> Result<(), String> {
     let context = scope.get_current_context();
     let global = context.global(scope);
-    let name = v8::String::new(scope, "__katanaMeasureText")
-        .ok_or_else(|| "font measure bridge name allocation failed".to_string())?;
-    let callback = v8::Function::new(scope, font_measure_callback)
-        .ok_or_else(|| "font measure bridge callback allocation failed".to_string())?;
+    install_callback(
+        scope,
+        global,
+        "__katanaMeasureText",
+        font_measure_callback,
+        "font",
+    )?;
+    install_callback(
+        scope,
+        global,
+        "__katanaMeasureCanvasText",
+        canvas::measure_callback,
+        "canvas font",
+    )?;
+    super::diagram_svg_font_bridge::install(scope)
+}
+
+fn install_callback(
+    scope: &mut v8::PinScope,
+    global: v8::Local<v8::Object>,
+    name: &str,
+    callback: impl v8::MapFnTo<v8::FunctionCallback>,
+    label: &str,
+) -> Result<(), String> {
+    let name = v8::String::new(scope, name)
+        .ok_or_else(|| format!("{label} measure bridge name allocation failed"))?;
+    let callback = v8::Function::new(scope, callback)
+        .ok_or_else(|| format!("{label} measure bridge callback allocation failed"))?;
     global
         .set(scope, name.into(), callback.into())
-        .ok_or_else(|| "font measure bridge registration failed".to_string())?;
-    super::diagram_svg_font_bridge::install(scope)
+        .and_then(|success| success.then_some(()))
+        .ok_or_else(|| format!("{label} measure bridge registration failed"))
 }
 
 fn font_measure_callback(
@@ -34,15 +61,7 @@ fn font_measure_callback(
         return_value.set(v8::undefined(scope).into());
         return;
     };
-    let width = crate::markdown::svg_rasterize::SvgRasterizeOps::measure_html_text(
-        &request.text,
-        &request.family,
-        request.size,
-        request.weight,
-        request.italic,
-        0.0,
-        None,
-    );
+    let width = measure_font_text(&request, &request.text);
     match width {
         Ok(width) if width.is_finite() && width >= 0.0 => {
             let css_layout_width =
@@ -51,6 +70,21 @@ fn font_measure_callback(
         }
         _ => return_value.set(v8::undefined(scope).into()),
     }
+}
+
+fn measure_font_text(
+    request: &FontMeasureRequest,
+    text: &str,
+) -> Result<f32, crate::markdown::svg_rasterize::SvgRasterizeError> {
+    crate::markdown::svg_rasterize::SvgRasterizeOps::measure_html_text(
+        text,
+        &request.family,
+        request.size,
+        request.weight,
+        request.italic,
+        0.0,
+        None,
+    )
 }
 
 pub(super) struct FontMeasureRequest {
