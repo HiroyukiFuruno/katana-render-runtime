@@ -7,9 +7,52 @@ import {
   collectHtmlFiles,
   parseSuiteOptions,
   runProbe,
+  scopedOutputFilename,
   scrollPositionsMatch,
+  validateViewportScrollCoverage,
 } from "./fidelity-suite";
 import { sha256File } from "./reference-capture";
+
+type CoverageCase = {
+  name: string;
+  results: { chromeScrollY: number; krrScrollY: number; passed: boolean; error?: string }[];
+  expectedPassed: boolean;
+};
+
+function coverageCases(): CoverageCase[] {
+  return [
+    {
+      name: "complete coverage",
+      results: [
+        { chromeScrollY: 0, krrScrollY: 0, passed: true },
+        { chromeScrollY: 400, krrScrollY: 400, passed: true },
+        { chromeScrollY: 800, krrScrollY: 800, passed: true },
+        { chromeScrollY: 1_000, krrScrollY: 1_000, passed: true },
+      ],
+      expectedPassed: true,
+    },
+    {
+      name: "coverage gap",
+      results: [{ chromeScrollY: 0, krrScrollY: 0, passed: true }],
+      expectedPassed: false,
+    },
+    {
+      name: "capture sentinel",
+      results: [{ chromeScrollY: -1, krrScrollY: 0, passed: false, error: "Chrome timeout" }],
+      expectedPassed: false,
+    },
+    {
+      name: "invalid NaN metadata",
+      results: [{ chromeScrollY: Number.NaN, krrScrollY: 0, passed: true }],
+      expectedPassed: false,
+    },
+    {
+      name: "invalid KRR NaN metadata",
+      results: [{ chromeScrollY: 0, krrScrollY: Number.NaN, passed: true }],
+      expectedPassed: false,
+    },
+  ];
+}
 
 describe("HTML fidelity suite options", () => {
   test("rejects mixing different probe builds in one capture suite", () => {
@@ -25,6 +68,23 @@ describe("HTML fidelity suite options", () => {
     ]);
     expect(options.binary).toContain("target/debug/probe");
     expect(options.input).toContain("/tmp/fixture.html");
+    expect(options.viewport).toBeUndefined();
+  });
+
+  test("selects a supported diagnostic viewport and rejects unknown sizes", () => {
+    const options = parseSuiteOptions(["--binary", "probe", "--viewport", "620x900"]);
+    expect(options.viewport).toEqual({ width: 620, height: 900 });
+    expect(() => parseSuiteOptions(["--binary", "probe", "--viewport", "620x720"])).toThrow(
+      "supported viewport",
+    );
+    expect(() => parseSuiteOptions(["--binary", "probe", "--viewport", "620"])).toThrow(
+      "supported viewport",
+    );
+    expect(() => parseSuiteOptions(["--binary", "probe", "--viewport", ""])).toThrow(
+      "requires WIDTHxHEIGHT",
+    );
+    expect(scopedOutputFilename("full", "scores.json")).toBe("scores.json");
+    expect(scopedOutputFilename("partial", "scores.json")).toBe("partial-scores.json");
   });
 
   test("rejects conflicting inputs and invalid thresholds", () => {
@@ -38,6 +98,21 @@ describe("HTML fidelity suite options", () => {
     expect(scrollPositionsMatch(600, 600)).toBe(true);
     expect(scrollPositionsMatch(600, 600.009)).toBe(true);
     expect(scrollPositionsMatch(600, 600.011)).toBe(false);
+  });
+
+  test("retains viewport coverage failures without skipping invalid results", () => {
+    for (const testCase of coverageCases()) {
+      const [before] = testCase.results;
+      if (!before) throw new Error(`missing ${testCase.name} input`);
+      const originalError = before.error;
+      validateViewportScrollCoverage(testCase.results, 1_000, 500);
+      const [result] = testCase.results;
+      if (!result) throw new Error(`missing ${testCase.name} result`);
+      expect(result.passed).toBe(testCase.expectedPassed);
+      if (!testCase.expectedPassed) expect(result.error).toBeTruthy();
+      if (originalError) expect(result.error).toContain(originalError);
+    }
+    expect(() => validateViewportScrollCoverage([], 1_000, 500)).toThrow();
   });
 
   test("rejects an HTML mutation during the KRR probe", () => {

@@ -32,6 +32,8 @@ const VIEWPORTS = [
   { width: 960, height: 720 },
   { width: 620, height: 900 },
 ] as const;
+type SuiteViewport = (typeof VIEWPORTS)[number];
+type SuiteScope = "full" | "partial";
 const BOTTOM_SCROLL_REQUEST = 1_000_000_000;
 const SCROLLS = [
   { name: "0", requested: 0 },
@@ -48,6 +50,7 @@ export interface SuiteOptions {
   output: string;
   minScore: number;
   phase?: FidelityPhase;
+  viewport?: SuiteViewport;
 }
 
 interface CaseResult {
@@ -76,26 +79,77 @@ export function parseSuiteOptions(argv: string[]): SuiteOptions {
   const values = suiteArgumentValues(argv);
   const binary = values.get("--binary");
   if (!binary) throw new Error("Missing required option: --binary");
-  const input = values.get("--input") ?? null;
-  const inputs = path.resolve(values.get("--inputs") ?? "tests/fixtures/html");
-  if (input && values.has("--inputs")) throw new Error("Use only one of --input and --inputs");
-  const phase = (values.get("--phase") ?? "final") as FidelityPhase;
-  const minScore = Number(values.get("--min-score") ?? (phase === "interim" ? "90" : "99"));
-  if (!Number.isFinite(minScore) || minScore < 0 || minScore > 100) {
-    throw new Error("--min-score must be between 0 and 100");
-  }
-  fidelityThresholdForPhase(phase, minScore);
+  const { input, inputs } = parseInputOptions(values);
+  const { phase, minScore } = parseThresholdOptions(values);
   return {
     phase,
-    ...(values.get("--toc-build-report")
-      ? { tocBuildReport: path.resolve(values.get("--toc-build-report") ?? "") }
-      : {}),
+    ...parseTocBuildReport(values),
     binary: path.resolve(binary),
     input: input ? path.resolve(input) : null,
     inputs,
     output: path.resolve(values.get("--output") ?? "tmp/html-chrome-fidelity-suite"),
     minScore,
+    ...parseViewportOption(values),
   };
+}
+
+function parseInputOptions(values: Map<string, string>): {
+  input: string | null;
+  inputs: string;
+} {
+  const input = values.get("--input") ?? null;
+  if (input && values.has("--inputs")) throw new Error("Use only one of --input and --inputs");
+  return {
+    input,
+    inputs: path.resolve(values.get("--inputs") ?? "tests/fixtures/html"),
+  };
+}
+
+function parseThresholdOptions(values: Map<string, string>): {
+  phase: FidelityPhase;
+  minScore: number;
+} {
+  const phase = (values.get("--phase") ?? "final") as FidelityPhase;
+  const defaultScore = phase === "interim" ? "90" : "99";
+  const minScore = Number(values.get("--min-score") ?? defaultScore);
+  if (!Number.isFinite(minScore) || minScore < 0 || minScore > 100) {
+    throw new Error("--min-score must be between 0 and 100");
+  }
+  fidelityThresholdForPhase(phase, minScore);
+  return { phase, minScore };
+}
+
+function parseTocBuildReport(values: Map<string, string>): Pick<SuiteOptions, "tocBuildReport"> {
+  const report = values.get("--toc-build-report");
+  return report ? { tocBuildReport: path.resolve(report) } : {};
+}
+
+function parseViewportOption(values: Map<string, string>): Pick<SuiteOptions, "viewport"> {
+  if (!values.has("--viewport")) return {};
+  const value = values.get("--viewport");
+  if (!value) throw new Error("--viewport requires WIDTHxHEIGHT");
+  return { viewport: parseViewport(value) };
+}
+
+export function scopedOutputFilename(scope: SuiteScope, filename: string): string {
+  return scope === "partial" ? `partial-${filename}` : filename;
+}
+
+function parseViewport(value: string): SuiteViewport {
+  const match = value.match(/^(\d+)x(\d+)$/);
+  const width = match?.[1] ? Number(match[1]) : NaN;
+  const height = match?.[2] ? Number(match[2]) : NaN;
+  const viewport = VIEWPORTS.find(
+    (candidate) => candidate.width === width && candidate.height === height,
+  );
+  if (!viewport) {
+    const supported = VIEWPORTS.map(
+      ({ width: candidateWidth, height: candidateHeight }) =>
+        `${candidateWidth}x${candidateHeight}`,
+    ).join(", ");
+    throw new Error(`--viewport must match a supported viewport: ${supported}`);
+  }
+  return viewport;
 }
 
 function suiteArgumentValues(argv: string[]): Map<string, string> {
@@ -108,6 +162,7 @@ function suiteArgumentValues(argv: string[]): Map<string, string> {
     "--min-score",
     "--toc-build-report",
     "--phase",
+    "--viewport",
   ]);
   for (let index = 0; index < argv.length; index += 2) {
     const name = argv.at(index);
@@ -249,29 +304,24 @@ async function runCase(
 export async function runSuite(options: SuiteOptions): Promise<CaseResult[]> {
   const phase = options.phase ?? "final";
   const threshold = fidelityThresholdForPhase(phase, options.minScore);
-  const results: CaseResult[] = [];
   const binarySha256 = sha256File(options.binary);
   const tocBinary = options.tocBuildReport
     ? tocBinaryFromBuildReport(options.tocBuildReport)
     : tocProbePath(options.binary);
   const tocBinarySha256 = fs.existsSync(tocBinary) ? sha256File(tocBinary) : null;
+  const { scope, viewports } = suiteScope(options);
   fs.mkdirSync(path.join(options.output, "krr"), { recursive: true });
-  for (const input of inputFiles(options)) {
-    for (const viewport of VIEWPORTS) {
-      assertBinaryUnchanged(binarySha256, sha256File(options.binary));
-      results.push(...(await runViewport(options, input, viewport, tocBinarySha256)));
-      assertBinaryUnchanged(binarySha256, sha256File(options.binary));
-    }
-  }
-  fs.writeFileSync(
-    path.join(options.output, "capture-build.json"),
-    `${JSON.stringify({ binarySha256, tocBinarySha256 }, null, 2)}\n`,
+  const results = await runSuiteViewports(options, binarySha256, tocBinarySha256, viewports);
+  writeSuiteOutputs(
+    options,
+    phase,
+    threshold,
+    scope,
+    viewports,
+    binarySha256,
+    tocBinarySha256,
+    results,
   );
-  fs.writeFileSync(
-    path.join(options.output, phase === "interim" ? "interim-scores.json" : "scores.json"),
-    `${JSON.stringify(phase === "interim" ? { phase, threshold, results } : results, null, 2)}\n`,
-  );
-  if (!options.input) writeVisualCatalogResults(options.output, results, phase);
   const passed = results.length > 0 && results.every((result) => result.passed);
   console.log(`cases: ${results.length}`);
   console.log(
@@ -281,10 +331,90 @@ export async function runSuite(options: SuiteOptions): Promise<CaseResult[]> {
   return results;
 }
 
+function suiteScope(options: SuiteOptions): {
+  scope: SuiteScope;
+  viewports: readonly SuiteViewport[];
+} {
+  return options.viewport
+    ? { scope: "partial", viewports: [options.viewport] }
+    : { scope: "full", viewports: VIEWPORTS };
+}
+
+async function runSuiteViewports(
+  options: SuiteOptions,
+  binarySha256: string,
+  tocBinarySha256: string | null,
+  viewports: readonly SuiteViewport[],
+): Promise<CaseResult[]> {
+  const results: CaseResult[] = [];
+  for (const input of inputFiles(options)) {
+    for (const viewport of viewports) {
+      assertBinaryUnchanged(binarySha256, sha256File(options.binary));
+      results.push(...(await runViewport(options, input, viewport, tocBinarySha256)));
+      assertBinaryUnchanged(binarySha256, sha256File(options.binary));
+    }
+  }
+  return results;
+}
+
+function writeSuiteOutputs(
+  options: SuiteOptions,
+  phase: FidelityPhase,
+  threshold: number,
+  scope: SuiteScope,
+  viewports: readonly SuiteViewport[],
+  binarySha256: string,
+  tocBinarySha256: string | null,
+  results: CaseResult[],
+): void {
+  writeCaptureBuild(options.output, scope, viewports, binarySha256, tocBinarySha256);
+  const resultOutput = suiteResultOutput(phase, threshold, scope, viewports, results);
+  fs.writeFileSync(
+    path.join(
+      options.output,
+      scopedOutputFilename(scope, phase === "interim" ? "interim-scores.json" : "scores.json"),
+    ),
+    `${JSON.stringify(resultOutput, null, 2)}\n`,
+  );
+  if (!options.input) writeVisualCatalogResults(options.output, results, phase, scope, viewports);
+}
+
+function writeCaptureBuild(
+  output: string,
+  scope: SuiteScope,
+  viewports: readonly SuiteViewport[],
+  binarySha256: string,
+  tocBinarySha256: string | null,
+): void {
+  const metadata = scope === "partial" ? { scope, viewports } : {};
+  fs.writeFileSync(
+    path.join(output, scopedOutputFilename(scope, "capture-build.json")),
+    `${JSON.stringify({ binarySha256, tocBinarySha256, ...metadata }, null, 2)}\n`,
+  );
+}
+
+function suiteResultOutput(
+  phase: FidelityPhase,
+  threshold: number,
+  scope: SuiteScope,
+  viewports: readonly SuiteViewport[],
+  results: CaseResult[],
+): unknown {
+  if (scope === "partial") {
+    const metadata = { scope, viewports };
+    return phase === "interim"
+      ? { phase, threshold, ...metadata, results }
+      : { ...metadata, results };
+  }
+  return phase === "interim" ? { phase, threshold, results } : results;
+}
+
 function writeVisualCatalogResults(
   output: string,
   results: CaseResult[],
   phase: FidelityPhase,
+  scope: SuiteScope,
+  viewports: readonly SuiteViewport[],
 ): void {
   const catalog = loadFeatureCatalog();
   assertCatalogComplete(catalog);
@@ -303,12 +433,26 @@ function writeVisualCatalogResults(
       ),
     };
   });
+  const outputResults =
+    scope === "partial"
+      ? {
+          scope,
+          viewports,
+          ...(phase === "interim" ? { phase, threshold: 90 } : {}),
+          results: visualResults,
+        }
+      : phase === "interim"
+        ? { phase, threshold: 90, results: visualResults }
+        : visualResults;
   fs.writeFileSync(
     path.join(
       output,
-      phase === "interim" ? "interim-visual-feature-results.json" : "visual-feature-results.json",
+      scopedOutputFilename(
+        scope,
+        phase === "interim" ? "interim-visual-feature-results.json" : "visual-feature-results.json",
+      ),
     ),
-    `${JSON.stringify(phase === "interim" ? { phase, threshold: 90, results: visualResults } : visualResults, null, 2)}\n`,
+    `${JSON.stringify(outputResults, null, 2)}\n`,
   );
   if (visualResults.some((result) => result.status !== "passed"))
     throw new Error("visual feature catalog score gate failed");
@@ -316,6 +460,43 @@ function writeVisualCatalogResults(
 
 export function assertBinaryUnchanged(expected: string, actual: string): void {
   if (expected !== actual) throw new Error("KRR probe binary changed during capture");
+}
+
+function retainScrollCoverageFailure(
+  results: { passed: boolean; error?: string }[],
+  error: unknown,
+): void {
+  const first = results[0];
+  const message = error instanceof Error ? error.message : String(error);
+  if (!first) throw new Error(message);
+  first.passed = false;
+  first.error = first.error ? `${first.error}; ${message}` : message;
+}
+
+export function validateViewportScrollCoverage(
+  results: {
+    chromeScrollY: number;
+    krrScrollY: number;
+    passed: boolean;
+    error?: string;
+  }[],
+  maxScrollY: number,
+  viewportHeight: number,
+): void {
+  try {
+    assertScrollCoverage(
+      results.map((result) => result.chromeScrollY),
+      maxScrollY,
+      viewportHeight,
+    );
+    assertScrollCoverage(
+      results.map((result) => result.krrScrollY),
+      maxScrollY,
+      viewportHeight,
+    );
+  } catch (error) {
+    retainScrollCoverageFailure(results, error);
+  }
 }
 
 async function runViewport(
@@ -377,16 +558,7 @@ async function runViewport(
   } finally {
     await captureBrowser.close();
   }
-  assertScrollCoverage(
-    results.map((result) => result.chromeScrollY),
-    coverage.maxScrollY,
-    viewport.height,
-  );
-  assertScrollCoverage(
-    results.map((result) => result.krrScrollY),
-    coverage.maxScrollY,
-    viewport.height,
-  );
+  validateViewportScrollCoverage(results, coverage.maxScrollY, viewport.height);
   results.push(
     ...runTocCases(
       options,
