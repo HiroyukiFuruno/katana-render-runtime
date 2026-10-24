@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "svg_rasterize_text_harfrust_face_cache_shared_file_tests.rs"]
+mod shared_file_tests;
+
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const MAX_SOURCE_BYTES: usize = 64 * 1024 * 1024;
 const SHAPER_SCALE: f32 = 65_536.0;

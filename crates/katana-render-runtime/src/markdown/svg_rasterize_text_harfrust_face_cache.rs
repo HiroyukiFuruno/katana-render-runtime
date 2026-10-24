@@ -178,12 +178,13 @@ pub(super) fn font_for_face(
     match source {
         Source::Binary(data) => load::binary_font(data, face_index),
         Source::SharedFile(_, data) => {
-            clear_cache();
+            let data_len = data.as_ref().as_ref().len();
+            admit_source_budget(data_len);
             Some(FontHandle {
                 font: Font::new(data, face_index)?,
                 key: None,
                 poisoned: None,
-                retained_source_bytes: MAX_SOURCE_BYTES,
+                retained_source_bytes: data_len,
             })
         }
         Source::File(path) => load::file_font(database, face_id, path, face_index),
