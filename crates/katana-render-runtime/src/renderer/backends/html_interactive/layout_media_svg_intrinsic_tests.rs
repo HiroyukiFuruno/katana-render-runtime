@@ -1,10 +1,11 @@
 use super::super::layout::HtmlLayoutRenderer;
 use super::super::style::CssStyle;
+use super::test_support::{find_svg, svg_coordinate};
 use super::{embedded_svg_size, intrinsic_image_width};
 use crate::renderer::backends::html_document::{HtmlDocument, HtmlDocumentNode};
 use crate::{HtmlBrowserSession, HtmlBrowserSource, HtmlBrowserViewport};
 use std::collections::HashMap;
-use xmltree::{Element, XMLNode};
+use xmltree::Element;
 
 type TestResult<T = ()> = Result<T, String>;
 const NATURAL_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="50" viewBox="0 0 80 50"><rect width="80" height="50" fill="#ff0000"/><circle cx="40" cy="25" r="15" fill="#0000ff"/></svg>"##;
@@ -14,6 +15,7 @@ const CAPTURE_WIDTH: u32 = 625;
 const CAPTURE_HEIGHT: u32 = 404;
 const SVG_VIEWPORT_WIDTH: u32 = 601;
 const SVG_VIEWPORT_HEIGHT: u32 = 380;
+const PERCENT_AUTO_HEIGHT: f32 = 189.859_38;
 
 #[test]
 fn natural_svg_keeps_attribute_dimensions_in_body_and_centered_flex() -> TestResult {
@@ -56,7 +58,7 @@ fn percentage_svg_obeys_maximum_width_inside_centered_flex() -> TestResult {
 #[test]
 fn percentage_svg_uses_default_intrinsic_width_in_nested_auto_flex() -> TestResult {
     let html = capture_auto_viewport_html(PERCENT_SVG);
-    assert_geometry(&html, 300.0, 300.0 * 380.0 / 600.406_25)
+    assert_geometry(&html, 300.0, PERCENT_AUTO_HEIGHT)
 }
 
 #[test]
@@ -119,7 +121,7 @@ fn css_auto_height_uses_svg_view_box_ratio_instead_of_height_attribute() {
         &CssStyle::browser_default(),
     );
     let auto_size = embedded_svg_size(&attributes, 1120.0, &auto_style);
-    assert!((auto_size.1 - 395.524_48).abs() < 0.001);
+    assert_eq!(auto_size.1, 395.515_63);
 
     let width_only_style = CssStyle::from_attributes(
         &[("style".to_owned(), "width:1120px".to_owned())],
@@ -255,14 +257,6 @@ fn assert_geometry(html: &str, width: f32, height: f32) -> TestResult {
     Ok(())
 }
 
-fn find_svg(root: &Element) -> Option<&Element> {
-    root.children.iter().find_map(|node| match node {
-        XMLNode::Element(element) if element.name == "svg" => Some(element),
-        XMLNode::Element(element) => find_svg(element),
-        _ => None,
-    })
-}
-
 fn rendered_svg_x_and_width(html: &str) -> TestResult<(f32, f32)> {
     let root = rendered_svg_document(html)?;
     let svg = find_svg(&root).ok_or("missing embedded SVG")?;
@@ -278,12 +272,4 @@ fn rendered_svg_document(html: &str) -> TestResult<Element> {
         .map_err(|error| error.to_string())?;
     let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
     Element::parse(layout.svg.as_bytes()).map_err(|error| error.to_string())
-}
-
-fn svg_coordinate(svg: &Element, name: &str) -> TestResult<f32> {
-    svg.attributes
-        .get(name)
-        .ok_or_else(|| format!("missing SVG {name}"))?
-        .parse::<f32>()
-        .map_err(|error| error.to_string())
 }

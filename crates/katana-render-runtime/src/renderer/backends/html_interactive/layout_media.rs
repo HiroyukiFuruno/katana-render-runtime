@@ -4,6 +4,7 @@ use super::layout::HtmlLayoutRenderer;
 use super::style::CssStyle;
 use super::svg::{escape_xml, snap_paint_coordinate};
 use super::types::LayoutContext;
+use crate::markdown::svg_rasterize::SvgRasterizeOps;
 use crate::renderer::backends::html_document::{
     EMBEDDED_SVG_HEIGHT_PLACEHOLDER, EMBEDDED_SVG_MARKUP_ATTRIBUTE, EMBEDDED_SVG_WIDTH_PLACEHOLDER,
     EMBEDDED_SVG_X_PLACEHOLDER, EMBEDDED_SVG_Y_PLACEHOLDER,
@@ -59,7 +60,7 @@ impl HtmlLayoutRenderer {
         };
         let (svg_width, svg_height) = embedded_svg_size(attributes, available_width, layout.style);
         /* WHY: 自然寸法と幅制約を適用したSVGの実幅からauto marginを解決する。 */
-        /* WHY: SVG原点はCSS座標で丸め、スクロールの小数移動は独立して保持する。 */
+        /* WHY: 原点の小数差は未解決のため、既存pixel snap契約を維持し、寸法量子化とは分離する。 */
         let x = snap_paint_coordinate(embedded_svg_x(
             layout.x,
             available_width,
@@ -67,7 +68,8 @@ impl HtmlLayoutRenderer {
             layout.style,
         )) - self.scroll_x;
         let y = snap_paint_coordinate(start) - self.scroll_y;
-        let svg = position_embedded_svg(markup, x, y, svg_width, svg_height);
+        let positioned = position_embedded_svg(markup, x, y, svg_width, svg_height);
+        let svg = inherit_svg_text_style(&positioned, layout.style);
         self.svg.push_str(&svg);
         start + svg_height + layout.style.margin_bottom
     }
@@ -163,6 +165,16 @@ fn position_embedded_svg(markup: &str, x: f32, y: f32, width: f32, height: f32) 
         .replace(EMBEDDED_SVG_HEIGHT_PLACEHOLDER, &height.to_string())
 }
 
+fn inherit_svg_text_style(markup: &str, style: &CssStyle) -> String {
+    let family = escape_xml(&style.font_family);
+    let size = SvgRasterizeOps::effective_html_font_size(style.font_size);
+    let font_style = if style.italic { "italic" } else { "normal" };
+    format!(
+        r#"<g font-family="{family}" font-size="{size}" font-weight="{}" font-style="{font_style}">{markup}</g>"#,
+        style.font_weight
+    )
+}
+
 #[cfg(test)]
 #[path = "layout_media_tests.rs"]
 mod tests;
@@ -174,3 +186,7 @@ mod svg_intrinsic_tests;
 #[cfg(test)]
 #[path = "layout_media_svg_origin_tests.rs"]
 mod svg_origin_tests;
+
+#[cfg(test)]
+#[path = "layout_media_test_support.rs"]
+mod test_support;
