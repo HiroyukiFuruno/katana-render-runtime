@@ -42,6 +42,8 @@ fork公開許可を採用確定として進めた判断を是正する。まず�
 
 ### CoreText実フレーム候補の追加対照
 
+共通フィルター修正後にも比較を更新した。R2153のAST/foundation/標準strict Clippyはactual0、R2154の同一buildを使うR2155の重点5件・runtime lib 2,616件は成功した。R2156/R2157は同じ12入力・viewport・資源を既定とCoreText候補の両方で新規取得し、全24 capture成功・source/binary不変。R2158の既定は10/12が99以上（95.44984〜99.9388241）、R2159のCoreText候補は0/12（92.14471〜98.96957）、両者とも取得失敗0・寸法失敗0。基準・scorer・閾値は不変であり、この接続の置換は引き続き採用しない。製品表示時間/RSS・実描画font完全一致・3 OSは未確認。過去の8/12と現在の10/12を同じsourceの結果として混同しない。証跡は`tmp/quality/svg-library-default12-score-r2158/scores.json`と`svg-library-coretext12-score-r2159/scores.json`。
+
 R2111のAST・foundation・strict Clippy、R2112のrelease buildは成功。R2113は関連5件とruntime lib 2,609件成功・失敗0・ignored18で、source/binary不変だった。これはテスト専用の描画経路であり、製品の既定Skia経路を変更していない。新規の上下位置回帰は、R2110で既存Skiaにもbaseline以下の微小alphaがあると確認し、全透明という誤った期待を訂正した。空画像と上下反転画像を拒否する判定を維持した。
 
 R2114はR1936と同じ元HTML・viewport・資源を使う既存12図すべての実PNGを取得し、R2115で既存の独立raw JS基準・scorerを変更せず採点した。99以上は0/12、最低92.14471・最高98.96957、寸法失敗0。同じ12図の既定経路は8/12で、既存合格8図すべてが脱落した。したがって、この設定のCoreText置換は採用しない。選択済み物理font bytesとusvg glyph IDを渡した接続であり、実描画font完全一致の正式認定と製品time-to-frame/RSS比較は未実施。以前の2glyph限定速度比較を採用根拠へ昇格させない。証跡は`tmp/quality/html-coretext-product-probe-r2114/result.json`と`tmp/quality/html-coretext-score-r2115/scores.json`。
