@@ -220,6 +220,10 @@ mod file_reuse_tests;
 #[path = "svg_rasterize_text_harfrust_face_cache_file_ttc_tests.rs"]
 mod file_ttc_tests;
 
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_text_harfrust_file_mapping_tests.rs"]
+mod file_mapping_tests;
+
 #[cfg(unix)]
 #[path = "svg_rasterize_text_harfrust_face_cache_generation_race_tests.rs"]
 mod generation_race_tests;
