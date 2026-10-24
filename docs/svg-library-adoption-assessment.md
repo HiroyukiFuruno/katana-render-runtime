@@ -40,6 +40,12 @@ fork公開許可を採用確定として進めた判断を是正する。まず�
 
 検索語: `quantified alternative selection`, `unknown is not pass`, `no weighted waiver`, `fork last resort`。
 
+### CoreText実フレーム候補の追加対照
+
+R2111のAST・foundation・strict Clippy、R2112のrelease buildは成功。R2113は関連5件とruntime lib 2,609件成功・失敗0・ignored18で、source/binary不変だった。これはテスト専用の描画経路であり、製品の既定Skia経路を変更していない。新規の上下位置回帰は、R2110で既存Skiaにもbaseline以下の微小alphaがあると確認し、全透明という誤った期待を訂正した。空画像と上下反転画像を拒否する判定を維持した。
+
+R2114はR1936と同じ元HTML・viewport・資源を使う既存12図すべての実PNGを取得し、R2115で既存の独立raw JS基準・scorerを変更せず採点した。99以上は0/12、最低92.14471・最高98.96957、寸法失敗0。同じ12図の既定経路は8/12で、既存合格8図すべてが脱落した。したがって、この設定のCoreText置換は採用しない。選択済み物理font bytesとusvg glyph IDを渡した接続であり、実描画font完全一致の正式認定と製品time-to-frame/RSS比較は未実施。以前の2glyph限定速度比較を採用根拠へ昇格させない。証跡は`tmp/quality/html-coretext-product-probe-r2114/result.json`と`tmp/quality/html-coretext-score-r2115/scores.json`。
+
 ## KRR内での同一12図の初期比較
 
 英日それぞれのflowchart・継承class・C4・timeline・tree view・journeyを選び、同一の前処理済みSVG、独立raw JS基準、同一scorerで比較した。合格基準99は維持する。描画寸法取得にはusvg parseを残す混成adapterであり、全面置換の性能を示す実験ではない。
