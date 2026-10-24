@@ -169,8 +169,9 @@ fn inherit_svg_text_style(markup: &str, style: &CssStyle) -> String {
     let family = escape_xml(&style.font_family);
     let size = SvgRasterizeOps::effective_html_font_size(style.font_size);
     let font_style = if style.italic { "italic" } else { "normal" };
+    /* WHY: HTML文字用の空白保持を埋め込みSVGへ漏らさず、内部の明示指定を優先させる。 */
     format!(
-        r#"<g font-family="{family}" font-size="{size}" font-weight="{}" font-style="{font_style}">{markup}</g>"#,
+        r#"<g xml:space="default" font-family="{family}" font-size="{size}" font-weight="{}" font-style="{font_style}">{markup}</g>"#,
         style.font_weight
     )
 }
@@ -186,6 +187,10 @@ mod svg_intrinsic_tests;
 #[cfg(test)]
 #[path = "layout_media_svg_origin_tests.rs"]
 mod svg_origin_tests;
+
+#[cfg(test)]
+#[path = "layout_media_svg_whitespace_tests.rs"]
+mod svg_whitespace_tests;
 
 #[cfg(test)]
 #[path = "layout_media_test_support.rs"]

@@ -15,3 +15,20 @@ pub(super) fn svg_coordinate(svg: &Element, name: &str) -> Result<f32, String> {
         .parse::<f32>()
         .map_err(|error| error.to_string())
 }
+
+pub(super) fn capture_frame_pixels(
+    html: &str,
+    url: &str,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    let source = crate::HtmlBrowserSource::new(html, url).map_err(|error| error.to_string())?;
+    let viewport =
+        crate::HtmlBrowserViewport::new(width, height, 1.0).map_err(|error| error.to_string())?;
+    let session =
+        crate::HtmlBrowserSession::new(source, viewport).map_err(|error| error.to_string())?;
+    session
+        .latest_frame()
+        .map(|frame| frame.pixels.clone())
+        .ok_or_else(|| "missing SVG frame".to_owned())
+}

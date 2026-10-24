@@ -14,6 +14,10 @@
 
 ## 現在の状態（2026-10-24）
 
+- [/] HTMLフレーム外側の`xml:space="preserve"`が埋め込みSVGへ漏れる描画不正を修正。境界だけを`default`へ戻し、内部の明示`preserve`と子`default`を維持する。R2126で実frameの三空白/単空白不一致を再現、R2129で新回帰は成功し、既存font継承テストの属性順序固定1件をXML属性名別判定へ是正した。R2132 AST/foundation0、R2133 build0、R2134重点2件・runtime lib 2,611件成功/失敗0/ignored18、R2135標準strict Clippy全構成0。R2130は同じ元HTMLの117実PNGを全取得し、R2131の同じraw JS基準/scorerで62/117が99以上、既存合格脱落0・寸法失敗0。変化は未達4図だけで、EN Gantt95.89284→96.68677、JA Gantt96.01954→96.71529、EN Timeline93.62048→97.36401、JA Timeline97.01308→97.61829。残55・HTML84の変更後再検証・実frame性能・公開依存・正式全体ゲート/リリースは未完了。新回帰の撮影処理は既存intrinsic回帰と共通化し重複例外を追加していない。独立差分レビューにactionable指摘なし。
+
+- [ ] Skia system cacheの完全一致付き再利用候補は未採用。R2116は既存Trebuchet normal/boldの文字幅/画素差0を再確認したが、system Typefaceに既存raw dataは無かった。R2122の公開`match_family_style`実測では両weightで再queryのunique IDは一致した一方、`to_existing_font_data`は取得不能、`to_font_bytes`は取得可能でも選択済みsource bytesと不一致で、物理font完全一致は認定していない。R2117の新診断関数長超過を分割、R2119のroot strict Clippyは成功したが性能harness容量post-checkが失敗し、既存admissionによるR2120で残Clippy成功。閾値は維持した。速度改善として扱わず、既定の物理font描画を継続する。
+
 - [ ] 数値選定の追加対照R2111〜R2115。CoreText実frame候補はAST/foundation/strict Clippy・release build成功、重点5件とruntime lib 2,609件成功・失敗0・ignored18。同じ元HTMLの12図を全取得・採点し、99以上0/12、92.14471〜98.96957、寸法失敗0、既定経路の既存合格8図が全脱落。この設定は採用せず、製品既定を維持する。限定2glyphの速度結果を製品性能へ転用しない。全font観測・製品時間/RSS・3 OS・最終採用は未完了。`docs/svg-library-adoption-assessment.md`に判定と実証跡を追記した。R2107の新規orientation回帰失敗は、R2110で既定Skiaにもbaseline以下の微小alphaがあると確認し、全透明という誤期待を訂正。空画像・上下反転の拒否は維持した。
 
 - [ ] 代替の選定を数値化する（最新ユーザー指摘）。`docs/svg-library-adoption-assessment.md`に試行/取得/失敗/採点/合格の母数、最低点・脱落数、初回/再表示/resize秒数、RSS bytes、3 OS成功数、adapter/patch量、上流公開・修正取込み日数の選定契約を固定した。未測定を不明とし、総合点で必須条件の未達を相殺しない。R2085 AST/foundation0、R2086 build0、R2087新規3回帰成功。英日2図のR2088は英語取得・日本語font拒否1。R2089の空projection後処理失敗を保持し、既存RGB判定のR2090は英語97.59019・99未達。Skia同図90.981との差+6.60919で、全体改善へ加算しない。R2091 build0、R2092の日本語個別load checksumは指定W3の抽出SFNTと異なり、実W4 TTCのSHAと一致した。実font接続・画像全体・時間/RSS・3 OS・保守費用の採否は未完了で、forkは未確定。

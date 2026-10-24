@@ -2,8 +2,8 @@ use super::super::layout::HtmlLayoutRenderer;
 use super::super::style::CssStyle;
 use super::test_support::{find_svg, svg_coordinate};
 use super::{embedded_svg_size, intrinsic_image_width};
+use crate::HtmlBrowserViewport;
 use crate::renderer::backends::html_document::{HtmlDocument, HtmlDocumentNode};
-use crate::{HtmlBrowserSession, HtmlBrowserSource, HtmlBrowserViewport};
 use std::collections::HashMap;
 use xmltree::Element;
 
@@ -228,15 +228,12 @@ fn capture_document(content: String, viewport_style: String, svg_style: String) 
 }
 
 fn capture_pixels(html: &str) -> TestResult<Vec<u8>> {
-    let source = HtmlBrowserSource::new(html, "https://example.test/natural-svg.html")
-        .map_err(|error| error.to_string())?;
-    let viewport = HtmlBrowserViewport::new(CAPTURE_WIDTH, CAPTURE_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())?;
-    let session = HtmlBrowserSession::new(source, viewport).map_err(|error| error.to_string())?;
-    session
-        .latest_frame()
-        .map(|frame| frame.pixels.clone())
-        .ok_or_else(|| "missing SVG frame".to_owned())
+    super::test_support::capture_frame_pixels(
+        html,
+        "https://example.test/natural-svg.html",
+        CAPTURE_WIDTH,
+        CAPTURE_HEIGHT,
+    )
 }
 
 fn assert_geometry(html: &str, width: f32, height: f32) -> TestResult {

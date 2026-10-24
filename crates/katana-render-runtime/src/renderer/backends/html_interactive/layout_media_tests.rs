@@ -180,9 +180,7 @@ fn embedded_svg_inherits_parent_font_without_rewriting_explicit_child_font() -> 
     );
 
     let wrapped = inherit_svg_text_style(&markup, &style);
-    assert!(wrapped.starts_with(
-        r#"<g font-family="Noto Sans, sans-serif" font-size="18" font-weight="700" font-style="italic">"#
-    ));
+    assert_inherited_font_attributes(&wrapped)?;
     assert!(wrapped.contains(markup.as_str()));
     assert!(wrapped.contains(r#"font-family="monospace""#));
     let document = format!(
@@ -192,6 +190,23 @@ fn embedded_svg_inherits_parent_font_without_rewriting_explicit_child_font() -> 
         crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_html_svg(&document, 1.0)
             .map_err(|error| error.to_string())?;
     assert!(raster.rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    Ok(())
+}
+
+fn assert_inherited_font_attributes(markup: &str) -> TestResult {
+    let wrapper = xmltree::Element::parse(markup.as_bytes()).map_err(|error| error.to_string())?;
+    assert_eq!(wrapper.name, "g");
+    for (attribute, expected) in [
+        ("font-family", "Noto Sans, sans-serif"),
+        ("font-size", "18"),
+        ("font-weight", "700"),
+        ("font-style", "italic"),
+    ] {
+        assert_eq!(
+            wrapper.attributes.get(attribute).map(String::as_str),
+            Some(expected)
+        );
+    }
     Ok(())
 }
 
