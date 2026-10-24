@@ -5,7 +5,8 @@ import { validateFontProvenance } from "./coretext-font-provenance";
 import { readKrrDynamicCapture } from "./dynamic-fidelity";
 import { assertExpectedStateMatches, type JsonValue } from "./dynamic-state";
 import { assertCatalogComplete, type FeatureCatalog, loadFeatureCatalog } from "./feature-catalog";
-import { compareImages, sha256File } from "./reference-capture";
+import { ImageComparisonSession } from "./image-comparison-session";
+import { sha256File } from "./reference-capture";
 
 export const STAGE90_THRESHOLD = 90;
 const REQUIRED_PHASES = ["cold", "warm", "re-display", "full-Y", "post-operation"] as const;
@@ -83,6 +84,7 @@ export function assertStrictHtml84ChromeReceipt(
       "browserExecutableSha256",
       "capturePath",
       "captureSha256",
+      "fontReadiness",
       "state",
       "boundary",
       "resourceProvenance",
@@ -104,6 +106,9 @@ export function assertStrictHtml84ChromeReceipt(
     !sameViewport(receipt.viewport, expected.viewport as unknown as JsonValue)
   )
     throw new Error(`Independent Chrome raw receipt identity differs: ${expected.conditionId}`);
+  const fontReadiness = strictRecord(receipt.fontReadiness, "Chrome font readiness");
+  assertOnlyStrictKeys(fontReadiness, ["status"], "Chrome font readiness");
+  if (fontReadiness.status !== "loaded") throw new Error("Chrome fonts are not ready");
   const browserPath = strictPath(
     strictText(receipt.browserExecutablePath, "Chrome executable"),
     "Chrome executable",
@@ -190,7 +195,11 @@ export interface Stage90Manifest {
 }
 
 /** Strict evidence-bound stage gate. Unlike the diagnostic loader, this recomputes PNG scores. */
-export function assertStrictStage90Manifest(value: JsonValue, trustedValue: JsonValue): void {
+export function assertStrictStage90Manifest(
+  value: JsonValue,
+  trustedValue: JsonValue,
+  comparisonSession = new ImageComparisonSession(),
+): void {
   assertStage90Manifest(value, trustedValue);
   const manifest = strictRecord(value, "stage manifest");
   const trusted = strictRecord(trustedValue, "trusted stage expectation");
@@ -213,7 +222,12 @@ export function assertStrictStage90Manifest(value: JsonValue, trustedValue: Json
     seen.add(key);
     const expectation = expected.get(key);
     if (!expectation) throw new Error(`unexpected strict stage image: ${key}`);
-    assertStrictImage(image, expectation, strictText(trusted.binarySha256, "binary SHA"));
+    assertStrictImage(
+      image,
+      expectation,
+      strictText(trusted.binarySha256, "binary SHA"),
+      comparisonSession,
+    );
   }
   if (seen.size !== expected.size) throw new Error("missing strict stage image");
 }
@@ -222,6 +236,7 @@ function assertStrictImage(
   image: { [key: string]: JsonValue },
   expectation: { [key: string]: JsonValue },
   binarySha256: string,
+  comparisonSession: ImageComparisonSession,
 ): void {
   const referencePath = strictPath(expectation.referencePath, "reference PNG");
   const candidatePath = strictPath(image.candidatePath, "candidate PNG");
@@ -232,6 +247,7 @@ function assertStrictImage(
     referencePath,
     candidatePath,
     binarySha256,
+    comparisonSession,
   );
   assertStrictEvidence(image, expectation, evidencePath, candidateSha, binarySha256);
 }
@@ -242,6 +258,7 @@ function assertStrictPng(
   referencePath: string,
   candidatePath: string,
   binarySha256: string,
+  comparisonSession: ImageComparisonSession,
 ): string {
   const referenceSha = sha256File(referencePath);
   const candidateSha = sha256File(candidatePath);
@@ -260,7 +277,7 @@ function assertStrictPng(
   )
     throw new Error(`strict image provenance differs: ${strictText(image.key, "image key")}`);
   assertStrictImageDimensions(image, expectation, referencePath, candidatePath);
-  const score = compareImages(referencePath, candidatePath, STAGE90_THRESHOLD);
+  const score = comparisonSession.compare(referencePath, candidatePath, STAGE90_THRESHOLD);
   if (score.rmseScore < STAGE90_THRESHOLD || score.maeScore < STAGE90_THRESHOLD)
     throw new Error(`strict stage score below 90: ${strictText(image.key, "image key")}`);
   assertReportedScore(image, score.rmseScore, score.maeScore);

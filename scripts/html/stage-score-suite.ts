@@ -8,7 +8,8 @@ import {
 import { stableJson } from "./dynamic-fidelity";
 import type { JsonValue } from "./dynamic-state";
 import { assertCatalogComplete, type CatalogCase, loadFeatureCatalog } from "./feature-catalog";
-import { compareImages, sha256File } from "./reference-capture";
+import { ImageComparisonSession } from "./image-comparison-session";
+import { sha256File } from "./reference-capture";
 import {
   assertOnlyStrictKeys,
   assertStrictHtml84ChromeReceipt,
@@ -113,11 +114,11 @@ export function validateCatalogRawStage90Captures(
   if (captures.length !== plan.conditions.length || byId.size !== captures.length)
     throw new Error("catalog raw capture coverage is incomplete or duplicated");
   const nonces = new Set<string>();
-  const imageScores = new Map<string, ReturnType<typeof compareImages>>();
+  const comparisonSession = new ImageComparisonSession();
   return plan.conditions.map((condition) => {
     const capture = byId.get(condition.conditionId);
     if (!capture) throw new Error(`catalog raw capture is missing: ${condition.conditionId}`);
-    return validateRawCaptureCondition(condition, capture, manifest, nonces, imageScores);
+    return validateRawCaptureCondition(condition, capture, manifest, nonces, comparisonSession);
   });
 }
 
@@ -190,7 +191,7 @@ function inspectRawCaptureConditions(
   currentChromeSha256: string,
 ): CatalogRawStage90ReuseResult {
   const nonces = new Set<string>();
-  const imageScores = new Map<string, ReturnType<typeof compareImages>>();
+  const comparisonSession = new ImageComparisonSession();
   const reusableConditionIds: string[] = [];
   const rejected: Array<{ conditionId: string; reason: string }> = [];
   for (const condition of plan.conditions) {
@@ -200,7 +201,7 @@ function inspectRawCaptureConditions(
       continue;
     }
     try {
-      validateRawCaptureCondition(condition, capture, manifest, nonces, imageScores);
+      validateRawCaptureCondition(condition, capture, manifest, nonces, comparisonSession);
       assertCurrentChromeIdentity(capture, currentChromePath, currentChromeSha256);
       reusableConditionIds.push(condition.conditionId);
     } catch (error) {
@@ -271,7 +272,7 @@ function validateRawCaptureCondition(
   capture: { [key: string]: JsonValue },
   manifest: { [key: string]: JsonValue },
   nonces: Set<string>,
-  imageScores: Map<string, ReturnType<typeof compareImages>>,
+  comparisonSession: ImageComparisonSession,
 ): CatalogRawStage90Result {
   assertRawCaptureTuple(condition, capture, manifest);
   const identity = rawCaptureIdentity(condition, manifest);
@@ -289,7 +290,7 @@ function validateRawCaptureCondition(
   if (stableJson(krr.state) !== stableJson(chrome.state))
     throw new Error(`independent raw semantic state differs: ${condition.conditionId}`);
   assertCaptureBindings(capture, krr, chrome, condition.conditionId);
-  const score = compareRawImagePair(chrome, krr, imageScores);
+  const score = compareRawImagePair(chrome, krr, comparisonSession);
   if (!score.passed)
     throw new Error(`independent raw image score is below 90: ${condition.conditionId}`);
   return {
@@ -310,17 +311,9 @@ function validateRawCaptureCondition(
 function compareRawImagePair(
   chrome: ReturnType<typeof assertStrictHtml84ChromeReceipt>,
   krr: ReturnType<typeof assertStrictHtml84KrrReceipt>,
-  imageScores: Map<string, ReturnType<typeof compareImages>>,
-): ReturnType<typeof compareImages> {
-  const key = [chrome.capturePath, chrome.captureSha256, krr.capturePath, krr.captureSha256].join(
-    "\0",
-  );
-  let score = imageScores.get(key);
-  if (!score) {
-    score = compareImages(chrome.capturePath, krr.capturePath, STAGE90_THRESHOLD);
-    imageScores.set(key, score);
-  }
-  return score;
+  comparisonSession: ImageComparisonSession,
+) {
+  return comparisonSession.compare(chrome.capturePath, krr.capturePath, STAGE90_THRESHOLD);
 }
 
 function assertRawCaptureTuple(
@@ -482,10 +475,11 @@ export function assertStageScoreSuite(
   assertConditionInventory(conditions, catalog);
   assertTrustedConditionInventory(trustedConditions, catalog);
   const executionNonces = new Set<string>();
+  const comparisonSession = new ImageComparisonSession();
   for (const condition of conditions) {
     const trusted = trustedConditions.find((item) => item.conditionId === condition.conditionId);
     if (!trusted) throw new Error(`missing trusted condition: ${condition.conditionId}`);
-    assertCondition(condition, trusted, catalog, executionNonces);
+    assertCondition(condition, trusted, catalog, executionNonces, comparisonSession);
   }
 }
 
@@ -572,6 +566,7 @@ function assertCondition(
   trustedCondition: TrustedSuiteCondition,
   catalog: { scriptCases: CatalogCase[]; visualAspects: CatalogCase[] },
   executionNonces: Set<string>,
+  comparisonSession: ImageComparisonSession,
 ): void {
   const entry = [...catalog.visualAspects, ...catalog.scriptCases].find(
     (item) => item.id === condition.caseId,
@@ -587,7 +582,7 @@ function assertCondition(
   assertTrustedConditionIdentity(condition, trustedCondition);
   const trusted = record(trustedCondition.trusted, "trusted condition");
   const candidate = record(condition.candidate, "candidate condition");
-  assertStageManifests(condition, trustedCondition, trusted, candidate);
+  assertStageManifests(condition, trustedCondition, trusted, candidate, comparisonSession);
   const identity: Html84ConditionIdentity = {
     conditionId: condition.conditionId,
     caseId: condition.caseId,
@@ -598,7 +593,13 @@ function assertCondition(
     sourceSha256: condition.sourceSha256,
     binarySha256: condition.binarySha256,
   };
-  assertIndependentRawReceipts(condition, trustedCondition, identity, executionNonces);
+  assertIndependentRawReceipts(
+    condition,
+    trustedCondition,
+    identity,
+    executionNonces,
+    comparisonSession,
+  );
 }
 
 function assertConditionSourceAndBinary(
@@ -638,6 +639,7 @@ function assertStageManifests(
   trustedCondition: TrustedSuiteCondition,
   trusted: { [key: string]: JsonValue },
   candidate: { [key: string]: JsonValue },
+  comparisonSession: ImageComparisonSession,
 ): void {
   if (
     trusted.sourceSha256 !== condition.sourceSha256 ||
@@ -653,7 +655,7 @@ function assertStageManifests(
     throw new Error(`condition is not an individual stage90 manifest: ${condition.conditionId}`);
   assertManifestTuple(trusted, condition, "trusted");
   assertManifestTuple(candidate, condition, "candidate");
-  assertStrictStage90Manifest(condition.candidate, trustedCondition.trusted);
+  assertStrictStage90Manifest(condition.candidate, trustedCondition.trusted, comparisonSession);
 }
 
 function assertIndependentRawReceipts(
@@ -661,6 +663,7 @@ function assertIndependentRawReceipts(
   trustedCondition: TrustedSuiteCondition,
   identity: Html84ConditionIdentity,
   executionNonces: Set<string>,
+  comparisonSession: ImageComparisonSession,
 ): void {
   const krr = assertStrictHtml84KrrReceipt(
     condition.rawKrrReportPath,
@@ -691,7 +694,7 @@ function assertIndependentRawReceipts(
     throw new Error(
       `KRR raw capture is not bound to a candidate stage image: ${condition.conditionId}`,
     );
-  if (!compareImages(krr.capturePath, chrome.capturePath, 90).passed)
+  if (!comparisonSession.compare(krr.capturePath, chrome.capturePath, 90).passed)
     throw new Error(`independent raw image score is below 90: ${condition.conditionId}`);
 }
 

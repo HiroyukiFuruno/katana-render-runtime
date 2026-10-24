@@ -533,6 +533,13 @@ function validateFontIdentityCondition(
   }
 }
 
+function readFontReadiness(value: JsonValue | undefined): { status: "loaded" } {
+  return z
+    .object({ status: z.literal("loaded") })
+    .strict()
+    .parse(value);
+}
+
 function assertFontIdentityRequestBinding(
   conditionId: string,
   capture: { [key: string]: JsonValue },
@@ -546,6 +553,7 @@ function assertFontIdentityRequestBinding(
     throw new Error("font observation or resource provenance is missing");
   const observation = jsonRecord(observationValue, "font observation");
   const resources = jsonRecord(resourceValue, "resource provenance");
+  readFontReadiness(capture.fontReadiness);
   if (
     capture.status !== "captured" ||
     capture.fontIdentityRequestConditionId !== conditionId ||
@@ -585,10 +593,13 @@ function compareFontIdentityReceipts(
     jsonText(capture.chromeReceiptPath, "Chrome receipt path"),
     jsonText(capture.chromeReceiptSha256, "Chrome receipt SHA"),
   );
+  const captureReadiness = readFontReadiness(capture.fontReadiness);
+  const chromeReadiness = readFontReadiness(chrome.fontReadiness);
   if (
     krr.conditionId !== conditionId ||
     chrome.conditionId !== conditionId ||
     chrome.status !== "observed" ||
+    !sameJson(captureReadiness, chromeReadiness) ||
     !sameJson(chrome.resourceProvenance, capture.resourceProvenance) ||
     !sameJson(chrome.fontProvenance, responseCapture.fontProvenance)
   )

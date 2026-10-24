@@ -286,6 +286,17 @@ export async function captureChromePlatformFonts(page: Page): Promise<ChromeFont
   }
 }
 
+type ChromeFontReadiness = { status: "loaded" };
+
+async function awaitChromeFontsReady(page: Page): Promise<ChromeFontReadiness> {
+  const status = await page.evaluate(async () => {
+    await document.fonts.ready;
+    return document.fonts.status;
+  });
+  if (status !== "loaded") throw new Error(`Chrome fonts are not ready: ${status}`);
+  return { status: "loaded" };
+}
+
 export interface ChromeResourceProvenance {
   inventoryComplete: boolean;
   requests: ChromeResourceEntry[];
@@ -1873,15 +1884,7 @@ function unknownCatalogCondition(
 ): JsonValue {
   return {
     ...catalogConditionIdentityFields(tuple, fixtureSha, binarySha256),
-    viewport: { ...tuple.viewport },
-    chromePath,
-    chromeSha256: sha256File(chromePath),
-    chromeReceiptPath,
-    chromeReceiptSha256: sha256File(chromeReceiptPath),
-    chromeState: chrome.state,
-    chromeBoundary: chrome.boundary,
-    resourceProvenance: chrome.resourceProvenance as unknown as JsonValue,
-    fontIdentityObservation: fontObservationJson(chrome.fontIdentityObservation),
+    ...chromeConditionEvidence(chrome, tuple.viewport, chromePath, chromeReceiptPath),
     krrReportPath: reportPath,
     krrReportSha256: sha256File(reportPath),
     ...(krr.capturePath ? { krrCapturePath: krr.capturePath } : {}),
@@ -1892,12 +1895,32 @@ function unknownCatalogCondition(
   } as unknown as JsonValue;
 }
 
+function chromeConditionEvidence(
+  chrome: Awaited<ReturnType<typeof captureChromeCatalogCondition>>,
+  viewport: CatalogStage90ConditionPlan["conditions"][number]["viewport"],
+  chromePath: string,
+  chromeReceiptPath: string,
+): Record<string, JsonValue> {
+  return {
+    viewport: { ...viewport },
+    chromePath,
+    chromeSha256: sha256File(chromePath),
+    chromeReceiptPath,
+    chromeReceiptSha256: sha256File(chromeReceiptPath),
+    chromeState: chrome.state,
+    chromeBoundary: chrome.boundary,
+    resourceProvenance: chrome.resourceProvenance as unknown as JsonValue,
+    fontIdentityObservation: fontObservationJson(chrome.fontIdentityObservation),
+    fontReadiness: chrome.fontReadiness,
+  };
+}
+
 function writeUnknownChromeReceipt(
   receiptPath: string,
   tuple: CatalogStage90ConditionPlan["conditions"][number],
   sourceSha256: string,
   binarySha256: string,
-  chrome: { state: JsonValue; boundary: JsonValue },
+  chrome: { state: JsonValue; boundary: JsonValue; fontReadiness: ChromeFontReadiness },
   capturePath: string,
   chromeExecutable: { path: string; sha256: string },
   resourceProvenance: ChromeResourceProvenance,
@@ -1922,6 +1945,7 @@ function writeUnknownChromeReceipt(
     captureSha256: sha256File(capturePath),
     state: chrome.state,
     boundary: chrome.boundary,
+    fontReadiness: chrome.fontReadiness,
     resourceProvenance,
     fontProvenance: [],
     ...(traceBinding === undefined ? {} : { traceBinding }),
@@ -1941,15 +1965,7 @@ function unverifiedChromeCatalogCondition(
 ): JsonValue {
   return {
     ...catalogConditionIdentityFields(tuple, sourceSha256, binarySha256),
-    viewport: { ...tuple.viewport },
-    chromePath,
-    chromeSha256: sha256File(chromePath),
-    chromeReceiptPath,
-    chromeReceiptSha256: sha256File(chromeReceiptPath),
-    chromeState: chrome.state,
-    chromeBoundary: chrome.boundary,
-    resourceProvenance: chrome.resourceProvenance as unknown as JsonValue,
-    fontIdentityObservation: fontObservationJson(chrome.fontIdentityObservation),
+    ...chromeConditionEvidence(chrome, tuple.viewport, chromePath, chromeReceiptPath),
     krrReportPath: reportPath,
     krrReportSha256: sha256File(reportPath),
     krrCapturePath: krr.capturePath,
@@ -2033,6 +2049,7 @@ async function captureChromeCatalogCondition(
   boundary: JsonValue;
   resourceProvenance: ChromeResourceProvenance;
   fontIdentityObservation: ChromeFontObservation;
+  fontReadiness: ChromeFontReadiness;
 }> {
   const page = await browser.newPage({
     viewport: { width: viewport.width, height: viewport.height },
@@ -2043,6 +2060,7 @@ async function captureChromeCatalogCondition(
     const fixture = path.resolve("tests/fixtures/html", entry.fixture);
     await page.goto(`file://${fixture}`, { waitUntil: "networkidle" });
     await performChromeCatalogOperation(page, entry, state);
+    const fontReadiness = await awaitChromeFontsReady(page);
     const fontIdentityObservation = await captureChromePlatformFonts(page);
     const spec = catalogOperationSpec(entry, state);
     const actualState = await readChromeCatalogState(page, spec.expression);
@@ -2057,6 +2075,7 @@ async function captureChromeCatalogCondition(
       boundary,
       resourceProvenance,
       fontIdentityObservation,
+      fontReadiness,
     };
   } finally {
     await page.close();
@@ -2109,7 +2128,6 @@ async function readChromeCatalogState(page: Page, expression: string): Promise<J
 
 async function waitForCatalogDynamicState(page: Page, caseId: string): Promise<void> {
   await page.waitForFunction(() => document.readyState === "complete");
-  if (caseId === "resources") await page.evaluate(() => document.fonts.ready);
   if (["async", "observers", "resources"].includes(caseId)) {
     await page.waitForFunction(() => {
       const state = document.querySelector("#state")?.textContent ?? "";

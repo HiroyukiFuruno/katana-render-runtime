@@ -562,6 +562,36 @@ describe("stage score contract", () => {
       fs.rmSync(fixture.directory, { recursive: true, force: true });
     }
   });
+
+  test.each(["missing", "loading", "extra"] as const)(
+    "strict Chrome receipt rejects font readiness: %s",
+    (mode) => {
+      const fixture = strictChromeReceiptFixture();
+      try {
+        expect(() =>
+          assertStrictHtml84ChromeReceipt(
+            fixture.receiptPath,
+            sha256File(fixture.receiptPath),
+            fixture.expected,
+          ),
+        ).not.toThrow();
+        const receipt: Record<string, JsonValue> = { ...fixture.receipt };
+        if (mode === "missing") delete receipt.fontReadiness;
+        if (mode === "loading") receipt.fontReadiness = { status: "loading" };
+        if (mode === "extra") receipt.fontReadiness = { status: "loaded", extra: true };
+        fs.writeFileSync(fixture.receiptPath, JSON.stringify(receipt));
+        expect(() =>
+          assertStrictHtml84ChromeReceipt(
+            fixture.receiptPath,
+            sha256File(fixture.receiptPath),
+            fixture.expected,
+          ),
+        ).toThrow(/font readiness|Chrome fonts are not ready/);
+      } finally {
+        fs.rmSync(fixture.directory, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 function strictChromeReceiptFixture() {
@@ -586,6 +616,7 @@ function strictChromeReceiptFixture() {
     browserExecutableSha256: sha256File(process.execPath),
     capturePath,
     captureSha256: sha256File(capturePath),
+    fontReadiness: { status: "loaded" },
     state: { ready: true },
     boundary: { state: "initial" },
     resourceProvenance: { inventoryComplete: true, requests: [] },

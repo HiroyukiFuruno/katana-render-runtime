@@ -7,6 +7,7 @@ import type { CatalogCaptureProducerContext } from "./catalog-capture-producer-c
 import type { JsonValue } from "./dynamic-state";
 import { type CatalogCase, loadFeatureCatalog, readExpectedState } from "./feature-catalog";
 import { jsonResourceFiles, validateCatalogChromeCaptures } from "./fidelity-acceptance-cli";
+import { ImageComparisonSession } from "./image-comparison-session";
 import { sha256File } from "./reference-capture";
 import {
   assertCatalogCaptureIdentity,
@@ -25,6 +26,26 @@ const CORETEXT_FIXTURE_AXIS_DEFAULT = 400;
 
 type JsonObject = { [key: string]: JsonValue };
 const producerTools = collectRuntimeBundleToolFingerprint();
+
+test("image comparison session rehashes rewritten files and isolates thresholds", () => {
+  const temporary = fs.mkdtempSync(path.resolve("tmp/image-comparison-session-"));
+  try {
+    const reference = viewportPng(temporary, { width: 4, height: 4, scale: 1 });
+    const candidate = path.join(temporary, "candidate.png");
+    fs.copyFileSync(reference, candidate);
+    const session = new ImageComparisonSession();
+    const first = session.compare(reference, candidate, 90);
+    first.dimensions.width = 0;
+    expect(session.compare(reference, candidate, 90).dimensions.width).toBeGreaterThan(0);
+    const threshold = session.compare(reference, candidate, 99);
+    expect(threshold.minScore).toBe(99);
+    const rewritten = Bun.spawnSync(["magick", "-size", "4x4", "xc:black", candidate]);
+    if (rewritten.exitCode !== 0) throw new Error("failed to rewrite candidate PNG");
+    expect(session.compare(reference, candidate, 90).passed).toBe(false);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
 type NavigationLinkFixture = JsonObject & {
   pointerTrace: JsonValue[];
   frame: { generation: number; contentHeight: number; scrollY: number };
@@ -87,9 +108,10 @@ test("pins the physical exact-84 plan to current fixture and catalog bytes", () 
 
 function suiteFixture(): { value: JsonObject; trustedPlan: JsonObject; cleanup: () => void } {
   const temporary = fs.mkdtempSync(path.resolve("tmp/stage-score-suite-"));
+  const binaryPath = path.join(temporary, "test-binary.bin");
+  fs.writeFileSync(binaryPath, "stage score suite test binary");
+  const binarySha = sha256File(binaryPath);
   const sourceRoot = path.resolve("tests/fixtures/html");
-  const binary = process.execPath;
-  const binarySha = sha256File(binary);
   const catalog = loadFeatureCatalog();
   const conditions: JsonObject[] = [];
   const trustedConditions: JsonObject[] = [];
@@ -108,6 +130,7 @@ function suiteFixture(): { value: JsonObject; trustedPlan: JsonObject; cleanup: 
           index,
           temporary,
           sourceRoot,
+          binaryPath,
           binarySha,
         );
         conditions.push(condition.candidate);
@@ -141,6 +164,7 @@ function conditionFixture(
   index: number,
   temporary: string,
   sourceRoot: string,
+  binaryPath: string,
   binarySha: string,
 ): { candidate: JsonObject; trusted: JsonObject } {
   const png = viewportPng(temporary, viewport);
@@ -346,10 +370,11 @@ function conditionFixture(
     sourceSha256: sourceSha,
     binarySha256: binarySha,
     viewport,
-    browserExecutablePath: process.execPath,
+    browserExecutablePath: binaryPath,
     browserExecutableSha256: binarySha,
     capturePath: png,
     captureSha256: sha256File(png),
+    fontReadiness: { status: "loaded" },
     state: rawState,
     boundary: { state },
     ...physicalProvenance,
@@ -364,7 +389,7 @@ function conditionFixture(
     viewport,
     sourceSha256: sourceSha,
     binarySha256: binarySha,
-    binaryPath: process.execPath,
+    binaryPath,
     rawKrrReportPath: rawPath,
     rawKrrReportSha256: sha256File(rawPath),
     candidate: manifest,
@@ -420,6 +445,10 @@ function rawCaptureFixture(): {
     "plan.json",
   );
   fs.writeFileSync(planPath, JSON.stringify(plan));
+  const firstCondition = objectConditions(suite.value)[0];
+  if (!firstCondition) throw new Error("missing suite binary fixture");
+  const binaryPath = requiredString(firstCondition.binaryPath, "suite binary path");
+  const binarySha256 = requiredString(firstCondition.binarySha256, "suite binary SHA");
   const sourceFile: FileRecord = {
     path: process.execPath,
     sha256: sha256File(process.execPath),
@@ -475,8 +504,8 @@ function rawCaptureFixture(): {
       catalogSha256: sha256File(catalogPath),
       planPath,
       planSha256: sha256File(planPath),
-      binaryPath: process.execPath,
-      binarySha256: sha256File(process.execPath),
+      binaryPath,
+      binarySha256,
       chromeRuntimeVersion: "chrome-test-runtime/1",
       producerContext: producerContext as unknown as JsonValue,
       conditions,
@@ -489,11 +518,14 @@ function rawCaptureFixture(): {
 }
 
 function reuseContext(fixture: ReturnType<typeof rawCaptureFixture>) {
+  const manifest = fixture.manifest;
+  const binaryPath = requiredString(manifest.binaryPath, "fixture binary path");
+  const binarySha256 = requiredString(manifest.binarySha256, "fixture binary SHA");
   return {
     planPath: fixture.planPath,
-    binaryPath: process.execPath,
-    chromeExecutablePath: process.execPath,
-    chromeExecutableSha256: sha256File(process.execPath),
+    binaryPath,
+    chromeExecutablePath: binaryPath,
+    chromeExecutableSha256: binarySha256,
     chromeRuntimeVersion: "chrome-test-runtime/1",
     producerContext: fixture.producerContext,
   };
@@ -517,6 +549,7 @@ function rawCaptureCondition(condition: JsonObject, trusted: JsonObject | undefi
     status: "captured",
     fontIdentityRequestConditionId: requiredString(condition.conditionId, "condition ID"),
     fontIdentityObservation: { status: "observed", unknownReasons: [] },
+    fontReadiness: requiredValue(receipt.fontReadiness, "font readiness"),
     krrReportPath: requiredString(condition.rawKrrReportPath, "KRR report path"),
     krrReportSha256: requiredString(condition.rawKrrReportSha256, "KRR report SHA"),
     krrCapturePath: requiredString(image.candidatePath, "KRR capture path"),
@@ -582,6 +615,45 @@ test.each([
     fixture.cleanup();
   }
 });
+
+test.each(["missing", "loading", "mismatch"] as const)(
+  "rejects Chrome font readiness evidence: %s",
+  (mode) => {
+    const fixture = rawCaptureFixture();
+    try {
+      const paths = addFontIdentityEvidence(fixture);
+      const first = objectConditions(fixture.manifest)[0];
+      if (!first) throw new Error("missing readiness fixture condition");
+      if (mode === "missing") delete first.fontReadiness;
+      if (mode === "loading") {
+        const receipt = readJsonObject(
+          requiredString(first.chromeReceiptPath, "Chrome receipt path"),
+        );
+        receipt.fontReadiness = { status: "loading" };
+        const receiptPath = requiredString(first.chromeReceiptPath, "Chrome receipt path");
+        writePinnedJson(receipt, receiptPath);
+        first.chromeReceiptSha256 = sha256File(receiptPath);
+        first.fontReadiness = { status: "loading" };
+      }
+      if (mode === "mismatch") first.fontReadiness = { status: "loading" };
+      writePinnedManifest(fixture, paths.manifestPath);
+      if (mode === "loading") {
+        expect(() => validateCatalogChromeCaptures(paths.manifestPath, fixture.planPath)).toThrow(
+          /Chrome fonts are not ready/,
+        );
+        return;
+      }
+      const result = requireJsonObject(
+        validateCatalogChromeCaptures(paths.manifestPath, fixture.planPath),
+        "CLI result",
+      );
+      expect(result.acceptance).toBe(false);
+      expect(result.fontIdentityEquivalence).toBe("not-established");
+    } finally {
+      fixture.cleanup();
+    }
+  },
+);
 
 test("raw stage90 adapter rejects a capture that is not strictly observed", () => {
   const fixture = rawCaptureFixture();
@@ -670,6 +742,7 @@ function addFontIdentityEvidence(
     const chromePath = requiredString(condition.chromeReceiptPath, "Chrome receipt path");
     const chrome = readJsonObject(chromePath);
     chrome.fontProvenance = [font];
+    chrome.fontReadiness = { status: "loaded" };
     writePinnedJson(chrome, chromePath);
     condition.chromeReceiptSha256 = sha256File(chromePath);
     const resourceProvenance = requireJsonObject(
@@ -682,6 +755,7 @@ function addFontIdentityEvidence(
       selectedFonts: [selectedFont],
       unknownReasons: [],
     };
+    condition.fontReadiness = { status: "loaded" };
     condition.fontIdentityUnknownReasons = [];
     requestRows.push({
       conditionId: requiredString(condition.conditionId, "condition ID"),
@@ -815,10 +889,12 @@ function identityFixture(): {
 test.each(identityMutations)("raw stage90 identity rejects %s", (_label, mutate) => {
   const { fixture, condition, capture } = identityFixture();
   try {
+    const binarySha = requiredString(fixture.manifest.binarySha256, "fixture binary SHA");
+    expect(() => assertCatalogCaptureIdentity(condition, capture, binarySha)).not.toThrow();
     mutate(capture);
-    expect(() =>
-      assertCatalogCaptureIdentity(condition, capture, sha256File(process.execPath)),
-    ).toThrow(/catalog raw capture identity differs/);
+    expect(() => assertCatalogCaptureIdentity(condition, capture, binarySha)).toThrow(
+      /catalog raw capture identity differs/,
+    );
   } finally {
     fixture.cleanup();
   }
