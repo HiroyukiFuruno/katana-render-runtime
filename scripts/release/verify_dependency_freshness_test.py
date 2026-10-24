@@ -357,11 +357,15 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertIn("passed (3 resolved dependencies and pinned runtime assets)", stdout)
 
     @staticmethod
-    def metadata_for_krr_usvg_skrifa(root: Path) -> CargoMetadata:
+    def metadata_for_krr_usvg_skrifa(
+        root: Path,
+        resvg_name: str = "resvg",
+        usvg_name: str = "usvg",
+    ) -> CargoMetadata:
         registry = "registry+https://github.com/rust-lang/crates.io-index"
         runtime_id = "path+file:///workspace/crates/katana-render-runtime#katana-render-runtime@0.1.0"
-        resvg_id = f"{registry}#resvg@0.48.1"
-        usvg_id = f"{registry}#usvg@0.48.1"
+        resvg_id = f"{registry}#{resvg_name}@0.48.1"
+        usvg_id = f"{registry}#{usvg_name}@0.48.1"
         skrifa_id = f"{registry}#skrifa@0.44.0"
         return {
             "workspace_members": [runtime_id],
@@ -379,7 +383,7 @@ class DependencyFreshnessTest(unittest.TestCase):
                 },
                 {
                     "id": resvg_id,
-                    "name": "resvg",
+                    "name": resvg_name,
                     "version": "0.48.1",
                     "source": registry,
                     "manifest_path": "/registry/resvg/Cargo.toml",
@@ -387,7 +391,7 @@ class DependencyFreshnessTest(unittest.TestCase):
                 },
                 {
                     "id": usvg_id,
-                    "name": "usvg",
+                    "name": usvg_name,
                     "version": "0.48.1",
                     "source": registry,
                     "manifest_path": "/registry/usvg/Cargo.toml",
@@ -451,6 +455,15 @@ class DependencyFreshnessTest(unittest.TestCase):
             [(dependency.name, dependency.current, dependency.requirement_operator) for dependency in dependencies],
             [("serde", "1.0.0", None), ("skrifa", "0.44.0", "="), ("usvg", "0.48.1", "=")],
         )
+
+    def test_verified_krr_pair_accepts_fork_package_names(self) -> None:
+        self.write_krr_skrifa_manifest("0.44")
+        metadata = self.metadata_for_krr_usvg_skrifa(
+            self.root,
+            resvg_name="katana-resvg",
+            usvg_name="katana-usvg",
+        )
+        self.assertIsNotNone(freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata))
 
     def write_krr_skrifa_manifest(self, requirement: str) -> Path:
         krr_manifest = self.root / "crates/katana-render-runtime/Cargo.toml"

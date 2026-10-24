@@ -92,8 +92,14 @@ def dependency(
 
 
 def metadata(
-    direct_id: str = TARGET_SKRIFA_ID, direct_req: str = "^0.44"
+    direct_id: str = TARGET_SKRIFA_ID,
+    direct_req: str = "^0.44",
+    resvg_name: str = "resvg",
+    usvg_name: str = "usvg",
+    include_decoy: bool = False,
 ) -> CargoMetadata:
+    resvg_id = f"{REGISTRY}#{resvg_name}@0.48.1"
+    usvg_id = f"{REGISTRY}#{usvg_name}@0.48.1"
     versions = {
         OLD_SKRIFA_ID: "0.48.0",
         TARGET_SKRIFA_ID: "0.44.0",
@@ -107,15 +113,15 @@ def metadata(
             "dependencies": [dependency("skrifa", direct_req, REGISTRY)],
         },
         {
-            "id": RESVG_ID,
-            "name": "resvg",
+            "id": resvg_id,
+            "name": resvg_name,
             "version": "0.48.1",
             "source": REGISTRY,
             "dependencies": [],
         },
         {
-            "id": USVG_ID,
-            "name": "usvg",
+            "id": usvg_id,
+            "name": usvg_name,
             "version": "0.48.1",
             "source": REGISTRY,
             "dependencies": [dependency("skrifa", "^0.44", REGISTRY)],
@@ -131,18 +137,49 @@ def metadata(
         }
         for package_id, version in versions.items()
     )
+    runtime_deps: list[CargoMetadataEdge] = [
+        edge("resvg", resvg_id),
+        edge("skrifa", direct_id),
+    ]
+    nodes: list[CargoResolveNode] = [
+        {"id": RUNTIME_ID, "deps": runtime_deps},
+        {"id": resvg_id, "deps": [edge("usvg", usvg_id)]},
+        {"id": usvg_id, "deps": [edge("skrifa", TARGET_SKRIFA_ID)]},
+        {"id": OLD_SKRIFA_ID, "deps": []},
+        {"id": TARGET_SKRIFA_ID, "deps": []},
+    ]
+    if include_decoy:
+        helper_id = f"{REGISTRY}#metadata-helper@0.1.0"
+        decoy_id = f"{REGISTRY}#usvg@0.49.0"
+        packages.extend(
+            [
+                {
+                    "id": helper_id,
+                    "name": "metadata-helper",
+                    "version": "0.1.0",
+                    "source": REGISTRY,
+                    "dependencies": [],
+                },
+                {
+                    "id": decoy_id,
+                    "name": "usvg",
+                    "version": "0.49.0",
+                    "source": REGISTRY,
+                    "dependencies": [],
+                },
+            ]
+        )
+        runtime_deps.append(edge("metadata-helper", helper_id))
+        nodes.extend(
+            [
+                {"id": helper_id, "deps": [edge("usvg", decoy_id)]},
+                {"id": decoy_id, "deps": []},
+            ]
+        )
     return {
         "packages": packages,
         "workspace_members": [RUNTIME_ID],
-        "resolve": {
-            "nodes": [
-                {"id": RUNTIME_ID, "deps": [edge("resvg", RESVG_ID), edge("skrifa", direct_id)]},
-                {"id": RESVG_ID, "deps": [edge("usvg", USVG_ID)]},
-                {"id": USVG_ID, "deps": [edge("skrifa", TARGET_SKRIFA_ID)]},
-                {"id": OLD_SKRIFA_ID, "deps": []},
-                {"id": TARGET_SKRIFA_ID, "deps": []},
-            ]
-        },
+        "resolve": {"nodes": nodes},
     }
 
 
@@ -174,6 +211,21 @@ class UpdateUsvgSkrifaPairTest(unittest.TestCase):
         runtime, _, selected, _ = MODULE.select_usvg_package(metadata())
         self.assertEqual(runtime["id"], RUNTIME_ID)
         self.assertEqual(selected["id"], USVG_ID)
+
+    def test_selects_fork_packages_through_logical_edges_with_public_decoy(self) -> None:
+        graph = metadata(
+            resvg_name="katana-resvg",
+            usvg_name="katana-usvg",
+            include_decoy=True,
+        )
+        _, _, selected, _ = MODULE.select_usvg_package(graph)
+        self.assertEqual(selected["name"], "katana-usvg")
+
+    def test_reachable_dangling_dependency_fails_closed(self) -> None:
+        graph = metadata()
+        graph["resolve"]["nodes"][0]["deps"].append(edge("broken", "missing-package"))
+        with self.assertRaisesRegex(ValueError, "missing package node"):
+            MODULE.select_usvg_package(graph)
 
     def test_ambiguous_usvg_resolution_fails_closed(self) -> None:
         graph = metadata()
