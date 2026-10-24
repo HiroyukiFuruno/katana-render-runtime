@@ -11,6 +11,9 @@ type GlyphMetricRecords = (Vec<Value>, Vec<Value>, Value);
 const DIAGNOSTIC_FONT_SIZE: f32 = 16.0;
 const GLYPH_POSITION_TOLERANCE: f32 = 0.001;
 
+#[path = "svg_rasterize_text_harfrust_tree_svg_layout_tests.rs"]
+mod svg_layout;
+
 #[derive(Debug, Deserialize)]
 struct Request {
     input: PathBuf,
@@ -49,10 +52,8 @@ fn read_request() -> Result<Request> {
 
 fn read_rows(request: &Request) -> Result<DiagnosticRows> {
     let input = std::fs::read(&request.input)?;
-    let source_sha = digest_hex(&input);
-    if source_sha != request.expected_source_sha256 {
-        return Err(format!("input SHA mismatch: {source_sha}").into());
-    }
+    let source_sha =
+        svg_layout::verify_input_sha(&request.input, &input, &request.expected_source_sha256)?;
     let svg = extract_svg(std::str::from_utf8(&input)?)?;
     let rows = CASES
         .into_iter()
@@ -69,28 +70,13 @@ fn write_report(
     source_svg: String,
     outline_svg: String,
 ) -> Result<()> {
-    if request.output.exists() {
-        return Err("diagnostic output must be fresh".into());
-    }
+    svg_layout::require_fresh_output(&request.output)?;
+    let source_layout =
+        svg_layout::observe_source_layout(&request.input, &source_sha, &source_svg)?;
     std::fs::create_dir(&request.output)?;
     write_fresh(&request.output.join("text.svg"), source_svg.as_bytes())?;
     write_fresh(&request.output.join("outline.svg"), outline_svg.as_bytes())?;
-    let report = json!({
-        "schema": "krr-tree-trebuchet-harfrust-usvg-metrics-v1",
-        "input": request.input,
-        "input_sha256": source_sha,
-        "font_family": "Trebuchet MS",
-        "rows": rows,
-        "diagnostic_only": true,
-        "formal_acceptance": false,
-    });
-    let report_path = request.output.join("report.json");
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(report_path)?;
-    serde_json::to_writer_pretty(file, &report)?;
-    Ok(())
+    svg_layout::write_report_json(request, source_sha, rows, source_layout)
 }
 
 fn write_fresh(path: &Path, bytes: &[u8]) -> Result<()> {
