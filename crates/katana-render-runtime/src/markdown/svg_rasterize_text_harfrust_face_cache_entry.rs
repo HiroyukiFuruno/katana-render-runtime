@@ -105,6 +105,32 @@ pub(super) fn load_file_font(
     generation: FontSourceGeneration,
     length: u64,
 ) -> Option<FontHandle> {
+    #[cfg(target_os = "macos")]
+    match super::immutable_mapping::try_load(
+        database,
+        face_id,
+        path,
+        face_index,
+        key.clone(),
+        generation.clone(),
+        length,
+    ) {
+        Ok(Some(font)) => return Some(font),
+        Err(_) => return None,
+        Ok(None) => {}
+    }
+    load_lazy_or_full(database, face_id, path, face_index, key, generation, length)
+}
+
+fn load_lazy_or_full(
+    database: &Database,
+    face_id: resvg::usvg::fontdb::ID,
+    path: &Path,
+    face_index: u32,
+    key: CacheKey,
+    generation: FontSourceGeneration,
+    length: u64,
+) -> Option<FontHandle> {
     if length > MAX_SOURCE_BYTES {
         return full_file_font(database, face_id);
     }

@@ -4,6 +4,9 @@ use std::{cell::RefCell, marker::PhantomData, rc::Rc};
 
 #[path = "svg_rasterize_text_harfrust_face_cache_entry.rs"]
 mod entry;
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_text_harfrust_immutable_mapping.rs"]
+mod immutable_mapping;
 #[path = "svg_rasterize_text_harfrust_lazy_table.rs"]
 mod lazy_table;
 #[path = "svg_rasterize_text_harfrust_face_cache_load.rs"]
