@@ -644,9 +644,12 @@ def _writable_raw_holders(raw: bytes, identities: list[tuple[int, int]]) -> list
             gate.require(all(key in record for key in ("D", "i", "f", "t")), "raw FD observer fields missing")
             pair = (int(record["D"], 16), int(record["i"]))
             gate.require(pair in identities and record["t"] == "REG", "raw FD observer identity differs")
-            if record.get("a") != "r":
+            access = record.get("a", "unknown")
+            # lsofのtxtは実行イメージのmappingであり、書込み可能な数値FDではない。
+            text_mapping = record["f"] == "txt" and access.strip() == ""
+            if access != "r" and not text_mapping:
                 holders.append({"pid": pid, "processGroupId": group,
-                                "descriptor": record["f"], "access": record.get("a", "unknown")})
+                                "descriptor": record["f"], "access": access})
     for line in raw.decode("ascii").splitlines():
         gate.require(bool(line), "empty raw FD observer field")
         key, value = line[0], line[1:]

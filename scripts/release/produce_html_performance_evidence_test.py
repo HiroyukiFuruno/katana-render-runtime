@@ -1227,6 +1227,29 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "posix", "POSIX ownership boundary unit only")
 class NativeCliOwnerHookTests(unittest.TestCase):
+    def test_txt_mapping_without_access_is_read_only_but_writable_controls_remain_holders(self) -> None:
+        identity = (0x1000010, 833523274)
+
+        def record(descriptor: str, access: str | None, inode: int = identity[1]) -> bytes:
+            fields = ["p40633", "g40633", f"f{descriptor}"]
+            if access is not None:
+                fields.append(f"a{access}")
+            fields.extend(["tREG", f"D{identity[0]:x}", f"i{inode}"])
+            return ("\n".join(fields) + "\n").encode("ascii")
+
+        text = record("txt", " ")
+        writable = record("3", "w")
+        used = record("4", "u")
+        unknown = record("5", None)
+        for raw in (text, record("txt", ""), record("3", "r")):
+            self.assertEqual(typed_producer._writable_raw_holders(raw, [identity]), [])
+        for raw in (writable, used, unknown, record("5", " "), record("txt", None)):
+            holders = typed_producer._writable_raw_holders(raw, [identity])
+            self.assertEqual(len(holders), 1)
+
+        with self.assertRaisesRegex(ValueError, "raw FD observer identity differs"):
+            typed_producer._writable_raw_holders(record("txt", "", inode=identity[1] + 1), [identity])
+
     def test_escaped_session_holding_raw_is_failed_without_signalling_unknown_pid(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
