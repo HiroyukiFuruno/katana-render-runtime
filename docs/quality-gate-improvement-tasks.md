@@ -12,7 +12,161 @@
 
   続く型修正後に標準型検査全11構成、対象2fileの全20件96assert、Biome・重複1,473ソース0・diff検査がactual0（`tmp/quality/managed-reader-typecheck-s9t73yb0/`、`managed-reader-tests-xo7oh5z7/`、`managed-reader-static-57248y3a/`）。主担当がraw・exit・テストSHA`7e81a12d`と型だけの差分を確認し、採点判定への接続と欠落拒否の修正項目を対応済みとする。現行製品117件の各99・完全ゲート・性能・公開は別の未完了項目であり、この局所成功へ代用しない。
 
-## 現在の状態（2026-10-23）
+## 現在の状態（2026-10-24）
+
+- [ ] Skia solid-path候補はR1947静的/ASTとR1948 build成功、R1949既定回帰193/193成功。R1952で同一source/binary/inputを検査してR1950の12成功画像を再利用し、残105件を新規取得した。R1953は64/117が99以上（XY英日2件が新規合格、旧62合格脱落0、残53）。ただし候補有効のR1954回帰は191/193、同色fractional背景不変と既存stroke比較の2失敗が残るため既定には採用しない。製品既定は62/117のまま。評価用依存/adapterを無条件に配布へ残さず、採否整理後に正式producer・性能・完全ゲートを確認する。
+
+- [ ] R1940でR1934実バイナリによるHTML84条件を全て新規取得し、厳格readerが84/84で90以上・最低91.79849、fontIdentityEquivalence=established、acceptance=trueを確認した。実行中source不変・全command actual0。build時点からの差はAGENTS.mdと評価/台帳の明示3文書だけと照合し、runtime・lock・patch・binaryの一致を検査したretained binary診断である。新しい正式build、私有全viewport、consumer、TTF/RSS非劣化へ転用しない。
+
+- [ ] 代替比較の実測を追加。KRR内の同一12図・同一基準/scorerでは、現行候補8/12、librsvg 2.63.3は0/12、Skia SVG DOMは0/12が99以上（R1924〜R1932）。混成adapterでの初期品質比較であり、font完全一致・3 OS配布・性能は未証明。CSS/shaper接続やnative依存の維持負担を`docs/svg-library-adoption-assessment.md`へ記録し、公開API不足だけで代替不可としない。forkの公開許可を本番採用へ読み替えない規則をAGENTS.mdへ追加した。採用理由の確定・公開は未完了。
+
+- [ ] R1934はSVG scale後のfont sizeへ既存Chromium同様の1/100 floorを適用してbuild actual0。R1935は190/190回帰成功、R1936で117実PNGを新規取得、R1937の同一基準/scorerは62/117が99以上、未達55、旧合格脱落0・新規合格0。52図のscoreは微変化に留まり、主因解消とは扱わない。全source/binary不変。R1938の6対照とR1939の18対照では14px near-unit scaleだけ6件のink幅+1が残り、13.99pxをparseした条件と恒等変換は一致した。paint sizeだけでなくshape advanceと変換の契約を切り分け、任意のglyph位置比率補正は加えない。HTML84の新source確認・TTF/RSS・正式producerは未完了。
+
+- [ ] SVG依存の採用順序を是正する（最新ユーザー指摘）。fork維持は高コストであり、保守性・要件・性能を満たす代替があれば優先採用する。候補調査だけで代替なしと扱わず、有力候補をKRRへ組み込んだ同条件の精度・time to frame・RSS比較を先に行う。fork公開許可と採用確定を混同しない。比較結果が出るまで公開・registry採用の確定は進めず、承認済み成果保存と独立修正を継続する。詳細は`docs/svg-library-adoption-assessment.md`。
+
+- [ ] R1896のHTML84新規取得は83成功・nowrap 1件のretained paint不足でactual1。元失敗を保持し、既存resume経路のR1908で成功済み83件を再利用・不足1件だけ新規取得した。厳格readerは84/84が90以上・最低91.79849、fontIdentityEquivalence=established、acceptance=true、各command actual0・source不変。未公開候補依存の診断であり、正式公開依存・全私有viewport・consumer・初回/再表示/resizeのtime to frameとRSS非劣化は未完了。検証所要時間を製品描画時間へ転用しない。
+
+- [ ] 公開forkは3修正と独立回帰をlocal checkpoint a4913b71c3715742a1e0ffde6f791d57131f6db5へ保存。独立ChromiumのR1899でex 5入力のraw/正規化SVGのbbox・文字位置・text length一致を確認し、元PNGをcheckpointへ保持して6 goldenを更新した。shape exはCLIがtextなしSVGでfontdbを初期化しない既存差によりR1910で1件失敗し、既存upstream MAKE_REF producerのR1911で再生成（生成成功時の意図したexit101）。結合文字fallback回帰追加後のR1915で標準fmt/copyright・全release test（画像1,730/1,730）・CAPI両構成buildすべてactual0。任意追加のstrict Clippyは既存codegen/CAPI診断で失敗を保持し、成功とは扱わない。ユーザー承認済み6 goldenをR1917のd6f2f2fb2913b2aa6c232d26108af742274f8f8bへcommitした。採用理由の確定、Draft review・公開2crate・KRR registry採用は未完了。origin/mainの未リリース23commitをreleaseへ混入させない。
+
+- [ ] R1887のAST・標準静的・strict Clippyは全actual0。R1888のnative/HTML example buildはactual0・source不変・lock byte/mode復元。R1889は187/187回帰成功、R1890で117実PNGを新規取得し、R1891の同一独立基準・同一scorerでは62/117が99以上（EN31/59・JA31/58、残55）、旧56合格脱落0。新規合格はclass03-01両言語、EN mindmap-icons/block-vertical/kanban-simple、JA sankey20-02の6件。正の等方倍率をfont sizeへ移し、文字位置とbaselineの倍率を保存する候補で、一般変換は従来経路を維持。未公開依存と保持wrapperによる診断であり、正式117合格・HTML再検査・時間/RSS非劣化・公開は未完了。
+
+- [ ] R1886の108小数変換対照は102件でink bounds一致（R1876の90件から12件改善）、残6件はHelvetica bold14pxの幅1px差。任意のepsilon/snapは追加していない。R1881のcomment形式、R1882の既存test呼出し引数不足、R1885の新shear回帰が検出した行列引数順の誤りは元失敗を保持し、R1887/R1889で修正後を確認した。
+
+- [ ] 公開forkのR1877 manifest bin path不足、R1878 formatting、R1879標準画像テスト1,724/1,730成功・6不一致、R1880/R1892の新fallback回帰fixture不備は証跡を保持。元goldenはcheckpointへ保存し、その後の独立確認・更新結果はR1899〜R1913の最新項目に記録する。root exの数値回帰はR1892で成功し、document rootとSVG elementを混同した調査仮説は採用しない。公開crate・fork PRは未完了。
+
+- [ ] R1876の小数変換対照108件は90件でink bounds一致、18件で1px差を検出した。translationだけの36件は全一致、差はscale=0.9999745488を含むHelvetica bold14/16px・Trebuchet regular16pxへ限定され、baseline種別に依存しない。source前後不変・実終了0。C4実入力にあるnear-unit scaleの描画経路を次の修正対象候補とするが、残61件の改善や原因確定とは数えない。`tmp/quality/c4-fractional-baseline-controls-r1876/result.json`。
+
+- [ ] R1865の旧2patch libraryで新ex回帰1件はactual101で想定red。R1867の参照型誤りE0308は原copy/ログを保持し、fresh R1868へ修正。R1869のnative/HTML example buildは全actual0・lock byte/mode復元、R1870は185/185回帰成功、source/binary不変。R1871で製品117PNGを新規取得し109枚はR1843とbyte同一、変更8枚のみ。独立基準・同一scorerのR1872は56/117が99以上（EN27/59・JA29/58、残61）、旧52合格脱落0。Journey4図が99.51以上へ新規合格し、Timeline4図も93.60〜98.24へ改善。診断候補であり正式producer/公開依存/全117正式合格は未完了。
+
+- [ ] R1873は新readiness必須契約でHTML84条件を全て新規取得し、84/84が90以上・最低91.79849、fontIdentityEquivalence=established、acceptance=true。全84 captureのfontReadiness=loaded、capture/validateはactual0、source前後不変。未公開候補の診断buildでformalAcceptance=falseを維持する。現私有全viewport・性能・consumer契約・正式公開依存への移行は未完了。
+
+- [ ] R1874の実KRR/独立Chromiumによる44baseline対照はsource不変。均一size36対照のink boundsは一致、mixed-size8対照中7つに差がある。ただし実C4代表2図は各9 text element全てでsize混在が無く、mixed-sizeだけをC4残差の原因とする仮説を棄却。混在sizeの差は別の未対応描画課題として保持し、C4には実入力の変換・座標対照を継続する。
+
+- [ ] 2026-10-24に公開fork/2crateとCSS ex追加公開の明示許可を取得。https://github.com/HiroyukiFuruno/katana-resvg とIssue #1を作成し、外部編集許可へ登録。既存v0.48.1のrelease branchで3patch/回帰/公開準備を分離担当へ移譲した。公開・KRR採用は未完了。保守意思・最新release・star/fork・代替libの評価を `docs/svg-library-adoption-assessment.md` へ記録し、許可だけで採用評価済みとしない。本家PRは追加リリース条件にしない。
+
+- [ ] R1853/R1857/R1860/R1861は標準静的/AST/strict Clippyが全actual0。R1854のreadiness許可キー漏れ、R1855のSpotlight読取専用txt mapping誤判定、R1856のtest型名不足、R1858のfixture余分field/巨大binary再hashを元の失敗証跡付きで是正した。R1862は関連Bun64/64（26.69秒）とproducer61/61（8.077秒）が成功、source前後不変。84条件のunit画像検証はR1858の4.981秒からR1862の0.880秒へ短縮したが、unit binary fixtureの軽量化も含むため製品描画速度の改善とは扱わない。新readiness条件での実HTML84再撮影・正式全体ゲート・性能は未完了。
+
+  HTML readiness/検証内の同一画像採点再利用7fileは通常hook成功後3aad74c9へ、読取専用mapping判定と61回帰の2fileは通常hook成功後90f0269aへcommitした（R1863/R1864 actual0）。未push・未公開。後続R1866/R1870のred→green、R1871製品117実PNG、R1873 HTML84新規撮影は上記の通り完了。公開依存での正式検査は未完了。
+
+- [ ] R1840はclip一回丸め候補の静的/AST/strict Clippyが全actual0、R1841診断buildはactual0、元lockのbyte/modeを復元。R1842は同色恒等性・全256 mask値・実HTML fractional clipを含む184/184回帰成功。R1843で製品117画像を再取得し、同一scorerのR1844は52/117が99以上（EN25/59、JA27/58、残65）、旧合格脱落0。46画像が変化し、個別の微小な改善/低下も原結果に保持する。正式producer・公開依存・性能非劣化は未完了。SVG寸法/継承の5fileは通常hook成功後442fa650へcommit済みで、未push・未公開。
+
+- [ ] Journey4図はR1837の同一Chromiumによる候補source SVG描画が独立基準とRMSE0であり、nativeとの残差をSVG解析以降へ切り分けた。R1846のChrome titleは33.4688px、nativeは32px。R1847で実Trebuchet regularのglyph x上端1071/2048と親16px×4exから33.46875pxを独立fontToolsで確認し、usvgのhalf-em固定変換を共通原因として特定。実font metricによるex解決の候補と維持回帰を実装中で、修正後のbuild・117画像再採点は未検証。基準入力や画像位置は補正しない。
+
+- [ ] HTML全84条件の撮影前font readinessをloadedまで待ち、captureとChrome receiptへ束縛する修正を追加。R1850静的/AST/strict Clippyは全actual0。R1852の関連Bun51件は26成功25失敗で、fresh fixtureの新必須field欠落24件と、既存84条件検査の30秒超過1件を保持。fixtureを修正し、条件・receipt検証を維持したまま同一画像対の数値比較だけを検証呼出し内で再利用する候補を追加。実SHAを毎回確認し、path/thresholdもkeyへ含め、返却値の改変から保存結果を保護する。修正後の静的検査・回帰・全84新規撮影は未完了。
+
+- [ ] JourneyのSVG max-height未適用を修正し、幅不変/min-height優先/親flex最終座標の回帰を追加。R1827のtest helper重複、R1829の新file未追跡、R1830のテスト借用違反は元失敗を保持した。共通helper化・Git登録・借用修正後、R1831は標準静的/AST/strict Clippyが全actual0、R1832診断build成功、R1833は新3件を含む179/179回帰成功。R1834の製品117画像再取得後、同一scorerのR1835は52/117合格を維持し旧合格脱落0。変更された画像はJourney4件のみで、EN83.8607/85.0852→93.96996/95.13156、JA84.3526/85.3431→94.7628/95.02491へ改善。残65は引き続き未合格、正式公開依存/producerへの移行も未完了。
+
+- [ ] R1828の固定R1818製品binaryによる48×48対照で、同一RGB30の背景/図形がfractional clip経由の場合のみ97pixelでRGB31となった。背景のみ・同色AA矩形のみは全2304pixelがRGB30。クリップ合成の恒等性破綻を切り分けた診断であり現行ソース全体合格ではない。tiny-skia公開APIには一回のmasked lerpがなく、既存のinverse-maskとPlus二段丸めを最小の一回丸め処理へ置換する候補を実装中。性能は未測定で非劣化の条件を維持する。
+
+- [ ] R1815のSVG原点と寸法を同時変更した候補Aは27/117へ低下し、旧51合格のうち24図を失ったため不採用。原点snapを元へ戻し、CSS使用寸法の1/64px量子化だけを残した候補BはR1817の静的/AST/strict Clippyがactual0、R1818の診断buildがactual0、R1819の176/176回帰が成功。R1820で製品117実PNGを生成し、同一独立基準・同一v2 scorerのR1821では52/117が99以上（EN25/59、JA27/58、残65）、旧51合格の脱落0。class03-01両言語は92.36464から98.09389へ改善したが未合格。未公開usvg候補と再利用wrapperによる診断であり、正式producer・公開依存・117件正式合格の代用にしない。
+
+- [ ] R1822は現候補BによるHTML動的84条件を既存catalogで新規取得し、captureと厳格capture検証がともにactual0、source前後不変。既存readerの採点は84/84が90以上、最低91.79849、fontIdentityEquivalence=established、acceptance=true。未公開候補依存と診断buildのため外側formalAcceptance=falseを維持する。公開依存への移行、観測font契約の最終監査、現行私有全viewport・性能・consumer契約と正式producerは未完了。
+
+- [ ] R1825は独立基準と同じChromiumでJourneyのSVG使用高さ540/原点y12、現候補では高さ565/原点y0を観測した。共通SVG寸法処理がmax-heightを適用していないことを特定し、高さ制約とmin-height優先の修正・回帰を実装中。4図の改善は修正後の製品PNG採点まで未確認。依存2patchの公開経路は新規repo/2crate公開範囲の回答待ちで、独立した描画修正を継続する。
+
+- [ ] R1798ではclass03-01の8labelのDOM char baselineがKRRと完全一致したが、R1803ではKRR中間SVGをChromeで描画してもinkが1px下となり、glyph rasterizer単独原因説を訂正。R1804/R1808はraw SVGを未改変のまま既存capture経路で観測し、235.1796875×367のviewBoxに対しCSS used SVGが235.171875×366.984375、原点12.40625/12であることを確認。R1808は独立基準R1573と同じChromium実path/SHAを検証して同じ寸法を再現した。KRRのSVG使用寸法を1/64px量子化し、原点の整数snapを廃止する修正と回帰を追加。R1805/R1806の静的拒否は原ログ保持、修正後R1807はAST・並列静的・strict Clippyすべてactual0/source不変。製品PNGの修正後再取得・117採点とHTML全体/性能は未検証。残66のうち40図に小数SVG寸法があるが、改善件数として数えない。
+
+- [ ] R1789は標準静的lane・AST・本体/独立性能harnessのstrict Clippyがactual0。R1792の2件のusvg候補patch併用buildはactual0、元Cargo.lockのbyte/modeを復元し他packageの解決は不変。R1793は線幅bbox・混在fontを含む162/162回帰成功。R1794で製品117実PNGを生成し、同一v2 scorerのR1795は51/117が99以上（EN25/59・JA26/58、残66、寸法失敗0）、旧31合格の脱落0。TreeView4件は99.93以上。候補依存と再利用SVGによる診断であり、正式producer・公開依存への移行と117件正式合格は未完了。class03-01の残差は文字inkがChromeより1px下で、入力座標・face・glyph rasterizationの共通原因を切り分ける。任意の画像位置補正で通過させない。
+
+- [ ] R1796の実私有HTML620×900は、既存full-scroll/全TOC suiteで47/47画像が90以上、最低92.51、actual0・source不変。旧620幅の未達を解消した限定診断として保持する。1280/960幅は旧ソース結果であり、現行全viewport・動的84・完全出力font一致・性能・consumer契約の全体合格には転用しない。私有原本・画像・詳細はGit管理外を維持する。
+
+- [ ] R1785の実私有HTML620×900で375要素を照合し、文書高さはKRR9253.703/Chrome9253.703125となり旧20px累積差を解消。全Y画像/TOC再採点・性能は未完了。Mermaid残86の実画像でclass/C4/TreeViewの細線欠落を確認し、文字だけという仮説を訂正。resvg::render_nodeのbbox補償は正常で、usvg Node::abs_layer_bounding_boxがPathのstrokeを含まないbboxを使い、水平/垂直線をNoneとして落とすAPI挙動を特定した。線幅込みbboxへ変更する最小patch候補を追加し、R1786へ旧patch候補と併用した新しい公開sourceコピーを生成（旧R1760は不変）。実軸線/斜線/translate/文字の回帰を追加し、修正後native・117再採点は未完了。
+
+- [ ] R1780診断用usvg patch buildはactual0。他packageのlock解決を維持し、終了後に元Cargo.lockのbyte/mode/SHAを復元した。R1781は未改変で失敗したmixed-font回帰を含む161/161成功。R1782で候補117実PNGを取得、R1783でR1692と同一scorer・独立raw JS基準へ比較し31/117が99以上（EN15/59・JA16/58、残86、寸法失敗0）。旧22合格の脱落0、JA9図が新規合格。指摘の日本語動物classは91.89246→99.497751、Trebuchet50glyph/Hiragino47glyphへ分離しdrop/error0。中間SVGの旧115合格と混同しない。候補path overrideは永続依存へ採用しておらず、正式117producer・公開依存への移行・残86修正・HTML全体/性能/完全gate・公開は未完了。
+
+- [ ] R1774限定runtime test buildはactual0・有効binary・source前後一致。R1775は161件中160成功、追加した未改変usvgの単一chunk Latin/CJK fallback回帰1件が想定した不具合を検出した。central符号の回帰は成功。R1777の実PNG生成とR1778のChrome同一入力比較は成功し、alphabetic/math/central×400/700の6条件すべてでink boundsが一致した（旧central2件の4px差を解消）。117全体の画像99、HTML全体90・性能・完全gateの合格には転用しない。usvg patch候補のred→greenと最新117再採点は未完了。
+
+- [ ] R1773 private clean-allはexit1、使用中targetの保護とCACHEDIR.TAG欠落の拒否を維持し、追加回復なし・空き1.7GiB。現root targetは削除済み。既存の限定runtime test producerで修正回帰用binaryの生成へ戻る。標準Clippy全体と独立性能harnessの検証は未完了のまま保持する。
+
+- [ ] R1769のtest-only再export3件/未使用import1件、R1770の未使用wrapper1件を是正。R1771はAST・標準静的lane成功、本体workspace Clippy完了後、独立性能harnessのcompile/linkが実ディスクENOSPCで失敗した。source-after取得も空となりソース同一性を確認できないため全体合格へ転用しない。R1772の記録付きclean起動もhere-doc一時fileを作れず失敗し、直接の既存`just clean`を実行してexit0・6,108files/1.7GiBを整理した。物理ログのない範囲はtool出力のみとして保持する。回復後の空き1.7GiB。privateの既存clean-allで追加回復を実行中。上限は変更しない。
+
+- [ ] R1768はAST・標準静的lane成功、本体のコンパイル診断を解消し、lib test側の移動後import/可視性/旧入口への余分な引数17件でClippy exit101。元のtestを削らず、実宣言元への参照を3担当で修正中。新ソースのnative回帰・実PNGは未検証。
+
+- [ ] R1767はAST・標準静的lane成功、型の7診断を解消した後Clippyが旧Normal wrapper等の未利用9診断でexit101。trim-aware production経路を維持し、実利用がtest限定の旧入口はtestへ限定、未利用wrapperは削除している。全体の再検証・実描画は未完了。
+
+- [ ] R1766はAST・source-static-foundationが成功。strict ClippyはFontShapeのprivate re-export、MeasuredDatabaseの境界re-export不足、未利用importの計7コンパイル診断でexit101。ソース前後一致。診断に沿って内部可視性とtest専用importを修正中で、修正後のnative型検査・回帰は未完了。
+
+- [ ] R1765はAST成功、標準静的laneが新規glyph runs/trim型の未登録2ファイルを拒否しClippy未実行。2ファイルを登録し、幅測定補助と既存shaping fallbackの同名衝突も是正した。既存fallbackはHEAD同一へ戻し、幅測定補助は独立名へ移動した。修正後の検査は未完了。
+
+- [ ] R1761/R1763はAST違反で後続を停止、R1762は観測器のsignal処理をthreadから呼べないため検査開始前に停止した。R1764はAST成功、標準静的laneは診断用fresh-file IOの未承認重複1件で失敗しClippy未実行。重複は既存test supportへの共通化で修正し、追加されたFontShape設定は既存constructorへ統一した。修正後の統合静的検査・native回帰は未検証。Moon内部の並列化を使用し、観測器自体はmain threadで実行する。
+
+- [ ] R1756で#108へ限定22/117・正式未合格の区別と同一SVGのChrome/KRR font差を追記した。上流resvg #486もwhole-chunk shapingのfallback制約を記録している。原ライブラリを直接編集せず、同数/同byte cluster対応の場合だけ正常primary glyphを保つ最小patch候補を`patches/usvg/preserve-primary-glyphs.patch`へ作成した。初回の手書きhunk行数誤りはR1757へ保持し、標準difflib再生成後dry-runは成功。製品採用・正式117再測定・公開依存への移行は未完了。
+
+- [ ] HTML HanKerningのproduction接続、TextSpacingTrim Normal/SpaceAllのparser/継承/測定/paint/cache key伝播を実装した。レビューでnatural/featured両方へHanを適用して差分が消える誤りを検出し、naturalは未補正・featuredはexplicit+Hanへ分離した。ASCIIはface data取得前に戻す。ここまで実装保存のみで、静的検査・測定/paint回帰・実HTML画像と性能は未確認。元の明示mixed-tspan回帰を保持し、単一chunkのLatin/CJK face保持回帰を別caseへ追加した（未改変usvgでは失敗見込み）。
+
+- [ ] R1747/1748のCargo JSON warning内でrust-objcopyのENOSPCを確認した。exit0だけで認定せず、R1752はruntime-only/lib/no-runへ絞り、ENOSPC診断と物理MachOを検査して保全、actual0/source不変。R1753は159回帰中158pass、centralの符号計算誤り1件を検知。R1754の固定binary6対照生成とR1755の実Chrome比較はactual0/source不変でalphabetic2件・math2件のink bbox一致、central2件は4px下を確認した。central式を是正済みだが修正後は未検証。HTML HanKerningの測定/paint共通接続を非重複担当へ並列移譲し、完成後に集約検証する。これらの局所結果を製品117件合格へ代用しない。
+
+- [ ] R1750はtext親nodeのplatformFontsが空でフォント同一性の根拠にならなかった。R1751は同一ja-03-02 sourceSvgのtext/tspanを実Chromeで照合しactual0/source不変、LatinはTrebuchet MS、日本語はHiragino Sansの混在を確認した。R1689のKRR glyph監査では20spanすべて単一Hiragino faceであり、混在spanがSkia全fallbackする仮説は否定される。usvgのwhole-chunk font fallbackがLatinまで置換する処理と整合するが、安全なライブラリ接続による是正と画像再測定は未完了。
+
+- [ ] R1747/R1748の限定buildはCargo actual0だが、保全したtest executableは1232byteの実行不能dataで、R1749はcatalog取得前にExec format errorとなった。合格へ転用しない。R1747 source差は台帳のみ、R1748 sourceは不変。元targetの消失と実行不能fileの原因を読み取り調査へ分離し、旧正常MachO binaryの成功を現行sourceへ再認定しない。
+
+- [ ] R1745の全target buildは実link時ENOSPCで101、source不変。承認済みprivate clean-allはroot targetを整理したが、他repoの使用中/不正cache tagの保護で全体exit1となった。保護は回避していない。R1746の限定test buildは既存retain-profile契約が直接Cargo buildを要求するため実行前にexit2。原証跡を保持し、R1747で直接buildのtests/libを指定して再開した。これは限定検証用で、完全all-target品質ゲートの成功へ代用しない。
+
+- [ ] Chrome互換math/central baselineを、physical faceごとの既存cacheへ保持する寸法と公開usvg span情報へ接続した。混在baseline/vertical/textPathは従来挙動を維持し、補正後のboundsをcropへ反映する。R1735〜R1740の関数/型責務・import/旧caller・raw文字列不整合は原ログを保持して是正。R1741はASTとworkspace/all-targets Clippyがactual0、独立harnessだけcommon lock未追従で拒否された。R1742はoffline metadataでlock更新、共通pin278a997bへ同期し、失敗したharness laneだけR1743で再実行、両arm Clippy actual0/source不変。現画像への修正効果・正式117合格は未検証。HanKerning helperはICU4X/既存font libraryを使う中間段階でcfg(test)限定、測定/paint双方の製品接続は未完了。
+
+- [/] 撮影例外保持・限定viewport出力の2fileをR1706成功時とSHA照合し、通常hook成功後`7c9295af`へcommitした（R1734 actual0）。限定出力を全体受入へ転用せず、invalid位置や元例外を保持して後続viewport/TOCを継続する。
+
+- [ ] R1731の現候補620幅375要素比較はactual0/source不変。small修正後は末尾差が40pxから20pxへ縮小（Chrome9253.703125px/native9273.703px）。残差はR1721で切り分けた句読点normal詰め処理へ対応する。R1728の実buildはactual0だが保全controllerが既存freeze APIの親directory作成契約に違反して失敗したため原証跡を保持。再buildせずR1730で同一sourceを照合し既存APIでbinaryを保全、149/149回帰が10.23秒で成功した。
+
+- [ ] Mermaid baseline対照R1732は同一Helvetica・同一座標の6SVG/実PNGを生成しactual0。R1733の実Chrome比較もactual0/source不変、alphabeticは実ink bbox一致、mathematical/centralはnativeが1px上だった。Blink font_metrics.ccのAscentDescentWithHacksはascent/descentを整数丸めし、macのHelvetica/Times/Courierに15%のascent補正を加える。SimpleFontDataはMacのx-heightも実glyph boundsから取得する。R1719の生Skia/CoreText/skrifa metrics一致だけではこのブラウザ後処理を検証できておらず、否定済みという旧解釈を訂正する。ライブラリの公開接続点と共通font metrics規則の適用を検討し、任意offsetは採用しない。正式117の再採点は未完了。
+
+- [/] R1722でfmt失敗後も重いClippyが実行されたため、既存Lefthookのpiped/priorityでfmt→AST→Clippyと先行失敗時の打切りを設定し、通常hook成功後`29d90929`へcommitした。R1729はproduction設定から派生した隔離対照で全成功順序、fmt失敗時1step、AST失敗時2stepで後続停止を確認した。既存検査・閾値は維持する。R1726の実disk不足後は承認済みprivate clean-allで3.3GiB整理し、sibling保護拒否による全体exit1と実整理成功を分けて保持した。
+
+- [/] small/bigのUA相対font-size・line-height修正2fileを通常hook成功後`9bbb8f60`へcommitした（R1725 actual0）。R1719の関連148件回帰は成功。R1722は新baseline診断testの保存途中状態とimport/Arc型誤りで通常commitが失敗した原証跡を保持し、保存を止めて修正した。R1723のAST関数長/定数指摘も修正し、R1724はformatter/AST/厳格Clippy全actual0・source不変。実画像の現在幅比較は未完了で、製品117・HTML84・性能の合格には代用しない。
+
+- [ ] R1711の実Chrome対照でsmall/bigのUA相対font-sizeを確認し、既存line-height/著者指定の継承を保つ修正を追加した。R1715のClippy型推論失敗を修正後、R1716の静的/AST/Clippyはactual0、buildは実ディスク不足で101。標準cleanの部分失敗・実空き容量の回復を区別して保持し、同一sourceを照合してbuildだけR1718へ再実行、actual0。R1719の実binary/catalog固定148回帰は全成功（10.18秒）、source/binary不変。ただし次のR1720開始時にbinary消失を検知して拒否し、修正後の620幅画像/寸法は未検証。旧成功を再認定しない。
+
+- [ ] R1721のChrome文字組み対照はactual0/source不変。同じ私有入力75文字・355.5625px幅でnormalは2行、text-spacing-trim:space-allではKRRと同じ3行になる。chwsの明示0/1はnormalと同じで、halt/paltの全体適用は別の折り返しになるため採用しない。既存ライブラリとBlink HanKerningの隣接句読点処理を照合し、表固有の補正を避けて共通原因を修正する。私有本文は管理外証跡に限定する。
+
+- [ ] 表nowrap/BR幅修正3fileを通常hook成功後`8b6fdd11`へcommitした（R1709 actual0、Refs #109）。R1706は撮影例外/coverage失敗の保持修正についてBiome・厳格型全構成・関連24件が全actual0、source不変。R1707はR1704で欠けた960幅1枚だけを再撮影して96.38で成功し、960幅は取得計33/33が90以上。未実行だった620幅も31scroll+16TOCを完走したが、scroll9/31・TOC4/16のみ合格しsuite actual1。R1708の現候補375要素比較では960幅のbody/末尾がChromeと一致し、620幅は表3・表5に各20pxの固有行高差、計40pxの末尾差が残った。成功済み画像の全再撮影は行わず欠損だけを再取得した。current private全Y/TOC・HTML84/font/performanceの合格や公開は未完了。
+
+- [ ] 表セルのnowrap最小幅がBR前後を合算していた共通原因を、強制改行ごとの最大幅へ修正した。R1700は新helper配置の行数、R1701はmodule importのClippyで失敗した原証跡を保持。責務分離・import修正後のR1702は静的/AST/厳格Clippy/最適化workspace・全target・全feature buildが全actual0、R1703は実binary/catalog固定の110回帰すべて成功（11.99秒）、source/binary不変。R1704の私有原本全Y撮影は1280幅28/28が90以上（最低95.6288）、960幅32/32取得分が90以上（最低93.67475）。ただし960幅の別1枚がChrome networkidle待ちで失敗し、coverage検証が元例外をinvalid positionへ置換して後続620幅を中断した。60枚の成功を全Y・全目次・現行HTML84・font・性能の合格へ転用しない。元の撮影失敗を結果へ保持し、独立viewportの継続と未取得の再取得を進める。私有原本・画像・詳細は管理外に維持する。
+
+- [ ] R1687はAST・source-static・厳格Clippy・最適化workspace/all-targets/all-features build全actual0、R1688の実binary/catalog固定回帰53件も全成功（9.59秒）、source/binary不変。R1689で現候補の製品PNG117枚を生成し、R1692で独立raw R1573の厳格reader検証と新規paint投影を経た採点v2を実行した。限定診断は22/117が99以上（EN15/59、JA7/58）、寸法失敗0、残95未達。EN継承図99.566966・flow99.083292・Sankey99.844686に対しJA継承図91.89246、C4/TreeViewは16件とも未達。R1511由来の入力SVG/wrapperを明示的に再利用した描画診断であり、現行SVG生成/build receiptを含む正式117の合格ではない。R1691の診断側evidence項目名誤りはpin照合で拒否され、訂正したR1692は全actual0・source不変。
+
+- [ ] 私有HTML寸法診断R1690は両幅でChrome値を取得したが、native側はカンマ区切りquerySelectorAll未対応のため要素0、scrollHeightも未取得だった。actual0という実行結果を寸法診断の成功へ転用しない。既存の単一selector・公開layout geometryで比較をやり直す。私有原本と詳細は引き続き管理外。
+
+- [ ] R1685で採点v2の既存28回帰と実Chromeの色変更/位置ずれ対照2件が全actual0、source前後一致。低contrast C4は独立基準geometryを維持した同配色referenceと実PNGを比較し、原本RGBも別記録する。R1683の合成境界fixture不足とR1684の既に明色だった保存fixtureの対照作成失敗は原証跡に保持した。R1686は型・AST・source-static・Bun28・Chrome2がactual0だが、追加font回帰がusvg公開APIに存在しないSpan.font()を参照してClippy101。後続buildは未開始。テストを実依存APIへ修正し、製品PNG117の再集計へ進む。旧正式0/117および中間SVG115/117を現製品の残件数へ代用しない。
+
+- [ ] 採点の追加監査R1682で実C4のfalse failを再現した。独立raw C4 SVGの`#444444`だけを`#e0e0e0`へ8置換した別対照を同じChromeで描画し、原本不変・原本PNG SHA一致・全text geometry/選択font同値を確認したが、raw RGB edge支持領域scoreは98.05656（RGB95.15254）で99を満たさない。高contrastの人工Chrome対照R1672（1件成功）だけでは校正不十分だった。原本と99を維持し、既存の構造/非paint/visibility検証済み投影reference PNGの物理pinと実native PNG pinを明示的に結び、同配色でactual shapeを比較するv2契約へ是正中。raw原本RGBは別記録し、他図RGB99・欠落/改変/旧scalar100拒否を維持する。旧正式0/117を117図すべての実形状不正とは解釈しない。
+
+- [ ] 私有原本の現候補全Y診断R1673は1280幅28/28が90以上・最低95.6288、960幅は19/33が90以上・最低80.0612で、KRR末尾7489がChrome7509より20px短くactual1。既定全3viewportを保ったまま選択診断を追加し、partial成果物名を正式とは別にした。R1681で未実行だった620幅も31枚すべて比較し11/31が90以上・最低72.5088、coverageの範囲不一致でactual1。TOC/coverage完了や正式HTML84合格へ代用しない。92のYサンプル比較は取得したが、960/620のextent差と計34枚の90未満を未解消として保持し、私有原本・画像・詳細はGit外のみ。
+
+- [ ] R1676は対象TS静的・Bun96件/3files・AST・source-staticがactual0、追加Rust test helperのvisibilityだけでClippy101だった。是正後R1679はAST・source-static・厳格Clippy・最適化全target build全actual0、R1680は実binary/catalog固定44回帰が成功・source/binary不変。Helvetica light/regular/boldのTTC再包装とCoreText対照のwidth/pixel差が全て0で、再包装の字形変化を主因とは認定しない。R1674の6図は独立raw基準PNGと全SHA一致し、EN C4の実font/glyph数はKRRと同じ。Zenの未指定textだけがChrome .SFNSに対しKRR Timesへ落ちるHTML→埋込SVGの継承欠落をlayout_media境界で修正中。
+
+- [ ] R1667はAST・source-static・厳格Clippy・最適化workspace/all-targets/all-features buildが全actual0、source前後一致。R1668は実binary/catalog固定43回帰すべて成功し、TTCのtable/metrics保持、sRGB shadowのsource/影/外側pixel、linearRGB/複合filter/clip/skewの無変更を確認した。R1670/R1671の旧wrapper18件診断ではEN継承図98.83764→99.566966、flowchart98.72504→99.083292、Sankey99.844686維持、JA継承図91.82577→91.89246。17/18 PNGが変わったがC4/Zen等には退行が残り、正式117の合格へ転用しない。R1669のChrome校正はNode入口の推移importにBun専用import.meta.dirがあり収集失敗・実行0件だった。最小のNode互換pathへ修正して校正を取り直す。
+
+- [ ] R1662/R1663はAST・source-staticがactual0、strict Clippyがactual101で後続buildを開始していない。TTC再包装は外部write-fontsでtable集合・内容（head checksum差だけ除く）・metricsを照合する方式へ接続し、R1662の借用/API誤りを修正した。R1663で残るshadow回帰の型/API誤りを是正中。画像・性能の改善や正式117合格とは扱わない。C4/TreeView色差別評価の監査では合成矩形の対照は確認したが、実ChromeのAA文字・線・影の色変更対照が不足しており、既存browser回帰へ追加中。基準PNG・99閾値は維持する。
+
+- [ ] R1652はAST・厳格Clippy・最適化全workspace/all-targets/all-features buildがactual0、R1653は実binary/catalog固定36回帰が成功、source/binary前後一致。有効なfontをSkiaが扱えない場合はrender単位negative cacheへ記録して既存resvgへ委譲し、欠落/破損/bytes変更のErrは維持する。Helvetica TTC400/700の実描画・無変更fallbackと再利用を確認した。R1654で旧14エラーすべてと対照4件が描画成功。R1655の18件採点では対照4件は同値で、復旧14件の精度未達・退行は引き続き残る。Trebuchet400/700のfile/system Typeface同glyph対照はRGBA差分0で、この読み込み経路差を主因として扱わない。
+
+- [ ] R1649はEN継承図の15文字列を覆う保守的矩形maskで誤差を分解した診断。nativeのMAE寄与はtext矩形内0.0000307695・外0.00157455、公開Skia対照は内0・外0.0000461373。矩形外に約98%残るため、文字以外の枠/矢印/影を切り分ける。これは新しい採点方式ではなく、基準画像と閾値は変更しない。single sRGB DropShadowを既存Skia filterへ委譲する限定adapterを調査・実装中で、実画像の改善・性能は未検証。
+
+- [ ] R1645/R1646でglyph候補を既存wrapper117件すべてへ適用し診断した。実PNG103件を採点し、15件がRGB99以上、60件改善、43件悪化。残る14件はSkiaの有効TTC face読込非対応で製品render自体が失敗し、optional rendererの既存resvg委譲を修正中。入力wrapperはR1511で、Ishikawa生成修正後の現行正式117件ではない。C4/TreeViewの形状/配色別判定の構造項も未再測定のため、正式合格数0/117をこの診断で更新しない。R1644で取得済み13件はsource manifest・binary/input/PNG pin一致を確認してR1645で再利用し、失敗記録は保持した。候補は悪化とrender失敗が残り採用不可。
+
+- [ ] R1637の最適化buildとR1638の実catalog固定34回帰はactual0、source/binary前後一致。一括glyph描画R1629/R1630は代表4画像がR1611と同値で、速度効果は未計測。baseline snap無効化R1633/R1634は悪化したため撤回した。R1635のChrome画像は英日とも独立基準PNGとSHA一致し、英語15文字列中14件の内部位置差は最大0.0078125px、Zebraのみ0.25px。Blinkのtypesetting feature初期値だけからauto kerning無効と推測したが、R1643の実Chromeではauto/normalが基準とSHA完全一致、noneだけ異なった。root CSS none対照R1641/R1642も代表4件すべて悪化したため、未接続のkerning変更案を撤回し製品へ入れない。根拠のない補正・基準変更は行わない。
+
+- [/] DOM selector-listとIshikawa枝線marker欠落を`50b36361`へ通常hook成功でcommitした。R1619のcommit検査は固定4,726,095,872Bに対する生成物5,283,991,552Bで失敗したため、実行中build不在と保護refがtarget外であることを確認し、標準`just clean`で5.1GiB整理（R1620 actual0）。上限変更なしでR1621の通常commitがactual0。公開・中間2件の99再測定・製品117件の受入は未完了。
+
+- [/] 私有原本のChrome全Y・全目次採取を既存`measureScrollCoverage`で実行した（R1613 actual0）。1280×900/960×720/620×900で28/33/31枚、計92枚。各16件の目次・子項目すべてのtarget存在/表示と、実最下部6268/7509/8354pxへの到達を確認し、入力SHAは全サイズ不変。画像・リンク先・原本情報は`tmp/quality/private-original-chrome-scroll-r1613/`だけへ保存しGit・公開先へ含めない。これは独立Chrome比較元の採取であり、KRR画像一致・font一致・性能・consumer受入へ代用しない。
+
+- [ ] R1614の静的/AST/厳格ClippyとR1615 build、R1616の関連33件は成功したが、背景copy候補R1617/R1618の改善はEN継承図98.83764→98.83823に留まり、余分な処理を撤回した。色空間だけSRGBへ変更したR1622 build/AST・R1623関連32件もactual0、R1624/R1625の代表4scoreはR1611と同値だったため、この変更も撤回する。旧失敗・診断を保存し、現在は1glyphごとのCanvas変換/描画を、配置が等価な通常文字runの一括描画へ置き換える候補を検証する。任意の補正・基準変更は行わない。
+
+- [/] Bun 1.4.4同期・外部型検査tool境界を通常hook成功後`f0743c44`へcommitした。R1607はsource-static・AST・厳格Clippy全actual0、R1608の最適化buildもactual0、R1609は実binary/catalog固定の関連32件全成功・source/binary前後一致。新しい同一chunkの混在tspan回帰は400/700両方で全glyphのfont IDと欠落なしを確認した。fallbackを無効化した対照testの成功であり、製品の日本語font修正完了ではない。
+
+- [ ] R1610/R1611でfont-size整合後の実PNGを再測定した。EN継承図98.83764、flowchart98.72504、Sankey99.844686、JA継承図91.82577。限定4件、source前後一致。英語の残差はfont-size変更だけで改善せず、日本語は旧製品91.93356に未復帰。透明の中間面にglyphを描いてから合成する経路と、実背景へ直接描くSkia診断との差を切り分ける。R1606の新testのBox参照型エラーは原証跡へ保持し、修正後のR1607/R1609で解消確認した。
+
+- [ ] R1600と、実font-sizeでglyphを描く候補のR1604はsource-static・AST・厳格Clippyが全てactual0、source前後一致。R1595/R1605の最適化native buildもactual0。旧UPEM候補のR1601は実binary catalogに束縛した関連30件が全成功した。新font-size候補の画像・回帰は未検証であり、完全ゲートや製品117件の成功へ代用しない。
+
+- [ ] R1602/R1603の実製品PNG代表4件では、EN継承図96.25943→98.83764、EN flowchart97.44692→98.72504、Sankey98.29483→99.844686、JA継承図91.93356→91.78633。日本語の微悪化を未解消として保持する。既存wrapperを使った限定診断であり、正式117件の0/117という直近結果は更新しない。usvg 0.48.1が欠落文字のfallbackで同じchunkのLatin文字まで置換する経路を確認し、明示fontを持つ同一chunkの回帰を追加して切り分け中。基準・閾値・座標を補正して通過させない。
+
+- [ ] R1582の外部tool契約回帰25件57assertはactual0。R1584のfoundation12タスクとR1590のnative解析を含むsource-static全体がactual0・source前後一致。Bun 1.4.4への契約pin/CI同期、selector修正の正規runtime生成、既存テスト追加時の未更新到達性pinをレビューして同期した。管理外の調査証跡コピー24,502ファイルは`tmp/local-evidence/xerj-20261023`へ内容SHA不変で移動し、検査への設定混入を解消（`tmp/quality/xerj-evidence-relocation-r1586.json`）。R1589の厳格Clippyは新glyph/compositorの関数長30行規約と不要castでactual101、型/APIの指摘なし。検査規則は維持し、責務分割後の再検証へ進む。PNG/性能の合格へ代用しない。
+
+- [ ] glyph/selector統合の静的検査R1577は負例fixtureのruntime literal型不一致、R1578は新compositor回帰13行の重複で失敗し、重いnative検査は開始していない。Bun実体1.4.4とCI・外部tool契約pinを同期し、第三者TypeScript executableをKRR所有コードへ誤分類しない修正を追加した。型負例はReflect.setによる既存形式へ修正、反復回帰は共通化中。glyph行列のskew軸交換を実tiny-skia契約に照合して是正中。部分成功を描画改善や正式合格として扱わない（`tmp/quality/glyph-and-selector-static-r1577/result.json`、`glyph-and-selector-static-r1578/result.json`）。
+
+- [/] 評価方式の独立監査: R1570は旧raw実行のBun 1.4.3が消失して厳格readerに拒否されたため、その成功を再認定しなかった。R1573で現行Bunの独立raw JSから全117枚を新規生成し、R1574で公式role/process/PNG/SVG無改変を既存readerで検証した。117/117 PNGが旧基準とSHA完全一致。同一画像100、1px移動91.51802、旧実製品の継承図96.25943を再現し、欠落・位置ずれ・不正provenanceの関連11件もactual0。過去の中間SVG115/117合格と実製品0/117を区別し、現行製品の合格へ流用しない（`tmp/quality/fresh-official-process-proof-r1573/result.json`、`scoring-validity-audit-r1574/audit.json`、`result.json`）。
+
+- [ ] glyph-only候補を既存usvg実glyph配置・物理font/TTC・既存compositorへ接続中。公開Skia 0.153.3のCPU配布SDKを使い、全SVG再shape・基準画像変換は採用しない。static/solid fillだけを対象とし、非対応faceもrender単位cacheへ記録、font fileはmmapと既存DB bytes一致で検証する。依存解決R1568/R1569はactual0。合成hook、実file fixtureのglyph/変換/非対応回帰、Ishikawaのselector-list欠落修正を統合中で、コンパイル・実画像・性能は未検証。
 
 - [/] R1556/R1557でHEAD `0f7c87c4`の正式HTML84撮影と厳密readerを実行し、84/84が90以上（最低91.49827）、出力font物理face・全実適用座標の双方向一致を確認した。actual0・source前後一致、`html84Acceptance=true`・`fontIdentityEquivalence=established`・診断空。性能・原資料の全Y走査・consumer受入・公開は未完了であり、画像/fontの成功で代用しない（`tmp/quality/current-html84-observer-validation-r1557/result.json`、`validation.json`、`tmp/html-performance-stage90/r1556/captures/catalog-stage90-captures.json`）。
 
