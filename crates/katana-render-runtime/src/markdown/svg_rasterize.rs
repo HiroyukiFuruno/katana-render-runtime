@@ -4,16 +4,6 @@ Returns the result as raw bytes compatible with egui's `ColorImage`. */
 
 use resvg::usvg;
 
-#[cfg(all(
-    test,
-    any(
-        feature = "svg-librsvg-evaluation",
-        feature = "svg-skia-evaluation",
-        feature = "svg-thorvg-evaluation"
-    )
-))]
-#[path = "svg_rasterize_candidate_test_support.rs"]
-mod candidate_test_support;
 #[path = "svg_rasterize_composite.rs"]
 mod composite;
 #[path = "svg_rasterize_font.rs"]
@@ -27,9 +17,6 @@ mod html_glyph;
 #[cfg(target_os = "macos")]
 #[path = "svg_rasterize_html_shadow.rs"]
 mod html_shadow;
-#[cfg(all(test, feature = "svg-librsvg-evaluation"))]
-#[path = "svg_rasterize_librsvg_candidate.rs"]
-mod librsvg_candidate;
 #[path = "svg_rasterize_text_measurement_api.rs"]
 mod measurement_api;
 #[path = "svg_rasterize_measurement_diagnostic.rs"]
@@ -43,17 +30,8 @@ mod preprocess;
 mod provenance;
 #[path = "svg_rasterize_render.rs"]
 mod render;
-#[cfg(all(test, target_os = "macos", feature = "svg-skia-evaluation"))]
-#[path = "svg_rasterize_skia_candidate.rs"]
-mod skia_candidate;
-#[cfg(all(test, target_os = "macos", feature = "svg-skia-evaluation"))]
-#[path = "svg_rasterize_skia_registered_candidate.rs"]
-mod skia_registered_candidate;
 #[path = "svg_rasterize_text.rs"]
 mod text;
-#[cfg(all(test, feature = "svg-thorvg-evaluation"))]
-#[path = "svg_rasterize_thorvg_candidate.rs"]
-mod thorvg_candidate;
 #[cfg(test)]
 pub(in crate::markdown::svg_rasterize) use text::probe_test_support;
 #[path = "svg_rasterize_text_shaping.rs"]
@@ -77,38 +55,6 @@ pub(crate) use text_shaping::{
 pub use types::{RasterizedSvg, SvgRasterizeError, SvgRasterizeOps};
 
 const MAX_RASTERIZED_SVG_EDGE: f32 = 8192.0;
-
-#[cfg(all(
-    test,
-    any(
-        feature = "svg-skia-evaluation",
-        feature = "svg-librsvg-evaluation",
-        feature = "svg-thorvg-evaluation"
-    )
-))]
-fn render_candidate_for_test(
-    svg: &str,
-    tree: &usvg::Tree,
-    scale: f32,
-) -> Option<Result<RasterizedSvg, SvgRasterizeError>> {
-    candidate_test_support::render_selected(svg, tree, scale)
-}
-
-#[cfg(all(
-    test,
-    not(any(
-        feature = "svg-skia-evaluation",
-        feature = "svg-librsvg-evaluation",
-        feature = "svg-thorvg-evaluation"
-    ))
-))]
-fn render_candidate_for_test(
-    _svg: &str,
-    _tree: &usvg::Tree,
-    _scale: f32,
-) -> Option<Result<RasterizedSvg, SvgRasterizeError>> {
-    None
-}
 
 #[cfg(test)]
 mod font_source_fixture {
@@ -354,10 +300,6 @@ impl SvgRasterizeOps {
         provenance: &GeneratedClipProvenance,
         text: Option<&dyn composite::TextRasterizer>,
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
-        #[cfg(test)]
-        if let Some(rendered) = render_candidate_for_test(compatible_svg, tree, scale) {
-            return rendered;
-        }
         let raster = RasterTarget::new(tree.size(), scale);
         #[cfg(all(test, target_os = "macos"))]
         font::observation::count(font::observation::Metric::RasterAttempt);

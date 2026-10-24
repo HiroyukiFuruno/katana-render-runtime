@@ -12,9 +12,6 @@ mod linear_component_transfer;
 mod mask;
 #[path = "svg_rasterize_composite_nodes.rs"]
 mod nodes;
-#[cfg(all(test, target_os = "macos"))]
-#[path = "svg_rasterize_skia_path_candidate.rs"]
-mod path_candidate;
 #[path = "svg_rasterize_composite_text.rs"]
 mod text;
 pub(crate) use text::TextRasterizer;
