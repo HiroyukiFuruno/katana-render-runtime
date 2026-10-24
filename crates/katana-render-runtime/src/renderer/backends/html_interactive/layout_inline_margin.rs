@@ -23,15 +23,19 @@ struct MarginRenderContext<'a> {
 
 pub(super) fn block_margins(node: &HtmlDocumentNode, inherited: &CssStyle) -> Option<BlockMargins> {
     let HtmlDocumentNode::Element {
-        tag,
-        attributes,
-        children,
-        ..
+        tag, attributes, ..
     } = node
     else {
         return None;
     };
     let style = CssStyle::from_element(tag, attributes, inherited);
+    block_margins_for_style(node, &style)
+}
+
+fn block_margins_for_style(node: &HtmlDocumentNode, style: &CssStyle) -> Option<BlockMargins> {
+    let HtmlDocumentNode::Element { children, .. } = node else {
+        return None;
+    };
     (matches!(
         style.display,
         Display::Block | Display::FlowRoot | Display::Flex | Display::Grid
@@ -42,23 +46,13 @@ pub(super) fn block_margins(node: &HtmlDocumentNode, inherited: &CssStyle) -> Op
         .then_some(BlockMargins {
             top: super::super::super::layout_block_margin::collapsed_margin(
                 style.margin_top,
-                super::super::super::layout_block_margin::leading_child_margin(children, &style),
+                super::super::super::layout_block_margin::leading_child_margin(children, style),
             ),
             bottom: super::super::super::layout_block_margin::collapsed_margin(
                 style.margin_bottom,
-                super::super::super::layout_block_margin::trailing_child_margin(children, &style),
+                super::super::super::layout_block_margin::trailing_child_margin(children, style),
             ),
         })
-}
-
-pub(super) fn skips_margin_chain(node: &HtmlDocumentNode, inherited: &CssStyle) -> bool {
-    let HtmlDocumentNode::Element {
-        tag, attributes, ..
-    } = node
-    else {
-        return false;
-    };
-    CssStyle::from_element(tag, attributes, inherited).display == Display::None
 }
 
 pub(super) fn collapsed_margin_overlap(previous_bottom: f32, current_top: f32) -> f32 {
@@ -166,14 +160,23 @@ fn remember_margin_state(
     previous_block_collapsible: &mut bool,
 ) {
     if matches!(&nodes[index], HtmlDocumentNode::Text(text) if text.chars().all(super::super::super::layout_text::is_css_whitespace))
-        || skips_margin_chain(&nodes[index], inherited)
     {
         return;
     }
-    if !had_inline_content && let Some(current) = block_margins(&nodes[index], inherited) {
-        *previous_block_bottom_margin = current.bottom;
-        *previous_block_collapsible = true;
-        return;
+    if let HtmlDocumentNode::Element {
+        tag, attributes, ..
+    } = &nodes[index]
+    {
+        let style = CssStyle::from_element(tag, attributes, inherited);
+        if style.display == Display::None {
+            return;
+        }
+        if !had_inline_content && let Some(current) = block_margins_for_style(&nodes[index], &style)
+        {
+            *previous_block_bottom_margin = current.bottom;
+            *previous_block_collapsible = true;
+            return;
+        }
     }
     *previous_block_bottom_margin = 0.0;
     *previous_block_collapsible = false;
@@ -193,6 +196,8 @@ fn collapsed_margin(previous_bottom: f32, current_top: f32) -> f32 {
 mod tests {
     use super::collapsed_margin_overlap;
     use super::{CssStyle, HtmlDocumentNode};
+
+    const TEST_NODE_ID: u64 = 51;
 
     #[test]
     fn sibling_collapse_includes_a_containers_leading_descendant() -> Result<(), String> {
@@ -249,6 +254,70 @@ mod tests {
             children: vec![HtmlDocumentNode::Text("badge".to_string())],
         };
         assert!(super::block_margins(&node, &CssStyle::browser_default()).is_none());
+    }
+
+    #[test]
+    fn remembers_block_margin_after_one_style_resolution() {
+        let node = margin_node("margin:8px 0", vec![HtmlDocumentNode::Text("child".into())]);
+        let mut previous_bottom = 0.0;
+        let mut previous_collapsible = false;
+        let mut diagnostic =
+            super::super::super::super::text_measurement_diagnostic::TextMeasurementDiagnosticScope::enter(true);
+
+        super::remember_margin_state(
+            &[node],
+            0,
+            &CssStyle::browser_default(),
+            false,
+            &mut previous_bottom,
+            &mut previous_collapsible,
+        );
+
+        assert_eq!(diagnostic.finish().style_calls, 1);
+        assert_eq!((previous_bottom, previous_collapsible), (8.0, true));
+    }
+
+    #[test]
+    fn margin_state_keeps_skip_and_reset_behavior() {
+        assert_eq!(remembered_state("display:none", 5.0, true), (5.0, true));
+        assert_eq!(remembered_state("display:contents", 5.0, true), (0.0, true));
+        assert_eq!(
+            remembered_state_for_node(HtmlDocumentNode::Text(" \n ".into()), 5.0, true),
+            (5.0, true)
+        );
+        assert_eq!(
+            remembered_state_for_node(HtmlDocumentNode::Text("content".into()), 5.0, true),
+            (0.0, false)
+        );
+    }
+
+    fn remembered_state(style: &str, bottom: f32, collapsible: bool) -> (f32, bool) {
+        remembered_state_for_node(margin_node(style, Vec::new()), bottom, collapsible)
+    }
+
+    fn remembered_state_for_node(
+        node: HtmlDocumentNode,
+        mut bottom: f32,
+        mut collapsible: bool,
+    ) -> (f32, bool) {
+        super::remember_margin_state(
+            &[node],
+            0,
+            &CssStyle::browser_default(),
+            false,
+            &mut bottom,
+            &mut collapsible,
+        );
+        (bottom, collapsible)
+    }
+
+    fn margin_node(style: &str, children: Vec<HtmlDocumentNode>) -> HtmlDocumentNode {
+        HtmlDocumentNode::Element {
+            node_id: TEST_NODE_ID,
+            tag: "div".to_string(),
+            attributes: vec![("style".to_string(), style.to_string())],
+            children,
+        }
     }
 
     #[test]
