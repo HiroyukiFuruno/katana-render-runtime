@@ -1180,25 +1180,37 @@ fn apply_mutation_observation(
     trace: &mut OperationTrace,
 ) -> TestResult {
     let settled = observe_event_state(session, request)?;
+    record_mutation_observation(trace, before, &settled);
+    Ok(())
+}
+
+fn record_mutation_observation(
+    trace: &mut OperationTrace,
+    before: &serde_json::Value,
+    settled: &serde_json::Value,
+) {
     let state_text = before
         .as_str()
         .map(str::to_owned)
         .unwrap_or_else(|| before.to_string());
-    if ["mutation", "resize", "intersection"]
+    let verified = ["mutation", "resize", "intersection"]
         .iter()
-        .all(|event| state_text.contains(event))
-    {
+        .all(|event| state_text.contains(event));
+    if verified {
         trace
             .extra
             .insert("delivery".into(), json!("session-load-settled"));
         trace.steps.push(json!({"kind":"session-load-settled-observer-state","stateBefore":before,"stateAfter":settled}));
     } else {
+        trace
+            .extra
+            .insert("delivery".into(), json!("session-load-observation"));
+        trace.steps.push(json!({"kind":"session-load-observer-state-observation","stateBefore":before,"stateAfter":settled,"fixtureStateVerified":false}));
         mark_operation_unknown(
             trace,
             "The settled session-load state does not expose the mutation, resize, and intersection delivery records",
         );
     }
-    Ok(())
 }
 
 fn apply_resource_settled_observation(
@@ -1208,26 +1220,50 @@ fn apply_resource_settled_observation(
     before: &serde_json::Value,
     trace: &mut OperationTrace,
 ) -> TestResult {
-    let Some(expected) = expected_resource_state(session, operation, request)? else {
+    let expected = expected_resource_state(session, operation, request)?;
+    let after = observe_event_state(session, request)?;
+    record_resource_observation(trace, before, &after, expected.as_ref());
+    Ok(())
+}
+
+fn record_resource_observation(
+    trace: &mut OperationTrace,
+    before: &serde_json::Value,
+    after: &serde_json::Value,
+    expected: Option<&serde_json::Value>,
+) {
+    let Some(expected) = expected else {
+        record_unknown_resource_state(trace, before, after, None);
         mark_operation_unknown(
             trace,
             "Resource settlement is not bound to the catalog fixture",
         );
-        return Ok(());
+        return;
     };
-    let after = observe_event_state(session, request)?;
-    if resource_state_matches_fixture(before, &after, &expected) {
+    if resource_state_matches_fixture(before, after, expected) {
         trace
             .extra
             .insert("delivery".into(), json!("session-load-settled"));
         trace.steps.push(json!({"kind":"session-load-settled-resource-state","stateBefore":before,"stateAfter":after}));
     } else {
+        record_unknown_resource_state(trace, before, after, Some(expected));
         mark_operation_unknown(
             trace,
             "Resource and font-ready state did not settle to the pinned fixture state",
         );
     }
-    Ok(())
+}
+
+fn record_unknown_resource_state(
+    trace: &mut OperationTrace,
+    before: &serde_json::Value,
+    after: &serde_json::Value,
+    expected: Option<&serde_json::Value>,
+) {
+    trace
+        .extra
+        .insert("delivery".into(), json!("session-load-observation"));
+    trace.steps.push(json!({"kind":"session-load-resource-state-observation","stateBefore":before,"stateAfter":after,"expectedState":expected,"fixtureStateVerified":false}));
 }
 
 fn expected_resource_state(
@@ -1410,6 +1446,7 @@ fn catalog_report_details(
 ) -> CatalogReportEvidence {
     let fonts = catalog_font_provenance(&font_audit);
     let observed = observed_operation_evidence(evidence, operation, request);
+    let diagnostic = diagnostic_operation_evidence(evidence, operation, request);
     let font_audit_complete = catalog_font_audit_complete(&font_audit, &fonts);
     let reason = catalog_unknown_reason(evidence, &font_audit, &fonts, &resource_inventory);
     CatalogReportEvidence {
@@ -1418,6 +1455,7 @@ fn catalog_report_details(
         font_audit_complete,
         reason,
         observed,
+        diagnostic,
         target_visible: evidence["target"]["visible"].clone(),
     }
 }
@@ -1737,22 +1775,42 @@ fn observed_operation_evidence(
     Some(observed)
 }
 
+fn diagnostic_operation_evidence(
+    evidence: &serde_json::Value,
+    operation: &CatalogOperation,
+    request: &FeatureRequest,
+) -> Option<serde_json::Value> {
+    let diagnostic_kind = matches!(
+        operation.operation_kind.as_str(),
+        "script-await-timer-microtask"
+            | "script-await-mutation-delivery"
+            | "script-await-resource-font"
+    );
+    if !diagnostic_kind
+        || evidence.get("status")?.as_str() != Some("unknown")
+        || !operation_evidence_identity_matches_request(evidence, operation, request)?
+    {
+        return None;
+    }
+    Some(evidence.clone())
+}
+
 fn operation_evidence_matches_request(
     evidence: &serde_json::Value,
     operation: &CatalogOperation,
     request: &FeatureRequest,
 ) -> Option<bool> {
+    if evidence.get("status")?.as_str() != Some("observed")
+        || !operation_evidence_identity_matches_request(evidence, operation, request)?
+    {
+        return Some(false);
+    }
     let target = evidence.get("target")?;
     let pre_frame = evidence.get("preFrame")?;
     let post_frame = evidence.get("postFrame")?;
     let state = evidence.get("state")?;
     Some(
-        evidence["status"] == "observed"
-            && evidence["schema"] == "krr-html84-operation-evidence-v1"
-            && evidence["kind"] == operation.operation_kind
-            && evidence["sourceSha256Before"] == request.source_sha256
-            && evidence["sourceSha256After"] == request.source_sha256
-            && target["visible"] == true
+        target["visible"] == true
             && target["nodeId"]
                 .as_u64()
                 .is_some_and(|node_id| node_id != 0)
@@ -1764,6 +1822,19 @@ fn operation_evidence_matches_request(
             && catalog_frame_is_complete(post_frame)
             && state.get("before").is_some()
             && state.get("after").is_some(),
+    )
+}
+
+fn operation_evidence_identity_matches_request(
+    evidence: &serde_json::Value,
+    operation: &CatalogOperation,
+    request: &FeatureRequest,
+) -> Option<bool> {
+    Some(
+        evidence["schema"] == "krr-html84-operation-evidence-v1"
+            && evidence["kind"] == operation.operation_kind
+            && evidence["sourceSha256Before"] == request.source_sha256
+            && evidence["sourceSha256After"] == request.source_sha256,
     )
 }
 
@@ -1863,6 +1934,7 @@ struct CatalogReportEvidence {
     font_audit_complete: bool,
     reason: String,
     observed: Option<serde_json::Value>,
+    diagnostic: Option<serde_json::Value>,
     target_visible: serde_json::Value,
 }
 
@@ -1905,6 +1977,9 @@ fn apply_catalog_report_status(
     } else {
         report["unknownReason"] = json!(&details.reason);
         report["operationEvidence"]["reason"] = json!(&details.reason);
+        if let Some(diagnostic) = &details.diagnostic {
+            report["diagnosticOperationEvidence"] = diagnostic.clone();
+        }
     }
     if !status_observed && let Some(observed) = details.observed.as_ref() {
         report["observedOperationEvidence"] = observed.clone();
@@ -2547,6 +2622,62 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn unknown_timer_diagnostic_keeps_matching_state_without_acceptance() -> super::TestResult {
+        let (root, capture_path) = catalog_report_capture_file()?;
+        let mut request = async_request()?;
+        request.binary_sha = super::digest(b"binary").to_owned();
+        let operation = async_operation();
+        let evidence = unknown_async_evidence(&request);
+        let diagnostic = super::diagnostic_operation_evidence(&evidence, &operation, &request)
+            .ok_or("bound unknown timer diagnostic was not preserved")?;
+        assert!(super::observed_operation_evidence(&evidence, &operation, &request).is_none());
+        let mut details = catalog_fixture_details(true);
+        details.observed = None;
+        details.diagnostic = Some(diagnostic);
+        let report = super::build_catalog_report(
+            &request,
+            "<p/>",
+            &operation,
+            catalog_fixture_capture(&capture_path),
+            details,
+        );
+        assert_unknown_timer_report(&report);
+        std::fs::remove_dir_all(root).map_err(super::to_string)?;
+        Ok(())
+    }
+
+    fn assert_unknown_timer_report(report: &serde_json::Value) {
+        assert_eq!(report["status"], "unknown");
+        assert_eq!(report["operationEvidence"]["status"], "unknown");
+        assert_eq!(report["diagnosticOperationEvidence"]["status"], "unknown");
+        assert_eq!(
+            report["diagnosticOperationEvidence"]["state"]["before"],
+            "microtask>ready>timer"
+        );
+        assert_eq!(
+            report["diagnosticOperationEvidence"]["steps"][0]["timerRan"],
+            false
+        );
+    }
+
+    fn unknown_async_evidence(request: &FeatureRequest) -> serde_json::Value {
+        let state = "microtask>ready>timer";
+        json!({
+            "schema":"krr-html84-operation-evidence-v1", "kind":"script-await-timer-microtask",
+            "status":"unknown", "unknownReason":"timer delivery remains unverified",
+            "reason":"timer delivery remains unverified",
+            "sourceSha256Before":request.source_sha256, "sourceSha256After":request.source_sha256,
+            "preFrame":{"generation":1,"contentHeight":100,"scrollY":0},
+            "postFrame":{"generation":2,"contentHeight":100,"scrollY":0},
+            "target":{"selector":null,"nodeId":1,"visible":true},
+            "state":{"before":state,"after":state}, "delivery":"session-load-settled",
+            "steps":[{"kind":"host-time-advance","elapsedMs":0.0,"timerRan":false,
+                "microtaskCheckpoint":"runtime-advance-timers","stateBefore":state,
+                "stateAfter":state,"fixtureStateVerified":false}]
+        })
+    }
+
     fn catalog_report_fixture(
         capture_path: &std::path::Path,
         resources_complete: bool,
@@ -2615,6 +2746,7 @@ mod tests {
             font_audit_complete: true,
             reason: "fixture audit reason".to_owned(),
             observed: Some(serde_json::json!({"kind":"observed"})),
+            diagnostic: None,
             target_visible: serde_json::json!(true),
         }
     }

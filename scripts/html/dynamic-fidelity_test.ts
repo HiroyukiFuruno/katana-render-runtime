@@ -109,6 +109,57 @@ async function withDynamicFixture(
   }
 }
 
+function unknownTimerDiagnostic(
+  sourceSha256: string,
+): Record<string, JsonValue> & { reason: string } {
+  const state = "microtask>ready>timer";
+  const reason = "Timer delivery remains unverified";
+  return {
+    schema: "krr-html84-operation-evidence-v1",
+    kind: "script-await-timer-microtask",
+    status: "unknown",
+    sourceSha256Before: sourceSha256,
+    sourceSha256After: sourceSha256,
+    preFrame: { generation: 1, scrollY: 0 },
+    postFrame: { generation: 2, scrollY: 0 },
+    target: { selector: null, nodeId: 1, visible: true },
+    state: { before: state, after: state },
+    delivery: "session-load-settled",
+    unknownReason: reason,
+    reason,
+    steps: [
+      {
+        kind: "host-time-advance",
+        elapsedMs: 0,
+        timerRan: false,
+        microtaskCheckpoint: "runtime-advance-timers",
+        stateBefore: state,
+        stateAfter: state,
+        fixtureStateVerified: false,
+      },
+    ],
+  };
+}
+
+function invalidUnknownTimerDiagnostics(
+  evidence: Record<string, JsonValue>,
+): Record<string, JsonValue>[] {
+  const steps = evidence.steps;
+  const step = Array.isArray(steps) ? steps[0] : undefined;
+  if (typeof step !== "object" || step === null || Array.isArray(step))
+    throw new Error("Timer diagnostic fixture is missing its step");
+  return [
+    { ...evidence, status: "observed" },
+    { ...evidence, sourceSha256After: "c".repeat(64) },
+    { ...evidence, extraEvidence: true },
+    { ...evidence, steps: [] },
+    {
+      ...evidence,
+      steps: [{ ...step, microtaskCheckpoint: "unknown" }],
+    },
+  ];
+}
+
 function emitChromeResource(
   page: EventEmitter,
   input: {
@@ -1250,6 +1301,47 @@ describe("dynamic capture input binding", () => {
     });
   });
 
+  test("retains unknown timer diagnostics without promoting matching state", async () => {
+    await withDynamicFixture(async (_fixture, directory) => {
+      const fixture = path.resolve("tests/fixtures/html/aspects/script-async.html");
+      const sourceSha256 = sha256File(fixture);
+      const reportPath = path.join(directory, "unknown-timer-report.json");
+      const diagnostic = unknownTimerDiagnostic(sourceSha256);
+      const { report, expected } = strictCatalogCaptureReport({
+        directory,
+        fixture,
+        caseId: "async",
+        boundaryState: "expected-state",
+        operationKind: "script-await-timer-microtask",
+        targetSelector: "button",
+        state: "microtask>ready>timer",
+        operationEvidence: {
+          schema: "krr-html84-operation-evidence-v1",
+          kind: "script-await-timer-microtask",
+          status: "unknown",
+          reason: diagnostic.reason,
+        },
+      });
+      report.status = "unknown";
+      report.unknownReason = diagnostic.reason;
+      report.diagnosticOperationEvidence = diagnostic;
+      fs.writeFileSync(reportPath, JSON.stringify(report));
+      const capture = readKrrDynamicCapture(reportPath, expected);
+      expect(capture.status).toBe("unknown");
+      if (capture.status === "unknown") {
+        expect(capture.stateValue).toBe("microtask>ready>timer");
+        expect(capture.diagnosticOperationEvidence).toEqual(diagnostic);
+      }
+      for (const invalid of invalidUnknownTimerDiagnostics(diagnostic)) {
+        fs.writeFileSync(
+          reportPath,
+          JSON.stringify({ ...report, diagnosticOperationEvidence: invalid }),
+        );
+        expect(() => readKrrDynamicCapture(reportPath, expected)).toThrow();
+      }
+    });
+  });
+
   test("binds response bytes to an unknown source-pinned condition without hiding failures", async () => {
     await withDynamicFixture(async (_original, directory) => {
       const sourceSha256 = sha256File(_original);
@@ -1740,6 +1832,7 @@ describe("fixed fidelity acceptance CLI routes", () => {
         browserExecutableSha256: executableSha256,
         capturePath: fs.realpathSync(capturePath),
         captureSha256: sha256File(capturePath),
+        fontReadiness: { status: "loaded" },
         state: {},
         boundary: {},
         resourceProvenance: { inventoryComplete: true, requests: [] },

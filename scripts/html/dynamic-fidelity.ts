@@ -130,6 +130,7 @@ export type KrrDynamicCapture = KrrDynamicCaptureIdentity &
         capturePath?: string;
         captureSha256?: string;
         operationEvidence: Record<string, JsonValue>;
+        diagnosticOperationEvidence?: Record<string, JsonValue>;
         observedOperationEvidence?: Record<string, JsonValue>;
         frame?: { generation: number; contentHeight?: number; scrollY?: number };
         geometry?: JsonValue[];
@@ -177,6 +178,7 @@ export function readKrrDynamicCapture(
       "state",
       "geometry",
       "operationEvidence",
+      "diagnosticOperationEvidence",
       "frame",
       "targetVisible",
       "resourceProvenance",
@@ -200,6 +202,8 @@ export function readKrrDynamicCapture(
     throw new Error(`Catalog capture viewport mismatch: ${expected.conditionId}`);
   if (report.status === "unknown") return readUnknownCatalogCapture(report, expected);
   if (report.status !== "observed") throw new Error("Catalog capture status is not recognized");
+  if (report.diagnosticOperationEvidence !== undefined)
+    throw new Error("Observed report cannot contain unknown operation diagnostics");
   if (report.targetVisible !== true)
     throw new Error(`Catalog target is not observed visible: ${expected.conditionId}`);
   const evidence = requireJsonRecord(report.operationEvidence, "operation evidence");
@@ -279,6 +283,7 @@ function readUnknownCatalogCapture(
 ): KrrDynamicCapture {
   const reason = requireText(report.unknownReason, "unknown reason");
   const evidence = requireUnknownOperationEvidence(report, expected, reason);
+  const diagnostic = readUnknownDiagnosticOperationEvidence(report, expected);
   const measurements = readUnknownMeasurements(report, expected);
   const capture = readOptionalCapture(report, expected.conditionId);
   const stateValue = report.state;
@@ -294,11 +299,136 @@ function readUnknownCatalogCapture(
     binarySha256: expected.binarySha256,
     viewport: { ...expected.viewport },
     operationEvidence: evidence,
+    ...(diagnostic ? { diagnosticOperationEvidence: diagnostic } : {}),
     ...measurements,
     unknownReason: reason,
     ...(stateValue === undefined ? {} : { stateValue }),
     ...(capture ?? {}),
   };
+}
+
+function readUnknownDiagnosticOperationEvidence(
+  report: Record<string, JsonValue>,
+  expected: {
+    operationKind: string;
+    sourceSha256: string;
+  },
+): Record<string, JsonValue> | undefined {
+  if (report.diagnosticOperationEvidence === undefined) return undefined;
+  const evidence = requireJsonRecord(
+    report.diagnosticOperationEvidence,
+    "unknown diagnostic operation evidence",
+  );
+  assertUnknownDiagnosticIdentity(evidence, expected);
+  requireJsonRecord(evidence.preFrame, "diagnostic pre-frame");
+  requireJsonRecord(evidence.postFrame, "diagnostic post-frame");
+  requireDiagnosticTarget(evidence.target);
+  requireDiagnosticState(evidence.state);
+  requireDiagnosticSteps(evidence.kind, evidence.steps);
+  requireText(evidence.delivery, "diagnostic delivery");
+  return evidence;
+}
+
+function assertUnknownDiagnosticIdentity(
+  evidence: Record<string, JsonValue>,
+  expected: { operationKind: string; sourceSha256: string },
+): void {
+  assertOnlyKeys(
+    evidence,
+    [
+      "schema",
+      "kind",
+      "status",
+      "sourceSha256Before",
+      "sourceSha256After",
+      "preFrame",
+      "postFrame",
+      "target",
+      "state",
+      "steps",
+      "delivery",
+      "unknownReason",
+      "reason",
+    ],
+    "unknown diagnostic operation evidence",
+  );
+  if (
+    evidence.schema !== "krr-html84-operation-evidence-v1" ||
+    evidence.kind !== expected.operationKind ||
+    !isSettledDiagnosticOperation(evidence.kind) ||
+    evidence.status !== "unknown" ||
+    evidence.sourceSha256Before !== expected.sourceSha256 ||
+    evidence.sourceSha256After !== expected.sourceSha256 ||
+    evidence.reason !== evidence.unknownReason
+  )
+    throw new Error("Unknown diagnostic operation evidence identity mismatch");
+  requireText(evidence.unknownReason, "diagnostic unknown reason");
+}
+
+function isSettledDiagnosticOperation(kind: JsonValue | undefined): boolean {
+  return (
+    kind === "script-await-timer-microtask" ||
+    kind === "script-await-mutation-delivery" ||
+    kind === "script-await-resource-font"
+  );
+}
+
+function requireDiagnosticTarget(value: JsonValue | undefined): void {
+  const target = requireJsonRecord(value, "diagnostic operation target");
+  assertOnlyKeys(target, ["selector", "nodeId", "visible"], "diagnostic operation target");
+  if (
+    !("selector" in target) ||
+    (target.selector !== null && typeof target.selector !== "string") ||
+    typeof target.nodeId !== "number" ||
+    !Number.isSafeInteger(target.nodeId) ||
+    target.nodeId < 0 ||
+    typeof target.visible !== "boolean"
+  )
+    throw new Error("Unknown diagnostic operation target is incomplete");
+}
+
+function requireDiagnosticState(value: JsonValue | undefined): void {
+  const state = requireJsonRecord(value, "diagnostic operation state");
+  assertOnlyKeys(state, ["before", "after"], "diagnostic operation state");
+  requireJsonValue(state.before, "diagnostic state before");
+  requireJsonValue(state.after, "diagnostic state after");
+}
+
+function requireDiagnosticSteps(kind: JsonValue | undefined, value: JsonValue | undefined): void {
+  const steps = requireJsonArray(value, "diagnostic operation steps");
+  if (steps.length !== 1)
+    throw new Error("Unknown diagnostic operation needs one observation step");
+  const step = requireJsonRecord(steps[0], "diagnostic operation step");
+  const shape = diagnosticStepShape(kind);
+  assertOnlyKeys(step, shape.keys, "diagnostic operation step");
+  if (step.kind !== shape.kind || step.fixtureStateVerified !== false)
+    throw new Error("Unknown diagnostic operation step differs from its operation");
+  requireJsonValue(step.stateBefore, "diagnostic step state before");
+  requireJsonValue(step.stateAfter, "diagnostic step state after");
+  if (shape.kind === "host-time-advance") {
+    if (
+      typeof step.timerRan !== "boolean" ||
+      step.microtaskCheckpoint !== "runtime-advance-timers" ||
+      !nonNegativeNumber(step.elapsedMs)
+    )
+      throw new Error("Timer diagnostic step is incomplete");
+  }
+  if (shape.kind === "session-load-resource-state-observation")
+    requireJsonValue(step.expectedState, "diagnostic expected resource state");
+}
+
+function diagnosticStepShape(kind: JsonValue | undefined): { kind: string; keys: string[] } {
+  const common = ["kind", "stateBefore", "stateAfter", "fixtureStateVerified"];
+  if (kind === "script-await-timer-microtask")
+    return {
+      kind: "host-time-advance",
+      keys: [...common, "elapsedMs", "timerRan", "microtaskCheckpoint"],
+    };
+  if (kind === "script-await-mutation-delivery")
+    return { kind: "session-load-observer-state-observation", keys: common };
+  if (kind === "script-await-resource-font")
+    return { kind: "session-load-resource-state-observation", keys: [...common, "expectedState"] };
+  throw new Error("Unknown diagnostic operation kind");
 }
 
 function requireUnknownOperationEvidence(
