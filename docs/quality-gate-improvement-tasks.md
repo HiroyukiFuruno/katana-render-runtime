@@ -14,6 +14,36 @@
 
 ## 現在の状態（2026-10-24）
 
+- [ ] 代替の選定を数値化する（最新ユーザー指摘）。`docs/svg-library-adoption-assessment.md`に試行/取得/失敗/採点/合格の母数、最低点・脱落数、初回/再表示/resize秒数、RSS bytes、3 OS成功数、adapter/patch量、上流公開・修正取込み日数の選定契約を固定した。未測定を不明とし、総合点で必須条件の未達を相殺しない。R2085 AST/foundation0、R2086 build0、R2087新規3回帰成功。英日2図のR2088は英語取得・日本語font拒否1。R2089の空projection後処理失敗を保持し、既存RGB判定のR2090は英語97.59019・99未達。Skia同図90.981との差+6.60919で、全体改善へ加算しない。R2091 build0、R2092の日本語個別load checksumは指定W3の抽出SFNTと異なり、実W4 TTCのSHAと一致した。実font接続・画像全体・時間/RSS・3 OS・保守費用の採否は未完了で、forkは未確定。
+
+  既存Fontconfigの子process設定でsystem font directoryを除外し、選択済みfaceだけをPangoへ登録したR2094/R2095は英日各1図を取得・採点、97.59019/97.72696で99以上0/2。R2096/R2097は既存12図すべて取得・採点成功、99以上0/12、最低82.5365・最高97.72696、寸法失敗0、source/binary不変。実SVG glyphのfont完全証明は未確定。初期のfont未接続0/12とは区別し、品質未達を時間/RSSの優劣へ読み替えない。
+
+- [ ] 代替比較の条件不足を補う。forkの修正効果・公開許可を採用判断の代用にしない。Pango FT mapへ同じ物理faceを登録するlibrsvg/Cairo中間SVG＋Skia複合候補を接続し、英日flowchart各1図から同じ入力・基準・scorerで評価する。個別loadのfont blob checksum確認と、実SVG glyphの使用font証明は区別する。R2081のAPI呼出しcompile失敗を修正し、R2082のroot strict Clippyは成功、performance baseline終了後の固定容量post-checkは拒否を保持。既存admissionで整理後のR2083はperformance両arm strict Clippyがactual0。全体AST・回帰・画像比較・性能・採用判断は未完了（`tmp/quality/svg-alternative-static-r2081/result.json`、`svg-alternative-static-r2082/result.json`、`svg-alternative-static-r2083/result.json`）。
+
+- [ ] R2071 AST/foundation・R2072 build成功、R2073は重点26件とruntime lib全2,605件成功・失敗0・ignored18、source/binary不変。R2074のHTML84取得は83成功・input-state/filled/960x720のChrome font retained paint不足1件を拒否。既存strict resumeのR2078で83件再利用・不足1件だけ新規取得し、標準readerは84/84が90以上・最低91.79849、fontIdentityEquivalence=established、acceptance=true、全command actual0、source/binary/Chrome不変を確認した。私有全Y/全目次・全viewport、実frame性能非劣化、公開依存と完全品質ゲート・リリースは未完了（`tmp/quality/svg-scaled-font-regressions-r2073/result.json`、`current-html84-scaled-font-capture-r2078/result.json`と`catalog-validation.observation.json`、`tmp/html-performance-stage90/r2078/captures/catalog-stage90-resume-report.json`）。
+
+  CoreText所有font APIとSkiaの独立cold診断はR2076の10測定を保持。R2075の後処理timestamp型エラーはnative exit0のrawを保持して訂正したが、再利用したpair0にCODEX_TOOL_CALL_ID差があるため、同一環境の集計は残4対8processだけへ限定して別保存した。準備込み中央値CoreText0.053134秒・Skia0.065712秒、peak RSS約21.25/24.28MiB。render_nsはCoreText側だけfont生成を含むため純粋paint比較へ使わない。2glyphの限定経路であり、製品HTML性能・画像同等性・全frame cacheの合格ではない（`tmp/quality/owned-font-cold-path-diagnostic-r2076/same-environment-summary.json`）。
+
+  ThorVGの実Trebuchet normal/bold 2source（別SHA・index0）を公開APIの別aliasへ登録した4描画はR2073で全canvas/alpha ink/premultiplied検査成功。400/700の各指定と物理太字の全6組合せに画素差があり、太字face選択と合成boldは別である。実sourceはSVG familyを単一loaderへ渡し、600以上をoutline化するため、複数font登録だけでは日本語glyph別fallbackを得られない。既存TTC抽出で登録可能であることと、fallback/kerning/位置を再現するadapter負担を区別し、APIのindex引数不足だけで代替不可としない。評価依存がWindows/Linuxのall-featuresへ混入する整理もリリース前に行う。
+
+- [ ] R2007でThorVGの公開clip APIとstatic TTF登録前後を含む5検査が成功。R2008のnative catalogは2,595成功・0失敗・18ignored。評価専用経路であり、実font選択・variation・TTC・fallback・全画像・性能・3 OSと採用判断は未完了。fork採用・公開は比較完了まで保留する（`tmp/quality/svg-scaled-font-regressions-r2007/result.json`、`svg-scaled-font-regressions-r2008/result.json`）。
+
+- [ ] R2010で公開0.4.23 baselineと候補だけ3patchを使う別armをbuild・凍結し、R2012で3viewport×5対×2armの30processを実測した。操作fixtureでは候補の初回表示約0.032秒、再表示・resize約0.016秒だが、baseline比約15〜27ms・peak RSS約13〜29MiB増で性能非劣化は未合格。warm_openは同時追加sessionでありclose/reopenではない。R2011の旧84font証跡readerはprobe binary SHA不一致で拒否を保持する。FontMgrを同一thread内で再利用する変更はR2014 AST/foundation0、R2015候補build0。R2016の同じ30process再計測は再表示0.00247〜0.00272秒・resize0.00340〜0.00370秒へ短縮したが、初回0.0328〜0.0339秒とRSS差は残る。source/binary不変。画像回帰と残コスト修正を継続し、私有原本・84全体・完全ゲートの合格へ転用しない（`tmp/quality/html-paired-interaction-diagnostic-r2012/result.json`、`html-paired-interaction-diagnostic-r2016/result.json`）。
+
+  R2017は削除fieldを参照する既存2testのcompile101を保持し、testを変更せずper-instance lazy cellに共有managerの参照count cloneを入れる形へ修正した。R2018 AST/foundation0、R2019 build0、R2020 native2,595成功・失敗0・ignored18。R2021最終候補build0、R2022の30processで再表示0.00238〜0.00292秒・resize0.00353〜0.00380秒、初回0.03224〜0.03370秒を確認。全source/binary不変。初回とRSS差は依然未解消で、clip合成の冗長backdrop bufferを調査する（`tmp/quality/svg-scaled-font-regressions-r2020/result.json`、`html-paired-interaction-diagnostic-r2022/result.json`）。
+
+  clip合成は元cropの二重RGBAコピーを1枚省き、既存blend式のまま元canvasへ直接書き戻す形へ変更した。R2024のimport不足compile101を保持・修正し、R2025 AST/foundation0、R2026 build0、R2027は重点16件と全native2,597件成功・0失敗・ignored18（source/binary不変）。非ゼロcrop座標、opaque/partial/同一sourceの全256 coverage、guard画素と不正入力時の無変更を確認。R2028 build0、R2029の30process比較は再表示0.00238〜0.00268秒・resize0.00319〜0.00375秒、初回0.03188〜0.03304秒。今回の操作fixtureではRSS差の明確な解消はなく、この変更を性能非劣化の合格としない。残差はbaseline比初回約26ms、再表示約1.3ms、resize約1.7〜2.1ms、peak RSS約13〜29MiB（`tmp/quality/svg-scaled-font-regressions-r2027/result.json`、`html-paired-interaction-diagnostic-r2029/result.json`）。
+
+  R2030では既存のfont決定・File/SharedFile段階診断2件を同一保持binaryで実行し成功。nocapture出力で一時集計器が0件と誤集計した原結果を保持し、rawの実2件・exit0・選択2件・stdout SHAへ束縛した訂正を別保存した（`svg-scaled-font-regressions-r2030/diagnostic-summary-correction.json`）。制御した旧File/SharedFile経路の5対で初回session中央値0.01473/0.00807秒、lazy parse約7.95/1.29ms。既定selected-face経路の置換候補や本番性能合格には転用しない。現行のSkia Dataはfontdbとは別にmapして全bytesを比較するため寄与を切り分ける。fontdbの現行版は0.24.0。unsafeな借用Dataや無効化不備のcacheを導入しない。
+
+- [/] R1962の8回帰失敗は、font eager/knownの期待側とinline SVG対照に旧一般SVG描画経路が残っていた不一致として修正。共通test helperへ集約し、metadata/face/invalidation・全pixel比較・marker/影control検査を維持した。R1963のAST関数長、R1965のhelper可視性/module pathの元失敗を保持し修正。R1964のAST/foundationはactual0、R1966 buildはactual0・lock復元・source不変。R1967で失敗8件が8/8成功、全catalog2,609件も2,591成功・0失敗・18診断ignored、70.54秒・source/binary不変。未公開3patchを用いた保持binary診断であり、117画像・性能・coverage・workspace全体の正式合格へ代用しない（`tmp/quality/svg-scaled-font-regressions-r1967/result.json`）。
+
+- [x] R1962の失敗記録を回収した。保持したR1948バイナリの全runtime lib catalog2,609件は2,583成功・8失敗・18ignored、actual101・135.47秒、source/binary不変だった。font admission3・selected-face invalidation3・inline SVG2は上記R1967で修正後を確認済み。元失敗は`tmp/quality/svg-scaled-font-regressions-r1962/`へ保持する。R1961は元target binary不在による検査開始前の失敗で、R1962は凍結済みbinaryの物理SHAとbuild証跡を照合した診断。正式current sourceの全ゲート合格へ転用しない。
+
+- [ ] R1956の既定feature release example buildはactual0、R1957で私有原本の初回frame1,461.739ms・全process2.18343079秒・正常closeを実測した。原本/source/binary不変。3秒の初回上限だけの診断で、paired非劣化・再表示・resize・RSSの解消とは扱わない。R1958の実catalogで選んだ両軸寸法/DPR/scroll/input/resize状態/同期/timer契約13件は13/13成功、source/binary不変。consumer全体や性能の合格へ代用しない（`tmp/quality/html-first-frame-current-r1957/`、`svg-scaled-font-regressions-r1958/`）。
+
+- [ ] R1959のSkia path失敗切り分けはclipなしAA入力だけ66pixelが変化した。R1960の独立Chromiumはclipあり・なし両方が変化し、SkiaのclipなしもChromeとは62pixel異なった。同色保存はChromeとの完全一致条件ではなく、clip混在を原因とは断定しない。既存期待値や正解画像は変更せず、候補採用未確定を維持する（`tmp/quality/svg-scaled-font-regressions-r1960/paired-pixel-comparison.json`）。ThorVGの公開font aliasによる物理face選択経路は未実測で、loader fork必須との断定を比較文書から訂正した。
+
 - [ ] Skia solid-path候補はR1947静的/ASTとR1948 build成功、R1949既定回帰193/193成功。R1952で同一source/binary/inputを検査してR1950の12成功画像を再利用し、残105件を新規取得した。R1953は64/117が99以上（XY英日2件が新規合格、旧62合格脱落0、残53）。ただし候補有効のR1954回帰は191/193、同色fractional背景不変と既存stroke比較の2失敗が残るため既定には採用しない。製品既定は62/117のまま。評価用依存/adapterを無条件に配布へ残さず、採否整理後に正式producer・性能・完全ゲートを確認する。
 
 - [ ] R1940でR1934実バイナリによるHTML84条件を全て新規取得し、厳格readerが84/84で90以上・最低91.79849、fontIdentityEquivalence=established、acceptance=trueを確認した。実行中source不変・全command actual0。build時点からの差はAGENTS.mdと評価/台帳の明示3文書だけと照合し、runtime・lock・patch・binaryの一致を検査したretained binary診断である。新しい正式build、私有全viewport、consumer、TTF/RSS非劣化へ転用しない。
@@ -23,6 +53,14 @@
 - [ ] R1934はSVG scale後のfont sizeへ既存Chromium同様の1/100 floorを適用してbuild actual0。R1935は190/190回帰成功、R1936で117実PNGを新規取得、R1937の同一基準/scorerは62/117が99以上、未達55、旧合格脱落0・新規合格0。52図のscoreは微変化に留まり、主因解消とは扱わない。全source/binary不変。R1938の6対照とR1939の18対照では14px near-unit scaleだけ6件のink幅+1が残り、13.99pxをparseした条件と恒等変換は一致した。paint sizeだけでなくshape advanceと変換の契約を切り分け、任意のglyph位置比率補正は加えない。HTML84の新source確認・TTF/RSS・正式producerは未完了。
 
 - [ ] SVG依存の採用順序を是正する（最新ユーザー指摘）。fork維持は高コストであり、保守性・要件・性能を満たす代替があれば優先採用する。候補調査だけで代替なしと扱わず、有力候補をKRRへ組み込んだ同条件の精度・time to frame・RSS比較を先に行う。fork公開許可と採用確定を混同しない。比較結果が出るまで公開・registry採用の確定は進めず、承認済み成果保存と独立修正を継続する。詳細は`docs/svg-library-adoption-assessment.md`。
+
+  R2034静的・R2035 build成功後、R2036のSkia physical font provider probeとcrop回帰は3/3成功。実Trebuchet MS normal/boldのsource bytes/indexと登録styleを検証し、provider-only/provider+systemのpixel一致とdefaultとのpixel差を確認した。R2033のsource取得不能なbytes-stream経路の失敗は保持し、入力Dataを保持する既存APIへ変更して照合を維持した。これは明示alias1入力の接続確認であり、元family/CSS・非0 TTC index・variation・fallback・12図再採点・表示時間/RSS・3 OSの採用条件は未完了。次はCSS解決済みtext保持入力のまま、登録した実fontによる12図比較へ進む（`tmp/quality/svg-scaled-font-regressions-r2036/result.json`）。
+
+  R2044のAST失敗（comment形式とmagic number）を保持して修正し、R2049はAST/foundation actual0、R2045 build actual0。R2040のTTC test module ancestryのcompile101はprivate境界を維持したtest分離で修正した。R2046は重点20件と全runtime lib 2,599件成功・失敗0・ignored18、source/binary不変。CoreTextの所有データAPIによる限定2glyph比較は101channel bytes・最大10の差であり、初期化条件も異なるので精度・cold性能の合格にはしない。
+
+  R2047の登録physical fontによる同12図は10図取得・C4英日2図SIGSEGV。保持したcrash reportではSkia TypefaceFontProviderのnull family問い合わせに到達していた。R2048は取得10図だけを明示して採点し、99以上0/10・寸法失敗0、同じ10図の旧Skia正規化経路とscoreは全件同値。attemptedCount=12と2 crashを結果へ保持し、12成功や代替不能へ読み替えない。要求familyと実fallback familyが異なる7条件とvariationの実適用は未証明。候補の安全な事前拒否を整備し、性能・3 OS・他候補の接続評価を継続する。fork採用・公開は未確定（`tmp/quality/svg-scaled-font-product-probe-r2047/result.json`、`crashes/summary.json`、`tmp/quality/svg-scaled-font-score-r2048/scores.json`）。
+
+  R2053の事前拒否で12件のSIGSEGVは0になったが、case-sensitiveなproviderが小文字familyを解決せず全件を拒否した。CSSに対応する大小文字aliasを登録し、R2055の借用型compile失敗とR2058のusvg既定resolverで文字が消えたtest失敗を保持・修正した。R2059 AST/foundation0、R2060 build0、R2061は重点23件成功・失敗0、source/binary不変。R2062の再取得は10件成功・C4英日2件は未接続Open Sansの明示拒否、crash0。R2063は同10図99以上0・寸法失敗0・旧Skia scoreと全件同値で、登録font接続だけでは精度差が解消しないと確認した。provider実使用の完全font証明、glyph別fallback/variation、ThorVG等の追加接続と採否判断は未完了。製品既定62/117や性能の改善件数へ加算しない（`tmp/quality/svg-scaled-font-regressions-r2061/result.json`、`svg-scaled-font-product-probe-r2062/result.json`、`svg-scaled-font-score-r2063/scores.json`）。
 
 - [ ] R1896のHTML84新規取得は83成功・nowrap 1件のretained paint不足でactual1。元失敗を保持し、既存resume経路のR1908で成功済み83件を再利用・不足1件だけ新規取得した。厳格readerは84/84が90以上・最低91.79849、fontIdentityEquivalence=established、acceptance=true、各command actual0・source不変。未公開候補依存の診断であり、正式公開依存・全私有viewport・consumer・初回/再表示/resizeのtime to frameとRSS非劣化は未完了。検証所要時間を製品描画時間へ転用しない。
 
