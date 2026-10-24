@@ -1,4 +1,5 @@
-use super::{FontShape, HARFRUST_SCALE, face_cache, font_variations, shape_buffer};
+use super::super::features::features_for_face;
+use super::{FontShape, HARFRUST_SCALE, face_cache, font_variations, shape_buffer_with_features};
 use resvg::usvg;
 
 const SVG_INK_BOUNDS_LENGTH: usize = 4;
@@ -36,7 +37,8 @@ pub(in super::super) fn shape_svg_run_metrics_with_face(
         .build();
     let (ascent, descent) = svg_run_line_metrics(&instance, font.size)?;
     /* WHY: default属性のSVG runのみ対象とし、同一instanceのshapeを一度だけ行う。 */
-    let glyphs = shape_buffer(&instance, text, font, None)?;
+    let features = features_for_face(database, face_id, text, None, font.trim)?;
+    let glyphs = shape_buffer_with_features(&instance, text, font, &features)?;
     let metrics = svg_text_run_metrics(&glyphs, ascent, descent)?;
     let ink = svg_run_ink_diagnostic(&instance, &glyphs, font.size);
     let metrics = SvgTextRunMetrics {
@@ -284,11 +286,7 @@ mod tests {
             )
             .is_some()
         );
-        let tiny = FontShape {
-            size: 1.0e-9,
-            weight: 400,
-            italic: false,
-        };
+        let tiny = FontShape::new(1.0e-9, 400, false);
         assert!(shape_svg_run_metrics_with_face(&database, face, "DB", tiny, false).is_none());
         assert!(svg_run_endpoints_with_face(&database, face, tiny).is_none());
         Ok(())

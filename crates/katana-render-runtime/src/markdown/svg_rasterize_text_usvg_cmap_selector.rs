@@ -192,3 +192,7 @@ mod attribute_tests;
 #[cfg(test)]
 #[path = "svg_rasterize_text_usvg_cmap_selector_family_case_tests.rs"]
 mod family_case_tests;
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_usvg_cmap_selector_mixed_tspan_tests.rs"]
+mod mixed_tspan_tests;

@@ -31,6 +31,11 @@ include = [
 [lib]
 path = "src/lib.rs"
 
+[features]
+svg-librsvg-evaluation = ["dep:rsvg", "dep:cairo", "dep:gio", "dep:glib", "dep:pango", "dep:pangocairo"]
+svg-skia-evaluation = ["skia-safe/svg", "skia-safe/textlayout", "skia-safe/webp"]
+svg-thorvg-evaluation = ["dep:thorvg"]
+
 [dependencies]
 katana-render-runtime-assets = { workspace = true }
 anyhow = { workspace = true }
@@ -49,6 +54,7 @@ log = "0.4"
 rustybuzz = { workspace = true }
 harfrust = { workspace = true }
 read-fonts = { version = "=0.46.0", default-features = false }
+icu_properties = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -67,14 +73,24 @@ simplecss = "=0.2.2"
 svgtypes = "=0.16.1"
 unicode-linebreak = { workspace = true }
 unicode-width = { workspace = true }
+rsvg = { package = "librsvg", version = "=2.63.3", optional = true }
+cairo = { package = "cairo-rs", version = "=0.22.9", features = ["svg", "v1_16"], optional = true }
+gio = { version = "=0.22.10", optional = true }
+glib = { version = "=0.22.10", optional = true }
+thorvg = { version = "=0.6.0", default-features = false, features = ["vendored", "std", "svg", "fonts", "threads"], optional = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { version = "0.31.3", default-features = false, features = ["fs"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+pango = { version = "=0.22.9", features = ["v1_56"], optional = true }
+pangocairo = { version = "=0.22.9", optional = true }
+# 公開済みCPU SDKの最小構成に合わせ、ローカルSkia改変や独自SDKへ依存しない。
+skia-safe = { version = "=0.153.3", default-features = false, features = ["binary-cache", "pdf"] }
 fontique = { version = "=0.12.0", default-features = false, features = ["std"] }
 objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFString", "CFURL"] }
 objc2-core-text = { version = "=0.3.2", default-features = false, features = ["CTFont", "CTFontDescriptor", "CTFontTraits"] }
+write-fonts = { version = "0.55", default-features = false, features = ["read"] }
 
 [build-dependencies]
 brotli-decompressor = { workspace = true }

@@ -1,4 +1,5 @@
 use super::{ProbeResult, Value, usvg};
+use crate::markdown::svg_rasterize::font::html_rasterizer_options;
 use std::sync::{Arc, atomic::Ordering};
 
 const WIDTH: u32 = 200;
@@ -104,7 +105,7 @@ fn compare_original_and_alias(svg: &str) -> ProbeResult<Snapshot> {
     let original_ids = face_ids(&official.fontdb);
     let expected = observe_geometry(svg, &official)?;
     assert_real_nested_text(&expected, id)?;
-    let mut wrapped = super::super::super::super::html_rasterizer_options(svg);
+    let mut wrapped = html_rasterizer_options(svg);
     wrapped.fontdb = Arc::clone(&official.fontdb);
     let (original_calls, alias_calls) = super::count_original_and_alias_selectors(&mut wrapped, id);
     let actual = observe_geometry(svg, &wrapped)?;

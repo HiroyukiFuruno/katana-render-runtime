@@ -1,3 +1,5 @@
+pub struct SvgRasterizeOps;
+
 #[derive(Debug, Clone)]
 pub struct RasterizedSvg {
     pub width: u32,

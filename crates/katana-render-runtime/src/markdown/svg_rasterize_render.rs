@@ -26,11 +26,22 @@ impl RasterTarget {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn render(
         &self,
         tree: &usvg::Tree,
         compatible_svg: &str,
         generated: &GeneratedClipProvenance,
+    ) -> Result<Pixmap, SvgRasterizeError> {
+        self.render_with_text(tree, compatible_svg, generated, None)
+    }
+
+    pub(super) fn render_with_text(
+        &self,
+        tree: &usvg::Tree,
+        compatible_svg: &str,
+        generated: &GeneratedClipProvenance,
+        text: Option<&dyn composite::TextRasterizer>,
     ) -> Result<Pixmap, SvgRasterizeError> {
         let Some(mut pixmap) = Pixmap::new(self.width, self.height) else {
             return Err(SvgRasterizeError::RasterizeFailed(
@@ -44,11 +55,12 @@ impl RasterTarget {
         } else {
             provenance::AuthoredClipInfo::default()
         };
-        composite::SvgCompositeRenderer::render(
+        composite::SvgCompositeRenderer::render_with_text(
             tree,
             transform,
             &mut pixmap.as_mut(),
             &authored_clip_info,
+            text,
         )
         .map_err(SvgRasterizeError::RasterizeFailed)?;
         Ok(pixmap)

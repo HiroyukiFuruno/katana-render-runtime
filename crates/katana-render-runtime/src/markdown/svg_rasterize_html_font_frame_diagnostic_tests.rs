@@ -189,11 +189,6 @@ fn encode_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
 }
 
 fn write_fresh(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|error| format!("create {}: {error}", path.display()))?;
-    file.write_all(bytes).map_err(|error| error.to_string())
+    crate::markdown::svg_rasterize::probe_test_support::write_fresh_file(path, bytes)
+        .map_err(|error| error.to_string())
 }

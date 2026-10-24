@@ -1,4 +1,4 @@
-use crate::markdown::svg_rasterize::SvgRasterizeOps;
+use crate::markdown::svg_rasterize::{RasterizedSvg, SvgRasterizeError, SvgRasterizeOps};
 use crate::{HtmlBrowserSession, HtmlBrowserSource, HtmlBrowserViewport, HtmlRuntime};
 
 const WIDTH: u32 = 100;
@@ -32,10 +32,7 @@ fn inline_svg_quoted_marker_selector_keeps_triangle_interior_empty() {
         with_native_pixels(&suffix, |suffix| {
             assert!(suffix == native, "native marker selector pixels differ");
         });
-        assert_eq!(
-            pixel_at(&native, TRIANGLE_INTERIOR_X, TRIANGLE_INTERIOR_Y),
-            Some(WHITE.as_slice())
-        );
+        assert_triangle_interior_empty(&native);
         with_inline_pixels(&suffix, |inline_suffix| {
             with_inline_pixels(&explicit, |inline_explicit| {
                 assert!(
@@ -43,10 +40,13 @@ fn inline_svg_quoted_marker_selector_keeps_triangle_interior_empty() {
                     "inline marker selector pixels differ"
                 );
             });
-            assert!(
-                inline_suffix == native,
-                "inline/native marker pixels differ"
-            );
+            with_html_raster_pixels(&suffix, |html_suffix| {
+                assert_triangle_interior_empty(&html_suffix);
+                assert!(
+                    inline_suffix == html_suffix,
+                    "inline/html marker pixels differ"
+                );
+            });
         });
     });
 }
@@ -68,10 +68,15 @@ fn inline_svg_unused_quoted_css_keeps_shadow_pixels_unchanged() {
                     inline_plain == inline_quoted,
                     "inline quoted shadow pixels differ"
                 );
-                assert!(
-                    inline_quoted == native,
-                    "inline/native shadow pixels differ"
-                );
+                with_html_raster_pixels(&quoted, |html_quoted| {
+                    let html_shadow = pixel_at(&html_quoted, SHADOW_X, SHADOW_Y);
+                    assert!(html_shadow.is_some(), "HTML shadow control pixel missing");
+                    assert_ne!(html_shadow, Some(WHITE.as_slice()));
+                    assert!(
+                        inline_quoted == html_quoted,
+                        "inline/html shadow pixels differ"
+                    );
+                });
             });
         });
     });
@@ -134,18 +139,41 @@ fn inline_svg_multiply_uses_external_backdrop_inside_overflow_clip() {
 }
 
 fn with_native_pixels(svg: &str, action: impl FnOnce(Vec<u8>)) {
-    with_success(
+    with_raster_pixels(
         SvgRasterizeOps::rasterize_svg(svg, 1.0),
         "native SVG",
-        |raster| {
-            assert_eq!((raster.width, raster.height), (WIDTH, HEIGHT));
-            assert_eq!(
-                raster.rgba.len(),
-                WIDTH as usize * HEIGHT as usize * RGBA_CHANNELS
-            );
-            action(raster.rgba);
-        },
+        action,
     );
+}
+
+fn assert_triangle_interior_empty(pixels: &[u8]) {
+    assert_eq!(
+        pixel_at(pixels, TRIANGLE_INTERIOR_X, TRIANGLE_INTERIOR_Y),
+        Some(WHITE.as_slice())
+    );
+}
+
+fn with_html_raster_pixels(svg: &str, action: impl FnOnce(Vec<u8>)) {
+    with_raster_pixels(
+        SvgRasterizeOps::rasterize_html_svg(svg, 1.0),
+        "HTML SVG raster",
+        action,
+    );
+}
+
+fn with_raster_pixels(
+    result: Result<RasterizedSvg, SvgRasterizeError>,
+    context: &str,
+    action: impl FnOnce(Vec<u8>),
+) {
+    with_success(result, context, |raster| {
+        assert_eq!((raster.width, raster.height), (WIDTH, HEIGHT));
+        assert_eq!(
+            raster.rgba.len(),
+            WIDTH as usize * HEIGHT as usize * RGBA_CHANNELS
+        );
+        action(raster.rgba);
+    });
 }
 
 fn with_inline_pixels(svg: &str, action: impl FnOnce(Vec<u8>)) {

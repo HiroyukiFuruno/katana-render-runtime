@@ -45,10 +45,17 @@ pub(super) fn write_fresh(path: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::
         return Err("fresh absolute workspace TMP output required".into());
     }
     let target = parent.join(path.file_name().ok_or("output file name missing")?);
+    write_fresh_file(&target, bytes)
+}
+
+pub(in crate::markdown::svg_rasterize) fn write_fresh_file(
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(target)?;
+        .open(path)?;
     file.write_all(bytes)?;
     Ok(())
 }

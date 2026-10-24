@@ -14,6 +14,7 @@ impl CssStyle {
             || self.font_weight != other.font_weight
             || self.italic != other.italic
             || self.letter_spacing != other.letter_spacing
+            || self.text_spacing_trim != other.text_spacing_trim
     }
 
     pub(in super::super) fn is_plain_inherited_inline(&self, inherited: &Self) -> bool {

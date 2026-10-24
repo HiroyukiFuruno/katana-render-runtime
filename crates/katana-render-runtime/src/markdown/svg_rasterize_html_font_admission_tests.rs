@@ -39,7 +39,7 @@ fn eager_render(svg: &str, request: &HtmlFontRequest) -> Result<RasterizedSvg, S
     let database = Arc::new(sources::build_html_font_db(request));
     let mut options = super::super::super::rasterizer_options_with_font_db(database);
     text_shaping::install_html_font_resolver(&mut options);
-    SvgRasterizeOps::rasterize_with_options(svg, 1.0, &options).map_err(|error| error.to_string())
+    crate::markdown::svg_rasterize::font::html::render_html_with_options(svg, &options)
 }
 
 fn assert_images_equal(actual: &RasterizedSvg, expected: &RasterizedSvg) {

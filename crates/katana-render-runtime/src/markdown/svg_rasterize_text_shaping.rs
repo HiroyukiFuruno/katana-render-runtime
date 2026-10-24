@@ -18,10 +18,13 @@ pub(super) use input_metrics::html_input_character_metrics;
 
 #[path = "svg_rasterize_text_dx.rs"]
 mod dx;
+#[cfg(test)]
 pub(super) use dx::shaped_html_text_dx;
+pub(super) use dx::shaped_html_text_dx_with_trim;
 
 #[path = "svg_rasterize_text_features.rs"]
 mod features;
+pub(crate) use features::TextSpacingTrim;
 
 #[path = "svg_rasterize_html_line_metrics.rs"]
 mod line_metrics;
@@ -39,8 +42,7 @@ pub(super) use super::font::html_font_db_for_measured_text;
 use resvg::usvg;
 #[path = "svg_rasterize_text_variations.rs"]
 mod variations;
-use variations::FontShape;
-pub(super) use variations::effective_html_font_size;
+pub(in crate::markdown::svg_rasterize) use variations::{FontShape, effective_html_font_size};
 
 #[path = "svg_rasterize_text_shaping_cache.rs"]
 mod cache;
@@ -55,7 +57,7 @@ mod measurement_token;
 mod weight;
 pub(crate) use measurement_token::{HtmlTextMeasurementToken, HtmlTextMeasurementTokenKey};
 
-use cache::cached_shaped_run;
+use cache::cached_shaped_run_with_trim;
 pub(crate) use harfrust::SvgTextRunMetrics;
 #[path = "svg_rasterize_text_family_runs.rs"]
 mod family_runs;
@@ -84,6 +86,7 @@ pub(super) fn with_render_scoped_stamp_batch<T>(operation: impl FnMut() -> T) ->
     })
 }
 
+#[cfg(test)]
 pub(super) fn shaped_text_width(
     text: &str,
     font_family: &str,
@@ -93,35 +96,48 @@ pub(super) fn shaped_text_width(
     letter_spacing: f32,
     font_feature_settings: Option<&str>,
 ) -> Option<f32> {
-    let database = html_font_db_for_measured_text(font_family, text, font_weight, italic);
-    shaped_text_width_in_database(
-        &database,
+    shaped_text_width_with_trim(
         text,
         font_family,
-        font_size,
-        (font_weight, italic),
+        FontShape::new(font_size, font_weight, italic),
         letter_spacing,
         font_feature_settings,
     )
 }
 
-pub(super) fn shaped_text_width_in_database(
-    database: &std::sync::Arc<usvg::fontdb::Database>,
+pub(super) fn shaped_text_width_with_trim(
     text: &str,
     font_family: &str,
-    font_size: f32,
-    font_style: (u16, bool),
+    font: FontShape,
     letter_spacing: f32,
     font_feature_settings: Option<&str>,
 ) -> Option<f32> {
-    let (font_weight, italic) = font_style;
-    let base_face_id = matching_font_face(database, font_family, font_weight, italic)?;
+    let database = html_font_db_for_measured_text(font_family, text, font.weight, font.italic);
+    shaped_text_width_in_database_with_trim(
+        &database,
+        text,
+        font_family,
+        font,
+        letter_spacing,
+        font_feature_settings,
+    )
+}
+
+pub(super) fn shaped_text_width_in_database_with_trim(
+    database: &std::sync::Arc<usvg::fontdb::Database>,
+    text: &str,
+    font_family: &str,
+    font: FontShape,
+    letter_spacing: f32,
+    font_feature_settings: Option<&str>,
+) -> Option<f32> {
+    let base_face_id = matching_font_face(database, font_family, font.weight, font.italic)?;
     let advance = shaped_runs_advance(
         database,
         base_face_id,
         font_family,
         text,
-        FontShape::new(font_size, font_weight, italic),
+        font,
         font_feature_settings,
     )?;
     let spacing = text.chars().count().saturating_sub(1) as f32 * letter_spacing;
@@ -136,7 +152,6 @@ fn shaped_runs_advance(
     shape: FontShape,
     font_feature_settings: Option<&str>,
 ) -> Option<f32> {
-    let mut advance = 0.0;
     let runs = resolved_font_runs(
         database,
         base_face_id,
@@ -149,10 +164,19 @@ fn shaped_runs_advance(
     for (face_id, _) in &runs {
         super::font::record_actual_selected_face(database, Some(*face_id));
     }
-    for (face_id, run) in runs {
-        advance += cached_shaped_run(database, face_id, &run, shape, font_feature_settings)?;
-    }
-    Some(advance)
+    advance_runs(database, runs, shape, font_feature_settings)
+}
+
+fn advance_runs(
+    database: &std::sync::Arc<usvg::fontdb::Database>,
+    runs: Vec<(usvg::fontdb::ID, String)>,
+    shape: FontShape,
+    settings: Option<&str>,
+) -> Option<f32> {
+    runs.into_iter().try_fold(0.0, |advance, (face_id, run)| {
+        cached_shaped_run_with_trim(database, face_id, &run, shape, settings)
+            .map(|width| advance + width)
+    })
 }
 
 pub(super) fn html_text_font_runs(
@@ -177,6 +201,7 @@ pub(super) fn html_text_font_runs(
 mod harfrust;
 #[path = "svg_rasterize_text_shaping_svg_metrics.rs"]
 mod svg_metrics;
+pub(super) use svg_metrics::svg_dom_layout_ascent;
 #[path = "svg_rasterize_text_shaping_x_height.rs"]
 mod svg_x_height;
 pub(super) use svg_metrics::shaped_svg_text_metrics;

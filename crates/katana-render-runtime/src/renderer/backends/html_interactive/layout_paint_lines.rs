@@ -1,9 +1,9 @@
 use super::constants::FONT_WEIGHT_NORMAL;
 use super::layout::HtmlLayoutRenderer;
-use super::style::{CssStyle, CssTextAlign};
+use super::style::{CssStyle, CssTextAlign, CssTextSpacingTrim};
 use super::svg::escape_xml;
 use super::text_metrics::text_width;
-use crate::markdown::svg_rasterize::SvgRasterizeOps;
+use crate::markdown::svg_rasterize::{SvgRasterizeOps, TextSpacingTrim};
 
 impl HtmlLayoutRenderer {
     pub(super) fn paint_text_lines(
@@ -15,6 +15,10 @@ impl HtmlLayoutRenderer {
         style: &CssStyle,
     ) {
         for (index, line) in lines.iter().enumerate() {
+            /* WHY: 空行は測定やSVG provenanceを作らず、enumerateのindexで行位置は保つ。 */
+            if line.is_empty() {
+                continue;
+            }
             let measured_width = text_width(line, style);
             let offset = text_baseline_offset(line, style);
             self.paint_text_line(
@@ -38,6 +42,7 @@ impl HtmlLayoutRenderer {
         let x = x - self.scroll_x;
         let y = baseline_y - self.scroll_y;
         let markup = self.text_line_markup(line, x, y, style, measured_width);
+        let markup = self.generated_html_text_provenance.record(markup);
         self.svg.push_str(&markup);
     }
 
@@ -155,13 +160,17 @@ fn font_feature_settings(style: &CssStyle) -> String {
 }
 
 fn font_feature_dx(text: &str, style: &CssStyle) -> Option<String> {
-    let dx = SvgRasterizeOps::shape_html_text_dx(
+    let dx = SvgRasterizeOps::shape_html_text_dx_with_trim(
         text,
         &style.font_family,
         style.font_size,
         style.font_weight,
         style.italic,
         style.font_feature_settings.as_deref(),
+        match style.text_spacing_trim {
+            CssTextSpacingTrim::Normal => TextSpacingTrim::Normal,
+            CssTextSpacingTrim::SpaceAll => TextSpacingTrim::SpaceAll,
+        },
     )?;
     Some(format!(
         " dx=\"{}\"",
@@ -261,8 +270,9 @@ mod tests {
         renderer.paint_text_line("hello", 2.0, 12.0, &style, text_width("hello", &style));
         assert!(renderer.svg.contains(" y=\"10\""));
         assert!(renderer.svg.contains(" textLength=\""));
-
-        renderer.paint_text_line("", 2.0, 12.0, &style, text_width("", &style));
-        assert_eq!(renderer.svg.matches(" textLength=\"").count(), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "layout_paint_lines_empty_tests.rs"]
+mod empty_text_tests;

@@ -5,7 +5,7 @@ use resvg::usvg;
 mod html;
 
 pub(in crate::markdown::svg_rasterize) use html::{
-    DatabaseKey, DiscoveryMode, html_font_db_for_measured_text, measured_database,
+    DatabaseKey, DiscoveryMode, MeasuredDatabase, html_font_db_for_measured_text, measured_database,
 };
 #[cfg(target_os = "macos")]
 pub(super) use html::{

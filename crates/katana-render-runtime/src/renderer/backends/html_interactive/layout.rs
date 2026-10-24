@@ -6,7 +6,9 @@ use super::layout_measurement_cache::FlowMeasurementCache;
 use super::layout_paint_order::{PaintClip, PaintFragment};
 use super::layout_viewport_overflow::HtmlViewportOverflowPolicy;
 use super::types::{ElementBox, HitTarget, LayoutResult};
-use crate::markdown::svg_rasterize::{GeneratedClip, GeneratedClipProvenance};
+use crate::markdown::svg_rasterize::{
+    GeneratedClip, GeneratedClipProvenance, GeneratedHtmlTextProvenance,
+};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 #[derive(Default)]
@@ -25,6 +27,7 @@ pub(super) struct HtmlLayoutRenderer {
     pub(super) viewport_width: f32,
     pub(super) next_clip_id: u64,
     pub(super) generated_clip_provenance: GeneratedClipProvenance,
+    pub(super) generated_html_text_provenance: GeneratedHtmlTextProvenance,
     pub(super) next_gradient_id: u64,
     pub(super) ownership: LayoutOwnership,
     pub(super) clickable_nodes: std::collections::HashSet<u64>,
@@ -137,6 +140,7 @@ impl HtmlLayoutRenderer {
         LayoutResult {
             svg: self.svg,
             generated_clip_provenance: self.generated_clip_provenance,
+            generated_html_text_provenance: self.generated_html_text_provenance,
             hit_targets: self.hit_targets,
             element_boxes: self.element_boxes,
             anchor_positions: self.anchor_positions,

@@ -84,15 +84,17 @@ pub(in crate::markdown::svg_rasterize) fn rasterize(
     svg: &str,
     scale: f32,
     provenance: &super::super::super::GeneratedClipProvenance,
+    html_text: &super::super::super::GeneratedHtmlTextProvenance,
 ) -> Result<super::super::super::RasterizedSvg, super::super::super::SvgRasterizeError> {
     let compatible = super::super::super::SvgRasterizeOps::preprocess_for_rasterizer(svg);
     let tree = parse(&compatible, svg)
         .map_err(|error| super::super::super::SvgRasterizeError::ParseFailed(error.to_string()))?;
-    super::super::super::SvgRasterizeOps::render_tree_with_provenance(
+    super::super::super::SvgRasterizeOps::render_html_tree_with_text_provenance(
         &tree,
         scale,
         &compatible,
         provenance,
+        html_text,
     )
 }
 
@@ -158,6 +160,10 @@ fn prepared_ascii(svg: &str) -> Option<String> {
 pub(in crate::markdown::svg_rasterize) use diagnostic::rasterize;
 #[cfg(test)]
 mod diagnostic {
+    use super::super::super::super::{
+        GeneratedClipProvenance, GeneratedHtmlTextProvenance, RasterizedSvg, SvgRasterizeError,
+        SvgRasterizeOps,
+    };
     use super::super::{lazy_diagnostic, raster_observer};
     use super::{
         HtmlFontRequest, KnownOptions, discovery_cache, install, parse, prepared_ascii,
@@ -169,24 +175,20 @@ mod diagnostic {
     pub(in crate::markdown::svg_rasterize) fn rasterize(
         svg: &str,
         scale: f32,
-        provenance: &super::super::super::super::GeneratedClipProvenance,
-    ) -> Result<
-        super::super::super::super::RasterizedSvg,
-        super::super::super::super::SvgRasterizeError,
-    > {
+        provenance: &GeneratedClipProvenance,
+        html_text: &GeneratedHtmlTextProvenance,
+    ) -> Result<RasterizedSvg, SvgRasterizeError> {
         let paint_call = lazy_diagnostic::begin_final_glyph_paint_call();
-        let compatible =
-            super::super::super::super::SvgRasterizeOps::preprocess_for_rasterizer(svg);
+        let compatible = SvgRasterizeOps::preprocess_for_rasterizer(svg);
         let tree = lazy_diagnostic::measure("lazy_parse_inclusive", || parse(&compatible, svg))
-            .map_err(|error| {
-                super::super::super::super::SvgRasterizeError::ParseFailed(error.to_string())
-            })?;
+            .map_err(|error| SvgRasterizeError::ParseFailed(error.to_string()))?;
         let rendered = lazy_diagnostic::measure("render_tree", || {
-            super::super::super::super::SvgRasterizeOps::render_tree_with_provenance(
+            SvgRasterizeOps::render_html_tree_with_text_provenance(
                 &tree,
                 scale,
                 &compatible,
                 provenance,
+                html_text,
             )
         });
         if rendered.is_ok()

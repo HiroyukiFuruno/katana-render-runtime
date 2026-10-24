@@ -1,4 +1,4 @@
-use super::features::harfrust_features;
+use super::features::{features_for_face, harfrust_features};
 use super::font::{
     font_has_char, font_runs, fontdb_family, matching_fallback_face, matching_font_face,
 };
@@ -79,6 +79,36 @@ fn generic_families_and_feature_settings_cover_css_shaping_inputs() {
     ));
     assert!(harfrust_features(None).is_empty());
     assert_eq!(harfrust_features(Some("'liga', 'kern' 0")).len(), 2);
+}
+
+#[test]
+fn production_feature_bridge_preserves_explicit_settings_and_skips_latin_tables()
+-> Result<(), String> {
+    let database = html_font_db_for_text("Noto Sans", "plain ASCII");
+    let face = matching_font_face(&database, "Noto Sans", 400, false)
+        .ok_or("bundled Noto Sans face must be available")?;
+    assert!(
+        features_for_face(
+            &database,
+            face,
+            "plain ASCII",
+            None,
+            super::TextSpacingTrim::Normal
+        )
+        .is_some_and(|features| { features.is_empty() })
+    );
+    let explicit = features_for_face(
+        &database,
+        face,
+        "plain ASCII",
+        Some("'kern' 0"),
+        super::TextSpacingTrim::Normal,
+    )
+    .ok_or("explicit feature bridge must preserve valid settings")?;
+    assert!(explicit.iter().any(|feature| {
+        feature.tag == harfrust::Tag::from_be_bytes(*b"kern") && feature.value == 0
+    }));
+    Ok(())
 }
 
 #[test]

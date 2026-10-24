@@ -1,6 +1,5 @@
-use super::{
-    canonical_svg_font_family, escape_xml_attribute, escape_xml_text, html_rasterizer_options, usvg,
-};
+use super::{canonical_svg_font_family, escape_xml_attribute, escape_xml_text, usvg};
+use crate::markdown::svg_rasterize::font::html_rasterizer_options;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use skrifa::{MetadataProvider, prelude::Size};

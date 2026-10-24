@@ -12,7 +12,11 @@ impl CssStyle {
         if let Some(tag) = tag {
             self.refresh_tag_margins(tag);
         }
-        self.apply_non_font_declarations(&declarations, inherited_vertical_align);
+        self.apply_non_font_declarations(
+            &declarations,
+            inherited_vertical_align,
+            self.text_spacing_trim,
+        );
     }
 
     fn apply_font_declarations(
@@ -33,12 +37,14 @@ impl CssStyle {
         &mut self,
         declarations: &[crate::renderer::backends::html_css_rule::CssDeclaration],
         inherited_vertical_align: super::CssVerticalAlign,
+        inherited_text_spacing_trim: super::CssTextSpacingTrim,
     ) {
         let mut line_heights = Vec::new();
         for declaration in declarations {
             self.apply_non_font_declaration(
                 declaration,
                 inherited_vertical_align,
+                inherited_text_spacing_trim,
                 &mut line_heights,
             );
         }
@@ -58,6 +64,7 @@ impl CssStyle {
         &mut self,
         declaration: &'a crate::renderer::backends::html_css_rule::CssDeclaration,
         inherited_vertical_align: super::CssVerticalAlign,
+        inherited_text_spacing_trim: super::CssTextSpacingTrim,
         line_heights: &mut Vec<&'a str>,
     ) {
         if declaration.name.eq_ignore_ascii_case("line-height") {
@@ -73,6 +80,26 @@ impl CssStyle {
         {
             return;
         }
+        if self.apply_inherited_text_spacing(declaration, inherited_text_spacing_trim) {
+            return;
+        }
         self.apply(&declaration.name, &declaration.value);
+    }
+
+    fn apply_inherited_text_spacing(
+        &mut self,
+        declaration: &crate::renderer::backends::html_css_rule::CssDeclaration,
+        inherited: super::CssTextSpacingTrim,
+    ) -> bool {
+        if declaration.name.eq_ignore_ascii_case("text-spacing-trim")
+            && matches!(
+                declaration.value.trim().to_ascii_lowercase().as_str(),
+                "inherit" | "unset"
+            )
+        {
+            self.text_spacing_trim = inherited;
+            return true;
+        }
+        false
     }
 }

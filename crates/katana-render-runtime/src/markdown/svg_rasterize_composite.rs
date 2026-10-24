@@ -1,32 +1,68 @@
 use super::provenance::AuthoredClipInfo;
 use resvg::usvg;
 use tiny_skia::Transform;
-
+#[path = "svg_rasterize_composite_groups.rs"]
+mod groups;
 #[path = "svg_rasterize_composite_layers.rs"]
 mod layers;
-
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_linear_component_transfer.rs"]
+mod linear_component_transfer;
+#[path = "svg_rasterize_composite_mask.rs"]
+mod mask;
+#[path = "svg_rasterize_composite_nodes.rs"]
+mod nodes;
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_skia_path_candidate.rs"]
+mod path_candidate;
+#[path = "svg_rasterize_composite_text.rs"]
+mod text;
+pub(crate) use text::TextRasterizer;
 pub(crate) struct SvgCompositeRenderer;
-
 impl SvgCompositeRenderer {
+    #[cfg(test)]
     pub(crate) fn render(
         tree: &usvg::Tree,
         transform: Transform,
         pixmap: &mut tiny_skia::PixmapMut<'_>,
         authored_clip_info: &AuthoredClipInfo,
     ) -> Result<(), String> {
-        if authored_clip_info.has_object_bounding_box || !Self::needs_authored_clip_ids(tree) {
+        Self::render_with_text(tree, transform, pixmap, authored_clip_info, None)
+    }
+    pub(crate) fn render_with_text(
+        tree: &usvg::Tree,
+        transform: Transform,
+        pixmap: &mut tiny_skia::PixmapMut<'_>,
+        authored_clip_info: &AuthoredClipInfo,
+        text_rasterizer: Option<&dyn TextRasterizer>,
+    ) -> Result<(), String> {
+        if authored_clip_info.has_object_bounding_box {
             resvg::render(tree, transform, pixmap);
             return Ok(());
         }
-
-        render_children(tree.root(), transform, pixmap, authored_clip_info)
+        let needs_authored_clip_ids = Self::needs_authored_clip_ids(tree);
+        match text_rasterizer {
+            Some(text_rasterizer) => render_children_with_text(
+                tree.root(),
+                transform.pre_concat(tree.root().transform()),
+                pixmap,
+                authored_clip_info,
+                Some(text_rasterizer),
+            ),
+            None if needs_authored_clip_ids => {
+                render_children_with_text(tree.root(), transform, pixmap, authored_clip_info, None)
+            }
+            None => {
+                resvg::render(tree, transform, pixmap);
+                Ok(())
+            }
+        }
     }
 
     pub(crate) fn needs_authored_clip_ids(tree: &usvg::Tree) -> bool {
         contains_clip_ancestor_blend(tree.root(), false, &AuthoredClipInfo::default())
     }
 }
-
 fn contains_clip_ancestor_blend(
     group: &usvg::Group,
     clip_ancestor: bool,
@@ -53,7 +89,6 @@ fn contains_clip_ancestor_blend(
     }
     false
 }
-
 fn is_traversable_group(group: &usvg::Group) -> bool {
     group.opacity().get() == 1.0
         && group.blend_mode() == usvg::BlendMode::Normal
@@ -61,7 +96,6 @@ fn is_traversable_group(group: &usvg::Group) -> bool {
         && group.filters().is_empty()
         && group.mask().is_none()
 }
-
 fn has_nonisolating_blend(group: &usvg::Group, clip_ancestor: bool) -> bool {
     clip_ancestor
         && group.opacity().get() == 1.0
@@ -71,41 +105,29 @@ fn has_nonisolating_blend(group: &usvg::Group, clip_ancestor: bool) -> bool {
         && group.mask().is_none()
         && group.clip_path().is_none()
 }
-
 fn generated_viewport_clip(group: &usvg::Group, authored_clip_info: &AuthoredClipInfo) -> bool {
     group
         .clip_path()
         .is_some_and(|clip| is_generated_viewport_clip(clip, authored_clip_info))
 }
 
-fn render_children(
+fn render_children_with_text(
     group: &usvg::Group,
     transform: Transform,
     pixmap: &mut tiny_skia::PixmapMut<'_>,
     authored_clip_info: &AuthoredClipInfo,
+    text_rasterizer: Option<&dyn TextRasterizer>,
 ) -> Result<(), String> {
     for child in group.children() {
-        render_node_custom(child, transform, pixmap, authored_clip_info)?;
+        nodes::render_node(
+            child,
+            transform,
+            pixmap,
+            authored_clip_info,
+            text_rasterizer,
+        )?;
     }
     Ok(())
-}
-
-fn render_node_custom(
-    node: &usvg::Node,
-    transform: Transform,
-    pixmap: &mut tiny_skia::PixmapMut<'_>,
-    authored_clip_info: &AuthoredClipInfo,
-) -> Result<(), String> {
-    let usvg::Node::Group(group) = node else {
-        layers::render_existing_node(node, transform, pixmap);
-        return Ok(());
-    };
-
-    if !is_traversable_group(group) {
-        layers::render_existing_node(node, transform, pixmap);
-        return Ok(());
-    }
-    render_traversable_group(node, group, transform, pixmap, authored_clip_info)
 }
 
 fn render_traversable_group(
@@ -114,13 +136,26 @@ fn render_traversable_group(
     transform: Transform,
     pixmap: &mut tiny_skia::PixmapMut<'_>,
     authored_clip_info: &AuthoredClipInfo,
+    text_rasterizer: Option<&dyn TextRasterizer>,
 ) -> Result<(), String> {
     let child_transform = transform.pre_concat(group.transform());
     if generated_viewport_clip(group, authored_clip_info) {
-        return layers::render_clipped_group(group, child_transform, pixmap, authored_clip_info);
+        return layers::render_clipped_group(
+            group,
+            child_transform,
+            pixmap,
+            authored_clip_info,
+            text_rasterizer,
+        );
     }
     if group.clip_path().is_none() {
-        return render_children(group, child_transform, pixmap, authored_clip_info);
+        return render_children_with_text(
+            group,
+            child_transform,
+            pixmap,
+            authored_clip_info,
+            text_rasterizer,
+        );
     }
     layers::render_existing_node(node, transform, pixmap);
     Ok(())
@@ -135,8 +170,17 @@ fn is_generated_viewport_clip(
 }
 
 #[cfg(test)]
+#[path = "svg_rasterize_composite_stroke_bounds_tests.rs"]
+mod stroke_bounds_tests;
+
+#[cfg(test)]
+#[path = "svg_rasterize_composite_mask_tests.rs"]
+mod mask_tests;
+
+#[cfg(test)]
 mod tests {
-    use super::{SvgCompositeRenderer, layers};
+    use super::{AuthoredClipInfo, SvgCompositeRenderer, TextRasterizer, layers};
+    use std::cell::Cell;
     use std::collections::HashSet;
 
     const SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><defs><clipPath id="window"><rect x="10" y="10" width="20" height="20"/></clipPath></defs><rect width="40" height="40" fill="#202020"/><g clip-path="url(#window)"><rect width="40" height="40" fill="#e0e0e0" style="mix-blend-mode:multiply"/></g></svg>"##;
@@ -154,6 +198,65 @@ mod tests {
     const OPACITY_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><defs><clipPath id="window"><rect x="10" y="10" width="20" height="20"/></clipPath></defs><rect width="40" height="40" fill="#202020"/><g opacity="0.5" clip-path="url(#window)"><rect width="40" height="40" fill="#e0e0e0" style="mix-blend-mode:multiply"/></g></svg>"##;
     const FILTER_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><defs><filter id="blur"><feGaussianBlur stdDeviation="0"/></filter><clipPath id="window"><rect x="10" y="10" width="20" height="20"/></clipPath></defs><rect width="40" height="40" fill="#202020"/><g filter="url(#blur)" clip-path="url(#window)"><rect width="40" height="40" fill="#e0e0e0" style="mix-blend-mode:multiply"/></g></svg>"##;
     const MASK_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><defs><mask id="window"><rect width="40" height="40" fill="white"/></mask><clipPath id="clip"><rect x="10" y="10" width="20" height="20"/></clipPath></defs><rect width="40" height="40" fill="#202020"/><g mask="url(#window)" clip-path="url(#clip)"><rect width="40" height="40" fill="#e0e0e0" style="mix-blend-mode:multiply"/></g></svg>"##;
+    const TEXT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><text x="2" y="20" font-size="12">text</text></svg>"##;
+    const TEXT_VIEWPORT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><svg x="5" y="5" width="30" height="30"><text x="2" y="20" font-size="12">text</text></svg></svg>"##;
+    const ROOT_TRANSFORM_TEXT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" transform="translate(3 4)"><text x="2" y="20" font-size="12">text</text></svg>"##;
+    const FILTER_TEXT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><defs><filter id="blur"><feGaussianBlur stdDeviation="0"/></filter></defs><g filter="url(#blur)"><text x="2" y="20" font-size="12">text</text></g></svg>"##;
+
+    pub(super) struct FallbackTextRasterizer;
+
+    impl TextRasterizer for FallbackTextRasterizer {
+        fn render(
+            &self,
+            _text: &resvg::usvg::Text,
+            _transform: tiny_skia::Transform,
+            _pixmap: &mut tiny_skia::PixmapMut<'_>,
+        ) -> Result<bool, String> {
+            Ok(false)
+        }
+    }
+
+    struct CountingTextRasterizer {
+        calls: Cell<usize>,
+        first_transform: Cell<Option<(f32, f32)>>,
+    }
+
+    struct TextHookObservation {
+        calls: usize,
+        first_transform: Option<(f32, f32)>,
+    }
+
+    impl TextRasterizer for CountingTextRasterizer {
+        fn render(
+            &self,
+            _text: &resvg::usvg::Text,
+            transform: tiny_skia::Transform,
+            _pixmap: &mut tiny_skia::PixmapMut<'_>,
+        ) -> Result<bool, String> {
+            self.calls.set(self.calls.get() + 1);
+            self.first_transform.set(Some((transform.tx, transform.ty)));
+            Ok(true)
+        }
+    }
+
+    fn observe_text_hook(svg: &str) -> Result<TextHookObservation, String> {
+        let (tree, mut pixmap) = parse_svg_pixmap_with_bundled_fonts(svg, 40, 40)?;
+        let rasterizer = CountingTextRasterizer {
+            calls: Cell::new(0),
+            first_transform: Cell::new(None),
+        };
+        SvgCompositeRenderer::render_with_text(
+            &tree,
+            tiny_skia::Transform::identity(),
+            &mut pixmap.as_mut(),
+            &AuthoredClipInfo::default(),
+            Some(&rasterizer),
+        )?;
+        Ok(TextHookObservation {
+            calls: rasterizer.calls.get(),
+            first_transform: rasterizer.first_transform.get(),
+        })
+    }
 
     #[test]
     fn clipped_nonisolating_blend_uses_the_existing_backdrop() -> Result<(), String> {
@@ -336,6 +439,67 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn text_rasterizer_false_preserves_existing_resvg_pixels() -> Result<(), String> {
+        let (tree, mut actual) = parse_svg_pixmap_with_bundled_fonts(TEXT_SVG, 40, 40)?;
+        let expected = render_existing_svg_with_bundled_fonts(
+            TEXT_SVG,
+            40,
+            40,
+            tiny_skia::Transform::identity(),
+        )?;
+        SvgCompositeRenderer::render_with_text(
+            &tree,
+            tiny_skia::Transform::identity(),
+            &mut actual.as_mut(),
+            &AuthoredClipInfo::default(),
+            Some(&FallbackTextRasterizer),
+        )?;
+        assert!(expected.data().chunks_exact(4).any(|pixel| pixel[3] != 0));
+        assert_eq!(actual.data(), expected.data());
+        Ok(())
+    }
+
+    #[test]
+    fn text_rasterizer_receives_generated_viewport_children() -> Result<(), String> {
+        let observation = observe_text_hook(TEXT_VIEWPORT_SVG)?;
+        assert_eq!(observation.calls, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn text_rasterizer_applies_root_transform_once() -> Result<(), String> {
+        let observation = observe_text_hook(ROOT_TRANSFORM_TEXT_SVG)?;
+        assert_eq!(observation.calls, 1);
+        assert_eq!(observation.first_transform, Some((3.0, 4.0)));
+        Ok(())
+    }
+
+    #[test]
+    fn text_rasterizer_skips_unsupported_filter_groups() -> Result<(), String> {
+        let (tree, mut actual) = parse_svg_pixmap_with_bundled_fonts(FILTER_TEXT_SVG, 40, 40)?;
+        let expected = render_existing_svg_with_bundled_fonts(
+            FILTER_TEXT_SVG,
+            40,
+            40,
+            tiny_skia::Transform::identity(),
+        )?;
+        let rasterizer = CountingTextRasterizer {
+            calls: Cell::new(0),
+            first_transform: Cell::new(None),
+        };
+        SvgCompositeRenderer::render_with_text(
+            &tree,
+            tiny_skia::Transform::identity(),
+            &mut actual.as_mut(),
+            &AuthoredClipInfo::default(),
+            Some(&rasterizer),
+        )?;
+        assert_eq!(rasterizer.calls.get(), 0);
+        assert_eq!(actual.data(), expected.data());
+        Ok(())
+    }
+
     fn assert_matches_existing_resvg(svg: &str) -> Result<(), String> {
         let expected = render_existing_svg(svg, 40, 40, tiny_skia::Transform::identity())?;
         let actual = render_svg(svg, 40, 40, tiny_skia::Transform::identity())?;
@@ -343,7 +507,7 @@ mod tests {
         Ok(())
     }
 
-    fn render_svg(
+    pub(super) fn render_svg(
         svg: &str,
         width: u32,
         height: u32,
@@ -382,6 +546,17 @@ mod tests {
         Ok(pixmap)
     }
 
+    fn render_existing_svg_with_bundled_fonts(
+        svg: &str,
+        width: u32,
+        height: u32,
+        transform: tiny_skia::Transform,
+    ) -> Result<tiny_skia::Pixmap, String> {
+        let (tree, mut pixmap) = parse_svg_pixmap_with_bundled_fonts(svg, width, height)?;
+        resvg::render(&tree, transform, &mut pixmap.as_mut());
+        Ok(pixmap)
+    }
+
     fn parse_svg_pixmap(
         svg: &str,
         width: u32,
@@ -389,6 +564,18 @@ mod tests {
     ) -> Result<(resvg::usvg::Tree, tiny_skia::Pixmap), String> {
         let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
             .map_err(|error| error.to_string())?;
+        let pixmap = tiny_skia::Pixmap::new(width, height)
+            .ok_or_else(|| "failed to allocate expected SVG pixmap".to_string())?;
+        Ok((tree, pixmap))
+    }
+
+    pub(super) fn parse_svg_pixmap_with_bundled_fonts(
+        svg: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<(resvg::usvg::Tree, tiny_skia::Pixmap), String> {
+        let options = super::super::rasterizer_options();
+        let tree = resvg::usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
         let pixmap = tiny_skia::Pixmap::new(width, height)
             .ok_or_else(|| "failed to allocate expected SVG pixmap".to_string())?;
         Ok((tree, pixmap))

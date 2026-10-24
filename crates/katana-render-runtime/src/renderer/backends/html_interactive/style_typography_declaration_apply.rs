@@ -2,7 +2,8 @@ use crate::renderer::backends::html_interactive::style::value::{
     css_font_size, css_font_weight, css_resolved_px, split_top_level_whitespace,
 };
 use crate::renderer::backends::html_interactive::style::{
-    normalized_property_name, CssStyle, CssTextAlign, CssTextTransform, CssWhiteSpace,
+    normalized_property_name, CssStyle, CssTextAlign, CssTextSpacingTrim, CssTextTransform,
+    CssWhiteSpace,
 };
 use crate::renderer::backends::html_interactive::style::style_typography_declaration::typography_parser::FontShorthandParser;
 
@@ -14,6 +15,7 @@ impl CssStyle {
             "font-weight" => self.apply_font_weight(value),
             "font-family" => self.apply_font_family(value),
             "font-feature-settings" => self.apply_font_feature_settings(value),
+            "text-spacing-trim" => self.apply_text_spacing_trim(value),
             "font-style" => self.apply_font_style(value),
             "text-decoration" => {
                 self.underline = value.contains("underline");
@@ -91,6 +93,16 @@ impl CssStyle {
             } else {
                 Some(settings.to_string())
             };
+    }
+
+    fn apply_text_spacing_trim(&mut self, value: &str) {
+        self.text_spacing_trim = match value.trim().to_ascii_lowercase().as_str() {
+            "normal" => CssTextSpacingTrim::Normal,
+            "space-all" => CssTextSpacingTrim::SpaceAll,
+            "initial" => CssTextSpacingTrim::Normal,
+            "inherit" | "unset" => self.text_spacing_trim,
+            _ => self.text_spacing_trim,
+        };
     }
 
     fn apply_text_align(&mut self, value: &str) {

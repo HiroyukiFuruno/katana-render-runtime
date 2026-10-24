@@ -4,6 +4,16 @@ Returns the result as raw bytes compatible with egui's `ColorImage`. */
 
 use resvg::usvg;
 
+#[cfg(all(
+    test,
+    any(
+        feature = "svg-librsvg-evaluation",
+        feature = "svg-skia-evaluation",
+        feature = "svg-thorvg-evaluation"
+    )
+))]
+#[path = "svg_rasterize_candidate_test_support.rs"]
+mod candidate_test_support;
 #[path = "svg_rasterize_composite.rs"]
 mod composite;
 #[path = "svg_rasterize_font.rs"]
@@ -11,18 +21,41 @@ mod font;
 #[cfg(test)]
 #[path = "svg_rasterize_font_file_fixture.rs"]
 pub(super) mod font_file_fixture;
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_glyph.rs"]
+mod html_glyph;
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_shadow.rs"]
+mod html_shadow;
+#[cfg(all(test, feature = "svg-librsvg-evaluation"))]
+#[path = "svg_rasterize_librsvg_candidate.rs"]
+mod librsvg_candidate;
 #[path = "svg_rasterize_text_measurement_api.rs"]
 mod measurement_api;
 #[path = "svg_rasterize_measurement_diagnostic.rs"]
 pub(crate) mod measurement_diagnostic;
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_glyph_ttc.rs"]
+mod physical_font_face;
 #[path = "svg_rasterize_preprocess.rs"]
 mod preprocess;
 #[path = "svg_rasterize_composite_provenance.rs"]
 mod provenance;
 #[path = "svg_rasterize_render.rs"]
 mod render;
+#[cfg(all(test, target_os = "macos", feature = "svg-skia-evaluation"))]
+#[path = "svg_rasterize_skia_candidate.rs"]
+mod skia_candidate;
+#[cfg(all(test, target_os = "macos", feature = "svg-skia-evaluation"))]
+#[path = "svg_rasterize_skia_registered_candidate.rs"]
+mod skia_registered_candidate;
 #[path = "svg_rasterize_text.rs"]
 mod text;
+#[cfg(all(test, feature = "svg-thorvg-evaluation"))]
+#[path = "svg_rasterize_thorvg_candidate.rs"]
+mod thorvg_candidate;
+#[cfg(test)]
+pub(in crate::markdown::svg_rasterize) use text::probe_test_support;
 #[path = "svg_rasterize_text_shaping.rs"]
 mod text_shaping;
 #[path = "svg_rasterize_types.rs"]
@@ -34,13 +67,48 @@ use font::rasterizer_options;
 use preprocess::parse_light_dark_function;
 use preprocess::{effective_scale, preprocess_for_rasterizer};
 pub(crate) use provenance::{GeneratedClip, GeneratedClipProvenance};
+#[path = "svg_rasterize_html_text_provenance.rs"]
+mod html_text_provenance;
+pub(crate) use html_text_provenance::GeneratedHtmlTextProvenance;
 use render::RasterTarget;
 pub(crate) use text_shaping::{
-    HtmlTextMeasurementToken, HtmlTextMeasurementTokenKey, SvgTextRunMetrics,
+    HtmlTextMeasurementToken, HtmlTextMeasurementTokenKey, SvgTextRunMetrics, TextSpacingTrim,
 };
-pub use types::{RasterizedSvg, SvgRasterizeError};
+pub use types::{RasterizedSvg, SvgRasterizeError, SvgRasterizeOps};
 
 const MAX_RASTERIZED_SVG_EDGE: f32 = 8192.0;
+
+#[cfg(all(
+    test,
+    any(
+        feature = "svg-skia-evaluation",
+        feature = "svg-librsvg-evaluation",
+        feature = "svg-thorvg-evaluation"
+    )
+))]
+fn render_candidate_for_test(
+    svg: &str,
+    tree: &usvg::Tree,
+    scale: f32,
+) -> Option<Result<RasterizedSvg, SvgRasterizeError>> {
+    candidate_test_support::render_selected(svg, tree, scale)
+}
+
+#[cfg(all(
+    test,
+    not(any(
+        feature = "svg-skia-evaluation",
+        feature = "svg-librsvg-evaluation",
+        feature = "svg-thorvg-evaluation"
+    ))
+))]
+fn render_candidate_for_test(
+    _svg: &str,
+    _tree: &usvg::Tree,
+    _scale: f32,
+) -> Option<Result<RasterizedSvg, SvgRasterizeError>> {
+    None
+}
 
 #[cfg(test)]
 mod font_source_fixture {
@@ -63,8 +131,6 @@ mod font_source_fixture {
         ))
     }
 }
-
-pub struct SvgRasterizeOps;
 
 impl SvgRasterizeOps {
     pub(crate) fn html_text_baseline_for_text(
@@ -115,37 +181,57 @@ impl SvgRasterizeOps {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn rasterize_html_svg_with_provenance(
         svg_text: &str,
         scale: f32,
         provenance: &GeneratedClipProvenance,
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
-        #[cfg(target_os = "macos")]
-        return font::rasterize_html_known_or_eager(svg_text, scale, provenance);
-        #[cfg(not(target_os = "macos"))]
-        Self::rasterize_with_options_and_provenance(
+        Self::rasterize_html_svg_with_text_provenance(
             svg_text,
             scale,
-            &html_rasterizer_options(svg_text),
             provenance,
+            &GeneratedHtmlTextProvenance::default(),
         )
     }
 
-    pub(crate) fn shape_html_text_dx(
+    pub(crate) fn rasterize_html_svg_with_text_provenance(
+        svg_text: &str,
+        scale: f32,
+        provenance: &GeneratedClipProvenance,
+        html_text: &GeneratedHtmlTextProvenance,
+    ) -> Result<RasterizedSvg, SvgRasterizeError> {
+        #[cfg(target_os = "macos")]
+        return font::rasterize_html_known_or_eager(svg_text, scale, provenance, html_text);
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = html_text;
+            Self::rasterize_with_options_and_provenance(
+                svg_text,
+                scale,
+                &html_rasterizer_options(svg_text),
+                provenance,
+            )
+        }
+    }
+
+    pub(crate) fn shape_html_text_dx_with_trim(
         text: &str,
         font_family: &str,
         font_size: f32,
         font_weight: u16,
         italic: bool,
         font_feature_settings: Option<&str>,
+        trim: TextSpacingTrim,
     ) -> Option<Vec<f32>> {
-        text_shaping::shaped_html_text_dx(
+        text_shaping::shaped_html_text_dx_with_trim(
             text,
             font_family,
             font_size,
             font_weight,
             italic,
             font_feature_settings,
+            trim,
         )
     }
 
@@ -222,10 +308,60 @@ impl SvgRasterizeOps {
         compatible_svg: &str,
         provenance: &GeneratedClipProvenance,
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
+        Self::render_tree_with_text(tree, scale, compatible_svg, provenance, None)
+    }
+
+    #[cfg(all(test, target_os = "macos"))]
+    pub(crate) fn render_html_tree_with_provenance(
+        tree: &usvg::Tree,
+        scale: f32,
+        compatible_svg: &str,
+        provenance: &GeneratedClipProvenance,
+    ) -> Result<RasterizedSvg, SvgRasterizeError> {
+        Self::render_html_tree_with_text_provenance(
+            tree,
+            scale,
+            compatible_svg,
+            provenance,
+            &GeneratedHtmlTextProvenance::default(),
+        )
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn render_html_tree_with_text_provenance(
+        tree: &usvg::Tree,
+        scale: f32,
+        compatible_svg: &str,
+        provenance: &GeneratedClipProvenance,
+        html_text: &GeneratedHtmlTextProvenance,
+    ) -> Result<RasterizedSvg, SvgRasterizeError> {
+        #[cfg(test)]
+        if std::env::var("KRR_HTML_FEATURE_RESVG_TEXT_RASTER").is_ok_and(|value| value == "1") {
+            return Self::render_tree_with_provenance(tree, scale, compatible_svg, provenance);
+        }
+        let routing = html_text.validated_routing(compatible_svg, tree)?;
+        if routing.all_text_verified {
+            return Self::render_tree_with_provenance(tree, scale, compatible_svg, provenance);
+        }
+        let glyphs = html_glyph::HtmlGlyphRasterizer::with_resvg_text(tree.fontdb(), routing.ids);
+        Self::render_tree_with_text(tree, scale, compatible_svg, provenance, Some(&glyphs))
+    }
+
+    fn render_tree_with_text(
+        tree: &usvg::Tree,
+        scale: f32,
+        compatible_svg: &str,
+        provenance: &GeneratedClipProvenance,
+        text: Option<&dyn composite::TextRasterizer>,
+    ) -> Result<RasterizedSvg, SvgRasterizeError> {
+        #[cfg(test)]
+        if let Some(rendered) = render_candidate_for_test(compatible_svg, tree, scale) {
+            return rendered;
+        }
         let raster = RasterTarget::new(tree.size(), scale);
         #[cfg(all(test, target_os = "macos"))]
         font::observation::count(font::observation::Metric::RasterAttempt);
-        let pixmap = raster.render(tree, compatible_svg, provenance)?;
+        let pixmap = raster.render_with_text(tree, compatible_svg, provenance, text)?;
         #[cfg(all(test, target_os = "macos"))]
         font::observation::count(font::observation::Metric::RasterSuccess);
         Ok(RasterizedSvg {
@@ -241,6 +377,10 @@ impl SvgRasterizeOps {
 #[cfg(test)]
 #[path = "svg_rasterize_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "svg_rasterize_css_ex_tests.rs"]
+mod css_ex_tests;
 
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_font_observation.rs"]

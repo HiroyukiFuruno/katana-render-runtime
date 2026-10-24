@@ -1,4 +1,4 @@
-use super::features::harfrust_features;
+use super::features::{features_for_face, harfrust_features};
 use super::variations::FontShape;
 use resvg::usvg;
 
@@ -38,7 +38,18 @@ mod combined_metrics_probe;
 #[path = "svg_rasterize_text_harfrust_tree_diagnostic_tests.rs"]
 mod tree_diagnostic;
 
+#[cfg(test)]
 pub(super) fn shape_text_with_face(
+    database: &usvg::fontdb::Database,
+    face_id: usvg::fontdb::ID,
+    text: &str,
+    font: FontShape,
+    font_feature_settings: Option<&str>,
+) -> Option<f32> {
+    shape_text_with_face_with_trim(database, face_id, text, font, font_feature_settings)
+}
+
+pub(super) fn shape_text_with_face_with_trim(
     database: &usvg::fontdb::Database,
     face_id: usvg::fontdb::ID,
     text: &str,
@@ -55,7 +66,18 @@ pub(super) fn shape_text_with_face(
     )
 }
 
+#[cfg(test)]
 pub(super) fn shape_run_character_metrics(
+    database: &usvg::fontdb::Database,
+    face_id: usvg::fontdb::ID,
+    text: &str,
+    font: FontShape,
+    font_feature_settings: Option<&str>,
+) -> Option<Vec<(f32, f32)>> {
+    shape_run_character_metrics_with_trim(database, face_id, text, font, font_feature_settings)
+}
+
+pub(super) fn shape_run_character_metrics_with_trim(
     database: &usvg::fontdb::Database,
     face_id: usvg::fontdb::ID,
     text: &str,
@@ -66,7 +88,26 @@ pub(super) fn shape_run_character_metrics(
         return None;
     }
     let face = face_cache::font_for_face(database, face_id)?;
-    let glyphs = shape_font(&face, text, font, font_feature_settings)?;
+    let features = features_for_face(database, face_id, text, font_feature_settings, font.trim)?;
+    let glyphs = shape_font_with_features(&face, text, font, &features)?;
+    let metrics = collect_character_metrics(&glyphs, text, 1.0 / HARFRUST_SCALE);
+    if metrics.is_some() && !face_cache::commit_file_font(database, face_id, &face) {
+        return None;
+    }
+    metrics
+}
+
+pub(super) fn shape_run_character_metrics_without_features(
+    database: &usvg::fontdb::Database,
+    face_id: usvg::fontdb::ID,
+    text: &str,
+    font: FontShape,
+) -> Option<Vec<(f32, f32)>> {
+    if !is_left_to_right(text) {
+        return None;
+    }
+    let face = face_cache::font_for_face(database, face_id)?;
+    let glyphs = shape_font(&face, text, font, None)?;
     let metrics = collect_character_metrics(&glyphs, text, 1.0 / HARFRUST_SCALE);
     if metrics.is_some() && !face_cache::commit_file_font(database, face_id, &face) {
         return None;
@@ -82,7 +123,8 @@ fn shape_database_face(
     font_feature_settings: Option<&str>,
 ) -> Option<harfrust::Buffer> {
     let face = face_cache::font_for_face(database, face_id)?;
-    let glyphs = shape_font(&face, text, font, font_feature_settings)?;
+    let features = features_for_face(database, face_id, text, font_feature_settings, font.trim)?;
+    let glyphs = shape_font_with_features(&face, text, font, &features)?;
     face_cache::commit_file_font(database, face_id, &face).then_some(glyphs)
 }
 
@@ -114,6 +156,28 @@ fn shape_font(
     shape_buffer(&instance, text, font, font_feature_settings)
 }
 
+pub(super) fn shape_buffer_with_features(
+    instance: &harfrust::font::Font,
+    text: &str,
+    font: FontShape,
+    features: &[harfrust::Feature],
+) -> Option<harfrust::Buffer> {
+    shape_buffer_features(instance, text, font, features)
+}
+
+fn shape_font_with_features(
+    face: &harfrust::font::Font,
+    text: &str,
+    font: FontShape,
+    features: &[harfrust::Feature],
+) -> Option<harfrust::Buffer> {
+    let instance = face
+        .instance_builder()
+        .variations(font_variations(font))
+        .build();
+    shape_buffer_with_features(&instance, text, font, features)
+}
+
 fn is_left_to_right(text: &str) -> bool {
     let mut buffer = harfrust::Buffer::new();
     buffer.push_str(text);
@@ -135,8 +199,22 @@ fn shape_buffer(
     font: FontShape,
     font_feature_settings: Option<&str>,
 ) -> Option<harfrust::Buffer> {
+    let features = harfrust_features(font_feature_settings);
+    let instance = face
+        .instance_builder()
+        .variations(font_variations(font))
+        .build();
+    shape_buffer_features(&instance, text, font, &features)
+}
+
+fn shape_buffer_features(
+    instance: &harfrust::font::Font,
+    text: &str,
+    font: FontShape,
+    features: &[harfrust::Feature],
+) -> Option<harfrust::Buffer> {
     use harfrust::{Buffer, ShapeOptions, ShaperFont};
-    let shaper = ShaperFont::new(face).with_scale((font.size * HARFRUST_SCALE) as i32);
+    let shaper = ShaperFont::new(instance).with_scale((font.size * HARFRUST_SCALE) as i32);
     let mut buffer = Buffer::new();
     buffer.push_str(text);
     buffer.guess_segment_properties();
@@ -145,7 +223,7 @@ fn shape_buffer(
         &mut buffer,
         ShapeOptions::new()
             .point_size(Some(font.size))
-            .features(&harfrust_features(font_feature_settings)),
+            .features(features),
     )
     .ok()?;
     Some(buffer)

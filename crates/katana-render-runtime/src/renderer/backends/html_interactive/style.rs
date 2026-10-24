@@ -37,6 +37,8 @@ mod tag_defaults;
 mod text_defaults_tests;
 #[path = "style_text_metrics.rs"]
 mod text_metrics;
+#[path = "style_text_spacing_trim.rs"]
+mod text_spacing_trim;
 #[path = "style_text_transform.rs"]
 mod text_transform;
 #[path = "style_types.rs"]
@@ -44,6 +46,7 @@ mod types;
 #[path = "style_value.rs"]
 mod value;
 
+pub(super) use text_spacing_trim::CssTextSpacingTrim;
 pub(super) use types::{
     CssBorderStyle, CssBoxShadow, CssBoxSizing, CssFloat, CssGridTrack, CssGridTrackBreadth,
     CssLength, CssOverflow, CssOverflowAxis, CssPosition, CssStyle, CssTextAlign, CssTextTransform,
@@ -174,6 +177,7 @@ impl CssStyle {
             normal_line_height: self.normal_line_height,
             explicit_typography: false,
             font_feature_settings: self.font_feature_settings.clone(),
+            text_spacing_trim: self.text_spacing_trim,
             font_weight: self.font_weight,
             column_gap: self.font_size,
             italic: self.italic,

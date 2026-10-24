@@ -1,6 +1,7 @@
 use super::FontShape;
+use super::TextSpacingTrim;
 use super::font::{FontSourceGeneration, font_source_generation};
-use super::harfrust::shape_text_with_face;
+use super::harfrust::shape_text_with_face_with_trim;
 use resvg::usvg;
 use sha2::{Digest, Sha256};
 use std::{
@@ -30,6 +31,7 @@ struct ShapedRunKey {
     weight: u16,
     italic: bool,
     font_feature_sha256: Option<[u8; SHA256_DIGEST_BYTES]>,
+    trim: TextSpacingTrim,
 }
 
 #[derive(Clone, Copy)]
@@ -50,7 +52,18 @@ thread_local! {
     static SHAPED_RUN_CACHE: RefCell<Vec<ShapedRunCacheEntry>> = const { RefCell::new(Vec::new()) };
 }
 
+#[cfg(test)]
 pub(super) fn cached_shaped_run(
+    database: &Arc<usvg::fontdb::Database>,
+    face_id: usvg::fontdb::ID,
+    text: &str,
+    font: FontShape,
+    font_feature_settings: Option<&str>,
+) -> Option<f32> {
+    cached_shaped_run_with_trim(database, face_id, text, font, font_feature_settings)
+}
+
+pub(super) fn cached_shaped_run_with_trim(
     database: &Arc<usvg::fontdb::Database>,
     face_id: usvg::fontdb::ID,
     text: &str,
@@ -79,18 +92,25 @@ fn shape_run_for_cache(
     font: FontShape,
     font_feature_settings: Option<&str>,
 ) -> Option<(f32, Option<super::harfrust::SvgTextRunMetrics>)> {
-    let full_metrics = font_feature_settings
-        .is_none()
-        .then(|| {
-            super::harfrust::shape_svg_run_metrics_with_face(database, face_id, text, font, false)
-                .map(|(metrics, _)| metrics)
-        })
-        .flatten();
+    let full_metrics = cacheable_svg_metrics(database, face_id, text, font, font_feature_settings);
     let width = full_metrics.map_or_else(
-        || shape_text_with_face(database, face_id, text, font, font_feature_settings),
+        || shape_text_with_face_with_trim(database, face_id, text, font, font_feature_settings),
         |metrics| Some(metrics.advance),
     )?;
     Some((width, full_metrics))
+}
+
+fn cacheable_svg_metrics(
+    database: &Arc<usvg::fontdb::Database>,
+    face_id: usvg::fontdb::ID,
+    text: &str,
+    font: FontShape,
+    settings: Option<&str>,
+) -> Option<super::harfrust::SvgTextRunMetrics> {
+    (settings.is_none() && !super::features::has_han_candidate(text)).then(|| {
+        super::harfrust::shape_svg_run_metrics_with_face(database, face_id, text, font, false)
+            .map(|(metrics, _)| metrics)
+    })?
 }
 
 fn cache_run_after_generation(
@@ -224,6 +244,7 @@ impl ShapedRunKey {
             weight: font.weight,
             italic: font.italic,
             font_feature_sha256: features.map(|value| Sha256::digest(value.as_bytes()).into()),
+            trim: font.trim,
         }
     }
 

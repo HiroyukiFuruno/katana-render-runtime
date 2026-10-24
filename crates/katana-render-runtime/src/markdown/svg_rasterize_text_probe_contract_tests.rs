@@ -1,4 +1,5 @@
 use super::{ProbeResult, Value};
+use crate::markdown::svg_rasterize::font::html_rasterizer_options;
 use resvg::usvg::{self, fontdb::Source};
 use std::sync::{
     Arc,
@@ -43,7 +44,7 @@ const NON_ALIAS_NOTO_FAMILY: &str = "Noto Sans";
 const NON_ALIAS_NOTO_TEXT: &str = "Noto";
 
 fn noto_options(svg: &str) -> ProbeResult<(usvg::Options<'static>, usvg::fontdb::ID)> {
-    let mut options = super::super::super::html_rasterizer_options(svg);
+    let mut options = html_rasterizer_options(svg);
     let mut database = usvg::fontdb::Database::new();
     let loaded = database.load_font_source(Source::Binary(Arc::new(FONT_BYTES.to_vec())));
     if loaded.len() != 1 {
@@ -115,7 +116,7 @@ fn non_alias_svg_uses_the_original_html_font_selector() -> ProbeResult<()> {
     let expected = parsed_probe_spans(&svg, &official_options)?;
     assert_selected_noto_face(&expected, selected)?;
 
-    let mut wrapped_options = super::super::super::html_rasterizer_options(&svg);
+    let mut wrapped_options = html_rasterizer_options(&svg);
     wrapped_options.fontdb = Arc::clone(&official_options.fontdb);
     let (original_calls, alias_calls) =
         count_original_and_alias_selectors(&mut wrapped_options, selected);
@@ -130,7 +131,7 @@ fn non_alias_svg_uses_the_original_html_font_selector() -> ProbeResult<()> {
 
 fn observe_bundled_noto() -> ProbeResult<(Value, usize, usize, usize, bool)> {
     let svg = super::super::probe_svg("Noto Sans", NORMAL_FONT_WEIGHT);
-    let mut options = super::super::super::html_rasterizer_options(&svg);
+    let mut options = html_rasterizer_options(&svg);
     let base = Arc::clone(&options.fontdb);
     let base_faces = base.faces().count();
     let mut database = base.as_ref().clone();

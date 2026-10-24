@@ -1,3 +1,5 @@
+use super::super::harfrust::shape_text_with_face;
+
 #[test]
 fn width_only_cache_entry_gains_svg_metrics_from_real_face() -> Result<(), String> {
     let database = bundled_font_db();
@@ -5,7 +7,7 @@ fn width_only_cache_entry_gains_svg_metrics_from_real_face() -> Result<(), Strin
         .ok_or("bundled Noto Sans must be available")?;
     let font = FontShape::new(16.0, 400, false);
     let text = "SVG cache upgrade";
-    let advance = super::shape_text_with_face(&database, face, text, font, None)
+    let advance = shape_text_with_face(&database, face, text, font, None)
         .ok_or("the bundled font must shape the run")?;
     let key = ShapedRunKey::new(face, text, font, None);
     SHAPED_RUN_CACHE.with(|cache| cache.borrow_mut().clear());

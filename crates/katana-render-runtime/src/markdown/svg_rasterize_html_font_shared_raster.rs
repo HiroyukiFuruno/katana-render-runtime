@@ -2,6 +2,24 @@ use super::super::super::text_shaping::FileStamp;
 use resvg::usvg::fontdb::{Database, FaceInfo, Family, ID, Source};
 use std::{collections::BTreeMap, path::PathBuf};
 
+#[cfg(test)]
+pub(in crate::markdown::svg_rasterize) fn render_html_with_options(
+    svg: &str,
+    options: &resvg::usvg::Options<'_>,
+) -> Result<crate::markdown::svg_rasterize::RasterizedSvg, String> {
+    let compatible =
+        crate::markdown::svg_rasterize::SvgRasterizeOps::preprocess_for_rasterizer(svg);
+    let tree =
+        resvg::usvg::Tree::from_str(&compatible, options).map_err(|error| error.to_string())?;
+    crate::markdown::svg_rasterize::SvgRasterizeOps::render_html_tree_with_provenance(
+        &tree,
+        1.0,
+        &compatible,
+        &Default::default(),
+    )
+    .map_err(|error| error.to_string())
+}
+
 #[path = "svg_rasterize_html_font_shared_sources.rs"]
 pub(super) mod shared_sources;
 use shared_sources::SharedSources;

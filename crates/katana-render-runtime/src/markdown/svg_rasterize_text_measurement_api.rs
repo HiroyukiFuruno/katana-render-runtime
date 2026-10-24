@@ -3,6 +3,7 @@ use super::HtmlTextMeasurementToken;
 use super::{SvgRasterizeError, SvgRasterizeOps, text, text_shaping};
 
 impl SvgRasterizeOps {
+    #[cfg(test)]
     pub(crate) fn prepare_html_text_measurement<'a>(
         text: &'a str,
         font_family: &'a str,
@@ -12,14 +13,36 @@ impl SvgRasterizeOps {
         letter_spacing: f32,
         font_feature_settings: Option<&'a str>,
     ) -> text::PreparedHtmlTextMeasurement<'a> {
-        text::PreparedHtmlTextMeasurement::prepare(
+        Self::prepare_html_text_measurement_with_trim(
             text,
             font_family,
             font_size,
-            font_weight,
-            italic,
+            (font_weight, italic),
             letter_spacing,
             font_feature_settings,
+            text_shaping::TextSpacingTrim::Normal,
+        )
+    }
+
+    pub(crate) fn prepare_html_text_measurement_with_trim<'a>(
+        text: &'a str,
+        font_family: &'a str,
+        font_size: f32,
+        font_style: (u16, bool),
+        letter_spacing: f32,
+        font_feature_settings: Option<&'a str>,
+        trim: text_shaping::TextSpacingTrim,
+    ) -> text::PreparedHtmlTextMeasurement<'a> {
+        text::PreparedHtmlTextMeasurement::prepare(
+            text,
+            text::HtmlTextMeasure::new(
+                font_family,
+                font_size,
+                font_style,
+                letter_spacing,
+                font_feature_settings,
+            )
+            .with_trim(trim),
         )
     }
 

@@ -93,7 +93,7 @@ pub(in super::super) fn eager_render(svg: &str) -> Result<RasterizedSvg, String>
     )));
     let mut options = rasterizer_options_with_font_db(database);
     text_shaping::install_html_font_resolver(&mut options);
-    SvgRasterizeOps::rasterize_with_options(svg, 1.0, &options).map_err(|error| error.to_string())
+    crate::markdown::svg_rasterize::font::html::render_html_with_options(svg, &options)
 }
 
 fn diagnostic_face_identity(database: &Database, id: ID) -> Result<serde_json::Value, String> {

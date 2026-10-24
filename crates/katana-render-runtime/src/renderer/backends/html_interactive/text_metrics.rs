@@ -1,9 +1,9 @@
 use super::document::text_display_columns;
-use super::style::CssStyle;
+use super::style::{CssStyle, CssTextSpacingTrim};
 use super::text_measurement_diagnostic::{
     record_lookup, record_text_total_timing, start_measurement, start_text_total_timing,
 };
-use crate::markdown::svg_rasterize::{HtmlTextMeasurementToken, SvgRasterizeOps};
+use crate::markdown::svg_rasterize::{HtmlTextMeasurementToken, SvgRasterizeOps, TextSpacingTrim};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -29,6 +29,7 @@ struct TextMeasurementKey {
     italic: bool,
     letter_spacing: u32,
     font_feature_sha256: Option<[u8; SHA256_DIGEST_BYTES]>,
+    text_spacing_trim: u8,
 }
 
 impl TextMeasurementKey {
@@ -44,6 +45,10 @@ impl TextMeasurementKey {
                 .font_feature_settings
                 .as_deref()
                 .map(|value| Sha256::digest(value.as_bytes()).into()),
+            text_spacing_trim: match style.text_spacing_trim {
+                CssTextSpacingTrim::Normal => 0,
+                CssTextSpacingTrim::SpaceAll => 1,
+            },
         }
     }
 }
@@ -90,14 +95,17 @@ fn text_width_body(text: &str, style: &CssStyle) -> f32 {
 }
 
 fn text_width_after_cache_miss(text: &str, style: &CssStyle, key: TextMeasurementKey) -> f32 {
-    let prepared = SvgRasterizeOps::prepare_html_text_measurement(
+    let prepared = SvgRasterizeOps::prepare_html_text_measurement_with_trim(
         text,
         &style.font_family,
         style.font_size,
-        style.font_weight,
-        style.italic,
+        (style.font_weight, style.italic),
         style.letter_spacing,
         style.font_feature_settings.as_deref(),
+        match style.text_spacing_trim {
+            CssTextSpacingTrim::Normal => TextSpacingTrim::Normal,
+            CssTextSpacingTrim::SpaceAll => TextSpacingTrim::SpaceAll,
+        },
     );
     let token = prepared.token();
     if let Some(width) = persistent_width(&key, token) {

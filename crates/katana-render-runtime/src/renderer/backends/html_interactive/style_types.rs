@@ -1,3 +1,4 @@
+use super::text_spacing_trim::CssTextSpacingTrim;
 use taffy::style::{AlignItems, Display, FlexDirection, FlexWrap, JustifyContent};
 
 #[path = "style_border_style.rs"]
@@ -128,6 +129,7 @@ pub(in crate::renderer::backends::html_interactive) struct CssStyle {
     pub(in crate::renderer::backends::html_interactive) text_baseline_offset: Option<f32>,
     pub(in crate::renderer::backends::html_interactive) font_family: String,
     pub(in crate::renderer::backends::html_interactive) font_feature_settings: Option<String>,
+    pub(in crate::renderer::backends::html_interactive) text_spacing_trim: CssTextSpacingTrim,
     pub(in crate::renderer::backends::html_interactive) italic: bool,
     pub(in crate::renderer::backends::html_interactive) text_align: CssTextAlign,
     pub(in crate::renderer::backends::html_interactive) vertical_align: CssVerticalAlign,

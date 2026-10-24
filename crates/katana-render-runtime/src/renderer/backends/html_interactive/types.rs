@@ -1,14 +1,16 @@
 use super::super::html_document::HtmlDocumentNode;
 use super::style::CssStyle;
-use std::collections::HashMap;
 
 pub(super) const ELEMENT_BOX_CORNER_COUNT: usize = 4;
 
 #[path = "types_geometry.rs"]
 mod geometry;
+#[path = "types_layout_result.rs"]
+mod layout_result;
 #[path = "types_positioning.rs"]
 mod positioning;
 pub(super) use geometry::InlineFragment;
+pub(super) use layout_result::LayoutResult;
 pub(super) use positioning::ElementPositioningContext;
 
 #[derive(Clone, Copy)]
@@ -183,18 +185,4 @@ pub(super) enum HitTargetKind {
     Click,
     Input,
     Summary { details_node_id: u64 },
-}
-
-pub(super) struct LayoutResult {
-    pub(super) svg: String,
-    pub(super) generated_clip_provenance: crate::markdown::svg_rasterize::GeneratedClipProvenance,
-    pub(super) hit_targets: Vec<HitTarget>,
-    pub(super) element_boxes: Vec<ElementBox>,
-    pub(super) anchor_positions: HashMap<String, f32>,
-    pub(super) content_width: f32,
-    pub(super) content_height: f32,
-    pub(super) viewport_overflow: (
-        super::super::html_browser::HtmlBrowserOverflowPolicy,
-        super::super::html_browser::HtmlBrowserOverflowPolicy,
-    ),
 }

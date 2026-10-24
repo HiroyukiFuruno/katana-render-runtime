@@ -12,30 +12,25 @@ pub(crate) struct PreparedHtmlTextMeasurement<'a> {
 impl<'a> PreparedHtmlTextMeasurement<'a> {
     pub(in crate::markdown::svg_rasterize) fn prepare(
         text: &'a str,
-        font_family: &'a str,
-        font_size: f32,
-        font_weight: u16,
-        italic: bool,
-        letter_spacing: f32,
-        font_feature_settings: Option<&'a str>,
+        style: HtmlTextMeasure<'a>,
     ) -> Self {
-        let selected =
-            super::super::font::measured_database(font_family, text, font_weight, italic);
+        let selected = selected_database(text, style.font_family, style.font_weight, style.italic);
+        Self::from_selected(text, style, selected)
+    }
+
+    fn from_selected(
+        text: &'a str,
+        style: HtmlTextMeasure<'a>,
+        selected: super::super::font::MeasuredDatabase,
+    ) -> Self {
         let token = HtmlTextMeasurementToken::for_selected_database(
-            font_family,
+            style.font_family,
             &selected.key,
             &selected.database,
         );
         Self {
             text,
-            style: HtmlTextMeasure {
-                font_family,
-                font_size,
-                font_weight,
-                italic,
-                letter_spacing,
-                font_feature_settings,
-            },
+            style,
             database: selected.database,
             token,
         }
@@ -55,4 +50,13 @@ impl<'a> PreparedHtmlTextMeasurement<'a> {
         self.style
             .measure_with_status_in_database(self.text, Some(&self.database))
     }
+}
+
+fn selected_database(
+    text: &str,
+    family: &str,
+    weight: u16,
+    italic: bool,
+) -> super::super::font::MeasuredDatabase {
+    super::super::font::measured_database(family, text, weight, italic)
 }

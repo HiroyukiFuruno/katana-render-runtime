@@ -1,20 +1,50 @@
-use super::font::html_rasterizer_options;
-use super::text_shaping::{shaped_text_width, shaped_text_width_in_database};
+use super::text_shaping::{
+    FontShape, TextSpacingTrim, shaped_text_width_in_database_with_trim,
+    shaped_text_width_with_trim,
+};
 use super::{HtmlTextMeasurementToken, SvgRasterizeError};
 use resvg::usvg;
 use std::sync::Arc;
 
-const FALLBACK_SVG_WIDTH: u32 = 16_384;
-const FALLBACK_HEIGHT_FACTOR: f32 = 4.0;
-const FALLBACK_BASELINE_FACTOR: f32 = 2.0;
+#[path = "svg_rasterize_text_width_fallback.rs"]
+mod width_fallback;
+use width_fallback::fallback_text_width;
+#[cfg(test)]
+use width_fallback::{canonical_svg_font_family, escape_xml_attribute, escape_xml_text};
 
-struct HtmlTextMeasure<'a> {
+pub(super) struct HtmlTextMeasure<'a> {
     font_family: &'a str,
     font_size: f32,
     font_weight: u16,
     italic: bool,
     letter_spacing: f32,
     font_feature_settings: Option<&'a str>,
+    trim: TextSpacingTrim,
+}
+
+impl<'a> HtmlTextMeasure<'a> {
+    pub(super) fn new(
+        font_family: &'a str,
+        font_size: f32,
+        font_style: (u16, bool),
+        letter_spacing: f32,
+        font_feature_settings: Option<&'a str>,
+    ) -> Self {
+        Self {
+            font_family,
+            font_size,
+            font_weight: font_style.0,
+            italic: font_style.1,
+            letter_spacing,
+            font_feature_settings,
+            trim: TextSpacingTrim::Normal,
+        }
+    }
+
+    pub(super) fn with_trim(mut self, trim: TextSpacingTrim) -> Self {
+        self.trim = trim;
+        self
+    }
 }
 
 #[path = "svg_rasterize_text_prepared.rs"]
@@ -30,14 +60,34 @@ pub(super) fn measure_html_text(
     letter_spacing: f32,
     font_feature_settings: Option<&str>,
 ) -> Result<f32, SvgRasterizeError> {
-    HtmlTextMeasure {
+    measure_html_text_with_trim(
+        text,
         font_family,
         font_size,
-        font_weight,
-        italic,
+        (font_weight, italic),
         letter_spacing,
         font_feature_settings,
-    }
+        TextSpacingTrim::Normal,
+    )
+}
+
+pub(super) fn measure_html_text_with_trim(
+    text: &str,
+    font_family: &str,
+    font_size: f32,
+    font_style: (u16, bool),
+    letter_spacing: f32,
+    font_feature_settings: Option<&str>,
+    trim: TextSpacingTrim,
+) -> Result<f32, SvgRasterizeError> {
+    HtmlTextMeasure::new(
+        font_family,
+        font_size,
+        font_style,
+        letter_spacing,
+        font_feature_settings,
+    )
+    .with_trim(trim)
     .measure(text)
 }
 
@@ -58,6 +108,7 @@ pub(super) fn measure_html_text_with_cache_status(
         italic,
         letter_spacing,
         font_feature_settings,
+        trim: TextSpacingTrim::Normal,
     }
     .measure_with_status(text)
 }
@@ -82,12 +133,12 @@ impl HtmlTextMeasure<'_> {
         let shaped = database.map_or_else(
             || self.shaped_measure(text),
             |database| {
-                shaped_text_width_in_database(
+                shaped_text_width_in_database_with_trim(
                     database,
                     text,
                     self.font_family,
-                    self.font_size,
-                    (self.font_weight, self.italic),
+                    FontShape::new(self.font_size, self.font_weight, self.italic)
+                        .with_trim(self.trim),
                     self.letter_spacing,
                     self.font_feature_settings,
                 )
@@ -100,12 +151,10 @@ impl HtmlTextMeasure<'_> {
     }
 
     fn shaped_measure(&self, text: &str) -> Option<f32> {
-        shaped_text_width(
+        shaped_text_width_with_trim(
             text,
             self.font_family,
-            self.font_size,
-            self.font_weight,
-            self.italic,
+            FontShape::new(self.font_size, self.font_weight, self.italic).with_trim(self.trim),
             self.letter_spacing,
             self.font_feature_settings,
         )
@@ -123,67 +172,9 @@ impl HtmlTextMeasure<'_> {
     }
 }
 
-fn fallback_text_width(
-    text: &str,
-    font_family: &str,
-    font_size: f32,
-    font_weight: u16,
-    italic: bool,
-    letter_spacing: f32,
-) -> Result<f32, SvgRasterizeError> {
-    let style = if italic { "italic" } else { "normal" };
-    let height = (font_size * FALLBACK_HEIGHT_FACTOR).max(1.0);
-    let baseline = font_size * FALLBACK_BASELINE_FACTOR;
-    let svg = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{FALLBACK_SVG_WIDTH}" height="{height}"><text id="krr-text-measure" x="0" y="{baseline}" font-family="{}" font-size="{font_size}" font-weight="{font_weight}" font-style="{style}" letter-spacing="{letter_spacing}">{}</text></svg>"#,
-        escape_xml_attribute(&canonical_svg_font_family(font_family)),
-        escape_xml_text(text)
-    );
-    let options = html_rasterizer_options(&svg);
-    let tree =
-        super::text_shaping::with_validated_tree_parse(|| usvg::Tree::from_str(&svg, &options))
-            .map_err(|error| SvgRasterizeError::ParseFailed(error.to_string()))?;
-    Ok(tree
-        .node_by_id("krr-text-measure")
-        .map(|node| node.abs_bounding_box().width())
-        .unwrap_or(0.0))
-}
-
-fn canonical_svg_font_family(value: &str) -> String {
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    {
-        value
-            .split(',')
-            .map(str::trim)
-            .map(|family| match family.to_ascii_lowercase().as_str() {
-                "system-ui" | "-apple-system" | "blinkmacsystemfont" => "System Font",
-                _ => family,
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-    {
-        value.to_string()
-    }
-}
-
-fn escape_xml_attribute(value: &str) -> String {
-    escape_xml_text(value)
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
-
-fn escape_xml_text(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{fallback_text_width, measure_html_text};
+    use super::{TextSpacingTrim, fallback_text_width, measure_html_text};
 
     const PREPARED_CASES: [(&str, &str, u16, bool); 3] = [
         ("Prepared AV", "Arial", 400, false),
@@ -311,6 +302,7 @@ mod tests {
             italic: false,
             letter_spacing: 0.0,
             font_feature_settings: None,
+            trim: TextSpacingTrim::Normal,
         };
         let actual = style.measure_with_status_in_database("A", Some(database))?;
         let expected = super::measure_html_text_with_cache_status(
@@ -458,7 +450,7 @@ mod html_png_probe;
 
 #[cfg(test)]
 #[path = "svg_rasterize_text_probe_test_support.rs"]
-mod probe_test_support;
+pub(super) mod probe_test_support;
 
 #[cfg(test)]
 #[path = "svg_rasterize_text_probe_file_contract_tests.rs"]

@@ -127,8 +127,8 @@ fn assert_route_contract(snapshot: &raster_observer::Snapshot) {
 
 fn assert_same_pixels(svg: &str, actual: &RasterizedSvg) -> Result<(), String> {
     let options = crate::markdown::svg_rasterize::font::html::html_rasterizer_options(svg);
-    let expected = SvgRasterizeOps::rasterize_with_options(svg, 1.0, &options)
-        .map_err(|error| error.to_string())?;
+    let expected =
+        crate::markdown::svg_rasterize::font::html::render_html_with_options(svg, &options)?;
     assert_eq!(
         (actual.width, actual.height, &actual.rgba),
         (expected.width, expected.height, &expected.rgba)

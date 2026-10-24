@@ -121,7 +121,7 @@ fn include_layout_ascent(current: &mut Option<f32>, candidate: Option<f32>) {
     }
 }
 
-fn svg_dom_layout_ascent(
+pub(in crate::markdown::svg_rasterize) fn svg_dom_layout_ascent(
     face: Option<&resvg::usvg::fontdb::FaceInfo>,
     ascent: f32,
     descent: f32,

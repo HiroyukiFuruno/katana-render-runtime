@@ -148,12 +148,14 @@ impl HtmlInteractiveSession {
         generation: u64,
         svg: &str,
         generated_clip_provenance: &crate::markdown::svg_rasterize::GeneratedClipProvenance,
+        generated_html_text_provenance: &crate::markdown::svg_rasterize::GeneratedHtmlTextProvenance,
     ) -> Result<Vec<u8>, HtmlBrowserError> {
         let started = self.trace.start();
-        let raster = SvgRasterizeOps::rasterize_html_svg_with_provenance(
+        let raster = SvgRasterizeOps::rasterize_html_svg_with_text_provenance(
             svg,
             1.0,
             generated_clip_provenance,
+            generated_html_text_provenance,
         )
         .map_err(|error| runtime_failure(error.to_string()))?;
         self.validate_raster_dimensions(raster.width, raster.height)?;
@@ -172,6 +174,7 @@ impl HtmlInteractiveSession {
             self.generation + 1,
             svg,
             &crate::markdown::svg_rasterize::GeneratedClipProvenance::default(),
+            &crate::markdown::svg_rasterize::GeneratedHtmlTextProvenance::default(),
         )
     }
 }

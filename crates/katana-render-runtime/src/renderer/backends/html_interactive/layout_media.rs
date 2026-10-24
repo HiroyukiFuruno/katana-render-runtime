@@ -61,18 +61,26 @@ impl HtmlLayoutRenderer {
         let (svg_width, svg_height) = embedded_svg_size(attributes, available_width, layout.style);
         /* WHY: 自然寸法と幅制約を適用したSVGの実幅からauto marginを解決する。 */
         /* WHY: 原点の小数差は未解決のため、既存pixel snap契約を維持し、寸法量子化とは分離する。 */
-        let x = snap_paint_coordinate(embedded_svg_x(
+        let x = embedded_svg_paint_coordinate(embedded_svg_x(
             layout.x,
             available_width,
             svg_width,
             layout.style,
         )) - self.scroll_x;
-        let y = snap_paint_coordinate(start) - self.scroll_y;
+        let y = embedded_svg_paint_coordinate(start) - self.scroll_y;
         let positioned = position_embedded_svg(markup, x, y, svg_width, svg_height);
         let svg = inherit_svg_text_style(&positioned, layout.style);
         self.svg.push_str(&svg);
         start + svg_height + layout.style.margin_bottom
     }
+}
+
+fn embedded_svg_paint_coordinate(value: f32) -> f32 {
+    #[cfg(test)]
+    if std::env::var("KRR_HTML_FEATURE_FRACTIONAL_SVG_ORIGIN").is_ok_and(|value| value == "1") {
+        return value;
+    }
+    snap_paint_coordinate(value)
 }
 
 fn embedded_svg_x(x: f32, available_width: f32, svg_width: f32, style: &CssStyle) -> f32 {
