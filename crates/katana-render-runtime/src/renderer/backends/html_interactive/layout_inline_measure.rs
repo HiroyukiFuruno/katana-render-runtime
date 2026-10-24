@@ -13,6 +13,9 @@ impl InlineMeasurement {
         available: f32,
         style: &CssStyle,
     ) -> f32 {
+        if style.text_align == CssTextAlign::Start {
+            return x;
+        }
         let width = nodes
             .iter()
             .filter(|node| !matches!(node, HtmlDocumentNode::Text(text) if text.trim().is_empty()))
@@ -137,6 +140,45 @@ mod tests {
         style.text_align = CssTextAlign::End;
 
         assert!(InlineMeasurement::run_start_x(&nodes, 10.0, 200.0, &style) > 100.0);
+    }
+
+    #[test]
+    fn start_aligned_inline_run_skips_width_and_style_measurements() {
+        let nodes = [
+            HtmlDocumentNode::Text("short".to_string()),
+            HtmlDocumentNode::Element {
+                node_id: 1,
+                tag: "span".to_string(),
+                attributes: Vec::new(),
+                children: vec![HtmlDocumentNode::Text("inline".to_string())],
+            },
+        ];
+        let style = CssStyle::browser_default();
+        let _cache = super::super::super::text_metrics::TextMeasurementCacheScope::enter();
+        let mut diagnostic =
+            super::super::super::text_measurement_diagnostic::TextMeasurementDiagnosticScope::enter(
+                true,
+            );
+
+        assert_eq!(
+            InlineMeasurement::run_start_x(&nodes, 10.0, 200.0, &style),
+            10.0
+        );
+        let stats = diagnostic.finish();
+        assert_eq!((stats.style_calls, stats.lookups, stats.misses), (0, 0, 0));
+    }
+
+    #[test]
+    fn center_aligned_inline_run_uses_measured_width() {
+        let nodes = [HtmlDocumentNode::Text("short".to_string())];
+        let mut style = CssStyle::browser_default();
+        style.text_align = CssTextAlign::Center;
+        let expected_width = InlineMeasurement::text_width("short", &style);
+
+        assert_eq!(
+            InlineMeasurement::run_start_x(&nodes, 10.0, 200.0, &style),
+            10.0 + (200.0 - expected_width) / 2.0
+        );
     }
 
     #[test]
