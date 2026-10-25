@@ -92,7 +92,7 @@ fn one_ordered_scalar_per_glyph(text: &str, glyphs: &[usvg::layout::PositionedGl
     characters.next().is_none()
 }
 
-fn uniform_css_scale(transform: Transform) -> Option<f32> {
+pub(super) fn uniform_css_scale(transform: Transform) -> Option<f32> {
     (transform.sx.is_finite()
         && transform.sx > 0.0
         && transform.sx == transform.sy
