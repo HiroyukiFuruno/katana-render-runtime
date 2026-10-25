@@ -184,6 +184,10 @@ performance-harness-lint retained_profile="":
 
 # profileは分離し、全出力は同じroot targetの固定aggregate容量へ含める。
 performance-harness-coverage:
+    python3 scripts/hooks/run_locked_command.py --performance-coverage
+
+[private]
+performance-harness-coverage-run:
     mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer performance
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-baseline -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked

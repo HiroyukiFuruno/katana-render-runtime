@@ -3612,6 +3612,7 @@ function performanceHarnessRecipes(root: string, overrides: Record<string, strin
     "performance-harness-fmt-check",
     "performance-harness-lint",
     "performance-harness-coverage",
+    "performance-harness-coverage-run",
   ];
   const commands = Object.fromEntries(names.map((name) => [name, actualRecipeBody(name, true)]));
   recipes(root, {
@@ -3647,11 +3648,13 @@ COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX = (
 )
 `,
   );
-  write(
-    root,
+  for (const source of [
+    "scripts/hooks/local_review_state.py",
+    "scripts/hooks/local_review_lock.py",
+    "scripts/hooks/run_locked_command.py",
     "scripts/release/native_nextest_root_coverage.py",
-    fs.readFileSync(path.join(actual, "scripts/release/native_nextest_root_coverage.py"), "utf8"),
-  );
+  ])
+    write(root, source, fs.readFileSync(path.join(actual, source), "utf8"));
   write(
     root,
     `${performanceRoot}/Cargo.lock`,
@@ -3963,33 +3966,33 @@ test.each([
     "manifest",
   ],
   [
-    "performance-harness-coverage",
+    "performance-harness-coverage-run",
     "--coverage-collection-domain performance-candidate",
     "--coverage-collection-domain performance-baseline",
     "domain",
   ],
   [
-    "performance-harness-coverage",
+    "performance-harness-coverage-run",
     "llvm-cov-performance-candidate",
     "llvm-cov-performance-baseline",
     "profiles",
   ],
-  ["performance-harness-coverage", "candidate.json", "baseline.json", "report"],
+  ["performance-harness-coverage-run", "candidate.json", "baseline.json", "report"],
   [
-    "performance-harness-coverage",
+    "performance-harness-coverage-run",
     "--coverage-collection-domain performance-candidate",
     "--coverage-domain performance-candidate",
     "strict collector mode",
   ],
-  ["performance-harness-coverage", "--profile krr-coverage", "--profile dev", "profile"],
-  ["performance-harness-coverage", "--profile krr-coverage", "", "missing profile"],
+  ["performance-harness-coverage-run", "--profile krr-coverage", "--profile dev", "profile"],
+  ["performance-harness-coverage-run", "--profile krr-coverage", "", "missing profile"],
   [
-    "performance-harness-coverage",
+    "performance-harness-coverage-run",
     "--coverage-collection-domain performance-baseline",
     "--coverage-domain performance-baseline",
     "baseline collector mode",
   ],
-  ["performance-harness-coverage", "--json", "--no-run --json", "no-run"],
+  ["performance-harness-coverage-run", "--json", "--no-run --json", "no-run"],
   ["coverage", "just root-test-and-coverage", "echo coverage", "shared root producer"],
   ["coverage", "just coverage-result-check", "echo accepted", "uncached result validation"],
   ["root-test-and-coverage", "CARGO={{quote(CARGO)}}", "CARGO=cargo", "CARGO override"],
@@ -4008,19 +4011,19 @@ test.each([
   ],
   ["root-test-and-coverage", "just plantuml-install", "just other-install", "PlantUML dependency"],
   [
-    "performance-harness-coverage",
+    "performance-harness-coverage-run",
     "--producer-exit 0",
     "--producer-exit 1",
     "producer success binding",
   ],
   [
-    "performance-harness-coverage",
+    "performance-harness-coverage-run",
     'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer performance',
     "",
     "collection authentication missing",
   ],
   [
-    "performance-harness-coverage",
+    "performance-harness-coverage-run",
     'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer performance',
     'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer performance || true',
     "collection authentication ignored",
@@ -4121,12 +4124,45 @@ test.each(["||", "&&", ";", "\n"])(
   (operator) => {
     const root = performanceHarnessFixture();
     const recipe = "performance-harness-coverage";
+    const original = actualRecipeBody(recipe);
+    const before = "python3 scripts/hooks/run_locked_command.py --performance-coverage";
+    expect(original).toContain(before);
+    const mutated = original.replace(before, `${before} ${operator} echo bypass`);
+    expect(mutated).not.toBe(original);
     performanceHarnessRecipes(root, {
-      [recipe]: actualRecipeBody(recipe).replace(" python3 ", ` ${operator} python3 `),
+      [recipe]: mutated,
     });
     expect(codes(root)).toContain(`performance-harness-recipe-unverified:${recipe}`);
   },
 );
+
+test.each([
+  ["public bypass", "just performance-harness-coverage-run"],
+  ["wrong mode", "python3 scripts/hooks/run_locked_command.py --protect-root-producer"],
+])("standalone performance coverage wrapper rejects %s", (_name, body) => {
+  const root = performanceHarnessFixture();
+  performanceHarnessRecipes(root, { "performance-harness-coverage": body });
+  expect(codes(root)).toContain(
+    "performance-harness-recipe-unverified:performance-harness-coverage",
+  );
+});
+
+test.each([
+  ["begin", "local-begin --producer performance"],
+  ["baseline arm", "--coverage-collection-domain performance-baseline"],
+  ["candidate arm", "--coverage-collection-domain performance-candidate"],
+  ["finish", "local-collect-finish"],
+  ["validate", "local-collection-validate --producer performance"],
+])("standalone performance coverage run requires its %s step", (_name, step) => {
+  const root = performanceHarnessFixture();
+  const recipe = "performance-harness-coverage-run";
+  const original = actualRecipeBody(recipe);
+  expect(original).toContain(step);
+  const mutated = original.replace(step, "missing-step");
+  expect(mutated).not.toBe(original);
+  performanceHarnessRecipes(root, { [recipe]: mutated });
+  expect(codes(root)).toContain(`performance-harness-recipe-unverified:${recipe}`);
+});
 
 function inheritedPerformanceCandidateFixture(): string {
   const root = performanceHarnessFixture();

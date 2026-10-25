@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from local_review_lock import review_lock
+from local_review_state import ReviewError
 from run_locked_command import _cargo_clean_target, run_locked_command
 
 
@@ -37,6 +38,44 @@ class LockedCommandTest(unittest.TestCase):
             producer_lock,
             root,
         )
+
+    def _fake_performance_coverage_just(self, root: Path, marker: Path) -> Path:
+        executable = root / "bin/just"
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        hooks = str(Path(__file__).parent)
+        producer_lock = root / "producer/root-nextest-producer.lock"
+        executable.write_text(
+            f"#!{sys.executable}\n"
+            "import sys\n"
+            "from pathlib import Path\n"
+            "if sys.argv[1:] != ['performance-harness-coverage-run']:\n"
+            "    raise SystemExit(99)\n"
+            f"sys.path.insert(0, {hooks!r})\n"
+            "from local_review_lock import review_lock\n"
+            "from local_review_state import ReviewError\n"
+            "try:\n"
+            f"    with review_lock(Path({str(producer_lock)!r})):\n"
+            "        pass\n"
+            "except ReviewError:\n"
+            "    pass\n"
+            "else:\n"
+            "    raise SystemExit(98)\n"
+            f"Path({str(marker)!r}).write_text('ran', encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        executable.chmod(0o755)
+        return executable
+
+    def _performance_coverage_fixture(
+        self, root: Path
+    ) -> tuple[Path, Path, Path, Path]:
+        terminal_lock = root / ".moon/cache/krr-terminal-report.lock"
+        producer_lock = root / "producer/root-nextest-producer.lock"
+        marker = root / "child-ran"
+        just = self._fake_performance_coverage_just(root, marker)
+        terminal_lock.parent.mkdir(parents=True)
+        producer_lock.parent.mkdir(parents=True)
+        return terminal_lock, producer_lock, marker, just
 
     def _run_clean_with_refs(
         self,
@@ -317,6 +356,48 @@ raise SystemExit(0)
                 self.assertTrue(outer_lock.exists())
                 self.assertTrue(producer_lock.exists())
 
+    def test_performance_coverage_mode_holds_only_root_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            terminal_lock, producer_lock, marker, just = self._performance_coverage_fixture(root)
+
+            with review_lock(terminal_lock), patch.dict(os.environ, {"PATH": str(just.parent)}):
+                status = run_locked_command(
+                    ["--performance-coverage"],
+                    terminal_lock,
+                    producer_lock,
+                    root,
+                )
+
+            self.assertEqual(status, 0)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "ran")
+
+    def test_performance_coverage_mode_rejects_busy_root_lock_and_extra_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            terminal_lock, producer_lock, marker, just = self._performance_coverage_fixture(root)
+
+            with patch.dict(os.environ, {"PATH": str(just.parent)}):
+                with review_lock(producer_lock):
+                    with self.assertRaises(ReviewError):
+                        run_locked_command(
+                            ["--performance-coverage"],
+                            terminal_lock,
+                            producer_lock,
+                            root,
+                        )
+                self.assertFalse(marker.exists())
+                self.assertEqual(
+                    run_locked_command(
+                        ["--performance-coverage", "--", "arbitrary-command"],
+                        terminal_lock,
+                        producer_lock,
+                        root,
+                    ),
+                    2,
+                )
+                self.assertFalse(marker.exists())
+
     def test_busy_root_producer_rejects_child_and_releases_outer_lock(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -364,6 +445,7 @@ raise SystemExit(9)
         self.assertEqual(run_locked_command(["--"]), 2)
         self.assertEqual(run_locked_command(["--protect-root-producer"]), 2)
         self.assertEqual(run_locked_command(["--protect-root-producer", "--"]), 2)
+        self.assertEqual(run_locked_command(["--performance-coverage", "extra"]), 2)
 
 
 if __name__ == "__main__":

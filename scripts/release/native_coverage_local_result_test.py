@@ -260,6 +260,78 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
             ["performance-baseline", "performance-candidate"],
         )
 
+    def test_performance_begin_revokes_old_receipt_until_new_collection_succeeds(self) -> None:
+        self.prepare_reports()
+        with (
+            patch.object(local_result, "_source_state", return_value=self.source_state),
+            patch.object(local_result, "_local_context", return_value=self.context),
+        ):
+            initial_key = local_result.local_key(self.root, "performance")
+            local_result.local_begin(self.root, "performance")
+            local_result.local_finish(self.root, "performance", 0)
+            self.assertTrue(
+                local_result.local_collection_validate(self.root, "performance")["valid"]
+            )
+            self.assertEqual(
+                local_result.local_key(self.root, "performance")["fingerprint"],
+                initial_key["fingerprint"],
+            )
+
+            receipt_path = (
+                self.root / coverage_result.REPORT_DIRECTORY / "performance-local-result.json"
+            )
+            old_receipt = receipt_path.read_bytes()
+            anchor_directory = local_anchor._anchor_directory(self.root, create=False)
+            self.assertIsNotNone(anchor_directory)
+            previous_anchor = local_anchor._read(cast(Path, anchor_directory), "performance")
+            if previous_anchor is None:
+                self.fail("performance anchor is missing")
+
+            local_result.local_begin(self.root, "performance")
+            pending_anchor = local_anchor._read(cast(Path, anchor_directory), "performance")
+            if pending_anchor is None:
+                self.fail("performance anchor disappeared after begin")
+            self.assertEqual(pending_anchor["state"], "pending")
+            self.assertEqual(pending_anchor["epoch"], previous_anchor["epoch"])
+            self.assertEqual(
+                local_result.local_key(self.root, "performance")["fingerprint"],
+                initial_key["fingerprint"],
+            )
+            with self.assertRaisesRegex(local_result.LocalCoverageError, "successfully"):
+                local_result.local_finish(self.root, "performance", 1)
+            with self.assertRaisesRegex(local_result.LocalCoverageError, "anchor"):
+                local_result.local_collection_validate(self.root, "performance")
+            self.assertEqual(receipt_path.read_bytes(), old_receipt)
+            refreshed_key = local_result.local_key(self.root, "performance")
+            self.assertNotEqual(refreshed_key["fingerprint"], initial_key["fingerprint"])
+
+            local_result.local_begin(self.root, "performance")
+            local_result.local_finish(self.root, "performance", 0)
+            self.assertTrue(
+                local_result.local_collection_validate(self.root, "performance")["valid"]
+            )
+            self.assertEqual(
+                local_result.local_key(self.root, "performance")["fingerprint"],
+                refreshed_key["fingerprint"],
+            )
+
+    def test_performance_begin_anchor_write_failure_stops_before_run_start(self) -> None:
+        self.prepare_reports()
+        with (
+            patch.object(local_result, "_source_state", return_value=self.source_state),
+            patch.object(local_result, "_local_context", return_value=self.context),
+        ):
+            local_result.local_key(self.root, "performance")
+            local_result.local_begin(self.root, "performance")
+            local_result.local_finish(self.root, "performance", 0)
+            run_path = self.root / coverage_result.REPORT_DIRECTORY / "performance-local-run.json"
+            previous_run = run_path.read_bytes()
+
+            with patch.object(local_anchor, "_write", return_value=False):
+                with self.assertRaisesRegex(local_result.LocalCoverageError, "marked pending"):
+                    local_result.local_begin(self.root, "performance")
+            self.assertEqual(run_path.read_bytes(), previous_run)
+
     def test_changed_source_context_or_report_bytes_reject(self) -> None:
         self.prepare_reports()
         current_source = [self.source_state]
@@ -529,19 +601,19 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         self.prepare_reports()
         self.context = self.make_context(False)
         with (
-            patch.object(
-                local_result, "_source_state", return_value=self.source_state
-            ),
+            patch.object(local_result, "_source_state", return_value=self.source_state),
             patch.object(local_result, "_local_context", return_value=self.context),
         ):
-            first = local_result.local_key(self.root, "root")
-            local_result.local_begin(self.root, "root")
-            local_result.local_finish(self.root, "root", 0)
-            self.assertTrue(local_result.local_validate(self.root, "root")["valid"])
-            second = local_result.local_key(self.root, "root")
-            self.assertNotEqual(first["fingerprint"], second["fingerprint"])
-            with self.assertRaises(local_result.LocalCoverageError):
-                local_result.local_validate(self.root, "root")
+            for producer in ("root", "performance"):
+                with self.subTest(producer=producer):
+                    first = local_result.local_key(self.root, producer)
+                    local_result.local_begin(self.root, producer)
+                    local_result.local_finish(self.root, producer, 0)
+                    self.assertTrue(local_result.local_validate(self.root, producer)["valid"])
+                    second = local_result.local_key(self.root, producer)
+                    self.assertNotEqual(first["fingerprint"], second["fingerprint"])
+                    with self.assertRaises(local_result.LocalCoverageError):
+                        local_result.local_validate(self.root, producer)
 
     def test_unknown_producer_and_malformed_context_reject(self) -> None:
         with self.assertRaises(local_result.LocalCoverageError):

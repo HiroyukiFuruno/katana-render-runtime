@@ -256,9 +256,19 @@ def begin_runtime_script(
 
 def begin_root_collection(repo: Path, identity_sha256: str, epoch: str) -> bool:
     """Invalidate the previous root success while preserving its identity epoch."""
-    if SHA256_RE.fullmatch(identity_sha256) is None:
+    return begin_coverage_collection(repo, "root", identity_sha256, epoch)
+
+
+def begin_coverage_collection(
+    repo: Path, producer: str, identity_sha256: str, epoch: str
+) -> bool:
+    """Invalidate an old root or performance success without changing its key epoch."""
+    if (
+        producer not in {"root", "performance"}
+        or SHA256_RE.fullmatch(identity_sha256) is None
+    ):
         return False
-    return _begin_existing(repo, "root", identity_sha256, epoch)
+    return _begin_existing(repo, producer, identity_sha256, epoch)
 
 
 def commit(

@@ -3319,6 +3319,9 @@ ${runtimeRecipes.join("\n")}
 root-test-and-coverage: plantuml-install
     CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"
 performance-harness-coverage:
+    python3 scripts/hooks/run_locked_command.py --performance-coverage
+[private]
+performance-harness-coverage-run:
     mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer performance
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-baseline -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked
@@ -3393,6 +3396,8 @@ function localCoverageMoonFixture(): HarnessSnapshot {
     ...Object.keys(moonRunContract(root).inputSha256),
     ...MOON_QUALITY_INPUTS,
     "scripts/build/cargo_capacity_guard.py",
+    "scripts/hooks/local_review_lock.py",
+    "scripts/hooks/run_locked_command.py",
     "scripts/html/helper.ts",
     "scripts/html/main.ts",
     "scripts/quality/duplication-check.ts",
@@ -3631,64 +3636,84 @@ test("combined coverage producer binds the root and performance arms", () => {
   expect(checkHarnessContract(combinedCoverageMoonFixture())).toEqual([]);
 });
 
-test.each([
-  "old unit leaf",
-  "coverage mask",
-  "missing PlantUML dependency",
-  "coverage threshold",
-  "missing asset dependency",
-  "performance profile missing",
-  "performance profile wrong",
-])("combined coverage contract rejects %s", (fault) => {
-  const snapshot = combinedCoverageMoonFixture();
-  if (fault === "old unit leaf")
-    changeMoon(snapshot, (tasks) => {
-      const unit = tasks["unit-test"];
-      if (!unit) throw new Error("fixture unit-test task missing");
-      unit.command = ["just", "unit-test"];
-    });
-  else if (fault === "missing asset dependency")
-    changeMoon(snapshot, (tasks) => {
-      const unit = tasks["unit-test"];
-      if (!unit) throw new Error("fixture unit-test task missing");
-      unit.deps = [];
-    });
-  else if (fault === "coverage mask")
-    replaceSources(snapshot, {
-      Justfile:
-        snapshot
-          .read("Justfile")
-          ?.replace(
-            "python3 scripts/release/native_nextest_root_coverage.py",
-            "echo python3 scripts/release/native_nextest_root_coverage.py",
-          ) ?? "",
-    });
-  else if (fault === "missing PlantUML dependency")
-    replaceSources(snapshot, {
-      Justfile:
-        snapshot
-          .read("Justfile")
-          ?.replace("root-test-and-coverage: plantuml-install", "root-test-and-coverage:") ?? "",
-    });
-  else if (fault === "coverage threshold")
-    replaceSources(snapshot, {
-      Justfile:
-        snapshot
-          .read("Justfile")
-          ?.replace('"COVERAGE_MIN_LINES", "100"', '"COVERAGE_MIN_LINES", "99"') ?? "",
-    });
-  else if (fault === "performance profile missing" || fault === "performance profile wrong") {
-    const before = snapshot.read("Justfile");
-    if (before === undefined) throw new Error("Justfile fixture is missing");
-    const after = before.replace(
+type CoverageFixtureMutation = (snapshot: HarnessSnapshot) => void;
+
+function replaceCoverageJustfile(
+  snapshot: HarnessSnapshot,
+  mutate: (source: string) => string,
+): void {
+  const before = snapshot.read("Justfile");
+  if (before === undefined) throw new Error("Justfile fixture is missing");
+  const after = mutate(before);
+  expect(after).not.toBe(before);
+  replaceSources(snapshot, { Justfile: after });
+}
+
+const combinedCoverageFaults: Array<[string, CoverageFixtureMutation]> = [
+  ["old unit leaf", (snapshot) => changeUnitCoverageLeaf(snapshot)],
+  ["coverage mask", (snapshot) => replaceCoverageJustfile(snapshot, maskRootCoverage)],
+  ["missing PlantUML dependency", (snapshot) => replaceCoverageJustfile(snapshot, removePlantUml)],
+  ["coverage threshold", (snapshot) => replaceCoverageJustfile(snapshot, lowerCoverageThreshold)],
+  ["missing asset dependency", (snapshot) => removeAssetDependency(snapshot)],
+  ["performance profile missing", (snapshot) => changePerformanceProfile(snapshot, "missing")],
+  ["performance profile wrong", (snapshot) => changePerformanceProfile(snapshot, "wrong")],
+  ["performance wrapper bypass", (snapshot) => bypassPerformanceCoverageWrapper(snapshot)],
+];
+
+function changeUnitCoverageLeaf(snapshot: HarnessSnapshot): void {
+  changeMoon(snapshot, (tasks) => {
+    const unit = tasks["unit-test"];
+    if (!unit) throw new Error("fixture unit-test task missing");
+    unit.command = ["just", "unit-test"];
+  });
+}
+
+function removeAssetDependency(snapshot: HarnessSnapshot): void {
+  changeMoon(snapshot, (tasks) => {
+    const unit = tasks["unit-test"];
+    if (!unit) throw new Error("fixture unit-test task missing");
+    unit.deps = [];
+  });
+}
+
+function maskRootCoverage(source: string): string {
+  return source.replace(
+    "python3 scripts/release/native_nextest_root_coverage.py",
+    "echo python3 scripts/release/native_nextest_root_coverage.py",
+  );
+}
+
+function removePlantUml(source: string): string {
+  return source.replace("root-test-and-coverage: plantuml-install", "root-test-and-coverage:");
+}
+
+function lowerCoverageThreshold(source: string): string {
+  return source.replace('"COVERAGE_MIN_LINES", "100"', '"COVERAGE_MIN_LINES", "99"');
+}
+
+function changePerformanceProfile(snapshot: HarnessSnapshot, profile: "missing" | "wrong"): void {
+  replaceCoverageJustfile(snapshot, (source) =>
+    source.replace(
       "--features baseline --locked --profile krr-coverage --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json",
-      fault === "performance profile missing"
+      profile === "missing"
         ? "--features baseline --locked --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json"
         : "--features baseline --locked --profile wrong-profile --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json",
-    );
-    expect(after).not.toBe(before);
-    replaceSources(snapshot, { Justfile: after });
-  }
+    ),
+  );
+}
+
+function bypassPerformanceCoverageWrapper(snapshot: HarnessSnapshot): void {
+  replaceCoverageJustfile(snapshot, (source) =>
+    source.replace(
+      "python3 scripts/hooks/run_locked_command.py --performance-coverage",
+      "just performance-harness-coverage-run",
+    ),
+  );
+}
+
+test.each(combinedCoverageFaults)("combined coverage contract rejects %s", (_fault, mutate) => {
+  const snapshot = combinedCoverageMoonFixture();
+  mutate(snapshot);
   expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
 });
 
@@ -3711,6 +3736,11 @@ test("local coverage entry preserves static barrier and required heavy closure",
   expect(snapshot.graph.localRecipes?.has("html-test")).toBe(true);
   expect(snapshot.graph.local.has("scripts/html/main.ts")).toBe(true);
   expect(snapshot.graph.local.has("scripts/quality/owned-validation-contract.ts")).toBe(true);
+  const justfile = snapshot.read("Justfile") ?? "";
+  expect(justfile).toContain(
+    "performance-harness-coverage:\n    python3 scripts/hooks/run_locked_command.py --performance-coverage",
+  );
+  expect(justfile).toMatch(/\[private\]\s*\nperformance-harness-coverage-run:/);
 });
 
 test.each(["missing", "ignored"])(

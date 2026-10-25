@@ -111,6 +111,9 @@ const NATIVE_TYPED_UTILITIES = new Set([
 const PERFORMANCE_HARNESS = "scripts/html/performance-harness";
 const PERFORMANCE_MANIFEST = `${PERFORMANCE_HARNESS}/Cargo.toml`;
 const PERFORMANCE_ARMS = ["baseline", "candidate"] as const;
+const PERFORMANCE_COVERAGE_RUN_RECIPE = "performance-harness-coverage-run";
+const PERFORMANCE_COVERAGE_WRAPPER =
+  "python3 scripts/hooks/run_locked_command.py --performance-coverage";
 const PERFORMANCE_RECIPES = {
   format: "performance-harness-fmt-check",
   lint: "performance-harness-lint",
@@ -1479,7 +1482,8 @@ function performanceRecipeCommands(): Record<string, string[]> {
       `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain performance-baseline -- {{CARGO}} clippy -j {{JOBS}} --manifest-path ${PERFORMANCE_MANIFEST} --all-targets --no-default-features --features baseline --locked -- ${deny}; \\`,
       `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain performance-candidate -- {{CARGO}} clippy -j {{JOBS}} --manifest-path ${PERFORMANCE_MANIFEST} --all-targets --no-default-features --features candidate --locked -- ${deny}`,
     ],
-    [PERFORMANCE_RECIPES.coverage]: [
+    [PERFORMANCE_RECIPES.coverage]: [PERFORMANCE_COVERAGE_WRAPPER],
+    [PERFORMANCE_COVERAGE_RUN_RECIPE]: [
       'mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"',
       localCoverageCommand("performance", "begin"),
       ...PERFORMANCE_ARMS.flatMap(performanceCoverageCommands),

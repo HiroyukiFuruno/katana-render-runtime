@@ -92,21 +92,41 @@ class NativeCoverageLocalAnchorTests(unittest.TestCase):
         (anchor_directory / "unexpected.json").write_text("{}", encoding="utf-8")
         self.assertIsNone(anchor.prepare(self.root, "runtime-unused-script-regression", "d" * 64))
 
-    def test_root_collection_begin_invalidates_success_without_rotating_epoch(self) -> None:
-        identity = "c" * 64
-        epoch = anchor.prepare(self.root, "root", identity)
-        self.assertIsNotNone(epoch)
-        previous_receipt = b"previous root collection"
-        self.assertTrue(anchor.commit(self.root, "root", identity, epoch or "", previous_receipt))
-        self.assertTrue(anchor.verify(self.root, "root", identity, epoch or "", previous_receipt))
+    def test_coverage_collection_begin_invalidates_success_without_rotating_epoch(self) -> None:
+        begin_calls: dict[str, Callable[[Path, str, str], bool]] = {
+            "root": lambda repo, identity, epoch: anchor.begin_root_collection(
+                repo, identity, epoch
+            ),
+            "performance": lambda repo, identity, epoch: anchor.begin_coverage_collection(
+                repo, "performance", identity, epoch
+            ),
+        }
+        for producer, begin in begin_calls.items():
+            with self.subTest(producer=producer):
+                identity = "c" * 64
+                epoch = anchor.prepare(self.root, producer, identity)
+                self.assertIsNotNone(epoch)
+                previous_receipt = f"previous {producer} collection".encode()
+                self.assertTrue(
+                    anchor.commit(self.root, producer, identity, epoch or "", previous_receipt)
+                )
+                self.assertTrue(
+                    anchor.verify(self.root, producer, identity, epoch or "", previous_receipt)
+                )
 
-        self.assertTrue(anchor.begin_root_collection(self.root, identity, epoch or ""))
-        self.assertEqual(anchor.prepare(self.root, "root", identity), epoch)
-        self.assertFalse(anchor.verify(self.root, "root", identity, epoch or "", previous_receipt))
+                self.assertTrue(begin(self.root, identity, epoch or ""))
+                self.assertEqual(anchor.prepare(self.root, producer, identity), epoch)
+                self.assertFalse(
+                    anchor.verify(self.root, producer, identity, epoch or "", previous_receipt)
+                )
 
-        next_receipt = b"new root collection"
-        self.assertTrue(anchor.commit(self.root, "root", identity, epoch or "", next_receipt))
-        self.assertTrue(anchor.verify(self.root, "root", identity, epoch or "", next_receipt))
+                next_receipt = f"new {producer} collection".encode()
+                self.assertTrue(
+                    anchor.commit(self.root, producer, identity, epoch or "", next_receipt)
+                )
+                self.assertTrue(
+                    anchor.verify(self.root, producer, identity, epoch or "", next_receipt)
+                )
 
     def test_runtime_script_begin_revokes_success_without_rotating_key_epoch(self) -> None:
         for producer in (

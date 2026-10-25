@@ -22,6 +22,10 @@ R2747でperformance harnessの標準LLVM line coverageがbaseline982/982・candi
 
 R2715の認証拒否は、Moon producerと直接validatorの環境fingerprint差が原因。資源digestは同一で、環境差19項目をR2719で確認した。環境除外・anchor改変ではなく、producer同recipe内のcollection認証へ接続してR2743で成功した。限定cache受入用に、既存validatorのproducer selectorと非cacheableなMoon acceptance taskを追加。未指定の完全aggregateはroot→performanceのまま。限定結果は専用schema・fullAggregate:falseとし、全体合格へ転用しない。実cache miss→同hash hit→CAS復元→改ざん拒否・実producer refresh→strict readbackは未完了。
 
+- [ ] Q19-PERFORMANCE-BEGIN-INVALIDATION: 同identityの成功receiptを残したまま性能producerが再実行を始め、そのrunがfinish前に失敗した場合、旧成功を検証が受け入れる経路をsource call chainで確認した。rootの既存開始時無効化と同じ保護をperformance local-beginへ接続し、epoch/keyを変えずpending化する。R2752のPython lint/strict型/重複は並列全0、local cache69件中68成功・既存opt-in skip1、source不変。拒否時の既存epoch rotationは変更していない。独立レビューで同時producerの遅延finishとの競合も指摘されたため、既存review_lockによる標準producer入口の単一owner保証も確認・整備する。旧成功→begin→未完了/失敗で拒否→新成功、重複起動拒否、実cache lifecycleを確認する。画像・coverage・性能の合格条件は維持する。
+
+  公開recipeを固定の`run_locked_command.py --performance-coverage`へ接続し、全8手順はprivate inner recipeへ移した。既存root producer lockだけを全手順中保持し、外側のterminal lockを再取得しない。任意child引数を拒否し、root/clean/depsと競合時は収集開始前に拒否する。R2755はlocal cache69件中68成功/既存skip1・実OS lockを含む16件成功。R2758は標準静的DAG actual0、修正shell-control4件と未実行tail19件が全成功・source不変。fixtureの実source不足・変異空振り・複雑度超過のR2753〜R2757は保持し、古い部分成功を最新全suite成功に置き換えない。実Moon cache lifecycleと最終完全ゲートは引き続き未完了。
+
 | 対象 | 最新の完了済み証拠 | 残る受入条件 |
 | --- | --- | --- |
 | Mermaid #108 | R2672の診断PNGは92/117が99以上・残25・新規合格/脱落0。multi-fragment候補は効果が小さく撤回した | 旧R1511 HTMLの再rasterを現行製品へ代用しない。fresh CLI→SVG→PNG/frameの正式117件・全99以上が必要 |

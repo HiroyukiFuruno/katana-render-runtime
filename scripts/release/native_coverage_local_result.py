@@ -450,6 +450,16 @@ def local_begin(repo: Path, producer: str) -> JsonObject:
     _ensure_report_directory(repo)
     source_state = _source_state(repo)
     identity = _bound_identity(repo, producer, source_state)
+    if identity["cacheable"] is True and producer == "performance":
+        if not local_anchor.begin_coverage_collection(
+            repo,
+            producer,
+            cast(str, identity["baseIdentitySha256"]),
+            cast(str, identity["anchorEpoch"]),
+        ):
+            raise LocalCoverageError(
+                "performance collection anchor could not be marked pending"
+            )
     moon_managed = "MOON_TASK_ID" in os.environ or "MOON_TASK_HASH" in os.environ
     probe_path = _paths(repo, producer)["probe"]
     if not moon_managed:

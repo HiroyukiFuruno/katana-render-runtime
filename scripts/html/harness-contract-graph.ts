@@ -4188,7 +4188,8 @@ function moonCoverageRecipesVerified(
   errors: string[],
 ): void {
   const root = recipes.get("root-test-and-coverage") ?? "";
-  const performance = recipes.get("performance-harness-coverage") ?? "";
+  const performanceWrapper = recipes.get("performance-harness-coverage") ?? "";
+  const performance = recipes.get("performance-harness-coverage-run") ?? "";
   const rootCommand =
     'CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"';
   const rootCommands = root
@@ -4206,6 +4207,8 @@ function moonCoverageRecipesVerified(
   const performanceCommand = (variant: "baseline" | "candidate") =>
     `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-${variant}" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-${variant} -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features ${variant} --locked --profile krr-coverage ${ignoreFilenameRegex} --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${variant}.json"` +
     suffix;
+  const performanceCleanCommand = (variant: "baseline" | "candidate") =>
+    `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-${variant}" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-${variant} -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked`;
   if (!/^COVERAGE_MIN_LINES := env_var_or_default\("COVERAGE_MIN_LINES", "100"\)$/m.test(justfile))
     errors.push("root coverage threshold default differs");
   if (
@@ -4222,6 +4225,13 @@ function moonCoverageRecipesVerified(
     errors.push("root combined coverage producer differs");
   const performanceReports = reportLines(performance);
   if (
+    performanceWrapper.trim() !==
+    "python3 scripts/hooks/run_locked_command.py --performance-coverage"
+  )
+    errors.push("performance coverage lock wrapper differs");
+  if (!/^\[private\]\s*\nperformance-harness-coverage-run:/m.test(justfile))
+    errors.push("performance coverage run recipe is not private");
+  if (
     performanceReports.length !== 2 ||
     ![performanceCommand("baseline"), performanceCommand("candidate")].every((command) =>
       performanceReports.includes(command),
@@ -4232,6 +4242,18 @@ function moonCoverageRecipesVerified(
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+  const expectedPerformanceCommands = [
+    'mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"',
+    'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer performance',
+    performanceCleanCommand("baseline"),
+    performanceCommand("baseline"),
+    performanceCleanCommand("candidate"),
+    performanceCommand("candidate"),
+    'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer performance --producer-exit 0',
+    'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer performance',
+  ];
+  if (performanceCommands.join("\0") !== expectedPerformanceCommands.join("\0"))
+    errors.push("performance coverage producer steps differ");
   const collectionFinish =
     'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer performance --producer-exit 0';
   const collectionValidate =
