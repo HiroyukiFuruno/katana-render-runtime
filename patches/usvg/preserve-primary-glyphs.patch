@@ -1,0 +1,18 @@
+diff --git a/src/text/layout.rs b/src/text/layout.rs
+--- a/src/text/layout.rs
++++ b/src/text/layout.rs
+@@ -1377,7 +1377,13 @@
+             .unwrap_or_default();
+ 
+             let all_matched = fallback_glyphs.iter().all(|g| !g.is_missing());
+-            if all_matched {
++            let same_cluster_boundaries = glyphs.len() == fallback_glyphs.len()
++                && glyphs
++                    .iter()
++                    .zip(&fallback_glyphs)
++                    .all(|(primary, fallback)| primary.byte_idx == fallback.byte_idx);
++            if all_matched && !same_cluster_boundaries {
++                // WHY: 同じbyte境界なら主faceのcluster対応を保ち、異なる場合だけ従来の全置換を使う。
+                 // Replace all glyphs when all of them were matched.
+                 glyphs = fallback_glyphs;
+                 break 'outer;
