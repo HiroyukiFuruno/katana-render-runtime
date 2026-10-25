@@ -7,6 +7,9 @@ use crate::renderer::backends::html_browser::{
     HtmlBrowserError, HtmlBrowserInput, HtmlBrowserOrigin, HtmlBrowserSource, HtmlBrowserViewport,
 };
 
+#[path = "interaction_svg_current_color.rs"]
+mod svg_current_color;
+
 const NO_HORIZONTAL_SCROLL: f32 = 0.0;
 const UNIT_SCROLL_DELTA: f32 = 1.0;
 const STICKY_FRAGMENT_DOCUMENT: &str = r#"<style>
