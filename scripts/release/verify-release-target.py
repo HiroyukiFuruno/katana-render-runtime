@@ -52,6 +52,34 @@ REQUIRED_RELEASE_COMMITS = (
     "ff69082e2d670a795ec18c516a1ba0d214ad7abc",
     "5b1f38392546648b033776ca81b405036fe98f11",
     "838d1652f05d9799f4e0d9b0651a73ef9a880fd8",
+    "8dfc8a98ac6094d26d55669f060d373029e20455",
+    "52f40f603e7e9b94f522d73057d7d7dc4a97cc4c",
+    "a8980ee0be22962581fc6b2b8651d56172e68002",
+    "9a7ca67bf55a3e39ca5f4ca2a85fe7c442c0ee67",
+    "8e0d8da9ed808b5c9685829b3a830faa5e48867d",
+    "a786af868ebe19000ceacd76e33e42957ce59971",
+    "44a50de256a887a20864a8bf76adf4768cc4d39e",
+    "8ff5bf0aac12adb2c3101992308142e637489aa6",
+    "4a28d34d873c225a9438cc7b6d5fb1f78cdf7f82",
+    "863cfa03eac350da77ed3c4c393701002a0f2f81",
+    "d6fb3c838599b4e48f945cc22eeaa5376046a9a7",
+    "095f8bcac4297347eae47a34f72ff100526e1af6",
+    "e804e70f2584c91f7c79937e43ca8e7d804f7642",
+    "91f784ecc99b9e9e249488a64a6255083a32babf",
+    "d0b0cc23c12d59647d882ad8040681243ac81bec",
+    "ff27708e8f9b4adfbc7470b74dea742c4f9362fc",
+    "b57760b6c7de1258d78eba0bad14471a4ef2824c",
+    "f98d9cc9b4c06070ddacf600c9859cfa8ba94a0a",
+    "6eeb2c1e541ed03b95b4274138755d75be767bea",
+    "5ef3b20341f5bbc1e50e5e9ada8dec57375719bb",
+    "8b13f5e195360c7169db821feb807a9379af1c71",
+    "132c069b01f06efa56afbc9b22c7c11be39db08e",
+    "cb45c106d71b6b7ed82d77ca87b5ae7bbc690952",
+    "1de60f4631ca2673c492ef332c075d7d0bd0fb9e",
+    "dedc5ad5653a4f31d4fc1fea94962f094e2823fe",
+    "8fb679c284885145aba9e71eab5fb08eaf4a400d",
+    "23dff6cdeaea7aa71ce903225bfae7c009a7dd64",
+    "fdb6b761868e84162f39989f3635b152728465c6",
 )
 # 公開snapshotが旧版の必須commitを全て含むため、今回のcommitだけを追加確認する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -69,7 +97,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0423_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "355784d76e9ca24506f6b9af04bc456e4ebbd3cdb9a1bad146ac36cbe6a1944f"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "4daec22a0fd56ad8b2c8f22500ced7bc9bcbb314775fdd710e6c228e2cd0f74c"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
