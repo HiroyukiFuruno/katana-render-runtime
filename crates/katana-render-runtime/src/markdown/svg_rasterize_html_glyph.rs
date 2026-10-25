@@ -19,6 +19,8 @@ thread_local! {
     static HTML_FONT_MANAGER: FontMgr = FontMgr::default();
 }
 
+#[path = "svg_rasterize_html_glyph_anchor.rs"]
+mod anchor;
 #[path = "svg_rasterize_html_glyph_baseline.rs"]
 mod baseline;
 #[path = "svg_rasterize_html_glyph_paint.rs"]
@@ -123,10 +125,16 @@ impl<'a> HtmlGlyphRasterizer<'a> {
                 return Ok(Prepared::Unsupported);
             }
         }
-        if let Some(anchor_x) = single_horizontal_alignment(text, &prepared)
-            && let Some(span) = prepared.first_mut()
-        {
-            span.x_alignment = Some(XAlignment { anchor_x });
+        if let Some(anchor_x) = single_horizontal_alignment(text, &prepared) {
+            let layout = anchor::layout_anchor(text);
+            let origin_snap_css_scale = anchor::run_origin_css_scale(text, &prepared);
+            if let Some(span) = prepared.first_mut() {
+                span.x_alignment = Some(XAlignment {
+                    anchor_x,
+                    layout,
+                    origin_snap_css_scale,
+                });
+            }
         }
         Ok(Prepared::Ready(prepared))
     }
@@ -344,6 +352,8 @@ fn solid_fill(span: &usvg::layout::Span) -> Option<(usvg::Color, u8)> {
 #[derive(Clone, Copy)]
 struct XAlignment {
     anchor_x: f32,
+    layout: Option<anchor::LayoutAnchor>,
+    origin_snap_css_scale: Option<f32>,
 }
 
 fn single_horizontal_alignment(text: &usvg::Text, prepared: &[PreparedSpan]) -> Option<f32> {

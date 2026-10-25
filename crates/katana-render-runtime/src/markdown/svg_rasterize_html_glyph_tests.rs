@@ -5,6 +5,9 @@ use resvg::usvg::{self, Node, Options, Tree};
 use std::sync::Arc;
 use tiny_skia::{Pixmap, Transform};
 
+#[path = "svg_rasterize_html_glyph_origin_tests.rs"]
+mod origin_tests;
+
 const FIXTURE_WIDTH: u32 = 160;
 const FIXTURE_HEIGHT: u32 = 80;
 
@@ -14,7 +17,18 @@ fn parse_text(
     weight: u16,
     stroke: bool,
 ) -> Result<(Tree, usize), String> {
-    let svg = fixture_svg(family, weight, stroke);
+    parse_text_content(database, family, weight, stroke, "Ag", "")
+}
+
+fn parse_text_content(
+    database: usvg::fontdb::Database,
+    family: &str,
+    weight: u16,
+    stroke: bool,
+    content: &str,
+    attributes: &str,
+) -> Result<(Tree, usize), String> {
+    let svg = fixture_svg(family, weight, stroke, content, attributes);
     let options = Options {
         fontdb: Arc::new(database),
         ..Options::default()
@@ -35,11 +49,11 @@ fn parse_text(
     Ok((tree, ids.len()))
 }
 
-fn fixture_svg(family: &str, weight: u16, stroke: bool) -> String {
+fn fixture_svg(family: &str, weight: u16, stroke: bool, content: &str, attributes: &str) -> String {
     let stroke = if stroke { r#" stroke="black""# } else { "" };
     format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{FIXTURE_WIDTH}" height="{FIXTURE_HEIGHT}">
-          <text id="run" x="0" y="40" font-family="{family}" font-weight="{weight}" font-size="28" fill="black"{stroke}>Ag</text>
+          <text id="run" x="0" y="40" font-family="{family}" font-weight="{weight}" font-size="28" fill="black"{stroke}{attributes}>{content}</text>
         </svg>"#
     )
 }

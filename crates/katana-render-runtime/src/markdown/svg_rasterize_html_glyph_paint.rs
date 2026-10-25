@@ -2,6 +2,10 @@ use super::{ALPHA_CHANNEL, BLUE_CHANNEL, GREEN_CHANNEL, PreparedSpan, RED_CHANNE
 use skia_safe::{Canvas, Font, FontHinting, Paint, Point as SkiaPoint, Typeface};
 use tiny_skia::Transform;
 
+#[cfg(test)]
+#[path = "svg_rasterize_html_glyph_paint_tests.rs"]
+mod tests;
+
 const IDENTITY_SCALE: f32 = 1.0;
 const IDENTITY_SKEW: f32 = 0.0;
 
@@ -30,7 +34,7 @@ fn draw_identity_glyphs(
     paint: &Paint,
     raster_scale: f32,
 ) -> Result<(), String> {
-    let positions = span
+    let mut positions = span
         .glyphs
         .iter()
         .map(|glyph| {
@@ -38,6 +42,7 @@ fn draw_identity_glyphs(
             SkiaPoint::new(transform.tx, transform.ty)
         })
         .collect::<Vec<_>>();
+    apply_run_origin_x_snap(span, &mut positions, raster_scale);
     canvas.draw_glyphs_at(
         &span.glyph_ids,
         positions.as_slice(),
@@ -46,6 +51,33 @@ fn draw_identity_glyphs(
         paint,
     );
     Ok(())
+}
+
+fn apply_run_origin_x_snap(span: &PreparedSpan, positions: &mut [SkiaPoint], raster_scale: f32) {
+    let Some(first_x) = positions.first().map(|position| position.x) else {
+        return;
+    };
+    let Some(delta) = run_origin_x_delta(span, first_x, raster_scale) else {
+        return;
+    };
+    for position in positions {
+        position.x += delta;
+    }
+}
+
+fn run_origin_x_delta(span: &PreparedSpan, origin_x: f32, raster_scale: f32) -> Option<f32> {
+    let alignment = span.x_alignment?;
+    if alignment.layout.is_some() {
+        return None;
+    }
+    let css_scale = alignment.origin_snap_css_scale?;
+    let device_scale = raster_scale / css_scale;
+    if !origin_x.is_finite() || !device_scale.is_finite() || device_scale <= 0.0 {
+        return None;
+    }
+    let css_origin = origin_x / device_scale;
+    let snapped_origin = super::anchor::trunc_layout_unit(css_origin)?;
+    Some((snapped_origin - css_origin) * device_scale)
 }
 
 fn draw_transformed_glyphs(
@@ -83,19 +115,49 @@ pub(super) fn normalized_transform(
         .post_translate(0.0, span.baseline_shift);
     let mut transform = scale_translation(transform, raster_scale);
     if let Some(alignment) = span.x_alignment {
-        transform.tx = aligned_x(
-            alignment.anchor_x,
-            transform.tx,
-            span.font_size,
-            raster_scale,
-        );
+        transform.tx = aligned_position_x(span, alignment, transform.tx, raster_scale);
     }
     transform
+}
+
+fn aligned_position_x(
+    span: &PreparedSpan,
+    alignment: super::XAlignment,
+    old_x: f32,
+    raster_scale: f32,
+) -> f32 {
+    let Some(layout) = alignment.layout else {
+        return aligned_x(alignment.anchor_x, old_x, span.font_size, raster_scale);
+    };
+    let nominal_size = span.font_size * raster_scale;
+    let Some(effective_size) =
+        super::anchor::paint_size(span.font_size, layout.css_scale, raster_scale)
+    else {
+        return aligned_x(alignment.anchor_x, old_x, span.font_size, raster_scale);
+    };
+    let aligned = aligned_x_with_size(
+        alignment.anchor_x,
+        old_x,
+        nominal_size,
+        effective_size,
+        raster_scale,
+    );
+    aligned + super::anchor::anchor_delta_or_zero(Some(layout), span.font_size, raster_scale)
 }
 
 fn aligned_x(anchor_x: f32, old_x: f32, font_size: f32, raster_scale: f32) -> f32 {
     let nominal_size = font_size * raster_scale;
     let effective_size = super::super::SvgRasterizeOps::effective_html_font_size(nominal_size);
+    aligned_x_with_size(anchor_x, old_x, nominal_size, effective_size, raster_scale)
+}
+
+fn aligned_x_with_size(
+    anchor_x: f32,
+    old_x: f32,
+    nominal_size: f32,
+    effective_size: f32,
+    raster_scale: f32,
+) -> f32 {
     if !nominal_size.is_finite() || nominal_size <= 0.0 || !effective_size.is_finite() {
         return old_x;
     }
@@ -137,8 +199,15 @@ fn text_paint(span: &PreparedSpan) -> Paint {
 }
 
 fn text_font(span: &PreparedSpan, typeface: &Typeface, raster_scale: f32) -> Font {
-    let size =
-        super::super::SvgRasterizeOps::effective_html_font_size(span.font_size * raster_scale);
+    let size = span
+        .x_alignment
+        .and_then(|alignment| alignment.layout)
+        .and_then(|layout| {
+            super::anchor::paint_size(span.font_size, layout.css_scale, raster_scale)
+        })
+        .unwrap_or_else(|| {
+            super::super::SvgRasterizeOps::effective_html_font_size(span.font_size * raster_scale)
+        });
     let mut font = Font::new(typeface.clone(), size);
     font.set_subpixel(true)
         .set_linear_metrics(true)
@@ -146,105 +215,4 @@ fn text_font(span: &PreparedSpan, typeface: &Typeface, raster_scale: f32) -> Fon
         .set_hinting(FontHinting::Normal)
         .set_edging(skia_safe::font::Edging::SubpixelAntiAlias);
     font
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::PreparedSpan;
-    use super::super::uniform_raster_scale;
-    use super::{aligned_x, is_identity_linear, scale_translation, text_font};
-    use skia_safe::{FontMgr, FontStyle};
-    use tiny_skia::Transform;
-
-    const SOURCE_FONT_SIZE: f32 = 14.0;
-    const FRACTIONAL_RASTER_SCALE: f32 = 0.999_974_55;
-    const EXPECTED_EFFECTIVE_SIZE: f32 = 13.99;
-
-    #[test]
-    fn glyph_batching_rejects_non_identity_linear_transforms() {
-        assert!(is_identity_linear(Transform::from_row(
-            1.0, 0.0, 0.0, 1.0, 4.0, 8.0
-        )));
-        assert!(!is_identity_linear(Transform::from_row(
-            1.0, 0.1, 0.0, 1.0, 4.0, 8.0
-        )));
-        assert!(!is_identity_linear(Transform::from_row(
-            1.1, 0.0, 0.0, 1.0, 4.0, 8.0
-        )));
-        assert!(!is_identity_linear(Transform::from_row(
-            1.0, 0.0, 0.0, -1.0, 4.0, 8.0
-        )));
-    }
-
-    #[test]
-    fn uniform_scale_preserves_linear_parts_and_scales_baseline_translation() {
-        let transform = Transform::from_row(1.0, 0.2, -0.1, 1.0, 3.0, 10.0);
-        let scaled = scale_translation(transform, 2.0);
-
-        assert_eq!(scaled.sx, transform.sx);
-        assert_eq!(scaled.kx, transform.kx);
-        assert_eq!(scaled.ky, transform.ky);
-        assert_eq!(scaled.sy, transform.sy);
-        assert_eq!(scaled.tx, 6.0);
-        assert_eq!(scaled.ty, 20.0);
-    }
-
-    #[test]
-    fn uniform_scale_does_not_snap_near_identity_or_general_transforms() {
-        assert_eq!(
-            uniform_raster_scale(Transform::from_row(1.0001, 0.0, 0.0, 1.0001, 0.0, 0.0)),
-            1.0001
-        );
-        assert_eq!(
-            uniform_raster_scale(Transform::from_row(2.0, 0.0, 0.0, 3.0, 0.0, 0.0)),
-            1.0
-        );
-        assert_eq!(
-            uniform_raster_scale(Transform::from_row(2.0, 0.1, 0.0, 2.0, 0.0, 0.0)),
-            1.0
-        );
-    }
-
-    #[test]
-    fn paint_font_uses_effective_scaled_size_before_skia_font_creation() -> Result<(), String> {
-        let typeface = FontMgr::default()
-            .legacy_make_typeface(Some("Trebuchet MS"), FontStyle::normal())
-            .ok_or("Trebuchet MS typeface unavailable")?;
-        let span = PreparedSpan {
-            fill: [0, 0, 0, 255],
-            font: resvg::usvg::fontdb::ID::default(),
-            glyphs: Vec::new(),
-            glyph_ids: Vec::new(),
-            upem: 2048.0,
-            font_size: SOURCE_FONT_SIZE,
-            baseline_shift: 0.0,
-            x_alignment: None,
-        };
-
-        let fractional = text_font(&span, &typeface, FRACTIONAL_RASTER_SCALE);
-        let identity = text_font(&span, &typeface, 1.0);
-
-        assert_eq!(fractional.size(), EXPECTED_EFFECTIVE_SIZE);
-        assert_eq!(identity.size(), SOURCE_FONT_SIZE);
-        Ok(())
-    }
-
-    #[test]
-    fn aligned_x_preserves_identity_and_anchor() {
-        assert_eq!(aligned_x(12.0, 18.0, 14.0, 1.0), 18.0);
-        assert_eq!(aligned_x(12.0, 40.0, 14.0, 2.0), 40.0);
-        let scaled_x = 20.0 * FRACTIONAL_RASTER_SCALE;
-        let expected = 12.0 * FRACTIONAL_RASTER_SCALE
-            + (scaled_x - 12.0 * FRACTIONAL_RASTER_SCALE)
-                * (EXPECTED_EFFECTIVE_SIZE / (14.0 * FRACTIONAL_RASTER_SCALE));
-        assert!(
-            (aligned_x(12.0, scaled_x, 14.0, FRACTIONAL_RASTER_SCALE) - expected).abs() < 0.0001
-        );
-    }
-
-    #[test]
-    fn aligned_x_keeps_invalid_inputs_unchanged() {
-        assert_eq!(aligned_x(12.0, 18.0, 0.0, 2.0), 18.0);
-        assert_eq!(aligned_x(12.0, 18.0, f32::NAN, 2.0), 18.0);
-    }
 }
