@@ -22,6 +22,8 @@ R2763/R2770/R2771/R2772は現行commit `9feed535`のperformance producer限定�
 
 R2775で実運用MoonのCAS出力・read integrityを両trueへ接続し、欠落/false拒否と既存inputSha256によるworkspace束縛を検証した。契約検査、関連Bun97件、source-static-foundationが全exit0・source前後一致。R2774はCLI変更に伴うterminal producer固定SHA不一致でexit1、後続をスキップした失敗として保持。修正では既存出力schemaを保ち、実ファイルSHA pinを更新した。実CASのhit/復元/改ざん検証はこの静的成功とは別に未完了。
 
+R2672の診断未達25件はC4 12、Ishikawa/Wardley各4、Kanban/XY各2、ZenUML 1。これは旧R1511入力の再rasterで、現行generatorの正式合否件数ではない。追加の読み取り照合ではC4見出しは公式/候補のSVGとPNG双方にあり、ROI crop差から「候補だけ余分」とした推定を撤回した。Ishikawaも旧入力marker欠落を現行generatorの原因へ転用しない。現行sourceを使うfresh CLI→SVG→PNG/frameの正式117件を引き続き必須とする。
+
 R2747でperformance harnessの標準LLVM line coverageがbaseline982/982・candidate989/989の100%になり、既存strict producer validatorもvalid:true・refreshed:falseで成功した。AST・重複・両arm Clippy・実collectionが全exit0、source前後一致。証跡は `tmp/quality/native-cache-exact-catalog-parser-gap-r2747/result.json`、retained-outputs、strict-producer-acceptanceのraw。これはperformance producer限定で、root/full aggregate・cache hit・公開の完了ではない。R2743の標準Moon静的DAG・Python context/aggregate・関連Bun契約も全exit0で保持する。
 
 残1行は単体と実CLIのparse_operation_planが別々の行を欠き、LLVMが被覆行の和集合ではなくinstantiation間の最大被覆数を合算するため残っていた。R2745の既存binary/profdataに対するreport-only診断で各21行中20行を確認し、実CLIのCatalog viewport不一致回帰を追加した。高さ欠落・metadata追加だけでは総数が変わらなかったR2743/R2744と、共通helperの引数型不整合でLint101・重いcollection未実行だったR2746を保持する。型修正後R2747で厳格な集計のまま100%になった。入力・画像・採点閾値・計測対象の追加除外は行っていない。
