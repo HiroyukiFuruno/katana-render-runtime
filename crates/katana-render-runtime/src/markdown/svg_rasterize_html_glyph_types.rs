@@ -27,6 +27,7 @@ pub(super) struct CachedFace {
     pub(super) upem: f32,
     pub(super) ascent: f32,
     pub(super) descent: f32,
+    pub(super) x_height: Option<f32>,
 }
 
 pub(super) struct SpanInput {
@@ -43,4 +44,5 @@ pub(super) struct FaceMetadata {
     pub(super) unsupported: bool,
     pub(super) ascent: f32,
     pub(super) descent: f32,
+    pub(super) x_height: Option<f32>,
 }

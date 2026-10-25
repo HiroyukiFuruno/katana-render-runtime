@@ -1,16 +1,26 @@
 use super::{CachedFace, FaceMetadata};
-use resvg::usvg::{self, AlignmentBaseline, DominantBaseline, TextFlow};
+use resvg::usvg::{self, TextFlow};
 
 #[path = "svg_rasterize_html_glyph_baseline_primary.rs"]
 mod primary;
 pub(super) use primary::resolved_policy;
+#[path = "svg_rasterize_html_glyph_baseline_kind.rs"]
+mod kind;
+#[path = "svg_rasterize_html_glyph_baseline_middle.rs"]
+mod middle;
 
 const HALF_METRIC: f32 = 0.5;
 
-#[derive(Clone, Copy, Debug)]
+fn is_middle(kind: PolicyKind) -> bool {
+    matches!(kind, PolicyKind::Middle | PolicyKind::AlignmentMiddle)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PolicyKind {
     Mathematical,
     Central,
+    Middle,
+    AlignmentMiddle,
 }
 
 #[derive(Clone, Copy)]
@@ -18,6 +28,7 @@ pub(super) struct Policy {
     kind: PolicyKind,
     font_size: f32,
     css_scale: Option<f32>,
+    /* WHY: Middleは主fontの解決済み補正がある場合だけ描画へ渡す。 */
     primary_shift: Option<f32>,
 }
 
@@ -26,6 +37,7 @@ pub(super) fn uniform_policy(text: &usvg::Text) -> Option<Policy> {
         return None;
     }
     let css_scale = super::anchor::uniform_css_scale(text.abs_transform());
+    let middle_supported = css_scale.is_some() && middle::layout_supported(text);
     let mut policy = None;
     for chunk in text.chunks() {
         if !matches!(chunk.text_flow(), TextFlow::Linear) {
@@ -33,13 +45,13 @@ pub(super) fn uniform_policy(text: &usvg::Text) -> Option<Policy> {
         }
         for span in chunk.spans() {
             let current = Policy {
-                kind: span_kind(span)?,
+                kind: kind::span_kind(span, middle_supported)?,
                 font_size: span.font_size().get(),
                 css_scale,
                 primary_shift: None,
             };
             if policy.is_some_and(|value: Policy| {
-                value.font_size != current.font_size || !same_kind(value.kind, current.kind)
+                value.font_size != current.font_size || value.kind != current.kind
             }) {
                 return None;
             }
@@ -47,33 +59,6 @@ pub(super) fn uniform_policy(text: &usvg::Text) -> Option<Policy> {
         }
     }
     policy
-}
-
-fn same_kind(left: PolicyKind, right: PolicyKind) -> bool {
-    matches!(
-        (left, right),
-        (PolicyKind::Mathematical, PolicyKind::Mathematical)
-            | (PolicyKind::Central, PolicyKind::Central)
-    )
-}
-
-fn span_kind(span: &usvg::TextSpan) -> Option<PolicyKind> {
-    let baseline = span.alignment_baseline();
-    if !matches!(
-        baseline,
-        AlignmentBaseline::Auto | AlignmentBaseline::Baseline
-    ) {
-        return match baseline {
-            AlignmentBaseline::Mathematical => Some(PolicyKind::Mathematical),
-            AlignmentBaseline::Central => Some(PolicyKind::Central),
-            _ => None,
-        };
-    }
-    match span.dominant_baseline() {
-        DominantBaseline::Mathematical => Some(PolicyKind::Mathematical),
-        DominantBaseline::Central => Some(PolicyKind::Central),
-        _ => None,
-    }
 }
 
 pub(super) fn glyph_shift(
@@ -85,6 +70,10 @@ pub(super) fn glyph_shift(
     if let Some(shift) = policy.primary_shift {
         return shift;
     }
+    if is_middle(policy.kind) {
+        /* WHY: Middleは解決済み主font補正を持つpolicyだけが適用される。 */
+        return 0.0;
+    }
     metrics_shift(
         database,
         face_id,
@@ -93,6 +82,7 @@ pub(super) fn glyph_shift(
             unsupported: false,
             ascent: face.ascent,
             descent: face.descent,
+            x_height: face.x_height,
         },
         policy,
     )
@@ -104,12 +94,16 @@ fn metrics_shift(
     face: &FaceMetadata,
     policy: Policy,
 ) -> f32 {
+    if is_middle(policy.kind) {
+        return 0.0;
+    }
     let scale = policy.font_size / face.upem;
     let ascent = face.ascent * scale;
     let descent = face.descent * scale;
     let raw_shift = match policy.kind {
         PolicyKind::Mathematical => ascent * HALF_METRIC,
         PolicyKind::Central => ascent - (ascent - descent) * HALF_METRIC,
+        PolicyKind::Middle | PolicyKind::AlignmentMiddle => return 0.0,
     };
     if let Some(target_local) = policy
         .css_scale
@@ -127,6 +121,9 @@ fn css_baseline_shift(
     policy: Policy,
     css_scale: f32,
 ) -> Option<f32> {
+    if is_middle(policy.kind) {
+        return None;
+    }
     let css_font_size = super::anchor::paint_size(policy.font_size, css_scale, css_scale)?;
     let metric_scale = css_font_size / face.upem;
     let ascent = face.ascent * metric_scale;
@@ -140,6 +137,7 @@ fn css_baseline_shift(
     let baseline_from_top = match policy.kind {
         PolicyKind::Mathematical => ascent_from_top(layout_ascent),
         PolicyKind::Central => central_from_top(layout_ascent, layout_descent),
+        PolicyKind::Middle | PolicyKind::AlignmentMiddle => return None,
     };
     /* WHY: line-topの丸めはCSS座標で行い、拡大前の半pixel丸めによるbaselineのずれを避ける。 */
     let target_css = layout_ascent + (HALF_METRIC - baseline_from_top).floor();
@@ -162,6 +160,9 @@ fn legacy_glyph_shift(
     descent: f32,
     raw_shift: f32,
 ) -> f32 {
+    if is_middle(policy.kind) {
+        return 0.0;
+    }
     let Some(layout_ascent) = crate::markdown::svg_rasterize::text_shaping::svg_dom_layout_ascent(
         database.face(face_id),
         ascent,
@@ -173,6 +174,7 @@ fn legacy_glyph_shift(
     let blink_shift = match policy.kind {
         PolicyKind::Mathematical => layout_ascent * HALF_METRIC,
         PolicyKind::Central => (layout_ascent - layout_descent) * HALF_METRIC,
+        PolicyKind::Middle | PolicyKind::AlignmentMiddle => return 0.0,
     };
     blink_shift - raw_shift
 }
@@ -184,3 +186,7 @@ mod tests;
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_html_glyph_baseline_origin_tests.rs"]
 mod origin_tests;
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_glyph_baseline_alignment_tests.rs"]
+mod alignment_tests;

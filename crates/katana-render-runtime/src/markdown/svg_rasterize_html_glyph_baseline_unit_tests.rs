@@ -75,6 +75,44 @@ fn baseline_policy_is_conservative_for_nonuniform_text() -> Result<(), String> {
 }
 
 #[test]
+fn middle_policy_rejects_missing_leading_dy_and_unsupported_transforms() -> Result<(), String> {
+    for body in [
+        r#"<text id="run" dominant-baseline="middle" x="0" y="20">AB</text>"#,
+        r#"<text id="run" dominant-baseline="middle" dy="0" x="0" y="20">AB</text>"#,
+        r#"<text id="run" dominant-baseline="middle" dy="0 1" x="0" y="20">AB</text>"#,
+        r#"<text id="run" transform="scale(2 1)" dominant-baseline="middle" dy="1" x="0" y="20">AB</text>"#,
+    ] {
+        assert!(parse_policy(body)?.is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn middle_policy_preserves_math_and_central_leading_dy_policies() -> Result<(), String> {
+    let supported = [
+        (
+            r#"<text id="run" dominant-baseline="middle" dy="1" x="0" y="20">AB</text>"#,
+            PolicyKind::Middle,
+        ),
+        (
+            r#"<text id="run" dominant-baseline="mathematical" dy="1" x="0" y="20">AB</text>"#,
+            PolicyKind::Mathematical,
+        ),
+        (
+            r#"<text id="run" dominant-baseline="central" dy="1" x="0" y="20">AB</text>"#,
+            PolicyKind::Central,
+        ),
+    ];
+    for (body, expected) in supported {
+        assert_eq!(
+            parse_policy(body)?.map(|policy| policy.kind),
+            Some(expected)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn baseline_policy_uses_legacy_metrics_for_nonuniform_or_invalid_scale() -> Result<(), String> {
     let policy = parse_policy(
         r#"<text id="run" transform="scale(2 1)" dominant-baseline="mathematical" x="0" y="20">A</text>"#,

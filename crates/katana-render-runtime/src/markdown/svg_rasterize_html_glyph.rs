@@ -237,6 +237,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             upem: metadata.upem,
             ascent: metadata.ascent,
             descent: metadata.descent,
+            x_height: metadata.x_height,
         };
         self.faces.borrow_mut().insert(id, Some(face.clone()));
         Ok(Some(face))
@@ -302,6 +303,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             unsupported: variable || color_or_bitmap,
             ascent: metrics.ascent.round(),
             descent: metrics.descent.round(),
+            x_height: metrics.x_height,
         })
     }
 

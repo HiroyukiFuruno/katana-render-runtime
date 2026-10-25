@@ -218,6 +218,10 @@ fn text_font(span: &PreparedSpan, typeface: &Typeface, raster_scale: f32) -> Fon
         .unwrap_or_else(|| {
             super::super::SvgRasterizeOps::effective_html_font_size(span.font_size * raster_scale)
         });
+    font_for_face(typeface, size)
+}
+
+pub(super) fn font_for_face(typeface: &Typeface, size: f32) -> Font {
     let mut font = Font::new(typeface.clone(), size);
     font.set_subpixel(true)
         .set_linear_metrics(true)
