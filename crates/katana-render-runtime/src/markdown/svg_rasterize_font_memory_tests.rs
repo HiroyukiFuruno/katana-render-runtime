@@ -4,6 +4,10 @@ use super::super::font::{
 use super::super::{RasterTarget, SvgRasterizeOps};
 use resvg::usvg;
 
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_font_memory_stages_tests.rs"]
+mod stages;
+
 #[test]
 fn cold_html_font_loading_keeps_system_font_bytes_out_of_the_process_cache()
 -> Result<(), Box<dyn std::error::Error>> {

@@ -5,11 +5,12 @@ use super::{SvgMeasurementStats, TextMeasurementDiagnosticStats};
 mod face_metric_detail;
 use face_metric_detail::{FACE_DETAIL_COUNT, face_detail_metrics};
 
-const METRICS_PER_GROUP: usize = 8;
-const BASE_METRIC_COUNT: usize = 16;
+const LEGACY_METRICS_PER_GROUP: usize = 8;
+const TIMING_METRICS_PER_GROUP: usize = 10;
+const BASE_METRIC_COUNT: usize = LEGACY_METRICS_PER_GROUP + TIMING_METRICS_PER_GROUP;
 const LINE_METRIC_DETAIL_COUNT: usize = 7;
 const LAYOUT_SVG_METRIC_COUNT: usize =
-    BASE_METRIC_COUNT + METRICS_PER_GROUP + LINE_METRIC_DETAIL_COUNT + FACE_DETAIL_COUNT;
+    BASE_METRIC_COUNT + LEGACY_METRICS_PER_GROUP + LINE_METRIC_DETAIL_COUNT + FACE_DETAIL_COUNT;
 const NANOS_PER_MICROSECOND: usize = 1_000;
 
 pub(super) fn layout_svg_metrics(
@@ -26,12 +27,13 @@ pub(super) fn layout_svg_metrics(
     std::array::from_fn(|index| {
         if index < BASE_METRIC_COUNT {
             base[index]
-        } else if index < BASE_METRIC_COUNT + METRICS_PER_GROUP {
+        } else if index < BASE_METRIC_COUNT + LEGACY_METRICS_PER_GROUP {
             svg[index - BASE_METRIC_COUNT]
-        } else if index < BASE_METRIC_COUNT + METRICS_PER_GROUP + LINE_METRIC_DETAIL_COUNT {
-            line_detail[index - BASE_METRIC_COUNT - METRICS_PER_GROUP]
+        } else if index < BASE_METRIC_COUNT + LEGACY_METRICS_PER_GROUP + LINE_METRIC_DETAIL_COUNT {
+            line_detail[index - BASE_METRIC_COUNT - LEGACY_METRICS_PER_GROUP]
         } else {
-            face_detail[index - BASE_METRIC_COUNT - METRICS_PER_GROUP - LINE_METRIC_DETAIL_COUNT]
+            face_detail
+                [index - BASE_METRIC_COUNT - LEGACY_METRICS_PER_GROUP - LINE_METRIC_DETAIL_COUNT]
         }
     })
 }
@@ -45,10 +47,10 @@ fn base_layout_svg_metrics(
     let legacy = legacy_layout_svg_metrics(rendered, flow_before, flow_after, text_stats);
     let timing = timing_metrics(text_stats);
     std::array::from_fn(|index| {
-        if index < METRICS_PER_GROUP {
+        if index < LEGACY_METRICS_PER_GROUP {
             legacy[index]
         } else {
-            timing[index - METRICS_PER_GROUP]
+            timing[index - LEGACY_METRICS_PER_GROUP]
         }
     })
 }
@@ -58,7 +60,7 @@ fn legacy_layout_svg_metrics(
     flow_before: (usize, usize),
     flow_after: (usize, usize),
     text_stats: TextMeasurementDiagnosticStats,
-) -> [(&'static str, usize); METRICS_PER_GROUP] {
+) -> [(&'static str, usize); LEGACY_METRICS_PER_GROUP] {
     [
         ("svg_bytes", rendered.svg.len()),
         ("text_width_lookups", text_stats.lookups),
@@ -79,7 +81,7 @@ fn legacy_layout_svg_metrics(
 
 fn timing_metrics(
     text_stats: TextMeasurementDiagnosticStats,
-) -> [(&'static str, usize); METRICS_PER_GROUP] {
+) -> [(&'static str, usize); TIMING_METRICS_PER_GROUP] {
     [
         ("css_style_calls", text_stats.style_calls),
         ("css_style_us", micros(text_stats.style_ns)),
@@ -89,12 +91,17 @@ fn timing_metrics(
         ("text_total_us", micros(text_stats.text_total_ns)),
         ("wrap_calls", text_stats.wrap_calls),
         ("wrap_us", micros(text_stats.wrap_ns)),
+        ("text_width_preparation_calls", text_stats.preparation_calls),
+        (
+            "text_width_preparation_us",
+            micros(text_stats.preparation_ns),
+        ),
     ]
 }
 
 fn svg_measurement_metrics(
     svg_stats: SvgMeasurementStats,
-) -> [(&'static str, usize); METRICS_PER_GROUP] {
+) -> [(&'static str, usize); LEGACY_METRICS_PER_GROUP] {
     [
         ("line_metric_calls", svg_stats.line_calls),
         ("line_metric_hits", svg_stats.line_hits),

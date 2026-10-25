@@ -10,8 +10,9 @@ mod metrics;
 mod timing;
 
 pub(super) use timing::{
-    record_style_timing, record_taffy_timing, record_text_total_timing, record_wrap_timing,
-    start_style_timing, start_taffy_timing, start_text_total_timing, start_wrap_timing,
+    record_preparation_timing, record_style_timing, record_taffy_timing, record_text_total_timing,
+    record_wrap_timing, start_preparation_timing, start_style_timing, start_taffy_timing,
+    start_text_total_timing, start_wrap_timing,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -21,6 +22,8 @@ pub(super) struct TextMeasurementDiagnosticStats {
     pub(super) misses: usize,
     pub(super) measured_calls: usize,
     pub(super) measured_ns: usize,
+    pub(super) preparation_calls: usize,
+    pub(super) preparation_ns: usize,
     pub(super) style_calls: usize,
     pub(super) style_ns: usize,
     pub(super) taffy_calls: usize,

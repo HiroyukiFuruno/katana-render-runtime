@@ -1,7 +1,8 @@
 use super::document::text_display_columns;
 use super::style::{CssStyle, CssTextSpacingTrim};
 use super::text_measurement_diagnostic::{
-    record_lookup, record_text_total_timing, start_measurement, start_text_total_timing,
+    record_lookup, record_preparation_timing, record_text_total_timing, start_measurement,
+    start_preparation_timing, start_text_total_timing,
 };
 use crate::markdown::svg_rasterize::{HtmlTextMeasurementToken, SvgRasterizeOps, TextSpacingTrim};
 use sha2::{Digest, Sha256};
@@ -95,6 +96,7 @@ fn text_width_body(text: &str, style: &CssStyle) -> f32 {
 }
 
 fn text_width_after_cache_miss(text: &str, style: &CssStyle, key: TextMeasurementKey) -> f32 {
+    let preparation_started = start_preparation_timing();
     let prepared = SvgRasterizeOps::prepare_html_text_measurement_with_trim(
         text,
         &style.font_family,
@@ -108,6 +110,7 @@ fn text_width_after_cache_miss(text: &str, style: &CssStyle, key: TextMeasuremen
         },
     );
     let token = prepared.token();
+    record_preparation_timing(preparation_started);
     if let Some(width) = persistent_width(&key, token) {
         record_lookup(false, None);
         cache_ephemeral_width(key, width);

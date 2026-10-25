@@ -1,6 +1,19 @@
 use super::{ACTIVE, TextMeasurementDiagnosticStats};
 use std::time::Instant;
 
+pub(in crate::renderer::backends::html_interactive) fn start_preparation_timing() -> Option<Instant>
+{
+    ACTIVE.with(|active| active.borrow().is_some().then(Instant::now))
+}
+
+pub(in crate::renderer::backends::html_interactive) fn record_preparation_timing(
+    started: Option<Instant>,
+) {
+    record_timing(started, |stats| {
+        (&mut stats.preparation_calls, &mut stats.preparation_ns)
+    });
+}
+
 pub(in crate::renderer::backends::html_interactive) fn start_style_timing() -> Option<Instant> {
     ACTIVE.with(|active| active.borrow().is_some().then(Instant::now))
 }
