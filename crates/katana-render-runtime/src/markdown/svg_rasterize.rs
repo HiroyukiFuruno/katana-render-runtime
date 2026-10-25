@@ -4,6 +4,15 @@ Returns the result as raw bytes compatible with egui's `ColorImage`. */
 
 use resvg::usvg;
 
+pub(super) fn escape_xml_attribute(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 #[path = "svg_rasterize_composite.rs"]
 mod composite;
 #[path = "svg_rasterize_font.rs"]

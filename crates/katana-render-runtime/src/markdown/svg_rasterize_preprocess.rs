@@ -8,6 +8,8 @@ mod marker;
 mod shadow;
 #[path = "svg_rasterize_preprocess_source_edits.rs"]
 mod source_edits;
+#[path = "svg_rasterize_preprocess_style_prefix.rs"]
+mod style_prefix;
 
 const LIGHT_DARK_FUNCTION: &str = "light-dark(";
 const FOREIGN_OBJECT_LOCAL_NAME: &str = "foreignObject";
@@ -16,7 +18,10 @@ const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
 pub(super) fn preprocess_for_rasterizer(svg_text: &str) -> String {
     let with_xml_entities = normalize_html_entities_for_xml(svg_text);
     let without_foreign_objects = strip_foreign_objects(&with_xml_entities);
-    let with_resolved_colors = resolve_light_dark_functions(&without_foreign_objects);
+    let with_normalized_styles =
+        style_prefix::normalize_inline_style_prefixes(&without_foreign_objects)
+            .unwrap_or(without_foreign_objects);
+    let with_resolved_colors = resolve_light_dark_functions(&with_normalized_styles);
     let with_normalized_shadows = shadow::normalize_filter_shadow_colors(&with_resolved_colors);
     let with_normalized_markers = marker::normalize_marker_selectors(with_normalized_shadows);
     geometry::materialize_geometry_properties(with_normalized_markers)

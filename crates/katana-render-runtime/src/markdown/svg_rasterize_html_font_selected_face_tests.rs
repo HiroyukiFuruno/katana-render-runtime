@@ -4,6 +4,9 @@ use crate::markdown::svg_rasterize::{SvgRasterizeOps, font::html::raster_observe
 mod fixture;
 use fixture::Fixture;
 use std::cell::RefCell;
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_font_selected_face_inline_style_tests.rs"]
+mod inline_style;
 #[path = "svg_rasterize_html_font_selected_face_mutation_tests.rs"]
 mod mutation;
 #[path = "svg_rasterize_html_font_selected_face_scenario_tests.rs"]

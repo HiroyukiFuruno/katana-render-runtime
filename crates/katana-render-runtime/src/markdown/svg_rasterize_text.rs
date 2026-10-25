@@ -8,9 +8,11 @@ use std::sync::Arc;
 
 #[path = "svg_rasterize_text_width_fallback.rs"]
 mod width_fallback;
+#[cfg(test)]
+use super::escape_xml_attribute;
 use width_fallback::fallback_text_width;
 #[cfg(test)]
-use width_fallback::{canonical_svg_font_family, escape_xml_attribute, escape_xml_text};
+use width_fallback::{canonical_svg_font_family, escape_xml_text};
 
 pub(super) struct HtmlTextMeasure<'a> {
     font_family: &'a str,

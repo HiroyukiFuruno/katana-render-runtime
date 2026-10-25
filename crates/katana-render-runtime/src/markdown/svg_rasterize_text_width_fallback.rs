@@ -1,3 +1,4 @@
+use super::super::escape_xml_attribute;
 use super::super::font::html_rasterizer_options;
 use super::SvgRasterizeError;
 use resvg::usvg;
@@ -50,12 +51,6 @@ pub(super) fn canonical_svg_font_family(value: &str) -> String {
     {
         value.to_string()
     }
-}
-
-pub(super) fn escape_xml_attribute(value: &str) -> String {
-    escape_xml_text(value)
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
 }
 
 pub(super) fn escape_xml_text(value: &str) -> String {
