@@ -5,6 +5,8 @@
 /rust_out
 /*.profraw
 tmp
+# 実ブラウザ検証の入力・画像は証跡として保持し、公開ソースへ混入させない。
+/output/playwright/
 .katana-krr-browser-*.html
 **/*.rs.bk
 Cargo.lock.bak

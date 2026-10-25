@@ -34,6 +34,14 @@ Issue #106はChrome描画・操作互換性と旧#107の永続化契約を所有
 
 ### HTML文字描画の候補評価
 
+#### 2026-10-23: 共通文字ラスタ修正の実装境界
+
+公開Skiaの全SVG置換はR1560で105図中82図が悪化したため採用しない。SkiaSVGには中央揃え時に累積`dy`をY方向のanchor補正へ混入する処理があり、限定的な等価変換ではR1566のフローチャート英日・横向きブロックが99以上へ改善した。しかしmultiply等の既存合成やdominant-baselineにも差が残る。正解入力・参照PNG・採点条件は変更しない。
+
+次の製品候補は、既存usvgの実glyph ID・物理font data/TTC index・確定済み配置をそのまま公開`skia-safe`のglyph描画APIへ渡し、形状・順序・clip・blendは既存compositorに保持する。SkiaSVGで再shapeしない。対象はstatic font、solid fill、stroke/装飾なしの通常文字へ限定し、variable font・色付きglyph・不明font・非対応paintは既存resvg経路を維持する。描画開始前にText全体の対応可否を確認し、途中まで描いた後にfallbackしない。予期しない失敗はエラーとして伝播する。
+
+公開SVG APIのhost非依存経路は変更せず、HTML専用入口だけでglyph rendererを渡す。font/typefaceはrender単位で共有し、glyphごとのfont file読み直しやfont DB全走査を避ける。surfaceは既存frame上限・文字boundsで制限し、RGBA順序とpremultiplied alphaを明示する。既存画像との無劣化、117図99以上、HTML84と全実font一致、初回/再表示/resizeの表示時間とRSS非劣化、3対象OSのビルドを満たしてから採用を確定する。
+
 現在のSVG→TinySkiaでは、実Chromeと同一font/文字位置でもglyphの描画差が残る。Skia CPU glyph描画をignoredの独立prototypeで評価する。製品採用は全18画像と原資料の各99以上、既存品質、3対象OSの配布可能性を確認して判断する。限定画像の成功で採用を確定しない。
 
 採用する場合はfontdbが選択した実fileとTTC index、variation、Harfrustのglyph/GPOSを共有する。SVGのtextごとに元位置へglyph画像を置き、親のclip/opacity/transformと描画順を維持する。全文字を取り除いて最後に重ねる方式は採用しない。tspanの属性継承、文字間隔、dx、textLength、装飾、device scaleを保持し、画像allocationとrender-scoped cacheを上限内に制限する。最新互換依存を評価し、古い取得可能版へ固定するために対象OSや品質条件を下げない。
@@ -48,6 +56,14 @@ HTML専用候補はrasterize_html_svg境界へ限定し、一般SVGの既存出�
 ユーザー承認により先行段階#109は各画像90以上、最終#110は各画像99以上とし、親#106は最終達成までopenを維持する。両段階とも性能劣化は不可であり、旧95点という総合表記から非劣化達成を推定しない。
 
 ## ライブラリ委譲と再利用の検証契約
+
+### 2026-10-24: HTML生成文字と埋め込みSVG文字の担当分離
+
+R2174/R2175では既存resvg文字経路のHTML84画像がすべて90以上だった。一方、Skia FontMgrの初回取得にはR2165で約0.019秒を観測した。画像だけの診断で採用を認定せず、HTML serializer自身が生成した文字に限り既存resvgへ委譲する候補を実装する。Mermaid等の埋め込みSVGは現在のSkia経路を維持し、入力種別を画像スコアから推測して切り替えない。
+
+由来はclipとは独立したprivate sidecarに保持する。生成したtextのIDとmarkup SHAを同時記録し、入力内・parsed tree内の一意性と完全一致を検証する。prefixだけでは信用せず、衝突・変更・ID移動は担当分離の対象外として従来Skia経路を維持する。画像とレイアウトを変えずにIDだけを付ける。objectBoundingBox等で既存compositor全体がresvgへ委譲する場合は個別Skia担当が作動したと報告しない。
+
+採用前にHTML/埋め込みSVGの実担当・font証明、全117画像・HTML84と私有全領域、初回/再表示/resizeの時間とRSSを再評価する。resvg側のlayout済みfont情報だけを追加の実paint証明と偽らず、観測範囲と未証明部分を分ける。Skia fork、正解画像・閾値の変更、ユーザー向け設定追加は行わない。
 
 文字整形・フォント表解析・metrics計算は既存ライブラリへ委譲する。委譲の確認は呼出先だけで終わらせず、KRRが所有するhandle、ライブラリ内の共有table/metrics、render scopeの寿命、無効化条件まで追跡する。独自の計測アルゴリズムを追加する前に、既存ライブラリの再利用機能と実際の呼出経路を検証する。
 
