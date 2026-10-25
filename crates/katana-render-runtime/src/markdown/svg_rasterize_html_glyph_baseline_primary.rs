@@ -3,6 +3,9 @@ use crate::markdown::svg_rasterize::{
     html_glyph::HtmlGlyphRasterizer, text_shaping::loaded_html_font,
 };
 use resvg::usvg;
+use skrifa::{FontRef, Tag};
+
+const BASE_TABLE_TAG: Tag = Tag::from_be_bytes(*b"BASE");
 
 pub(in super::super) fn resolved_policy(
     rasterizer: &HtmlGlyphRasterizer<'_>,
@@ -14,6 +17,9 @@ pub(in super::super) fn resolved_policy(
     if super::is_middle(policy.kind) {
         return resolve_middle_policy(rasterizer, text, policy);
     }
+    if policy.kind == super::PolicyKind::Hanging {
+        return resolve_hanging_policy(rasterizer, text, policy);
+    }
     let Some((id, metadata)) = primary_face_metadata(rasterizer, text)? else {
         return Ok(Some(policy));
     };
@@ -22,6 +28,33 @@ pub(in super::super) fn resolved_policy(
         policy.primary_shift = Some(metrics_shift(rasterizer.database, id, &metadata, policy));
     }
     Ok(Some(policy))
+}
+
+fn resolve_hanging_policy(
+    rasterizer: &HtmlGlyphRasterizer<'_>,
+    text: &usvg::Text,
+    mut policy: Policy,
+) -> Result<Option<Policy>, String> {
+    let Some((id, metadata)) = primary_face_metadata(rasterizer, text)? else {
+        return Ok(None);
+    };
+    if metadata.unsupported || !has_known_missing_base_table(rasterizer.database, id) {
+        return Ok(None);
+    }
+    /* WHY: usvgのspan baselineは主font由来なので、fallback glyphにも同じCSS補正を使う。 */
+    policy.primary_shift = Some(metrics_shift(rasterizer.database, id, &metadata, policy));
+    Ok(Some(policy))
+}
+
+fn has_known_missing_base_table(database: &usvg::fontdb::Database, id: usvg::fontdb::ID) -> bool {
+    database
+        .with_face_data(id, |bytes, index| {
+            FontRef::from_index(bytes, index)
+                .ok()
+                .map(|font| font.table_data(BASE_TABLE_TAG).is_none())
+        })
+        .flatten()
+        .unwrap_or(false)
 }
 
 fn resolve_middle_policy(

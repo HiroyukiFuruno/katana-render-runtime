@@ -17,6 +17,7 @@ pub(super) fn span_kind(span: &TextSpan, middle_supported: bool) -> Option<Polic
     match span.dominant_baseline() {
         DominantBaseline::Mathematical => Some(PolicyKind::Mathematical),
         DominantBaseline::Central => Some(PolicyKind::Central),
+        DominantBaseline::Hanging => Some(PolicyKind::Hanging),
         DominantBaseline::Middle if middle_supported => Some(PolicyKind::Middle),
         _ => None,
     }

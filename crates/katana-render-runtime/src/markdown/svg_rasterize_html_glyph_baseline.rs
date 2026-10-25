@@ -1,5 +1,5 @@
 use super::{CachedFace, FaceMetadata};
-use resvg::usvg::{self, TextFlow};
+use resvg::usvg;
 
 #[path = "svg_rasterize_html_glyph_baseline_primary.rs"]
 mod primary;
@@ -8,8 +8,12 @@ pub(super) use primary::resolved_policy;
 mod kind;
 #[path = "svg_rasterize_html_glyph_baseline_middle.rs"]
 mod middle;
+#[path = "svg_rasterize_html_glyph_baseline_policy.rs"]
+mod policy;
+use policy::uniform_policy;
 
 const HALF_METRIC: f32 = 0.5;
+const HANGING_BASELINE_SHIFT_FACTOR: f32 = 0.8;
 
 fn is_middle(kind: PolicyKind) -> bool {
     matches!(kind, PolicyKind::Middle | PolicyKind::AlignmentMiddle)
@@ -19,6 +23,7 @@ fn is_middle(kind: PolicyKind) -> bool {
 pub(super) enum PolicyKind {
     Mathematical,
     Central,
+    Hanging,
     Middle,
     AlignmentMiddle,
 }
@@ -30,35 +35,6 @@ pub(super) struct Policy {
     css_scale: Option<f32>,
     /* WHY: Middleは主fontの解決済み補正がある場合だけ描画へ渡す。 */
     primary_shift: Option<f32>,
-}
-
-pub(super) fn uniform_policy(text: &usvg::Text) -> Option<Policy> {
-    if text.writing_mode() != usvg::WritingMode::LeftToRight {
-        return None;
-    }
-    let css_scale = super::anchor::uniform_css_scale(text.abs_transform());
-    let middle_supported = css_scale.is_some() && middle::layout_supported(text);
-    let mut policy = None;
-    for chunk in text.chunks() {
-        if !matches!(chunk.text_flow(), TextFlow::Linear) {
-            return None;
-        }
-        for span in chunk.spans() {
-            let current = Policy {
-                kind: kind::span_kind(span, middle_supported)?,
-                font_size: span.font_size().get(),
-                css_scale,
-                primary_shift: None,
-            };
-            if policy.is_some_and(|value: Policy| {
-                value.font_size != current.font_size || value.kind != current.kind
-            }) {
-                return None;
-            }
-            policy = Some(current);
-        }
-    }
-    policy
 }
 
 pub(super) fn glyph_shift(
@@ -103,6 +79,7 @@ fn metrics_shift(
     let raw_shift = match policy.kind {
         PolicyKind::Mathematical => ascent * HALF_METRIC,
         PolicyKind::Central => ascent - (ascent - descent) * HALF_METRIC,
+        PolicyKind::Hanging => ascent * HANGING_BASELINE_SHIFT_FACTOR,
         PolicyKind::Middle | PolicyKind::AlignmentMiddle => return 0.0,
     };
     if let Some(target_local) = policy
@@ -125,6 +102,17 @@ fn css_baseline_shift(
         return None;
     }
     let css_font_size = super::anchor::paint_size(policy.font_size, css_scale, css_scale)?;
+    let target_css = css_baseline_target(database, face_id, face, policy, css_font_size)?;
+    Some(target_css / css_scale)
+}
+
+fn css_baseline_target(
+    database: &usvg::fontdb::Database,
+    face_id: usvg::fontdb::ID,
+    face: &FaceMetadata,
+    policy: Policy,
+    css_font_size: f32,
+) -> Option<f32> {
     let metric_scale = css_font_size / face.upem;
     let ascent = face.ascent * metric_scale;
     let descent = face.descent * metric_scale;
@@ -133,15 +121,19 @@ fn css_baseline_shift(
         ascent,
         -descent,
     )?;
+    if policy.kind == PolicyKind::Hanging {
+        /* WHY: Hanging fallbackはBlinkのpostprocessed ascentから補正し、origin snapはpaintで行う。 */
+        return Some(layout_ascent * HANGING_BASELINE_SHIFT_FACTOR);
+    }
     let layout_descent = -descent.round();
     let baseline_from_top = match policy.kind {
         PolicyKind::Mathematical => ascent_from_top(layout_ascent),
         PolicyKind::Central => central_from_top(layout_ascent, layout_descent),
+        PolicyKind::Hanging => return None,
         PolicyKind::Middle | PolicyKind::AlignmentMiddle => return None,
     };
     /* WHY: line-topの丸めはCSS座標で行い、拡大前の半pixel丸めによるbaselineのずれを避ける。 */
-    let target_css = layout_ascent + (HALF_METRIC - baseline_from_top).floor();
-    Some(target_css / css_scale)
+    Some(layout_ascent + (HALF_METRIC - baseline_from_top).floor())
 }
 
 fn ascent_from_top(layout_ascent: f32) -> f32 {
@@ -174,6 +166,7 @@ fn legacy_glyph_shift(
     let blink_shift = match policy.kind {
         PolicyKind::Mathematical => layout_ascent * HALF_METRIC,
         PolicyKind::Central => (layout_ascent - layout_descent) * HALF_METRIC,
+        PolicyKind::Hanging => return 0.0,
         PolicyKind::Middle | PolicyKind::AlignmentMiddle => return 0.0,
     };
     blink_shift - raw_shift

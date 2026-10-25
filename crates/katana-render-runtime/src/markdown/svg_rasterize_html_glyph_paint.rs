@@ -6,6 +6,10 @@ use tiny_skia::Transform;
 #[path = "svg_rasterize_html_glyph_paint_tests.rs"]
 mod tests;
 
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_glyph_paint_hanging_origin_tests.rs"]
+mod hanging_origin_tests;
+
 const IDENTITY_SCALE: f32 = 1.0;
 const IDENTITY_SKEW: f32 = 0.0;
 
