@@ -22,15 +22,8 @@ fn configure_html_sans_serif_family(database: &mut usvg::fontdb::Database) {
 }
 
 pub(in super::super) fn configured_html_sans_serif_family() -> &'static str {
-    /* WHY: FontiqueのmacOS既定とChrome実測を使い、既定名の取得だけで全書体を列挙しない。 */
-    #[cfg(target_os = "macos")]
-    {
-        "Helvetica"
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        "Arial"
-    }
+    /* WHY: ChromeのmacOS HTML sans-serif既定はArialで、native SVGのfont profileとは別に保つ。 */
+    "Arial"
 }
 
 fn configure_html_serif_family(database: &mut usvg::fontdb::Database) {

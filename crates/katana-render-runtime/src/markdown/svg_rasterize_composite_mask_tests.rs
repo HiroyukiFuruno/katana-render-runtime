@@ -143,12 +143,22 @@ fn fractional_generated_clip_preserves_uniform_backdrop_and_aa_control() -> Resu
     )?;
     let background_only =
         render_html_frame(r##"<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"/>"##)?;
-    for pixels in [clipped, aa_only, background_only] {
-        if pixels
+    for (case, pixels) in [
+        ("fractional clip", clipped),
+        ("AA-only shape", aa_only),
+        ("background only", background_only),
+    ] {
+        if let Some((index, pixel)) = pixels
             .chunks_exact(RGBA_CHANNELS)
-            .any(|pixel| pixel != FRACTIONAL_BACKDROP)
+            .enumerate()
+            .find(|(_, pixel)| *pixel != FRACTIONAL_BACKDROP)
         {
-            return Err("uniform fractional backdrop changed".to_string());
+            let x = index as u32 % FRACTIONAL_SIZE;
+            let y = index as u32 / FRACTIONAL_SIZE;
+            return Err(format!(
+                "{case} changed uniform fractional backdrop at ({x}, {y}): expected {FRACTIONAL_BACKDROP:?}, actual [{}, {}, {}, {}]",
+                pixel[0], pixel[1], pixel[2], pixel[3]
+            ));
         }
     }
     Ok(())

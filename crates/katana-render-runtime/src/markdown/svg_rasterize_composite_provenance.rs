@@ -1,6 +1,12 @@
 use super::types::SvgRasterizeError;
 use std::collections::HashSet;
 
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_composite_authored_text_context.rs"]
+mod authored_text_context;
+#[cfg(target_os = "macos")]
+pub(super) use authored_text_context::AuthoredTextContext;
+
 #[derive(Clone, Default)]
 pub(crate) struct GeneratedClipProvenance {
     pub(crate) clips: Vec<GeneratedClip>,
@@ -19,23 +25,54 @@ pub(super) struct AuthoredClipInfo {
     pub(super) has_object_bounding_box: bool,
 }
 
+#[cfg(target_os = "macos")]
+pub(super) struct AuthoredSvgContext {
+    pub(super) clips: AuthoredClipInfo,
+    pub(super) text: AuthoredTextContext,
+}
+
 pub(super) fn authored_clip_ids(
     svg: &str,
     generated: &GeneratedClipProvenance,
 ) -> Result<AuthoredClipInfo, SvgRasterizeError> {
     let document = resvg::usvg::roxmltree::Document::parse(svg)
         .map_err(|error| SvgRasterizeError::ParseFailed(error.to_string()))?;
+    Ok(authored_clip_info(&document, generated))
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn authored_svg_context(
+    svg: &str,
+    generated: &GeneratedClipProvenance,
+    needs_authored_clip_ids: bool,
+) -> Result<AuthoredSvgContext, SvgRasterizeError> {
+    let document = resvg::usvg::roxmltree::Document::parse(svg)
+        .map_err(|error| SvgRasterizeError::ParseFailed(error.to_string()))?;
+    Ok(AuthoredSvgContext {
+        clips: if needs_authored_clip_ids {
+            authored_clip_info(&document, generated)
+        } else {
+            AuthoredClipInfo::default()
+        },
+        text: authored_text_context::collect(&document),
+    })
+}
+
+fn authored_clip_info(
+    document: &resvg::usvg::roxmltree::Document<'_>,
+    generated: &GeneratedClipProvenance,
+) -> AuthoredClipInfo {
     let clips = document
         .descendants()
         .filter(|node| node.has_tag_name("clipPath"))
         .collect::<Vec<_>>();
     let ids = clip_ids(&clips);
-    let generated_ids = generated_clip_ids(&document, &clips, generated);
-    Ok(AuthoredClipInfo {
+    let generated_ids = generated_clip_ids(document, &clips, generated);
+    AuthoredClipInfo {
         ids,
         generated_ids,
         has_object_bounding_box: has_object_bounding_box(&clips),
-    })
+    }
 }
 
 fn clip_ids(clips: &[resvg::usvg::roxmltree::Node<'_, '_>]) -> HashSet<String> {
@@ -92,6 +129,8 @@ fn clip_shape_matches(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::authored_svg_context;
     use super::{GeneratedClip, GeneratedClipProvenance, authored_clip_ids};
 
     fn provenance(shape: &str) -> GeneratedClipProvenance {
@@ -129,4 +168,20 @@ mod tests {
         assert!(empty.generated_ids.is_empty());
         Ok(())
     }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn authored_text_context_preserves_unneeded_clip_default() -> Result<(), String> {
+        let svg = r#"<svg><defs><clipPath id="authored" clipPathUnits="objectBoundingBox"><rect width="1" height="1"/></clipPath></defs></svg>"#;
+        let context = authored_svg_context(svg, &GeneratedClipProvenance::default(), false)
+            .map_err(|error| error.to_string())?;
+        assert!(context.clips.ids.is_empty());
+        assert!(context.clips.generated_ids.is_empty());
+        assert!(!context.clips.has_object_bounding_box);
+        Ok(())
+    }
 }
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_composite_authored_text_context_tests.rs"]
+mod authored_text_context_tests;

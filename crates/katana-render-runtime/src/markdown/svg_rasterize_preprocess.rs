@@ -27,6 +27,13 @@ pub(super) fn preprocess_for_rasterizer(svg_text: &str) -> String {
     geometry::materialize_geometry_properties(with_normalized_markers)
 }
 
+pub(super) fn source_selector_matches(
+    node: resvg::usvg::roxmltree::Node<'_, '_>,
+    selector: &simplecss::Selector<'_>,
+) -> bool {
+    geometry::selector_matches_source_node(node, selector)
+}
+
 fn normalize_html_entities_for_xml(svg_text: &str) -> String {
     svg_text.replace("&nbsp;", "&#160;")
 }

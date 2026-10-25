@@ -121,3 +121,7 @@ mod tests;
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_html_font_generic_sans_tests.rs"]
 mod generic_sans_tests;
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_font_generic_sans_family_profile_tests.rs"]
+mod generic_sans_family_profile_tests;

@@ -46,6 +46,10 @@ mod ttc_integration_tests;
 mod typeface_tests;
 
 #[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_glyph_anchor_fragment_tests.rs"]
+mod anchor_fragment_tests;
+
+#[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_html_glyph_coretext.rs"]
 mod coretext;
 
@@ -74,6 +78,29 @@ pub(crate) struct HtmlGlyphRasterizer<'a> {
     font_mgr: OnceCell<FontMgr>,
     backend: RasterBackend,
     resvg_text_ids: HashSet<String>,
+    authored_text_context: Option<&'a super::provenance::AuthoredTextContext>,
+}
+
+pub(super) fn has_nested_middle_candidate(tree: &usvg::Tree) -> bool {
+    baseline::has_nested_middle_candidate(tree)
+}
+
+pub(super) fn has_multi_fragment_anchor_candidate(tree: &usvg::Tree) -> bool {
+    contains_multi_fragment_anchor_candidate(tree.root().children())
+}
+
+fn contains_multi_fragment_anchor_candidate(nodes: &[usvg::Node]) -> bool {
+    nodes.iter().any(|node| match node {
+        usvg::Node::Group(group) => contains_multi_fragment_anchor_candidate(group.children()),
+        usvg::Node::Text(text) => {
+            if let [chunk] = text.chunks() {
+                chunk.anchor() != usvg::TextAnchor::Start && chunk.spans().len() > 1
+            } else {
+                false
+            }
+        }
+        usvg::Node::Path(_) | usvg::Node::Image(_) => false,
+    })
 }
 
 enum Prepared {
@@ -89,6 +116,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             font_mgr: OnceCell::new(),
             backend: default_backend(),
             resvg_text_ids: HashSet::new(),
+            authored_text_context: None,
         }
     }
 
@@ -102,6 +130,23 @@ impl<'a> HtmlGlyphRasterizer<'a> {
         }
     }
 
+    pub(super) fn with_resvg_text_and_source_context(
+        database: &'a usvg::fontdb::Database,
+        resvg_text_ids: HashSet<String>,
+        authored_text_context: &'a super::provenance::AuthoredTextContext,
+    ) -> Self {
+        Self {
+            resvg_text_ids,
+            authored_text_context: Some(authored_text_context),
+            ..Self::new(database)
+        }
+    }
+
+    pub(super) fn has_authored_nested_text_context(&self, text: &usvg::Text) -> bool {
+        self.authored_text_context
+            .is_some_and(|context| context.matches(text))
+    }
+
     #[cfg(all(test, target_os = "macos"))]
     pub(super) fn new_coretext(database: &'a usvg::fontdb::Database) -> Self {
         Self {
@@ -110,6 +155,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             font_mgr: OnceCell::new(),
             backend: RasterBackend::CoreText,
             resvg_text_ids: HashSet::new(),
+            authored_text_context: None,
         }
     }
 
@@ -125,18 +171,37 @@ impl<'a> HtmlGlyphRasterizer<'a> {
                 return Ok(Prepared::Unsupported);
             }
         }
-        if let Some(anchor_x) = single_horizontal_alignment(text, &prepared) {
-            let layout = anchor::layout_anchor(text);
-            let origin_snap_css_scale = anchor::run_origin_css_scale(text, &prepared);
+        self.apply_horizontal_alignment(text, &mut prepared);
+        Ok(Prepared::Ready(prepared))
+    }
+
+    fn apply_horizontal_alignment(&self, text: &usvg::Text, prepared: &mut [PreparedSpan]) {
+        if let Some(anchor_x) = single_horizontal_alignment(text, prepared) {
+            let alignment = XAlignment {
+                anchor_x,
+                layout: anchor::layout_anchor(text),
+                origin_snap_css_scale: anchor::run_origin_css_scale(text, prepared),
+            };
             if let Some(span) = prepared.first_mut() {
-                span.x_alignment = Some(XAlignment {
-                    anchor_x,
-                    layout,
-                    origin_snap_css_scale,
-                });
+                span.x_alignment = Some(alignment);
+            }
+        } else if self.admits_source_multi_fragment_alignment(text)
+            && let Some(anchor_x) = anchor::multi_fragment_anchor_x(text, prepared)
+        {
+            let alignment = XAlignment {
+                anchor_x,
+                layout: None,
+                origin_snap_css_scale: None,
+            };
+            for span in prepared {
+                span.x_alignment = Some(alignment);
             }
         }
-        Ok(Prepared::Ready(prepared))
+    }
+
+    fn admits_source_multi_fragment_alignment(&self, text: &usvg::Text) -> bool {
+        self.authored_text_context
+            .is_some_and(|context| context.admits_multi_fragment_alignment(text))
     }
 
     fn prepare_span(
@@ -381,15 +446,23 @@ fn alignment_text_supported(
     prepared: &PreparedSpan,
 ) -> bool {
     text.layouted().len() == 1
-        && all_zero(text.dx())
+        && alignment_positioning_supported(text, chunk)
+        && alignment_source_span_supported(source_span)
+        && !prepared.glyphs.is_empty()
+}
+
+fn alignment_positioning_supported(text: &usvg::Text, chunk: &usvg::TextChunk) -> bool {
+    all_zero(text.dx())
         && alignment_dy_supported(text.dy())
         && all_zero(text.rotate())
         && text.writing_mode() == usvg::WritingMode::LeftToRight
-        && source_span.letter_spacing() == 0.0
+        && matches!(chunk.text_flow(), usvg::TextFlow::Linear)
+}
+
+fn alignment_source_span_supported(source_span: &usvg::TextSpan) -> bool {
+    source_span.letter_spacing() == 0.0
         && source_span.word_spacing() == 0.0
         && source_span.text_length().is_none()
-        && matches!(chunk.text_flow(), usvg::TextFlow::Linear)
-        && !prepared.glyphs.is_empty()
 }
 
 fn alignment_dy_supported(values: &[f32]) -> bool {

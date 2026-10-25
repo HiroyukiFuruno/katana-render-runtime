@@ -1,4 +1,4 @@
-use super::{Policy, metrics_shift, middle, uniform_policy};
+use super::{Policy, metrics_shift, middle, uniform_policy_with_nested_context};
 use crate::markdown::svg_rasterize::{
     html_glyph::HtmlGlyphRasterizer, text_shaping::loaded_html_font,
 };
@@ -11,7 +11,8 @@ pub(in super::super) fn resolved_policy(
     rasterizer: &HtmlGlyphRasterizer<'_>,
     text: &usvg::Text,
 ) -> Result<Option<Policy>, String> {
-    let Some(mut policy) = uniform_policy(text) else {
+    let nested_text_context = rasterizer.has_authored_nested_text_context(text);
+    let Some(mut policy) = uniform_policy_with_nested_context(text, nested_text_context) else {
         return Ok(None);
     };
     if super::is_middle(policy.kind) {

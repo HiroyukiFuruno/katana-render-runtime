@@ -100,6 +100,13 @@ fn resolve_property(
     })
 }
 
+pub(super) fn selector_matches_source_node(
+    node: Node<'_, '_>,
+    selector: &simplecss::Selector<'_>,
+) -> bool {
+    selector.matches(&support::SvgElement::new(node, None))
+}
+
 fn consider_stylesheet_declarations(
     winner: &mut Option<Winner>,
     node: Node<'_, '_>,

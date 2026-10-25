@@ -32,7 +32,7 @@ fn inline_svg_quoted_marker_selector_keeps_triangle_interior_empty() {
         with_native_pixels(&suffix, |suffix| {
             assert!(suffix == native, "native marker selector pixels differ");
         });
-        assert_triangle_interior_empty(&native);
+        assert_triangle_interior_empty(&native, "native SVG");
         with_inline_pixels(&suffix, |inline_suffix| {
             with_inline_pixels(&explicit, |inline_explicit| {
                 assert!(
@@ -41,7 +41,7 @@ fn inline_svg_quoted_marker_selector_keeps_triangle_interior_empty() {
                 );
             });
             with_html_raster_pixels(&suffix, |html_suffix| {
-                assert_triangle_interior_empty(&html_suffix);
+                assert_triangle_interior_empty(&html_suffix, "HTML raster");
                 assert!(
                     inline_suffix == html_suffix,
                     "inline/html marker pixels differ"
@@ -146,10 +146,11 @@ fn with_native_pixels(svg: &str, action: impl FnOnce(Vec<u8>)) {
     );
 }
 
-fn assert_triangle_interior_empty(pixels: &[u8]) {
+fn assert_triangle_interior_empty(pixels: &[u8], route: &str) {
     assert_eq!(
         pixel_at(pixels, TRIANGLE_INTERIOR_X, TRIANGLE_INTERIOR_Y),
-        Some(WHITE.as_slice())
+        Some(WHITE.as_slice()),
+        "{route} triangle interior pixel"
     );
 }
 

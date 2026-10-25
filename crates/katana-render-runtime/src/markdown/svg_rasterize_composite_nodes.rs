@@ -1,3 +1,4 @@
+use super::path;
 use super::{AuthoredClipInfo, TextRasterizer, groups, layers, text};
 use resvg::usvg;
 use tiny_skia::Transform;
@@ -21,6 +22,13 @@ pub(super) fn render_node(
             authored_clip_info,
             text_rasterizer,
         ),
+        usvg::Node::Path(path_node) if text_rasterizer.is_some() => {
+            if path::render_if_supported(path_node, transform, pixmap)? {
+                Ok(())
+            } else {
+                render_existing_path_node(node, transform, pixmap)
+            }
+        }
         _ => render_existing_path_node(node, transform, pixmap),
     }
 }

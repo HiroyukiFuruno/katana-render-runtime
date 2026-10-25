@@ -10,6 +10,15 @@ const HALF_METRIC: f32 = 0.5;
 const USVG_X_HEIGHT_RATIO: f32 = 0.45;
 
 pub(super) fn layout_supported(text: &usvg::Text) -> bool {
+    layout_supported_with_zero_first_dy(text, false)
+}
+
+pub(super) fn nested_layout_supported(text: &usvg::Text) -> bool {
+    layout_supported_with_zero_first_dy(text, true)
+        && text.dy().first().is_some_and(|first_dy| *first_dy == 0.0)
+}
+
+fn layout_supported_with_zero_first_dy(text: &usvg::Text, allow_zero_first_dy: bool) -> bool {
     let [chunk] = text.chunks() else { return false };
     let dy = text.dy();
     let Some(first_dy) = dy.first() else {
@@ -22,7 +31,7 @@ pub(super) fn layout_supported(text: &usvg::Text) -> bool {
         && matches!(chunk.text_flow(), TextFlow::Linear)
         && super::super::alignment_dy_supported(dy)
         && first_dy.is_finite()
-        && *first_dy != 0.0
+        && (*first_dy != 0.0 || allow_zero_first_dy)
         && super::super::all_zero(text.dx())
         && super::super::all_zero(text.rotate())
         && chunk.spans().iter().all(source_span_has_default_spacing)

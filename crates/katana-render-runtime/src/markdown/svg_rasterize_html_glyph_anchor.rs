@@ -1,6 +1,9 @@
 use super::PreparedSpan;
 use resvg::usvg::{self, Transform};
 
+#[path = "svg_rasterize_html_glyph_anchor_fragments.rs"]
+mod fragments;
+
 const LAYOUT_UNIT_SCALE: f64 = 64.0;
 const START_ANCHOR_FACTOR: f64 = 0.0;
 const MIDDLE_ANCHOR_FACTOR: f64 = -0.5;
@@ -11,6 +14,10 @@ pub(super) struct LayoutAnchor {
     pub(super) width: f32,
     pub(super) anchor: usvg::TextAnchor,
     pub(super) css_scale: f32,
+}
+
+pub(super) fn multi_fragment_anchor_x(text: &usvg::Text, prepared: &[PreparedSpan]) -> Option<f32> {
+    fragments::multi_fragment_anchor_x(text, prepared)
 }
 
 pub(super) fn layout_anchor(text: &usvg::Text) -> Option<LayoutAnchor> {

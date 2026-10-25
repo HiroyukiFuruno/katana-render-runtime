@@ -10,7 +10,12 @@ mod kind;
 mod middle;
 #[path = "svg_rasterize_html_glyph_baseline_policy.rs"]
 mod policy;
+#[cfg(test)]
 use policy::uniform_policy;
+use policy::uniform_policy_with_nested_context;
+#[path = "svg_rasterize_html_glyph_baseline_source_context.rs"]
+mod source_context;
+pub(super) use source_context::has_nested_middle_candidate;
 
 const HALF_METRIC: f32 = 0.5;
 const HANGING_BASELINE_SHIFT_FACTOR: f32 = 0.8;
@@ -183,3 +188,6 @@ mod origin_tests;
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_html_glyph_baseline_alignment_tests.rs"]
 mod alignment_tests;
+#[cfg(test)]
+#[path = "svg_rasterize_html_glyph_baseline_nested_context_tests.rs"]
+mod nested_context_tests;

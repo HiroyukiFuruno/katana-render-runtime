@@ -12,6 +12,8 @@ mod linear_component_transfer;
 mod mask;
 #[path = "svg_rasterize_composite_nodes.rs"]
 mod nodes;
+#[path = "svg_rasterize_composite_path.rs"]
+mod path;
 #[path = "svg_rasterize_composite_text.rs"]
 mod text;
 pub(crate) use text::TextRasterizer;
