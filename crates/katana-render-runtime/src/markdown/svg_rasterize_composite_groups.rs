@@ -2,6 +2,13 @@ use super::{AuthoredClipInfo, TextRasterizer, layers};
 use resvg::usvg;
 use tiny_skia::{PixmapMut, Transform};
 
+#[path = "svg_rasterize_composite_opacity.rs"]
+mod opacity;
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_composite_groups_opacity_tests.rs"]
+mod opacity_tests;
+
 pub(super) fn render_group_node(
     node: &usvg::Node,
     group: &usvg::Group,
@@ -33,8 +40,9 @@ fn render_effect_group(
     if text.is_some() && render_shadow_group(group, transform, pixmap, provenance, text)? {
         return Ok(());
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = (group, provenance, text);
+    if let Some(text_rasterizer) = text.filter(|_| opacity::supports(group)) {
+        return opacity::render(group, transform, pixmap, provenance, text_rasterizer);
+    }
     layers::render_existing_node(node, transform, pixmap);
     Ok(())
 }

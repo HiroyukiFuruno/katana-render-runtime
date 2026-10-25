@@ -25,7 +25,7 @@ pub(super) fn render_clipped_group(
     )
 }
 
-fn crop_context(
+pub(super) fn crop_context(
     group: &usvg::Group,
     transform: Transform,
     pixmap: &tiny_skia::PixmapMut<'_>,
