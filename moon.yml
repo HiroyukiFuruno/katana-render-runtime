@@ -348,6 +348,11 @@ tasks:
         script: just native-coverage-cache-key performance
         hash: stdout
 
+  performance-coverage-acceptance:
+    command: ['just', 'performance-coverage-result-check']
+    deps: ['performance-coverage']
+    inputs: *quality-inputs
+
   coverage:
     command: ['just', 'coverage-result-check']
     deps: ['performance-coverage']

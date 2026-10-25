@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use super::{parse_options, worker_sample};
+use super::{parse_options, required_number, worker_sample};
 use super::{LegacyOperationPlan, OperationPlan};
 use serde_json::json;
 use std::{ffi::OsString, fs, iter, path::PathBuf};
@@ -139,4 +139,50 @@ fn worker_invocation_consumes_only_marker_and_sample() -> Result<(), Box<dyn std
 fn worker_marker_requires_a_sample() {
     let mut args = iter::once(OsString::from("--worker")).peekable();
     assert!(worker_sample(&mut args).is_err());
+}
+
+#[test]
+fn worker_sample_rejects_a_non_numeric_sample() {
+    let mut args = [OsString::from("--worker"), OsString::from("four")]
+        .into_iter()
+        .peekable();
+    assert!(worker_sample(&mut args).is_err());
+}
+
+#[test]
+fn required_number_rejects_missing_and_invalid_u32_values() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut missing = iter::empty::<OsString>();
+    let missing_error = required_number::<u32>(&mut missing, "viewport width is required")
+        .err()
+        .ok_or("missing u32 value must be rejected")?;
+    assert_eq!(missing_error.to_string(), "viewport width is required");
+
+    let mut invalid = iter::once(OsString::from("not-a-number"));
+    let invalid_error = required_number::<u32>(&mut invalid, "viewport width is required")
+        .err()
+        .ok_or("invalid u32 value must be rejected")?;
+    assert!(invalid_error
+        .downcast_ref::<std::num::ParseIntError>()
+        .is_some());
+    Ok(())
+}
+
+#[test]
+fn required_number_rejects_missing_and_invalid_f32_values() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut missing = iter::empty::<OsString>();
+    let missing_error = required_number::<f32>(&mut missing, "viewport scale is required")
+        .err()
+        .ok_or("missing f32 value must be rejected")?;
+    assert_eq!(missing_error.to_string(), "viewport scale is required");
+
+    let mut invalid = iter::once(OsString::from("not-a-number"));
+    let invalid_error = required_number::<f32>(&mut invalid, "viewport scale is required")
+        .err()
+        .ok_or("invalid f32 value must be rejected")?;
+    assert!(invalid_error
+        .downcast_ref::<std::num::ParseFloatError>()
+        .is_some());
+    Ok(())
 }

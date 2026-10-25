@@ -4228,6 +4228,23 @@ function moonCoverageRecipesVerified(
     )
   )
     errors.push("performance coverage arms differ");
+  const performanceCommands = performance
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const collectionFinish =
+    'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer performance --producer-exit 0';
+  const collectionValidate =
+    'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer performance';
+  const finishIndex = performanceCommands.indexOf(collectionFinish);
+  const reportIndices = performanceReports.map((command) => performanceCommands.indexOf(command));
+  if (
+    performanceCommands.filter((command) => command === collectionFinish).length !== 1 ||
+    performanceCommands.filter((command) => command === collectionValidate).length !== 1 ||
+    finishIndex < Math.max(-1, ...reportIndices) ||
+    performanceCommands[finishIndex + 1] !== collectionValidate
+  )
+    errors.push("performance collection authentication differs");
 }
 
 function moonCoverageGraphVerified(

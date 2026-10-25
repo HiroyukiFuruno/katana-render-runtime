@@ -1,7 +1,10 @@
 use std::time::Instant;
 
 use super::options::LegacyOperationPlan;
-use super::{hex_digest, phase_snapshot, HtmlBrowserSession, HtmlBrowserViewport, SessionFrame};
+use super::{
+    hex_digest, phase_snapshot, HtmlBrowserSession, HtmlBrowserViewport, PhaseSnapshot,
+    SessionFrame, MILLISECONDS_PER_SECOND,
+};
 
 mod catalog;
 #[cfg(feature = "baseline")]
@@ -12,9 +15,8 @@ pub(super) use catalog::CatalogOperations;
 
 const SCROLL_STEP: f32 = 600.0;
 const POINTER_EVENT_SEQUENCE_LENGTH: usize = 3;
-const MILLISECONDS_PER_SECOND: f64 = 1000.0;
 
-pub(super) type OperationMeasurement = (serde_json::Value, u64, u64, String, String);
+pub(super) type OperationMeasurement = (PhaseSnapshot, u64, u64, String, String);
 
 pub(super) fn perform_operation(
     session: &mut HtmlBrowserSession,
@@ -46,7 +48,7 @@ pub(super) fn perform_operation(
 fn measure_pointer_action(
     session: &mut HtmlBrowserSession,
     operation_plan: &LegacyOperationPlan,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+) -> Result<PhaseSnapshot, Box<dyn std::error::Error>> {
     let operation_start = Instant::now();
     for input in pointer_click_inputs(operation_plan.x, operation_plan.y) {
         session.dispatch_input(input)?;
@@ -54,7 +56,7 @@ fn measure_pointer_action(
     phase_snapshot(operation_start, session)
 }
 
-pub(super) type FullYMeasurement = (serde_json::Value, usize, f32, f32);
+pub(super) type FullYMeasurement = (PhaseSnapshot, usize, f32, f32);
 
 pub(super) fn measure_full_y(
     session: &mut HtmlBrowserSession,
@@ -72,7 +74,7 @@ pub(super) fn measure_full_y(
             return Err("short-document full-Y capture must begin at the top".into());
         }
         let mut full_y = phase_snapshot(full_y_start, session)?;
-        set_max_frame_elapsed_ms(&mut full_y, 0.0)?;
+        set_max_frame_elapsed_ms(&mut full_y, 0.0);
         return Ok((full_y, scroll_steps, scroll_y, max_scroll));
     }
     let bottom_frame_elapsed_ms =
@@ -91,30 +93,23 @@ fn finish_full_y_measurement(
     full_y_start: Instant,
     max_scroll: f32,
     bottom_frame_elapsed_ms: f64,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+) -> Result<PhaseSnapshot, Box<dyn std::error::Error>> {
     let bottom_frame = session.frame_state()?;
     let top_frame_elapsed_ms = prepare_top_scroll(session, max_scroll)?;
     let mut full_y = phase_snapshot(full_y_start, session)?;
-    full_y["frame"] = bottom_frame;
+    full_y.insert("frame".to_owned(), bottom_frame);
     set_max_frame_elapsed_ms(
         &mut full_y,
         bottom_frame_elapsed_ms.max(top_frame_elapsed_ms),
-    )?;
+    );
     Ok(full_y)
 }
 
-fn set_max_frame_elapsed_ms(
-    measurement: &mut serde_json::Value,
-    max_frame_elapsed_ms: f64,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let measurement = measurement
-        .as_object_mut()
-        .ok_or("full-Y measurement must be a JSON object")?;
+fn set_max_frame_elapsed_ms(measurement: &mut PhaseSnapshot, max_frame_elapsed_ms: f64) {
     measurement.insert(
         "max_frame_elapsed_ms".to_string(),
         serde_json::json!(max_frame_elapsed_ms),
     );
-    Ok(())
 }
 
 fn scroll_to_bottom(
@@ -175,3 +170,7 @@ fn pointer_click_inputs(x: f32, y: f32) -> [HtmlBrowserInput; POINTER_EVENT_SEQU
 #[cfg(test)]
 #[path = "operations_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "operations_test_support.rs"]
+mod test_support;

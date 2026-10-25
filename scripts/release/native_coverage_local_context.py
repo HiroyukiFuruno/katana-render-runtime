@@ -690,6 +690,8 @@ def _collect(repo: Path, env: Mapping[str, str], profile: dict[str, object] | No
         profile.update({
             "schema": "krr-native-local-coverage-profile-v1",
             "cacheable": True,
+            "environmentSha256": environment_sha,
+            "resourcesSha256": resources_sha,
             "recordCount": len(records),
             **stage_timings,
             "totalSeconds": time.perf_counter() - started,

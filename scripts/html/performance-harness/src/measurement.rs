@@ -13,7 +13,7 @@ use super::{
     operations::{measure_full_y, CatalogOperations},
     options::{CatalogOperationPlan, OperationPlan},
 };
-use super::{phase_snapshot, HtmlBrowserSession, HtmlBrowserViewport, SessionFrame};
+use super::{phase_snapshot, HtmlBrowserSession, HtmlBrowserViewport, PhaseSnapshot, SessionFrame};
 #[cfg(feature = "baseline")]
 use baseline::{HtmlBrowserSource, HtmlRuntime};
 #[cfg(feature = "candidate")]
@@ -44,6 +44,7 @@ pub(super) fn measure_one(
     let same_session_resize = measure_same_session_resize(&mut session, viewport)?;
     session.close()?;
     let catalog_condition = catalog_condition_report(operation_plan);
+    let full_y = serde_json::Value::Object(full_y);
     Ok(serde_json::json!({
         "sample": sample,
         "viewport": {"width": viewport.width, "height": viewport.height, "scale": viewport.device_scale_factor},
@@ -119,7 +120,7 @@ fn validate_resized_frame(
     Ok(frame.generation)
 }
 
-type OpenMeasurements = (HtmlBrowserSession, serde_json::Value, serde_json::Value);
+type OpenMeasurements = (HtmlBrowserSession, PhaseSnapshot, PhaseSnapshot);
 
 fn measure_open_phases(
     html: &[u8],

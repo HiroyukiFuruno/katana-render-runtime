@@ -1424,9 +1424,14 @@ function performanceCoverageExclusionContract(context: ContractContext): boolean
     guard.includes(String.raw`r"([^/\\]+[/\\])*[^/\\]+(_tests|_test_support)\.rs$"`)
   );
 }
-function localCoverageCommand(producer: "root" | "performance", phase: "begin" | "finish"): string {
+function localCoverageCommand(
+  producer: "root" | "performance",
+  phase: "begin" | "finish" | "validate",
+): string {
   if (phase === "finish")
     return `python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer ${producer} --producer-exit 0`;
+  if (phase === "validate")
+    return `python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer ${producer}`;
   return `python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer ${producer}`;
 }
 function rootLintRecipeLines(context: ContractContext): string[] {
@@ -1479,6 +1484,7 @@ function performanceRecipeCommands(): Record<string, string[]> {
       localCoverageCommand("performance", "begin"),
       ...PERFORMANCE_ARMS.flatMap(performanceCoverageCommands),
       localCoverageCommand("performance", "finish"),
+      localCoverageCommand("performance", "validate"),
     ],
     "fmt-check": ["{{CARGO}} fmt --all -- --check", `just ${PERFORMANCE_RECIPES.format}`],
     coverage: [

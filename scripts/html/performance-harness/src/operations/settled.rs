@@ -103,3 +103,7 @@ fn settled_resource_state_is_valid(state: &Map<String, Value>, steps: &[Value]) 
 fn has_exact_keys(object: &Map<String, Value>, keys: &[&str]) -> bool {
     object.len() == keys.len() && keys.iter().all(|key| object.contains_key(*key))
 }
+
+#[cfg(test)]
+#[path = "settled_tests.rs"]
+mod tests;

@@ -19,12 +19,13 @@ pub(super) fn provenance() -> Result<serde_json::Value, Box<dyn Error>> {
     }))
 }
 
+#[cfg(all(feature = "baseline", not(feature = "candidate")))]
+const ARM_NAME: &str = "baseline-0.4.23";
+#[cfg(all(feature = "candidate", not(feature = "baseline")))]
+const ARM_NAME: &str = "candidate";
+
 pub(super) fn arm_name() -> &'static str {
-    if cfg!(feature = "baseline") {
-        "baseline-0.4.23"
-    } else {
-        "candidate"
-    }
+    ARM_NAME
 }
 
 pub(super) fn hex_digest(bytes: &[u8]) -> String {
@@ -33,3 +34,7 @@ pub(super) fn hex_digest(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+
+#[cfg(test)]
+#[path = "provenance_tests.rs"]
+mod tests;

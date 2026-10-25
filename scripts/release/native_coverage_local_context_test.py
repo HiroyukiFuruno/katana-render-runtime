@@ -4,6 +4,7 @@ import errno
 import hashlib
 import json
 import os
+import platform
 import threading
 import time
 import unittest
@@ -103,6 +104,40 @@ class LocalCoverageContextTests(unittest.TestCase):
             local_context._record_environment({"RUSTFLAGS": "-C opt-level=3"})
         with self.assertRaisesRegex(local_context.LocalCoverageContextError, "unsupported_tool_override"):
             local_context._record_environment({"LLVM_COV": "/unreviewed/llvm-cov"})
+
+    def test_opt_in_profile_keeps_environment_details_aggregate_only(self) -> None:
+        secret = "profile-secret-value"
+        env = {
+            "API_TOKEN": secret,
+            "PATH": "/tools/bin",
+            "MOON_TASK_ID": "volatile-task-id",
+            "KRR_LOCAL_COVERAGE_PROFILE_PATH": "/tmp/private-profile.json",
+        }
+        records = {"tool:rustc": {"sha256": "a" * 64, "size": 1}}
+        profile: dict[str, object] = {}
+        with patch.object(platform, "system", return_value="Darwin"), \
+                patch.object(platform, "machine", return_value="arm64"), \
+                patch.object(local_context, "_collect_stages", return_value=(
+                    {key: "version" for key in local_context.TOOLS}, records, {}, {},
+                )), \
+                patch.object(local_context, "_record_environment", return_value="b" * 64), \
+                patch.object(local_context, "_run", return_value="host-version"):
+            context = local_context._collect(Path.cwd(), env, profile)
+
+        self.assertEqual(profile["schema"], "krr-native-local-coverage-profile-v1")
+        self.assertEqual(profile["environmentSha256"], "b" * 64)
+        self.assertEqual(context["environmentSha256"], "b" * 64)
+        resources_sha = hashlib.sha256(local_context._canonical(records)).hexdigest()
+        self.assertEqual(context["resourcesSha256"], resources_sha)
+        self.assertEqual(profile["resourcesSha256"], resources_sha)
+        serialized = json.dumps(profile)
+        self.assertNotIn("nonvolatileEnvironmentSha256ByName", profile)
+        self.assertNotIn("API_TOKEN", serialized)
+        self.assertNotIn(hashlib.sha256(secret.encode("utf-8")).hexdigest(), serialized)
+        self.assertNotIn(secret, serialized)
+        self.assertNotIn("/tools/bin", serialized)
+        self.assertNotIn("/tmp/private-profile.json", serialized)
+        self.assertNotIn("volatile-task-id", serialized)
 
     def test_stage_merge_preserves_records_from_all_stages(self) -> None:
         merged = local_context._merge_stage_records((

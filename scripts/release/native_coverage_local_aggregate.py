@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 
 PRODUCERS = {"root": "root-test-and-coverage", "performance": "performance-harness-coverage"}
+AGGREGATE_SCHEMA = "krr-native-local-coverage-aggregate-v1"
+PRODUCER_VALIDATION_SCHEMA = "krr-native-local-coverage-producer-validation-v1"
 
 
 def _cli(root: Path, command: str, producer: str) -> tuple[int, dict[str, object]]:
@@ -64,17 +66,27 @@ def validate_or_refresh(root: Path, producer: str) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=Path, required=True)
+    parser.add_argument("--producer", choices=tuple(PRODUCERS))
     args = parser.parse_args(argv)
     root = args.repo.resolve(strict=True)
     rows = []
-    for producer in PRODUCERS:
+    selected_producers = (args.producer,) if args.producer is not None else tuple(PRODUCERS)
+    for producer in selected_producers:
         row = validate_or_refresh(root, producer)
         rows.append(row)
         if row["valid"] is not True:
             break
-    valid = len(rows) == len(PRODUCERS) and all(row["valid"] is True for row in rows)
-    print(json.dumps({"schema": "krr-native-local-coverage-aggregate-v1",
-                      "valid": valid, "producers": rows}, sort_keys=True))
+    valid = len(rows) == len(selected_producers) and all(row["valid"] is True for row in rows)
+    if args.producer is None:
+        result = {"schema": AGGREGATE_SCHEMA, "valid": valid, "producers": rows}
+    else:
+        result = {
+            "schema": PRODUCER_VALIDATION_SCHEMA,
+            "scope": {"kind": "producer-only", "producer": args.producer, "fullAggregate": False},
+            "valid": valid,
+            "producers": rows,
+        }
+    print(json.dumps(result, sort_keys=True))
     return 0 if valid else 1
 
 

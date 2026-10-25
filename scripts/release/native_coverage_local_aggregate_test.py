@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import io
+import json
 import os
 import subprocess
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -66,6 +69,62 @@ class LocalCoverageAggregateUnitTests(unittest.TestCase):
         with patch("native_coverage_local_aggregate.subprocess.run") as run, self.assertRaises(KeyError):
             aggregate.validate_or_refresh(Path("/fixture"), "unregistered")
         run.assert_not_called()
+
+    def test_main_defaults_to_the_full_aggregate_in_existing_order(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        output = io.StringIO()
+        rows = [
+            {"producer": "root", "valid": True},
+            {"producer": "performance", "valid": True},
+        ]
+        with patch.object(aggregate, "validate_or_refresh", side_effect=rows) as validate, \
+             redirect_stdout(output):
+            exit_code = aggregate.main(["--repo", str(root)])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual([call.args[1] for call in validate.call_args_list], ["root", "performance"])
+        self.assertEqual(json.loads(output.getvalue()), {
+            "schema": aggregate.AGGREGATE_SCHEMA,
+            "valid": True,
+            "producers": rows,
+        })
+
+    def test_main_preserves_explicit_partial_scope_for_success_and_failure(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        cases = (
+            ("success", {"producer": "performance", "valid": True}, 0),
+            ("failure", {"producer": "performance", "valid": False,
+                         "failure": "invalid-collection"}, 1),
+        )
+        for case, row, expected_exit in cases:
+            with self.subTest(case=case):
+                output = io.StringIO()
+                with patch.object(aggregate, "validate_or_refresh", return_value=row) as validate, \
+                     redirect_stdout(output):
+                    exit_code = aggregate.main([
+                        "--repo", str(root), "--producer", "performance",
+                    ])
+
+                self.assertEqual(exit_code, expected_exit)
+                validate.assert_called_once_with(root, "performance")
+                result = json.loads(output.getvalue())
+                self.assertEqual(result["schema"], aggregate.PRODUCER_VALIDATION_SCHEMA)
+                self.assertEqual(result["scope"], {
+                    "kind": "producer-only", "producer": "performance", "fullAggregate": False,
+                })
+                self.assertEqual(result["valid"], expected_exit == 0)
+                self.assertEqual(result["producers"], [row])
+
+    def test_main_rejects_unknown_selector_before_validating_any_producer(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        error = io.StringIO()
+        with patch.object(aggregate, "validate_or_refresh") as validate, \
+             redirect_stderr(error), self.assertRaises(SystemExit) as raised:
+            aggregate.main(["--repo", str(root), "--producer", "unregistered"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("invalid choice", error.getvalue())
+        validate.assert_not_called()
 
 
 if __name__ == "__main__":

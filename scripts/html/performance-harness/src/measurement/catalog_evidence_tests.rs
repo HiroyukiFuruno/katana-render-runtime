@@ -8,12 +8,13 @@ use crate::{
 use serde_json::json;
 use std::fs;
 
-#[path = "catalog_evidence_test_support.rs"]
-mod support;
+use super::test_support as support;
 use support::{
     case_with_mutated_static_report, case_with_report, case_with_static_report,
     fixture_source_hash, operation_report, settled_report, Mutation, STATIC_OPERATION_KIND,
 };
+
+const DYNAMIC_OPERATION_KIND: &str = "script-real-events";
 
 #[test]
 fn catalog_condition_report_emits_operation_identity() -> Result<(), Box<dyn std::error::Error>> {
@@ -144,7 +145,10 @@ fn validates_settled_catalog_operation_kinds_through_sample_input(
 fn rejects_catalog_streams_inconsistent_with_operation_kind(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source_hash = fixture_source_hash()?;
-    for (kind, has_stream) in [(STATIC_OPERATION_KIND, true), ("script-real-events", false)] {
+    for (kind, has_stream) in [
+        (STATIC_OPERATION_KIND, true),
+        (DYNAMIC_OPERATION_KIND, false),
+    ] {
         let mut case = case_with_report(operation_report(&source_hash, kind), &source_hash, kind)?;
         if let OperationPlan::Catalog(plan) = &mut case.plan {
             plan.operation_stream = stream_for(has_stream);
@@ -185,5 +189,84 @@ fn rejects_non_object_catalog_viewport() -> Result<(), Box<dyn std::error::Error
         error.to_string(),
         "catalog operation evidence status or identity differs"
     );
+    Ok(())
+}
+
+#[test]
+fn rejects_catalog_report_when_operation_evidence_is_missing(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source_hash = fixture_source_hash()?;
+    let mut report = operation_report(&source_hash, STATIC_OPERATION_KIND);
+    report
+        .as_object_mut()
+        .ok_or("report must be an object")?
+        .remove("operationEvidence");
+    let case = case_with_report(report, &source_hash, STATIC_OPERATION_KIND)?;
+    let error = validate_sample_input(&case.plan, &case.source_hash, case.viewport)
+        .err()
+        .ok_or("missing operation evidence must be rejected")?;
+    assert_eq!(
+        error.to_string(),
+        "catalog typed operation evidence is missing"
+    );
+    Ok(())
+}
+
+#[test]
+fn rejects_catalog_report_when_viewport_is_missing() -> Result<(), Box<dyn std::error::Error>> {
+    let source_hash = fixture_source_hash()?;
+    let mut report = operation_report(&source_hash, STATIC_OPERATION_KIND);
+    report
+        .as_object_mut()
+        .ok_or("report must be an object")?
+        .remove("viewport");
+    let case = case_with_report(report, &source_hash, STATIC_OPERATION_KIND)?;
+    let error = validate_sample_input(&case.plan, &case.source_hash, case.viewport)
+        .err()
+        .ok_or("missing viewport must be rejected")?;
+    assert_eq!(
+        error.to_string(),
+        "catalog operation report viewport is missing"
+    );
+    Ok(())
+}
+
+#[test]
+fn rejects_catalog_report_when_target_evidence_is_missing() -> Result<(), Box<dyn std::error::Error>>
+{
+    let source_hash = fixture_source_hash()?;
+    let mut report = operation_report(&source_hash, STATIC_OPERATION_KIND);
+    report["operationEvidence"]
+        .as_object_mut()
+        .ok_or("operation evidence must be an object")?
+        .remove("target");
+    let case = case_with_report(report, &source_hash, STATIC_OPERATION_KIND)?;
+    let error = validate_sample_input(&case.plan, &case.source_hash, case.viewport)
+        .err()
+        .ok_or("missing target evidence must be rejected")?;
+    assert_eq!(
+        error.to_string(),
+        "catalog operation target evidence is missing"
+    );
+    Ok(())
+}
+
+#[test]
+fn accepts_nonsettled_dynamic_operation_with_a_nonempty_stream(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source_hash = fixture_source_hash()?;
+    let mut case = case_with_report(
+        operation_report(&source_hash, DYNAMIC_OPERATION_KIND),
+        &source_hash,
+        DYNAMIC_OPERATION_KIND,
+    )?;
+    if let OperationPlan::Catalog(plan) = &mut case.plan {
+        plan.operation_stream = stream_for(true);
+    }
+    assert!(!validate_sample_input(
+        &case.plan,
+        &case.source_hash,
+        case.viewport
+    )?);
     Ok(())
 }

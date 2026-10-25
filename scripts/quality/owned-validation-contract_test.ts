@@ -4014,6 +4014,18 @@ test.each([
     "producer success binding",
   ],
   [
+    "performance-harness-coverage",
+    'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer performance',
+    "",
+    "collection authentication missing",
+  ],
+  [
+    "performance-harness-coverage",
+    'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer performance',
+    'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer performance || true',
+    "collection authentication ignored",
+  ],
+  [
     "root-test-and-coverage",
     "python3 scripts/release/native_nextest_root_coverage.py",
     "echo success && python3 scripts/release/native_nextest_root_coverage.py",

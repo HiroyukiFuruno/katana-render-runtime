@@ -16,60 +16,27 @@ IssueのClose条件は担当が実行できる実装・自動検証・公開へ�
 
 ## 現在の状態（2026-10-26）
 
-Q19の実performance coverage producerはR2692で成功したが、cacheable:falseだった。Skia公開依存内の同一package内regular fileへの相対symlinkを従来collectorが一律拒否していたことをR2694で特定し、外部・絶対・連鎖・欠損・非regularを拒否したままlink identityとtarget contentを束縛する修正を追加した。R2698の実Cargo stageはaccepted。R2704のcontext回帰は24成功・既存opt-in benchmark1skip、R2706の容量/実行guard178件、R2707のresult認証14件が成功した。これは実cache hit/CAS復元/改ざん拒否の一連の受入完了ではない。
+R2747でperformance harnessの標準LLVM line coverageがbaseline982/982・candidate989/989の100%になり、既存strict producer validatorもvalid:true・refreshed:falseで成功した。AST・重複・両arm Clippy・実collectionが全exit0、source前後一致。証跡は `tmp/quality/native-cache-exact-catalog-parser-gap-r2747/result.json`、retained-outputs、strict-producer-acceptanceのraw。これはperformance producer限定で、root/full aggregate・cache hit・公開の完了ではない。R2743の標準Moon静的DAG・Python context/aggregate・関連Bun契約も全exit0で保持する。
 
-承認済みの純テスト判定コード分離をperformance harnessへ適用し、標準llvm-covの固定filename regexをcollectionとcache identityへ接続した。対象は先頭行に実`#![cfg(test)]`属性を持つharness内の純テストfileだけで、コメント/raw string偽装の負例を追加した。実装100%/未計測0・rootの計測範囲・全テスト実行は維持する。実sessionのclick/resize/全Y/復帰と異常系の回帰を追加。R2709と修正後R2711の既存静的DAGはactual0・source前後一致。R2710の契約全1287件は1281成功/6失敗を保持し、期待値・fixture・空振り変異を是正後、R2711で失敗6件、R2712で共通fixtureの影響を含む関連171件が全成功した。未変更の1116件を最新ソースで再実行したとは扱わない。現行実producerの両arm100%・安全な結果再利用・正式117・最終性能・完全公開は引き続き未完了。
+残1行は単体と実CLIのparse_operation_planが別々の行を欠き、LLVMが被覆行の和集合ではなくinstantiation間の最大被覆数を合算するため残っていた。R2745の既存binary/profdataに対するreport-only診断で各21行中20行を確認し、実CLIのCatalog viewport不一致回帰を追加した。高さ欠落・metadata追加だけでは総数が変わらなかったR2743/R2744と、共通helperの引数型不整合でLint101・重いcollection未実行だったR2746を保持する。型修正後R2747で厳格な集計のまま100%になった。入力・画像・採点閾値・計測対象の追加除外は行っていない。
 
-最新の完了済み診断はR2630の製品PNG 92/117合格・残25件、R2632のHTML84/84合格・最低91.49827・出力font一致である。R2631の全runtimeは2,683成功・失敗0・既存ignored24・実行漏れ0。いずれも診断vendor経路であり、公開registry採用・最終性能・完全リリースの合格へ代用しない。R2623の93件からは新規C4 deployment合格1件が脱落しており、Arial修正を回復済みとしない。旧R2582の92件からの合格脱落はない。
+R2715の認証拒否は、Moon producerと直接validatorの環境fingerprint差が原因。資源digestは同一で、環境差19項目をR2719で確認した。環境除外・anchor改変ではなく、producer同recipe内のcollection認証へ接続してR2743で成功した。限定cache受入用に、既存validatorのproducer selectorと非cacheableなMoon acceptance taskを追加。未指定の完全aggregateはroot→performanceのまま。限定結果は専用schema・fullAggregate:falseとし、全体合格へ転用しない。実cache miss→同hash hit→CAS復元→改ざん拒否・実producer refresh→strict readbackは未完了。
 
-複数fragmentの共通anchor補正と、配色分離参照の実browser executableを記録する修正は検証中。R2660の既存Moon静的ゲート・関連Bun・source前後一致はactual0。その後に先頭以降の非zero dyを拒否する負例を1件追加したため、最新ソースのRust検査・117再採点は未完了である。ブラウザ情報の記録誤りは既存参照画像の改変とは区別し、原画像は保持する。
-
-R2657はディスク満杯で失敗した。R2658のprivate clean-allは部分整理後exit1を保持。R2659では保護registryの既存validatorと実path/SHA照合後、不要な検証binary103個だけを整理し約11.67GiBを回収、必要な3世代・画像・ログ・receiptを保持した。旧receiptは書き換えず、消失binaryを現行証跡として再利用しない。詳細は `tmp/quality/retired-frozen-binary-cleanup-r2659/retirement-result.json`。固定容量閾値は変更していない。
-
-R2661は追加dy負例を含む静的ゲート/Bun/source一致がactual0、R2662はbuild成功後の重点244件中243成功・1失敗。root textLengthが子tspanのpublic TextSpanへ保持されず補正対象に入る負例であり、元結果を保持してsource照合を修正中。R2663の既存実ブラウザ契約は26成功・skip/flaky0・対象TS不変。これをRustや117画像の合格へ代用しない。
-
-Q19/Q20のsource再確認では、実装済みのMoon key/producer receipt検証とfixtureテストを区別した。残りは実root/performance coverage producerでcache miss→同key hit/CAS復元→aggregate strict readback→改ざん・欠損時のproducer再実行を一連で受入確認すること。既存 `root-test-and-coverage`、`performance-harness-coverage`、`coverage-result-check` を使用し、fixture producerだけの成功で完了にしない。
-
-R2666の静的/Bun、R2667の重点244件、R2668の全runtime2,685件が成功（失敗0・既存ignored24・未実行0・source/binary不変）。R2669は旧R1511 HTML入力を現binaryで117件再描画。容量不足のR2670を保持し、承認済みprivate clean-allのR2671後、R2672で92/117・残25・新規合格/脱落0、数値改善5/悪化2を確認した。multi-fragment比率補正は効果が小さく不採用として撤回予定。R2673はHTML84/84・最低91.49827・出力font一致・source/binary不変。撮影manifestのacceptance:falseは判定前の固定値であり、不合格理由にしない。strict validatorのacceptance:trueを確認済み。
-
-R2675では独立raw SVGのIshikawa marker-startが9個に対し、旧R1511 HTML入力は0個、marker定義は両方1個と記録した。旧HTMLをChrome/KRRで再rasterする診断は現行Mermaid runtimeからのSVG生成を再実行していない。したがって上記92件を最新製品117件の合格へ代用せず、正式 `mermaid-compare-full-managed` のfresh CLI→SVG→PNG/frameと独立raw JS参照の経路を優先して再確認する。矢印が現在のrendererで消えたとは断定しない。既存Ishikawa marker回帰は現runtimeの別証拠として区別する。
-
-比較派生画像の実browser executable記録修正2fileは、R2663実ブラウザ26件・静的/Bun成功とdiff review後、通常commit `1de60f4631ca2673c492ef332c075d7d0bd0fb9e` へ記録した。Issue #108 OPENを再取得。既存stageのusvg3patchはbyte一致で保持し、画像・入力・閾値は変更していない。
-
-multi-fragment候補はcheckpoint `dedc5ad5`を残したうえで、3source fileをSHA付きで管理外へ退避し、5integration箇所から候補だけを撤回した。R2678静的/Bun、R2679重点242件、R2680全runtime2,683件が成功（失敗0・既存ignored24不変・未実行0）。既存single-span/nested-middle・他の形状修正を保持し、`8fb679c2`へ通常commitした。新規試行に属した2テストだけを候補とともに外し、既存回帰を削って合格にしていない。撤回後のHTML84・正式117・最終性能は別途必要。
-
-承認済み3patchのworking版は、未改変registry usvg0.49.0へ各`git apply --check -p1`成功（R2685）。R2684の誤ったstrip指定の失敗も保持し、patch不適合と混同しない。性能harness lock/pinの既存recipeはR2684で成功。外部unified diffの空行contextを保持するため、該当3patchだけGitの行末空白検査を限定調整し、内部Rustの属性は未指定のまま確認した。元stageを物理保存し、承認済みworking版・採用文書・fork Issue1の境界登録を`23dff6cd`へcommit、indexは0件。追加mask修正は含めていない。実ブラウザの入力・画像は`output/playwright`に保持し、Gitの公開対象から限定除外する。
-
-正式検証のsourceを固定した後は、結果回収前にGit管理内の台帳・文書・設定を更新して自分でsource bindingを失効させない。実行中の状態と結果は管理外のrun記録・終了hook台帳へ記録し、次のsource更新点で本台帳へまとめる。完全ゲート・coverage・性能・正式117の成功を、古い入力や異なるdependency経路の診断から補完しない。
-
-### 再開時の入口
-
-Middleの初期候補R2520（74/117）はSequence英日2件の合格脱落があり不採用とした。原結果は保持する。独立ChromeのR2521でSequence原本PNG不変と実glyph originを確認し、明示alignment-middleはx-heightの半分、dominant-middle/autoはline-topの整数化を使う処理へ分けた。R2523の既存Moon静的ゲート・関連Bun、R2524のbuild・重点107件、R2527の全体Nextest2,655件が成功（失敗0、既存ignored24件不変、実行漏れ0）。R2525/R2526の117再描画・同一採点は76合格・4改善・悪化0・既存合格脱落0となり、10fileを`b57760b6`へ通常commitした。R2528のHTML84条件も合格・最低91.49827・出力フォント一致を維持。入力・原本・採点閾値は不変。現行公開registry経路・性能・完全リリースの合格は別途必要。
-
-C4のRGBだけへの判定変更は採用しない。R2507の短い線だけを除いた負例はRGB99.400207となり、99基準でも欠落を見逃す。現行の形状検査は同負例96.29045で拒否する。1階調の境界差を過大評価する可能性と、短い線の欠落検出を両方維持する必要がある。
-
-Requirement4件の太字欠落は、simplecss 0.2.2が先頭の空宣言で読み取りを停止することが原因だった。R2530の独立raw SKPはTrebuchet通常400/太字700の両方、修正前の製品実描画記録は通常400だけ。R2533で実KRR経路の400対700の失敗を保持し、既存cssparser 0.38による先頭空宣言の限定正規化と既存XML escape共通化を`6eeb2c1e`へ通常commitした。R2537の既存静的/Bun、R2538の重点188件、R2541の全体2,659件（失敗0・既存ignored24不変）が成功。R2539/R2540は80/117合格・Requirement4新規合格・悪化0・既存合格脱落0。実製品の700 face使用も確認した。R2542はHTML84合格・最低91.49827・fontIdentityEquivalence established。入力・原本・採点処理は不変で、Treemap2件は変化なし。この時点では残37件で、実fork/registry・性能・公開は未完了だった。
-
-Ganttの黒いグリッドは、HTMLのcomputed colorを埋め込みSVGへ継承していないことが原因だった。R2546で実wrapper→usvgの黒0対明灰224の失敗を保持し、color継承・内部の明示指定優先・半透明・同一sessionのJSによる親色変更を`5ef3b203`へ通常commitした。R2550静的/Bun、R2551重点219件、R2554全体2,662件が成功（失敗0・既存ignored24不変・実行漏れ0）。R2552/R2553はGantt4図が96点台から98.2〜98.8へ改善・悪化0・既存合格脱落0だが、80/117合格・残37件のまま。R2557は残差が日付文字に集中し、R2558/R2559の既存HarfBuzzによるfont table比較は全24table一致。原本・採点処理は不変。途中のSVG修正では関連回帰と117図を優先し、旧HTML84の成功を現行ソースの完全合格へ代用しない。最終の現行ソース全84・出力font一致・性能・完全ゲートは維持する。
-
-Ganttの画素化原因の切り分けでは、Skia153とChrome155の既定gamma/contrast・macOS rasterizerのソースに原因と断定できる差はなかった。実ビルドの有効defineは未確認。R2560はR2551との台帳・release inclusionスクリプトの差で開始前に拒否された結果を保持した。製品ソース差がないことを照合したR2561は旧binaryの単一図診断に限定し、現行ソース合格には用いない。R2562の同一原本に対するRMSEはSkia 0.0134454、CoreText 0.0191965で悪化し、CoreTextへの切替は採用しない。採点条件・原本・製品設定は変更していない。
-
-続くsource確認で、Gantt日付の祖先`opacity=0.8`が`composite_groups::render_effect_group`から`render_existing_node`へ戻り、Skia text rasterizerを通らずresvgの輪郭描画になる経路を特定した。従前のfont/位置照合はpre-paintであり、実Skia描画の一致証明ではなかった。RadarもR2563の独立raw SKPとR2564の7行照合でhanging位置差を取得した。R2567のHanging回帰とR2576のopacity回帰は修正前に実失敗を確認し、既存描画・主fontのCSSメトリクスへ接続する修正を`8b13f5e`と`132c069b`へ通常commitした。BASE tableあり・非一様変換・明示alignment-hangingは新補正へ広げず、opacityは単純normal blend・mask/clip/filterなし・textありに限定する。重なり・nested opacity・transform・既存経路の対照も実描画で検証した。
-
-R2579の静的/Bun全0、R2580のbuild/CSS ex/重点228件、R2583の全runtime2,671件が成功（失敗0・既存ignored24不変・実行漏れ0）。R2581/R2582は同じ117入力・raw JS原本・採点器で92/117合格、残25、12新規合格・悪化0・既存合格脱落0。Gantt4・Radar4・Quadrant2・nested Treemap2が新規合格した。R2586の現行HTML全84も合格・最低91.49827・出力font一致established。診断vendorでの検証であり、実fork/公開registry・性能・完全公開の合格へ代用しない。元の3staged patchは両commit後もindex/worktreeのbyte一致を確認した。
-
-継続利用するフォント準備時間・段階診断の8fileも`cb45c106`へ通常commitした。段階probeの追加copyによるRSSは製品性能へ代用しない。R2587のrelease inclusion同期と18回帰は成功したが、その後のcommitを含む最終同期は残る。次のSkia単色path adapterとnested tspan文脈の試作は未検証であり、92件へ加算しない。正式117は既存source-ownedのCLI生成SVG→HTML wrapper→実HtmlRuntime frame producerで最終再取得し、局所診断の成功を正式認定へすり替えない。
-
-同じ未達条件を記した過去の測定は、別々の新規要件として重複計上しない。以下は現在の判断への入口であり、後段の未完了項目や受入条件を削除・完了扱いするものではない。
-
-| 対象 | 最新の確定結果 | 未完了の判定 |
+| 対象 | 最新の完了済み証拠 | 残る受入条件 |
 | --- | --- | --- |
-| Mermaid #108 | R2581/R2582で92/117が99以上、12新規合格・悪化0・既存合格脱落0。Hangingとopacity内文字描画を`8b13f5e`・`132c069b`へ通常commitした | 残25件（C4 12・Ishikawa 4・Kanban 2・Wardley 4・XY 2・日本語ZenUML 1）。実fork/公開registryでの正式再検証が必要 |
-| HTML #109 | R2586の現行全84合格・最低91.49827・fontIdentityEquivalence=established、source/binary不変 | 実fork/公開registry採用後の最終判定、私有原本全Y/目次・利用側契約・表示時間/RSS非劣化は残る |
-| 実装と検査 | R2579静的/Bun全0、R2580 build0・重点228成功。R2583はruntime 2,671成功・失敗0・既存ignored24・未実行runnable0、source/binary不変 | 完全workspaceゲート・coverage・release inclusion同期が必要。局所成功を現行全体合格へ代用しない |
-| 依存と公開 | 限定fork PR #2は最新review指摘なし・3 OS成功で保護squash merge`c0ad186d`済み、保護設定も再確認 | usvg dry-run成功後のuploadが403認証失敗、API token更新を依頼済み。2crate公開→registry採用、KRR完全ゲート・coverage100/未計測0・PR/review/3 OS・3crate公開・Issue close・cleanupが残る |
+| Mermaid #108 | R2672の診断PNGは92/117が99以上・残25・新規合格/脱落0。multi-fragment候補は効果が小さく撤回した | 旧R1511 HTMLの再rasterを現行製品へ代用しない。fresh CLI→SVG→PNG/frameの正式117件・全99以上が必要 |
+| HTML #109 | R2673で84/84が90以上・最低91.49827・出力font一致established | 公開registry採用後の全84、私有原本全Y/実末尾/全目次、consumer XY/resize契約、初回/再表示/resizeの時間とRSS非劣化。99は#106 |
+| runtime | 撤回後R2680は2,683成功・失敗0・既存ignored24・実行漏れ0、source/binary不変 | 最新全workspace品質ゲート・coverage100%/未計測0・最終性能は別工程 |
+| fork依存 | PR #3 HEAD5a776257。旧headの3 OS必須CI成功後、Windows一般jobのexplorer依存pin不整合を修正。R2737のWindows-target依存解決/locked repeat成功、R2738通常commit/push | 最新headのCodex reviewはrunning、Draft。最新3 OS CI→expected SHA保護merge→2crate公開→KRR registry採用。旧head CIやDraft skipを代用しない |
+| 公開 | KRRはrelease/v0.4.24、正式公開は未完了 | 最新変更commit・release inclusion同期、Draft PR→最新review/個別reply・resolve→Ready→必須3 OS CI→保護merge、GitHub Release/3crate公開、#108/#109 close、安全なcleanup |
 
-棄却済みの方式を根拠なく再試行しない。font sizeの小数2桁切捨てはChromium sourceと順序まで一致し、丸め除去と外側SVGの小数配置は画像比較で不採用。CoreText glyph backend、Skia SVG DOMへの単純置換も不採用。ThorVGの追加実測はユーザー指示により不要。Skia forkは採用範囲に含めない。これらの実験記録と、別方式で満たすべき未達ゲートを区別する。
+forkの既存P2は上流0.49由来のmask/context-fill課題としてIssue #4へ分離し、元threadへの個別reply/resolveを確認した。承認済み3修正の公開範囲を維持し、第四patchは採用していない。旧0.48.1 Draft Releaseは未公開のまま、現行0.49の公開成功へ代用しない。既存のcrates.io 403は保持し、現行publishで再確認するまで認証復旧済みとしない。
+
+R2675では独立raw SVGのIshikawa marker-start9に対し旧R1511 HTMLは0だった。旧HTMLの差を現行rendererの欠落と断定しない。R27の古いgeometry判定エラーも現行sourceやofficial rawの無効証明へ転用せず、fresh source-pinned比較で確認する。Mermaid Liveは参考、独立raw JSが正解基準。C4/TreeViewはKRR配色維持・実PNG形状99と色差を別評価する。
+
+固定容量閾値4,726,095,872Bを維持する。R2748の通常commit hookはClippy自体の成功後、target4,762,419,200Bの容量拒否でexit1。R2749の既存root just cleanはexit0、source/index不変・保護4binaryのSHA一致、実空き約4.09→8.09GiBを確認した。削除されたtarget binaryの過去証拠は保持し、現行build proofへ再認定しない。R2725のprivate clean-all部分整理後exit1（無関係repoの安全guard）とR2659不要binary整理の記録も保持する。閾値変更や追加容量基盤を理由に元検証を止めない。
+
+棄却済み方式を根拠なく再試行しない。CoreText glyph切替、Skia SVG DOM単純置換、font size丸め除去、外側SVG小数配置、広い単色path置換、multi-fragment比率補正の不採用根拠は各物理runに保持。ThorVG追加実測はユーザー指示により不要、Skia forkは採用範囲外。局所・診断の成功と、現行公開依存の正式製品受入を区別する。
 
 ### 実装・検証の記録
 

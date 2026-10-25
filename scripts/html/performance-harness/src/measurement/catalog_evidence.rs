@@ -196,3 +196,15 @@ fn validate_catalog_operation_stream(
 #[cfg(test)]
 #[path = "catalog_evidence_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "catalog_evidence_path_tests.rs"]
+mod path_tests;
+
+#[cfg(test)]
+#[path = "catalog_evidence_target_tests.rs"]
+mod target_tests;
+
+#[cfg(test)]
+#[path = "catalog_evidence_test_support.rs"]
+mod test_support;

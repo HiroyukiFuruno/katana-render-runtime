@@ -30,6 +30,8 @@ use process::ProcessService;
 use provenance::{arm_name, hex_digest, provenance};
 
 const SAMPLE_COUNT: usize = 5;
+const MILLISECONDS_PER_SECOND: f64 = 1_000.0;
+type PhaseSnapshot = serde_json::Map<String, serde_json::Value>;
 #[cfg(target_os = "macos")]
 const BYTES_PER_RSS_UNIT: u64 = 1;
 #[cfg(not(target_os = "macos"))]
@@ -143,13 +145,22 @@ fn run_measurement() -> Result<(), Box<dyn std::error::Error>> {
 fn phase_snapshot(
     start: Instant,
     session: &impl SessionFrame,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    Ok(
-        serde_json::json!({"elapsed_ms": start.elapsed().as_secs_f64() * 1_000.0,
-        "peak_rss_bytes": peak_rss_bytes()?,
-        "peak_rss_scope": "process-cumulative-including-phase-setup",
-        "frame": session.frame_state()?}),
-    )
+) -> Result<PhaseSnapshot, Box<dyn std::error::Error>> {
+    let elapsed_ms = start.elapsed().as_secs_f64() * MILLISECONDS_PER_SECOND;
+    let peak_rss_bytes = peak_rss_bytes()?;
+    let frame = session.frame_state()?;
+    Ok(serde_json::Map::from_iter([
+        ("elapsed_ms".to_owned(), serde_json::json!(elapsed_ms)),
+        (
+            "peak_rss_bytes".to_owned(),
+            serde_json::json!(peak_rss_bytes),
+        ),
+        (
+            "peak_rss_scope".to_owned(),
+            serde_json::json!("process-cumulative-including-phase-setup"),
+        ),
+        ("frame".to_owned(), frame),
+    ]))
 }
 
 trait SessionFrame {

@@ -78,12 +78,16 @@ function currentMoonConfig(): Record<string, unknown> {
   return z.record(z.string(), z.unknown()).parse(Bun.YAML.parse(source));
 }
 
-test("native coverage caches keep the aggregate validator uncached", () => {
-  const tasks = moonStaticTaskProjection(JSON.stringify(currentMoonConfig()), "krr", "coverage");
+test.each([
+  ["coverage", "coverage-result-check"],
+  ["performance-coverage-acceptance", "performance-coverage-result-check"],
+])("native coverage caches keep %s validator uncached", (entry, leaf) => {
+  const tasks = moonStaticTaskProjection(JSON.stringify(currentMoonConfig()), "krr", entry);
   expect(tasks["unit-test"]?.options.cache).toBe("local");
   expect(tasks["performance-coverage"]?.options.cache).toBe("local");
-  expect(tasks.coverage?.options.cache).toBe(false);
-  expect(tasks.coverage?.leaf).toBe("coverage-result-check");
+  expect(tasks[entry]?.options.cache).toBe(false);
+  expect(tasks[entry]?.leaf).toBe(leaf);
+  expect(tasks[entry]?.deps).toEqual(["performance-coverage"]);
 });
 
 test.each([
@@ -3321,7 +3325,8 @@ performance-harness-coverage:
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-baseline -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features baseline --locked --profile krr-coverage --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/baseline.json"{{TEST_THREAD_ARGS}}
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-candidate -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-candidate -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features candidate --locked --profile krr-coverage --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/candidate.json"{{TEST_THREAD_ARGS}}
-    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-finish --producer performance --producer-exit 0
+    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer performance --producer-exit 0
+    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer performance
 coverage-result-check:
     python3 scripts/release/native_coverage_local_aggregate.py --repo "{{REPO_ROOT}}"
 `;
@@ -3707,6 +3712,23 @@ test("local coverage entry preserves static barrier and required heavy closure",
   expect(snapshot.graph.local.has("scripts/html/main.ts")).toBe(true);
   expect(snapshot.graph.local.has("scripts/quality/owned-validation-contract.ts")).toBe(true);
 });
+
+test.each(["missing", "ignored"])(
+  "local coverage route rejects %s collection authentication",
+  (kind) => {
+    const snapshot = localCoverageMoonFixture();
+    const justfile = snapshot.read("Justfile");
+    if (justfile === undefined) throw new Error("Justfile fixture is missing");
+    const command =
+      'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer performance';
+    expect(justfile).toContain(command);
+    const replacement = kind === "missing" ? "" : `${command} || true`;
+    replaceSources(snapshot, { Justfile: justfile.replace(command, replacement) });
+    expect(checkHarnessContract(snapshot)).toContain(
+      "performance collection authentication differs",
+    );
+  },
+);
 
 test.each(["old bridge", "old entry", "noop coverage", "redirected coverage", "barrier bypass"])(
   "local coverage route rejects %s",

@@ -1,10 +1,6 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::{Command, Output},
-};
+use std::{fs, path::Path};
 
 const BIN: &str = env!("CARGO_BIN_EXE_krr-html-performance-harness");
 const WIDTH: u32 = 960;
@@ -16,21 +12,6 @@ mod native_frame_capture;
 const ARM: &str = "baseline-0.4.23";
 #[cfg(feature = "candidate")]
 const ARM: &str = "candidate";
-
-type TempDir = tempfile::TempDir;
-
-fn create_temp_dir() -> Result<TempDir, Box<dyn std::error::Error>> {
-    Ok(tempfile::Builder::new().prefix("krr-perf-cli-").tempdir()?)
-}
-
-struct Inputs {
-    fixture: PathBuf,
-    plan: PathBuf,
-    evidence: PathBuf,
-    snapshot: PathBuf,
-    fixture_sha: String,
-    evidence_bytes: Vec<u8>,
-}
 
 #[test]
 fn cli_measures_five_real_workers_and_records_unit_only_provenance(
@@ -71,73 +52,6 @@ fn cli_rejects_malformed_plan_without_report() -> Result<(), Box<dyn std::error:
     assert!(!output.exists());
     assert!(!result.stderr.is_empty());
     Ok(())
-}
-
-fn valid_inputs(temp: &TempDir) -> Result<Inputs, Box<dyn std::error::Error>> {
-    let fixture = fixture_path()?;
-    let fixture_sha = sha(&fs::read(&fixture)?);
-    let evidence = temp.path().join("unit-only-dom-state.json");
-    let evidence_bytes =
-        br#"{"scope":"unit-test-only","states":{"js":{"expanded":true,"result":"opened"}}}"#
-            .to_vec();
-    fs::write(&evidence, &evidence_bytes)?;
-    let snapshot = temp.path().join("unit-only-source-snapshot.json");
-    fs::write(
-        &snapshot,
-        br#"{"scope":"unit-test-only; not release evidence"}"#,
-    )?;
-    let plan = temp.path().join("operation-plan.json");
-    write_plan(&plan, &fixture_sha, &evidence, &evidence_bytes)?;
-    Ok(Inputs {
-        fixture,
-        plan,
-        evidence,
-        snapshot,
-        fixture_sha,
-        evidence_bytes,
-    })
-}
-
-fn fixture_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    Ok(Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../tests/fixtures/html/interaction-fidelity.html")
-        .canonicalize()?)
-}
-
-fn write_plan(
-    path: &Path,
-    fixture_sha: &str,
-    evidence: &Path,
-    evidence_bytes: &[u8],
-) -> Result<(), Box<dyn std::error::Error>> {
-    let plan = serde_json::json!({
-        "fixture_sha256": fixture_sha, "operation": "action-button-toggle",
-        "x": 100.0, "y": 100.0, "expected_dom_state_path": evidence,
-        "expected_dom_state_sha256": sha(evidence_bytes),
-    });
-    fs::write(path, serde_json::to_vec(&plan)?)?;
-    Ok(())
-}
-
-fn cli(inputs: &Inputs, output: &Path) -> Result<Output, Box<dyn std::error::Error>> {
-    let lock = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("Cargo.lock")
-        .canonicalize()?;
-    Ok(Command::new(BIN)
-        .arg(&inputs.fixture)
-        .arg(output)
-        .arg(&inputs.plan)
-        .arg(WIDTH.to_string())
-        .arg(HEIGHT.to_string())
-        .arg("1")
-        .env("KRR_PERF_PAIR_INDEX", "37")
-        .env("KRR_PERF_MEASUREMENT_EXECUTED", "0")
-        .env("KRR_PERF_LOCK_PATH", lock)
-        .env("KRR_PERF_SOURCE_SNAPSHOT_PATH", &inputs.snapshot)
-        .env("KRR_PERF_RUSTC", "unit-test-only")
-        .env("KRR_PERF_CARGO", "unit-test-only")
-        .env("KRR_PERF_ENVIRONMENT_SHA256", "unit-test-only")
-        .output()?)
 }
 
 fn assert_report(report: &Value, inputs: &Inputs) -> Result<(), Box<dyn std::error::Error>> {
@@ -325,3 +239,20 @@ fn sha(bytes: &[u8]) -> String {
 
 #[path = "cli_execution/legacy_guard_regressions.rs"]
 mod legacy_guard_regressions;
+
+#[path = "cli_execution/provenance_regressions.rs"]
+mod provenance_regressions;
+
+#[path = "cli_execution/provenance_test_support.rs"]
+mod provenance_test_support;
+
+#[path = "cli_execution/catalog_contract_test_support.rs"]
+mod catalog_contract_test_support;
+
+#[path = "cli_execution/catalog_contract_tests.rs"]
+mod catalog_contract_tests;
+
+use provenance_test_support::{
+    cli, cli_with_missing_required_provenance_env, cli_with_provenance_paths, create_temp_dir,
+    fixture_path, valid_inputs, Inputs, TempDir,
+};

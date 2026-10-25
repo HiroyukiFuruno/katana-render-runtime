@@ -167,6 +167,10 @@ coverage:
 coverage-result-check:
     python3 scripts/release/native_coverage_local_aggregate.py --repo "{{REPO_ROOT}}"
 
+# 性能producerの限定受入でもMoonと同じ環境で復元結果を認証する。
+performance-coverage-result-check:
+    python3 scripts/release/native_coverage_local_aggregate.py --repo "{{REPO_ROOT}}" --producer performance
+
 # 独立workspaceの両armを個別に検査し、排他featureを同時選択しない。
 performance-harness-fmt-check:
     {{CARGO}} fmt --manifest-path scripts/html/performance-harness/Cargo.toml --all -- --check
@@ -187,6 +191,7 @@ performance-harness-coverage:
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-candidate -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-candidate -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features candidate --locked --profile krr-coverage --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/candidate.json"{{TEST_THREAD_ARGS}}
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer performance --producer-exit 0
+    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer performance
 
 # Verify pinned runtime asset checksums
 runtime-asset-check:

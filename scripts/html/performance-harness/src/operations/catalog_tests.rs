@@ -1,5 +1,6 @@
 #![cfg(test)]
 
+use super::super::test_support::settled_timer_evidence;
 use super::CatalogOperations;
 use crate::{options::CatalogOperationPlan, test_support::TestSupport};
 
@@ -7,32 +8,11 @@ fn settled_plan() -> Result<CatalogOperationPlan, Box<dyn std::error::Error>> {
     Ok(serde_json::from_value(TestSupport::catalog_test_plan())?)
 }
 
-fn settled_evidence() -> serde_json::Value {
-    serde_json::json!({
-        "schema": "krr-html84-operation-evidence-v1",
-        "kind": "script-await-timer-microtask",
-        "status": "observed",
-        "sourceSha256Before": "a".repeat(64),
-        "sourceSha256After": "a".repeat(64),
-        "preFrame": {"generation": 1, "scrollY": 0},
-        "postFrame": {"generation": 1, "scrollY": 0},
-        "target": {"visible": true, "nodeId": 7, "selector": "#state"},
-        "state": {"before": "microtask>ready>timer", "after": "microtask>ready>timer"},
-        "steps": [{
-            "kind": "host-time-advance", "elapsedMs": 0, "timerRan": false,
-            "microtaskCheckpoint": "runtime-advance-timers",
-            "stateBefore": "microtask>ready>timer", "stateAfter": "microtask>ready>timer",
-            "fixtureStateVerified": true,
-        }],
-        "delivery": "session-load-settled",
-    })
-}
-
 #[test]
 fn settled_timer_accepts_nested_operation_evidence() -> Result<(), Box<dyn std::error::Error>> {
     assert!(CatalogOperations::is_settled_timer(
         &settled_plan()?,
-        &settled_evidence()
+        &settled_timer_evidence()
     ));
     Ok(())
 }
@@ -41,7 +21,7 @@ fn settled_timer_accepts_nested_operation_evidence() -> Result<(), Box<dyn std::
 fn settled_timer_rejects_tampered_nested_operation_evidence(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let plan = settled_plan()?;
-    let mut evidence = settled_evidence();
+    let mut evidence = settled_timer_evidence();
     evidence["steps"][0]["timerRan"] = serde_json::Value::Bool(true);
     assert!(!CatalogOperations::is_settled_timer(&plan, &evidence));
     Ok(())
@@ -52,7 +32,7 @@ fn settled_resource_rejects_missing_resource_settlement_step(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut plan = settled_plan()?;
     plan.operation_kind = "script-await-resource-font".to_owned();
-    let mut evidence = settled_evidence();
+    let mut evidence = settled_timer_evidence();
     evidence["kind"] = serde_json::Value::String("script-await-resource-font".to_owned());
     evidence["steps"][0]["kind"] = serde_json::Value::String("host-time-advance".to_owned());
     assert!(!CatalogOperations::is_settled_resource(&plan, &evidence));
@@ -60,7 +40,7 @@ fn settled_resource_rejects_missing_resource_settlement_step(
 }
 
 fn settled_resource_evidence() -> serde_json::Value {
-    let mut evidence = settled_evidence();
+    let mut evidence = settled_timer_evidence();
     evidence["kind"] = serde_json::Value::String("script-await-resource-font".to_owned());
     evidence["steps"] = serde_json::json!([{
         "kind": "session-load-settled-resource-state",
@@ -145,7 +125,7 @@ fn assert_timer_mutations(plan: &CatalogOperationPlan) -> Result<(), String> {
         "wrong-delivery",
         "extra-key",
     ] {
-        let mut evidence = settled_evidence();
+        let mut evidence = settled_timer_evidence();
         if !mutate_timer_case(&mut evidence, name) {
             return Err(format!("timer mutation failed: {name}"));
         }
