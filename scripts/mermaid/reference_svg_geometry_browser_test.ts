@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { chromium } from "playwright";
 import { expect, test } from "playwright/test";
 import { DiagramTheme } from "./diagram_theme";
 import { parsePaintProjectedReferenceEvidence } from "./managed-full-compare-results";
@@ -393,6 +394,20 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
       neutralCandidate === undefined
     ) {
       throw new Error("Paint projection fixture did not produce every expected raster");
+    }
+    const identityServer = await chromium.launchServer({ headless: true });
+    try {
+      const spawnedExecutable = identityServer.process().spawnfile;
+      if (spawnedExecutable === undefined || !path.isAbsolute(spawnedExecutable)) {
+        throw new Error("Launched Chromium process executable path is unavailable");
+      }
+      const actualExecutable = fs.realpathSync(spawnedExecutable);
+      expect(projected.browserExecutablePath).toBe(actualExecutable);
+      expect(neutral.browserExecutablePath).toBe(actualExecutable);
+      expect(projected.browserExecutableSha256).toBe(fileSha256(actualExecutable));
+      expect(neutral.browserExecutableSha256).toBe(fileSha256(actualExecutable));
+    } finally {
+      await identityServer.close();
     }
     observation = {
       fixture,

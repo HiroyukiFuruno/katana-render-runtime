@@ -4,7 +4,12 @@ import path from "node:path";
 import { DiagramTheme, type DiagramThemeName } from "./diagram_theme";
 import { fileSha256 } from "./mermaid-pair-manifest";
 import { PlaywrightLoader } from "./official-renderer";
-import type { BrowserHandle, FontReadyDocument, PageHandle } from "./official-renderer-types";
+import type {
+  BrowserHandle,
+  BrowserLauncher,
+  FontReadyDocument,
+  PageHandle,
+} from "./official-renderer-types";
 import { assignStrictSvg, resizeSvgCapture } from "./raster-capture-observation";
 import { rasterCaptureHtml } from "./rasterize-svg-dir";
 import { waitForStrictSvgExternalImages } from "./strict-svg-external-images";
@@ -117,6 +122,17 @@ type PaintProjectionPageResult =
   | CandidatePaintSnapshot
   | { svg: string; graphicsElementCount: number; paintVisibility: string };
 
+interface HeadlessBrowserServer {
+  process(): { spawnfile?: string };
+  wsEndpoint(): string;
+  close(): Promise<void>;
+}
+
+interface HeadlessBrowserLauncher {
+  launchServer(options: { headless: boolean }): Promise<HeadlessBrowserServer>;
+  connect(options: { wsEndpoint: string }): Promise<BrowserHandle>;
+}
+
 export async function rasterizeNeutralSvgBatch(
   inputs: NeutralRasterInput[],
   outputDirectory: string,
@@ -124,14 +140,11 @@ export async function rasterizeNeutralSvgBatch(
 ): Promise<NeutralRasterBatch> {
   assertFreshDirectory(outputDirectory, inputs);
   const playwright = await new PlaywrightLoader().load();
-  const executable = playwright.chromium.executablePath?.();
-  if (executable === undefined) throw new Error("Pinned Chromium executable path is unavailable");
-  const browserExecutablePath = fs.realpathSync(executable);
-  const browser = await playwright.chromium.launch({ headless: true });
+  const session = await launchHeadlessBrowser(playwright.chromium);
   try {
-    return await renderBatch(inputs, themeName, browser, browserExecutablePath);
+    return await renderBatch(inputs, themeName, session.browser, session.executablePath);
   } finally {
-    await browser.close();
+    await session.close();
   }
 }
 
@@ -142,15 +155,56 @@ export async function rasterizePaintProjectedReferenceBatch(
 ): Promise<PaintProjectedReferenceBatch> {
   assertFreshPaintProjectedDirectory(outputDirectory, inputs);
   const playwright = await new PlaywrightLoader().load();
-  const executable = playwright.chromium.executablePath?.();
-  if (executable === undefined) throw new Error("Pinned Chromium executable path is unavailable");
-  const browserExecutablePath = fs.realpathSync(executable),
-    browser = await playwright.chromium.launch({ headless: true });
+  const session = await launchHeadlessBrowser(playwright.chromium);
   try {
-    return await renderPaintProjectedBatch(inputs, themeName, browser, browserExecutablePath);
+    return await renderPaintProjectedBatch(
+      inputs,
+      themeName,
+      session.browser,
+      session.executablePath,
+    );
   } finally {
-    await browser.close();
+    await session.close();
   }
+}
+
+async function launchHeadlessBrowser(chromium: BrowserLauncher) {
+  if (!hasHeadlessBrowserLauncher(chromium)) {
+    throw new Error("Launched Chromium process identity API is unavailable");
+  }
+  const server = await chromium.launchServer({ headless: true });
+  try {
+    const spawnedExecutable = server.process().spawnfile;
+    if (spawnedExecutable === undefined || !path.isAbsolute(spawnedExecutable)) {
+      throw new Error("Launched Chromium process executable path is unavailable");
+    }
+    const executablePath = fs.realpathSync(spawnedExecutable);
+    const browser = await chromium.connect({ wsEndpoint: server.wsEndpoint() });
+    return {
+      browser,
+      executablePath,
+      close: async () => {
+        try {
+          await browser.close();
+        } finally {
+          await server.close();
+        }
+      },
+    };
+  } catch (error) {
+    await server.close();
+    throw error;
+  }
+}
+
+function hasHeadlessBrowserLauncher(
+  chromium: BrowserLauncher,
+): chromium is BrowserLauncher & HeadlessBrowserLauncher {
+  const candidate: unknown = chromium;
+  if (typeof candidate !== "object" || candidate === null) return false;
+  const launchApi = (candidate as { launchServer?: unknown }).launchServer;
+  const connectApi = (candidate as { connect?: unknown }).connect;
+  return typeof launchApi === "function" && typeof connectApi === "function";
 }
 
 async function renderPaintProjectedBatch(
