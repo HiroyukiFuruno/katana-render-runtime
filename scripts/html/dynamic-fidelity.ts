@@ -186,18 +186,7 @@ export function readKrrDynamicCapture(
     ],
     "catalog capture report",
   );
-  if (
-    report.schema !== "krr-html84-raw-condition-v1" ||
-    report.executionNonce !== expected.nonce ||
-    report.conditionId !== expected.conditionId ||
-    report.caseId !== expected.caseId ||
-    report.boundaryState !== expected.state ||
-    report.operationKind !== expected.operationKind ||
-    report.htmlSha256 !== expected.sourceSha256 ||
-    report.binarySha256 !== expected.binarySha256
-  ) {
-    throw new Error(`Catalog capture identity mismatch: ${expected.conditionId}`);
-  }
+  assertDynamicCaptureIdentity(report, expected);
   if (!sameViewportRecord(report.viewport, expected.viewport))
     throw new Error(`Catalog capture viewport mismatch: ${expected.conditionId}`);
   if (report.status === "unknown") return readUnknownCatalogCapture(report, expected);
@@ -265,6 +254,34 @@ export function readKrrDynamicCapture(
     resourceProvenance: resourceProvenance as { inventoryComplete: true; requests: JsonValue[] },
     fontProvenance,
   };
+}
+
+function assertDynamicCaptureIdentity(
+  report: Record<string, JsonValue>,
+  expected: {
+    conditionId: string;
+    caseId: string;
+    state: string;
+    operationKind: string;
+    nonce: string;
+    sourceSha256: string;
+    binarySha256: string;
+    viewport: DynamicViewport & { scale: number };
+    targetSelector?: string;
+  },
+): void {
+  if (
+    report.schema !== "krr-html84-raw-condition-v1" ||
+    report.executionNonce !== expected.nonce ||
+    report.conditionId !== expected.conditionId ||
+    report.caseId !== expected.caseId ||
+    report.boundaryState !== expected.state ||
+    report.operationKind !== expected.operationKind ||
+    report.htmlSha256 !== expected.sourceSha256 ||
+    report.binarySha256 !== expected.binarySha256
+  ) {
+    throw new Error(`Catalog capture identity mismatch: ${expected.conditionId}`);
+  }
 }
 
 function readUnknownCatalogCapture(
